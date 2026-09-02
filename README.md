@@ -46,13 +46,27 @@ If it does not start, use the
 After CordisX starts, tell Codex what you want to add. For example:
 
 ```text
-Make the send button launch fullscreen confetti when it is clicked.
+Make the send button launch full-screen confetti when clicked.
 ```
 
 CordisX includes the plugin-development skill. Codex turns your request into a
 plugin, runs it in the CordisX Playground, and verifies the result. You do not
 need to install a skill, create a scaffold, or learn the underlying plugin
 commands first.
+
+Each feature becomes an independent plugin project that you can keep developing
+or share. Codex handles publication details only when you explicitly ask to
+publish or share it.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-en-dark.gif">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-en-light.gif">
+    <img alt="Create the Send Confetti plugin in CordisX with natural language" src="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-en-light.gif" width="900">
+  </picture>
+</p>
+
+<p align="center"><sub>Switches with the page theme · <a href="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-en-light.mp4">light HD MP4</a> · <a href="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-en-dark.mp4">dark HD MP4</a></sub></p>
 
 ## Documentation
 

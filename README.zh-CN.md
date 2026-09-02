@@ -45,7 +45,7 @@ cordisx
 启动 CordisX 后，直接告诉 Codex 你想加入什么功能。例如：
 
 ```text
-我要发送按钮在点击时全屏放礼花。
+我要发送按钮在点击的时候全屏放礼花。
 ```
 
 CordisX 内置插件开发 Skill。Codex 会把你的需求实现为插件，并在 CordisX
@@ -57,13 +57,13 @@ Playground 中运行和验证。你不需要预先安装 Skill、创建脚手架
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/b21aa6330e4577c2bccbff0a12a08218a3ca4167/assets/motion/cordisx-ai-plugin-demo-zh-dark.gif">
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/b21aa6330e4577c2bccbff0a12a08218a3ca4167/assets/motion/cordisx-ai-plugin-demo-zh-light.gif">
-    <img alt="在 CordisX 中用自然语言创建 Send Confetti 插件" src="https://raw.githubusercontent.com/cordisx/cordisx.github.io/b21aa6330e4577c2bccbff0a12a08218a3ca4167/assets/motion/cordisx-ai-plugin-demo-zh-light.gif" width="900">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-zh-dark.gif">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-zh-light.gif">
+    <img alt="在 CordisX 中用自然语言创建 Send Confetti 插件" src="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-zh-light.gif" width="900">
   </picture>
 </p>
 
-<p align="center"><sub>随页面主题自动切换 · <a href="https://raw.githubusercontent.com/cordisx/cordisx.github.io/b21aa6330e4577c2bccbff0a12a08218a3ca4167/assets/motion/cordisx-ai-plugin-demo-zh-light.mp4">浅色高清 MP4</a> · <a href="https://raw.githubusercontent.com/cordisx/cordisx.github.io/b21aa6330e4577c2bccbff0a12a08218a3ca4167/assets/motion/cordisx-ai-plugin-demo-zh-dark.mp4">深色高清 MP4</a></sub></p>
+<p align="center"><sub>随页面主题自动切换 · <a href="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-zh-light.mp4">浅色高清 MP4</a> · <a href="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-zh-dark.mp4">深色高清 MP4</a></sub></p>
 
 ## 文档
 
