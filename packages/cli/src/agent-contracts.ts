@@ -411,6 +411,12 @@ export interface CordisXSystemPrompt {
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
+    /** Permission-brokered, read-only adapter-neutral Agent event ledger. */
+    agentEvents: CordisXAgentEvents
+    /** Permission-brokered, privacy-bounded durable Agent history. */
+    agentHistory: CordisXAgentHistory
+    /** DSH-aligned Agent messaging and pre-step composition. */
+    agents: CordisXAgents
     /** Brokered system-prompt sections and dynamic context. */
     systemPrompt: CordisXSystemPrompt
   }

@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
-import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2, type CordisXNavigationCollectionSnapshotV2 } from 'cordisx/contracts'
+import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2, type CordisXNavigationCollectionSnapshot } from 'cordisx/contracts'
 
 const message = (key: string, fallback: string) => ({ namespace: 'navigation-collection', key, fallback } as const)
 const roomVisual = (...participantIds: string[]) => ({
@@ -11,38 +11,27 @@ const roomVisual = (...participantIds: string[]) => ({
   })),
 })
 
-const feedback = { success: message('action.success', 'Action completed'), failure: message('action.failure', 'Action failed') }
-
-let snapshot: CordisXNavigationCollectionSnapshotV2 = {
+let snapshot: CordisXNavigationCollectionSnapshot = {
   revision: 1,
   items: [
-    { id: 'latest', label: message('room.latest', 'Latest room'), leadingVisual: roomVisual('lead'), route: { id: 'room', params: { roomId: 'latest' } }, order: 0, actions: [
-      { kind: 'command', id: 'pin', label: message('action.pin', 'Pin'), icon: 'host:pin', placement: 'direct', tone: 'neutral', pressed: false, disabled: { value: false }, command: { id: 'pin-room', arguments: { roomId: 'latest' } }, feedback },
-      { kind: 'copy-route-link', id: 'copy-link', label: message('action.copy-link', 'Copy link'), icon: 'host:link', placement: 'overflow', tone: 'neutral', pressed: false, disabled: { value: false }, feedback },
-      { kind: 'copy-text', id: 'copy-id', label: message('action.copy-id', 'Copy ID'), icon: 'host:copy', placement: 'overflow', tone: 'neutral', pressed: false, disabled: { value: false }, text: { value: 'latest' }, feedback },
-      { kind: 'command', id: 'delete', label: message('action.delete', 'Delete'), icon: 'host:delete', placement: 'overflow', tone: 'danger', pressed: false, disabled: { value: false }, command: { id: 'delete-room', arguments: { roomId: 'latest' } }, confirmation: { title: message('delete.title', 'Delete room?'), description: message('delete.description', 'This cannot be undone.'), confirmLabel: message('delete.confirm', 'Delete') }, feedback },
-    ] },
+    { id: 'latest', label: message('room.latest', 'Latest room'), leadingVisual: roomVisual('lead'), route: { id: 'room', params: { roomId: 'latest' } }, order: 0 },
     { id: 'older', label: message('room.older', 'Older room'), leadingVisual: roomVisual('reviewer', 'writer'), route: { id: 'room', params: { roomId: 'older' } }, order: 10 },
   ],
 }
 const listeners = new Set<() => void>()
 
-export const inject = ['commands', 'i18n', 'pages', 'routes', 'slots']
+export const inject = ['i18n', 'pages', 'routes', 'slots']
 
 export function apply(ctx: Context): void {
   const scope = globalThis as typeof globalThis & {
-    __cordisxNavigationCollectionFixture?: { replace(next: CordisXNavigationCollectionSnapshotV2): void; commands: string[] }
+    __cordisxNavigationCollectionFixture?: { replace(next: CordisXNavigationCollectionSnapshot): void }
   }
-  const commands: string[] = []
   scope.__cordisxNavigationCollectionFixture = {
-    commands,
     replace(next) {
       snapshot = next
       for (const listener of [...listeners]) listener()
     },
   }
-  ctx.commands.register({ id: 'pin-room', title: message('action.pin', 'Pin') }, () => { commands.push('pin') })
-  ctx.commands.register({ id: 'delete-room', title: message('action.delete', 'Delete') }, () => { commands.push('delete') })
   ctx.i18n.define({
     namespace: 'navigation-collection', locale: 'en', default: true,
     messages: {
@@ -112,7 +101,7 @@ export function apply(ctx: Context): void {
     route: { id: 'new-room' },
   })
   ctx.slots.registerCollection({
-    name: 'sidebar.navigation.items', id: 'rooms', contract: 'cordisx.navigation-collection/v2',
+    name: 'sidebar.navigation.items', id: 'rooms',
     group: { id: 'rooms', label: message('navigation.rooms', 'Rooms'), order: 20 },
   }, {
     snapshot: () => snapshot,

@@ -10,6 +10,10 @@ import { defaultUiPlaygroundConfig } from '../packages/cli/src/playground/defaul
 import { startUiPlayground } from '../packages/cli/src/playground/server.js'
 import { createPlaygroundSession } from '../packages/cli/src/playground/session.js'
 import { activatePlaygroundReviewNavigation, authorizePlaygroundReviewNavigation } from '../packages/cli/src/playground/client/review-navigation.js'
+import {
+  clearPlaygroundSimulatorSessionRegistry,
+  subscribePlaygroundTaskLocation,
+} from '../packages/cli/src/playground/client/task-details-navigation.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 import { createSidebarItem } from '../packages/cli/src/renderer/host-ui/SidebarItem.js'
 import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
@@ -82,6 +86,57 @@ describe('UI Playground', () => {
       { pointId: 'sidebar.navigation.items', policy: 'allow' },
       { pointId: 'main', policy: 'allow' },
     ]]])
+  })
+
+  it('restores the Host outlet before a Room route projects during Task history back and forward', async () => {
+    const dom = new JSDOM('<!doctype html><body><div id="root"><main data-host-seats><div data-cordisx-playground-seat="main"></div></main></div></body>', {
+      url: 'http://127.0.0.1/',
+    })
+    const roomEntry = {
+      key: 'room', idx: 1,
+      __cordisxRouteV1: { schemaVersion: 1, owner: 'chatroom', routeId: 'chatroom:room', outlet: 'main', params: { roomId: 'room-1' } },
+    }
+    dom.window.history.replaceState(roomEntry, '', '/')
+    const root = dom.window.document.getElementById('root')!
+    const dispose = subscribePlaygroundTaskLocation(dom.window, taskId => {
+      root.innerHTML = taskId === undefined
+        ? '<main data-host-seats><div data-cordisx-playground-seat="main"></div></main>'
+        : `<main data-playground-simulator="true">${taskId}</main>`
+    })
+    dom.window.addEventListener('popstate', () => {
+      const route = dom.window.history.state?.__cordisxRouteV1
+      const outlet = dom.window.document.querySelector('[data-cordisx-playground-seat="main"]')
+      if (route?.params?.roomId === 'room-1' && outlet !== null) outlet.innerHTML = '<article data-room-page="room-1">Room one</article>'
+    })
+
+    dom.window.history.pushState({ key: 'task', idx: 2 }, '', '/playground/simulator/tasks/Lead')
+    dom.window.dispatchEvent(new dom.window.Event('cordisx:host-task-details-navigation'))
+    expect(dom.window.document.querySelector('[data-playground-simulator]')?.textContent).toBe('Lead')
+
+    dom.window.history.back()
+    await new Promise(resolve => dom.window.addEventListener('popstate', resolve, { once: true }))
+    expect(dom.window.document.querySelector('[data-room-page="room-1"]')?.textContent).toBe('Room one')
+    dom.window.history.forward()
+    await new Promise(resolve => dom.window.addEventListener('popstate', resolve, { once: true }))
+    expect(dom.window.document.querySelector('[data-playground-simulator]')?.textContent).toBe('Lead')
+    dom.window.history.back()
+    await new Promise(resolve => dom.window.addEventListener('popstate', resolve, { once: true }))
+    expect(dom.window.document.querySelectorAll('[data-room-page="room-1"]')).toHaveLength(1)
+
+    dispose()
+    dom.window.close()
+  })
+
+  it('resets only namespaced Simulator session registries', () => {
+    const dom = new JSDOM('', { url: 'http://127.0.0.1/' })
+    dom.window.sessionStorage.setItem('cordisx.playground.simulator/v1:playground:chatroom', '{"tasks":[1]}')
+    dom.window.sessionStorage.setItem('cordisx.playground.simulator/v1:other:plugin', '{"tasks":[2]}')
+    dom.window.sessionStorage.setItem('cordisx.unrelated.session', 'keep')
+    clearPlaygroundSimulatorSessionRegistry(dom.window.sessionStorage)
+    expect(dom.window.sessionStorage.getItem('cordisx.playground.simulator/v1:playground:chatroom')).toBeNull()
+    expect(dom.window.sessionStorage.getItem('cordisx.playground.simulator/v1:other:plugin')).toBeNull()
+    expect(dom.window.sessionStorage.getItem('cordisx.unrelated.session')).toBe('keep')
+    dom.window.close()
   })
 
   it('enters an exact configured review navigation row without selecting a debug fixture', async () => {
@@ -208,29 +263,39 @@ describe('UI Playground', () => {
     expect(environment).toContain('new DocumentLocaleAdapter(document)')
   })
 
-  it('keeps the Playground on the formal Session runtime without the retired AgentLoop simulator UI', async () => {
-    const [app, seats, fixtureSource, runtime, session, viteServer] = await Promise.all([
+  it('keeps review tasks in one Recent tasks section and excludes Playground fixtures', async () => {
+    const [app, seats, fixtureSource, styles, viteServer] = await Promise.all([
       readFile(path.resolve('packages/cli/src/playground/client/App.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/components/HostSeats.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/fixtures/agent-conversation.ts'), 'utf8'),
-      readFile(path.resolve('packages/cli/src/renderer/runtime.ts'), 'utf8'),
-      readFile(path.resolve('packages/cli/src/playground/session.ts'), 'utf8'),
+      readFile(path.resolve('packages/cli/src/playground/client/styles.css'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/vite/server.ts'), 'utf8'),
     ])
-    expect(app).not.toContain('pg-recent-task-list-title')
-    expect(app).not.toContain('playgroundMockAgentLoop')
-    expect(app).not.toContain('ScenarioLabPage')
-    expect(runtime).toContain('new DeterministicAgentSessionTransport()')
-    expect(runtime).toContain('new CordisXAgentSessionRuntime({')
-    expect(session).toContain('same Agent/Session Runtime authority')
-    expect(session).toContain('const providerFleet = undefined')
+    expect(app.match(/id="pg-recent-task-list-title"/g)).toHaveLength(1)
+    expect(styles).toContain('.pg-recent-task-list > [data-recent-task-row] .cxsi-icon { border-radius: 50%; }')
+    expect(app).toContain("en ? 'Recent tasks' : '最近任务'")
+    expect(app).toContain("en ? 'No recent tasks.' : '暂无最近任务。'")
+    expect(app).toContain("en ? 'Mock' : '模拟'")
+    expect(app).toContain('data-recent-task-row')
+    expect(app).toContain('icon="host:history"')
+    expect(app).not.toContain('HostAgentAvatar')
+    expect(app).not.toContain('task.effective.avatar')
+    expect(app).toContain('onClickCapture={preparePluginNavigation}')
+    expect(app).toContain('flushSync(() => setSimulatorTaskId(undefined))')
+    expect(app).toContain('subscribePlaygroundTaskLocation(window')
+    expect(app).toContain('clearPlaygroundSimulatorSessionRegistry(sessionStorage)')
     expect(app).toContain('playgroundEnvironment.resetPreferences()')
     expect(app).not.toContain('localStorage.clear()')
     expect(app).toContain('fixture.reviewNavigationItem === undefined')
     expect(app).toContain("en ? 'Playground fixtures' : 'Playground 测试场景'")
+    expect(app).not.toContain('Simulator tasks')
+    expect(app).not.toContain('Simulator 任务')
+    expect(app).not.toContain('pg-simulator-task-list')
+    expect(app).toContain("fixture.reviewNavigationItem === undefined")
     expect(seats).toContain("mode === 'review' ? null")
     expect(fixtureSource).toContain("newRoomTitle: 'Empty conversation fixture'")
     expect(fixtureSource).toContain("newRoomTitle: '空会话测试场景'")
+    expect(styles).not.toContain('插件导航贡献会显示在这里')
     expect(viteServer).toContain("url.pathname === '/api/documents'")
     expect(viteServer).toContain('session.handleOwnerDocumentRequest(await requestBody(request))')
   })
@@ -296,8 +361,6 @@ describe('UI Playground', () => {
       const bundle = await fetch(`${playground.url}api/bundle`).then(response => response.text())
       expect(bundle).toContain('hostKind: "playground"')
       expect(bundle).toContain('installCordisX')
-      expect(bundle).toContain('pluginBundleSnapshot:')
-      expect(bundle).toContain('Workflow Essentials')
       const serviceConfigToken = /serviceConfigBridgeToken: "([a-f0-9]{64})"/.exec(bundle)?.[1]
       const generation = /generation: "(playground-[a-f0-9]+)"/.exec(bundle)?.[1]
       expect(serviceConfigToken).toBeDefined()

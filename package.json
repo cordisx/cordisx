@@ -28,6 +28,6 @@
     "node": ">=22.19"
   },
   "devDependencies": {
-    "@cordisx/protocol": "file:/private/tmp/cordisx-protocol-manager-navigation-profile"
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#3ad21adb5fa10c75aec88f7280c5b31f87e76dad"
   }
 }

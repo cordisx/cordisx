@@ -3,7 +3,6 @@ import type { CordisXPluginLifecycleOperationV1 } from '../../../contracts.js'
 import type { ManagerSnapshot } from '../../manager.js'
 import type { ManagerModel, ManagerPluginSnapshot } from '../../manager.js'
 import { managerCopy } from '../../ui-copy.js'
-import { productLocale } from '../../ui-copy.js'
 import type { ManagerRouter } from '../model/routes.js'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
@@ -25,11 +24,7 @@ export function PluginsPage({ model, snapshot, router }: { readonly model: Manag
     try {
       let result = await model.requestPluginLifecycle(operation)
       if ((operation.kind === 'disable' || operation.kind === 'uninstall') && result.outcome === 'planned' && result.impactToken !== undefined) {
-        const affected = result.affectedPluginIds.join(productLocale(snapshot.localization.locale) === 'zh-CN' ? '、' : ', ') || plugin.name
-        const prompt = productLocale(snapshot.localization.locale) === 'zh-CN'
-          ? `此操作会影响：${affected}。继续吗？`
-          : `This action affects: ${affected}. Continue?`
-        if (!window.confirm(prompt)) return
+        if (!window.confirm(`此操作会影响：${result.affectedPluginIds.join('、') || plugin.name}。继续吗？`)) return
         result = await model.requestPluginLifecycle({ ...operation, impactToken: result.impactToken })
       }
       if (result.error !== undefined) window.alert(result.error.message)
@@ -40,26 +35,26 @@ export function PluginsPage({ model, snapshot, router }: { readonly model: Manag
       <SearchField className="cxr-search" value={query} aria-label={managerCopy(snapshot.localization.locale, 'plugins.search-label')} placeholder={managerCopy(snapshot.localization.locale, 'plugins.search-placeholder')} onChange={setQuery} />
       <div className="cxr-list" role="list">
         {pendingDevelopment.map(item => <div key={item.sourcePath} className="cxr-local-development-source" role="listitem" data-plugin-origin="local-dev" data-development-state={item.state}>
-          <span className="cxr-card-body"><span className="cxr-card-title">{item.pluginId}<span className="cxr-badge">{managerCopy(snapshot.localization.locale, 'plugins.local-development')}</span></span><code className="cxr-card-code">{item.sourcePath}</code>{item.error === undefined ? null : <span className="cxr-local-development-error" role="alert">{item.error}</span>}</span>
+          <span className="cxr-card-body"><span className="cxr-card-title">{item.pluginId}<span className="cxr-badge">本地开发</span></span><code className="cxr-card-code">{item.sourcePath}</code>{item.error === undefined ? null : <span className="cxr-local-development-error" role="alert">{item.error}</span>}</span>
           <strong>{item.state}</strong>
         </div>)}
         {plugins.map(plugin => (
           <div key={`${plugin.source}\0${plugin.id}`} className="cxr-plugin-row" role="listitem">
-            <button className="cxr-plugin-primary" type="button" data-plugin-id={plugin.id} aria-label={`${managerCopy(snapshot.localization.locale, 'plugins.open')} · ${plugin.name}`} onClick={() => router.navigate({ kind: 'plugin', pluginId: plugin.id, page: 'readme' })}>
+            <button className="cxr-plugin-primary" type="button" data-plugin-id={plugin.id} aria-label={`打开插件详情 · ${plugin.name}`} onClick={() => router.navigate({ kind: 'plugin', pluginId: plugin.id, page: 'readme' })}>
               <PluginIdentityIcon pluginId={plugin.id} name={plugin.name} icon={plugin.icon} status={plugin.status} />
-              <span className="cxr-card-body"><span className="cxr-card-title">{plugin.name}{plugin.development === undefined ? null : <span className="cxr-badge" data-plugin-origin="local-dev">{managerCopy(snapshot.localization.locale, 'plugins.local-development')}</span>}</span><span className="cxr-card-description">{plugin.description}</span><code className="cxr-card-code">{plugin.id}</code></span>
+              <span className="cxr-card-body"><span className="cxr-card-title">{plugin.name}{plugin.development === undefined ? null : <span className="cxr-badge" data-plugin-origin="local-dev">本地开发</span>}</span><span className="cxr-card-description">{plugin.description}</span><code className="cxr-card-code">{plugin.id}</code></span>
             </button>
             <span className="cxr-plugin-actions">
-              <IconButton icon={plugin.status === 'configured-disabled' ? 'enable-plugin' : 'disable-plugin'} label={managerCopy(snapshot.localization.locale, plugin.status === 'configured-disabled' ? 'plugins.enable' : 'plugins.disable')} loading={busyPluginId === plugin.id} disabled={model.requestPluginLifecycle === undefined} onClick={() => void run(plugin, plugin.status === 'configured-disabled' ? { kind: 'enable', pluginId: plugin.id } : { kind: 'disable', pluginId: plugin.id, impactToken: '' })} />
-              <IconButton icon="reload-plugin" label={managerCopy(snapshot.localization.locale, 'plugins.reload')} loading={busyPluginId === plugin.id} disabled={model.requestPluginLifecycle === undefined || plugin.status !== 'active'} onClick={() => void run(plugin, { kind: 'reload', pluginId: plugin.id })} />
-              <MoreMenu label={`${plugin.name} · ${managerCopy(snapshot.localization.locale, 'plugins.more-actions')}`} items={[
-                { id: 'logs', label: managerCopy(snapshot.localization.locale, 'plugin-tab.logs'), icon: 'diagnostics', onSelect: () => router.navigate({ kind: 'plugin', pluginId: plugin.id, page: 'logs' }) },
-                { id: 'uninstall', label: managerCopy(snapshot.localization.locale, 'plugins.uninstall'), icon: 'uninstall-plugin', disabled: model.requestPluginLifecycle === undefined, onSelect: () => void run(plugin, { kind: 'uninstall', pluginId: plugin.id, impactToken: '' }) },
+              <IconButton icon={plugin.status === 'configured-disabled' ? 'enable-plugin' : 'disable-plugin'} label={plugin.status === 'configured-disabled' ? '启用' : '停用'} loading={busyPluginId === plugin.id} disabled={model.requestPluginLifecycle === undefined} onClick={() => void run(plugin, plugin.status === 'configured-disabled' ? { kind: 'enable', pluginId: plugin.id } : { kind: 'disable', pluginId: plugin.id, impactToken: '' })} />
+              <IconButton icon="reload-plugin" label="重新加载" loading={busyPluginId === plugin.id} disabled={model.requestPluginLifecycle === undefined || plugin.status !== 'active'} onClick={() => void run(plugin, { kind: 'reload', pluginId: plugin.id })} />
+              <MoreMenu label={`${plugin.name} 更多操作`} items={[
+                { id: 'logs', label: '日志与诊断', icon: 'diagnostics', onSelect: () => router.navigate({ kind: 'plugin', pluginId: plugin.id, page: 'logs' }) },
+                { id: 'uninstall', label: '卸载', icon: 'uninstall-plugin', disabled: model.requestPluginLifecycle === undefined, onSelect: () => void run(plugin, { kind: 'uninstall', pluginId: plugin.id, impactToken: '' }) },
               ]} />
             </span>
           </div>
         ))}
-        {plugins.length === 0 && pendingDevelopment.length === 0 ? <div className="cxr-empty">{managerCopy(snapshot.localization.locale, 'plugins.no-matches')}</div> : null}
+        {plugins.length === 0 && pendingDevelopment.length === 0 ? <div className="cxr-empty">没有匹配的插件</div> : null}
       </div>
     </section>
   )

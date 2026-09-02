@@ -149,7 +149,7 @@ describe('settings navigation demo bundle', () => {
     item()!.click()
     await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-demo-content]') !== null)
     const priorGeneration = runtime.snapshot().extensionPoints.accessDiagnostics.at(-1)!.request.generation
-    dom.window.document.querySelector<HTMLButtonElement>('.cxr-header button[aria-label="关闭 CordisX 管理器"]')!.click()
+    dom.window.document.querySelector<HTMLButtonElement>('.cxr-header button[aria-label="关闭"]')!.click()
     await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-demo-content]') === null)
     dom.window.eval(bundle)
     await waitFor(() => (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime !== runtime)

@@ -2,8 +2,7 @@
   "version": 1,
   "playground": {
     "name": "Comprehensive UI demos",
-    "description": "Local multi-plugin fixture for CordisX UI Playground.",
-    "pluginBundleFixture": true
+    "description": "Local multi-plugin fixture for CordisX UI Playground."
   },
   "codex": {
     "debugPort": 9229

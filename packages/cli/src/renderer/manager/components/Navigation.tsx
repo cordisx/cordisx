@@ -9,7 +9,6 @@ import { primaryFor, type ManagerPrimaryPage, type ManagerRouter } from '../mode
 
 const core: readonly { readonly page: ManagerPrimaryPage; readonly icon: ManagerIconToken; readonly copy: Parameters<typeof managerCopy>[1] }[] = [
   { page: 'plugins', icon: 'plugins', copy: 'manager.nav.plugins' },
-  { page: 'plugin-bundles', icon: 'plugins', copy: 'manager.nav.plugin-bundles' },
   { page: 'extension-points', icon: 'outlets', copy: 'manager.nav.extension-points' },
   { page: 'routes', icon: 'routes', copy: 'manager.nav.routes' },
   { page: 'marketplace', icon: 'marketplace', copy: 'manager.nav.marketplace' },

@@ -277,10 +277,7 @@ describe('controlled extension point runtime', () => {
     const result = await coordinator.invoke(generation('overlay'), request)
     expect(result).toMatchObject({ authority: 'host', outcome: 'accepted', reason: 'command.accepted' })
     expect(result).not.toHaveProperty('payload')
-    expect(dispatch).toHaveBeenCalledWith('setReasoningIntensity', { value: 'medium' }, expect.objectContaining({
-      caller: expect.objectContaining({ pluginId: 'overlay', moduleGeneration: 'overlay-v1' }),
-      declaration: expect.objectContaining({ claimId: 'sync' }),
-    }))
+    expect(dispatch).toHaveBeenCalledWith('setReasoningIntensity', { value: 'medium' })
     expect(intensity()).toBe('medium')
     expect(coordinator.publishEvent('model.reasoning-intensity', 'reasoningIntensityChanged', { value: 'medium' })[0]).toMatchObject({
       authority: 'host', sequence: 1, identity: { pluginId: 'overlay' }, eventId: 'reasoningIntensityChanged', payload: { value: 'medium' },
@@ -354,7 +351,7 @@ describe('controlled extension point runtime', () => {
     hostAuthorized = false
     coordinator.invalidate()
     expect(lease.snapshot()).toMatchObject({ state: 'denied', properties: {}, commands: [], events: [] })
-    await expect(lease.invoke('setReasoningIntensity', { value: 'low' })).resolves.toMatchObject({ outcome: 'rejected', reason: 'authorization.denied' })
+    await expect(lease.invoke('setReasoningIntensity', { value: 'low' })).resolves.toMatchObject({ outcome: 'rejected', reason: 'claim.not-selected' })
     registration.dispose(); lease.dispose()
     expect(lease.snapshot()).toMatchObject({ state: 'revoked', reason: 'lease.revoked' })
     expect(changed).toHaveBeenCalled()
@@ -566,7 +563,7 @@ describe('controlled extension point runtime', () => {
     expect(lease.snapshot()).toMatchObject({ state: 'denied', reason: 'point.local-deny', properties: {}, commands: [], events: [] })
     const deniedChanged = vi.fn()
     expect(() => lease.subscribe(deniedChanged)).not.toThrow()
-    await expect(lease.invoke('setReasoningIntensity', { value: 'low' })).resolves.toMatchObject({ outcome: 'rejected', reason: 'authorization.denied' })
+    await expect(lease.invoke('setReasoningIntensity', { value: 'low' })).resolves.toMatchObject({ outcome: 'rejected', reason: 'claim.not-selected' })
     expect(controls.publishEvent('composer.reasoning-intensity', 'reasoningIntensityChanged', { value: 'low' })).toEqual([])
     expect(dispatch).not.toHaveBeenCalled()
     expect(changed).toHaveBeenCalledTimes(3)
@@ -577,10 +574,7 @@ describe('controlled extension point runtime', () => {
     expect(deniedChanged).toHaveBeenCalledTimes(1)
     expect(lease.snapshot()).toMatchObject({ state: 'selected', properties: { reasoningIntensity: 'high' } })
     await expect(lease.invoke('setReasoningIntensity', { value: 'medium' })).resolves.toMatchObject({ outcome: 'accepted' })
-    expect(dispatch).toHaveBeenCalledWith('setReasoningIntensity', { value: 'medium' }, expect.objectContaining({
-      caller: expect.objectContaining({ pluginId: 'theme', moduleGeneration: 'theme-v1' }),
-      declaration: expect.objectContaining({ claimId: 'presentation' }),
-    }))
+    expect(dispatch).toHaveBeenCalledWith('setReasoningIntensity', { value: 'medium' })
     registry.dispose(); contexts.dispose()
   })
 

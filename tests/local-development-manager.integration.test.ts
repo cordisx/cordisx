@@ -79,8 +79,6 @@ describe('local development Manager projection', () => {
     const privateProjection = dom.window.document.querySelector<HTMLElement>('.cxr-local-development-source')
     expect(privateProjection?.textContent).toContain(sourcePath)
     expect(privateProjection?.textContent).toContain('fixture build failed')
-    expect(privateProjection?.textContent).toContain('Local development')
-    expect(privateProjection?.textContent).not.toMatch(/[\u3400-\u9fff]/u)
     expect(privateProjection?.dataset.developmentState).toBe('failed')
 
     const candidate = {
