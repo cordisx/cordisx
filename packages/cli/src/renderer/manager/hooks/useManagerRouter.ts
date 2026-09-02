@@ -18,8 +18,11 @@ export function useManagerRouter(storage?: Storage): ManagerRouter {
   const navigate = useCallback((next: ManagerRoute) => {
     setHistory(current => [...current, next])
   }, [])
+  const replace = useCallback((next: ManagerRoute) => {
+    setHistory(current => current.length === 0 ? [next] : [...current.slice(0, -1), next])
+  }, [])
   const back = useCallback(() => {
     setHistory(current => current.length > 1 ? current.slice(0, -1) : current)
   }, [])
-  return useMemo(() => ({ route, navigate, back }), [back, navigate, route])
+  return useMemo(() => ({ route, navigate, replace, back }), [back, navigate, replace, route])
 }

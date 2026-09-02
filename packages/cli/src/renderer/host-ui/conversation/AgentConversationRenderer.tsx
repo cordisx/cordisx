@@ -1,10 +1,13 @@
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { HostSurfaceIcon } from '../HostSurfaceIcon.js'
+import { HostIcon } from '../HostIcon.js'
 import { useAutoFollow } from '../useAutoFollow.js'
 import type { AgentConversationCommandController } from './commands.js'
 import {
   participantFor,
   type AgentConversationAction,
+  type AgentConversationActiveRun,
   type AgentConversationApproval,
   type AgentConversationEntry,
   type AgentConversationMessage,
@@ -15,12 +18,25 @@ import { HostAgentAvatar } from './AgentAvatar.js'
 import type { HostAgentTaskDetailsNavigator } from '../AgentTaskDetailsNavigator.js'
 import {
   createHostAgentIdentityPresentation,
-  HostAgentIdentityAvatarButton,
-  HostAgentIdentityPanel,
+  HostAgentIdentityContent,
+  type HostAgentIdentityPanelCopy,
   type HostAgentIdentityPresentation,
 } from './AgentIdentityPanel.js'
 import { HostConversationRightInspector } from './RightInspector.js'
 import { HostRoomCompositeAvatar } from './RoomCompositeAvatar.js'
+import { useHostShikitorComposer } from './ShikitorComposerAdapter.js'
+import type { HostSchemaFormProps } from '../HostSchemaForm.js'
+import type { CordisXConfigFieldSnapshot } from '../../../contracts.js'
+import { PLAYGROUND_ROOM_SIMULATION_BINDING_CONTRACT } from '../../playground-room-simulation-bridge.js'
+import { HostThemeProjection } from '../../host-theme.js'
+
+// The schema renderer is loaded only when the Host-owned settings inspector
+// opens. This preserves the same Schemastery/TDesign form path while allowing
+// the conversation shell itself to remain a lightweight structured surface.
+const HostSchemaForm = React.lazy(async () => {
+  const module = await import('../HostSchemaForm.js')
+  return { default: module.HostSchemaForm }
+})
 
 export interface AgentConversationRendererCopy {
   readonly locale: string
@@ -107,23 +123,382 @@ function ActionButton({ action, run }: { readonly action: AgentConversationActio
   </>
 }
 
+function MessageHoverActions({
+  entry, model, commands, copy, onCommandError,
+}: {
+  readonly entry: AgentConversationMessage
+  readonly model: AgentConversationModel
+  readonly commands: AgentConversationCommandController
+  readonly copy: AgentConversationRendererCopy
+  readonly onCommandError: (error: unknown) => void
+}) {
+  const chinese = copy.locale.toLowerCase().startsWith('zh')
+  const directActions = entry.actions.slice(0, 2)
+  const overflowActions = entry.actions.slice(2)
+  const copyMessage = (event: React.MouseEvent<HTMLButtonElement>): void => {
+    const clipboard = event.currentTarget.ownerDocument.defaultView?.navigator.clipboard
+    if (clipboard === undefined) {
+      onCommandError(new Error(chinese ? '当前环境不支持复制。' : 'Copy is unavailable in this environment.'))
+      return
+    }
+    void clipboard.writeText(entry.body.join('\n\n')).catch(onCommandError)
+  }
+  return <div className="cxa-message-hover-actions" role="toolbar" aria-label={chinese ? '消息操作' : 'Message actions'}>
+    <div className="cxa-message-extension-actions" data-host-conversation-message-action-slot="v1">
+      {directActions.map(action => <ActionButton key={action.id} action={action} run={() => {
+        void commands.runMessage(model, entry.itemId, action).catch(onCommandError)
+      }} />)}
+    </div>
+    <button type="button" className="cxa-message-hover-action" aria-label={chinese ? '复制消息' : 'Copy message'} onClick={copyMessage}><HostIcon token="action.copy" /></button>
+    <details className="cxa-message-more">
+      <summary className="cxa-message-hover-action" aria-label={chinese ? '更多消息操作' : 'More message actions'}><HostSurfaceIcon token="host:more" /></summary>
+      <div className="cxa-message-more-menu" role="menu" data-host-conversation-message-action-overflow="v1">
+        {overflowActions.length === 0
+          ? <span className="cxa-message-more-empty">{chinese ? '暂无更多操作' : 'No more actions'}</span>
+          : overflowActions.map(action => <ActionButton key={action.id} action={action} run={() => {
+            void commands.runMessage(model, entry.itemId, action).catch(onCommandError)
+          }} />)}
+      </div>
+    </details>
+  </div>
+}
+
+function HeaderMoreMenu({
+  actions, model, commands, copy, onCommandError,
+}: {
+  readonly actions: readonly AgentConversationAction[]
+  readonly model: AgentConversationModel
+  readonly commands: AgentConversationCommandController
+  readonly copy: AgentConversationRendererCopy
+  readonly onCommandError: (error: unknown) => void
+}) {
+  const [open, setOpen] = React.useState(false)
+  const triggerRef = React.useRef<HTMLButtonElement>(null)
+  const menuRef = React.useRef<HTMLDivElement>(null)
+  const menuId = React.useId()
+  const chinese = copy.locale.toLowerCase().startsWith('zh')
+  const closeAndRestoreFocus = React.useCallback(() => {
+    setOpen(false)
+    triggerRef.current?.focus()
+  }, [])
+
+  React.useEffect(() => {
+    if (!open) return
+    const trigger = triggerRef.current
+    const menu = menuRef.current
+    const document = trigger?.ownerDocument
+    if (trigger === null || menu === null || document === undefined) return
+    const firstAction = menu.querySelector<HTMLButtonElement>('button:not(:disabled)')
+    ;(firstAction ?? menu).focus()
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target
+      if (!(target instanceof document.defaultView!.Node) || trigger.contains(target) || menu.contains(target)) return
+      setOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      closeAndRestoreFocus()
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true)
+      document.removeEventListener('keydown', onKeyDown, true)
+    }
+  }, [closeAndRestoreFocus, open])
+
+  const select = (action: AgentConversationAction): void => {
+    closeAndRestoreFocus()
+    void commands.runHeader(model, action).catch(onCommandError)
+  }
+  return <span className="cxa-header-more-anchor">
+    <button
+      ref={triggerRef}
+      type="button"
+      className="cxa-header-icon-action"
+      aria-label={chinese ? '更多' : 'More'}
+      aria-haspopup="menu"
+      aria-expanded={open}
+      aria-controls={open ? menuId : undefined}
+      onClick={() => setOpen(value => !value)}
+      onKeyDown={event => {
+        if (event.key !== 'ArrowDown') return
+        event.preventDefault()
+        setOpen(true)
+      }}
+    ><HostSurfaceIcon token="host:more" /></button>
+    {!open ? null : <div
+      ref={menuRef}
+      id={menuId}
+      className="cxa-header-more-menu"
+      role="menu"
+      aria-label={chinese ? '更多操作' : 'More actions'}
+      tabIndex={-1}
+      data-host-conversation-header-action-overflow="v1"
+    >
+      {actions.length === 0
+        ? <span className="cxa-header-more-empty" role="status">{chinese ? '暂无更多操作' : 'No more actions'}</span>
+        : actions.map(action => <button
+          key={action.id}
+          type="button"
+          className="cxa-header-more-item"
+          role="menuitem"
+          disabled={action.disabled}
+          title={action.disabledReason}
+          data-host-conversation-header-action-id={action.id}
+          onClick={() => select(action)}
+        >
+          {action.icon === undefined ? null : <HostSurfaceIcon token={action.icon} />}
+          <span>{action.label}</span>
+        </button>)}
+    </div>}
+  </span>
+}
+
 type ConversationInspector =
-  | Readonly<{ kind: 'members' | 'settings' | 'more' }>
+  | Readonly<{ kind: 'members' | 'settings' }>
   | Readonly<{ kind: 'identity'; participantId: string }>
 
+type ConversationContextTarget = Readonly<{
+  kind: 'avatar' | 'message'
+  x: number
+  y: number
+  participantId: string
+  participantName: string
+  participantRole: 'agent' | 'human' | 'system'
+  restoreFocus: HTMLElement
+  messageText?: string
+}>
+
+type ComposerMentionRequest = Readonly<{
+  sequence: number
+  participantId: string
+  participantName: string
+}>
+
+function identityMentionAliases(
+  model: AgentConversationModel,
+  presentations: ReadonlyMap<string, HostAgentIdentityPresentation>,
+): readonly Readonly<{
+  alias: string
+  participantId: string
+  name: string
+  presentation?: HostAgentIdentityPresentation
+}>[] {
+  if (model.selection.kind !== 'room') return []
+  const candidates = new Map<string, Set<string>>()
+  for (const participant of model.selection.participants) {
+    for (const alias of [participant.id, participant.name]) {
+      if (alias === '') continue
+      const participantIds = candidates.get(alias) ?? new Set<string>()
+      participantIds.add(participant.id)
+      candidates.set(alias, participantIds)
+    }
+  }
+  const participants = new Map(model.selection.participants.map(participant => [participant.id, participant] as const))
+  const resolved: {
+    alias: string
+    participantId: string
+    name: string
+    presentation?: HostAgentIdentityPresentation
+  }[] = []
+  for (const [alias, participantIds] of candidates) {
+    if (participantIds.size !== 1) continue
+    const participantId = participantIds.values().next().value
+    if (participantId === undefined) continue
+    const participant = participants.get(participantId)
+    if (participant === undefined) continue
+    const presentation = presentations.get(participantId)
+    resolved.push({
+      alias,
+      participantId,
+      name: presentation?.name ?? participant.name,
+      ...(presentation === undefined ? {} : { presentation }),
+    })
+  }
+  return resolved.sort((left, right) => right.alias.length - left.alias.length)
+}
+
+function MessageText({ text, mentions, onOpenMention }: {
+  readonly text: string
+  readonly mentions: readonly Readonly<{
+    alias: string
+    participantId: string
+    name: string
+    presentation?: HostAgentIdentityPresentation
+  }>[]
+  readonly onOpenMention: (participantId: string) => void
+}) {
+  if (mentions.length === 0 || !text.includes('@')) return text
+  const output: React.ReactNode[] = []
+  let cursor = 0
+  let searchFrom = 0
+  while (searchFrom < text.length) {
+    const marker = text.indexOf('@', searchFrom)
+    if (marker < 0) break
+    const mention = mentions.find(candidate => {
+      if (!text.startsWith(candidate.alias, marker + 1)) return false
+      const next = text[marker + candidate.alias.length + 1]
+      return next === undefined || !/[\p{L}\p{N}._~-]/u.test(next)
+    })
+    if (mention === undefined) {
+      searchFrom = marker + 1
+      continue
+    }
+    if (marker > cursor) output.push(text.slice(cursor, marker))
+    const participantId = mention.participantId
+    output.push(<button
+      key={`${marker}:${participantId}`}
+      type="button"
+      className="cxa-message-mention"
+      data-mention-participant-id={participantId}
+      aria-label={`Open ${mention.name}${mention.presentation === undefined ? ' in members' : ''}`}
+      onClick={() => onOpenMention(participantId)}
+    >@{mention.alias}</button>)
+    cursor = marker + mention.alias.length + 1
+    searchFrom = cursor
+  }
+  if (cursor < text.length) output.push(text.slice(cursor))
+  return output.length === 0 ? text : <>{output}</>
+}
+
+function ConversationContextMenu({ target, chinese, onClose, onMention, onOpenParticipant, onError }: {
+  readonly target: ConversationContextTarget
+  readonly chinese: boolean
+  readonly onClose: () => void
+  readonly onMention: (participantId: string) => void
+  readonly onOpenParticipant: (participantId: string) => void
+  readonly onError: (error: unknown) => void
+}) {
+  const menuRef = React.useRef<HTMLDivElement>(null)
+  const menuId = React.useId()
+  const closeAndRestoreFocus = (): void => {
+    onClose()
+    queueMicrotask(() => target.restoreFocus.focus({ preventScroll: true }))
+  }
+  const copyMessage = (): void => {
+    const clipboard = menuRef.current?.ownerDocument.defaultView?.navigator.clipboard
+    if (clipboard === undefined || target.messageText === undefined) {
+      onError(new Error(chinese ? '当前环境不支持复制。' : 'Copy is unavailable in this environment.'))
+      return
+    }
+    void clipboard.writeText(target.messageText).catch(onError)
+  }
+  const actions = [
+    ...(target.kind === 'message' && target.messageText !== undefined ? [{
+      id: 'copy', label: chinese ? '复制消息' : 'Copy message', run: copyMessage,
+    }] : []),
+    ...(target.participantRole === 'agent' ? [{
+      id: 'mention', label: chinese ? `@提及 ${target.participantName}` : `Mention @${target.participantName}`,
+      run: () => onMention(target.participantId),
+    }, {
+      id: 'profile', label: chinese ? `查看 ${target.participantName}` : `View ${target.participantName}`,
+      run: () => onOpenParticipant(target.participantId),
+    }] : []),
+  ]
+
+  React.useLayoutEffect(() => {
+    const menu = menuRef.current
+    if (menu === null) return
+    const document = menu.ownerDocument
+    const view = document.defaultView
+    if (view === null) return
+    const theme = new HostThemeProjection(document)
+    const detachTheme = theme.attach(menu)
+    const edge = 8
+    const rect = menu.getBoundingClientRect()
+    menu.style.left = `${Math.round(Math.min(Math.max(edge, target.x), Math.max(edge, view.innerWidth - rect.width - edge)))}px`
+    menu.style.top = `${Math.round(Math.min(Math.max(edge, target.y), Math.max(edge, view.innerHeight - rect.height - edge)))}px`
+    menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true })
+    return () => { detachTheme(); theme.dispose() }
+  }, [target.x, target.y])
+
+  React.useEffect(() => {
+    const menu = menuRef.current
+    if (menu === null) return
+    const document = menu.ownerDocument
+    const view = document.defaultView
+    if (view === null) return
+    const closeOutside = (event: PointerEvent): void => {
+      const candidate = event.target
+      if (candidate instanceof view.Node && menu.contains(candidate)) return
+      closeAndRestoreFocus()
+    }
+    const closeForViewport = (): void => onClose()
+    document.addEventListener('pointerdown', closeOutside, true)
+    view.addEventListener('resize', closeForViewport)
+    document.addEventListener('scroll', closeForViewport, true)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside, true)
+      view.removeEventListener('resize', closeForViewport)
+      document.removeEventListener('scroll', closeForViewport, true)
+    }
+  }, [onClose])
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      closeAndRestoreFocus()
+      return
+    }
+    const buttons = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
+    if (buttons.length === 0) return
+    const index = buttons.indexOf(event.currentTarget.ownerDocument.activeElement as HTMLButtonElement)
+    const next = event.key === 'ArrowDown' || event.key === 'ArrowRight'
+      ? buttons[(index + 1 + buttons.length) % buttons.length]
+      : event.key === 'ArrowUp' || event.key === 'ArrowLeft'
+        ? buttons[(index - 1 + buttons.length) % buttons.length]
+        : event.key === 'Home' ? buttons[0] : event.key === 'End' ? buttons.at(-1) : undefined
+    if (next === undefined) return
+    event.preventDefault()
+    event.stopPropagation()
+    next.focus()
+  }
+
+  return createPortal(<div
+    ref={menuRef}
+    id={menuId}
+    className="cxa-context-menu"
+    role="menu"
+    aria-label={target.kind === 'avatar'
+      ? (chinese ? `${target.participantName} 头像操作` : `${target.participantName} avatar actions`)
+      : (chinese ? '消息操作' : 'Message actions')}
+    onKeyDown={onKeyDown}
+  >{actions.map(action => <button
+    key={action.id}
+    type="button"
+    className="cxa-context-menu-item"
+    role="menuitem"
+    onClick={() => {
+      onClose()
+      action.run()
+      if (action.id === 'copy') queueMicrotask(() => target.restoreFocus.focus({ preventScroll: true }))
+    }}
+  >{action.label}</button>)}</div>, document.body)
+}
+
 function MessageEntry({
-  entry, previous, model, commands, onCommandError, copy, identityPresentation, onOpenIdentity,
+  entry, previous, next, model, commands, onCommandError, copy, mentionPresentations, onOpenMention, onMentionParticipant, onOpenContextMenu,
 }: {
   readonly entry: AgentConversationMessage
   readonly previous: AgentConversationEntry | undefined
+  readonly next: AgentConversationEntry | undefined
   readonly model: AgentConversationModel
   readonly commands: AgentConversationCommandController
   readonly onCommandError: (error: unknown) => void
   readonly copy: AgentConversationRendererCopy
-  readonly identityPresentation?: HostAgentIdentityPresentation
-  readonly onOpenIdentity: () => void
+  readonly mentionPresentations: readonly Readonly<{
+    alias: string
+    participantId: string
+    name: string
+    presentation?: HostAgentIdentityPresentation
+  }>[]
+  readonly onOpenMention: (participantId: string) => void
+  readonly onMentionParticipant: (participantId: string) => void
+  readonly onOpenContextMenu: (target: ConversationContextTarget) => void
 }) {
-  const labelId = React.useId()
   const participant = participantFor(model, entry.authorId)
   if (participant === undefined) return null
   const showInitials = model.selection.kind === 'room'
@@ -131,68 +506,142 @@ function MessageEntry({
     && model.selection.participantPresentation === 'host-initials'
   const showAgentAvatar = participant.role === 'agent'
     && (participant.avatar !== undefined || showInitials)
-  const groupStart = previous?.kind !== 'message' || previous.authorId !== entry.authorId
+  const sameIncomingAgent = (other: AgentConversationEntry | undefined): boolean => {
+    if (other?.kind !== 'message' || participant.role !== 'agent' || other.authorId !== participant.id) return false
+    const otherParticipant = participantFor(model, other.authorId)
+    return otherParticipant?.role === 'agent'
+      && otherParticipant.agentIdentity?.agentId === participant.agentIdentity?.agentId
+      && otherParticipant.agentIdentity?.revision === participant.agentIdentity?.revision
+  }
+  const groupStart = !sameIncomingAgent(previous)
+  const groupEnd = !sameIncomingAgent(next)
   const state = stateCopy(entry, copy)
   const outgoing = participant.role === 'human'
+  const time = new Date(entry.timestamp).toLocaleTimeString(copy.locale, { hour: '2-digit', minute: '2-digit' })
+  const accessibleLabel = `${participant.name}, ${time}`
+  const timestamp = <time className="cxa-message-time" dateTime={entry.timestamp} aria-label={time}>{time}</time>
+  const contextTarget = (
+    kind: ConversationContextTarget['kind'],
+    x: number,
+    y: number,
+    restoreFocus: HTMLElement,
+  ): ConversationContextTarget => ({
+    kind,
+    x,
+    y,
+    participantId: participant.id,
+    participantName: participant.name,
+    participantRole: participant.role,
+    restoreFocus,
+    ...(kind === 'message' ? { messageText: entry.body.join('\n\n') } : {}),
+  })
+  const openPointerContextMenu = (kind: ConversationContextTarget['kind'], event: React.MouseEvent<HTMLElement>): void => {
+    event.preventDefault()
+    event.stopPropagation()
+    onOpenContextMenu(contextTarget(kind, event.clientX, event.clientY, event.currentTarget))
+  }
+  const openKeyboardContextMenu = (kind: ConversationContextTarget['kind'], event: React.KeyboardEvent<HTMLElement>): void => {
+    if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return
+    event.preventDefault()
+    event.stopPropagation()
+    const rect = event.currentTarget.getBoundingClientRect()
+    onOpenContextMenu(contextTarget(
+      kind,
+      rect.left + Math.min(24, rect.width / 2),
+      rect.top + Math.min(24, rect.height / 2),
+      event.currentTarget,
+    ))
+  }
+  const messageReactions = (entry.reactions ?? []).length === 0 ? null : <div className="cxa-message-reactions" role="list" aria-label={copy.locale.toLowerCase().startsWith('zh') ? '消息反应' : 'Message reactions'}>
+    {(entry.reactions ?? []).map(reaction => {
+      const actor = participantFor(model, reaction.actorParticipantId)
+      const actorName = actor?.name ?? (copy.locale.toLowerCase().startsWith('zh') ? '未知参与者' : 'Unknown participant')
+      const value = reaction.value.kind === 'emoji' ? reaction.value.emoji : reaction.value.token
+      const state = reactionStateCopy(reaction.state, copy.locale)
+      return <span
+        key={reaction.reactionId}
+        className="cxa-message-reaction"
+        data-reaction-state={reaction.state}
+        role="listitem"
+        aria-label={copy.locale.toLowerCase().startsWith('zh') ? `${actorName} 的反应：${value}，${state}` : `${actorName}'s reaction: ${value}, ${state}`}
+      >
+        {actor === undefined ? null : <span className="cxa-message-reaction-avatar"><HostAgentAvatar participant={actor} /></span>}
+        <span className="cxa-message-reaction-actor">{actorName}</span>
+        <span className="cxa-message-reaction-value">{value}</span>
+      </span>
+    })}
+  </div>
+  const messageSurface = <div
+    className="cxa-message-surface"
+    tabIndex={0}
+    aria-label={accessibleLabel}
+    onContextMenu={event => openPointerContextMenu('message', event)}
+    onKeyDown={event => openKeyboardContextMenu('message', event)}
+  >
+    <div className="cxa-message-body">{entry.body.map((block, index) => <p key={index}><MessageText text={block} mentions={mentionPresentations} onOpenMention={onOpenMention} /></p>)}</div>
+    {outgoing || state === undefined ? null : <span className="cxa-message-state">{state}</span>}
+    {!outgoing || entry.deliveryState !== 'failed' ? null : <span className="cxa-outgoing-error" role="status">{copy.failed}</span>}
+  </div>
+  const avatarSeatEmpty = !groupEnd || !showAgentAvatar
+  const avatarSeat = participant.role !== 'agent' ? null : <span
+    className="cxa-message-avatar-seat"
+    data-avatar-seat={avatarSeatEmpty ? 'placeholder' : 'visible'}
+    {...(avatarSeatEmpty ? { 'aria-hidden': true, inert: true } : {})}
+  >
+    {avatarSeatEmpty
+      ? null
+      : <button
+          type="button"
+          className="cx-agent-identity-avatar-button"
+          aria-label={copy.locale.toLowerCase().startsWith('zh') ? `查看 ${participant.name}` : `Open ${participant.name}`}
+          onClick={() => onOpenMention(entry.authorId)}
+          onContextMenu={event => openPointerContextMenu('avatar', event)}
+          onKeyDown={event => openKeyboardContextMenu('avatar', event)}
+        ><HostAgentAvatar participant={participant} /></button>}
+  </span>
   return <article
     className="cxa-entry cxa-message"
     data-entry-id={entry.itemId}
     data-role={participant.role}
     data-group-start={String(groupStart)}
+    data-group-end={String(groupEnd)}
     data-delivery-state={entry.deliveryState}
     data-run-state={entry.runState}
-    {...(outgoing ? { 'aria-label': participant.name } : { 'aria-labelledby': labelId })}
+    aria-label={accessibleLabel}
     aria-live={entry.ariaLive}
   >
-    {showAgentAvatar
-      ? identityPresentation === undefined
-        ? <HostAgentAvatar participant={participant} />
-        : <HostAgentIdentityAvatarButton presentation={identityPresentation} label={`Open ${participant.name}`} onOpen={onOpenIdentity} />
-      : null}
     <div className="cxa-message-content">
-      {outgoing ? null : <div className="cxa-message-meta" id={labelId}>
-          <span className="cxa-author">{participant.name}</span>
-          <time dateTime={entry.timestamp}>{new Date(entry.timestamp).toLocaleTimeString(copy.locale, { hour: '2-digit', minute: '2-digit' })}</time>
-        </div>}
-      <div className="cxa-message-surface">
-        <div className="cxa-message-body">{entry.body.map((block, index) => <p key={index}>{block}</p>)}</div>
-        {outgoing || state === undefined ? null : <span className="cxa-message-state">{state}</span>}
-        {!outgoing || entry.deliveryState !== 'failed' ? null : <span className="cxa-outgoing-error" role="status">{copy.failed}</span>}
-        {(entry.reactions ?? []).length === 0 ? null : <div className="cxa-message-reactions" role="list" aria-label={copy.locale.toLowerCase().startsWith('zh') ? '消息反应' : 'Message reactions'}>
-          {(entry.reactions ?? []).map(reaction => {
-            const actor = participantFor(model, reaction.actorParticipantId)
-            const actorName = actor?.name ?? (copy.locale.toLowerCase().startsWith('zh') ? '未知参与者' : 'Unknown participant')
-            const value = reaction.value.kind === 'emoji' ? reaction.value.emoji : reaction.value.token
-            const state = reactionStateCopy(reaction.state, copy.locale)
-            return <span
-              key={reaction.reactionId}
-              className="cxa-message-reaction"
-              data-reaction-state={reaction.state}
-              role="listitem"
-              aria-label={copy.locale.toLowerCase().startsWith('zh') ? `${actorName} 的反应：${value}，${state}` : `${actorName}'s reaction: ${value}, ${state}`}
-            >
-              {actor === undefined ? null : <span className="cxa-message-reaction-avatar"><HostAgentAvatar participant={actor} /></span>}
-              <span className="cxa-message-reaction-actor">{actorName}</span>
-              <span className="cxa-message-reaction-value">{value}</span>
-            </span>
-          })}
-        </div>}
-        {entry.actions.length === 0 ? null : <div className="cxa-message-actions">
-          {entry.actions.map(action => <ActionButton key={action.id} action={action} run={() => {
-            void commands.runMessage(model, entry.itemId, action).catch(onCommandError)
-          }} />)}
-        </div>}
-      </div>
+      {outgoing ? null : <div className="cxa-message-meta">{groupStart ? <button
+        type="button"
+        className="cxa-author cxa-author-button"
+        aria-label={copy.locale.toLowerCase().startsWith('zh') ? `@提及 ${participant.name}` : `Mention @${participant.name}`}
+        onClick={() => onMentionParticipant(participant.id)}
+      >{participant.name}</button> : null}{timestamp}</div>}
+      <div className="cxa-message-bubble-row">{avatarSeat}<div className="cxa-message-bubble-shell">
+        <div className="cxa-message-bubble-anchor">
+          {outgoing ? timestamp : null}
+          {messageSurface}
+          <MessageHoverActions entry={entry} model={model} commands={commands} copy={copy} onCommandError={onCommandError} />
+        </div>
+        {messageReactions}
+      </div></div>
     </div>
   </article>
 }
 
 function Timeline({
-  model, commands, copy, onCommandError, identityPresentations, onOpenIdentity,
+  model, commands, copy, onCommandError, mentionPresentations, onOpenMention, onMentionParticipant, onOpenContextMenu,
 }: Pick<AgentConversationRendererProps, 'model' | 'commands' | 'copy'> & {
   readonly onCommandError: (error: unknown) => void
-  readonly identityPresentations: ReadonlyMap<string, HostAgentIdentityPresentation>
-  readonly onOpenIdentity: (participantId: string) => void
+  readonly mentionPresentations: readonly Readonly<{
+    alias: string
+    participantId: string
+    name: string
+    presentation?: HostAgentIdentityPresentation
+  }>[]
+  readonly onOpenMention: (participantId: string) => void
+  readonly onMentionParticipant: (participantId: string) => void
+  readonly onOpenContextMenu: (target: ConversationContextTarget) => void
 }) {
   const follow = useAutoFollow<HTMLDivElement>(`${model.binding.bindingId}:${model.generation}:${model.snapshotSequence}:${model.entries.length}`)
   const presence = (entry: Extract<AgentConversationEntry, { kind: 'member-presence' }>): string => {
@@ -211,12 +660,15 @@ function Timeline({
             key={entry.itemId}
             entry={entry}
             previous={model.entries[index - 1]}
+            next={model.entries[index + 1]}
             model={model}
             commands={commands}
             copy={copy}
             onCommandError={onCommandError}
-            {...(identityPresentations.get(entry.authorId) === undefined ? {} : { identityPresentation: identityPresentations.get(entry.authorId)! })}
-            onOpenIdentity={() => onOpenIdentity(entry.authorId)}
+            mentionPresentations={mentionPresentations}
+            onOpenMention={onOpenMention}
+            onMentionParticipant={onMentionParticipant}
+            onOpenContextMenu={onOpenContextMenu}
           />
         : entry.kind === 'approval'
           ? <ApprovalEntry key={entry.itemId} entry={entry} model={model} commands={commands} copy={copy} onCommandError={onCommandError} />
@@ -232,10 +684,11 @@ function Timeline({
 }
 
 function Composer({
-  model, commands, copy, commandError, setCommandError,
+  model, commands, copy, commandError, setCommandError, mentionRequest,
 }: Pick<AgentConversationRendererProps, 'model' | 'commands' | 'copy'> & {
   readonly commandError: string | undefined
   readonly setCommandError: (value: string | undefined) => void
+  readonly mentionRequest: ComposerMentionRequest | undefined
 }) {
   const [draft, setDraft] = React.useState('')
   const [submitting, setSubmitting] = React.useState(false)
@@ -244,6 +697,26 @@ function Composer({
   const unavailable = model.composer.availability !== 'available'
   const reason = commandError ?? model.composer.disabledReason ?? (unavailable ? copy.unavailable : undefined)
   const disabled = unavailable || model.composer.disabled || submitting || draft.trim() === ''
+  const inputRef = useHostShikitorComposer({
+    draft,
+    instanceKey: `${model.binding.bindingId}:${model.generation}`,
+    placeholder: model.composer.placeholder,
+    unavailable,
+    onDraftChange: setDraft,
+  })
+  React.useEffect(() => {
+    if (mentionRequest === undefined || unavailable) return
+    const token = `@${mentionRequest.participantName}`
+    setDraft(current => `${current}${current === '' || /\s$/u.test(current) ? '' : ' '}${token} `)
+    const view = inputRef.current?.ownerDocument.defaultView ?? undefined
+    const frame = view?.requestAnimationFrame(() => {
+      const input = inputRef.current
+      if (input === null) return
+      input.focus({ preventScroll: true })
+      input.setSelectionRange(input.value.length, input.value.length)
+    })
+    return () => { if (view !== undefined && frame !== undefined) view.cancelAnimationFrame(frame) }
+  }, [inputRef, mentionRequest, unavailable])
   const submit = async (): Promise<void> => {
     if (disabled) return
     setSubmitting(true)
@@ -260,6 +733,7 @@ function Composer({
   return <div className="cxa-composer-region" data-agent-conversation-composer="fixed">
     <form className="cxa-composer" aria-label={copy.composerLabel} onSubmit={event => { event.preventDefault(); void submit() }}>
       <textarea
+        ref={inputRef}
         className="cxa-draft"
         aria-label={copy.composerLabel}
         aria-describedby={reason === undefined ? undefined : noticeId}
@@ -290,44 +764,68 @@ function RoomSettingsEditor({ title, description, chinese, settings, onError, on
   readonly onError: (error: unknown) => void
   readonly onDone: () => void
 }) {
-  const [name, setName] = React.useState(title)
-  const [details, setDetails] = React.useState(description ?? '')
-  const [saving, setSaving] = React.useState(false)
-  const save = async (): Promise<void> => {
-    const normalizedName = name.trim()
-    if (normalizedName === '') return
-    setSaving(true)
-    try {
-      await settings.update({ name: normalizedName, description: details.trim() === '' ? { state: 'empty' } : { state: 'present', text: details.trim() } })
-      onDone()
-    } catch (error) { onError(error) } finally { setSaving(false) }
+  const fields = React.useMemo<readonly CordisXConfigFieldSnapshot[]>(() => [
+    {
+      namespace: 'host.agent-conversation.room-settings/v1', path: ['name'], type: 'string',
+      label: chinese ? '群聊名称' : 'Room name', description: chinese ? '显示在群聊标题中。' : 'Shown in the room header.',
+      value: title, disabled: false, required: true, min: 1, max: 256,
+    },
+    {
+      namespace: 'host.agent-conversation.room-settings/v1', path: ['description'], type: 'string', role: 'textarea',
+      label: chinese ? '群聊介绍' : 'Description', description: chinese ? '可选，显示在群聊标题下方。' : 'Optional. Shown below the room title.',
+      value: description ?? '', disabled: false, required: false, max: 4_000,
+    },
+  ], [chinese, description, title])
+  const props: HostSchemaFormProps = {
+    id: 'agent-conversation-room-settings',
+    fields,
+    locale: chinese ? 'zh-CN' : 'en',
+    resetKey: `${title}\u0000${description ?? ''}`,
+    submitLabel: chinese ? '保存' : 'Save',
+    savingLabel: chinese ? '保存中…' : 'Saving…',
+    onSubmit: async values => {
+      const name = typeof values.name === 'string' ? values.name.trim() : ''
+      const details = typeof values.description === 'string' ? values.description.trim() : ''
+      if (name === '') throw new Error(chinese ? '群聊名称不能为空。' : 'Room name is required.')
+      await settings.update({ name, description: details === '' ? { state: 'empty' } : { state: 'present', text: details } })
+    },
+    onSubmitted: onDone,
+    onError,
   }
-  return <form className="cxa-room-settings-form" onSubmit={event => { event.preventDefault(); void save() }}>
-    <label>{chinese ? '群聊名称' : 'Room name'}<input value={name} maxLength={256} onInput={event => setName(event.currentTarget.value)} /></label>
-    <label>{chinese ? '群聊介绍' : 'Description'}<textarea value={details} maxLength={4_000} rows={5} onInput={event => setDetails(event.currentTarget.value)} /></label>
-    <button className="cxa-action" type="submit" disabled={saving || name.trim() === ''}>{saving ? (chinese ? '保存中…' : 'Saving…') : (chinese ? '保存' : 'Save')}</button>
-  </form>
+  return <React.Suspense fallback={<p className="cxa-inspector-note" role="status">{chinese ? '正在载入设置…' : 'Loading settings…'}</p>}><HostSchemaForm {...props} /></React.Suspense>
 }
 
 /** Production Host-owned conversation shell. It has no fixture dependency. */
 export function AgentConversationRenderer({ model, commands, copy, debugFixture = false, identity, roomSettings }: AgentConversationRendererProps) {
   const titleId = React.useId()
+  const identityContentId = React.useId()
   const [commandError, setCommandErrorState] = React.useState<string | undefined>(undefined)
   const [inspector, setInspector] = React.useState<ConversationInspector | undefined>()
+  const [inspectorWidth, setInspectorWidth] = React.useState(360)
+  const [memberSearch, setMemberSearch] = React.useState('')
+  const [memberTargetParticipantId, setMemberTargetParticipantId] = React.useState<string | undefined>()
+  const [contextMenuTarget, setContextMenuTarget] = React.useState<ConversationContextTarget | undefined>()
+  const [mentionRequest, setMentionRequest] = React.useState<ComposerMentionRequest | undefined>()
+  const mentionSequence = React.useRef(0)
+  const memberSearchRef = React.useRef<HTMLInputElement>(null)
   const setCommandError = React.useCallback((value: string | undefined) => setCommandErrorState(value), [])
   const title = model.selection.kind === 'room' ? model.selection.title : copy.newRoomTitle
   const description = model.selection.kind === 'room' && model.selection.description?.state === 'present'
     ? model.selection.description.text
     : undefined
   const headerActions = model.headerActions
+  const inlineHeaderActions = headerActions.filter(action => action.icon !== undefined).slice(0, 2)
+  const inlineHeaderActionSet = new Set(inlineHeaderActions)
+  const overflowHeaderActions = headerActions.filter(action => !inlineHeaderActionSet.has(action))
   const onCommandError = React.useCallback((error: unknown) => {
     setCommandError(error instanceof Error ? error.message : String(error))
   }, [])
   const identityPresentations = React.useMemo(() => {
     const output = new Map<string, HostAgentIdentityPresentation>()
     if (identity === undefined || model.selection.kind !== 'room') return output
-    const roomTitle = model.selection.title
-    for (const participant of model.selection.participants) {
+    const roomSelection = model.selection
+    const roomTitle = roomSelection.title
+    for (const participant of roomSelection.participants) {
       if (participant.role !== 'agent' || participant.agentIdentity === undefined) continue
       const effective = identity.resolve(participant.agentIdentity)
       if (effective === undefined) continue
@@ -341,38 +839,118 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
         },
         name: effective.name,
         introduction: effective.introduction,
-        activeSessions: (model.selection.activeRuns ?? [])
-          .filter((run): run is typeof run & { readonly details: NonNullable<typeof run.details> } => run.participantId === participant.id && run.details !== undefined)
+        activeSessions: (roomSelection.activeRuns ?? [])
+          .filter(run => run.participantId === participant.id)
           .map(run => ({
-            run: {
-              participantId: run.participantId,
-              memberId: run.memberId,
-              sessionId: run.runId,
-              lifecycle: run.lifecycle,
-              details: run.details,
-            },
+            run,
             roomLabel: roomTitle,
             taskLabel: `${copy.locale.toLowerCase().startsWith('zh') ? 'Agent 任务' : 'Agent task'} · ${run.lifecycle.phase}`,
+            simulationBinding: {
+              contract: PLAYGROUND_ROOM_SIMULATION_BINDING_CONTRACT,
+              roomId: roomSelection.roomId,
+              runId: run.runId,
+              memberId: run.memberId,
+              bindingId: model.binding.bindingId,
+              ownerGeneration: model.binding.ownerGeneration,
+              generation: model.generation,
+            },
           })),
       }))
     }
     return output
   }, [copy.locale, identity, model.selection])
+  const mentionPresentations = React.useMemo(
+    () => identityMentionAliases(model, identityPresentations),
+    [identityPresentations, model],
+  )
   React.useEffect(() => {
     if (inspector?.kind === 'identity' && !identityPresentations.has(inspector.participantId)) setInspector(undefined)
   }, [identityPresentations, inspector])
   const selectedIdentity = inspector?.kind === 'identity' ? identityPresentations.get(inspector.participantId) : undefined
   const chinese = copy.locale.toLowerCase().startsWith('zh')
+  const identityCopy: HostAgentIdentityPanelCopy = {
+    settings: chinese ? '设置' : 'Settings',
+    close: chinese ? '关闭' : 'Close',
+    members: chinese ? '群成员' : 'Members',
+    backToMembers: chinese ? '返回群成员' : 'Back to members',
+    hierarchyNavigation: chinese ? '详情栏层级导航' : 'Inspector hierarchy',
+    introduction: chinese ? '介绍' : 'Introduction',
+    activeSessions: chinese ? '当前激活的会话' : 'Active sessions',
+    noActiveSessions: chinese ? '当前没有激活会话' : 'No active sessions',
+    sessionCount: count => chinese ? `${count} 个激活会话` : `${count} active session${count === 1 ? '' : 's'}`,
+    lifecycle: {
+      active: chinese ? '激活' : 'Active', running: chinese ? '运行中' : 'Running',
+      waiting: chinese ? '等待中' : 'Waiting', attention: chinese ? '需处理' : 'Attention',
+    },
+  }
+  const memberInspectorIdentity = inspector?.kind === 'identity' ? selectedIdentity : undefined
+  const memberInspectorOpen = inspector?.kind === 'members' || memberInspectorIdentity !== undefined
   const participants = model.selection.kind === 'room' ? model.selection.participants : []
   const activeRuns = model.selection.kind === 'room' ? model.selection.activeRuns ?? [] : []
-  const closeInspector = (): void => setInspector(undefined)
-  const lifecycleFor = (participantId: string): string | undefined => {
+  const roomId = model.selection.kind === 'room' ? model.selection.roomId : undefined
+  const memberTargetParticipant = memberTargetParticipantId === undefined
+    ? undefined
+    : participants.find(participant => participant.id === memberTargetParticipantId)
+  React.useEffect(() => {
+    setMemberSearch('')
+    setMemberTargetParticipantId(undefined)
+    setContextMenuTarget(undefined)
+  }, [roomId])
+  const closeInspector = (): void => {
+    setInspector(undefined)
+    setMemberSearch('')
+    setMemberTargetParticipantId(undefined)
+  }
+  const openMembersInspector = (): void => {
+    setMemberSearch('')
+    setMemberTargetParticipantId(undefined)
+    setInspector({ kind: 'members' })
+  }
+  const openIdentityInspector = (participantId: string): void => {
+    setMemberSearch('')
+    setMemberTargetParticipantId(undefined)
+    setInspector({ kind: 'identity', participantId })
+  }
+  const openMentionInspector = (participantId: string): void => {
+    const presentation = identityPresentations.get(participantId)
+    if (presentation !== undefined) {
+      openIdentityInspector(participantId)
+      return
+    }
+    const participant = participants.find(candidate => candidate.id === participantId)
+    if (participant === undefined) return
+    setMemberSearch(participant.name)
+    setMemberTargetParticipantId(participantId)
+    setInspector({ kind: 'members' })
+  }
+  const mentionParticipant = (participantId: string): void => {
+    const participant = participants.find(candidate => candidate.id === participantId)
+    if (participant?.role !== 'agent') return
+    mentionSequence.current += 1
+    setMentionRequest({
+      sequence: mentionSequence.current,
+      participantId: participant.id,
+      participantName: participant.name,
+    })
+  }
+  const lifecycleFor = (participantId: string): Readonly<{
+    phase: AgentConversationActiveRun['lifecycle']['phase']
+    label: string
+  }> | undefined => {
     const phase = activeRuns.find(run => run.participantId === participantId)?.lifecycle.phase
     if (phase === undefined) return undefined
-    return chinese
+    const label = chinese
       ? ({ active: '可用', running: '运行中', waiting: '等待中', attention: '需处理' } as const)[phase]
       : ({ active: 'Available', running: 'Running', waiting: 'Waiting', attention: 'Needs attention' } as const)[phase]
+    return { phase, label }
   }
+  const memberRoleLabel = chinese ? 'Agent' : 'Agent'
+  const memberAgents = participants.filter(participant => participant.role === 'agent')
+  const normalizedMemberSearch = memberSearch.trim().toLocaleLowerCase()
+  const visibleMemberAgents = normalizedMemberSearch === ''
+    ? memberAgents
+    : memberAgents.filter(participant => participant.name.toLocaleLowerCase().includes(normalizedMemberSearch)
+      || memberRoleLabel.toLocaleLowerCase().includes(normalizedMemberSearch))
   return <section
     className="cxa-root"
     data-agent-conversation-renderer="production"
@@ -389,7 +967,7 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
           size="header"
           label={chinese ? '打开群成员' : 'Open room members'}
           moreLabel={count => chinese ? `查看其余 ${count} 位群成员` : `View ${count} more room members`}
-          onOpen={() => setInspector({ kind: 'members' })}
+          onOpen={openMembersInspector}
         /> : <span className="cxa-room-avatar" data-count="zero"><span className="cxa-room-avatar-fallback"><HostSurfaceIcon token="host:layers" /></span></span>}
         <div className="cxa-title-block">
           <h1 id={titleId} className="cxa-title">{title}</h1>
@@ -398,78 +976,173 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
           </button>}
         </div>
         {model.selection.kind !== 'room' ? null : <div className="cxa-header-actions">
-          <button type="button" className="cxa-header-icon-action" aria-label={chinese ? '群成员' : 'Members'} onClick={() => setInspector({ kind: 'members' })}><HostSurfaceIcon token="host:layers" /></button>
+          <button type="button" className="cxa-header-icon-action" aria-label={chinese ? '群成员' : 'Members'} onClick={openMembersInspector}><HostSurfaceIcon token="host:layers" /></button>
           <button type="button" className="cxa-header-icon-action" aria-label={chinese ? '设置' : 'Settings'} onClick={() => setInspector({ kind: 'settings' })}><HostSurfaceIcon token="host:settings" /></button>
-          <button type="button" className="cxa-header-icon-action" aria-label={chinese ? '更多' : 'More'} onClick={() => setInspector({ kind: 'more' })}><HostSurfaceIcon token="host:more" /></button>
+          <span
+            className="cxa-header-plugin-actions"
+            data-host-conversation-header-action-slot="v1"
+            data-host-conversation-header-action-inline-limit="2"
+          >{inlineHeaderActions.map(action => <button
+            key={action.id}
+            type="button"
+            className="cxa-header-icon-action cxa-header-plugin-action"
+            aria-label={action.label}
+            disabled={action.disabled}
+            title={action.disabledReason}
+            data-host-conversation-header-action-id={action.id}
+            onClick={() => { void commands.runHeader(model, action).catch(onCommandError) }}
+          ><HostSurfaceIcon token={action.icon!} /></button>)}</span>
+          <HeaderMoreMenu actions={overflowHeaderActions} model={model} commands={commands} copy={copy} onCommandError={onCommandError} />
         </div>}
       </div>
     </header>
     <div className="cxa-body">
-      <Timeline model={model} commands={commands} copy={copy} onCommandError={onCommandError} identityPresentations={identityPresentations} onOpenIdentity={participantId => setInspector({ kind: 'identity', participantId })} />
-      <Composer model={model} commands={commands} copy={copy} commandError={commandError} setCommandError={setCommandError} />
+      <Timeline
+        model={model}
+        commands={commands}
+        copy={copy}
+        onCommandError={onCommandError}
+        mentionPresentations={mentionPresentations}
+        onOpenMention={openMentionInspector}
+        onMentionParticipant={mentionParticipant}
+        onOpenContextMenu={setContextMenuTarget}
+      />
+      <Composer
+        model={model}
+        commands={commands}
+        copy={copy}
+        commandError={commandError}
+        setCommandError={setCommandError}
+        mentionRequest={mentionRequest}
+      />
     </div>
-    {identity === undefined ? null : <HostAgentIdentityPanel
-      open={selectedIdentity !== undefined}
-      {...(selectedIdentity === undefined ? {} : { presentation: selectedIdentity })}
-      navigator={identity.navigator}
-      onOpenChange={open => { if (!open) closeInspector() }}
-      onSettings={identity.onSettings}
-      onNavigationError={onCommandError}
-      copy={{
-        settings: chinese ? '设置' : 'Settings',
-        close: chinese ? '关闭' : 'Close',
-        introduction: chinese ? '介绍' : 'Introduction',
-        activeSessions: chinese ? '当前激活的会话' : 'Active sessions',
-        noActiveSessions: chinese ? '当前没有激活会话' : 'No active sessions',
-        sessionCount: count => chinese ? `${count} 个激活会话` : `${count} active session${count === 1 ? '' : 's'}`,
-        lifecycle: {
-          active: chinese ? '激活' : 'Active', running: chinese ? '运行中' : 'Running',
-          waiting: chinese ? '等待中' : 'Waiting', attention: chinese ? '需处理' : 'Attention',
-        },
-      }}
+    {contextMenuTarget === undefined ? null : <ConversationContextMenu
+      target={contextMenuTarget}
+      chinese={chinese}
+      onClose={() => setContextMenuTarget(undefined)}
+      onMention={mentionParticipant}
+      onOpenParticipant={openMentionInspector}
+      onError={onCommandError}
     />}
-    {inspector?.kind !== 'members' ? null : <HostConversationRightInspector
+    {!memberInspectorOpen ? null : <HostConversationRightInspector
       open={true}
-      title={chinese ? '群成员' : 'Members'}
-      closeLabel={chinese ? '关闭群成员' : 'Close members'}
+      title={memberInspectorIdentity?.name ?? (chinese ? '群成员' : 'Members')}
+      closeLabel={memberInspectorIdentity === undefined ? (chinese ? '关闭群成员' : 'Close members') : identityCopy.close}
+      resizeLabel={chinese ? '调整详情栏宽度' : 'Resize inspector'}
+      width={inspectorWidth}
+      onWidthChange={setInspectorWidth}
+      pageKey={memberInspectorIdentity === undefined ? 'members' : `identity:${memberInspectorIdentity.participant.participantId}`}
+      {...(memberInspectorIdentity === undefined ? {
+        leading: <HostSurfaceIcon token="host:layers" />,
+      } : {
+        breadcrumb: {
+          parentLabel: identityCopy.members ?? (chinese ? '群成员' : 'Members'),
+          backLabel: identityCopy.backToMembers ?? (chinese ? '返回群成员' : 'Back to members'),
+          navigationLabel: identityCopy.hierarchyNavigation ?? (chinese ? '详情栏层级导航' : 'Inspector hierarchy'),
+          onBack: () => setInspector({ kind: 'members' }),
+        },
+        describedBy: `${identityContentId}-introduction`,
+      })}
       onOpenChange={open => { if (!open) closeInspector() }}
     >
-      <ul className="cxa-members-list">{participants.map(participant => {
+      {memberInspectorIdentity !== undefined && identity !== undefined ? <HostAgentIdentityContent
+        presentation={memberInspectorIdentity}
+        copy={identityCopy}
+        navigator={identity.navigator}
+        onClose={closeInspector}
+        onSettings={identity.onSettings}
+        onNavigationError={onCommandError}
+        idPrefix={identityContentId}
+      /> : <div
+        className="cxa-members-panel"
+        {...(memberTargetParticipant === undefined ? {} : {
+          'data-mention-target-participant-id': memberTargetParticipant.id,
+          'aria-label': `${chinese ? '消息提及目标' : 'Message mention target'}: ${memberTargetParticipant.name}`,
+        })}
+      >
+        <div className="cxa-member-search" data-host-conversation-member-search="true">
+          <input
+            ref={memberSearchRef}
+            type="search"
+            value={memberSearch}
+            aria-label={chinese ? '搜索成员' : 'Search members'}
+            placeholder={chinese ? '搜索成员' : 'Search members'}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={event => {
+              setMemberSearch(event.currentTarget.value)
+              setMemberTargetParticipantId(undefined)
+            }}
+            onKeyDown={event => {
+              if (event.key !== 'Escape' || memberSearch === '') return
+              event.preventDefault()
+              event.stopPropagation()
+              setMemberSearch('')
+              setMemberTargetParticipantId(undefined)
+              memberSearchRef.current?.focus()
+            }}
+          />
+          {memberSearch === '' ? null : <button
+            type="button"
+            aria-label={chinese ? '清除成员搜索' : 'Clear member search'}
+            title={chinese ? '清除' : 'Clear'}
+            onClick={() => {
+              setMemberSearch('')
+              setMemberTargetParticipantId(undefined)
+              memberSearchRef.current?.focus()
+            }}
+          ><HostSurfaceIcon token="host:close" /></button>}
+        </div>
+        {memberTargetParticipant === undefined ? null : <p
+          className="cxa-inspector-note"
+          role="status"
+          data-mention-target-participant-id={memberTargetParticipant.id}
+        >{chinese
+            ? `已定位到消息中提及的成员：${memberTargetParticipant.name}`
+            : `Showing the member mentioned in the message: ${memberTargetParticipant.name}`}</p>}
+        {visibleMemberAgents.length === 0 ? <p className="cxa-members-empty" role="status">
+          {normalizedMemberSearch === ''
+            ? (chinese ? '暂无协作 Agent' : 'No collaborative agents')
+            : (chinese ? '未找到成员' : 'No members found')}
+        </p> : <ul className="cxa-members-list">{visibleMemberAgents.map(participant => {
         const presentation = identityPresentations.get(participant.id)
-        const role = participant.role === 'agent'
-          ? (chinese ? 'Agent' : 'Agent')
-          : participant.role === 'human' ? (chinese ? '成员' : 'Member') : (chinese ? '系统' : 'System')
+        const lifecycle = lifecycleFor(participant.id)
+        const mentionTarget = memberTargetParticipantId === participant.id
         return <li key={participant.id}><button
           type="button"
           className="cxa-member-button"
           disabled={presentation === undefined}
+          {...(mentionTarget ? { 'data-mention-target': 'true', 'aria-current': 'true' as const } : {})}
+          {...(lifecycle === undefined ? {} : { 'data-member-presence': lifecycle.phase })}
           onClick={() => { if (presentation !== undefined) setInspector({ kind: 'identity', participantId: participant.id }) }}
         >
-          <HostAgentAvatar participant={participant} />
-          <span className="cxa-member-copy"><span className="cxa-member-name">{participant.name}</span><span className="cxa-member-role">{role}</span></span>
-          {lifecycleFor(participant.id) === undefined ? null : <span className="cxa-member-status">{lifecycleFor(participant.id)}</span>}
+          <span className="cxa-member-avatar-seat">
+            <HostAgentAvatar participant={participant} />
+            {lifecycle === undefined ? null : <span
+              className="cxa-member-presence-dot"
+              data-presence={lifecycle.phase}
+              title={lifecycle.label}
+              aria-hidden="true"
+            />}
+          </span>
+          <span className="cxa-member-copy"><span className="cxa-member-name">{participant.name}</span><span className="cxa-member-role">{memberRoleLabel}</span></span>
+          {lifecycle === undefined ? null : <span className="cxa-visually-hidden">{lifecycle.label}</span>}
         </button></li>
-      })}</ul>
+      })}</ul>}
+      </div>}
     </HostConversationRightInspector>}
     {inspector?.kind !== 'settings' ? null : <HostConversationRightInspector
       open={true}
       title={chinese ? '群聊设置' : 'Room settings'}
       closeLabel={chinese ? '关闭群聊设置' : 'Close room settings'}
+      resizeLabel={chinese ? '调整详情栏宽度' : 'Resize inspector'}
+      width={inspectorWidth}
+      onWidthChange={setInspectorWidth}
       onOpenChange={open => { if (!open) closeInspector() }}
     >
       {roomSettings === undefined
         ? <><dl className="cxa-inspector-readonly"><dt>{chinese ? '群聊名称' : 'Room name'}</dt><dd>{title}</dd><dt>{chinese ? '群聊介绍' : 'Description'}</dt><dd>{description ?? (chinese ? '尚未添加' : 'Not added')}</dd></dl><p className="cxa-inspector-note">{chinese ? '当前数据源未提供群聊设置更新。' : 'The current source does not provide room settings updates.'}</p></>
         : <RoomSettingsEditor title={title} description={description} chinese={chinese} settings={roomSettings} onError={onCommandError} onDone={closeInspector} />}
-    </HostConversationRightInspector>}
-    {inspector?.kind !== 'more' ? null : <HostConversationRightInspector
-      open={true}
-      title={chinese ? '更多' : 'More'}
-      closeLabel={chinese ? '关闭更多操作' : 'Close more actions'}
-      onOpenChange={open => { if (!open) closeInspector() }}
-    >
-      {headerActions.length === 0 ? null : <div className="cxa-inspector-actions">{headerActions.map(action => <ActionButton key={action.id} action={action} run={() => {
-        void commands.runHeader(model, action).then(closeInspector).catch(onCommandError)
-      }} />)}</div>}
     </HostConversationRightInspector>}
     <div className="cxa-live-region" role="status" aria-live="polite">{commandError ?? ''}</div>
   </section>

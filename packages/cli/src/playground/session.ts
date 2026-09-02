@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -32,6 +32,8 @@ import {
   parseProviderBindingRequest,
 } from '../launcher/provider-rpc.js'
 import { normalizePersistedPermissionPolicyRecord } from '../permission-persistence.js'
+import { resolveLocalCodexProviderConfig } from '../providers/config.js'
+import type { CodexProviderConfig } from '../providers/contracts.js'
 import { ProviderFleet } from '../providers/fleet.js'
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
 import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
@@ -42,7 +44,6 @@ import {
   parseOwnerDocumentBindingRequest,
   type OwnerDocumentBridgeHandler,
 } from '../launcher/owner-document-rpc.js'
-import { playgroundPluginBundleSnapshot } from './plugin-bundle-fixture.js'
 
 export interface PlaygroundFixtureInfo {
   readonly name: string
@@ -84,6 +85,11 @@ export interface PlaygroundSession {
   close(): Promise<void>
 }
 
+export interface PlaygroundSessionOptions {
+  /** Explicit external isolated home. The caller, not the session, owns its lifecycle. */
+  readonly homeDir?: string
+}
+
 class PlaygroundCredentialBackend implements LauncherKeychainBackend {
   private readonly values = new Map<string, string>()
 
@@ -123,7 +129,33 @@ function fixtureInfo(source: Record<string, unknown>, sourcePath: string): Playg
  * Materialize a source fixture into an isolated, writable Playground home.
  * Both the production-bundle server and Vite dev server share this authority.
  */
-export async function createPlaygroundSession(sourceConfigPath: string): Promise<PlaygroundSession> {
+async function externalPlaygroundHome(input: string, sourcePath: string): Promise<string> {
+  if (input.trim() === '' || !path.isAbsolute(input)) {
+    throw new Error('Playground external home must be a non-empty absolute path')
+  }
+  const homeDir = path.resolve(input)
+  const protectedRoots = [path.parse(homeDir).root, os.homedir(), process.cwd(), path.dirname(sourcePath)]
+    .map(candidate => path.resolve(candidate))
+  if (protectedRoots.some(root => homeDir === root || path.relative(homeDir, root) === ''
+    || (!path.relative(homeDir, root).startsWith('..') && !path.isAbsolute(path.relative(homeDir, root))))) {
+    throw new Error('Playground external home cannot contain a protected root')
+  }
+  try {
+    const entry = await lstat(homeDir)
+    if (entry.isSymbolicLink() || !entry.isDirectory()) {
+      throw new Error('Playground external home must be a real directory')
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    await mkdir(homeDir, { recursive: true, mode: 0o700 })
+  }
+  return homeDir
+}
+
+export async function createPlaygroundSession(
+  sourceConfigPath: string,
+  options: PlaygroundSessionOptions = {},
+): Promise<PlaygroundSession> {
   const sourcePath = path.resolve(sourceConfigPath)
   const source = JSON.parse(await readFile(sourcePath, 'utf8')) as Record<string, unknown>
   if (source.version !== 1 || !Array.isArray(source.plugins)) {
@@ -142,11 +174,10 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
         `playground.permissionPolicies[${index}]`,
       ))
       : (() => { throw new Error('playground.permissionPolicies must be an array') })()
-  if (playground.pluginBundleFixture !== undefined && typeof playground.pluginBundleFixture !== 'boolean') {
-    throw new Error('playground.pluginBundleFixture must be a boolean')
-  }
-  const includePluginBundleFixture = playground.pluginBundleFixture === true
-  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cordisx-ui-playground-'))
+  const ownsHome = options.homeDir === undefined
+  const homeDir = options.homeDir === undefined
+    ? await mkdtemp(path.join(os.tmpdir(), 'cordisx-ui-playground-'))
+    : await externalPlaygroundHome(options.homeDir, sourcePath)
   const stateRoot = path.join(homeDir, 'state')
   const configPath = path.join(homeDir, 'config', 'playground.config.json')
   const serviceConfigPath = path.join(homeDir, 'config', 'playground.home.json')
@@ -199,11 +230,20 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
     const serviceConfigToken = randomBytes(32).toString('hex')
     const credentialToken = randomBytes(32).toString('hex')
     const config = await loadConfig(configPath, { profileId: 'playground' })
-    // The development composition injects the deterministic transport into the
-    // same Agent/Session Runtime authority. It never starts a Provider Fleet,
-    // local CLI, or a second app-server connection.
-    const providerFleet = undefined
-    const providerToken = undefined
+    const mockAgentLoop = config.codex.agentLoopBackend === 'mock'
+    const localProvider = mockAgentLoop ? undefined : resolveLocalCodexProviderConfig(config.codex, process.env)
+    // The deterministic Simulator is a complete Playground AgentLoop backend.
+    // It must not create a Provider Fleet even when the reviewed composition
+    // still contains enabled real-provider configuration.
+    const providerConfigs: readonly CodexProviderConfig[] = mockAgentLoop
+      ? []
+      : localProvider === undefined
+        ? config.providers
+        : [...config.providers, localProvider]
+    const providerFleet = providerConfigs.some(provider => provider.enabled)
+      ? await ProviderFleet.create(providerConfigs, { appServer: { environment: process.env } })
+      : undefined
+    const providerToken = providerFleet === undefined ? undefined : randomBytes(32).toString('hex')
     const bridge = createConfigBridgeHandler({
       token,
       profileId: 'playground',
@@ -282,7 +322,6 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
     ...(generation.providerToken === undefined ? {} : { providerBridgeToken: generation.providerToken }),
     profileId: 'playground',
     permission: { profileId: 'playground', policies: previewPermissionPolicies },
-    ...(includePluginBundleFixture ? { pluginBundleSnapshot: playgroundPluginBundleSnapshot(generation.generation) } : {}),
   })
 
   return {
@@ -386,7 +425,7 @@ export async function createPlaygroundSession(sourceConfigPath: string): Promise
       await active?.providerFleet?.close()
       credentialBackend.clear()
       active = undefined
-      await rm(homeDir, { recursive: true, force: true })
+      if (ownsHome) await rm(homeDir, { recursive: true, force: true })
     },
   }
 }

@@ -71,13 +71,6 @@ projected only into Manager and never become public package sources, lifecycle
 snapshots, permission identities, or share targets. Details and the phase-1
 entry-basename id restriction are in
 [`distribution-and-cli.md`](distribution-and-cli.md#explicit-local-development-entry).
-AI-first development uses the same plane with a normal project created by the
-published plugin scaffolder. The launched Host receives that project's exact
-entry and explicit-development mode as launcher-owned environment facts,
-allowing its Codex agent to edit the already-watched source without a shared
-scratch plugin, second watcher, or restart. Build, publication, rollback,
-fencing, diagnostics, and shutdown remain the existing local-generation
-authorities.
 
 The launcher implementation of that boundary is specified separately in
 [`dynamic-package-store.md`](dynamic-package-store.md): it maps source-v1 and
@@ -85,27 +78,6 @@ package-v2 intake plus a Host-private journal/token/permission/rollback layer
 onto the single package and activation stores implemented by the generation
 runtime slice. It does not create another store/registry, switch renderer
 generations, or render Manager UI.
-
-Plugin bundles layer a Host-owned management registry and coordinator over the
-same single-plugin package lifecycle. A bundle is immutable installation and
-policy metadata, never executable code or a permission principal. The
-coordinator stages explicit-local member packages, compares exact
-`(id, version, digest)` tuples, applies dependency-first, compensates failures
-in reverse order, and records bundle/direct/runtime-dependency claims. Shared
-members have one installed runtime identity; disabling removes only active
-enable intent, while uninstall removes only that bundle's ownership claim.
-Direct Manager removal is fenced while any bundle claim remains.
-
-Bundle permission choices bind exact member permission ids. Enabled bundle
-policies merge `deny > ask > allow`; one explicit plugin override replaces the
-merge globally for that exact plugin permission. Disabling or removing a more
-restrictive bundle persists its former result as a safety floor until a
-confirmed permission review accepts widening. The launcher publishes the
-revision-fenced bundle snapshot and private lifecycle RPC into the production
-renderer composition. Manager owns the bundle list, detail header, exact
-`README / Members / Permissions / Relations / Records` tabs, and all actions.
-The complete behavior and verification ledger are in
-[`plugin-bundles.md`](plugin-bundles.md).
 
 The launcher binds CDP to `127.0.0.1`, records every `Page.addScriptToEvaluateOnNewDocument` identifier, and removes those identifiers on shutdown before asking the live page to dispose CordisX.
 
@@ -128,21 +100,6 @@ connection state. The launcher starts its Host in a private process group and,
 on shutdown, removes CDP injections then terminates only that group plus
 helpers fenced by its exact CordisX-managed user-data directory; an explicitly
 user-supplied `--profile-dir` never grants a broad helper-cleanup target.
-
-Immediately before a named Host launch or a direct-entry development launch,
-the launcher deploys the versioned `cordisx-plugin-development` Skill shipped
-in its npm distribution. A normal
-`shared` launch targets the resolved real `HOME`; `host-isolated` targets only
-the private `HOME` projected by that launch plan. `CORDISX_HOME`, the selected
-CordisX profile id, its independent Chromium `user-data-dir`, and Codex's
-official `CODEX_HOME` remain separate concepts and are never substituted for
-the Skill installation HOME. Deployment stages and content-hashes the complete
-Skill before publication, updates only a target with a valid matching CordisX
-management marker, and fails closed without changing a pre-existing unmanaged
-or locally modified target. It neither scans nor copies sibling user Skills,
-writes a repository `AGENTS.md`, creates a Studio checkout, nor changes the
-launcher's current working directory, so repository-local instructions and
-`.agents/skills` remain in scope for the Host process.
 
 The second Desktop process is a UI development host, not a transparent platform
 bridge. CordisX must not start another app-server to impersonate or replace the
@@ -168,6 +125,27 @@ chain, and private Codex event adapter are specified in
 [`agent-events.md`](agent-events.md). They share the Platform broker and host
 adapter generation, retain only stable projection identities, and define no
 Timeline, session header, DOM surface, or outlet.
+
+The internal text AgentLoop bridge is specified in
+[`agent-loop.md`](agent-loop.md). It injects one principal-bound
+`ctx.agentLoop` client per plugin fiber, resolves the Protocol AgentDefinition
+catalog, creates a fresh binding or binds one explicit opaque task, wakes it
+through the existing Provider Fleet, and proactively projects
+assistant text, observed approvals, and lifecycle. It reuses the existing task
+permissions and prompt runtime, owns no Chatroom data or plugin UI, and returns
+typed unsupported for `image-ref` until a controlled resolver exists.
+For internal development and Playground composition, the explicit
+`codex.agentLoopBackend="local-cli"` option adds `codex-local` to that Provider
+Fleet. Its launcher-owned app-server reuses the authenticated local Codex home,
+publishes only the existing token-bound provider RPC, and starts tasks with a
+read-only sandbox plus `approvalPolicy=never`. It is an independent connection,
+not the Desktop current connection or a raw app-server plugin API.
+The alternative `codex.agentLoopBackend="mock"` is fenced to the explicit UI
+Playground and substitutes only a Host-private deterministic in-memory
+AgentLoop host. It uses the same broker and public client but creates no
+provider, model, App Server, Codex task, process, connection, or login state.
+Its `debug:agent-loop/mock/v1` task registry and trace page are development
+diagnostics, not public runtime state or a permanent CLI contract.
 
 Small plugin-owned durable state uses the Host public
 `cordisx.owner-documents/v1` service at `ctx.documents`. The renderer receives
@@ -472,18 +450,9 @@ generation of the same canonical source/plugin/origin reuses its Host principal.
 
 The generic resolver implements and tests transitive parent/subtree
 suppression and same-generation restoration. The current production Codex
-control catalog binds `composer.reasoning-intensity` and
-`composer.toolbar.items`. The toolbar point exposes the exact
-`cordisx.composer-submit-celebration/v1` profile through one host-priority,
-exclusive `proxy` claim: property `celebrationProfile`, event
-`submitActivated`, and commands `presentCelebration` / `dismissCelebration`.
-The Host emits a five-second, opaque, single-use activation only for an enabled
-native submit activation. It alone owns the pointer-inert full-window confetti
-DOM, styles, timer, idempotency, and removal on timeout, unload, replacement,
-candidate abort, rollback, or adapter disposal. The plugin receives no native
-event, selector, node, stylesheet, timer, or presentation handle. Real-App
-evidence for a parent control point still must not be claimed until such a
-semantic parent is cataloged and adapted.
+control catalog binds only `composer.reasoning-intensity`, so real-App evidence
+for a parent control point must not be claimed until such a semantic parent is
+cataloged and adapted.
 
 The host-neutral surface/outlet vocabulary, current Codex adapter availability,
 DeepSeek Harness intent mapping, explicit replacement refusals, contextual

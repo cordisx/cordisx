@@ -1,4 +1,6 @@
+import { relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { randomUUID } from 'node:crypto'
 import react from '@vitejs/plugin-react'
 import { createServer, type Plugin, type ViteDevServer } from 'vite'
 import { createPlaygroundSession } from '../session.js'
@@ -7,9 +9,16 @@ const COMPOSITION_ID = 'virtual:cordisx-composition'
 const RESOLVED_COMPOSITION_ID = `\0${COMPOSITION_ID}`
 const FIXTURE_ID = 'virtual:cordisx-playground-fixture'
 const RESOLVED_FIXTURE_ID = `\0${FIXTURE_ID}`
+const GENERATED_OUTPUT_ROOT = fileURLToPath(new URL('../../../dist/', import.meta.url))
+
+function isGeneratedOutput(file: string): boolean {
+  const path = relative(GENERATED_OUTPUT_ROOT, file)
+  return path !== '' && !path.startsWith('..') && !path.startsWith('/')
+}
 
 export interface VitePlaygroundOptions {
   readonly configPath: string
+  readonly homeDir?: string
   readonly port?: number
   readonly host?: '127.0.0.1' | '::1'
 }
@@ -39,11 +48,20 @@ function sendJson(response: import('node:http').ServerResponse, status: number, 
 
 /** Vite transport around the same isolated composition/session used by production parity tests. */
 export async function startVitePlayground(options: VitePlaygroundOptions): Promise<VitePlaygroundHandle> {
-  const session = await createPlaygroundSession(options.configPath)
+  const session = await createPlaygroundSession(options.configPath, {
+    ...(options.homeDir === undefined ? {} : { homeDir: options.homeDir }),
+  })
   const clientRoot = fileURLToPath(new URL('../client', import.meta.url))
   const runtimePath = fileURLToPath(new URL('../../renderer/runtime.ts', import.meta.url))
   const runtimeImport = `/@fs/${runtimePath}`
   let vite: ViteDevServer | undefined
+  const previewResetInstanceId = randomUUID()
+  let previewResetGeneration = 0
+  const previewResetState = () => Object.freeze({
+    version: 1 as const,
+    instanceId: previewResetInstanceId,
+    generation: previewResetGeneration,
+  })
 
   const compositionPlugin: Plugin = {
     name: 'cordisx-playground-composition',
@@ -60,6 +78,12 @@ export async function startVitePlayground(options: VitePlaygroundOptions): Promi
       return composition.source
     },
     handleHotUpdate(context) {
+      // `npm run build` writes the CLI package's generated dist tree while a
+      // Playground server may be running from src. Those files are not part of
+      // the composition's source graph. Rebuilding the virtual composition for
+      // them disposes the active plugin generation and can leave the review
+      // surface blank during a browser reload.
+      if (isGeneratedOutput(context.file)) return []
       const composition = context.server.moduleGraph.getModuleById(RESOLVED_COMPOSITION_ID)
       if (composition !== undefined) context.server.moduleGraph.invalidateModule(composition)
     },
@@ -89,10 +113,17 @@ export async function startVitePlayground(options: VitePlaygroundOptions): Promi
           }
           if (request.method === 'POST' && url.pathname === '/api/reset') {
             await session.reset()
+            previewResetGeneration += 1
             const composition = server.moduleGraph.getModuleById(RESOLVED_COMPOSITION_ID)
             if (composition !== undefined) server.moduleGraph.invalidateModule(composition)
-            sendJson(response, 200, { ok: true })
-            server.ws.send({ type: 'full-reload' })
+            const reset = previewResetState()
+            sendJson(response, 200, { ok: true, reset })
+            server.ws.send({ type: 'custom', event: 'cordisx:playground-preview-reset', data: reset })
+            if (url.searchParams.get('client') !== 'playground-reset-v1') server.ws.send({ type: 'full-reload' })
+            return
+          }
+          if (request.method === 'GET' && url.pathname === '/api/reset-state') {
+            sendJson(response, 200, previewResetState())
             return
           }
           next()
@@ -126,6 +157,9 @@ export async function startVitePlayground(options: VitePlaygroundOptions): Promi
         host,
         port: options.port ?? 0,
         strictPort: options.port !== undefined,
+        watch: {
+          ignored: [`${GENERATED_OUTPUT_ROOT.replaceAll('\\', '/')}/**`],
+        },
       },
       clearScreen: false,
     })

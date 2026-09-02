@@ -6,7 +6,12 @@ import {
   type NormalizedVectorDescriptor,
   type SemanticIconKey,
 } from '../icon-theme-contracts.js'
-import { resolveBuiltinReiconDescriptor } from './reicon-icon-backend.js'
+import {
+  BUILTIN_HOST_SURFACE_ICON_KEYS,
+  resolveBuiltinHostSurfaceIconDescriptor,
+  resolveBuiltinReiconDescriptor,
+  type BuiltinHostSurfaceIconKey,
+} from './reicon-icon-backend.js'
 import { resolveHostTheme, type HostAppTheme } from './host-theme.js'
 import type { IconThemeRegistry } from './icon-theme-registry.js'
 
@@ -100,17 +105,16 @@ export const MANAGER_ICON_SEMANTICS: Readonly<Partial<Record<ManagerIconToken, S
 })
 
 const HOST_SURFACE_ICON_MAP: Readonly<Record<string, SemanticIconKey>> = Object.freeze({
-  'host:analytics': 'navigation.dashboard', 'host:archive': 'content.files', 'host:back': 'action.back',
-  'host:chat': 'content.panel',
+  'host:analytics': 'navigation.dashboard', 'host:back': 'action.back',
   'host:calendar': 'content.calendar', 'host:close': 'action.close', 'host:error': 'status.error',
+  'host:chat': 'navigation.channels',
   'host:copy': 'action.copy', 'host:delete': 'action.delete',
   'host:files': 'content.files', 'host:folder': 'content.folder', 'host:history': 'navigation.history',
-  'host:info': 'status.info', 'host:hierarchy': 'navigation.routes', 'host:layers': 'content.layers', 'host:key': 'content.key',
-  'host:link': 'action.share',
+  'host:info': 'status.info', 'host:layers': 'content.layers', 'host:key': 'content.key',
+  'host:marketplace': 'navigation.marketplace',
   'host:more': 'action.more', 'host:new': 'action.add', 'host:open': 'action.external-link',
-  'host:people-search': 'action.search', 'host:pin': 'action.favorite', 'host:pinned': 'action.favorite',
   'host:palette': 'content.palette', 'host:playground': 'navigation.overview',
-  'host:refresh': 'action.refresh', 'host:reset': 'action.reset', 'host:restore': 'action.refresh', 'host:review': 'control.check',
+  'host:refresh': 'action.refresh', 'host:reset': 'action.reset', 'host:review': 'control.check',
   'host:settings': 'action.settings', 'host:save': 'action.save', 'host:clock': 'content.clock',
   'host:success': 'status.success', 'host:warning': 'status.warning', 'host:tags': 'content.tags',
 })
@@ -254,6 +258,39 @@ export function renderHostIconSvg(
   return { svg: renderNormalizedIconSvg(document, result.descriptor, result.resolution, options.size), resolution: result.resolution }
 }
 
+export function renderHostSurfaceIconSvg(
+  document: Document,
+  token: string | undefined,
+  options: HostIconRenderOptions = {},
+): { readonly svg: SVGSVGElement; readonly resolution: HostIconResolution } {
+  const requested = token ?? 'host:more'
+  const key = hostSurfaceIconKey(requested)
+  const state = normalizedState(options.state ?? (requested === 'host:pinned' ? 'selected' : undefined))
+  const variant = normalizedVariant({ ...options, state })
+  const theme = options.theme ?? resolveHostTheme(document).theme
+  const privateSurfaceKey = (BUILTIN_HOST_SURFACE_ICON_KEYS as readonly string[]).includes(requested)
+    ? requested as BuiltinHostSurfaceIconKey
+    : undefined
+  if (privateSurfaceKey === undefined) return renderHostIconSvg(document, key ?? requested, { ...options, theme, state, variant })
+  const resolution: HostIconResolution = {
+    key: requested,
+    provider: 'builtin:reicon',
+    fallback: 'none',
+    state,
+    theme,
+    variant,
+  }
+  return {
+    svg: renderNormalizedIconSvg(
+      document,
+      resolveBuiltinHostSurfaceIconDescriptor(privateSurfaceKey, variant, state),
+      resolution,
+      options.size,
+    ),
+    resolution,
+  }
+}
+
 export function renderManagerIconSvg(
   document: Document,
   token: ManagerIconToken,
@@ -287,15 +324,18 @@ export function hostSurfaceIconKey(token: string | undefined): SemanticIconKey |
   return HOST_SURFACE_ICON_MAP[token ?? 'host:more']
 }
 
-export function createHostSurfaceIcon(document: Document, token: string | undefined): HTMLSpanElement {
+export function createHostSurfaceIcon(
+  document: Document,
+  token: string | undefined,
+  options: HostIconRenderOptions = {},
+): HTMLSpanElement {
   const requested = token ?? 'host:more'
-  const key = hostSurfaceIconKey(requested)
   const icon = document.createElement('span')
   icon.className = 'cordisx-host-icon'
   icon.dataset.hostIcon = requested
   icon.setAttribute('aria-hidden', 'true')
   icon.draggable = false
-  icon.append(renderHostIconSvg(document, key ?? requested, { theme: resolveHostTheme(document).theme }).svg)
+  icon.append(renderHostSurfaceIconSvg(document, requested, options).svg)
   return icon
 }
 

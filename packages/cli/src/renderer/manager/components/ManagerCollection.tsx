@@ -1,4 +1,4 @@
-import type { ManagerCollectionAction, ManagerCollectionItem, ManagerCollectionLeadingVisual } from '../../../contracts.js'
+import type { ManagerCollectionAction, ManagerCollectionItem, ManagerCollectionLeadingVisual } from '@cordisx/protocol/manager-collection/v1'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
@@ -13,7 +13,12 @@ import {
 } from '../../manager-collection.js'
 
 function ActionIcon({ action }: { readonly action: ManagerCollectionAction }) {
-  if (action.icon !== undefined) return <HostSurfaceIcon token={action.icon as CordisXIconToken} />
+  const semantic = action.id.toLocaleLowerCase().split(/[.:/_-]/u).at(-1)
+  if (semantic === 'pin' || semantic === 'unpin') return <HostSurfaceIcon token="host:pin" state={action.pressed || semantic === 'unpin' ? 'active' : 'default'} />
+  if (semantic === 'archive') return <HostSurfaceIcon token="host:archive" />
+  if (semantic === 'restore' || semantic === 'unarchive') return <HostSurfaceIcon token="host:restore" />
+  if (semantic === 'delete' || semantic === 'remove') return <HostSurfaceIcon token="host:delete" />
+  if (action.icon !== undefined) return <HostSurfaceIcon token={action.icon as CordisXIconToken} state={action.pressed ? 'active' : 'default'} />
   if (action.kind === 'copy-route-link' || action.kind === 'copy-text') return <HostIcon token="copy" />
   if (action.kind === 'text-input-command') return <HostIcon token="edit" />
   return <HostIcon token={action.tone === 'danger' ? 'delete' : 'more'} />
@@ -232,7 +237,7 @@ function ManagerCollectionHost({ registry }: { readonly registry: HostManagerCol
 
 export interface MountedManagerCollectionHost {
   readonly registry: HostManagerCollectionPageRegistry
-  dispose(): Promise<void>
+  dispose(): void
 }
 
 export function mountManagerCollectionHost(container: HTMLElement, options: HostManagerCollectionPageOptions): MountedManagerCollectionHost {
@@ -240,19 +245,16 @@ export function mountManagerCollectionHost(container: HTMLElement, options: Host
   const root = createRoot(container)
   container.dataset.managerCollectionHost = 'true'
   flushSync(() => root.render(<ManagerCollectionHost registry={registry} />))
-  let disposePromise: Promise<void> | undefined
+  let disposed = false
   return {
     registry,
     dispose: () => {
-      if (disposePromise !== undefined) return disposePromise
+      if (disposed) return
+      disposed = true
       registry.dispose()
-      disposePromise = new Promise(resolve => queueMicrotask(() => {
-        root.unmount()
-        container.removeAttribute('data-manager-collection-host')
-        container.replaceChildren()
-        resolve()
-      }))
-      return disposePromise
+      root.unmount()
+      container.removeAttribute('data-manager-collection-host')
+      container.replaceChildren()
     },
   }
 }

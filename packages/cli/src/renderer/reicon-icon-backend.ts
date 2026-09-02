@@ -14,7 +14,10 @@ import ArrowRight from 'reicon/icons/ArrowRight'
 import ArrowUp from 'reicon/icons/ArrowUp'
 import ArrowUpRightSquare from 'reicon/icons/ArrowUpRightSquare'
 import AlertTriangle from 'reicon/icons/AlertTriangle'
+import ArchiveBox from 'reicon/icons/ArchiveBox'
+import ArchiveUp from 'reicon/icons/ArchiveUp'
 import Calendar from 'reicon/icons/Calendar'
+import Chat from 'reicon/icons/Chat'
 import Chart from 'reicon/icons/Chart'
 import Check from 'reicon/icons/Check'
 import CheckCircle from 'reicon/icons/CheckCircle'
@@ -23,6 +26,7 @@ import Component from 'reicon/icons/Component'
 import CommandSquare from 'reicon/icons/CommandSquare'
 import Copy from 'reicon/icons/Copy'
 import Crown from 'reicon/icons/Crown'
+import DiagramTree from 'reicon/icons/DiagramTree'
 import DocumentText from 'reicon/icons/DocumentText'
 import Edit from 'reicon/icons/Edit'
 import Export from 'reicon/icons/Export'
@@ -35,10 +39,12 @@ import InfoCircle from 'reicon/icons/InfoCircle'
 import Import from 'reicon/icons/Import'
 import Key from 'reicon/icons/Key'
 import Layers from 'reicon/icons/Layers'
+import Link from 'reicon/icons/Link'
 import MinusCircle from 'reicon/icons/MinusCircle'
 import MoreH from 'reicon/icons/MoreH'
 import Palette from 'reicon/icons/Palette'
 import Pause from 'reicon/icons/Pause'
+import PinTack from 'reicon/icons/PinTack'
 import Play from 'reicon/icons/Play'
 import Plug from 'reicon/icons/Plug'
 import Power from 'reicon/icons/Power'
@@ -56,6 +62,7 @@ import Sparkles from 'reicon/icons/Sparkles'
 import Star from 'reicon/icons/Star'
 import Tag from 'reicon/icons/Tag'
 import Trash2 from 'reicon/icons/Trash2'
+import UserSearch from 'reicon/icons/UserSearch'
 import Verified from 'reicon/icons/Verified'
 import XCircle from 'reicon/icons/XCircle'
 import X from 'reicon/icons/X'
@@ -135,6 +142,32 @@ const REICON_GLYPHS = Object.freeze({
   'trust.certified': Verified,
   'trust.official': Crown,
 } as const satisfies Readonly<Record<SemanticIconKey, IconFunction>>)
+
+export const BUILTIN_HOST_SURFACE_ICON_KEYS = [
+  'host:archive',
+  'host:chat',
+  'host:hierarchy',
+  'host:link',
+  'host:marketplace',
+  'host:pin',
+  'host:pinned',
+  'host:people-search',
+  'host:restore',
+] as const
+
+export type BuiltinHostSurfaceIconKey = typeof BUILTIN_HOST_SURFACE_ICON_KEYS[number]
+
+const HOST_SURFACE_GLYPHS = Object.freeze({
+  'host:archive': ArchiveBox,
+  'host:chat': Chat,
+  'host:hierarchy': DiagramTree,
+  'host:link': Link,
+  'host:marketplace': Shop,
+  'host:pin': PinTack,
+  'host:pinned': PinTack,
+  'host:people-search': UserSearch,
+  'host:restore': ArchiveUp,
+} as const satisfies Readonly<Record<BuiltinHostSurfaceIconKey, IconFunction>>)
 
 const numberPattern = '[-+]?(?:\\d*\\.\\d+|\\d+\\.?)(?:[eE][-+]?\\d+)?'
 const tokenPattern = new RegExp(`[A-Za-z]|${numberPattern}`, 'g')
@@ -319,23 +352,39 @@ function compileFragment(fragment: string): NormalizedVectorDescriptor {
 
 const cache = new Map<string, NormalizedVectorDescriptor>()
 
+function resolveReiconGlyphDescriptor(
+  cacheKey: string,
+  glyph: IconFunction,
+  variant: IconVariant,
+): NormalizedVectorDescriptor {
+  const weight: IconWeight = variant === 'filled' ? 'Filled' : 'Outline'
+  const weightedCacheKey = `${cacheKey}\0${weight}`
+  const cached = cache.get(weightedCacheKey)
+  if (cached !== undefined) return cached
+  const sourceKey = weight === 'Filled' ? 'F' : 'O'
+  const source = glyph.iconData[sourceKey] ?? glyph.iconData[Object.keys(glyph.iconData)[0]!]
+  if (source === undefined) throw new Error(`Reicon has no ${weight} source for ${cacheKey}`)
+  const descriptor = compileFragment(source)
+  cache.set(weightedCacheKey, descriptor)
+  return descriptor
+}
+
 /** Compile one exact Protocol tuple without exporting Reicon source geometry. */
 export function resolveBuiltinReiconDescriptor(
   key: SemanticIconKey,
   variant: IconVariant,
   _state: IconState,
 ): NormalizedVectorDescriptor {
-  const weight: IconWeight = variant === 'filled' ? 'Filled' : 'Outline'
-  const cacheKey = `${key}\0${weight}`
-  const cached = cache.get(cacheKey)
-  if (cached !== undefined) return cached
-  const glyph = REICON_GLYPHS[key]
-  const sourceKey = weight === 'Filled' ? 'F' : 'O'
-  const source = glyph.iconData[sourceKey] ?? glyph.iconData[Object.keys(glyph.iconData)[0]!]
-  if (source === undefined) throw new Error(`Reicon has no ${weight} source for ${key}`)
-  const descriptor = compileFragment(source)
-  cache.set(cacheKey, descriptor)
-  return descriptor
+  return resolveReiconGlyphDescriptor(key, REICON_GLYPHS[key], variant)
+}
+
+/** Compile one Host surface token through the same normalized Reicon provider boundary. */
+export function resolveBuiltinHostSurfaceIconDescriptor(
+  key: BuiltinHostSurfaceIconKey,
+  variant: IconVariant,
+  _state: IconState,
+): NormalizedVectorDescriptor {
+  return resolveReiconGlyphDescriptor(key, HOST_SURFACE_GLYPHS[key], variant)
 }
 
 export function clearBuiltinReiconDescriptorCacheForTests(): void {

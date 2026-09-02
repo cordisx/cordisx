@@ -77,13 +77,14 @@
     "provenance": true
   },
   "dependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#5cff7e65c30216dba544e4836f4bd015a46bc53d",
+    "@cordisx/protocol": "file:/private/tmp/cordisx-protocol-manager-navigation-profile",
     "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@larksuiteoapi/node-sdk": "^1.73.0",
     "@oneworks/avatar": "1.0.0-rc.8",
     "@oneworks/avatar-react": "1.0.0-rc.8",
+    "@shikitor/core": "1.0.2",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
     "esbuild": "0.28.2",
@@ -107,7 +108,7 @@
   },
   "devDependencies": {
     "@cordisx/channel-runtime": "file:../channel-runtime",
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#5cff7e65c30216dba544e4836f4bd015a46bc53d",
+    "@cordisx/protocol": "file:/private/tmp/cordisx-protocol-manager-navigation-profile",
     "@types/node": "^22.18.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",

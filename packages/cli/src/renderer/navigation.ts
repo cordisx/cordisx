@@ -650,6 +650,7 @@ export interface ManagerContentPresentation {
    * A Host semantic icon is projected from the exact same-owner page route.
    * The manager renders it; plugins never supply DOM or renderer callbacks.
    */
+  /** Host activation of one projected sibling replaces the current Manager history entry. */
   readonly tabs: readonly Readonly<{
     readonly id: string
     readonly label: string
@@ -663,10 +664,6 @@ export class ManagerContentNavigationRegistry {
   private readonly declarations = new Map<string, ManagerContentDeclarationRecord>()
   private readonly titles = new Map<string, CordisXLocalizedText>()
   private readonly projections = new Map<string, () => void>()
-  private readonly projectionInputs = new Map<string, Readonly<{
-    readonly declarations: readonly (CordisXManagerContentNavigationDeclarationV1 | CordisXManagerContentNavigationDeclarationV2)[]
-    readonly recordTitles: readonly CordisXManagerContentRecordTitleV1[]
-  }>>()
   private readonly listeners = new Set<() => void>()
   private notificationDepth = 0
   private notificationPending = false
@@ -729,17 +726,15 @@ export class ManagerContentNavigationRegistry {
 
   registerRecordTitles(owner: string, records: readonly CordisXManagerContentRecordTitleV1[]): () => void {
     const entries: string[] = []
-    const pending = new Set<string>()
     for (const record of records) {
       assertKeys(record, ['id', 'title'], 'manager content record title')
       if (typeof record.id !== 'string' || record.id.length < 1 || record.id.length > 512) throw new Error('manager content record title id is invalid')
       assertLocalizedText(record.title, 'manager content record title')
       const key = `${owner}\u0000${record.id}`
-      if (this.titles.has(key) || pending.has(key)) throw new Error(`manager content record title ${record.id} is already registered`)
-      pending.add(key)
+      if (this.titles.has(key)) throw new Error(`manager content record title ${record.id} is already registered`)
+      this.titles.set(key, immutableSnapshot(record.title))
       entries.push(key)
     }
-    records.forEach((record, index) => this.titles.set(entries[index]!, immutableSnapshot(record.title)))
     this.notify()
     return () => {
       let changed = false
@@ -758,46 +753,20 @@ export class ManagerContentNavigationRegistry {
       readonly recordTitles: readonly CordisXManagerContentRecordTitleV1[]
     }>,
   ): () => void {
-    const input = immutableSnapshot(projection)
-    const previous = this.projectionInputs.get(owner)
-    const install = (candidate: typeof input): (() => void) => {
-      const declarations: (() => void)[] = []
-      let titles: (() => void) | undefined
-      try {
-        for (const declaration of candidate.declarations) declarations.push(this.register(owner, declaration))
-        titles = this.registerRecordTitles(owner, candidate.recordTitles)
-      } catch (error) {
-        titles?.()
-        for (const unregister of declarations.reverse()) unregister()
-        throw error
-      }
-      return () => this.transaction(() => {
-        titles?.()
-        for (const unregister of declarations.reverse()) unregister()
-      })
-    }
     let dispose: () => void = () => {}
     this.transaction(() => {
       this.projections.get(owner)?.()
-      this.projections.delete(owner)
-      this.projectionInputs.delete(owner)
-      try {
-        dispose = install(input)
-        this.projections.set(owner, dispose)
-        this.projectionInputs.set(owner, input)
-      } catch (error) {
-        if (previous !== undefined) {
-          const restored = install(previous)
-          this.projections.set(owner, restored)
-          this.projectionInputs.set(owner, previous)
-        }
-        throw error
-      }
+      const declarations = projection.declarations.map(declaration => this.register(owner, declaration))
+      const titles = this.registerRecordTitles(owner, projection.recordTitles)
+      dispose = () => this.transaction(() => {
+        titles()
+        for (const unregister of declarations.reverse()) unregister()
+      })
+      this.projections.set(owner, dispose)
     })
     return () => {
       if (this.projections.get(owner) !== dispose) return
       this.projections.delete(owner)
-      this.projectionInputs.delete(owner)
       dispose()
     }
   }
@@ -817,7 +786,6 @@ export class ManagerContentNavigationRegistry {
 
   dispose(): void {
     this.projections.clear()
-    this.projectionInputs.clear()
     this.declarations.clear()
     this.titles.clear()
     this.listeners.clear()
@@ -1440,6 +1408,37 @@ export class NavigationRegistry {
     return this.enqueue(() => this.navigateNow(requestingOwner, reference))
   }
 
+  deepLink(requestingOwner: string, reference: CordisXRouteReference): string {
+    assertKeys(reference, ['id', 'params'], 'route reference')
+    assertReference(reference.id, 'route reference')
+    const record = this.findRecord(requestingOwner, reference.id)
+    if (record === undefined || record.owner !== requestingOwner) {
+      throw new Error(`route ${reference.id} is not available to plugin ${requestingOwner}`)
+    }
+    const error = this.routeError(record)
+    if (error !== undefined) throw new Error(`route ${record.qualifiedId} is invalid: ${error}`)
+    const routeAccess = this.access?.authorizeOutletRoute(
+      requestingOwner,
+      record.definition.outlet,
+      record.qualifiedId,
+      qualifyOwnedId(record.owner, record.definition.page),
+      record.candidateView,
+    )
+    if (routeAccess !== undefined && !routeAccess.authorized) {
+      throw new Error(routeAccess.reason ?? `extension point ${record.definition.outlet} is denied for plugin ${requestingOwner}`)
+    }
+    const params = immutableSnapshot(reference.params ?? {})
+    const path = buildPath(record, params)
+    return this.history.deepLink(Object.freeze({
+      schemaVersion: 1,
+      owner: record.owner,
+      routeId: record.qualifiedId,
+      outlet: record.definition.outlet,
+      path,
+      params,
+    }))
+  }
+
   navigateFromSurface(
     requestingOwner: string,
     reference: CordisXRouteReference,
@@ -1453,25 +1452,6 @@ export class NavigationRegistry {
       return Promise.reject(new Error(decision.reason ?? `extension point ${pointId} is denied for plugin ${requestingOwner}`))
     }
     return this.enqueue(() => this.navigateNow(requestingOwner, reference, returnFocus))
-  }
-
-  pathFromSurface(
-    requestingOwner: string,
-    reference: CordisXRouteReference,
-    pointId: string,
-    contributionId: string,
-  ): string {
-    assertKeys(reference, ['id', 'params'], 'route reference')
-    assertReference(reference.id, 'route reference')
-    const record = this.findRecord(requestingOwner, reference.id)
-    if (record === undefined || record.owner !== requestingOwner) throw new Error(`route ${reference.id} is not available to plugin ${requestingOwner}`)
-    const error = this.routeError(record)
-    if (error !== undefined) throw new Error(`route ${record.qualifiedId} is invalid: ${error}`)
-    const decision = this.access?.authorizeSurfaceRoute(requestingOwner, pointId, contributionId, record.qualifiedId)
-    if (decision !== undefined && !decision.authorized) {
-      throw new Error(decision.reason ?? `extension point ${pointId} is denied for plugin ${requestingOwner}`)
-    }
-    return buildPath(record, immutableSnapshot(reference.params ?? {}))
   }
 
   routeProjection(requestingOwner: string, reference: CordisXRouteReference): RouteProjection {
@@ -2411,6 +2391,11 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
     })
   }
 
+  /** Host-internal projection used by structured navigation collection actions. */
+  deepLinkFor(owner: string, reference: CordisXRouteReference): string {
+    return this.registry.deepLink(owner, reference)
+  }
+
   back(outlet?: CordisXOutletName): Promise<void> {
     return this.registry.back(ownerFromContext(this.ctx), outlet)
   }
@@ -2478,10 +2463,6 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
     returnFocus?: HTMLElement,
   ): Promise<void> {
     return this.registry.navigateFromSurface(owner, reference, pointId, contributionId, returnFocus)
-  }
-
-  pathFromSurface(owner: string, reference: CordisXRouteReference, pointId: string, contributionId: string): string {
-    return this.registry.pathFromSurface(owner, reference, pointId, contributionId)
   }
 
   toggleFromSurface(

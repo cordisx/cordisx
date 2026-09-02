@@ -1,18 +1,17 @@
 import {
-  CORDISX_COMPOSER_SUBMIT_CELEBRATION_PROFILE_V1,
   CORDISX_HOST_EXTENSION_POINT_CONTROL_CATALOG_SCHEMA_V1,
   CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1,
   type CordisXExtensionPointControlMode,
   type CordisXHostExtensionPointControlCatalogV1,
   type CordisXLocalizedText,
+  type CordisXNavigationCollectionAction,
+  type CordisXNavigationCollectionLeadingVisual,
   type CordisXReasoningIntensityPresentation,
   type CordisXSessionBackdropPresentation,
   type CordisXRouteReference,
   type CordisXStructuredAction,
   type CordisXSurfaceInvocationContextV1,
   type CordisXSurfaceName,
-  type NavigationCollectionAction,
-  type NavigationCollectionActions,
 } from '../contracts.js'
 import type { CordisXCommandService } from './commands.js'
 import type { CordisXI18nService } from './i18n.js'
@@ -25,6 +24,10 @@ import {
 import { createHostSurfaceIcon } from './icons.js'
 import { createSidebarItem } from './host-ui/SidebarItem.js'
 import {
+  mountNavigationCollectionActions,
+  type HostNavigationCollectionAction,
+} from './host-ui/NavigationCollectionActions.js'
+import {
   HOST_ROOM_COMPOSITE_AVATAR_STYLES,
   mountHostRoomCompositeAvatar,
 } from './host-ui/RoomCompositeAvatar.js'
@@ -32,12 +35,9 @@ import { HostTooltipController, type HostTooltipPlacement } from './tooltips.js'
 import { evaluateWhen } from './validation.js'
 import {
   BrowserControlledSurfacePolicyStore,
-  ControlledSurfaceCommandError,
   ControlledSurfaceCoordinator,
   ControlledSurfacePolicyBroker,
-  type ControlledSurfaceCommandContext,
   type ControlledSurfacePointBinding,
-  type ControlledSurfaceSelectedClaim,
 } from './controlled-surfaces.js'
 
 interface ResolvedOutletAnchor {
@@ -937,7 +937,6 @@ export class ReasoningIntensityNativeVisibility {
 }
 
 const REASONING_CONTROL_POINT = 'composer.reasoning-intensity'
-const COMPOSER_TOOLBAR_CONTROL_POINT = 'composer.toolbar.items'
 
 export const CORDISX_CODEX_CONTROL_CATALOG = {
   $schema: CORDISX_HOST_EXTENSION_POINT_CONTROL_CATALOG_SCHEMA_V1,
@@ -962,39 +961,6 @@ export const CORDISX_CODEX_CONTROL_CATALOG = {
     }],
     safeEvents: [{
       id: 'reasoningIntensityChanged', delivery: 'host-projected', payload: [{ id: 'value', schema: { type: 'string' }, required: true }],
-    }],
-    ownership: { scope: 'point', suppressesDescendantsWhenModes: [] },
-  }, {
-    id: COMPOSER_TOOLBAR_CONTROL_POINT,
-    modes: [
-      { id: 'compose', stacking: 'ordered', coexistsWith: ['proxy'], defaultAuthorization: 'allow' },
-      { id: 'proxy', stacking: 'exclusive', exclusiveGroup: 'submit-observer', coexistsWith: ['compose'], defaultAuthorization: 'deny' },
-    ],
-    exclusiveGroups: [{
-      id: 'submit-observer', modes: ['proxy'], cardinality: 'one', selection: 'host-priority', nativeFallback: true,
-    }],
-    safeProperties: [{
-      id: 'celebrationProfile',
-      schema: { type: 'string', enum: [CORDISX_COMPOSER_SUBMIT_CELEBRATION_PROFILE_V1] },
-      visibility: 'renderer-safe',
-      mutable: false,
-    }],
-    safeCommands: [{
-      id: 'presentCelebration', dispatch: 'host-brokered', arguments: [
-        { id: 'requestId', schema: { type: 'string' }, required: true },
-        { id: 'activationId', schema: { type: 'string' }, required: true },
-        { id: 'effect', schema: { type: 'string', enum: ['confetti'] }, required: true },
-        { id: 'durationMs', schema: { type: 'integer' }, required: true },
-      ],
-    }, {
-      id: 'dismissCelebration', dispatch: 'host-brokered', arguments: [
-        { id: 'requestId', schema: { type: 'string' }, required: true },
-      ],
-    }],
-    safeEvents: [{
-      id: 'submitActivated', delivery: 'host-projected', payload: [
-        { id: 'activationId', schema: { type: 'string' }, required: true },
-      ],
     }],
     ownership: { scope: 'point', suppressesDescendantsWhenModes: [] },
   }],
@@ -1059,223 +1025,6 @@ class ReasoningIntensityControlBinding implements ControlledSurfacePointBinding 
   }
 
   dispose(): void { this.update(undefined); this.coordinator = undefined }
-}
-
-function celebrationOwnerKey(value: ControlledSurfaceSelectedClaim): string {
-  const { declaration, generation } = value
-  return [
-    declaration.principalHandle,
-    declaration.identity.source,
-    declaration.identity.pluginId,
-    declaration.identity.pointId,
-    declaration.claimId,
-    declaration.contributionId,
-    declaration.mode,
-    generation.moduleGeneration ?? 'host',
-    generation.transactionId ?? '',
-    generation.transactionEpoch ?? '',
-  ].join('\u0000')
-}
-
-/** @internal Host-owned, pointer-inert full-window presentation. */
-export class HostConfettiPresentation {
-  private readonly root: HTMLElement
-
-  constructor(document: Document) {
-    this.root = create(document, 'div', 'cordisx-celebration')
-    this.root.dataset.cordisxEffect = 'confetti'
-    this.root.setAttribute('aria-hidden', 'true')
-    this.root.style.position = 'fixed'
-    this.root.style.inset = '0'
-    this.root.style.pointerEvents = 'none'
-    this.root.style.overflow = 'hidden'
-    const colors = ['#ff4d6d', '#ffd166', '#06d6a0', '#4cc9f0', '#8b5cf6', '#ff8c42'] as const
-    const fragment = document.createDocumentFragment()
-    for (let index = 0; index < 96; index += 1) {
-      const piece = document.createElement('i')
-      piece.className = 'cordisx-confetti-piece'
-      piece.style.setProperty('--cordisx-confetti-x', `${(index * 37) % 101}%`)
-      piece.style.setProperty('--cordisx-confetti-y', `${8 + ((index * 53) % 84)}%`)
-      piece.style.setProperty('--cordisx-confetti-drift', `${((index * 29) % 31) - 15}vw`)
-      piece.style.setProperty('--cordisx-confetti-delay', `${-((index * 71) % 1600)}ms`)
-      piece.style.setProperty('--cordisx-confetti-duration', `${1450 + ((index * 47) % 1150)}ms`)
-      piece.style.setProperty('--cordisx-confetti-spin', `${240 + ((index * 83) % 640)}deg`)
-      piece.style.setProperty('--cordisx-confetti-color', colors[index % colors.length]!)
-      fragment.append(piece)
-    }
-    this.root.append(fragment)
-    ;(document.body ?? document.documentElement).append(this.root)
-  }
-
-  dispose(): void { this.root.remove() }
-}
-
-interface CelebrationActivation {
-  readonly owner: string
-  readonly expiresAt: number
-  readonly timer: number
-}
-
-interface ActiveCelebration {
-  readonly owner: string
-  readonly requestId: string
-  readonly timer: number
-  readonly presentation: HostConfettiPresentation
-}
-
-/** @internal Exact Host binding for cordisx.composer-submit-celebration/v1. */
-export class ComposerSubmitCelebrationControlBinding implements ControlledSurfacePointBinding {
-  private native: HTMLButtonElement | undefined
-  private coordinator: ControlledSurfaceCoordinator | undefined
-  private readonly activations = new Map<string, CelebrationActivation>()
-  private readonly requests = new Map<string, Readonly<{ owner: string; value: string }>>()
-  private active: ActiveCelebration | undefined
-  private sequence = 0
-
-  constructor(private readonly document: Document) {}
-
-  connect(coordinator: ControlledSurfaceCoordinator): void { this.coordinator = coordinator }
-
-  update(native: HTMLButtonElement | undefined): void {
-    if (this.native === native) return
-    this.native?.removeEventListener('click', this.onNativeActivation)
-    this.native = native
-    this.native?.addEventListener('click', this.onNativeActivation)
-    this.coordinator?.invalidate()
-  }
-
-  currentState(): Readonly<{ state: 'active' | 'not-mounted'; reason: string }> {
-    return this.native?.isConnected === true
-      ? { state: 'active', reason: 'point.mounted' }
-      : { state: 'not-mounted', reason: 'point.not-mounted' }
-  }
-
-  readProperty(id: string): string {
-    if (id !== 'celebrationProfile') throw new Error('celebration profile property is unavailable')
-    return CORDISX_COMPOSER_SUBMIT_CELEBRATION_PROFILE_V1
-  }
-
-  commandAvailability(id: string): Readonly<{ available: boolean; reason?: string }> {
-    return ['presentCelebration', 'dismissCelebration'].includes(id) && this.native?.isConnected === true
-      ? { available: true }
-      : { available: false, reason: this.native?.isConnected === true ? 'celebration.unavailable' : 'point.not-mounted' }
-  }
-
-  eventAvailability(id: string): Readonly<{ available: boolean; reason?: string }> {
-    return id === 'submitActivated' && this.native?.isConnected === true
-      ? { available: true }
-      : { available: false, reason: this.native?.isConnected === true ? 'celebration.unavailable' : 'point.not-mounted' }
-  }
-
-  selectionChanged(selected: readonly ControlledSurfaceSelectedClaim[]): void {
-    const owners = new Set(selected.map(celebrationOwnerKey))
-    for (const [activationId, activation] of this.activations) {
-      if (owners.has(activation.owner)) continue
-      this.clearActivation(activationId)
-    }
-    for (const [key, request] of this.requests) {
-      if (!owners.has(request.owner)) this.requests.delete(key)
-    }
-    if (this.active !== undefined && !owners.has(this.active.owner)) this.dismissActive()
-  }
-
-  dispatch(
-    id: string,
-    arguments_: Readonly<Record<string, string | number | boolean | null>>,
-    context: ControlledSurfaceCommandContext,
-  ): void {
-    const owner = celebrationOwnerKey(context)
-    if (id === 'dismissCelebration') {
-      const requestId = String(arguments_.requestId)
-      if (this.active?.owner === owner && this.active.requestId === requestId) this.dismissActive()
-      return
-    }
-    if (id !== 'presentCelebration') throw new ControlledSurfaceCommandError('celebration.unavailable')
-    const requestId = String(arguments_.requestId)
-    const activationId = String(arguments_.activationId)
-    const effect = String(arguments_.effect)
-    const durationMs = Number(arguments_.durationMs)
-    if (!Number.isInteger(durationMs) || durationMs < 250 || durationMs > 5000) {
-      throw new ControlledSurfaceCommandError('argument.out-of-range')
-    }
-    if (effect !== 'confetti') throw new ControlledSurfaceCommandError('arguments.invalid')
-    const requestKey = JSON.stringify([owner, requestId])
-    const requestValue = JSON.stringify({ requestId, activationId, effect, durationMs })
-    const previous = this.requests.get(requestKey)
-    if (previous !== undefined) {
-      if (previous.value !== requestValue) throw new ControlledSurfaceCommandError('request.conflict')
-      return
-    }
-    const activation = this.activations.get(activationId)
-    if (activation === undefined || activation.owner !== owner || activation.expiresAt <= Date.now()) {
-      if (activation !== undefined) this.clearActivation(activationId)
-      throw new ControlledSurfaceCommandError('activation.stale')
-    }
-    this.clearActivation(activationId)
-    this.dismissActive()
-    let presentation: HostConfettiPresentation | undefined
-    try {
-      presentation = new HostConfettiPresentation(this.document)
-      const view = this.document.defaultView
-      if (view === null) throw new Error('celebration window is unavailable')
-      const timer = view.setTimeout(() => {
-        if (this.active?.owner === owner && this.active.requestId === requestId) this.dismissActive()
-      }, durationMs)
-      this.requests.set(requestKey, { owner, value: requestValue })
-      this.active = { owner, requestId, timer, presentation }
-    } catch {
-      presentation?.dispose()
-      throw new ControlledSurfaceCommandError('presentation.failed')
-    }
-  }
-
-  dispose(): void {
-    this.native?.removeEventListener('click', this.onNativeActivation)
-    this.native = undefined
-    for (const activationId of [...this.activations.keys()]) this.clearActivation(activationId)
-    this.requests.clear()
-    this.dismissActive()
-    this.coordinator = undefined
-  }
-
-  private readonly onNativeActivation = (event: MouseEvent): void => {
-    const native = this.native
-    if (native === undefined || native.disabled || native.getAttribute('aria-disabled') === 'true') return
-    queueMicrotask(() => {
-      if (event.defaultPrevented) return
-      this.issueActivation()
-    })
-  }
-
-  private issueActivation(): void {
-    const coordinator = this.coordinator
-    const selected = coordinator?.selectedClaims(COMPOSER_TOOLBAR_CONTROL_POINT) ?? []
-    if (coordinator === undefined || selected.length !== 1) return
-    const owner = celebrationOwnerKey(selected[0]!)
-    const view = this.document.defaultView
-    if (view === null) return
-    const random = view.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${(++this.sequence).toString(36)}`
-    const activationId = `activation:${random}`
-    const expiresAt = Date.now() + 5000
-    const timer = view.setTimeout(() => this.clearActivation(activationId), 5000)
-    this.activations.set(activationId, { owner, expiresAt, timer })
-    const published = coordinator.publishEvent(COMPOSER_TOOLBAR_CONTROL_POINT, 'submitActivated', { activationId })
-    if (published.length !== 1) this.clearActivation(activationId)
-  }
-
-  private clearActivation(activationId: string): void {
-    const activation = this.activations.get(activationId)
-    if (activation === undefined) return
-    this.document.defaultView?.clearTimeout(activation.timer)
-    this.activations.delete(activationId)
-  }
-
-  private dismissActive(): void {
-    if (this.active === undefined) return
-    this.document.defaultView?.clearTimeout(this.active.timer)
-    this.active.presentation.dispose()
-    this.active = undefined
-  }
 }
 
 function rangeProgress(native: HTMLInputElement): number {
@@ -1409,6 +1158,12 @@ function nativeToolbarCornerRadius(template: HTMLButtonElement): string {
   return radius === '' ? '8px' : radius
 }
 
+interface NavigationLeadingVisualMount {
+  readonly element: HTMLElement
+  readonly semanticKey: string
+  readonly dispose: () => void
+}
+
 class StructuredSurfaceRenderer {
   private readonly roots = new Map<string, HTMLElement>()
   private readonly sites = new Set<string>()
@@ -1421,11 +1176,11 @@ class StructuredSurfaceRenderer {
   private environmentRetryTimer: number | undefined
   private environmentRetryAttempts = 0
   private rebuildScheduled = false
-  private controlBindingUpdate = false
   private disposed = false
   private nextContext = 0
   private readonly routeProjectors = new Map<HTMLButtonElement, () => void>()
-  private navigationLeadingVisualDisposers: (() => void)[] = []
+  private readonly navigationLeadingVisualMounts = new Map<string, NavigationLeadingVisualMount>()
+  private navigationRenderSignature: string | undefined
   private navigationActionDisposers: (() => void)[] = []
   private reasoningProjection: ReasoningIntensityProjection | undefined
   private readonly reasoningNativeVisibility = new ReasoningIntensityNativeVisibility()
@@ -1438,7 +1193,6 @@ class StructuredSurfaceRenderer {
     private readonly routes: CordisXRouteService,
     private readonly i18n: CordisXI18nService,
     private readonly reasoningControl: ReasoningIntensityControlBinding,
-    private readonly celebrationControl: ComposerSubmitCelebrationControlBinding,
     private readonly adapterIdentity: Readonly<{
       generation: string
       adapterVersion: string
@@ -1448,7 +1202,7 @@ class StructuredSurfaceRenderer {
   ) {
     this.tooltips = new HostTooltipController(document)
     this.unsubscribers = [
-      slots.subscribeInternal(() => this.schedule(!this.controlBindingUpdate)),
+      slots.subscribeInternal(() => this.schedule(true)),
       commands.subscribeInternal(() => this.schedule(true)),
       routes.subscribeInternal(() => this.schedule(false)),
       i18n.subscribeInternal(() => this.schedule(true)),
@@ -1498,7 +1252,6 @@ class StructuredSurfaceRenderer {
     this.reasoningProjection = undefined
     this.reasoningNativeVisibility.dispose()
     this.reasoningControl.update(undefined)
-    this.celebrationControl.update(undefined)
     this.sessionBackdropProjection?.dispose()
     this.sessionBackdropProjection = undefined
     this.tooltips.dispose()
@@ -1615,13 +1368,7 @@ class StructuredSurfaceRenderer {
     const reasoningRange = managerOverlay ? undefined : playground
       ? sessionId === undefined ? undefined : this.document.querySelector<HTMLInputElement>('input[data-cordisx-playground-reasoning]') ?? undefined
       : resolveReasoningIntensityRange(this.document, sessionId)
-    this.controlBindingUpdate = true
-    try {
-      this.reasoningControl.update(reasoningRange)
-      this.celebrationControl.update(composerSubmitSeat?.template)
-    } finally {
-      this.controlBindingUpdate = false
-    }
+    this.reasoningControl.update(reasoningRange)
     const contextValues = {
       'sidebar.visible': sidebarNavigation !== undefined || sidebarFooterControl !== undefined,
       'toolbar.visible': toolbarControl !== undefined,
@@ -1680,7 +1427,11 @@ class StructuredSurfaceRenderer {
         const root = this.placeRoot({
           key: 'sidebar.navigation', parent: sidebarNavigation, before: null, className: 'cordisx-sidebar-navigation',
         }, usedRoots)
-        if (rebuild || root.childElementCount === 0) this.renderNavigation(root, items, nextSites, nativeButtons(sidebarNavigation)[0])
+        const signature = this.navigationContentSignature(items)
+        if (root.childElementCount === 0 || signature !== this.navigationRenderSignature) {
+          this.renderNavigation(root, items, nextSites, nativeButtons(sidebarNavigation)[0])
+          this.navigationRenderSignature = signature
+        }
       }
     }
     if (sidebarFooterControl?.parentElement !== null && sidebarFooterControl?.parentElement !== undefined) {
@@ -1753,7 +1504,6 @@ class StructuredSurfaceRenderer {
     if (composerSubmitSeat !== undefined) {
       availableSurfaces.add('composer.toolbar.items')
       const items = active.filter(item => item.surface === 'composer.toolbar.items'
-        && item.control?.mode !== 'proxy'
         && (item.item as { anchor: string; placement: string }).anchor === 'submit'
         && (item.item as { anchor: string; placement: string }).placement === 'before')
       if (items.length > 0) {
@@ -1833,6 +1583,7 @@ class StructuredSurfaceRenderer {
     if (!usedRoots.has('sidebar.navigation')) {
       this.disposeNavigationLeadingVisuals()
       this.disposeNavigationActions()
+      this.navigationRenderSignature = undefined
     }
     for (const snapshot of snapshots) {
       const rendered = snapshot.visible && snapshot.authorized && snapshot.valid && !snapshot.pending
@@ -2042,23 +1793,21 @@ class StructuredSurfaceRenderer {
   }
 
   private renderNavigation(root: HTMLElement, snapshots: readonly SurfaceContributionSnapshot[], sites: Set<string>, _nativeTemplate?: HTMLButtonElement): void {
-    this.disposeNavigationLeadingVisuals()
     this.disposeNavigationActions()
-    root.replaceChildren()
+    const usedLeadingVisuals = new Set<string>()
     const navigation = create(this.document, 'div', 'cordisx-navigation')
     const groups = this.slots.navigationCollectionGroupsSnapshot()
     const collectionGroupIds = new Set(groups.map(group => group.surfaceGroup))
     const renderRows = (items: readonly SurfaceContributionSnapshot[], parent: HTMLElement): void => {
       for (const snapshot of items) {
-        const item = snapshot.item as { label: CordisXLocalizedText; description?: CordisXLocalizedText; icon?: string; command?: { id: string; arguments?: never }; route?: { id: string; params?: never }; actions?: readonly (CordisXStructuredAction & { id: string })[] }
+        const item = snapshot.item as { label: CordisXLocalizedText; description?: CordisXLocalizedText; icon?: string; command?: { id: string; arguments?: never }; route?: CordisXRouteReference; actions?: readonly CordisXNavigationCollectionAction[] }
         const label = this.text(snapshot, item.label, 'label', sites)
         const description = item.description === undefined ? undefined : this.text(snapshot, item.description, 'description', sites)
         const leadingVisual = this.slots.navigationCollectionLeadingVisual(snapshot.qualifiedId)
         let iconElement: HTMLElement | undefined
         if (leadingVisual !== undefined) {
-          iconElement = this.document.createElement('span')
-          iconElement.className = 'cordisx-room-composite-seat'
-          this.navigationLeadingVisualDisposers.push(mountHostRoomCompositeAvatar(iconElement, leadingVisual))
+          iconElement = this.navigationLeadingVisualElement(snapshot.qualifiedId, leadingVisual)
+          usedLeadingVisuals.add(snapshot.qualifiedId)
         }
         const activate = (): void => {
           const operation = item.command !== undefined
@@ -2072,6 +1821,7 @@ class StructuredSurfaceRenderer {
         const control = createSidebarItem(this.document, {
           id: snapshot.qualifiedId,
           label,
+          ...(description === undefined ? {} : { secondary: description }),
           ...(description === undefined ? {} : { ariaLabel: `${label}：${description}` }),
           ...(iconElement === undefined ? {} : { iconElement }),
           ...(item.icon === undefined ? {} : { icon: item.icon }),
@@ -2089,10 +1839,55 @@ class StructuredSurfaceRenderer {
           this.routeProjectors.set(primary, project)
           project()
         }
-        const collectionActions = this.slots.navigationCollectionActionsFor(snapshot.qualifiedId)
-        if (collectionActions === undefined) {
-          for (const [index, action] of (item.actions ?? []).entries()) control.actions.append(this.button(snapshot, action, `actions.${index}`, sites, 'shortcut'))
-        } else this.renderNavigationCollectionActions(snapshot, item.route!, collectionActions, control.actions, sites)
+        const actions = control.actions
+        const actionViews = (item.actions ?? []).map((action, index): HostNavigationCollectionAction => {
+          const path = `actions.${index}`
+          const command = action.kind !== 'command' ? undefined : this.commands.snapshot().find(candidate => (
+            candidate.qualifiedId === (action.command.id.includes(':') ? action.command.id : `${snapshot.owner}:${action.command.id}`)
+          ))
+          const disabledReason = action.disabled.reason === undefined
+            ? undefined
+            : this.text(snapshot, action.disabled.reason as CordisXLocalizedText, `${path}.disabled.reason`, sites)
+          const confirmation = action.kind !== 'command' || action.confirmation === undefined
+            ? undefined
+            : {
+                title: this.text(snapshot, action.confirmation.title as CordisXLocalizedText, `${path}.confirmation.title`, sites),
+                description: this.text(snapshot, action.confirmation.description as CordisXLocalizedText, `${path}.confirmation.description`, sites),
+                confirmLabel: this.text(snapshot, action.confirmation.confirmLabel as CordisXLocalizedText, `${path}.confirmation.confirmLabel`, sites),
+              }
+          return {
+            id: action.id,
+            label: this.text(snapshot, action.label as CordisXLocalizedText, `${path}.label`, sites),
+            ariaLabel: this.text(snapshot, (action.ariaLabel ?? action.label) as CordisXLocalizedText, `${path}.ariaLabel`, sites),
+            ...(action.icon === undefined ? {} : { icon: action.icon }),
+            placement: action.placement,
+            tone: action.tone,
+            pressed: action.pressed,
+            disabled: snapshot.disabled || action.disabled.value || (command?.running ?? 0) > 0,
+            ...(disabledReason === undefined ? {} : { disabledReason }),
+            success: this.text(snapshot, action.feedback.success as CordisXLocalizedText, `${path}.feedback.success`, sites),
+            failure: this.text(snapshot, action.feedback.failure as CordisXLocalizedText, `${path}.feedback.failure`, sites),
+            ...(confirmation === undefined ? {} : { confirmation }),
+            invoke: async () => {
+              if (action.kind === 'command') {
+                await this.commands.executeFor(snapshot.owner, action.command, `nav-action:${snapshot.qualifiedId}:${action.id}`, {
+                  pointId: snapshot.surface,
+                  contributionId: snapshot.qualifiedId,
+                })
+                return
+              }
+              const value = action.kind === 'copy-route-link'
+                ? this.routes.deepLinkFor(snapshot.owner, item.route!)
+                : action.text.value
+              const clipboard = this.document.defaultView?.navigator.clipboard
+              if (clipboard === undefined) throw new Error('clipboard is unavailable')
+              await clipboard.writeText(value)
+            },
+          }
+        })
+        if (actionViews.length > 0) {
+          this.navigationActionDisposers.push(mountNavigationCollectionActions(this.document, actions, actionViews))
+        }
         parent.append(row)
       }
     }
@@ -2110,216 +1905,75 @@ class StructuredSurfaceRenderer {
       renderRows(items, section)
       navigation.append(section)
     }
-    root.append(navigation)
+    root.replaceChildren(navigation)
+    this.disposeUnusedNavigationLeadingVisuals(usedLeadingVisuals)
   }
 
   private disposeNavigationLeadingVisuals(): void {
-    for (const dispose of this.navigationLeadingVisualDisposers.splice(0)) dispose()
+    for (const mount of this.navigationLeadingVisualMounts.values()) {
+      mount.dispose()
+      mount.element.remove()
+    }
+    this.navigationLeadingVisualMounts.clear()
+  }
+
+  private disposeUnusedNavigationLeadingVisuals(used: ReadonlySet<string>): void {
+    for (const [qualifiedItemId, mount] of this.navigationLeadingVisualMounts) {
+      if (used.has(qualifiedItemId)) continue
+      mount.dispose()
+      mount.element.remove()
+      this.navigationLeadingVisualMounts.delete(qualifiedItemId)
+    }
+  }
+
+  private navigationLeadingVisualElement(
+    qualifiedItemId: string,
+    visual: CordisXNavigationCollectionLeadingVisual,
+  ): HTMLElement {
+    const semanticKey = JSON.stringify(visual)
+    const current = this.navigationLeadingVisualMounts.get(qualifiedItemId)
+    if (current?.semanticKey === semanticKey) return current.element
+    if (current !== undefined) {
+      current.dispose()
+      current.element.remove()
+    }
+    const element = this.document.createElement('span')
+    element.className = 'cordisx-room-composite-seat'
+    this.navigationLeadingVisualMounts.set(qualifiedItemId, {
+      element,
+      semanticKey,
+      dispose: mountHostRoomCompositeAvatar(element, visual),
+    })
+    return element
+  }
+
+  private navigationContentSignature(snapshots: readonly SurfaceContributionSnapshot[]): string {
+    return JSON.stringify({
+      groups: this.slots.navigationCollectionGroupsSnapshot(),
+      localization: this.i18n.getSnapshot(),
+      commands: this.commands.snapshot().map(command => ({
+        qualifiedId: command.qualifiedId,
+        running: command.running,
+      })),
+      items: snapshots.map(snapshot => ({
+        owner: snapshot.owner,
+        id: snapshot.id,
+        qualifiedId: snapshot.qualifiedId,
+        group: snapshot.group,
+        order: snapshot.order,
+        item: snapshot.item,
+        visible: snapshot.visible,
+        authorized: snapshot.authorized,
+        disabled: snapshot.disabled,
+        valid: snapshot.valid,
+        pending: snapshot.pending,
+        leadingVisual: this.slots.navigationCollectionLeadingVisual(snapshot.qualifiedId),
+      })),
+    })
   }
 
   private disposeNavigationActions(): void {
     for (const dispose of this.navigationActionDisposers.splice(0)) dispose()
-  }
-
-  private renderNavigationCollectionActions(
-    snapshot: SurfaceContributionSnapshot,
-    route: CordisXRouteReference,
-    actionItems: NavigationCollectionActions,
-    root: HTMLElement,
-    sites: Set<string>,
-  ): void {
-    const feedback = create(this.document, 'span', 'cordisx-navigation-action-feedback')
-    feedback.setAttribute('aria-live', 'polite')
-    let feedbackTimer: number | undefined
-    const setFeedback = (action: NavigationCollectionAction, success: boolean): void => {
-      if (feedbackTimer !== undefined) this.document.defaultView?.clearTimeout(feedbackTimer)
-      feedback.textContent = this.text(snapshot, success ? action.feedback.success : action.feedback.failure, `navigation.actions.${action.id}.feedback.${success ? 'success' : 'failure'}`, sites)
-      feedback.setAttribute('role', success ? 'status' : 'alert')
-      feedback.dataset.tone = success ? 'success' : 'error'
-      feedbackTimer = this.document.defaultView?.setTimeout(() => {
-        feedback.removeAttribute('role')
-        feedback.removeAttribute('data-tone')
-        feedback.textContent = ''
-        feedbackTimer = undefined
-      }, 4_000)
-    }
-    const activate = async (action: NavigationCollectionAction, returnFocus: HTMLElement): Promise<void> => {
-      if (action.disabled.value) return
-      if (action.kind === 'command' && action.confirmation !== undefined) {
-        const confirmed = await this.confirmNavigationCollectionAction(snapshot, action, sites, returnFocus)
-        if (!confirmed) return
-      }
-      try {
-        if (action.kind === 'command') {
-          await this.commands.executeFor(snapshot.owner, action.command, `navcol:${snapshot.qualifiedId}:${action.id}`, {
-            pointId: snapshot.surface,
-            contributionId: snapshot.qualifiedId,
-          })
-        } else {
-          const clipboard = this.document.defaultView?.navigator.clipboard
-          if (clipboard === undefined) throw new Error('clipboard is unavailable')
-          const value = action.kind === 'copy-text'
-            ? action.text.value
-            : new URL(this.routes.pathFromSurface(snapshot.owner, route, snapshot.surface, snapshot.qualifiedId), this.document.location.href).href
-          await clipboard.writeText(value)
-        }
-        setFeedback(action, true)
-      } catch (error) {
-        returnFocus.dataset.error = error instanceof Error ? error.message : String(error)
-        setFeedback(action, false)
-      }
-    }
-    const buttonFor = (action: NavigationCollectionAction, menu = false): HTMLButtonElement => {
-      const label = this.text(snapshot, action.label, `navigation.actions.${action.id}.label`, sites)
-      const aria = action.ariaLabel === undefined
-        ? label
-        : this.text(snapshot, action.ariaLabel, `navigation.actions.${action.id}.ariaLabel`, sites)
-      const button = this.document.createElement('button')
-      button.type = 'button'
-      button.className = menu ? 'cordisx-navigation-action-menuitem' : 'cordisx-shortcut-action cordisx-icon-only-control'
-      button.dataset.cordisxNoDrag = 'true'
-      button.dataset.tone = action.tone
-      button.setAttribute('aria-label', aria)
-      button.setAttribute('aria-pressed', String(action.pressed))
-      button.disabled = snapshot.disabled || action.disabled.value
-      if (menu) {
-        button.setAttribute('role', 'menuitem')
-        button.tabIndex = -1
-      }
-      if (action.icon !== undefined) button.append(createHostSurfaceIcon(this.document, action.icon))
-      const copy = create(this.document, 'span', 'cordisx-navigation-action-label')
-      copy.textContent = label
-      if (menu || action.icon === undefined) button.append(copy)
-      else {
-        button.dataset.cordisxTooltip = label
-        this.tooltips.attach(button, () => button.dataset.cordisxTooltip, 'top')
-      }
-      if (button.disabled && action.disabled.reason !== undefined) {
-        button.dataset.cordisxTooltip = this.text(snapshot, action.disabled.reason, `navigation.actions.${action.id}.disabled`, sites)
-      }
-      button.addEventListener('click', event => {
-        event.stopPropagation()
-        const details = button.closest('details')
-        if (details !== null) details.removeAttribute('open')
-        void activate(action, button)
-      })
-      return button
-    }
-    for (const action of actionItems.filter(item => item.placement === 'direct')) root.append(buttonFor(action))
-    const overflowActions = actionItems.filter(item => item.placement === 'overflow')
-    if (overflowActions.length > 0) {
-      const overflow = this.document.createElement('details')
-      overflow.className = 'cordisx-surface-overflow cordisx-navigation-action-overflow'
-      overflow.dataset.cordisxNoDrag = 'true'
-      const summary = this.document.createElement('summary')
-      summary.className = 'cordisx-icon-only-control'
-      summary.setAttribute('aria-label', 'More actions')
-      summary.append(createHostSurfaceIcon(this.document, 'host:more'))
-      const menu = create(this.document, 'div', 'cordisx-surface-overflow-menu cordisx-navigation-action-menu')
-      menu.setAttribute('role', 'menu')
-      const buttons = overflowActions.map(action => buttonFor(action, true))
-      menu.append(...buttons)
-      overflow.addEventListener('toggle', () => {
-        if (overflow.open) buttons.find(button => !button.disabled)?.focus()
-      })
-      overflow.addEventListener('keydown', event => {
-        if (!overflow.open) return
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          overflow.open = false
-          summary.focus()
-          return
-        }
-        if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
-        event.preventDefault()
-        const enabled = buttons.filter(button => !button.disabled)
-        if (enabled.length === 0) return
-        const current = enabled.indexOf(this.document.activeElement as HTMLButtonElement)
-        const index = event.key === 'Home' ? 0
-          : event.key === 'End' ? enabled.length - 1
-            : event.key === 'ArrowDown' ? (current + 1 + enabled.length) % enabled.length
-              : (current - 1 + enabled.length) % enabled.length
-        enabled[index]?.focus()
-      })
-      const closeOutside = (event: PointerEvent): void => {
-        if (overflow.open && event.target instanceof Node && !overflow.contains(event.target)) overflow.open = false
-      }
-      this.document.addEventListener('pointerdown', closeOutside)
-      this.navigationActionDisposers.push(() => this.document.removeEventListener('pointerdown', closeOutside))
-      overflow.append(summary, menu)
-      root.append(overflow)
-    }
-    root.append(feedback)
-    this.navigationActionDisposers.push(() => {
-      if (feedbackTimer !== undefined) this.document.defaultView?.clearTimeout(feedbackTimer)
-    })
-  }
-
-  private confirmNavigationCollectionAction(
-    snapshot: SurfaceContributionSnapshot,
-    action: Extract<NavigationCollectionAction, { readonly kind: 'command' }>,
-    sites: Set<string>,
-    returnFocus: HTMLElement,
-  ): Promise<boolean> {
-    const confirmation = action.confirmation
-    if (confirmation === undefined) return Promise.resolve(true)
-    return new Promise(resolve => {
-      const overlay = create(this.document, 'div', 'cordisx-navigation-confirmation-overlay')
-      overlay.dataset.cordisxManagerModal = 'true'
-      const dialog = create(this.document, 'section', 'cordisx-navigation-confirmation-dialog')
-      dialog.setAttribute('role', 'dialog')
-      dialog.setAttribute('aria-modal', 'true')
-      dialog.tabIndex = -1
-      const title = create(this.document, 'h2', 'cordisx-navigation-confirmation-title')
-      const description = create(this.document, 'p', 'cordisx-navigation-confirmation-description')
-      const controls = create(this.document, 'div', 'cordisx-navigation-confirmation-controls')
-      const cancel = this.document.createElement('button')
-      cancel.type = 'button'
-      cancel.textContent = (this.document.documentElement.lang || '').toLowerCase().startsWith('zh') ? '取消' : 'Cancel'
-      const confirm = this.document.createElement('button')
-      confirm.type = 'button'
-      confirm.dataset.tone = 'danger'
-      title.textContent = this.text(snapshot, confirmation.title, `navigation.actions.${action.id}.confirmation.title`, sites)
-      description.textContent = this.text(snapshot, confirmation.description, `navigation.actions.${action.id}.confirmation.description`, sites)
-      confirm.textContent = this.text(snapshot, confirmation.confirmLabel, `navigation.actions.${action.id}.confirmation.confirmLabel`, sites)
-      const titleId = `cordisx-navigation-confirmation-${this.nextContext++}`
-      const descriptionId = `${titleId}-description`
-      title.id = titleId
-      description.id = descriptionId
-      dialog.setAttribute('aria-labelledby', titleId)
-      dialog.setAttribute('aria-describedby', descriptionId)
-      controls.append(cancel, confirm)
-      dialog.append(title, description, controls)
-      overlay.append(dialog)
-      let settled = false
-      const finish = (value: boolean): void => {
-        if (settled) return
-        settled = true
-        overlay.remove()
-        const index = this.navigationActionDisposers.indexOf(dispose)
-        if (index >= 0) this.navigationActionDisposers.splice(index, 1)
-        if (returnFocus.isConnected) returnFocus.focus()
-        resolve(value)
-      }
-      const dispose = (): void => finish(false)
-      cancel.addEventListener('click', () => finish(false))
-      confirm.addEventListener('click', () => finish(true))
-      overlay.addEventListener('pointerdown', event => { if (event.target === overlay) finish(false) })
-      dialog.addEventListener('keydown', event => {
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          finish(false)
-        } else if (event.key === 'Tab') {
-          const targets = [cancel, confirm]
-          const current = targets.indexOf(this.document.activeElement as HTMLButtonElement)
-          event.preventDefault()
-          targets[(current + (event.shiftKey ? -1 : 1) + targets.length) % targets.length]?.focus()
-        }
-      })
-      this.navigationActionDisposers.push(dispose)
-      this.document.body.append(overlay)
-      cancel.focus()
-    })
   }
 
   private renderActions(
@@ -2577,13 +2231,7 @@ function installStyles(document: Document): () => void {
     .cordisx-session-backdrop-portrait[data-active="false"] { opacity:0; }
     .cordisx-session-backdrop[data-peak="true"] .cordisx-session-backdrop-architecture { animation:cordisx-backdrop-crown 8s linear infinite; }
     @keyframes cordisx-backdrop-crown { to { transform:translateY(44%) rotate(366deg); } }
-    .cordisx-celebration { position:fixed; inset:0; z-index:2147482000; overflow:hidden; contain:strict; pointer-events:none!important; isolation:isolate; background:radial-gradient(circle at 50% 34%,rgba(255,209,102,.16),transparent 23%),radial-gradient(circle at 20% 62%,rgba(76,201,240,.10),transparent 19%),radial-gradient(circle at 82% 58%,rgba(255,77,109,.10),transparent 21%); }
-    .cordisx-celebration,.cordisx-celebration * { box-sizing:border-box; pointer-events:none!important; user-select:none; -webkit-user-select:none; }
-    .cordisx-confetti-piece { position:absolute; top:-12vh; left:var(--cordisx-confetti-x); width:9px; height:17px; border-radius:2px; background:var(--cordisx-confetti-color); box-shadow:0 1px 2px rgba(0,0,0,.18); opacity:0; transform:translate3d(0,-10vh,0) rotate(0deg); animation:cordisx-confetti-fall var(--cordisx-confetti-duration) var(--cordisx-confetti-delay) cubic-bezier(.18,.72,.32,1) infinite; }
-    .cordisx-confetti-piece:nth-child(3n) { width:13px; height:8px; border-radius:999px; }
-    .cordisx-confetti-piece:nth-child(5n) { width:8px; height:8px; transform:rotate(45deg); }
-    @keyframes cordisx-confetti-fall { 0% { opacity:0; transform:translate3d(0,-12vh,0) rotate(0deg); } 8% { opacity:1; } 78% { opacity:1; } 100% { opacity:0; transform:translate3d(var(--cordisx-confetti-drift),118vh,0) rotate(var(--cordisx-confetti-spin)); } }
-    @media (prefers-reduced-motion:reduce) { .cordisx-reasoning-intensity *,.cordisx-session-backdrop * { animation:none!important; transition-duration:0ms!important; } .cordisx-celebration { background:radial-gradient(circle at 50% 44%,rgba(255,209,102,.20),transparent 30%),radial-gradient(circle at 22% 64%,rgba(76,201,240,.12),transparent 22%),radial-gradient(circle at 78% 64%,rgba(255,77,109,.12),transparent 22%); } .cordisx-confetti-piece { top:var(--cordisx-confetti-y); animation:none!important; opacity:.78; transform:rotate(var(--cordisx-confetti-spin)); } }
+    @media (prefers-reduced-motion:reduce) { .cordisx-reasoning-intensity *,.cordisx-session-backdrop * { animation:none!important; transition-duration:0ms!important; } }
     .cordisx-sidebar-navigation { display: block; width: 100%; min-width: 0; container-type: inline-size; }
     .cordisx-sidebar-footer-before, .cordisx-sidebar-footer-after { display: flex; flex: 0 0 auto; height: 32px; align-items: center; gap: 4px; min-width: 0; }
     .cordisx-toolbar-before, .cordisx-toolbar-after, .cordisx-session-header-actions { --cordisx-toolbar-action-target-size: 28px; --cordisx-toolbar-action-corner-radius: 8px; --cordisx-toolbar-action-idle-background: transparent; --cordisx-toolbar-action-hover-background: var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); --cordisx-toolbar-action-focus-ring: var(--color-ring,rgba(131,195,255,.76)); --cordisx-toolbar-action-disabled-opacity: .4; --cordisx-toolbar-action-pressed-background: color-mix(in oklab,var(--color-text,currentColor) 5%,transparent); --cordisx-toolbar-action-pressed-hover-background: color-mix(in oklab,var(--color-text,currentColor) 10%,transparent); --cordisx-toolbar-action-pressed-foreground: var(--color-text,currentColor); --cordisx-toolbar-action-gap: 6px; display: flex; flex: 0 0 auto; height: var(--cordisx-toolbar-action-target-size); align-items: center; gap: var(--cordisx-toolbar-action-gap); min-width: 0; }
@@ -2594,13 +2242,44 @@ function installStyles(document: Document): () => void {
     .cordisx-navigation-group { min-width: 0; margin-top: 12px; }
     .cordisx-navigation-group-heading { min-width: 0; padding: 0 8px 4px; overflow: hidden; color: var(--color-text-secondary,var(--color-text-tertiary,currentColor)); font: 500 11px/16px system-ui,sans-serif; text-overflow: ellipsis; white-space: nowrap; }
     @container (max-width: 80px) { .cordisx-navigation-group { margin-top: 6px; } .cordisx-navigation-group-heading { display: none; } }
-    .cordisx-nav-row { display: grid; grid-template-columns: minmax(0,1fr) max-content; align-items: center; height: var(--height-token-row,30px); padding: 0 8px; border-radius: var(--radius-lg,10px); -webkit-app-region: no-drag; }
-    .cordisx-nav-row:hover { background: var(--color-background-primary-ghost-hover,rgba(255,255,255,.078)); }
-    .cordisx-nav-row[data-cordisx-route-state="presented"] { background: var(--color-background-primary-ghost-hover,rgba(255,255,255,.078)); }
-    .cordisx-nav-primary { display: grid; grid-template-columns: 16px minmax(0,1fr); align-items: center; gap: 8px; height: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: 445 13px/18px system-ui,sans-serif; text-align: left; cursor: default; }
+    .pg-sidebar .cxsi-row.cordisx-nav-row { --cordisx-nav-content-gutter:var(--space-2,8px); --cordisx-nav-content-gap:var(--space-2,8px); --cordisx-nav-action-gap:var(--space-1,4px); --cordisx-nav-action-target:24px; --cordisx-nav-row-interactive-surface:var(--color-background-primary-ghost-hover,color-mix(in srgb,currentColor 8%,transparent)); --cordisx-nav-row-selected-hover-surface:color-mix(in srgb,var(--cordisx-nav-row-interactive-surface) 92%,currentColor 8%); display:flex; inline-size:auto; max-inline-size:100%; min-width:0; height:auto; box-sizing:border-box; align-items:center; gap:var(--cordisx-nav-content-gap); min-height:var(--height-token-row,30px); padding-block:0; padding-inline:var(--cordisx-nav-content-gutter); overflow:visible; border-radius:var(--radius-lg,10px); background:transparent; -webkit-app-region:no-drag; }
+    .cordisx-nav-row[data-variant="two-line"] { min-height: 46px; }
+    .pg-sidebar .cxsi-row.cordisx-nav-row:hover, .pg-sidebar .cxsi-row.cordisx-nav-row:focus-within { background:var(--cordisx-nav-row-interactive-surface); }
+    .pg-sidebar .cxsi-row.cordisx-nav-row[data-selected="true"], .pg-sidebar .cxsi-row.cordisx-nav-row[data-cordisx-route-state="active"], .pg-sidebar .cxsi-row.cordisx-nav-row[data-cordisx-route-state="presented"] { background:var(--cordisx-nav-row-interactive-surface); }
+    .pg-sidebar .cxsi-row.cordisx-nav-row[data-selected="true"]:hover, .pg-sidebar .cxsi-row.cordisx-nav-row[data-selected="true"]:focus-within, .pg-sidebar .cxsi-row.cordisx-nav-row[data-cordisx-route-state="active"]:hover, .pg-sidebar .cxsi-row.cordisx-nav-row[data-cordisx-route-state="active"]:focus-within, .pg-sidebar .cxsi-row.cordisx-nav-row[data-cordisx-route-state="presented"]:hover, .pg-sidebar .cxsi-row.cordisx-nav-row[data-cordisx-route-state="presented"]:focus-within { background:var(--cordisx-nav-row-selected-hover-surface); }
+    .pg-sidebar .cxsi-row.cordisx-nav-row > .cxsi-primary.cordisx-nav-primary { appearance:none; display:grid; flex:1 1 auto; grid-template-columns:16px minmax(0,1fr); align-items:center; gap:8px; height:100%; min-width:0; padding:0; border:0; background:transparent; color:inherit; font:445 13px/18px system-ui,sans-serif; text-align:left; cursor:default; }
+    .cxsi-row.cordisx-nav-row > .cxsi-primary.cordisx-nav-primary, .cxsi-row.cordisx-nav-row > .cxsi-primary.cordisx-nav-primary:hover, .cxsi-row.cordisx-nav-row > .cxsi-primary.cordisx-nav-primary[aria-pressed="true"], .cxsi-row.cordisx-nav-row > .cxsi-primary.cordisx-nav-primary[aria-current="page"] { background:transparent; }
     .cordisx-nav-primary:focus-visible { outline: 2px solid var(--color-ring,rgba(131,195,255,.76)); outline-offset: -2px; border-radius: var(--radius-lg,10px); }
-    .cordisx-nav-copy { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .cordisx-nav-actions { display: flex; align-items: center; gap: 2px; }
+    .cordisx-nav-copy { display: grid; min-width: 0; overflow: hidden; }
+    .cordisx-nav-copy > .cxsi-title, .cordisx-nav-copy > .cxsi-secondary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cordisx-nav-copy > .cxsi-secondary { color: var(--color-text-tertiary,rgba(127,127,127,.72)); font: 400 11px/15px system-ui,sans-serif; }
+    .cordisx-nav-actions { display:flex; min-width:0; flex:0 0 auto; align-items:center; gap:var(--cordisx-nav-action-gap); opacity:0; pointer-events:none; transition:opacity 120ms ease; }
+    .cordisx-nav-row:hover > .cordisx-nav-actions, .cordisx-nav-row:focus-within > .cordisx-nav-actions, .cordisx-nav-row[data-selected="true"] > .cordisx-nav-actions, .cordisx-nav-row[data-cordisx-route-state="presented"] > .cordisx-nav-actions { opacity: 1; pointer-events: auto; }
+    .cordisx-navigation-direct-action, .cordisx-navigation-more-action { display:inline-flex; width:var(--cordisx-nav-action-target); min-width:var(--cordisx-nav-action-target); height:var(--cordisx-nav-action-target); min-height:var(--cordisx-nav-action-target); flex:0 0 var(--cordisx-nav-action-target); align-items:center; justify-content:center; padding:0; border:0; border-radius:var(--radius-md,7px); background:transparent; color:var(--color-text-tertiary,currentColor); }
+    .cordisx-navigation-direct-action:hover:not(:disabled), .cordisx-navigation-more-action:hover:not(:disabled), .cordisx-navigation-direct-action[aria-pressed="true"] { background:var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); color:var(--color-text,currentColor); }
+    .cordisx-navigation-direct-action:focus-visible, .cordisx-navigation-more-action:focus-visible { outline:2px solid var(--color-ring,rgba(131,195,255,.76)); outline-offset:-1px; }
+    .cordisx-navigation-direct-action:disabled, .cordisx-navigation-more-action:disabled { opacity:.4; }
+    .cordisx-navigation-action-icon-slot { display:inline-flex; width:16px; height:16px; align-items:center; justify-content:center; color:inherit; pointer-events:none; }
+    .cordisx-navigation-direct-action .cordisx-host-icon, .cordisx-navigation-more-action .cordisx-host-icon, .cordisx-navigation-direct-action .cordisx-host-icon svg, .cordisx-navigation-more-action .cordisx-host-icon svg { width:14px; height:14px; }
+    .cordisx-navigation-menu { position:fixed; z-index:2147483200; display:grid; min-width:180px; padding:5px; border:1px solid var(--color-border,rgba(127,127,127,.24)); border-radius:10px; background:var(--color-surface-elevated,var(--color-background-elevated,#272727)); color:var(--color-text,currentColor); box-shadow:0 10px 30px rgba(0,0,0,.28); -webkit-app-region:no-drag; }
+    .cordisx-navigation-menu-item { display:grid; width:100%; min-height:30px; box-sizing:border-box; grid-template-columns:16px minmax(0,1fr); align-items:center; column-gap:var(--space-2,8px); padding:5px 8px; border:0; border-radius:7px; background:transparent; color:inherit; font:400 13px/18px system-ui,sans-serif; text-align:left; }
+    .cordisx-navigation-menu-icon-slot { display:inline-flex; width:16px; height:16px; align-items:center; justify-content:center; color:inherit; pointer-events:none; }
+    .cordisx-navigation-menu-icon-slot .cordisx-host-icon, .cordisx-navigation-menu-icon-slot .cordisx-host-icon svg { width:16px; height:16px; }
+    .cordisx-navigation-menu-item > span:last-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .cordisx-navigation-menu-item:hover:not(:disabled), .cordisx-navigation-menu-item:focus-visible { outline:none; background:var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); }
+    .cordisx-navigation-menu-item[data-tone="danger"] { color:var(--color-text-danger,#ef6b73); }
+    .cordisx-navigation-menu-item:disabled { opacity:.42; }
+    .cordisx-navigation-confirm-backdrop { position:fixed; inset:0; z-index:2147483400; display:grid; place-items:center; padding:24px; background:rgba(0,0,0,.38); -webkit-app-region:no-drag; }
+    .cordisx-navigation-confirm { width:min(380px,calc(100vw - 48px)); padding:18px; border:1px solid var(--color-border,rgba(127,127,127,.24)); border-radius:14px; background:var(--color-surface-elevated,var(--color-background-elevated,#272727)); color:var(--color-text,currentColor); box-shadow:0 18px 50px rgba(0,0,0,.36); }
+    .cordisx-navigation-confirm-title { font:600 16px/22px system-ui,sans-serif; }
+    .cordisx-navigation-confirm-description { margin-top:8px; color:var(--color-text-secondary,currentColor); font:400 13px/19px system-ui,sans-serif; }
+    .cordisx-navigation-confirm-footer { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
+    .cordisx-navigation-confirm-button { min-height:30px; padding:5px 12px; border:1px solid var(--color-border,rgba(127,127,127,.24)); border-radius:8px; background:transparent; color:inherit; }
+    .cordisx-navigation-confirm-danger { border-color:transparent; background:var(--color-background-danger,#c33c48); color:#fff; }
+    .cordisx-navigation-confirm-button:focus-visible { outline:2px solid var(--color-ring,rgba(131,195,255,.76)); outline-offset:2px; }
+    .cordisx-navigation-feedback { position:fixed; left:50%; bottom:28px; z-index:2147483500; max-width:min(420px,calc(100vw - 32px)); transform:translateX(-50%); padding:8px 12px; border:1px solid var(--color-border,rgba(127,127,127,.24)); border-radius:9px; background:var(--color-surface-elevated,var(--color-background-elevated,#272727)); color:var(--color-text,currentColor); box-shadow:0 8px 24px rgba(0,0,0,.26); font:500 12px/17px system-ui,sans-serif; }
+    .cordisx-navigation-feedback[data-tone="danger"] { color:var(--color-text-danger,#ef6b73); }
+    @media (forced-colors:active) { .pg-sidebar .cxsi-row.cordisx-nav-row:hover, .pg-sidebar .cxsi-row.cordisx-nav-row:focus-within { background:Highlight; color:HighlightText; outline:1px solid Highlight; outline-offset:-1px; } .pg-sidebar .cxsi-row.cordisx-nav-row[data-selected="true"], .pg-sidebar .cxsi-row.cordisx-nav-row[data-cordisx-route-state="active"], .pg-sidebar .cxsi-row.cordisx-nav-row[data-cordisx-route-state="presented"] { background:Canvas; color:CanvasText; outline:1px solid Highlight; outline-offset:-1px; } .pg-sidebar .cxsi-row.cordisx-nav-row[data-selected="true"]:hover, .pg-sidebar .cxsi-row.cordisx-nav-row[data-selected="true"]:focus-within, .pg-sidebar .cxsi-row.cordisx-nav-row[data-cordisx-route-state="active"]:hover, .pg-sidebar .cxsi-row.cordisx-nav-row[data-cordisx-route-state="active"]:focus-within, .pg-sidebar .cxsi-row.cordisx-nav-row[data-cordisx-route-state="presented"]:hover, .pg-sidebar .cxsi-row.cordisx-nav-row[data-cordisx-route-state="presented"]:focus-within { background:Highlight; color:HighlightText; } .cordisx-navigation-direct-action:hover:not(:disabled), .cordisx-navigation-more-action:hover:not(:disabled), .cordisx-navigation-direct-action[aria-pressed="true"] { background:Canvas; color:CanvasText; outline:1px solid Highlight; } }
     .cordisx-env-section { position: relative; z-index: 0; display: flex; width: 100%; min-width: 0; box-sizing: border-box; flex-direction: column; padding: 0 0 12px; background: transparent; color: inherit; }
     .cordisx-env-section:last-child { padding-bottom: 0; }
     .cordisx-env-section:not(:last-child)::after { content: ""; position: absolute; right: 14px; bottom: 0; left: 14px; height: .5px; background: var(--color-border,rgba(127,127,127,.18)); }
@@ -2660,21 +2339,6 @@ function installStyles(document: Document): () => void {
     .cordisx-composer-submit-before > .cordisx-surface-overflow > summary .cordisx-host-icon, .cordisx-composer-submit-before > .cordisx-surface-overflow > summary .cordisx-host-icon svg { width: 16px; height: 16px; }
     .cordisx-surface-overflow-menu { position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; display: grid; min-width: 160px; padding: 4px; border: 1px solid var(--color-border,rgba(255,255,255,.084)); border-radius: var(--radius-lg,10px); background: var(--color-background-elevated-secondary,#242424); box-shadow: 0 8px 28px rgba(0,0,0,.28); }
     .cordisx-surface-overflow:not([open]) > .cordisx-surface-overflow-menu { display: none; }
-    .cordisx-navigation-action-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .cordisx-navigation-action-menuitem { display:flex; width:100%; min-height:30px; align-items:center; gap:8px; border:0; border-radius:7px; padding:5px 8px; background:transparent; color:inherit; font:inherit; text-align:left; }
-    .cordisx-navigation-action-menuitem:hover:not(:disabled), .cordisx-navigation-action-menuitem:focus-visible { outline:0; background:var(--color-background-primary-ghost-hover,rgba(127,127,127,.12)); }
-    .cordisx-navigation-action-menuitem[data-tone="danger"] { color:var(--color-text-error,#ff737a); }
-    .cordisx-navigation-action-feedback:empty { display:none; }
-    .cordisx-navigation-action-feedback:not(:empty) { position:fixed; z-index:2147482500; right:18px; bottom:18px; max-width:min(360px,calc(100vw - 36px)); border:1px solid var(--color-border,rgba(255,255,255,.12)); border-radius:9px; padding:8px 11px; background:var(--color-background-elevated-secondary,#242424); box-shadow:0 8px 28px rgba(0,0,0,.28); color:var(--color-text-primary,#f5f5f5); font:13px/18px system-ui,sans-serif; }
-    .cordisx-navigation-action-feedback[data-tone="error"] { border-color:color-mix(in srgb,var(--color-text-error,#ff737a) 55%,transparent); }
-    .cordisx-navigation-confirmation-overlay { position:fixed; z-index:2147482600; inset:0; display:grid; place-items:center; padding:24px; background:rgba(0,0,0,.52); }
-    .cordisx-navigation-confirmation-dialog { width:min(420px,calc(100vw - 48px)); box-sizing:border-box; border:1px solid var(--color-border,rgba(255,255,255,.12)); border-radius:12px; padding:18px; background:var(--color-background-elevated-secondary,#242424); box-shadow:0 18px 64px rgba(0,0,0,.42); color:var(--color-text-primary,#f5f5f5); }
-    .cordisx-navigation-confirmation-title { margin:0; font:600 17px/24px system-ui,sans-serif; }
-    .cordisx-navigation-confirmation-description { margin:8px 0 18px; color:var(--color-text-secondary,rgba(255,255,255,.68)); font:14px/21px system-ui,sans-serif; }
-    .cordisx-navigation-confirmation-controls { display:flex; justify-content:flex-end; gap:8px; }
-    .cordisx-navigation-confirmation-controls button { min-height:32px; border:1px solid var(--color-border,rgba(255,255,255,.12)); border-radius:8px; padding:5px 12px; background:transparent; color:inherit; font:inherit; }
-    .cordisx-navigation-confirmation-controls button[data-tone="danger"] { border-color:transparent; background:var(--color-background-error,#b8323b); color:white; }
-    .cordisx-navigation-confirmation-controls button:focus-visible { outline:2px solid var(--color-ring,rgba(131,195,255,.76)); outline-offset:2px; }
     .cordisx-env-header .cordisx-shortcut-action { --cordisx-icon-only-glyph-size: 18px; }
     .cordisx-env-header .cordisx-shortcut-action .cordisx-host-icon { width: 18px; height: 18px; }
     .cordisx-env-row-leading > .cordisx-host-icon, .cordisx-env-row-leading > .cordisx-host-icon svg { width: 18px; height: 18px; }
@@ -2756,17 +2420,14 @@ export function installCodexAdapter(
     ? globalThis.crypto.randomUUID()
     : `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const reasoningControl = new ReasoningIntensityControlBinding()
-  const celebrationControl = new ComposerSubmitCelebrationControlBinding(document)
   const controls = new ControlledSurfaceCoordinator(CORDISX_CODEX_CONTROL_CATALOG, {
     [REASONING_CONTROL_POINT]: reasoningControl,
-    [COMPOSER_TOOLBAR_CONTROL_POINT]: celebrationControl,
   }, generation, new ControlledSurfacePolicyBroker(new BrowserControlledSurfacePolicyStore(options.profileId ?? 'default')),
   (candidate, view) => slots.controlGenerationVisible(candidate, view),
   candidate => slots.controlGenerationCallable(candidate))
   reasoningControl.connect(controls)
-  celebrationControl.connect(controls)
   slots.setControlCoordinator(controls)
-  const surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, reasoningControl, celebrationControl, {
+  const surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, reasoningControl, {
     generation,
     adapterVersion: options.adapterVersion ?? 'ui-catalog-v2',
     hostId: options.hostId ?? 'com.openai.codex',
@@ -2775,7 +2436,6 @@ export function installCodexAdapter(
     dispose() {
       surfaces.dispose()
       reasoningControl.dispose()
-      celebrationControl.dispose()
       removeStyles()
       for (const dispose of undeclare.reverse()) dispose()
       session.dispose()
@@ -2807,15 +2467,12 @@ export function installPlaygroundAdapter(
     ? globalThis.crypto.randomUUID()
     : `playground-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   const reasoningControl = new ReasoningIntensityControlBinding()
-  const celebrationControl = new ComposerSubmitCelebrationControlBinding(document)
   const controls = new ControlledSurfaceCoordinator(CORDISX_CODEX_CONTROL_CATALOG, {
     [REASONING_CONTROL_POINT]: reasoningControl,
-    [COMPOSER_TOOLBAR_CONTROL_POINT]: celebrationControl,
   }, generation, new ControlledSurfacePolicyBroker(new BrowserControlledSurfacePolicyStore(options.profileId ?? 'playground')),
   (candidate, view) => slots.controlGenerationVisible(candidate, view),
   candidate => slots.controlGenerationCallable(candidate))
   reasoningControl.connect(controls)
-  celebrationControl.connect(controls)
   const seat = (name: string): HTMLElement | undefined => document.querySelector<HTMLElement>(`[data-cordisx-playground-seat="${name}"]`) ?? undefined
   const controllers = [
     ['app', 'fixed', () => seat('app')],
@@ -2848,7 +2505,7 @@ export function installPlaygroundAdapter(
         throw error
       }
     }
-    surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, reasoningControl, celebrationControl, {
+    surfaces = new StructuredSurfaceRenderer(document, slots, commands, routes, i18n, reasoningControl, {
       generation,
       adapterVersion: options.adapterVersion ?? 'ui-playground-v1',
       hostId: options.hostId ?? 'cordisx.playground',
@@ -2859,7 +2516,6 @@ export function installPlaygroundAdapter(
       dispose() {
         surfaces?.dispose()
         reasoningControl.dispose()
-        celebrationControl.dispose()
         removeStyles?.()
         for (const item of declared.reverse()) {
           item.dispose()
@@ -2871,7 +2527,6 @@ export function installPlaygroundAdapter(
   } catch (error) {
     surfaces?.dispose()
     reasoningControl.dispose()
-    celebrationControl.dispose()
     removeStyles?.()
     for (const item of declared.reverse()) {
       item.dispose()

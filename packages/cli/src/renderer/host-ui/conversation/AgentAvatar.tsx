@@ -140,10 +140,12 @@ class AvatarFailureBoundary extends React.Component<FailureBoundaryProps, { fail
 export interface HostAgentAvatarProps {
   readonly participant: AgentConversationParticipant
   readonly resolver?: HostAgentAvatarResolver
+  /** Group composites are raw artwork only: a missing asset is neutral, never initials. */
+  readonly fallback?: 'initials' | 'neutral'
 }
 
 /** Decorative Host-owned renderer with deterministic initials fallback. */
-export function HostAgentAvatar({ participant, resolver = defaultHostAgentAvatarResolver }: HostAgentAvatarProps) {
+export function HostAgentAvatar({ participant, resolver = defaultHostAgentAvatarResolver, fallback = 'initials' }: HostAgentAvatarProps) {
   const wrapperRef = React.useRef<HTMLSpanElement>(null)
   const [theme, setTheme] = React.useState<HostAppTheme>('light')
   const [clientReady, setClientReady] = React.useState(false)
@@ -161,19 +163,25 @@ export function HostAgentAvatar({ participant, resolver = defaultHostAgentAvatar
   React.useEffect(() => {
     const wrapper = wrapperRef.current
     if (wrapper === null) return
-    const root = wrapper.closest<HTMLElement>('[data-cordisx-app-theme]')
-    if (root === undefined || root === null) return
     const releaseStyles = acquireAgentAvatarStyles(wrapper.ownerDocument)
-    const update = (): void => setTheme(root.dataset.cordisxAppTheme === 'dark' ? 'dark' : 'light')
+    // Navigation collection rows can mount before the shared Host theme
+    // projection arrives.  Render the official asset with a neutral default
+    // immediately, then follow the closest Host theme when it appears.
+    const update = (): void => {
+      const root = wrapper.closest<HTMLElement>('[data-cordisx-app-theme]')
+      setTheme(root?.dataset.cordisxAppTheme === 'dark' ? 'dark' : 'light')
+      setClientReady(true)
+    }
     update()
-    setClientReady(true)
-    const Observer = root.ownerDocument.defaultView?.MutationObserver
+    const Observer = wrapper.ownerDocument.defaultView?.MutationObserver
     if (Observer === undefined) return releaseStyles
     const observer = new Observer(update)
-    observer.observe(root, { attributes: true, attributeFilter: ['data-cordisx-app-theme'] })
+    observer.observe(wrapper.ownerDocument.documentElement, { attributes: true, subtree: true, attributeFilter: ['data-cordisx-app-theme'] })
     return () => { observer.disconnect(); releaseStyles() }
   }, [])
-  const initials = <span className="cxa-avatar-initials">{participantInitials(participant.name)}</span>
+  const fallbackNode = fallback === 'neutral'
+    ? <span className="cxa-avatar-neutral" />
+    : <span className="cxa-avatar-initials">{participantInitials(participant.name)}</span>
   const resolved = resolution?.status === 'resolved' && clientReady && !renderFailed
   const state = resolved ? 'resolved' : 'fallback'
   return <span
@@ -186,7 +194,7 @@ export function HostAgentAvatar({ participant, resolver = defaultHostAgentAvatar
     {...(resolution?.status === 'unsupported' ? { 'data-avatar-code': resolution.code } : {})}
   >
     {resolved
-      ? <AvatarFailureBoundary resetKey={key} fallback={initials} onFailure={() => setRenderFailed(true)}>
+      ? <AvatarFailureBoundary resetKey={key} fallback={fallbackNode} onFailure={() => setRenderFailed(true)}>
           <OneWorksAvatar
             className="cxa-avatar-renderer"
             definition={resolution.definition}
@@ -198,6 +206,6 @@ export function HostAgentAvatar({ participant, resolver = defaultHostAgentAvatar
             onError={() => setRenderFailed(true)}
           />
         </AvatarFailureBoundary>
-      : initials}
+      : fallbackNode}
   </span>
 }
