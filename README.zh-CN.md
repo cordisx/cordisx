@@ -56,12 +56,14 @@ Playground 中运行和验证。你不需要预先安装 Skill、创建脚手架
 发布或分享时，Codex 才会处理发布所需的信息。
 
 <p align="center">
-  <a href="https://raw.githubusercontent.com/cordisx/cordisx.github.io/7b6d93a095c8fa0de2dd44e10352ed4784a0cfce/assets/motion/cordisx-ai-plugin-demo-zh-dark.mp4">
-    <img alt="在 CordisX 中用自然语言创建 Send Confetti 插件的深色界面演示" src="https://raw.githubusercontent.com/cordisx/cordisx.github.io/7b6d93a095c8fa0de2dd44e10352ed4784a0cfce/assets/motion/cordisx-ai-plugin-demo-zh-dark.gif" width="900">
-  </a>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/b21aa6330e4577c2bccbff0a12a08218a3ca4167/assets/motion/cordisx-ai-plugin-demo-zh-dark.gif">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/b21aa6330e4577c2bccbff0a12a08218a3ca4167/assets/motion/cordisx-ai-plugin-demo-zh-light.gif">
+    <img alt="在 CordisX 中用自然语言创建 Send Confetti 插件" src="https://raw.githubusercontent.com/cordisx/cordisx.github.io/b21aa6330e4577c2bccbff0a12a08218a3ca4167/assets/motion/cordisx-ai-plugin-demo-zh-light.gif" width="900">
+  </picture>
 </p>
 
-<p align="center"><sub>深色界面演示 · 点击查看高清 MP4</sub></p>
+<p align="center"><sub>随页面主题自动切换 · <a href="https://raw.githubusercontent.com/cordisx/cordisx.github.io/b21aa6330e4577c2bccbff0a12a08218a3ca4167/assets/motion/cordisx-ai-plugin-demo-zh-light.mp4">浅色高清 MP4</a> · <a href="https://raw.githubusercontent.com/cordisx/cordisx.github.io/b21aa6330e4577c2bccbff0a12a08218a3ca4167/assets/motion/cordisx-ai-plugin-demo-zh-dark.mp4">深色高清 MP4</a></sub></p>
 
 ## 文档
 
