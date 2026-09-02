@@ -377,6 +377,7 @@ export interface RendererPluginMutation {
     readonly digest: `sha256:${string}`
     readonly identitySource: string
     readonly readme?: string
+    readonly readmes?: Readonly<Record<string, string>>
     readonly development: CordisXLocalDevelopmentSnapshot
   }
   /** Host-only source held as data and executed solely in the isolated Host DOM worker. */
@@ -2084,7 +2085,9 @@ async function start(
       ...(replacesTarget
         ? replacementPackage!.readme === undefined ? {} : { readme: replacementPackage!.readme }
         : existing!.item.readme === undefined ? {} : { readme: existing!.item.readme }),
-      ...(!replacesTarget && existing!.item.readmes !== undefined ? { readmes: existing!.item.readmes } : {}),
+      ...(replacesTarget
+        ? mutation.developmentPackage?.readmes === undefined ? {} : { readmes: mutation.developmentPackage.readmes }
+        : existing!.item.readmes === undefined ? {} : { readmes: existing!.item.readmes }),
     }
     const controller = createController(item, pluginConsole)
     if (replacesTarget && mutation.developmentPackage !== undefined && controller.status === 'failed') {

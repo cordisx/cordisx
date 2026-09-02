@@ -183,6 +183,15 @@ export async function buildRendererCompositionSource(
   const [version, readmes, pluginBundles] = await Promise.all([
     readCordisXVersion(),
     Promise.all(config.plugins.map(async plugin => {
+      if (plugin.readmes !== undefined) {
+        const { default: localizedDefault, ...localized } = plugin.readmes
+        const fallback = plugin.readme ?? localizedDefault
+        return {
+          ...(fallback === undefined ? {} : { default: fallback }),
+          localized,
+          files: [],
+        } satisfies PluginReadmes
+      }
       if (plugin.readme !== undefined) return { default: plugin.readme, localized: {}, files: [] } satisfies PluginReadmes
       return await readPluginReadmes(plugin.entry)
     })),
