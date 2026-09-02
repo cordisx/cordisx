@@ -6,12 +6,14 @@ Use this workflow only when the current Codex session was launched by
 1. Read the exact entry with `printenv CORDISX_DEV_ENTRY`. It is an absolute,
    already-watched entry inside a CLI-created plugin project. Never guess a
    second path and never create another project, launcher, or watcher.
-2. Inspect the entry, its `package.json`, README, tests, and the request. Keep
+2. Inspect the entry, its `package.json`, English `README.md`, Simplified
+   Chinese `README.zh-Hans.md`, tests, and the request. Keep
    the exported manifest id equal to the entry basename because local
    development derives the runtime identity from that basename.
 3. Preserve the independent project boundary: product name, description,
-   localization, version, license choice, tests, and package metadata belong
-   to this plugin rather than to a shared scratch file.
+   runtime localization, both localized READMEs, version, license choice,
+   tests, and package metadata belong to this plugin rather than to a shared
+   scratch file.
 4. Implement the request with `cordisx/contracts`, `ctx.commands`, `ctx.slots`,
    routes/pages, and other documented public services. Do not use Codex DOM
    selectors, raw DOM nodes, arbitrary HTML/CSS, renderer globals, or a private
