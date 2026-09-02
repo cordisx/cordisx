@@ -236,7 +236,7 @@ function normalizeAgentRuntimeDeclarationV5(value: unknown, label: string): Cord
     name: declaration.name as AgentRuntimeCapability, required: declaration.required,
     ...(declaration.rationale === undefined ? {} : { rationale: normalizePermissionRationaleV2(declaration.rationale, `${label}.rationale`) }),
     ...(declaration.security === undefined ? {} : { security: normalizePermissionSecurityV2(declaration.security, `${label}.security`) }),
-    scope: Object.freeze({ sessionIds }),
+    scope: Object.freeze(sessionIds === undefined ? {} : { sessionIds }),
   })
 }
 
