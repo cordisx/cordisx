@@ -46,6 +46,7 @@ export interface AgentPermissionPlanV4 {
   readonly scopeSource: Readonly<
     | { kind: 'host-route'; routeId: string; routeInstanceId: string; path: string; params: Readonly<{ sessionId: string }> }
     | { kind: 'host-create'; reservedSessionId: string }
+    | { kind: 'host-exact'; exactSessionId: string }
   >
 }
 
@@ -140,15 +141,15 @@ export class AgentRouteSessionScopeAuthority {
     if (!validSessionId(sessionId)) return false
     const scope = declaration.scope.sessionIds
     if (scope === undefined) {
-      if (capability !== 'agents.create') return false
-      const decision = await this.decide(owner, capability, [sessionId], { kind: 'host-create', reservedSessionId: sessionId })
+      const source: AgentPermissionPlanV4['scopeSource'] = capability === 'agents.create'
+        ? { kind: 'host-create', reservedSessionId: sessionId }
+        : { kind: 'host-exact', exactSessionId: sessionId }
+      const decision = await this.decide(owner, capability, [sessionId], source)
       return decision.authorized && (decision.leaseId === undefined || this.options.isLeaseActive?.(owner, decision.leaseId) !== false)
     }
     if (Array.isArray(scope)) {
       if (!scope.includes(sessionId)) return false
-      const decision = await this.decide(owner, capability, [sessionId], {
-        kind: 'host-route', routeId: 'static', routeInstanceId: 'static', path: 'static', params: { sessionId },
-      })
+      const decision = await this.decide(owner, capability, [sessionId], { kind: 'host-exact', exactSessionId: sessionId })
       return decision.authorized && (decision.leaseId === undefined || this.options.isLeaseActive?.(owner, decision.leaseId) !== false)
     }
     if (!isBinding(scope)) return false
@@ -187,7 +188,7 @@ export class AgentRouteSessionScopeAuthority {
       }
     }
     if (SESSION_CAPABILITIES.has(declaration.name)) {
-      if (scope === undefined || (Array.isArray(scope) && (scope.length === 0 || scope.some(item => !validSessionId(item))))) {
+      if (Array.isArray(scope) && (scope.length === 0 || scope.some(item => !validSessionId(item)))) {
         throw new Error('Session read declarations require exact non-wildcard sessionIds')
       }
     }
@@ -204,8 +205,10 @@ export class AgentRouteSessionScopeAuthority {
     const plan: AgentPermissionPlanV4 = Object.freeze({
       schemaVersion: 4, owner: Object.freeze({ ...owner }), capability,
       scope: Object.freeze({ sessionIds: Object.freeze([...sessionIds]) as [string, ...string[]] }),
-      routeInstanceId: scopeSource.kind === 'host-route' ? scopeSource.routeInstanceId : `reserved:${scopeSource.reservedSessionId}`,
-      routeId: scopeSource.kind === 'host-route' ? scopeSource.routeId : 'host-create',
+      routeInstanceId: scopeSource.kind === 'host-route'
+        ? scopeSource.routeInstanceId
+        : scopeSource.kind === 'host-create' ? `reserved:${scopeSource.reservedSessionId}` : `exact:${scopeSource.exactSessionId}`,
+      routeId: scopeSource.kind === 'host-route' ? scopeSource.routeId : scopeSource.kind,
       scopeSource: Object.freeze(scopeSource),
     })
     try { return await this.options.decide(plan) } catch { return Object.freeze({ authorized: false }) }

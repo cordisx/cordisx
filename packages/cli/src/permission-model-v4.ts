@@ -38,7 +38,6 @@ const AGENT_RUNTIME_CAPABILITIES = new Set<AgentRuntimeCapability>([
   'agents.create', 'agents.resume', 'agents.get', 'agents.message.submit', 'agents.message.cancel', 'agents.cancel',
   'agents.live.subscribe', 'sessions.get', 'sessions.read', 'sessions.subscribe', 'approvals.request', 'approvals.answer',
 ])
-const SESSION_RUNTIME_CAPABILITIES = new Set<AgentRuntimeCapability>(['sessions.get', 'sessions.read', 'sessions.subscribe'])
 
 export const HOST_DOM_READ_OPERATIONS = Object.freeze([
   'inspect-structure',
@@ -220,9 +219,11 @@ function normalizeAgentRuntimeDeclarationV5(value: unknown, label: string): Cord
   exact(scope, ['sessionIds'], `${label}.scope`)
   const raw = scope.sessionIds
   const dynamic = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : undefined
-  const sessionIds: CordisXPermissionScopeV5['sessionIds'] = dynamic === undefined
-    ? uniqueSortedStrings(raw, `${label}.scope.sessionIds`, 100, item => item !== '*' && item.length <= 512)
-    : (() => {
+  const sessionIds: CordisXPermissionScopeV5['sessionIds'] = raw === undefined
+    ? undefined
+    : dynamic === undefined
+      ? uniqueSortedStrings(raw, `${label}.scope.sessionIds`, 100, item => item !== '*' && item.length <= 512)
+      : (() => {
         exact(dynamic, ['kind', 'routeId', 'param'], `${label}.scope.sessionIds`)
         if (dynamic.kind !== 'host-route-param' || typeof dynamic.routeId !== 'string' || !LOCAL_ID.test(dynamic.routeId)
           || typeof dynamic.param !== 'string' || !/^[a-z][a-zA-Z0-9]*$/u.test(dynamic.param)) throw new Error(`${label}.scope.sessionIds is invalid`)
@@ -230,10 +231,7 @@ function normalizeAgentRuntimeDeclarationV5(value: unknown, label: string): Cord
           throw new Error(`${label}.scope.sessionIds dynamic binding is invalid for this capability`)
         }
         return Object.freeze({ kind: 'host-route-param' as const, routeId: dynamic.routeId, param: dynamic.param })
-      })()
-  if (SESSION_RUNTIME_CAPABILITIES.has(declaration.name as AgentRuntimeCapability) && sessionIds === undefined) {
-    throw new Error(`${label}.scope.sessionIds is required for Session capability`)
-  }
+        })()
   return Object.freeze({
     name: declaration.name as AgentRuntimeCapability, required: declaration.required,
     ...(declaration.rationale === undefined ? {} : { rationale: normalizePermissionRationaleV2(declaration.rationale, `${label}.rationale`) }),
