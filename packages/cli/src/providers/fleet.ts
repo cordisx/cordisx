@@ -561,6 +561,13 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     }
   }
 
+  resolveAgentLoopV4Session(input: { readonly scope: AgentLoopAuthorityScope; readonly task: string; readonly binding: { readonly bindingId: string; readonly generation: number }; readonly definition: { readonly agentId: string; readonly revision: string } }): unknown {
+    const locator = this.resolveAgentLoopBinding(input)
+    if (locator === undefined || locator.state !== 'active') return { status: 'unavailable', code: 'binding-closed' }
+    if (this.generationFor(locator.providerId) !== locator.providerGeneration) return { status: 'unavailable', code: 'provider-replaced' }
+    return { status: 'resolved', sessionId: locator.remoteSessionId }
+  }
+
   async controlTask(input: CordisXTaskControlInput): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>> {
     return await this.withSession(input.session, async adapter => await adapter.controlSession(input))
   }

@@ -126,6 +126,7 @@ export interface AgentLoopV4Transport {
   requestAgentLoopIntroductionV4(input: { readonly scope: CordisXAgentLoopV4Scope; readonly command: unknown; readonly operationId: string; readonly task: string; readonly binding: AgentLoopTaskBinding['binding']; readonly definition: AgentLoopTaskBinding['definition']; readonly participantId: string; readonly memberId: string; readonly runId: string }): Promise<unknown>
   cancelAgentLoopIntroductionV4(input: { readonly scope: CordisXAgentLoopV4Scope; readonly command: unknown; readonly operationId: string; readonly requestOperationId: string; readonly task: string; readonly binding: AgentLoopTaskBinding['binding']; readonly definition: AgentLoopTaskBinding['definition']; readonly participantId: string; readonly memberId: string; readonly runId: string }): Promise<unknown>
   readAgentLoopV4Lifecycle(input: { readonly scope: CordisXAgentLoopV4Scope; readonly task: string; readonly binding: AgentLoopTaskBinding['binding']; readonly definition: AgentLoopTaskBinding['definition']; readonly afterSequence: number }): Promise<unknown>
+  resolveAgentLoopV4Session(input: { readonly scope: CordisXAgentLoopV4Scope; readonly task: string; readonly binding: AgentLoopTaskBinding['binding']; readonly definition: AgentLoopTaskBinding['definition'] }): Promise<unknown>
 }
 
 function clone<Value>(value: Value): Value { return structuredClone(value) }
@@ -243,6 +244,25 @@ export class CordisXAgentLoopBrokerV4 {
   private readonly approvals = new Map<string, string>()
   private readonly cancellations = new Map<string, string>()
   private readonly promptRegistrations = new Map<string, PromptRegistration>()
+
+  async resolveLegacySession(
+    options: Pick<CordisXBoundAgentLoopClientOptions, 'ownerKey' | 'active'>,
+    binding: AgentLoopTaskBinding,
+  ): Promise<{ readonly status: 'resolved'; readonly sessionId: string } | { readonly status: 'unavailable'; readonly code: 'binding-unresolved' | 'binding-closed' | 'plugin-generation-replaced' | 'connection-replaced' | 'host-unavailable' | 'unsupported' }> {
+    if (this.disposed || !options.active()) return { status: 'unavailable', code: 'plugin-generation-replaced' }
+    if (binding.contract !== 'cordisx.agent-loop-task-binding/v4' || binding.schemaVersion !== 4) return { status: 'unavailable', code: 'unsupported' }
+    if (binding.state !== 'active') return { status: 'unavailable', code: 'binding-closed' }
+    if (this.transport === undefined) return { status: 'unavailable', code: 'host-unavailable' }
+    try {
+      const value = record(await this.transport.resolveAgentLoopV4Session({
+        scope: scope(this.profileId, this.compositionGeneration, options.ownerKey),
+        task: binding.task, binding: binding.binding, definition: binding.definition,
+      }))
+      return value?.status === 'resolved' && handle(value.sessionId) !== undefined
+        ? { status: 'resolved', sessionId: value.sessionId as string }
+        : { status: 'unavailable', code: value?.code === 'binding-closed' ? 'binding-closed' : value?.code === 'provider-replaced' ? 'connection-replaced' : 'binding-unresolved' }
+    } catch { return { status: 'unavailable', code: 'host-unavailable' } }
+  }
   private readonly lifecycleMutations = new Map<string, number>()
   private readonly publicEventSnapshots = new Map<string, readonly AgentLoopEvent[]>()
   private readonly definitionPresentations = new Map<string, CordisXAgentDefinitionPresentation>()

@@ -1,4 +1,6 @@
 import type { AgentLoopTaskDetailsUrl } from '@cordisx/protocol/agent-loop/v2'
+import type { AgentDetailReference } from '@cordisx/protocol/agents/v1'
+import type { SessionId } from '@cordisx/protocol/sessions/v1'
 import { withoutCordisXRouteHistoryEntry } from '../codex-router-history.js'
 
 /** Host-private notification for same-document task URL pushes. */
@@ -60,6 +62,21 @@ export class HostAgentTaskDetailsNavigator {
     return location.target === 'host'
       ? this.port.navigateHost(location.url)
       : this.port.navigateExternal(location.url)
+  }
+
+  /** Resolves only Host-issued Agent detail refs; opaque refs never escape to plugins or external URLs. */
+  navigateAgentDetail(input: AgentDetailReference, sessionId: SessionId): void | Promise<void> {
+    if (input === null || typeof input !== 'object' || Object.keys(input).sort().join(',') !== 'kind,ref'
+      || input.kind !== 'host' || typeof input.ref !== 'string' || input.ref.length < 1 || input.ref.length > 512) {
+      throw new TypeError('Agent detail reference is invalid')
+    }
+    const codex = /^codex-thread:([^\u0000-\u001f\u007f]{1,480})$/u.exec(input.ref)
+    if (codex !== null) return this.port.navigateHost(`app://-/local/${encodeURIComponent(codex[1]!)}`)
+    const deterministic = /^deterministic-agent-session:([^\u0000-\u001f\u007f]{1,460})$/u.exec(input.ref)
+    if (deterministic !== null && deterministic[1] === sessionId) {
+      return this.port.navigateHost(`app://-/playground/simulator/tasks/${encodeURIComponent(sessionId)}`)
+    }
+    throw new Error('Agent detail reference is unavailable')
   }
 }
 

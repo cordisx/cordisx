@@ -174,6 +174,35 @@ describe('AgentLoop v4 renderer adapter', () => {
     expect(await broker.bind(options('owner-a')).send({ ...base('forged-send'), type: 'send', binding: forged, content: [{ kind: 'text', text: 'forged' }] })).not.toMatchObject({ status: 'accepted' })
   })
 
+  it('resolves legacy TaskBinding through the exact owner and generation without treating task as SessionId', async () => {
+    const host = new PlaygroundMockAgentLoopHost()
+    const source = new PlaygroundMockAgentLoopV4Transport(host)
+    const transport = Object.create(source) as AgentLoopV4Transport
+    const observed: unknown[] = []
+    transport.resolveAgentLoopV4Session = async input => {
+      observed.push(structuredClone(input))
+      return input.binding.generation === 1
+        ? { status: 'resolved', sessionId: 'remote-session-exact' }
+        : { status: 'unavailable', code: 'binding-closed' }
+    }
+    const broker = new CordisXAgentLoopBrokerV4(transport, host, 'playground', 'legacy-acquire')
+    const created = await broker.bind(options()).createOrBind({
+      ...base('create-for-legacy-acquire'), type: 'create-or-bind', definition: definition.identity, definitions: [definition], target: { mode: 'create' },
+    })
+    if (created.status !== 'accepted') throw new Error('create failed')
+    expect(await broker.resolveLegacySession(options(), created.binding)).toEqual({ status: 'resolved', sessionId: 'remote-session-exact' })
+    expect(observed).toEqual([expect.objectContaining({
+      task: created.binding.task, binding: created.binding.binding, definition: created.binding.definition,
+      scope: expect.objectContaining({ ownerKey: 'plugin-owner' }),
+    })])
+    expect(await broker.resolveLegacySession(options(), {
+      ...created.binding, binding: { ...created.binding.binding, generation: 2 },
+    })).toEqual({ status: 'unavailable', code: 'binding-closed' })
+    expect(await broker.resolveLegacySession({ ...options(), active: () => false }, created.binding))
+      .toEqual({ status: 'unavailable', code: 'plugin-generation-replaced' })
+    broker.dispose()
+  })
+
   it('isolates lifecycle correlation when owners reuse the same opaque task and turn handles', async () => {
     const host = new PlaygroundMockAgentLoopHost()
     const source = new PlaygroundMockAgentLoopV4Transport(host)

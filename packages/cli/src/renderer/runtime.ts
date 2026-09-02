@@ -44,8 +44,16 @@ import type {
 import { installCodexAdapter, installPlaygroundAdapter, type CodexAdapterHandle } from './adapter.js'
 import { UnavailableCodexHostAdapter } from '../adapters/codex-agent.js'
 import { createCodexAgentConnector } from '../adapters/codex-agent-connector.js'
-import { CordisXAgentService, CordisXHostAgentRuntime, CordisXSystemPromptService } from './agent.js'
-import { CordisXAgentEventService } from './agent-events.js'
+import { CordisXHostAgentRuntime, CordisXSystemPromptService } from './agent.js'
+import {
+  CordisXAgentRegistryServiceV1,
+  CordisXAgentSessionRuntime,
+  CordisXApprovalServiceV1,
+  CordisXSessionRegistryServiceV1,
+} from './agent-session-runtime.js'
+import { CodexDesktopAgentSessionTransport, UnavailableAgentSessionTransport } from './codex-desktop-agent-session-transport.js'
+import { DeterministicAgentSessionTransport } from './deterministic-agent-session-transport.js'
+import { AgentRouteSessionScopeAuthority, type AgentRuntimePermissionDeclaration } from './agent-route-session-scope.js'
 import {
   CordisXConnectorBroker,
   type CordisXBoundConnectorClient,
@@ -82,6 +90,7 @@ import {
   PermissionBroker,
   normalizePluginManifest,
   type PlatformPermissionSnapshot,
+  type AgentRuntimeConnection,
 } from './platform.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE, CordisXSlotService } from './service.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
@@ -120,8 +129,6 @@ import {
   type PlaygroundRoomSimulationForwardingClient,
 } from './playground-room-simulation-bridge.js'
 import type { CompatibleBoundAgentLoopClient } from '../agent-loop-contracts.js'
-import { BindingAgentHistoryAdapter, UnavailableAgentHistoryAdapter } from './agent-history-binding.js'
-import { CordisXAgentHistoryService } from './agent-history.js'
 import {
   BrowserConfigBridge,
   ConfigRendererRegistry,
@@ -245,6 +252,14 @@ interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
  */
 export type CordisXInternalRendererBootstrap = (host: Readonly<{
   readonly connectors: CordisXConnectorBroker
+  /** Development-only setup seam; never injected into plugin Contexts. */
+  readonly agentRuntimePolicies?: Readonly<{
+    seed(identity: CordisXPluginIdentity, entries: readonly Readonly<{
+      capability: import('@cordisx/protocol/agents/v1').AgentRuntimeCapability
+      sessionIds: readonly [string, ...string[]]
+      policy: 'ask' | 'allow-persistent' | 'deny-persistent'
+    }>[]): Promise<void>
+  }>
 }>) => void | (() => void | Promise<void>) | Promise<void | (() => void | Promise<void>)>
 
 interface PluginController {
@@ -259,6 +274,10 @@ interface PluginController {
   unregisterConnector?: () => void | Promise<void>
   unregisterAgentLoop?: () => void | Promise<void>
   unregisterDocuments?: () => void | Promise<void>
+  agentRegistryFiber?: Fiber
+  sessionRegistryFiber?: Fiber
+  approvalServiceFiber?: Fiber
+  unregisterAgentSessionMigration?: () => void
   fiber?: Fiber
   status: ManagerPluginStatus
   error?: string
@@ -732,6 +751,7 @@ async function start(
   const configuration = new PluginConfigurationRegistry(generationVisibility)
   const configRenderers = new ConfigRendererRegistry(generationVisibility)
   const agentRuntime = new CordisXHostAgentRuntime({ adapter: agentAdapter, broker, generation })
+  let routeService: CordisXRouteService | undefined
   if (metadata.agentLoopBackend === 'mock' && metadata.hostKind !== 'playground') {
     throw new Error('The deterministic AgentLoop Simulator is available only in the explicit Playground host')
   }
@@ -780,6 +800,94 @@ async function start(
     metadata.profileId,
     generation,
   )
+  // One Host-private authority backs all three public Agent/Session services.
+  // The environment chooses a transport before plugin activation; no public
+  // backend selector, raw bridge, or second app-server connection is exposed.
+  const desktopAgentSessionTransport = metadata.hostKind === 'playground'
+    ? undefined
+    : await CodexDesktopAgentSessionTransport.connect()
+  const agentSessionTransport = metadata.hostKind === 'playground'
+    ? new DeterministicAgentSessionTransport()
+    : desktopAgentSessionTransport ?? new UnavailableAgentSessionTransport()
+  const agentRuntimeConnection: AgentRuntimeConnection = Object.freeze({
+    connectionId: metadata.hostKind === 'playground'
+      ? 'development-host-transport'
+      : desktopAgentSessionTransport === undefined ? 'unavailable-host-transport' : 'desktop-current-transport',
+    generation: 1,
+  })
+  broker.replaceAgentRuntimeConnection(agentRuntimeConnection)
+  const agentRouteScopes = new AgentRouteSessionScopeAuthority({
+    activeRoute: () => {
+      const snapshot = routeHistory.snapshot()
+      const entry = snapshot.entry
+      const route = entry === undefined ? undefined : routeService?.snapshot().routes.find(item => item.qualifiedId === entry.routeId)
+      return entry === undefined ? undefined : {
+        owner: entry.owner,
+        routeId: route?.id ?? entry.routeId,
+        instanceId: `${entry.outlet}:${snapshot.key ?? 'unkeyed'}`,
+        params: entry.params,
+      }
+    },
+    routes: owner => (routeService?.snapshot().routes ?? [])
+      .filter(route => route.owner === owner)
+      .map(route => ({ id: route.id, path: route.definition.path })),
+    decide: async plan => {
+      const identity = controllers.find(controller => `${controller.item.source}:${controller.item.id}` === plan.owner.pluginId)?.identity
+      if (identity === undefined) return Object.freeze({ authorized: false })
+      const decision = await broker.authorizeAgentRuntime({
+        identity,
+        capability: plan.capability,
+        sessionId: plan.scope.sessionIds[0],
+        scopeSource: plan.scopeSource,
+        connection: agentRuntimeConnection,
+      })
+      return Object.freeze({ authorized: decision.authorized, ...(decision.lease === undefined ? {} : { leaseId: decision.lease.leaseId }) })
+    },
+    isLeaseActive: (owner, leaseId) => {
+      const identity = controllers.find(controller => `${controller.item.source}:${controller.item.id}` === owner.pluginId)?.identity
+      return identity !== undefined && broker.isAgentRuntimeLeaseActive(identity, leaseId)
+    },
+    connectionGeneration: () => agentRuntimeConnection.generation,
+  })
+  const agentSessionRuntime = new CordisXAgentSessionRuntime({
+    driver: agentSessionTransport,
+    authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
+  })
+  const disposeAgentRouteFences = agentRouteScopes.subscribe((owner, sessionId, code) => {
+    agentSessionRuntime.fenceSession(sessionId, code)
+    if (code !== 'route-replaced') agentSessionRuntime.fenceOwner(owner, code)
+  })
+  const disposeAgentPermissionFences = broker.subscribeAgentRuntimePermissionFences(fence => {
+    const owner = `${fence.identity.source}:${fence.identity.id}`
+    if (fence.code === 'route-replaced') agentRouteScopes.reconcileRoutes()
+    else agentRouteScopes.revoke(owner, fence.code)
+    agentSessionRuntime.fenceSession(fence.sessionId, fence.code)
+    if (fence.code !== 'route-replaced') agentSessionRuntime.fenceOwner(owner, fence.code)
+  })
+  let activeAgentRuntimeRouteInstance: string | undefined
+  const reconcileAgentRuntimeRoute = (): void => {
+    const snapshot = routeHistory.snapshot()
+    const entry = snapshot.entry
+    const controller = entry === undefined ? undefined : controllers.find(item => `${item.item.source}:${item.item.id}` === entry.owner)
+    const route = entry === undefined ? undefined : routeService?.snapshot().routes.find(item => item.qualifiedId === entry.routeId)
+    const sessionId = entry?.params.sessionId
+    if (entry === undefined || controller === undefined || route === undefined || typeof sessionId !== 'string' || sessionId === '*') {
+      if (activeAgentRuntimeRouteInstance !== undefined) broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
+      activeAgentRuntimeRouteInstance = undefined
+      agentRouteScopes.reconcileRoutes()
+      return
+    }
+    const routeInstanceId = `${entry.outlet}:${snapshot.key ?? 'unkeyed'}`
+    if (activeAgentRuntimeRouteInstance !== undefined && activeAgentRuntimeRouteInstance !== routeInstanceId) broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
+    broker.replaceAgentRuntimeRouteScope({
+      kind: 'host-route', active: true,
+      owner: { source: controller.item.source, pluginId: controller.item.id },
+      routeId: route.id, routeInstanceId, path: route.definition.path, params: { sessionId },
+    })
+    activeAgentRuntimeRouteInstance = routeInstanceId
+    agentRouteScopes.reconcileRoutes()
+  }
+  const disposeAgentRouteHistory = routeHistory.subscribe(reconcileAgentRuntimeRoute)
   // Host-owned only: no plugin or renderer global receives this broker/adapter.
   const connectorBroker = new CordisXConnectorBroker()
   const agentConnector = connectorBroker.register(createCodexAgentConnector(agentAdapter))
@@ -787,11 +895,22 @@ async function start(
   // The bootstrap closure is selected only by the Host composition before it
   // is bundled. It runs before controller construction/normal plugin
   // activation and is never placed in metadata or a renderer global.
-  const bootstrapResult = await internalBootstrap?.(Object.freeze({ connectors: connectorBroker }))
+  const developmentPolicySeed = metadata.hostKind === 'playground'
+    ? broker.createDevelopmentAgentRuntimePolicySeedAuthority()
+    : undefined
+  const bootstrapResult = await internalBootstrap?.(Object.freeze({
+    connectors: connectorBroker,
+    ...(developmentPolicySeed === undefined ? {} : {
+      agentRuntimePolicies: Object.freeze({
+        seed: async (identity: CordisXPluginIdentity, entries: readonly Readonly<{
+          capability: import('@cordisx/protocol/agents/v1').AgentRuntimeCapability
+          sessionIds: readonly [string, ...string[]]
+          policy: 'ask' | 'allow-persistent' | 'deny-persistent'
+        }>[]) => await broker.seedAgentRuntimePolicies(developmentPolicySeed, identity, entries),
+      }),
+    }),
+  }))
   if (typeof bootstrapResult === 'function') disposeInternalBootstrap = bootstrapResult
-  const historyAdapter = metadata.agentHistoryBridgeToken === undefined
-    ? new UnavailableAgentHistoryAdapter()
-    : await BindingAgentHistoryAdapter.connect(metadata.agentHistoryBridgeToken).catch(() => new UnavailableAgentHistoryAdapter())
   const boundProviderStatuses = bindingPlatformAdapter?.capabilityProviderStatuses() ?? []
   const externalProviderStatuses = boundProviderStatuses.length > 0
     ? boundProviderStatuses
@@ -808,7 +927,12 @@ async function start(
     ...externalProviderCapabilityProviders(externalProviderStatuses),
     ...hostLocalCapabilityProviders({
       agentStatus: agentRuntime.status(),
-      historyStatus: historyAdapter.status(),
+      historyStatus: {
+        hostId: 'cordisx-host', hostName: 'CordisX Host', mode: 'unavailable',
+        adapterId: 'retired-agent-history', adapterVersion: 'none', profileId: metadata.profileId,
+        defaultPayloadPolicy: 'referenced', diagnostics: [{ code: 'history-unavailable', severity: 'info', count: 1 }],
+        filesystemExposed: false, rawBridgeExposed: false,
+      },
       configurationWritable: configBridge !== undefined,
       packageLifecycleAvailable: lifecycleBridge !== undefined,
     }),
@@ -905,6 +1029,12 @@ async function start(
           transactionEpoch: controller.generationView.transactionEpoch,
         }),
       }, controller.generationView)
+      const agentRuntimeDeclarations = controller.manifest.schemaVersion === 5
+        ? controller.manifest.capabilities.filter((item): item is typeof item & AgentRuntimePermissionDeclaration => (
+            item.name.startsWith('agents.') || item.name.startsWith('sessions.') || item.name.startsWith('approvals.')
+          ))
+        : []
+      agentRouteScopes.install(`${controller.item.source}:${controller.item.id}`, agentRuntimeDeclarations)
     }
     const configSchema = moduleConfigSchema(controller.item.module)
     const configApplies = controller.item.isolatedArtifactSource === undefined
@@ -931,6 +1061,9 @@ async function start(
     delete controller.unregisterPermissions
     controller.unregisterExtensionPoints?.()
     delete controller.unregisterExtensionPoints
+    const owner = `${controller.item.source}:${controller.item.id}`
+    agentRouteScopes.uninstall(owner)
+    agentSessionRuntime.fenceOwner(owner, 'plugin-generation-replaced')
     configuration.unregister(
       controller.item.id,
       moduleGenerationOf(controller),
@@ -953,13 +1086,9 @@ async function start(
   let slotService: CordisXSlotService | undefined
   let commandService: CordisXCommandService | undefined
   let pageService: CordisXPageService | undefined
-  let routeService: CordisXRouteService | undefined
   let i18nService: CordisXI18nService | undefined
   let i18nFiber: Fiber | undefined
   let platformFiber: Fiber | undefined
-  let agentEventFiber: Fiber | undefined
-  let agentHistoryFiber: Fiber | undefined
-  let agentFiber: Fiber | undefined
   let systemPromptFiber: Fiber | undefined
   let commandFiber: Fiber | undefined
   let agentConversationShellFiber: Fiber | undefined
@@ -1084,6 +1213,17 @@ async function start(
     } catch (error) {
       failure ??= error
     } finally {
+      const owner = `${controller.item.source}:${controller.item.id}`
+      agentRouteScopes.revoke(owner, 'plugin-generation-replaced')
+      agentSessionRuntime.fenceOwner(owner, 'plugin-generation-replaced')
+      await controller.approvalServiceFiber?.dispose()
+      delete controller.approvalServiceFiber
+      await controller.sessionRegistryFiber?.dispose()
+      delete controller.sessionRegistryFiber
+      await controller.agentRegistryFiber?.dispose()
+      delete controller.agentRegistryFiber
+      controller.unregisterAgentSessionMigration?.()
+      delete controller.unregisterAgentSessionMigration
       controller.agentLoopClient?.dispose()
       delete controller.agentLoopClient
       await controller.unregisterAgentLoop?.()
@@ -1304,6 +1444,10 @@ async function start(
       adaptAgentLoopV3(agentLoopClientV4),
       agentLoopClientV4,
     )
+    controller.unregisterAgentSessionMigration = agentSessionRuntime.installLegacyBindingResolver(
+      `${controller.item.source}:${controller.item.id}`,
+      async binding => await agentLoopBrokerV4.resolveLegacySession(agentLoopOptions, binding),
+    )
     const documentsClient = ownerDocumentBroker.bind({
       identity: controller.identity,
       moduleGeneration: moduleGenerationOf(controller),
@@ -1317,7 +1461,7 @@ async function start(
         }
       },
     })
-    pluginContext = ctx.isolate('connectors').isolate('agentLoop').isolate('documents').extend({
+    pluginContext = ctx.isolate('connectors').isolate('agentLoop').isolate('agents').isolate('sessions').isolate('approvals').isolate('documents').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
@@ -1330,14 +1474,20 @@ async function start(
     controller.unregisterAgentLoop = pluginContext.reflect.provide('agentLoop', agentLoopClient)
     controller.documentsClient = documentsClient
     controller.unregisterDocuments = pluginContext.reflect.provide('documents', documentsClient)
-    pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Plugin activation started')
-    const fiber = pluginContext.plugin(
-      pluginFromModule(module),
-      configuration.get(controller.item.id, generationVisibility.view(pluginContext)),
-    )
-    controller.fiber = fiber
     try {
-      await fiber
+      controller.agentRegistryFiber = pluginContext.plugin(CordisXAgentRegistryServiceV1, agentSessionRuntime)
+      await controller.agentRegistryFiber
+      controller.sessionRegistryFiber = pluginContext.plugin(CordisXSessionRegistryServiceV1, agentSessionRuntime)
+      await controller.sessionRegistryFiber
+      controller.approvalServiceFiber = pluginContext.plugin(CordisXApprovalServiceV1, agentSessionRuntime)
+      await controller.approvalServiceFiber
+      pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Plugin activation started')
+      controller.fiber = pluginContext.plugin(
+        pluginFromModule(module),
+        configuration.get(controller.item.id, generationVisibility.view(pluginContext)),
+      )
+      await controller.fiber
+      agentRouteScopes.validateInstalledRoutes(`${controller.item.source}:${controller.item.id}`)
       controller.status = 'active'
       pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Plugin activation completed')
       delete controller.error
@@ -1347,8 +1497,16 @@ async function start(
       controller.status = 'failed'
       controller.error = errorMessage(error)
       pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Plugin activation failed', error)
-      await fiber.dispose()
+      await controller.fiber?.dispose()
       delete controller.fiber
+      await controller.approvalServiceFiber?.dispose()
+      delete controller.approvalServiceFiber
+      await controller.sessionRegistryFiber?.dispose()
+      delete controller.sessionRegistryFiber
+      await controller.agentRegistryFiber?.dispose()
+      delete controller.agentRegistryFiber
+      controller.unregisterAgentSessionMigration?.()
+      delete controller.unregisterAgentSessionMigration
       agentLoopClient.dispose()
       delete controller.agentLoopClient
       await controller.unregisterAgentLoop?.()
@@ -2524,6 +2682,10 @@ async function start(
   const dispose = async (): Promise<void> => {
     if (disposed) return
     disposed = true
+    if (activeAgentRuntimeRouteInstance !== undefined) broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
+    activeAgentRuntimeRouteInstance = undefined
+    broker.clearAgentRuntimeConnection()
+    disposeAgentPermissionFences()
     certifiedPermissionChannel?.dispose()
     certifiedPermissionChannel = undefined
     await disposeInternalBootstrap?.()
@@ -2545,6 +2707,14 @@ async function start(
       delete controller.agentLoopClient
       await controller.unregisterAgentLoop?.()
       delete controller.unregisterAgentLoop
+      await controller.approvalServiceFiber?.dispose()
+      delete controller.approvalServiceFiber
+      await controller.sessionRegistryFiber?.dispose()
+      delete controller.sessionRegistryFiber
+      await controller.agentRegistryFiber?.dispose()
+      delete controller.agentRegistryFiber
+      controller.unregisterAgentSessionMigration?.()
+      delete controller.unregisterAgentSessionMigration
       controller.documentsClient?.dispose()
       delete controller.documentsClient
       await controller.unregisterDocuments?.()
@@ -2602,19 +2772,15 @@ async function start(
     platformFiber = undefined
     await systemPromptFiber?.dispose()
     systemPromptFiber = undefined
-    await agentFiber?.dispose()
-    agentFiber = undefined
-    await agentEventFiber?.dispose()
-    agentEventFiber = undefined
-    await agentHistoryFiber?.dispose()
-    agentHistoryFiber = undefined
     connectorBroker.disposeAll()
     agentLoopBroker.dispose()
     agentLoopBrokerV2.dispose()
     agentLoopBrokerV4.dispose()
+    disposeAgentRouteHistory()
+    disposeAgentRouteFences()
+    await agentSessionRuntime.dispose()
     ownerDocumentBroker.dispose()
     await agentRuntime.dispose()
-    historyAdapter.dispose()
     bindingPlatformAdapter?.dispose()
     bindingPlatformAdapter = undefined
     if (permissionStore instanceof BindingPermissionPolicyStore) permissionStore.dispose()
@@ -2872,17 +3038,6 @@ async function start(
     registrySubscriptions.push(configuration.subscribe(notifyFrom('configuration')))
     platformFiber = ctx.plugin(CordisXPlatformService, { adapter: platformAdapter, broker, console: pluginConsole })
     await platformFiber
-    agentEventFiber = ctx.plugin(CordisXAgentEventService, {
-      ledger: agentRuntime.ledger,
-      broker,
-      status: () => agentRuntime.status(),
-      console: pluginConsole,
-    })
-    await agentEventFiber
-    agentHistoryFiber = ctx.plugin(CordisXAgentHistoryService, { adapter: historyAdapter, broker, generation, console: pluginConsole })
-    await agentHistoryFiber
-    agentFiber = ctx.plugin(CordisXAgentService, { runtime: agentRuntime, console: pluginConsole })
-    await agentFiber
     systemPromptFiber = ctx.plugin(CordisXSystemPromptService, { runtime: agentRuntime, console: pluginConsole })
     await systemPromptFiber
     commandFiber = ctx.plugin(CordisXCommandService, { console: pluginConsole })
@@ -2917,6 +3072,7 @@ async function start(
     routeFiber = ctx.plugin(CordisXRouteService, { history: routeHistory, console: pluginConsole })
     await routeFiber
     routeService = ctx.routes as CordisXRouteService
+    reconcileAgentRuntimeRoute()
     managerContentFiber = ctx.plugin(CordisXManagerContentNavigationService)
     await managerContentFiber
     unregisterManagerPointCatalog = extensionPointDescriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
