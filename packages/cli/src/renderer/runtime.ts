@@ -91,6 +91,7 @@ import {
   PermissionBroker,
   normalizePluginManifest,
   type PlatformPermissionSnapshot,
+  type AgentRuntimeConnection,
 } from './platform.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE, CordisXSlotService } from './service.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
@@ -270,6 +271,14 @@ interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
  */
 export type CordisXInternalRendererBootstrap = (host: Readonly<{
   readonly connectors: CordisXConnectorBroker
+  /** Development composition only; the opaque authority never crosses into a plugin Context. */
+  readonly agentRuntimePolicies?: Readonly<{
+    seed(identity: CordisXPluginIdentity, entries: readonly Readonly<{
+      capability: import('@cordisx/protocol/agents/v1').AgentRuntimeCapability
+      sessionIds: readonly [string, ...string[]]
+      policy: 'ask' | 'allow-persistent' | 'deny-persistent'
+    }>[]): Promise<void>
+  }>
 }>) => void | (() => void | Promise<void>) | Promise<void | (() => void | Promise<void>)>
 
 interface PluginController {
@@ -747,6 +756,11 @@ async function start(
   const agentSessionTransport = metadata.hostKind === 'playground'
     ? new DeterministicAgentSessionTransport()
     : desktopTransport ?? new UnavailableAgentSessionTransport()
+  const agentRuntimeConnection: AgentRuntimeConnection = Object.freeze({
+    connectionId: metadata.hostKind === 'playground' ? 'development-host-transport' : desktopTransport === undefined ? 'unavailable-host-transport' : 'desktop-current-transport',
+    generation: 1,
+  })
+  broker.replaceAgentRuntimeConnection(agentRuntimeConnection)
   const agentRouteScopes = new AgentRouteSessionScopeAuthority({
     activeRoute: () => {
       const entry = routeHistory.snapshot().entry
@@ -759,10 +773,36 @@ async function start(
     routes: owner => (routeService?.snapshot().routes ?? [])
       .filter(route => route.owner === owner)
       .map(route => ({ id: route.id, path: route.definition.path })),
-    // Permission-v4 owns exact policy seeding and lease authorization. Until
-    // that Host API is installed this production path remains fail-closed.
-    decide: async () => false,
-    connectionGeneration: () => desktopTransport === undefined ? 0 : 1,
+    decide: async plan => {
+      const identity = controllers.find(controller => (
+        `${controller.item.source}:${controller.item.id}` === plan.owner.pluginId
+      ))?.identity
+      if (identity === undefined) return Object.freeze({ authorized: false })
+      const decision = await broker.authorizeAgentRuntime({
+        identity,
+        capability: plan.capability,
+        sessionId: plan.scope.sessionIds[0],
+        scopeSource: plan.scopeSource.kind === 'host-create'
+          ? plan.scopeSource
+          : Object.freeze({
+              kind: 'host-route' as const,
+              routeInstanceId: plan.scopeSource.routeInstanceId,
+              routeId: plan.scopeSource.routeId,
+              path: plan.scopeSource.path,
+              params: plan.scopeSource.params,
+            }),
+        connection: agentRuntimeConnection,
+      })
+      return Object.freeze({
+        authorized: decision.authorized,
+        ...(decision.lease === undefined ? {} : { leaseId: decision.lease.leaseId }),
+      })
+    },
+    isLeaseActive: (owner, leaseId) => {
+      const identity = controllers.find(controller => `${controller.item.source}:${controller.item.id}` === owner.pluginId)?.identity
+      return identity !== undefined && broker.isAgentRuntimeLeaseActive(identity, leaseId)
+    },
+    connectionGeneration: () => agentRuntimeConnection.generation,
   })
   const agentSessionRuntime = new CordisXAgentSessionRuntime({
     driver: agentSessionTransport,
@@ -772,14 +812,59 @@ async function start(
     agentSessionRuntime.fenceSession(sessionId, code)
     if (code !== 'route-replaced') agentSessionRuntime.fenceOwner(owner, code)
   })
-  const disposeAgentRouteHistory = routeHistory.subscribe(() => agentRouteScopes.reconcileRoutes())
+  const disposeAgentPermissionFences = broker.subscribeAgentRuntimePermissionFences(fence => {
+    const owner = `${fence.identity.source}:${fence.identity.id}`
+    if (fence.code === 'route-replaced') agentRouteScopes.reconcileRoutes()
+    else agentRouteScopes.revoke(owner, fence.code)
+    agentSessionRuntime.fenceSession(fence.sessionId, fence.code)
+    if (fence.code !== 'route-replaced') agentSessionRuntime.fenceOwner(owner, fence.code)
+  })
+  let activeAgentRuntimeRouteInstance: string | undefined
+  const reconcileAgentRuntimeRoute = (): void => {
+    const entry = routeHistory.snapshot().entry
+    const controller = entry === undefined ? undefined : controllers.find(item => `${item.item.source}:${item.item.id}` === entry.owner)
+    const route = entry === undefined ? undefined : routeService?.snapshot().routes.find(item => item.qualifiedId === entry.routeId)
+    const sessionId = entry?.params.sessionId
+    if (entry === undefined || controller === undefined || route === undefined || typeof sessionId !== 'string' || sessionId === '*') {
+      if (activeAgentRuntimeRouteInstance !== undefined) broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
+      activeAgentRuntimeRouteInstance = undefined
+      agentRouteScopes.reconcileRoutes()
+      return
+    }
+    const routeInstanceId = `${entry.outlet}:${routeHistory.snapshot().key ?? 'unkeyed'}`
+    if (activeAgentRuntimeRouteInstance !== undefined && activeAgentRuntimeRouteInstance !== routeInstanceId) {
+      broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
+    }
+    broker.replaceAgentRuntimeRouteScope({
+      kind: 'host-route', active: true,
+      owner: { source: controller.item.source, pluginId: controller.item.id },
+      routeId: route.id, routeInstanceId, path: route.definition.path, params: { sessionId },
+    })
+    activeAgentRuntimeRouteInstance = routeInstanceId
+    agentRouteScopes.reconcileRoutes()
+  }
+  const disposeAgentRouteHistory = routeHistory.subscribe(reconcileAgentRuntimeRoute)
   const connectorBroker = new CordisXConnectorBroker()
   const agentConnector = connectorBroker.register(createCodexAgentConnector(agentAdapter))
   if (!agentConnector.ok) throw new Error(`Host Agent Connector registration failed: ${agentConnector.error.message}`)
   // The bootstrap closure is selected only by the Host composition before it
   // is bundled. It runs before controller construction/normal plugin
   // activation and is never placed in metadata or a renderer global.
-  const bootstrapResult = await internalBootstrap?.(Object.freeze({ connectors: connectorBroker }))
+  const developmentPolicySeed = metadata.hostKind === 'playground'
+    ? broker.createDevelopmentAgentRuntimePolicySeedAuthority()
+    : undefined
+  const bootstrapResult = await internalBootstrap?.(Object.freeze({
+    connectors: connectorBroker,
+    ...(developmentPolicySeed === undefined ? {} : {
+      agentRuntimePolicies: Object.freeze({
+        seed: async (identity: CordisXPluginIdentity, entries: readonly Readonly<{
+          capability: import('@cordisx/protocol/agents/v1').AgentRuntimeCapability
+          sessionIds: readonly [string, ...string[]]
+          policy: 'ask' | 'allow-persistent' | 'deny-persistent'
+        }>[]) => await broker.seedAgentRuntimePolicies(developmentPolicySeed, identity, entries),
+      }),
+    }),
+  }))
   if (typeof bootstrapResult === 'function') disposeInternalBootstrap = bootstrapResult
   const boundProviderStatuses = bindingPlatformAdapter?.capabilityProviderStatuses() ?? []
   const externalProviderStatuses = boundProviderStatuses.length > 0
@@ -2485,6 +2570,10 @@ async function start(
   const dispose = async (): Promise<void> => {
     if (disposed) return
     disposed = true
+    if (activeAgentRuntimeRouteInstance !== undefined) broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
+    activeAgentRuntimeRouteInstance = undefined
+    broker.clearAgentRuntimeConnection()
+    disposeAgentPermissionFences()
     certifiedPermissionChannel?.dispose()
     certifiedPermissionChannel = undefined
     await disposeInternalBootstrap?.()
@@ -2746,7 +2835,6 @@ async function start(
     }
     disposeI18nSubscription = i18nService.subscribeInternal(notifyFrom('i18n'))
     disposePermissionSubscription = broker.subscribe(() => {
-      agentRouteScopes.revokeAll('permission-revoked')
       slotService?.invalidatePointPolicies()
       void routeService?.invalidatePointPolicies()
       notify('permissions')
@@ -2790,6 +2878,7 @@ async function start(
     routeFiber = ctx.plugin(CordisXRouteService, { history: routeHistory, console: pluginConsole })
     await routeFiber
     routeService = ctx.routes as CordisXRouteService
+    reconcileAgentRuntimeRoute()
     managerContentFiber = ctx.plugin(CordisXManagerContentNavigationService)
     await managerContentFiber
     unregisterManagerPointCatalog = extensionPointDescriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)

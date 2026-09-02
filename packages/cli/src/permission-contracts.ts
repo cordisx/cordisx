@@ -382,8 +382,9 @@ export interface CordisXPermissionAuthorizationDecisionV3 {
 export interface CordisXPermissionAuthorizationKeyV4 {
   readonly profileId: string
   readonly identity: CordisXPermissionIdentityV2
-  readonly capability: CordisXPermissionCapabilityV4
-  readonly scope: CordisXPermissionScopeV4
+  /** v4 policy storage also carries the closed Agent/Session vocabulary from manifest v5. */
+  readonly capability: CordisXPermissionCapabilityV5
+  readonly scope: CordisXPermissionScopeV5
   readonly securityFingerprint: `sha256:${string}`
 }
 

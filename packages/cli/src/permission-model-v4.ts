@@ -349,7 +349,8 @@ export function normalizePermissionPolicyRecordV4(
   }
   const key = object(record.key, `${label}.key`)
   exact(key, ['profileId', 'identity', 'capability', 'scope', 'securityFingerprint'], `${label}.key`)
-  if (!isHostDomPermissionCapability(key.capability)) throw new Error(`${label} stores only Host DOM v4 capabilities`)
+  const agentCapability = AGENT_RUNTIME_CAPABILITIES.has(key.capability as AgentRuntimeCapability)
+  if (!isHostDomPermissionCapability(key.capability) && !agentCapability) throw new Error(`${label} capability is unsupported`)
   if (typeof key.securityFingerprint !== 'string' || !FINGERPRINT.test(key.securityFingerprint)) {
     throw new Error(`${label}.key.securityFingerprint is invalid`)
   }
@@ -365,11 +366,22 @@ export function normalizePermissionPolicyRecordV4(
     key: Object.freeze({
       profileId: normalizePermissionLocalIdV2(key.profileId, `${label}.key.profileId`),
       identity: normalizePermissionIdentityV2(key.identity, `${label}.key.identity`),
-      capability: key.capability,
-      scope: normalizeHostDomPermissionScopeV4(key.scope, key.capability, `${label}.key.scope`),
+      capability: key.capability as CordisXPermissionCapabilityV5,
+      scope: agentCapability
+        ? normalizeAgentRuntimePolicyScopeV4(key.scope, `${label}.key.scope`)
+        : normalizeHostDomPermissionScopeV4(key.scope, key.capability as 'ui.host-dom.read' | 'ui.host-dom.modify', `${label}.key.scope`),
       securityFingerprint: key.securityFingerprint as `sha256:${string}`,
     }),
     policy: record.policy,
+  })
+}
+
+/** Persisted Agent/Session policy records are always concrete: routes are resolved before policy lookup. */
+function normalizeAgentRuntimePolicyScopeV4(value: unknown, label: string): CordisXPermissionScopeV5 {
+  const scope = object(value, label)
+  exact(scope, ['sessionIds'], label)
+  return Object.freeze({
+    sessionIds: uniqueSortedStrings(scope.sessionIds, `${label}.sessionIds`, 1, item => item !== '*' && item.length <= 512),
   })
 }
 

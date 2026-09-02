@@ -43,6 +43,10 @@ export interface AgentPermissionPlanV4 {
   readonly scope: Readonly<{ readonly sessionIds: readonly [string, ...string[]] }>
   readonly routeId: string
   readonly routeInstanceId: string
+  readonly scopeSource: Readonly<
+    | { kind: 'host-route'; routeId: string; routeInstanceId: string; path: string; params: Readonly<{ sessionId: string }> }
+    | { kind: 'host-create'; reservedSessionId: string }
+  >
 }
 
 export interface AgentPermissionLeaseV4 extends AgentPermissionPlanV4 {
@@ -58,7 +62,8 @@ export interface AgentRouteSessionScopeOptions {
   readonly activeRoute: () => AgentActiveRoute | undefined
   readonly routes: (owner: string) => readonly AgentRouteDefinition[]
   /** Host-only permission-v4 decision seam; it receives an already exact scope. */
-  readonly decide: (plan: AgentPermissionPlanV4) => Promise<boolean>
+  readonly decide: (plan: AgentPermissionPlanV4) => Promise<Readonly<{ authorized: boolean; leaseId?: string }>>
+  readonly isLeaseActive?: (owner: PluginOwnerIdentity, leaseId: string) => boolean
   readonly connectionGeneration: () => number
 }
 
@@ -71,6 +76,7 @@ interface LeaseRecord {
   readonly lease: AgentPermissionLeaseV4
   readonly sessionId: string
   readonly routeParam: string
+  readonly permissionLeaseId?: string
 }
 
 /**
@@ -130,15 +136,21 @@ export class AgentRouteSessionScopeAuthority {
   async authorize(owner: PluginOwnerIdentity, capability: AgentRuntimeCapability, sessionId?: string): Promise<boolean> {
     const declaration = this.declarations.get(owner.pluginId)?.find(item => item.declaration.name === capability)?.declaration
     if (declaration === undefined) return false
-    // There is no implicit allow while permission-v4 is not productized. A
-    // Session-bearing operation must always arrive with an exact Host-resolved
-    // identity, and unscoped declarations remain denied until that product
-    // supplies its own authority path.
     if (sessionId === undefined) return false
     if (!validSessionId(sessionId)) return false
     const scope = declaration.scope.sessionIds
-    if (scope === undefined) return false
-    if (Array.isArray(scope)) return scope.includes(sessionId) && await this.decide(owner, capability, [sessionId], 'static', 'static')
+    if (scope === undefined) {
+      if (capability !== 'agents.create') return false
+      const decision = await this.decide(owner, capability, [sessionId], { kind: 'host-create', reservedSessionId: sessionId })
+      return decision.authorized && (decision.leaseId === undefined || this.options.isLeaseActive?.(owner, decision.leaseId) !== false)
+    }
+    if (Array.isArray(scope)) {
+      if (!scope.includes(sessionId)) return false
+      const decision = await this.decide(owner, capability, [sessionId], {
+        kind: 'host-route', routeId: 'static', routeInstanceId: 'static', path: 'static', params: { sessionId },
+      })
+      return decision.authorized && (decision.leaseId === undefined || this.options.isLeaseActive?.(owner, decision.leaseId) !== false)
+    }
     if (!isBinding(scope)) return false
     const active = this.options.activeRoute()
     if (active === undefined || active.owner !== owner.pluginId || active.routeId !== scope.routeId) return false
@@ -148,15 +160,22 @@ export class AgentRouteSessionScopeAuthority {
     if (route === undefined || !routeHasParam(route.path, scope.param)) return false
     const key = `${owner.pluginId}\u0000${owner.generation}\u0000${capability}\u0000${sessionId}\u0000${active.instanceId}\u0000${this.options.connectionGeneration()}`
     const existing = this.leases.get(key)
-    if (existing?.lease.status === 'active') return true
-    if (!await this.decide(owner, capability, [sessionId], scope.routeId, active.instanceId)) return false
+    if (existing?.lease.status === 'active' && (existing.permissionLeaseId === undefined || this.options.isLeaseActive?.(owner, existing.permissionLeaseId) !== false)) return true
+    const decision = await this.decide(owner, capability, [sessionId], {
+      kind: 'host-route', routeId: scope.routeId, routeInstanceId: active.instanceId, path: route.path, params: { sessionId },
+    })
+    if (!decision.authorized) return false
     const lease = Object.freeze({
       schemaVersion: 4 as const, owner: Object.freeze({ ...owner }), capability,
       scope: Object.freeze({ sessionIds: Object.freeze([sessionId] as [string]) }),
       routeId: scope.routeId, routeInstanceId: active.instanceId, leaseId: crypto.randomUUID(), pluginGeneration: owner.generation,
       connectionGeneration: this.options.connectionGeneration(), status: 'active' as const,
+      scopeSource: Object.freeze({
+        kind: 'host-route' as const, routeId: scope.routeId, routeInstanceId: active.instanceId,
+        path: route.path, params: Object.freeze({ sessionId }),
+      }),
     })
-    this.leases.set(key, { lease, sessionId, routeParam: scope.param })
+    this.leases.set(key, { lease, sessionId, routeParam: scope.param, ...(decision.leaseId === undefined ? {} : { permissionLeaseId: decision.leaseId }) })
     return true
   }
 
@@ -176,13 +195,20 @@ export class AgentRouteSessionScopeAuthority {
     return Object.freeze({ owner, declaration: Object.freeze({ ...declaration, scope: Object.freeze({ ...(scope === undefined ? {} : { sessionIds: Array.isArray(scope) ? Object.freeze([...scope]) : Object.freeze({ ...scope }) }) }) }) })
   }
 
-  private async decide(owner: PluginOwnerIdentity, capability: AgentRuntimeCapability, sessionIds: readonly [string, ...string[]], routeId: string, routeInstanceId: string): Promise<boolean> {
+  private async decide(
+    owner: PluginOwnerIdentity,
+    capability: AgentRuntimeCapability,
+    sessionIds: readonly [string, ...string[]],
+    scopeSource: AgentPermissionPlanV4['scopeSource'],
+  ): Promise<Readonly<{ authorized: boolean; leaseId?: string }>> {
     const plan: AgentPermissionPlanV4 = Object.freeze({
       schemaVersion: 4, owner: Object.freeze({ ...owner }), capability,
-      scope: Object.freeze({ sessionIds: Object.freeze([...sessionIds]) as [string, ...string[]] }), routeInstanceId,
-      routeId,
+      scope: Object.freeze({ sessionIds: Object.freeze([...sessionIds]) as [string, ...string[]] }),
+      routeInstanceId: scopeSource.kind === 'host-route' ? scopeSource.routeInstanceId : `reserved:${scopeSource.reservedSessionId}`,
+      routeId: scopeSource.kind === 'host-route' ? scopeSource.routeId : 'host-create',
+      scopeSource: Object.freeze(scopeSource),
     })
-    try { return await this.options.decide(plan) } catch { return false }
+    try { return await this.options.decide(plan) } catch { return Object.freeze({ authorized: false }) }
   }
 
   private matchesActiveRoute(record: LeaseRecord): boolean {

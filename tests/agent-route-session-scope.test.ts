@@ -14,7 +14,10 @@ function harness(input: { active?: AgentActiveRoute; allow?: boolean } = {}) {
   const authority = new AgentRouteSessionScopeAuthority({
     activeRoute: () => active,
     routes: plugin => plugin === owner.pluginId ? [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }] : [],
-    decide: async plan => { plans.push(plan); return input.allow !== false && plan.scope.sessionIds.length === 1 },
+    decide: async plan => {
+      plans.push(plan)
+      return Object.freeze({ authorized: input.allow !== false && plan.scope.sessionIds.length === 1 })
+    },
     connectionGeneration: () => 1,
   })
   return { authority, plans, setActive: (next: AgentActiveRoute | undefined) => { active = next } }
@@ -54,7 +57,7 @@ describe('Host route-bound Agent Session authorization', () => {
     expect(() => authority.install(owner.pluginId, [{ ...declaration, scope: { sessionIds: [] } }])).toThrow('Session read')
     expect(() => authority.install(owner.pluginId, [{ ...declaration, scope: { sessionIds: ['*'] } }])).toThrow('Session read')
     const unresolved = new AgentRouteSessionScopeAuthority({
-      activeRoute: () => undefined, routes: () => [], decide: async () => true, connectionGeneration: () => 1,
+      activeRoute: () => undefined, routes: () => [], decide: async () => Object.freeze({ authorized: true }), connectionGeneration: () => 1,
     })
     unresolved.install(owner.pluginId, [declaration])
     expect(() => unresolved.validateInstalledRoutes(owner.pluginId)).toThrow('owned route')
