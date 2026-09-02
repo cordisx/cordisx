@@ -112,6 +112,7 @@ type CopyKey =
   | 'marketplace.invalid-url'
   | 'marketplace.duplicate-source'
   | 'manager.nav.plugins'
+  | 'manager.nav.plugin-bundles'
   | 'manager.nav.extension-points'
   | 'manager.nav.routes'
   | 'manager.nav.marketplace'
@@ -543,6 +544,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'marketplace.invalid-url': { en: 'Enter an HTTPS URL', 'zh-CN': '请输入 HTTPS 地址' },
   'marketplace.duplicate-source': { en: 'This marketplace is already configured', 'zh-CN': '这个商店地址已经配置' },
   'manager.nav.plugins': { en: 'Plugins', 'zh-CN': '插件' },
+  'manager.nav.plugin-bundles': { en: 'Plugin bundles', 'zh-CN': '插件包' },
   'manager.nav.extension-points': { en: 'Extension points', 'zh-CN': '扩展点' },
   'manager.nav.routes': { en: 'Routes', 'zh-CN': '路由' },
   'manager.nav.marketplace': { en: 'Marketplace', 'zh-CN': '插件商店' },

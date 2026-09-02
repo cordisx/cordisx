@@ -70,6 +70,7 @@ import {
   type StagedPluginPackage,
 } from './plugin-package.js'
 import { stagePluginPackageSourceV1 } from './packages/delivery.js'
+import type { PluginPackageSourceV1 } from './packages/source.js'
 import {
   PackageLifecycleAuthority,
   createHostPermissionReviewAuthority,
@@ -580,6 +581,7 @@ export class PluginLifecycleCoordinator {
     readonly completed: readonly string[]
     readonly rollbacks: readonly { access: RollbackAccess; plan: RollbackPlan }[]
   } | undefined
+  private bundleClaimGuard: ((pluginId: string) => Promise<readonly string[]>) | undefined
 
   constructor(private readonly options: CoordinatorOptions) {
     if (!path.isAbsolute(options.homeDir)) throw new Error('CordisX home directory must be absolute')
@@ -610,6 +612,15 @@ export class PluginLifecycleCoordinator {
       runtimeGeneration: options.runtimeGeneration,
       permissionAuthority,
     })
+  }
+
+  setBundleClaimGuard(guard: (pluginId: string) => Promise<readonly string[]>): void {
+    this.bundleClaimGuard = guard
+  }
+
+  /** Bundle coordinator-only path; claim enforcement remains active for ordinary Manager operations. */
+  async handleBundleOperation(request: CordisXPluginLifecycleRequestV1): Promise<CordisXPluginLifecycleResultV1> {
+    return await this.handleRequest(request, true)
   }
 
   private async permissionPolicies(): Promise<readonly CordisXPersistedPermissionPolicyRecord[]> {
@@ -661,10 +672,15 @@ export class PluginLifecycleCoordinator {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       return await stageLocalPluginPackage(this.options.homeDir, sourceDirectory)
     }
-    return await stagePluginPackageSourceV1({
+    return await this.stagePackageSource({
       kind: 'local-directory',
       location: pathToFileURL(sourceDirectory).href,
-    }, {
+    })
+  }
+
+  /** Host-internal bundle orchestration entry; it preserves the same formal package validators. */
+  async stagePackageSource(source: PluginPackageSourceV1): Promise<StagedPluginPackage> {
+    return await stagePluginPackageSourceV1(source, {
       homeDir: this.options.homeDir,
       runtimeValidators: {
         [CORDISX_PLUGIN_MANIFEST_SCHEMA_V1]: value => {
@@ -776,6 +792,33 @@ export class PluginLifecycleCoordinator {
     } catch (error) {
       throw classify(error)
     }
+    return await this.planStagedPackage(request, active, staged)
+  }
+
+  /** Plan one already immutable package. Bundle install uses this dependency-first. */
+  async inspectStagedPackage(staged: StagedPluginPackage, requestId = `bundle-plugin-${randomUUID()}`): Promise<CordisXPluginLifecycleResultV1> {
+    const active = await this.store.loadActive()
+    const request: CordisXPluginLifecycleRequestV1 = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-lifecycle-operation.v1.schema.json',
+      schemaVersion: 1,
+      requestId,
+      profileId: this.options.profileId,
+      expectedRevision: active.revision,
+      runtimeGeneration: this.options.runtimeGeneration,
+      operation: { kind: 'inspect-local', sourceDirectory: '/host-internal/staged-package' },
+    }
+    try {
+      return await this.planStagedPackage(request, active, staged)
+    } catch (error) {
+      return this.failed(request, active, classify(error))
+    }
+  }
+
+  private async planStagedPackage(
+    request: CordisXPluginLifecycleRequestV1,
+    active: CordisXPluginActivationRecordV1,
+    staged: StagedPluginPackage,
+  ): Promise<CordisXPluginLifecycleResultV1> {
     if (this.reservedPluginIds.has(staged.manifest.id)) {
       throw new LifecycleFailure('operation-unavailable', 'A launcher-configured plugin already owns this id.')
     }
@@ -1681,6 +1724,10 @@ export class PluginLifecycleCoordinator {
   }
 
   async handle(request: CordisXPluginLifecycleRequestV1): Promise<CordisXPluginLifecycleResultV1> {
+    return await this.handleRequest(request, false)
+  }
+
+  private async handleRequest(request: CordisXPluginLifecycleRequestV1, bundleMutation: boolean): Promise<CordisXPluginLifecycleResultV1> {
     let active: CordisXPluginActivationRecordV1
     try {
       active = await this.active(request)
@@ -1698,6 +1745,10 @@ export class PluginLifecycleCoordinator {
         return await this.applyStateMutation(request, active, 'enable', operation.pluginId, operation.authorizationDecision)
       }
       if (operation.kind === 'disable' || operation.kind === 'uninstall') {
+        if (!bundleMutation && this.bundleClaimGuard !== undefined) {
+          const owners = await this.bundleClaimGuard(operation.pluginId)
+          if (owners.length > 0) throw new LifecycleFailure('operation-unavailable', `This plugin is managed by bundle${owners.length === 1 ? '' : 's'}: ${owners.join(', ')}.`)
+        }
         return await this.applyStateMutation(request, active, operation.kind, operation.pluginId, undefined, operation.impactToken)
       }
       if (operation.kind !== 'reload') throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
