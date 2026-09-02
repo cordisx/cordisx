@@ -48,10 +48,6 @@ cordisx
 我要发送按钮在点击的时候全屏放礼花。
 ```
 
-生成的是可独立安装的插件。插件只能使用 CordisX 已开放的能力；如果所需能力
-尚未开放，可以提交 PR 建设 CordisX 或底层 Cordis。查看
-[插件能力边界与贡献方式](./.agents/docs/plugin-capabilities.zh-CN.md)。
-
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-zh-dark.gif">

@@ -49,11 +49,6 @@ After CordisX starts, tell Codex what you want to add. For example:
 Make the send button launch full-screen confetti when clicked.
 ```
 
-The result is an independently installable plugin. Plugins use the capabilities
-CordisX exposes; when one is missing, you can contribute it to CordisX or the
-underlying Cordis runtime. See
-[plugin capabilities and contribution paths](./.agents/docs/plugin-capabilities.md).
-
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cordisx/cordisx.github.io/6078127db936d8932c41f63fa48c14d41ae90b62/assets/motion/cordisx-ai-plugin-demo-en-dark.gif">
