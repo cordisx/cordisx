@@ -62,7 +62,9 @@ This directory is the public, aggregatable source for CordisX product and archit
   app/profile command model, package ownership, and release gates.
 - `showcase-capture-integration.md` defines which real-showcase support belongs
   in CordisX, which behavior is opt-in, which capture artifacts stay in the
-  homepage repository, and which module guides an Agent must read first.
+  homepage repository, which module guides an Agent must read first, and how
+  changes to the root README AI-first plugin demo route to the website-owned
+  [capture workflow](https://github.com/cordisx/cordisx.github.io/blob/main/.agents/docs/ai-plugin-demo-capture.md).
 - `dynamic-package-store.md` maps source-v1/package-v2 intake and Host-private
   transaction hardening onto the single launcher package/activation stores.
 - `platform-capabilities.md` defines the Platform service, permission broker,
