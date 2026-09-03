@@ -51,6 +51,7 @@
     "prepare:dev": "npm run build",
     "prepack": "npm run build",
     "smoke": "node scripts/live-smoke.mjs",
+    "smoke:desktop-agents": "node scripts/run-codex-desktop-agent-session-harness.mjs",
     "typecheck": "npm run build --workspace=@cordisx/channel-runtime && npm run build --workspace=@cordisx/schemastery-ui && node scripts/prepare-bundled-schemastery-ui.mjs && tsc -p tsconfig.json --noEmit"
   },
   "engines": {

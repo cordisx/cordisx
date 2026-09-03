@@ -20,6 +20,7 @@
     "precheckpoint:local-dev": "npm run build --workspace=cordisx",
     "prepare:dev": "npm run prepare:dev --workspace=cordisx",
     "smoke": "node packages/cli/scripts/live-smoke.mjs",
+    "smoke:desktop-agents": "node packages/cli/scripts/run-codex-desktop-agent-session-harness.mjs",
     "smoke:isolated-app": "node packages/cli/scripts/run-isolated-app-smoke.mjs",
     "test": "npm run build --workspace=@cordisx/schemastery-ui && vitest run --maxWorkers=1 --no-file-parallelism --testTimeout=30000 --hookTimeout=30000",
     "typecheck": "npm run typecheck --workspaces --if-present"
