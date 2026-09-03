@@ -1564,7 +1564,7 @@ export class PlaygroundScenarioLabController {
       entries: this.conversationEntries,
       composer: {
         availability: 'unavailable', placeholder: 'Use Run or Next to drive this disposable scenario.', disabled: true,
-        disabledReason: 'Scenario controls own this deterministic preview.', submit: { id: 'scenario.submit' },
+        disabledReason: 'Scenario controls own this deterministic preview.', shortcutPolicy: 'enter', submit: { id: 'scenario.submit' },
       },
       headerActions: [],
     })

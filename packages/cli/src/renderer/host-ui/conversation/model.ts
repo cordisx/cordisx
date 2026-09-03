@@ -3,6 +3,7 @@ import { cloneAgentAvatarRef, type AgentAvatarRef } from '@cordisx/protocol/agen
 import type { AgentDefinitionIdentity, AgentDetailReference } from '@cordisx/protocol/agents/v1'
 import type { AgentLoopBindingIdentity, AgentLoopTaskDetailsUrl } from '@cordisx/protocol/agent-loop/v3'
 import type { SessionId, SessionSeq } from '@cordisx/protocol/sessions/v1'
+import type { AgentConversationComposerShortcutPolicy } from '@cordisx/protocol/agent-conversation-shell/v5'
 import { CORDISX_HOST_ICON_TOKENS } from '../../surfaces.js'
 import { immutableSnapshot, LOCAL_ID_PATTERN, REFERENCE_PATTERN } from '../../validation.js'
 import { validateAgentLoopTaskDetailsUrl } from '../AgentTaskDetailsNavigator.js'
@@ -144,6 +145,7 @@ export interface AgentConversationComposer {
   readonly placeholder: string
   readonly disabled: boolean
   readonly disabledReason?: string
+  readonly shortcutPolicy: AgentConversationComposerShortcutPolicy
   readonly submit: AgentConversationCommandReference
 }
 
@@ -402,11 +404,14 @@ export function createAgentConversationModel(input: AgentConversationModel): Age
     if (input.entries.length !== 0) throw new Error('no-room selection cannot contain timeline entries')
     if (input.headerActions.length !== 0) throw new Error('no-room selection forbids header actions')
   }
-  assertKnownKeys(input.composer, ['availability', 'placeholder', 'disabled', 'disabledReason', 'submit'], 'composer')
+  assertKnownKeys(input.composer, ['availability', 'placeholder', 'disabled', 'disabledReason', 'shortcutPolicy', 'submit'], 'composer')
   if (!['available', 'unavailable'].includes(input.composer.availability)) throw new Error('composer.availability is invalid')
   assertText(input.composer.placeholder, 'composer.placeholder', 1_000)
   if (typeof input.composer.disabled !== 'boolean') throw new Error('composer.disabled must be boolean')
   if (input.composer.disabledReason !== undefined) assertText(input.composer.disabledReason, 'composer.disabledReason', 1_000)
+  if (input.composer.shortcutPolicy !== 'enter' && input.composer.shortcutPolicy !== 'mod-enter') {
+    throw new Error('composer.shortcutPolicy is invalid')
+  }
   assertCommand(input.composer.submit, 'composer.submit')
   return immutableSnapshot(input)
 }
