@@ -52,6 +52,29 @@ export interface SelectProps {
   readonly onChange: (value: string) => void
 }
 
+export interface SelectionRailOption {
+  readonly value: string
+  readonly label: React.ReactNode
+  readonly description?: React.ReactNode
+  readonly disabled?: boolean
+  readonly controls?: string
+}
+
+export interface SelectionRailProps {
+  readonly className?: string
+  readonly 'aria-label': string
+  readonly value: string
+  readonly options: readonly SelectionRailOption[]
+  readonly onChange: (value: string) => void
+  readonly layout?: 'responsive' | 'vertical' | 'horizontal'
+}
+
+export interface MarkdownViewerProps {
+  readonly source: string
+  readonly className?: string
+  readonly 'aria-label'?: string
+}
+
 function HostComponent<Props>(name: string): React.ComponentType<Props> {
   return function UnavailableHostComponent(): never {
     throw new Error(`${name} is available only inside the CordisX renderer Host`)
@@ -64,5 +87,7 @@ export const EmptyState = HostComponent<EmptyStateProps>('EmptyState')
 export const Heading = HostComponent<HeadingProps>('Heading')
 export const Icon = HostComponent<IconProps>('Icon')
 export const Select = HostComponent<SelectProps>('Select')
+export const SelectionRail = HostComponent<SelectionRailProps>('SelectionRail')
+export const MarkdownViewer = HostComponent<MarkdownViewerProps>('MarkdownViewer')
 export const Stack = HostComponent<StackProps>('Stack')
 export const Text = HostComponent<TextProps>('Text')

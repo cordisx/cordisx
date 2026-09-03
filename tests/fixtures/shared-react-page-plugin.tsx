@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import React, { defineReactPage, useEffect, useState } from 'cordisx/react'
-import { Button, Card, Heading, Stack, Text } from 'cordisx/ui'
+import { Button, Card, Heading, MarkdownViewer, SelectionRail, Stack, Text } from 'cordisx/ui'
 import {
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_ROUTE_SCHEMA_V2,
@@ -45,6 +45,7 @@ const route = {
 
 const mount = defineReactPage<Messages>(({ t }) => {
   const [count, setCount] = useState(0)
+  const [section, setSection] = useState('overview')
   useEffect(() => {
     globalThis.__sharedReactEffectMounts = (globalThis.__sharedReactEffectMounts ?? 0) + 1
     return () => { globalThis.__sharedReactEffectCleanups = (globalThis.__sharedReactEffectCleanups ?? 0) + 1 }
@@ -59,6 +60,20 @@ const mount = defineReactPage<Messages>(({ t }) => {
             {t('counter', { count })}
           </Button>
         </Stack>
+      </Card>
+      <Card>
+        <SelectionRail
+          aria-label="Document sections"
+          value={section}
+          options={[
+            { value: 'overview', label: 'Overview', controls: 'shared-react-document' },
+            { value: 'details', label: 'Details', controls: 'shared-react-document' },
+          ]}
+          onChange={setSection}
+        />
+        <div id="shared-react-document" role="tabpanel">
+          <MarkdownViewer source={`## ${section}\n\nSafe **Markdown**.`} />
+        </div>
       </Card>
     </Stack>
   )

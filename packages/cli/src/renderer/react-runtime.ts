@@ -11,6 +11,8 @@ import type {
   CordisXReactPageComponent,
 } from '../contracts.js'
 import { HostThemeProjection } from './host-theme.js'
+import { PublicMarkdownViewer } from './host-ui/PublicMarkdownViewer.js'
+import { PublicSelectionRail } from './host-ui/PublicSelectionRail.js'
 
 type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost'
 type StackDirection = 'row' | 'column'
@@ -87,6 +89,21 @@ const SHARED_REACT_STYLES = `
 .cxr-ui-empty{display:flex;min-height:180px;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:24px;text-align:center;color:var(--cx-muted)}
 .cxr-ui-empty-title{color:var(--cx-text);font-size:16px;font-weight:650}
 .cxr-ui-error{display:grid;min-height:180px;place-content:center;gap:6px;padding:24px;text-align:center;color:var(--cx-danger)}
+.cxr-ui-selection-rail{display:flex;min-width:0;flex-direction:column;gap:4px;padding:4px;border:1px solid var(--cx-border);border-radius:10px;background:var(--cx-surface)}
+.cxr-ui-selection-rail[data-layout="horizontal"]{flex-direction:row;overflow-x:auto}
+.cxr-ui-selection-rail-item{appearance:none;display:grid;min-width:0;gap:2px;border:0;border-radius:7px;padding:9px 10px;background:transparent;color:var(--cx-text);font:inherit;text-align:left;cursor:pointer}
+.cxr-ui-selection-rail[data-layout="horizontal"] .cxr-ui-selection-rail-item{min-width:max-content}
+.cxr-ui-selection-rail-item:hover:not(:disabled){background:var(--cx-hover)}
+.cxr-ui-selection-rail-item[aria-selected="true"]{background:color-mix(in srgb,var(--cx-primary) 14%,var(--cx-surface-raised));color:var(--cx-text)}
+.cxr-ui-selection-rail-item:focus-visible{outline:2px solid var(--cx-focus);outline-offset:1px}
+.cxr-ui-selection-rail-item:disabled{cursor:not-allowed;opacity:var(--cx-disabled)}
+.cxr-ui-selection-rail-label{font-weight:620;line-height:1.35}.cxr-ui-selection-rail-description{color:var(--cx-muted);font-size:12px;line-height:1.35}
+.cxr-ui-markdown{width:100%;max-width:none;min-width:0;margin:0;color:var(--cx-text);font-size:13px;line-height:1.65;overflow-wrap:anywhere}
+.cxr-ui-markdown>:first-child{margin-top:0}.cxr-ui-markdown>:last-child{margin-bottom:0}
+.cxr-ui-markdown h1,.cxr-ui-markdown h2,.cxr-ui-markdown h3,.cxr-ui-markdown h4{margin:1.55em 0 .65em;line-height:1.3}.cxr-ui-markdown h1{padding-bottom:.35em;border-bottom:1px solid var(--cx-border);font-size:22px}.cxr-ui-markdown h2{padding-bottom:.3em;border-bottom:1px solid var(--cx-border);font-size:18px}.cxr-ui-markdown h3{font-size:15px}
+.cxr-ui-markdown p,.cxr-ui-markdown ul,.cxr-ui-markdown ol,.cxr-ui-markdown blockquote,.cxr-ui-markdown pre,.cxr-ui-markdown table{margin:0 0 1em}.cxr-ui-markdown ul,.cxr-ui-markdown ol{padding-left:1.65em}.cxr-ui-markdown li+li{margin-top:.3em}
+.cxr-ui-markdown a{color:var(--cx-primary);text-decoration-thickness:1px;text-underline-offset:2px}.cxr-ui-markdown code{border-radius:5px;padding:.15em .35em;background:var(--cx-hover);font:.9em/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}.cxr-ui-markdown pre{max-width:100%;overflow:auto;border:1px solid var(--cx-border);border-radius:9px;padding:12px;background:var(--cx-surface-raised)}.cxr-ui-markdown pre code{padding:0;background:transparent;color:inherit;white-space:pre}.cxr-ui-markdown pre code[data-shiki-theme]{display:block}.cxr-ui-markdown .cxm-readme-code-line{display:block;min-height:1.45em}
+.cxr-ui-markdown blockquote{border-left:3px solid var(--cx-border);padding-left:12px;color:var(--cx-muted)}.cxr-ui-markdown table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse}.cxr-ui-markdown th,.cxr-ui-markdown td{border:1px solid var(--cx-border);padding:6px 9px;text-align:left}.cxr-ui-markdown picture{display:block;max-width:100%;margin:0 0 1em}.cxr-ui-markdown img,.cxr-ui-markdown video{display:block;max-width:100%;height:auto;border-radius:9px;background:var(--cx-surface-raised)}.cxr-ui-markdown picture>img{margin:0 auto}.cxr-ui-markdown video{width:100%}
 `
 
 function joinClassName(...values: (string | undefined)[]): string {
@@ -267,7 +284,9 @@ export interface SharedReactRuntime {
     EmptyState: typeof EmptyState
     Heading: typeof Heading
     Icon: typeof Icon
+    MarkdownViewer: typeof PublicMarkdownViewer
     Select: typeof Select
+    SelectionRail: typeof PublicSelectionRail
     Stack: typeof Stack
     Text: typeof Text
   }>
@@ -345,7 +364,7 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
     React,
     jsxRuntime,
     jsxDevRuntime,
-    ui: Object.freeze({ Button, Card, EmptyState, Heading, Icon, Select, Stack, Text }),
+    ui: Object.freeze({ Button, Card, EmptyState, Heading, Icon, MarkdownViewer: PublicMarkdownViewer, Select, SelectionRail: PublicSelectionRail, Stack, Text }),
     defineReactPage,
     dispose(): void {
       if (disposed) return
