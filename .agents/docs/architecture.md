@@ -159,6 +159,11 @@ ordinary Playground plugins retain the interactive fail-closed path. No
 wildcard or plugin-provided flag is accepted. Connection, route, permission,
 and plugin-generation replacement abort pending Agent runtime prompts before
 fencing leases, so an obsolete dialog cannot survive as inert UI.
+The `dev:ui` session mints that provenance only for enabled, non-built-in local
+entries explicitly named by the source Playground composition. It compiles
+them through the normal verified local-development builder, carries its full
+watch graph into Vite invalidation, and assigns a Host-generated artifact
+generation; `loadConfig` never accepts equivalent provenance from JSON.
 
 Small plugin-owned durable state uses the Host public
 `cordisx.owner-documents/v1` service at `ctx.documents`. The renderer receives
