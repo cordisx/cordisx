@@ -5,6 +5,18 @@ export function desktopAgentSessionRendererTimeoutMs(enabled) {
   return enabled ? 120_000 : 30_000
 }
 
+export async function waitForOwnedProfileQuiescence(read, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 5_000
+  const intervalMs = options.intervalMs ?? 100
+  const startedAt = Date.now()
+  let active = read()
+  while (active.length > 0 && Date.now() - startedAt < timeoutMs) {
+    await new Promise(resolve => setTimeout(resolve, Math.min(intervalMs, timeoutMs - (Date.now() - startedAt))))
+    active = read()
+  }
+  return active
+}
+
 export async function writeDesktopAgentSessionHarnessReport(reportPath, fallback, harness) {
   let report
   let fallbackCreated = false

@@ -121,6 +121,11 @@ export function createCodexDesktopAgentSessionSmokeController(
     return agent
   }
 
+  const requireHandle = (): AgentHandle => {
+    if (handle === undefined) throw new Error('no live Agent owner handle')
+    return handle
+  }
+
   const acquire = (result: Awaited<ReturnType<Context['agents']['create']>>): unknown => {
     if (result.status === 'accepted') {
       handle = result.handle
@@ -188,7 +193,7 @@ export function createCodexDesktopAgentSessionSmokeController(
     send: async input => {
       const data = object(input)
       const currentAgent = requireAgent()
-      const value = message(requiredText(data.messageId, 'messageId'), requiredText(data.text, 'text'), currentAgent.session.header.owner)
+      const value = message(requiredText(data.messageId, 'messageId'), requiredText(data.text, 'text'), requireHandle().owner)
       const mode = data.mode
       if (mode === 'followup') return await currentAgent.followup(value)
       if (mode === 'steer') return await currentAgent.steer(value)
@@ -305,4 +310,3 @@ export function apply(ctx: Context, config: DesktopAgentSessionSmokeConfig): voi
     await controller.dispose()
   }, 'Codex Desktop Agent Session smoke fixture')
 }
-
