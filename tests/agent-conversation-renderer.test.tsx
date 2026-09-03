@@ -795,6 +795,73 @@ describe('AgentConversationRenderer production DOM', () => {
     }
   })
 
+  it('keeps the disabled attachment placeholder in exact compact and expanded Host composer geometry', async () => {
+    const requests: AgentConversationCommandRequest[] = []
+    const model = createAgentConversationModel({
+      ...createPlaygroundConversationFixture('conversation', 'en'),
+      composer: { availability: 'available', placeholder: 'Write a message', disabled: false, submit: { id: 'room.send' } },
+    })
+    const harness = await render(model, new AgentConversationCommandController({
+      execute: async request => { requests.push(request) },
+    }, model))
+    try {
+      const document = harness.dom.window.document
+      const composer = document.querySelector<HTMLFormElement>('.cxa-composer')!
+      const footer = document.querySelector<HTMLElement>('.cxa-composer-footer')!
+      const draft = document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+      const attachment = document.querySelector<HTMLButtonElement>('.cxa-attachment-placeholder')!
+      const notice = document.querySelector<HTMLElement>('.cxa-composer-notice')!
+      const send = document.querySelector<HTMLButtonElement>('.cxa-send')!
+      expect([...footer.children]).toEqual([attachment, notice, send])
+      expect(attachment.disabled).toBe(true)
+      expect(attachment.type).toBe('button')
+      expect(attachment.dataset.hostComposerAttachment).toBe('unavailable')
+      expect(attachment.getAttribute('aria-label')).toBe('添加附件（暂不可用）')
+      expect(attachment.title).toBe('添加附件（暂不可用）')
+      expect(attachment.querySelector('[data-host-icon="host:new"][data-host-icon-key="action.add"]')).not.toBeNull()
+
+      const valueSetter = Object.getOwnPropertyDescriptor(harness.dom.window.HTMLTextAreaElement.prototype, 'value')?.set
+      await act(async () => {
+        valueSetter?.call(draft, 'one line')
+        draft.dispatchEvent(new harness.dom.window.Event('input', { bubbles: true }))
+        await Promise.resolve()
+      })
+      draft.focus()
+      draft.setSelectionRange(2, 6)
+      composer.dataset.cordisxShikitorLayout = 'compact'
+      const residentDraft = draft
+      const residentAttachment = attachment
+      composer.style.width = '280px'
+      document.documentElement.dataset.theme = 'light'
+      composer.dataset.cordisxShikitorLayout = 'expanded'
+      document.documentElement.dataset.theme = 'dark'
+      attachment.click()
+      expect(document.querySelector('.cxa-draft')).toBe(residentDraft)
+      expect(document.querySelector('.cxa-attachment-placeholder')).toBe(residentAttachment)
+      expect(document.activeElement).toBe(draft)
+      expect(draft.value).toBe('one line')
+      expect([draft.selectionStart, draft.selectionEnd]).toEqual([2, 6])
+      expect(requests).toHaveLength(0)
+
+      const [styles, shikitor] = await Promise.all([
+        readFile(path.resolve('packages/cli/src/renderer/host-ui/conversation/styles.ts'), 'utf8'),
+        readFile(path.resolve('packages/cli/src/renderer/host-ui/conversation/ShikitorComposerAdapter.ts'), 'utf8'),
+      ])
+      expect(styles).toContain('.cxa-attachment-placeholder{appearance:none;display:inline-grid;width:30px;height:30px;min-height:30px;flex:none')
+      expect(styles).toContain('border:1px solid var(--cx-border)')
+      expect(styles).toContain('background:transparent;color:var(--cx-muted)')
+      expect(shikitor).toContain('grid-template-columns:auto minmax(0,1fr) auto')
+      expect(shikitor).toContain('>.cxa-draft{grid-column:2;grid-row:1;align-self:center}')
+      expect(shikitor).toContain('>.cxa-attachment-placeholder{grid-column:1;grid-row:1;align-self:center}')
+      expect(shikitor).toContain('>.cxa-send{grid-column:3;grid-row:1;align-self:center}')
+      expect(shikitor).toContain('[data-cordisx-shikitor-layout="expanded"]>.cxa-composer-footer{grid-column:1;grid-row:2}')
+      expect(shikitor).toContain('>.shikitor.shikitor--attached{inset:8px 46px auto;width:auto;height:30px}')
+      expect(shikitor).toContain('COMPACT_COLUMN_GAP * 2 - attachmentWidth - sendWidth')
+    } finally {
+      await harness.close()
+    }
+  })
+
   it('keeps Host-owned draft state, submit, and focus order outside the immutable model', async () => {
     const requests: AgentConversationCommandRequest[] = []
     const model = createAgentConversationModel({
