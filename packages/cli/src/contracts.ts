@@ -1256,6 +1256,11 @@ export type CordisXAgentConversationShellSourceFactoryV4 = (
 ) => import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellSource>
 
+export type CordisXAgentConversationShellSourceFactoryV5 = (
+  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellBinding>,
+) => import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellSource
+  | Promise<import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellSource>
+
 /** Host-owned page mount paired with one fiber-owned source registration. */
 export interface CordisXAgentConversationShellRegistration {
   readonly mount: CordisXPageMount
@@ -1269,6 +1274,8 @@ export interface CordisXAgentConversationShell {
   registerSource(factory: CordisXAgentConversationShellSourceFactoryV3): CordisXAgentConversationShellRegistration
   /** Explicit Session-runtime shell seam; it never reinterprets v4 facts as AgentLoop v3. */
   registerSourceV4(factory: CordisXAgentConversationShellSourceFactoryV4): CordisXAgentConversationShellRegistration
+  /** Shell v5 adds only the explicit Host-owned composer shortcut policy. */
+  registerSourceV5(factory: CordisXAgentConversationShellSourceFactoryV5): CordisXAgentConversationShellRegistration
 }
 
 export interface CordisXRouteDefinition<Outlet extends CordisXOutletName = CordisXOutletName> {

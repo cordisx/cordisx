@@ -8,6 +8,10 @@ import type {
   AgentConversationShellSnapshot as AgentConversationShellSnapshotV4,
   AgentConversationShellSubscriptionClosed as AgentConversationShellSubscriptionClosedV4,
 } from '@cordisx/protocol/agent-conversation-shell/v4'
+import type {
+  AgentConversationShellSnapshot as AgentConversationShellSnapshotV5,
+  AgentConversationShellSubscriptionClosed as AgentConversationShellSubscriptionClosedV5,
+} from '@cordisx/protocol/agent-conversation-shell/v5'
 import { Context } from '@deepseek-ai/cordis'
 import { JSDOM } from 'jsdom'
 import { act } from 'react'
@@ -336,6 +340,70 @@ describe('Agent conversation shell public runtime', () => {
     commands.dispose()
     await settle()
     dom.window.close()
+  })
+
+  it('accepts Shell v5 and fails closed when its terminal schema identity is not exactly v5', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
+    const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-v5' })
+    let resolveClosed: ((value: AgentConversationShellSubscriptionClosedV5) => void) | undefined
+    const closed = new Promise<AgentConversationShellSubscriptionClosedV5>(resolve => { resolveClosed = resolve })
+    let connectionClose: AgentConversationShellSubscriptionClosedV5 | undefined
+    let unsubscribed = 0
+    const registration = runtime.register(plugin, binding => {
+      const snapshot: AgentConversationShellSnapshotV5 = {
+        binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration },
+        generation: 'session-generation-v5', snapshotSequence: 0, selection: { kind: 'no-room' }, items: [],
+        composer: {
+          availability: 'available', placeholder: message('composer.v5', 'Message'), disabled: { value: false },
+          shortcutPolicy: 'mod-enter', submit: { id: 'send' },
+        },
+        headerActions: [],
+      }
+      const subscription = {
+        subscriptionId: 'subscription-v5', binding: snapshot.binding, generation: snapshot.generation,
+        afterSequence: 0, snapshotSequence: 0,
+      }
+      const close = (code: AgentConversationShellSubscriptionClosedV5['code']): AgentConversationShellSubscriptionClosedV5 => ({
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-conversation-shell-subscription-close.v5.schema.json',
+        contract: 'cordisx.agent-conversation-shell-subscription-close/v5', schemaVersion: 5,
+        subscriptionId: subscription.subscriptionId, binding: subscription.binding, generation: subscription.generation,
+        status: 'closed', code,
+      })
+      connectionClose = close('connection-replaced')
+      return {
+        snapshot: async () => snapshot,
+        subscribe: async () => ({
+          result: { type: 'subscribe', status: 'accepted', code: 'allowed', subscription },
+          handle: {
+            subscription,
+            pages: { async *[Symbol.asyncIterator]() { await new Promise<void>(() => {}) } },
+            closed,
+            unsubscribe: async () => { unsubscribed += 1; return close('unsubscribed') },
+          },
+        }),
+        updateRoomSettings: async request => ({
+          type: 'update-room-settings', requestId: request.requestId, binding: request.binding,
+          generation: request.generation, roomId: request.roomId, expectedSnapshotSequence: request.expectedSnapshotSequence,
+          status: 'unavailable', code: 'settings-unavailable',
+        }),
+        dispose() {},
+      }
+    }, undefined, 5)
+    registration.mount(mountContext(dom))
+    await vi.waitFor(() => expect(dom.window.document.querySelector('[data-agent-conversation-renderer="production"]')).not.toBeNull())
+    resolveClosed!({
+      ...connectionClose!,
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-conversation-shell-subscription-close.v4.schema.json',
+      contract: 'cordisx.agent-conversation-shell-subscription-close/v4',
+      schemaVersion: 4,
+    } as unknown as AgentConversationShellSubscriptionClosedV5)
+    await waitForRuntimeState(dom, 'error')
+    expect(unsubscribed).toBe(1)
+    registration.dispose(); runtime.dispose(); commands.dispose()
+    await settle(); dom.window.close()
   })
 
   it('opens recovered Shell v4 AgentSetup identity details from members and avatars, then fences stale generations', async () => {

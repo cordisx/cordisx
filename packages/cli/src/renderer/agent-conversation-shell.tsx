@@ -37,6 +37,15 @@ import type {
   AgentConversationShellSubscriptionClosed as AgentConversationShellSubscriptionClosedV4,
   AgentConversationShellUpdate as AgentConversationShellUpdateV4,
 } from '@cordisx/protocol/agent-conversation-shell/v4'
+import type {
+  AgentConversationShellPage as AgentConversationShellPageV5,
+  AgentConversationShellSnapshot as AgentConversationShellSnapshotV5,
+  AgentConversationShellSource as AgentConversationShellSourceV5,
+  AgentConversationShellSubscribeRuntimeResult as AgentConversationShellSubscribeRuntimeResultV5,
+  AgentConversationShellSubscription as AgentConversationShellSubscriptionV5,
+  AgentConversationShellSubscriptionClosed as AgentConversationShellSubscriptionClosedV5,
+  AgentConversationShellUpdate as AgentConversationShellUpdateV5,
+} from '@cordisx/protocol/agent-conversation-shell/v5'
 import * as React from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type {
@@ -46,6 +55,7 @@ import type {
   CordisXAgentConversationShellSourceFactoryV2,
   CordisXAgentConversationShellSourceFactoryV3,
   CordisXAgentConversationShellSourceFactoryV4,
+  CordisXAgentConversationShellSourceFactoryV5,
   CordisXJsonValue,
   CordisXLocalizedText,
   CordisXPageMount,
@@ -628,6 +638,18 @@ function assertSnapshotV4(value: unknown): asserts value is AgentConversationShe
   }
 }
 
+function assertSnapshotV5(value: unknown): asserts value is AgentConversationShellSnapshotV5 {
+  plainObject(value, 'v5 snapshot')
+  exactKeys(value, ['binding', 'generation', 'snapshotSequence', 'selection', 'items', 'composer', 'headerActions'], 'v5 snapshot')
+  plainObject(value.composer, 'v5 snapshot.composer')
+  exactKeys(value.composer, ['availability', 'placeholder', 'disabled', 'shortcutPolicy', 'submit'], 'v5 snapshot.composer')
+  if (value.composer.shortcutPolicy !== 'enter' && value.composer.shortcutPolicy !== 'mod-enter') {
+    throw new Error('v5 snapshot.composer.shortcutPolicy is invalid')
+  }
+  const { shortcutPolicy: _shortcutPolicy, ...composerV4 } = value.composer
+  assertSnapshotV4({ ...value, composer: composerV4 })
+}
+
 function sameBinding(left: { bindingId: string; ownerGeneration: string }, right: { bindingId: string; ownerGeneration: string }): boolean {
   return left.bindingId === right.bindingId && left.ownerGeneration === right.ownerGeneration
 }
@@ -807,6 +829,7 @@ function projectSnapshot(
       availability: snapshot.composer.availability,
       placeholder: localization.resolve(snapshot.composer.placeholder, 'composer.placeholder'),
       disabled: snapshot.composer.disabled.value,
+      shortcutPolicy: 'enter',
       ...(snapshot.composer.disabled.reason === undefined ? {} : {
         disabledReason: localization.resolve(snapshot.composer.disabled.reason, 'composer.disabled'),
       }),
@@ -887,10 +910,29 @@ export function projectAgentConversationShellSnapshotV4(
       availability: snapshot.composer.availability,
       placeholder: localization.resolve(snapshot.composer.placeholder, 'composer.placeholder'),
       disabled: snapshot.composer.disabled.value,
+      shortcutPolicy: 'enter',
       ...(snapshot.composer.disabled.reason === undefined ? {} : { disabledReason: localization.resolve(snapshot.composer.disabled.reason, 'composer.disabled') }),
       submit: { id: snapshot.composer.submit.id, ...(snapshot.composer.submit.arguments === undefined ? {} : { arguments: snapshot.composer.submit.arguments as CordisXJsonValue }) },
     },
     headerActions: snapshot.headerActions.map((action, index) => projectAction(action, localization, `headerActions.${index}`)),
+  })
+}
+
+export function projectAgentConversationShellSnapshotV5(
+  owner: string,
+  snapshotInput: AgentConversationShellSnapshotV5,
+  localization: ProjectionLocalization,
+): AgentConversationModel {
+  const snapshot = immutableSnapshot(snapshotInput)
+  assertSnapshotV5(snapshot)
+  const { shortcutPolicy, ...composerV4 } = snapshot.composer
+  const model = projectAgentConversationShellSnapshotV4(owner, {
+    ...snapshot,
+    composer: composerV4,
+  }, localization)
+  return createAgentConversationModel({
+    ...model,
+    composer: { ...model.composer, shortcutPolicy },
   })
 }
 
@@ -922,11 +964,11 @@ function rendererCopy(locale: string): AgentConversationRendererCopy {
 }
 
 interface RegisteredSource {
-  readonly version: 3 | 4
+  readonly version: 3 | 4 | 5
   readonly owner: string
   readonly ownerGeneration: string
   readonly effect: PluginGenerationEffectIdentity
-  readonly factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2 | CordisXAgentConversationShellSourceFactoryV3 | CordisXAgentConversationShellSourceFactoryV4
+  readonly factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2 | CordisXAgentConversationShellSourceFactoryV3 | CordisXAgentConversationShellSourceFactoryV4 | CordisXAgentConversationShellSourceFactoryV5
   readonly principal?: PluginPrincipalToken
   readonly sessions: Set<MountedConversation>
   active: boolean
@@ -963,10 +1005,10 @@ class BoundSourceHost implements AgentConversationShellHost {
 }
 
 class MountedConversation {
-  private source: AgentConversationShellSource | AgentConversationShellSourceV4 | undefined
-  private subscription: AgentConversationShellSubscription | AgentConversationShellSubscriptionV4 | undefined
+  private source: AgentConversationShellSource | AgentConversationShellSourceV4 | AgentConversationShellSourceV5 | undefined
+  private subscription: AgentConversationShellSubscription | AgentConversationShellSubscriptionV4 | AgentConversationShellSubscriptionV5 | undefined
   private unsubscribe: (() => void | Promise<unknown>) | undefined
-  private snapshot: AgentConversationShellSnapshot | AgentConversationShellSnapshotV4 | undefined
+  private snapshot: AgentConversationShellSnapshot | AgentConversationShellSnapshotV4 | AgentConversationShellSnapshotV5 | undefined
   private cursor = 0
   private terminal = false
   private disposed = false
@@ -1026,17 +1068,19 @@ class MountedConversation {
       || typeof sourceCandidate.snapshot !== 'function' || typeof sourceCandidate.subscribe !== 'function' || typeof sourceCandidate.dispose !== 'function') {
       throw new Error('conversation source must implement snapshot, subscribe, and dispose')
     }
-    const source = sourceCandidate as unknown as AgentConversationShellSource | AgentConversationShellSourceV4
+    const source = sourceCandidate as unknown as AgentConversationShellSource | AgentConversationShellSourceV4 | AgentConversationShellSourceV5
     this.source = source
     const initial = immutableSnapshot(await this.runPlugin<unknown>('agent-conversation-shell.snapshot', () => source.snapshot()))
-    if (this.record.version === 4) assertSnapshotV4(initial)
+    if (this.record.version === 5) assertSnapshotV5(initial)
+    else if (this.record.version === 4) assertSnapshotV4(initial)
     else assertSnapshot(initial)
     this.assertSnapshotFence(initial)
-    if (this.record.version === 4) projectAgentConversationShellSnapshotV4(this.record.owner, initial as AgentConversationShellSnapshotV4, { resolve: message => message.fallback })
+    if (this.record.version === 5) projectAgentConversationShellSnapshotV5(this.record.owner, initial as AgentConversationShellSnapshotV5, { resolve: message => message.fallback })
+    else if (this.record.version === 4) projectAgentConversationShellSnapshotV4(this.record.owner, initial as AgentConversationShellSnapshotV4, { resolve: message => message.fallback })
     else projectSnapshot(this.record.owner, initial as AgentConversationShellSnapshot, { resolve: message => message.fallback })
     this.snapshot = initial
     this.cursor = initial.snapshotSequence
-    const subscribed = await this.runPlugin<unknown>('agent-conversation-shell.subscribe', () => source.subscribe(this.cursor)) as AgentConversationShellSubscribeRuntimeResultV3 | AgentConversationShellSubscribeRuntimeResultV4
+    const subscribed = await this.runPlugin<unknown>('agent-conversation-shell.subscribe', () => source.subscribe(this.cursor)) as AgentConversationShellSubscribeRuntimeResultV3 | AgentConversationShellSubscribeRuntimeResultV4 | AgentConversationShellSubscribeRuntimeResultV5
     if (this.disposed) {
       if ('handle' in subscribed) subscribed.handle.unsubscribe()
       return
@@ -1073,13 +1117,13 @@ class MountedConversation {
     exactKeys(subscribed.result, ['type', 'status', 'code', 'subscription'], 'subscribe result')
     if (subscribed.result.code !== 'allowed' || !('handle' in subscribed)) throw new Error('accepted subscribe result is missing its runtime handle')
     plainObject(subscribed.handle, 'subscribe runtime handle')
-    exactKeys(subscribed.handle, this.record.version === 4 ? ['subscription', 'pages', 'closed', 'unsubscribe'] : ['subscription', 'pages', 'unsubscribe'], 'subscribe runtime handle')
+    exactKeys(subscribed.handle, this.record.version >= 4 ? ['subscription', 'pages', 'closed', 'unsubscribe'] : ['subscription', 'pages', 'unsubscribe'], 'subscribe runtime handle')
     if (typeof subscribed.handle.unsubscribe !== 'function') throw new Error('accepted subscribe result has an invalid runtime handle')
     this.unsubscribe = () => subscribed.handle.unsubscribe()
-    if (this.record.version === 4) {
+    if (this.record.version >= 4) {
       const closed = (subscribed.handle as { readonly closed?: unknown }).closed
-      if (closed === null || typeof closed !== 'object' || typeof (closed as PromiseLike<unknown>).then !== 'function') throw new Error('v4 subscribe runtime handle.closed is invalid')
-      void Promise.resolve(closed).then(value => this.observeV4Closed(value)).catch(error => this.fail(new Error(`v4 subscription closed Promise rejected: ${String(error)}`)))
+      if (closed === null || typeof closed !== 'object' || typeof (closed as PromiseLike<unknown>).then !== 'function') throw new Error(`v${this.record.version} subscribe runtime handle.closed is invalid`)
+      void Promise.resolve(closed).then(value => this.observeVersionedClosed(value)).catch(error => this.fail(new Error(`v${this.record.version} subscription closed Promise rejected: ${String(error)}`)))
     }
     assertSubscription(subscribed.result.subscription, 'subscribe result.subscription')
     assertSubscription(subscribed.handle.subscription, 'subscribe handle.subscription')
@@ -1097,10 +1141,10 @@ class MountedConversation {
     }
     this.subscription = immutableSnapshot(issued)
     this.render()
-    await this.consume(subscribed.handle.pages as AsyncIterable<AgentConversationShellPage | AgentConversationShellPageV4>)
+    await this.consume(subscribed.handle.pages as AsyncIterable<AgentConversationShellPage | AgentConversationShellPageV4 | AgentConversationShellPageV5>)
   }
 
-  private async consume(pages: AsyncIterable<AgentConversationShellPage | AgentConversationShellPageV4>): Promise<void> {
+  private async consume(pages: AsyncIterable<AgentConversationShellPage | AgentConversationShellPageV4 | AgentConversationShellPageV5>): Promise<void> {
     for await (const pageInput of pages) {
       if (this.disposed) return
       if (this.terminal) throw new Error('conversation source emitted a page after terminal disposal')
@@ -1111,7 +1155,7 @@ class MountedConversation {
     if (!this.disposed && !this.terminal) throw new Error('conversation source ended without terminal disposal')
   }
 
-  private applyPage(page: AgentConversationShellPage | AgentConversationShellPageV4): void {
+  private applyPage(page: AgentConversationShellPage | AgentConversationShellPageV4 | AgentConversationShellPageV5): void {
     plainObject(page, 'subscription page')
     exactKeys(page, ['subscription', 'afterSequence', 'phase', 'updates', 'nextAfterSequence', 'hasMore'], 'subscription page')
     assertSubscription(page.subscription, 'subscription page.subscription')
@@ -1163,19 +1207,20 @@ class MountedConversation {
     else this.render()
   }
 
-  private assertUpdate(value: unknown, label: string): asserts value is AgentConversationShellUpdate | AgentConversationShellUpdateV4 {
+  private assertUpdate(value: unknown, label: string): asserts value is AgentConversationShellUpdate | AgentConversationShellUpdateV4 | AgentConversationShellUpdateV5 {
     plainObject(value, label)
     if (value.kind === 'snapshot-replaced') {
       exactKeys(value, ['kind', 'sequence', 'snapshot'], label)
       safeSequence(value.sequence, `${label}.sequence`)
-      if (this.record.version === 4) assertSnapshotV4(value.snapshot)
+      if (this.record.version === 5) assertSnapshotV5(value.snapshot)
+      else if (this.record.version === 4) assertSnapshotV4(value.snapshot)
       else assertSnapshot(value.snapshot)
       return
     }
     if (value.kind === 'item-appended' || value.kind === 'item-updated') {
       exactKeys(value, ['kind', 'sequence', 'item'], label)
       safeSequence(value.sequence, `${label}.sequence`)
-      if (this.record.version === 4) assertItemV4(value.item, `${label}.item`)
+      if (this.record.version >= 4) assertItemV4(value.item, `${label}.item`)
       else assertItem(value.item, `${label}.item`)
       return
     }
@@ -1188,8 +1233,8 @@ class MountedConversation {
     throw new Error(`${label}.kind is invalid`)
   }
 
-  private applyUpdate(update: AgentConversationShellUpdate | AgentConversationShellUpdateV4): void {
-    if (this.record.version === 4) this.applyUpdateV4(update as AgentConversationShellUpdateV4)
+  private applyUpdate(update: AgentConversationShellUpdate | AgentConversationShellUpdateV4 | AgentConversationShellUpdateV5): void {
+    if (this.record.version >= 4) this.applyUpdateV4(update as AgentConversationShellUpdateV4 | AgentConversationShellUpdateV5)
     else this.applyUpdateV3(update as AgentConversationShellUpdate)
   }
 
@@ -1270,46 +1315,48 @@ class MountedConversation {
     this.snapshot = next
   }
 
-  private applyUpdateV4(update: AgentConversationShellUpdateV4): void {
-    const snapshot = this.snapshot as AgentConversationShellSnapshotV4 | undefined
-    if (snapshot === undefined) throw new Error('v4 conversation snapshot is unavailable')
+  private applyUpdateV4(update: AgentConversationShellUpdateV4 | AgentConversationShellUpdateV5): void {
+    const snapshot = this.snapshot as AgentConversationShellSnapshotV4 | AgentConversationShellSnapshotV5 | undefined
+    const label = `v${this.record.version}`
+    if (snapshot === undefined) throw new Error(`${label} conversation snapshot is unavailable`)
     if (update.kind === 'disposed') return
     if (update.kind === 'snapshot-replaced') {
-      if (update.snapshot.snapshotSequence !== update.sequence) throw new Error('v4 replacement snapshot sequence differs from its update')
+      if (update.snapshot.snapshotSequence !== update.sequence) throw new Error(`${label} replacement snapshot sequence differs from its update`)
       this.assertSnapshotFence(update.snapshot)
-      if (update.snapshot.generation !== snapshot.generation) throw new Error('v4 replacement snapshot crossed its generation fence')
+      if (update.snapshot.generation !== snapshot.generation) throw new Error(`${label} replacement snapshot crossed its generation fence`)
       this.snapshot = immutableSnapshot(update.snapshot)
       return
     }
-    if (update.item.sequence > update.sequence) throw new Error('v4 conversation item sequence exceeds its update sequence')
+    if (update.item.sequence > update.sequence) throw new Error(`${label} conversation item sequence exceeds its update sequence`)
     const existing = snapshot.items.findIndex(item => item.itemId === update.item.itemId)
-    if (update.kind === 'item-appended' && existing !== -1) throw new Error('v4 item-appended references an existing item')
-    if (update.kind === 'item-updated' && existing === -1) throw new Error('v4 item-updated references an unknown item')
+    if (update.kind === 'item-appended' && existing !== -1) throw new Error(`${label} item-appended references an existing item`)
+    if (update.kind === 'item-updated' && existing === -1) throw new Error(`${label} item-updated references an unknown item`)
     const items = [...snapshot.items]
     if (existing === -1) items.push(update.item)
     else {
       const previous = items[existing]!
-      if (previous.kind !== update.item.kind || previous.sequence !== update.item.sequence) throw new Error('v4 item-updated changed its stable kind or item sequence')
+      if (previous.kind !== update.item.kind || previous.sequence !== update.item.sequence) throw new Error(`${label} item-updated changed its stable kind or item sequence`)
       if (previous.kind === 'message' && update.item.kind === 'message') {
         if (previous.messageId !== update.item.messageId || JSON.stringify(previous.author) !== JSON.stringify(update.item.author)
-          || JSON.stringify(previous.source) !== JSON.stringify(update.item.source) || JSON.stringify(previous.semantic) !== JSON.stringify(update.item.semantic)) throw new Error('v4 item-updated changed its message association')
+          || JSON.stringify(previous.source) !== JSON.stringify(update.item.source) || JSON.stringify(previous.semantic) !== JSON.stringify(update.item.semantic)) throw new Error(`${label} item-updated changed its message association`)
       }
       if (previous.kind === 'member-presence' && update.item.kind === 'member-presence'
-        && JSON.stringify([previous.participantId, previous.memberId, previous.runId, previous.sessionId]) !== JSON.stringify([update.item.participantId, update.item.memberId, update.item.runId, update.item.sessionId])) throw new Error('v4 item-updated changed its member presence association')
+        && JSON.stringify([previous.participantId, previous.memberId, previous.runId, previous.sessionId]) !== JSON.stringify([update.item.participantId, update.item.memberId, update.item.runId, update.item.sessionId])) throw new Error(`${label} item-updated changed its member presence association`)
       if (previous.kind === 'approval' && update.item.kind === 'approval') {
         const prior = JSON.stringify([previous.participantId, previous.memberId, previous.runId, previous.sessionId, previous.agentGeneration, previous.approvalId, previous.approvalKind, previous.rationale])
         const next = JSON.stringify([update.item.participantId, update.item.memberId, update.item.runId, update.item.sessionId, update.item.agentGeneration, update.item.approvalId, update.item.approvalKind, update.item.rationale])
-        if (prior !== next) throw new Error('v4 item-updated changed its approval association')
-        if (previous.state !== 'pending' && JSON.stringify(previous) !== JSON.stringify(update.item)) throw new Error('v4 item-updated changed a terminal approval')
+        if (prior !== next) throw new Error(`${label} item-updated changed its approval association`)
+        if (previous.state !== 'pending' && JSON.stringify(previous) !== JSON.stringify(update.item)) throw new Error(`${label} item-updated changed a terminal approval`)
       }
       items[existing] = update.item
     }
     const next = immutableSnapshot({ ...snapshot, snapshotSequence: update.sequence, items })
-    assertSnapshotV4(next)
+    if (this.record.version === 5) assertSnapshotV5(next)
+    else assertSnapshotV4(next)
     this.snapshot = next
   }
 
-  private assertSnapshotFence(snapshot: AgentConversationShellSnapshot | AgentConversationShellSnapshotV4): void {
+  private assertSnapshotFence(snapshot: AgentConversationShellSnapshot | AgentConversationShellSnapshotV4 | AgentConversationShellSnapshotV5): void {
     if (!sameBinding(snapshot.binding, this.binding)) throw new Error('conversation snapshot crossed its binding fence')
   }
 
@@ -1323,9 +1370,11 @@ class MountedConversation {
       },
     }
     try {
-      const model = this.record.version === 4
-        ? projectAgentConversationShellSnapshotV4(this.record.owner, this.snapshot as AgentConversationShellSnapshotV4, localization)
-        : projectSnapshot(this.record.owner, this.snapshot as AgentConversationShellSnapshot, localization)
+      const model = this.record.version === 5
+        ? projectAgentConversationShellSnapshotV5(this.record.owner, this.snapshot as AgentConversationShellSnapshotV5, localization)
+        : this.record.version === 4
+          ? projectAgentConversationShellSnapshotV4(this.record.owner, this.snapshot as AgentConversationShellSnapshotV4, localization)
+          : projectSnapshot(this.record.owner, this.snapshot as AgentConversationShellSnapshot, localization)
       const controller = new AgentConversationCommandController({
         execute: async request => await this.commands.executeConversationFor(
           request.ownerId,
@@ -1420,19 +1469,20 @@ class MountedConversation {
     console.error('[cordisx] Agent conversation source failed', error)
   }
 
-  private observeV4Closed(value: unknown): void {
-    if (this.disposed || this.record.version !== 4) return
-    plainObject(value, 'v4 subscription close')
-    exactKeys(value, ['$schema', 'contract', 'schemaVersion', 'subscriptionId', 'binding', 'generation', 'status', 'code'], 'v4 subscription close')
-    const close = value as unknown as AgentConversationShellSubscriptionClosedV4
-    if (close.$schema !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-conversation-shell-subscription-close.v4.schema.json'
-      || close.contract !== 'cordisx.agent-conversation-shell-subscription-close/v4' || close.schemaVersion !== 4
+  private observeVersionedClosed(value: unknown): void {
+    if (this.disposed || this.record.version < 4) return
+    const version = this.record.version
+    plainObject(value, `v${version} subscription close`)
+    exactKeys(value, ['$schema', 'contract', 'schemaVersion', 'subscriptionId', 'binding', 'generation', 'status', 'code'], `v${version} subscription close`)
+    const close = value as unknown as AgentConversationShellSubscriptionClosedV4 | AgentConversationShellSubscriptionClosedV5
+    if (close.$schema !== `https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-conversation-shell-subscription-close.v${version}.schema.json`
+      || close.contract !== `cordisx.agent-conversation-shell-subscription-close/v${version}` || close.schemaVersion !== version
       || close.status !== 'closed' || !['unsubscribed', 'explicit', 'owner-disposed', 'generation-replaced', 'permission-revoked', 'connection-replaced', 'observer-failed'].includes(close.code)) {
-      throw new Error('v4 subscription close is invalid')
+      throw new Error(`v${version} subscription close is invalid`)
     }
     const subscription = this.subscription
     if (subscription === undefined || close.subscriptionId !== subscription.subscriptionId
-      || !sameBinding(close.binding, subscription.binding) || close.generation !== subscription.generation) throw new Error('v4 subscription close crossed its subscription fence')
+      || !sameBinding(close.binding, subscription.binding) || close.generation !== subscription.generation) throw new Error(`v${version} subscription close crossed its subscription fence`)
     if (!this.terminal) {
       this.terminal = true
       this.releaseSource()
@@ -1485,7 +1535,7 @@ export class AgentConversationShellRegistry {
     } })
   }
 
-  register(ctx: Context, factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2 | CordisXAgentConversationShellSourceFactoryV3 | CordisXAgentConversationShellSourceFactoryV4, principal?: PluginPrincipalToken, version: 3 | 4 = 3): CordisXAgentConversationShellRegistration {
+  register(ctx: Context, factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2 | CordisXAgentConversationShellSourceFactoryV3 | CordisXAgentConversationShellSourceFactoryV4 | CordisXAgentConversationShellSourceFactoryV5, principal?: PluginPrincipalToken, version: 3 | 4 | 5 = 3): CordisXAgentConversationShellRegistration {
     if (this.disposed) throw new Error('Agent conversation shell registry is disposed')
     if (typeof factory !== 'function') throw new Error('Agent conversation shell source factory must be a function')
     const owner = ownerFromContext(ctx)
@@ -1606,6 +1656,17 @@ export class CordisXAgentConversationShellService extends Service implements Cor
       return () => registration?.dispose()
     }, 'agentConversationShell.registerSourceV4()')
     if (registration === undefined) throw new Error('Agent conversation Shell v4 source registration failed')
+    return { mount: registration.mount, dispose: () => { dispose() } }
+  }
+
+  registerSourceV5(factory: CordisXAgentConversationShellSourceFactoryV5): CordisXAgentConversationShellRegistration {
+    const principal = this.console?.tokenFromContext(this.ctx)
+    let registration: CordisXAgentConversationShellRegistration | undefined
+    const dispose = this.ctx.effect(() => {
+      registration = this.registry.register(this.ctx, factory, principal, 5)
+      return () => registration?.dispose()
+    }, 'agentConversationShell.registerSourceV5()')
+    if (registration === undefined) throw new Error('Agent conversation Shell v5 source registration failed')
     return { mount: registration.mount, dispose: () => { dispose() } }
   }
 }

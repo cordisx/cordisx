@@ -173,7 +173,7 @@ describe('AgentConversation renderer model', () => {
     const requests: AgentConversationCommandRequest[] = []
     const model = createAgentConversationModel({
       ...createPlaygroundConversationFixture('conversation', 'en'),
-      composer: { availability: 'available', placeholder: 'Message', disabled: false, submit: { id: 'room.send' } },
+      composer: { availability: 'available', placeholder: 'Message', disabled: false, shortcutPolicy: 'enter', submit: { id: 'room.send' } },
       headerActions: [{ id: 'refresh', label: 'Refresh', icon: 'host:refresh', command: { id: 'room.refresh' }, disabled: false }],
     })
     const controller = new AgentConversationCommandController({ execute: async request => { requests.push(request) } }, model)
@@ -207,7 +207,7 @@ describe('AgentConversation renderer model', () => {
     const messageAction = { id: 'retry', label: 'Retry', command: { id: 'room.retry' }, disabled: false } as const
     const model = createAgentConversationModel({
       ...base,
-      composer: { availability: 'available', placeholder: 'Message', disabled: false, submit: { id: 'room.send' } },
+      composer: { availability: 'available', placeholder: 'Message', disabled: false, shortcutPolicy: 'enter', submit: { id: 'room.send' } },
       headerActions: [{ id: 'refresh', label: 'Refresh', command: { id: 'room.refresh' }, disabled: false }],
       entries: base.entries.map(entry => entry === firstMessage ? { ...entry, actions: [messageAction] } : entry),
     })
@@ -346,7 +346,7 @@ describe('AgentConversationRenderer production DOM', () => {
       },
       entries: [message],
       headerActions: [],
-      composer: { availability: 'available', placeholder: 'Write a message', disabled: false, submit: { id: 'room.send' } },
+      composer: { availability: 'available', placeholder: 'Write a message', disabled: false, shortcutPolicy: 'enter', submit: { id: 'room.send' } },
     })
     const controller = new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, single)
     const roomHarness = await render(single, controller)
@@ -799,7 +799,7 @@ describe('AgentConversationRenderer production DOM', () => {
     const requests: AgentConversationCommandRequest[] = []
     const model = createAgentConversationModel({
       ...createPlaygroundConversationFixture('conversation', 'en'),
-      composer: { availability: 'available', placeholder: 'Write a message', disabled: false, submit: { id: 'room.send' } },
+      composer: { availability: 'available', placeholder: 'Write a message', disabled: false, shortcutPolicy: 'enter', submit: { id: 'room.send' } },
     })
     const harness = await render(model, new AgentConversationCommandController({
       execute: async request => { requests.push(request) },
@@ -862,11 +862,139 @@ describe('AgentConversationRenderer production DOM', () => {
     }
   })
 
+  it('applies the v5 Enter, modifier, IME, disabled, and duplicate-submit fences on the resident textarea', async () => {
+    const renderPolicy = async (
+      shortcutPolicy: 'enter' | 'mod-enter',
+      execute: (request: AgentConversationCommandRequest) => Promise<void>,
+      disabled = false,
+      availability: 'available' | 'unavailable' = 'available',
+    ) => {
+      const model = createAgentConversationModel({
+        ...createPlaygroundConversationFixture('conversation', 'en'),
+        composer: {
+          availability, placeholder: 'Write a message', disabled,
+          shortcutPolicy, submit: { id: 'room.send' },
+        },
+      })
+      return await render(model, new AgentConversationCommandController({ execute }, model))
+    }
+    const write = async (harness: RenderHarness, value: string): Promise<HTMLTextAreaElement> => {
+      const draft = harness.dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+      const setter = Object.getOwnPropertyDescriptor(harness.dom.window.HTMLTextAreaElement.prototype, 'value')?.set
+      await act(async () => {
+        setter?.call(draft, value)
+        draft.dispatchEvent(new harness.dom.window.Event('input', { bubbles: true }))
+        await Promise.resolve()
+      })
+      draft.focus()
+      return draft
+    }
+    const press = async (harness: RenderHarness, init: KeyboardEventInit): Promise<KeyboardEvent> => {
+      const draft = harness.dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+      const event = new harness.dom.window.KeyboardEvent('keydown', {
+        key: 'Enter', bubbles: true, cancelable: true, ...init,
+      })
+      await act(async () => {
+        draft.dispatchEvent(event)
+        await Promise.resolve()
+      })
+      return event
+    }
+
+    const enterRequests: AgentConversationCommandRequest[] = []
+    const enter = await renderPolicy('enter', async request => { enterRequests.push(request) })
+    try {
+      await write(enter, 'enter submits')
+      expect((await press(enter, {})).defaultPrevented).toBe(true)
+      expect(enterRequests).toHaveLength(1)
+      expect(enterRequests[0]).toMatchObject({
+        reference: { id: 'room.send' },
+        context: { scope: 'composer-submit', command: { id: 'room.send' }, submitPayload: 'enter submits' },
+      })
+
+      const shifted = await write(enter, 'shift newline')
+      shifted.setSelectionRange(5, 5)
+      expect((await press(enter, { shiftKey: true })).defaultPrevented).toBe(true)
+      expect(enterRequests).toHaveLength(1)
+      expect(shifted.value).toBe('shift\n newline')
+
+      await write(enter, 'ime stays local')
+      expect((await press(enter, { isComposing: true })).defaultPrevented).toBe(false)
+      expect(enterRequests).toHaveLength(1)
+    } finally {
+      await enter.close()
+    }
+
+    const modifierRequests: AgentConversationCommandRequest[] = []
+    const modifier = await renderPolicy('mod-enter', async request => { modifierRequests.push(request) })
+    try {
+      await write(modifier, 'plain newline')
+      expect((await press(modifier, {})).defaultPrevented).toBe(false)
+      expect(modifierRequests).toHaveLength(0)
+
+      await write(modifier, 'control submit')
+      expect((await press(modifier, { ctrlKey: true })).defaultPrevented).toBe(true)
+      expect(modifierRequests).toHaveLength(1)
+
+      await write(modifier, 'meta submit')
+      expect((await press(modifier, { metaKey: true })).defaultPrevented).toBe(true)
+      expect(modifierRequests).toHaveLength(2)
+
+      await write(modifier, 'composing modifier')
+      expect((await press(modifier, { metaKey: true, isComposing: true })).defaultPrevented).toBe(false)
+      expect(modifierRequests).toHaveLength(2)
+    } finally {
+      await modifier.close()
+    }
+
+    const disabledRequests: AgentConversationCommandRequest[] = []
+    const disabled = await renderPolicy('enter', async request => { disabledRequests.push(request) }, true)
+    try {
+      await write(disabled, 'disabled')
+      expect((await press(disabled, {})).defaultPrevented).toBe(true)
+      expect(disabledRequests).toHaveLength(0)
+    } finally {
+      await disabled.close()
+    }
+
+    const unavailableRequests: AgentConversationCommandRequest[] = []
+    const unavailable = await renderPolicy('mod-enter', async request => { unavailableRequests.push(request) }, false, 'unavailable')
+    try {
+      await write(unavailable, 'unavailable')
+      await press(unavailable, { ctrlKey: true })
+      expect(unavailableRequests).toHaveLength(0)
+    } finally {
+      await unavailable.close()
+    }
+
+    const duplicateRequests: AgentConversationCommandRequest[] = []
+    let release: (() => void) | undefined
+    const inFlight = new Promise<void>(resolve => { release = resolve })
+    const duplicate = await renderPolicy('enter', async request => {
+      duplicateRequests.push(request)
+      await inFlight
+    })
+    try {
+      await write(duplicate, 'one request')
+      await act(async () => {
+        const draft = duplicate.dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+        draft.dispatchEvent(new duplicate.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+        draft.dispatchEvent(new duplicate.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+        await Promise.resolve()
+      })
+      expect(duplicateRequests).toHaveLength(1)
+      await act(async () => { release?.(); await inFlight })
+    } finally {
+      release?.()
+      await duplicate.close()
+    }
+  })
+
   it('keeps Host-owned draft state, submit, and focus order outside the immutable model', async () => {
     const requests: AgentConversationCommandRequest[] = []
     const model = createAgentConversationModel({
       ...createPlaygroundConversationFixture('conversation', 'en'),
-      composer: { availability: 'available', placeholder: 'Write a message', disabled: false, submit: { id: 'room.send' } },
+      composer: { availability: 'available', placeholder: 'Write a message', disabled: false, shortcutPolicy: 'enter', submit: { id: 'room.send' } },
       headerActions: [{ id: 'refresh', label: 'Refresh', icon: 'host:refresh', command: { id: 'room.refresh' }, disabled: false }],
     })
     const controller = new AgentConversationCommandController({ execute: async request => { requests.push(request) } }, model)

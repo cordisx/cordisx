@@ -692,6 +692,7 @@ function Composer({
 }) {
   const [draft, setDraft] = React.useState('')
   const [submitting, setSubmitting] = React.useState(false)
+  const submittingRef = React.useRef(false)
   const noticeId = React.useId()
   const chinese = copy.locale.toLowerCase().startsWith('zh')
   const attachmentUnavailableLabel = chinese ? '添加附件（暂不可用）' : 'Add attachment (unavailable)'
@@ -720,7 +721,8 @@ function Composer({
     return () => { if (view !== undefined && frame !== undefined) view.cancelAnimationFrame(frame) }
   }, [inputRef, mentionRequest, unavailable])
   const submit = async (): Promise<void> => {
-    if (disabled) return
+    if (disabled || submittingRef.current) return
+    submittingRef.current = true
     setSubmitting(true)
     setCommandError(undefined)
     try {
@@ -729,6 +731,7 @@ function Composer({
     } catch (error) {
       setCommandError(error instanceof Error ? error.message : String(error))
     } finally {
+      submittingRef.current = false
       setSubmitting(false)
     }
   }
@@ -745,7 +748,11 @@ function Composer({
         disabled={unavailable}
         onInput={event => setDraft(event.currentTarget.value)}
         onKeyDown={event => {
-          if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+          if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+          const shouldSubmit = model.composer.shortcutPolicy === 'enter'
+            ? !event.shiftKey
+            : event.metaKey || event.ctrlKey
+          if (!shouldSubmit) return
           event.preventDefault()
           void submit()
         }}

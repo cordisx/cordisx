@@ -32,7 +32,7 @@ describe('Conversation Shell v3 production projection', () => {
           ],
         },
       ],
-      composer: { availability: 'available', placeholder: 'Message', disabled: false, submit: { id: 'chatroom:submit' } }, headerActions: [],
+      composer: { availability: 'available', placeholder: 'Message', disabled: false, shortcutPolicy: 'enter', submit: { id: 'chatroom:submit' } }, headerActions: [],
     })
     const commands = new AgentConversationCommandController({ execute: async () => undefined }, model)
     const markup = renderToString(<AgentConversationRenderer model={model} commands={commands} copy={{ locale: 'en', newRoomTitle: 'New room', timelineLabel: 'Room conversation', composerLabel: 'Message', sendLabel: 'Send', running: 'Working', stopped: 'Stopped', failed: 'Failed', pending: 'Pending', unavailable: 'Unavailable' }} />)
