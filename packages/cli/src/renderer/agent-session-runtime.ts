@@ -18,6 +18,7 @@ import type {
   AgentRegistry,
   AgentResumeOptions,
   AgentRuntimeCapability,
+  AgentSetup,
   AgentStatus,
   AgentStatusObservation,
 } from '@cordisx/protocol/agents/v1'
@@ -133,6 +134,8 @@ export interface CordisXPersistedSession {
   readonly generation: number
   readonly header: SessionHeader
   readonly events: readonly SessionEvent[]
+  /** Host-validated setup retained in the same Session authority record. */
+  readonly setup?: AgentSetup
 }
 
 export interface CordisXSessionEventPersistence {
@@ -142,6 +145,11 @@ export interface CordisXSessionEventPersistence {
     readonly sessionGeneration: number
     readonly expectedSeq: number
     readonly events: readonly SessionEvent[]
+  }): Promise<void>
+  updateSetup?(input: {
+    readonly sessionId: string
+    readonly sessionGeneration: number
+    readonly setup: AgentSetup
   }): Promise<void>
 }
 
@@ -158,6 +166,8 @@ interface SessionRecord {
   generation: number
   readonly header: SessionHeader
   readonly events: SessionEvent[]
+  setup: AgentSetup | undefined
+  definitions: readonly CordisXResolvedAgentDefinition[] | undefined
   readonly subscribers: Set<SessionSubscriber>
   appendQueue: Promise<void>
   closed?: 'connection-replaced' | 'host-unavailable'
@@ -191,6 +201,10 @@ export interface CordisXAgentSessionProjection {
   readonly sessionGeneration: number
   readonly header: SessionHeader
   readonly events: readonly SessionEvent[]
+  readonly setup?: {
+    readonly definition: AgentDefinitionIdentity
+    readonly definitions: readonly CordisXResolvedAgentDefinition[]
+  }
   readonly closed?: 'connection-replaced' | 'host-unavailable'
   readonly agent?: {
     readonly generation: number
@@ -258,11 +272,18 @@ export class CordisXAgentSessionRuntime {
         throw new Error('Recovered Agent Session ledger is invalid')
       }
       if (this.sessions.has(persisted.id)) throw new Error('Recovered Agent Session ledger contains a duplicate SessionId')
+      let definitions: readonly CordisXResolvedAgentDefinition[] | undefined
+      if (persisted.setup !== undefined) {
+        try { definitions = resolveAgentDefinitionCatalog(persisted.setup).definitions }
+        catch { throw new Error('Recovered Agent Session setup is invalid') }
+      }
       this.sessions.set(persisted.id, {
         id: persisted.id,
         generation: persisted.generation,
         header: Object.freeze(clone(persisted.header)),
         events: persisted.events.map(event => Object.freeze(clone(event))),
+        setup: persisted.setup === undefined ? undefined : Object.freeze(clone(persisted.setup)),
+        definitions: definitions === undefined ? undefined : Object.freeze(definitions.map(clone)),
         subscribers: new Set(),
         appendQueue: Promise.resolve(),
       })
@@ -309,18 +330,29 @@ export class CordisXAgentSessionRuntime {
 
   /** Host-only projection for Conversation Shell identity actions. */
   definitionPresentation(identity: { readonly agentId: string; readonly revision: string }): CordisXAgentDefinitionPresentation | undefined {
-    let selected: { readonly generation: number; readonly definition: CordisXResolvedAgentDefinition } | undefined
+    let selected: { readonly live: boolean; readonly generation: number; readonly definition: CordisXResolvedAgentDefinition } | undefined
     for (const record of this.agents.values()) {
       if (!this.current(record)) continue
       const definition = record.definitions?.find(candidate => candidate.identity.agentId === identity.agentId
         && candidate.identity.revision === identity.revision)
       if (definition === undefined) continue
-      if (selected === undefined || record.generation > selected.generation) selected = { generation: record.generation, definition }
+      if (selected === undefined || !selected.live || record.generation > selected.generation) {
+        selected = { live: true, generation: record.generation, definition }
+      }
+    }
+    for (const session of this.sessions.values()) {
+      if (!this.sessionLive(session)) continue
+      const definition = session.definitions?.find(candidate => candidate.identity.agentId === identity.agentId
+        && candidate.identity.revision === identity.revision)
+      if (definition === undefined || selected?.live === true) continue
+      if (selected === undefined || session.generation > selected.generation) {
+        selected = { live: false, generation: session.generation, definition }
+      }
     }
     return selected === undefined ? undefined : presentationForDefinition(selected.definition)
   }
 
-  /** Host-only projection; SessionEvent remains the sole durable fact. */
+  /** Host-only projection; SessionEvent remains the sole durable execution fact. */
   playgroundProjection(): readonly CordisXAgentSessionProjection[] {
     return Object.freeze([...this.sessions.values()].map(session => {
       const agent = this.agents.get(session.id)
@@ -330,6 +362,12 @@ export class CordisXAgentSessionRuntime {
         sessionGeneration: session.generation,
         header: clone(session.header),
         events: Object.freeze(session.events.map(clone)),
+        ...(session.setup === undefined || session.definitions === undefined ? {} : {
+          setup: Object.freeze({
+            definition: clone(session.setup.definition),
+            definitions: Object.freeze(session.definitions.map(clone)),
+          }),
+        }),
         ...(session.closed === undefined ? {} : { closed: session.closed }),
         ...(currentAgent === undefined ? {} : {
           agent: Object.freeze({
@@ -518,8 +556,14 @@ export class CordisXAgentSessionRuntime {
       ? await this.options.driver.create({ sessionId, options: input.options ?? {}, ...(input.setup === undefined ? {} : { setup: input.setup }) })
       : await this.options.driver.resume({ sessionId, options: input.options ?? {}, ...(input.setup === undefined ? {} : { setup: input.setup }) })
     if (driver.status !== 'accepted') return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, driver.code))
-    const session = existing ?? await this.newSession(sessionId)
+    const session = existing ?? await this.newSession(sessionId, input.setup, definitions)
     if (session === undefined) return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, 'host-unavailable'))
+    if (existing !== undefined && input.setup !== undefined && definitions !== undefined
+      && !await this.updateSessionSetup(session, input.setup, definitions)) {
+      return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, 'host-unavailable'))
+    }
+    const setup = input.setup ?? session.setup
+    const resolvedDefinitions = definitions ?? session.definitions
     const record: AgentRecord = {
       id: sessionId,
       generation: ++this.nextAgentGeneration,
@@ -531,8 +575,8 @@ export class CordisXAgentSessionRuntime {
       live: new Set(),
       status: 'idle',
       idleWaiters: new Set(),
-      ...(input.setup === undefined ? {} : { definition: clone(input.setup.definition) }),
-      ...(definitions === undefined ? {} : { definitions: clone(definitions) }),
+      ...(setup === undefined ? {} : { definition: clone(setup.definition) }),
+      ...(resolvedDefinitions === undefined ? {} : { definitions: clone(resolvedDefinitions) }),
       ...(driver.detail === undefined ? {} : { detail: clone(driver.detail) }),
     }
     this.agents.set(sessionId, record)
@@ -783,13 +827,45 @@ export class CordisXAgentSessionRuntime {
     this.emitLive(record, 'agent/inbox/claimed', { message: pending.message, turn: event.turn })
   }
 
-  private async newSession(id: string): Promise<SessionRecord | undefined> {
-    const record: SessionRecord = { id, generation: 1, header: Object.freeze({ id, formatVersion: 1, createdAt: this.now(), isSeeded: false }), events: [], subscribers: new Set(), appendQueue: Promise.resolve() }
+  private async newSession(
+    id: string,
+    setup: AgentSetup | undefined,
+    definitions: readonly CordisXResolvedAgentDefinition[] | undefined,
+  ): Promise<SessionRecord | undefined> {
+    const record: SessionRecord = {
+      id, generation: 1,
+      header: Object.freeze({ id, formatVersion: 1, createdAt: this.now(), isSeeded: false }),
+      events: [],
+      setup: setup === undefined ? undefined : Object.freeze(clone(setup)),
+      definitions: definitions === undefined ? undefined : Object.freeze(definitions.map(clone)),
+      subscribers: new Set(), appendQueue: Promise.resolve(),
+    }
     try {
-      await this.options.persistence?.create({ id, generation: record.generation, header: clone(record.header), events: [] })
+      await this.options.persistence?.create({
+        id, generation: record.generation, header: clone(record.header), events: [],
+        ...(record.setup === undefined ? {} : { setup: clone(record.setup) }),
+      })
     } catch { return undefined }
     this.sessions.set(id, record)
     return record
+  }
+
+  private async updateSessionSetup(
+    session: SessionRecord,
+    setup: AgentSetup,
+    definitions: readonly CordisXResolvedAgentDefinition[],
+  ): Promise<boolean> {
+    if (this.options.persistence !== undefined && this.options.persistence.updateSetup === undefined) return false
+    try {
+      await this.options.persistence?.updateSetup?.({
+        sessionId: session.id,
+        sessionGeneration: session.generation,
+        setup: clone(setup),
+      })
+    } catch { return false }
+    session.setup = Object.freeze(clone(setup))
+    session.definitions = Object.freeze(definitions.map(clone))
+    return true
   }
 
   private handle(owner: PluginOwnerIdentity, record: AgentRecord): AgentHandle {

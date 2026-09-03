@@ -161,10 +161,11 @@ function status(session: CordisXAgentSessionProjection): PlaygroundMockTaskTrace
 }
 
 function projectTask(session: CordisXAgentSessionProjection): PlaygroundMockTaskTrace {
-  const definitions = session.agent?.definitions?.map(resolvedDefinition) ?? []
+  const definitions = (session.agent?.definitions ?? session.setup?.definitions)?.map(resolvedDefinition) ?? []
   const fallback = fallbackDefinition(session)
-  const selected = definitions.find(definition => definition.identity.agentId === session.agent?.definition?.agentId
-    && definition.identity.revision === session.agent.definition.revision) ?? definitions.at(-1) ?? fallback
+  const target = session.agent?.definition ?? session.setup?.definition
+  const selected = definitions.find(definition => definition.identity.agentId === target?.agentId
+    && definition.identity.revision === target.revision) ?? definitions.at(-1) ?? fallback
   const catalog = definitions.length === 0 ? [fallback] : definitions
   const lastInput = [...session.events].reverse().find(event => event.type === 'user/message')
   return Object.freeze({
@@ -194,7 +195,7 @@ function projectTask(session: CordisXAgentSessionProjection): PlaygroundMockTask
 /**
  * Projects native Playground task UI directly from the Session authority. The
  * result is disposable display state; restart recovery comes only from the
- * Host-owned SessionEvent store supplied to the authority.
+ * Host-owned Session authority store supplied to the authority.
  */
 export function projectPlaygroundAgentSessions(
   sessions: readonly CordisXAgentSessionProjection[],
