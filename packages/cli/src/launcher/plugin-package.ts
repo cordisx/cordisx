@@ -38,6 +38,7 @@ import {
   assertNoPrivateReactBundle,
   cordisXReactVirtualModules,
 } from './react-virtual-modules.js'
+import { readEntityTemplatePayload, type EntityTemplatePayload } from './entity-directory.js'
 
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const SEMANTIC_VERSION = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
@@ -53,6 +54,7 @@ export interface StagedPluginPackage {
   readonly moduleSource: string
   readonly artifactSource: string
   readonly serviceModules: readonly StagedPluginServiceModule[]
+  readonly entityTemplates: readonly EntityTemplatePayload[]
   readonly readme?: string
   /** Stable launcher-issued identity; this is not a real filesystem path. */
   readonly identitySource: string
@@ -302,6 +304,7 @@ function artifactDigest(
   moduleSource: string,
   artifactSource: string,
   serviceModules: readonly StagedPluginServiceModule[] = [],
+  entityTemplatesText?: string,
 ): `sha256:${string}` {
   const digest = createHash('sha256')
     .update(manifestText)
@@ -315,6 +318,7 @@ function artifactDigest(
       .update('\0')
       .update(service.moduleSource)
   }
+  if (entityTemplatesText !== undefined) digest.update('\0entity-templates\0').update(entityTemplatesText)
   const value = digest.digest('hex')
   return `sha256:${value}`
 }
@@ -359,6 +363,7 @@ async function publishPackage(
   readme: string | undefined,
   runtimeManifestText?: string,
   serviceModules: readonly StagedPluginServiceModule[] = [],
+  entityTemplatesText?: string,
 ): Promise<void> {
   const parent = path.join(homeDir, 'packages', 'sha256')
   await mkdir(parent, { recursive: true, mode: 0o700 })
@@ -367,13 +372,14 @@ async function publishPackage(
   try {
     const metadata = await lstat(destination)
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error('existing plugin package target is not a real directory')
-    const [storedManifest, storedModule, storedArtifact, storedServices] = await Promise.all([
+    const [storedManifest, storedModule, storedArtifact, storedServices, storedEntityTemplates] = await Promise.all([
       readFile(path.join(destination, 'manifest.json'), 'utf8'),
       readFile(path.join(destination, 'module.js'), 'utf8'),
       readFile(path.join(destination, 'artifact.js'), 'utf8'),
       readStoredServiceModules(destination),
+      readOptionalFile(path.join(destination, 'entity-templates.json')),
     ])
-    if (artifactDigest(storedManifest, storedModule, storedArtifact, storedServices) !== digest) {
+    if (artifactDigest(storedManifest, storedModule, storedArtifact, storedServices, storedEntityTemplates) !== digest) {
       throw new Error('existing plugin package failed integrity readback')
     }
     return
@@ -391,6 +397,7 @@ async function publishPackage(
       writeFileSynced(path.join(temporary, 'artifact.js'), artifactSource),
       ...(runtimeManifestText === undefined ? [] : [writeFileSynced(path.join(temporary, 'runtime-manifest.json'), runtimeManifestText)]),
       ...(readme === undefined ? [] : [writeFileSynced(path.join(temporary, 'README.md'), readme)]),
+      ...(entityTemplatesText === undefined ? [] : [writeFileSynced(path.join(temporary, 'entity-templates.json'), entityTemplatesText)]),
       ...(serviceModules.length === 0 ? [] : [
         writeFileSynced(
           path.join(temporary, 'services.json'),
@@ -411,6 +418,7 @@ async function publishPackage(
         chmod(path.join(destination, 'artifact.js'), 0o444),
         ...(runtimeManifestText === undefined ? [] : [chmod(path.join(destination, 'runtime-manifest.json'), 0o444)]),
         ...(readme === undefined ? [] : [chmod(path.join(destination, 'README.md'), 0o444)]),
+        ...(entityTemplatesText === undefined ? [] : [chmod(path.join(destination, 'entity-templates.json'), 0o444)]),
         ...(serviceModules.length === 0 ? [] : [
           chmod(path.join(destination, 'services.json'), 0o444),
           ...serviceModules.map(service => chmod(
@@ -425,6 +433,13 @@ async function publishPackage(
   } finally {
     if (!published) await rm(temporary, { recursive: true, force: true })
   }
+}
+
+async function readOptionalFile(file: string): Promise<string | undefined> {
+  return await readFile(file, 'utf8').catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  })
 }
 
 async function readStoredServiceModules(directory: string): Promise<readonly StagedPluginServiceModule[]> {
@@ -528,6 +543,10 @@ export async function stageResolvedPluginPackage(
   const serviceModules = runtimeManifest.schemaVersion === 4 || runtimeManifest.schemaVersion === 5
     ? await Promise.all(runtimeManifest.services.map(service => buildServiceArtifact(root, service)))
     : []
+  const entityTemplates = await Promise.all((resolved.packageManifest.entityTemplates ?? []).map(async declaration => (
+    await readEntityTemplatePayload(root, declaration)
+  )))
+  const entityTemplatesText = entityTemplates.length === 0 ? undefined : `${JSON.stringify(entityTemplates)}\n`
   const runtimeManifestText = `${JSON.stringify(runtimeManifest, null, 2)}\n`
   const storedRuntimeDigest = `sha256:${createHash('sha256').update(runtimeManifestText).digest('hex')}` as const
   const stored: StoredSeparatedPackageV3 = {
@@ -539,7 +558,7 @@ export async function stageResolvedPluginPackage(
     },
   }
   const manifestText = `${JSON.stringify(stored, null, 2)}\n`
-  const digest = artifactDigest(manifestText, built.moduleSource, built.artifactSource, serviceModules)
+  const digest = artifactDigest(manifestText, built.moduleSource, built.artifactSource, serviceModules, entityTemplatesText)
   await publishPackage(
     homeDir,
     digest,
@@ -549,6 +568,7 @@ export async function stageResolvedPluginPackage(
     readme,
     runtimeManifestText,
     serviceModules,
+    entityTemplatesText,
   )
   return await loadStagedPluginPackage(homeDir, digest)
 }
@@ -583,6 +603,7 @@ export async function stageLocalPluginPackage(homeDir: string, sourceDirectory: 
     moduleSource: built.moduleSource,
     artifactSource: built.artifactSource,
     serviceModules: [],
+    entityTemplates: [],
     ...(readme === undefined ? {} : { readme }),
     identitySource: manifest.canonicalSource ?? `file:///cordisx-store/sha256/${hex}/entry.js`,
   }
@@ -591,7 +612,7 @@ export async function stageLocalPluginPackage(homeDir: string, sourceDirectory: 
 /** Read and integrity-check one immutable package without exposing its store path. */
 export async function loadStagedPluginPackage(homeDir: string, digest: `sha256:${string}`): Promise<StagedPluginPackage> {
   const directory = packageDirectory(homeDir, digest)
-  const [manifestText, moduleSource, artifactSource, readme, serviceModules] = await Promise.all([
+  const [manifestText, moduleSource, artifactSource, readme, serviceModules, entityTemplatesText] = await Promise.all([
     readFile(path.join(directory, 'manifest.json'), 'utf8'),
     readFile(path.join(directory, 'module.js'), 'utf8'),
     readFile(path.join(directory, 'artifact.js'), 'utf8'),
@@ -600,11 +621,13 @@ export async function loadStagedPluginPackage(homeDir: string, digest: `sha256:$
       throw error
     }),
     readStoredServiceModules(directory),
+    readOptionalFile(path.join(directory, 'entity-templates.json')),
   ])
-  if (artifactDigest(manifestText, moduleSource, artifactSource, serviceModules) !== digest) {
+  if (artifactDigest(manifestText, moduleSource, artifactSource, serviceModules, entityTemplatesText) !== digest) {
     throw new Error('plugin package failed integrity readback')
   }
   const parsed = JSON.parse(manifestText) as unknown
+  const entityTemplates = entityTemplatesText === undefined ? [] : JSON.parse(entityTemplatesText) as EntityTemplatePayload[]
   let manifest: StagedPluginPackage['manifest']
   if (separatedPackage(parsed)) {
     const runtimeBytes = await readFile(path.join(directory, 'runtime-manifest.json'))
@@ -649,9 +672,21 @@ export async function loadStagedPluginPackage(homeDir: string, digest: `sha256:$
     moduleSource,
     artifactSource,
     serviceModules,
+    entityTemplates: immutableEntityTemplates(entityTemplates),
     ...(readme === undefined ? {} : { readme }),
     identitySource: manifest.canonicalSource ?? `file:///cordisx-store/sha256/${hex}/entry.js`,
   }
+}
+
+function immutableEntityTemplates(value: readonly EntityTemplatePayload[]): readonly EntityTemplatePayload[] {
+  const cloned = structuredClone(value)
+  for (const template of cloned) {
+    Object.freeze(template.declaration)
+    for (const prompt of template.promptFiles) Object.freeze(prompt)
+    Object.freeze(template.promptFiles)
+    Object.freeze(template)
+  }
+  return Object.freeze(cloned)
 }
 
 async function makeWritable(directory: string): Promise<void> {

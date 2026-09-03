@@ -49,6 +49,15 @@ import type {
   SessionSubscriptionCloseCode,
   UserMessage,
 } from '@cordisx/protocol/sessions/v1'
+import type {
+  EntityAgentAcquireResult,
+  EntityAgentCreateOptions,
+  EntityAgentResumeOptions,
+  EntityBackedAgentRegistry,
+  EntityDefinitionResolution,
+  EntityRegistry,
+  EntitySessionDefinitionBinding,
+} from '@cordisx/protocol/entities/v1'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from './service.js'
 import { generationFromContext } from './ownership.js'
 import {
@@ -70,6 +79,16 @@ const PAGE_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/
 const SUBSCRIPTION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/session-subscription-page.v1.schema.json' as const
 const QUESTION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-question.v1.schema.json' as const
 const DECISION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-decision.v1.schema.json' as const
+const ENTITY_ACQUIRE_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-agent-acquire-result.v1.schema.json' as const
+
+type EntityAcquireEnvelope = {
+  readonly $schema: typeof ENTITY_ACQUIRE_SCHEMA
+  readonly contract: 'cordisx.entity-agent-acquire-result/v1'
+  readonly schemaVersion: 1
+  readonly operation: 'create' | 'resume'
+  readonly mutationId?: string
+}
+type AcceptedEntityAcquire = Extract<EntityAgentAcquireResult, { readonly status: 'accepted' }>
 
 const clone = <Value>(value: Value): Value => structuredClone(value)
 const opaque = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 512
@@ -250,6 +269,7 @@ export class CordisXAgentSessionRuntime {
   private readonly handleCapabilities = new WeakMap<object, AgentRecord>()
   private readonly answerers = new Map<string, AnswererRecord>()
   private readonly mutations = new Map<string, { readonly fingerprint: string; readonly result: AgentAcquireResult }>()
+  private readonly entityMutations = new Map<string, { readonly fingerprint: string; readonly result: AcceptedEntityAcquire }>()
   private nextAgentGeneration = 0
   private nextSubscriptionGeneration = 0
   private nextOwnerGeneration = 0
@@ -320,6 +340,73 @@ export class CordisXAgentSessionRuntime {
     if (!opaque(input.sessionId)) throw new Error('Agent SessionId must be a non-empty opaque identifier')
     if (!await this.allowed(owner, 'agents.resume', input.sessionId)) return this.acquireDenied('resume', input.mutationId)
     return await this.acquire(owner, 'resume', input.sessionId, input, 'caller')
+  }
+
+  async createEntity(owner: PluginOwnerIdentity, input: EntityAgentCreateOptions, registry: EntityRegistry): Promise<EntityAgentAcquireResult> {
+    const sessionId = input.sessionId ?? `cx-session.${crypto.randomUUID()}`
+    const envelope = { $schema: ENTITY_ACQUIRE_SCHEMA, contract: 'cordisx.entity-agent-acquire-result/v1' as const, schemaVersion: 1 as const, operation: 'create' as const, ...(input.mutationId === undefined ? {} : { mutationId: input.mutationId }) }
+    if (!opaque(sessionId)) throw new Error('Agent SessionId must be a non-empty opaque identifier')
+    if (!await this.allowed(owner, 'agents.create', sessionId)) return { ...envelope, status: 'denied', code: 'permission-denied' }
+    const prior = this.replayEntityMutation(owner, envelope, input)
+    if (prior !== undefined) return prior
+    const target = await registry.get(input.definition)
+    if (target.status === 'unavailable') return { ...envelope, status: 'unavailable', code: 'host-unavailable' }
+    if (target.status === 'not-found') {
+      const snapshot = await registry.snapshot().catch(() => undefined)
+      const current = snapshot?.entities.find(entity => entity.identity.agentId === input.definition.agentId)
+      return { ...envelope, status: 'unavailable', code: current === undefined ? 'entity-not-found' : 'entity-revision-stale' }
+    }
+    const catalog = new Map<string, typeof target.entity>()
+    const collect = async (resolution: typeof target.entity): Promise<boolean> => {
+      const key = JSON.stringify([resolution.identity.agentId, resolution.identity.revision])
+      if (catalog.has(key)) return true
+      catalog.set(key, resolution)
+      for (const parent of resolution.definition.extends ?? []) {
+        const result = await registry.get(parent)
+        if (result.status !== 'found' || !await collect(result.entity)) return false
+      }
+      return true
+    }
+    catalog.clear()
+    if (!await collect(target.entity)) return { ...envelope, status: 'unavailable', code: 'entity-invalid' }
+    const definitions = [...catalog.values()].map(entity => clone(entity.definition))
+    if (definitions.length === 0) return { ...envelope, status: 'unavailable', code: 'entity-invalid' }
+    const setup: AgentSetup = { definition: clone(target.entity.identity), definitions: definitions as [typeof definitions[number], ...typeof definitions[number][]] }
+    const binding: EntitySessionDefinitionBinding = {
+      source: 'entity-registry', owner: clone(target.entity.owner),
+      resolution: { identity: clone(target.entity.identity), digest: target.entity.digest, definition: clone(target.entity.definition) },
+    }
+    const acquireInput: AgentCreateOptions = {
+      ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+      ...(input.mutationId === undefined ? {} : { mutationId: input.mutationId }),
+      ...(input.options === undefined ? {} : { options: clone(input.options) }), setup,
+    }
+    const acquired = await this.acquire(owner, 'create', sessionId, acquireInput, input.sessionId === undefined ? 'host' : 'caller', false, binding)
+    const result = this.entityAcquireResult(envelope, acquired, {
+      identity: clone(target.entity.identity), digest: target.entity.digest, definition: clone(target.entity.definition),
+    }, 'registry-current')
+    return this.rememberEntityMutation(owner, input, result)
+  }
+
+  async resumeEntity(owner: PluginOwnerIdentity, input: EntityAgentResumeOptions): Promise<EntityAgentAcquireResult> {
+    const envelope = { $schema: ENTITY_ACQUIRE_SCHEMA, contract: 'cordisx.entity-agent-acquire-result/v1' as const, schemaVersion: 1 as const, operation: 'resume' as const, ...(input.mutationId === undefined ? {} : { mutationId: input.mutationId }) }
+    if (!opaque(input.sessionId)) throw new Error('Agent SessionId must be a non-empty opaque identifier')
+    if (!await this.allowed(owner, 'agents.resume', input.sessionId)) return { ...envelope, status: 'denied', code: 'permission-denied' }
+    const prior = this.replayEntityMutation(owner, envelope, input)
+    if (prior !== undefined) return prior
+    const session = this.sessions.get(input.sessionId)
+    const event = session?.events.find(candidate => candidate.type === 'entity/definition-bound')
+    if (event === undefined || event.type !== 'entity/definition-bound') return { ...envelope, status: 'unavailable', code: 'unsupported' }
+    const binding = event.data
+    if (input.definition !== undefined && (input.definition.agentId !== binding.resolution.identity.agentId
+      || input.definition.revision !== binding.resolution.identity.revision)) return { ...envelope, status: 'unavailable', code: 'entity-revision-stale' }
+    const acquireInput: AgentResumeOptions = {
+      sessionId: input.sessionId,
+      ...(input.mutationId === undefined ? {} : { mutationId: input.mutationId }),
+      ...(input.options === undefined ? {} : { options: clone(input.options) }),
+    }
+    const acquired = await this.acquire(owner, 'resume', input.sessionId, acquireInput, 'caller')
+    return this.rememberEntityMutation(owner, input, this.entityAcquireResult(envelope, acquired, binding.resolution, 'session-persisted'))
   }
 
   async get(owner: PluginOwnerIdentity, agentId: string): Promise<Agent | undefined> {
@@ -527,6 +614,7 @@ export class CordisXAgentSessionRuntime {
     input: AgentCreateOptions | AgentResumeOptions,
     source: 'host' | 'caller',
     resolvedLegacy = false,
+    entityBinding?: EntitySessionDefinitionBinding,
   ): Promise<AgentAcquireResult> {
     if (this.disposed) return this.acquireUnavailable(operation, input.mutationId, 'runtime-unavailable')
     const mutationId = input.mutationId
@@ -556,7 +644,7 @@ export class CordisXAgentSessionRuntime {
       ? await this.options.driver.create({ sessionId, options: input.options ?? {}, ...(input.setup === undefined ? {} : { setup: input.setup }) })
       : await this.options.driver.resume({ sessionId, options: input.options ?? {}, ...(input.setup === undefined ? {} : { setup: input.setup }) })
     if (driver.status !== 'accepted') return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, driver.code))
-    const session = existing ?? await this.newSession(sessionId, input.setup, definitions)
+    const session = existing ?? await this.newSession(sessionId, input.setup, definitions, entityBinding)
     if (session === undefined) return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, 'host-unavailable'))
     if (existing !== undefined && input.setup !== undefined && definitions !== undefined
       && !await this.updateSessionSetup(session, input.setup, definitions)) {
@@ -831,18 +919,24 @@ export class CordisXAgentSessionRuntime {
     id: string,
     setup: AgentSetup | undefined,
     definitions: readonly CordisXResolvedAgentDefinition[] | undefined,
+    entityBinding?: EntitySessionDefinitionBinding,
   ): Promise<SessionRecord | undefined> {
+    const initialEvents: SessionEvent[] = entityBinding === undefined ? [] : [Object.freeze({
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/session-event.v1.schema.json',
+      contract: 'cordisx.session-event/v1', schemaVersion: 1,
+      sessionId: id, seq: 0, time: this.now(), type: 'entity/definition-bound', ignorable: true, data: clone(entityBinding),
+    }) as SessionEvent]
     const record: SessionRecord = {
       id, generation: 1,
       header: Object.freeze({ id, formatVersion: 1, createdAt: this.now(), isSeeded: false }),
-      events: [],
+      events: initialEvents,
       setup: setup === undefined ? undefined : Object.freeze(clone(setup)),
       definitions: definitions === undefined ? undefined : Object.freeze(definitions.map(clone)),
       subscribers: new Set(), appendQueue: Promise.resolve(),
     }
     try {
       await this.options.persistence?.create({
-        id, generation: record.generation, header: clone(record.header), events: [],
+        id, generation: record.generation, header: clone(record.header), events: clone(initialEvents),
         ...(record.setup === undefined ? {} : { setup: clone(record.setup) }),
       })
     } catch { return undefined }
@@ -954,6 +1048,45 @@ export class CordisXAgentSessionRuntime {
   private acquireDenied(operation: 'create' | 'resume', mutationId?: string): AgentAcquireResult { return { $schema: ACQUIRE_SCHEMA, contract: 'cordisx.agent-acquire-result/v1', schemaVersion: 1, operation, ...(mutationId === undefined ? {} : { mutationId }), status: 'denied', code: 'permission-denied' } }
   private acquireUnavailable(operation: 'create' | 'resume', mutationId: string | undefined, code: 'runtime-unavailable' | 'host-unavailable' | 'unsupported' | 'session-unavailable'): AgentAcquireResult { return { $schema: ACQUIRE_SCHEMA, contract: 'cordisx.agent-acquire-result/v1', schemaVersion: 1, operation, ...(mutationId === undefined ? {} : { mutationId }), status: 'unavailable', code: code === 'session-unavailable' ? 'session-unavailable' : code } }
   private acquireConflict(operation: 'create' | 'resume', mutationId: string | undefined, code: 'mutation-conflict' | 'session-already-exists' | 'agent-already-live'): AgentAcquireResult { return { $schema: ACQUIRE_SCHEMA, contract: 'cordisx.agent-acquire-result/v1', schemaVersion: 1, operation, ...(mutationId === undefined ? {} : { mutationId }), status: 'conflict', code } }
+  private entityAcquireResult(
+    envelope: EntityAcquireEnvelope,
+    result: AgentAcquireResult,
+    resolution: EntityDefinitionResolution,
+    definitionSource: 'registry-current' | 'session-persisted',
+  ): EntityAgentAcquireResult {
+    if (result.status !== 'accepted') return { ...envelope, status: result.status, code: result.code } as EntityAgentAcquireResult
+    return Object.freeze({
+      ...envelope, status: 'accepted', sessionId: result.sessionId, agentGeneration: result.agentGeneration,
+      sessionGeneration: result.sessionGeneration, owner: clone(result.owner), sessionIdSource: result.sessionIdSource,
+      disposition: result.disposition, ...(result.handle.agent.detail === undefined ? {} : { details: clone(result.handle.agent.detail) }),
+      definitionResolution: clone(resolution), definitionSource, handle: result.handle,
+    }) as EntityAgentAcquireResult
+  }
+  private replayEntityMutation(
+    owner: PluginOwnerIdentity,
+    envelope: EntityAcquireEnvelope,
+    input: EntityAgentCreateOptions | EntityAgentResumeOptions,
+  ): EntityAgentAcquireResult | undefined {
+    if (input.mutationId === undefined) return undefined
+    const prior = this.entityMutations.get(`${ownerKey(owner)}\u0000${envelope.operation}\u0000${input.mutationId}`)
+    if (prior === undefined) return undefined
+    if (prior.fingerprint !== JSON.stringify(clone(input))) return { ...envelope, status: 'conflict', code: 'mutation-conflict' }
+    const record = this.handleCapabilities.get(prior.result.handle as object)
+    return record !== undefined && this.current(record)
+      ? Object.freeze({ ...prior.result, disposition: 'replayed' })
+      : { ...envelope, status: 'unavailable', code: 'host-unavailable' }
+  }
+  private rememberEntityMutation(
+    owner: PluginOwnerIdentity,
+    input: EntityAgentCreateOptions | EntityAgentResumeOptions,
+    result: EntityAgentAcquireResult,
+  ): EntityAgentAcquireResult {
+    if (input.mutationId !== undefined && result.status === 'accepted') this.entityMutations.set(
+      `${ownerKey(owner)}\u0000${result.operation}\u0000${input.mutationId}`,
+      { fingerprint: JSON.stringify(clone(input)), result },
+    )
+    return result
+  }
   private remember(key: string | undefined, fingerprint: string, result: AgentAcquireResult): AgentAcquireResult { if (key !== undefined) this.mutations.set(key, { fingerprint, result }); return result }
   private admission(messageId: string, status: 'accepted' | 'denied' | 'unavailable', code?: 'source-denied' | 'permission-denied' | 'agent-replaced' | 'host-unavailable'): Agent['send'] extends (...args: never[]) => Promise<infer Result> ? Result : never { return Object.freeze({ $schema: ADMISSION_SCHEMA, contract: 'cordisx.agent-admission/v1', schemaVersion: 1, status, messageId, ...(status === 'accepted' ? {} : { code }) }) as never }
   private discard(messageId: string, status: AgentMessageDiscardResult['status'], code?: string): AgentMessageDiscardResult { return Object.freeze({ $schema: DISCARD_SCHEMA, contract: 'cordisx.agent-message-cancellation-result/v1', schemaVersion: 1, status, messageId, ...(code === undefined ? {} : { code }) }) as AgentMessageDiscardResult }
@@ -965,10 +1098,26 @@ export class CordisXAgentSessionRuntime {
 const runtimes = new WeakMap<object, CordisXAgentSessionRuntime>()
 function runtimeFor(service: object): CordisXAgentSessionRuntime { const runtime = runtimes.get(service); if (runtime === undefined) throw new Error('Agent Session runtime service is detached'); return runtime }
 
-export class CordisXAgentRegistryServiceV1 extends Service implements AgentRegistry {
-  constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) { super(ctx, 'agents'); runtimes.set(this, runtime) }
-  create = async (options: AgentCreateOptions): Promise<AgentAcquireResult> => { const runtime = runtimeFor(this); return await runtime.create(runtime.ownerFromContext(this.ctx), options) }
-  resume = async (options: AgentResumeOptions): Promise<AgentAcquireResult> => { const runtime = runtimeFor(this); return await runtime.resume(runtime.ownerFromContext(this.ctx), options) }
+export class CordisXAgentRegistryServiceV1 extends Service implements EntityBackedAgentRegistry {
+  private readonly entities: EntityRegistry | undefined
+  constructor(ctx: Context, input: CordisXAgentSessionRuntime | { readonly runtime: CordisXAgentSessionRuntime; readonly entities: EntityRegistry }) {
+    super(ctx, 'agents')
+    const runtime = input instanceof CordisXAgentSessionRuntime ? input : input.runtime
+    this.entities = input instanceof CordisXAgentSessionRuntime ? undefined : input.entities
+    runtimes.set(this, runtime)
+  }
+  create: EntityBackedAgentRegistry['create'] = (async (options: AgentCreateOptions | EntityAgentCreateOptions): Promise<AgentAcquireResult | EntityAgentAcquireResult> => {
+    const runtime = runtimeFor(this); const owner = runtime.ownerFromContext(this.ctx)
+    return 'definition' in options && (options as { readonly setup?: unknown }).setup === undefined && this.entities !== undefined
+      ? await runtime.createEntity(owner, options as EntityAgentCreateOptions, this.entities)
+      : await runtime.create(owner, options as AgentCreateOptions)
+  }) as EntityBackedAgentRegistry['create']
+  resume: EntityBackedAgentRegistry['resume'] = (async (options: AgentResumeOptions | EntityAgentResumeOptions): Promise<AgentAcquireResult | EntityAgentAcquireResult> => {
+    const runtime = runtimeFor(this); const owner = runtime.ownerFromContext(this.ctx)
+    return 'definitionSource' in options && this.entities !== undefined
+      ? await runtime.resumeEntity(owner, options as EntityAgentResumeOptions)
+      : await runtime.resume(owner, options as AgentResumeOptions)
+  }) as EntityBackedAgentRegistry['resume']
   get = async (agentId: string): Promise<Agent | undefined> => { const runtime = runtimeFor(this); return await runtime.get(runtime.ownerFromContext(this.ctx), agentId) }
   acquireLegacyTaskBinding = async (request: CordisXAgentSessionLegacyAcquireRequestV1): Promise<CordisXAgentSessionLegacyAcquireResultV1> => { const runtime = runtimeFor(this); return await runtime.acquireLegacyTaskBinding(runtime.ownerFromContext(this.ctx), request) }
 }

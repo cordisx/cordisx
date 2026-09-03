@@ -1,8 +1,9 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 
 import type { CordisXJsonValue } from '../contracts.js'
 import type { CordisXOwnerDocumentLoadResultV1, CordisXOwnerDocumentReplaceResultV1 } from '../durable-document-contracts.js'
 import { OwnerDocumentStore, type OwnerDocumentIdentity } from './owner-document-store.js'
+import type { EntityBridgeHandler } from './entity-rpc.js'
 
 export const OWNER_DOCUMENT_BINDING = '__cordisxOwnerDocumentRequestV1'
 export const OWNER_DOCUMENT_RECEIVER = '__cordisxOwnerDocumentReceiveV1'
@@ -18,6 +19,8 @@ export interface OwnerDocumentPrincipal {
 
 export interface OwnerDocumentPrincipalBinding extends OwnerDocumentIdentity {
   readonly moduleGeneration: string
+  readonly installationId?: string
+  readonly pluginGeneration?: number
   readonly token: string
 }
 
@@ -109,7 +112,16 @@ export function issueOwnerDocumentPrincipalToken(secret: string, principal: Owne
   return `${payload}.${signature}`
 }
 
-function verifyPrincipalToken(secret: string, token: string): OwnerDocumentPrincipal | undefined {
+export function entityInstallationId(profileId: string, pluginId: string): string {
+  return `cx-installation.${createHash('sha256').update('cordisx.entity-installation/v1\0').update(profileId).update('\0').update(pluginId).digest('base64url').slice(0, 40)}`
+}
+
+export function entityPluginGeneration(moduleGeneration: string): number {
+  const digest = createHash('sha256').update('cordisx.entity-plugin-generation/v1\0').update(moduleGeneration).digest()
+  return digest.readUIntBE(0, 6) + 1
+}
+
+export function verifyOwnerDocumentPrincipalToken(secret: string, token: string): OwnerDocumentPrincipal | undefined {
   const parts = token.split('.')
   if (parts.length !== 2) return undefined
   const [payload, signature] = parts as [string, string]
@@ -143,6 +155,7 @@ export function parseOwnerDocumentBindingRequest(value: unknown): OwnerDocumentB
 }
 
 export interface OwnerDocumentBridgeHandler {
+  readonly entities?: EntityBridgeHandler
   issue(identity: OwnerDocumentIdentity, moduleGeneration: string): OwnerDocumentPrincipalBinding
   load(request: OwnerDocumentBindingRequest): Promise<CordisXOwnerDocumentLoadResultV1>
   replace(request: OwnerDocumentBindingRequest): Promise<CordisXOwnerDocumentReplaceResultV1>
@@ -163,7 +176,7 @@ export function createOwnerDocumentBridgeHandler(input: {
     try { return await operation() } finally { activeRequests -= 1 }
   }
   const resolve = (request: OwnerDocumentBindingRequest): OwnerDocumentPrincipal | undefined => {
-    const principal = verifyPrincipalToken(input.secret, request.token)
+    const principal = verifyOwnerDocumentPrincipalToken(input.secret, request.token)
     if (principal === undefined || principal.profileId !== input.profileId || principal.generation !== input.generation) return undefined
     if (!input.principalAllowed(principal)) return undefined
     return principal
@@ -171,7 +184,12 @@ export function createOwnerDocumentBridgeHandler(input: {
   return {
     issue(identity, moduleGeneration) {
       const principal = { profileId: input.profileId, generation: input.generation, moduleGeneration, identity }
-      return { ...identity, moduleGeneration, token: issueOwnerDocumentPrincipalToken(input.secret, principal) }
+      return {
+        ...identity, moduleGeneration,
+        installationId: entityInstallationId(input.profileId, identity.pluginId),
+        pluginGeneration: entityPluginGeneration(moduleGeneration),
+        token: issueOwnerDocumentPrincipalToken(input.secret, principal),
+      }
     },
     async load(request) {
       return await bounded(async () => {

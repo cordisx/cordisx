@@ -29,18 +29,21 @@ export const manifest = ${JSON.stringify({
     { name: 'agents.message.submit', required: true, scope: {} },
   ],
 })}
-export const inject = ['sessions', 'agents']
+export const inject = ['sessions', 'agents', 'entities']
 export async function apply(ctx) {
   const explicitElement = createElement(Button, null, 'Chatroom')
   const automaticElement = <Button>Chatroom JSX</Button>
   await ctx.sessions.get('cx-session.playground-local-artifact')
   const acquired = await ctx.agents.create({ sessionId: 'cx-session.playground-local-artifact' })
+  const entities = await ctx.entities.snapshot()
   if (acquired.status === 'accepted') await acquired.handle.agent.followup({
     id: 'cx-message.playground-local-artifact.1', role: 'user', content: [{ type: 'text', text: 'hi' }],
     source: { kind: 'plugin', pluginId: acquired.owner.pluginId, generation: acquired.owner.generation,
       correlation: { namespace: 'chatroom.room-run', id: 'fixture-room/fixture-run' } },
   })
-  globalThis.__playgroundLocalSessionGetApplied = explicitElement.type === Button && automaticElement.type === Button && acquired.status === 'accepted'
+  globalThis.__playgroundLocalSessionGetApplied = explicitElement.type === Button && automaticElement.type === Button
+    && acquired.status === 'accepted' && entities.binding.profileId === 'playground'
+    && entities.binding.pluginId === 'chatroom' && entities.entities.length === 0
 }
 `)
     await writeFile(configPath, JSON.stringify({
@@ -76,6 +79,11 @@ export async function apply(ctx) {
       expect(composition.watchFiles).not.toContain(`${root}/cordisx-shared-react:cordisx/ui`)
 
       const built = await session.buildBundle()
+      ;(dom.window as unknown as { __cordisxOwnerDocumentRequestV1?: (payload: string) => void }).__cordisxOwnerDocumentRequestV1 = payload => {
+        void session.handleOwnerDocumentRequest(payload).then(value => {
+          ;(dom.window as unknown as { __cordisxOwnerDocumentReceiveV1?: (payload: string) => void }).__cordisxOwnerDocumentReceiveV1?.(JSON.stringify(value))
+        })
+      }
       dom.window.eval(built.source)
       for (let attempt = 0; attempt < 200 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
         await new Promise(resolve => setTimeout(resolve, 10))

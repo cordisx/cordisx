@@ -32,7 +32,7 @@ interface DocumentWatch {
   lastKey?: string
 }
 
-export interface OwnerDocumentPrincipalBinding { readonly source: string; readonly pluginId: string; readonly moduleGeneration: string; readonly token: string }
+export interface OwnerDocumentPrincipalBinding { readonly source: string; readonly pluginId: string; readonly moduleGeneration: string; readonly installationId?: string; readonly pluginGeneration?: number; readonly token: string }
 
 function clone<Value>(value: Value): Value { return typeof globalThis.structuredClone === 'function' ? globalThis.structuredClone(value) : JSON.parse(JSON.stringify(value)) as Value }
 function deepFreeze<Value>(value: Value, seen = new Set<object>()): Value {

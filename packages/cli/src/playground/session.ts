@@ -47,11 +47,14 @@ import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
 import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
 import {
   createOwnerDocumentBridgeHandler,
+  entityInstallationId,
   OwnerDocumentLeaseRegistry,
   ownerDocumentBridgeError,
   parseOwnerDocumentBindingRequest,
   type OwnerDocumentBridgeHandler,
 } from '../launcher/owner-document-rpc.js'
+import { EntityDirectoryAuthority } from '../launcher/entity-directory.js'
+import { createEntityBridgeHandler, isEntityBindingRequest } from '../launcher/entity-rpc.js'
 
 export interface PlaygroundFixtureInfo {
   readonly name: string
@@ -240,6 +243,7 @@ export async function createPlaygroundSession(
   let activeProviderRequests = 0
   const credentialBackend = new PlaygroundCredentialBackend()
   const ownerDocumentStore = new OwnerDocumentStore(homeDir)
+  const entityAuthority = new EntityDirectoryAuthority(homeDir, 'playground')
   const agentSessionStore = new PlaygroundAgentSessionStore(homeDir)
   const nextGeneration = async (): Promise<PlaygroundGeneration> => {
     active?.channelConfig?.dispose()
@@ -319,13 +323,21 @@ export async function createPlaygroundSession(
     const documentLeases = new OwnerDocumentLeaseRegistry({
       stable: [...identities].map(([pluginId, source]) => ({ pluginId, source })),
     })
-    const documents = createOwnerDocumentBridgeHandler({
+    const ownerDocuments = createOwnerDocumentBridgeHandler({
       secret: documentSecret,
       profileId: 'playground',
       generation,
       store: ownerDocumentStore,
       principalAllowed: principal => documentLeases.allowed(principal),
     })
+    for (const plugin of config.plugins.filter(item => item.enabled)) entityAuthority.register({
+      profileId: 'playground', installationId: entityInstallationId('playground', plugin.id),
+      pluginId: plugin.id, pluginGeneration: 1,
+    }, [])
+    const documents = Object.assign(ownerDocuments, { entities: createEntityBridgeHandler({
+      secret: documentSecret, profileId: 'playground', generation, authority: entityAuthority,
+      principalAllowed: principal => documentLeases.allowed(principal),
+    }) })
     const channelPlugin = config.plugins.find(plugin => plugin.id === 'channel')
     const channelConfig = channelPlugin === undefined ? undefined : new HostServiceConfigNarrowApi({
       contract: createChannelHostServiceConfigContract({
@@ -442,14 +454,23 @@ export async function createPlaygroundSession(
     async handleOwnerDocumentRequest(raw) {
       if (active === undefined) throw new Error('Playground has no active generation')
       let requestId = 'invalid'
+      let entityRequest = false
       try {
-        const parsed = parseOwnerDocumentBindingRequest(JSON.parse(raw))
+        const value = JSON.parse(raw) as unknown
+        const generic = value as { readonly requestId?: unknown }
+        requestId = typeof generic.requestId === 'string' ? generic.requestId : 'invalid'
+        entityRequest = isEntityBindingRequest(value)
+        if (entityRequest && active.documents.entities !== undefined) {
+          return { requestId, ok: true, value: await active.documents.entities.handle(value) }
+        }
+        const parsed = parseOwnerDocumentBindingRequest(value)
         requestId = parsed.requestId
-        const value = parsed.operation === 'load'
+        const result = parsed.operation === 'load'
           ? await active.documents.load(parsed)
           : await active.documents.replace(parsed)
-        return { requestId, ok: true, value }
-      } catch {
+        return { requestId, ok: true, value: result }
+      } catch (error) {
+        if (entityRequest) return { requestId, ok: false, error: error instanceof Error ? error.message : 'entity request rejected' }
         return { requestId, ok: true, value: ownerDocumentBridgeError() }
       }
     },
