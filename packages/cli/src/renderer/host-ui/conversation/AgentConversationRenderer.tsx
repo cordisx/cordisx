@@ -693,6 +693,8 @@ function Composer({
   const [draft, setDraft] = React.useState('')
   const [submitting, setSubmitting] = React.useState(false)
   const noticeId = React.useId()
+  const chinese = copy.locale.toLowerCase().startsWith('zh')
+  const attachmentUnavailableLabel = chinese ? '添加附件（暂不可用）' : 'Add attachment (unavailable)'
   React.useEffect(() => { setDraft(''); setCommandError(undefined) }, [model.binding.bindingId, model.generation, setCommandError])
   const unavailable = model.composer.availability !== 'available'
   const reason = commandError ?? model.composer.disabledReason ?? (unavailable ? copy.unavailable : undefined)
@@ -749,6 +751,14 @@ function Composer({
         }}
       />
       <div className="cxa-composer-footer">
+        <button
+          type="button"
+          className="cxa-attachment-placeholder"
+          disabled
+          aria-label={attachmentUnavailableLabel}
+          title={attachmentUnavailableLabel}
+          data-host-composer-attachment="unavailable"
+        ><HostSurfaceIcon token="host:new" /></button>
         <p id={noticeId} className="cxa-composer-notice" data-error={String(commandError !== undefined)}>{reason ?? ''}</p>
         <button type="submit" className="cxa-send" disabled={disabled} aria-describedby={reason === undefined ? undefined : noticeId} aria-label={copy.sendLabel}>↑</button>
       </div>

@@ -11,13 +11,15 @@ const MAX_COMPOSER_ROWS = 6
 const HOST_COMPOSER_OVERRIDES = `
 .cxa-composer[data-cordisx-shikitor-layout]{grid-template-rows:auto auto}
 .cxa-composer[data-cordisx-shikitor-layout]>.cxa-draft{min-height:0!important;max-height:none!important;resize:none!important;overflow-x:hidden!important}
-.cxa-composer[data-cordisx-shikitor-layout="compact"]{grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto;align-items:center;column-gap:8px;row-gap:0;padding:8px}
-.cxa-composer[data-cordisx-shikitor-layout="compact"]>.cxa-draft{grid-column:1;grid-row:1;align-self:center}
+.cxa-composer[data-cordisx-shikitor-layout="compact"]{grid-template-columns:auto minmax(0,1fr) auto;grid-template-rows:auto;align-items:center;column-gap:8px;row-gap:0;padding:8px}
+.cxa-composer[data-cordisx-shikitor-layout="compact"]>.cxa-draft{grid-column:2;grid-row:1;align-self:center}
 .cxa-composer[data-cordisx-shikitor-layout="compact"]>.cxa-composer-footer{display:contents}
+.cxa-composer[data-cordisx-shikitor-layout="compact"]>.cxa-composer-footer>.cxa-attachment-placeholder{grid-column:1;grid-row:1;align-self:center}
 .cxa-composer[data-cordisx-shikitor-layout="compact"]>.cxa-composer-footer>.cxa-composer-notice{grid-column:1/-1;grid-row:2}
 .cxa-composer[data-cordisx-shikitor-layout="compact"]>.cxa-composer-footer>.cxa-composer-notice:empty{display:none}
 .cxa-composer[data-cordisx-shikitor-layout="compact"]>.cxa-composer-footer>.cxa-composer-notice:not(:empty){margin-top:4px}
-.cxa-composer[data-cordisx-shikitor-layout="compact"]>.cxa-composer-footer>.cxa-send{grid-column:2;grid-row:1;align-self:center}
+.cxa-composer[data-cordisx-shikitor-layout="compact"]>.cxa-composer-footer>.cxa-send{grid-column:3;grid-row:1;align-self:center}
+.cxa-composer[data-cordisx-shikitor-layout="compact"]>.shikitor.shikitor--attached{inset:8px 46px auto;width:auto;height:30px}
 .cxa-composer[data-cordisx-shikitor-layout="expanded"]{grid-template-columns:minmax(0,1fr);align-items:stretch}
 .cxa-composer[data-cordisx-shikitor-layout="expanded"]>.cxa-draft{grid-column:1;grid-row:1}
 .cxa-composer[data-cordisx-shikitor-layout="expanded"]>.cxa-composer-footer{grid-column:1;grid-row:2}
@@ -233,11 +235,13 @@ export function useHostShikitorComposer({
       if (composerWidth <= 0) return
       syncMeasurementMetrics(input, measurement)
       const sendRect = composer.querySelector<HTMLElement>('.cxa-send')?.getBoundingClientRect()
+      const attachmentRect = composer.querySelector<HTMLElement>('.cxa-attachment-placeholder')?.getBoundingClientRect()
       const sendWidth = sendRect?.width ?? 30
+      const attachmentWidth = attachmentRect?.width ?? 30
       const sendHeight = sendRect?.height ?? 30
       const compactWidth = Math.max(
         1,
-        composerWidth - COMPACT_INLINE_PADDING * 2 - COMPACT_COLUMN_GAP - sendWidth,
+        composerWidth - COMPACT_INLINE_PADDING * 2 - COMPACT_COLUMN_GAP * 2 - attachmentWidth - sendWidth,
       )
       measurement.style.width = `${compactWidth}px`
       const singleRowHeight = measuredHeight(measurement, 'M')
@@ -334,6 +338,8 @@ export function useHostShikitorComposer({
       layoutObserver.observe(input)
       const send = composer.querySelector<HTMLElement>('.cxa-send')
       if (send !== null) layoutObserver.observe(send)
+      const attachment = composer.querySelector<HTMLElement>('.cxa-attachment-placeholder')
+      if (attachment !== null) layoutObserver.observe(attachment)
     }
 
     const updateTheme = (): void => {
