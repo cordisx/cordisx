@@ -8,7 +8,7 @@ import type { CordisXPersistedPermissionPolicyRecord } from '../permission-persi
 import type { HomeConfigIconThemePreference } from '../config/home-config.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
-import { issueOwnerDocumentPrincipalToken } from './owner-document-rpc.js'
+import { entityInstallationId, entityPluginGeneration, issueOwnerDocumentPrincipalToken } from './owner-document-rpc.js'
 import {
   assertNoPrivateReactBundle,
   cordisXReactVirtualModules,
@@ -251,6 +251,8 @@ export async function buildRendererCompositionSource(
       ?? `${options.ownerDocumentAuthority!.generation}:${plugin.id}:bundled`
     return {
       source, pluginId: plugin.id, moduleGeneration,
+      installationId: entityInstallationId(options.ownerDocumentAuthority!.profileId, plugin.id),
+      pluginGeneration: entityPluginGeneration(moduleGeneration),
       token: issueOwnerDocumentPrincipalToken(options.ownerDocumentAuthority!.secret, {
         profileId: options.ownerDocumentAuthority!.profileId,
         generation: options.ownerDocumentAuthority!.generation,

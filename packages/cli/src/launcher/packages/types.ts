@@ -1,3 +1,4 @@
+import type { EntityTemplateDeclaration } from '@cordisx/protocol/entities/v1'
 import type {
   CordisXPluginActivationRecordV1,
   CordisXPluginDependencyV1,
@@ -26,7 +27,7 @@ export interface PackageIdentity {
 
 export type PackageDependency = CordisXPluginDependencyV1
 
-/** Package-v2/v3/v4 metadata. The referenced runtime manifest is a distinct object. */
+/** Package-v2/v3/v4/v5 metadata. The referenced runtime manifest is a distinct object. */
 export interface HostPackageManifest {
   readonly pluginId: string
   readonly version: string
@@ -48,6 +49,7 @@ export interface HostPackageManifest {
     readonly digest: `sha256:${string}`
   }
   readonly permissionFingerprint: string
+  readonly entityTemplates?: readonly EntityTemplateDeclaration[]
 }
 
 export type HostServiceConfigurationDeclaration =

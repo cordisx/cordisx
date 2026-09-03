@@ -1,4 +1,5 @@
-import type { AgentAcquireResult, AgentOptions, AgentRegistry, AgentSetup } from '@cordisx/protocol/agents/v1'
+import type { AgentAcquireResult, AgentOptions, AgentSetup } from '@cordisx/protocol/agents/v1'
+import type { EntityBackedAgentRegistry, EntityRegistry } from '@cordisx/protocol/entities/v1'
 import type { AgentLoopTaskBinding } from '@cordisx/protocol/agent-loop/v4'
 import type { ApprovalService } from '@cordisx/protocol/approval/v1'
 import type { SessionId, SessionRegistry } from '@cordisx/protocol/sessions/v1'
@@ -46,7 +47,7 @@ export type CordisXAgentSessionLegacyAcquireResultV1 = ResultEnvelope & (
 )
 
 /** Host extension of the formal Protocol registry; still injected only as ctx.agents. */
-export interface CordisXAgentRegistryV1 extends AgentRegistry {
+export interface CordisXAgentRegistryV1 extends EntityBackedAgentRegistry {
   acquireLegacyTaskBinding(
     request: CordisXAgentSessionLegacyAcquireRequestV1,
   ): Promise<CordisXAgentSessionLegacyAcquireResultV1>
@@ -58,5 +59,6 @@ declare module '@deepseek-ai/cordis' {
     agents: CordisXAgentRegistryV1
     sessions: SessionRegistry
     approvals: ApprovalService
+    entities: EntityRegistry
   }
 }

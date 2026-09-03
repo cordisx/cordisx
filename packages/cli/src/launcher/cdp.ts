@@ -103,12 +103,15 @@ import {
   MAX_OWNER_DOCUMENT_REQUESTS,
   OWNER_DOCUMENT_BINDING,
   OWNER_DOCUMENT_RECEIVER,
+  entityInstallationId,
   ownerDocumentBridgeError,
   parseOwnerDocumentBindingRequest,
   type OwnerDocumentLeaseRegistry,
   type OwnerDocumentPrincipalBinding,
   type OwnerDocumentBridgeHandler,
 } from './owner-document-rpc.js'
+import { isEntityBindingRequest } from './entity-rpc.js'
+import type { EntityDirectoryAuthority } from './entity-directory.js'
 
 const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
 const MARKETPLACE_RECEIVER = '__cordisxMarketplaceReceiveV1'
@@ -262,6 +265,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     readonly leases: OwnerDocumentLeaseRegistry
     readonly issue: (identity: { readonly source: string; readonly pluginId: string }, moduleGeneration: string) => OwnerDocumentPrincipalBinding
   } | undefined
+  private entityAuthority: { readonly profileId: string; readonly authority: EntityDirectoryAuthority } | undefined
   private recoveredActivation: CordisXPluginActivationRecordV1 | undefined
   private readonly recoveredSessions = new WeakSet<CdpSession>()
   private readonly developmentStates = new Map<string, CordisXLocalDevelopmentSnapshot>()
@@ -283,6 +287,13 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       throw new Error('cannot replace owner document authority during a generation transaction')
     }
     this.ownerDocumentAuthority = authority
+  }
+
+  setEntityAuthority(profileId: string, authority: EntityDirectoryAuthority): void {
+    if (this.joining.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0 || this.fences.size !== 0) {
+      throw new Error('cannot replace entity authority during a generation transaction')
+    }
+    this.entityAuthority = { profileId, authority }
   }
 
   currentRegistryEpoch(): number {
@@ -411,6 +422,20 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     this.staged.set(mutation.transactionId, sessions)
     const { runtimeArtifactSource, ...projectedMutation } = mutation
     const runtimePackage = mutation.package
+    if (runtimePackage !== undefined && mutation.candidate.plugins.find(item => item.id === mutation.targetId)?.enabled === true
+      && this.entityAuthority !== undefined) {
+      const binding = {
+        profileId: this.entityAuthority.profileId,
+        installationId: entityInstallationId(this.entityAuthority.profileId, mutation.targetId),
+        pluginId: mutation.targetId, pluginGeneration: 1,
+      }
+      this.entityAuthority.authority.register(binding, runtimePackage.entityTemplates.map(template => template.declaration))
+      const materialized = await this.entityAuthority.authority.materialize(
+        binding, runtimePackage.manifest.version, runtimePackage.digest, runtimePackage.entityTemplates,
+      )
+      const rejected = materialized.find(result => result.status === 'rejected')
+      if (rejected !== undefined) throw new Error(`entity template ${rejected.agentId} was rejected: ${rejected.code}`)
+    }
     const runtimeManifest = runtimePackage?.manifest?.runtimeManifest
     const isolatedArtifactSource = runtimePackage !== undefined && runtimeManifest?.schemaVersion === 5
       && runtimeManifest.capabilities.some(capability => (
@@ -1243,22 +1268,34 @@ async function install(
         const payload = params.payload
         void (async () => {
           let requestId = 'invalid'
+          let entityRequest = false
           try {
             if (Buffer.byteLength(payload) > MAX_OWNER_DOCUMENT_REQUEST_BYTES) throw new Error('owner document request exceeds maximum size')
-            const request = parseOwnerDocumentBindingRequest(JSON.parse(payload) as unknown)
-            requestId = request.requestId
+            const parsed = JSON.parse(payload) as unknown
+            const generic = parsed as { readonly requestId?: unknown }
+            requestId = typeof generic.requestId === 'string' ? generic.requestId : 'invalid'
+            entityRequest = isEntityBindingRequest(parsed)
             if (ownerDocumentController?.signal.aborted === true) throw new Error('owner document bridge is closed')
             if (activeOwnerDocumentRequests >= MAX_OWNER_DOCUMENT_REQUESTS) throw new Error('too many owner document requests')
             activeOwnerDocumentRequests += 1
             try {
-              const value = request.operation === 'load'
-                ? await ownerDocuments.load(request)
-                : await ownerDocuments.replace(request)
+              const value = entityRequest && ownerDocuments.entities !== undefined
+                ? await ownerDocuments.entities.handle(parsed)
+                : await (async () => {
+                    const request = parseOwnerDocumentBindingRequest(parsed)
+                    return request.operation === 'load' ? await ownerDocuments.load(request) : await ownerDocuments.replace(request)
+                  })()
               await sendOwnerDocumentBindingResponse(session, { requestId, ok: true, value })
             } finally {
               activeOwnerDocumentRequests -= 1
             }
-          } catch {
+          } catch (error) {
+            if (entityRequest) {
+              await sendOwnerDocumentBindingResponse(session, {
+                requestId, ok: false, error: error instanceof Error ? error.message : 'entity request rejected',
+              }).catch(() => undefined)
+              return
+            }
             await sendOwnerDocumentBindingResponse(session, {
               requestId,
               ok: true,

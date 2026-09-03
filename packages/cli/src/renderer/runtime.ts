@@ -194,6 +194,8 @@ import {
   type HostDomWorkerEnvironment,
 } from './host-dom-worker.js'
 import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from './owner-documents.js'
+import { CordisXEntityRegistryServiceV1, type EntityPrincipalBinding } from './entities.js'
+import type { EntityRegistry } from '@cordisx/protocol/entities/v1'
 import { BrowserPlaygroundAgentSessionPersistence } from './playground-agent-session-persistence.js'
 import type { CordisXOwnerDocumentsV1 } from '../durable-document-contracts.js'
 
@@ -220,7 +222,7 @@ interface CordisXRuntimeMetadata {
   readonly agentHistoryBridgeToken?: string
   readonly configBridgeToken?: string
   readonly playgroundAgentSessionStoreToken?: string
-  readonly ownerDocumentBindings?: readonly { readonly source: string; readonly pluginId: string; readonly moduleGeneration: string; readonly token: string }[]
+  readonly ownerDocumentBindings?: readonly { readonly source: string; readonly pluginId: string; readonly moduleGeneration: string; readonly installationId?: string; readonly pluginGeneration?: number; readonly token: string }[]
   readonly serviceConfigBridgeToken?: string
   readonly channelCredentialBridgeToken?: string
   readonly channelActionsBridgeToken?: string
@@ -287,6 +289,7 @@ interface PluginController {
   unregisterConnector?: () => void | Promise<void>
   unregisterAgentLoop?: () => void | Promise<void>
   unregisterDocuments?: () => void | Promise<void>
+  entityRegistryFiber?: Fiber
   agentRegistryFiber?: Fiber
   sessionRegistryFiber?: Fiber
   approvalServiceFiber?: Fiber
@@ -377,7 +380,7 @@ export interface RendererPluginMutation {
   readonly isolatedArtifactSource?: string
   readonly authorizationDecision?: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV4
   /** Host-private activation lease; never projected to plugins. */
-  readonly ownerDocumentBindings?: readonly { readonly source: string; readonly pluginId: string; readonly moduleGeneration: string; readonly token: string }[]
+  readonly ownerDocumentBindings?: readonly { readonly source: string; readonly pluginId: string; readonly moduleGeneration: string; readonly installationId?: string; readonly pluginGeneration?: number; readonly token: string }[]
 }
 
 interface CordisXRuntimeHandle extends ManagerModel {
@@ -663,6 +666,14 @@ async function start(
     : new BrowserConfigBridge(metadata.configBridgeToken, metadata.profileId, generation)
   const ownerDocumentBridge = metadata.ownerDocumentBindings === undefined ? undefined : new BrowserOwnerDocumentBridge()
   const ownerDocumentBroker = new CordisXOwnerDocumentBroker(ownerDocumentBridge, metadata.ownerDocumentBindings)
+  const entityPrincipalBindings = new Map<string, EntityPrincipalBinding>()
+  const registerEntityBindings = (bindings: CordisXRuntimeMetadata['ownerDocumentBindings']): void => {
+    for (const binding of bindings ?? []) if (binding.installationId !== undefined && binding.pluginGeneration !== undefined) entityPrincipalBindings.set(
+      JSON.stringify([binding.source, binding.pluginId, binding.moduleGeneration]),
+      binding as EntityPrincipalBinding,
+    )
+  }
+  registerEntityBindings(metadata.ownerDocumentBindings)
   const serviceConfigBridge = metadata.serviceConfigBridgeToken === undefined
     ? undefined
     : BrowserServiceConfigBridge.connect(metadata.serviceConfigBridgeToken, metadata.profileId, generation)
@@ -1256,6 +1267,8 @@ async function start(
       delete controller.sessionRegistryFiber
       await controller.agentRegistryFiber?.dispose()
       delete controller.agentRegistryFiber
+      await controller.entityRegistryFiber?.dispose()
+      delete controller.entityRegistryFiber
       controller.unregisterAgentSessionMigration?.()
       delete controller.unregisterAgentSessionMigration
       controller.agentLoopClient?.dispose()
@@ -1495,7 +1508,7 @@ async function start(
         }
       },
     })
-    pluginContext = ctx.isolate('connectors').isolate('agentLoop').isolate('agents').isolate('sessions').isolate('approvals').isolate('documents').extend({
+    pluginContext = ctx.isolate('connectors').isolate('agentLoop').isolate('agents').isolate('sessions').isolate('approvals').isolate('entities').isolate('documents').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
@@ -1509,7 +1522,20 @@ async function start(
     controller.documentsClient = documentsClient
     controller.unregisterDocuments = pluginContext.reflect.provide('documents', documentsClient)
     try {
-      controller.agentRegistryFiber = pluginContext.plugin(CordisXAgentRegistryServiceV1, agentSessionRuntime)
+      const owner = agentSessionRuntime.ownerFromContext(pluginContext)
+      const entityPrincipal = entityPrincipalBindings.get(JSON.stringify([
+        controller.identity.source, controller.identity.id, moduleGenerationOf(controller),
+      ]))
+      controller.entityRegistryFiber = pluginContext.plugin(
+        CordisXEntityRegistryServiceV1, {
+          bridge: ownerDocumentBridge, principal: entityPrincipal,
+          profileId: metadata.profileId, pluginGeneration: entityPrincipal?.pluginGeneration ?? owner.generation,
+          active: () => controller.principalLive,
+        },
+      )
+      await controller.entityRegistryFiber
+      const entityRegistry = (pluginContext as unknown as { readonly entities: EntityRegistry }).entities
+      controller.agentRegistryFiber = pluginContext.plugin(CordisXAgentRegistryServiceV1, { runtime: agentSessionRuntime, entities: entityRegistry })
       await controller.agentRegistryFiber
       controller.sessionRegistryFiber = pluginContext.plugin(CordisXSessionRegistryServiceV1, agentSessionRuntime)
       await controller.sessionRegistryFiber
@@ -1539,6 +1565,8 @@ async function start(
       delete controller.sessionRegistryFiber
       await controller.agentRegistryFiber?.dispose()
       delete controller.agentRegistryFiber
+      await controller.entityRegistryFiber?.dispose()
+      delete controller.entityRegistryFiber
       controller.unregisterAgentSessionMigration?.()
       delete controller.unregisterAgentSessionMigration
       agentLoopClient.dispose()
@@ -2387,6 +2415,7 @@ async function start(
       }
       const affected = new Set(handle.affectedPluginIds)
       ownerDocumentBroker.registerBindings(mutation.ownerDocumentBindings ?? [])
+      registerEntityBindings(mutation.ownerDocumentBindings)
       const previous = activeControllers().filter(controller => affected.has(controller.item.id))
       const candidates: PluginController[] = []
       notificationsSuppressed = true
@@ -2750,6 +2779,8 @@ async function start(
       delete controller.sessionRegistryFiber
       await controller.agentRegistryFiber?.dispose()
       delete controller.agentRegistryFiber
+      await controller.entityRegistryFiber?.dispose()
+      delete controller.entityRegistryFiber
       controller.unregisterAgentSessionMigration?.()
       delete controller.unregisterAgentSessionMigration
       controller.documentsClient?.dispose()

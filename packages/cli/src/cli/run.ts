@@ -74,9 +74,13 @@ import {
 } from '../plugin-lifecycle-contracts.js'
 import type { RollbackPlan } from '../launcher/packages/authority.js'
 import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
+import { EntityDirectoryAuthority } from '../launcher/entity-directory.js'
+import { createEntityBridgeHandler } from '../launcher/entity-rpc.js'
+import { loadStagedPluginPackage } from '../launcher/plugin-package.js'
 import { AgentLoopAuthority } from '../launcher/agent-loop-authority.js'
 import {
   createOwnerDocumentBridgeHandler,
+  entityInstallationId,
   type OwnerDocumentBridgeHandler,
   OwnerDocumentLeaseRegistry,
 } from '../launcher/owner-document-rpc.js'
@@ -553,13 +557,24 @@ async function runDevelopment(
     const documentLeases = new OwnerDocumentLeaseRegistry({
       stable: [{ source: initialDevelopmentPlugin.source, pluginId: initialDevelopmentPlugin.id }],
     })
-    const ownerDocuments = createOwnerDocumentBridgeHandler({
+    const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
       secret: composition.ownerDocumentSecret,
       profileId: 'development',
       generation: composition.generation,
       store: new OwnerDocumentStore(cordisxHomeDir),
       principalAllowed: principal => documentLeases.allowed(principal),
     })
+    const entityAuthority = new EntityDirectoryAuthority(cordisxHomeDir, 'development')
+    entityAuthority.register({
+      profileId: 'development', installationId: entityInstallationId('development', initialDevelopmentPlugin.id),
+      pluginId: initialDevelopmentPlugin.id, pluginGeneration: 1,
+    }, [])
+    const ownerDocuments = Object.assign(ownerDocumentHandler, { entities: createEntityBridgeHandler({
+      secret: composition.ownerDocumentSecret, profileId: 'development', generation: composition.generation,
+      authority: entityAuthority, principalAllowed: principal => documentLeases.allowed(principal),
+    }) })
+    lifecycleRuntime.setOwnerDocumentAuthority({ leases: documentLeases, issue: ownerDocuments.issue })
+    lifecycleRuntime.setEntityAuthority('development', entityAuthority)
     let bootstrapSource = composition.source
     const controller = await LocalDevelopmentController.create({
       entry,
@@ -647,13 +662,22 @@ async function runDevelopment(
   const documentLeases = new OwnerDocumentLeaseRegistry({
     stable: [...developmentIdentities].map(([pluginId, source]) => ({ pluginId, source })),
   })
-  const ownerDocuments = createOwnerDocumentBridgeHandler({
+  const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
     secret: composition.ownerDocumentSecret,
     profileId: 'development',
     generation: composition.generation,
     store: new OwnerDocumentStore(cordisxHomeDir),
     principalAllowed: principal => documentLeases.allowed(principal),
   })
+  const developmentEntityAuthority = new EntityDirectoryAuthority(cordisxHomeDir, 'development')
+  for (const plugin of config.plugins.filter(item => item.enabled)) developmentEntityAuthority.register({
+    profileId: 'development', installationId: entityInstallationId('development', plugin.id),
+    pluginId: plugin.id, pluginGeneration: 1,
+  }, [])
+  const ownerDocuments = Object.assign(ownerDocumentHandler, { entities: createEntityBridgeHandler({
+    secret: composition.ownerDocumentSecret, profileId: 'development', generation: composition.generation,
+    authority: developmentEntityAuthority, principalAllowed: principal => documentLeases.allowed(principal),
+  }) })
   await runInjectedHost({
     source: composition.source,
     agentHistoryHost: agentHistoryHost(environment, homeConfigPath, `development:${config.rootDir}`),
@@ -914,14 +938,33 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           runtimeGeneration: lifecycleGeneration,
         },
       })
-  const ownerDocuments = createOwnerDocumentBridgeHandler({
+  const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
     secret: rendererComposition.ownerDocumentSecret,
     profileId: selection.profileId,
     generation: rendererComposition.generation,
     store: new OwnerDocumentStore(rootFromConfigPath(configPath)),
     principalAllowed: principal => documentLeases.allowed(principal),
   })
+  const entityAuthority = new EntityDirectoryAuthority(rootFromConfigPath(configPath), selection.profileId)
+  for (const plugin of composition.plugins.filter(item => item.enabled)) {
+    const installationId = entityInstallationId(selection.profileId, plugin.id)
+    const binding = { profileId: selection.profileId, installationId, pluginId: plugin.id, pluginGeneration: 1 }
+    if (plugin.package === undefined) { entityAuthority.register(binding, []); continue }
+    const staged = await loadStagedPluginPackage(rootFromConfigPath(configPath), plugin.package.digest)
+    const declarations = staged.entityTemplates.map(template => template.declaration)
+    entityAuthority.register(binding, declarations)
+    const materialized = await entityAuthority.materialize(binding, staged.manifest.version, staged.digest, staged.entityTemplates)
+    const rejected = materialized.find(result => result.status === 'rejected')
+    if (rejected !== undefined) throw new Error(`entity template ${rejected.agentId} was rejected: ${rejected.code}`)
+  }
+  const entityBridge = createEntityBridgeHandler({
+    secret: rendererComposition.ownerDocumentSecret, profileId: selection.profileId,
+    generation: rendererComposition.generation, authority: entityAuthority,
+    principalAllowed: principal => documentLeases.allowed(principal),
+  })
+  const ownerDocuments = Object.assign(ownerDocumentHandler, { entities: entityBridge })
   lifecycleRuntime.setOwnerDocumentAuthority({ leases: documentLeases, issue: ownerDocuments.issue })
+  lifecycleRuntime.setEntityAuthority(selection.profileId, entityAuthority)
   await runtime.internalObserveOwnerDocuments?.({ source: rendererComposition.source, handler: ownerDocuments })
   const permissionPersistence = rendererComposition.permissionBridgeToken === undefined ? undefined : {
     configPath,

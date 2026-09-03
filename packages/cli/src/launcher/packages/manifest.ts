@@ -16,6 +16,8 @@ export const PLUGIN_PACKAGE_SCHEMA_V3 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v3.schema.json'
 export const PLUGIN_PACKAGE_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v4.schema.json'
+export const PLUGIN_PACKAGE_SCHEMA_V5 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v5.schema.json'
 export const PLUGIN_RUNTIME_MANIFEST_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v4.schema.json'
 export const PLUGIN_RUNTIME_MANIFEST_SCHEMA_V5 =
@@ -34,6 +36,7 @@ const DIGEST = /^sha256:[a-f0-9]{64}$/
 const ENTRY = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:mjs|js|ts)$/
 const JSON_PATH = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.json$/
 const PUBLIC_HTTPS = /^https:\/\/[^?#]+$/
+const ENTITY_FILE_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-file.v1.schema.json'
 const FORBIDDEN_RUNTIME_VALUE_KEYS = new Set([
   'connection',
   'connections',
@@ -127,7 +130,7 @@ function assertNoLauncherValues(value: unknown, trail = 'runtimeManifest'): void
 }
 
 /**
- * Resolves package-v2/v3/v4 documents and their separately digested runtime
+ * Resolves package-v2/v3/v4/v5 documents and their separately digested runtime
  * manifest. Formal runtime-schema validators are injected by the owning Host.
  */
 export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
@@ -144,7 +147,7 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
     const manifest = object(raw, 'package manifest')
     exactKeys(manifest, [
       '$schema', 'schemaVersion', 'id', 'version', 'entry', 'readme', 'canonicalSource',
-      'distribution', 'compatibility', 'dependencies', 'runtimeManifest',
+      'distribution', 'compatibility', 'dependencies', 'runtimeManifest', 'entityTemplates',
     ], 'package manifest')
     const packageVersion = manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V2 && manifest.schemaVersion === 2
       ? 2
@@ -152,9 +155,11 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
         ? 3
         : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V4 && manifest.schemaVersion === 4
           ? 4
+          : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V5 && manifest.schemaVersion === 5
+            ? 5
           : undefined
     if (packageVersion === undefined) {
-      throw new PackageLifecycleError('invalid-package-manifest', 'package manifest must use plugin-package.v2, plugin-package.v3, or plugin-package.v4')
+      throw new PackageLifecycleError('invalid-package-manifest', 'package manifest must use plugin-package.v2, plugin-package.v3, plugin-package.v4, or plugin-package.v5')
     }
     const pluginId = string(manifest.id, 'package manifest id')
     if (!LOCAL_ID.test(pluginId)) throw new PackageLifecycleError('invalid-package-manifest', 'package manifest id is invalid')
@@ -184,7 +189,7 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
     const runtimeDigest = string(runtimeReference.digest, 'runtime manifest digest')
     if (!PLUGIN_RUNTIME_MANIFEST_SCHEMAS.includes(runtimeSchema as typeof PLUGIN_RUNTIME_MANIFEST_SCHEMAS[number])
       || (packageVersion === 2 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V4)
-      || (packageVersion !== 4 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V5)
+      || (packageVersion < 4 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V5)
       || !DIGEST.test(runtimeDigest)
       || !(compatibility.protocolSchemas as readonly unknown[]).includes(runtimeSchema)) {
       throw new PackageLifecycleError('incompatible-runtime', 'runtime manifest reference is unsupported or not declared compatible')
@@ -212,6 +217,29 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
     if (publicSource !== undefined && (typeof publicSource !== 'string' || !PUBLIC_HTTPS.test(publicSource))) {
       throw new PackageLifecycleError('invalid-package-manifest', 'canonicalSource must be public HTTPS without query or fragment')
     }
+    let entityTemplates: HostPackageManifest['entityTemplates']
+    if (manifest.entityTemplates !== undefined) {
+      if (packageVersion !== 5 || !Array.isArray(manifest.entityTemplates) || manifest.entityTemplates.length > 64) {
+        throw new PackageLifecycleError('invalid-package-manifest', 'entityTemplates requires package v5 and at most 64 declarations')
+      }
+      const seen = new Set<string>()
+      entityTemplates = manifest.entityTemplates.map((raw, index) => {
+        const template = object(raw, `entityTemplates[${index}]`)
+        exactKeys(template, ['agentId', 'entityPath', 'digest'], `entityTemplates[${index}]`)
+        const agentId = string(template.agentId, `entityTemplates[${index}].agentId`)
+        const entityPath = string(template.entityPath, `entityTemplates[${index}].entityPath`)
+        const digest = string(template.digest, `entityTemplates[${index}].digest`)
+        if (!LOCAL_ID.test(agentId) || seen.has(agentId)
+          || !/^\.\/entities\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\/entity\.json$/u.test(entityPath)
+          || entityPath !== `./entities/${agentId}/entity.json`
+          || !DIGEST.test(digest)) throw new PackageLifecycleError('invalid-package-manifest', `entityTemplates[${index}] is invalid or duplicated`)
+        seen.add(agentId)
+        return { agentId, entityPath: entityPath as `./entities/${string}/entity.json`, digest: digest as `sha256:${string}` }
+      })
+      if (!(compatibility.protocolSchemas as readonly unknown[]).includes(ENTITY_FILE_SCHEMA_V1)) {
+        throw new PackageLifecycleError('incompatible-runtime', 'entity template packages must declare entity-file.v1 compatibility')
+      }
+    }
     const packageManifest: HostPackageManifest = {
       pluginId,
       version,
@@ -232,6 +260,7 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
         digest: runtimeDigest as `sha256:${string}`,
       },
       permissionFingerprint: createHash('sha256').update(JSON.stringify(runtimeManifest)).digest('hex'),
+      ...(entityTemplates === undefined ? {} : { entityTemplates }),
     }
     return {
       packageManifest,
