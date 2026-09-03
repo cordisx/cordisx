@@ -383,8 +383,8 @@ handle and source.
 
 For Session-compatible Shell v4 identity actions, the same Host Agent/Session
 authority resolves each accepted `AgentSetup` catalog with the established
-AgentDefinition inheritance, prompt, and avatar rules, then retains the exact
-effective definition only for that owned Agent generation. Shell identity
+AgentDefinition inheritance, prompt, and avatar rules, then retains the complete
+exact effective catalog only for that owned Agent generation. Shell identity
 resolution consults this live catalog alongside the byte-preserved AgentLoop v4
 catalog. Owner, Session, connection, or Agent generation replacement removes
 the stale presentation; unresolved identities continue to use the members

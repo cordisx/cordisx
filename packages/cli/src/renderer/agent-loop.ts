@@ -165,7 +165,12 @@ function assertDefinition(definition: CordisXAgentDefinition): void {
   if (definition.promptSections?.some(section => !identifier(section.sectionId) || section.text.trim() === '') === true) throw new Error('Agent prompt section is invalid')
 }
 
-export function resolveAgentDefinition(command: Pick<CreateCommand, 'definition' | 'definitions'>): CordisXResolvedAgentDefinition {
+export interface CordisXResolvedAgentDefinitionCatalog {
+  readonly target: CordisXResolvedAgentDefinition
+  readonly definitions: readonly CordisXResolvedAgentDefinition[]
+}
+
+export function resolveAgentDefinitionCatalog(command: Pick<CreateCommand, 'definition' | 'definitions'>): CordisXResolvedAgentDefinitionCatalog {
   if (command.definitions.length === 0 || command.definitions.length > 64) throw new Error('Agent definition catalog is invalid')
   const catalog = new Map<string, CordisXAgentDefinition>()
   for (const definition of command.definitions) {
@@ -217,7 +222,11 @@ export function resolveAgentDefinition(command: Pick<CreateCommand, 'definition'
   }
   const value = visit(command.definition)
   if (resolved.size !== catalog.size) throw new Error('Agent definition catalog contains an unreachable definition')
-  return value
+  return Object.freeze({ target: value, definitions: Object.freeze([...resolved.values()].map(clone)) })
+}
+
+export function resolveAgentDefinition(command: Pick<CreateCommand, 'definition' | 'definitions'>): CordisXResolvedAgentDefinition {
+  return resolveAgentDefinitionCatalog(command).target
 }
 
 const MERGE_INHERITANCE: CordisXAgentDefinition['inherit'] = Object.freeze({
