@@ -652,6 +652,17 @@ to conversation participant surfaces, not to generic task navigation. A future
 per-Room composite leading visual must come from an exact row-scoped collection
 contract; the Host must not infer it from the current Room selection or title.
 
+Playground Agent/Session runs enter that same Recent tasks and Simulator detail
+surface through a Host-private read projection of the single Agent/Session
+authority. The task key and details route are the exact `SessionId`; every
+conversation, tool, approval, and lifecycle row retains its originating
+`SessionEvent` and sequence. Live status comes from the current Agent generation,
+while recovered status is derived only from the persisted event terminal. The
+projection is merged additively beside the byte-preserved AgentLoop Simulator,
+but is never written to the browser task-snapshot registry: restart recovery
+comes exclusively from the launcher-owned Playground SessionEvent store. This
+prevents Recent tasks from becoming a second execution or causation ledger.
+
 AgentLoop v2 commands are accepted only when the Host can provide the formal
 owner/provider durable-ledger semantics. The explicit Playground mock uses
 session-scoped persistence for disposable simulator state. A real/local-cli

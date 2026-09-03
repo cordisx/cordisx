@@ -162,10 +162,13 @@ export function readPlaygroundSimulatorTaskSnapshots(storage: Storage | undefine
 export function mergePlaygroundSimulatorTaskSnapshots(
   storage: Storage | undefined,
   live: PlaygroundMockAgentLoopSnapshot | undefined,
+  agentSessions?: PlaygroundMockAgentLoopSnapshot,
 ): PlaygroundMockAgentLoopSnapshot | undefined {
   const cached = readPlaygroundSimulatorTaskSnapshots(storage)
   const tasks = new Map<string, PlaygroundMockTaskTrace>()
-  for (const task of cached?.tasks ?? []) tasks.set(task.taskRef, task)
+  // Agent/Session rows are never recovered from this browser cache. Their only
+  // durable source is the Host SessionEvent authority.
+  for (const task of cached?.tasks ?? []) if (task.origin !== 'agent-session') tasks.set(task.taskRef, task)
   for (const value of live?.tasks ?? []) {
     const task = normalizeTaskSnapshot(value)
     if (task !== undefined) {
@@ -175,18 +178,28 @@ export function mergePlaygroundSimulatorTaskSnapshots(
         : { ...task, simulationBinding: cachedTask.simulationBinding })
     }
   }
-  if (tasks.size === 0) return undefined
-  const snapshot = {
+  const cachedSnapshot = {
     namespace: PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE,
     label: 'Mock / Simulator' as const,
     tasks: [...tasks.values()],
   }
   try {
-    if (storage === undefined) return snapshot
-    const registry: PlaygroundSimulatorTaskSnapshotRegistry = { version: 2, tasks: snapshot.tasks }
-    storage.setItem(PLAYGROUND_SIMULATOR_TASK_SNAPSHOT_KEY, JSON.stringify(registry))
+    if (storage !== undefined) {
+      const registry: PlaygroundSimulatorTaskSnapshotRegistry = { version: 2, tasks: cachedSnapshot.tasks }
+      storage.setItem(PLAYGROUND_SIMULATOR_TASK_SNAPSHOT_KEY, JSON.stringify(registry))
+    }
   } catch {
     // The current live snapshot remains usable if browser session storage is unavailable.
+  }
+  for (const value of agentSessions?.tasks ?? []) {
+    const task = normalizeTaskSnapshot(value)
+    if (task !== undefined && task.origin === 'agent-session') tasks.set(task.taskRef, task)
+  }
+  if (tasks.size === 0) return undefined
+  const snapshot = {
+    namespace: PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE,
+    label: 'Mock / Simulator' as const,
+    tasks: [...tasks.values()],
   }
   return snapshot
 }

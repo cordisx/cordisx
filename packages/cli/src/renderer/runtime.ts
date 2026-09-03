@@ -53,6 +53,7 @@ import {
 } from './agent-session-runtime.js'
 import { CodexDesktopAgentSessionTransport, UnavailableAgentSessionTransport } from './codex-desktop-agent-session-transport.js'
 import { DeterministicAgentSessionTransport } from './deterministic-agent-session-transport.js'
+import { projectPlaygroundAgentSessions } from './playground-agent-session-projection.js'
 import { AgentRouteSessionScopeAuthority, type AgentRuntimePermissionDeclaration } from './agent-route-session-scope.js'
 import {
   CordisXConnectorBroker,
@@ -419,6 +420,8 @@ interface CordisXRuntimeHandle extends ManagerModel {
   updateLocalDevelopmentStatus(status: CordisXLocalDevelopmentSnapshot): boolean
   /** Host-private debug projection. Plugins and public runtime snapshots cannot access it. */
   playgroundMockAgentLoop?(): PlaygroundMockAgentLoopSnapshot
+  /** Host-private native task projection read directly from the Playground Session authority. */
+  playgroundAgentSessions?(): PlaygroundMockAgentLoopSnapshot | undefined
   /** Host-private destructive clear plus zero-count readback for this loopback Playground's mock tasks and ledgers. */
   resetPlaygroundMockAgentLoop?(): Readonly<{ before: number; after: number }>
   /** Host-private, loopback-Playground-only forwarding client. It never exposes the Room owner document. */
@@ -2974,6 +2977,9 @@ async function start(
     abortPluginMutation,
     reloadPluginGeneration,
     updateLocalDevelopmentStatus,
+    ...(metadata.hostKind === 'playground' ? {
+      playgroundAgentSessions: () => projectPlaygroundAgentSessions(agentSessionRuntime.playgroundProjection()),
+    } : {}),
     ...(playgroundMockAgentLoop === undefined ? {} : {
       playgroundMockAgentLoop: () => playgroundMockAgentLoop.snapshot(),
       resetPlaygroundMockAgentLoop: () => {

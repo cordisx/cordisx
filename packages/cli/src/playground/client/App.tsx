@@ -567,6 +567,7 @@ export function App() {
       data-simulator-session-record-count={simulatorSessionRecordCount}
       data-preview-reset-live-recent-tasks={recentTasks.length}
       data-simulator-source-live-runtime={simulatorSources.liveRuntime}
+      data-simulator-source-agent-session={simulatorSources.agentSessionAuthority}
       data-simulator-source-runtime-memory={simulatorSources.runtimeMemory}
       data-simulator-source-task-registry={simulatorSources.taskSnapshotRegistry}
       data-simulator-source-host-session={simulatorSources.hostSessionRegistry}

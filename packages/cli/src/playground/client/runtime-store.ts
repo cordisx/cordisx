@@ -35,6 +35,7 @@ interface RuntimeState {
 
 export interface PlaygroundSimulatorSourceBreakdown {
   readonly liveRuntime: number
+  readonly agentSessionAuthority: number
   readonly runtimeMemory: number
   readonly taskSnapshotRegistry: number
   readonly hostSessionRegistry: number
@@ -44,6 +45,7 @@ export interface PlaygroundSimulatorSourceBreakdown {
 
 export type PlaygroundSimulatorTaskSource =
   | 'live-runtime'
+  | 'agent-session-authority'
   | 'runtime-memory'
   | 'task-snapshot-registry'
   | 'host-session-registry'
@@ -89,7 +91,11 @@ function refresh(): void {
     publish({ status: 'active', plugins: runtime.snapshot().plugins, ...resetStateProjection() })
     return
   }
-  const simulator = mergePlaygroundSimulatorTaskSnapshots(browserSessionStorage(), runtime.playgroundMockAgentLoop?.())
+  const simulator = mergePlaygroundSimulatorTaskSnapshots(
+    browserSessionStorage(),
+    runtime.playgroundMockAgentLoop?.(),
+    runtime.playgroundAgentSessions?.(),
+  )
   publish({ status: 'active', plugins: runtime.snapshot().plugins, ...(simulator === undefined ? {} : { simulator }), ...resetStateProjection() })
 }
 
@@ -239,9 +245,11 @@ export function resetPlaygroundLiveSimulator(): Readonly<{ before: number; after
 export function playgroundSimulatorSourceBreakdown(): PlaygroundSimulatorSourceBreakdown {
   const cached = readPlaygroundSimulatorTaskSnapshots(browserSessionStorage())?.tasks ?? []
   const live = window.__cordisxRuntime?.playgroundMockAgentLoop?.().tasks ?? []
+  const agentSessions = window.__cordisxRuntime?.playgroundAgentSessions?.()?.tasks ?? []
   const memory = state.simulator?.tasks ?? []
   return Object.freeze({
     liveRuntime: live.length,
+    agentSessionAuthority: agentSessions.length,
     runtimeMemory: memory.length,
     taskSnapshotRegistry: cached.length,
     hostSessionRegistry: cached.filter(task => task.origin === 'host-session').length,
@@ -253,9 +261,11 @@ export function playgroundSimulatorSourceBreakdown(): PlaygroundSimulatorSourceB
 export function playgroundSimulatorTaskSources(taskRef: string): readonly PlaygroundSimulatorTaskSource[] {
   const cached = readPlaygroundSimulatorTaskSnapshots(browserSessionStorage())?.tasks ?? []
   const live = window.__cordisxRuntime?.playgroundMockAgentLoop?.().tasks ?? []
+  const agentSessions = window.__cordisxRuntime?.playgroundAgentSessions?.()?.tasks ?? []
   const memory = state.simulator?.tasks ?? []
   const sources: PlaygroundSimulatorTaskSource[] = []
   if (live.some(task => task.taskRef === taskRef)) sources.push('live-runtime')
+  if (agentSessions.some(task => task.taskRef === taskRef)) sources.push('agent-session-authority')
   if (memory.some(task => task.taskRef === taskRef)) sources.push('runtime-memory')
   const cachedTask = cached.find(task => task.taskRef === taskRef)
   if (cachedTask !== undefined) sources.push('task-snapshot-registry')
