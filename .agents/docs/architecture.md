@@ -147,6 +147,19 @@ provider, model, App Server, Codex task, process, connection, or login state.
 Its `debug:agent-loop/mock/v1` task registry and trace page are development
 diagnostics, not public runtime state or a permanent CLI contract.
 
+The additive Agent/Session/Approval runtime keeps authorization in the same
+Host `PermissionBroker` and resolves one exact `SessionId` before every
+capability decision or lease. Only the explicit Playground composition may
+create the opaque development authorization authority, and it may use that
+authority only for the launcher-marked, ready local-development artifact whose
+plugin id and `file:///cordisx-local-dev/` identity match. That path writes the
+ordinary exact in-memory development policy and returns the normal revocable
+lease without opening a dialog; installed plugins, production hosts, and
+ordinary Playground plugins retain the interactive fail-closed path. No
+wildcard or plugin-provided flag is accepted. Connection, route, permission,
+and plugin-generation replacement abort pending Agent runtime prompts before
+fencing leases, so an obsolete dialog cannot survive as inert UI.
+
 Small plugin-owned durable state uses the Host public
 `cordisx.owner-documents/v1` service at `ctx.documents`. The renderer receives
 one client bound to the Host-issued plugin principal; callers cannot choose a

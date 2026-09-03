@@ -242,6 +242,16 @@ interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
   readonly development?: CordisXLocalDevelopmentSnapshot
 }
 
+function isExplicitLocalDevelopmentArtifact(item: RuntimeBrowserPlugin): boolean {
+  const development = item.development
+  return development?.origin === 'local-dev'
+    && development.state === 'ready'
+    && development.pluginId === item.id
+    && development.sourcePath.trim().length > 0
+    && item.package !== undefined
+    && item.source.startsWith('file:///cordisx-local-dev/')
+}
+
 /**
  * Internal renderer bootstrap seam. It is intentionally absent from renderer
  * metadata and has no configuration, CLI, environment, or global input.
@@ -816,6 +826,11 @@ async function start(
     generation: 1,
   })
   broker.replaceAgentRuntimeConnection(agentRuntimeConnection)
+  // Created only by the Playground Host; each use still requires the
+  // launcher-owned provenance of one explicitly loaded local artifact.
+  const developmentAgentRuntimeAuthorization = metadata.hostKind === 'playground'
+    ? broker.createDevelopmentAgentRuntimeAuthorizationAuthority()
+    : undefined
   const agentRouteScopes = new AgentRouteSessionScopeAuthority({
     activeRoute: () => {
       const snapshot = routeHistory.snapshot()
@@ -832,15 +847,18 @@ async function start(
       .filter(route => route.owner === owner)
       .map(route => ({ id: route.id, path: route.definition.path })),
     decide: async plan => {
-      const identity = controllers.find(controller => `${controller.item.source}:${controller.item.id}` === plan.owner.pluginId)?.identity
-      if (identity === undefined) return Object.freeze({ authorized: false })
-      const decision = await broker.authorizeAgentRuntime({
-        identity,
+      const controller = controllers.find(candidate => `${candidate.item.source}:${candidate.item.id}` === plan.owner.pluginId)
+      if (controller === undefined) return Object.freeze({ authorized: false })
+      const input = {
+        identity: controller.identity,
         capability: plan.capability,
         sessionId: plan.scope.sessionIds[0],
         scopeSource: plan.scopeSource,
         connection: agentRuntimeConnection,
-      })
+      }
+      const decision = developmentAgentRuntimeAuthorization !== undefined && isExplicitLocalDevelopmentArtifact(controller.item)
+        ? await broker.authorizeDevelopmentAgentRuntime(developmentAgentRuntimeAuthorization, input)
+        : await broker.authorizeAgentRuntime(input)
       return Object.freeze({ authorized: decision.authorized, ...(decision.lease === undefined ? {} : { leaseId: decision.lease.leaseId }) })
     },
     isLeaseActive: (owner, leaseId) => {
@@ -2214,6 +2232,9 @@ async function start(
       ...(candidateModule === undefined ? {} : { module: candidateModule }),
       ...(candidateModuleFactory === undefined ? {} : { moduleFactory: candidateModuleFactory }),
       ...(candidateIsolatedArtifactSource === undefined ? {} : { isolatedArtifactSource: candidateIsolatedArtifactSource }),
+      ...(replacesTarget
+        ? mutation.developmentPackage === undefined ? {} : { development: mutation.developmentPackage.development }
+        : existing!.item.development === undefined ? {} : { development: existing!.item.development }),
       config: descriptor?.value ?? {},
       revision: descriptor?.revision ?? 0,
       ...(candidateManifest === undefined ? {} : { manifest: candidateManifest }),

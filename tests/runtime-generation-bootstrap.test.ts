@@ -1,5 +1,7 @@
 import { JSDOM } from 'jsdom'
+import type { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 } from '../packages/cli/src/permission-contracts.js'
 
 vi.mock('../packages/cli/src/renderer/host-ui/BrandMark.js', () => ({
   createBrandMarkElement: (document: Document, className?: string) => {
@@ -48,13 +50,61 @@ function installBrowserGlobals(): JSDOM {
   return dom
 }
 
-function metadata(generation: string) {
+function metadata(generation: string, hostKind?: 'codex' | 'playground', includeFixture = false) {
   return {
     version: 'test',
+    workspaceCwd: '/private/tmp/cordisx-runtime-test',
     providers: [],
     profileId: 'work',
     generation,
+    ...(hostKind === undefined ? {} : { hostKind }),
+    ...(hostKind === 'playground' ? { permissionPolicies: [] } : {}),
+    ...(includeFixture ? {
+      pluginActivation: {
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-activation.v1.schema.json' as const,
+        schemaVersion: 1 as const, recordKind: 'active' as const, profileId: 'work',
+        revision: 1, lastGoodRevision: 1, runtimeGeneration: generation,
+        plugins: [{
+          id: 'org.cordisx.permission-fixture', version: '1.0.0',
+          digest: `sha256:${'a'.repeat(64)}` as const,
+          moduleGeneration: 'local-dev-generation-1', enabled: true, dependencies: [],
+        }],
+      },
+    } : {}),
   } as const
+}
+
+const localDevelopmentPlugin = (development: boolean, applied: () => void) => {
+  const id = 'org.cordisx.permission-fixture'
+  const source = 'file:///cordisx-local-dev/fixture/org.cordisx.permission-fixture.js'
+  const manifest = {
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
+    schemaVersion: 5 as const,
+    id,
+    services: [],
+    capabilities: [{ name: 'sessions.get' as const, required: true, scope: {} }],
+  }
+  return {
+    id, source, enabled: true, config: {}, revision: 0, manifest,
+    package: {
+      version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` as const,
+      moduleGeneration: 'local-dev-generation-1', dependencies: [],
+    },
+    ...(development ? {
+      development: {
+        origin: 'local-dev' as const, pluginId: id,
+        sourcePath: '/private/tmp/chatroom/src/index.ts', state: 'ready' as const,
+      },
+    } : {}),
+    module: {
+      manifest,
+      inject: ['sessions'],
+      async apply(ctx: Context) {
+        await ctx.sessions.get('cx-session.permission-fixture')
+        applied()
+      },
+    },
+  }
 }
 
 async function disposeRuntime(): Promise<void> {
@@ -77,6 +127,64 @@ afterEach(async () => {
 })
 
 describe('production renderer generation bootstrap', () => {
+  it('does not show a permission dialog for an explicitly loaded Playground development artifact', async () => {
+    const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
+    const dom = installBrowserGlobals()
+    const applied = vi.fn()
+
+    await expect(installCordisX(
+      [localDevelopmentPlugin(true, applied)],
+      metadata('playground-local-development', 'playground', true),
+    )).resolves.toBeDefined()
+
+    expect(applied).toHaveBeenCalledOnce()
+    expect(dom.window.document.querySelector('[data-permission-prompt]')).toBeNull()
+    await disposeRuntime()
+    dom.window.close()
+  }, 60_000)
+
+  it('still prompts for an ordinary plugin outside the local development authority', async () => {
+    const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
+    const dom = installBrowserGlobals()
+    const applied = vi.fn()
+    const boot = installCordisX(
+      [localDevelopmentPlugin(false, applied)],
+      metadata('playground-ordinary-plugin', 'playground', true),
+    )
+    for (let attempt = 0; attempt < 50 && dom.window.document.querySelector('[data-permission-prompt]') === null; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    const prompt = dom.window.document.querySelector<HTMLElement>('[data-permission-prompt]')
+    expect(prompt?.dataset.permissionPrompt).toBe('sessions.get')
+    prompt?.querySelector<HTMLButtonElement>('[data-permission-decision="deny"]')?.click()
+    await expect(boot).resolves.toBeDefined()
+    expect(applied).toHaveBeenCalledOnce()
+
+    await disposeRuntime()
+    dom.window.close()
+  }, 60_000)
+
+  it('still prompts outside the Playground host even when local development metadata is present', async () => {
+    const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
+    const dom = installBrowserGlobals()
+    const applied = vi.fn()
+    const boot = installCordisX(
+      [localDevelopmentPlugin(true, applied)],
+      metadata('codex-local-development-metadata', 'codex', true),
+    )
+    for (let attempt = 0; attempt < 50 && dom.window.document.querySelector('[data-permission-prompt]') === null; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    const prompt = dom.window.document.querySelector<HTMLElement>('[data-permission-prompt]')
+    expect(prompt?.dataset.permissionPrompt).toBe('sessions.get')
+    prompt?.querySelector<HTMLButtonElement>('[data-permission-decision="deny"]')?.click()
+    await expect(boot).resolves.toBeDefined()
+    expect(applied).toHaveBeenCalledOnce()
+
+    await disposeRuntime()
+    dom.window.close()
+  }, 60_000)
+
   it('reuses one Promise and starts once for a same-generation duplicate', async () => {
     const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
     const dom = installBrowserGlobals()

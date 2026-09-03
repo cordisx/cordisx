@@ -472,6 +472,7 @@ export interface PermissionPromptRequest {
   readonly identity: CordisXPluginIdentity
   readonly declaration: CordisXCapabilityDeclaration
   readonly requested: RequestedScope
+  readonly signal?: AbortSignal
 }
 
 export interface PermissionPrompt {
@@ -505,14 +506,14 @@ export class BrowserPermissionPrompt implements PermissionPrompt {
   }
 
   request(input: PermissionPromptRequest): Promise<Exclude<CordisXPermissionDecision, 'ask'>> {
-    const next = this.queue.then(async () => await this.show(input))
+    const next = this.queue.then(async () => input.signal?.aborted === true ? 'deny' : await this.show(input))
     this.queue = next.then(() => undefined, () => undefined)
     return next
   }
 
   private async show(input: PermissionPromptRequest): Promise<Exclude<CordisXPermissionDecision, 'ask'>> {
     const document = this.document
-    if (document?.body === undefined) return 'deny'
+    if (document?.body === undefined || input.signal?.aborted === true) return 'deny'
     const reason = input.declaration.reason.fallback ?? `${input.declaration.reason.namespace ?? input.identity.id}:${input.declaration.reason.key}`
     return await new Promise((resolve) => {
       const overlay = document.createElement('div')
@@ -547,11 +548,17 @@ export class BrowserPermissionPrompt implements PermissionPrompt {
       reasonNode.textContent = reason
       const actions = document.createElement('div')
       actions.className = 'cxp-actions'
+      let settled = false
       const finish = (decision: Exclude<CordisXPermissionDecision, 'ask'>): void => {
+        if (settled) return
+        settled = true
+        input.signal?.removeEventListener('abort', abort)
         detachTheme()
         overlay.remove()
         resolve(decision)
       }
+      const abort = (): void => finish('deny')
+      input.signal?.addEventListener('abort', abort, { once: true })
       const deny = document.createElement('button')
       deny.type = 'button'
       deny.dataset.permissionDecision = 'deny'
@@ -839,6 +846,7 @@ export type AgentRuntimePermissionFence = Readonly<{
 }>
 export type AgentRuntimeLease = Readonly<{ leaseId: string; sessionId: string }>
 export type DevelopmentAgentRuntimePolicySeedAuthority = object
+export type DevelopmentAgentRuntimeAuthorizationAuthority = object
 
 export type AgentRuntimeAuthorization = Readonly<{
   authorized: boolean
@@ -920,8 +928,14 @@ export class PermissionBroker {
   private readonly listeners = new Set<() => void>()
   private readonly agentRuntimeRoutes = new Map<string, AgentRuntimeRouteScope>()
   private readonly agentRuntimeLeases = new Map<string, AgentRuntimeLeaseRecord>()
+  private readonly pendingAgentRuntimePrompts = new Set<Readonly<{
+    identity: CordisXPluginIdentity
+    registrationToken: object
+    abort: AbortController
+  }>>()
   private readonly agentRuntimeFenceListeners = new Set<(fence: AgentRuntimePermissionFence) => void>()
   private readonly developmentAgentRuntimeSeeds = new WeakSet<object>()
+  private readonly developmentAgentRuntimeAuthorizations = new WeakSet<object>()
   private agentRuntimeConnection: AgentRuntimeConnection | undefined
   private readonly migrationTasks: Promise<void>[] = []
   private domPolicyCommitTail: Promise<void> = Promise.resolve()
@@ -1021,7 +1035,7 @@ export class PermissionBroker {
     if (this.visibility?.visible(generation) !== false) this.changed()
     return () => {
       if (this.registrations.get(key)?.token !== registration.token) return
-      this.fenceAgentRuntime(identity, 'plugin-generation-replaced')
+      this.fenceAgentRuntime(identity, 'plugin-generation-replaced', registration.token)
       this.registrations.delete(key)
       this.clearDomCertificationTimer(key)
       const identityKey = platformIdentityKey(identity)
@@ -1085,6 +1099,35 @@ export class PermissionBroker {
     connection: AgentRuntimeConnection
     view?: PluginGenerationView
   }>): Promise<AgentRuntimeAuthorization> {
+    return await this.authorizeAgentRuntimeInternal(input, false)
+  }
+
+  /** Host development composition only: applies a normal exact policy without opening interactive UI. */
+  async authorizeDevelopmentAgentRuntime(
+    authority: DevelopmentAgentRuntimeAuthorizationAuthority,
+    input: Readonly<{
+      identity: CordisXPluginIdentity
+      capability: AgentRuntimeCapability
+      sessionId: string
+      scopeSource: AgentRuntimeScopeSource
+      connection: AgentRuntimeConnection
+      view?: PluginGenerationView
+    }>,
+  ): Promise<AgentRuntimeAuthorization> {
+    if (!this.developmentAgentRuntimeAuthorizations.has(authority)) {
+      throw new Error('Agent Session development authorization authority is invalid')
+    }
+    return await this.authorizeAgentRuntimeInternal(input, true)
+  }
+
+  private async authorizeAgentRuntimeInternal(input: Readonly<{
+    identity: CordisXPluginIdentity
+    capability: AgentRuntimeCapability
+    sessionId: string
+    scopeSource: AgentRuntimeScopeSource
+    connection: AgentRuntimeConnection
+    view?: PluginGenerationView
+  }>, developmentAutoApprove: boolean): Promise<AgentRuntimeAuthorization> {
     const registration = this.registration(input.identity, input.view)
     if (registration === undefined || !validAgentRuntimeSessionId(input.sessionId)
       || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
@@ -1094,8 +1137,19 @@ export class PermissionBroker {
     if (!this.validAgentRuntimeScopeSource(registration, input, declaration.scope.sessionIds)) return Object.freeze({ authorized: false })
     const policyKey = this.agentRuntimePolicyKey(registration, input.capability, input.sessionId)
     const policy = this.policyRecords.get(policyKey)
-    if (isPermissionPolicyRecordV4(policy) && policy.policy === 'deny-persistent') return Object.freeze({ authorized: false })
-    if (!isPermissionPolicyRecordV4(policy) || policy.policy !== 'allow-persistent') {
+    if (!developmentAutoApprove && isPermissionPolicyRecordV4(policy) && policy.policy === 'deny-persistent') {
+      return Object.freeze({ authorized: false })
+    }
+    if (developmentAutoApprove && (!isPermissionPolicyRecordV4(policy) || policy.policy !== 'allow-persistent')) {
+      const record = this.agentRuntimePolicyRecord(registration, input.capability, input.sessionId, 'allow-persistent')
+      try { await this.persistV4([record]) } catch { return Object.freeze({ authorized: false }) }
+      if (!this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
+        || !this.validAgentRuntimeScopeSource(registration, input, declaration.scope.sessionIds)) {
+        return Object.freeze({ authorized: false })
+      }
+      this.policyRecords.set(permissionRecordKeyV4(record), record)
+      this.changed()
+    } else if (!isPermissionPolicyRecordV4(policy) || policy.policy !== 'allow-persistent') {
       const promptDeclaration: CordisXCapabilityDeclaration = Object.freeze({
         name: input.capability as CordisXPlatformCapability,
         required: declaration.required,
@@ -1105,23 +1159,40 @@ export class PermissionBroker {
         }),
         scope: Object.freeze({ sessionIds: Object.freeze([input.sessionId]) }),
       })
-      let decision: Exclude<CordisXPermissionDecision, 'ask'> | 'timeout'
+      let decision: Exclude<CordisXPermissionDecision, 'ask'> | 'timeout' | 'cancelled'
       let timer: ReturnType<typeof setTimeout> | undefined
+      const abort = new AbortController()
+      const pending = Object.freeze({ identity: registration.identity, registrationToken: registration.token, abort })
+      this.pendingAgentRuntimePrompts.add(pending)
       try {
         decision = await Promise.race([
           this.prompt.request({
             identity: input.identity,
             declaration: promptDeclaration,
             requested: Object.freeze({ agentSessionId: input.sessionId }),
+            signal: abort.signal,
           }),
           new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), this.promptTimeoutMs) }),
+          new Promise<'cancelled'>(resolve => abort.signal.addEventListener('abort', () => resolve('cancelled'), { once: true })),
         ])
       } catch { decision = 'deny' }
-      finally { if (timer !== undefined) clearTimeout(timer) }
+      finally {
+        if (timer !== undefined) clearTimeout(timer)
+        this.pendingAgentRuntimePrompts.delete(pending)
+        abort.abort()
+      }
       if (decision !== 'allow' && decision !== 'allow-once') return Object.freeze({ authorized: false })
+      if (!this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
+        || !this.validAgentRuntimeScopeSource(registration, input, declaration.scope.sessionIds)) {
+        return Object.freeze({ authorized: false })
+      }
       if (decision === 'allow') {
         const record = this.agentRuntimePolicyRecord(registration, input.capability, input.sessionId, 'allow-persistent')
         try { await this.persistV4([record]) } catch { return Object.freeze({ authorized: false }) }
+        if (!this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
+          || !this.validAgentRuntimeScopeSource(registration, input, declaration.scope.sessionIds)) {
+          return Object.freeze({ authorized: false })
+        }
         this.policyRecords.set(permissionRecordKeyV4(record), record)
         this.changed()
       }
@@ -1166,6 +1237,13 @@ export class PermissionBroker {
   createDevelopmentAgentRuntimePolicySeedAuthority(): DevelopmentAgentRuntimePolicySeedAuthority {
     const authority = Object.freeze({})
     this.developmentAgentRuntimeSeeds.add(authority)
+    return authority
+  }
+
+  /** Created only by a Host development composition and never projected into plugin context. */
+  createDevelopmentAgentRuntimeAuthorizationAuthority(): DevelopmentAgentRuntimeAuthorizationAuthority {
+    const authority = Object.freeze({})
+    this.developmentAgentRuntimeAuthorizations.add(authority)
     return authority
   }
 
@@ -1252,7 +1330,17 @@ export class PermissionBroker {
     return permissionRecordKeyV4(this.agentRuntimePolicyRecord(registration, capability, sessionId, 'ask'))
   }
 
-  private fenceAgentRuntime(identity: CordisXPluginIdentity | undefined, code: AgentRuntimePermissionFence['code']): void {
+  private fenceAgentRuntime(
+    identity: CordisXPluginIdentity | undefined,
+    code: AgentRuntimePermissionFence['code'],
+    registrationToken?: object,
+  ): void {
+    for (const pending of this.pendingAgentRuntimePrompts) {
+      if (identity !== undefined && (pending.identity.source !== identity.source || pending.identity.id !== identity.id)) continue
+      if (registrationToken !== undefined && pending.registrationToken !== registrationToken) continue
+      pending.abort.abort()
+      this.pendingAgentRuntimePrompts.delete(pending)
+    }
     for (const [leaseId, lease] of this.agentRuntimeLeases) {
       if (identity !== undefined && (lease.identity.source !== identity.source || lease.identity.id !== identity.id)) continue
       this.agentRuntimeLeases.delete(leaseId)
