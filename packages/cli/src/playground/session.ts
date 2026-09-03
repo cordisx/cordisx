@@ -9,6 +9,7 @@ import {
   type RendererCompositionSource,
 } from '../launcher/bundle.js'
 import { loadConfig, type CordisXConfig } from '../launcher/config.js'
+import { createLauncherConfigBridgeHandler } from '../launcher/launcher-plugin-config.js'
 import { buildLocalDevelopmentPlugin } from '../launcher/development.js'
 import {
   PlaygroundAgentSessionStore,
@@ -16,7 +17,6 @@ import {
 } from './agent-session-store.js'
 import {
   configBridgeError,
-  createConfigBridgeHandler,
   parseConfigBindingRequest,
   type ConfigBridgeHandler,
 } from '../launcher/config-rpc.js'
@@ -311,7 +311,7 @@ export async function createPlaygroundSession(
       ? await ProviderFleet.create(providerConfigs, { appServer: { environment: process.env } })
       : undefined
     const providerToken = providerFleet === undefined ? undefined : randomBytes(32).toString('hex')
-    const bridge = createConfigBridgeHandler({
+    const bridge = createLauncherConfigBridgeHandler({
       token,
       profileId: 'playground',
       generation,

@@ -4,6 +4,7 @@ import {
   commitPluginConfigCandidate,
   PluginConfigConflictError,
   stagePluginConfigCandidate,
+  type PluginConfigCandidateStore,
 } from '../config/plugin-config.js'
 import type { JsonValue } from '../config/home-config.js'
 import type { CordisXConfig } from './config.js'
@@ -105,6 +106,8 @@ export function createConfigBridgeHandler(input: {
   readonly generation: string
   readonly configPath: string
   readonly composition: CordisXConfig
+  /** Explicit storage authority for configured plugins; Home config remains the default. */
+  readonly configuredPluginConfig?: PluginConfigCandidateStore
   readonly packagePlugins?: {
     readonly homeDir: string
     readonly runtimeGeneration: string
@@ -142,6 +145,11 @@ export function createConfigBridgeHandler(input: {
       }
       if (request.operation === 'stage') {
         if (packageOwned) return await packageConfig!.stage(request.identity.pluginId, request.expectedRevision!, request.config!, input.token)
+        if (input.configuredPluginConfig !== undefined) return await input.configuredPluginConfig.stage({
+          ...scope,
+          expectedRevision: request.expectedRevision!,
+          config: request.config!,
+        })
         return stagePluginConfigCandidate({
           ...scope,
           expectedRevision: request.expectedRevision!,
@@ -150,9 +158,17 @@ export function createConfigBridgeHandler(input: {
       }
       if (request.operation === 'commit') {
         if (packageOwned) return await packageConfig!.commit(request.identity.pluginId, request.candidateRevision!, input.token)
+        if (input.configuredPluginConfig !== undefined) return await input.configuredPluginConfig.commit({
+          ...scope,
+          candidateRevision: request.candidateRevision!,
+        })
         return commitPluginConfigCandidate({ ...scope, candidateRevision: request.candidateRevision! }, input.configPath)
       }
       if (packageOwned) return await packageConfig!.abort(request.identity.pluginId, request.candidateRevision!, input.token)
+      if (input.configuredPluginConfig !== undefined) return await input.configuredPluginConfig.abort({
+        ...scope,
+        candidateRevision: request.candidateRevision!,
+      })
       await abortPluginConfigCandidate({ ...scope, candidateRevision: request.candidateRevision! }, input.configPath)
       return undefined
     },

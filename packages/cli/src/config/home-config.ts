@@ -583,22 +583,22 @@ function normalizeOptions(options: string | HomeConfigWriteOptions | undefined):
   return typeof options === 'string' ? { configPath: options } : (options ?? {})
 }
 
-async function readValidated(configPath: string): Promise<HomeConfig> {
+async function readConfigDocument(configPath: string, label: string): Promise<unknown> {
   let text: string
   try {
     const pathStat = await lstat(configPath)
     if (pathStat.isSymbolicLink() || !pathStat.isFile()) {
-      throw new Error(`home config target must be a regular file, not a symbolic link or directory: ${configPath}`)
+      throw new Error(`${label} target must be a regular file, not a symbolic link or directory: ${configPath}`)
     }
     const noFollow = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0
     const handle = await open(configPath, constants.O_RDONLY | noFollow)
     try {
       const openedStat = await handle.stat()
       if (!openedStat.isFile()) {
-        throw new Error(`home config target must be a regular file: ${configPath}`)
+        throw new Error(`${label} target must be a regular file: ${configPath}`)
       }
       if (pathStat.dev !== openedStat.dev || pathStat.ino !== openedStat.ino) {
-        throw new Error(`home config target changed while being opened: ${configPath}`)
+        throw new Error(`${label} target changed while being opened: ${configPath}`)
       }
       text = await handle.readFile('utf8')
     } finally {
@@ -606,18 +606,21 @@ async function readValidated(configPath: string): Promise<HomeConfig> {
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw error
-    if (error instanceof Error && error.message.startsWith('home config target ')) throw error
+    if (error instanceof Error && error.message.startsWith(`${label} target `)) throw error
     if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
-      throw new Error(`home config target must not be a symbolic link: ${configPath}`, { cause: error })
+      throw new Error(`${label} target must not be a symbolic link: ${configPath}`, { cause: error })
     }
-    throw new Error(`failed to read home config at ${configPath}`, { cause: error })
+    throw new Error(`failed to read ${label} at ${configPath}`, { cause: error })
   }
-  let parsed: unknown
   try {
-    parsed = JSON.parse(text) as unknown
+    return JSON.parse(text) as unknown
   } catch (error) {
-    throw new Error(`invalid JSON in home config at ${configPath}`, { cause: error })
+    throw new Error(`invalid JSON in ${label} at ${configPath}`, { cause: error })
   }
+}
+
+async function readValidated(configPath: string): Promise<HomeConfig> {
+  const parsed = await readConfigDocument(configPath, 'home config')
   try {
     return parseHomeConfig(parsed)
   } catch (error) {
@@ -692,7 +695,7 @@ function positiveDuration(value: number | undefined, fallback: number, label: st
   return value
 }
 
-async function acquireLock(configPath: string, options: HomeConfigWriteOptions): Promise<{
+async function acquireLock(configPath: string, options: HomeConfigWriteOptions, label = 'home config'): Promise<{
   readonly release: () => Promise<void>
 }> {
   const lockPath = `${configPath}.lock`
@@ -729,14 +732,14 @@ async function acquireLock(configPath: string, options: HomeConfigWriteOptions):
         const lockStat = await stat(lockPath)
         const ageMs = Math.max(0, Date.now() - lockStat.mtimeMs)
         if (ageMs >= staleMs) {
-          throw new Error(`home config lock appears stale (${Math.round(ageMs)}ms old): ${lockPath}`)
+          throw new Error(`${label} lock appears stale (${Math.round(ageMs)}ms old): ${lockPath}`)
         }
       } catch (statError) {
         if ((statError as NodeJS.ErrnoException).code === 'ENOENT') continue
         throw statError
       }
       if (Date.now() - startedAt >= timeoutMs) {
-        throw new Error(`timed out waiting for home config lock: ${lockPath}`)
+        throw new Error(`timed out waiting for ${label} lock: ${lockPath}`)
       }
       await new Promise((resolve) => setTimeout(resolve, retryMs))
     }
@@ -756,7 +759,7 @@ async function syncDirectory(directory: string): Promise<void> {
   }
 }
 
-async function publishAtomic(configPath: string, config: HomeConfig): Promise<void> {
+async function publishAtomic(configPath: string, config: unknown, label = 'home config'): Promise<void> {
   const directory = path.dirname(configPath)
   const temporaryPath = path.join(directory, `.${path.basename(configPath)}.${process.pid}.${randomUUID()}.tmp`)
   const handle = await open(temporaryPath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
@@ -768,7 +771,7 @@ async function publishAtomic(configPath: string, config: HomeConfig): Promise<vo
     try {
       const targetStat = await lstat(configPath)
       if (targetStat.isSymbolicLink() || !targetStat.isFile()) {
-        throw new Error(`refusing to replace non-regular home config target: ${configPath}`)
+        throw new Error(`refusing to replace non-regular ${label} target: ${configPath}`)
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
@@ -780,6 +783,38 @@ async function publishAtomic(configPath: string, config: HomeConfig): Promise<vo
   } finally {
     await handle.close().catch(() => undefined)
     if (!published) await unlink(temporaryPath).catch(() => undefined)
+  }
+}
+
+export interface ConfigDocumentWriteOptions {
+  readonly lockTimeoutMs?: number
+  readonly lockRetryMs?: number
+  readonly lockStaleMs?: number
+}
+
+/**
+ * Atomically update one already-existing Host-owned JSON document with its own
+ * parser. This deliberately does not apply HomeConfig defaults or semantics.
+ */
+export async function updateConfigDocumentAtomic(
+  configPath: string,
+  label: string,
+  validate: (value: unknown) => void,
+  updater: (current: Record<string, unknown>) => Record<string, unknown> | Promise<Record<string, unknown>>,
+  options: ConfigDocumentWriteOptions = {},
+): Promise<Record<string, unknown>> {
+  const absolutePath = path.resolve(configPath)
+  const lock = await acquireLock(absolutePath, options, label)
+  try {
+    const current = await readConfigDocument(absolutePath, label)
+    validate(current)
+    const source = record(current, label)
+    const updated = await updater(source)
+    validate(updated)
+    await publishAtomic(absolutePath, updated, label)
+    return updated
+  } finally {
+    await lock.release()
   }
 }
 
