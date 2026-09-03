@@ -870,7 +870,13 @@ only the selected plugin profile state inside the validated launcher document;
 launcher fields such as `codex` and unconsumed forward-compatible fields remain
 unchanged. The Host never normalizes that launcher document through the Home
 schema, and both stores retain the same lock, no-follow read, atomic rename,
-file-mode, candidate ownership, commit, and abort fences.
+file-mode, candidate ownership, commit, and abort fences. After a successful
+Playground commit, the owning session publishes one effective-composition
+change for each advancing plugin revision. The Vite server invalidates only its
+cached virtual composition, so a reload rebuilds from that committed ledger;
+commit publication, composition rebuild, reset, and disposal are serialized so
+the next generation cannot hydrate an intermediate document. Abort, conflict,
+rejected, and stale-generation requests never publish a change.
 
 Codex's `app://` renderer rejects direct arbitrary network reads, including the
 official raw GitHub feed. The launcher therefore owns a narrow, private CDP

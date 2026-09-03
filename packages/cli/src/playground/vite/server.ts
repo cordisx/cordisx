@@ -48,13 +48,17 @@ function sendJson(response: import('node:http').ServerResponse, status: number, 
 
 /** Vite transport around the same isolated composition/session used by production parity tests. */
 export async function startVitePlayground(options: VitePlaygroundOptions): Promise<VitePlaygroundHandle> {
+  let vite: ViteDevServer | undefined
   const session = await createPlaygroundSession(options.configPath, {
     ...(options.homeDir === undefined ? {} : { homeDir: options.homeDir }),
+    onEffectiveConfigCommitted() {
+      const composition = vite?.moduleGraph.getModuleById(RESOLVED_COMPOSITION_ID)
+      if (composition !== undefined) vite?.moduleGraph.invalidateModule(composition)
+    },
   })
   const clientRoot = fileURLToPath(new URL('../client', import.meta.url))
   const runtimePath = fileURLToPath(new URL('../../renderer/runtime.ts', import.meta.url))
   const runtimeImport = `/@fs/${runtimePath}`
-  let vite: ViteDevServer | undefined
   const previewResetInstanceId = randomUUID()
   let previewResetGeneration = 0
   const previewResetState = () => Object.freeze({

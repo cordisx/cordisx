@@ -105,6 +105,14 @@ export interface PlaygroundSession {
 export interface PlaygroundSessionOptions {
   /** Explicit external isolated home. The caller, not the session, owns its lifecycle. */
   readonly homeDir?: string
+  /** Host-private signal used to invalidate a cached Playground composition after a durable config commit. */
+  readonly onEffectiveConfigCommitted?: (commit: PlaygroundEffectiveConfigCommit) => void
+}
+
+export interface PlaygroundEffectiveConfigCommit {
+  readonly generation: string
+  readonly pluginId: string
+  readonly revision: number
 }
 
 class PlaygroundCredentialBackend implements LauncherKeychainBackend {
@@ -244,6 +252,13 @@ export async function createPlaygroundSession(
 
   let active: PlaygroundGeneration | undefined
   let activeProviderRequests = 0
+  const publishedConfigRevisions = new Map<string, number>()
+  let compositionOperation: Promise<void> = Promise.resolve()
+  const runCompositionOperation = <T>(work: () => Promise<T>): Promise<T> => {
+    const task = compositionOperation.then(work, work)
+    compositionOperation = task.then(() => undefined, () => undefined)
+    return task
+  }
   const credentialBackend = new PlaygroundCredentialBackend()
   const ownerDocumentStore = new OwnerDocumentStore(homeDir)
   const entityAuthority = new EntityDirectoryAuthority(homeDir, 'playground')
@@ -417,38 +432,62 @@ export async function createPlaygroundSession(
     fixture,
     homeDir,
     async buildBundle() {
-      const generation = await nextGeneration()
-      return {
-        generation: generation.generation,
-        source: await buildRendererBundle(generation.config, rendererOptions(generation)),
-      }
+      return await runCompositionOperation(async () => {
+        const generation = await nextGeneration()
+        return {
+          generation: generation.generation,
+          source: await buildRendererBundle(generation.config, rendererOptions(generation)),
+        }
+      })
     },
     async buildComposition(runtimeImport) {
-      const generation = await nextGeneration()
-      const composition = await buildRendererCompositionSource(
-        generation.config,
-        rendererOptions(generation),
-        { runtimeImport, awaitBoot: true },
-      )
-      return {
-        ...composition,
-        watchFiles: [...new Set([...composition.watchFiles, ...generation.localDevelopmentWatchFiles])],
-        generation: generation.generation,
-      }
+      return await runCompositionOperation(async () => {
+        const generation = await nextGeneration()
+        const composition = await buildRendererCompositionSource(
+          generation.config,
+          rendererOptions(generation),
+          { runtimeImport, awaitBoot: true },
+        )
+        return {
+          ...composition,
+          watchFiles: [...new Set([...composition.watchFiles, ...generation.localDevelopmentWatchFiles])],
+          generation: generation.generation,
+        }
+      })
     },
     async handleConfigRequest(raw) {
-      if (active === undefined) throw new Error('Playground has no active generation')
-      const parsed = parseConfigBindingRequest(
-        JSON.parse(raw),
-        active.bridge.token,
-        active.bridge.profileId,
-        active.generation,
-      )
-      try {
-        return { requestId: parsed.requestId, ok: true, value: await active.bridge.handle(parsed) }
-      } catch (error) {
-        return { requestId: parsed.requestId, ok: false, ...configBridgeError(error) }
-      }
+      return await runCompositionOperation(async () => {
+        if (active === undefined) throw new Error('Playground has no active generation')
+        const requestGeneration = active
+        const parsed = parseConfigBindingRequest(
+          JSON.parse(raw),
+          requestGeneration.bridge.token,
+          requestGeneration.bridge.profileId,
+          requestGeneration.generation,
+        )
+        try {
+          const value = await requestGeneration.bridge.handle(parsed)
+          if (parsed.operation === 'commit') {
+            const revision = value !== null && typeof value === 'object'
+              ? (value as { readonly revision?: unknown }).revision
+              : undefined
+            const key = `${parsed.identity.source}\u0000${parsed.identity.pluginId}`
+            const lastPublished = publishedConfigRevisions.get(key)
+            if (Number.isInteger(revision) && (revision as number) > 0
+              && (lastPublished === undefined || revision as number > lastPublished)) {
+              publishedConfigRevisions.set(key, revision as number)
+              options.onEffectiveConfigCommitted?.({
+                generation: requestGeneration.generation,
+                pluginId: parsed.identity.pluginId,
+                revision: revision as number,
+              })
+            }
+          }
+          return { requestId: parsed.requestId, ok: true, value }
+        } catch (error) {
+          return { requestId: parsed.requestId, ok: false, ...configBridgeError(error) }
+        }
+      })
     },
     async handleAgentSessionStoreRequest(raw) {
       if (active === undefined) throw new Error('Playground has no active generation')
@@ -529,20 +568,26 @@ export async function createPlaygroundSession(
       }
     },
     async reset() {
-      active?.channelConfig?.dispose()
-      await active?.providerFleet?.close()
-      credentialBackend.clear()
-      await writeFixture()
-      await rm(stateRoot, { recursive: true, force: true })
-      await mkdir(stateRoot, { recursive: true, mode: 0o700 })
-      active = undefined
+      await runCompositionOperation(async () => {
+        active?.channelConfig?.dispose()
+        await active?.providerFleet?.close()
+        credentialBackend.clear()
+        await writeFixture()
+        await rm(stateRoot, { recursive: true, force: true })
+        await mkdir(stateRoot, { recursive: true, mode: 0o700 })
+        publishedConfigRevisions.clear()
+        active = undefined
+      })
     },
     async close() {
-      active?.channelConfig?.dispose()
-      await active?.providerFleet?.close()
-      credentialBackend.clear()
-      active = undefined
-      if (ownsHome) await rm(homeDir, { recursive: true, force: true })
+      await runCompositionOperation(async () => {
+        active?.channelConfig?.dispose()
+        await active?.providerFleet?.close()
+        credentialBackend.clear()
+        publishedConfigRevisions.clear()
+        active = undefined
+        if (ownsHome) await rm(homeDir, { recursive: true, force: true })
+      })
     },
   }
 }
