@@ -1,11 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentCancelCause, AgentOptions } from '@cordisx/protocol/agents/v1'
 import type { UserMessage } from '@cordisx/protocol/sessions/v1'
-import { CordisXAgentSessionRuntime, type CordisXPrivateAgentDriver } from '../packages/cli/src/renderer/agent-session-runtime.js'
+import { Context } from '@deepseek-ai/cordis'
+import {
+  CordisXAgentRegistryServiceV1,
+  CordisXAgentSessionRuntime,
+  CordisXApprovalServiceV1,
+  CordisXSessionRegistryServiceV1,
+  type CordisXPrivateAgentDriver,
+} from '../packages/cli/src/renderer/agent-session-runtime.js'
 import {
   CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_CONTRACT_V1,
   CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1,
 } from '../packages/cli/src/agent-session-migration-contracts.js'
+import {
+  CORDISX_PLUGIN_GENERATION,
+  CORDISX_PLUGIN_ID,
+  CORDISX_PLUGIN_SOURCE,
+} from '../packages/cli/src/renderer/ownership.js'
 
 class Driver implements CordisXPrivateAgentDriver {
   private readonly replacement = new Set<() => void>()
@@ -27,6 +39,53 @@ const message = (id: string): UserMessage => ({
 })
 
 describe('Agent/Session Host authority v1', () => {
+  it('keeps every Cordis service method bound to the Host runtime through the service proxy', async () => {
+    const runtime = new CordisXAgentSessionRuntime({ driver: new Driver(), authorize: async () => true })
+    const ctx = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'proxy-test',
+      [CORDISX_PLUGIN_SOURCE]: 'file:///fixtures/proxy-test.ts',
+      [CORDISX_PLUGIN_GENERATION]: 'proxy-generation',
+    })
+    const agents = ctx.plugin(CordisXAgentRegistryServiceV1, runtime)
+    await agents
+    const sessions = ctx.plugin(CordisXSessionRegistryServiceV1, runtime)
+    await sessions
+    const approvals = ctx.plugin(CordisXApprovalServiceV1, runtime)
+    await approvals
+
+    const { acquireLegacyTaskBinding, create, get, resume } = ctx.agents
+    const { get: getSession } = ctx.sessions
+    const { registerAnswerer, request } = ctx.approvals
+    const created = await create({})
+    expect(created).toMatchObject({ status: 'accepted', sessionIdSource: 'host' })
+    if (created.status !== 'accepted') throw new Error('agent unavailable')
+    expect(created.sessionId).toMatch(/^cx-session\.[A-Za-z0-9-]+$/u)
+    expect(await get(created.sessionId)).toMatchObject({ id: created.sessionId, generation: created.handle.agent.generation })
+    expect(await getSession(created.sessionId)).toMatchObject({ id: created.sessionId })
+    await registerAnswerer(created.handle.agent, async () => 'allowed-once')
+    const decision = await request({ agent: created.handle.agent, toolName: 'shell' })
+    expect(decision).toMatchObject({ outcome: 'allowed-once' })
+    expect(decision.id).toMatch(/^cx-approval\.[A-Za-z0-9-]+$/u)
+    expect(await created.handle.dispose()).toMatchObject({ status: 'accepted' })
+    expect(await resume({ sessionId: created.sessionId })).toMatchObject({ status: 'accepted', disposition: 'resumed' })
+    expect(await acquireLegacyTaskBinding({
+      $schema: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1,
+      contract: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_CONTRACT_V1,
+      schemaVersion: 1, mutationId: 'proxy-legacy-closed',
+      binding: {
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v4.schema.json',
+        contract: 'cordisx.agent-loop-task-binding/v4', schemaVersion: 4,
+        task: 'proxy-legacy-task', binding: { bindingId: 'proxy-legacy-binding', generation: 1 },
+        definition: { agentId: 'lead', revision: 'revision-one' }, state: 'closed',
+      },
+    })).toMatchObject({ status: 'unavailable', code: 'binding-closed' })
+
+    await approvals.dispose()
+    await sessions.dispose()
+    await agents.dispose()
+    await runtime.dispose()
+  })
+
   it('creates an owner handle, admits a MessageId once, and replays one Session truth', async () => {
     const driver = new Driver()
     const runtime = new CordisXAgentSessionRuntime({ driver, authorize: async () => true, now: () => 10 })
@@ -58,6 +117,30 @@ describe('Agent/Session Host authority v1', () => {
     expect(await subscribed.subscription.closed).toMatchObject({ status: 'closed', code: 'connection-replaced' })
     expect(await subscribed.subscription.unsubscribe()).toMatchObject({ status: 'closed', code: 'connection-replaced' })
     expect(await created.handle.agent.whenIdle()).toEqual({ status: 'unavailable', code: 'agent-replaced' })
+  })
+
+  it('keeps one atomic replay watermark on every live page emitted by a subscription', async () => {
+    const runtime = new CordisXAgentSessionRuntime({ driver: new Driver(), authorize: async () => true })
+    const created = await runtime.create(owner, { sessionId: 'session-watermark' })
+    if (created.status !== 'accepted') throw new Error('agent unavailable')
+    await created.handle.agent.followup(message('message-before-replay'))
+    const pages: Array<{ readonly phase: string; readonly replayThrough: number; readonly events: readonly number[] }> = []
+    let appendedDuringReplay = false
+    const subscribed = await created.handle.agent.session.subscribe({ afterSeq: -1 }, async page => {
+      pages.push({ phase: page.phase, replayThrough: page.replayThrough, events: page.events.map(event => event.seq) })
+      if (page.phase === 'replay' && !appendedDuringReplay) {
+        appendedDuringReplay = true
+        await created.handle.agent.followup(message('message-during-replay'))
+      }
+    })
+    if (subscribed.status !== 'subscribed') throw new Error('subscription unavailable')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(subscribed.subscription.replayThrough).toBe(1)
+    expect(pages).toEqual([
+      { phase: 'replay', replayThrough: 1, events: [0, 1] },
+      { phase: 'live', replayThrough: 1, events: [2] },
+      { phase: 'live', replayThrough: 1, events: [3] },
+    ])
   })
 
   it('uses first-terminal route fencing and never starts an observer after closure', async () => {

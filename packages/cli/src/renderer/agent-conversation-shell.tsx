@@ -611,7 +611,14 @@ function assertSnapshotV4(value: unknown): asserts value is AgentConversationShe
   const runs = new Set((value.selection.activeRuns ?? []).map(run => JSON.stringify([run.participantId, run.memberId, run.runId, run.sessionId])))
   for (const item of value.items) {
     if (item.kind === 'message') {
-      if (JSON.stringify(participants.get(item.author.participantId)) !== JSON.stringify(item.author)) throw new Error('v4 message author is not the exact Room participant')
+      const participant = participants.get(item.author.participantId)
+      if (participant === undefined
+        || participant.role !== item.author.role
+        || JSON.stringify(participant.displayName) !== JSON.stringify(item.author.displayName)
+        || !sameAvatar(participant.avatar, item.author.avatar)
+        || JSON.stringify(participant.agentIdentity) !== JSON.stringify(item.author.agentIdentity)) {
+        throw new Error('v4 message author is not the exact Room participant')
+      }
       if (item.source.kind === 'session-event' && item.semantic.purpose === 'member-self-introduction') {
         if (item.author.role !== 'agent' || item.author.agentIdentity === undefined || item.semantic.participantId !== item.author.participantId || item.semantic.correlation.sessionId !== item.source.sessionId) throw new Error('v4 self-introduction association is invalid')
       }
@@ -845,7 +852,13 @@ export function projectAgentConversationShellSnapshotV4(
       ...(item.diagnostic === undefined ? {} : { diagnostic: localization.resolve(item.diagnostic, `items.${index}.diagnostic`) }),
     }
     const declared = participantById.get(item.author.participantId)
-    if (declared === undefined || JSON.stringify(declared) !== JSON.stringify(item.author)) throw new Error(`v4 snapshot.items[${index}].author does not match the selected room participant`)
+    if (declared === undefined
+      || declared.role !== item.author.role
+      || JSON.stringify(declared.displayName) !== JSON.stringify(item.author.displayName)
+      || !sameAvatar(declared.avatar, item.author.avatar)
+      || JSON.stringify(declared.agentIdentity) !== JSON.stringify(item.author.agentIdentity)) {
+      throw new Error(`v4 snapshot.items[${index}].author does not match the selected room participant`)
+    }
     return {
       kind: 'message' as const, itemId: item.itemId, messageId: item.messageId, sequence: item.sequence,
       authorId: item.author.participantId,
@@ -1121,7 +1134,9 @@ class MountedConversation {
     let terminal = false
     for (const [index, update] of page.updates.entries()) {
       this.assertUpdate(update, `subscription page.updates[${index}]`)
-      if (update.sequence !== expected) throw new Error('subscription updates are not monotonic')
+      if (update.sequence !== expected) {
+        throw new Error(`subscription updates are not monotonic (expected ${expected}, received ${update.sequence}, page after ${page.afterSequence})`)
+      }
       if (page.phase === 'replay' && update.sequence > this.subscription.snapshotSequence) {
         throw new Error('replay subscription update crossed its snapshot watermark')
       }
