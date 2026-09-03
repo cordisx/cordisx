@@ -21,6 +21,8 @@ export interface ManagerRouter {
   readonly navigate: (route: ManagerRoute) => void
   /** Host-owned tab activation replaces the current Manager history entry. */
   readonly replace: (route: ManagerRoute) => void
+  /** Open an external detail target with one exact in-Manager Back destination. */
+  readonly openDetail: (root: ManagerRoute, detail: ManagerRoute) => void
   readonly back: () => void
 }
 

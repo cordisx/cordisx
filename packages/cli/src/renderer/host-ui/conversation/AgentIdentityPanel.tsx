@@ -72,6 +72,7 @@ export interface HostAgentIdentityPanelProps {
   readonly copy: HostAgentIdentityPanelCopy
   readonly navigator: HostAgentTaskDetailsNavigator
   readonly onOpenChange: (open: boolean) => void
+  readonly resolveSettings?: (identity: HostAgentDefinitionIdentityPresentation) => HostAgentIdentitySettingsAvailability
   readonly onSettings: (identity: HostAgentDefinitionIdentityPresentation) => void | Promise<void>
   readonly onNavigationError?: (error: unknown) => void
   readonly onBack?: () => void
@@ -84,9 +85,15 @@ export interface HostAgentIdentityContentProps {
   readonly copy: HostAgentIdentityPanelCopy
   readonly navigator: HostAgentTaskDetailsNavigator
   readonly onClose: () => void
+  readonly resolveSettings?: (identity: HostAgentDefinitionIdentityPresentation) => HostAgentIdentitySettingsAvailability
   readonly onSettings: (identity: HostAgentDefinitionIdentityPresentation) => void | Promise<void>
   readonly onNavigationError?: (error: unknown) => void
   readonly idPrefix?: string
+}
+
+export interface HostAgentIdentitySettingsAvailability {
+  readonly available: boolean
+  readonly reason?: string
 }
 
 export interface HostAgentIdentityAvatarButtonProps {
@@ -266,6 +273,7 @@ export function HostAgentIdentityContent({
   copy,
   navigator,
   onClose,
+  resolveSettings,
   onSettings,
   onNavigationError,
   idPrefix,
@@ -277,6 +285,8 @@ export function HostAgentIdentityContent({
   const contentId = idPrefix ?? generatedId
 
   if (!interactive || presentation === undefined) return null
+  const settingsAvailability = resolveSettings?.(presentation.participant.agentIdentity!) ?? { available: true }
+  const settingsReasonId = `${contentId}-settings-unavailable`
   const run = async (key: string, session: HostAgentIdentitySessionPresentation): Promise<void> => {
     if (pendingSession !== undefined) return
     setPendingSession(key)
@@ -324,12 +334,24 @@ export function HostAgentIdentityContent({
           <h3 id={`${contentId}-name`} className="cx-agent-identity-name">{presentation.name}</h3>
           <span className="cx-agent-identity-kind">Agent</span>
         </span>
-        <button type="button" className="cx-conversation-inspector-icon-action" aria-label={copy.settings} onClick={() => {
-        void Promise.resolve()
-          .then(() => onSettings(presentation.participant.agentIdentity!))
-          .then(onClose)
-          .catch(error => onNavigationError?.(error))
-        }}><HostSurfaceIcon token="host:settings" /></button>
+        <button
+          type="button"
+          className="cx-conversation-inspector-icon-action"
+          data-host-inspector-primary-focus="true"
+          aria-label={copy.settings}
+          disabled={!settingsAvailability.available}
+          title={settingsAvailability.reason}
+          aria-describedby={!settingsAvailability.available && settingsAvailability.reason !== undefined ? settingsReasonId : undefined}
+          onClick={() => {
+            if (!settingsAvailability.available) return
+            onClose()
+            void Promise.resolve(onSettings(presentation.participant.agentIdentity!))
+              .catch(error => onNavigationError?.(error))
+          }}
+        ><HostSurfaceIcon token="host:settings" /></button>
+        {!settingsAvailability.available && settingsAvailability.reason !== undefined
+          ? <span id={settingsReasonId} className="cx-agent-identity-live">{settingsAvailability.reason}</span>
+          : null}
       </section>
       <section className="cx-agent-identity-section" aria-labelledby={`${contentId}-introduction-heading`}>
         <h3 id={`${contentId}-introduction-heading`}>{copy.introduction}</h3>
@@ -366,6 +388,7 @@ export function HostAgentIdentityPanel({
   copy,
   navigator,
   onOpenChange,
+  resolveSettings,
   onSettings,
   onNavigationError,
   onBack,
@@ -406,6 +429,7 @@ export function HostAgentIdentityPanel({
       copy={copy}
       navigator={navigator}
       onClose={() => onOpenChange(false)}
+      {...(resolveSettings === undefined ? {} : { resolveSettings })}
       onSettings={onSettings}
       {...(onNavigationError === undefined ? {} : { onNavigationError })}
       idPrefix={contentId}

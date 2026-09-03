@@ -51,7 +51,7 @@ const REACT_EXPORTS = [
   'version',
 ] as const
 
-const UI_EXPORTS = ['Button', 'Card', 'EmptyState', 'Heading', 'Icon', 'Select', 'Stack', 'Text'] as const
+const UI_EXPORTS = ['Button', 'Card', 'EmptyState', 'Heading', 'Icon', 'MarkdownViewer', 'Select', 'SelectionRail', 'Stack', 'Text'] as const
 
 const CONTRACTS_MODULE_PATH = fileURLToPath(new URL(
   import.meta.url.endsWith('.ts') ? '../contracts.ts' : '../contracts.js',

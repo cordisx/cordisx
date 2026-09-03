@@ -49,6 +49,16 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-content:has(.cxm-console-panel) { display: flex; overflow: hidden; }
   .cxr-content:has(.cxm-console-panel) > * { min-height: 0; flex: 1; }
   .cxr-page { width: 100%; min-width: 0; }
+  .cxr-content:has(> .cxr-manager-content-page) { overflow: hidden; }
+  .cxr-manager-content-page { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+  .cxr-manager-record-summary { display: grid; min-width: 0; grid-template-columns: 56px minmax(0,1fr); align-items: center; gap: 13px; margin: 0 0 14px; padding: 2px 2px 14px; border-bottom: 1px solid var(--cx-border,#353a42); }
+  .cxr-manager-record-avatar { display: grid; width: 52px; height: 52px; overflow: hidden; place-items: center; border-radius: 13px; background: var(--cx-hover,rgba(255,255,255,.08)); }
+  .cxr-manager-record-avatar .cxa-avatar { width: 52px; height: 52px; }
+  .cxr-manager-record-copy { display: grid; min-width: 0; gap: 4px; }
+  .cxr-manager-record-copy strong { overflow: hidden; color: var(--cx-text,#edf0f4); font-size: 16px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+  .cxr-manager-record-copy > span { display: -webkit-box; overflow: hidden; color: var(--cx-muted,#9ca5b5); font-size: 12px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .cxr-manager-content-page > .cxr-tabs { margin-top: 0; }
+  .cxr-manager-content-panel { min-width: 0; min-height: 0; flex: 1; overflow: auto; padding: 1px 1px 12px; }
   .cxr-content .cxr-react-root { min-height: 0; padding: 0; }
   .cxr-page:has(> .cxm-console-panel) { display: flex; min-height: 0; flex-direction: column; overflow: hidden; }
   .cxr-page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }

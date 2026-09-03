@@ -82,6 +82,8 @@ describe('shared React plugin runtime', () => {
     button.click()
     await waitFor(() => button.textContent === 'Count 1')
     expect(dom.window.document.querySelector('.cxr-ui-card')).not.toBeNull()
+    expect(dom.window.document.querySelector('.cxr-ui-selection-rail')).not.toBeNull()
+    expect(dom.window.document.querySelector('.cxr-ui-markdown')?.textContent).toContain('Safe Markdown')
     expect(dom.window.document.querySelector('[data-cordisx-shared-react="true"]')).not.toBeNull()
 
     dom.window.document.documentElement.lang = 'zh-CN'

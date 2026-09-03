@@ -17,6 +17,7 @@ import { useManagerRouter } from './hooks/useManagerRouter.js'
 import { projectManagerContentBreadcrumbs } from './model/manager-content-breadcrumbs.js'
 import { useManagerSnapshot } from './model/store.js'
 import type { ManagerRoute } from './model/routes.js'
+import type { HostManagerNavigationController } from './navigation-controller.js'
 import { AboutPage } from './pages/AboutPage.js'
 import { AcknowledgementsPage } from './pages/AcknowledgementsPage.js'
 import { ExtensionPointDetailPage } from './pages/ExtensionPointDetailPage.js'
@@ -134,6 +135,7 @@ export interface ManagerAppProps {
   readonly model: ManagerModel
   readonly marketplace: MarketplaceModel
   readonly triggerSeat: HTMLElement
+  readonly navigationController?: HostManagerNavigationController
 }
 
 function PlaygroundManagerTrigger({ seat, open, onToggle }: {
@@ -170,7 +172,7 @@ function PlaygroundManagerTrigger({ seat, open, onToggle }: {
   return null
 }
 
-export function ManagerApp({ model, marketplace, triggerSeat }: ManagerAppProps) {
+export function ManagerApp({ model, marketplace, triggerSeat, navigationController }: ManagerAppProps) {
   const snapshot = useManagerSnapshot(model)
   const playgroundStorage = useMemo(() => triggerSeat.ownerDocument.querySelector('[data-cordisx-playground-manager-trigger]') === null ? undefined : triggerSeat.ownerDocument.defaultView?.sessionStorage, [triggerSeat])
   const router = useManagerRouter(playgroundStorage)
@@ -178,6 +180,13 @@ export function ManagerApp({ model, marketplace, triggerSeat }: ManagerAppProps)
   const previousOpen = useRef(open)
   const dialog = useRef<HTMLElement>(null)
   const heading = useMemo(() => title(router.route, snapshot), [router.route, snapshot])
+  useLayoutEffect(() => navigationController?.bind(request => {
+    router.openDetail(
+      { kind: 'manager-content', id: request.contributionId, reference: request.root },
+      { kind: 'manager-content', id: request.contributionId, reference: request.target },
+    )
+    setOpen(true)
+  }), [navigationController, router.openDetail])
   useEffect(() => {
     if (!open) return
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented) setOpen(false) }
@@ -217,7 +226,7 @@ export function ManagerApp({ model, marketplace, triggerSeat }: ManagerAppProps)
             <span className="cxr-header-seat">{router.route.kind === 'primary'
               ? router.route.page === 'about' ? <BrandMark /> : <HostIcon token={primaryIcon(router.route)!} />
               : managerContentBackRoute !== undefined
-                ? <Button shape="square" variant="text" aria-label="返回" icon={<HostIcon token="back" />} onClick={() => router.navigate(managerContentBackRoute)} />
+                ? <Button shape="square" variant="text" aria-label="返回" icon={<HostIcon token="back" />} onClick={router.back} />
                 : contributionIcon !== undefined
                   ? <HostSurfaceIcon token={contributionIcon} />
                   : <Button shape="square" variant="text" aria-label="返回" icon={<HostIcon token="back" />} onClick={router.back} />}</span>

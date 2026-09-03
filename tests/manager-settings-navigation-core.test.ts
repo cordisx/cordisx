@@ -1,9 +1,12 @@
 import { JSDOM } from 'jsdom'
+import { createGeneratedAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
+import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import {
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_ROUTE_SCHEMA_V2,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
+  CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3,
   type CordisXLocalizationSeat,
 } from '../packages/cli/src/contracts.js'
 import type { CordisXI18nService, LocalizationEffectOwner } from '../packages/cli/src/renderer/i18n.js'
@@ -13,11 +16,15 @@ import {
 } from '../packages/cli/src/renderer/manager-settings-navigation.js'
 import {
   NavigationRegistry,
+  ManagerContentNavigationRegistry,
   OutletRegistry,
   PageRegistry,
   type OutletController,
   type OutletHostSnapshot,
 } from '../packages/cli/src/renderer/navigation.js'
+import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
+import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
+import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import { TestCodexRouteHistory } from './helpers/codex-route-history.js'
 import { SurfaceRegistry } from '../packages/cli/src/renderer/surfaces.js'
 import { HostContextStore } from '../packages/cli/src/renderer/validation.js'
@@ -48,6 +55,7 @@ function fakeI18n(): CordisXI18nService {
       return { text: message.fallback ?? message.key, namespace: 'demo', key: message.key }
     },
     clearDiagnosticSite() {},
+    subscribeInternal: () => () => {},
     seatFor(owner: string, namespace: string | undefined, own: LocalizationEffectOwner): CordisXLocalizationSeat {
       return {
         namespace: `${owner}:${namespace ?? owner}`,
@@ -163,6 +171,9 @@ describe('Manager Settings navigation core', () => {
     expect(navigation.managerSettingsNavigationRoute('demo', 'ready')).toMatchObject({ state: 'pending' })
 
     const dom = new JSDOM('<body><main id="manager"></main></body>')
+    const previousWindow = globalThis.window
+    const previousDocument = globalThis.document
+    Object.assign(globalThis, { window: dom.window, document: dom.window.document })
     const controller = new FakeOutlet(dom.window.document.getElementById('manager')!)
     outlets.declare({
       schemaVersion: 1, id: 'manager.content', authority: 'host-adapter', scope: 'manager',
@@ -270,11 +281,146 @@ describe('Manager Settings navigation core', () => {
     })
     expect(navigation.managerSettingsNavigationRoute('demo', 'when')).toMatchObject({ state: 'pending' })
 
-    void navigation.dispose()
+    await navigation.dispose()
+    await new Promise(resolve => setImmediate(resolve))
+    pages.dispose()
+    outlets.dispose()
+    contexts.dispose()
+    Object.assign(globalThis, { window: previousWindow, document: previousDocument })
+    dom.window.close()
+  })
+
+  it('retains an exact v3 Agent subject and one fixed summary across sibling tab routes', async () => {
+    const contexts = new HostContextStore()
+    const pages = new PageRegistry()
+    const outlets = new OutletRegistry()
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory(), contexts)
+    const dom = new JSDOM('<body><main id="manager"></main></body>')
+    outlets.declare({
+      schemaVersion: 1, id: 'manager.content', authority: 'host-adapter', scope: 'manager',
+      preferredPlacement: 'absolute', contextPolicy: 'semantic', presentationGroup: 'manager',
+    }, new FakeOutlet(dom.window.document.getElementById('manager')!), path => path.startsWith('/manager/extensions/'))
+    const avatar = createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'lead' })
+    const root = { id: 'team' } as const
+    const overview = { id: 'entity-overview', params: { entityId: 'lead' } } as const
+    const prompts = { id: 'entity-prompts', params: { entityId: 'lead' } } as const
+
+    for (const [id, path, title] of [
+      ['team', '/manager/extensions/chatroom', 'Team Architecture'],
+      ['entity-overview', '/manager/extensions/chatroom/:entityId', 'Overview'],
+      ['entity-prompts', '/manager/extensions/chatroom/:entityId/prompts', 'Prompts'],
+    ] as const) {
+      pages.register('chatroom', {
+        $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3, id,
+        title: { key: `page.${id}`, fallback: title },
+        description: { key: `page.${id}.description`, fallback: `${title} content` },
+        icon: 'host:layers', chrome: 'standard',
+      }, () => undefined)
+      navigation.register('chatroom', {
+        $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2, id, path,
+        outlet: 'manager.content', page: id,
+        title: { key: `route.${id}`, fallback: title },
+        description: { key: `route.${id}.description`, fallback: `${title} route` },
+      })
+    }
+    navigation.managerContent.register('chatroom', {
+      $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3,
+      schemaVersion: 3,
+      id: 'lead-overview',
+      route: overview,
+      parentRoute: root,
+      header: { title: { kind: 'route' } },
+      subject: { kind: 'agent-definition', identity: { agentId: 'lead', revision: 'sha256:lead-r1' } },
+      recordSummary: {
+        leadingVisual: { kind: 'agent-avatar', avatar },
+        title: { key: 'entity.lead.title', fallback: 'Lead' },
+        description: { key: 'entity.lead.description', fallback: 'Coordinates the team.' },
+      },
+      tabs: [
+        { id: 'overview', route: overview, label: { key: 'tab.overview', fallback: 'Overview' } },
+        { id: 'prompts', route: prompts, label: { key: 'tab.prompts', fallback: 'Prompts' } },
+      ],
+    })
+    navigation.managerContent.register('chatroom', {
+      $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3,
+      schemaVersion: 3,
+      id: 'lead-prompts',
+      route: prompts,
+      parentRoute: root,
+      header: { title: { kind: 'route' } },
+      tabs: [
+        { id: 'overview', route: overview, label: { key: 'tab.overview', fallback: 'Overview' } },
+        { id: 'prompts', route: prompts, label: { key: 'tab.prompts', fallback: 'Prompts' } },
+      ],
+    })
+
+    expect(navigation.managerContentAgentDefinitionTarget({ agentId: 'lead', revision: 'sha256:lead-r1' })).toMatchObject({
+      owner: 'chatroom', route: overview, parent: root,
+    })
+    expect(navigation.managerContentAgentDefinitionTarget({ agentId: 'lead', revision: 'sha256:stale' })).toBeUndefined()
+    for (const reference of [overview, prompts]) {
+      expect(navigation.managerContentPresentation('chatroom', reference)).toMatchObject({
+        recordSummary: {
+          title: 'Lead', description: 'Coordinates the team.',
+          leadingVisual: { kind: 'agent-avatar', avatar },
+        },
+      })
+    }
+    expect(navigation.managerContentPresentation('chatroom', prompts)?.tabs.map(tab => [tab.id, tab.active])).toEqual([
+      ['overview', false], ['prompts', true],
+    ])
+    expect(() => navigation.managerContent.register('other-owner', {
+      $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3,
+      schemaVersion: 3,
+      id: 'duplicate-lead',
+      route: { id: 'elsewhere' },
+      header: { title: { kind: 'route' } },
+      subject: { kind: 'agent-definition', identity: { agentId: 'lead', revision: 'sha256:lead-r1' } },
+    })).toThrow(/already claimed/)
+
+    await navigation.dispose()
     pages.dispose()
     outlets.dispose()
     contexts.dispose()
     dom.window.close()
+  })
+
+  it('atomically fences the old exact subject when its plugin generation is replaced', () => {
+    const activation = (revision: number, generation: string): CordisXPluginActivationRecordV1 => ({
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, schemaVersion: 1,
+      recordKind: revision === 1 ? 'active' : 'candidate',
+      ...(revision === 1 ? {} : { transactionId: 'replace-chatroom' }),
+      profileId: 'work', revision, lastGoodRevision: 1, runtimeGeneration: 'runtime-1',
+      plugins: [{
+        id: 'chatroom', version: '1.0.0', digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`,
+        moduleGeneration: generation, enabled: true, dependencies: [],
+      }],
+    })
+    const previous = activation(1, 'chatroom-g1')
+    const candidate = activation(2, 'chatroom-g2')
+    const visibility = new GenerationVisibilityCoordinator(previous)
+    const registry = new ManagerContentNavigationRegistry(visibility)
+    const declaration = (id: string, routeId: string) => ({
+      $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3,
+      schemaVersion: 3 as const,
+      id,
+      route: { id: routeId },
+      header: { title: { kind: 'route' as const } },
+      subject: { kind: 'agent-definition' as const, identity: { agentId: 'lead', revision: 'sha256:lead' } },
+    })
+    const oldContext = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'chatroom-g1' })
+    registry.register(oldContext, declaration('old-lead', 'old-overview'))
+    expect(registry.resolveAgentDefinitionSubject({ agentId: 'lead', revision: 'sha256:lead' })?.route.id).toBe('old-overview')
+
+    const handle = visibility.begin('replace-chatroom', previous, candidate)
+    const candidateContext = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'chatroom-g2', ...visibility.context(handle, 'chatroom'),
+    })
+    registry.register(candidateContext, declaration('new-lead', 'new-overview'))
+    expect(registry.resolveAgentDefinitionSubject({ agentId: 'lead', revision: 'sha256:lead' })?.route.id).toBe('old-overview')
+    visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
+    expect(registry.resolveAgentDefinitionSubject({ agentId: 'lead', revision: 'sha256:lead' })?.route.id).toBe('new-overview')
+    registry.dispose()
   })
 
 })
