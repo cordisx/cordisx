@@ -3,16 +3,21 @@ import os from 'node:os'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
+import { buildLocalDevelopmentPlugin } from '../packages/cli/src/launcher/development.js'
 import { createPlaygroundSession } from '../packages/cli/src/playground/session.js'
 import { ProviderFleet } from '../packages/cli/src/providers/fleet.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 } from '../packages/cli/src/permission-contracts.js'
 
 describe('Agent/Session development composition', () => {
-  it('mints configured local file plugins as exact no-dialog Playground development artifacts', async () => {
+  it('embeds a shared React/UI local artifact without sourcemap imports or a permission dialog', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-agent-session-local-artifact-'))
-    const entry = path.join(root, 'chatroom.ts')
+    const entry = path.join(root, 'chatroom.tsx')
     const configPath = path.join(root, 'cordisx.config.json')
+    await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'chatroom-fixture', version: '1.0.0' }))
     await writeFile(entry, `
+import { createElement } from 'cordisx/react'
+import { Button } from 'cordisx/ui'
+
 export const manifest = ${JSON.stringify({
   $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
   schemaVersion: 5,
@@ -22,15 +27,21 @@ export const manifest = ${JSON.stringify({
 })}
 export const inject = ['sessions']
 export async function apply(ctx) {
+  const explicitElement = createElement(Button, null, 'Chatroom')
+  const automaticElement = <Button>Chatroom JSX</Button>
   await ctx.sessions.get('cx-session.playground-local-artifact')
-  globalThis.__playgroundLocalSessionGetApplied = true
+  globalThis.__playgroundLocalSessionGetApplied = explicitElement.type === Button && automaticElement.type === Button
 }
 `)
     await writeFile(configPath, JSON.stringify({
       version: 1,
       providers: [],
-      plugins: [{ id: 'chatroom', entry: './chatroom.ts', enabled: true, config: {} }],
+      plugins: [{ id: 'chatroom', entry: './chatroom.tsx', enabled: true, config: {} }],
     }))
+    const ordinaryLocalDevelopmentBuild = await buildLocalDevelopmentPlugin(entry)
+    expect(ordinaryLocalDevelopmentBuild.moduleFactorySource).toContain('sourceMappingURL=data:application/json;base64,')
+    expect(ordinaryLocalDevelopmentBuild.watchFiles).not.toContain(`${root}/cordisx-shared-react:cordisx/react`)
+    expect(ordinaryLocalDevelopmentBuild.watchFiles).not.toContain(`${root}/cordisx-shared-react:cordisx/ui`)
     const session = await createPlaygroundSession(configPath)
     const dom = new JSDOM('<!doctype html><html><body></body></html>', {
       pretendToBeVisual: true,
@@ -48,6 +59,11 @@ export async function apply(ctx) {
       expect(composition.source).toContain('origin":"local-dev')
       expect(composition.source).toContain('artifactGeneration')
       expect(composition.watchFiles).toContain(entry)
+      expect(composition.source).not.toContain('sourceMappingURL=')
+      expect(composition.source).not.toContain(`${root}/cordisx-shared-react:cordisx/react`)
+      expect(composition.source).not.toContain(`${root}/cordisx-shared-react:cordisx/ui`)
+      expect(composition.watchFiles).not.toContain(`${root}/cordisx-shared-react:cordisx/react`)
+      expect(composition.watchFiles).not.toContain(`${root}/cordisx-shared-react:cordisx/ui`)
 
       const built = await session.buildBundle()
       dom.window.eval(built.source)

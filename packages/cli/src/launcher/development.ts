@@ -35,6 +35,11 @@ export interface LocalDevelopmentBuild {
   readonly readme?: string
 }
 
+interface LocalDevelopmentBuildOptions {
+  /** Inline by default for ordinary local development and real-App diagnostics. */
+  readonly sourcemap?: 'inline' | false
+}
+
 interface LocalDevelopmentEntry {
   readonly entry: string
   readonly sourceRoot: string
@@ -130,11 +135,18 @@ async function assertRendererOnlyPackage(root: string): Promise<readonly string[
 }
 
 function absoluteInputs(root: string, inputs: Readonly<Record<string, unknown>>): readonly string[] {
-  return Object.keys(inputs).map(input => path.resolve(root, input))
+  // esbuild reports Host-provided virtual modules in the metafile too. They
+  // have no filesystem node and must never enter a file watcher/import graph.
+  return Object.keys(inputs).flatMap(input => input.startsWith('cordisx-shared-react:')
+    ? []
+    : [path.resolve(root, input)])
 }
 
 /** Build one immutable local-dev candidate and return its complete esbuild input graph. */
-export async function buildLocalDevelopmentPlugin(rawEntry: string): Promise<LocalDevelopmentBuild> {
+export async function buildLocalDevelopmentPlugin(
+  rawEntry: string,
+  options: LocalDevelopmentBuildOptions = {},
+): Promise<LocalDevelopmentBuild> {
   const entry = path.resolve(rawEntry)
   await access(entry)
   const { root, version } = await packageRoot(entry)
@@ -144,7 +156,7 @@ export async function buildLocalDevelopmentPlugin(rawEntry: string): Promise<Loc
     bundle: true,
     platform: 'browser' as const,
     target: ['chrome120'],
-    sourcemap: 'inline' as const,
+    sourcemap: options.sourcemap ?? 'inline',
     metafile: true,
     loader: { '.svg': 'text' as const, '.css': 'text' as const, '.png': 'dataurl' as const },
     jsx: 'automatic' as const,
