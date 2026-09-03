@@ -193,7 +193,17 @@ function stableLocalTaskScope(taskRef: string): string {
   return `${slug === '' ? 'task' : slug}-${hash.toString(36)}`
 }
 
-function traceDirection(type: PlaygroundMockTaskTrace['events'][number]['type'], source: 'original' | 'simulated'): PlaygroundTaskTraceDirection {
+function traceDirection(event: PlaygroundMockTaskTrace['events'][number], source: 'original' | 'simulated'): PlaygroundTaskTraceDirection {
+  if (event.sessionEvent !== undefined) {
+    if (event.sessionEvent.type === 'user/message') return 'chatroom-to-agent-host'
+    if (event.sessionEvent.type === 'assistant/message' || event.sessionEvent.type === 'assistant/chunk'
+      || event.sessionEvent.type === 'tool/call' || event.sessionEvent.type === 'tool/result'
+      || event.sessionEvent.type === 'approval/asked' || event.sessionEvent.type === 'approval/decided') {
+      return 'agent-host-to-chatroom'
+    }
+    return 'host-lifecycle'
+  }
+  const type = event.type
   if (type === 'task.created' || type === 'task.bound' || type === 'task.closed' || type === 'execution.started') return 'host-lifecycle'
   if (type === 'approval.required') return source === 'simulated' ? 'simulator-to-chatroom' : 'agent-host-to-chatroom'
   if (type === 'execution.completed' || type === 'execution.failed') return 'agent-host-to-chatroom'
@@ -216,9 +226,10 @@ function originalTrace(sourceTask: PlaygroundScenarioTaskContext): readonly Play
     id: `original-${event.sequence}`,
     source: 'original' as const,
     generation: 'original' as const,
-    direction: traceDirection(event.type, 'original'),
+    direction: traceDirection(event, 'original'),
     type: event.type,
     summary: event.detail,
+    ...(event.sessionEvent === undefined ? {} : { timestamp: new Date(event.sessionEvent.time).toISOString() }),
     payload: Object.freeze({
       event,
       ...(index === 0 && sourceTask.simulationBinding !== undefined
@@ -665,7 +676,7 @@ export class PlaygroundScenarioLabController {
     const cursor = this.simulatedEventCursors.get(taskRef) ?? 0
     for (const event of task.events.slice(cursor)) {
       this.appendSimulatedTrace({
-        direction: traceDirection(event.type, 'simulated'),
+        direction: traceDirection(event, 'simulated'),
         type: event.type,
         summary: event.detail,
         timestamp,

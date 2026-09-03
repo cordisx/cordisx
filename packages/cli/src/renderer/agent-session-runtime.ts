@@ -4,6 +4,7 @@ import type {
   AgentAcquireResult,
   AgentCancelOptions,
   AgentCreateOptions,
+  AgentDefinitionIdentity,
   AgentDetailReference,
   AgentDisposeOptions,
   AgentHandle,
@@ -172,11 +173,32 @@ interface AgentRecord {
   readonly claimed: Set<string>
   readonly live: Set<AgentSubscriber>
   readonly detail?: AgentDetailReference
+  readonly definition?: AgentDefinitionIdentity
   /** Exact Host-resolved setup catalog retained only for this live Agent generation. */
   readonly definitions?: readonly CordisXResolvedAgentDefinition[]
   status: AgentStatus
   readonly idleWaiters: Set<(value: AgentIdleResult) => void>
   disposed?: 'owner-disposed' | 'runtime-disposed' | 'connection-replaced'
+}
+
+/**
+ * Host-private, read-only materialization input for native task surfaces. It is
+ * cloned from the one Session authority and is never offered as a plugin
+ * service or used as an append/recovery ledger.
+ */
+export interface CordisXAgentSessionProjection {
+  readonly sessionId: string
+  readonly sessionGeneration: number
+  readonly header: SessionHeader
+  readonly events: readonly SessionEvent[]
+  readonly closed?: 'connection-replaced' | 'host-unavailable'
+  readonly agent?: {
+    readonly generation: number
+    readonly status: AgentStatus
+    readonly detail?: AgentDetailReference
+    readonly definition?: AgentDefinitionIdentity
+    readonly definitions?: readonly CordisXResolvedAgentDefinition[]
+  }
 }
 
 interface SessionSubscriber {
@@ -296,6 +318,30 @@ export class CordisXAgentSessionRuntime {
       if (selected === undefined || record.generation > selected.generation) selected = { generation: record.generation, definition }
     }
     return selected === undefined ? undefined : presentationForDefinition(selected.definition)
+  }
+
+  /** Host-only projection; SessionEvent remains the sole durable fact. */
+  playgroundProjection(): readonly CordisXAgentSessionProjection[] {
+    return Object.freeze([...this.sessions.values()].map(session => {
+      const agent = this.agents.get(session.id)
+      const currentAgent = agent !== undefined && this.current(agent) ? agent : undefined
+      return Object.freeze({
+        sessionId: session.id,
+        sessionGeneration: session.generation,
+        header: clone(session.header),
+        events: Object.freeze(session.events.map(clone)),
+        ...(session.closed === undefined ? {} : { closed: session.closed }),
+        ...(currentAgent === undefined ? {} : {
+          agent: Object.freeze({
+            generation: currentAgent.generation,
+            status: currentAgent.status,
+            ...(currentAgent.detail === undefined ? {} : { detail: clone(currentAgent.detail) }),
+            ...(currentAgent.definition === undefined ? {} : { definition: clone(currentAgent.definition) }),
+            ...(currentAgent.definitions === undefined ? {} : { definitions: Object.freeze(currentAgent.definitions.map(clone)) }),
+          }),
+        }),
+      })
+    }))
   }
 
   installLegacyBindingResolver(ownerPluginId: string, resolve: CordisXLegacyAgentLoopBindingResolver): () => void {
@@ -485,6 +531,7 @@ export class CordisXAgentSessionRuntime {
       live: new Set(),
       status: 'idle',
       idleWaiters: new Set(),
+      ...(input.setup === undefined ? {} : { definition: clone(input.setup.definition) }),
       ...(definitions === undefined ? {} : { definitions: clone(definitions) }),
       ...(driver.detail === undefined ? {} : { detail: clone(driver.detail) }),
     }

@@ -1,5 +1,7 @@
 import type { AgentDefinition, AgentDefinitionIdentity, AgentLoopContentPart } from '../agent-loop-contracts.js'
 import type { AgentLoopTaskDetailsUrl } from '@cordisx/protocol/agent-loop/v2'
+import type { AgentDetailReference } from '@cordisx/protocol/agents/v1'
+import type { SessionEvent } from '@cordisx/protocol/sessions/v1'
 import type { CordisXPlatformResult, CordisXPlatformSessionRef } from '../platform-contracts.js'
 import type {
   CordisXAgentLoopCreateContext,
@@ -62,7 +64,11 @@ export type PlaygroundMockTaskDetailsUrl = AgentLoopTaskDetailsUrl
 
 export interface PlaygroundMockTaskTrace {
   readonly taskRef: string
-  readonly origin?: 'simulator' | 'host-session'
+  readonly origin?: 'simulator' | 'host-session' | 'agent-session'
+  readonly sessionId?: string
+  readonly sessionGeneration?: number
+  readonly agentGeneration?: number
+  readonly agentDetail?: AgentDetailReference
   readonly debugTaskId: string
   readonly detailsUrl: PlaygroundMockTaskDetailsUrl
   readonly agentLabel: string
@@ -91,8 +97,10 @@ export interface PlaygroundMockTaskTrace {
   }
   readonly events: readonly {
     readonly sequence: number
-    readonly type: 'task.created' | 'task.bound' | 'input.accepted' | 'execution.started' | 'approval.required' | 'execution.completed' | 'execution.failed' | 'task.closed' | 'semantic.message'
+    readonly type: 'task.created' | 'task.bound' | 'input.accepted' | 'execution.started' | 'approval.required' | 'execution.completed' | 'execution.failed' | 'task.closed' | 'semantic.message' | 'session.event'
     readonly detail: string
+    /** Exact read-only fact when this row is projected from Agent/Session. */
+    readonly sessionEvent?: SessionEvent
     readonly operationId?: string
     readonly purpose?: 'conversation' | 'member-self-introduction'
     readonly turn?: string

@@ -9,7 +9,7 @@ import { ProviderFleet } from '../packages/cli/src/providers/fleet.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 } from '../packages/cli/src/permission-contracts.js'
 
 describe('Agent/Session development composition', () => {
-  it('embeds a shared React/UI local artifact without sourcemap imports or a permission dialog', async () => {
+  it('embeds a shared React/UI local artifact and projects its Session task without sourcemap imports or a permission dialog', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-agent-session-local-artifact-'))
     const entry = path.join(root, 'chatroom.tsx')
     const configPath = path.join(root, 'cordisx.config.json')
@@ -23,14 +23,24 @@ export const manifest = ${JSON.stringify({
   schemaVersion: 5,
   id: 'chatroom',
   services: [],
-  capabilities: [{ name: 'sessions.get', required: true, scope: {} }],
+  capabilities: [
+    { name: 'sessions.get', required: true, scope: {} },
+    { name: 'agents.create', required: true, scope: {} },
+    { name: 'agents.message.submit', required: true, scope: {} },
+  ],
 })}
-export const inject = ['sessions']
+export const inject = ['sessions', 'agents']
 export async function apply(ctx) {
   const explicitElement = createElement(Button, null, 'Chatroom')
   const automaticElement = <Button>Chatroom JSX</Button>
   await ctx.sessions.get('cx-session.playground-local-artifact')
-  globalThis.__playgroundLocalSessionGetApplied = explicitElement.type === Button && automaticElement.type === Button
+  const acquired = await ctx.agents.create({ sessionId: 'cx-session.playground-local-artifact' })
+  if (acquired.status === 'accepted') await acquired.handle.agent.followup({
+    id: 'cx-message.playground-local-artifact.1', role: 'user', content: [{ type: 'text', text: 'hi' }],
+    source: { kind: 'plugin', pluginId: acquired.owner.pluginId, generation: acquired.owner.generation,
+      correlation: { namespace: 'chatroom.room-run', id: 'fixture-room/fixture-run' } },
+  })
+  globalThis.__playgroundLocalSessionGetApplied = explicitElement.type === Button && automaticElement.type === Button && acquired.status === 'accepted'
 }
 `)
     await writeFile(configPath, JSON.stringify({
@@ -42,7 +52,7 @@ export async function apply(ctx) {
     expect(ordinaryLocalDevelopmentBuild.moduleFactorySource).toContain('sourceMappingURL=data:application/json;base64,')
     expect(ordinaryLocalDevelopmentBuild.watchFiles).not.toContain(`${root}/cordisx-shared-react:cordisx/react`)
     expect(ordinaryLocalDevelopmentBuild.watchFiles).not.toContain(`${root}/cordisx-shared-react:cordisx/ui`)
-    const session = await createPlaygroundSession(configPath)
+    const session = await createPlaygroundSession(configPath, { homeDir: path.join(root, 'home') })
     const dom = new JSDOM('<!doctype html><html><body></body></html>', {
       pretendToBeVisual: true,
       runScripts: 'dangerously',
@@ -73,7 +83,19 @@ export async function apply(ctx) {
       expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
       expect((dom.window as unknown as { __playgroundLocalSessionGetApplied?: boolean }).__playgroundLocalSessionGetApplied).toBe(true)
       expect(dom.window.document.querySelector('[data-permission-prompt]')).toBeNull()
-      await (dom.window as unknown as { __cordisxRuntime: { dispose(): Promise<void> } }).__cordisxRuntime.dispose()
+      await new Promise(resolve => setTimeout(resolve, 20))
+      const runtime = (dom.window as unknown as { __cordisxRuntime: {
+        playgroundAgentSessions?(): { readonly tasks: readonly { readonly taskRef: string; readonly events: readonly { readonly sessionEvent?: { readonly type: string } }[] }[] } | undefined
+        dispose(): Promise<void>
+      } }).__cordisxRuntime
+      expect(runtime.playgroundAgentSessions?.()?.tasks).toMatchObject([{
+        taskRef: 'cx-session.playground-local-artifact',
+        events: expect.arrayContaining([
+          expect.objectContaining({ sessionEvent: expect.objectContaining({ type: 'user/message' }) }),
+          expect.objectContaining({ sessionEvent: expect.objectContaining({ type: 'assistant/message' }) }),
+        ]),
+      }])
+      await runtime.dispose()
     } finally {
       dom.window.close()
       await session.close()

@@ -55,7 +55,9 @@ export function MockAgentTaskPage({ task, locale, scenarioController }: {
       </div>
       <div className="pg-simulator-task-header-actions">
         <span className="pg-simulator-task-status" data-status={task.status}>{task.status}</span>
-        <span className="pg-simulator-task-mode">{task.origin === 'host-session' ? (en ? 'Host snapshot' : 'Host 快照') : (en ? 'Simulator' : '模拟器')}</span>
+        <span className="pg-simulator-task-mode">{task.origin === 'agent-session'
+          ? 'Agent / Session'
+          : task.origin === 'host-session' ? (en ? 'Host snapshot' : 'Host 快照') : (en ? 'Simulator' : '模拟器')}</span>
         <MoreMenu label={en ? 'Task actions' : 'Task 操作'} items={[{
           id: 'reset-debug-generation',
           label: en ? 'Reset simulated session' : '重置模拟会话',
