@@ -3174,6 +3174,9 @@ async function start(
       profileId: metadata.profileId,
       runtimeGeneration: generation,
       locale: () => i18nService?.getSnapshot().locale ?? 'en',
+      resolveText: (owner, message, site) => i18nService?.resolveFor(owner, message, site).text
+        ?? message.fallback
+        ?? message.key,
       update: updatePluginConfig,
     })
     routeService.setManagerContentConfigFactory(input => managerContentConfigAuthority!.bind(input))

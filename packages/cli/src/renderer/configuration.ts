@@ -6,6 +6,12 @@ import type {
   ManagerContentPluginConfigDescriptorV2,
 } from '@cordisx/protocol/manager-content-navigation/v4'
 import type {
+  ManagerContentPluginConfigDescriptorV3,
+  ManagerContentPluginConfigFormFieldV2,
+  ManagerContentPluginConfigFormPresentationV2,
+  ManagerContentPluginConfigLocalizedChoiceV2,
+} from '@cordisx/protocol/manager-content-navigation/v5'
+import type {
   CordisXConfigApplies,
   CordisXConfigAppliesInput,
   CordisXConfigFormActionIcons,
@@ -21,6 +27,7 @@ import type {
   CordisXConfigRenderers,
   CordisXJsonValue,
   CordisXJsonScalar,
+  CordisXLocalizedText,
   CordisXPluginIdentity,
   CordisXPluginSettings,
   CordisXStandardSchema,
@@ -32,7 +39,7 @@ import {
   type PluginGenerationEffectIdentity,
   type PluginGenerationView,
 } from './generation-visibility.js'
-import { assertLocalId } from './validation.js'
+import { assertLocalId, assertLocalizedText } from './validation.js'
 import { formSchemaDefaultValue } from './form-schema-defaults.js'
 import type { PluginConsoleAspect } from './plugin-console.js'
 
@@ -51,6 +58,8 @@ interface SchemaNode {
     readonly extra?: {
       readonly label?: string | Readonly<Record<string, string>>
       readonly cordisxForm?: {
+        readonly version?: number
+        readonly fields?: readonly unknown[]
         readonly icon?: string
         readonly group?: {
           readonly id?: string
@@ -337,6 +346,168 @@ function choices(schema: SchemaNode): readonly { readonly label: string; readonl
     result.push({ label: String(item.value), value: item.value as CordisXJsonScalar })
   }
   return result
+}
+
+function assertOnlyKeys(value: object, keys: readonly string[], label: string): void {
+  const unknown = Object.keys(value).find(key => !keys.includes(key))
+  if (unknown !== undefined) throw new Error(`${label} has unknown field ${unknown}`)
+}
+
+function objectValue(value: unknown, label: string): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
+  return value as Record<string, unknown>
+}
+
+function scalarValue(value: unknown, label: string): CordisXJsonScalar {
+  if (value === null || typeof value === 'boolean') return value
+  if (typeof value === 'string' && value.length <= 4096) return value
+  if (typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 1_000_000_000_000) return value
+  throw new Error(`${label} must be a bounded JSON scalar`)
+}
+
+function sameScalar(left: CordisXJsonScalar, right: CordisXJsonScalar): boolean {
+  return Object.is(left, right) || left === right
+}
+
+function schemaNodeAtPath(schema: SchemaNode | undefined, path: CordisXConfigFieldPath): SchemaNode | undefined {
+  let node = schema
+  for (const segment of path) {
+    if (node?.type !== 'object' || node.dict === undefined || !Object.hasOwn(node.dict, segment)) return undefined
+    node = node.dict[segment]
+  }
+  return node
+}
+
+function assertFormText(value: unknown, label: string): void {
+  if (typeof value === 'string') {
+    if (value.trim() === '' || value.length > 400) throw new Error(`${label} must be a bounded non-empty string`)
+    return
+  }
+  const record = objectValue(value, label)
+  if (Object.keys(record).length === 0 || Object.keys(record).length > 32
+    || Object.keys(record).some(locale => !/^[A-Za-z0-9-]{2,32}$/u.test(locale))
+    || Object.values(record).some(item => typeof item !== 'string' || item.trim() === '' || item.length > 400)) {
+    throw new Error(`${label} must contain bounded locale strings`)
+  }
+}
+
+function normalizedFormPresenter(value: unknown, label: string): CordisXConfigFormPresenter {
+  const presenter = objectValue(value, label)
+  assertOnlyKeys(presenter, ['version', 'kind', 'options'], label)
+  if (presenter.options !== undefined) {
+    const options = objectValue(presenter.options, `${label}.options`)
+    assertOnlyKeys(options, ['density', 'maxInlineItems', 'allowReorder'], `${label}.options`)
+  }
+  const normalized = normalizeFormPresentation(presenter)
+  if (normalized === undefined) throw new Error(`${label} is invalid`)
+  const options = presenter.options as Record<string, unknown> | undefined
+  if (options?.density !== undefined && options.density !== 'compact' && options.density !== 'regular') throw new Error(`${label}.options.density is invalid`)
+  if (options?.maxInlineItems !== undefined
+    && (!Number.isInteger(options.maxInlineItems) || (options.maxInlineItems as number) < 1 || (options.maxInlineItems as number) > 64)) {
+    throw new Error(`${label}.options.maxInlineItems is invalid`)
+  }
+  if (options?.allowReorder !== undefined && typeof options.allowReorder !== 'boolean') throw new Error(`${label}.options.allowReorder is invalid`)
+  return normalized as CordisXConfigFormPresenter
+}
+
+function normalizedFormGroup(value: unknown): ManagerContentPluginConfigFormFieldV2['group'] {
+  if (value === undefined) return undefined
+  const group = objectValue(value, 'manager config form group')
+  assertOnlyKeys(group, ['id', 'title', 'description', 'icon'], 'manager config form group')
+  if (typeof group.id !== 'string') throw new Error('manager config form group id is required')
+  assertLocalId(group.id, 'manager config form group id')
+  if (group.title !== undefined) assertFormText(group.title, 'manager config form group title')
+  if (group.description !== undefined) assertFormText(group.description, 'manager config form group description')
+  const icon = group.icon === undefined ? undefined : formIcon(group.icon)
+  if (group.icon !== undefined && icon === undefined) throw new Error('manager config form group icon is invalid')
+  return immutable({
+    id: group.id,
+    ...(group.title === undefined ? {} : { title: group.title }),
+    ...(group.description === undefined ? {} : { description: group.description }),
+    ...(icon === undefined ? {} : { icon }),
+  }) as ManagerContentPluginConfigFormFieldV2['group']
+}
+
+function localizedChoices(
+  value: unknown,
+  node: SchemaNode,
+  label: string,
+): readonly ManagerContentPluginConfigLocalizedChoiceV2[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length < 1 || value.length > 100) throw new Error(`${label} must contain 1 to 100 choices`)
+  const expected = choices(node)?.map(choice => choice.value)
+  if (expected === undefined || expected.length === 0) throw new Error(`${label} requires a finite scalar enum field`)
+  const result: ManagerContentPluginConfigLocalizedChoiceV2[] = []
+  for (const [index, item] of value.entries()) {
+    const choice = objectValue(item, `${label}[${index}]`)
+    assertOnlyKeys(choice, ['value', 'label'], `${label}[${index}]`)
+    if (!Object.hasOwn(choice, 'value')) throw new Error(`${label}[${index}].value is required`)
+    const scalar = scalarValue(choice.value, `${label}[${index}].value`)
+    if (result.some(candidate => sameScalar(candidate.value as CordisXJsonScalar, scalar))) {
+      throw new Error(`${label} contains a duplicate value`)
+    }
+    assertLocalizedText(choice.label, `${label}[${index}].label`)
+    if (choice.label.params !== undefined && Object.keys(choice.label.params).length > 32) {
+      throw new Error(`${label}[${index}].label.params has too many fields`)
+    }
+    if (typeof choice.label.fallback !== 'string' || choice.label.fallback.trim() === '' || choice.label.fallback.length > 4000) {
+      throw new Error(`${label}[${index}].label.fallback is required`)
+    }
+    result.push(immutable({ value: scalar, label: choice.label }) as ManagerContentPluginConfigLocalizedChoiceV2)
+  }
+  if (result.length !== expected.length
+    || expected.some(candidate => !result.some(choice => sameScalar(choice.value as CordisXJsonScalar, candidate)))) {
+    throw new Error(`${label} must exactly cover the field scalar enum`)
+  }
+  return Object.freeze(result)
+}
+
+function managerContentFormPresentationV2(schema: SchemaNode | undefined): ManagerContentPluginConfigFormPresentationV2 | undefined {
+  const value = schema?.meta?.extra?.cordisxForm
+  if (value === undefined) return undefined
+  const root = objectValue(value, 'manager config form presentation')
+  if (root.version !== 2) throw new Error('manager config form presentation has an unsupported version')
+  assertOnlyKeys(root, ['version', 'fields', 'actions'], 'manager config form presentation')
+  if (!Array.isArray(root.fields) || root.fields.length > 100) throw new Error('manager config form presentation fields are invalid')
+  const seenPaths = new Set<string>()
+  const projected: ManagerContentPluginConfigFormFieldV2[] = []
+  for (const [index, item] of root.fields.entries()) {
+    const field = objectValue(item, `manager config form field ${index}`)
+    assertOnlyKeys(field, ['path', 'icon', 'group', 'presenter', 'choices'], `manager config form field ${index}`)
+    assertPath(field.path as CordisXConfigFieldPath)
+    const path = field.path as CordisXConfigFieldPath
+    const pathKey = JSON.stringify(path)
+    if (seenPaths.has(pathKey)) throw new Error(`manager config form presentation has duplicate field path ${path.join('.')}`)
+    seenPaths.add(pathKey)
+    const node = schemaNodeAtPath(schema, path)
+    if (node === undefined) throw new Error(`manager config form field path ${path.join('.')} is not in the Schemastery schema`)
+    const icon = field.icon === undefined ? undefined : formIcon(field.icon)
+    if (field.icon !== undefined && icon === undefined) throw new Error(`manager config form field ${path.join('.')} icon is invalid`)
+    const group = normalizedFormGroup(field.group)
+    const presenter = field.presenter === undefined
+      ? undefined
+      : normalizedFormPresenter(field.presenter, `manager config form field ${path.join('.')} presenter`)
+    const fieldChoices = localizedChoices(field.choices, node, `manager config form field ${path.join('.')} choices`)
+    projected.push(immutable({
+      path,
+      ...(icon === undefined ? {} : { icon }),
+      ...(group === undefined ? {} : { group }),
+      ...(presenter === undefined ? {} : { presenter }),
+      ...(fieldChoices === undefined ? {} : { choices: fieldChoices }),
+    }) as ManagerContentPluginConfigFormFieldV2)
+  }
+  let actions: ManagerContentPluginConfigFormPresentationV2['actions']
+  if (root.actions !== undefined) {
+    const rawActions = objectValue(root.actions, 'manager config form actions')
+    assertOnlyKeys(rawActions, ['save', 'reset'], 'manager config form actions')
+    const save = rawActions.save === undefined ? undefined : formIcon(rawActions.save)
+    const reset = rawActions.reset === undefined ? undefined : formIcon(rawActions.reset)
+    if ((rawActions.save !== undefined && save === undefined) || (rawActions.reset !== undefined && reset === undefined)) {
+      throw new Error('manager config form actions contain an invalid icon')
+    }
+    actions = { ...(save === undefined ? {} : { save }), ...(reset === undefined ? {} : { reset }) }
+  }
+  return immutable({ version: 2, fields: projected, ...(actions === undefined ? {} : { actions }) })
 }
 
 function arrayChoices(schema: SchemaNode | undefined, locale: string): readonly { readonly label: string; readonly value: CordisXJsonScalar }[] | undefined {
@@ -627,11 +798,49 @@ export class PluginConfigurationRegistry {
     return this.descriptorForRecord(this.require(owner, view), locale)
   }
 
-  private descriptorForRecord(record: ConfigRecord, locale: string): ManagerPluginConfigSnapshot {
+  private descriptorForRecord(
+    record: ConfigRecord,
+    locale: string,
+    localizedForm?: Readonly<{
+      readonly presentation: ManagerContentPluginConfigFormPresentationV2
+      readonly resolveText: (message: CordisXLocalizedText, site: string) => string
+    }>,
+  ): ManagerPluginConfigSnapshot {
     const schemastery = record.schema !== undefined
       && record.schema['~standard'].vendor === 'schemastery'
       && typeof record.schema.toJSON === 'function'
-    const descriptorActionIcons = actionIcons(record.schema)
+    const descriptorActionIcons = localizedForm?.presentation.actions ?? actionIcons(record.schema)
+    const projectedFields = schemastery ? fields(
+      record.schema,
+      record.pendingAppRestart?.raw ?? record.raw,
+      record.pendingAppRestart?.value ?? record.value,
+      record.namespace,
+      locale,
+    ).map(field => {
+      const presentation = localizedForm?.presentation.fields.find(candidate => (
+        candidate.path.length === field.path.length && candidate.path.every((segment, index) => segment === field.path[index])
+      ))
+      if (presentation === undefined) return field
+      const groupTitle = presentation.group?.title === undefined ? undefined : localizedText(presentation.group.title, locale)
+      const groupDescription = presentation.group?.description === undefined ? undefined : localizedText(presentation.group.description, locale)
+      const group: CordisXConfigFormGroupSnapshot | undefined = presentation.group === undefined ? field.group : {
+        id: presentation.group.id,
+        ...(groupTitle === undefined ? {} : { title: groupTitle }),
+        ...(groupDescription === undefined ? {} : { description: groupDescription }),
+        ...(presentation.group.icon === undefined ? {} : { icon: presentation.group.icon }),
+      }
+      const choiceLabels = presentation.choices?.map((choice, index) => ({
+        value: choice.value as CordisXJsonScalar,
+        label: localizedForm!.resolveText(choice.label, `manager-config:${record.identity.id}:${field.path.join('.')}:choice:${index}`),
+      }))
+      return immutable({
+        ...field,
+        ...(presentation.icon === undefined ? {} : { icon: presentation.icon }),
+        ...(group === undefined ? {} : { group }),
+        ...(presentation.presenter === undefined ? {} : { presenter: presentation.presenter }),
+        ...(choiceLabels === undefined ? {} : { choices: choiceLabels }),
+      })
+    }) : []
     return {
       namespace: record.namespace,
       schemaKind: record.schema === undefined ? 'none' : schemastery ? 'schemastery' : 'standard',
@@ -640,26 +849,32 @@ export class PluginConfigurationRegistry {
       revision: record.revision,
       lastGoodRevision: record.activeRevision,
       value: immutable(removePaths(record.pendingAppRestart?.raw ?? record.raw, record.secretPaths)),
-      fields: schemastery ? fields(
-        record.schema,
-        record.pendingAppRestart?.raw ?? record.raw,
-        record.pendingAppRestart?.value ?? record.value,
-        record.namespace,
-        locale,
-      ) : [],
+      fields: projectedFields,
       secrets: record.secretPaths.map(path => ({ path, set: false })),
       ...(descriptorActionIcons === undefined ? {} : { actionIcons: descriptorActionIcons }),
     }
   }
 
-  /** Host-internal Protocol v4 projection; plugins never receive this writer-facing descriptor. */
+  managerContentHostDescriptor(
+    owner: string,
+    locale: string,
+    resolveText: (message: CordisXLocalizedText, site: string) => string,
+    view?: PluginGenerationView,
+  ): ManagerPluginConfigSnapshot {
+    const record = this.require(owner, view)
+    const presentation = managerContentFormPresentationV2(record.schema)
+    return this.descriptorForRecord(record, locale, presentation === undefined ? undefined : { presentation, resolveText })
+  }
+
+  /** Host-internal Protocol v4/v5 projection; plugins never receive this writer-facing descriptor. */
   managerContentDescriptor(
     owner: string,
     profileId: string,
     runtimeGeneration: string,
     locale: string,
     view?: PluginGenerationView,
-  ): ManagerContentPluginConfigDescriptorV2 {
+    contractVersion: 1 | 2 = 1,
+  ): ManagerContentPluginConfigDescriptorV2 | ManagerContentPluginConfigDescriptorV3 {
     const record = this.require(owner, view)
     const current = this.descriptorForRecord(record, locale)
     const schemastery = record.schema !== undefined
@@ -683,23 +898,20 @@ export class PluginConfigurationRegistry {
         ...(field.presenter === undefined ? {} : { presenter: field.presenter }),
       }
     })
-    const form = formFields.length === 0 && current.actionIcons === undefined ? undefined : {
+    const formV1 = formFields.length === 0 && current.actionIcons === undefined ? undefined : {
       version: 1 as const,
       fields: formFields,
       ...(current.actionIcons === undefined ? {} : { actions: current.actionIcons }),
     }
+    const formV2 = contractVersion === 2 ? managerContentFormPresentationV2(record.schema) : undefined
     const user = immutable(removePaths(record.pendingAppRestart?.raw ?? record.raw, record.secretPaths))
     const value = immutable(removePaths(record.pendingAppRestart?.value ?? record.value, record.secretPaths))
     jsonCompatible(user, 'plugin configuration user projection')
     jsonCompatible(value, 'plugin configuration value projection')
-    return immutable({
-      version: 2 as const,
+    const common = {
       identity: { source: record.identity.source, pluginId: record.identity.id },
       scope: { profileId, generation: record.generation.moduleGeneration ?? runtimeGeneration },
       namespace: record.namespace,
-      schema: schemastery
-        ? { kind: 'schemastery' as const, envelope: envelope!, ...(form === undefined ? {} : { form }) }
-        : { kind: 'standard' as const, renderable: false as const },
       value: value as import('@cordisx/protocol/manager-content-navigation/v4').ManagerContentConfigJsonValue,
       ...(user === undefined ? {} : { user: user as import('@cordisx/protocol/manager-content-navigation/v4').ManagerContentConfigJsonValue }),
       revision: record.revision,
@@ -710,6 +922,22 @@ export class PluginConfigurationRegistry {
         path: path as import('@cordisx/protocol/manager-content-navigation/v4').ManagerContentConfigFieldPath,
         set: false,
       })),
+    }
+    if (contractVersion === 2) {
+      return immutable({
+        ...common,
+        version: 3 as const,
+        schema: schemastery
+          ? { kind: 'schemastery' as const, envelope: envelope!, ...(formV2 === undefined ? {} : { form: formV2 }) }
+          : { kind: 'standard' as const, renderable: false as const },
+      })
+    }
+    return immutable({
+      ...common,
+      version: 2 as const,
+      schema: schemastery
+        ? { kind: 'schemastery' as const, envelope: envelope!, ...(formV1 === undefined ? {} : { form: formV1 }) }
+        : { kind: 'standard' as const, renderable: false as const },
     })
   }
 
