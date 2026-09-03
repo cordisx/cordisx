@@ -5,6 +5,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import process from 'node:process'
 import { appendRunnerCleanup, cleanupIsolatedSmokeHome, prepareIsolatedSmokeHome } from './isolated-smoke-home.mjs'
+import { desktopAgentSessionRendererTimeoutMs } from './desktop-agent-session-harness-report.mjs'
 
 function value(name) {
   const index = process.argv.indexOf(name)
@@ -122,18 +123,36 @@ async function cordisxReady(target) {
 }
 
 async function waitForRenderer() {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  const startedAt = Date.now()
+  const timeoutMs = desktopAgentSessionRendererTimeoutMs(desktopAgentSessionHarness)
+  let targetObserved = false
+  while (Date.now() - startedAt < timeoutMs) {
     if (exited(launcher)) throw new Error(`isolated launcher exited before renderer readiness (status ${String(launcher.exitCode)})`)
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(500) })
+      const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
+        signal: AbortSignal.timeout(Math.min(500, Math.max(1, timeoutMs - (Date.now() - startedAt)))),
+      })
       if (response.ok) {
         const target = (await response.json()).find(item => item.url === 'app://-/index.html')
-        if (target !== undefined && await cordisxReady(target)) return
+        if (target !== undefined && !targetObserved) {
+          targetObserved = true
+          harnessStage('injection-target-observed', startedAt)
+        }
+        if (target !== undefined && await cordisxReady(target)) {
+          harnessStage('renderer-ready', startedAt)
+          return
+        }
       }
     } catch {}
-    await new Promise(resolve => setTimeout(resolve, 250))
+    const remaining = timeoutMs - (Date.now() - startedAt)
+    if (remaining > 0) await new Promise(resolve => setTimeout(resolve, Math.min(250, remaining)))
   }
-  throw new Error('isolated app:// renderer did not become available')
+  throw new Error(`isolated app:// renderer did not become available within ${Math.round(timeoutMs / 1_000)} seconds`)
+}
+
+function harnessStage(stage, startedAt) {
+  if (!desktopAgentSessionHarness) return
+  console.log(`[cordisx-desktop-agent-session-stage] ${JSON.stringify({ stage, elapsedMs: Date.now() - startedAt })}`)
 }
 
 const crashpadBefore = await crashpadCount()
@@ -195,6 +214,7 @@ const launcher = spawn(process.execPath, [
   env: launcherEnvironment,
   detached: process.platform !== 'win32',
 })
+harnessStage('launch-started', Date.now())
 launcher.stdout.pipe(process.stdout)
 launcher.stderr.pipe(process.stderr)
 let smoke

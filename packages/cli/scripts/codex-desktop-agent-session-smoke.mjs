@@ -70,6 +70,7 @@ const report = {
   permissionPrompts: [],
   assertions: {},
   limitations: [],
+  stages: [{ stage: 'renderer-ready', elapsedMs: 0 }],
 }
 
 const installBridgeTrace = await evaluate(`(() => {
@@ -108,6 +109,7 @@ const installBridgeTrace = await evaluate(`(() => {
 })()`)
 report.bridge.instrumentation = installBridgeTrace?.installed === true
 if (!report.bridge.instrumentation) report.limitations.push(`bridge method-only trace unavailable: ${installBridgeTrace?.reason ?? 'unknown'}`)
+report.stages.push({ stage: report.bridge.instrumentation ? 'bridge-ready' : 'bridge-unavailable', elapsedMs: 0 })
 
 let permissionPromptOrdinal = 0
 const answerPermissionPrompt = async () => {
@@ -128,6 +130,8 @@ const answerPermissionPrompt = async () => {
 
 const controllerSnapshot = async () => await evaluate('globalThis.__cordisxDesktopAgentSessionSmoke?.snapshot()')
 const invoke = async (name, input, timeoutMs = 90_000) => {
+  const startedAt = Date.now()
+  report.stages.push({ stage: `api:${name}:start`, elapsedMs: 0 })
   const before = await controllerSnapshot()
   const accepted = await evaluate(`globalThis.__cordisxDesktopAgentSessionSmoke?.invoke(${JSON.stringify(name)}, ${JSON.stringify(input)}) === true`)
   if (!accepted) throw new Error(`fixture rejected operation ${name}`)
@@ -137,6 +141,7 @@ const invoke = async (name, input, timeoutMs = 90_000) => {
     const snapshot = await controllerSnapshot()
     if (snapshot !== undefined && snapshot.busy === false && snapshot.operationOrdinal > before.operationOrdinal) {
       report.operations.push(snapshot.last)
+      report.stages.push({ stage: `api:${name}:complete`, elapsedMs: Date.now() - startedAt, ok: snapshot.last?.ok === true })
       return snapshot.last
     }
     await sleep(100)
@@ -250,4 +255,3 @@ await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o60
 socket.close()
 if (report.result === 'failed') throw new Error(fatal ?? 'Codex Desktop Agent/Session live smoke failed')
 console.log(`[cordisx-desktop-agent-session-smoke] ${report.result}: ${reportPath}`)
-

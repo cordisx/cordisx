@@ -14,6 +14,7 @@ describe('Codex Desktop Agent Session live harness', () => {
     expect(wrapper).toContain("appVersion: '26.818.61809'")
     expect(wrapper).toContain("buildNumber: '7019'")
     expect(wrapper).toContain("CORDISX_HOME: cordisxHome")
+    expect(wrapper).toContain('writeDesktopAgentSessionHarnessReport')
     expect(wrapper).toContain('sharedHome: process.env.HOME')
     expect(wrapper).toContain('sharedCodexHome: process.env.CODEX_HOME')
     expect(wrapper).toContain('secondProviderStarted: false')
@@ -21,6 +22,7 @@ describe('Codex Desktop Agent Session live harness', () => {
     expect(wrapper).toContain("'--desktop-agent-session-harness'")
     expect(runner).toContain("'packages/cli/scripts/codex-desktop-agent-session-smoke.mjs'")
     expect(runner).toContain("'--desktop-agent-session-harness requires --dev-config")
+    expect(runner).toContain('desktopAgentSessionRendererTimeoutMs(desktopAgentSessionHarness)')
   })
 
   it('declares every public Agent Session capability exercised by the fixture', () => {
