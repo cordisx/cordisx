@@ -105,6 +105,7 @@ flow. These values are fixture-owned catalog keys, not Runtime commands.
               "targetAgentId": "chatroom.reviewer",
               "task": "Review the declared flow."
             },
+            { "type": "activate-session-scope", "actor": "reviewer" },
             { "type": "tool-call", "actor": "reviewer", "call": "inspect", "name": "workspace.inspect", "arguments": { "scope": "current" } },
             { "type": "tool-result", "actor": "reviewer", "call": "inspect", "content": "Inspection complete." },
             { "type": "assistant-reply", "actor": "reviewer", "text": "Review complete." },
@@ -119,9 +120,15 @@ flow. These values are fixture-owned catalog keys, not Runtime commands.
 
 Steps support `assistant-reply`, `final-summary`, `tool-call`, `tool-result`,
 `approval-request` with outcome branches, `room-delegation`, `followup`,
-`failure`, and `cancel`. A delegation binds its `as` actor only after the
-existing Room bridge admits a Session whose exact Agent identity and task text
-match the declaration. Scenario progress is an ignorable Host SessionEvent in
+`activate-session-scope`, `failure`, and `cancel`. A delegation binds its `as`
+actor only after the existing Room bridge admits a Session whose exact Agent
+identity and task text match the declaration. `activate-session-scope` requires
+that bound actor and derives its exact Session, plugin owner, and route from
+Host authorities; it accepts none of those values from the fixture. It keeps
+the visible Lead route intact while the delegated exact route is active, waits
+for normal `approvals.request` authorization, and closes on the first run,
+route, generation, permission, connection, reset, or disposal fence. Scenario
+progress is an ignorable Host SessionEvent in
 the same durable Session ledger; tool, approval, assistant, and terminal facts
 use their existing SessionEvent variants. The run identity derives from source
 message id, catalog revision, and code. Completed or failed runs do not execute

@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentSetup } from '@cordisx/protocol/agents/v1'
-import type { UserMessage } from '@cordisx/protocol/sessions/v1'
+import type { ApprovalOutcome, UserMessage } from '@cordisx/protocol/sessions/v1'
 import { buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
 import { PlaygroundAgentSessionStore } from '../packages/cli/src/playground/agent-session-store.js'
 import { createPlaygroundSession } from '../packages/cli/src/playground/session.js'
@@ -13,6 +13,11 @@ import {
 } from '../packages/cli/src/playground/session-scenario-catalog.js'
 import { CordisXAgentSessionRuntime } from '../packages/cli/src/renderer/agent-session-runtime.js'
 import { DeterministicAgentSessionTransport } from '../packages/cli/src/renderer/deterministic-agent-session-transport.js'
+import { AgentRouteSessionScopeAuthority } from '../packages/cli/src/renderer/agent-route-session-scope.js'
+import {
+  PlaygroundScenarioSessionScopeAuthority,
+  type PlaygroundScenarioSessionScopeClient,
+} from '../packages/cli/src/renderer/playground-scenario-session-scope.js'
 import { projectPlaygroundAgentSessions } from '../packages/cli/src/renderer/playground-agent-session-projection.js'
 import type {
   PlaygroundRoomSimulationBinding,
@@ -92,6 +97,24 @@ function catalog(enabled = true): PlaygroundSessionScenarioCatalogV1 {
   return parsed
 }
 
+function delegatedApprovalCatalog(): PlaygroundSessionScenarioCatalogV1 {
+  const parsed = parsePlaygroundSessionScenarioCatalog({
+    version: 1, revision: 'delegated-approval-v1', enabled: true,
+    scenarios: Object.fromEntries(['delegated', 'delegated-rejected'].map(code => [code, {
+      entryAgentId: 'chatroom.generalist', steps: [
+        { type: 'room-delegation', as: 'reviewer', memberId: 'reviewer-member', targetAgentId: 'chatroom.reviewer', task: 'Approve the reviewed task.' },
+        { type: 'activate-session-scope', actor: 'reviewer' },
+        { type: 'approval-request', actor: 'reviewer', request: 'publish', toolName: 'workspace.publish', branches: {
+          'allowed-once': [{ type: 'assistant-reply', actor: 'reviewer', text: 'Reviewer approval succeeded.' }],
+          rejected: [{ type: 'failure', actor: 'reviewer', code: 'reviewer-rejected', message: 'Reviewer rejected approval.' }],
+        } },
+      ],
+    }])),
+  })
+  if (parsed === undefined) throw new Error('Scoped catalog fixture did not parse')
+  return parsed
+}
+
 function bridgeFor(
   runtime: () => CordisXAgentSessionRuntime,
   observations: { delegations: number; operationIds: string[] },
@@ -147,6 +170,9 @@ describe('Host Playground Session scenario catalog', () => {
     expect(() => parsePlaygroundSessionScenarioCatalog({ version: 1, revision: 'r1', enabled: true, scenarios: {
       '1': { entryAgentId: 'lead', steps: [{ type: 'unknown' }] },
     } })).toThrow('.type is unsupported')
+    expect(() => parsePlaygroundSessionScenarioCatalog({ version: 1, revision: 'r1', enabled: true, scenarios: {
+      '1': { entryAgentId: 'lead', steps: [{ type: 'activate-session-scope' }] },
+    } })).toThrow('.actor is required')
 
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-session-scenario-config-'))
     const configPath = path.join(root, 'cordisx.config.json')
@@ -209,6 +235,87 @@ describe('Host Playground Session scenario catalog', () => {
     expect(projected.find(task => task.sessionId === binding.sessionId)?.scenario).toMatchObject({ code: '01234', phase: 'completed' })
     expect(projected.find(task => task.sessionId === 'cx-session.reviewer')?.scenario).toMatchObject({ code: '01234', actor: 'reviewer' })
     await runtime.dispose()
+  })
+
+  it('activates the delegated Reviewer exact route scope before approval and completes the allowed branch', async () => {
+    const scopedCatalog = delegatedApprovalCatalog()
+    const observations = { delegations: 0, operationIds: [] as string[] }
+    let runtime!: CordisXAgentSessionRuntime
+    let scopeAuthority!: PlaygroundScenarioSessionScopeAuthority
+    const routeScopes = new AgentRouteSessionScopeAuthority({
+      activeRoute: () => {
+        const route = scopeAuthority.effectiveRoute()
+        return route === undefined ? undefined : {
+          owner: `${route.owner.source}:${route.owner.pluginId}`, routeId: route.routeId,
+          instanceId: route.routeInstanceId, params: route.params,
+        }
+      },
+      routes: pluginId => pluginId === owner.pluginId
+        ? [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }]
+        : [],
+      decide: async plan => ({ authorized: plan.scope.sessionIds.length === 1 }),
+      connectionGeneration: () => 1,
+    })
+    routeScopes.install(owner.pluginId, [
+      { name: 'approvals.request', required: false, scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
+      { name: 'approvals.answer', required: false, scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
+    ])
+    let approvalOutcome: ApprovalOutcome = 'allowed-once'
+    scopeAuthority = new PlaygroundScenarioSessionScopeAuthority({
+      hostGeneration: 'playground-generation-one',
+      currentRoute: () => ({
+        kind: 'host-route', active: true, owner: { source: 'file:///fixtures/chatroom.ts', pluginId: 'chatroom' },
+        routeId: 'room-session-detail', routeInstanceId: 'main:lead-route',
+        path: '/main/chatroom/:roomId/run/:runId/session/:sessionId', params: { sessionId: binding.sessionId! },
+      }),
+      ownerForSession: sessionId => runtime?.ownerForSession(sessionId),
+      authorize: async (agentOwner, capability, sessionId) => {
+        const authorized = await routeScopes.authorize(agentOwner, capability, sessionId)
+        if (authorized && capability === 'approvals.request') {
+          const agent = await runtime.get(agentOwner, sessionId)
+          if (agent !== undefined) await runtime.registerAnswerer(agentOwner, agent, async () => approvalOutcome)
+        }
+        return authorized
+      },
+      mountRoute: () => () => {},
+      changed: () => routeScopes.reconcileRoutes(),
+    })
+    const driver = new DeterministicAgentSessionTransport({
+      scenarioCatalog: scopedCatalog, roomBridge: bridgeFor(() => runtime, observations),
+      scenarioSessionScope: scopeAuthority.client, delegationTimeoutMs: 1_000,
+    })
+    runtime = new CordisXAgentSessionRuntime({
+      driver,
+      authorize: async (agentOwner, capability, sessionId) => capability === 'approvals.request' || capability === 'approvals.answer'
+        ? await routeScopes.authorize(agentOwner, capability, sessionId)
+        : true,
+    })
+    const lead = await runtime.create(owner, { sessionId: binding.sessionId!, setup: setup('chatroom.generalist', 'Lead') })
+    if (lead.status !== 'accepted') throw new Error('Lead Session create failed')
+    await lead.handle.agent.followup(message('cx-message.delegated-approval', 'delegated'))
+    await lead.handle.agent.whenIdle()
+
+    const reviewer = await readAll(runtime, 'cx-session.reviewer')
+    expect(reviewer.find(event => event.type === 'approval/asked')).toMatchObject({ data: { toolName: 'workspace.publish' } })
+    expect(reviewer.find(event => event.type === 'approval/decided')).toMatchObject({ data: { outcome: 'allowed-once' } })
+    expect(reviewer.find(event => event.type === 'assistant/message')).toMatchObject({
+      data: { message: { content: [{ text: 'Reviewer approval succeeded.' }] } },
+    })
+    expect(reviewer.find(event => event.type === 'playground/scenario' && event.data.stepType === 'activate-session-scope'))
+      .toMatchObject({ data: { actor: 'reviewer', phase: 'step-started' } })
+    expect(scopeAuthority.effectiveRoute()?.params.sessionId).toBe(binding.sessionId)
+
+    approvalOutcome = 'rejected'
+    await lead.handle.agent.followup(message('cx-message.delegated-rejected', 'delegated-rejected'))
+    await lead.handle.agent.whenIdle()
+    const rejectedReviewer = await readAll(runtime, 'cx-session.reviewer')
+    expect(rejectedReviewer.findLast(event => event.type === 'approval/decided')).toMatchObject({ data: { outcome: 'rejected' } })
+    const rejectedLead = await readAll(runtime, binding.sessionId!)
+    expect(rejectedLead.findLast(event => event.type === 'playground/scenario')).toMatchObject({
+      data: { code: 'delegated-rejected', phase: 'failed', error: { code: 'reviewer-rejected' } },
+    })
+    await runtime.dispose()
+    scopeAuthority.dispose()
   })
 
   it('passes through disabled, unknown, production, and wrong-entry messages as ordinary deterministic inputs', async () => {
@@ -300,6 +407,60 @@ describe('Host Playground Session scenario catalog', () => {
       })
       expect(cancelled.findLast(event => event.type === 'turn/end')).toMatchObject({ data: { reason: { kind: 'aborted' } } })
       await second.dispose()
+    } finally { await rm(home, { recursive: true, force: true }) }
+  })
+
+  it('does not repeat delegated scope activation when the same durable source message is replayed after restart', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cordisx-session-scenario-scope-restart-'))
+    try {
+      const store = new PlaygroundAgentSessionStore(home)
+      let activations = 0
+      let runtime!: CordisXAgentSessionRuntime
+      const scopeClient = (): PlaygroundScenarioSessionScopeClient => ({
+        activate: async input => {
+          activations += 1
+          const agent = await runtime.get(owner, input.targetSessionId)
+          if (agent === undefined) return { status: 'unavailable', code: 'session-unavailable', message: 'missing target' }
+          await runtime.registerAnswerer(owner, agent, async () => 'allowed-once')
+          let active = true
+          let settle!: (value: { readonly code: 'completed' }) => void
+          const closed = new Promise<{ readonly code: 'completed' }>(resolve => { settle = resolve })
+          return { status: 'available', handle: Object.freeze({
+            runId: input.runId, sessionId: input.targetSessionId, routeInstanceId: `scenario:${input.runId}`, closed,
+            active: () => active,
+            close: () => { if (active) { active = false; settle({ code: 'completed' }) } },
+          }) }
+        },
+      })
+      const firstObservations = { delegations: 0, operationIds: [] as string[] }
+      const firstDriver = new DeterministicAgentSessionTransport({
+        scenarioCatalog: delegatedApprovalCatalog(), roomBridge: bridgeFor(() => runtime, firstObservations),
+        scenarioSessionScope: scopeClient(), delegationTimeoutMs: 1_000,
+      })
+      runtime = new CordisXAgentSessionRuntime({ driver: firstDriver, authorize: async () => true, persistence: store })
+      const lead = await runtime.create(owner, { sessionId: binding.sessionId!, setup: setup('chatroom.generalist', 'Lead') })
+      if (lead.status !== 'accepted') throw new Error('Persisted scoped Lead create failed')
+      const source = message('cx-message.persisted-delegated-scope', 'delegated')
+      await lead.handle.agent.followup(source)
+      await lead.handle.agent.whenIdle()
+      expect(activations).toBe(1)
+      const before = await readAll(runtime, binding.sessionId!)
+      await runtime.dispose()
+
+      const recovered = await store.load()
+      const secondObservations = { delegations: 0, operationIds: [] as string[] }
+      const secondDriver = new DeterministicAgentSessionTransport({
+        recoveredSessions: recovered, scenarioCatalog: delegatedApprovalCatalog(),
+        roomBridge: bridgeFor(() => runtime, secondObservations), scenarioSessionScope: scopeClient(), delegationTimeoutMs: 1_000,
+      })
+      runtime = new CordisXAgentSessionRuntime({ driver: secondDriver, authorize: async () => true, persistence: store, initialSessions: recovered })
+      const resumed = await runtime.resume(owner, { sessionId: binding.sessionId! })
+      if (resumed.status !== 'accepted') throw new Error('Persisted scoped Lead resume failed')
+      expect(await resumed.handle.agent.followup(source)).toMatchObject({ status: 'accepted' })
+      expect(await readAll(runtime, binding.sessionId!)).toEqual(before)
+      expect(activations).toBe(1)
+      expect(secondObservations.delegations).toBe(0)
+      await runtime.dispose()
     } finally { await rm(home, { recursive: true, force: true }) }
   })
 

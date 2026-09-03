@@ -159,6 +159,16 @@ ordinary Playground plugins retain the interactive fail-closed path. No
 wildcard or plugin-provided flag is accepted. Connection, route, permission,
 and plugin-generation replacement abort pending Agent runtime prompts before
 fencing leases, so an obsolete dialog cannot survive as inert UI.
+An explicitly enabled Playground scenario may temporarily add one exact
+delegated Session route to that same broker without replacing the visible Lead
+Room route. The Host derives its owner and route identity from the active Lead
+route and its `SessionId` from the Room-admitted scenario actor; fixture data
+cannot supply any of those authority fields. The supplemental route is guarded
+by an opaque Host-only authority, authorizes through the ordinary exact policy
+and lease path, and is removed on run completion, visible-route change,
+permission or plugin-generation fencing, connection replacement, reset, or
+runtime disposal. Removal fences only leases issued for that supplemental
+route instance, so the Lead route is neither broadened nor replaced.
 The explicit Playground Host also owns a private durable Agent Session ledger
 under its selected Playground home. The renderer receives only a per-composition
 generation token and commits each new Session or contiguous `SessionEvent`

@@ -9,6 +9,10 @@ import type {
   CordisXPersistedSession,
 } from './agent-session-runtime.js'
 import type { PlaygroundRoomSimulationForwardingClient } from './playground-room-simulation-bridge.js'
+import type {
+  PlaygroundScenarioSessionScopeClient,
+  PlaygroundScenarioSessionScopeHandle,
+} from './playground-scenario-session-scope.js'
 import {
   PLAYGROUND_SESSION_SCENARIO_EVENT_TYPE,
   type PlaygroundSessionScenarioCatalogV1,
@@ -47,6 +51,7 @@ interface ScenarioRun {
   readonly catalogRevision: string
   readonly actors: Map<string, ScenarioActorRun>
   readonly toolCalls: Map<string, { readonly actor: string; readonly callId: string; readonly name: string }>
+  scopeActivation?: PlaygroundScenarioSessionScopeHandle
   stepIndex: number
   stepCount: number
   currentStep?: PlaygroundSessionScenarioStep
@@ -72,6 +77,7 @@ export interface DeterministicAgentSessionTransportOptions {
   readonly recoveredSessions?: readonly CordisXPersistedSession[]
   readonly scenarioCatalog?: PlaygroundSessionScenarioCatalogV1
   readonly roomBridge?: PlaygroundRoomSimulationForwardingClient
+  readonly scenarioSessionScope?: PlaygroundScenarioSessionScopeClient
   readonly delegationTimeoutMs?: number
 }
 
@@ -105,10 +111,12 @@ export class DeterministicAgentSessionTransport implements CordisXPrivateAgentDr
   private readonly claimedListeners = new Set<(event: CordisXDriverMessageClaimed) => void>()
   private readonly scenarioCatalog: PlaygroundSessionScenarioCatalogV1 | undefined
   private readonly roomBridge: PlaygroundRoomSimulationForwardingClient | undefined
+  private readonly scenarioSessionScope: PlaygroundScenarioSessionScopeClient | undefined
   private readonly delegationTimeoutMs: number
   private readonly seenScenarioRuns = new Set<string>()
   private readonly interruptedScenarioRuns = new Map<string, PlaygroundSessionScenarioEventData>()
   private readonly pendingDelegations = new Set<PendingDelegation>()
+  private readonly scenarioRuns = new Set<ScenarioRun>()
   private disposed = false
 
   constructor(input: readonly CordisXPersistedSession[] | DeterministicAgentSessionTransportOptions = []) {
@@ -118,6 +126,7 @@ export class DeterministicAgentSessionTransport implements CordisXPrivateAgentDr
     const recoveredSessions = options.recoveredSessions ?? []
     this.scenarioCatalog = options.scenarioCatalog?.enabled === true ? clone(options.scenarioCatalog) : undefined
     this.roomBridge = options.roomBridge
+    this.scenarioSessionScope = options.scenarioSessionScope
     this.delegationTimeoutMs = options.delegationTimeoutMs ?? 10_000
     for (const session of recoveredSessions) {
       const nextTurn = session.events.reduce((highest, event) => {
@@ -215,6 +224,9 @@ export class DeterministicAgentSessionTransport implements CordisXPrivateAgentDr
     const active = session?.active
     if (this.disposed || session === undefined || active === undefined) return 'unavailable'
     active.cancelled = true
+    for (const scenario of this.scenarioRuns) {
+      if ([...scenario.actors.values()].some(actor => actor.sessionId === input.sessionId)) scenario.scopeActivation?.close()
+    }
     this.emit({ sessionId: input.sessionId, type: 'turn/end', data: { turn: active.turn, reason: { kind: 'interrupted' } } })
     delete session.active
     if (!input.keepInbox) session.queue.splice(0)
@@ -251,6 +263,8 @@ export class DeterministicAgentSessionTransport implements CordisXPrivateAgentDr
       pending.reject(new Error('Playground Session scenario transport was disposed'))
     }
     this.pendingDelegations.clear()
+    for (const scenario of this.scenarioRuns) scenario.scopeActivation?.close()
+    this.scenarioRuns.clear()
     this.sessions.clear(); this.replacements.clear(); this.eventListeners.clear(); this.approvalListeners.clear(); this.statusListeners.clear(); this.claimedListeners.clear()
   }
 
@@ -344,6 +358,7 @@ export class DeterministicAgentSessionTransport implements CordisXPrivateAgentDr
       actors: new Map([['lead', { actor: 'lead', sessionId: leadSessionId, run: leadRun, started: false, ended: false }]]),
       toolCalls: new Map(), stepIndex: 0, stepCount: definition.steps.length,
     }
+    this.scenarioRuns.add(scenario)
     await this.emitScenario(leadSessionId, this.scenarioFact(scenario, 'lead', 'started', 0))
     const queue = [...definition.steps]
     try {
@@ -353,6 +368,9 @@ export class DeterministicAgentSessionTransport implements CordisXPrivateAgentDr
         scenario.stepCount = scenario.stepIndex + queue.length
         scenario.currentStep = step
         const actorName = step.actor ?? 'lead'
+        if (scenario.scopeActivation !== undefined && !scenario.scopeActivation.active()) {
+          throw new DeclaredScenarioFailure('scenario-session-scope-closed', 'The exact scenario Session scope was fenced before the next step.')
+        }
         const actor = scenario.actors.get(actorName)
         if (actor === undefined) throw new Error(`Scenario actor ${actorName} is unavailable at step ${scenario.stepIndex}`)
         if (actor.run.cancelled) throw new DeclaredScenarioCancellation(`Scenario actor ${actorName} was cancelled`)
@@ -387,6 +405,8 @@ export class DeterministicAgentSessionTransport implements CordisXPrivateAgentDr
         this.pendingDelegations.delete(pending)
       }
       for (const actor of scenario.actors.values()) this.releaseScenarioActor(actor)
+      scenario.scopeActivation?.close()
+      this.scenarioRuns.delete(scenario)
     }
   }
 
@@ -435,6 +455,30 @@ export class DeterministicAgentSessionTransport implements CordisXPrivateAgentDr
     }
     if (step.type === 'room-delegation') {
       await this.delegateScenarioActor(scenario, actor, step)
+      return []
+    }
+    if (step.type === 'activate-session-scope') {
+      const client = this.scenarioSessionScope
+      if (client === undefined) throw new DeclaredScenarioFailure(
+        'scenario-session-scope-unavailable',
+        'Playground scenario Session scope activation is unavailable.',
+      )
+      const lead = scenario.actors.get('lead')
+      if (lead === undefined) throw new DeclaredScenarioFailure(
+        'scenario-source-session-unavailable',
+        'The scenario Lead Session is unavailable.',
+      )
+      const activated = await client.activate({
+        runId: scenario.runId,
+        sourceSessionId: lead.sessionId,
+        targetSessionId: actor.sessionId,
+      })
+      if (activated.status !== 'available') throw new DeclaredScenarioFailure(
+        `scenario-session-scope-${activated.code}`,
+        activated.message,
+      )
+      scenario.scopeActivation?.close()
+      scenario.scopeActivation = activated.handle
       return []
     }
     if (step.type === 'followup') {

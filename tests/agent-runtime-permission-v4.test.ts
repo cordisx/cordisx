@@ -152,6 +152,45 @@ describe('Agent Session permission-v4 Host authority', () => {
     expect(broker.isAgentRuntimeLeaseActive(identity, decision.lease!.leaseId)).toBe(false)
   })
 
+  it('adds a Host-authorized scenario route without replacing the visible Room lease', async () => {
+    const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), prompt)
+    broker.register(identity, manifest)
+    broker.replaceAgentRuntimeConnection(connection)
+    broker.replaceAgentRuntimeRouteScope(route)
+    const seed = broker.createDevelopmentAgentRuntimePolicySeedAuthority()
+    await broker.seedAgentRuntimePolicies(seed, identity, [
+      { capability: 'sessions.subscribe', sessionIds: ['room-a-run-a'], policy: 'allow-persistent' },
+      { capability: 'sessions.subscribe', sessionIds: ['room-a-reviewer'], policy: 'allow-persistent' },
+    ])
+    const visible = await broker.authorizeAgentRuntime({
+      identity, capability: 'sessions.subscribe', sessionId: 'room-a-run-a',
+      scopeSource: { kind: 'host-route', routeInstanceId: route.routeInstanceId, routeId: route.routeId, path: route.path, params: route.params }, connection,
+    })
+    const authority = broker.createPlaygroundScenarioAgentRuntimeRouteAuthority()
+    const scenarioRoute = {
+      ...route, routeInstanceId: 'playground-scenario:run-one', params: { sessionId: 'room-a-reviewer' },
+    }
+    const close = broker.activatePlaygroundScenarioAgentRuntimeRoute(authority, route.routeInstanceId, scenarioRoute)
+    const reviewer = await broker.authorizeAgentRuntime({
+      identity, capability: 'sessions.subscribe', sessionId: 'room-a-reviewer',
+      scopeSource: {
+        kind: 'host-route', routeInstanceId: scenarioRoute.routeInstanceId,
+        routeId: scenarioRoute.routeId, path: scenarioRoute.path, params: scenarioRoute.params,
+      }, connection,
+    })
+    expect(visible.authorized).toBe(true)
+    expect(reviewer.authorized).toBe(true)
+    const fences: string[] = []
+    broker.subscribeAgentRuntimePermissionFences(fence => fences.push(`${fence.sessionId}:${fence.code}`))
+    close()
+    close()
+    expect(broker.isAgentRuntimeLeaseActive(identity, visible.lease!.leaseId)).toBe(true)
+    expect(broker.isAgentRuntimeLeaseActive(identity, reviewer.lease!.leaseId)).toBe(false)
+    expect(fences).toEqual(['room-a-reviewer:route-replaced'])
+    expect(() => broker.activatePlaygroundScenarioAgentRuntimeRoute({}, route.routeInstanceId, scenarioRoute))
+      .toThrow('authority is invalid')
+  })
+
   it('closes active and queued prompts when the plugin generation is replaced', async () => {
     const dom = new JSDOM('<html><body></body></html>', { pretendToBeVisual: true })
     const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), new BrowserPermissionPrompt(dom.window.document))
