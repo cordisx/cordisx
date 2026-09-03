@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from 'node:child_process'
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { parseArgs } from 'node:util'
+import { writeDesktopAgentSessionHarnessReport } from './desktop-agent-session-harness-report.mjs'
 
 const APP_PIN = Object.freeze({
   bundleId: 'com.openai.codex',
@@ -69,9 +70,26 @@ function profileProcesses(profileDir) {
     })
 }
 
-function run(command, args, environment) {
+function run(command, args, environment, onStage) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: 'inherit', env: environment })
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], env: environment })
+    const observe = (stream, output) => {
+      let pending = ''
+      stream.on('data', chunk => {
+        const text = String(chunk)
+        output.write(text)
+        pending += text
+        const lines = pending.split('\n')
+        pending = lines.pop() ?? ''
+        for (const line of lines) {
+          const prefix = '[cordisx-desktop-agent-session-stage] '
+          if (!line.startsWith(prefix)) continue
+          try { onStage(JSON.parse(line.slice(prefix.length))) } catch {}
+        }
+      })
+    }
+    observe(child.stdout, process.stdout)
+    observe(child.stderr, process.stderr)
     child.once('error', reject)
     child.once('exit', (code, signal) => {
       if (code === 0) resolve()
@@ -80,10 +98,13 @@ function run(command, args, environment) {
   })
 }
 
-async function annotateReport(value) {
-  const existing = JSON.parse(await readFile(reportPath, 'utf8'))
-  existing.harness = value
-  await writeFile(reportPath, `${JSON.stringify(existing, null, 2)}\n`, { mode: 0o600 })
+async function portClosed(port) {
+  try {
+    await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(500) })
+    return false
+  } catch {
+    return true
+  }
 }
 
 if (process.platform !== 'darwin') throw new Error('the pinned Codex Desktop live harness currently supports macOS only')
@@ -129,6 +150,8 @@ const args = [
   '--marker', marker,
   '--session-id', sessionId,
 ]
+const startedAt = Date.now()
+const stages = []
 let error
 try {
   await run(process.execPath, args, {
@@ -136,11 +159,20 @@ try {
     // Isolate CordisX test state while deliberately retaining the user's
     // authenticated HOME/CODEX_HOME for the installed Desktop connection.
     CORDISX_HOME: cordisxHome,
-  })
+  }, stage => stages.push(stage))
 } catch (cause) {
   error = cause
 } finally {
   const active = profileProcesses(profileDir)
+  const isPortClosed = await portClosed(port)
+  let temporaryRootRemoved = false
+  if (active.length === 0 && isPortClosed) {
+    await rm(root, { recursive: true, force: true })
+    temporaryRootRemoved = !await access(root).then(() => true, cause => {
+      if (cause?.code === 'ENOENT') return false
+      throw cause
+    })
+  }
   const annotation = {
     app: installed,
     appExecutable,
@@ -153,14 +185,28 @@ try {
     isolatedCordisxHome: cordisxHome,
     secondProviderStarted: false,
     appAsarPatched: false,
+    stages,
+    elapsedMs: Date.now() - startedAt,
+    portClosed: isPortClosed,
     profileProcessesAfterRunner: active.length,
-    temporaryRootRemoved: active.length === 0,
+    temporaryRootRemoved,
   }
-  await annotateReport(annotation).catch(async annotateError => {
+  const fallback = {
+    schemaVersion: 1,
+    kind: 'codex-desktop-agent-session-live-smoke',
+    marker,
+    sessionId,
+    result: 'failed',
+    error: error instanceof Error ? error.message : 'smoke runner produced no report',
+    assertions: {},
+    limitations: ['the app:// renderer did not reach the Agent Session fixture'],
+  }
+  await writeDesktopAgentSessionHarnessReport(reportPath, fallback, annotation).catch(async annotateError => {
     if (error === undefined) error = annotateError
   })
-  if (active.length === 0) await rm(root, { recursive: true, force: true })
-  else if (error === undefined) error = new Error(`isolated profile still has active processes: ${active.map(item => item.pid).join(',')}`)
+  if ((!isPortClosed || active.length > 0 || !temporaryRootRemoved) && error === undefined) {
+    error = new Error(`isolated harness cleanup incomplete: portClosed=${isPortClosed}, profileProcesses=${active.length}, temporaryRootRemoved=${temporaryRootRemoved}`)
+  }
 }
 if (error !== undefined) throw error
 console.log(`[cordisx-desktop-agent-session-harness] report: ${reportPath}`)
