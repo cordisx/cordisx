@@ -26,7 +26,19 @@ const setup: AgentSetup = {
     identity: { agentId: 'chatroom.generalist', revision: 'session-projection-1' },
     name: 'Chatroom Generalist',
     inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
-    promptSections: [{ sectionId: 'role', kind: 'role', text: 'Answer the Room.' }],
+    promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Answer the Room.' }],
+  }],
+}
+
+const reviewerSetup: AgentSetup = {
+  definition: { agentId: 'chatroom.reviewer', revision: 'session-projection-1' },
+  definitions: [{
+    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
+    contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
+    identity: { agentId: 'chatroom.reviewer', revision: 'session-projection-1' },
+    name: 'Chatroom Reviewer',
+    inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
+    promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Review the Room.' }],
   }],
 }
 
@@ -151,7 +163,7 @@ describe('Playground Agent/Session native task projection', () => {
         driver: new DeterministicAgentSessionTransport(), authorize: async () => true, persistence: firstStore,
       })
       const one = await first.create(owner, { sessionId: 'cx-session.room-one', setup })
-      const two = await first.create(owner, { sessionId: 'cx-session.room-two', setup })
+      const two = await first.create(owner, { sessionId: 'cx-session.room-two', setup: reviewerSetup })
       if (one.status !== 'accepted' || two.status !== 'accepted') throw new Error('Distinct Session create failed')
       await Promise.all([
         one.handle.agent.followup(message('cx-message.one', 'one', 'room-one/run-one')),
@@ -170,11 +182,17 @@ describe('Playground Agent/Session native task projection', () => {
       })
       const replay = projectPlaygroundAgentSessions(second.playgroundProjection())
       expect(replay?.tasks).toHaveLength(2)
+      expect(replay?.tasks.map(task => [task.taskRef, task.agentLabel])).toEqual([
+        ['cx-session.room-one', 'Chatroom Generalist'],
+        ['cx-session.room-two', 'Chatroom Reviewer'],
+      ])
+      expect(second.definitionPresentation(setup.definition)).toMatchObject({ name: 'Chatroom Generalist', introduction: 'Answer the Room.' })
+      expect(second.definitionPresentation(reviewerSetup.definition)).toMatchObject({ name: 'Chatroom Reviewer', introduction: 'Review the Room.' })
       expect(replay?.tasks.find(task => task.taskRef === 'cx-session.room-one')?.events
         .find(event => event.sessionEvent?.type === 'assistant/message')).toMatchObject({
         sessionEvent: { data: { message: { id: 'deterministic-assistant.cx-session.room-one.1' } } },
       })
-      const resumed = await second.resume(owner, { sessionId: 'cx-session.room-one', setup })
+      const resumed = await second.resume(owner, { sessionId: 'cx-session.room-one' })
       expect(resumed).toMatchObject({ status: 'accepted', sessionId: 'cx-session.room-one', disposition: 'resumed' })
       const afterResume = projectPlaygroundAgentSessions(second.playgroundProjection())
       expect(afterResume?.tasks.map(task => task.taskRef)).toEqual(['cx-session.room-one', 'cx-session.room-two'])

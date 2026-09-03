@@ -77,6 +77,13 @@ export class BrowserPlaygroundAgentSessionPersistence implements CordisXSessionE
     }
   }
 
+  async updateSetup(input: Parameters<NonNullable<CordisXSessionEventPersistence['updateSetup']>>[0]): Promise<void> {
+    const result = await this.request({ operation: 'update-setup', ...clone(input) })
+    if (result.status !== 'accepted') {
+      throw new Error(`Playground Session setup update failed: ${result.status === 'unavailable' ? result.code : 'invalid-response'}`)
+    }
+  }
+
   dispose(): void {
     if (this.disposed) return
     this.disposed = true

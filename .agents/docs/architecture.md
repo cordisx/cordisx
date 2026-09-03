@@ -165,13 +165,18 @@ generation token and commits each new Session or contiguous `SessionEvent`
 batch through the launcher before publishing it to memory or live subscribers.
 The launcher validates lossless structured-clone/JSON data, exact `SessionId`,
 Session generation, and expected cursor, serializes updates, and replaces the
-ledger file atomically. A later Playground process hydrates the same Session
-headers and event sequences before plugin activation, preserving opaque Session
-ids and plugin-supplied Room/Simulator correlation; the deterministic transport
-continues its turn counter from those facts. Old composition tokens fail closed,
-and an explicit Playground reset clears this ledger with the other fixture
-state. This store is not installed in production or Desktop, whose current
-native Agent Session transport remains the persistence authority.
+ledger file atomically. The same Session record may also retain its Host-validated
+`AgentSetup` catalog as identity metadata; this is not an execution fact or a
+second ledger. Create commits it atomically with the Session, and resume may
+enrich an older setup-less record only through the exact Session generation
+fence. A later Playground process hydrates the same Session headers, event
+sequences, and optional setup before plugin activation, preserving opaque
+Session ids, identity presentation, and plugin-supplied Room/Simulator
+correlation; the deterministic transport continues its turn counter from the
+events. Existing v1 ledgers without setup remain valid. Old composition tokens
+fail closed, and an explicit Playground reset clears this ledger with the other
+fixture state. This store is not installed in production or Desktop, whose
+current native Agent Session transport remains the persistence authority.
 The `dev:ui` session mints that provenance only for enabled, non-built-in local
 entries explicitly named by the source Playground composition. It compiles
 them through the normal verified local-development builder, carries its full
@@ -382,12 +387,14 @@ generation replacement and terminal source updates all release the runtime
 handle and source.
 
 For Session-compatible Shell v4 identity actions, the same Host Agent/Session
-authority resolves each accepted `AgentSetup` catalog with the established
-AgentDefinition inheritance, prompt, and avatar rules, then retains the complete
-exact effective catalog only for that owned Agent generation. Shell identity
-resolution consults this live catalog alongside the byte-preserved AgentLoop v4
-catalog. Owner, Session, connection, or Agent generation replacement removes
-the stale presentation; unresolved identities continue to use the members
+authority resolves each accepted or recovered `AgentSetup` catalog with the
+established AgentDefinition inheritance, prompt, and avatar rules, then retains
+the complete exact effective catalog on the owned Session and its current Agent
+generation. Shell identity resolution consults this authority alongside the
+byte-preserved AgentLoop v4 catalog, so recovered member and message-avatar
+actions still open the exact identity detail and Recent tasks retains its agent
+label. Owner, Session, connection, or Agent generation replacement removes the
+stale live presentation; unresolved identities continue to use the members
 search fallback. Active Session navigation consumes only the Host-issued
 `AgentDetailReference` carried by the Shell v4 run.
 

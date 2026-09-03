@@ -1,11 +1,13 @@
 import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import type { AgentSetup } from '@cordisx/protocol/agents/v1'
 import type { SessionEvent, SessionHeader } from '@cordisx/protocol/sessions/v1'
 import type {
   CordisXPersistedSession,
   CordisXSessionEventPersistence,
 } from '../renderer/agent-session-runtime.js'
+import { resolveAgentDefinitionCatalog } from '../renderer/agent-loop.js'
 
 const CONTRACT = 'cordisx.playground-agent-session-store/v1' as const
 const STORE_VERSION = 1 as const
@@ -26,6 +28,7 @@ interface StoredSession {
   readonly generation: number
   readonly header: SessionHeader
   readonly events: readonly SessionEvent[]
+  readonly setup?: AgentSetup
 }
 
 interface StoredLedger {
@@ -43,6 +46,12 @@ export type PlaygroundAgentSessionStoreRequest =
     readonly sessionGeneration: number
     readonly expectedSeq: number
     readonly events: readonly SessionEvent[]
+  }
+  | {
+    readonly operation: 'update-setup'
+    readonly sessionId: string
+    readonly sessionGeneration: number
+    readonly setup: AgentSetup
   }
 
 export type PlaygroundAgentSessionStoreResult =
@@ -126,9 +135,21 @@ function sessionEvent(value: unknown, sessionId: string, seq: number): SessionEv
   return structuredClone(item) as unknown as SessionEvent
 }
 
+function agentSetup(value: unknown): AgentSetup {
+  jsonValue(value, 'Agent setup')
+  const item = record(value, 'Agent setup')
+  exactKeys(item, ['definition', 'definitions'], 'Agent setup')
+  if (!Array.isArray(item.definitions) || item.definitions.length === 0 || item.definitions.length > 64) {
+    throw new Error('Agent setup definition catalog is invalid')
+  }
+  const setup = structuredClone(item) as unknown as AgentSetup
+  resolveAgentDefinitionCatalog(setup)
+  return setup
+}
+
 function persistedSession(value: unknown): CordisXPersistedSession {
   const item = record(value, 'Stored Session')
-  exactKeys(item, ['id', 'generation', 'header', 'events'], 'Stored Session')
+  exactKeys(item, ['id', 'generation', 'header', 'events', 'setup'], 'Stored Session')
   if (!opaque(item.id) || !Number.isSafeInteger(item.generation) || (item.generation as number) < 1 || !Array.isArray(item.events)) {
     throw new Error('Stored Session identity is invalid')
   }
@@ -139,6 +160,7 @@ function persistedSession(value: unknown): CordisXPersistedSession {
     generation: item.generation as number,
     header: Object.freeze(sessionHeader(item.header, id)),
     events: Object.freeze(item.events.map((event, index) => Object.freeze(sessionEvent(event, id, index)))),
+    ...(item.setup === undefined ? {} : { setup: Object.freeze(agentSetup(item.setup)) }),
   })
 }
 
@@ -225,12 +247,30 @@ export class PlaygroundAgentSessionStore implements CordisXSessionEventPersisten
     })
   }
 
+  async updateSetup(input: { readonly sessionId: string; readonly sessionGeneration: number; readonly setup: AgentSetup }): Promise<void> {
+    if (!opaque(input.sessionId) || !Number.isSafeInteger(input.sessionGeneration) || input.sessionGeneration < 1) throw new Error('invalid-request')
+    const setup = agentSetup(input.setup)
+    await this.serialized(async () => {
+      const ledger = await this.read()
+      const current = Object.hasOwn(ledger.sessions, input.sessionId) ? ledger.sessions[input.sessionId] : undefined
+      if (current === undefined) throw new Error('session-conflict')
+      if (current.generation !== input.sessionGeneration) throw new Error('generation-conflict')
+      if (current.setup !== undefined && same(current.setup, setup)) return
+      await this.write(replaceSession(ledger, input.sessionId, { ...current, setup }))
+    })
+  }
+
   async handle(request: PlaygroundAgentSessionStoreRequest): Promise<PlaygroundAgentSessionStoreResult> {
     try {
       if (request.operation === 'load') return { status: 'loaded', sessions: await this.load() }
       if (request.operation === 'create') {
         await this.create(request.session)
         return { status: 'accepted', nextSeq: request.session.events.length, disposition: 'committed' }
+      }
+      if (request.operation === 'update-setup') {
+        await this.updateSetup(request)
+        const session = (await this.load()).find(candidate => candidate.id === request.sessionId)
+        return { status: 'accepted', nextSeq: session?.events.length ?? 0, disposition: 'committed' }
       }
       await this.append(request)
       return { status: 'accepted', nextSeq: request.expectedSeq + request.events.length, disposition: 'committed' }

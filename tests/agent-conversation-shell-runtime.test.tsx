@@ -338,12 +338,10 @@ describe('Agent conversation shell public runtime', () => {
     dom.window.close()
   })
 
-  it('opens exact Shell v4 AgentSetup identity details from members and avatars, then fences stale generations', async () => {
+  it('opens recovered Shell v4 AgentSetup identity details from members and avatars, then fences stale generations', async () => {
     const dom = installDom()
     const commands = new CommandRegistry()
     const driver = new IdentitySessionDriver()
-    const authority = new CordisXAgentSessionRuntime({ driver, authorize: async () => true })
-    const owner = { pluginId: 'file:///chatroom.ts:chatroom', generation: 1 } as const
     const definition = {
       $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json' as const,
       contract: 'cordisx.agent-definition/v1' as const, schemaVersion: 1 as const,
@@ -352,10 +350,16 @@ describe('Agent conversation shell public runtime', () => {
       promptSections: [{ sectionId: 'introduction', kind: 'introduction' as const, text: 'Coordinates the Session-native room.' }],
       inherit: { promptSections: 'none' as const, rules: 'none' as const, skills: 'none' as const, tools: 'none' as const, mcpServers: 'none' as const, runtimeDefaults: 'none' as const },
     }
-    const acquired = await authority.create(owner, {
-      sessionId: 'cx-session.identity-v4', setup: { definition: definition.identity, definitions: [definition] },
+    const sessionId = 'cx-session.identity-v4'
+    const authority = new CordisXAgentSessionRuntime({
+      driver, authorize: async () => true,
+      initialSessions: [{
+        id: sessionId, generation: 1,
+        header: { id: sessionId, formatVersion: 1, createdAt: 1, isSeeded: false },
+        events: [], setup: { definition: definition.identity, definitions: [definition] },
+      }],
     })
-    if (acquired.status !== 'accepted') throw new Error('Session Agent identity setup unavailable')
+    expect(authority.definitionPresentation(definition.identity)).toMatchObject({ name: 'Lead exact' })
     const navigateHost = vi.fn()
     const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n(), undefined, undefined, {
       resolve: value => authority.definitionPresentation(value),
@@ -374,11 +378,11 @@ describe('Agent conversation shell public runtime', () => {
         selection: {
           kind: 'room', roomId: 'room-v4-identity', title: message('room.identity', 'Identity room'),
           multiParticipant: true, participantPresentation: 'host-initials', participants: [participant],
-          activeRuns: [{ participantId: participant.participantId, memberId: 'member-lead', runId: 'run-lead', sessionId: acquired.sessionId, lifecycle: { phase: 'running' }, details: acquired.handle.agent.detail! }],
+          activeRuns: [{ participantId: participant.participantId, memberId: 'member-lead', runId: 'run-lead', sessionId, lifecycle: { phase: 'running' }, details: { kind: 'host', ref: `deterministic-agent-session:${sessionId}` } }],
         },
         items: [{
           kind: 'message', itemId: 'message-entry', messageId: 'message-one', sequence: 1,
-          author: participant, source: { kind: 'session-event', sessionId: acquired.sessionId, eventSeq: 1 },
+          author: participant, source: { kind: 'session-event', sessionId, eventSeq: 1 },
           semantic: { purpose: 'conversation' }, body: [{ kind: 'text', text: message('message.one', 'Hello @Lead source') }],
           reactions: [], timestamp: '2026-09-03T00:00:00.000Z', deliveryState: 'delivered', runState: 'idle', ariaLive: 'off', actions: [],
         }],
