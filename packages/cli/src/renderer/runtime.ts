@@ -141,6 +141,7 @@ import {
   type ConfigCandidate,
   type ConfigMutationOperation,
 } from './configuration.js'
+import { ManagerContentConfigAuthority } from './manager-content-config.js'
 import { BrowserServiceConfigBridge } from './service-config-binding.js'
 import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
@@ -1147,6 +1148,7 @@ async function start(
   let pageFiber: Fiber | undefined
   let routeFiber: Fiber | undefined
   let managerContentFiber: Fiber | undefined
+  let managerContentConfigAuthority: ManagerContentConfigAuthority | undefined
   let slotFiber: Fiber | undefined
   let settingsFiber: Fiber | undefined
   let configRendererFiber: Fiber | undefined
@@ -2808,6 +2810,8 @@ async function start(
     disposeIconThemePreferenceSubscription?.()
     disposeIconThemePreferenceSubscription = undefined
     lifecycleBridge?.dispose()
+    managerContentConfigAuthority?.dispose()
+    managerContentConfigAuthority = undefined
     configRenderers.dispose()
     configuration.dispose()
     unbindIconThemeRegistry()
@@ -3165,6 +3169,14 @@ async function start(
     routeFiber = ctx.plugin(CordisXRouteService, { history: routeHistory, console: pluginConsole })
     await routeFiber
     routeService = ctx.routes as CordisXRouteService
+    managerContentConfigAuthority = new ManagerContentConfigAuthority({
+      configuration,
+      profileId: metadata.profileId,
+      runtimeGeneration: generation,
+      locale: () => i18nService?.getSnapshot().locale ?? 'en',
+      update: updatePluginConfig,
+    })
+    routeService.setManagerContentConfigFactory(input => managerContentConfigAuthority!.bind(input))
     reconcileAgentRuntimeRoute()
     managerContentFiber = ctx.plugin(CordisXManagerContentNavigationService)
     await managerContentFiber

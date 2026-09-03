@@ -1,6 +1,11 @@
 import { Context, Service, type Disposable } from '@deepseek-ai/cordis'
 import { normalizeFormPresentation } from '@cordisx/schemastery-ui'
 import type {
+  ManagerContentConfigMissingDefaultV1,
+  ManagerContentPluginConfigFormFieldV1,
+  ManagerContentPluginConfigDescriptorV2,
+} from '@cordisx/protocol/manager-content-navigation/v4'
+import type {
   CordisXConfigApplies,
   CordisXConfigAppliesInput,
   CordisXConfigFormActionIcons,
@@ -618,8 +623,11 @@ export class PluginConfigurationRegistry {
     this.notify()
   }
 
-  descriptor(owner: string, locale: string): ManagerPluginConfigSnapshot {
-    const record = this.require(owner)
+  descriptor(owner: string, locale: string, view?: PluginGenerationView): ManagerPluginConfigSnapshot {
+    return this.descriptorForRecord(this.require(owner, view), locale)
+  }
+
+  private descriptorForRecord(record: ConfigRecord, locale: string): ManagerPluginConfigSnapshot {
     const schemastery = record.schema !== undefined
       && record.schema['~standard'].vendor === 'schemastery'
       && typeof record.schema.toJSON === 'function'
@@ -642,6 +650,109 @@ export class PluginConfigurationRegistry {
       secrets: record.secretPaths.map(path => ({ path, set: false })),
       ...(descriptorActionIcons === undefined ? {} : { actionIcons: descriptorActionIcons }),
     }
+  }
+
+  /** Host-internal Protocol v4 projection; plugins never receive this writer-facing descriptor. */
+  managerContentDescriptor(
+    owner: string,
+    profileId: string,
+    runtimeGeneration: string,
+    locale: string,
+    view?: PluginGenerationView,
+  ): ManagerContentPluginConfigDescriptorV2 {
+    const record = this.require(owner, view)
+    const current = this.descriptorForRecord(record, locale)
+    const schemastery = record.schema !== undefined
+      && record.schema['~standard'].vendor === 'schemastery'
+      && typeof record.schema.toJSON === 'function'
+    let envelope: Readonly<Record<string, import('@cordisx/protocol/manager-content-navigation/v4').ManagerContentConfigJsonValue>> | undefined
+    if (schemastery) {
+      const projected = record.schema!.toJSON!()
+      jsonCompatible(projected, 'plugin configuration schema projection')
+      if (projected === null || typeof projected !== 'object' || Array.isArray(projected)) {
+        throw new Error('Schemastery configuration projection must be an object')
+      }
+      envelope = immutable(projected) as typeof envelope
+    }
+    const formFields: ManagerContentPluginConfigFormFieldV1[] = current.fields.map(field => {
+      if (field.path.length === 0) throw new Error('plugin configuration form field path must not be empty')
+      return {
+        path: field.path as ManagerContentPluginConfigFormFieldV1['path'],
+        ...(field.icon === undefined ? {} : { icon: field.icon }),
+        ...(field.group === undefined ? {} : { group: field.group }),
+        ...(field.presenter === undefined ? {} : { presenter: field.presenter }),
+      }
+    })
+    const form = formFields.length === 0 && current.actionIcons === undefined ? undefined : {
+      version: 1 as const,
+      fields: formFields,
+      ...(current.actionIcons === undefined ? {} : { actions: current.actionIcons }),
+    }
+    const user = immutable(removePaths(record.pendingAppRestart?.raw ?? record.raw, record.secretPaths))
+    const value = immutable(removePaths(record.pendingAppRestart?.value ?? record.value, record.secretPaths))
+    jsonCompatible(user, 'plugin configuration user projection')
+    jsonCompatible(value, 'plugin configuration value projection')
+    return immutable({
+      version: 2 as const,
+      identity: { source: record.identity.source, pluginId: record.identity.id },
+      scope: { profileId, generation: record.generation.moduleGeneration ?? runtimeGeneration },
+      namespace: record.namespace,
+      schema: schemastery
+        ? { kind: 'schemastery' as const, envelope: envelope!, ...(form === undefined ? {} : { form }) }
+        : { kind: 'standard' as const, renderable: false as const },
+      value: value as import('@cordisx/protocol/manager-content-navigation/v4').ManagerContentConfigJsonValue,
+      ...(user === undefined ? {} : { user: user as import('@cordisx/protocol/manager-content-navigation/v4').ManagerContentConfigJsonValue }),
+      revision: record.revision,
+      lastGoodRevision: record.activeRevision,
+      applies: record.applies,
+      writable: record.writable,
+      secrets: record.secretPaths.map(path => ({
+        path: path as import('@cordisx/protocol/manager-content-navigation/v4').ManagerContentConfigFieldPath,
+        set: false,
+      })),
+    })
+  }
+
+  /** Validate declared missing-only defaults against the exact Schemastery source record. */
+  managerContentMissingDefaults(
+    owner: string,
+    fields: readonly ManagerContentConfigMissingDefaultV1[],
+    view?: PluginGenerationView,
+  ): { readonly operations: readonly ConfigMutationOperation[]; readonly allPresent: boolean } {
+    const record = this.require(owner, view)
+    if (record.schema === undefined || record.schema['~standard'].vendor !== 'schemastery') {
+      throw new Error('default-schema-mismatch: configuration is not Schemastery')
+    }
+    const seen = new Set<string>()
+    const operations: ConfigMutationOperation[] = []
+    const raw = record.pendingAppRestart?.raw ?? record.raw
+    for (const field of fields) {
+      assertPath(field.path)
+      const key = JSON.stringify(field.path)
+      if (seen.has(key)) throw new Error(`default-not-declared: duplicate path ${field.path.join('.')}`)
+      seen.add(key)
+      if (record.secretPaths.some(path => pathStartsWith(field.path, path) || pathStartsWith(path, field.path))) {
+        throw new Error(`secret-path: ${field.path.join('.')}`)
+      }
+      let node: SchemaNode | undefined = record.schema
+      for (const segment of field.path) {
+        if (node?.type !== 'object' || node.dict === undefined || !Object.hasOwn(node.dict, segment)) {
+          node = undefined
+          break
+        }
+        node = node.dict[segment]
+      }
+      if (node === undefined || !Object.hasOwn(node.meta ?? {}, 'default')) {
+        throw new Error(`default-not-declared: ${field.path.join('.')}`)
+      }
+      const declared = node.meta?.default
+      jsonCompatible(declared, `config schema default ${field.path.join('.')}`)
+      if (!Object.is(declared, field.value)) {
+        throw new Error(`default-schema-mismatch: ${field.path.join('.')}`)
+      }
+      if (!hasOwnPath(raw, field.path)) operations.push({ op: 'set', path: field.path, value: field.value })
+    }
+    return Object.freeze({ operations: Object.freeze(operations), allPresent: operations.length === 0 })
   }
 
   subscribe(listener: () => void): () => void {
