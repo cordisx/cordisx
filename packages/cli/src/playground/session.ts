@@ -8,7 +8,12 @@ import {
   buildRendererCompositionSource,
   type RendererCompositionSource,
 } from '../launcher/bundle.js'
-import { loadConfig, type CordisXConfig } from '../launcher/config.js'
+import { loadConfig, parseConfigDocument, type CordisXConfig } from '../launcher/config.js'
+import {
+  loadValidatedConfigDocument,
+  materializeValidatedConfigDocument,
+  parseHomeConfig,
+} from '../config/home-config.js'
 import { createLauncherConfigBridgeHandler } from '../launcher/launcher-plugin-config.js'
 import { buildLocalDevelopmentPlugin } from '../launcher/development.js'
 import {
@@ -177,6 +182,16 @@ async function externalPlaygroundHome(input: string, sourcePath: string): Promis
   return homeDir
 }
 
+async function ensurePlaygroundDirectory(homeDir: string, name: 'config' | 'cache' | 'state'): Promise<string> {
+  const directory = path.join(homeDir, name)
+  await mkdir(directory, { recursive: true, mode: 0o700 })
+  const entry = await lstat(directory)
+  if (entry.isSymbolicLink() || !entry.isDirectory()) {
+    throw new Error(`Playground ${name} directory must be a real directory`)
+  }
+  return directory
+}
+
 export async function createPlaygroundSession(
   sourceConfigPath: string,
   options: PlaygroundSessionOptions = {},
@@ -209,12 +224,6 @@ export async function createPlaygroundSession(
   const serviceConfigPath = path.join(homeDir, 'config', 'playground.home.json')
   const rootDir = path.dirname(sourcePath)
   const { playground: _fixtureMetadata, ...compositionConfig } = source
-  const explicitlyConfiguredLocalEntries = new Set(source.plugins.flatMap((item: unknown) => {
-    const plugin = item as Record<string, unknown>
-    return typeof plugin.entry === 'string' && !plugin.entry.startsWith('cordisx:')
-      ? [path.resolve(rootDir, plugin.entry)]
-      : []
-  }))
   const materialized = {
     ...compositionConfig,
     plugins: source.plugins.map((item: unknown) => {
@@ -227,28 +236,71 @@ export async function createPlaygroundSession(
       }
     }),
   }
+  const materializedServiceConfig = {
+    version: 1,
+    defaultApp: 'codex',
+    providers: [],
+    plugins: materialized.plugins,
+    permissions: previewPermissionPolicies,
+    publisherGrantIssuers: [],
+    apps: {
+      codex: {
+        defaultProfile: 'playground',
+        profiles: { playground: { displayName: 'Playground', dataMode: 'host-isolated' } },
+      },
+    },
+  }
   const writeFixture = async (): Promise<void> => {
     await writeFile(configPath, `${JSON.stringify(materialized, null, 2)}\n`, { mode: 0o600 })
-    await writeFile(serviceConfigPath, `${JSON.stringify({
-      version: 1,
-      defaultApp: 'codex',
-      providers: [],
-      plugins: materialized.plugins,
-      permissions: previewPermissionPolicies,
-      publisherGrantIssuers: [],
-      apps: {
-        codex: {
-          defaultProfile: 'playground',
-          profiles: { playground: { displayName: 'Playground', dataMode: 'host-isolated' } },
-        },
-      },
-    }, null, 2)}\n`, { mode: 0o600 })
+    await writeFile(serviceConfigPath, `${JSON.stringify(materializedServiceConfig, null, 2)}\n`, { mode: 0o600 })
   }
 
-  await mkdir(path.dirname(configPath), { recursive: true, mode: 0o700 })
-  await mkdir(path.join(homeDir, 'cache'), { recursive: true, mode: 0o700 })
-  await mkdir(stateRoot, { recursive: true, mode: 0o700 })
-  await writeFixture()
+  await ensurePlaygroundDirectory(homeDir, 'config')
+  await ensurePlaygroundDirectory(homeDir, 'cache')
+  await ensurePlaygroundDirectory(homeDir, 'state')
+  let launcherDocument = materialized as Record<string, unknown>
+  if (ownsHome) {
+    await writeFixture()
+  } else {
+    const parseLauncher = (value: unknown) => {
+      const config = parseConfigDocument(value, configPath, { profileId: 'playground' })
+      return { config, document: value as Record<string, unknown> }
+    }
+    let launcherPresent = false
+    let servicePresent = false
+    try {
+      launcherDocument = (await loadValidatedConfigDocument(configPath, 'Playground launcher config', parseLauncher)).document
+      launcherPresent = true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    try {
+      await loadValidatedConfigDocument(serviceConfigPath, 'Playground home config', parseHomeConfig)
+      servicePresent = true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    // Validate every missing initial document before creating either one, so
+    // an incompatible fixture cannot partially initialize a stable home.
+    if (!launcherPresent) parseLauncher(materialized)
+    if (!servicePresent) parseHomeConfig(materializedServiceConfig)
+    if (!launcherPresent) {
+      launcherDocument = (await materializeValidatedConfigDocument(
+        configPath, 'Playground launcher config', materialized, parseLauncher,
+      )).value.document
+    }
+    if (!servicePresent) {
+      await materializeValidatedConfigDocument(
+        serviceConfigPath, 'Playground home config', materializedServiceConfig, parseHomeConfig,
+      )
+    }
+  }
+  const explicitlyConfiguredLocalEntries = new Set((launcherDocument.plugins as readonly unknown[]).flatMap(item => {
+    const plugin = item as Record<string, unknown>
+    return typeof plugin.entry === 'string' && !plugin.entry.startsWith('cordisx:')
+      ? [path.resolve(path.dirname(configPath), plugin.entry)]
+      : []
+  }))
 
   let active: PlaygroundGeneration | undefined
   let activeProviderRequests = 0

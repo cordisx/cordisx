@@ -870,13 +870,21 @@ only the selected plugin profile state inside the validated launcher document;
 launcher fields such as `codex` and unconsumed forward-compatible fields remain
 unchanged. The Host never normalizes that launcher document through the Home
 schema, and both stores retain the same lock, no-follow read, atomic rename,
-file-mode, candidate ownership, commit, and abort fences. After a successful
-Playground commit, the owning session publishes one effective-composition
-change for each advancing plugin revision. The Vite server invalidates only its
-cached virtual composition, so a reload rebuilds from that committed ledger;
-commit publication, composition rebuild, reset, and disposal are serialized so
-the next generation cannot hydrate an intermediate document. Abort, conflict,
-rejected, and stale-generation requests never publish a change.
+file-mode, candidate ownership, commit, and abort fences. A disposable
+Playground home continues to receive a fresh fixture, while an explicitly
+selected stable home materializes each launcher and Home document only when it
+is absent. Existing documents are adopted only after their respective formal
+parsers accept them and are never replaced from a changed source fixture;
+malformed or incompatible documents fail startup without rewriting either
+file. This startup path is distinct from the explicit preview-reset authority,
+which remains the only operation that intentionally restores the fixture.
+After a successful Playground commit, the owning session publishes one
+effective-composition change for each advancing plugin revision. The Vite
+server invalidates only its cached virtual composition, so a reload rebuilds
+from that committed ledger; commit publication, composition rebuild, reset,
+and disposal are serialized so the next generation cannot hydrate an
+intermediate document. Abort, conflict, rejected, and stale-generation requests
+never publish a change.
 
 Codex's `app://` renderer rejects direct arbitrary network reads, including the
 official raw GitHub feed. The launcher therefore owns a narrow, private CDP

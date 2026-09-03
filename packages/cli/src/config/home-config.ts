@@ -619,13 +619,56 @@ async function readConfigDocument(configPath: string, label: string): Promise<un
   }
 }
 
-async function readValidated(configPath: string): Promise<HomeConfig> {
-  const parsed = await readConfigDocument(configPath, 'home config')
+function validateConfigDocument<Value>(
+  value: unknown,
+  configPath: string,
+  label: string,
+  parse: (value: unknown) => Value,
+): Value {
   try {
-    return parseHomeConfig(parsed)
+    return parse(value)
   } catch (error) {
-    throw new Error(`invalid home config at ${configPath}: ${(error as Error).message}`, { cause: error })
+    throw new Error(`invalid ${label} at ${configPath}: ${(error as Error).message}`, { cause: error })
   }
+}
+
+/** Read one existing Host-owned JSON document through the shared no-follow fence and its owning parser. */
+export async function loadValidatedConfigDocument<Value>(
+  configPath: string,
+  label: string,
+  parse: (value: unknown) => Value,
+): Promise<Value> {
+  const absolutePath = path.resolve(configPath)
+  return validateConfigDocument(await readConfigDocument(absolutePath, label), absolutePath, label, parse)
+}
+
+/** Atomically materialize a validated Host-owned document only when it is absent. */
+export async function materializeValidatedConfigDocument<Value>(
+  configPath: string,
+  label: string,
+  initial: unknown,
+  parse: (value: unknown) => Value,
+  options: ConfigDocumentWriteOptions = {},
+): Promise<{ readonly status: 'existing' | 'created'; readonly value: Value }> {
+  const absolutePath = path.resolve(configPath)
+  const lock = await acquireLock(absolutePath, options, label)
+  try {
+    try {
+      const existing = await readConfigDocument(absolutePath, label)
+      return { status: 'existing', value: validateConfigDocument(existing, absolutePath, label, parse) }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    const value = validateConfigDocument(initial, absolutePath, label, parse)
+    await publishAtomic(absolutePath, initial, label)
+    return { status: 'created', value }
+  } finally {
+    await lock.release()
+  }
+}
+
+async function readValidated(configPath: string): Promise<HomeConfig> {
+  return await loadValidatedConfigDocument(configPath, 'home config', parseHomeConfig)
 }
 
 /** Load an existing home configuration without creating or mutating it. */
