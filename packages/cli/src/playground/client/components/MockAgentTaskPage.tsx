@@ -54,6 +54,12 @@ export function MockAgentTaskPage({ task, locale, scenarioController }: {
         <p>{task.agentLabel} · {task.identity.agentId} · {task.identity.revision}</p>
       </div>
       <div className="pg-simulator-task-header-actions">
+        {task.scenario === undefined ? null : <span
+          className="pg-simulator-task-scenario"
+          data-scenario-code={task.scenario.code}
+          data-scenario-phase={task.scenario.phase}
+          data-scenario-step={task.scenario.stepIndex}
+        >{en ? 'Scenario' : '场景'} {task.scenario.code} · {en ? 'step' : '步骤'} {task.scenario.stepIndex}/{task.scenario.stepCount}</span>}
         <span className="pg-simulator-task-status" data-status={task.status}>{task.status}</span>
         <span className="pg-simulator-task-mode">{task.origin === 'agent-session'
           ? 'Agent / Session'

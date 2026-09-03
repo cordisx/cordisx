@@ -13,6 +13,7 @@ import { resolveAgentDefinition } from './agent-loop.js'
 import type { CordisXAgentLoopLifecycleEvent } from './provider-binding.js'
 import type { AgentLoopV4Transport } from './agent-loop-v4.js'
 import type { PlaygroundRoomSimulationBinding } from './playground-room-simulation-bridge.js'
+import type { PlaygroundSessionScenarioEventData } from '../playground/session-scenario-catalog.js'
 
 export const PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE = 'debug:agent-loop/mock/v1' as const
 
@@ -76,6 +77,8 @@ export interface PlaygroundMockTaskTrace {
   readonly status: 'created' | 'working' | 'approval' | 'completed' | 'error' | 'closed'
   /** Exact mounted Room correlation captured when this task is opened from a Host active session. */
   readonly simulationBinding?: PlaygroundRoomSimulationBinding
+  /** Derived solely from the latest Host-owned scenario SessionEvent. */
+  readonly scenario?: PlaygroundSessionScenarioEventData
   readonly identity: AgentDefinitionIdentity
   readonly catalog: readonly AgentDefinition[]
   readonly layers: readonly PlaygroundMockTraceLayer[]

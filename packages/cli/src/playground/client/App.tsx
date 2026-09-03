@@ -618,6 +618,7 @@ export function App() {
                 <SidebarItem
                   id={`task.${task.taskRef}`}
                   label={task.agentLabel}
+                  {...(task.scenario === undefined ? {} : { secondary: `${en ? 'Scenario' : '场景'} ${task.scenario.code} · ${task.scenario.stepIndex}/${task.scenario.stepCount}` })}
                   ariaLabel={`${task.agentLabel} · ${en ? 'sources' : '来源'} ${sources.join(', ')}`}
                   icon="host:history"
                   selected={task.taskRef === simulatorTask?.taskRef}

@@ -219,7 +219,8 @@ function traceDirection(event: PlaygroundMockTaskTrace['events'][number], source
     if (event.sessionEvent.type === 'turn/start' || event.sessionEvent.type === 'turn/end'
       || event.sessionEvent.type === 'step/start' || event.sessionEvent.type === 'step/end'
       || event.sessionEvent.type === 'assistant/chunk' || event.sessionEvent.type === 'request/header'
-      || event.sessionEvent.type === 'request/context' || event.sessionEvent.type === 'agent/inbox/spliced') return 'agent-execution'
+      || event.sessionEvent.type === 'request/context' || event.sessionEvent.type === 'agent/inbox/spliced'
+      || event.sessionEvent.type === 'playground/scenario') return 'agent-execution'
     return 'host-lifecycle'
   }
   const type = event.type
@@ -241,6 +242,7 @@ function tracePresentation(event: PlaygroundMockTaskTrace['events'][number]): Pl
     case 'request/header':
     case 'request/context':
     case 'agent/inbox/spliced': return 'agent-execution'
+    case 'playground/scenario': return 'agent-execution'
     case 'tool/call': return 'tool-use'
     case 'tool/result': return 'tool-result'
     case 'approval/asked':

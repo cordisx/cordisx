@@ -197,6 +197,7 @@ import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from './owner-
 import { CordisXEntityRegistryServiceV1, type EntityPrincipalBinding } from './entities.js'
 import type { EntityRegistry } from '@cordisx/protocol/entities/v1'
 import { BrowserPlaygroundAgentSessionPersistence } from './playground-agent-session-persistence.js'
+import type { PlaygroundSessionScenarioCatalogV1 } from '../playground/session-scenario-catalog.js'
 import type { CordisXOwnerDocumentsV1 } from '../durable-document-contracts.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
@@ -237,6 +238,8 @@ interface CordisXRuntimeMetadata {
   readonly hostKind?: 'codex' | 'playground'
   /** Debug-only deterministic service; accepted only by the explicit Playground host. */
   readonly agentLoopBackend?: 'mock'
+  /** Host-validated declarative catalog; never accepted from a plugin Context. */
+  readonly playgroundSessionScenarios?: PlaygroundSessionScenarioCatalogV1
 }
 
 interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
@@ -840,7 +843,11 @@ async function start(
     ? []
     : await playgroundAgentSessionPersistence.load()
   const agentSessionTransport = metadata.hostKind === 'playground'
-    ? new DeterministicAgentSessionTransport(recoveredPlaygroundSessions)
+    ? new DeterministicAgentSessionTransport({
+        recoveredSessions: recoveredPlaygroundSessions,
+        ...(metadata.playgroundSessionScenarios === undefined ? {} : { scenarioCatalog: metadata.playgroundSessionScenarios }),
+        ...(playgroundRoomSimulationBridgeRegistry === undefined ? {} : { roomBridge: playgroundRoomSimulationBridgeRegistry.client }),
+      })
     : desktopAgentSessionTransport ?? new UnavailableAgentSessionTransport()
   const agentRuntimeConnection: AgentRuntimeConnection = Object.freeze({
     connectionId: metadata.hostKind === 'playground'

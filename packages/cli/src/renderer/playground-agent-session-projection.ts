@@ -122,6 +122,9 @@ function eventDetail(event: SessionEvent, toolNames: ReadonlyMap<string, string>
     case 'request/context': return `Request context: ${event.data.provider}/${event.data.model}.`
     case 'agent/inbox/spliced': return `Agent inbox ${event.data.target} changed.`
     case 'session/end-seed': return 'Session seed ended.'
+    case 'playground/scenario': return event.data.phase === 'failed' || event.data.phase === 'cancelled'
+      ? `Scenario ${event.data.code} · step ${event.data.stepIndex}/${event.data.stepCount} · ${event.data.phase} · ${event.data.error?.message ?? 'no detail'}`
+      : `Scenario ${event.data.code} · step ${event.data.stepIndex}/${event.data.stepCount} · ${event.data.phase}${event.data.stepType === undefined ? '' : ` · ${event.data.stepType}`}`
   }
   return `Session event: ${event.type}`
 }
@@ -167,6 +170,12 @@ function status(session: CordisXAgentSessionProjection): PlaygroundMockTaskTrace
     else if (event.type === 'approval/decided') pendingApprovals.delete(event.data.id)
   }
   if (pendingApprovals.size > 0) return 'approval'
+  const scenario = [...session.events].reverse().find(event => event.type === 'playground/scenario')
+  if (scenario?.type === 'playground/scenario') {
+    if (scenario.data.phase === 'failed') return 'error'
+    if (scenario.data.phase === 'cancelled') return 'closed'
+    if (scenario.data.phase === 'started' || scenario.data.phase === 'step-started' || scenario.data.phase === 'step-completed') return 'working'
+  }
   const terminal = [...session.events].reverse().find(event => event.type === 'turn/end')
   if (terminal?.type === 'turn/end') {
     if (terminal.data.reason.kind === 'completed') return 'completed'
@@ -188,6 +197,7 @@ function projectTask(session: CordisXAgentSessionProjection): PlaygroundMockTask
   const toolNames = new Map(session.events.flatMap(event => event.type === 'tool/call'
     ? [[event.data.callId, event.data.name] as const]
     : []))
+  const scenario = [...session.events].reverse().find(event => event.type === 'playground/scenario')
   return Object.freeze({
     taskRef: session.sessionId,
     origin: 'agent-session',
@@ -203,6 +213,7 @@ function projectTask(session: CordisXAgentSessionProjection): PlaygroundMockTask
     agentLabel: selected.name ?? selected.identity.agentId,
     active: session.closed === undefined && session.agent !== undefined,
     status: status(session),
+    ...(scenario?.type === 'playground/scenario' ? { scenario: clone(scenario.data) } : {}),
     identity: clone(selected.identity),
     catalog: Object.freeze(catalog.map(clone)),
     layers: Object.freeze(catalog.map(traceLayer)),
