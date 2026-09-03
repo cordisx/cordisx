@@ -862,6 +862,16 @@ mutate the current fiber or watchers; service-restart requires an owning
 launcher handler and is not downgraded to a plugin restart. Removing Manager
 placeholders does not remove CLI parsing, launcher stores, or diagnostics.
 
+The normal CordisX Home document and an explicit Playground launcher
+composition are also separate storage envelopes. They share the same
+owner/profile/generation-scoped plugin candidate ledger and revision CAS, but
+each read-modify-write uses its own parser. A Playground Manager save replaces
+only the selected plugin profile state inside the validated launcher document;
+launcher fields such as `codex` and unconsumed forward-compatible fields remain
+unchanged. The Host never normalizes that launcher document through the Home
+schema, and both stores retain the same lock, no-follow read, atomic rename,
+file-mode, candidate ownership, commit, and abort fences.
+
 Codex's `app://` renderer rejects direct arbitrary network reads, including the
 official raw GitHub feed. The launcher therefore owns a narrow, private CDP
 binding for marketplace JSON retrieval. It accepts only configured public

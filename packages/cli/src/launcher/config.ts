@@ -95,10 +95,10 @@ function serviceConfiguration(
   return object(profiles[profileId], `config.plugins.${plugin.id as string}.services.${serviceId}.profiles.${profileId}`).config
 }
 
-/** Read and validate the version-1 local composition file. */
-export async function loadConfig(configPath: string, options: LoadConfigOptions = {}): Promise<CordisXConfig> {
+/** Validate a version-1 local composition document without changing its storage envelope. */
+export function parseConfigDocument(value: unknown, configPath: string, options: LoadConfigOptions = {}): CordisXConfig {
   const absolutePath = path.resolve(configPath)
-  const raw = object(JSON.parse(await readFile(absolutePath, 'utf8')) as unknown, 'config')
+  const raw = object(value, 'config')
   if (raw.version !== 1) throw new Error('config.version must be 1')
   const codex = raw.codex === undefined ? {} : object(raw.codex, 'config.codex')
   const debugPort = codex.debugPort ?? 9229
@@ -181,4 +181,10 @@ export async function loadConfig(configPath: string, options: LoadConfigOptions 
     providers,
     plugins,
   }
+}
+
+/** Read and validate the version-1 local composition file. */
+export async function loadConfig(configPath: string, options: LoadConfigOptions = {}): Promise<CordisXConfig> {
+  const absolutePath = path.resolve(configPath)
+  return parseConfigDocument(JSON.parse(await readFile(absolutePath, 'utf8')) as unknown, absolutePath, options)
 }
