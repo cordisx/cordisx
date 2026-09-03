@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { JSDOM } from 'jsdom'
+import { describe, expect, it, vi } from 'vitest'
 import type { CordisXPluginManifestV5 } from '../packages/cli/src/permission-contracts.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 } from '../packages/cli/src/permission-contracts.js'
 import { normalizePluginManifestV5 } from '../packages/cli/src/permission-model-v4.js'
-import { MemoryPermissionPolicyStore, PermissionBroker, type PermissionPrompt } from '../packages/cli/src/renderer/platform.js'
+import { BrowserPermissionPrompt, MemoryPermissionPolicyStore, PermissionBroker, type PermissionPrompt } from '../packages/cli/src/renderer/platform.js'
 
 const identity = { source: 'file:///plugins/chatroom.mjs', id: 'org.cordisx.chatroom' } as const
 const connection = { connectionId: 'development-host-transport', generation: 1 } as const
@@ -47,6 +48,38 @@ describe('Agent Session permission-v4 Host authority', () => {
     expect((await broker.authorizeAgentRuntime(input)).authorized).toBe(true)
     expect((await broker.authorizeAgentRuntime(input)).authorized).toBe(true)
     expect(requested).toEqual(['agents.create:host-reserved-session'])
+  })
+
+  it('uses the Host development authority to persist an exact lease without a dialog', async () => {
+    const store = new MemoryPermissionPolicyStore()
+    const request = vi.fn<PermissionPrompt['request']>(async () => 'deny')
+    const broker = new PermissionBroker(store, { request })
+    broker.register(identity, {
+      ...manifest,
+      capabilities: [{ name: 'sessions.get', required: true, scope: {} }],
+    })
+    broker.replaceAgentRuntimeConnection(connection)
+    const authority = broker.createDevelopmentAgentRuntimeAuthorizationAuthority()
+    const decision = await broker.authorizeDevelopmentAgentRuntime(authority, {
+      identity, capability: 'sessions.get', sessionId: 'room-a-run-a',
+      scopeSource: { kind: 'host-exact', exactSessionId: 'room-a-run-a' }, connection,
+    })
+
+    expect(request).not.toHaveBeenCalled()
+    expect(decision.authorized).toBe(true)
+    expect(decision.lease?.sessionId).toBe('room-a-run-a')
+    expect(broker.isAgentRuntimeLeaseActive(identity, decision.lease!.leaseId)).toBe(true)
+    expect(store.readV4()).toEqual([
+      expect.objectContaining({
+        schemaVersion: 4,
+        key: expect.objectContaining({
+          identity: { source: identity.source, pluginId: identity.id },
+          capability: 'sessions.get',
+          scope: { sessionIds: ['room-a-run-a'] },
+        }),
+        policy: 'allow-persistent',
+      }),
+    ])
   })
 
   it('admits one unbound Session capability only through its Host-issued exact scope', async () => {
@@ -117,5 +150,31 @@ describe('Agent Session permission-v4 Host authority', () => {
     broker.revokeAgentRuntimeRoute('main:route-1')
     expect(fences).toEqual(['room-a-run-a:route-replaced'])
     expect(broker.isAgentRuntimeLeaseActive(identity, decision.lease!.leaseId)).toBe(false)
+  })
+
+  it('closes active and queued prompts when the plugin generation is replaced', async () => {
+    const dom = new JSDOM('<html><body></body></html>', { pretendToBeVisual: true })
+    const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), new BrowserPermissionPrompt(dom.window.document))
+    const unregister = broker.register(identity, {
+      ...manifest,
+      capabilities: [{ name: 'sessions.get', required: true, scope: {} }],
+    }, { pluginId: identity.id, moduleGeneration: 'generation-1' })
+    broker.replaceAgentRuntimeConnection(connection)
+    const authorize = (sessionId: string) => broker.authorizeAgentRuntime({
+      identity, capability: 'sessions.get' as const, sessionId,
+      scopeSource: { kind: 'host-exact' as const, exactSessionId: sessionId }, connection,
+    })
+    const first = authorize('room-a-run-a')
+    const queued = authorize('room-a-run-b')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(dom.window.document.querySelectorAll('[data-permission-prompt]')).toHaveLength(1)
+
+    unregister()
+
+    await expect(first).resolves.toEqual({ authorized: false })
+    await expect(queued).resolves.toEqual({ authorized: false })
+    expect(dom.window.document.querySelectorAll('[data-permission-prompt]')).toHaveLength(0)
+    dom.window.close()
   })
 })
