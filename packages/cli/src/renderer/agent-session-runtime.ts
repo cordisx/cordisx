@@ -56,7 +56,7 @@ import {
   type CordisXAgentSessionLegacyAcquireRequestV1,
   type CordisXAgentSessionLegacyAcquireResultV1,
 } from '../agent-session-migration-contracts.js'
-import { resolveAgentDefinition, type CordisXResolvedAgentDefinition } from './agent-loop.js'
+import { resolveAgentDefinitionCatalog, type CordisXResolvedAgentDefinition } from './agent-loop.js'
 import { presentationForDefinition, type CordisXAgentDefinitionPresentation } from './agent-loop-v4.js'
 
 const ACQUIRE_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-acquire-result.v1.schema.json' as const
@@ -172,8 +172,8 @@ interface AgentRecord {
   readonly claimed: Set<string>
   readonly live: Set<AgentSubscriber>
   readonly detail?: AgentDetailReference
-  /** Exact Host-resolved setup retained only for this live Agent generation. */
-  readonly definition?: CordisXResolvedAgentDefinition
+  /** Exact Host-resolved setup catalog retained only for this live Agent generation. */
+  readonly definitions?: readonly CordisXResolvedAgentDefinition[]
   status: AgentStatus
   readonly idleWaiters: Set<(value: AgentIdleResult) => void>
   disposed?: 'owner-disposed' | 'runtime-disposed' | 'connection-replaced'
@@ -287,13 +287,15 @@ export class CordisXAgentSessionRuntime {
 
   /** Host-only projection for Conversation Shell identity actions. */
   definitionPresentation(identity: { readonly agentId: string; readonly revision: string }): CordisXAgentDefinitionPresentation | undefined {
-    let selected: AgentRecord | undefined
+    let selected: { readonly generation: number; readonly definition: CordisXResolvedAgentDefinition } | undefined
     for (const record of this.agents.values()) {
-      if (!this.current(record) || record.definition?.identity.agentId !== identity.agentId
-        || record.definition.identity.revision !== identity.revision) continue
-      if (selected === undefined || record.generation > selected.generation) selected = record
+      if (!this.current(record)) continue
+      const definition = record.definitions?.find(candidate => candidate.identity.agentId === identity.agentId
+        && candidate.identity.revision === identity.revision)
+      if (definition === undefined) continue
+      if (selected === undefined || record.generation > selected.generation) selected = { generation: record.generation, definition }
     }
-    return selected?.definition === undefined ? undefined : presentationForDefinition(selected.definition)
+    return selected === undefined ? undefined : presentationForDefinition(selected.definition)
   }
 
   installLegacyBindingResolver(ownerPluginId: string, resolve: CordisXLegacyAgentLoopBindingResolver): () => void {
@@ -461,9 +463,9 @@ export class CordisXAgentSessionRuntime {
     if (live !== undefined && live.disposed === undefined) return this.remember(mutationKey, fingerprint, this.acquireConflict(operation, mutationId, 'agent-already-live'))
     const existing = this.sessions.get(sessionId)
     if (operation === 'resume' && existing === undefined && !resolvedLegacy) return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, 'session-unavailable'))
-    let definition: CordisXResolvedAgentDefinition | undefined
+    let definitions: readonly CordisXResolvedAgentDefinition[] | undefined
     if (input.setup !== undefined) {
-      try { definition = resolveAgentDefinition(input.setup) }
+      try { definitions = resolveAgentDefinitionCatalog(input.setup).definitions }
       catch { return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, 'unsupported')) }
     }
     const driver = operation === 'create'
@@ -483,7 +485,7 @@ export class CordisXAgentSessionRuntime {
       live: new Set(),
       status: 'idle',
       idleWaiters: new Set(),
-      ...(definition === undefined ? {} : { definition: clone(definition) }),
+      ...(definitions === undefined ? {} : { definitions: clone(definitions) }),
       ...(driver.detail === undefined ? {} : { detail: clone(driver.detail) }),
     }
     this.agents.set(sessionId, record)

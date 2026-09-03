@@ -68,8 +68,13 @@ describe('Agent/Session Host authority v1', () => {
       name: 'Lead exact',
       introduction: 'Base operating context.\n\nCoordinates the exact Session room.',
     })
+    expect(runtime.definitionPresentation({ agentId: 'base', revision: 'revision-base-1' })).toEqual({
+      identity: { agentId: 'base', revision: 'revision-base-1' },
+      name: 'Base', introduction: 'Base operating context.',
+    })
     driver.replace()
     expect(runtime.definitionPresentation(setup.definition)).toBeUndefined()
+    expect(runtime.definitionPresentation({ agentId: 'base', revision: 'revision-base-1' })).toBeUndefined()
     await runtime.dispose()
   })
 
