@@ -82,20 +82,36 @@ function textContent(content: readonly ContentBlock[]): string {
 }
 
 function eventType(event: SessionEvent): PlaygroundMockTaskTrace['events'][number]['type'] {
-  if (event.type === 'user/message' || event.type === 'assistant/message' || event.type === 'tool/result' || event.type === 'approval/decided') return 'semantic.message'
+  if (event.type === 'user/message' || event.type === 'assistant/message' || event.type === 'approval/decided') return 'semantic.message'
   if (event.type === 'approval/asked') return 'approval.required'
-  if (event.type === 'turn/start' || event.type === 'tool/call') return 'execution.started'
+  if (event.type === 'tool/call') return 'tool.call'
+  if (event.type === 'tool/result') return 'tool.result'
+  if (event.type === 'turn/start') return 'execution.started'
   if (event.type === 'turn/end') return event.data.reason.kind === 'completed' ? 'execution.completed' : 'execution.failed'
   return 'session.event'
 }
 
-function eventDetail(event: SessionEvent): string {
+function compact(value: string, limit = 180): string {
+  const normalized = value.replace(/\s+/gu, ' ').trim()
+  return normalized.length <= limit ? normalized : `${normalized.slice(0, limit - 1)}…`
+}
+
+function eventDetail(event: SessionEvent, toolNames: ReadonlyMap<string, string>): string {
   switch (event.type) {
     case 'user/message': return textContent(event.data.content) || `User message ${event.data.id}`
     case 'assistant/message': return textContent(event.data.message.content) || `Assistant message ${event.data.message.id}`
     case 'assistant/chunk': return `Assistant stream chunk: ${event.data.chunk.type}`
-    case 'tool/call': return `Tool call: ${event.data.name}`
-    case 'tool/result': return textContent(event.data.message.content) || `Tool result: ${event.data.message.source.callId}`
+    case 'tool/call': {
+      const argumentsPreview = compact(event.data.arguments)
+      return `Tool use · ${event.data.name} · ${event.data.callId}${argumentsPreview === '' ? '' : ` · ${argumentsPreview}`}`
+    }
+    case 'tool/result': {
+      const callId = event.data.message.source.callId
+      const toolName = toolNames.get(callId) ?? 'unknown tool'
+      const result = compact(textContent(event.data.message.content))
+      const error = event.data.error === undefined ? undefined : `${event.data.error.name}/${event.data.error.code}`
+      return `${error === undefined ? 'Tool result' : 'Tool error'} · ${toolName} · ${callId}${error === undefined ? '' : ` · ${error}`}${result === '' ? '' : ` · ${result}`}`
+    }
     case 'approval/asked': return `Approval requested: ${event.data.toolName}${event.data.reason === undefined ? '' : ` — ${event.data.reason}`}`
     case 'approval/decided': return `Approval ${event.data.id}: ${event.data.outcome}`
     case 'turn/start': return `Turn ${event.data.turn} started.`
@@ -107,6 +123,7 @@ function eventDetail(event: SessionEvent): string {
     case 'agent/inbox/spliced': return `Agent inbox ${event.data.target} changed.`
     case 'session/end-seed': return 'Session seed ended.'
   }
+  return `Session event: ${event.type}`
 }
 
 function eventTurn(event: SessionEvent): string | undefined {
@@ -126,14 +143,14 @@ function eventOperationId(event: SessionEvent): string | undefined {
   return undefined
 }
 
-function projectEvent(event: SessionEvent): PlaygroundMockTaskTrace['events'][number] {
+function projectEvent(event: SessionEvent, toolNames: ReadonlyMap<string, string>): PlaygroundMockTaskTrace['events'][number] {
   const operationId = eventOperationId(event)
   const turn = eventTurn(event)
   const messageId = eventMessageId(event)
   return Object.freeze({
     sequence: event.seq,
     type: eventType(event),
-    detail: eventDetail(event),
+    detail: eventDetail(event, toolNames),
     sessionEvent: clone(event),
     ...(operationId === undefined ? {} : { operationId }),
     ...(turn === undefined ? {} : { turn }),
@@ -168,6 +185,9 @@ function projectTask(session: CordisXAgentSessionProjection): PlaygroundMockTask
     && definition.identity.revision === target.revision) ?? definitions.at(-1) ?? fallback
   const catalog = definitions.length === 0 ? [fallback] : definitions
   const lastInput = [...session.events].reverse().find(event => event.type === 'user/message')
+  const toolNames = new Map(session.events.flatMap(event => event.type === 'tool/call'
+    ? [[event.data.callId, event.data.name] as const]
+    : []))
   return Object.freeze({
     taskRef: session.sessionId,
     origin: 'agent-session',
@@ -188,7 +208,7 @@ function projectTask(session: CordisXAgentSessionProjection): PlaygroundMockTask
     layers: Object.freeze(catalog.map(traceLayer)),
     effective: traceLayer(selected),
     ...(lastInput?.type === 'user/message' ? { input: textContent(lastInput.data.content) } : {}),
-    events: Object.freeze(session.events.map(projectEvent)),
+    events: Object.freeze(session.events.map(event => projectEvent(event, toolNames))),
   })
 }
 

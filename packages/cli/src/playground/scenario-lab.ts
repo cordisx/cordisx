@@ -6,6 +6,7 @@ import type {
 } from '../agent-loop-contracts.js'
 import type { AgentLoopTaskDetailsUrl } from '@cordisx/protocol/agent-loop/v3'
 import { createGeneratedAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
+import type { SessionEvent } from '@cordisx/protocol/sessions/v1'
 import {
   CORDISX_AGENT_DEFINITION_SCHEMA_V1,
   CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V4,
@@ -117,18 +118,33 @@ export type PlaygroundScenarioTaskContext = Readonly<Pick<PlaygroundMockTaskTrac
 export type PlaygroundTaskTraceDirection =
   | 'chatroom-to-agent-host'
   | 'agent-host-to-chatroom'
+  | 'agent-execution'
+  | 'agent-to-tool'
+  | 'tool-to-agent'
   | 'injector-to-agent-host'
   | 'simulator-to-chatroom'
   | 'host-lifecycle'
+
+export type PlaygroundTaskTracePresentation =
+  | 'user-input'
+  | 'assistant-response'
+  | 'agent-execution'
+  | 'tool-use'
+  | 'tool-result'
+  | 'approval'
+  | 'lifecycle'
+  | 'legacy'
 
 export interface PlaygroundTaskTraceEntry {
   readonly id: string
   readonly source: 'original' | 'simulated'
   readonly generation: 'original' | string
   readonly direction: PlaygroundTaskTraceDirection
+  readonly presentation?: PlaygroundTaskTracePresentation
   readonly type: string
   readonly summary: string
   readonly timestamp?: string
+  readonly rawSessionEvents?: readonly SessionEvent[]
   readonly payload: unknown
   readonly correlations: {
     readonly operationId?: string
@@ -196,11 +212,14 @@ function stableLocalTaskScope(taskRef: string): string {
 function traceDirection(event: PlaygroundMockTaskTrace['events'][number], source: 'original' | 'simulated'): PlaygroundTaskTraceDirection {
   if (event.sessionEvent !== undefined) {
     if (event.sessionEvent.type === 'user/message') return 'chatroom-to-agent-host'
-    if (event.sessionEvent.type === 'assistant/message' || event.sessionEvent.type === 'assistant/chunk'
-      || event.sessionEvent.type === 'tool/call' || event.sessionEvent.type === 'tool/result'
-      || event.sessionEvent.type === 'approval/asked' || event.sessionEvent.type === 'approval/decided') {
-      return 'agent-host-to-chatroom'
-    }
+    if (event.sessionEvent.type === 'assistant/message'
+      || event.sessionEvent.type === 'approval/asked' || event.sessionEvent.type === 'approval/decided') return 'agent-host-to-chatroom'
+    if (event.sessionEvent.type === 'tool/call') return 'agent-to-tool'
+    if (event.sessionEvent.type === 'tool/result') return 'tool-to-agent'
+    if (event.sessionEvent.type === 'turn/start' || event.sessionEvent.type === 'turn/end'
+      || event.sessionEvent.type === 'step/start' || event.sessionEvent.type === 'step/end'
+      || event.sessionEvent.type === 'assistant/chunk' || event.sessionEvent.type === 'request/header'
+      || event.sessionEvent.type === 'request/context' || event.sessionEvent.type === 'agent/inbox/spliced') return 'agent-execution'
     return 'host-lifecycle'
   }
   const type = event.type
@@ -208,6 +227,27 @@ function traceDirection(event: PlaygroundMockTaskTrace['events'][number], source
   if (type === 'approval.required') return source === 'simulated' ? 'simulator-to-chatroom' : 'agent-host-to-chatroom'
   if (type === 'execution.completed' || type === 'execution.failed') return 'agent-host-to-chatroom'
   return source === 'simulated' ? 'injector-to-agent-host' : 'chatroom-to-agent-host'
+}
+
+function tracePresentation(event: PlaygroundMockTaskTrace['events'][number]): PlaygroundTaskTracePresentation {
+  switch (event.sessionEvent?.type) {
+    case 'user/message': return 'user-input'
+    case 'assistant/message': return 'assistant-response'
+    case 'assistant/chunk':
+    case 'turn/start':
+    case 'turn/end':
+    case 'step/start':
+    case 'step/end':
+    case 'request/header':
+    case 'request/context':
+    case 'agent/inbox/spliced': return 'agent-execution'
+    case 'tool/call': return 'tool-use'
+    case 'tool/result': return 'tool-result'
+    case 'approval/asked':
+    case 'approval/decided': return 'approval'
+    case 'session/end-seed': return 'lifecycle'
+    default: return event.sessionEvent === undefined ? 'legacy' : 'lifecycle'
+  }
 }
 
 function eventCorrelations(event: PlaygroundMockTaskTrace['events'][number]): PlaygroundTaskTraceEntry['correlations'] {
@@ -222,26 +262,70 @@ function eventCorrelations(event: PlaygroundMockTaskTrace['events'][number]): Pl
 }
 
 function originalTrace(sourceTask: PlaygroundScenarioTaskContext): readonly PlaygroundTaskTraceEntry[] {
-  return sourceTask.events.map((event, index) => Object.freeze({
-    id: `original-${event.sequence}`,
-    source: 'original' as const,
-    generation: 'original' as const,
-    direction: traceDirection(event, 'original'),
-    type: event.type,
-    summary: event.detail,
-    ...(event.sessionEvent === undefined ? {} : { timestamp: new Date(event.sessionEvent.time).toISOString() }),
-    payload: Object.freeze({
-      event,
-      ...(index === 0 && sourceTask.simulationBinding !== undefined
-        ? { roomSimulationBinding: sourceTask.simulationBinding }
-        : {}),
-      ...(event.type === 'input.accepted' && sourceTask.input !== undefined ? { latestTaskInputSnapshot: sourceTask.input } : {}),
-      ...((event.type === 'execution.completed' || event.type === 'execution.failed') && sourceTask.execution !== undefined
-        ? { latestTaskExecutionSnapshot: sourceTask.execution }
-        : {}),
-    }),
-    correlations: eventCorrelations(event),
-  }))
+  const output: PlaygroundTaskTraceEntry[] = []
+  let pendingAssistantChunks: PlaygroundMockTaskTrace['events'][number][] = []
+  const append = (
+    event: PlaygroundMockTaskTrace['events'][number],
+    rawSessionEvents: readonly SessionEvent[] = event.sessionEvent === undefined ? [] : [event.sessionEvent],
+    summary = event.detail,
+  ) => {
+    output.push(Object.freeze({
+      id: `original-${event.sequence}`,
+      source: 'original' as const,
+      generation: 'original' as const,
+      direction: traceDirection(event, 'original'),
+      presentation: tracePresentation(event),
+      type: event.type,
+      summary,
+      ...(event.sessionEvent === undefined ? {} : { timestamp: new Date(event.sessionEvent.time).toISOString() }),
+      ...(rawSessionEvents.length === 0 ? {} : { rawSessionEvents: Object.freeze([...rawSessionEvents]) }),
+      payload: Object.freeze({
+        event,
+        ...(output.length === 0 && sourceTask.simulationBinding !== undefined
+          ? { roomSimulationBinding: sourceTask.simulationBinding }
+          : {}),
+        ...(event.type === 'input.accepted' && sourceTask.input !== undefined ? { latestTaskInputSnapshot: sourceTask.input } : {}),
+        ...((event.type === 'execution.completed' || event.type === 'execution.failed') && sourceTask.execution !== undefined
+          ? { latestTaskExecutionSnapshot: sourceTask.execution }
+          : {}),
+      }),
+      correlations: eventCorrelations(event),
+    }))
+  }
+  const flushAssistantChunks = () => {
+    const first = pendingAssistantChunks[0]
+    if (first === undefined) return
+    const raw = pendingAssistantChunks.flatMap(event => event.sessionEvent === undefined ? [] : [event.sessionEvent])
+    append(first, raw, `Agent response stream · ${raw.length} raw event${raw.length === 1 ? '' : 's'}`)
+    pendingAssistantChunks = []
+  }
+  for (const event of sourceTask.events) {
+    if (event.sessionEvent?.type === 'assistant/chunk') {
+      pendingAssistantChunks.push(event)
+      continue
+    }
+    const assistantMessage = event.sessionEvent?.type === 'assistant/message'
+      ? event.sessionEvent
+      : undefined
+    const matchingAssistantChunks = assistantMessage !== undefined
+      && pendingAssistantChunks.length > 0
+      && pendingAssistantChunks.every(chunk => chunk.sessionEvent?.type === 'assistant/chunk'
+        && chunk.sessionEvent.data.turn === assistantMessage.data.turn
+        && chunk.sessionEvent.data.step === assistantMessage.data.step)
+    if (matchingAssistantChunks && assistantMessage !== undefined) {
+      const raw = [
+        ...pendingAssistantChunks.flatMap(chunk => chunk.sessionEvent === undefined ? [] : [chunk.sessionEvent]),
+        assistantMessage,
+      ]
+      pendingAssistantChunks = []
+      append(event, raw)
+      continue
+    }
+    flushAssistantChunks()
+    append(event)
+  }
+  flushAssistantChunks()
+  return Object.freeze(output)
 }
 
 function agent(alias: 'a' | 'b' | 'c'): AgentDefinition {

@@ -16,6 +16,7 @@ import {
   type PlaygroundScenarioLabSnapshot,
   type PlaygroundTaskTraceDirection,
   type PlaygroundTaskTraceEntry,
+  type PlaygroundTaskTracePresentation,
 } from '../../scenario-lab.js'
 
 export interface SimulatorTaskScenarioWorkbenchProps {
@@ -59,8 +60,11 @@ class ScenarioWorkbenchErrorBoundary extends Component<SimulatorTaskScenarioWork
 }
 
 const directionLabels: Readonly<Record<PlaygroundTaskTraceDirection, { readonly 'zh-CN': string; readonly en: string }>> = {
-  'chatroom-to-agent-host': { 'zh-CN': 'Chatroom → Agent / Host', en: 'Chatroom → Agent / Host' },
-  'agent-host-to-chatroom': { 'zh-CN': 'Agent / Host → Chatroom', en: 'Agent / Host → Chatroom' },
+  'chatroom-to-agent-host': { 'zh-CN': '用户 / Chatroom → Agent', en: 'User / Chatroom → Agent' },
+  'agent-host-to-chatroom': { 'zh-CN': 'Agent → Chatroom', en: 'Agent → Chatroom' },
+  'agent-execution': { 'zh-CN': 'Agent 内部执行', en: 'Agent execution' },
+  'agent-to-tool': { 'zh-CN': 'Agent → 工具', en: 'Agent → Tool' },
+  'tool-to-agent': { 'zh-CN': '工具 → Agent', en: 'Tool → Agent' },
   'injector-to-agent-host': { 'zh-CN': 'Simulator → Agent / Host', en: 'Simulator → Agent / Host' },
   'simulator-to-chatroom': { 'zh-CN': 'Simulator → Chatroom', en: 'Simulator → Chatroom' },
   'host-lifecycle': { 'zh-CN': 'Host lifecycle', en: 'Host lifecycle' },
@@ -81,8 +85,30 @@ function isComposerEventType(value: unknown): value is ComposerEventType {
 }
 
 function timelineAlignment(direction: PlaygroundTaskTraceDirection): 'left' | 'right' | 'center' {
-  if (direction === 'host-lifecycle') return 'center'
+  if (direction === 'host-lifecycle' || direction === 'agent-execution'
+    || direction === 'agent-to-tool' || direction === 'tool-to-agent') return 'center'
   return direction === 'chatroom-to-agent-host' || direction === 'injector-to-agent-host' ? 'left' : 'right'
+}
+
+function tracePresentationLabel(presentation: PlaygroundTaskTracePresentation | undefined, locale: 'zh-CN' | 'en', fallback: string): string {
+  if (presentation === undefined || presentation === 'legacy') return fallback
+  const labels: Readonly<Record<Exclude<PlaygroundTaskTracePresentation, 'legacy'>, { readonly 'zh-CN': string; readonly en: string }>> = {
+    'user-input': { 'zh-CN': '用户消息', en: 'User message' },
+    'assistant-response': { 'zh-CN': 'Agent 回复', en: 'Agent response' },
+    'agent-execution': { 'zh-CN': 'Agent 执行', en: 'Agent execution' },
+    'tool-use': { 'zh-CN': '工具调用', en: 'Tool use' },
+    'tool-result': { 'zh-CN': '工具结果', en: 'Tool result' },
+    approval: { 'zh-CN': '批准流程', en: 'Approval flow' },
+    lifecycle: { 'zh-CN': '会话生命周期', en: 'Session lifecycle' },
+  }
+  return labels[presentation][locale]
+}
+
+function traceFactKind(presentation: PlaygroundTaskTracePresentation | undefined): 'semantic' | 'tool' | 'raw' | 'legacy' {
+  if (presentation === 'user-input' || presentation === 'assistant-response') return 'semantic'
+  if (presentation === 'tool-use' || presentation === 'tool-result') return 'tool'
+  if (presentation === undefined || presentation === 'legacy') return 'legacy'
+  return 'raw'
 }
 
 function correlationSummary(entry: PlaygroundTaskTraceEntry): string {
@@ -110,6 +136,7 @@ function traceDetails(entry: PlaygroundTaskTraceEntry): unknown {
       runId: entry.correlations.runId ?? null,
     },
     payload: entry.payload,
+    rawSessionEvents: entry.rawSessionEvents ?? [],
   }
 }
 
@@ -227,32 +254,44 @@ function SimulatorTaskScenarioWorkbenchContent({ locale, task, controller }: Sim
         ? <li className="pg-event-timeline-empty">{en ? 'No task events yet.' : '此 task 尚无事件。'}</li>
         : snapshot.trace.map((entry, index) => {
             const alignment = timelineAlignment(entry.direction)
+            const presentation = entry.presentation ?? 'legacy'
+            const toolEvent = presentation === 'tool-use' || presentation === 'tool-result'
+            const compactEvent = alignment === 'center' && !toolEvent
+            const presentationLabel = tracePresentationLabel(entry.presentation, locale, entry.type)
+            const factKind = traceFactKind(entry.presentation)
             const pendingApproval = (entry.type === 'approval.required' || entry.type === 'room.permission.pending' || entry.type === 'room.agent-approval.pending')
               && entry.source === 'simulated'
               && snapshot.injector.pendingApproval !== undefined
               && (entry.correlations.turn === undefined || entry.correlations.turn === snapshot.injector.pendingApproval.turn)
-            return <li key={entry.id} className="pg-event-timeline-item" data-trace-source={entry.source} data-trace-direction={entry.direction} data-timeline-alignment={alignment}>
+            return <li key={entry.id} className="pg-event-timeline-item" data-trace-source={entry.source} data-trace-direction={entry.direction} data-trace-presentation={presentation} data-timeline-alignment={alignment}>
               {index === originalCount && index > 0 ? <div className="pg-event-generation-divider" role="separator">
                 <span>{en ? `Simulated session · ${snapshot.disposableGeneration.split(':').slice(-2).join(':')}` : `模拟会话 · ${snapshot.disposableGeneration.split(':').slice(-2).join(':')}`}</span>
               </div> : null}
-              {alignment === 'center'
+              {compactEvent
                 ? <button type="button" className="pg-event-system-row" onClick={event => {
                     drawerTriggerRef.current = event.currentTarget
                     setSelectedEventId(entry.id)
-                  }} aria-haspopup="dialog">
-                    <span>{entry.type}</span><span>{entry.summary}</span>
+                  }} aria-haspopup="dialog" aria-label={`${directionLabels[entry.direction][locale]} · ${presentationLabel} · ${entry.summary}`}>
+                    <span>{presentationLabel}</span><span>{entry.summary}</span>
                   </button>
-                : <article className="pg-event-message">
+                : <article className={`pg-event-message${toolEvent ? ' pg-event-tool-message' : ''}`}>
                     <button type="button" className="pg-event-bubble" onClick={event => {
                       drawerTriggerRef.current = event.currentTarget
                       setSelectedEventId(entry.id)
-                    }} aria-haspopup="dialog" aria-label={`${directionLabels[entry.direction][locale]} · ${entry.type} · ${entry.summary}`}>
+                    }} aria-haspopup="dialog" aria-label={`${directionLabels[entry.direction][locale]} · ${presentationLabel} · ${entry.summary}`}>
                       <span className="pg-event-bubble-meta">
                         <span>{directionLabels[entry.direction][locale]}</span>
-                        <span>{entry.source === 'original' ? (en ? 'original' : '原始') : (en ? 'simulated' : '模拟')}</span>
+                        <span data-event-fact={factKind}>{factKind === 'semantic'
+                          ? (en ? 'semantic' : '语义')
+                          : factKind === 'tool'
+                            ? (en ? 'tool fact' : '工具事实')
+                            : factKind === 'raw'
+                              ? (en ? 'raw event' : '原始事件')
+                              : (en ? 'legacy' : '旧路径')}</span>
+                        <span data-trace-source-label>{entry.source === 'original' ? (en ? 'authority' : '权威') : (en ? 'simulated' : '模拟')}</span>
                         {entry.timestamp === undefined ? null : <time dateTime={entry.timestamp}>{new Date(entry.timestamp).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time>}
                       </span>
-                      <strong>{entry.type}</strong>
+                      <strong>{presentationLabel}</strong>
                       <span className="pg-event-bubble-summary">{entry.summary}</span>
                       {correlationSummary(entry) === '' ? null : <code>{correlationSummary(entry)}</code>}
                     </button>
@@ -342,10 +381,15 @@ function SimulatorTaskScenarioWorkbenchContent({ locale, task, controller }: Sim
           <div><dt>{en ? 'Generation' : 'Generation'}</dt><dd>{selectedEvent.generation}</dd></div>
           <div><dt>{en ? 'Time' : '时间'}</dt><dd>{selectedEvent.timestamp === undefined ? (en ? 'Not provided by original trace' : '原始 trace 未提供') : new Date(selectedEvent.timestamp).toLocaleString(locale)}</dd></div>
         </dl>
-        <section aria-label={en ? 'Structured event details' : '结构化事件详情'}>
-          <h3>{en ? 'Structured details' : '结构化详情'}</h3>
-          <pre>{JSON.stringify(traceDetails(selectedEvent), null, 2)}</pre>
-        </section>
+        <details className="pg-event-raw-details">
+          <summary>{en
+            ? `Raw event details${selectedEvent.rawSessionEvents === undefined ? '' : ` · ${selectedEvent.rawSessionEvents.length} SessionEvent${selectedEvent.rawSessionEvents.length === 1 ? '' : 's'}`}`
+            : `原始事件详情${selectedEvent.rawSessionEvents === undefined ? '' : ` · ${selectedEvent.rawSessionEvents.length} 个 SessionEvent`}`}</summary>
+          <section aria-label={en ? 'Structured event details' : '结构化事件详情'}>
+            <h3>{en ? 'Structured details' : '结构化详情'}</h3>
+            <pre>{JSON.stringify(traceDetails(selectedEvent), null, 2)}</pre>
+          </section>
+        </details>
       </div>
     </aside>}
   </div></ConfigProvider>

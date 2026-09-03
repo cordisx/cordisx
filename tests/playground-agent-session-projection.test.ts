@@ -120,8 +120,14 @@ describe('Playground Agent/Session native task projection', () => {
     expect(events.find(event => event.sessionEvent?.type === 'assistant/message')).toMatchObject({
       type: 'semantic.message', detail: 'Playground Agent/Session fixture approval: unavailable',
     })
-    expect(events.find(event => event.sessionEvent?.type === 'tool/call')).toMatchObject({ type: 'execution.started' })
-    expect(events.find(event => event.sessionEvent?.type === 'tool/result')).toMatchObject({ type: 'semantic.message' })
+    expect(events.find(event => event.sessionEvent?.type === 'tool/call')).toMatchObject({
+      type: 'tool.call',
+      detail: expect.stringContaining('Tool use · playground.fixture.echo · playground-tool:cx-session.room-one.run-one:1'),
+    })
+    expect(events.find(event => event.sessionEvent?.type === 'tool/result')).toMatchObject({
+      type: 'tool.result',
+      detail: expect.stringContaining('Tool result · playground.fixture.echo · playground-tool:cx-session.room-one.run-one:1'),
+    })
     expect(events.find(event => event.sessionEvent?.type === 'approval/asked')).toMatchObject({ type: 'approval.required' })
     expect(events.find(event => event.sessionEvent?.type === 'approval/decided')).toMatchObject({ type: 'semantic.message' })
     const detailController = new PlaygroundScenarioLabController(sessionTask!)
