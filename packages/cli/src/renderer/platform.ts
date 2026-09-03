@@ -847,6 +847,7 @@ export type AgentRuntimePermissionFence = Readonly<{
 export type AgentRuntimeLease = Readonly<{ leaseId: string; sessionId: string }>
 export type DevelopmentAgentRuntimePolicySeedAuthority = object
 export type DevelopmentAgentRuntimeAuthorizationAuthority = object
+export type PlaygroundScenarioAgentRuntimeRouteAuthority = object
 
 export type AgentRuntimeAuthorization = Readonly<{
   authorized: boolean
@@ -927,6 +928,10 @@ export class PermissionBroker {
   private readonly catalog = new CapabilityRiskCatalog()
   private readonly listeners = new Set<() => void>()
   private readonly agentRuntimeRoutes = new Map<string, AgentRuntimeRouteScope>()
+  private readonly playgroundScenarioAgentRuntimeRoutes = new Map<string, Readonly<{
+    route: AgentRuntimeRouteScope
+    baseRouteInstanceId: string
+  }>>()
   private readonly agentRuntimeLeases = new Map<string, AgentRuntimeLeaseRecord>()
   private readonly pendingAgentRuntimePrompts = new Set<Readonly<{
     identity: CordisXPluginIdentity
@@ -936,6 +941,7 @@ export class PermissionBroker {
   private readonly agentRuntimeFenceListeners = new Set<(fence: AgentRuntimePermissionFence) => void>()
   private readonly developmentAgentRuntimeSeeds = new WeakSet<object>()
   private readonly developmentAgentRuntimeAuthorizations = new WeakSet<object>()
+  private readonly playgroundScenarioAgentRuntimeRouteAuthorities = new WeakSet<object>()
   private agentRuntimeConnection: AgentRuntimeConnection | undefined
   private readonly migrationTasks: Promise<void>[] = []
   private domPolicyCommitTail: Promise<void> = Promise.resolve()
@@ -1055,12 +1061,14 @@ export class PermissionBroker {
     if (sameAgentRuntimeConnection(this.agentRuntimeConnection, connection)) return
     this.agentRuntimeConnection = Object.freeze({ ...connection })
     this.fenceAgentRuntime(undefined, 'connection-replaced')
+    this.playgroundScenarioAgentRuntimeRoutes.clear()
   }
 
   clearAgentRuntimeConnection(): void {
     if (this.agentRuntimeConnection === undefined) return
     this.agentRuntimeConnection = undefined
     this.fenceAgentRuntime(undefined, 'connection-replaced')
+    this.playgroundScenarioAgentRuntimeRoutes.clear()
   }
 
   /** Host Router only: records the active same-plugin route projection. */
@@ -1075,6 +1083,7 @@ export class PermissionBroker {
     })
     if (previous !== undefined && !sameAgentRuntimeRoute(previous, next)) {
       this.agentRuntimeRoutes.set(key, next)
+      this.clearPlaygroundScenarioAgentRuntimeRoutes(previous.routeInstanceId)
       this.fenceAgentRuntime({ source: previous.owner.source, id: previous.owner.pluginId }, 'route-replaced')
       return
     }
@@ -1086,6 +1095,7 @@ export class PermissionBroker {
     for (const [key, route] of this.agentRuntimeRoutes) {
       if (route.routeInstanceId !== routeInstanceId) continue
       this.agentRuntimeRoutes.delete(key)
+      this.clearPlaygroundScenarioAgentRuntimeRoutes(route.routeInstanceId)
       this.fenceAgentRuntime({ source: route.owner.source, id: route.owner.pluginId }, 'route-replaced')
     }
   }
@@ -1222,7 +1232,7 @@ export class PermissionBroker {
       && lease.identity.source === identity.source && lease.identity.id === identity.id
       && lease.moduleGeneration === registration.generation.moduleGeneration
       && sameAgentRuntimeConnection(lease.connection, this.agentRuntimeConnection)
-      && (lease.routeInstanceId === undefined || [...this.agentRuntimeRoutes.values()].some(route => (
+      && (lease.routeInstanceId === undefined || this.agentRuntimeRouteValues().some(route => (
         route.routeInstanceId === lease.routeInstanceId && route.params.sessionId === lease.lease.sessionId
         && route.owner.source === identity.source && route.owner.pluginId === identity.id
       )))
@@ -1245,6 +1255,53 @@ export class PermissionBroker {
     const authority = Object.freeze({})
     this.developmentAgentRuntimeAuthorizations.add(authority)
     return authority
+  }
+
+  /** Host Playground only: mint authority for an exact scenario route beside the visible Room route. */
+  createPlaygroundScenarioAgentRuntimeRouteAuthority(): PlaygroundScenarioAgentRuntimeRouteAuthority {
+    const authority = Object.freeze({})
+    this.playgroundScenarioAgentRuntimeRouteAuthorities.add(authority)
+    return authority
+  }
+
+  /**
+   * Add one temporary exact route to this broker without replacing the visible
+   * Room route. Cleanup is idempotent and fences only leases from this route.
+   */
+  activatePlaygroundScenarioAgentRuntimeRoute(
+    authority: PlaygroundScenarioAgentRuntimeRouteAuthority,
+    baseRouteInstanceId: string,
+    scope: AgentRuntimeRouteScope,
+  ): () => void {
+    if (!this.playgroundScenarioAgentRuntimeRouteAuthorities.has(authority)) {
+      throw new Error('Playground scenario Agent Session route authority is invalid')
+    }
+    if (!validAgentRuntimeOpaqueId(baseRouteInstanceId) || !validAgentRuntimeRoute(scope)) {
+      throw new Error('Playground scenario Agent Session route scope is invalid')
+    }
+    const primary = this.agentRuntimeRoutes.get(agentRuntimeIdentityKey(scope.owner))
+    if (primary === undefined || primary.routeInstanceId !== baseRouteInstanceId
+      || primary.owner.source !== scope.owner.source || primary.owner.pluginId !== scope.owner.pluginId
+      || primary.routeId !== scope.routeId || primary.path !== scope.path
+      || scope.routeInstanceId === baseRouteInstanceId) {
+      throw new Error('Playground scenario Agent Session route does not match the active Room route')
+    }
+    if (this.playgroundScenarioAgentRuntimeRoutes.has(scope.routeInstanceId)) {
+      throw new Error('Playground scenario Agent Session route instance is already active')
+    }
+    const record = Object.freeze({
+      route: Object.freeze({ ...scope, owner: Object.freeze({ ...scope.owner }), params: Object.freeze({ ...scope.params }) }),
+      baseRouteInstanceId,
+    })
+    this.playgroundScenarioAgentRuntimeRoutes.set(scope.routeInstanceId, record)
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      if (this.playgroundScenarioAgentRuntimeRoutes.get(scope.routeInstanceId) !== record) return
+      this.playgroundScenarioAgentRuntimeRoutes.delete(scope.routeInstanceId)
+      this.fenceAgentRuntimeRouteInstance(scope.routeInstanceId, 'route-replaced')
+    }
   }
 
   async seedAgentRuntimePolicies(
@@ -1284,8 +1341,12 @@ export class PermissionBroker {
         && (declaredScope === undefined || (Array.isArray(declaredScope) && declaredScope.includes(input.sessionId)))
     }
     if (Array.isArray(declaredScope)) return declaredScope.length === 1 && declaredScope[0] === input.sessionId
-    const route = this.agentRuntimeRoutes.get(agentRuntimeIdentityKey({ source: registration.identity.source, pluginId: registration.identity.id }))
     const source = input.scopeSource
+    const route = this.agentRuntimeRouteValues().find(candidate => (
+      candidate.owner.source === registration.identity.source
+      && candidate.owner.pluginId === registration.identity.id
+      && candidate.routeInstanceId === source.routeInstanceId
+    ))
     return route !== undefined
       && route.routeInstanceId === source.routeInstanceId
       && route.routeId === source.routeId
@@ -1335,6 +1396,13 @@ export class PermissionBroker {
     code: AgentRuntimePermissionFence['code'],
     registrationToken?: object,
   ): void {
+    if (code === 'plugin-generation-replaced' && identity !== undefined) {
+      for (const [routeInstanceId, record] of this.playgroundScenarioAgentRuntimeRoutes) {
+        if (record.route.owner.source === identity.source && record.route.owner.pluginId === identity.id) {
+          this.playgroundScenarioAgentRuntimeRoutes.delete(routeInstanceId)
+        }
+      }
+    }
     for (const pending of this.pendingAgentRuntimePrompts) {
       if (identity !== undefined && (pending.identity.source !== identity.source || pending.identity.id !== identity.id)) continue
       if (registrationToken !== undefined && pending.registrationToken !== registrationToken) continue
@@ -1348,6 +1416,32 @@ export class PermissionBroker {
       for (const listener of this.agentRuntimeFenceListeners) {
         try { listener(fence) } catch { /* fences are authoritative; observers are isolated */ }
       }
+    }
+  }
+
+  private agentRuntimeRouteValues(): readonly AgentRuntimeRouteScope[] {
+    return [
+      ...this.agentRuntimeRoutes.values(),
+      ...[...this.playgroundScenarioAgentRuntimeRoutes.values()].map(record => record.route),
+    ]
+  }
+
+  private fenceAgentRuntimeRouteInstance(routeInstanceId: string, code: AgentRuntimePermissionFence['code']): void {
+    for (const [leaseId, lease] of this.agentRuntimeLeases) {
+      if (lease.routeInstanceId !== routeInstanceId) continue
+      this.agentRuntimeLeases.delete(leaseId)
+      const fence = Object.freeze({ identity: lease.identity, sessionId: lease.lease.sessionId, code })
+      for (const listener of this.agentRuntimeFenceListeners) {
+        try { listener(fence) } catch { /* fences are authoritative; observers are isolated */ }
+      }
+    }
+  }
+
+  private clearPlaygroundScenarioAgentRuntimeRoutes(baseRouteInstanceId: string): void {
+    for (const [routeInstanceId, record] of this.playgroundScenarioAgentRuntimeRoutes) {
+      if (record.baseRouteInstanceId !== baseRouteInstanceId) continue
+      this.playgroundScenarioAgentRuntimeRoutes.delete(routeInstanceId)
+      this.fenceAgentRuntimeRouteInstance(routeInstanceId, 'route-replaced')
     }
   }
 
@@ -3576,6 +3670,7 @@ export class PermissionBroker {
     this.hostDomPromptPlans.clear()
     this.hostDomPolicyRevisions.clear()
     this.agentRuntimeRoutes.clear()
+    this.playgroundScenarioAgentRuntimeRoutes.clear()
     this.agentRuntimeLeases.clear()
     this.agentRuntimeFenceListeners.clear()
     this.pendingDomReviews.clear()

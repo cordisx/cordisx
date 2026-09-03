@@ -53,6 +53,7 @@ import {
 } from './agent-session-runtime.js'
 import { CodexDesktopAgentSessionTransport, UnavailableAgentSessionTransport } from './codex-desktop-agent-session-transport.js'
 import { DeterministicAgentSessionTransport } from './deterministic-agent-session-transport.js'
+import { PlaygroundScenarioSessionScopeAuthority } from './playground-scenario-session-scope.js'
 import { projectPlaygroundAgentSessions } from './playground-agent-session-projection.js'
 import { AgentRouteSessionScopeAuthority, type AgentRuntimePermissionDeclaration } from './agent-route-session-scope.js'
 import {
@@ -92,6 +93,7 @@ import {
   normalizePluginManifest,
   type PlatformPermissionSnapshot,
   type AgentRuntimeConnection,
+  type AgentRuntimeRouteScope,
 } from './platform.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE, CordisXSlotService } from './service.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
@@ -843,13 +845,6 @@ async function start(
   const recoveredPlaygroundSessions = playgroundAgentSessionPersistence === undefined
     ? []
     : await playgroundAgentSessionPersistence.load()
-  const agentSessionTransport = metadata.hostKind === 'playground'
-    ? new DeterministicAgentSessionTransport({
-        recoveredSessions: recoveredPlaygroundSessions,
-        ...(metadata.playgroundSessionScenarios === undefined ? {} : { scenarioCatalog: metadata.playgroundSessionScenarios }),
-        ...(playgroundRoomSimulationBridgeRegistry === undefined ? {} : { roomBridge: playgroundRoomSimulationBridgeRegistry.client }),
-      })
-    : desktopAgentSessionTransport ?? new UnavailableAgentSessionTransport()
   const agentRuntimeConnection: AgentRuntimeConnection = Object.freeze({
     connectionId: metadata.hostKind === 'playground'
       ? 'development-host-transport'
@@ -862,16 +857,40 @@ async function start(
   const developmentAgentRuntimeAuthorization = metadata.hostKind === 'playground'
     ? broker.createDevelopmentAgentRuntimeAuthorizationAuthority()
     : undefined
+  const playgroundScenarioAgentRuntimeRoute = metadata.hostKind === 'playground'
+    && metadata.playgroundSessionScenarios?.enabled === true
+    ? broker.createPlaygroundScenarioAgentRuntimeRouteAuthority()
+    : undefined
+  let scenarioSessionOwner = (_sessionId: string): import('@cordisx/protocol/sessions/v1').PluginOwnerIdentity | undefined => undefined
+  let scenarioSessionScopeAuthority: PlaygroundScenarioSessionScopeAuthority | undefined
+  let activeAgentRuntimeRouteInstance: string | undefined
+  let reconcilingAgentRuntimeRoute = false
+  let agentRuntimeRouteDisposed = false
+  const actualAgentRuntimeRoute = (): AgentRuntimeRouteScope | undefined => {
+    const snapshot = routeHistory.snapshot()
+    const entry = snapshot.entry
+    const controller = entry === undefined ? undefined : controllers.find(item => `${item.item.source}:${item.item.id}` === entry.owner)
+    const route = entry === undefined ? undefined : routeService?.snapshot().routes.find(item => item.qualifiedId === entry.routeId)
+    const sessionId = entry?.params.sessionId
+    if (entry === undefined || controller === undefined || route === undefined || typeof sessionId !== 'string' || sessionId === '*') return undefined
+    return Object.freeze({
+      kind: 'host-route' as const, active: true as const,
+      owner: Object.freeze({ source: controller.item.source, pluginId: controller.item.id }),
+      routeId: route.id, routeInstanceId: `${entry.outlet}:${snapshot.key ?? 'unkeyed'}`,
+      path: route.definition.path, params: Object.freeze({ sessionId }),
+    })
+  }
+  const effectiveAgentRuntimeRoute = (): AgentRuntimeRouteScope | undefined => (
+    scenarioSessionScopeAuthority?.effectiveRoute() ?? actualAgentRuntimeRoute()
+  )
   const agentRouteScopes = new AgentRouteSessionScopeAuthority({
     activeRoute: () => {
-      const snapshot = routeHistory.snapshot()
-      const entry = snapshot.entry
-      const route = entry === undefined ? undefined : routeService?.snapshot().routes.find(item => item.qualifiedId === entry.routeId)
-      return entry === undefined ? undefined : {
-        owner: entry.owner,
-        routeId: route?.id ?? entry.routeId,
-        instanceId: `${entry.outlet}:${snapshot.key ?? 'unkeyed'}`,
-        params: entry.params,
+      const route = effectiveAgentRuntimeRoute()
+      return route === undefined ? undefined : {
+        owner: `${route.owner.source}:${route.owner.pluginId}`,
+        routeId: route.routeId,
+        instanceId: route.routeInstanceId,
+        params: route.params,
       }
     },
     routes: owner => (routeService?.snapshot().routes ?? [])
@@ -898,6 +917,49 @@ async function start(
     },
     connectionGeneration: () => agentRuntimeConnection.generation,
   })
+  const reconcileAgentRuntimeRoute = (): void => {
+    if (agentRuntimeRouteDisposed || reconcilingAgentRuntimeRoute) return
+    reconcilingAgentRuntimeRoute = true
+    try {
+      scenarioSessionScopeAuthority?.reconcileVisibleRoute()
+      const route = actualAgentRuntimeRoute()
+      if (route === undefined) {
+        if (activeAgentRuntimeRouteInstance !== undefined) broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
+        activeAgentRuntimeRouteInstance = undefined
+        agentRouteScopes.reconcileRoutes()
+        return
+      }
+      if (activeAgentRuntimeRouteInstance !== undefined && activeAgentRuntimeRouteInstance !== route.routeInstanceId) {
+        broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
+      }
+      broker.replaceAgentRuntimeRouteScope(route)
+      activeAgentRuntimeRouteInstance = route.routeInstanceId
+      if (scenarioSessionScopeAuthority?.active() !== true) agentRouteScopes.reconcileRoutes()
+    } finally {
+      reconcilingAgentRuntimeRoute = false
+    }
+  }
+  if (metadata.hostKind === 'playground' && metadata.playgroundSessionScenarios?.enabled === true) {
+    scenarioSessionScopeAuthority = new PlaygroundScenarioSessionScopeAuthority({
+      hostGeneration: generation,
+      currentRoute: actualAgentRuntimeRoute,
+      ownerForSession: sessionId => scenarioSessionOwner(sessionId),
+      authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
+      mountRoute: (baseRouteInstanceId, route) => {
+        if (playgroundScenarioAgentRuntimeRoute === undefined) throw new Error('Playground scenario route authority is unavailable')
+        return broker.activatePlaygroundScenarioAgentRuntimeRoute(playgroundScenarioAgentRuntimeRoute, baseRouteInstanceId, route)
+      },
+      changed: active => { if (!active) agentRouteScopes.reconcileRoutes() },
+    })
+  }
+  const agentSessionTransport = metadata.hostKind === 'playground'
+    ? new DeterministicAgentSessionTransport({
+        recoveredSessions: recoveredPlaygroundSessions,
+        ...(metadata.playgroundSessionScenarios === undefined ? {} : { scenarioCatalog: metadata.playgroundSessionScenarios }),
+        ...(playgroundRoomSimulationBridgeRegistry === undefined ? {} : { roomBridge: playgroundRoomSimulationBridgeRegistry.client }),
+        ...(scenarioSessionScopeAuthority === undefined ? {} : { scenarioSessionScope: scenarioSessionScopeAuthority.client }),
+      })
+    : desktopAgentSessionTransport ?? new UnavailableAgentSessionTransport()
   const agentSessionRuntime = new CordisXAgentSessionRuntime({
     driver: agentSessionTransport,
     authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
@@ -906,40 +968,20 @@ async function start(
       initialSessions: recoveredPlaygroundSessions,
     }),
   })
+  scenarioSessionOwner = sessionId => agentSessionRuntime.ownerForSession(sessionId)
   const disposeAgentRouteFences = agentRouteScopes.subscribe((owner, sessionId, code) => {
+    scenarioSessionScopeAuthority?.fenceSession(sessionId, code)
     agentSessionRuntime.fenceSession(sessionId, code)
     if (code !== 'route-replaced') agentSessionRuntime.fenceOwner(owner, code)
   })
   const disposeAgentPermissionFences = broker.subscribeAgentRuntimePermissionFences(fence => {
     const owner = `${fence.identity.source}:${fence.identity.id}`
+    scenarioSessionScopeAuthority?.fenceSession(fence.sessionId, fence.code)
     if (fence.code === 'route-replaced') agentRouteScopes.reconcileRoutes()
     else agentRouteScopes.revoke(owner, fence.code)
     agentSessionRuntime.fenceSession(fence.sessionId, fence.code)
     if (fence.code !== 'route-replaced') agentSessionRuntime.fenceOwner(owner, fence.code)
   })
-  let activeAgentRuntimeRouteInstance: string | undefined
-  const reconcileAgentRuntimeRoute = (): void => {
-    const snapshot = routeHistory.snapshot()
-    const entry = snapshot.entry
-    const controller = entry === undefined ? undefined : controllers.find(item => `${item.item.source}:${item.item.id}` === entry.owner)
-    const route = entry === undefined ? undefined : routeService?.snapshot().routes.find(item => item.qualifiedId === entry.routeId)
-    const sessionId = entry?.params.sessionId
-    if (entry === undefined || controller === undefined || route === undefined || typeof sessionId !== 'string' || sessionId === '*') {
-      if (activeAgentRuntimeRouteInstance !== undefined) broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
-      activeAgentRuntimeRouteInstance = undefined
-      agentRouteScopes.reconcileRoutes()
-      return
-    }
-    const routeInstanceId = `${entry.outlet}:${snapshot.key ?? 'unkeyed'}`
-    if (activeAgentRuntimeRouteInstance !== undefined && activeAgentRuntimeRouteInstance !== routeInstanceId) broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
-    broker.replaceAgentRuntimeRouteScope({
-      kind: 'host-route', active: true,
-      owner: { source: controller.item.source, pluginId: controller.item.id },
-      routeId: route.id, routeInstanceId, path: route.definition.path, params: { sessionId },
-    })
-    activeAgentRuntimeRouteInstance = routeInstanceId
-    agentRouteScopes.reconcileRoutes()
-  }
   const disposeAgentRouteHistory = routeHistory.subscribe(reconcileAgentRuntimeRoute)
   // Host-owned only: no plugin or renderer global receives this broker/adapter.
   const connectorBroker = new CordisXConnectorBroker()
@@ -2757,6 +2799,8 @@ async function start(
   const dispose = async (): Promise<void> => {
     if (disposed) return
     disposed = true
+    agentRuntimeRouteDisposed = true
+    scenarioSessionScopeAuthority?.dispose()
     if (activeAgentRuntimeRouteInstance !== undefined) broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
     activeAgentRuntimeRouteInstance = undefined
     broker.clearAgentRuntimeConnection()

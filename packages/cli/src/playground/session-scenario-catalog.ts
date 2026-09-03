@@ -41,6 +41,11 @@ export type PlaygroundSessionScenarioStep =
     readonly targetAgentId: string
     readonly task: string
   })
+  | {
+    /** Host resolves this actor to the exact Session admitted by a prior delegation. */
+    readonly type: 'activate-session-scope'
+    readonly actor: PlaygroundSessionScenarioActor
+  }
   | (PlaygroundSessionScenarioStepBase & {
     readonly type: 'followup'
     readonly text: string
@@ -201,6 +206,11 @@ function parseSteps(value: unknown, label: string, budget: { count: number }, de
         type, ...withActor, as: alias, memberId: handle(item.memberId, `${stepLabel}.memberId`),
         targetAgentId: handle(item.targetAgentId, `${stepLabel}.targetAgentId`), task: boundedString(item.task, `${stepLabel}.task`),
       })
+    }
+    if (type === 'activate-session-scope') {
+      exactKeys(item, ['type', 'actor'], stepLabel)
+      if (item.actor === undefined) throw new Error(`${stepLabel}.actor is required`)
+      return Object.freeze({ type, actor: actor(item.actor, `${stepLabel}.actor`) })
     }
     if (type === 'followup') {
       exactKeys(item, ['type', 'actor', 'text'], stepLabel)

@@ -445,6 +445,12 @@ export class CordisXAgentSessionRuntime {
     return selected === undefined ? undefined : presentationForDefinition(selected.definition)
   }
 
+  /** Host-only exact owner lookup for Playground scenario scope activation. */
+  ownerForSession(sessionId: string): PluginOwnerIdentity | undefined {
+    const record = this.agents.get(sessionId)
+    return record === undefined || !this.current(record) ? undefined : Object.freeze(clone(record.owner))
+  }
+
   /** Host-only projection; SessionEvent remains the sole durable execution fact. */
   playgroundProjection(): readonly CordisXAgentSessionProjection[] {
     return Object.freeze([...this.sessions.values()].map(session => {
