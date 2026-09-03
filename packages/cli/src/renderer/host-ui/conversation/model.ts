@@ -185,6 +185,12 @@ function assertOpaque(value: string, label: string): void {
   if (!/^[A-Za-z0-9._~-]{1,512}$/u.test(value)) throw new Error(`${label} must be an opaque identifier`)
 }
 
+function assertDefinitionRevision(value: string, label: string): void {
+  if (!/^[A-Za-z0-9._~-]{1,512}$/u.test(value) && !/^sha256:[a-f0-9]{64}$/u.test(value)) {
+    throw new Error(`${label} must be an opaque definition revision`)
+  }
+}
+
 function assertAgentLoopHandle(value: string, label: string): void {
   if (typeof value !== 'string' || [...value].length < 1 || [...value].length > 512) {
     throw new Error(`${label} must be an AgentLoop opaque handle`)
@@ -253,7 +259,7 @@ function assertSelection(selection: AgentConversationSelection): void {
     if (participant.agentIdentity !== undefined) {
       if (participant.role !== 'agent') throw new Error(`selection.participants[${index}].agentIdentity requires agent role`)
       assertOpaque(participant.agentIdentity.agentId, `selection.participants[${index}].agentIdentity.agentId`)
-      assertOpaque(participant.agentIdentity.revision, `selection.participants[${index}].agentIdentity.revision`)
+      assertDefinitionRevision(participant.agentIdentity.revision, `selection.participants[${index}].agentIdentity.revision`)
     }
   }
   const activeRuns = selection.activeRuns ?? []

@@ -23,15 +23,16 @@ export function resolveHostManagerAgentDefinitionOpenRequest(
   items: readonly ManagerSettingsNavigationItemSnapshot[],
 ): HostManagerContentOpenRequest | undefined {
   if (target?.parent === undefined) return undefined
+  const parent = target.parent
   const candidates = items.filter(item => item.owner === target.owner
     && !item.disabled
-    && sameRouteReference(item.route, target.parent))
+    && sameRouteReference(item.route, parent))
   if (candidates.length !== 1) return undefined
   const candidate = candidates[0]
   if (candidate === undefined) return undefined
   return Object.freeze({
     contributionId: candidate.id,
-    root: structuredClone(target.parent),
+    root: structuredClone(parent),
     target: structuredClone(target.route),
   })
 }

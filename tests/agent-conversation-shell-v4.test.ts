@@ -64,6 +64,17 @@ describe('Session-compatible Agent conversation Shell v4', () => {
     expect(() => projectAgentConversationShellSnapshotV4('chatroom', input as never, { resolve: value => value.fallback })).toThrow(/unknown field detailsUrl/)
   })
 
+  it('accepts the formal sha256 entity revision without broadening other opaque identifiers', () => {
+    const input = structuredClone(snapshot())
+    input.selection.participants[0]!.agentIdentity!.revision = `sha256:${'a'.repeat(64)}`
+    expect(projectAgentConversationShellSnapshotV4('chatroom', input, { resolve: value => value.fallback }).selection)
+      .toMatchObject({ kind: 'room', participants: [{ agentIdentity: { revision: `sha256:${'a'.repeat(64)}` } }] })
+
+    input.selection.participants[0]!.agentIdentity!.revision = 'sha256:not-a-digest'
+    expect(() => projectAgentConversationShellSnapshotV4('chatroom', input, { resolve: value => value.fallback }))
+      .toThrow(/opaque definition revision/)
+  })
+
   it('navigates only exact Host-issued Desktop and deterministic detail refs', async () => {
     const host: string[] = []
     const external: string[] = []
