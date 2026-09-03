@@ -97,7 +97,7 @@ export interface PlaygroundMockTaskTrace {
   }
   readonly events: readonly {
     readonly sequence: number
-    readonly type: 'task.created' | 'task.bound' | 'input.accepted' | 'execution.started' | 'approval.required' | 'execution.completed' | 'execution.failed' | 'task.closed' | 'semantic.message' | 'session.event'
+    readonly type: 'task.created' | 'task.bound' | 'input.accepted' | 'execution.started' | 'approval.required' | 'execution.completed' | 'execution.failed' | 'task.closed' | 'semantic.message' | 'tool.call' | 'tool.result' | 'session.event'
     readonly detail: string
     /** Exact read-only fact when this row is projected from Agent/Session. */
     readonly sessionEvent?: SessionEvent

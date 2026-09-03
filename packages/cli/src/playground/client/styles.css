@@ -276,11 +276,20 @@ body:has(.pg-simulator-task-page) .pg-main-chrome-leading[data-placement="main"]
 .pg-event-bubble:focus-visible, .pg-event-system-row:focus-visible, .pg-event-inline-actions button:focus-visible, .pg-event-composer :is(textarea,input,button):focus-visible { outline: 2px solid var(--pg-accent); outline-offset: 2px; }
 .pg-event-bubble-meta { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--pg-muted); font-size: 9px; line-height: 14px; }
 .pg-event-bubble-meta > span:nth-child(2) { padding: 0 5px; border: 1px solid var(--pg-border); border-radius: 999px; }
+.pg-event-bubble-meta > [data-event-fact="semantic"] { border-color: color-mix(in srgb,var(--pg-accent) 42%,var(--pg-border)); color: var(--pg-accent); }
+.pg-event-bubble-meta > [data-event-fact="tool"] { border-color: color-mix(in srgb,var(--pg-text) 30%,var(--pg-border)); color: var(--pg-text); }
+.pg-event-bubble-meta > [data-event-fact="raw"] { color: var(--pg-subtle); }
+.pg-event-bubble-meta > [data-trace-source-label] { color: var(--pg-subtle); }
 .pg-event-timeline-item[data-trace-source="simulated"] .pg-event-bubble-meta > span:nth-child(2) { border-color: color-mix(in srgb,var(--pg-accent) 40%,var(--pg-border)); color: var(--pg-accent); }
 .pg-event-bubble-meta time { margin-inline-start: auto; }
 .pg-event-bubble > strong { overflow-wrap: anywhere; font: 650 11px/16px ui-monospace,SFMono-Regular,Menlo,monospace; }
 .pg-event-bubble-summary { overflow-wrap: anywhere; font-size: 12px; line-height: 18px; }
 .pg-event-bubble > code { margin-top: 2px; overflow: hidden; color: var(--pg-muted); font: 9px/14px ui-monospace,SFMono-Regular,Menlo,monospace; text-overflow: ellipsis; white-space: nowrap; }
+.pg-event-tool-message { width: min(76%,760px); }
+.pg-event-tool-message .pg-event-bubble { width: 100%; border: 1px solid var(--pg-border); border-radius: 12px; background: var(--pg-panel-raised); }
+.pg-event-timeline-item[data-trace-presentation="tool-use"] .pg-event-bubble { border-color: color-mix(in srgb,var(--pg-accent) 36%,var(--pg-border)); background: color-mix(in srgb,var(--pg-accent) 7%,var(--pg-panel-raised)); }
+.pg-event-timeline-item[data-trace-presentation="tool-result"] .pg-event-bubble { border-color: color-mix(in srgb,var(--pg-text) 22%,var(--pg-border)); }
+.pg-event-tool-message .pg-event-bubble:hover { background: var(--pg-hover); }
 .pg-event-system-row { appearance: none; display: inline-flex; max-width: min(760px,92%); align-items: center; justify-content: center; gap: 7px; padding: 3px 9px; border: 0; border-radius: 999px; background: transparent; color: var(--pg-muted); font-size: 10px; line-height: 15px; cursor: pointer; }
 .pg-event-system-row:hover { background: var(--pg-hover); color: var(--pg-text); }
 .pg-event-system-row > span:first-child { flex: none; font: 650 9px/15px ui-monospace,SFMono-Regular,Menlo,monospace; }
@@ -346,6 +355,11 @@ body:has(.pg-simulator-task-page) .pg-main-chrome-leading[data-placement="main"]
 .pg-event-drawer-body section { padding-top: 13px; border-top: 1px solid var(--pg-border-soft); }
 .pg-event-drawer-body h3 { margin: 0 0 8px; font-size: 11px; }
 .pg-event-drawer-body pre { max-height: none; padding: 11px; border-radius: 9px; background: var(--pg-panel-raised); }
+.pg-event-raw-details { border-top: 1px solid var(--pg-border-soft); color: var(--pg-text); }
+.pg-event-raw-details > summary { padding: 11px 2px; border-radius: 7px; color: var(--pg-muted); font-size: 11px; cursor: pointer; }
+.pg-event-raw-details > summary:hover { background: var(--pg-hover); color: var(--pg-text); }
+.pg-event-raw-details > summary:focus-visible { outline: 2px solid var(--pg-accent); outline-offset: 1px; }
+.pg-event-raw-details > section { padding-top: 11px; }
 .pg-scenario-workbench-failed { display: grid; min-height: 0; flex: 1; align-content: center; justify-items: center; gap: 7px; padding: 28px; text-align: center; }
 .pg-scenario-workbench-failed > button { min-height: 34px; margin-top: 6px; padding: 5px 12px; border: 1px solid var(--pg-border); border-radius: 8px; background: var(--pg-panel-raised); cursor: pointer; }
 .pg-visually-hidden { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; overflow: hidden !important; clip: rect(0,0,0,0) !important; white-space: nowrap !important; border: 0 !important; }
