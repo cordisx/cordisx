@@ -11,6 +11,7 @@ import {
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V2,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V4,
+  CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V5,
 } from '../contracts.js'
 import type {
   CordisXJsonScalar,
@@ -21,6 +22,7 @@ import type {
   CordisXManagerContentNavigationDeclarationV2,
   CordisXManagerContentNavigationDeclarationV3,
   CordisXManagerContentNavigationDeclarationV4,
+  CordisXManagerContentNavigationDeclarationV5,
   CordisXManagerContentRecordTitleV1,
   CordisXMessageDefinition,
   CordisXOutletName,
@@ -652,6 +654,7 @@ export interface ManagerContentDeclarationRecord {
     | CordisXManagerContentNavigationDeclarationV2
     | CordisXManagerContentNavigationDeclarationV3
     | CordisXManagerContentNavigationDeclarationV4
+    | CordisXManagerContentNavigationDeclarationV5
   readonly config?: ManagerContentConfigBindingHandle
 }
 
@@ -732,6 +735,7 @@ export class ManagerContentNavigationRegistry {
     readonly moduleGeneration: string
     readonly view?: PluginGenerationView
     readonly body: NonNullable<CordisXManagerContentNavigationDeclarationV4['body']>
+    readonly contractVersion: 1 | 2
   }) => ManagerContentConfigBindingHandle) | undefined
 
   constructor(private readonly visibility?: GenerationVisibilityCoordinator) {
@@ -749,7 +753,8 @@ export class ManagerContentNavigationRegistry {
       | CordisXManagerContentNavigationDeclarationV1
       | CordisXManagerContentNavigationDeclarationV2
       | CordisXManagerContentNavigationDeclarationV3
-      | CordisXManagerContentNavigationDeclarationV4,
+      | CordisXManagerContentNavigationDeclarationV4
+      | CordisXManagerContentNavigationDeclarationV5,
   ): () => void {
     const owner = typeof ownerOrContext === 'string' ? ownerOrContext : ownerFromContext(ownerOrContext)
     const generation: PluginGenerationEffectIdentity = typeof ownerOrContext === 'string'
@@ -759,7 +764,7 @@ export class ManagerContentNavigationRegistry {
       ? undefined
       : this.visibility?.view(ownerOrContext)
     assertKeys(declaration, declaration.schemaVersion >= 3
-      ? ['$schema', 'schemaVersion', 'id', 'route', 'parentRoute', 'header', 'subject', 'recordSummary', 'tabs', ...(declaration.schemaVersion === 4 ? ['body'] : [])]
+      ? ['$schema', 'schemaVersion', 'id', 'route', 'parentRoute', 'header', 'subject', 'recordSummary', 'tabs', ...(declaration.schemaVersion >= 4 ? ['body'] : [])]
       : ['$schema', 'schemaVersion', 'id', 'route', 'parentRoute', 'header', 'tabs'], 'manager content navigation declaration')
     const version = declaration.$schema === CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1 && declaration.schemaVersion === 1
       ? 1
@@ -769,6 +774,8 @@ export class ManagerContentNavigationRegistry {
           ? 3
           : declaration.$schema === CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V4 && declaration.schemaVersion === 4
             ? 4
+            : declaration.$schema === CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V5 && declaration.schemaVersion === 5
+              ? 5
         : undefined
     if (version === undefined) {
       throw new Error('manager content navigation declaration has an unsupported schema tuple')
@@ -806,18 +813,18 @@ export class ManagerContentNavigationRegistry {
         assertLocalizedText((tab as ManagerContentNavigationTabV2).label, 'manager content navigation tab label')
       }
     }
-    if (version >= 3) this.assertV3(declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4, candidateView)
+    if (version >= 3) this.assertV3(declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5, candidateView)
     const key = `${owner}\u0000${declaration.id}\u0000${generation.moduleGeneration ?? 'host'}`
     if (this.declarations.has(key)) throw new Error(`manager content navigation declaration ${declaration.id} is already registered`)
     let config: ManagerContentConfigBindingHandle | undefined
-    if (version === 4 && (declaration as CordisXManagerContentNavigationDeclarationV4).body !== undefined) {
-      const body = (declaration as CordisXManagerContentNavigationDeclarationV4).body!
+    if (version >= 4 && (declaration as CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5).body !== undefined) {
+      const body = (declaration as CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5).body!
       this.assertConfigBody(body)
       if (this.configFactory === undefined) throw new Error('manager content config authority is unavailable')
       const moduleGeneration = generation.moduleGeneration
       if (moduleGeneration === undefined) throw new Error('manager content config requires an exact plugin generation')
       config = this.configFactory({
-        owner, declarationId: declaration.id, moduleGeneration, body,
+        owner, declarationId: declaration.id, moduleGeneration, body, contractVersion: version === 5 ? 2 : 1,
         ...(candidateView === undefined ? {} : { view: candidateView }),
       })
     }
@@ -879,6 +886,7 @@ export class ManagerContentNavigationRegistry {
         | CordisXManagerContentNavigationDeclarationV2
         | CordisXManagerContentNavigationDeclarationV3
         | CordisXManagerContentNavigationDeclarationV4
+        | CordisXManagerContentNavigationDeclarationV5
       )[]
       readonly recordTitles: readonly CordisXManagerContentRecordTitleV1[]
     }>,
@@ -932,7 +940,7 @@ export class ManagerContentNavigationRegistry {
   resolveAgentDefinitionSubject(identity: AgentDefinitionIdentity): ManagerContentAgentDefinitionTarget | undefined {
     const matches = this.visibleDeclarations().filter(record => {
       const subject = record.declaration.schemaVersion >= 3
-        ? (record.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4).subject
+        ? (record.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5).subject
         : undefined
       return subject?.kind === 'agent-definition'
         && subject.identity.agentId === identity.agentId
@@ -940,7 +948,7 @@ export class ManagerContentNavigationRegistry {
     })
     if (matches.length !== 1) return undefined
     const match = matches[0]!
-    const subject = (match.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4).subject!
+    const subject = (match.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5).subject!
     return Object.freeze({
       owner: match.owner,
       generation: match.generation,
@@ -968,7 +976,7 @@ export class ManagerContentNavigationRegistry {
     return [...this.declarations.values()].filter(record => this.visibility?.visible(record.generation, view) ?? true)
   }
 
-  private assertV3(declaration: CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4, view?: PluginGenerationView): void {
+  private assertV3(declaration: CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5, view?: PluginGenerationView): void {
     if (declaration.subject !== undefined) {
       assertKeys(declaration.subject, ['kind', 'identity'], 'manager content navigation subject')
       if (declaration.subject.kind !== 'agent-definition') throw new Error('manager content navigation subject kind is invalid')
@@ -981,7 +989,7 @@ export class ManagerContentNavigationRegistry {
       }
       const duplicate = this.visibleDeclarations(view).find(record => {
         const subject = record.declaration.schemaVersion >= 3
-          ? (record.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4).subject
+          ? (record.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5).subject
           : undefined
         return subject?.kind === 'agent-definition'
           && subject.identity.agentId === declaration.subject!.identity.agentId
@@ -1131,8 +1139,8 @@ export class NavigationRegistry {
     ))
     const summarySources = relatedDeclarations.flatMap(candidate => (
       candidate.declaration.schemaVersion >= 3
-        && (candidate.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4).recordSummary !== undefined
-        ? [(candidate.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4).recordSummary!]
+        && (candidate.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5).recordSummary !== undefined
+        ? [(candidate.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5).recordSummary!]
         : []
     ))
     if (summarySources.length > 1 && summarySources.some(summary => !sameStructuredValue(summarySources[0], summary))) return undefined
@@ -1662,6 +1670,7 @@ export class NavigationRegistry {
               pageBody,
               managerDeclaration.config,
               () => this.i18n.getSnapshot().locale,
+              listener => this.i18n.subscribeInternal(listener),
             )
         if (typeof pageDispose === 'function') mount.pageDispose = pageDispose
         result = mount
@@ -2806,12 +2815,14 @@ export class CordisXManagerContentNavigationService extends Service implements C
   register(declaration: CordisXManagerContentNavigationDeclarationV2): Disposable<void | Promise<void>>
   register(declaration: CordisXManagerContentNavigationDeclarationV3): Disposable<void | Promise<void>>
   register(declaration: CordisXManagerContentNavigationDeclarationV4): Disposable<void | Promise<void>>
+  register(declaration: CordisXManagerContentNavigationDeclarationV5): Disposable<void | Promise<void>>
   register(
     declaration:
       | CordisXManagerContentNavigationDeclarationV1
       | CordisXManagerContentNavigationDeclarationV2
       | CordisXManagerContentNavigationDeclarationV3
-      | CordisXManagerContentNavigationDeclarationV4,
+      | CordisXManagerContentNavigationDeclarationV4
+      | CordisXManagerContentNavigationDeclarationV5,
   ): Disposable<void | Promise<void>> {
     const routes = this.ctx.routes as CordisXRouteService
     return this.ctx.effect(
@@ -2831,10 +2842,12 @@ export class CordisXManagerContentNavigationService extends Service implements C
   replaceProjection(projection: import('../contracts.js').CordisXManagerContentNavigationProjectionV1): ReturnType<CordisXManagerContentNavigation['replaceProjection']>
   replaceProjection(projection: import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV2): ReturnType<CordisXManagerContentNavigation['replaceProjection']>
   replaceProjection(projection: import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV3): ReturnType<CordisXManagerContentNavigation['replaceProjection']>
+  replaceProjection(projection: import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV4): ReturnType<CordisXManagerContentNavigation['replaceProjection']>
   replaceProjection(projection:
     | import('../contracts.js').CordisXManagerContentNavigationProjectionV1
     | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV2
-    | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV3,
+    | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV3
+    | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV4,
   ): ReturnType<CordisXManagerContentNavigation['replaceProjection']> {
     const routes = this.ctx.routes as CordisXRouteService
     return this.ctx.effect(

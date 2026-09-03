@@ -8,7 +8,10 @@ import type {
 } from '@cordisx/protocol/manager-content-navigation/v4'
 
 vi.mock('../packages/cli/src/renderer/host-ui/HostForm.js', () => ({
-  HostForm: () => <div data-host-form-fixture="true" />,
+  HostForm: ({ plugin }: { plugin: { configuration: { fields: readonly { choices?: readonly { label: string }[] }[] } } }) => <div
+    data-host-form-fixture="true"
+    data-choice-labels={plugin.configuration.fields.flatMap(field => field.choices?.map(choice => choice.label) ?? []).join('|')}
+  ><button type="button" data-host-form-draft-fixture="true" data-draft="">draft control</button></div>,
 }))
 
 import { mountManagerContentConfigForm } from '../packages/cli/src/renderer/manager-content-config-form.js'
@@ -162,6 +165,71 @@ describe('Host Manager config form mount', () => {
     })
     await new Promise(resolve => setImmediate(resolve))
     expect(unsubscribe).toHaveBeenCalledOnce()
+    dom.window.close()
+  })
+
+  it('refreshes localized choice labels in place when the active Host locale changes', async () => {
+    const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
+    Object.assign(globalThis, {
+      window: dom.window, document: dom.window.document,
+      HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, Node: dom.window.Node,
+      MutationObserver: dom.window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: false,
+    })
+    const binding = {
+      bindingId: 'cx-manager-config:locale', identity: { source: 'file:///chatroom.ts', pluginId: 'chatroom' },
+      scope: { profileId: 'default', generation: 'chatroom-g1' }, declarationId: 'settings', namespace: 'chatroom',
+    } as const
+    let locale = 'en'
+    let localeListener: (() => void) | undefined
+    const configuration = () => ({
+      namespace: 'chatroom', schemaKind: 'schemastery' as const, applies: 'live' as const,
+      writable: true, revision: 0, lastGoodRevision: 0, value: { shortcutPolicy: 'enter' }, secrets: [],
+      fields: [{
+        namespace: 'chatroom', path: ['shortcutPolicy'] as const, type: 'union', value: 'enter', disabled: false, required: false,
+        choices: locale === 'zh-CN'
+          ? [{ value: 'enter' as const, label: 'Enter 发送' }, { value: 'mod-enter' as const, label: 'Command/Ctrl+Enter 发送' }]
+          : [{ value: 'enter' as const, label: 'Enter sends' }, { value: 'mod-enter' as const, label: 'Command/Ctrl+Enter sends' }],
+      }],
+    })
+    const body: ManagerContentPluginConfigFormProjectionV1 = {
+      kind: 'plugin-config-form', binding, sequence: 0,
+      configuration: {
+        version: 2, identity: binding.identity, scope: binding.scope, namespace: 'chatroom',
+        schema: { kind: 'standard', renderable: false }, value: { shortcutPolicy: 'enter' },
+        revision: 0, lastGoodRevision: 0, applies: 'live', writable: true, secrets: [],
+      },
+      draft: { baseRevision: 0, dirty: false, value: { shortcutPolicy: 'enter' }, validation: { state: 'unvalidated' } },
+    }
+    const handle = {
+      owner: 'chatroom', declarationId: 'settings', moduleGeneration: 'chatroom-g1', contractVersion: 2 as const,
+      body: { kind: 'plugin-config-form' as const, namespace: 'chatroom' },
+      source: {
+        binding,
+        snapshot: async () => ({ status: 'available' as const, body }),
+        execute: vi.fn(),
+        subscribe: async () => ({ status: 'unavailable' as const, code: 'disposed' as const }),
+      } as unknown as ManagerContentConfigSourceV1,
+      snapshotForHost: configuration,
+      close: () => {},
+    } satisfies ManagerContentConfigBindingHandle
+    const dispose = mountManagerContentConfigForm(
+      dom.window.document.getElementById('root')!, handle, () => locale,
+      listener => { localeListener = listener; return () => { localeListener = undefined } },
+    )
+    expect(dom.window.document.querySelector('[data-host-form-fixture]')?.getAttribute('data-choice-labels')).toBe('Enter sends|Command/Ctrl+Enter sends')
+    const draft = dom.window.document.querySelector<HTMLButtonElement>('[data-host-form-draft-fixture]')!
+    draft.dataset.draft = 'unsaved-choice'
+    draft.focus()
+    locale = 'zh-CN'
+    localeListener?.()
+    await new Promise(resolve => setImmediate(resolve))
+    expect(dom.window.document.querySelector('[data-host-form-fixture]')?.getAttribute('data-choice-labels')).toBe('Enter 发送|Command/Ctrl+Enter 发送')
+    expect(dom.window.document.querySelector('[data-host-form-draft-fixture]')).toBe(draft)
+    expect(draft.dataset.draft).toBe('unsaved-choice')
+    expect(dom.window.document.activeElement).toBe(draft)
+    dispose()
+    expect(localeListener).toBeUndefined()
+    await new Promise(resolve => setImmediate(resolve))
     dom.window.close()
   })
 })

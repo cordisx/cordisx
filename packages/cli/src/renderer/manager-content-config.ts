@@ -10,6 +10,14 @@ import type {
   ManagerContentPluginConfigFormBodyV1,
   ManagerContentPluginConfigFormProjectionV1,
 } from '@cordisx/protocol/manager-content-navigation/v4'
+import type {
+  ManagerContentConfigSourceV2,
+  ManagerContentConfigSubscriptionPageV2,
+  ManagerContentConfigSubscriptionV2,
+  ManagerContentConfigUpdateV2,
+  ManagerContentPluginConfigFormProjectionV2,
+} from '@cordisx/protocol/manager-content-navigation/v5'
+import type { CordisXLocalizedText } from '../contracts.js'
 import {
   ConfigRevisionConflictError,
   type ConfigMutationOperation,
@@ -22,6 +30,7 @@ import { immutableSnapshot } from './validation.js'
 const COMMAND_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-command.v1.schema.json' as const
 const RESULT_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-result.v1.schema.json' as const
 const PAGE_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-subscription-page.v1.schema.json' as const
+const PAGE_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-subscription-page.v2.schema.json' as const
 const CLOSE_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-subscription-close.v1.schema.json' as const
 
 type SourceUnavailableCode = 'owner-unavailable' | 'stale-generation' | 'binding-replaced' | 'disposed'
@@ -59,12 +68,18 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-class AsyncPageQueue implements AsyncIterable<ManagerContentConfigSubscriptionPageV1> {
-  private readonly pages: ManagerContentConfigSubscriptionPageV1[] = []
-  private readonly waiters: ((result: IteratorResult<ManagerContentConfigSubscriptionPageV1>) => void)[] = []
+type ConfigSource = ManagerContentConfigSourceV1 | ManagerContentConfigSourceV2
+type ConfigProjection = ManagerContentPluginConfigFormProjectionV1 | ManagerContentPluginConfigFormProjectionV2
+type ConfigUpdate = ManagerContentConfigUpdateV1 | ManagerContentConfigUpdateV2
+type ConfigPage = ManagerContentConfigSubscriptionPageV1 | ManagerContentConfigSubscriptionPageV2
+type ConfigSubscription = ManagerContentConfigSubscriptionV1 | ManagerContentConfigSubscriptionV2
+
+class AsyncPageQueue implements AsyncIterable<ConfigPage> {
+  private readonly pages: ConfigPage[] = []
+  private readonly waiters: ((result: IteratorResult<ConfigPage>) => void)[] = []
   private ended = false
 
-  push(page: ManagerContentConfigSubscriptionPageV1): void {
+  push(page: ConfigPage): void {
     if (this.ended) return
     const waiter = this.waiters.shift()
     if (waiter === undefined) this.pages.push(page)
@@ -77,7 +92,7 @@ class AsyncPageQueue implements AsyncIterable<ManagerContentConfigSubscriptionPa
     for (const waiter of this.waiters.splice(0)) waiter({ done: true, value: undefined })
   }
 
-  [Symbol.asyncIterator](): AsyncIterator<ManagerContentConfigSubscriptionPageV1> {
+  [Symbol.asyncIterator](): AsyncIterator<ConfigPage> {
     return {
       next: () => {
         const page = this.pages.shift()
@@ -90,7 +105,7 @@ class AsyncPageQueue implements AsyncIterable<ManagerContentConfigSubscriptionPa
 }
 
 interface SubscriptionRecord {
-  readonly descriptor: ManagerContentConfigSubscriptionV1['descriptor']
+  readonly descriptor: ConfigSubscription['descriptor']
   readonly queue: AsyncPageQueue
   readonly closed: Promise<ManagerContentConfigSubscriptionClosedV1>
   readonly resolveClosed: (value: ManagerContentConfigSubscriptionClosedV1) => void
@@ -102,8 +117,9 @@ export interface ManagerContentConfigBindingHandle {
   readonly owner: string
   readonly declarationId: string
   readonly moduleGeneration: string
+  readonly contractVersion: 1 | 2
   readonly body: ManagerContentPluginConfigFormBodyV1
-  readonly source: ManagerContentConfigSourceV1
+  readonly source: ConfigSource
   snapshotForHost(): ManagerPluginConfigSnapshot
   close(reason: ManagerContentConfigDisposeReason): void
 }
@@ -113,6 +129,7 @@ export interface ManagerContentConfigAuthorityOptions {
   readonly profileId: string
   readonly runtimeGeneration: string
   readonly locale: () => string
+  readonly resolveText?: (owner: string, message: CordisXLocalizedText, site: string) => string
   readonly update: (
     owner: string,
     expectedRevision: number,
@@ -131,6 +148,7 @@ export class ManagerContentConfigAuthority {
     readonly owner: string
     readonly declarationId: string
     readonly moduleGeneration: string
+    readonly contractVersion?: 1 | 2
     readonly view?: PluginGenerationView
     readonly body: ManagerContentPluginConfigFormBodyV1
   }): ManagerContentConfigBindingHandle {
@@ -152,15 +170,16 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
   readonly owner: string
   readonly declarationId: string
   readonly moduleGeneration: string
+  readonly contractVersion: 1 | 2
   readonly body: ManagerContentPluginConfigFormBodyV1
   readonly binding: ManagerContentConfigBindingV1
-  readonly source: ManagerContentConfigSourceV1
+  readonly source: ConfigSource
   private readonly subscriptions = new Set<SubscriptionRecord>()
   private readonly commands = new Map<string, { readonly command: ManagerContentConfigCommandV1; readonly result: ManagerContentConfigResultV1 }>()
   private readonly materializations = new Set<string>()
   private readonly unsubscribeConfiguration: () => void
   private sequence = 0
-  private lastBody: ManagerContentPluginConfigFormProjectionV1
+  private lastBody: ConfigProjection
   private unavailable: SourceUnavailableCode | undefined
   private operation = Promise.resolve()
   private readonly view: PluginGenerationView | undefined
@@ -171,6 +190,7 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
       readonly owner: string
       readonly declarationId: string
       readonly moduleGeneration: string
+      readonly contractVersion?: 1 | 2
       readonly view?: PluginGenerationView
       readonly body: ManagerContentPluginConfigFormBodyV1
     },
@@ -179,6 +199,7 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
     this.owner = input.owner
     this.declarationId = input.declarationId
     this.moduleGeneration = input.moduleGeneration
+    this.contractVersion = input.contractVersion ?? 1
     this.view = input.view
     this.body = immutable(input.body)
     const descriptor = this.descriptor()
@@ -207,12 +228,19 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
       snapshot: () => Promise.resolve(this.snapshot()),
       execute: (command: ManagerContentConfigCommandV1) => this.enqueue(() => this.executeNow(command)),
       subscribe: (afterSequence: number) => Promise.resolve(this.subscribeNow(afterSequence)),
-    }) as unknown as ManagerContentConfigSourceV1
+    }) as unknown as ConfigSource
   }
 
   snapshotForHost(): ManagerPluginConfigSnapshot {
     this.assertAvailable()
-    return this.options.configuration.descriptor(this.owner, this.options.locale(), this.view)
+    return this.contractVersion === 2
+      ? this.options.configuration.managerContentHostDescriptor(
+          this.owner,
+          this.options.locale(),
+          (message, site) => this.options.resolveText?.(this.owner, message, site) ?? message.fallback ?? message.key,
+          this.view,
+        )
+      : this.options.configuration.descriptor(this.owner, this.options.locale(), this.view)
   }
 
   close(reason: ManagerContentConfigDisposeReason): void {
@@ -222,7 +250,7 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
         : 'disposed'
     this.unsubscribeConfiguration()
     this.sequence += 1
-    const update = immutable<ManagerContentConfigUpdateV1>({ kind: 'disposed', sequence: this.sequence, reason })
+    const update = immutable<ConfigUpdate>({ kind: 'disposed', sequence: this.sequence, reason })
     for (const subscription of [...this.subscriptions]) {
       this.push(subscription, update, 'live')
       this.settle(subscription, reason)
@@ -244,12 +272,13 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
       this.options.runtimeGeneration,
       this.options.locale(),
       this.view,
+      this.contractVersion,
     )
   }
 
-  private project(descriptor = this.descriptor()): ManagerContentPluginConfigFormProjectionV1 {
-    return immutable({
-      kind: 'plugin-config-form',
+  private project(descriptor = this.descriptor()): ConfigProjection {
+    const projection = {
+      kind: 'plugin-config-form' as const,
       binding: this.binding ?? ({
         bindingId: 'cx-manager-config:pending',
         identity: descriptor.identity,
@@ -263,9 +292,12 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
         baseRevision: descriptor.revision,
         dirty: false,
         value: descriptor.value,
-        validation: { state: 'unvalidated' },
+        validation: { state: 'unvalidated' as const },
       },
-    })
+    }
+    return this.contractVersion === 2
+      ? immutable({ ...projection, configuration: descriptor as ManagerContentPluginConfigFormProjectionV2['configuration'] })
+      : immutable({ ...projection, configuration: descriptor as ManagerContentPluginConfigFormProjectionV1['configuration'] })
   }
 
   private availability(): SourceUnavailableCode | undefined {
@@ -446,7 +478,7 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
 
   private configurationChanged(): void {
     if (this.unavailable !== undefined) return
-    let next: ManagerContentPluginConfigFormProjectionV1
+    let next: ConfigProjection
     try {
       const descriptor = this.descriptor()
       if (descriptor.scope.generation !== this.moduleGeneration) {
@@ -462,7 +494,9 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
     this.sequence += 1
     next = immutable({ ...next, sequence: this.sequence })
     this.lastBody = next
-    const update = immutable<ManagerContentConfigUpdateV1>({ kind: 'snapshot-replaced', sequence: this.sequence, body: next })
+    const update: ConfigUpdate = this.contractVersion === 2
+      ? immutable({ kind: 'snapshot-replaced', sequence: this.sequence, body: next as ManagerContentPluginConfigFormProjectionV2 })
+      : immutable({ kind: 'snapshot-replaced', sequence: this.sequence, body: next as ManagerContentPluginConfigFormProjectionV1 })
     for (const subscription of this.subscriptions) this.push(subscription, update, 'live')
   }
 
@@ -489,26 +523,42 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
     }
     this.subscriptions.add(record)
     if (afterSequence < this.sequence) {
-      this.push(record, immutable({ kind: 'snapshot-replaced', sequence: this.sequence, body: this.lastBody }), 'replay')
+      const update: ConfigUpdate = this.contractVersion === 2
+        ? immutable({ kind: 'snapshot-replaced', sequence: this.sequence, body: this.lastBody as ManagerContentPluginConfigFormProjectionV2 })
+        : immutable({ kind: 'snapshot-replaced', sequence: this.sequence, body: this.lastBody as ManagerContentPluginConfigFormProjectionV1 })
+      this.push(record, update, 'replay')
     }
     const subscription = Object.freeze({
       descriptor,
       pages: queue,
       closed: record.closed,
       unsubscribe: () => Promise.resolve(this.settle(record, 'unsubscribed')),
-    }) as unknown as ManagerContentConfigSubscriptionV1
+    }) as unknown as ConfigSubscription
     return Object.freeze({ status: 'subscribed' as const, subscription })
   }
 
-  private push(record: SubscriptionRecord, update: ManagerContentConfigUpdateV1, phase: 'replay' | 'live'): void {
+  private push(record: SubscriptionRecord, update: ConfigUpdate, phase: 'replay' | 'live'): void {
     if (record.settled || update.sequence <= record.descriptor.afterSequence) return
+    if (this.contractVersion === 2) {
+      record.queue.push(immutable({
+        $schema: PAGE_SCHEMA_V2,
+        contract: 'cordisx.manager-content-config-subscription-page/v2',
+        schemaVersion: 2,
+        subscription: record.descriptor,
+        phase,
+        updates: [update as ManagerContentConfigUpdateV2],
+        nextAfterSequence: update.sequence,
+        hasMore: false,
+      }))
+      return
+    }
     record.queue.push(immutable({
       $schema: PAGE_SCHEMA,
       contract: 'cordisx.manager-content-config-subscription-page/v1',
       schemaVersion: 1,
       subscription: record.descriptor,
       phase,
-      updates: [update],
+      updates: [update as ManagerContentConfigUpdateV1],
       nextAfterSequence: update.sequence,
       hasMore: false,
     }))
