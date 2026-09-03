@@ -9,6 +9,7 @@ import {
   type RendererCompositionSource,
 } from '../launcher/bundle.js'
 import { loadConfig, type CordisXConfig } from '../launcher/config.js'
+import { buildLocalDevelopmentPlugin } from '../launcher/development.js'
 import {
   configBridgeError,
   createConfigBridgeHandler,
@@ -31,7 +32,10 @@ import {
   MAX_PROVIDER_REQUESTS,
   parseProviderBindingRequest,
 } from '../launcher/provider-rpc.js'
-import { normalizePersistedPermissionPolicyRecord } from '../permission-persistence.js'
+import {
+  normalizePersistedPermissionPolicyRecord,
+  type CordisXPersistedPermissionPolicyRecord,
+} from '../permission-persistence.js'
 import { resolveLocalCodexProviderConfig } from '../providers/config.js'
 import type { CodexProviderConfig } from '../providers/contracts.js'
 import { ProviderFleet } from '../providers/fleet.js'
@@ -55,6 +59,8 @@ interface PlaygroundGeneration {
   readonly generation: string
   readonly token: string
   readonly config: CordisXConfig
+  readonly localDevelopmentWatchFiles: readonly string[]
+  readonly permissionPolicies: readonly CordisXPersistedPermissionPolicyRecord[]
   readonly bridge: ConfigBridgeHandler
   readonly documents: OwnerDocumentBridgeHandler
   readonly documentSecret: string
@@ -183,6 +189,12 @@ export async function createPlaygroundSession(
   const serviceConfigPath = path.join(homeDir, 'config', 'playground.home.json')
   const rootDir = path.dirname(sourcePath)
   const { playground: _fixtureMetadata, ...compositionConfig } = source
+  const explicitlyConfiguredLocalEntries = new Set(source.plugins.flatMap((item: unknown) => {
+    const plugin = item as Record<string, unknown>
+    return typeof plugin.entry === 'string' && !plugin.entry.startsWith('cordisx:')
+      ? [path.resolve(rootDir, plugin.entry)]
+      : []
+  }))
   const materialized = {
     ...compositionConfig,
     plugins: source.plugins.map((item: unknown) => {
@@ -229,7 +241,44 @@ export async function createPlaygroundSession(
     const token = randomBytes(32).toString('hex')
     const serviceConfigToken = randomBytes(32).toString('hex')
     const credentialToken = randomBytes(32).toString('hex')
-    const config = await loadConfig(configPath, { profileId: 'playground' })
+    const loadedConfig = await loadConfig(configPath, { profileId: 'playground' })
+    const localDevelopmentBuilds = await Promise.all(loadedConfig.plugins.map(async plugin => {
+      if (!plugin.enabled || !explicitlyConfiguredLocalEntries.has(plugin.entry)) return undefined
+      return { plugin, build: await buildLocalDevelopmentPlugin(plugin.entry) }
+    }))
+    const successfulAt = new Date().toISOString()
+    const localDevelopmentByPlugin = new Map(localDevelopmentBuilds.flatMap(item => item === undefined ? [] : [[item.plugin.id, item] as const]))
+    const config: CordisXConfig = {
+      ...loadedConfig,
+      plugins: loadedConfig.plugins.map(plugin => {
+        const local = localDevelopmentByPlugin.get(plugin.id)
+        if (local === undefined) return plugin
+        const identityPrefix = local.build.identitySource.slice(0, local.build.identitySource.lastIndexOf('/') + 1)
+        return {
+          ...plugin,
+          source: `${identityPrefix}${plugin.id}.js`,
+          moduleFactorySource: local.build.moduleFactorySource,
+          development: {
+            origin: 'local-dev', pluginId: plugin.id, sourcePath: plugin.entry,
+            state: 'ready', lastSuccessfulAt: successfulAt,
+          },
+          ...(local.build.readme === undefined ? {} : { readme: local.build.readme }),
+        }
+      }),
+    }
+    const localDevelopmentWatchFiles = localDevelopmentBuilds.flatMap(item => item?.build.watchFiles ?? [])
+    const developmentIdentityByConfiguredIdentity = new Map(config.plugins.flatMap(plugin => {
+      if (plugin.development === undefined || plugin.source === undefined) return []
+      return [[`${pathToFileURL(plugin.entry).href}\u0000${plugin.id}`, plugin.source] as const]
+    }))
+    const permissionPolicies = previewPermissionPolicies.map(record => {
+      const source = developmentIdentityByConfiguredIdentity.get(`${record.key.identity.source}\u0000${record.key.identity.pluginId}`)
+      if (source === undefined) return record
+      return normalizePersistedPermissionPolicyRecord({
+        ...record,
+        key: { ...record.key, identity: { ...record.key.identity, source } },
+      }, 'playground remapped local-development permission policy')
+    })
     const mockAgentLoop = config.codex.agentLoopBackend === 'mock'
     const localProvider = mockAgentLoop ? undefined : resolveLocalCodexProviderConfig(config.codex, process.env)
     // The deterministic Simulator is a complete Playground AgentLoop backend.
@@ -296,7 +345,7 @@ export async function createPlaygroundSession(
       writable: channelDescriptor.writable,
     })
     const next: PlaygroundGeneration = {
-      generation, token, config, bridge, documents, documentSecret,
+      generation, token, config, localDevelopmentWatchFiles, permissionPolicies, bridge, documents, documentSecret,
       ...(channelConfig === undefined ? {} : { channelConfig }),
       ...(serviceConfig === undefined ? {} : { serviceConfig }),
       ...(credential === undefined ? {} : { credential }),
@@ -321,7 +370,7 @@ export async function createPlaygroundSession(
     ...(generation.channelManager === undefined ? {} : { channelManager: generation.channelManager }),
     ...(generation.providerToken === undefined ? {} : { providerBridgeToken: generation.providerToken }),
     profileId: 'playground',
-    permission: { profileId: 'playground', policies: previewPermissionPolicies },
+    permission: { profileId: 'playground', policies: generation.permissionPolicies },
   })
 
   return {
@@ -342,7 +391,11 @@ export async function createPlaygroundSession(
         rendererOptions(generation),
         { runtimeImport, awaitBoot: true },
       )
-      return { ...composition, generation: generation.generation }
+      return {
+        ...composition,
+        watchFiles: [...new Set([...composition.watchFiles, ...generation.localDevelopmentWatchFiles])],
+        generation: generation.generation,
+      }
     },
     async handleConfigRequest(raw) {
       if (active === undefined) throw new Error('Playground has no active generation')

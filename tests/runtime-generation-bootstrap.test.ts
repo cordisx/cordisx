@@ -74,9 +74,12 @@ function metadata(generation: string, hostKind?: 'codex' | 'playground', include
   } as const
 }
 
-const localDevelopmentPlugin = (development: boolean, applied: () => void) => {
+const localDevelopmentPlugin = (
+  development: boolean,
+  applied: () => void,
+  source = 'file:///cordisx-local-dev/fixture/org.cordisx.permission-fixture.js',
+) => {
   const id = 'org.cordisx.permission-fixture'
-  const source = 'file:///cordisx-local-dev/fixture/org.cordisx.permission-fixture.js'
   const manifest = {
     $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
     schemaVersion: 5 as const,
@@ -143,12 +146,12 @@ describe('production renderer generation bootstrap', () => {
     dom.window.close()
   }, 60_000)
 
-  it('still prompts for an ordinary plugin outside the local development authority', async () => {
+  it('still prompts for an ordinary packaged remote plugin outside the local development authority', async () => {
     const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
     const dom = installBrowserGlobals()
     const applied = vi.fn()
     const boot = installCordisX(
-      [localDevelopmentPlugin(false, applied)],
+      [localDevelopmentPlugin(false, applied, 'https://plugins.example/org.cordisx.permission-fixture.js')],
       metadata('playground-ordinary-plugin', 'playground', true),
     )
     for (let attempt = 0; attempt < 50 && dom.window.document.querySelector('[data-permission-prompt]') === null; attempt += 1) {

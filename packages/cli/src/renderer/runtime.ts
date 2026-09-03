@@ -248,7 +248,7 @@ function isExplicitLocalDevelopmentArtifact(item: RuntimeBrowserPlugin): boolean
     && development.state === 'ready'
     && development.pluginId === item.id
     && development.sourcePath.trim().length > 0
-    && item.package !== undefined
+    && (item.package !== undefined || item.artifactGeneration !== undefined)
     && item.source.startsWith('file:///cordisx-local-dev/')
 }
 
