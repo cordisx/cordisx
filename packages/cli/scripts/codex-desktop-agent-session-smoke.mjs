@@ -65,7 +65,14 @@ const report = {
     ready: await evaluate("document.documentElement.dataset.cordisxReady === 'true' && globalThis.__cordisxRuntime !== undefined"),
     fixtureReady: await evaluate('globalThis.__cordisxDesktopAgentSessionSmoke !== undefined'),
   },
-  bridge: { instrumentation: false, hostId: 'local', outboundMethods: [], inboundMethods: [], connectionEvents: [] },
+  bridge: {
+    instrumentation: false,
+    observationMode: 'unavailable',
+    hostId: 'local',
+    outboundMethods: [],
+    inboundMethods: [],
+    connectionEvents: [],
+  },
   operations: [],
   permissionPrompts: [],
   assertions: {},
@@ -107,9 +114,10 @@ const installBridgeTrace = await evaluate(`(() => {
   }
   return { installed: true }
 })()`)
-report.bridge.instrumentation = installBridgeTrace?.installed === true
-if (!report.bridge.instrumentation) report.limitations.push(`bridge method-only trace unavailable: ${installBridgeTrace?.reason ?? 'unknown'}`)
-report.stages.push({ stage: report.bridge.instrumentation ? 'bridge-ready' : 'bridge-unavailable', elapsedMs: 0 })
+const bridgeObserverInstalled = installBridgeTrace?.installed === true
+report.bridge.observationMode = bridgeObserverInstalled ? 'method-wrapper-installed' : 'unavailable'
+if (!bridgeObserverInstalled) report.limitations.push(`bridge method-only trace unavailable: ${installBridgeTrace?.reason ?? 'unknown'}`)
+report.stages.push({ stage: bridgeObserverInstalled ? 'bridge-observer-installed' : 'bridge-unavailable', elapsedMs: 0 })
 
 let permissionPromptOrdinal = 0
 const answerPermissionPrompt = async () => {
@@ -213,6 +221,14 @@ try {
   const trace = await evaluate('globalThis.__cordisxDesktopAgentSessionBridgeTrace?.snapshot()').catch(() => undefined)
   if (trace !== undefined) Object.assign(report.bridge, trace)
   await evaluate('globalThis.__cordisxDesktopAgentSessionBridgeTrace?.cleanup()').catch(() => undefined)
+}
+
+if (report.bridge.outboundMethods.length > 0 || report.bridge.inboundMethods.length > 0) {
+  report.bridge.instrumentation = true
+  report.bridge.observationMode = 'observed'
+} else if (bridgeObserverInstalled) {
+  report.bridge.observationMode = 'unsupported-runtime-held-reference'
+  report.limitations.push('the bridge method wrapper could not observe the runtime-held connection reference')
 }
 
 const sessionEvents = report.fixture?.entries?.filter(entry => entry.kind === 'session').map(entry => entry.name) ?? []

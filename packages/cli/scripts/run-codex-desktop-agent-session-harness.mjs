@@ -6,7 +6,10 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import { parseArgs } from 'node:util'
-import { writeDesktopAgentSessionHarnessReport } from './desktop-agent-session-harness-report.mjs'
+import {
+  waitForOwnedProfileQuiescence,
+  writeDesktopAgentSessionHarnessReport,
+} from './desktop-agent-session-harness-report.mjs'
 
 const APP_PIN = Object.freeze({
   bundleId: 'com.openai.codex',
@@ -163,7 +166,7 @@ try {
 } catch (cause) {
   error = cause
 } finally {
-  const active = profileProcesses(profileDir)
+  const active = await waitForOwnedProfileQuiescence(() => profileProcesses(profileDir))
   const isPortClosed = await portClosed(port)
   let temporaryRootRemoved = false
   if (active.length === 0 && isPortClosed) {
@@ -196,10 +199,18 @@ try {
     kind: 'codex-desktop-agent-session-live-smoke',
     marker,
     sessionId,
+    renderer: { url: 'app://-/index.html', ready: false, fixtureReady: false },
+    bridge: {
+      instrumentation: false, observationMode: 'unavailable', hostId: 'local',
+      outboundMethods: [], inboundMethods: [], connectionEvents: [],
+    },
+    operations: [],
+    permissionPrompts: [],
     result: 'failed',
     error: error instanceof Error ? error.message : 'smoke runner produced no report',
     assertions: {},
     limitations: ['the app:// renderer did not reach the Agent Session fixture'],
+    stages: [],
   }
   await writeDesktopAgentSessionHarnessReport(reportPath, fallback, annotation).catch(async annotateError => {
     if (error === undefined) error = annotateError
