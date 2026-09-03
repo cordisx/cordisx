@@ -268,7 +268,11 @@ function SimulatorTaskScenarioWorkbenchContent({ locale, task, controller }: Sim
 
     {snapshot.error === undefined ? null : <p className="pg-scenario-error pg-event-runtime-error" role="alert">{snapshot.error}</p>}
 
-    <form className="pg-event-composer" onSubmit={event => { event.preventDefault(); submit() }}>
+    <form
+      className="pg-event-composer"
+      data-composer-event-type={eventType}
+      onSubmit={event => { event.preventDefault(); submit() }}
+    >
       <div className="pg-event-composer-type">
         <span className="pg-visually-hidden">{en ? 'Event type' : '事件类型'}</span>
         <Select
