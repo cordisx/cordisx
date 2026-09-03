@@ -111,7 +111,7 @@ export interface PlaygroundScenarioLabSnapshot {
 }
 
 export type PlaygroundScenarioTaskContext = Readonly<Pick<PlaygroundMockTaskTrace,
-  'taskRef' | 'debugTaskId' | 'detailsUrl' | 'agentLabel' | 'status' | 'identity' | 'catalog' | 'input' | 'execution' | 'events' | 'simulationBinding'
+  'taskRef' | 'sessionId' | 'debugTaskId' | 'detailsUrl' | 'agentLabel' | 'status' | 'identity' | 'catalog' | 'input' | 'execution' | 'events' | 'simulationBinding'
 >>
 
 export type PlaygroundTaskTraceDirection =
@@ -463,7 +463,7 @@ function standaloneScenarioTaskContext(): PlaygroundScenarioTaskContext {
     identity: definition.identity,
     catalog: Object.freeze([definition]),
     events: Object.freeze([]),
-  })
+  } satisfies PlaygroundScenarioTaskContext)
 }
 
 export class PlaygroundScenarioLabController {
@@ -504,6 +504,7 @@ export class PlaygroundScenarioLabController {
     delegationTargets: Object.freeze([]),
   }
   private roomBridgeSubscription: (() => void) | undefined
+  private roomBridgeBinding: PlaygroundRoomSimulationBinding | undefined
   private roomBridgeConnection = 0
   private readonly roomBridgeOperationIds = new Set<string>()
   private readonly roomBridgeEventFingerprints = new Set<string>()
@@ -767,7 +768,7 @@ export class PlaygroundScenarioLabController {
 
   private async emitRoomAgentReply(text: string): Promise<void> {
     const normalized = text.trim()
-    const binding = this.sourceTask.simulationBinding
+    const binding = this.roomBridgeBinding
     if (normalized === '' || binding === undefined) {
       if (binding === undefined) this.markRoomBridgeUnavailable('当前 task 没有关联可用的 Chatroom Room binding。')
       return
@@ -803,7 +804,7 @@ export class PlaygroundScenarioLabController {
 
   private async emitRoomAgentApprovalRequest(reason: string): Promise<void> {
     const normalized = reason.trim()
-    const binding = this.sourceTask.simulationBinding
+    const binding = this.roomBridgeBinding
     if (normalized === '' || binding === undefined) {
       if (binding === undefined) this.markRoomBridgeUnavailable('当前 task 没有关联可用的 Chatroom Room binding。')
       return
@@ -848,7 +849,7 @@ export class PlaygroundScenarioLabController {
   private async emitRoomTaskDelegation(memberId: string, task: string): Promise<void> {
     const normalizedMemberId = memberId.trim()
     const normalizedTask = task.trim()
-    const binding = this.sourceTask.simulationBinding
+    const binding = this.roomBridgeBinding
     if (normalizedMemberId === '' || normalizedTask === '' || binding === undefined) {
       if (binding === undefined) this.markRoomBridgeUnavailable('当前 task 没有关联可用的 Chatroom Room binding。')
       return
@@ -911,23 +912,31 @@ export class PlaygroundScenarioLabController {
   private connectRoomBridge(): void {
     this.disconnectRoomBridge()
     const connection = this.roomBridgeConnection
-    const binding = this.sourceTask.simulationBinding
     const client = this.roomBridgeClient()
-    if (binding === undefined) {
-      this.roomBridgeState = { state: 'unavailable', delegationTargets: Object.freeze([]), message: '当前 task 没有关联可用的 Chatroom Room binding。' }
-      return
-    }
     if (client === undefined) {
       this.roomBridgeState = { state: 'unavailable', delegationTargets: Object.freeze([]), message: '当前 Playground 未安装 Room simulation bridge。' }
       return
     }
     this.roomBridgeState = { state: 'checking', delegationTargets: Object.freeze([]) }
-    this.roomBridgeSubscription = client.subscribe(binding, result => {
+    const resolveBinding = this.sourceTask.simulationBinding !== undefined
+      ? Promise.resolve({ status: 'available' as const, ownerGeneration: this.sourceTask.simulationBinding.ownerGeneration, value: this.sourceTask.simulationBinding })
+      : this.sourceTask.sessionId === undefined
+        ? Promise.resolve({ status: 'unavailable' as const, code: 'invalid-binding', message: '当前 task 没有关联可用的 Agent Session。' })
+        : client.resolveSession(this.sourceTask.sessionId)
+    void resolveBinding.then(resolved => {
       if (connection !== this.roomBridgeConnection) return
-      this.consumeRoomBridgeEvent(result)
-    })
-    void Promise.all([client.inspect(binding), client.snapshot(binding)]).then(([result, snapshot]) => {
-      if (connection !== this.roomBridgeConnection) return
+      if (resolved.status === 'unavailable') {
+        this.markRoomBridgeUnavailable(`${resolved.code}: ${resolved.message}`)
+        return
+      }
+      const binding = resolved.value
+      this.roomBridgeBinding = binding
+      this.roomBridgeSubscription = client.subscribe(binding, result => {
+        if (connection !== this.roomBridgeConnection) return
+        this.consumeRoomBridgeEvent(result)
+      })
+      return Promise.all([client.inspect(binding), client.snapshot(binding)]).then(([result, snapshot]) => {
+        if (connection !== this.roomBridgeConnection) return
       if (result.status === 'unavailable') {
         this.markRoomBridgeUnavailable(`${result.code}: ${result.message}`)
         return
@@ -946,6 +955,7 @@ export class PlaygroundScenarioLabController {
         delegationTargets: Object.freeze([...result.value.delegationTargets]),
       }
       this.publish()
+      })
     }).catch(cause => {
       if (connection === this.roomBridgeConnection) this.markRoomBridgeUnavailable(cause instanceof Error ? cause.message : String(cause))
     })
@@ -955,6 +965,7 @@ export class PlaygroundScenarioLabController {
     this.roomBridgeConnection += 1
     this.roomBridgeSubscription?.()
     this.roomBridgeSubscription = undefined
+    this.roomBridgeBinding = undefined
   }
 
   private markRoomBridgeUnavailable(message: string): void {

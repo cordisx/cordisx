@@ -5,6 +5,8 @@ export const PLAYGROUND_ROOM_SIMULATION_BINDING_CONTRACT = 'cordisx.playground-r
 
 export interface PlaygroundRoomSimulationBinding {
   readonly contract: typeof PLAYGROUND_ROOM_SIMULATION_BINDING_CONTRACT
+  /** Present when the Room binding was discovered from an Agent Session. */
+  readonly sessionId?: string
   readonly roomId: string
   readonly runId: string
   readonly memberId: string
@@ -107,6 +109,7 @@ type MaybePromise<Value> = Value | Promise<Value>
 
 export interface PlaygroundRoomSimulationOwner {
   readonly ownerGeneration: string
+  resolveSession(sessionId: string): MaybePromise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationBinding>>
   inspect(binding: PlaygroundRoomSimulationBinding): MaybePromise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationInspection>>
   injectMessage(
     binding: PlaygroundRoomSimulationBinding,
@@ -155,6 +158,7 @@ export interface PlaygroundRoomSimulationBridgeStatus {
 
 export interface PlaygroundRoomSimulationForwardingClient {
   status(): PlaygroundRoomSimulationBridgeStatus
+  resolveSession(sessionId: string): Promise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationBinding>>
   inspect(binding: PlaygroundRoomSimulationBinding): Promise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationInspection>>
   injectMessage(
     binding: PlaygroundRoomSimulationBinding,
@@ -223,8 +227,11 @@ function boundedHandle(value: unknown): value is string {
 export function isPlaygroundRoomSimulationBinding(value: unknown): value is PlaygroundRoomSimulationBinding {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
   const input = value as Partial<PlaygroundRoomSimulationBinding>
-  return Object.keys(input).sort().join(',') === 'bindingId,contract,generation,memberId,ownerGeneration,roomId,runId'
+  const keys = Object.keys(input).sort().join(',')
+  return (keys === 'bindingId,contract,generation,memberId,ownerGeneration,roomId,runId'
+      || keys === 'bindingId,contract,generation,memberId,ownerGeneration,roomId,runId,sessionId')
     && input.contract === PLAYGROUND_ROOM_SIMULATION_BINDING_CONTRACT
+    && (input.sessionId === undefined || boundedHandle(input.sessionId))
     && boundedHandle(input.roomId)
     && boundedHandle(input.runId)
     && boundedHandle(input.memberId)
@@ -252,6 +259,7 @@ export class PlaygroundRoomSimulationBridgeRegistry {
 
   readonly client: PlaygroundRoomSimulationForwardingClient = Object.freeze({
     status: () => this.status(),
+    resolveSession: (sessionId: string) => this.forwardSession(sessionId, owner => owner.resolveSession(sessionId)),
     inspect: (binding: PlaygroundRoomSimulationBinding) => this.forward(binding, owner => owner.inspect(binding)),
     injectMessage: (binding: PlaygroundRoomSimulationBinding, operationId: string, payload: PlaygroundRoomSimulationMessageInput) => (
       this.forward(binding, owner => owner.injectMessage(binding, operationId, clone(payload)))
@@ -296,7 +304,7 @@ export class PlaygroundRoomSimulationBridgeRegistry {
     if (owner === null || typeof owner !== 'object' || !boundedHandle(owner.ownerGeneration)) {
       throw new TypeError('Playground Room simulation ownerGeneration is invalid')
     }
-    if (['inspect', 'injectMessage', 'emitAgentReply', 'emitAgentApprovalRequest', 'delegateTask', 'requestPermission', 'decidePermission', 'snapshot', 'subscribe']
+    if (['resolveSession', 'inspect', 'injectMessage', 'emitAgentReply', 'emitAgentApprovalRequest', 'delegateTask', 'requestPermission', 'decidePermission', 'snapshot', 'subscribe']
       .some(method => typeof owner[method as keyof PlaygroundRoomSimulationOwner] !== 'function')) {
       throw new TypeError('Playground Room simulation owner is incomplete')
     }
@@ -333,6 +341,25 @@ export class PlaygroundRoomSimulationBridgeRegistry {
     if (binding.ownerGeneration !== current.owner.ownerGeneration) {
       return unavailable('owner-retired', 'The Playground Chatroom owner generation is no longer current.', current.owner.ownerGeneration)
     }
+    try {
+      const result = await call(current.owner)
+      if (!current.active || this.current !== current) {
+        return unavailable('owner-retired', 'The Playground Chatroom owner retired before the request completed.', current.owner.ownerGeneration)
+      }
+      return clone(result)
+    } catch {
+      return ownerError(current.owner.ownerGeneration)
+    }
+  }
+
+  private async forwardSession<Value>(
+    sessionId: string,
+    call: (owner: PlaygroundRoomSimulationOwner) => MaybePromise<PlaygroundRoomSimulationResult<Value>>,
+  ): Promise<PlaygroundRoomSimulationResult<Value>> {
+    if (!boundedHandle(sessionId)) return unavailable('invalid-binding', 'The Agent SessionId is invalid.')
+    const current = this.current
+    if (this.disposed) return unavailable('service-unavailable', 'The Playground Room simulation bridge is disposed.')
+    if (current?.active !== true) return unavailable('owner-unavailable', 'No Playground Chatroom owner is registered.')
     try {
       const result = await call(current.owner)
       if (!current.active || this.current !== current) {
@@ -416,6 +443,7 @@ export class CordisXPlaygroundRoomSimulationBridgeService extends Service implem
   }
 
   status(): PlaygroundRoomSimulationBridgeStatus { return this.registry.client.status() }
+  resolveSession(sessionId: string) { return this.registry.client.resolveSession(sessionId) }
   inspect(binding: PlaygroundRoomSimulationBinding) { return this.registry.client.inspect(binding) }
   injectMessage(binding: PlaygroundRoomSimulationBinding, operationId: string, payload: PlaygroundRoomSimulationMessageInput) {
     return this.registry.client.injectMessage(binding, operationId, payload)
@@ -425,6 +453,9 @@ export class CordisXPlaygroundRoomSimulationBridgeService extends Service implem
   }
   emitAgentApprovalRequest(binding: PlaygroundRoomSimulationBinding, operationId: string, request: PlaygroundRoomSimulationAgentApprovalRequest) {
     return this.registry.client.emitAgentApprovalRequest(binding, operationId, request)
+  }
+  delegateTask(binding: PlaygroundRoomSimulationBinding, operationId: string, request: PlaygroundRoomSimulationTaskDelegationInput) {
+    return this.registry.client.delegateTask(binding, operationId, request)
   }
   requestPermission(binding: PlaygroundRoomSimulationBinding, operationId: string, request: PlaygroundRoomSimulationPermissionRequest) {
     return this.registry.client.requestPermission(binding, operationId, request)
