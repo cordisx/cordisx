@@ -25,7 +25,7 @@ import {
 } from './preview-reset.js'
 
 export const PLAYGROUND_SIMULATOR_SESSION_PREFIX = 'cordisx.playground.simulator/v1:'
-const PLAYGROUND_SIMULATOR_TASK_SNAPSHOT_KEY = `${PLAYGROUND_SIMULATOR_SESSION_PREFIX}task-snapshots/v2`
+export const PLAYGROUND_SIMULATOR_TASK_SNAPSHOT_KEY = `${PLAYGROUND_SIMULATOR_SESSION_PREFIX}task-snapshots/v2`
 
 interface PlaygroundSimulatorTaskSnapshotRegistry {
   readonly version: 2
@@ -263,7 +263,16 @@ export function clearPlaygroundSimulatorSessionRegistry(storage: Storage): void 
 
 /** Content-free readback used by the Playground reset surface and manual preview checks. */
 export function countPlaygroundSimulatorSessionRecords(storage: Storage): number {
-  return countPlaygroundDisposableSessionRecords(storage)
+  const disposableContainers = countPlaygroundDisposableSessionRecords(storage)
+  const rawRegistry = storage.getItem(PLAYGROUND_SIMULATOR_TASK_SNAPSHOT_KEY)
+  if (rawRegistry === null) return disposableContainers
+  try {
+    const registry = JSON.parse(rawRegistry) as Partial<PlaygroundSimulatorTaskSnapshotRegistry>
+    if (registry.version !== 2 || !Array.isArray(registry.tasks)) return disposableContainers
+    return disposableContainers - 1 + registry.tasks.length
+  } catch {
+    return disposableContainers
+  }
 }
 
 export function navigateTaskDetails(

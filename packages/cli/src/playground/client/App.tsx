@@ -36,6 +36,7 @@ import {
 import {
   clearPlaygroundPreviewResetMarker,
   PLAYGROUND_PREVIEW_RESET_RESULT_KEY,
+  playgroundPreviewResetDisposition,
   readPlaygroundPreviewResetMarker,
   readPlaygroundPreviewResetResult,
   writePlaygroundPreviewResetMarker,
@@ -105,13 +106,6 @@ function previewResetMessage(result: Pick<PlaygroundPreviewResetResult, 'roomRow
   return en
     ? `epoch ${result.appliedGeneration}/${result.serverGeneration} · Rooms ${result.roomRows} · recent ${result.recentTaskRows} · records ${result.simulatorRecords} · live ${sources.liveRuntime} · memory ${sources.runtimeMemory} · registry ${sources.taskSnapshotRegistry} · Host sessions ${sources.hostSessionRegistry} · legacy ${sources.legacyAliasRegistry} · final ${sources.finalSelector}`
     : `epoch ${result.appliedGeneration}/${result.serverGeneration} · 房间 ${result.roomRows} · 最近任务 ${result.recentTaskRows} · 记录 ${result.simulatorRecords} · live ${sources.liveRuntime} · memory ${sources.runtimeMemory} · registry ${sources.taskSnapshotRegistry} · Host session ${sources.hostSessionRegistry} · legacy ${sources.legacyAliasRegistry} · final ${sources.finalSelector}`
-}
-
-function previewResetIsComplete(result: Pick<PlaygroundPreviewResetResult, 'roomRows' | 'recentTaskRows' | 'simulatorRecords' | 'sources' | 'instanceId' | 'serverGeneration' | 'appliedGeneration'>): boolean {
-  return result.instanceId !== 'unavailable'
-    && result.serverGeneration >= 0 && result.appliedGeneration === result.serverGeneration
-    && result.roomRows === 0 && result.recentTaskRows === 0 && result.simulatorRecords === 0
-    && Object.values(result.sources).every(count => count === 0)
 }
 
 function SidebarItem(props: SidebarItemProps) {
@@ -265,7 +259,8 @@ export function App() {
         await new Promise(resolve => window.setTimeout(resolve, 450))
         const counts = previewResetReadback()
         if (restoreCollapsedNavigation) setNavigationCollapsed(true)
-        const complete = previewResetIsComplete(counts)
+        const disposition = playgroundPreviewResetDisposition(counts)
+        const complete = disposition.complete
         const result: PlaygroundPreviewResetResult = {
           version: 1,
           status: complete ? 'complete' : 'failed',
@@ -281,13 +276,13 @@ export function App() {
             ? `Clear failed verification: ${previewResetMessage(counts, true)}`
             : `清理读回失败：${previewResetMessage(counts, false)}`)
           setResetPhase('failed')
-          setResetConfirmationOpen(true)
+          setResetConfirmationOpen(disposition.confirmationOpen)
           return
         }
         clearPlaygroundPreviewResetMarker(sessionStorage)
         setResetError(undefined)
         setResetPhase('confirming')
-        setResetConfirmationOpen(false)
+        setResetConfirmationOpen(disposition.confirmationOpen)
       } catch (error) {
         if (restoreCollapsedNavigation) setNavigationCollapsed(true)
         const message = error instanceof Error ? error.message : String(error)

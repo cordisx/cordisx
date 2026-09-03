@@ -138,3 +138,19 @@ export function playgroundPreviewResetEpochMatches(
     && applied.instanceId === server.instanceId
     && applied.generation === server.generation
 }
+
+export interface PlaygroundPreviewResetDisposition {
+  readonly complete: boolean
+  readonly confirmationOpen: boolean
+}
+
+export function playgroundPreviewResetDisposition(
+  result: Pick<PlaygroundPreviewResetResult,
+    'roomRows' | 'recentTaskRows' | 'simulatorRecords' | 'sources' | 'instanceId' | 'serverGeneration' | 'appliedGeneration'>,
+): PlaygroundPreviewResetDisposition {
+  const complete = result.instanceId !== 'unavailable'
+    && result.serverGeneration >= 0 && result.appliedGeneration === result.serverGeneration
+    && result.roomRows === 0 && result.recentTaskRows === 0 && result.simulatorRecords === 0
+    && Object.values(result.sources).every(count => count === 0)
+  return Object.freeze({ complete, confirmationOpen: !complete })
+}
