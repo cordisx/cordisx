@@ -193,6 +193,7 @@ import {
   type HostDomWorkerEnvironment,
 } from './host-dom-worker.js'
 import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from './owner-documents.js'
+import { BrowserPlaygroundAgentSessionPersistence } from './playground-agent-session-persistence.js'
 import type { CordisXOwnerDocumentsV1 } from '../durable-document-contracts.js'
 
 const BLOCKED_PLUGINS_KEY = 'cordisx.manager.blockedPlugins.v1'
@@ -217,6 +218,7 @@ interface CordisXRuntimeMetadata {
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
   readonly configBridgeToken?: string
+  readonly playgroundAgentSessionStoreToken?: string
   readonly ownerDocumentBindings?: readonly { readonly source: string; readonly pluginId: string; readonly moduleGeneration: string; readonly token: string }[]
   readonly serviceConfigBridgeToken?: string
   readonly channelCredentialBridgeToken?: string
@@ -816,8 +818,15 @@ async function start(
   const desktopAgentSessionTransport = metadata.hostKind === 'playground'
     ? undefined
     : await CodexDesktopAgentSessionTransport.connect()
+  const playgroundAgentSessionPersistence = metadata.hostKind === 'playground'
+    && metadata.playgroundAgentSessionStoreToken !== undefined
+    ? BrowserPlaygroundAgentSessionPersistence.connect(metadata.playgroundAgentSessionStoreToken, generation)
+    : undefined
+  const recoveredPlaygroundSessions = playgroundAgentSessionPersistence === undefined
+    ? []
+    : await playgroundAgentSessionPersistence.load()
   const agentSessionTransport = metadata.hostKind === 'playground'
-    ? new DeterministicAgentSessionTransport()
+    ? new DeterministicAgentSessionTransport(recoveredPlaygroundSessions)
     : desktopAgentSessionTransport ?? new UnavailableAgentSessionTransport()
   const agentRuntimeConnection: AgentRuntimeConnection = Object.freeze({
     connectionId: metadata.hostKind === 'playground'
@@ -870,6 +879,10 @@ async function start(
   const agentSessionRuntime = new CordisXAgentSessionRuntime({
     driver: agentSessionTransport,
     authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
+    ...(playgroundAgentSessionPersistence === undefined ? {} : {
+      persistence: playgroundAgentSessionPersistence,
+      initialSessions: recoveredPlaygroundSessions,
+    }),
   })
   const disposeAgentRouteFences = agentRouteScopes.subscribe((owner, sessionId, code) => {
     agentSessionRuntime.fenceSession(sessionId, code)
@@ -2800,6 +2813,7 @@ async function start(
     disposeAgentRouteHistory()
     disposeAgentRouteFences()
     await agentSessionRuntime.dispose()
+    playgroundAgentSessionPersistence?.dispose()
     ownerDocumentBroker.dispose()
     await agentRuntime.dispose()
     bindingPlatformAdapter?.dispose()
@@ -3074,10 +3088,11 @@ async function start(
     agentConversationShellFiber = ctx.plugin(CordisXAgentConversationShellService, {
       console: pluginConsole,
       identity: {
-        // The public Shell v3 source is backed by AgentLoop v4 in current
-        // compositions.  Keep identity actions on that exact accepted
-        // definition catalog instead of consulting the legacy v2 broker.
-        resolve: value => agentLoopBrokerV4.definitionPresentation(value),
+        // Resolve Session-native Shell v4 identities from the live AgentSetup
+        // generation, then retain the accepted AgentLoop v4 catalog for the
+        // byte-preserved v3 path. Never infer presentation from labels.
+        resolve: value => agentSessionRuntime.definitionPresentation(value)
+          ?? agentLoopBrokerV4.definitionPresentation(value),
         navigator: taskDetailsNavigator,
         onSettings: value => {
           const path = `/playground/simulator/agents/${encodeURIComponent(`${value.agentId}@${value.revision}`)}`

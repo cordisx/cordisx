@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentCancelCause, AgentOptions } from '@cordisx/protocol/agents/v1'
+import type { AgentCancelCause, AgentOptions, AgentSetup } from '@cordisx/protocol/agents/v1'
 import type { UserMessage } from '@cordisx/protocol/sessions/v1'
 import { Context } from '@deepseek-ai/cordis'
 import {
@@ -38,7 +38,41 @@ const message = (id: string): UserMessage => ({
   source: { kind: 'plugin', pluginId: owner.pluginId, generation: owner.generation },
 })
 
+const setup: AgentSetup = {
+  definition: { agentId: 'lead', revision: 'revision-session-1' },
+  definitions: [{
+    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
+    contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
+    identity: { agentId: 'base', revision: 'revision-base-1' },
+    name: 'Base',
+    promptSections: [{ sectionId: 'base-introduction', kind: 'introduction', text: 'Base operating context.' }],
+    inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
+  }, {
+    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
+    contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
+    identity: { agentId: 'lead', revision: 'revision-session-1' },
+    name: 'Lead exact', extends: [{ agentId: 'base', revision: 'revision-base-1' }],
+    promptSections: [{ sectionId: 'lead-introduction', kind: 'introduction', text: 'Coordinates the exact Session room.' }],
+    inherit: { promptSections: 'append', rules: 'merge', skills: 'merge', tools: 'merge', mcpServers: 'merge', runtimeDefaults: 'merge', avatar: 'inherit' },
+  }],
+}
+
 describe('Agent/Session Host authority v1', () => {
+  it('retains the resolved AgentSetup presentation only for the current owned Agent generation', async () => {
+    const driver = new Driver()
+    const runtime = new CordisXAgentSessionRuntime({ driver, authorize: async () => true })
+    const created = await runtime.create(owner, { sessionId: 'cx-session.identity', setup })
+    expect(created).toMatchObject({ status: 'accepted' })
+    expect(runtime.definitionPresentation(setup.definition)).toEqual({
+      identity: setup.definition,
+      name: 'Lead exact',
+      introduction: 'Base operating context.\n\nCoordinates the exact Session room.',
+    })
+    driver.replace()
+    expect(runtime.definitionPresentation(setup.definition)).toBeUndefined()
+    await runtime.dispose()
+  })
+
   it('keeps every Cordis service method bound to the Host runtime through the service proxy', async () => {
     const runtime = new CordisXAgentSessionRuntime({ driver: new Driver(), authorize: async () => true })
     const ctx = new Context().extend({

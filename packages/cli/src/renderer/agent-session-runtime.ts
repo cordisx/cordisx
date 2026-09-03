@@ -56,6 +56,8 @@ import {
   type CordisXAgentSessionLegacyAcquireRequestV1,
   type CordisXAgentSessionLegacyAcquireResultV1,
 } from '../agent-session-migration-contracts.js'
+import { resolveAgentDefinition, type CordisXResolvedAgentDefinition } from './agent-loop.js'
+import { presentationForDefinition, type CordisXAgentDefinitionPresentation } from './agent-loop-v4.js'
 
 const ACQUIRE_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-acquire-result.v1.schema.json' as const
 const ADMISSION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-admission.v1.schema.json' as const
@@ -75,6 +77,13 @@ export type CordisXDriverSessionEvent = {
   [K in 'turn/start' | 'turn/end' | 'step/start' | 'step/end' | 'assistant/chunk' | 'assistant/message' | 'tool/call' | 'tool/result']:
     { readonly sessionId: string; readonly type: K; readonly data: SessionEventDataMap[K] }
 }['turn/start' | 'turn/end' | 'step/start' | 'step/end' | 'assistant/chunk' | 'assistant/message' | 'tool/call' | 'tool/result']
+
+type SessionEventInput = {
+  [K in SessionEvent['type']]: {
+    readonly type: K
+    readonly data: Extract<SessionEvent, { readonly type: K }>['data']
+  }
+}[SessionEvent['type']]
 
 export interface CordisXDriverApprovalRequest {
   readonly sessionId: string
@@ -114,6 +123,25 @@ export interface CordisXAgentSessionRuntimeOptions {
   readonly driver: CordisXPrivateAgentDriver
   readonly authorize: (owner: PluginOwnerIdentity, capability: AgentRuntimeCapability, sessionId?: string) => Promise<boolean>
   readonly now?: () => number
+  readonly persistence?: CordisXSessionEventPersistence
+  readonly initialSessions?: readonly CordisXPersistedSession[]
+}
+
+export interface CordisXPersistedSession {
+  readonly id: string
+  readonly generation: number
+  readonly header: SessionHeader
+  readonly events: readonly SessionEvent[]
+}
+
+export interface CordisXSessionEventPersistence {
+  create(session: CordisXPersistedSession): Promise<void>
+  append(input: {
+    readonly sessionId: string
+    readonly sessionGeneration: number
+    readonly expectedSeq: number
+    readonly events: readonly SessionEvent[]
+  }): Promise<void>
 }
 
 export type CordisXLegacyAgentLoopBindingResolution =
@@ -130,6 +158,7 @@ interface SessionRecord {
   readonly header: SessionHeader
   readonly events: SessionEvent[]
   readonly subscribers: Set<SessionSubscriber>
+  appendQueue: Promise<void>
   closed?: 'connection-replaced' | 'host-unavailable'
 }
 
@@ -143,6 +172,8 @@ interface AgentRecord {
   readonly claimed: Set<string>
   readonly live: Set<AgentSubscriber>
   readonly detail?: AgentDetailReference
+  /** Exact Host-resolved setup retained only for this live Agent generation. */
+  readonly definition?: CordisXResolvedAgentDefinition
   status: AgentStatus
   readonly idleWaiters: Set<(value: AgentIdleResult) => void>
   disposed?: 'owner-disposed' | 'runtime-disposed' | 'connection-replaced'
@@ -199,11 +230,26 @@ export class CordisXAgentSessionRuntime {
 
   constructor(private readonly options: CordisXAgentSessionRuntimeOptions) {
     this.now = options.now ?? (() => Date.now())
+    for (const persisted of options.initialSessions ?? []) {
+      if (!opaque(persisted.id) || persisted.generation < 1 || persisted.header.id !== persisted.id
+        || persisted.events.some((event, index) => event.sessionId !== persisted.id || event.seq !== index)) {
+        throw new Error('Recovered Agent Session ledger is invalid')
+      }
+      if (this.sessions.has(persisted.id)) throw new Error('Recovered Agent Session ledger contains a duplicate SessionId')
+      this.sessions.set(persisted.id, {
+        id: persisted.id,
+        generation: persisted.generation,
+        header: Object.freeze(clone(persisted.header)),
+        events: persisted.events.map(event => Object.freeze(clone(event))),
+        subscribers: new Set(),
+        appendQueue: Promise.resolve(),
+      })
+    }
     this.unsubscribeReplacement = options.driver.onReplacement(() => this.connectionReplaced())
-    this.unsubscribeDriverEvents = options.driver.onSessionEvent?.(event => this.appendDriverEvent(event)) ?? (() => {})
+    this.unsubscribeDriverEvents = options.driver.onSessionEvent?.(event => { void this.appendDriverEvent(event) }) ?? (() => {})
     this.unsubscribeDriverApprovals = options.driver.onApprovalRequest?.(async request => await this.requestDriverApproval(request)) ?? (() => {})
     this.unsubscribeDriverStatus = options.driver.onAgentStatus?.(event => this.emitDriverStatus(event)) ?? (() => {})
-    this.unsubscribeDriverClaimed = options.driver.onMessageClaimed?.(event => this.claimDriverMessage(event)) ?? (() => {})
+    this.unsubscribeDriverClaimed = options.driver.onMessageClaimed?.(event => { void this.claimDriverMessage(event) }) ?? (() => {})
   }
 
   ownerFromContext(ctx: Context): PluginOwnerIdentity {
@@ -237,6 +283,17 @@ export class CordisXAgentSessionRuntime {
     if (!opaque(agentId) || !await this.allowed(owner, 'agents.get', agentId)) return undefined
     const record = this.agents.get(agentId)
     return record === undefined || record.disposed !== undefined ? undefined : this.agent(owner, record)
+  }
+
+  /** Host-only projection for Conversation Shell identity actions. */
+  definitionPresentation(identity: { readonly agentId: string; readonly revision: string }): CordisXAgentDefinitionPresentation | undefined {
+    let selected: AgentRecord | undefined
+    for (const record of this.agents.values()) {
+      if (!this.current(record) || record.definition?.identity.agentId !== identity.agentId
+        || record.definition.identity.revision !== identity.revision) continue
+      if (selected === undefined || record.generation > selected.generation) selected = record
+    }
+    return selected?.definition === undefined ? undefined : presentationForDefinition(selected.definition)
   }
 
   installLegacyBindingResolver(ownerPluginId: string, resolve: CordisXLegacyAgentLoopBindingResolver): () => void {
@@ -314,7 +371,9 @@ export class CordisXAgentSessionRuntime {
     }
     const id = `cx-approval.${crypto.randomUUID()}`
     const question = this.approvalQuestion(record, id, request.toolName, request.callId, request.reason)
-    this.append(record.session, 'approval/asked', { id, toolName: request.toolName, ...(request.callId === undefined ? {} : { callId: request.callId }), ...(request.reason === undefined ? {} : { reason: request.reason }) })
+    if (!await this.append(record.session, 'approval/asked', { id, toolName: request.toolName, ...(request.callId === undefined ? {} : { callId: request.callId }), ...(request.reason === undefined ? {} : { reason: request.reason }) })) {
+      return this.approvalDecision(record, id, request.toolName, request.callId, 'unavailable')
+    }
     const answerer = this.answerers.get(this.answererKey(record))
     let outcome: ApprovalOutcome = 'unavailable'
     if (answerer !== undefined && answerer.closed === undefined && await this.allowed(answerer.owner, 'approvals.answer', record.id)) {
@@ -323,7 +382,7 @@ export class CordisXAgentSessionRuntime {
         if (proposed === 'allowed-once' || proposed === 'rejected' || proposed === 'cancelled' || proposed === 'unavailable') outcome = proposed
       } catch { outcome = 'unavailable' }
     }
-    this.append(record.session, 'approval/decided', { id, outcome })
+    if (!await this.append(record.session, 'approval/decided', { id, outcome })) outcome = 'unavailable'
     return this.approvalDecision(record, id, request.toolName, request.callId, outcome)
   }
 
@@ -348,12 +407,13 @@ export class CordisXAgentSessionRuntime {
 
   async dispose(): Promise<void> {
     if (this.disposed) return
-    this.disposed = true
     this.unsubscribeReplacement()
     this.unsubscribeDriverEvents()
     this.unsubscribeDriverApprovals()
     this.unsubscribeDriverStatus()
     this.unsubscribeDriverClaimed()
+    await Promise.all([...this.sessions.values()].map(session => session.appendQueue))
+    this.disposed = true
     for (const agent of this.agents.values()) this.disposeAgent(agent, 'runtime-disposed')
     for (const session of this.sessions.values()) this.closeSession(session, 'host-unavailable')
     this.options.driver.dispose()
@@ -401,11 +461,17 @@ export class CordisXAgentSessionRuntime {
     if (live !== undefined && live.disposed === undefined) return this.remember(mutationKey, fingerprint, this.acquireConflict(operation, mutationId, 'agent-already-live'))
     const existing = this.sessions.get(sessionId)
     if (operation === 'resume' && existing === undefined && !resolvedLegacy) return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, 'session-unavailable'))
+    let definition: CordisXResolvedAgentDefinition | undefined
+    if (input.setup !== undefined) {
+      try { definition = resolveAgentDefinition(input.setup) }
+      catch { return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, 'unsupported')) }
+    }
     const driver = operation === 'create'
       ? await this.options.driver.create({ sessionId, options: input.options ?? {}, ...(input.setup === undefined ? {} : { setup: input.setup }) })
       : await this.options.driver.resume({ sessionId, options: input.options ?? {}, ...(input.setup === undefined ? {} : { setup: input.setup }) })
     if (driver.status !== 'accepted') return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, driver.code))
-    const session = existing ?? this.newSession(sessionId)
+    const session = existing ?? await this.newSession(sessionId)
+    if (session === undefined) return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, 'host-unavailable'))
     const record: AgentRecord = {
       id: sessionId,
       generation: ++this.nextAgentGeneration,
@@ -417,6 +483,7 @@ export class CordisXAgentSessionRuntime {
       live: new Set(),
       status: 'idle',
       idleWaiters: new Set(),
+      ...(definition === undefined ? {} : { definition: clone(definition) }),
       ...(driver.detail === undefined ? {} : { detail: clone(driver.detail) }),
     }
     this.agents.set(sessionId, record)
@@ -444,8 +511,14 @@ export class CordisXAgentSessionRuntime {
       if (submitted !== 'accepted') return this.admission(message.id, 'unavailable', 'host-unavailable')
       const stored = clone(message)
       record.pending.set(stored.id, { message: stored, target })
-      this.append(record.session, 'agent/inbox/spliced', { target, start: target === 'next-turn' ? record.pending.size - 1 : 0, inserted: [stored] })
-      this.append(record.session, 'user/message', stored)
+      const appended = await this.appendMany(record.session, [
+        { type: 'agent/inbox/spliced', data: { target, start: target === 'next-turn' ? record.pending.size - 1 : 0, inserted: [stored] } },
+        { type: 'user/message', data: stored },
+      ])
+      if (!appended) {
+        record.pending.delete(stored.id)
+        return this.admission(message.id, 'unavailable', 'host-unavailable')
+      }
       this.emitLive(record, 'agent/inbox/inserted', { message: stored })
       return this.admission(stored.id, 'accepted')
     }
@@ -470,7 +543,9 @@ export class CordisXAgentSessionRuntime {
         if (driver === 'not-found' || pending === undefined) return this.discard(messageId, 'not-found')
         if (driver === 'unavailable') return this.discard(messageId, 'unavailable', 'host-unavailable')
         record.pending.delete(messageId)
-        this.append(record.session, 'agent/inbox/spliced', { target: 'next-turn', start: 0, removedCount: 1, inserted: [], outcome: 'canceled' })
+        if (!await this.append(record.session, 'agent/inbox/spliced', { target: 'next-turn', start: 0, removedCount: 1, inserted: [], outcome: 'canceled' })) {
+          return this.discard(messageId, 'unavailable', 'host-unavailable')
+        }
         this.emitLive(record, 'agent/inbox/discarded', { message: pending.message })
         return this.discard(messageId, 'accepted')
       },
@@ -481,7 +556,9 @@ export class CordisXAgentSessionRuntime {
         if (result !== 'accepted') return this.mutation('cancel', options?.mutationId, 'unavailable', 'unsupported')
         if (options?.keepInbox !== true) {
           for (const pending of record.pending.values()) {
-            this.append(record.session, 'agent/inbox/spliced', { target: pending.target, start: 0, removedCount: 1, inserted: [], outcome: 'canceled' })
+            if (!await this.append(record.session, 'agent/inbox/spliced', { target: pending.target, start: 0, removedCount: 1, inserted: [], outcome: 'canceled' })) {
+              return this.mutation('cancel', options?.mutationId, 'unavailable', 'host-unavailable')
+            }
             this.emitLive(record, 'agent/inbox/discarded', { message: pending.message })
           }
           record.pending.clear()
@@ -517,6 +594,7 @@ export class CordisXAgentSessionRuntime {
     const session = Object.freeze({
       id: record.id, generation: record.generation, header: clone(record.header),
       snapshot: async (): Promise<SessionSnapshotResult> => {
+        await record.appendQueue
         if (!this.sessionLive(record)) return { status: 'unavailable', code: record.closed === 'connection-replaced' ? 'session-replaced' : 'host-unavailable' }
         if (!await this.allowed(owner, 'sessions.read', record.id)) return { status: 'unavailable', code: 'permission-revoked' }
         return { status: 'available', snapshot: {
@@ -525,6 +603,7 @@ export class CordisXAgentSessionRuntime {
         } }
       },
       read: async (request: SessionReadRequest = {}) => {
+        await record.appendQueue
         if (!this.sessionLive(record)) return { status: 'unavailable' as const, code: record.closed === 'connection-replaced' ? 'session-replaced' as const : 'host-unavailable' as const }
         if (!await this.allowed(owner, 'sessions.read', record.id)) return { status: 'unavailable' as const, code: 'permission-revoked' as const }
         const afterSeq = request.afterSeq ?? -1
@@ -542,6 +621,7 @@ export class CordisXAgentSessionRuntime {
         } }
       },
       subscribe: async (request: SessionSubscribeRequest, observer: SessionEventObserver): Promise<SessionSubscribeResult> => {
+        await record.appendQueue
         if (!this.sessionLive(record)) return { status: 'unavailable', code: record.closed === 'connection-replaced' ? 'session-replaced' : 'host-unavailable' }
         if (!await this.allowed(owner, 'sessions.subscribe', record.id)) return { status: 'unavailable', code: 'permission-revoked' }
         const afterSeq = request.afterSeq ?? -1
@@ -571,26 +651,52 @@ export class CordisXAgentSessionRuntime {
     return session as Session
   }
 
-  private append<K extends SessionEvent['type']>(session: SessionRecord, type: K, data: Extract<SessionEvent, { readonly type: K }>['data']): void {
-    if (!this.sessionLive(session)) return
-    const event = Object.freeze({
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/session-event.v1.schema.json' as const,
-      contract: 'cordisx.session-event/v1' as const, schemaVersion: 1 as const,
-      sessionId: session.id, seq: session.events.length, time: this.now(), type, data: clone(data),
-    }) as SessionEvent
-    session.events.push(event)
-    for (const subscriber of [...session.subscribers]) {
-      if (subscriber.closed !== undefined) continue
-      if (event.seq <= subscriber.lastSeq) continue
-      subscriber.lastSeq = event.seq
-      void this.deliver(subscriber, { $schema: SUBSCRIPTION_SCHEMA, contract: 'cordisx.session-subscription-page/v1', schemaVersion: 1, sessionId: session.id, sessionGeneration: session.generation, subscriptionGeneration: subscriber.generation, replayThrough: subscriber.replayThrough, phase: 'live', events: [clone(event)] })
-    }
+  private async append<K extends SessionEvent['type']>(session: SessionRecord, type: K, data: Extract<SessionEvent, { readonly type: K }>['data']): Promise<boolean> {
+    return await this.appendMany(session, [{ type, data } as SessionEventInput])
   }
 
-  private appendDriverEvent(event: CordisXDriverSessionEvent): void {
+  private async appendMany(session: SessionRecord, inputs: readonly SessionEventInput[]): Promise<boolean> {
+    if (inputs.length === 0) return true
+    let accepted = false
+    const operation = session.appendQueue.then(async () => {
+      if (!this.sessionLive(session)) return
+      const expectedSeq = session.events.length
+      const events = inputs.map((input, index) => Object.freeze({
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/session-event.v1.schema.json' as const,
+        contract: 'cordisx.session-event/v1' as const, schemaVersion: 1 as const,
+        sessionId: session.id, seq: expectedSeq + index, time: this.now(), type: input.type, data: clone(input.data),
+      }) as SessionEvent)
+      try {
+        await this.options.persistence?.append({
+          sessionId: session.id,
+          sessionGeneration: session.generation,
+          expectedSeq,
+          events: clone(events),
+        })
+      } catch {
+        this.closeSession(session, 'host-unavailable')
+        return
+      }
+      if (!this.sessionLive(session)) return
+      session.events.push(...events)
+      accepted = true
+      for (const event of events) {
+        for (const subscriber of [...session.subscribers]) {
+          if (subscriber.closed !== undefined || event.seq <= subscriber.lastSeq) continue
+          subscriber.lastSeq = event.seq
+          void this.deliver(subscriber, { $schema: SUBSCRIPTION_SCHEMA, contract: 'cordisx.session-subscription-page/v1', schemaVersion: 1, sessionId: session.id, sessionGeneration: session.generation, subscriptionGeneration: subscriber.generation, replayThrough: subscriber.replayThrough, phase: 'live', events: [clone(event)] })
+        }
+      }
+    })
+    session.appendQueue = operation.catch(() => undefined)
+    await session.appendQueue
+    return accepted
+  }
+
+  private async appendDriverEvent(event: CordisXDriverSessionEvent): Promise<void> {
     const record = this.agents.get(event.sessionId)
     if (record === undefined || !this.current(record)) return
-    this.append(record.session, event.type, event.data as Extract<SessionEvent, { readonly type: typeof event.type }>['data'])
+    await this.append(record.session, event.type, event.data as Extract<SessionEvent, { readonly type: typeof event.type }>['data'])
   }
 
   private async requestDriverApproval(request: CordisXDriverApprovalRequest): Promise<ApprovalOutcome> {
@@ -615,21 +721,24 @@ export class CordisXAgentSessionRuntime {
     }
   }
 
-  private claimDriverMessage(event: CordisXDriverMessageClaimed): void {
+  private async claimDriverMessage(event: CordisXDriverMessageClaimed): Promise<void> {
     const record = this.agents.get(event.sessionId)
     if (record === undefined || !this.current(record) || record.claimed.has(event.messageId)) return
     const pending = record.pending.get(event.messageId)
     if (pending === undefined) return
     record.pending.delete(event.messageId)
     record.claimed.add(event.messageId)
-    this.append(record.session, 'agent/inbox/spliced', {
+    if (!await this.append(record.session, 'agent/inbox/spliced', {
       target: pending.target, start: 0, removedCount: 1, inserted: [],
-    })
+    })) return
     this.emitLive(record, 'agent/inbox/claimed', { message: pending.message, turn: event.turn })
   }
 
-  private newSession(id: string): SessionRecord {
-    const record: SessionRecord = { id, generation: 1, header: Object.freeze({ id, formatVersion: 1, createdAt: this.now(), isSeeded: false }), events: [], subscribers: new Set() }
+  private async newSession(id: string): Promise<SessionRecord | undefined> {
+    const record: SessionRecord = { id, generation: 1, header: Object.freeze({ id, formatVersion: 1, createdAt: this.now(), isSeeded: false }), events: [], subscribers: new Set(), appendQueue: Promise.resolve() }
+    try {
+      await this.options.persistence?.create({ id, generation: record.generation, header: clone(record.header), events: [] })
+    } catch { return undefined }
     this.sessions.set(id, record)
     return record
   }

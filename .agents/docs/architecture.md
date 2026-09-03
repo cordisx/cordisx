@@ -159,6 +159,19 @@ ordinary Playground plugins retain the interactive fail-closed path. No
 wildcard or plugin-provided flag is accepted. Connection, route, permission,
 and plugin-generation replacement abort pending Agent runtime prompts before
 fencing leases, so an obsolete dialog cannot survive as inert UI.
+The explicit Playground Host also owns a private durable Agent Session ledger
+under its selected Playground home. The renderer receives only a per-composition
+generation token and commits each new Session or contiguous `SessionEvent`
+batch through the launcher before publishing it to memory or live subscribers.
+The launcher validates lossless structured-clone/JSON data, exact `SessionId`,
+Session generation, and expected cursor, serializes updates, and replaces the
+ledger file atomically. A later Playground process hydrates the same Session
+headers and event sequences before plugin activation, preserving opaque Session
+ids and plugin-supplied Room/Simulator correlation; the deterministic transport
+continues its turn counter from those facts. Old composition tokens fail closed,
+and an explicit Playground reset clears this ledger with the other fixture
+state. This store is not installed in production or Desktop, whose current
+native Agent Session transport remains the persistence authority.
 The `dev:ui` session mints that provenance only for enabled, non-built-in local
 entries explicitly named by the source Playground composition. It compiles
 them through the normal verified local-development builder, carries its full
@@ -367,6 +380,16 @@ descriptor, replay watermark, serialized cursor, monotonic updates and
 terminal disposal before projecting any data. Registration, page unmount,
 generation replacement and terminal source updates all release the runtime
 handle and source.
+
+For Session-compatible Shell v4 identity actions, the same Host Agent/Session
+authority resolves each accepted `AgentSetup` catalog with the established
+AgentDefinition inheritance, prompt, and avatar rules, then retains the exact
+effective definition only for that owned Agent generation. Shell identity
+resolution consults this live catalog alongside the byte-preserved AgentLoop v4
+catalog. Owner, Session, connection, or Agent generation replacement removes
+the stale presentation; unresolved identities continue to use the members
+search fallback. Active Session navigation consumes only the Host-issued
+`AgentDetailReference` carried by the Shell v4 run.
 
 Conversation commands remain normal owner commands registered through
 `ctx.commands`. The Host verifies the renderer freshness fence and injects the
