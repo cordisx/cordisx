@@ -71,6 +71,8 @@ interface Window {
   __cordisxProviderRequestV1?: (payload: string) => void
   __cordisxProviderReceiveV1?: (payload: string) => void
   __cordisxConfigReceiveV1?: (payload: string) => void
+  __cordisxPlaygroundAgentSessionRequestV1?: (payload: string) => void
+  __cordisxPlaygroundAgentSessionReceiveV1?: (payload: string) => void
   __cordisxOwnerDocumentRequestV1?: (payload: string) => void
   __cordisxOwnerDocumentReceiveV1?: (payload: string) => void
   __cordisxServiceConfigRequestV1?: (payload: string) => void

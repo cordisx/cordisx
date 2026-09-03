@@ -104,7 +104,7 @@ function definitionPresentationKey(identity: { readonly agentId: string; readonl
   return `${identity.agentId}\u0000${identity.revision}`
 }
 
-function presentationForDefinition(definition: CordisXResolvedAgentDefinition): CordisXAgentDefinitionPresentation {
+export function presentationForDefinition(definition: CordisXResolvedAgentDefinition): CordisXAgentDefinitionPresentation {
   const introduction = (definition.promptSections ?? [])
     .filter(section => section.kind === 'introduction')
     .map(section => section.text.trim())

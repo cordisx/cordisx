@@ -11,6 +11,10 @@ import {
 import { loadConfig, type CordisXConfig } from '../launcher/config.js'
 import { buildLocalDevelopmentPlugin } from '../launcher/development.js'
 import {
+  PlaygroundAgentSessionStore,
+  type PlaygroundAgentSessionStoreRequest,
+} from './agent-session-store.js'
+import {
   configBridgeError,
   createConfigBridgeHandler,
   parseConfigBindingRequest,
@@ -58,6 +62,7 @@ export interface PlaygroundFixtureInfo {
 interface PlaygroundGeneration {
   readonly generation: string
   readonly token: string
+  readonly agentSessionStoreToken: string
   readonly config: CordisXConfig
   readonly localDevelopmentWatchFiles: readonly string[]
   readonly permissionPolicies: readonly CordisXPersistedPermissionPolicyRecord[]
@@ -83,6 +88,7 @@ export interface PlaygroundSession {
   buildBundle(): Promise<{ readonly generation: string; readonly source: string }>
   buildComposition(runtimeImport: string): Promise<PreparedPlaygroundComposition>
   handleConfigRequest(raw: string): Promise<unknown>
+  handleAgentSessionStoreRequest(raw: string): Promise<unknown>
   handleOwnerDocumentRequest(raw: string): Promise<unknown>
   handleServiceConfigRequest(raw: string): Promise<unknown>
   handleChannelCredentialRequest(raw: string): Promise<unknown>
@@ -234,11 +240,13 @@ export async function createPlaygroundSession(
   let activeProviderRequests = 0
   const credentialBackend = new PlaygroundCredentialBackend()
   const ownerDocumentStore = new OwnerDocumentStore(homeDir)
+  const agentSessionStore = new PlaygroundAgentSessionStore(homeDir)
   const nextGeneration = async (): Promise<PlaygroundGeneration> => {
     active?.channelConfig?.dispose()
     await active?.providerFleet?.close()
     const generation = `playground-${randomBytes(12).toString('hex')}`
     const token = randomBytes(32).toString('hex')
+    const agentSessionStoreToken = randomBytes(32).toString('hex')
     const serviceConfigToken = randomBytes(32).toString('hex')
     const credentialToken = randomBytes(32).toString('hex')
     const loadedConfig = await loadConfig(configPath, { profileId: 'playground' })
@@ -348,7 +356,7 @@ export async function createPlaygroundSession(
       writable: channelDescriptor.writable,
     })
     const next: PlaygroundGeneration = {
-      generation, token, config, localDevelopmentWatchFiles, permissionPolicies, bridge, documents, documentSecret,
+      generation, token, agentSessionStoreToken, config, localDevelopmentWatchFiles, permissionPolicies, bridge, documents, documentSecret,
       ...(channelConfig === undefined ? {} : { channelConfig }),
       ...(serviceConfig === undefined ? {} : { serviceConfig }),
       ...(credential === undefined ? {} : { credential }),
@@ -363,6 +371,7 @@ export async function createPlaygroundSession(
     playground: true as const,
     generation: generation.generation,
     configBridgeToken: generation.token,
+    playgroundAgentSessionStoreToken: generation.agentSessionStoreToken,
     ownerDocumentAuthority: {
       secret: generation.documentSecret,
       profileId: 'playground',
@@ -412,6 +421,22 @@ export async function createPlaygroundSession(
         return { requestId: parsed.requestId, ok: true, value: await active.bridge.handle(parsed) }
       } catch (error) {
         return { requestId: parsed.requestId, ok: false, ...configBridgeError(error) }
+      }
+    },
+    async handleAgentSessionStoreRequest(raw) {
+      if (active === undefined) throw new Error('Playground has no active generation')
+      let requestId = 'invalid'
+      try {
+        const parsed = JSON.parse(raw) as Record<string, unknown>
+        requestId = typeof parsed.requestId === 'string' && parsed.requestId !== '' ? parsed.requestId : 'invalid'
+        if (parsed.version !== 1 || parsed.token !== active.agentSessionStoreToken
+          || parsed.runtimeGeneration !== active.generation || requestId === 'invalid') {
+          return { requestId, ok: true, value: { status: 'unavailable', code: 'generation-conflict' } }
+        }
+        const { version: _version, requestId: _requestId, token: _token, runtimeGeneration: _runtimeGeneration, ...request } = parsed
+        return { requestId, ok: true, value: await agentSessionStore.handle(request as unknown as PlaygroundAgentSessionStoreRequest) }
+      } catch {
+        return { requestId, ok: true, value: { status: 'unavailable', code: 'invalid-request' } }
       }
     },
     async handleOwnerDocumentRequest(raw) {

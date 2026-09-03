@@ -95,6 +95,10 @@ export async function startVitePlayground(options: VitePlaygroundOptions): Promi
             sendJson(response, 200, await session.handleConfigRequest(await requestBody(request)))
             return
           }
+          if (request.method === 'POST' && url.pathname === '/api/agent-sessions') {
+            sendJson(response, 200, await session.handleAgentSessionStoreRequest(await requestBody(request)))
+            return
+          }
           if (request.method === 'POST' && url.pathname === '/api/documents') {
             sendJson(response, 200, await session.handleOwnerDocumentRequest(await requestBody(request)))
             return

@@ -50,6 +50,22 @@ import { HostAgentTaskDetailsNavigator } from '../packages/cli/src/renderer/host
 import { CordisXI18nService } from '../packages/cli/src/renderer/i18n.js'
 import { CordisXPageService } from '../packages/cli/src/renderer/navigation.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
+import {
+  CordisXAgentSessionRuntime,
+  type CordisXPrivateAgentDriver,
+} from '../packages/cli/src/renderer/agent-session-runtime.js'
+
+class IdentitySessionDriver implements CordisXPrivateAgentDriver {
+  private readonly replacements = new Set<() => void>()
+  async create(input: { readonly sessionId: string }) { return { status: 'accepted' as const, detail: { kind: 'host' as const, ref: `deterministic-agent-session:${input.sessionId}` } } }
+  async resume(input: { readonly sessionId: string }) { return { status: 'accepted' as const, detail: { kind: 'host' as const, ref: `deterministic-agent-session:${input.sessionId}` } } }
+  async submit() { return 'accepted' as const }
+  async discard() { return 'accepted' as const }
+  async cancel() { return 'accepted' as const }
+  onReplacement(listener: () => void): () => void { this.replacements.add(listener); return () => this.replacements.delete(listener) }
+  replace(): void { for (const listener of this.replacements) listener() }
+  dispose(): void { this.replacements.clear() }
+}
 
 class PageStream implements AsyncIterableIterator<AgentConversationShellPage> {
   private readonly pages: AgentConversationShellPage[] = []
@@ -320,6 +336,100 @@ describe('Agent conversation shell public runtime', () => {
     commands.dispose()
     await settle()
     dom.window.close()
+  })
+
+  it('opens exact Shell v4 AgentSetup identity details from members and avatars, then fences stale generations', async () => {
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    const driver = new IdentitySessionDriver()
+    const authority = new CordisXAgentSessionRuntime({ driver, authorize: async () => true })
+    const owner = { pluginId: 'file:///chatroom.ts:chatroom', generation: 1 } as const
+    const definition = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json' as const,
+      contract: 'cordisx.agent-definition/v1' as const, schemaVersion: 1 as const,
+      identity: { agentId: 'lead', revision: 'session-revision-one' }, name: 'Lead exact',
+      avatar: createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'lead' }),
+      promptSections: [{ sectionId: 'introduction', kind: 'introduction' as const, text: 'Coordinates the Session-native room.' }],
+      inherit: { promptSections: 'none' as const, rules: 'none' as const, skills: 'none' as const, tools: 'none' as const, mcpServers: 'none' as const, runtimeDefaults: 'none' as const },
+    }
+    const acquired = await authority.create(owner, {
+      sessionId: 'cx-session.identity-v4', setup: { definition: definition.identity, definitions: [definition] },
+    })
+    if (acquired.status !== 'accepted') throw new Error('Session Agent identity setup unavailable')
+    const navigateHost = vi.fn()
+    const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n(), undefined, undefined, {
+      resolve: value => authority.definitionPresentation(value),
+      navigator: new HostAgentTaskDetailsNavigator({ navigateHost, navigateExternal: vi.fn() }),
+      onSettings: vi.fn(),
+    })
+    const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-v4-identity' })
+    const participant = {
+      participantId: 'participant-lead', role: 'agent' as const,
+      displayName: message('participant.lead', 'Lead source'), avatar: definition.avatar, agentIdentity: definition.identity,
+    }
+    const registration = runtime.register(plugin, binding => {
+      const snapshot: AgentConversationShellSnapshotV4 = {
+        binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration },
+        generation: 'session-generation-v4-identity', snapshotSequence: 1,
+        selection: {
+          kind: 'room', roomId: 'room-v4-identity', title: message('room.identity', 'Identity room'),
+          multiParticipant: true, participantPresentation: 'host-initials', participants: [participant],
+          activeRuns: [{ participantId: participant.participantId, memberId: 'member-lead', runId: 'run-lead', sessionId: acquired.sessionId, lifecycle: { phase: 'running' }, details: acquired.handle.agent.detail! }],
+        },
+        items: [{
+          kind: 'message', itemId: 'message-entry', messageId: 'message-one', sequence: 1,
+          author: participant, source: { kind: 'session-event', sessionId: acquired.sessionId, eventSeq: 1 },
+          semantic: { purpose: 'conversation' }, body: [{ kind: 'text', text: message('message.one', 'Hello @Lead source') }],
+          reactions: [], timestamp: '2026-09-03T00:00:00.000Z', deliveryState: 'delivered', runState: 'idle', ariaLive: 'off', actions: [],
+        }],
+        composer: { availability: 'unavailable', placeholder: message('composer', 'Message'), disabled: { value: true }, submit: { id: 'send' } },
+        headerActions: [],
+      }
+      const subscription = { subscriptionId: 'subscription-v4-identity', binding: snapshot.binding, generation: snapshot.generation, afterSequence: 1, snapshotSequence: 1 }
+      const close = (code: 'unsubscribed') => ({
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-conversation-shell-subscription-close.v4.schema.json' as const,
+        contract: 'cordisx.agent-conversation-shell-subscription-close/v4' as const, schemaVersion: 4 as const,
+        subscriptionId: subscription.subscriptionId, binding: subscription.binding, generation: subscription.generation, status: 'closed' as const, code,
+      })
+      return {
+        snapshot: async () => snapshot,
+        subscribe: async () => ({
+          result: { type: 'subscribe' as const, status: 'accepted' as const, code: 'allowed' as const, subscription },
+          handle: { subscription, pages: { async *[Symbol.asyncIterator]() { await new Promise<void>(() => {}) } }, closed: new Promise<never>(() => {}), unsubscribe: async () => close('unsubscribed') },
+        }),
+        dispose() {},
+      }
+    }, undefined, 4)
+
+    const firstUnmount = registration.mount(mountContext(dom, { roomId: 'room-v4-identity' }))
+    await vi.waitFor(() => expect(dom.window.document.querySelector('.cxa-header-icon-action[aria-label="Members"]')).not.toBeNull())
+    dom.window.document.querySelector<HTMLButtonElement>('.cxa-header-icon-action[aria-label="Members"]')!.click()
+    await vi.waitFor(() => expect(dom.window.document.querySelector<HTMLButtonElement>('.cxa-member-button')?.disabled).toBe(false))
+    dom.window.document.querySelector<HTMLButtonElement>('.cxa-member-button')!.click()
+    await vi.waitFor(() => expect(dom.window.document.querySelector('[role="dialog"]')?.textContent).toContain('Lead exact'))
+    expect(dom.window.document.querySelector('[role="dialog"]')?.textContent).toContain('Coordinates the Session-native room.')
+    dom.window.document.querySelector<HTMLButtonElement>('.cx-conversation-inspector-icon-action')!.click()
+    await vi.waitFor(() => expect(dom.window.document.querySelector<HTMLButtonElement>('[aria-label="Close members"]')).not.toBeNull())
+    dom.window.document.querySelector<HTMLButtonElement>('[aria-label="Close members"]')!.click()
+    await vi.waitFor(() => expect(dom.window.document.querySelector('[role="dialog"]')).toBeNull())
+    dom.window.document.querySelector<HTMLButtonElement>('.cx-agent-identity-avatar-button')!.click()
+    await vi.waitFor(() => expect(dom.window.document.querySelector('[role="dialog"]')?.textContent).toContain('Lead exact'))
+    dom.window.document.querySelector<HTMLButtonElement>('.cx-agent-identity-session')!.click()
+    await vi.waitFor(() => expect(navigateHost).toHaveBeenCalledWith('app://-/playground/simulator/tasks/cx-session.identity-v4'))
+    if (typeof firstUnmount === 'function') firstUnmount()
+    await settle()
+
+    driver.replace()
+    expect(authority.definitionPresentation(definition.identity)).toBeUndefined()
+    const staleUnmount = registration.mount(mountContext(dom, { roomId: 'room-v4-identity' }))
+    await vi.waitFor(() => expect(dom.window.document.querySelector('.cxa-message-mention')).not.toBeNull())
+    dom.window.document.querySelector<HTMLButtonElement>('.cxa-message-mention')!.click()
+    await vi.waitFor(() => expect(dom.window.document.querySelector('[data-host-conversation-member-search="true"] input')).not.toBeNull())
+    expect(dom.window.document.querySelector<HTMLInputElement>('[data-host-conversation-member-search="true"] input')?.value).toBe('Lead source')
+    expect(dom.window.document.querySelector<HTMLButtonElement>('.cxa-member-button')?.disabled).toBe(true)
+    if (typeof staleUnmount === 'function') staleUnmount()
+    registration.dispose(); runtime.dispose(); commands.dispose(); await authority.dispose()
+    await settle(); dom.window.close()
   })
 
   it('exposes the agentConversationShell injection and owns registration on the plugin fiber', async () => {

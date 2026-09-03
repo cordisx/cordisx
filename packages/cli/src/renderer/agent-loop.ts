@@ -165,7 +165,7 @@ function assertDefinition(definition: CordisXAgentDefinition): void {
   if (definition.promptSections?.some(section => !identifier(section.sectionId) || section.text.trim() === '') === true) throw new Error('Agent prompt section is invalid')
 }
 
-export function resolveAgentDefinition(command: CreateCommand): CordisXResolvedAgentDefinition {
+export function resolveAgentDefinition(command: Pick<CreateCommand, 'definition' | 'definitions'>): CordisXResolvedAgentDefinition {
   if (command.definitions.length === 0 || command.definitions.length > 64) throw new Error('Agent definition catalog is invalid')
   const catalog = new Map<string, CordisXAgentDefinition>()
   for (const definition of command.definitions) {

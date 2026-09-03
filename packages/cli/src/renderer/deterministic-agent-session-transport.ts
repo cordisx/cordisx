@@ -6,6 +6,7 @@ import type {
   CordisXDriverMessageClaimed,
   CordisXDriverSessionEvent,
   CordisXPrivateAgentDriver,
+  CordisXPersistedSession,
 } from './agent-session-runtime.js'
 
 const clone = <Value>(value: Value): Value => structuredClone(value)
@@ -29,6 +30,16 @@ export class DeterministicAgentSessionTransport implements CordisXPrivateAgentDr
   private readonly statusListeners = new Set<(event: CordisXDriverAgentStatus) => void>()
   private readonly claimedListeners = new Set<(event: CordisXDriverMessageClaimed) => void>()
   private disposed = false
+
+  constructor(recoveredSessions: readonly CordisXPersistedSession[] = []) {
+    for (const session of recoveredSessions) {
+      const nextTurn = session.events.reduce((highest, event) => {
+        const turn = 'turn' in event.data && typeof event.data.turn === 'number' ? event.data.turn : 0
+        return Math.max(highest, turn)
+      }, 0)
+      this.sessions.set(session.id, { nextTurn, queue: [] })
+    }
+  }
 
   async create(input: { readonly sessionId: string; readonly options: AgentOptions }): Promise<{ readonly status: 'accepted'; readonly detail: { readonly kind: 'host'; readonly ref: string } }> {
     if (this.disposed || this.sessions.has(input.sessionId)) throw new Error('Playground Agent Session creation is unavailable')
