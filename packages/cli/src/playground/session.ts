@@ -244,7 +244,10 @@ export async function createPlaygroundSession(
     const loadedConfig = await loadConfig(configPath, { profileId: 'playground' })
     const localDevelopmentBuilds = await Promise.all(loadedConfig.plugins.map(async plugin => {
       if (!plugin.enabled || !explicitlyConfiguredLocalEntries.has(plugin.entry)) return undefined
-      return { plugin, build: await buildLocalDevelopmentPlugin(plugin.entry) }
+      // This candidate is embedded again inside Vite's virtual composition.
+      // A nested inline map makes its virtual React/UI sources look like real
+      // filesystem imports during Vite import analysis.
+      return { plugin, build: await buildLocalDevelopmentPlugin(plugin.entry, { sourcemap: false }) }
     }))
     const successfulAt = new Date().toISOString()
     const localDevelopmentByPlugin = new Map(localDevelopmentBuilds.flatMap(item => item === undefined ? [] : [[item.plugin.id, item] as const]))

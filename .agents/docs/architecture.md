@@ -163,7 +163,14 @@ The `dev:ui` session mints that provenance only for enabled, non-built-in local
 entries explicitly named by the source Playground composition. It compiles
 them through the normal verified local-development builder, carries its full
 watch graph into Vite invalidation, and assigns a Host-generated artifact
-generation; `loadConfig` never accepts equivalent provenance from JSON.
+generation; `loadConfig` never accepts equivalent provenance from JSON. The
+ordinary local-development artifact retains its inline source map. Only the
+copy secondarily embedded into the Vite Playground composition is built without
+an inline `sourceMappingURL`, so decoded virtual React/UI sources cannot be
+reinterpreted as filesystem imports without changing shared-runtime module
+resolution or real-App diagnostics. The builder's virtual React/UI metafile
+inputs are likewise never projected as filesystem watch files; only its real
+input graph participates in local-development invalidation.
 
 Small plugin-owned durable state uses the Host public
 `cordisx.owner-documents/v1` service at `ctx.documents`. The renderer receives
