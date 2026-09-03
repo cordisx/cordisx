@@ -150,6 +150,7 @@ interface AgentRecord {
 
 interface SessionSubscriber {
   readonly generation: number
+  readonly replayThrough: number
   readonly owner: PluginOwnerIdentity
   readonly observer: SessionEventObserver
   lastSeq: number
@@ -220,7 +221,7 @@ export class CordisXAgentSessionRuntime {
   }
 
   async create(owner: PluginOwnerIdentity, input: AgentCreateOptions): Promise<AgentAcquireResult> {
-    const sessionId = input.sessionId ?? `cx-session:${crypto.randomUUID()}`
+    const sessionId = input.sessionId ?? `cx-session.${crypto.randomUUID()}`
     if (!opaque(sessionId)) throw new Error('Agent SessionId must be a non-empty opaque identifier')
     if (!await this.allowed(owner, 'agents.create', sessionId)) return this.acquireDenied('create', input.mutationId)
     return await this.acquire(owner, 'create', sessionId, input, input.sessionId === undefined ? 'host' : 'caller')
@@ -311,7 +312,7 @@ export class CordisXAgentSessionRuntime {
     if (record === undefined || !await this.allowed(owner, 'approvals.request', request.agent.id)) {
       return this.approvalDecision(request.agent, crypto.randomUUID(), request.toolName, request.callId, 'unavailable')
     }
-    const id = `cx-approval:${crypto.randomUUID()}`
+    const id = `cx-approval.${crypto.randomUUID()}`
     const question = this.approvalQuestion(record, id, request.toolName, request.callId, request.reason)
     this.append(record.session, 'approval/asked', { id, toolName: request.toolName, ...(request.callId === undefined ? {} : { callId: request.callId }), ...(request.reason === undefined ? {} : { reason: request.reason }) })
     const answerer = this.answerers.get(this.answererKey(record))
@@ -551,10 +552,11 @@ export class CordisXAgentSessionRuntime {
         const closed = new Promise<SessionSubscriptionClosed>(resolve => { resolveClosed = resolve })
         const subscriber: SessionSubscriber = {
           generation: ++this.nextSubscriptionGeneration,
+          replayThrough: record.events.length - 1,
           owner: clone(owner), observer, lastSeq: afterSeq, resolveClosed, delivery: Promise.resolve(),
         }
         record.subscribers.add(subscriber)
-        const replayThrough = record.events.length - 1
+        const replayThrough = subscriber.replayThrough
         const replay = record.events.filter(event => event.seq > afterSeq && event.seq <= replayThrough).map(clone)
         subscriber.lastSeq = replayThrough
         if (replay.length > 0) await this.deliver(subscriber, { $schema: SUBSCRIPTION_SCHEMA, contract: 'cordisx.session-subscription-page/v1', schemaVersion: 1, sessionId: record.id, sessionGeneration: record.generation, subscriptionGeneration: subscriber.generation, replayThrough, phase: 'replay', events: replay })
@@ -581,7 +583,7 @@ export class CordisXAgentSessionRuntime {
       if (subscriber.closed !== undefined) continue
       if (event.seq <= subscriber.lastSeq) continue
       subscriber.lastSeq = event.seq
-      void this.deliver(subscriber, { $schema: SUBSCRIPTION_SCHEMA, contract: 'cordisx.session-subscription-page/v1', schemaVersion: 1, sessionId: session.id, sessionGeneration: session.generation, subscriptionGeneration: subscriber.generation, replayThrough: event.seq - 1, phase: 'live', events: [clone(event)] })
+      void this.deliver(subscriber, { $schema: SUBSCRIPTION_SCHEMA, contract: 'cordisx.session-subscription-page/v1', schemaVersion: 1, sessionId: session.id, sessionGeneration: session.generation, subscriptionGeneration: subscriber.generation, replayThrough: subscriber.replayThrough, phase: 'live', events: [clone(event)] })
     }
   }
 
@@ -731,17 +733,17 @@ function runtimeFor(service: object): CordisXAgentSessionRuntime { const runtime
 
 export class CordisXAgentRegistryServiceV1 extends Service implements AgentRegistry {
   constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) { super(ctx, 'agents'); runtimes.set(this, runtime) }
-  async create(options: AgentCreateOptions): Promise<AgentAcquireResult> { const runtime = runtimeFor(this); return await runtime.create(runtime.ownerFromContext(this.ctx), options) }
-  async resume(options: AgentResumeOptions): Promise<AgentAcquireResult> { const runtime = runtimeFor(this); return await runtime.resume(runtime.ownerFromContext(this.ctx), options) }
-  async get(agentId: string): Promise<Agent | undefined> { const runtime = runtimeFor(this); return await runtime.get(runtime.ownerFromContext(this.ctx), agentId) }
-  async acquireLegacyTaskBinding(request: CordisXAgentSessionLegacyAcquireRequestV1): Promise<CordisXAgentSessionLegacyAcquireResultV1> { const runtime = runtimeFor(this); return await runtime.acquireLegacyTaskBinding(runtime.ownerFromContext(this.ctx), request) }
+  create = async (options: AgentCreateOptions): Promise<AgentAcquireResult> => { const runtime = runtimeFor(this); return await runtime.create(runtime.ownerFromContext(this.ctx), options) }
+  resume = async (options: AgentResumeOptions): Promise<AgentAcquireResult> => { const runtime = runtimeFor(this); return await runtime.resume(runtime.ownerFromContext(this.ctx), options) }
+  get = async (agentId: string): Promise<Agent | undefined> => { const runtime = runtimeFor(this); return await runtime.get(runtime.ownerFromContext(this.ctx), agentId) }
+  acquireLegacyTaskBinding = async (request: CordisXAgentSessionLegacyAcquireRequestV1): Promise<CordisXAgentSessionLegacyAcquireResultV1> => { const runtime = runtimeFor(this); return await runtime.acquireLegacyTaskBinding(runtime.ownerFromContext(this.ctx), request) }
 }
 export class CordisXSessionRegistryServiceV1 extends Service implements SessionRegistry {
   constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) { super(ctx, 'sessions'); runtimes.set(this, runtime) }
-  async get(sessionId: string): Promise<Session | undefined> { const runtime = runtimeFor(this); return await runtime.session(runtime.ownerFromContext(this.ctx), sessionId) }
+  get = async (sessionId: string): Promise<Session | undefined> => { const runtime = runtimeFor(this); return await runtime.session(runtime.ownerFromContext(this.ctx), sessionId) }
 }
 export class CordisXApprovalServiceV1 extends Service implements ApprovalService {
   constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) { super(ctx, 'approvals'); runtimes.set(this, runtime) }
-  async request(request: Parameters<ApprovalService['request']>[0]): Promise<ApprovalDecision> { const runtime = runtimeFor(this); return await runtime.requestApproval(runtime.ownerFromContext(this.ctx), request) }
-  async registerAnswerer(agent: Agent, answerer: ApprovalAnswerer): Promise<ApprovalAnswererHandle> { const runtime = runtimeFor(this); return await runtime.registerAnswerer(runtime.ownerFromContext(this.ctx), agent, answerer) }
+  request = async (request: Parameters<ApprovalService['request']>[0]): Promise<ApprovalDecision> => { const runtime = runtimeFor(this); return await runtime.requestApproval(runtime.ownerFromContext(this.ctx), request) }
+  registerAnswerer = async (agent: Agent, answerer: ApprovalAnswerer): Promise<ApprovalAnswererHandle> => { const runtime = runtimeFor(this); return await runtime.registerAnswerer(runtime.ownerFromContext(this.ctx), agent, answerer) }
 }

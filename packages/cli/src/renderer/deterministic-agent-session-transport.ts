@@ -135,7 +135,7 @@ export class DeterministicAgentSessionTransport implements CordisXPrivateAgentDr
     this.emit({ sessionId, type: 'assistant/chunk', data: { turn: run.turn, step: 1, chunk: { type: 'block-end', index: 0, block } } })
     this.emit({ sessionId, type: 'assistant/message', data: {
       turn: run.turn, step: 1,
-      message: { id: `deterministic-assistant:${sessionId}:${run.turn}`, role: 'assistant', content: [block], source: { kind: 'model', provider: 'deterministic-agent-session', model: 'deterministic-v1', replayState: { fixture: true } } },
+      message: { id: `deterministic-assistant.${sessionId}.${run.turn}`, role: 'assistant', content: [block], source: { kind: 'model', provider: 'deterministic-agent-session', model: 'deterministic-v1', replayState: { fixture: true } } },
     } })
     this.emit({ sessionId, type: 'step/end', data: { turn: run.turn, step: 1 } })
     this.emit({ sessionId, type: 'turn/end', data: { turn: run.turn, reason: { kind: 'completed' } } })

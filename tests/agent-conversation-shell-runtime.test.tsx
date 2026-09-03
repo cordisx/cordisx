@@ -43,6 +43,7 @@ import { CORDISX_PAGE_SCHEMA_V3, type CordisXCommandContext, type CordisXPageMou
 import {
   AgentConversationShellRegistry,
   CordisXAgentConversationShellService,
+  projectAgentConversationShellSnapshotV4,
 } from '../packages/cli/src/renderer/agent-conversation-shell.js'
 import { CommandRegistry, CordisXCommandService } from '../packages/cli/src/renderer/commands.js'
 import { HostAgentTaskDetailsNavigator } from '../packages/cli/src/renderer/host-ui/AgentTaskDetailsNavigator.js'
@@ -226,6 +227,35 @@ afterEach(() => {
 })
 
 describe('Agent conversation shell public runtime', () => {
+  it('accepts a Shell v4 message author whose exact participant fields use a different property order', () => {
+    const displayName = message('participant.agent-one', 'Agent One')
+    const avatar = createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'agent-one' })
+    const agentIdentity = { agentId: 'agent-one', revision: 'revision-one' }
+    const participant = { participantId: 'agent-one', role: 'agent' as const, displayName, avatar, agentIdentity }
+    const author = { agentIdentity, avatar, displayName, role: 'agent' as const, participantId: 'agent-one' }
+    const snapshot: AgentConversationShellSnapshotV4 = {
+      binding: { bindingId: 'binding-v4', ownerGeneration: 'owner-v4' },
+      generation: 'snapshot-v4', snapshotSequence: 1,
+      selection: {
+        kind: 'room', roomId: 'room-v4', title: message('room.v4', 'Room'), multiParticipant: false,
+        participantPresentation: 'none', participants: [participant],
+      },
+      items: [{
+        kind: 'message', itemId: 'item-v4', messageId: 'message-v4', sequence: 1,
+        author, source: { kind: 'session-event', sessionId: 'session-v4', eventSeq: 1 },
+        semantic: { purpose: 'conversation' },
+        body: [{ kind: 'text', text: message('message.v4', 'Ready.') }], reactions: [],
+        timestamp: '2026-09-03T00:00:00.000Z', deliveryState: 'delivered', runState: 'idle', ariaLive: 'off', actions: [],
+      }],
+      composer: { availability: 'unavailable', placeholder: message('composer.v4', 'Message'), disabled: { value: true }, submit: { id: 'send' } },
+      headerActions: [],
+    }
+
+    expect(projectAgentConversationShellSnapshotV4('chatroom', snapshot, {
+      resolve: value => value.fallback,
+    }).entries).toMatchObject([{ kind: 'message', authorId: 'agent-one' }])
+  })
+
   it('settles a Shell v4 close once and releases its source with an idempotent async unsubscribe', async () => {
     const dom = installDom()
     const commands = new CommandRegistry()
@@ -762,7 +792,7 @@ describe('Agent conversation shell public runtime', () => {
 
   it('rejects premature live replay, non-monotonic updates, and replay watermark overshoot', async () => {
     const dom = installDom()
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     const commands = new CommandRegistry()
     const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
     const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-1' })
@@ -809,6 +839,12 @@ describe('Agent conversation shell public runtime', () => {
         nextAfterSequence: 3, hasMore: true,
       })
       await waitForRuntimeState(dom, 'error')
+      if (candidate === 'sequence-gap') {
+        expect(error).toHaveBeenCalledWith(
+          '[cordisx] Agent conversation source failed',
+          expect.objectContaining({ message: 'subscription updates are not monotonic (expected 1, received 2, page after 0)' }),
+        )
+      }
       registration.dispose()
       await settle()
       dom.window.document.getElementById('page')!.replaceChildren()
