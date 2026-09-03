@@ -9,6 +9,8 @@ import {
 } from '../plugin-lifecycle-contracts.js'
 import type { CordisXConfig } from './config.js'
 import { CdpPluginLifecycleRuntime } from './cdp.js'
+import { readEntityTemplatePayload, type EntityTemplatePayload } from './entity-directory.js'
+import { PLUGIN_PACKAGE_SCHEMA_V5 } from './packages/manifest.js'
 import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
 
 const WATCH_INTERVAL_MS = 200
@@ -16,6 +18,10 @@ const DEBOUNCE_MS = 120
 const ROLLBACK_RETRY_MS = 750
 const IGNORED_DIRECTORIES = new Set(['.git', '.next', 'coverage', 'dist', 'node_modules'])
 const MAX_DIAGNOSTIC_LENGTH = 4_000
+const ENTITY_FILE_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-file.v1.schema.json'
+const LOCAL_ENTITY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u
+const ENTITY_TEMPLATE_PATH = /^\.\/entities\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\/entity\.json$/u
+const ENTITY_DIGEST = /^sha256:[a-f0-9]{64}$/u
 
 function diagnostic(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
@@ -32,6 +38,7 @@ export interface LocalDevelopmentBuild {
   readonly moduleFactorySource: string
   readonly runtimeArtifactSource: string
   readonly watchFiles: readonly string[]
+  readonly entityTemplates: readonly EntityTemplatePayload[]
   readonly readme?: string
 }
 
@@ -117,21 +124,62 @@ async function readReadme(root: string): Promise<{ readonly text?: string; reado
   }
 }
 
-async function assertRendererOnlyPackage(root: string): Promise<readonly string[]> {
+async function readRendererOnlyPackage(root: string): Promise<{
+  readonly files: readonly string[]
+  readonly entityTemplates: readonly EntityTemplatePayload[]
+}> {
   const manifestPath = path.join(root, 'cordisx-package.json')
   const text = await readFile(manifestPath, 'utf8').catch(error => {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error
   })
-  if (text === undefined) return []
-  const manifest = JSON.parse(text) as { readonly dependencies?: unknown }
+  if (text === undefined) return { files: [], entityTemplates: [] }
+  const manifest = JSON.parse(text) as Record<string, unknown>
   if (manifest.dependencies !== undefined && !Array.isArray(manifest.dependencies)) {
     throw new Error('local development package dependencies must be an array')
   }
   if (Array.isArray(manifest.dependencies) && manifest.dependencies.length > 0) {
     throw new Error('local development phase 1 is renderer-only; package dependencies are unavailable')
   }
-  return [manifestPath]
+  if (manifest.entityTemplates === undefined) return { files: [manifestPath], entityTemplates: [] }
+  if (manifest.$schema !== PLUGIN_PACKAGE_SCHEMA_V5 || manifest.schemaVersion !== 5) {
+    throw new Error('local development entityTemplates require plugin-package.v5')
+  }
+  const compatibility = manifest.compatibility
+  if (compatibility === null || typeof compatibility !== 'object' || Array.isArray(compatibility)
+    || !Array.isArray((compatibility as Record<string, unknown>).protocolSchemas)
+    || !(compatibility as { readonly protocolSchemas: readonly unknown[] }).protocolSchemas.includes(ENTITY_FILE_SCHEMA_V1)) {
+    throw new Error('local development entityTemplates require entity-file.v1 compatibility')
+  }
+  if (!Array.isArray(manifest.entityTemplates) || manifest.entityTemplates.length > 64) {
+    throw new Error('local development entityTemplates must be an array of at most 64 declarations')
+  }
+  const seen = new Set<string>()
+  const declarations = manifest.entityTemplates.map((candidate, index) => {
+    if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      throw new Error(`local development entityTemplates[${index}] must be an object`)
+    }
+    const item = candidate as Record<string, unknown>
+    const agentId = item.agentId
+    const entityPath = item.entityPath
+    const digest = item.digest
+    if (Object.keys(item).some(key => !['agentId', 'entityPath', 'digest'].includes(key))
+      || typeof agentId !== 'string' || !LOCAL_ENTITY_ID.test(agentId) || seen.has(agentId)
+      || typeof entityPath !== 'string' || !ENTITY_TEMPLATE_PATH.test(entityPath)
+      || entityPath !== `./entities/${agentId}/entity.json`
+      || typeof digest !== 'string' || !ENTITY_DIGEST.test(digest)) {
+      throw new Error(`local development entityTemplates[${index}] is invalid or duplicated`)
+    }
+    seen.add(agentId)
+    return { agentId, entityPath: entityPath as `./entities/${string}/entity.json`, digest: digest as `sha256:${string}` }
+  })
+  const entityTemplates = await Promise.all(declarations.map(async declaration => await readEntityTemplatePayload(root, declaration)))
+  const entityFiles = entityTemplates.flatMap(template => {
+    const entityFile = path.resolve(root, template.declaration.entityPath.slice(2))
+    const entityDirectory = path.dirname(entityFile)
+    return [entityFile, ...template.promptFiles.map(file => path.resolve(entityDirectory, file.path.slice(2)))]
+  })
+  return { files: [manifestPath, ...entityFiles], entityTemplates }
 }
 
 function absoluteInputs(root: string, inputs: Readonly<Record<string, unknown>>): readonly string[] {
@@ -165,10 +213,10 @@ export async function buildLocalDevelopmentPlugin(
     write: false,
     logLevel: 'silent' as const,
   }
-  const [moduleResult, readme, packageFiles] = await Promise.all([
+  const [moduleResult, readme, packageSource] = await Promise.all([
     build({ entryPoints: [entry], format: 'iife', globalName: '__cordisxPluginModule', ...common }),
     readReadme(root),
-    assertRendererOnlyPackage(root),
+    readRendererOnlyPackage(root),
   ])
   if (moduleResult.metafile === undefined) {
     throw new Error('local development build produced no dependency metadata')
@@ -190,6 +238,8 @@ export async function buildLocalDevelopmentPlugin(
     .update(version)
     .update('\0')
     .update(readme.text ?? '')
+    .update('\0')
+    .update(JSON.stringify(packageSource.entityTemplates))
     .digest('hex')}` as const
   const sourceKey = createHash('sha256').update(entry).digest('hex').slice(0, 24)
   return {
@@ -204,10 +254,11 @@ export async function buildLocalDevelopmentPlugin(
     watchFiles: [...new Set([
       entry,
       path.join(root, 'package.json'),
-      ...packageFiles,
+      ...packageSource.files,
       ...readme.files,
       ...absoluteInputs(root, moduleResult.metafile.inputs),
     ])].sort(),
+    entityTemplates: packageSource.entityTemplates,
     ...(readme.text === undefined ? {} : { readme: readme.text }),
   }
 }

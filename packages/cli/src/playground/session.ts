@@ -333,10 +333,20 @@ export async function createPlaygroundSession(
       store: ownerDocumentStore,
       principalAllowed: principal => documentLeases.allowed(principal),
     })
-    for (const plugin of config.plugins.filter(item => item.enabled)) entityAuthority.register({
-      profileId: 'playground', installationId: entityInstallationId('playground', plugin.id),
-      pluginId: plugin.id, pluginGeneration: 1,
-    }, [])
+    for (const plugin of config.plugins.filter(item => item.enabled)) {
+      const binding = {
+        profileId: 'playground', installationId: entityInstallationId('playground', plugin.id),
+        pluginId: plugin.id, pluginGeneration: 1,
+      } as const
+      const local = localDevelopmentByPlugin.get(plugin.id)?.build
+      const templates = local?.entityTemplates ?? []
+      entityAuthority.register(binding, templates.map(template => template.declaration))
+      if (local !== undefined && templates.length > 0) {
+        const results = await entityAuthority.materialize(binding, local.version, local.digest, templates)
+        const rejected = results.find(result => result.status === 'rejected')
+        if (rejected !== undefined) throw new Error(`entity template ${rejected.agentId} was rejected: ${rejected.code}`)
+      }
+    }
     const documents = Object.assign(ownerDocuments, { entities: createEntityBridgeHandler({
       secret: documentSecret, profileId: 'playground', generation, authority: entityAuthority,
       principalAllowed: principal => documentLeases.allowed(principal),

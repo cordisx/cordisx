@@ -121,6 +121,13 @@ function opaque(value: unknown, label: string): asserts value is string {
   }
 }
 
+function definitionRevision(value: unknown, label: string): asserts value is string {
+  if (typeof value !== 'string'
+    || (!/^[A-Za-z0-9._~-]{1,512}$/u.test(value) && !/^sha256:[a-f0-9]{64}$/u.test(value))) {
+    throw new Error(`${label} must be an opaque definition revision`)
+  }
+}
+
 function agentLoopHandle(value: unknown, label: string): asserts value is string {
   if (typeof value !== 'string' || [...value].length < 1 || [...value].length > 512) {
     throw new Error(`${label} must be an AgentLoop opaque handle`)
@@ -217,7 +224,7 @@ function assertParticipant(value: unknown, label: string): asserts value is Prot
     plainObject(value.agentIdentity, `${label}.agentIdentity`)
     exactKeys(value.agentIdentity, ['agentId', 'revision'], `${label}.agentIdentity`)
     opaque(value.agentIdentity.agentId, `${label}.agentIdentity.agentId`)
-    opaque(value.agentIdentity.revision, `${label}.agentIdentity.revision`)
+    definitionRevision(value.agentIdentity.revision, `${label}.agentIdentity.revision`)
   }
 }
 
