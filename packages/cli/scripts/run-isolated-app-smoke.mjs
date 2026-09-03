@@ -26,12 +26,16 @@ const profileDir = value('--profile-dir')
 const devConfig = optionalValue('--dev-config')
 const homeConfig = optionalValue('--home-config')
 const connectorHarness = process.argv.includes('--connector-harness')
+const desktopAgentSessionHarness = process.argv.includes('--desktop-agent-session-harness')
 const connectorHarnessPolicy = optionalValue('--connector-harness-policy') ?? 'allow'
 const connectorHarnessScenario = optionalValue('--connector-harness-scenario') ?? 'flow'
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('--port must be an unprivileged TCP port')
 if (devConfig !== undefined && homeConfig !== undefined) throw new Error('--dev-config and --home-config are mutually exclusive')
 if (homeConfig !== undefined && !path.isAbsolute(homeConfig)) throw new Error('--home-config must be an absolute config path')
 if (connectorHarness && (devConfig !== undefined || homeConfig !== undefined)) throw new Error('--connector-harness owns its fixed temporary Home composition')
+if (desktopAgentSessionHarness && (connectorHarness || devConfig === undefined || homeConfig !== undefined)) {
+  throw new Error('--desktop-agent-session-harness requires --dev-config and cannot be combined with another harness or --home-config')
+}
 if (!['allow', 'deny', 'default'].includes(connectorHarnessPolicy)) throw new Error('--connector-harness-policy must be allow, deny, or default')
 if (!['flow', 'unsubscribe', 'owner-replay', 'owner-live'].includes(connectorHarnessScenario)) throw new Error('--connector-harness-scenario is invalid')
 const smokeArgs = process.argv.slice(separator + 1)
@@ -175,7 +179,11 @@ const invocation = connectorHarness
   ? ['codex', 'smoke', '--data', 'host-isolated']
   : ['dev', '--config', devConfig]
 const cliEntry = connectorHarness ? 'tests/fixtures/connector-production-smoke-cli.ts' : 'packages/cli/src/cli.ts'
-const smokeEntry = connectorHarness ? 'tests/fixtures/connector-production-smoke.mjs' : 'packages/cli/scripts/live-smoke.mjs'
+const smokeEntry = connectorHarness
+  ? 'tests/fixtures/connector-production-smoke.mjs'
+  : desktopAgentSessionHarness
+    ? 'packages/cli/scripts/codex-desktop-agent-session-smoke.mjs'
+    : 'packages/cli/scripts/live-smoke.mjs'
 const launcherEnvironment = connectorHarness
   ? { ...process.env, CORDISX_HOME: path.join(homeRoot, '.cordisx') }
   : homeRoot === undefined ? process.env : { ...process.env, HOME: homeRoot }
