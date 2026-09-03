@@ -94,15 +94,21 @@ const clone = <Value>(value: Value): Value => structuredClone(value)
 const opaque = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 512
 const ownerKey = (owner: PluginOwnerIdentity) => `${owner.pluginId}\u0000${owner.generation}`
 
+type CordisXDriverSessionEventType =
+  | 'turn/start' | 'turn/end' | 'step/start' | 'step/end'
+  | 'assistant/chunk' | 'assistant/message' | 'tool/call' | 'tool/result'
+  | 'agent/inbox/spliced' | 'playground/scenario'
+
 export type CordisXDriverSessionEvent = {
-  [K in 'turn/start' | 'turn/end' | 'step/start' | 'step/end' | 'assistant/chunk' | 'assistant/message' | 'tool/call' | 'tool/result']:
-    { readonly sessionId: string; readonly type: K; readonly data: SessionEventDataMap[K] }
-}['turn/start' | 'turn/end' | 'step/start' | 'step/end' | 'assistant/chunk' | 'assistant/message' | 'tool/call' | 'tool/result']
+  [K in CordisXDriverSessionEventType]:
+    { readonly sessionId: string; readonly type: K; readonly data: SessionEventDataMap[K]; readonly ignorable?: true }
+}[CordisXDriverSessionEventType]
 
 type SessionEventInput = {
   [K in SessionEvent['type']]: {
     readonly type: K
     readonly data: Extract<SessionEvent, { readonly type: K }>['data']
+    readonly ignorable?: true
   }
 }[SessionEvent['type']]
 
@@ -127,11 +133,11 @@ export interface CordisXDriverMessageClaimed {
 export interface CordisXPrivateAgentDriver {
   create(input: { readonly sessionId: string; readonly options: AgentOptions; readonly setup?: AgentCreateOptions['setup'] }): Promise<{ readonly status: 'accepted'; readonly detail?: AgentDetailReference } | { readonly status: 'unavailable'; readonly code: 'host-unavailable' | 'unsupported' }>
   resume(input: { readonly sessionId: string; readonly options: AgentOptions; readonly setup?: AgentResumeOptions['setup'] }): Promise<{ readonly status: 'accepted'; readonly detail?: AgentDetailReference } | { readonly status: 'unavailable'; readonly code: 'host-unavailable' | 'unsupported' }>
-  submit(input: { readonly sessionId: string; readonly message: UserMessage; readonly target: 'next-turn' | 'next-step'; readonly wakeup: boolean }): Promise<'accepted' | 'unavailable'>
+  submit(input: { readonly sessionId: string; readonly message: UserMessage; readonly target: 'next-turn' | 'next-step'; readonly wakeup: boolean }): Promise<'accepted' | 'replayed' | 'unavailable'>
   discard(input: { readonly sessionId: string; readonly messageId: MessageId }): Promise<'accepted' | 'not-found' | 'already-claimed' | 'unavailable'>
   cancel(input: { readonly sessionId: string; readonly cause: AgentCancelCause; readonly keepInbox: boolean }): Promise<'accepted' | 'unavailable'>
   /** Driver observations are appended only by the Host Session authority. */
-  onSessionEvent?(listener: (event: CordisXDriverSessionEvent) => void): () => void
+  onSessionEvent?(listener: (event: CordisXDriverSessionEvent) => void | Promise<void>): () => void
   onAgentStatus?(listener: (event: CordisXDriverAgentStatus) => void): () => void
   onMessageClaimed?(listener: (event: CordisXDriverMessageClaimed) => void): () => void
   /** A driver can request a Host-scoped approval without seeing an Agent handle. */
@@ -309,7 +315,7 @@ export class CordisXAgentSessionRuntime {
       })
     }
     this.unsubscribeReplacement = options.driver.onReplacement(() => this.connectionReplaced())
-    this.unsubscribeDriverEvents = options.driver.onSessionEvent?.(event => { void this.appendDriverEvent(event) }) ?? (() => {})
+    this.unsubscribeDriverEvents = options.driver.onSessionEvent?.(event => this.appendDriverEvent(event)) ?? (() => {})
     this.unsubscribeDriverApprovals = options.driver.onApprovalRequest?.(async request => await this.requestDriverApproval(request)) ?? (() => {})
     this.unsubscribeDriverStatus = options.driver.onAgentStatus?.(event => this.emitDriverStatus(event)) ?? (() => {})
     this.unsubscribeDriverClaimed = options.driver.onMessageClaimed?.(event => { void this.claimDriverMessage(event) }) ?? (() => {})
@@ -689,6 +695,7 @@ export class CordisXAgentSessionRuntime {
       const prior = record.pending.get(message.id)
       if (prior !== undefined) return this.admission(message.id, 'accepted')
       const submitted = await this.options.driver.submit({ sessionId: record.id, message: clone(message), target, wakeup })
+      if (submitted === 'replayed') return this.admission(message.id, 'accepted')
       if (submitted !== 'accepted') return this.admission(message.id, 'unavailable', 'host-unavailable')
       const stored = clone(message)
       record.pending.set(stored.id, { message: stored, target })
@@ -832,8 +839,8 @@ export class CordisXAgentSessionRuntime {
     return session as Session
   }
 
-  private async append<K extends SessionEvent['type']>(session: SessionRecord, type: K, data: Extract<SessionEvent, { readonly type: K }>['data']): Promise<boolean> {
-    return await this.appendMany(session, [{ type, data } as SessionEventInput])
+  private async append<K extends SessionEvent['type']>(session: SessionRecord, type: K, data: Extract<SessionEvent, { readonly type: K }>['data'], ignorable?: true): Promise<boolean> {
+    return await this.appendMany(session, [{ type, data, ...(ignorable === true ? { ignorable: true as const } : {}) } as SessionEventInput])
   }
 
   private async appendMany(session: SessionRecord, inputs: readonly SessionEventInput[]): Promise<boolean> {
@@ -846,6 +853,7 @@ export class CordisXAgentSessionRuntime {
         $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/session-event.v1.schema.json' as const,
         contract: 'cordisx.session-event/v1' as const, schemaVersion: 1 as const,
         sessionId: session.id, seq: expectedSeq + index, time: this.now(), type: input.type, data: clone(input.data),
+        ...('ignorable' in input && input.ignorable === true ? { ignorable: true as const } : {}),
       }) as SessionEvent)
       try {
         await this.options.persistence?.append({
@@ -877,7 +885,7 @@ export class CordisXAgentSessionRuntime {
   private async appendDriverEvent(event: CordisXDriverSessionEvent): Promise<void> {
     const record = this.agents.get(event.sessionId)
     if (record === undefined || !this.current(record)) return
-    await this.append(record.session, event.type, event.data as Extract<SessionEvent, { readonly type: typeof event.type }>['data'])
+    await this.append(record.session, event.type, event.data as Extract<SessionEvent, { readonly type: typeof event.type }>['data'], event.ignorable)
   }
 
   private async requestDriverApproval(request: CordisXDriverApprovalRequest): Promise<ApprovalOutcome> {

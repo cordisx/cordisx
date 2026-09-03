@@ -70,6 +70,64 @@ strictly normalizes those records and uses them only in its temporary in-memory
 permission store. This is the narrow preview mechanism for an explicitly
 authorized internal composition; absent records remain denied/unavailable.
 
+### Declarative Agent/Session scenarios
+
+An explicit fixture may also provide a Host-only `playground.sessionScenarios`
+catalog. The catalog is accepted only by the UI Playground launcher, is parsed
+with exact fields and bounded codes, and is never injected into a plugin
+Context or enabled for the production renderer. The message text must equal a
+configured code and the receiving Session must use the scenario's exact
+`entryAgentId`; otherwise the deterministic transport handles it as an ordinary
+message.
+
+A useful first fixture catalog can reserve `0` for a non-streamed plain-text
+baseline, `1` for a streamed reply, `2` for tool call/result, `3` for an
+approval branch, `4` for Room delegation, and `01234` for a composed regression
+flow. These values are fixture-owned catalog keys, not Runtime commands.
+
+```json
+{
+  "playground": {
+    "sessionScenarios": {
+      "version": 1,
+      "revision": "local-smoke-1",
+      "enabled": true,
+      "scenarios": {
+        "01234": {
+          "entryAgentId": "chatroom.generalist",
+          "label": "Full local smoke",
+          "steps": [
+            { "type": "assistant-reply", "text": "Starting the declared flow." },
+            {
+              "type": "room-delegation",
+              "as": "reviewer",
+              "memberId": "reviewer-member",
+              "targetAgentId": "chatroom.reviewer",
+              "task": "Review the declared flow."
+            },
+            { "type": "tool-call", "actor": "reviewer", "call": "inspect", "name": "workspace.inspect", "arguments": { "scope": "current" } },
+            { "type": "tool-result", "actor": "reviewer", "call": "inspect", "content": "Inspection complete." },
+            { "type": "assistant-reply", "actor": "reviewer", "text": "Review complete." },
+            { "type": "final-summary", "text": "The declared flow completed." }
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+Steps support `assistant-reply`, `final-summary`, `tool-call`, `tool-result`,
+`approval-request` with outcome branches, `room-delegation`, `followup`,
+`failure`, and `cancel`. A delegation binds its `as` actor only after the
+existing Room bridge admits a Session whose exact Agent identity and task text
+match the declaration. Scenario progress is an ignorable Host SessionEvent in
+the same durable Session ledger; tool, approval, assistant, and terminal facts
+use their existing SessionEvent variants. The run identity derives from source
+message id, catalog revision, and code. Completed or failed runs do not execute
+again after reload; a generation interrupted mid-step is closed as a readable
+failure and can be retried by sending the code as a new message.
+
 ## What it proves
 
 - configured local plugin modules bundle, load, activate, dispose, and rebuild

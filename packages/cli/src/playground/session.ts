@@ -55,6 +55,7 @@ import {
 } from '../launcher/owner-document-rpc.js'
 import { EntityDirectoryAuthority } from '../launcher/entity-directory.js'
 import { createEntityBridgeHandler, isEntityBindingRequest } from '../launcher/entity-rpc.js'
+import { parsePlaygroundSessionScenarioCatalog, type PlaygroundSessionScenarioCatalogV1 } from './session-scenario-catalog.js'
 
 export interface PlaygroundFixtureInfo {
   readonly name: string
@@ -78,6 +79,7 @@ interface PlaygroundGeneration {
   readonly channelManager?: ChannelManagerProjectionV1
   readonly providerFleet?: ProviderFleet
   readonly providerToken?: string
+  readonly sessionScenarios?: PlaygroundSessionScenarioCatalogV1
 }
 
 export interface PreparedPlaygroundComposition extends RendererCompositionSource {
@@ -181,6 +183,7 @@ export async function createPlaygroundSession(
   const playground = source.playground !== null && typeof source.playground === 'object'
     ? source.playground as Record<string, unknown>
     : {}
+  const sessionScenarios = parsePlaygroundSessionScenarioCatalog(playground.sessionScenarios)
   const previewPermissionPolicies = playground.permissionPolicies === undefined
     ? []
     : Array.isArray(playground.permissionPolicies)
@@ -375,6 +378,7 @@ export async function createPlaygroundSession(
       ...(channelManager === undefined ? {} : { channelManager }),
       ...(providerFleet === undefined ? {} : { providerFleet }),
       ...(providerToken === undefined ? {} : { providerToken }),
+      ...(sessionScenarios === undefined ? {} : { sessionScenarios }),
     }
     active = next
     return next
@@ -384,6 +388,7 @@ export async function createPlaygroundSession(
     generation: generation.generation,
     configBridgeToken: generation.token,
     playgroundAgentSessionStoreToken: generation.agentSessionStoreToken,
+    ...(generation.sessionScenarios === undefined ? {} : { playgroundSessionScenarios: generation.sessionScenarios }),
     ownerDocumentAuthority: {
       secret: generation.documentSecret,
       profileId: 'playground',
