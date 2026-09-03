@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import type { ManagerModel } from '../../manager.js'
 import { HostSurfaceIcon } from '../../host-ui/HostSurfaceIcon.js'
+import { HostAgentAvatar } from '../../host-ui/conversation/AgentAvatar.js'
 import { managerCopy } from '../../ui-copy.js'
 import type { ManagerRouter } from '../model/routes.js'
 
@@ -51,14 +52,32 @@ export function ManagerContentPage({ model, router, locale }: { readonly model: 
     event.preventDefault()
     activateTab(next)
   }
-  return <section className="cxr-page">
+  return <section className="cxr-page cxr-manager-content-page" data-manager-content-page="true">
+    {presentation?.recordSummary === undefined ? null : <section
+      className="cxr-manager-record-summary"
+      data-manager-content-record-summary="true"
+      aria-label={presentation.recordSummary.title}
+    >
+      <span className="cxr-manager-record-avatar" role="img" aria-label={presentation.recordSummary.title}>
+        <HostAgentAvatar participant={{
+          id: `manager-summary:${contributionId ?? 'record'}`,
+          role: 'agent',
+          name: presentation.recordSummary.title,
+          avatar: presentation.recordSummary.leadingVisual.avatar,
+        }} />
+      </span>
+      <span className="cxr-manager-record-copy">
+        <strong>{presentation.recordSummary.title}</strong>
+        {presentation.recordSummary.description === undefined ? null : <span>{presentation.recordSummary.description}</span>}
+      </span>
+    </section>}
     {presentation === undefined || contributionId === undefined || presentation.tabs.length === 0 ? null : <div className="cxr-tabs" role="tablist" aria-label={presentation.title} data-manager-content-tabs="true">
       {presentation.tabs.map((tab, index) => <button key={tab.id} id={`${panelId}-${tab.id}`} ref={node => { if (node === null) tabs.current.delete(tab.id); else tabs.current.set(tab.id, node) }} type="button" role="tab" data-manager-content-tab={tab.id} aria-selected={tab.active} aria-controls={panelId} tabIndex={tab.active ? 0 : -1}
         onKeyDown={event => onTabKeyDown(event, index)} onClick={() => router.replace({ kind: 'manager-content', id: contributionId, reference: tab.route })}>
         <HostSurfaceIcon token={tab.icon} /><span>{tab.label}</span>
       </button>)}
     </div>}
-    <div id={panelId} role={activeTab === undefined ? undefined : 'tabpanel'} aria-labelledby={activeTab === undefined ? undefined : `${panelId}-${activeTab.id}`}>
+    <div className="cxr-manager-content-panel" id={panelId} role={activeTab === undefined ? undefined : 'tabpanel'} aria-labelledby={activeTab === undefined ? undefined : `${panelId}-${activeTab.id}`}>
       {state === 'loading' ? <div className="cxr-notice" role="status">{managerCopy(locale, 'manager.content.loading')}</div> : null}
       {state === 'error' ? <div className="cxr-notice" role="alert">{managerCopy(locale, 'manager.content.failed')}</div> : null}
       <div ref={seat} hidden={state === 'error'} />

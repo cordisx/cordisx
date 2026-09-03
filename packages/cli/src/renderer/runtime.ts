@@ -71,17 +71,17 @@ import {
   type ManagerSettingsNavigationItemSnapshot,
 } from './manager.js'
 import { installReactCordisXManager } from './manager/install.js'
+import {
+  HostManagerNavigationController,
+  resolveHostManagerAgentDefinitionOpenRequest,
+} from './manager/navigation-controller.js'
 import { selectPluginReadme } from './readme.js'
 import { CordisXCommandService } from './commands.js'
 import { CordisXAgentConversationShellService } from './agent-conversation-shell.js'
-import {
-  CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT,
-  HostAgentTaskDetailsNavigator,
-  navigateHostTaskDetailsSameDocument,
-} from './host-ui/AgentTaskDetailsNavigator.js'
+import { HostAgentTaskDetailsNavigator, navigateHostTaskDetailsSameDocument } from './host-ui/AgentTaskDetailsNavigator.js'
 import { CordisXI18nService } from './i18n.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
-import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter, withoutCordisXRouteHistoryEntry } from './codex-router-history.js'
+import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter } from './codex-router-history.js'
 import {
   BrowserPermissionPolicyStore,
   BrowserPermissionPrompt,
@@ -3062,6 +3062,7 @@ async function start(
       candidate,
     ),
   }
+  const managerNavigationController = new HostManagerNavigationController()
 
   try {
     i18nFiber = ctx.plugin(CordisXI18nService)
@@ -3137,11 +3138,23 @@ async function start(
         // byte-preserved v3 path. Never infer presentation from labels.
         resolve: value => agentSessionRuntime.definitionPresentation(value)
           ?? agentLoopBrokerV4.definitionPresentation(value),
+        resolveSettings: value => {
+          const request = resolveHostManagerAgentDefinitionOpenRequest(
+            routeService?.managerContentAgentDefinitionTarget(value),
+            managerModel.snapshot().settingsNavigationItems ?? [],
+          )
+          return request === undefined
+            ? { available: false, reason: 'Manager entity detail is unavailable for this exact Agent revision.' }
+            : { available: true }
+        },
         navigator: taskDetailsNavigator,
         onSettings: value => {
-          const path = `/playground/simulator/agents/${encodeURIComponent(`${value.agentId}@${value.revision}`)}`
-          window.history.pushState(withoutCordisXRouteHistoryEntry(window.history.state), '', path)
-          window.setTimeout(() => window.dispatchEvent(new Event(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT)), 0)
+          const request = resolveHostManagerAgentDefinitionOpenRequest(
+            routeService?.managerContentAgentDefinitionTarget(value),
+            managerModel.snapshot().settingsNavigationItems ?? [],
+          )
+          if (request === undefined) throw new Error('Manager entity detail is unavailable for this exact Agent revision.')
+          managerNavigationController.openManagerContent(request)
         },
       },
     })
@@ -3275,6 +3288,7 @@ async function start(
       await iconThemePreferenceBridge.ready()
     }
     disposeManager = installReactCordisXManager(document, managerModel, {
+      navigationController: managerNavigationController,
       ...(metadata.hostKind === 'playground'
         ? { triggerTarget: () => document.querySelector<HTMLElement>('[data-cordisx-playground-manager-trigger]') ?? undefined }
         : {}),

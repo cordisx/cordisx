@@ -16,6 +16,10 @@ import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { ManagerCollectionRegistryV1 } from '@cordisx/protocol/manager-collection/v1'
 import type { ManagerContentNavigationDeclarationV2 } from '@cordisx/protocol/manager-content-navigation/v2'
 import type {
+  ManagerContentNavigationDeclarationV3,
+  ManagerContentProjectionV2,
+} from '@cordisx/protocol/manager-content-navigation/v3'
+import type {
   NavigationCollectionAction,
   NavigationCollectionActions,
 } from '@cordisx/protocol/navigation-collection-actions/v1'
@@ -96,6 +100,18 @@ export type {
   ManagerContentNavigationRouteReferenceV2,
   ManagerContentNavigationTabV2,
 } from '@cordisx/protocol/manager-content-navigation/v2'
+export type {
+  ManagerContentNavigationAgentDefinitionSubjectV3,
+  ManagerContentNavigationDeclarationV3,
+  ManagerContentNavigationLocalizedTextV3,
+  ManagerContentNavigationRouteReferenceV3,
+  ManagerContentNavigationSubjectV3,
+  ManagerContentNavigationTabV3,
+  ManagerContentProjectionV2,
+  ManagerContentRecordSummaryLeadingVisualV3,
+  ManagerContentRecordSummaryProjectionV2,
+  ManagerContentRecordSummaryV3,
+} from '@cordisx/protocol/manager-content-navigation/v3'
 export type {
   NavigationCollectionAction,
   NavigationCollectionActionConfirmation,
@@ -1078,9 +1094,14 @@ export const CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1 =
 /** Additive Manager subroute declaration with an optional Host-localized tab label. */
 export const CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V2 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-navigation.v2.schema.json' as const
+/** Additive Manager detail declaration with fixed record summary and exact subject identity. */
+export const CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-navigation.v3.schema.json' as const
 /** Renderer-safe Host projection of an active Manager subroute. */
 export const CORDISX_MANAGER_CONTENT_PROJECTION_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-projection.v1.schema.json' as const
+export const CORDISX_MANAGER_CONTENT_PROJECTION_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-projection.v2.schema.json' as const
 
 export interface CordisXManagerContentNavigationDeclarationV1 {
   readonly $schema: typeof CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1
@@ -1098,6 +1119,8 @@ export interface CordisXManagerContentNavigationDeclarationV1 {
 
 /** Exact protocol v2 declaration; v1 remains closed and continues to reject tab labels. */
 export type CordisXManagerContentNavigationDeclarationV2 = ManagerContentNavigationDeclarationV2
+export type CordisXManagerContentNavigationDeclarationV3 = ManagerContentNavigationDeclarationV3
+export type CordisXManagerContentProjectionV2 = ManagerContentProjectionV2
 
 /**
  * A bounded record-title catalog.  It is data only: no DOM, CSS, callback,
@@ -1120,11 +1143,23 @@ export interface CordisXManagerContentNavigationProjectionV1 {
   readonly recordTitles: readonly CordisXManagerContentRecordTitleV1[]
 }
 
+/** Additive atomic catalog replacement that may contain navigation v3 declarations. */
+export interface CordisXManagerContentNavigationCatalogProjectionV2 {
+  readonly declarations: readonly (
+    CordisXManagerContentNavigationDeclarationV1
+    | CordisXManagerContentNavigationDeclarationV2
+    | CordisXManagerContentNavigationDeclarationV3
+  )[]
+  readonly recordTitles: readonly CordisXManagerContentRecordTitleV1[]
+}
+
 export interface CordisXManagerContentNavigation {
   register(declaration: CordisXManagerContentNavigationDeclarationV1): Disposable<void | Promise<void>>
   register(declaration: CordisXManagerContentNavigationDeclarationV2): Disposable<void | Promise<void>>
+  register(declaration: CordisXManagerContentNavigationDeclarationV3): Disposable<void | Promise<void>>
   registerRecordTitles(records: readonly CordisXManagerContentRecordTitleV1[]): Disposable<void | Promise<void>>
   replaceProjection(projection: CordisXManagerContentNavigationProjectionV1): Disposable<void | Promise<void>>
+  replaceProjection(projection: CordisXManagerContentNavigationCatalogProjectionV2): Disposable<void | Promise<void>>
 }
 
 export interface CordisXPageMetadata {

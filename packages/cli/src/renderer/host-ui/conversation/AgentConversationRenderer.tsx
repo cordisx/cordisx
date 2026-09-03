@@ -81,6 +81,7 @@ export interface AgentConversationRendererProps {
   readonly debugFixture?: boolean
   readonly identity?: {
     readonly resolve: (identity: { readonly agentId: string; readonly revision: string }) => { readonly identity: { readonly agentId: string; readonly revision: string }; readonly name: string; readonly introduction: string } | undefined
+    readonly resolveSettings?: (identity: { readonly agentId: string; readonly revision: string }) => { readonly available: boolean; readonly reason?: string }
     readonly navigator: HostAgentTaskDetailsNavigator
     readonly onSettings: (identity: { readonly agentId: string; readonly revision: string }) => void | Promise<void>
   }
@@ -1067,6 +1068,7 @@ export function AgentConversationRenderer({ model, commands, copy, debugFixture 
         copy={identityCopy}
         navigator={identity.navigator}
         onClose={closeInspector}
+        {...(identity.resolveSettings === undefined ? {} : { resolveSettings: identity.resolveSettings })}
         onSettings={identity.onSettings}
         onNavigationError={onCommandError}
         idPrefix={identityContentId}

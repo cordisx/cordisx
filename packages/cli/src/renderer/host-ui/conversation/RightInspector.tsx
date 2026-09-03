@@ -29,6 +29,13 @@ function focusable(panel: HTMLElement): HTMLElement[] {
     .filter(item => item.getAttribute('aria-hidden') !== 'true' && !item.hasAttribute('inert'))
 }
 
+function initialFocusable(panel: HTMLElement): HTMLElement | undefined {
+  const items = focusable(panel)
+  return items.find(item => item.dataset.hostInspectorPrimaryFocus === 'true')
+    ?? items.find(item => item.getAttribute('role') !== 'separator')
+    ?? items[0]
+}
+
 const DEFAULT_INSPECTOR_WIDTH = 360
 const MINIMUM_INSPECTOR_WIDTH = 300
 const MAXIMUM_INSPECTOR_WIDTH = 640
@@ -98,9 +105,7 @@ export function HostConversationRightInspector({
     pageKeyRef.current = pageKey
     const panel = panelRef.current
     if (panel === null) return
-    const items = focusable(panel)
-    const pageFocus = items.find(item => item.getAttribute('role') !== 'separator') ?? items[0]
-    pageFocus?.focus()
+    initialFocusable(panel)?.focus()
   }, [open, pageKey])
 
   React.useLayoutEffect(() => {
@@ -110,9 +115,7 @@ export function HostConversationRightInspector({
     returnFocusRef.current = panel.ownerDocument.activeElement instanceof panel.ownerDocument.defaultView!.HTMLElement
       ? panel.ownerDocument.activeElement
       : null
-    const items = focusable(panel)
-    const initialFocus = items.find(item => item.getAttribute('role') !== 'separator') ?? items[0]
-    initialFocus?.focus()
+    initialFocusable(panel)?.focus()
     return () => {
       const target = returnFocusRef.current
       returnFocusRef.current = null

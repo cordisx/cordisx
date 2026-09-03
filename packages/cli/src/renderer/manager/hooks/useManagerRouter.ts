@@ -21,8 +21,11 @@ export function useManagerRouter(storage?: Storage): ManagerRouter {
   const replace = useCallback((next: ManagerRoute) => {
     setHistory(current => current.length === 0 ? [next] : [...current.slice(0, -1), next])
   }, [])
+  const openDetail = useCallback((root: ManagerRoute, detail: ManagerRoute) => {
+    setHistory([root, detail])
+  }, [])
   const back = useCallback(() => {
     setHistory(current => current.length > 1 ? current.slice(0, -1) : current)
   }, [])
-  return useMemo(() => ({ route, navigate, replace, back }), [back, navigate, replace, route])
+  return useMemo(() => ({ route, navigate, replace, openDetail, back }), [back, navigate, openDetail, replace, route])
 }

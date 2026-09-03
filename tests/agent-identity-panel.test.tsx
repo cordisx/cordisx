@@ -291,8 +291,9 @@ describe('Host Agent identity panel interaction', () => {
     expect(harness.dom.window.document.activeElement).toBe(settings)
     session.focus()
     await act(async () => session.dispatchEvent(new harness.dom.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })))
-    expect(harness.dom.window.document.activeElement).toBe(settings)
-    await act(async () => settings.dispatchEvent(new harness.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    const close = harness.dom.window.document.querySelector<HTMLButtonElement>('.cx-conversation-inspector-icon-action[aria-label="Close Agent panel"]')!
+    expect(harness.dom.window.document.activeElement).toBe(close)
+    await act(async () => close.dispatchEvent(new harness.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
     expect(harness.dom.window.document.querySelector('[role="dialog"]')).toBeNull()
     expect(harness.dom.window.document.activeElement).toBe(trigger)
 
@@ -302,6 +303,39 @@ describe('Host Agent identity panel interaction', () => {
     expect(harness.dom.window.document.querySelector('[role="dialog"]')).toBeNull()
     expect(harness.dom.window.document.activeElement).toBe(trigger)
     await harness.close()
+  })
+
+  it('fails closed for a missing exact Manager target and closes before opening an available target', async () => {
+    const order: string[] = []
+    const navigator = new HostAgentTaskDetailsNavigator({ navigateHost: vi.fn(), navigateExternal: vi.fn() })
+    function Harness({ available }: { readonly available: boolean }) {
+      const [open, setOpen] = useState(true)
+      return <HostAgentIdentityPanel
+        open={open}
+        presentation={presentation()}
+        copy={copy}
+        navigator={navigator}
+        onOpenChange={next => { if (!next) order.push('close'); setOpen(next) }}
+        resolveSettings={identity => identity.agentId === 'lead' && identity.revision === 'r1' && available
+          ? { available: true }
+          : { available: false, reason: 'Exact entity detail is unavailable.' }}
+        onSettings={() => { order.push('settings') }}
+      />
+    }
+    const unavailable = await install(<Harness available={false} />)
+    const disabled = unavailable.dom.window.document.querySelector<HTMLButtonElement>('[aria-label="Agent settings"]')!
+    expect(disabled.disabled).toBe(true)
+    expect(disabled.title).toBe('Exact entity detail is unavailable.')
+    disabled.click()
+    expect(order).toEqual([])
+    await unavailable.close()
+
+    const available = await install(<Harness available={true} />)
+    const enabled = available.dom.window.document.querySelector<HTMLButtonElement>('[aria-label="Agent settings"]')!
+    await act(async () => enabled.click())
+    expect(order).toEqual(['close', 'settings'])
+    expect(available.dom.window.document.querySelector('[role="dialog"]')).toBeNull()
+    await available.close()
   })
 
   it('captures focus only on open and preserves it across callback rerenders and drawer mode changes', async () => {

@@ -6,9 +6,11 @@ import { HostThemeProjection } from '../host-theme.js'
 import { ManagerApp } from './ManagerApp.js'
 import { createManagerMarketplaceStore } from './model/marketplace-store.js'
 import { REACT_MANAGER_STYLES } from './styles.js'
+import type { HostManagerNavigationController } from './navigation-controller.js'
 
 export interface ReactManagerInstallOptions {
   readonly triggerTarget?: () => HTMLElement | undefined
+  readonly navigationController?: HostManagerNavigationController
 }
 
 /** One React root owns the complete Manager shell and every Host-owned page. */
@@ -37,7 +39,12 @@ export function installReactCordisXManager(document: Document, model: ManagerMod
   // The Manager trigger is part of the Host bootstrap contract. Commit the
   // initial tree before returning so callers never observe a half-installed
   // renderer (and tests do not need renderer-specific timing workarounds).
-  flushSync(() => root.render(<ManagerApp model={model} marketplace={marketplace.model} triggerSeat={triggerSeat} />))
+  flushSync(() => root.render(<ManagerApp
+    model={model}
+    marketplace={marketplace.model}
+    triggerSeat={triggerSeat}
+    {...(options.navigationController === undefined ? {} : { navigationController: options.navigationController })}
+  />))
 
   let currentTarget: HTMLElement | undefined
   let scheduled = false
