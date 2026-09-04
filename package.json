@@ -29,6 +29,6 @@
     "node": ">=22.19"
   },
   "devDependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#df6caacaf7f538b6e0fe95e2dfaa30e11961fa1e"
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#77a09f7c5092a88155338b8651a09cf2b22a0207"
   }
 }

@@ -55,8 +55,14 @@ This directory is the public, aggregatable source for CordisX product and archit
   Harness mapping/refusals, contextual identity boundary, and validation matrix.
 - `distribution-and-cli.md` defines the product monorepo, home configuration,
   app/profile command model, package ownership, and release gates.
+- `showcase-capture-integration.md` defines which real-showcase support belongs
+  in CordisX, which behavior is opt-in, which capture artifacts stay in the
+  homepage repository, and which module guides an Agent must read first.
 - `dynamic-package-store.md` maps source-v1/package-v2 intake and Host-private
   transaction hardening onto the single launcher package/activation stores.
+- `plugin-bundles.md` defines Host-owned bundle manifests, member claims,
+  atomic lifecycle coordination, permission merging and safety floors,
+  Manager information architecture, Playground fixtures, and app-smoke proof.
 - `platform-capabilities.md` defines the Platform service, permission broker,
   current-connection adapter boundary, manager projection, PR order, and validation scope.
 - `multi-provider-sessions.md` defines provider-aware model/session identity,

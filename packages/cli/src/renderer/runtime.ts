@@ -19,6 +19,9 @@ import type {
   CordisXPluginPackageManifestV1,
   CordisXPluginLifecycleOperationV1,
   CordisXPluginLifecycleResultV1,
+  CordisXPluginBundleLifecycleOperationV1,
+  CordisXPluginBundleLifecycleResultV1,
+  CordisXPluginBundleManagerSnapshotV1,
   CordisXPluginConsoleFacade,
   CordisXLocalizedText,
   CordisXPluginManifestV1,
@@ -237,6 +240,7 @@ interface CordisXRuntimeMetadata {
   readonly channelCredentialBridgeToken?: string
   readonly channelActionsBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
+  readonly pluginBundleSnapshot?: CordisXPluginBundleManagerSnapshotV1
   /** Launcher-only RemoteObject handoff nonce; never an authorization payload. */
   readonly certifiedPermissionChannelToken?: string
   readonly pluginActivation?: CordisXPluginActivationRecordV1
@@ -713,6 +717,10 @@ async function start(
   }
   if (currentActivation.profileId !== metadata.profileId || currentActivation.runtimeGeneration !== generation) {
     throw new Error('plugin activation metadata does not match the renderer scope')
+  }
+  let currentPluginBundles: CordisXPluginBundleManagerSnapshotV1 | undefined = metadata.pluginBundleSnapshot
+  if (lifecycleBridge !== undefined) {
+    currentPluginBundles = await lifecycleBridge.bundleSnapshot().catch(() => currentPluginBundles)
   }
   sharedReactRuntime = installSharedReactRuntime(document)
   let certifiedPermissionChannel: CertifiedPermissionDocumentChannel | undefined
@@ -1881,6 +1889,7 @@ async function start(
         runtimeGeneration: generation,
         operationsAvailable: lifecycleBridge !== undefined,
       },
+      ...(currentPluginBundles === undefined ? {} : { pluginBundles: currentPluginBundles }),
       iconThemes: iconThemeRegistry.redactedSnapshot(),
       permissions: broker.snapshots().map((permission: PlatformPermissionSnapshot) => {
         const pointId = permission.capability === 'ui.extension-points.render'
@@ -3102,6 +3111,27 @@ async function start(
     requestPluginLifecycle: (lifecycleOperation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1> => {
       if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
       return lifecycleBridge.request(currentActivation.revision, lifecycleOperation)
+    },
+    requestPluginBundleLifecycle: async (operation: CordisXPluginBundleLifecycleOperationV1): Promise<CordisXPluginBundleLifecycleResultV1> => {
+      if (lifecycleBridge === undefined || currentPluginBundles === undefined) throw new Error('plugin bundle lifecycle operations are unavailable')
+      const result = await lifecycleBridge.bundleRequest(currentPluginBundles, operation)
+      currentPluginBundles = await lifecycleBridge.bundleSnapshot()
+      if (result.outcome === 'applied') {
+        const effective = new Map(currentPluginBundles.bundles.flatMap(bundle => bundle.permissions).map(permission => [
+          `${permission.pluginId}\u0000${permission.permissionId}`,
+          permission,
+        ]))
+        const runtimePermissions = broker.snapshots()
+        for (const permission of effective.values()) {
+          const runtimePermission = runtimePermissions.find(item => item.identity.id === permission.pluginId
+            && item.capability === permission.capability && JSON.stringify(item.scope) === permission.scopeLabel)
+          if (runtimePermission !== undefined) {
+            await setPermissionPolicy(permission.pluginId, permission.capability as CordisXPermissionCapabilityV4, permission.effectivePolicy, runtimePermission.scope)
+          }
+        }
+      }
+      notify('plugin-bundles')
+      return result
     },
     permissionLifecycleReviewPlanV2: target => {
       if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))

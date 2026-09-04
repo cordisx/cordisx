@@ -112,6 +112,7 @@ type CopyKey =
   | 'marketplace.invalid-url'
   | 'marketplace.duplicate-source'
   | 'manager.nav.plugins'
+  | 'manager.nav.plugin-bundles'
   | 'manager.nav.extension-points'
   | 'manager.nav.routes'
   | 'manager.nav.marketplace'
@@ -132,6 +133,38 @@ type CopyKey =
   | 'plugins.reload'
   | 'plugins.open'
   | 'plugins.heading'
+  | 'plugins.local-development'
+  | 'plugins.development'
+  | 'plugins.project-link'
+  | 'plugins.details-actions'
+  | 'plugins.details-tabs'
+  | 'plugins.missing'
+  | 'plugins.no-readme'
+  | 'plugins.operation-result'
+  | 'plugins.source-path'
+  | 'plugins.build-status'
+  | 'plugins.last-success'
+  | 'plugins.metric.requests'
+  | 'plugins.metric.successes'
+  | 'plugins.metric.failures'
+  | 'plugins.metric.denials'
+  | 'plugins.metric.status'
+  | 'plugins.metric.permissions'
+  | 'plugins.metric.extension-points'
+  | 'plugins.metric.routes'
+  | 'plugins.metric.injected-capabilities'
+  | 'plugins.metric.dependencies'
+  | 'plugins.injected-capabilities'
+  | 'plugins.none'
+  | 'plugins.no-permissions'
+  | 'plugins.search-extension-points'
+  | 'plugins.search-extension-points-placeholder'
+  | 'plugins.no-extension-points'
+  | 'plugins.no-matching-extension-points'
+  | 'plugins.search-routes'
+  | 'plugins.search-routes-placeholder'
+  | 'plugins.no-routes'
+  | 'plugins.no-matching-routes'
   | 'plugin.status.active'
   | 'plugin.status.blocked'
   | 'plugin.status.permission-blocked'
@@ -511,6 +544,7 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'marketplace.invalid-url': { en: 'Enter an HTTPS URL', 'zh-CN': '请输入 HTTPS 地址' },
   'marketplace.duplicate-source': { en: 'This marketplace is already configured', 'zh-CN': '这个商店地址已经配置' },
   'manager.nav.plugins': { en: 'Plugins', 'zh-CN': '插件' },
+  'manager.nav.plugin-bundles': { en: 'Plugin bundles', 'zh-CN': '插件包' },
   'manager.nav.extension-points': { en: 'Extension points', 'zh-CN': '扩展点' },
   'manager.nav.routes': { en: 'Routes', 'zh-CN': '路由' },
   'manager.nav.marketplace': { en: 'Marketplace', 'zh-CN': '插件商店' },
@@ -531,6 +565,38 @@ const COPY: Readonly<Record<CopyKey, Readonly<Record<CordisXProductLocale, strin
   'plugins.reload': { en: 'Reload plugin', 'zh-CN': '重载插件' },
   'plugins.open': { en: 'Open plugin details', 'zh-CN': '打开插件详情' },
   'plugins.heading': { en: 'Plugin details', 'zh-CN': '插件详情' },
+  'plugins.local-development': { en: 'Local development', 'zh-CN': '本地开发' },
+  'plugins.development': { en: 'Development build', 'zh-CN': '开发态' },
+  'plugins.project-link': { en: 'Project link', 'zh-CN': '项目链接' },
+  'plugins.details-actions': { en: 'Plugin information and actions', 'zh-CN': '插件信息与操作' },
+  'plugins.details-tabs': { en: 'Plugin details', 'zh-CN': '插件详情' },
+  'plugins.missing': { en: 'This plugin is no longer available.', 'zh-CN': '插件已不存在' },
+  'plugins.no-readme': { en: 'This plugin does not provide a README.', 'zh-CN': '此插件没有提供 README。' },
+  'plugins.operation-result': { en: 'Operation result', 'zh-CN': '操作结果' },
+  'plugins.source-path': { en: 'Source path', 'zh-CN': '源码路径' },
+  'plugins.build-status': { en: 'Build status', 'zh-CN': '构建状态' },
+  'plugins.last-success': { en: 'Last successful build', 'zh-CN': '最近成功' },
+  'plugins.metric.requests': { en: 'Requests', 'zh-CN': '请求' },
+  'plugins.metric.successes': { en: 'Succeeded', 'zh-CN': '成功' },
+  'plugins.metric.failures': { en: 'Failed', 'zh-CN': '失败' },
+  'plugins.metric.denials': { en: 'Denied', 'zh-CN': '拒绝' },
+  'plugins.metric.status': { en: 'Status', 'zh-CN': '状态' },
+  'plugins.metric.permissions': { en: 'Permissions', 'zh-CN': '权限' },
+  'plugins.metric.extension-points': { en: 'Extension points', 'zh-CN': '扩展点' },
+  'plugins.metric.routes': { en: 'Routes', 'zh-CN': '路由' },
+  'plugins.metric.injected-capabilities': { en: 'Injected capabilities', 'zh-CN': '注入能力' },
+  'plugins.metric.dependencies': { en: 'Dependencies', 'zh-CN': '依赖' },
+  'plugins.injected-capabilities': { en: 'Injected capabilities', 'zh-CN': '注入能力' },
+  'plugins.none': { en: 'None', 'zh-CN': '无' },
+  'plugins.no-permissions': { en: 'This plugin does not declare platform permissions.', 'zh-CN': '该插件未声明平台权限' },
+  'plugins.search-extension-points': { en: 'Search plugin extension points', 'zh-CN': '搜索插件扩展点' },
+  'plugins.search-extension-points-placeholder': { en: 'Search extension points, descriptions, or IDs…', 'zh-CN': '搜索扩展点、介绍或 id…' },
+  'plugins.no-extension-points': { en: 'This plugin does not use extension points.', 'zh-CN': '该插件未使用扩展点' },
+  'plugins.no-matching-extension-points': { en: 'No matching extension points', 'zh-CN': '没有匹配的扩展点' },
+  'plugins.search-routes': { en: 'Search plugin routes', 'zh-CN': '搜索插件路由' },
+  'plugins.search-routes-placeholder': { en: 'Search titles, paths, or IDs…', 'zh-CN': '搜索标题、路径或 id…' },
+  'plugins.no-routes': { en: 'This plugin does not register routes.', 'zh-CN': '该插件未注册路由' },
+  'plugins.no-matching-routes': { en: 'No matching routes', 'zh-CN': '没有匹配的路由' },
   'plugin.status.active': { en: 'Active', 'zh-CN': '运行中' },
   'plugin.status.blocked': { en: 'Blocked', 'zh-CN': '已屏蔽' },
   'plugin.status.permission-blocked': { en: 'Permission blocked', 'zh-CN': '权限阻止' },

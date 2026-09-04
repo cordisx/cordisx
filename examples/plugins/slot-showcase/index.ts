@@ -24,6 +24,13 @@ export const Config = Schema.object({
       en: 'Selected native session ID used by the optional navigation shortcut. Leave empty to hide that shortcut.',
       'zh-CN': '可选导航快捷操作使用的原生会话 ID；留空时隐藏该快捷操作。',
     }),
+  welcomePage: Schema.boolean().default(false).role('switch')
+    .extra('extra', { label: { en: 'Branded welcome page', 'zh-CN': '品牌欢迎页' } })
+    .description('Enable the optional CordisX welcome destination for demos and product capture.')
+    .i18n({
+      en: 'Enable the optional CordisX welcome destination for demos and product capture.',
+      'zh-CN': '启用用于演示和产品录制的可选 CordisX 品牌欢迎页。',
+    }),
 })
 export type SlotShowcaseConfig = Schemastery.TypeT<typeof Config>
 export const configApplies = 'plugin-restart'
@@ -66,12 +73,16 @@ interface Messages {
   'environment.status': undefined
   'navigation.description': undefined
   'navigation.title': undefined
+  'navigation.welcome.title': undefined
   'page.app.body': undefined
   'page.app.description': undefined
   'page.app.title': undefined
   'page.main.body': undefined
   'page.main.description': undefined
   'page.main.title': undefined
+  'page.welcome.description': undefined
+  'page.welcome.eyebrow': undefined
+  'page.welcome.title': undefined
   'page.session.body': { readonly sessionId: string }
   'page.session.description': undefined
   'page.session.title': undefined
@@ -82,6 +93,8 @@ interface Messages {
   'route.app.title': undefined
   'route.main.description': undefined
   'route.main.title': undefined
+  'route.welcome.description': undefined
+  'route.welcome.title': undefined
   'route.session.description': undefined
   'route.session.title': undefined
 }
@@ -128,12 +141,16 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'environment.status': 'Snapshot revision',
       'navigation.description': 'Open showcase pages.',
       'navigation.title': 'Structured UI showcase',
+      'navigation.welcome.title': 'CordisX',
       'page.app.body': 'Showcase page for the application area.',
       'page.app.description': 'Presents the complete structured UI showcase as an application overview.',
       'page.app.title': 'Application overview',
       'page.main.body': 'Showcase page for the main area.',
       'page.main.description': 'Presents the showcase analytics content beside the native sidebar while preserving the surrounding application shell.',
       'page.main.title': 'Workspace analytics',
+      'page.welcome.description': 'A CordisX-owned welcome page rendered inside the native Codex workspace shell.',
+      'page.welcome.eyebrow': 'CORDISX · EXTENSIBLE WORKSPACE',
+      'page.welcome.title': 'What should we extend?',
       'page.session.body': 'Session content page for native session {sessionId}.',
       'page.session.description': 'Presents analytics for the currently selected native session below its persistent session header.',
       'page.session.title': 'Session analytics',
@@ -144,6 +161,8 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'route.app.title': 'Application overview',
       'route.main.description': 'Open workspace analytics from showcase navigation or the workspace toolbar.',
       'route.main.title': 'Workspace analytics',
+      'route.welcome.description': 'Open the optional branded welcome destination from showcase navigation.',
+      'route.welcome.title': 'CordisX welcome',
       'route.session.description': 'Toggle analytics for the current session from its header, or open the configured session from showcase navigation.',
       'route.session.title': 'Session analytics',
     },
@@ -165,12 +184,16 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'environment.status': '快照修订',
       'navigation.description': '打开演示页面。',
       'navigation.title': '结构化 UI 演示',
+      'navigation.welcome.title': 'CordisX',
       'page.app.body': '应用区域的演示页面。',
       'page.app.description': '以应用概览展示完整的结构化 UI 演示。',
       'page.app.title': '应用概览',
       'page.main.body': '主区域的演示页面。',
       'page.main.description': '在保留原生侧栏和应用外壳的同时，于主区域展示演示分析内容。',
       'page.main.title': '工作区分析',
+      'page.welcome.description': '由 CordisX 提供、在原生 Codex 工作区外壳内渲染的欢迎页面。',
+      'page.welcome.eyebrow': 'CORDISX · 可扩展工作区',
+      'page.welcome.title': '今天想扩展什么？',
       'page.session.body': '原生会话 {sessionId} 的正文分析页。',
       'page.session.description': '在保留当前原生会话页头的前提下，于会话正文区域展示该会话的分析内容。',
       'page.session.title': '会话分析',
@@ -182,6 +205,8 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'route.app.title': '应用概览',
       'route.main.description': '从演示导航或工作区工具栏打开工作区分析。',
       'route.main.title': '工作区分析',
+      'route.welcome.description': '从演示导航打开可选的品牌欢迎页。',
+      'route.welcome.title': 'CordisX 欢迎页',
       'route.session.description': '从会话页头切换当前会话分析，或从演示导航打开已配置会话的分析内容。',
       'route.session.title': '会话分析',
     },
@@ -205,6 +230,16 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       { id: 'details', label: message('page.tab.details'), icon: 'host:info' },
     ],
   }, defineReactPage<Messages>(ShowcasePage))
+  if (config.welcomePage) {
+    ctx.pages.register<Messages>({
+      $schema: CORDISX_PAGE_SCHEMA_V3,
+      schemaVersion: 3,
+      id: 'main.welcome',
+      title: message('page.welcome.title'),
+      description: message('page.welcome.description'),
+      icon: 'host:layers',
+    }, defineReactPage<Messages>(ShowcasePage))
+  }
   ctx.pages.register<Messages>({
     $schema: CORDISX_PAGE_SCHEMA_V3,
     schemaVersion: 3,
@@ -238,6 +273,18 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
     title: message('route.app.title'),
     description: message('route.app.description'),
   })
+  if (config.welcomePage) {
+    ctx.routes.register({
+      $schema: CORDISX_ROUTE_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'main.welcome',
+      path: '/main/welcome',
+      outlet: 'main',
+      page: 'main.welcome',
+      title: message('route.welcome.title'),
+      description: message('route.welcome.description'),
+    })
+  }
   ctx.routes.register({
     $schema: CORDISX_ROUTE_SCHEMA_V2,
     schemaVersion: 2,
@@ -293,10 +340,10 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
   ctx.slots.register({ name: 'sidebar.footer.menu', id: 'refresh', order: 10 }, action(message('action.refresh'), 'refresh', 'host:refresh'))
   ctx.slots.register({ name: 'sidebar.account.menu', id: 'settings', order: 10 }, action(message('action.settings'), 'settings', 'host:settings'))
   ctx.slots.register({ name: 'sidebar.navigation.items', id: 'main-page', order: 10 }, {
-    label: message('navigation.title'),
+    label: message(config.welcomePage ? 'navigation.welcome.title' : 'navigation.title'),
     description: message('navigation.description'),
     icon: 'host:layers',
-    route: { id: 'main.analytics' },
+    route: { id: config.welcomePage ? 'main.welcome' : 'main.analytics' },
     actions: [
       { id: 'quick', ...action(message('action.quick'), 'quick', 'host:refresh') },
       ...(config.sessionId === '' ? [] : [{

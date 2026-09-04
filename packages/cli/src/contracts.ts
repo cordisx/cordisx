@@ -47,6 +47,7 @@ export * from './agent-loop-contracts.js'
 export * from './agent-session-migration-contracts.js'
 export * from './durable-document-contracts.js'
 export * from './plugin-lifecycle-contracts.js'
+export * from './plugin-bundle-contracts.js'
 export type {
   CordisXBoundConnectorClient,
   CordisXBoundConnectorClientResult,

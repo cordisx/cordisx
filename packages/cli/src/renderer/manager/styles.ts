@@ -178,6 +178,18 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-plugin-identity-description { display: -webkit-box; overflow: hidden; color: var(--cx-muted,#9ca5b5); font-size: 11px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .cxr-plugin-identity-actions { display: flex; flex: none; align-items: center; gap: 6px; }
   .cxr-plugin-identity-actions .t-button { width: 34px; height: 34px; flex: none; padding: 0; }
+  .cxr-bundle-import { display: grid; gap: 10px; }
+  .cxr-bundle-source-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; }
+  .cxr-bundle-source-row input, .cxr-bundle-permission-row select, .cxr-bundle-permission-editor select { min-height: 32px; border: 1px solid var(--cx-border,#353a42); border-radius: 7px; padding: 5px 8px; background: var(--cx-surface,#17191d); color: inherit; }
+  .cxr-bundle-plan { display: grid; gap: 10px; border-top: 1px solid var(--cx-border,#353a42); padding-top: 10px; }
+  .cxr-bundle-permission-row { display: grid; grid-template-columns: minmax(0,1fr) 120px; align-items: center; gap: 10px; margin-top: 8px; }
+  .cxr-bundle-permission-row > span { display: grid; gap: 3px; }
+  .cxr-bundle-permission-row small { color: var(--cx-muted,#9ca5b5); overflow-wrap: anywhere; }
+  button.cxr-bundle-row { width: 100%; padding: 11px 12px; color: inherit; cursor: pointer; text-align: left; }
+  .cxr-bundle-identity .cxr-plugin-identity-meta code { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cxr-bundle-permissions { display: grid; gap: 8px; }
+  .cxr-bundle-permission-editor { display: grid; grid-template-columns: minmax(0,1fr) 130px 150px; align-items: center; gap: 10px; }
+  .cxr-bundle-permission-editor > label { display: grid; gap: 4px; color: var(--cx-muted,#9ca5b5); font-size: 10px; }
   .cxr-marketplace-identity .cxr-card-icon img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
   .cxr-marketplace-trust-details { display: grid; gap: 10px; margin: 0 0 14px; border-top: 1px solid var(--cx-border,#353a42); border-bottom: 1px solid var(--cx-border,#353a42); padding: 12px 0; }
   .cxr-marketplace-trust-details > div { min-width: 0; }

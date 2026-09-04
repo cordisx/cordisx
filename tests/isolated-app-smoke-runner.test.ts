@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -14,6 +14,13 @@ describe('isolated app smoke runner', () => {
       const homeConfig = path.join(fixtureRoot, 'config.json')
       await writeFile(homeConfig, '{"plugins":{}}\n')
       const homeRoot = await homeHelper.prepareIsolatedSmokeHome(homeConfig)
+      const immutablePackage = path.join(homeRoot, '.cordisx', 'packages', 'sha256', 'fixture')
+      await mkdir(immutablePackage, { recursive: true })
+      await writeFile(path.join(immutablePackage, 'artifact.js'), 'void 0\n')
+      if (process.platform !== 'win32') {
+        await chmod(path.join(immutablePackage, 'artifact.js'), 0o444)
+        await chmod(immutablePackage, 0o555)
+      }
 
       await expect(readFile(path.join(homeRoot, '.cordisx', 'config.json'), 'utf8')).resolves.toBe('{"plugins":{}}\n')
       await expect(homeHelper.cleanupIsolatedSmokeHome(homeRoot)).resolves.toEqual({

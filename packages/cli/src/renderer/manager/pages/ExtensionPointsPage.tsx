@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ManagerSnapshot } from '../../manager.js'
+import { managerCopy } from '../../ui-copy.js'
 import type { ManagerRouter } from '../model/routes.js'
 import { SearchField } from '../../host-ui/SearchField.js'
 
@@ -9,7 +10,7 @@ export function ExtensionPointsPage({ snapshot, router }: { readonly snapshot: M
   const points = (snapshot.extensionPoints?.points ?? []).filter(point => `${point.id} ${point.titleProjection.text} ${point.descriptionProjection.text}`.toLocaleLowerCase().includes(normalized))
   return (
     <section className="cxr-page">
-      <SearchField className="cxr-search" value={query} aria-label="搜索扩展点" placeholder="搜索扩展点、介绍或 id…" onChange={setQuery} />
+      <SearchField className="cxr-search" value={query} aria-label={managerCopy(snapshot.localization.locale, 'extension.search-label')} placeholder={managerCopy(snapshot.localization.locale, 'extension.search-placeholder')} onChange={setQuery} />
       <div className="cxr-list">
         {points.map(point => (
           <button key={point.id} type="button" className="cxr-card" onClick={() => router.navigate({ kind: 'extension-point', pointId: point.id })}>
@@ -18,7 +19,7 @@ export function ExtensionPointsPage({ snapshot, router }: { readonly snapshot: M
             <span className="cxr-status">{point.plugins.length}</span>
           </button>
         ))}
-        {points.length === 0 ? <div className="cxr-empty">当前没有匹配的扩展点</div> : null}
+        {points.length === 0 ? <div className="cxr-empty">{managerCopy(snapshot.localization.locale, normalized === '' ? 'extension.empty' : 'extension.no-matches')}</div> : null}
       </div>
     </section>
   )

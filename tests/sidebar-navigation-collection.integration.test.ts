@@ -2,7 +2,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
-import type { CordisXNavigationCollectionSnapshot } from '../packages/cli/src/contracts.js'
+import type { CordisXNavigationCollectionSnapshotV2 } from '../packages/cli/src/contracts.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
@@ -44,6 +44,8 @@ describe('sidebar navigation collections', () => {
     dom.window.console.error = (...values: unknown[]) => { errors.push(values) }
     dom.window.console.warn = (...values: unknown[]) => { warnings.push(values) }
     installPermissionPolicyBridge(dom.window)
+    const writeText = vi.fn(async (_value: string) => {})
+    Object.defineProperty(dom.window.navigator, 'clipboard', { configurable: true, value: { writeText } })
     let runtime: { snapshot(): unknown; dispose(): Promise<void> } | undefined
     try {
       dom.window.eval(bundle)
@@ -82,13 +84,31 @@ describe('sidebar navigation collections', () => {
       expect(dom.window.getComputedStyle(compositeSeat).boxShadow).toBe('none')
       expect(dom.window.getComputedStyle(composite).position).toBe('absolute')
       expect(dom.window.getComputedStyle(composite).overflow).toBe('hidden')
-      expect(dom.window.getComputedStyle(composite).gap).toBe('0px')
+      expect(dom.window.getComputedStyle(composite).gap).toBe('0')
       expect(dom.window.getComputedStyle(participant).position).toBe('absolute')
       expect(dom.window.getComputedStyle(participant).borderRadius).toBe('50%')
       document.documentElement.lang = 'zh-CN'
       await vi.waitFor(() => expect(document.querySelector('[data-navigation-group] [role="heading"]')?.textContent).toBe('房间'))
       document.documentElement.lang = 'en'
       await vi.waitFor(() => expect(document.querySelector('[data-navigation-group] [role="heading"]')?.textContent).toBe('Rooms'))
+
+      const latestRow = [...document.querySelectorAll<HTMLElement>('[data-navigation-group] .cordisx-nav-row')]
+        .find(row => row.querySelector('.cxsi-title')?.textContent === 'Latest room')!
+      latestRow.querySelector<HTMLButtonElement>('[aria-label="Pin"]')!.click()
+      await vi.waitFor(() => expect((dom.window as unknown as { __cordisxNavigationCollectionFixture: { commands: string[] } }).__cordisxNavigationCollectionFixture.commands).toEqual(['pin']))
+      const refreshedLatestRow = [...document.querySelectorAll<HTMLElement>('[data-navigation-group] .cordisx-nav-row')]
+        .find(row => row.querySelector('.cxsi-title')?.textContent === 'Latest room')!
+      refreshedLatestRow.querySelector<HTMLButtonElement>('.cordisx-navigation-more-action')!.click()
+      document.querySelector<HTMLButtonElement>('[aria-label="Copy ID"]')!.click()
+      await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('latest'))
+      refreshedLatestRow.querySelector<HTMLButtonElement>('.cordisx-navigation-more-action')!.click()
+      document.querySelector<HTMLButtonElement>('[aria-label="Delete"]')!.click()
+      const dialog = document.querySelector<HTMLElement>('.cordisx-navigation-confirm')!
+      expect(dialog.getAttribute('aria-modal')).toBe('true')
+      expect(dialog.textContent).toContain('Delete room?')
+      ;[...dialog.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Delete')!.click()
+      await vi.waitFor(() => expect((dom.window as unknown as { __cordisxNavigationCollectionFixture: { commands: string[] } }).__cordisxNavigationCollectionFixture.commands).toEqual(['pin', 'delete']))
+      expect(document.querySelector('.cordisx-navigation-confirm')).toBeNull()
 
       const older = [...document.querySelectorAll<HTMLButtonElement>('[data-navigation-group] .cordisx-nav-primary')]
         .find(button => button.querySelector('.cxsi-title')?.textContent === 'Older room')!
@@ -103,7 +123,7 @@ describe('sidebar navigation collections', () => {
         .find(row => row.querySelector('.cxsi-title')?.textContent === 'Latest room')?.dataset.selected).toBe('false')
 
       const fixture = (dom.window as unknown as {
-        __cordisxNavigationCollectionFixture: { replace(next: CordisXNavigationCollectionSnapshot): void }
+        __cordisxNavigationCollectionFixture: { replace(next: CordisXNavigationCollectionSnapshotV2): void; commands: string[] }
       }).__cordisxNavigationCollectionFixture
       fixture.replace({
         revision: 2,

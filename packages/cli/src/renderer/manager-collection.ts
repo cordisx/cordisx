@@ -97,6 +97,10 @@ function assertRecord(value: unknown, label: string): asserts value is Record<st
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
 }
 
+function assertPlainObject(value: unknown, label: string): void {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
+}
+
 function assertDisplayText(value: ManagerCollectionDisplayText, label: string): void {
   assertManagerLocalizedText(value, label)
   if (typeof value.fallback !== 'string') throw new Error(`${label} requires fallback text`)
@@ -238,7 +242,7 @@ function assertAction(action: ManagerCollectionAction, label: string): void {
 }
 
 function assertRegistration(input: ManagerCollectionRegistrationV1): ManagerCollectionRegistrationV1 {
-  assertRecord(input, 'manager collection registration')
+  assertPlainObject(input, 'manager collection registration')
   assertKeys(input, ['$schema', 'contract', 'schemaVersion', 'id', 'label', 'description', 'views', 'defaultView', 'search'], 'manager collection registration')
   if (input.$schema !== REGISTRATION_SCHEMA || input.contract !== 'cordisx.manager-collection-registration/v1' || input.schemaVersion !== 1) throw new Error('manager collection registration has an unsupported schema tuple')
   assertLocalId(input.id, 'manager collection registration id')
@@ -247,7 +251,7 @@ function assertRegistration(input: ManagerCollectionRegistrationV1): ManagerColl
   if (!Array.isArray(input.views) || input.views.length < 1 || input.views.length > 8) throw new Error('manager collection registration views are invalid')
   const ids = new Set<string>()
   for (const [index, view] of input.views.entries()) {
-    assertRecord(view, `manager collection view ${index}`)
+    assertPlainObject(view, `manager collection view ${index}`)
     assertKeys(view, ['id', 'label', 'emptyTitle', 'emptyDescription'], `manager collection view ${index}`)
     assertLocalId(view.id, `manager collection view ${index} id`)
     if (ids.has(view.id)) throw new Error(`manager collection registration has duplicate view ${view.id}`)
@@ -257,7 +261,7 @@ function assertRegistration(input: ManagerCollectionRegistrationV1): ManagerColl
     assertDisplayText(view.emptyDescription, `manager collection view ${index} emptyDescription`)
   }
   if (!ids.has(input.defaultView)) throw new Error('manager collection defaultView must reference a declared view')
-  assertRecord(input.search, 'manager collection search')
+  assertPlainObject(input.search, 'manager collection search')
   assertKeys(input.search, ['fields', 'normalization', 'label', 'placeholder', 'noMatchTitle', 'noMatchDescription'], 'manager collection search')
   if (input.search.fields.length !== 2 || input.search.fields[0] !== 'title' || input.search.fields[1] !== 'summary' || input.search.normalization !== 'nfkc-casefold') throw new Error('manager collection search descriptor is invalid')
   assertDisplayText(input.search.label, 'manager collection search label')
@@ -268,7 +272,7 @@ function assertRegistration(input: ManagerCollectionRegistrationV1): ManagerColl
 }
 
 function assertSnapshot(input: ManagerCollectionSnapshotV1, query: ManagerCollectionQueryV1): ManagerCollectionSnapshotV1 {
-  assertRecord(input, 'manager collection snapshot')
+  assertPlainObject(input, 'manager collection snapshot')
   assertKeys(input, ['$schema', 'contract', 'schemaVersion', 'collectionId', 'queryRevision', 'view', 'normalizedSearch', 'revision', 'items'], 'manager collection snapshot')
   if (input.$schema !== SNAPSHOT_SCHEMA || input.contract !== 'cordisx.manager-collection-snapshot/v1' || input.schemaVersion !== 1) throw new Error('manager collection snapshot has an unsupported schema tuple')
   if (input.collectionId !== query.collectionId || input.queryRevision !== query.queryRevision || input.view !== query.view || input.normalizedSearch !== query.search.normalized) throw new Error('manager collection snapshot query fence mismatch')
@@ -277,14 +281,14 @@ function assertSnapshot(input: ManagerCollectionSnapshotV1, query: ManagerCollec
   if (!Array.isArray(input.items) || input.items.length > 1_000) throw new Error('manager collection snapshot items are invalid')
   const ids = new Set<string>()
   for (const [index, item] of input.items.entries()) {
-    assertRecord(item, `manager collection item ${index}`)
+    assertPlainObject(item, `manager collection item ${index}`)
     assertKeys(item, ['id', 'title', 'summary', 'leadingVisual', 'route', 'order', 'disabled', 'actions'], `manager collection item ${index}`)
     if (!OPAQUE_ID.test(item.id)) throw new Error(`manager collection item ${index} id is invalid`)
     if (ids.has(item.id)) throw new Error(`manager collection snapshot has duplicate item ${item.id}`)
     ids.add(item.id)
     assertDisplayText(item.title, `manager collection item ${index} title`)
     assertDisplayText(item.summary, `manager collection item ${index} summary`)
-    assertRecord(item.leadingVisual, `manager collection item ${index} leadingVisual`)
+    assertPlainObject(item.leadingVisual, `manager collection item ${index} leadingVisual`)
     if (item.leadingVisual.kind === 'semantic-icon') {
       assertKeys(item.leadingVisual, ['kind', 'icon'], `manager collection item ${index} leadingVisual`)
       assertIcon(item.leadingVisual.icon, `manager collection item ${index} leadingVisual icon`, true)
@@ -296,7 +300,7 @@ function assertSnapshot(input: ManagerCollectionSnapshotV1, query: ManagerCollec
       if (!Array.isArray(item.leadingVisual.entries) || item.leadingVisual.entries.length < 1 || item.leadingVisual.entries.length > 16) throw new Error(`manager collection item ${index} avatar stack is invalid`)
       const entryIds = new Set<string>()
       for (const [entryIndex, entry] of item.leadingVisual.entries.entries()) {
-        assertRecord(entry, `manager collection item ${index} avatar ${entryIndex}`)
+        assertPlainObject(entry, `manager collection item ${index} avatar ${entryIndex}`)
         assertKeys(entry, ['id', 'avatar'], `manager collection item ${index} avatar ${entryIndex}`)
         if (!OPAQUE_ID.test(entry.id) || entryIds.has(entry.id)) throw new Error(`manager collection item ${index} avatar ${entryIndex} id is invalid`)
         entryIds.add(entry.id)
@@ -338,18 +342,18 @@ function validActionResult(input: unknown, collectionId: string, itemId: string,
 }
 
 export class HostManagerCollectionPageRegistry implements ManagerCollectionRegistryV1 {
-  private registration?: ManagerCollectionRegistrationV1
-  private source?: ManagerCollectionSourceV1
-  private sourceDispose?: () => void
-  private unsubscribeSource?: () => void
-  private queryAbort?: AbortController
-  private accepted?: ManagerCollectionSnapshotV1
-  private view?: string
+  private registration: ManagerCollectionRegistrationV1 | undefined
+  private source: ManagerCollectionSourceV1 | undefined
+  private sourceDispose: (() => void) | undefined
+  private unsubscribeSource: (() => void) | undefined
+  private queryAbort: AbortController | undefined
+  private accepted: ManagerCollectionSnapshotV1 | undefined
+  private view: string | undefined
   private search = ''
   private state: ManagerCollectionLoadState = 'unregistered'
-  private busy?: Readonly<{ readonly itemId: string; readonly actionId: string }>
-  private dialog?: ManagerCollectionDialogState
-  private feedback?: ManagerCollectionFeedbackState
+  private busy: Readonly<{ readonly itemId: string; readonly actionId: string }> | undefined
+  private dialog: ManagerCollectionDialogState | undefined
+  private feedback: ManagerCollectionFeedbackState | undefined
   private feedbackSequence = 0
   private queryRevision = 0
   private version = 0

@@ -261,6 +261,8 @@ describe('renderer bundle', () => {
           applies: 'plugin-restart',
           fields: [expect.objectContaining({
             path: ['sessionId'], label: 'Native session ID', value: sessionId, max: 128,
+          }), expect.objectContaining({
+            path: ['welcomePage'], label: 'Branded welcome page', value: false,
           })],
         }),
       }),
@@ -626,6 +628,8 @@ describe('renderer bundle', () => {
 
     const trailing = dom.window.document.querySelector<HTMLButtonElement>('.cordisx-nav-actions button')!
     expect(trailing.className).toContain('cordisx-icon-only-control')
+    expect(trailing.className).toContain('cordisx-shortcut-action')
+    expect(trailing.className).not.toContain('cordisx-navigation-direct-action')
     expect(dom.window.getComputedStyle(trailing).width).toBe('24px')
     expect(dom.window.getComputedStyle(trailing).height).toBe('24px')
     expect(dom.window.getComputedStyle(trailing).getPropertyValue('--cordisx-icon-only-glyph-size')).toBe('12px')
@@ -846,7 +850,7 @@ describe('renderer bundle', () => {
     expect(managerModal?.hidden).toBe(false)
     expect(managerModal?.querySelector('.cxr-dialog')).not.toBeNull()
     expect(managerModal?.querySelector('.cxr-nav')?.getAttribute('aria-label')).toBe('CordisX 管理器页面')
-    expect([...managerModal!.querySelectorAll<HTMLElement>('.cxr-nav [data-tab]')].map(item => item.dataset.tab)).toEqual(['plugins', 'extension-points', 'routes', 'marketplace', 'about'])
+    expect([...managerModal!.querySelectorAll<HTMLElement>('.cxr-nav [data-tab]')].map(item => item.dataset.tab)).toEqual(['plugins', 'plugin-bundles', 'extension-points', 'routes', 'marketplace', 'about'])
     const pluginRow = managerModal?.querySelector<HTMLButtonElement>('[data-plugin-id="slot-showcase"]')
     expect(pluginRow?.querySelector('[data-icon-kind="derived"]')).not.toBeNull()
     expect(pluginRow?.textContent).toContain('点位展示')
@@ -872,11 +876,11 @@ describe('renderer bundle', () => {
     expect(navigation?.tagName).toBe('NAV')
     expect(navigation?.getAttribute('aria-label')).toBe('CordisX 管理器页面')
     const primaryNavigation = [...(navigation?.querySelectorAll<HTMLElement>('.cxm-nav-button') ?? [])]
-    expect(primaryNavigation.map(item => item.dataset.tab)).toEqual(['plugins', 'extension-points', 'routes', 'marketplace', 'about'])
-    expect(primaryNavigation.map(item => item.tabIndex)).toEqual([0, -1, -1, -1, -1])
-    expect(primaryNavigation.map(item => item.getAttribute('aria-current'))).toEqual(['page', null, null, null, null])
-    expect(primaryNavigation.slice(0, 4).map(item => item.querySelector('[data-host-icon-key]')?.getAttribute('data-host-icon-key'))).toEqual([
-      'plugins', 'contributions', 'routes', 'marketplace',
+    expect(primaryNavigation.map(item => item.dataset.tab)).toEqual(['plugins', 'plugin-bundles', 'extension-points', 'routes', 'marketplace', 'about'])
+    expect(primaryNavigation.map(item => item.tabIndex)).toEqual([0, -1, -1, -1, -1, -1])
+    expect(primaryNavigation.map(item => item.getAttribute('aria-current'))).toEqual(['page', null, null, null, null, null])
+    expect(primaryNavigation.slice(0, 5).map(item => item.querySelector('[data-host-icon-key]')?.getAttribute('data-host-icon-key'))).toEqual([
+      'plugins', 'plugins', 'contributions', 'routes', 'marketplace',
     ])
     expect(primaryNavigation.at(0)?.textContent).toContain('插件')
     expect(primaryNavigation.at(-1)?.textContent).toContain('关于 CordisX')

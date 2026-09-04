@@ -10,6 +10,13 @@ import type {
   CordisXPermissionAuthorizationPlanV2,
   CordisXPermissionAuthorizationPlanV4,
 } from '../permission-contracts.js'
+import {
+  CORDISX_PLUGIN_BUNDLE_LIFECYCLE_OPERATION_SCHEMA_V1,
+  type CordisXPluginBundleLifecycleOperationV1,
+  type CordisXPluginBundleLifecycleRequestV1,
+  type CordisXPluginBundleLifecycleResultV1,
+  type CordisXPluginBundleManagerSnapshotV1,
+} from '../plugin-bundle-contracts.js'
 
 const BINDING = '__cordisxPluginLifecycleRequestV1'
 const RECEIVER = '__cordisxPluginLifecycleReceiveV1'
@@ -54,6 +61,42 @@ export class BrowserPluginLifecycleBridge {
       operation,
     }
     return this.send<CordisXPluginLifecycleResultV1>(requestId, { token: this.token, request })
+  }
+
+  bundleSnapshot(): Promise<CordisXPluginBundleManagerSnapshotV1> {
+    const requestId = this.requestId()
+    return this.send(requestId, {
+      token: this.token,
+      privateRequest: {
+        kind: 'bundle-snapshot-v1', requestId,
+        profileId: this.profileId, runtimeGeneration: this.generation,
+      },
+    })
+  }
+
+  bundleRequest(
+    snapshot: Pick<CordisXPluginBundleManagerSnapshotV1, 'revision' | 'pluginRevision'>,
+    operation: CordisXPluginBundleLifecycleOperationV1,
+  ): Promise<CordisXPluginBundleLifecycleResultV1> {
+    const requestId = this.requestId()
+    const request: CordisXPluginBundleLifecycleRequestV1 = {
+      $schema: CORDISX_PLUGIN_BUNDLE_LIFECYCLE_OPERATION_SCHEMA_V1,
+      schemaVersion: 1,
+      requestId,
+      profileId: this.profileId,
+      expectedRevision: snapshot.revision,
+      expectedPluginRevision: snapshot.pluginRevision,
+      runtimeGeneration: this.generation,
+      operation,
+    }
+    return this.send(requestId, {
+      token: this.token,
+      privateRequest: {
+        kind: 'bundle-operation-v1', requestId,
+        profileId: this.profileId, runtimeGeneration: this.generation,
+        request,
+      },
+    })
   }
 
   permissionReviewPlanV2(
