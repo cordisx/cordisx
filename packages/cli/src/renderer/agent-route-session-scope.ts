@@ -6,9 +6,6 @@ const DYNAMIC_CAPABILITIES = new Set<AgentRuntimeCapability>([
   'agents.cancel', 'agents.live.subscribe', 'sessions.get', 'sessions.read',
   'sessions.subscribe', 'approvals.request', 'approvals.answer',
 ])
-const SESSION_CAPABILITIES = new Set<AgentRuntimeCapability>([
-  'sessions.get', 'sessions.read', 'sessions.subscribe',
-])
 const localId = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u
 const paramId = /^[a-z][a-zA-Z0-9]*$/u
 
@@ -31,6 +28,8 @@ export interface AgentRouteScopeBinding {
 }
 
 export interface AgentRuntimePermissionDeclaration {
+  /** Host-owned source schema discriminator; omitted only by legacy v5 callers. */
+  readonly manifestVersion?: 5 | 6
   readonly name: AgentRuntimeCapability
   readonly required: boolean
   readonly scope: Readonly<{ readonly sessionIds?: readonly string[] | AgentRouteScopeBinding }>
@@ -69,7 +68,7 @@ export interface AgentRouteSessionScopeOptions {
 }
 
 interface InstalledDeclaration {
-  readonly owner: string
+  readonly owner: PluginOwnerIdentity
   readonly declaration: AgentRuntimePermissionDeclaration
 }
 
@@ -87,22 +86,34 @@ interface LeaseRecord {
  */
 export class AgentRouteSessionScopeAuthority {
   private readonly declarations = new Map<string, InstalledDeclaration[]>()
+  private readonly generations = new Map<string, number>()
   private readonly leases = new Map<string, LeaseRecord>()
   private readonly listeners = new Set<(owner: string, sessionId: string, code: AgentRouteFenceCode) => void>()
 
   constructor(private readonly options: AgentRouteSessionScopeOptions) {}
 
-  install(owner: string, declarations: readonly AgentRuntimePermissionDeclaration[]): void {
+  install(owner: PluginOwnerIdentity, declarations: readonly AgentRuntimePermissionDeclaration[]): void {
+    if (this.declarations.has(owner.pluginId)) this.fence(owner.pluginId, 'plugin-generation-replaced')
+    const names = new Set<AgentRuntimeCapability>()
+    for (const declaration of declarations) {
+      if (names.has(declaration.name)) throw new Error(`duplicate Agent runtime capability declaration: ${declaration.name}`)
+      names.add(declaration.name)
+    }
     const normalized = declarations.map(item => this.validate(owner, item))
-    this.declarations.set(owner, normalized)
+    this.declarations.set(owner.pluginId, normalized)
+    this.generations.set(owner.pluginId, owner.generation)
   }
 
   /** Must run after the same plugin's route contributions have mounted. */
-  validateInstalledRoutes(owner: string): void {
-    for (const installed of this.declarations.get(owner) ?? []) {
+  validateInstalledRoutes(owner: PluginOwnerIdentity): void {
+    if (this.generations.get(owner.pluginId) !== owner.generation) {
+      throw new Error('Agent Session permission declaration generation is stale')
+    }
+    for (const installed of this.declarations.get(owner.pluginId) ?? []) {
+      if (installed.owner.generation !== owner.generation) throw new Error('Agent Session permission declaration generation is stale')
       const scope = installed.declaration.scope.sessionIds
-    if (isBinding(scope)) {
-        const route = this.options.routes(owner).find(item => item.id === scope.routeId)
+      if (isBinding(scope)) {
+        const route = this.options.routes(owner.pluginId).find(item => item.id === scope.routeId)
         if (route === undefined || !routeHasParam(route.path, scope.param)) {
           throw new Error('dynamic Agent Session scope does not name an owned route parameter')
         }
@@ -112,7 +123,8 @@ export class AgentRouteSessionScopeAuthority {
 
   /** Host-only readback of one installed exact dynamic permission route. */
   permissionRoute(owner: PluginOwnerIdentity, capability: AgentRuntimeCapability): AgentRouteDefinition | undefined {
-    const declaration = this.declarations.get(owner.pluginId)?.find(item => item.declaration.name === capability)?.declaration
+    const installed = this.declarations.get(owner.pluginId)?.find(item => item.declaration.name === capability)
+    const declaration = installed?.owner.generation === owner.generation ? installed.declaration : undefined
     const scope = declaration?.scope.sessionIds
     if (!isBinding(scope)) return undefined
     const route = this.options.routes(owner.pluginId).find(item => item.id === scope.routeId)
@@ -121,7 +133,12 @@ export class AgentRouteSessionScopeAuthority {
       : Object.freeze({ ...route })
   }
 
-  uninstall(owner: string): void { this.fence(owner, 'plugin-generation-replaced') }
+  uninstall(owner: PluginOwnerIdentity): void {
+    if (this.generations.get(owner.pluginId) !== owner.generation) return
+    this.fence(owner.pluginId, 'plugin-generation-replaced')
+    this.declarations.delete(owner.pluginId)
+    this.generations.delete(owner.pluginId)
+  }
 
   subscribe(listener: (owner: string, sessionId: string, code: AgentRouteFenceCode) => void): () => void {
     this.listeners.add(listener)
@@ -133,7 +150,11 @@ export class AgentRouteSessionScopeAuthority {
     for (const [key, record] of this.leases) {
       if (record.lease.status !== 'active' || !this.matchesActiveRoute(record)) {
         this.leases.delete(key)
-        this.emit(record.lease.owner.pluginId, record.sessionId, 'route-replaced')
+        this.emit(
+          record.lease.owner.pluginId,
+          record.sessionId,
+          record.lease.connectionGeneration === this.options.connectionGeneration() ? 'route-replaced' : 'connection-replaced',
+        )
       }
     }
   }
@@ -146,7 +167,8 @@ export class AgentRouteSessionScopeAuthority {
   }
 
   async authorize(owner: PluginOwnerIdentity, capability: AgentRuntimeCapability, sessionId?: string): Promise<boolean> {
-    const declaration = this.declarations.get(owner.pluginId)?.find(item => item.declaration.name === capability)?.declaration
+    const installed = this.declarations.get(owner.pluginId)?.find(item => item.declaration.name === capability)
+    const declaration = installed?.owner.generation === owner.generation ? installed.declaration : undefined
     if (declaration === undefined) return false
     if (sessionId === undefined) return false
     if (!validSessionId(sessionId)) return false
@@ -191,20 +213,18 @@ export class AgentRouteSessionScopeAuthority {
     return true
   }
 
-  private validate(owner: string, declaration: AgentRuntimePermissionDeclaration): InstalledDeclaration {
+  private validate(owner: PluginOwnerIdentity, declaration: AgentRuntimePermissionDeclaration): InstalledDeclaration {
     const scope = declaration.scope.sessionIds
     if (isBinding(scope)) {
-      if (!DYNAMIC_CAPABILITIES.has(declaration.name) || declaration.required || !localId.test(scope.routeId) || !paramId.test(scope.param)) {
+      if (!DYNAMIC_CAPABILITIES.has(declaration.name) || declaration.required || !localId.test(scope.routeId)
+        || !paramId.test(scope.param) || (declaration.manifestVersion === 6 && scope.param !== 'sessionId')) {
         throw new Error('invalid dynamic Agent Session permission declaration')
       }
     }
-    if (SESSION_CAPABILITIES.has(declaration.name)) {
-      if (Array.isArray(scope) && (scope.length === 0 || scope.some(item => !validSessionId(item)))) {
-        throw new Error('Session read declarations require exact non-wildcard sessionIds')
-      }
+    if (Array.isArray(scope) && (scope.length === 0 || new Set(scope).size !== scope.length || scope.some(item => !validSessionId(item)))) {
+      throw new Error('exact Agent Session scopes require unique non-wildcard sessionIds')
     }
-    if (Array.isArray(scope) && scope.some(item => !validSessionId(item))) throw new Error('invalid exact SessionId scope')
-    return Object.freeze({ owner, declaration: Object.freeze({ ...declaration, scope: Object.freeze({ ...(scope === undefined ? {} : { sessionIds: Array.isArray(scope) ? Object.freeze([...scope]) : Object.freeze({ ...scope }) }) }) }) })
+    return Object.freeze({ owner: Object.freeze({ ...owner }), declaration: Object.freeze({ ...declaration, scope: Object.freeze({ ...(scope === undefined ? {} : { sessionIds: Array.isArray(scope) ? Object.freeze([...scope]) : Object.freeze({ ...scope }) }) }) }) })
   }
 
   private async decide(
@@ -246,8 +266,10 @@ export class AgentRouteSessionScopeAuthority {
   }
 }
 
-function validSessionId(value: string): boolean { return value.length > 0 && value.length <= 512 && value !== '*' }
-function routeHasParam(path: string, param: string): boolean { return path.split('/').includes(`:${param}`) }
+function validSessionId(value: string): boolean { return value.length > 0 && value.length <= 512 && !value.includes('*') }
+function routeHasParam(path: string, param: string): boolean {
+  return path.split('/').filter(segment => segment === `:${param}`).length === 1
+}
 function isBinding(value: readonly string[] | AgentRouteScopeBinding | undefined): value is AgentRouteScopeBinding {
   return value !== undefined && !Array.isArray(value)
 }

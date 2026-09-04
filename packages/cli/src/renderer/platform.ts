@@ -68,6 +68,7 @@ import { BrowserPermissionAuthorizationDialog } from './permission-authorization
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V3,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
@@ -101,6 +102,7 @@ import {
   type CordisXPermissionScopeV4,
   type CordisXPluginManifestV4,
   type CordisXPluginManifestV5,
+  type CordisXPluginManifestV6,
 } from '../permission-contracts.js'
 import {
   CapabilityRiskCatalog,
@@ -133,6 +135,7 @@ import {
   normalizeCertifiedPermissionProjectionV1,
   normalizePermissionPolicyRecordV4,
   normalizePluginManifestV5,
+  normalizePluginManifestV6,
   permissionRecordKeyV4,
 } from '../permission-model-v4.js'
 import {
@@ -195,7 +198,7 @@ function normalizedReason(value: unknown, label: string): CordisXLocalizedText {
 export function normalizePluginManifest(
   value: unknown,
   expectedId: string,
-): CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 {
+): CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 {
   if (!ID_PATTERN.test(expectedId)) throw new Error(`launcher plugin id ${expectedId} is invalid`)
   if (value === undefined) {
     return Object.freeze({
@@ -206,6 +209,9 @@ export function normalizePluginManifest(
     })
   }
   const manifest = object(value, `plugin ${expectedId} manifest`)
+  if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V6 || manifest.schemaVersion === 6) {
+    return normalizePluginManifestV6(manifest, expectedId, new CapabilityRiskCatalog())
+  }
   if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 || manifest.schemaVersion === 5) {
     return normalizePluginManifestV5(manifest, expectedId, new CapabilityRiskCatalog())
   }
@@ -709,7 +715,7 @@ export interface DomPermissionPolicyEntry {
 interface Registration {
   readonly token: object
   readonly identity: CordisXPluginIdentity
-  readonly manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5
+  readonly manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6
   readonly declarations: ReadonlyMap<CordisXPlatformCapability, CordisXCapabilityDeclaration>
   readonly declarationsV2: ReadonlyMap<CordisXPermissionCapabilityV2, CordisXCapabilityDeclarationV2>
   readonly declarationsV4: ReadonlyMap<'ui.host-dom.read' | 'ui.host-dom.modify', CordisXCapabilityDeclarationV4>
@@ -742,10 +748,10 @@ export interface HostDomPermissionAccessDecision extends DomPermissionAccessDeci
 }
 
 function manifestDeclarationsV2(
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5,
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6,
 ): readonly CordisXCapabilityDeclarationV2[] {
   if (manifest.schemaVersion === 4) return manifest.capabilities
-  if (manifest.schemaVersion === 5) return manifest.capabilities.filter(item => (
+  if (manifest.schemaVersion === 5 || manifest.schemaVersion === 6) return manifest.capabilities.filter(item => (
     !isHostDomPermissionCapability(item.name) && !isAgentRuntimePermission(item.name)
   )) as readonly CordisXCapabilityDeclarationV2[]
   return Object.freeze(manifest.capabilities.map(declaration => Object.freeze({
@@ -756,9 +762,9 @@ function manifestDeclarationsV2(
 }
 
 function manifestHostDomDeclarationsV4(
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5,
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6,
 ): readonly CordisXCapabilityDeclarationV4[] {
-  return manifest.schemaVersion === 5
+  return manifest.schemaVersion === 5 || manifest.schemaVersion === 6
     ? manifest.capabilities.filter(item => isHostDomPermissionCapability(item.name)) as readonly CordisXCapabilityDeclarationV4[]
     : Object.freeze([])
 }
@@ -770,9 +776,9 @@ function isAgentRuntimePermission(value: string): boolean {
 /** The legacy v4 review UI has no Agent/Session vocabulary; those declarations
  * are evaluated by the Host-private exact Session lease authority instead. */
 function permissionPlanDeclarations(
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5,
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6,
 ): readonly CordisXCapabilityDeclarationV4[] {
-  return (manifest.schemaVersion === 5
+  return (manifest.schemaVersion === 5 || manifest.schemaVersion === 6
     ? manifest.capabilities.filter(item => !isAgentRuntimePermission(item.name))
     : manifest.capabilities) as readonly CordisXCapabilityDeclarationV4[]
 }
@@ -867,7 +873,7 @@ function validAgentRuntimeOpaqueId(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 512
 }
 function validAgentRuntimeSessionId(value: unknown): value is string {
-  return validAgentRuntimeOpaqueId(value) && value !== '*'
+  return validAgentRuntimeOpaqueId(value) && !value.includes('*')
 }
 function validAgentRuntimeConnection(value: AgentRuntimeConnection): boolean {
   return validAgentRuntimeOpaqueId(value.connectionId) && Number.isSafeInteger(value.generation) && value.generation >= 0
@@ -889,11 +895,12 @@ function sameAgentRuntimeRoute(left: AgentRuntimeRouteScope, right: AgentRuntime
     && left.routeId === right.routeId && left.routeInstanceId === right.routeInstanceId
     && left.path === right.path && left.params.sessionId === right.params.sessionId
 }
-function isHostRouteSessionScopeBinding(value: unknown): value is Readonly<{ kind: 'host-route-param'; routeId: string; param: string }> {
+function isHostRouteSessionScopeBinding(value: unknown): value is Readonly<{ kind: 'host-route-param'; routeId: string; param: 'sessionId' }> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).every(key => key === 'kind' || key === 'routeId' || key === 'param')
     && (value as { kind?: unknown }).kind === 'host-route-param'
     && typeof (value as { routeId?: unknown }).routeId === 'string'
-    && typeof (value as { param?: unknown }).param === 'string'
+    && (value as { param?: unknown }).param === 'sessionId'
 }
 
 export class PermissionBroker {
@@ -976,14 +983,14 @@ export class PermissionBroker {
 
   register(
     identity: CordisXPluginIdentity,
-    manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5,
+    manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6,
     generation: PluginGenerationEffectIdentity = Object.freeze({ pluginId: identity.id }),
     candidateView?: PluginGenerationView,
     artifact?: PermissionArtifactBindingV3,
   ): () => void {
     const key = `${platformIdentityKey(identity)}\u0000${generation.moduleGeneration ?? 'host'}`
     const declarations = new Map<CordisXPlatformCapability, CordisXCapabilityDeclaration>(
-      manifest.schemaVersion === 4 || manifest.schemaVersion === 5
+      manifest.schemaVersion === 4 || manifest.schemaVersion === 5 || manifest.schemaVersion === 6
         ? manifest.capabilities.flatMap(item => (
             (CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
               ? [[item.name as CordisXPlatformCapability, {
@@ -1100,7 +1107,7 @@ export class PermissionBroker {
     }
   }
 
-  /** Returns an exact revocable lease only after a registered v5 declaration and exact policy match. */
+  /** Returns an exact revocable lease only after a registered v5/v6 declaration and exact policy match. */
   async authorizeAgentRuntime(input: Readonly<{
     identity: CordisXPluginIdentity
     capability: AgentRuntimeCapability
@@ -1141,7 +1148,7 @@ export class PermissionBroker {
     const registration = this.registration(input.identity, input.view)
     if (registration === undefined || !validAgentRuntimeSessionId(input.sessionId)
       || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-      || registration.manifest.schemaVersion !== 5) return Object.freeze({ authorized: false })
+      || (registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6)) return Object.freeze({ authorized: false })
     const declaration = registration.manifest.capabilities.find(item => item.name === input.capability)
     if (declaration === undefined) return Object.freeze({ authorized: false })
     if (!this.validAgentRuntimeScopeSource(registration, input, declaration.scope.sessionIds)) return Object.freeze({ authorized: false })
@@ -2805,7 +2812,7 @@ export class PermissionBroker {
   ): CordisXPermissionAuthorizationPlanV4 | undefined {
     const registration = this.registration(identity, view)
     if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
-    if (registration.manifest.schemaVersion !== 5) return undefined
+    if (registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6) return undefined
     const operationBinding = binding ?? this.binding(registration, `${this.generation}:${identity.id}`)
     const certification = this.activeCertification(registration)
     return buildPermissionAuthorizationPlanV4({
@@ -2828,7 +2835,7 @@ export class PermissionBroker {
     view?: PluginGenerationView,
   ): Promise<void> {
     const registration = this.registration(identity, view)
-    if (registration === undefined || registration.manifest.schemaVersion !== 5) {
+    if (registration === undefined || (registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6)) {
       throw new Error(`plugin ${identity.id} does not use permission v4`)
     }
     const plan = this.authorizationPlanV4(identity, operation, view, authorization.binding)!
@@ -2985,7 +2992,7 @@ export class PermissionBroker {
   }
 
   private migratePolicyRecordsV1(registration: Registration): void {
-    if (registration.manifest.schemaVersion !== 4 && registration.manifest.schemaVersion !== 5) return
+    if (registration.manifest.schemaVersion !== 4 && registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6) return
     const legacy = [...this.policyRecords.values()].filter((record): record is CordisXPermissionPolicyRecordV1 => (
       !isPermissionPolicyRecordV2(record)
       && !isPermissionPolicyRecordV3(record)
@@ -3528,7 +3535,7 @@ export class PermissionBroker {
       && item.policy !== 'allow-persistent'
       && !this.onceV2.has(this.authorizationKey(plan, item.capability), plan.binding))
       .map(item => item.capability)
-    if (registration.manifest.schemaVersion === 5) {
+    if (registration.manifest.schemaVersion === 5 || registration.manifest.schemaVersion === 6) {
       for (const declaration of registration.declarationsV4.values()) {
         if (!declaration.required) continue
         const capability = declaration.name as 'ui.host-dom.read' | 'ui.host-dom.modify'

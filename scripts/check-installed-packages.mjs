@@ -202,16 +202,20 @@ if ('handle' in hostResult) hostResult.handle.unsubscribe()
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentRegistry } from '@cordisx/protocol/agents/v1'
 import type { ApprovalService } from '@cordisx/protocol/approval/v1'
+import type { PluginRuntimeManifestV6 } from '@cordisx/protocol/plugin-manifest/v6'
 import type { SessionRegistry } from '@cordisx/protocol/sessions/v1'
 import type {
   CordisXAgentConversationShellSourceFactoryV4,
   CordisXAgentSessionLegacyAcquireRequestV1,
   CordisXAgentSessionLegacyAcquireResultV1,
+  CordisXPluginManifestV6,
 } from 'cordisx/contracts'
 
 declare const ctx: Context
 declare const legacyRequest: CordisXAgentSessionLegacyAcquireRequestV1
 declare const shellFactory: CordisXAgentConversationShellSourceFactoryV4
+declare const protocolManifestV6: PluginRuntimeManifestV6
+declare const hostManifestV6: CordisXPluginManifestV6
 
 ctx.agents satisfies AgentRegistry
 ctx.sessions satisfies SessionRegistry
@@ -220,6 +224,8 @@ const migrated: Promise<CordisXAgentSessionLegacyAcquireResultV1> = ctx.agents.a
 const registration = ctx.agentConversationShell.registerSourceV4(shellFactory)
 migrated satisfies Promise<CordisXAgentSessionLegacyAcquireResultV1>
 registration.mount satisfies Function
+protocolManifestV6 satisfies CordisXPluginManifestV6
+hostManifestV6 satisfies PluginRuntimeManifestV6
 `, 'utf8')
   await writeFile(path.join(runnerDirectory, 'agent-loop-collection-consumer.ts'), `
 import type { Context } from '@deepseek-ai/cordis'

@@ -10,6 +10,7 @@ import type {
   CordisXPermissionAuthorizationPlanV1,
   CordisXPluginManifestV4,
   CordisXPluginManifestV5,
+  CordisXPluginManifestV6,
   CordisXPointPolicy,
   CordisXPlatformCapability,
   CordisXCapabilityScope,
@@ -248,7 +249,7 @@ interface CordisXRuntimeMetadata {
 interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
   /** Launcher-derived opaque generation for a verified bundled artifact. */
   readonly artifactGeneration?: string
-  /** Source data for one manifest-v5 plugin isolated from the Host renderer. */
+  /** Source data for one manifest-v5/v6 plugin isolated from the Host renderer. */
   readonly isolatedArtifactSource?: string
   readonly development?: CordisXLocalDevelopmentSnapshot
 }
@@ -286,7 +287,7 @@ export type CordisXInternalRendererBootstrap = (host: Readonly<{
 interface PluginController {
   item: RuntimeBrowserPlugin
   readonly identity: CordisXPluginIdentity
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6
   principal: PluginPrincipalToken
   activation: number
   principalLive: boolean
@@ -546,9 +547,9 @@ function errorMessage(error: unknown): string {
 }
 
 function manifestUsesHostDom(
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5,
-): manifest is CordisXPluginManifestV5 {
-  return manifest.schemaVersion === 5 && manifest.capabilities.some(capability => (
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6,
+): manifest is CordisXPluginManifestV5 | CordisXPluginManifestV6 {
+  return (manifest.schemaVersion === 5 || manifest.schemaVersion === 6) && manifest.capabilities.some(capability => (
     capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
   ))
 }
@@ -570,7 +571,7 @@ function createController(item: RuntimeBrowserPlugin, pluginConsole: PluginConso
     const boundItem: RuntimeBrowserPlugin = module === undefined || module === item.module ? item : { ...item, module }
     const manifest = normalizePluginManifest(item.manifest ?? module?.manifest, item.id)
     if (isolated && (item.manifest === undefined || !manifestUsesHostDom(manifest))) {
-      throw new Error('isolated Host DOM artifact requires an authoritative manifest-v5 declaration')
+      throw new Error('isolated Host DOM artifact requires an authoritative manifest-v5 or manifest-v6 declaration')
     }
     return {
       item: boundItem,
@@ -1100,7 +1101,7 @@ async function start(
         && permission.policy === 'allow'
       )))
     if (unavailable.length > 0 && !explicitlyAllowedInPlayground) return `Required capability unavailable: ${unavailable.join(', ')}`
-    const requiredHostDom = controller.manifest.schemaVersion === 5
+    const requiredHostDom = controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6
       ? controller.manifest.capabilities.find(item => (
           item.required && (item.name === 'ui.host-dom.read' || item.name === 'ui.host-dom.modify')
         ))
@@ -1132,12 +1133,20 @@ async function start(
           transactionEpoch: controller.generationView.transactionEpoch,
         }),
       }, controller.generationView)
-      const agentRuntimeDeclarations = controller.manifest.schemaVersion === 5
-        ? controller.manifest.capabilities.filter((item): item is typeof item & AgentRuntimePermissionDeclaration => (
-            item.name.startsWith('agents.') || item.name.startsWith('sessions.') || item.name.startsWith('approvals.')
-          ))
+      const agentRuntimeManifestVersion = controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6
+        ? controller.manifest.schemaVersion
+        : undefined
+      const agentRuntimeDeclarations = agentRuntimeManifestVersion !== undefined
+        ? controller.manifest.capabilities
+          .filter((item): item is typeof item & AgentRuntimePermissionDeclaration => (
+              item.name.startsWith('agents.') || item.name.startsWith('sessions.') || item.name.startsWith('approvals.')
+            ))
+          .map(item => Object.freeze({ ...item, manifestVersion: agentRuntimeManifestVersion }))
         : []
-      agentRouteScopes.install(`${controller.item.source}:${controller.item.id}`, agentRuntimeDeclarations)
+      agentRouteScopes.install(
+        agentSessionRuntime.ownerForPlugin(controller.item.source, controller.item.id, moduleGenerationOf(controller)),
+        agentRuntimeDeclarations,
+      )
     }
     const configSchema = moduleConfigSchema(controller.item.module)
     const configApplies = controller.item.isolatedArtifactSource === undefined
@@ -1165,7 +1174,11 @@ async function start(
     controller.unregisterExtensionPoints?.()
     delete controller.unregisterExtensionPoints
     const owner = `${controller.item.source}:${controller.item.id}`
-    agentRouteScopes.uninstall(owner)
+    agentRouteScopes.uninstall(agentSessionRuntime.ownerForPlugin(
+      controller.item.source,
+      controller.item.id,
+      moduleGenerationOf(controller),
+    ))
     agentSessionRuntime.fenceOwner(owner, 'plugin-generation-replaced')
     configuration.unregister(
       controller.item.id,
@@ -1606,7 +1619,7 @@ async function start(
         configuration.get(controller.item.id, generationVisibility.view(pluginContext)),
       )
       await controller.fiber
-      agentRouteScopes.validateInstalledRoutes(`${controller.item.source}:${controller.item.id}`)
+      agentRouteScopes.validateInstalledRoutes(owner)
       controller.status = 'active'
       pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Plugin activation completed')
       delete controller.error
@@ -2106,7 +2119,7 @@ async function start(
           policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
           controller.generationView,
         )
-      } else if (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5) {
+      } else if (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6) {
         await broker.setPolicyV2(
           controller.identity,
           capability,
@@ -2290,7 +2303,7 @@ async function start(
     id: string,
     decision: CordisXPermissionAuthorizationDecisionV4,
   ): Promise<void> => authorizePluginWith(id, async controller => {
-    if (controller.manifest.schemaVersion !== 5) throw new Error(`plugin ${id} does not use permission v4`)
+    if (controller.manifest.schemaVersion !== 5 && controller.manifest.schemaVersion !== 6) throw new Error(`plugin ${id} does not use permission v4`)
     await broker.authorizeActivationV4(controller.identity, decision, 'enable', controller.generationView)
   })
 
@@ -2358,7 +2371,7 @@ async function start(
       throw new Error(`local development candidate ${pluginId} is invalid: ${controller.error ?? 'module initialization failed'}`)
     }
     if (replacesTarget && mutation.developmentPackage !== undefined
-      && (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5)
+      && (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6)
       && controller.manifest.services.length > 0) {
       throw new Error('local development phase 1 is renderer-only; manifest services are unavailable')
     }
@@ -2489,7 +2502,7 @@ async function start(
             && mutation.authorizationDecision !== undefined
             && (mutation.operation === 'install' || mutation.operation === 'update' || mutation.operation === 'enable')) {
             if (mutation.authorizationDecision.schemaVersion === 4) {
-              if (candidate.controller.manifest.schemaVersion !== 5) throw new Error('permission v4 decision requires manifest-v5')
+              if (candidate.controller.manifest.schemaVersion !== 5 && candidate.controller.manifest.schemaVersion !== 6) throw new Error('permission v4 decision requires manifest-v5 or manifest-v6')
               await broker.authorizeActivationV4(
                 candidate.controller.identity,
                 mutation.authorizationDecision,

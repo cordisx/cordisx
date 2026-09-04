@@ -68,7 +68,7 @@ function bundledArtifactGeneration(plugin: CordisXConfigPlugin, moduleSource: st
 }
 
 function usesHostDomWorker(plugin: CordisXConfigPlugin): boolean {
-  return plugin.manifest?.schemaVersion === 5 && plugin.manifest.capabilities.some(capability => (
+  return (plugin.manifest?.schemaVersion === 5 || plugin.manifest?.schemaVersion === 6) && plugin.manifest.capabilities.some(capability => (
     capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
   ))
 }

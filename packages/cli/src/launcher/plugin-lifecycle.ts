@@ -27,6 +27,7 @@ import {
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
   type CordisXCertifiedPermissionProjectionV1,
   type CordisXPermissionAuthorizationDecisionV4,
   type CordisXPermissionAuthorizationPlanV4,
@@ -36,7 +37,6 @@ import {
   type CordisXPermissionPolicyRecordV2,
   type CordisXPermissionPolicyRecordV4,
   type CordisXCapabilityDeclarationV4,
-  type CordisXCapabilityDeclarationV5,
 } from '../permission-contracts.js'
 import {
   isPermissionPolicyRecordV2,
@@ -56,6 +56,7 @@ import {
   assertPermissionAuthorizationDecisionV4,
   normalizeCertifiedPermissionProjectionV1,
   normalizePluginManifestV5,
+  normalizePluginManifestV6,
 } from '../permission-model-v4.js'
 import {
   PluginActivationStore,
@@ -373,8 +374,8 @@ function authorizationPlanV4(
   policiesV4: readonly CordisXPermissionPolicyRecordV4[],
   certification?: CordisXCertifiedPermissionProjectionV1,
 ): CordisXPermissionAuthorizationPlanV4 {
-  if (staged.manifest.runtimeManifest.schemaVersion !== 5) {
-    throw new LifecycleFailure('permission-denied', 'Permission V4 review requires manifest-v5.')
+  if (staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6) {
+    throw new LifecycleFailure('permission-denied', 'Permission V4 review requires manifest-v5 or manifest-v6.')
   }
   const catalog = new CapabilityRiskCatalog()
   return buildPermissionAuthorizationPlanV4({
@@ -388,7 +389,7 @@ function authorizationPlanV4(
       moduleGeneration,
       requestId,
     },
-    declarations: staged.manifest.runtimeManifest.capabilities.filter(isLegacyPermissionDeclarationV4),
+    declarations: staged.manifest.runtimeManifest.capabilities.filter(isLegacyPermissionDeclarationV4) as readonly CordisXCapabilityDeclarationV4[],
     policiesV2,
     policiesV4,
     ...(certification === undefined ? {} : { certification }),
@@ -396,8 +397,8 @@ function authorizationPlanV4(
 }
 
 function isLegacyPermissionDeclarationV4(
-  declaration: CordisXCapabilityDeclarationV5,
-): declaration is CordisXCapabilityDeclarationV4 {
+  declaration: Readonly<{ readonly name: string }>,
+): boolean {
   return !(declaration.name.startsWith('agents.')
     || declaration.name.startsWith('sessions.')
     || declaration.name.startsWith('approvals.'))
@@ -680,6 +681,11 @@ export class PluginLifecycleCoordinator {
           const id = (value as { readonly id?: unknown })?.id
           if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
           return normalizePluginManifestV5(value, id, new CapabilityRiskCatalog())
+        },
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V6]: value => {
+          const id = (value as { readonly id?: unknown })?.id
+          if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
+          return normalizePluginManifestV6(value, id, new CapabilityRiskCatalog())
         },
       },
     })
@@ -1393,7 +1399,7 @@ export class PluginLifecycleCoordinator {
     )
   }
 
-  /** Host-private manifest-v5 review; uses the same PackageLifecycleAuthority transaction. */
+  /** Host-private manifest-v5/v6 review; uses the same PackageLifecycleAuthority transaction. */
   async permissionReviewPlanV4(
     input: HostPermissionLifecycleReviewV4Request,
   ): Promise<CordisXPermissionAuthorizationPlanV4 | undefined> {
@@ -1412,7 +1418,7 @@ export class PluginLifecycleCoordinator {
       const operation = active.plugins.some(plugin => plugin.id === pluginId) ? 'update' : 'install'
       const target = candidate.plugins.find(plugin => plugin.id === pluginId)!
       const staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => { throw classify(error) })
-      if (staged.manifest.runtimeManifest.schemaVersion !== 5) return undefined
+      if (staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6) return undefined
       return authorizationPlanV4(
         staged,
         operation,
@@ -1429,7 +1435,7 @@ export class PluginLifecycleCoordinator {
     const activeTarget = active.plugins.find(plugin => plugin.id === pluginId)
     if (activeTarget === undefined || activeTarget.enabled) throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
     const staged = await loadStagedPluginPackage(this.options.homeDir, activeTarget.digest).catch(error => { throw classify(error) })
-    if (staged.manifest.runtimeManifest.schemaVersion !== 5) return undefined
+    if (staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6) return undefined
     const { candidate } = this.mutationCandidate(active, 'enable', pluginId)
     await this.store.writeCandidate(candidate)
     const target = candidate.plugins.find(plugin => plugin.id === pluginId)!
@@ -1473,7 +1479,7 @@ export class PluginLifecycleCoordinator {
     return await this.applyStateMutationV2(request, active, candidateId, input.decision)
   }
 
-  /** Applies one manifest-v5 review through the existing lifecycle authority. */
+  /** Applies one manifest-v5/v6 review through the existing lifecycle authority. */
   async applyPermissionReviewV4(
     input: HostPermissionLifecycleApplyV4Request,
   ): Promise<CordisXPluginLifecycleResultV1> {

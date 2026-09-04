@@ -159,6 +159,18 @@ ordinary Playground plugins retain the interactive fail-closed path. No
 wildcard or plugin-provided flag is accepted. Connection, route, permission,
 and plugin-generation replacement abort pending Agent runtime prompts before
 fencing leases, so an obsolete dialog cannot survive as inert UI.
+Plugin manifest/package v6 adds public exact route-scoped declarations for all
+twelve Agent runtime capabilities, including independent `approvals.request`
+and `approvals.answer` authority. A dynamic declaration is optional and binds
+only `sessionIds` to the authenticated owner's route-v2 `:sessionId` parameter;
+the named route must contain that parameter exactly once. The Host captures the
+active route instance and exact value, then materializes only that Session id
+through the existing permission-v4 policy and lease ledger. Static lists remain
+non-empty, unique, and non-wildcard. Route, plugin generation, connection, or
+policy replacement revokes the lease; foreign owners, stale generations,
+inactive routes, malformed values, and duplicate declarations fail closed.
+No Room identifier is reinterpreted as Session authority and no approval-specific
+ledger or writer exists.
 An explicitly enabled Playground scenario may temporarily add one exact
 delegated Session route to that same broker without replacing the visible Lead
 Room route. The Host derives its owner and route identity from the active Lead

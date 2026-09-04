@@ -3,6 +3,10 @@ import type { CordisXPlatformSessionRef } from './platform-contracts.js'
 import type { HostDomOperation } from '@cordisx/protocol/host-dom/v1'
 import type { AgentRuntimeCapability } from '@cordisx/protocol/agents/v1'
 import type { HostRouteSessionScopeBinding } from '@cordisx/protocol/sessions/v1'
+import type {
+  PluginManifestCapabilityDeclarationV6,
+  PluginRuntimeManifestV6,
+} from '@cordisx/protocol/plugin-manifest/v6'
 
 export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v4.schema.json'
@@ -30,6 +34,10 @@ export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v5.schema.json'
 export const CORDISX_PLUGIN_PACKAGE_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v4.schema.json'
+export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V6 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v6.schema.json'
+export const CORDISX_PLUGIN_PACKAGE_SCHEMA_V6 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v6.schema.json'
 export const CORDISX_PERMISSION_POLICY_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v4.schema.json'
 export const CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V4 =
@@ -196,6 +204,10 @@ export interface CordisXPluginManifestV5 {
   readonly capabilities: readonly CordisXCapabilityDeclarationV5[]
   readonly services: readonly CordisXPluginServiceDeclarationV4[]
 }
+
+/** Public Protocol-v6 manifest shape re-exported through `cordisx/contracts`. */
+export type CordisXCapabilityDeclarationV6 = PluginManifestCapabilityDeclarationV6
+export type CordisXPluginManifestV6 = PluginRuntimeManifestV6
 
 export interface CordisXPermissionIdentityV2 {
   readonly source: string
