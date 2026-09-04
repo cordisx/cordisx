@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveProviderConfigs } from '../providers/config.js'
@@ -15,7 +15,7 @@ import {
 import type { CordisXPluginDependencyV1 } from '../plugin-lifecycle-contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 import type { CordisXPluginManifestV1 } from '../platform-contracts.js'
-import type { CordisXPluginManifestV4, CordisXPluginManifestV5, CordisXPluginManifestV6, CordisXPluginManifestV7 } from '../permission-contracts.js'
+import type { CordisXPluginManifestV4, CordisXPluginManifestV5, CordisXPluginManifestV6, CordisXPluginManifestV8 } from '../permission-contracts.js'
 
 export interface CordisXConfigPlugin {
   readonly id: string
@@ -24,7 +24,7 @@ export interface CordisXConfigPlugin {
   readonly config: unknown
   readonly revision?: number
   readonly source?: string
-  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7
+  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV8
   readonly package?: {
     readonly version: string
     readonly digest: `sha256:${string}`
@@ -33,7 +33,6 @@ export interface CordisXConfigPlugin {
     readonly canonicalSource?: string
   }
   readonly readme?: string
-  readonly readmes?: Readonly<Record<string, string>>
   /** Prebuilt lexical module body used only by the launcher local-dev bootstrap. */
   readonly moduleFactorySource?: string
   readonly development?: CordisXLocalDevelopmentSnapshot
@@ -41,20 +40,11 @@ export interface CordisXConfigPlugin {
 
 export interface LoadConfigOptions {
   readonly profileId?: string
-  /** Explicit business-project root. Project discovery supplies this value. */
-  readonly projectRoot?: string
 }
 
 export interface CordisXConfig {
   readonly version: 1
-  /** Business-project root and Vite/workspace boundary. */
   readonly rootDir: string
-  /** Explicit alias for rootDir on project-aware loaded configurations. */
-  readonly projectRoot?: string
-  /** Directory containing the composition file; relative config paths resolve here. */
-  readonly configRoot?: string
-  /** Absolute composition path when the configuration was loaded from disk. */
-  readonly configPath?: string
   readonly codex: {
     readonly debugPort: number
     readonly executable?: string
@@ -63,89 +53,6 @@ export interface CordisXConfig {
   }
   readonly providers: readonly CliProxyProviderConfig[]
   readonly plugins: readonly CordisXConfigPlugin[]
-}
-
-export type CordisXProjectConfigLayout = 'embedded' | 'legacy' | 'explicit'
-
-export interface CordisXProjectConfigLocation {
-  readonly layout: CordisXProjectConfigLayout
-  readonly configPath: string
-  readonly configRoot: string
-  readonly projectRoot: string
-}
-
-export interface FindCordisXProjectConfigOptions {
-  /** Exact config paths that belong to another scope, such as the user home config. */
-  readonly excludeConfigPaths?: readonly string[]
-}
-
-const EMBEDDED_CONFIG_DIRECTORY = '.cordisx'
-const EMBEDDED_CONFIG_FILE = 'config.json'
-const LEGACY_CONFIG_FILE = 'cordisx.config.json'
-
-function projectConfigLocation(configPath: string): CordisXProjectConfigLocation {
-  const absolutePath = path.resolve(configPath)
-  const configRoot = path.dirname(absolutePath)
-  const embedded = path.basename(configRoot) === EMBEDDED_CONFIG_DIRECTORY
-    && path.basename(absolutePath) === EMBEDDED_CONFIG_FILE
-  const legacy = path.basename(absolutePath) === LEGACY_CONFIG_FILE
-  return {
-    layout: embedded ? 'embedded' : legacy ? 'legacy' : 'explicit',
-    configPath: absolutePath,
-    configRoot,
-    projectRoot: embedded ? path.dirname(configRoot) : configRoot,
-  }
-}
-
-async function regularFile(filePath: string): Promise<boolean> {
-  try {
-    return (await stat(filePath)).isFile()
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code === 'ENOENT' || code === 'ENOTDIR') return false
-    throw error
-  }
-}
-
-/**
- * Resolve an explicitly selected project composition without changing its
- * config-relative path boundary.
- */
-export function resolveCordisXProjectConfig(
-  configPath: string,
-  cwd: string = process.cwd(),
-): CordisXProjectConfigLocation {
-  return projectConfigLocation(path.resolve(cwd, configPath))
-}
-
-/**
- * Search from the current directory towards the filesystem root. The nearest
- * project wins; within one directory the embedded layout wins over the legacy
- * root file.
- */
-export async function findCordisXProjectConfig(
-  startDirectory: string,
-  options: FindCordisXProjectConfigOptions = {},
-): Promise<CordisXProjectConfigLocation | undefined> {
-  const excluded = new Set((options.excludeConfigPaths ?? []).map(value => path.resolve(value)))
-  let directory = path.resolve(startDirectory)
-  while (true) {
-    const embedded = path.join(directory, EMBEDDED_CONFIG_DIRECTORY, EMBEDDED_CONFIG_FILE)
-    if (!excluded.has(embedded) && await regularFile(embedded)) return projectConfigLocation(embedded)
-    const legacy = path.join(directory, LEGACY_CONFIG_FILE)
-    if (!excluded.has(legacy) && await regularFile(legacy)) return projectConfigLocation(legacy)
-    const parent = path.dirname(directory)
-    if (parent === directory) return undefined
-    directory = parent
-  }
-}
-
-export function cordisXProjectRoot(config: CordisXConfig): string {
-  return config.projectRoot ?? config.rootDir
-}
-
-export function cordisXConfigRoot(config: CordisXConfig): string {
-  return config.configRoot ?? config.rootDir
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -190,10 +97,7 @@ function serviceConfiguration(
 
 /** Validate a version-1 local composition document without changing its storage envelope. */
 export function parseConfigDocument(value: unknown, configPath: string, options: LoadConfigOptions = {}): CordisXConfig {
-  const location = projectConfigLocation(configPath)
-  const absolutePath = location.configPath
-  const configRoot = location.configRoot
-  const projectRoot = options.projectRoot === undefined ? location.projectRoot : path.resolve(options.projectRoot)
+  const absolutePath = path.resolve(configPath)
   const raw = object(value, 'config')
   if (raw.version !== 1) throw new Error('config.version must be 1')
   const codex = raw.codex === undefined ? {} : object(raw.codex, 'config.codex')
@@ -220,7 +124,7 @@ export function parseConfigDocument(value: unknown, configPath: string, options:
     if (id === 'host' || id.startsWith('cordisx.')) throw new Error(`reserved plugin id: ${id}`)
     if (seen.has(id)) throw new Error(`duplicate plugin id: ${id}`)
     seen.add(id)
-    const entry = pluginEntry(plugin.entry, `config.plugins[${index}].entry`, configRoot)
+    const entry = pluginEntry(plugin.entry, `config.plugins[${index}].entry`, path.dirname(absolutePath))
     if (plugin.enabled !== undefined && typeof plugin.enabled !== 'boolean') {
       throw new Error(`config.plugins[${index}].enabled must be a boolean`)
     }
@@ -249,14 +153,14 @@ export function parseConfigDocument(value: unknown, configPath: string, options:
     ? undefined
     : serviceConfiguration(cliProxyPlugin, CLI_PROXY_PROVIDER_RUNTIME_SERVICE_ID, profileId)
   const providers = runtimeValue === undefined
-    ? resolveProviderConfigs(raw.providers, { rootDir: configRoot })
+    ? resolveProviderConfigs(raw.providers, { rootDir: path.dirname(absolutePath) })
     : resolveCliProxyProviderConfigs(
         parseCliProxyProviderRuntimeConfig(runtimeValue ?? CLI_PROXY_PROVIDER_RUNTIME_CONFIG_INITIAL),
         parseCliProxyProviderStartupConfig(
           serviceConfiguration(cliProxyPlugin!, CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID, profileId)
             ?? CLI_PROXY_PROVIDER_STARTUP_CONFIG_INITIAL,
         ),
-        { rootDir: configRoot },
+        { rootDir: path.dirname(absolutePath) },
       )
   if (codex.agentLoopBackend === 'local-cli' && providers.some(provider => provider.id === 'codex-local')) {
     throw new Error('config.providers id codex-local is reserved by config.codex.agentLoopBackend')
@@ -264,13 +168,10 @@ export function parseConfigDocument(value: unknown, configPath: string, options:
 
   return {
     version: 1,
-    rootDir: projectRoot,
-    projectRoot,
-    configRoot,
-    configPath: absolutePath,
+    rootDir: path.dirname(absolutePath),
     codex: {
       debugPort: debugPort as number,
-      ...(executable === undefined ? {} : { executable: path.resolve(configRoot, executable) }),
+      ...(executable === undefined ? {} : { executable: path.resolve(path.dirname(absolutePath), executable) }),
       ...(codex.agentLoopBackend === 'local-cli'
         ? { agentLoopBackend: 'local-cli' as const }
         : codex.agentLoopBackend === 'mock'

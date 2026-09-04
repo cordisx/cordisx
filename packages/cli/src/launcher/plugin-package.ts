@@ -19,12 +19,12 @@ import {
   type CordisXCapabilityDeclaration,
   type CordisXPluginManifestV1,
 } from '../platform-contracts.js'
-import type { CordisXPluginManifestV4, CordisXPluginManifestV5, CordisXPluginManifestV6, CordisXPluginManifestV7 } from '../permission-contracts.js'
+import type { CordisXPluginManifestV4, CordisXPluginManifestV5, CordisXPluginManifestV6, CordisXPluginManifestV8 } from '../permission-contracts.js'
 import type { CordisXPluginServiceDeclarationV4 } from '../permission-contracts.js'
-import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V4, CORDISX_PLUGIN_MANIFEST_SCHEMA_V5, CORDISX_PLUGIN_MANIFEST_SCHEMA_V6, CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 } from '../permission-contracts.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V4, CORDISX_PLUGIN_MANIFEST_SCHEMA_V5, CORDISX_PLUGIN_MANIFEST_SCHEMA_V6, CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 } from '../permission-contracts.js'
 import { CapabilityRiskCatalog } from '../capability-risk-catalog.js'
 import { normalizePluginManifestV4 } from '../permission-model-v2.js'
-import { normalizePluginManifestV5, normalizePluginManifestV6, normalizePluginManifestV7 } from '../permission-model-v4.js'
+import { normalizePluginManifestV5, normalizePluginManifestV6, normalizePluginManifestV8 } from '../permission-model-v4.js'
 import {
   CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
   CORDISX_PLUGIN_PROTOCOL_V1,
@@ -48,7 +48,7 @@ const DIGEST = /^sha256:([a-f0-9]{64})$/
 
 export interface StagedPluginPackage {
   readonly manifest: Omit<CordisXPluginPackageManifestV1, 'runtimeManifest'> & {
-    readonly runtimeManifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7
+    readonly runtimeManifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV8
   }
   readonly digest: `sha256:${string}`
   readonly moduleSource: string
@@ -237,10 +237,10 @@ async function buildArtifact(root: string, entry: string): Promise<{ readonly mo
     target: ['chrome120'],
     sourcemap: false,
     metafile: true,
-    loader: { '.svg': 'text' as const, '.css': 'text' as const, '.png': 'dataurl' as const },
+    loader: { '.svg': 'text' as const, '.png': 'dataurl' as const },
     jsx: 'automatic' as const,
     jsxImportSource: 'cordisx/react',
-    plugins: [cordisXReactVirtualModules(entry)],
+    plugins: [cordisXReactVirtualModules()],
     write: false,
     logLevel: 'silent' as const,
   }
@@ -540,10 +540,10 @@ export async function stageResolvedPluginPackage(
         ? normalizePluginManifestV5(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
         : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V6 && runtime.schemaVersion === 6
           ? normalizePluginManifestV6(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
-          : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 && runtime.schemaVersion === 7
-            ? normalizePluginManifestV7(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
+          : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 && runtime.schemaVersion === 8
+            ? normalizePluginManifestV8(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
         : undefined
-  if (runtimeManifest === undefined) throw new Error('the current renderer generation ABI accepts runtime plugin manifest v1, v4, v5, v6, or v7 only')
+  if (runtimeManifest === undefined) throw new Error('the current renderer generation ABI accepts runtime plugin manifest v1, v4, v5, v6, or v8 only')
   const entry = await regularContainedFile(root, resolved.packageManifest.entry, 'package entry')
   const readmePath = resolved.packageManifest.readme === undefined
     ? undefined
@@ -552,7 +552,7 @@ export async function stageResolvedPluginPackage(
     buildArtifact(root, entry),
     readmePath === undefined ? Promise.resolve(undefined) : readFile(readmePath, 'utf8'),
   ])
-  const serviceModules = runtimeManifest.schemaVersion === 4 || runtimeManifest.schemaVersion === 5 || runtimeManifest.schemaVersion === 6 || runtimeManifest.schemaVersion === 7
+  const serviceModules = runtimeManifest.schemaVersion === 4 || runtimeManifest.schemaVersion === 5 || runtimeManifest.schemaVersion === 6 || runtimeManifest.schemaVersion === 8
     ? await Promise.all(runtimeManifest.services.map(service => buildServiceArtifact(root, service)))
     : []
   const entityTemplates = await Promise.all((resolved.packageManifest.entityTemplates ?? []).map(async declaration => (
@@ -662,8 +662,8 @@ export async function loadStagedPluginPackage(homeDir: string, digest: `sha256:$
           ? normalizePluginManifestV5(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
           : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V6 && candidate.schemaVersion === 6
             ? normalizePluginManifestV6(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
-            : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 && candidate.schemaVersion === 7
-              ? normalizePluginManifestV7(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
+            : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 && candidate.schemaVersion === 8
+              ? normalizePluginManifestV8(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
           : undefined
     if (runtime === undefined) throw new Error('stored runtime manifest schema is unsupported')
     manifest = {
