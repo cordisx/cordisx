@@ -10,7 +10,10 @@ import {
 import type { CordisXConfig } from './config.js'
 import { CdpPluginLifecycleRuntime } from './cdp.js'
 import { readEntityTemplatePayload, type EntityTemplatePayload } from './entity-directory.js'
-import { PLUGIN_PACKAGE_SCHEMA_V5, PLUGIN_PACKAGE_SCHEMA_V6 } from './packages/manifest.js'
+import { PLUGIN_PACKAGE_SCHEMA_V5, PLUGIN_PACKAGE_SCHEMA_V6, PLUGIN_PACKAGE_SCHEMA_V7 } from './packages/manifest.js'
+import type { CordisXPluginManifestV7 } from '../permission-contracts.js'
+import { normalizePluginManifestV7 } from '../permission-model-v4.js'
+import { CapabilityRiskCatalog } from '../capability-risk-catalog.js'
 import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
 
 const WATCH_INTERVAL_MS = 200
@@ -41,6 +44,7 @@ export interface LocalDevelopmentBuild {
   readonly entityTemplates: readonly EntityTemplatePayload[]
   readonly readme?: string
   readonly readmes?: Readonly<Record<string, string>>
+  readonly manifest?: CordisXPluginManifestV7
 }
 
 interface LocalDevelopmentBuildOptions {
@@ -83,6 +87,7 @@ export interface LocalDevelopmentPackageInfo {
   /** Exact renderer-only package inputs that must invalidate a development generation. */
   readonly packageFiles: readonly string[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
+  readonly manifest?: CordisXPluginManifestV7
 }
 
 export async function localDevelopmentPackageInfo(entry: string): Promise<LocalDevelopmentPackageInfo> {
@@ -106,6 +111,7 @@ export async function localDevelopmentPackageInfo(entry: string): Promise<LocalD
       : '0.0.0-local-dev',
     packageFiles: rendererPackage.files,
     entityTemplates: rendererPackage.entityTemplates,
+    ...(rendererPackage.manifest === undefined ? {} : { manifest: rendererPackage.manifest }),
   }
 }
 
@@ -157,6 +163,7 @@ async function readReadmes(root: string): Promise<{
 async function readRendererOnlyPackage(root: string): Promise<{
   readonly files: readonly string[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
+  readonly manifest?: CordisXPluginManifestV7
 }> {
   const manifestPath = path.join(root, 'cordisx-package.json')
   const text = await readFile(manifestPath, 'utf8').catch(error => {
@@ -171,10 +178,37 @@ async function readRendererOnlyPackage(root: string): Promise<{
   if (Array.isArray(manifest.dependencies) && manifest.dependencies.length > 0) {
     throw new Error('local development phase 1 is renderer-only; package dependencies are unavailable')
   }
-  if (manifest.entityTemplates === undefined) return { files: [manifestPath], entityTemplates: [] }
+  let runtimeManifest: CordisXPluginManifestV7 | undefined
+  let runtimeManifestFile: string | undefined
+  if (manifest.runtimeManifest !== undefined && manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7) {
+    if (manifest.runtimeManifest === null || typeof manifest.runtimeManifest !== 'object' || Array.isArray(manifest.runtimeManifest)) {
+      throw new Error('local development runtimeManifest must be an object')
+    }
+    const declaration = manifest.runtimeManifest as Record<string, unknown>
+    if (Object.keys(declaration).some(key => !['path', 'schema', 'digest'].includes(key))
+      || typeof declaration.path !== 'string' || !/^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.json$/u.test(declaration.path)
+      || declaration.schema !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v7.schema.json'
+      || typeof declaration.digest !== 'string' || !ENTITY_DIGEST.test(declaration.digest)) {
+      throw new Error('local development runtimeManifest declaration is invalid')
+    }
+    runtimeManifestFile = path.resolve(root, declaration.path.slice(2))
+    if (!runtimeManifestFile.startsWith(`${path.resolve(root)}${path.sep}`)) throw new Error('local development runtimeManifest escapes package root')
+    const runtimeText = await readFile(runtimeManifestFile, 'utf8')
+    const actualDigest = `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`
+    if (actualDigest !== declaration.digest) throw new Error('local development runtimeManifest digest mismatch')
+    const packageId = manifest.id
+    if (typeof packageId !== 'string') throw new Error('local development package id is required')
+    runtimeManifest = normalizePluginManifestV7(JSON.parse(runtimeText) as unknown, packageId, new CapabilityRiskCatalog())
+  }
+  if (manifest.entityTemplates === undefined) return {
+    files: [manifestPath, ...(runtimeManifestFile === undefined ? [] : [runtimeManifestFile])],
+    entityTemplates: [],
+    ...(runtimeManifest === undefined ? {} : { manifest: runtimeManifest }),
+  }
   if (!((manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V5 && manifest.schemaVersion === 5)
-    || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V6 && manifest.schemaVersion === 6))) {
-    throw new Error('local development entityTemplates require plugin-package.v5 or plugin-package.v6')
+    || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V6 && manifest.schemaVersion === 6)
+    || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7))) {
+    throw new Error('local development entityTemplates require plugin-package.v5, plugin-package.v6, or plugin-package.v7')
   }
   const compatibility = manifest.compatibility
   if (compatibility === null || typeof compatibility !== 'object' || Array.isArray(compatibility)
@@ -210,7 +244,11 @@ async function readRendererOnlyPackage(root: string): Promise<{
     const entityDirectory = path.dirname(entityFile)
     return [entityFile, ...template.promptFiles.map(file => path.resolve(entityDirectory, file.path.slice(2)))]
   })
-  return { files: [manifestPath, ...entityFiles], entityTemplates }
+  return {
+    files: [manifestPath, ...(runtimeManifestFile === undefined ? [] : [runtimeManifestFile]), ...entityFiles],
+    entityTemplates,
+    ...(runtimeManifest === undefined ? {} : { manifest: runtimeManifest }),
+  }
 }
 
 function absoluteInputs(root: string, inputs: Readonly<Record<string, unknown>>): readonly string[] {
@@ -228,7 +266,7 @@ export async function buildLocalDevelopmentPlugin(
 ): Promise<LocalDevelopmentBuild> {
   const entry = path.resolve(rawEntry)
   await access(entry)
-  const { root, version, packageFiles, entityTemplates } = await localDevelopmentPackageInfo(entry)
+  const { root, version, packageFiles, entityTemplates, manifest } = await localDevelopmentPackageInfo(entry)
   const id = pluginId(entry)
   const common = {
     absWorkingDir: root,
@@ -248,7 +286,10 @@ export async function buildLocalDevelopmentPlugin(
     build({ entryPoints: [entry], format: 'iife', globalName: '__cordisxPluginModule', ...common }),
     readReadmes(root),
   ])
-  const packageSource = { files: packageFiles, entityTemplates }
+  const packageSource = { files: packageFiles, entityTemplates, ...(manifest === undefined ? {} : { manifest }) }
+  if (packageSource.manifest !== undefined && packageSource.manifest.id !== id) {
+    throw new Error('local development runtime manifest id does not match the selected entry')
+  }
   if (moduleResult.metafile === undefined) {
     throw new Error('local development build produced no dependency metadata')
   }
@@ -273,6 +314,8 @@ export async function buildLocalDevelopmentPlugin(
     .update(JSON.stringify(readmes.localized))
     .update('\0')
     .update(JSON.stringify(packageSource.entityTemplates))
+    .update('\0')
+    .update(JSON.stringify(packageSource.manifest ?? null))
     .digest('hex')}` as const
   const sourceKey = createHash('sha256').update(entry).digest('hex').slice(0, 24)
   return {
@@ -292,6 +335,7 @@ export async function buildLocalDevelopmentPlugin(
       ...absoluteInputs(root, moduleResult.metafile.inputs),
     ])].sort(),
     entityTemplates: packageSource.entityTemplates,
+    ...(packageSource.manifest === undefined ? {} : { manifest: packageSource.manifest }),
     ...(readmes.default === undefined ? {} : { readme: readmes.default }),
     ...(Object.keys(readmes.localized).length === 0 ? {} : {
       readmes: {
@@ -640,6 +684,7 @@ export class LocalDevelopmentController {
           dependencies: [],
         },
         moduleFactorySource: build.moduleFactorySource,
+        ...(build.manifest === undefined ? {} : { manifest: build.manifest }),
         development: readyState,
         ...(build.readme === undefined ? {} : { readme: build.readme }),
         ...(build.readmes === undefined ? {} : { readmes: build.readmes }),
@@ -694,6 +739,7 @@ export class LocalDevelopmentController {
           digest: build.digest,
           identitySource: this.identitySource,
           development: readyState,
+          ...(build.manifest === undefined ? {} : { manifest: build.manifest }),
           ...(build.readme === undefined ? {} : { readme: build.readme }),
           ...(build.readmes === undefined ? {} : { readmes: build.readmes }),
         },

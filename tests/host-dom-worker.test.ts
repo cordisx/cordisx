@@ -21,11 +21,15 @@ const RESULT_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protoco
 
 class FakeTransport implements HostDomWorkerTransport {
   readonly posted: unknown[] = []
+  readonly transfers: Transferable[][] = []
   readonly listeners = new Set<(message: unknown) => void>()
   terminated = false
   destroyed = false
 
-  post = (message: unknown): void => { this.posted.push(message) }
+  post = (message: unknown, transfer: readonly Transferable[] = []): void => {
+    this.posted.push(message)
+    this.transfers.push([...transfer])
+  }
   subscribe = (listener: (message: unknown) => void): (() => void) => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
@@ -134,7 +138,7 @@ describe('Host DOM worker boundary', () => {
     expect(bootstrap).toContain('nativeImportScripts(event.data.artifactUrl)')
     expect(bootstrap).toContain('const portPost = port.postMessage.bind(port)')
     expect(bootstrap).toContain('message.token !== boundaryToken')
-    expect(bootstrap).toContain('applyFunction(pluginModule.apply, pluginModule, [freeze({ hostDom, onDispose }), config])')
+    expect(bootstrap).toContain('applyFunction(pluginModule.apply, pluginModule, [context, config])')
     expect(bootstrap).toContain("plugin apply must return void or Promise<void>")
 
     environment.transport.emit(status(environment, 'ready'))
@@ -237,6 +241,59 @@ describe('Host DOM worker boundary', () => {
     environment.transport.emit(status(environment, 'disposed'))
     await disposal
     expect(hostDom.dispose).toHaveBeenCalledTimes(1)
+    dom.window.close()
+  })
+
+  it('exposes transient canvas only through its declared worker interface and transfers no DOM object', async () => {
+    const dom = new JSDOM('<body></body>')
+    const environment = new FakeEnvironment()
+    const transientCanvas = {
+      register: vi.fn(async () => undefined),
+      unregister: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    }
+    const boundary = createHostDomWorkerBoundary({
+      document: dom.window.document,
+      artifactSource: 'globalThis.__cordisxHostDomPluginModuleV1 = { apply() {} }',
+      transientCanvas,
+      environment,
+    })
+    expect(environment.input?.interfaces).toEqual(['ui.transient-canvas/v1'])
+    expect(environment.input?.bootstrapSource).toContain("['require', 'process', 'module', 'document', 'window']")
+    environment.transport.emit(status(environment, 'ready'))
+    await boundary.ready
+
+    const declaration = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
+      schemaVersion: 1,
+      id: 'sparkles',
+      pointId: 'composer.submit.effects',
+      durationMs: 700,
+      reducedMotion: 'static',
+    } as const
+    environment.transport.emit(fromWorker(environment, {
+      type: 'rpc', sequence: 1, requestId: 'rpc-canvas-register-1', method: 'canvas-register', payload: declaration,
+    }))
+    await waitForPosted(environment.transport, 1)
+    expect(transientCanvas.register).toHaveBeenCalledWith(declaration)
+
+    const offscreen = { kind: 'offscreen' } as unknown as OffscreenCanvas
+    boundary.startTransientCanvas({
+      sessionId: 'canvas:1', registrationId: 'sparkles', canvas: offscreen,
+      width: 1200, height: 800, pixelRatio: 2, reducedMotion: false, startedAt: 42,
+    })
+    expect(environment.transport.posted[1]).toMatchObject({
+      type: 'canvas-start', registrationId: 'sparkles', canvas: offscreen,
+    })
+    expect(environment.transport.posted[1]).not.toHaveProperty('document')
+    expect(environment.transport.transfers[1]).toEqual([offscreen])
+    boundary.stopTransientCanvas('canvas:1')
+    expect(environment.transport.posted[2]).toMatchObject({ type: 'canvas-stop', sessionId: 'canvas:1' })
+
+    const disposal = boundary.dispose()
+    environment.transport.emit(status(environment, 'disposed'))
+    await disposal
+    expect(transientCanvas.dispose).toHaveBeenCalledTimes(1)
     dom.window.close()
   })
 

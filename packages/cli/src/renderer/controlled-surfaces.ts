@@ -48,8 +48,6 @@ export interface ControlledSurfacePointBinding {
   readonly readProperty: (id: string) => CordisXJsonScalar
   readonly commandAvailability?: (id: string) => Readonly<{ available: boolean; reason?: string }>
   readonly eventAvailability?: (id: string) => Readonly<{ available: boolean; reason?: string }>
-  /** Host-only lifecycle projection for the exact claims selected in this revision. */
-  readonly selectionChanged?: (selected: readonly ControlledSurfaceSelectedClaim[]) => void
   /** Host-only operation. Its result is intentionally discarded by the v1 protocol. */
   readonly dispatch: (
     id: string,
@@ -685,15 +683,6 @@ export class ControlledSurfaceCoordinator {
       .map(item => Object.freeze({ declaration: item.record.declaration, presenter: item.record.presenter })))
   }
 
-  selectedClaims(pointId: string): readonly ControlledSurfaceSelectedClaim[] {
-    return Object.freeze([...this.resolve().selected.values()]
-      .filter(item => item.record.declaration.identity.pointId === pointId)
-      .map(item => Object.freeze({
-        declaration: item.record.declaration,
-        generation: item.record.generation,
-      })))
-  }
-
   async invoke(caller: ControlledSurfaceGeneration, request: CordisXExtensionPointControlAccessV1): Promise<CordisXExtensionPointControlResultV1> {
     const reject = (why: string): CordisXExtensionPointControlResultV1 => Object.freeze({
       $schema: CORDISX_EXTENSION_POINT_CONTROL_RESULT_SCHEMA_V1,
@@ -774,14 +763,6 @@ export class ControlledSurfaceCoordinator {
     this.assertLive()
     this.lastEvents.clear()
     this.snapshotRevision += 1
-    const selected = this.resolve().selected
-    for (const [pointId, binding] of Object.entries(this.bindings)) {
-      if (binding.selectionChanged === undefined) continue
-      const claims = Object.freeze([...selected.values()]
-        .filter(item => item.record.declaration.identity.pointId === pointId)
-        .map(item => Object.freeze({ declaration: item.record.declaration, generation: item.record.generation })))
-      try { binding.selectionChanged(claims) } catch { /* Cleanup projection cannot split Host publication. */ }
-    }
     for (const listener of this.listeners) {
       try { listener() } catch { /* One observer cannot split one Host revision. */ }
     }

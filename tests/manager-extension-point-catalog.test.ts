@@ -122,7 +122,7 @@ describe('Manager extension point catalog', () => {
       const collection = list.closest<HTMLElement>('[data-host-collection="extension-points"]')!
       expect(collection.dataset.density).toBe('compact')
       expect(dom.window.document.querySelector('.cxm-heading > p')).toBeNull()
-      expect(list.querySelectorAll('[data-extension-point-id]')).toHaveLength(39)
+      expect(list.querySelectorAll('[data-extension-point-id]')).toHaveLength(40)
       expect(list.querySelector('.cxm-kind-badge')).toBeNull()
       expect(list.querySelector('.cxm-chevron')).toBeNull()
 

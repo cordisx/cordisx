@@ -6,6 +6,7 @@ import {
   CORDISX_PERMISSION_POLICY_SCHEMA_V4,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
   type CordisXCapabilityDeclarationV4,
   type CordisXCapabilityDeclarationV5,
   type CordisXCertifiedPermissionProjectionV1,
@@ -19,6 +20,7 @@ import {
   type CordisXPermissionScopeV4,
   type CordisXPluginManifestV5,
   type CordisXPluginManifestV6,
+  type CordisXPluginManifestV7,
   type CordisXPluginServiceConfigurationV4,
   type CordisXPluginServiceDeclarationV4,
 } from './permission-contracts.js'
@@ -408,6 +410,39 @@ export function normalizePluginManifestV6(
     capabilities,
     services,
   }) as CordisXPluginManifestV6
+}
+
+export function normalizePluginManifestV7(
+  value: unknown,
+  expectedId: string,
+  catalog: PermissionCapabilityCatalogBoundaryV4,
+): CordisXPluginManifestV7 {
+  const manifest = object(value, 'plugin manifest')
+  exact(manifest, ['$schema', 'schemaVersion', 'id', 'name', 'capabilities', 'services', 'execution'], 'plugin manifest')
+  if (manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 || manifest.schemaVersion !== 7) {
+    throw new Error('plugin manifest schema is unsupported')
+  }
+  if (Array.isArray(manifest.capabilities) && manifest.capabilities.some(capability => (
+    capability !== null && typeof capability === 'object' && !Array.isArray(capability)
+      && isHostDomPermissionCapability((capability as Record<string, unknown>).name)
+  ))) throw new Error('plugin manifest-v7 must not declare Host DOM capabilities')
+  const { execution: _execution, ...baseManifest } = manifest
+  const base = normalizePluginManifestV6({ ...baseManifest,
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
+    schemaVersion: 6,
+  }, expectedId, catalog)
+  const execution = object(manifest.execution, 'plugin manifest.execution')
+  exact(execution, ['realm', 'interfaces'], 'plugin manifest.execution')
+  if (execution.realm !== 'isolated-worker' || !Array.isArray(execution.interfaces)
+    || execution.interfaces.length !== 1 || execution.interfaces[0] !== 'ui.transient-canvas/v1') {
+    throw new Error('plugin manifest.execution must select only ui.transient-canvas/v1 in isolated-worker')
+  }
+  return Object.freeze({
+    ...base,
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
+    schemaVersion: 7,
+    execution: Object.freeze({ realm: 'isolated-worker', interfaces: Object.freeze(['ui.transient-canvas/v1'] as const) }),
+  }) as CordisXPluginManifestV7
 }
 
 function normalizedForFingerprint(value: unknown): unknown {

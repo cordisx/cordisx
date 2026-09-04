@@ -7,7 +7,7 @@ type Metadata = Parameters<Install>[1]
 type BrowserPlugin = Parameters<Install>[0][number]
 
 export interface ViteDevelopmentPlugin {
-  readonly plugin: BrowserPlugin
+  readonly plugin: BrowserPlugin & { readonly isolatedArtifactSource?: string }
   readonly ownerDocumentBindings: NonNullable<Metadata['ownerDocumentBindings']>
 }
 
@@ -115,7 +115,12 @@ export class NativeViteDevelopmentClient {
           identitySource: plugin.source,
           development: plugin.development!,
           ...(plugin.readme === undefined ? {} : { readme: plugin.readme }),
+          ...(plugin.readmes === undefined ? {} : { readmes: plugin.readmes }),
+          ...(plugin.manifest?.schemaVersion !== 7 ? {} : { manifest: plugin.manifest }),
         },
+        ...(plugin.isolatedArtifactSource === undefined ? {} : {
+          isolatedArtifactSource: plugin.isolatedArtifactSource,
+        }),
         ownerDocumentBindings: artifact.ownerDocumentBindings,
       }
       await runtime.settleRegistryProjection()

@@ -15,6 +15,7 @@ import type {
   CordisXPluginManifestV4,
   CordisXPluginManifestV5,
   CordisXPluginManifestV6,
+  CordisXPluginManifestV7,
   CordisXPointPolicy,
   CordisXPlatformCapability,
   CordisXCapabilityScope,
@@ -31,7 +32,6 @@ import type {
   CordisXPluginManifestV1,
   CordisXPluginModule,
   CordisXRouteReference,
-  CordisXExtensionPointControlDeclarationV1,
   CordisXExtensionPointControlMode,
 } from '../contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
@@ -213,6 +213,7 @@ import {
   type HostDomWorkerBoundary,
   type HostDomWorkerEnvironment,
 } from './host-dom-worker.js'
+import { TransientCanvasCoordinator } from './transient-canvas.js'
 import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from './owner-documents.js'
 import { CordisXEntityRegistryServiceV1, type EntityPrincipalBinding } from './entities.js'
 import type { EntityRegistry } from '@cordisx/protocol/entities/v1'
@@ -257,21 +258,6 @@ interface CordisXRuntimeMetadata {
   readonly initialRegistryEpoch?: number
   readonly generation?: string
   readonly channelManager?: ChannelManagerProjectionV1
-  /** Host-private, launcher-authenticated exact claim for one explicit local-development entry. */
-  readonly localDevelopmentControlGrant?: {
-    readonly profile: 'cordisx.composer-submit-celebration/v1'
-    readonly identity: { readonly source: string; readonly id: string }
-    readonly pointId: 'composer.toolbar.items'
-    readonly contributionId: 'submit-celebration'
-    readonly claimId: 'submit-celebration'
-    readonly mode: 'proxy'
-    readonly priority: 100
-    readonly requestedBindings: {
-      readonly properties: readonly ['celebrationProfile']
-      readonly commands: readonly ['presentCelebration', 'dismissCelebration']
-      readonly events: readonly ['submitActivated']
-    }
-  }
   /** Development-only host with explicit semantic seats and no Codex DOM probes. */
   readonly hostKind?: 'codex' | 'playground'
   /** Debug-only deterministic service; accepted only by the explicit Playground host. */
@@ -280,37 +266,10 @@ interface CordisXRuntimeMetadata {
   readonly playgroundSessionScenarios?: PlaygroundSessionScenarioCatalogV1
 }
 
-function exactStringList(actual: readonly string[], expected: readonly string[]): boolean {
-  return actual.length === expected.length && actual.every((value, index) => value === expected[index])
-}
-
-function localDevelopmentControlGrantMatches(
-  metadata: CordisXRuntimeMetadata,
-  declaration: CordisXExtensionPointControlDeclarationV1,
-  generation: Readonly<{ source: string; pluginId: string }>,
-): boolean {
-  const grant = metadata.localDevelopmentControlGrant
-  return metadata.profileId === 'development'
-    && grant?.profile === 'cordisx.composer-submit-celebration/v1'
-    && declaration.origin === 'explicit'
-    && declaration.identity.source === grant.identity.source
-    && declaration.identity.pluginId === grant.identity.id
-    && declaration.identity.pointId === grant.pointId
-    && generation.source === grant.identity.source
-    && generation.pluginId === grant.identity.id
-    && declaration.contributionId === grant.contributionId
-    && declaration.claimId === grant.claimId
-    && declaration.mode === grant.mode
-    && declaration.priority === grant.priority
-    && exactStringList(declaration.requestedBindings.properties, grant.requestedBindings.properties)
-    && exactStringList(declaration.requestedBindings.commands, grant.requestedBindings.commands)
-    && exactStringList(declaration.requestedBindings.events, grant.requestedBindings.events)
-}
-
 interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
   /** Launcher-derived opaque generation for a verified bundled artifact. */
   readonly artifactGeneration?: string
-  /** Source data for one manifest-v5/v6 plugin isolated from the Host renderer. */
+  /** Source data for one manifest-v5/v6/v7 plugin isolated from the Host renderer. */
   readonly isolatedArtifactSource?: string
   readonly development?: CordisXLocalDevelopmentSnapshot
 }
@@ -348,7 +307,7 @@ export type CordisXInternalRendererBootstrap = (host: Readonly<{
 interface PluginController {
   item: RuntimeBrowserPlugin
   readonly identity: CordisXPluginIdentity
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7
   principal: PluginPrincipalToken
   activation: number
   principalLive: boolean
@@ -446,6 +405,7 @@ export interface RendererPluginMutation {
     readonly identitySource: string
     readonly readme?: string
     readonly readmes?: Readonly<Record<string, string>>
+    readonly manifest?: CordisXPluginManifestV7
     readonly development: CordisXLocalDevelopmentSnapshot
   }
   /** Host-only source held as data and executed solely in the isolated Host DOM worker. */
@@ -612,11 +572,19 @@ function errorMessage(error: unknown): string {
 }
 
 function manifestUsesHostDom(
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6,
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7,
 ): manifest is CordisXPluginManifestV5 | CordisXPluginManifestV6 {
   return (manifest.schemaVersion === 5 || manifest.schemaVersion === 6) && manifest.capabilities.some(capability => (
     capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
   ))
+}
+
+function manifestUsesTransientCanvas(
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7,
+): manifest is CordisXPluginManifestV7 {
+  return manifest.schemaVersion === 7
+    && manifest.execution.realm === 'isolated-worker'
+    && manifest.execution.interfaces.includes('ui.transient-canvas/v1')
 }
 
 function controllerHasRuntimeModule(controller: PluginController): boolean {
@@ -635,8 +603,8 @@ function createController(item: RuntimeBrowserPlugin, pluginConsole: PluginConso
     const module = isolated ? undefined : item.moduleFactory?.(pluginConsole.consoleFacade(principal)) ?? item.module
     const boundItem: RuntimeBrowserPlugin = module === undefined || module === item.module ? item : { ...item, module }
     const manifest = normalizePluginManifest(item.manifest ?? module?.manifest, item.id)
-    if (isolated && (item.manifest === undefined || !manifestUsesHostDom(manifest))) {
-      throw new Error('isolated Host DOM artifact requires an authoritative manifest-v5 or manifest-v6 declaration')
+    if (isolated && (item.manifest === undefined || (!manifestUsesHostDom(manifest) && !manifestUsesTransientCanvas(manifest)))) {
+      throw new Error('isolated artifact requires an authoritative isolated-worker manifest')
     }
     return {
       item: boundItem,
@@ -1257,8 +1225,8 @@ async function start(
           transactionEpoch: controller.generationView.transactionEpoch,
         }),
       }, controller.generationView)
-      const agentRuntimeManifestVersion = controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6
-        ? controller.manifest.schemaVersion
+      const agentRuntimeManifestVersion = controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7
+        ? controller.manifest.schemaVersion === 7 ? 6 : controller.manifest.schemaVersion
         : undefined
       const agentRuntimeDeclarations = agentRuntimeManifestVersion !== undefined
         ? controller.manifest.capabilities
@@ -1342,6 +1310,7 @@ async function start(
   let undeclareManagerContentOutlet: (() => void) | undefined
   let unregisterManagerPointCatalog: (() => void) | undefined
   let adapterHandle: CodexAdapterHandle | undefined
+  let transientCanvasCoordinator: TransientCanvasCoordinator | undefined
   let disposeI18nSubscription: (() => void) | undefined
   let disposePermissionSubscription: (() => void) | undefined
   let disposeExtensionPointSubscription: (() => void) | undefined
@@ -1523,9 +1492,9 @@ async function start(
     }
     if (isolatedArtifactSource !== undefined) {
       if (hostDomWorkerEnvironment === undefined) {
-        throw new Error('native browser primitives are unavailable for Host DOM worker isolation')
+        throw new Error('native browser primitives are unavailable for isolated plugin execution')
       }
-      const hostDom = hostDomAuthority.bind({
+      const hostDom = !manifestUsesHostDom(controller.manifest) ? undefined : hostDomAuthority.bind({
         ownerKey: JSON.stringify([
           metadata.profileId,
           controller.identity.source,
@@ -1555,19 +1524,40 @@ async function start(
         subscribeInvalidation: listener => broker.subscribe(listener),
       })
       let boundary: HostDomWorkerBoundary | undefined
+      const transientCanvas = !manifestUsesTransientCanvas(controller.manifest) || transientCanvasCoordinator === undefined
+        ? undefined
+        : transientCanvasCoordinator.bind({
+            owner: controller.item.id,
+            source: controller.identity.source,
+            moduleGeneration: moduleGenerationOf(controller),
+            generation: Object.freeze({
+              pluginId: controller.item.id,
+              moduleGeneration: moduleGenerationOf(controller),
+              ...(controller.generationView?.transactionId === undefined ? {} : {
+                transactionId: controller.generationView.transactionId,
+                transactionEpoch: controller.generationView.transactionEpoch,
+              }),
+            }),
+            ...(controller.generationView === undefined ? {} : { candidateView: controller.generationView }),
+            sink: {
+              start: input => boundary?.startTransientCanvas(input),
+              stop: sessionId => boundary?.stopTransientCanvas(sessionId),
+            },
+          })
       try {
-        pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Isolated Host DOM plugin activation started')
+        pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Isolated plugin activation started')
         boundary = createHostDomWorkerBoundary({
           document,
           artifactSource: isolatedArtifactSource,
           config: configuration.get(controller.item.id, controller.generationView),
-          hostDom,
+          ...(hostDom === undefined ? {} : { hostDom }),
+          ...(transientCanvas === undefined ? {} : { transientCanvas }),
           environment: hostDomWorkerEnvironment,
           onStatus: status => {
             if (status.status !== 'error' || controller.hostDomWorker !== boundary) return
             controller.status = 'failed'
             controller.error = status.error
-            notify('host-dom-worker')
+            notify('isolated-worker')
           },
         })
         controller.hostDomWorker = boundary
@@ -1575,15 +1565,16 @@ async function start(
         controller.status = 'active'
         delete controller.error
         delete controller.blockedReason
-        pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Isolated Host DOM plugin activation completed')
+        pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Isolated plugin activation completed')
         return
       } catch (error) {
         await boundary?.dispose().catch(() => undefined)
-        hostDom.dispose()
+        hostDom?.dispose()
+        transientCanvas?.dispose()
         delete controller.hostDomWorker
         controller.status = 'failed'
         controller.error = errorMessage(error)
-        pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Isolated Host DOM plugin activation failed', error)
+        pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Isolated plugin activation failed', error)
         retirePrincipal(controller, 'Plugin disposed after isolated activation failure')
         throw error
       }
@@ -2260,7 +2251,7 @@ async function start(
           policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
           controller.generationView,
         )
-      } else if (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6) {
+      } else if (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7) {
         await broker.setPolicyV2(
           controller.identity,
           capability,
@@ -2444,7 +2435,7 @@ async function start(
     id: string,
     decision: CordisXPermissionAuthorizationDecisionV4,
   ): Promise<void> => authorizePluginWith(id, async controller => {
-    if (controller.manifest.schemaVersion !== 5 && controller.manifest.schemaVersion !== 6) throw new Error(`plugin ${id} does not use permission v4`)
+    if (controller.manifest.schemaVersion !== 5 && controller.manifest.schemaVersion !== 6 && controller.manifest.schemaVersion !== 7) throw new Error(`plugin ${id} does not use permission v4`)
     await broker.authorizeActivationV4(controller.identity, decision, 'enable', controller.generationView)
   })
 
@@ -2481,7 +2472,9 @@ async function start(
     const candidateIsolatedArtifactSource = replacesTarget
       ? mutation.isolatedArtifactSource
       : existing!.item.isolatedArtifactSource
-    const candidateManifest = replacesTarget ? mutation.package?.manifest.runtimeManifest : existing!.item.manifest
+    const candidateManifest = replacesTarget
+      ? mutation.package?.manifest.runtimeManifest ?? mutation.developmentPackage?.manifest
+      : existing!.item.manifest
     const item: RuntimeBrowserPlugin = {
       id: pluginId,
       source: replacesTarget ? replacementPackage!.identitySource : existing!.item.source,
@@ -2514,7 +2507,7 @@ async function start(
       throw new Error(`local development candidate ${pluginId} is invalid: ${controller.error ?? 'module initialization failed'}`)
     }
     if (replacesTarget && mutation.developmentPackage !== undefined
-      && (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6)
+      && (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7)
       && controller.manifest.services.length > 0) {
       throw new Error('local development phase 1 is renderer-only; manifest services are unavailable')
     }
@@ -2645,7 +2638,7 @@ async function start(
             && mutation.authorizationDecision !== undefined
             && (mutation.operation === 'install' || mutation.operation === 'update' || mutation.operation === 'enable')) {
             if (mutation.authorizationDecision.schemaVersion === 4) {
-              if (candidate.controller.manifest.schemaVersion !== 5 && candidate.controller.manifest.schemaVersion !== 6) throw new Error('permission v4 decision requires manifest-v5 or manifest-v6')
+              if (candidate.controller.manifest.schemaVersion !== 5 && candidate.controller.manifest.schemaVersion !== 6 && candidate.controller.manifest.schemaVersion !== 7) throw new Error('permission v4 decision requires manifest-v5, manifest-v6, or manifest-v7')
               await broker.authorizeActivationV4(
                 candidate.controller.identity,
                 mutation.authorizationDecision,
@@ -3031,6 +3024,8 @@ async function start(
     unbindIconThemeRegistry()
     adapterHandle?.dispose()
     adapterHandle = undefined
+    transientCanvasCoordinator?.dispose()
+    transientCanvasCoordinator = undefined
     undeclareManagerContentOutlet?.()
     undeclareManagerContentOutlet = undefined
     undeclareManagerOutlet?.()
@@ -3497,18 +3492,7 @@ async function start(
     commandService.setAccessResolver(extensionPointBroker)
     routeService.setAccessResolver(extensionPointBroker)
     slotService.setAccessResolver(extensionPointBroker)
-    if (metadata.localDevelopmentControlGrant !== undefined) {
-      slotService.setHostPrivateControlAccessResolver((declaration, controlGeneration) => (
-        localDevelopmentControlGrantMatches(metadata, declaration, controlGeneration)
-          ? Object.freeze({
-              authorized: true,
-              policy: 'allow' as const,
-              effectivePolicy: 'allow' as const,
-              reason: 'permission.local-development-exact-control',
-            })
-          : undefined
-      ))
-    }
+    transientCanvasCoordinator = new TransientCanvasCoordinator(document, slotService.registry)
     registrySubscriptions.push(
       extensionPointDescriptors.subscribe(notifyFrom('extension-descriptors')),
       commandService.subscribeInternal(notifyFrom('commands')),
@@ -3518,11 +3502,15 @@ async function start(
       iconThemeRegistry.subscribe(notifyFrom('icon-themes')),
     )
     adapterHandle = metadata.hostKind === 'playground'
-      ? installPlaygroundAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, { profileId: metadata.profileId })
+      ? installPlaygroundAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, {
+          profileId: metadata.profileId,
+          transientCanvas: transientCanvasCoordinator,
+        })
       : installCodexAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, {
           generation,
           adapterVersion: metadata.version,
           profileId: metadata.profileId,
+          transientCanvas: transientCanvasCoordinator,
         })
     const legacyAuthorizationGroups = new Map<string, {
       readonly source: string

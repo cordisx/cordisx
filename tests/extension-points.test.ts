@@ -19,7 +19,7 @@ import {
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V6,
-  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V7,
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V8,
   type CordisXExtensionPointPolicyRecordV1,
 } from '../packages/cli/src/contracts.js'
 import type { CordisXI18nService } from '../packages/cli/src/renderer/i18n.js'
@@ -75,15 +75,15 @@ describe('extension point runtime contract', () => {
     descriptors.dispose()
   })
 
-  it('declares the complete v7 catalog with static maturity and adapter support', () => {
+  it('declares the complete v8 catalog with static maturity and adapter support', () => {
     const registry = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     const remove = registry.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     expect(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG).toMatchObject({
-      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V7,
-      schemaVersion: 7,
+      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V8,
+      schemaVersion: 8,
     })
-    expect(registry.descriptors()).toHaveLength(35)
-    expect(registry.descriptors().filter(item => item.kind === 'surface')).toHaveLength(30)
+    expect(registry.descriptors()).toHaveLength(36)
+    expect(registry.descriptors().filter(item => item.kind === 'surface')).toHaveLength(31)
     expect(registry.descriptors().filter(item => item.kind === 'outlet')).toHaveLength(5)
     expect(registry.descriptors()
       .filter(item => item.maturity === 'stable' && item.adapterSupport === 'supported')
@@ -131,6 +131,9 @@ describe('extension point runtime contract', () => {
     })
     expect(registry.descriptor('session.backdrop')).toMatchObject({
       kind: 'surface', payloadFamily: 'session-backdrop-presentation', maturity: 'stable', adapterSupport: 'supported',
+    })
+    expect(registry.descriptor('composer.submit.effects')).toMatchObject({
+      kind: 'surface', payloadFamily: 'transient-canvas-presentation', maturity: 'experimental', adapterSupport: 'supported',
     })
     expect(registry.descriptor('panel.right.content')).toMatchObject({
       kind: 'outlet', maturity: 'reserved', adapterSupport: 'unsupported',

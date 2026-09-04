@@ -366,6 +366,38 @@ describe('native Vite development transport', () => {
     await expect(fetch(vite.url)).rejects.toThrow()
   }, 30_000)
 
+  it('keeps transient-canvas plugin code out of the renderer module graph', async () => {
+    const root = path.resolve('tests/fixtures/send-confetti-plugin')
+    const entry = path.join(root, 'src/send-confetti.ts')
+    const config = {
+      version: 1 as const, rootDir: root, codex: { debugPort: 9229 }, providers: [],
+      plugins: [{ id: 'send-confetti', entry, enabled: true, config: {} }],
+    }
+    const vite = await startTestViteServer(config)
+    try {
+      await buildRendererComposition(config, () => {}, {
+        developmentBuild: (config, options) => vite.buildBootstrap(config, options ?? {}),
+      })
+      const get = async (name: string): Promise<string> => await fetch(vite.url + name, {
+        headers: { Origin: 'null' }, signal: AbortSignal.timeout(5000),
+      }).then(async response => {
+        expect(response.status).toBe(200)
+        return await response.text()
+      })
+      const entrySource = await get('@id/__x00__virtual:cordisx-native-entry')
+      const pluginSource = await get('@id/__x00__virtual:cordisx-native-plugin/send-confetti')
+
+      expect(entrySource).not.toContain('ctx.transientCanvas.register')
+      expect(pluginSource).toContain('isolatedArtifactSource')
+      expect(pluginSource).toContain('ctx.transientCanvas.register')
+      expect(pluginSource).toContain('"schemaVersion":7')
+      expect(pluginSource).not.toContain('module: pluginModule')
+      expect(pluginSource).not.toContain('/send-confetti.ts?cordisx-plugin-generation=')
+    } finally {
+      await vite.close()
+    }
+  }, 30_000)
+
   it('uses React Fast Refresh for component leaves and exposes targeted manual reload over Vite HMR', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-vite-react-'))
     const entry = path.join(root, 'index.tsx')

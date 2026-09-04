@@ -9,7 +9,8 @@ import { createServer, normalizePath, type ModuleNode, type Plugin, type ViteDev
 import { buildRendererCompositionSource, type BuildRendererBundleOptions } from './bundle.js'
 import type { CordisXConfig, CordisXConfigPlugin } from './config.js'
 import { findFreeLoopbackPort } from './process.js'
-import { localDevelopmentPackageInfo } from './development.js'
+import { buildLocalDevelopmentPlugin, localDevelopmentPackageInfo } from './development.js'
+import type { CordisXPluginManifestV7 } from '../permission-contracts.js'
 import { EntityDirectoryAuthority, type EntityTemplatePayload } from './entity-directory.js'
 import { CONTRACTS_MODULE_PATH, cordisXSharedModuleSource } from './react-virtual-modules.js'
 import { entityInstallationId, entityPluginGeneration, issueOwnerDocumentPrincipalToken } from './owner-document-rpc.js'
@@ -64,6 +65,11 @@ interface DevelopmentGeneration {
   lastSuccessfulAt: string
   readonly packageFiles: readonly string[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
+  readonly manifest?: CordisXPluginManifestV7
+  /** Executable only by the Host-owned isolated Worker boundary. */
+  readonly isolatedArtifactSource?: string
+  /** Complete esbuild input graph for isolated-worker HMR ownership. */
+  readonly watchFiles: readonly string[]
 }
 
 export interface NativeVitePluginGeneration {
@@ -180,7 +186,8 @@ export async function startNativeViteServer(
   initialConfig: CordisXConfig,
   serverOptions: NativeViteServerOptions = {},
 ): Promise<NativeViteServer> {
-  if (initialConfig.plugins.some(plugin => plugin.enabled && plugin.manifest?.schemaVersion === 5
+  if (initialConfig.plugins.some(plugin => plugin.enabled
+    && (plugin.manifest?.schemaVersion === 5 || plugin.manifest?.schemaVersion === 6)
     && plugin.manifest.capabilities.some(capability => capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'))) {
     throw new Error('Native Vite development supports structured renderer plugins; isolated Host DOM plugins require packaged launch')
   }
@@ -274,6 +281,12 @@ export async function startNativeViteServer(
     const current = generations.get(plugin.id)
     if (current !== undefined) return current
     const info = await localDevelopmentPackageInfo(plugin.entry)
+    const isolatedBuild = info.manifest === undefined
+      ? undefined
+      : await buildLocalDevelopmentPlugin(plugin.entry, { sourcemap: false })
+    if (isolatedBuild !== undefined && isolatedBuild.id !== plugin.id) {
+      throw new Error(`isolated development plugin id ${isolatedBuild.id} does not match config id ${plugin.id}`)
+    }
     const realEntry = await realpath(plugin.entry)
     const realRoot = await realpath(info.root).catch(() => path.resolve(info.root))
     const packageFiles = [...new Set([path.join(realRoot, 'cordisx-package.json'), ...info.packageFiles])]
@@ -290,6 +303,9 @@ export async function startNativeViteServer(
       lastSuccessfulAt: new Date().toISOString(),
       packageFiles,
       entityTemplates: info.entityTemplates,
+      ...(info.manifest === undefined ? {} : { manifest: info.manifest }),
+      ...(isolatedBuild === undefined ? {} : { isolatedArtifactSource: isolatedBuild.runtimeArtifactSource }),
+      watchFiles: isolatedBuild?.watchFiles ?? [realEntry, ...packageFiles],
     }
     generations.set(plugin.id, created)
     return created
@@ -297,9 +313,16 @@ export async function startNativeViteServer(
   const bumpGeneration = async (plugin: CordisXConfigPlugin): Promise<DevelopmentGeneration> => {
     const previous = await ensureGeneration(plugin)
     const info = await localDevelopmentPackageInfo(plugin.entry)
+    const isolatedBuild = info.manifest === undefined
+      ? undefined
+      : await buildLocalDevelopmentPlugin(plugin.entry, { sourcemap: false })
+    if (isolatedBuild !== undefined && isolatedBuild.id !== plugin.id) {
+      throw new Error(`isolated development plugin id ${isolatedBuild.id} does not match config id ${plugin.id}`)
+    }
     const packageFiles = [...new Set([path.join(previous.realRoot, 'cordisx-package.json'), ...info.packageFiles])]
     await rememberPluginMetadata(previous.realEntry, previous.realRoot, packageFiles)
-    server?.watcher.add(packageFiles)
+    const watchFiles = isolatedBuild?.watchFiles ?? [previous.realEntry, ...packageFiles]
+    server?.watcher.add(watchFiles)
     const next: DevelopmentGeneration = {
       ...previous,
       revision: previous.revision + 1,
@@ -308,6 +331,9 @@ export async function startNativeViteServer(
       lastSuccessfulAt: new Date().toISOString(),
       packageFiles,
       entityTemplates: info.entityTemplates,
+      ...(info.manifest === undefined ? {} : { manifest: info.manifest }),
+      ...(isolatedBuild === undefined ? {} : { isolatedArtifactSource: isolatedBuild.runtimeArtifactSource }),
+      watchFiles,
     }
     generations.set(plugin.id, next)
     const pending = pendingGenerations.get(plugin.id) ?? new Map<string, DevelopmentGeneration>()
@@ -333,6 +359,7 @@ export async function startNativeViteServer(
         state: 'ready',
         lastSuccessfulAt: generation.lastSuccessfulAt,
       },
+      ...(generation.manifest === undefined ? {} : { manifest: generation.manifest }),
     }
   }
   const compiledConfig = async (): Promise<CordisXConfig> => ({
@@ -360,6 +387,13 @@ export async function startNativeViteServer(
     const compiled = await packageConfig(plugin)
     const { entry: _entry, moduleFactorySource: _factory, ...descriptor } = compiled
     const generation = await ensureGeneration(plugin)
+    if (generation.isolatedArtifactSource !== undefined) {
+      const artifact = {
+        plugin: { ...descriptor, isolatedArtifactSource: generation.isolatedArtifactSource },
+        ownerDocumentBindings: ownerBindings(compiled),
+      }
+      return `export async function load() { return ${JSON.stringify(artifact)}; }\n`
+    }
     const entryUrl = `/@fs/${normalizePath(generation.realEntry)}?cordisx-plugin-generation=${encodeURIComponent(compiled.package!.moduleGeneration)}`
     return `const plugin = ${JSON.stringify(descriptor)};\nexport async function load() { const pluginModule = await import(${JSON.stringify(entryUrl)}); return { plugin: { ...plugin, module: pluginModule }, ownerDocumentBindings: ${JSON.stringify(ownerBindings(compiled))} }; }\n`
   }
@@ -618,7 +652,8 @@ if (import.meta.hot) {
         if (metadataChange) {
           await invalidatePlugin(plugin.id, context.timestamp)
           replacements.add(plugin.id)
-        } else if (directEntryOwners.has(plugin.id)
+        } else if ((generation.isolatedArtifactSource !== undefined && generation.watchFiles.includes(realFile))
+          || directEntryOwners.has(plugin.id)
           || (owners.has(plugin.id) && (directEntryOwners.size > 0 || !refreshBoundaryHandlesUpdate))) {
           await bumpGeneration(plugin)
           invalidatePluginModule(plugin.id, context.timestamp)
@@ -772,7 +807,9 @@ if (import.meta.hot) {
       appType: 'custom',
       plugins: [integration, react()],
       ...(serverOptions.prebundleHostDependencies === true ? {
-        optimizeDeps: { entries: [rendererPath, ...initialGenerations.map(item => item.realEntry)] },
+        optimizeDeps: { entries: [rendererPath, ...initialGenerations
+          .filter(item => item.isolatedArtifactSource === undefined)
+          .map(item => item.realEntry)] },
       } : {}),
       resolve: {
         dedupe: ['react', 'react-dom'],
@@ -798,7 +835,7 @@ if (import.meta.hot) {
     })
     const watcherReady = new Promise<void>(resolve => server.watcher.once('ready', resolve))
     await server.listen()
-    server.watcher.add(initialGenerations.flatMap(generation => generation.packageFiles))
+    server.watcher.add(initialGenerations.flatMap(generation => generation.watchFiles))
     await watcherReady
     if (serverOptions.prebundleHostDependencies === true) await waitForDependencyOptimization()
   } catch (error) {

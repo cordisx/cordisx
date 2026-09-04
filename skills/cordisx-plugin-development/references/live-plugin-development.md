@@ -47,110 +47,54 @@ For native behavior, verify the actual isolated `app://` App launched by
 CordisX. A Playground or browser harness is useful supporting evidence only
 when it exposes the same public capability.
 
-## Native submit celebration profile
+For a native Host interaction, use only a cataloged extension point. If the
+contract is unavailable in the installed CordisX version, say so plainly
+instead of installing a selector or DOM fallback.
 
-For a request such as “make the send button show full-screen confetti when it
-is clicked,” consume the exact
-`cordisx.composer-submit-celebration/v1` profile. Register one explicit
-`proxy` claim on `composer.toolbar.items`; the Host does not render that proxy
-contribution as a second toolbar button. Request only:
+## Isolated transient canvas
 
-- property `celebrationProfile`;
-- event `submitActivated`; and
-- commands `presentCelebration` and `dismissCelebration`.
+For submit-triggered visual effects, use `composer.submit.effects` with
+manifest v7 execution in `isolated-worker` and the single interface
+`ui.transient-canvas/v1`. The Host owns the semantic submit binding, the real
+transparent canvas element, stacking, pointer inertness, reduced-motion
+policy, timeout, resize/unload cleanup, authorization, and generation
+lifecycle. It transfers only an `OffscreenCanvas` drawing surface to the
+plugin Worker.
 
-The Host emits an opaque, one-use `activationId` only after an accepted native
-submit activation. Invoke `presentCelebration` with a unique `requestId`, that
-activation id, `effect: 'confetti'`, and an integer `durationMs` from 250 to
-5000. Treat only `outcome: 'accepted'` as success. Never add a DOM listener,
-selector, canvas, stylesheet, timeout, or presentation node in the plugin.
+The Worker receives no `document`, `window`, selectors, Element, stylesheet,
+event object, or arbitrary Host callback. Never add a main-renderer fallback
+when isolated Worker or OffscreenCanvas support is unavailable. Manifest v7
+also rejects `ui.host-dom.read` and `ui.host-dom.modify`; the canvas interface
+cannot be combined with either DOM capability.
 
-For the `send-confetti` scaffold, the maintained minimal implementation is:
+The visual vocabulary is plugin-owned. Confetti, sparkles, ink, particles, or
+any other drawing algorithm must not become Host protocol enums or presets.
+Register a duration from 100 to 5000 ms and choose `skip` or `static` for
+reduced motion. The Host deterministically presents one eligible contribution
+per semantic submit and removes it at the declared deadline.
+
+Minimal registration:
 
 ```ts
-import type { Context } from '@deepseek-ai/cordis'
-import {
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
-  type CordisXPluginManifestV1,
-} from 'cordisx/contracts'
+import type { TransientCanvasPluginContextV1 } from 'cordisx/contracts'
 
-type Messages = { 'command.observe-submit': undefined }
-
-export const manifest = {
-  $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
-  schemaVersion: 1,
-  id: 'send-confetti',
-  name: 'Send Confetti',
-  capabilities: [],
-} as const satisfies CordisXPluginManifestV1
-
-export const inject = ['commands', 'i18n', 'slots']
-
-export function apply(ctx: Context): void {
-  ctx.i18n.define<Messages>({
-    namespace: 'send-confetti', locale: 'en', default: true,
-    messages: { 'command.observe-submit': 'Celebrate after sending' },
+export async function apply(ctx: TransientCanvasPluginContextV1): Promise<void> {
+  const handle = await ctx.transientCanvas.register({
+    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
+    schemaVersion: 1,
+    id: 'my-effect',
+    pointId: 'composer.submit.effects',
+    durationMs: 1200,
+    reducedMotion: 'static',
+  }, ({ canvas, width, height, signal }) => {
+    const drawing = canvas.getContext('2d')
+    if (drawing === null || signal.aborted) return
+    drawing.clearRect(0, 0, width, height)
+    // Draw the plugin's own effect. Stop animation when signal.aborted.
   })
-  ctx.i18n.define<Messages>({
-    namespace: 'send-confetti', locale: 'zh-CN',
-    messages: { 'command.observe-submit': '发送后播放礼花' },
-  })
-  const title = { key: 'command.observe-submit', fallback: 'Celebrate after sending' }
-  ctx.commands.register({ id: 'celebration-proxy', title }, () => undefined)
-  const contribution = ctx.slots.register({
-    name: 'composer.toolbar.items',
-    id: 'submit-celebration',
-    control: {
-      claimId: 'submit-celebration', mode: 'proxy', priority: 100,
-      requestedBindings: {
-        properties: ['celebrationProfile'],
-        events: ['submitActivated'],
-        commands: ['presentCelebration', 'dismissCelebration'],
-      },
-    },
-  }, {
-    anchor: 'submit', placement: 'before', label: title, ariaLabel: title,
-    icon: 'host:info', command: { id: 'celebration-proxy' },
-  })
-  const control = contribution.control
-  if (control === undefined) {
-    console.warn('[send-confetti] celebration unavailable: control lease missing')
-    return
-  }
-  let lastEvent = 0
-  let nextRequest = 0
-  const consume = (): void => {
-    const snapshot = control.snapshot()
-    if (snapshot.state !== 'selected'
-      || snapshot.properties.celebrationProfile !== 'cordisx.composer-submit-celebration/v1') return
-    const event = snapshot.events.find(item => item.id === 'submitActivated')
-    if (event === undefined || event.sequence <= lastEvent) return
-    lastEvent = event.sequence
-    const activationId = event.payload.activationId
-    if (typeof activationId !== 'string') return
-    const requestId = `send-confetti:${Date.now().toString(36)}:${++nextRequest}`
-    void control.invoke('presentCelebration', {
-      requestId, activationId, effect: 'confetti', durationMs: 2400,
-    }).then(result => {
-      if (result.outcome !== 'accepted') {
-        console.warn(`[send-confetti] celebration rejected: ${result.reason}`)
-      }
-    })
-  }
-  ctx.effect(() => control.subscribe(consume), 'submit celebration subscription')
-  consume()
+  ctx.onDispose(() => handle.dispose())
 }
 ```
-
-Adapt ids and copy only when the scaffold has a different product identity.
-Keep the entry basename and manifest id aligned, preserve the README and
-project checks, and do not introduce a generic development identity.
-
-Stable downgrade reasons include `celebration.unavailable`,
-`point.not-mounted`, `authorization.denied`, `activation.stale`,
-`argument.out-of-range`, `request.conflict`, and `presentation.failed`.
-Surface the reason; do not hide it with a fake success or alternate
-presentation.
 
 Every event subscription or timer not already owned by a returned CordisX
 handle must be registered as a Cordis effect so plugin reload, generation

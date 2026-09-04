@@ -95,7 +95,7 @@ describe('local development package-v5 entity templates', () => {
     expect(third.entityTemplates[0]?.declaration.digest).toBe(thirdEntityDigest)
 
     await value.writeManifest(thirdEntityDigest, 4)
-    await expect(buildLocalDevelopmentPlugin(value.entry)).rejects.toThrow(/require plugin-package\.v5 or plugin-package\.v6/)
+    await expect(buildLocalDevelopmentPlugin(value.entry)).rejects.toThrow(/require plugin-package\.v5, plugin-package\.v6, or plugin-package\.v7/)
   })
 
   it('accepts package-v6 entity templates on the local development path', async () => {

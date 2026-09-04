@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v7.schema.json",
+  "schemaVersion": 7,
+  "id": "send-confetti",
+  "name": "Send Confetti",
+  "capabilities": [],
+  "services": [],
+  "execution": {
+    "realm": "isolated-worker",
+    "interfaces": ["ui.transient-canvas/v1"]
+  }
+}

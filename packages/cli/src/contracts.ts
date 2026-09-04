@@ -35,7 +35,7 @@ import type {
 } from '@cordisx/protocol/navigation-collection-actions/v1'
 import type { ComponentType } from 'react'
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
-import type { CordisXPluginManifestV4, CordisXPluginManifestV5, CordisXPluginManifestV6 } from './permission-contracts.js'
+import type { CordisXPluginManifestV4, CordisXPluginManifestV5, CordisXPluginManifestV6, CordisXPluginManifestV7 } from './permission-contracts.js'
 import type { CordisXPluginDependencyV1 } from './plugin-lifecycle-contracts.js'
 import type { CordisXExtensionPointControlMode, CordisXExtensionPointControlResultV1 } from './control-contracts.js'
 
@@ -50,8 +50,14 @@ export * from './durable-document-contracts.js'
 export * from './plugin-lifecycle-contracts.js'
 export * from './plugin-bundle-contracts.js'
 
-/** Exact protocol application profile for Host-owned native-submit celebrations. */
-export const CORDISX_COMPOSER_SUBMIT_CELEBRATION_PROFILE_V1 = 'cordisx.composer-submit-celebration/v1' as const
+export type {
+  TransientCanvasPluginContextV1,
+  TransientCanvasPresenterV1,
+  TransientCanvasRegistrationHandleV1,
+  TransientCanvasRegistrationV1,
+  TransientCanvasRegistryV1,
+  TransientCanvasSessionV1,
+} from '@cordisx/protocol/transient-canvas/v1'
 export type {
   CordisXBoundConnectorClient,
   CordisXBoundConnectorClientResult,
@@ -363,6 +369,8 @@ export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V6 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v6.schema.json' as const
 export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V7 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v7.schema.json' as const
+export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V8 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v8.schema.json' as const
 export const CORDISX_EXTENSION_POINT_RUNTIME_CONTEXT_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/extension-point-runtime-context.v1.schema.json' as const
 export const CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1 =
@@ -398,6 +406,7 @@ export type CordisXExtensionPointPayloadFamily =
   | 'manager-settings-navigation-item'
   | 'reasoning-intensity-presentation'
   | 'session-backdrop-presentation'
+  | 'transient-canvas-presentation'
   | 'presenter'
   | 'navigation-item'
   | 'environment-section'
@@ -502,6 +511,14 @@ export interface CordisXHostExtensionPointCatalogV7 {
   readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V7
   readonly schemaVersion: 7
   readonly points: readonly CordisXHostExtensionPointDescriptorV7[]
+}
+
+export type CordisXHostExtensionPointDescriptorV8 = CordisXHostExtensionPointDescriptorV7
+
+export interface CordisXHostExtensionPointCatalogV8 {
+  readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V8
+  readonly schemaVersion: 8
+  readonly points: readonly CordisXHostExtensionPointDescriptorV8[]
 }
 
 export interface CordisXExtensionPointAnchorCurrentContextV1 {
@@ -892,6 +909,7 @@ export interface CordisXSurfaceMap {
   'session.backdrop': CordisXSessionBackdropPresentation
   'composer.toolbar.items': CordisXToolbarItem
   'composer.reasoning-intensity': CordisXReasoningIntensityPresentation
+  'composer.submit.effects': CordisXTransientCanvasPresentation
   'composer.command-menu.items': CordisXStructuredAction
   'composer.dock.above': CordisXPresenterItem
   'composer.dock.below': CordisXPresenterItem
@@ -906,6 +924,13 @@ export interface CordisXSurfaceMap {
   'environment.row.trailing-actions': CordisXEnvironmentRowAction
   'manager.settings.tabs': CordisXManagerSettingsContentTabItem
   'manager.settings.navigation-items': CordisXManagerSettingsNavigationItem
+}
+
+/** Declarative portion of an isolated transient canvas registration. */
+export interface CordisXTransientCanvasPresentation {
+  readonly kind: 'isolated-canvas'
+  readonly durationMs: number
+  readonly reducedMotion: 'skip' | 'static'
 }
 
 export type CordisXSurfaceName = Extract<keyof CordisXSurfaceMap, string>
@@ -929,6 +954,7 @@ export const CORDISX_SURFACE_NAMES = [
   'session.backdrop',
   'composer.toolbar.items',
   'composer.reasoning-intensity',
+  'composer.submit.effects',
   'composer.command-menu.items',
   'composer.dock.above',
   'composer.dock.below',
@@ -956,6 +982,7 @@ export const CORDISX_IMPLEMENTED_SURFACE_NAMES = [
   'session.backdrop',
   'composer.toolbar.items',
   'composer.reasoning-intensity',
+  'composer.submit.effects',
   'environment.panel.header-actions',
   'environment.panel.sections',
   'environment.section.actions',
@@ -980,7 +1007,7 @@ export type CordisXContributionOptions<Name extends CordisXSurfaceName = CordisX
   CordisXContributionOptionsBase<Name>
   & (Name extends 'manager.settings.navigation-items'
     ? { readonly group: CordisXManagerSettingsNavigationGroup }
-    : Name extends 'manager.settings.tabs' | 'composer.reasoning-intensity'
+    : Name extends 'manager.settings.tabs' | 'composer.reasoning-intensity' | 'composer.submit.effects'
       ? { readonly group?: never }
       : { readonly group?: string })
 
@@ -1632,7 +1659,7 @@ export interface CordisXPluginModule {
   readonly icon?: CordisXPluginBrandIcon
   /** User-facing identity; stable ids and manifest names remain untranslated fallbacks. */
   readonly presentation?: CordisXPluginPresentation
-  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6
+  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7
   readonly inject?: readonly string[] | Record<string, unknown>
   readonly Config?: CordisXStandardSchema
   readonly configApplies?: CordisXConfigAppliesInput
@@ -1658,7 +1685,7 @@ export interface CordisXBrowserPlugin {
   readonly config: unknown
   readonly revision: number
   /** Package-authoritative manifest, used instead of executing module metadata when present. */
-  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6
+  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7
   /** Immutable package and module generation metadata owned by the launcher. */
   readonly package?: {
     readonly version: string
