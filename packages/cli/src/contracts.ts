@@ -13,6 +13,7 @@ import type {
   AgentConversationShellSource as AgentConversationShellSourceV3,
 } from '@cordisx/protocol/agent-conversation-shell/v3'
 import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV7 } from '@cordisx/protocol/agent-conversation-shell/v7'
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV8 } from '@cordisx/protocol/agent-conversation-shell/v8'
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { ManagerCollectionRegistryV1 } from '@cordisx/protocol/manager-collection/v1'
 import type { ManagerContentNavigationDeclarationV2 } from '@cordisx/protocol/manager-content-navigation/v2'
@@ -1375,6 +1376,11 @@ export type CordisXAgentConversationShellSourceFactoryV7 = (
 ) => import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellSource>
 
+export type CordisXAgentConversationShellSourceFactoryV8 = (
+  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellBinding>,
+) => import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellSource
+  | Promise<import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellSource>
+
 /** Host-owned page mount paired with one fiber-owned source registration. */
 export interface CordisXAgentConversationShellRegistration {
   readonly mount: CordisXPageMount
@@ -1394,6 +1400,8 @@ export interface CordisXAgentConversationShell {
   registerSourceV6(factory: CordisXAgentConversationShellSourceFactoryV6): CordisXAgentConversationShellRegistration
   /** Shell v7 binds requester-authored approvals to one exact live authority. */
   registerSourceV7(factory: CordisXAgentConversationShellSourceFactoryV7): CordisXAgentConversationShellRegistration
+  /** Shell v8 supplies a Host-generated one-shot Agent admission origin. */
+  registerSourceV8(factory: CordisXAgentConversationShellSourceFactoryV8): CordisXAgentConversationShellRegistration
 }
 
 export interface CordisXRouteDefinition<Outlet extends CordisXOutletName = CordisXOutletName> {

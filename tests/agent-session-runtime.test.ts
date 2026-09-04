@@ -660,4 +660,67 @@ describe('Agent/Session Host authority v1', () => {
       schemaVersion: 1, mutationId: 'missing-owner', binding: active,
     })).toMatchObject({ status: 'unavailable', code: 'plugin-generation-replaced' })
   })
+
+  it('captures a v2 reservation before submitting its newly admitted Session message', async () => {
+    const driver = new Driver()
+    const order: string[] = []
+    driver.submit = async input => { order.push(`driver:${input.message.id}`); return 'accepted' }
+    const runtime = new CordisXAgentSessionRuntime({
+      driver, authorize: async () => true,
+      captureAdmission: (_owner, _origin, sessionId, generation, messageId) => {
+        order.push(`capture:${sessionId}:${generation}:${messageId}`)
+        return { commit: () => { order.push('commit') }, close: () => { order.push('close') } }
+      },
+    })
+    const created = await runtime.create(owner, { sessionId: 'cx-session.created-during-command', setup })
+    if (created.status !== 'accepted') throw new Error('agent unavailable')
+    const result = await runtime.reserveAdmission(owner, {
+      handle: created.handle,
+      message: { text: 'scenario input' },
+      origin: {
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json',
+        contract: 'cordisx.agent-command-origin/v1', schemaVersion: 1,
+        originId: 'origin-1', binding: { bindingId: 'binding-1', ownerGeneration: 'generation-1' },
+        generation: 'generation-1', executionId: 'execution-1', commandId: 'composer.submit', scope: 'composer-submit',
+        room: { roomId: 'room-1', participantId: 'lead', memberId: 'lead', runId: 'run-1' },
+      },
+    })
+    expect(result.status).toBe('reserved')
+    if (result.status !== 'reserved') throw new Error('reservation denied')
+    await expect(result.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
+    expect(order[0]).toMatch(/^capture:cx-session\.created-during-command:/)
+    expect(order[1]).toMatch(/^driver:cx-message\./)
+    expect(order).toContain('commit')
+    await expect(result.reservation.submit()).rejects.toThrow('unavailable')
+    await runtime.dispose()
+  })
+
+  it('fences a reserved admission on revoke or connection replacement without submitting', async () => {
+    const driver = new Driver()
+    let captures = 0
+    const runtime = new CordisXAgentSessionRuntime({
+      driver, authorize: async () => true,
+      captureAdmission: () => { captures += 1; return { commit: () => {}, close: () => {} } },
+    })
+    const created = await runtime.create(owner, { sessionId: 'cx-session.reservation-fence', setup })
+    if (created.status !== 'accepted') throw new Error('agent unavailable')
+    const origin = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json',
+      contract: 'cordisx.agent-command-origin/v1', schemaVersion: 1 as const,
+      originId: 'origin-fence', binding: { bindingId: 'binding-fence', ownerGeneration: 'generation-fence' },
+      generation: 'generation-fence', executionId: 'execution-fence', commandId: 'composer.submit', scope: 'composer-submit' as const,
+      room: { roomId: 'room-fence', participantId: 'lead', memberId: 'lead', runId: 'run-fence' },
+    }
+    const reserved = await runtime.reserveAdmission(owner, { handle: created.handle, origin, message: { text: 'fenced' } })
+    if (reserved.status !== 'reserved') throw new Error('reservation unavailable')
+    await reserved.reservation.revoke()
+    await expect(reserved.reservation.submit()).rejects.toThrow('unavailable')
+    expect(driver.submitted).toEqual([])
+    expect(captures).toBe(1)
+    const replacement = await runtime.reserveAdmission(owner, { handle: created.handle, origin: { ...origin, originId: 'origin-replacement' }, message: { text: 'replacement' } })
+    if (replacement.status !== 'reserved') throw new Error('reservation unavailable')
+    driver.replace()
+    await expect(replacement.reservation.submit()).rejects.toThrow('unavailable')
+    expect(driver.submitted).toEqual([])
+  })
 })
