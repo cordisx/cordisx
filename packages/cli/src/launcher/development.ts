@@ -10,7 +10,14 @@ import {
 import type { CordisXConfig } from './config.js'
 import { CdpPluginLifecycleRuntime } from './cdp.js'
 import { readEntityTemplatePayload, type EntityTemplatePayload } from './entity-directory.js'
-import { PLUGIN_PACKAGE_SCHEMA_V5, PLUGIN_PACKAGE_SCHEMA_V6, PLUGIN_PACKAGE_SCHEMA_V7, PLUGIN_PACKAGE_SCHEMA_V8 } from './packages/manifest.js'
+import {
+  PLUGIN_PACKAGE_SCHEMA_V5,
+  PLUGIN_PACKAGE_SCHEMA_V6,
+  PLUGIN_PACKAGE_SCHEMA_V7,
+  PLUGIN_PACKAGE_SCHEMA_V8,
+  PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7,
+  PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8,
+} from './packages/manifest.js'
 import type { CordisXPluginManifestV7, CordisXPluginManifestV8 } from '../permission-contracts.js'
 import { normalizePluginManifestV7, normalizePluginManifestV8 } from '../permission-model-v4.js'
 import { CapabilityRiskCatalog } from '../capability-risk-catalog.js'
@@ -180,15 +187,21 @@ async function readRendererOnlyPackage(root: string): Promise<{
   }
   let runtimeManifest: CordisXPluginManifestV7 | CordisXPluginManifestV8 | undefined
   let runtimeManifestFile: string | undefined
-  if (manifest.runtimeManifest !== undefined && ((manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7)
-    || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 && manifest.schemaVersion === 8))) {
+  const runtimeManifestSchema = manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7
+    ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7
+    : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 && manifest.schemaVersion === 8
+      ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8
+      : undefined
+  const declaresV7OrV8 = manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 || manifest.schemaVersion === 7
+    || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 || manifest.schemaVersion === 8
+  if (manifest.runtimeManifest !== undefined && runtimeManifestSchema !== undefined) {
     if (manifest.runtimeManifest === null || typeof manifest.runtimeManifest !== 'object' || Array.isArray(manifest.runtimeManifest)) {
       throw new Error('local development runtimeManifest must be an object')
     }
     const declaration = manifest.runtimeManifest as Record<string, unknown>
     if (Object.keys(declaration).some(key => !['path', 'schema', 'digest'].includes(key))
       || typeof declaration.path !== 'string' || !/^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.json$/u.test(declaration.path)
-      || declaration.schema !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v7.schema.json'
+      || declaration.schema !== runtimeManifestSchema
       || typeof declaration.digest !== 'string' || !ENTITY_DIGEST.test(declaration.digest)) {
       throw new Error('local development runtimeManifest declaration is invalid')
     }
@@ -199,9 +212,11 @@ async function readRendererOnlyPackage(root: string): Promise<{
     if (actualDigest !== declaration.digest) throw new Error('local development runtimeManifest digest mismatch')
     const packageId = manifest.id
     if (typeof packageId !== 'string') throw new Error('local development package id is required')
-    runtimeManifest = manifest.schemaVersion === 8
+    runtimeManifest = runtimeManifestSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8
       ? normalizePluginManifestV8(JSON.parse(runtimeText) as unknown, packageId, new CapabilityRiskCatalog())
       : normalizePluginManifestV7(JSON.parse(runtimeText) as unknown, packageId, new CapabilityRiskCatalog())
+  } else if (manifest.runtimeManifest !== undefined && declaresV7OrV8) {
+    throw new Error('local development runtimeManifest requires exact plugin-package.v7 or plugin-package.v8')
   }
   if (manifest.entityTemplates === undefined) return {
     files: [manifestPath, ...(runtimeManifestFile === undefined ? [] : [runtimeManifestFile])],
@@ -212,7 +227,7 @@ async function readRendererOnlyPackage(root: string): Promise<{
     || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V6 && manifest.schemaVersion === 6)
     || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7)
     || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 && manifest.schemaVersion === 8))) {
-    throw new Error('local development entityTemplates require plugin-package.v5 through plugin-package.v8')
+    throw new Error('local development entityTemplates require plugin-package.v5, plugin-package.v6, or plugin-package.v7; plugin-package.v8 is also supported')
   }
   const compatibility = manifest.compatibility
   if (compatibility === null || typeof compatibility !== 'object' || Array.isArray(compatibility)
