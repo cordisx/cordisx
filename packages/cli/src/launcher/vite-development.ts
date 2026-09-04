@@ -27,6 +27,7 @@ const SHARED_MODULES = new Set([
   'cordisx/react/jsx-dev-runtime',
   'cordisx/ui',
 ])
+const COMMONJS_INTEROP_LEAVES = ['debug', 'extend', 'raf', 'style-to-js'] as const
 const sourceMode = import.meta.url.endsWith('.ts')
 const extension = sourceMode ? 'ts' : 'js'
 const rendererPath = fileURLToPath(new URL(`../renderer/runtime.${extension}`, import.meta.url))
@@ -195,6 +196,16 @@ export async function startNativeViteServer(
   const cliRoot = cliPackage.root
   const workspaceRoot = await realpath(initialConfig.projectRoot ?? initialConfig.rootDir)
     .catch(() => path.resolve(initialConfig.projectRoot ?? initialConfig.rootDir))
+  const workspaceRequire = createRequire(path.join(workspaceRoot, 'package.json'))
+  const commonJsInteropLeaves = serverOptions.prebundleHostDependencies === true
+    ? COMMONJS_INTEROP_LEAVES.flatMap(specifier => {
+        for (const resolver of [workspaceRequire, require]) {
+          try { return [{ specifier, entry: resolver.resolve(specifier) }] }
+          catch { /* Try the other package boundary. */ }
+        }
+        return []
+      })
+    : []
   const generatedRoot = path.join(cliRoot, 'dist') + path.sep
   const port = await findFreeLoopbackPort()
   const cacheKey = createHash('sha256')
@@ -811,15 +822,19 @@ if (import.meta.hot) {
           entries: [rendererPath, ...initialGenerations
             .filter(item => item.isolatedArtifactSource === undefined)
             .map(item => item.realEntry)],
-          // react-markdown reaches these CommonJS leaves through ESM-only
-          // dependency chains, so Vite's static scan cannot discover the
-          // required default-export interop before the native renderer boots.
-          include: ['debug', 'extend', 'style-to-js'],
+          // Host and plugin ESM graphs can reach these CommonJS leaves after
+          // Vite's static scan. Resolve only installed leaves at their owning
+          // boundary so fixtures need not install unrelated product peers.
+          include: commonJsInteropLeaves.map(item => item.specifier),
         },
       } : {}),
       resolve: {
         dedupe: ['react', 'react-dom'],
         alias: [
+          ...commonJsInteropLeaves.map(item => ({
+            find: new RegExp(`^${item.specifier.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}$`, 'u'),
+            replacement: item.entry,
+          })),
           { find: /^react$/, replacement: path.join(reactPackageRoot, 'index.js') },
           { find: /^react\/(.+)$/, replacement: `${normalizePath(reactPackageRoot)}/$1` },
           { find: /^react-dom$/, replacement: path.join(reactDomPackageRoot, 'index.js') },
