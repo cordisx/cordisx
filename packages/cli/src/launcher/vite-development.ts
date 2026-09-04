@@ -38,6 +38,7 @@ const COMMONJS_INTEROP_LEAVES = [
   'react-fast-compare',
   'react-is',
   'style-to-js',
+  'use-sync-external-store/shim',
   'use-sync-external-store/shim/index.js',
 ] as const
 const sourceMode = import.meta.url.endsWith('.ts')
