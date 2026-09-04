@@ -8,6 +8,7 @@ import {
 } from '../packages/cli/src/contracts.js'
 import { CommandRegistry } from '../packages/cli/src/renderer/commands.js'
 import { markAgentConversationPageMount } from '../packages/cli/src/renderer/agent-conversation-page.js'
+import { BrowserRouteHistoryAdapter } from '../packages/cli/src/renderer/codex-router-history.js'
 import type { CordisXI18nService, LocalizationEffectOwner } from '../packages/cli/src/renderer/i18n.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from '../packages/cli/src/renderer/ownership.js'
@@ -28,6 +29,7 @@ import {
   MemoryExtensionPointPolicyStore,
 } from '../packages/cli/src/renderer/extension-points.js'
 import { TestCodexRouteHistory } from './helpers/codex-route-history.js'
+import { activatePlaygroundReviewNavigation } from '../packages/cli/src/playground/client/review-navigation.js'
 
 declare module '../packages/cli/src/contracts.js' {
   interface CordisXOutletMap {
@@ -98,6 +100,13 @@ function fakeI18n(): CordisXI18nService {
 
 async function settle(): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, 0))
+}
+
+function copySessionStorage(source: Storage, target: Storage): void {
+  for (let index = 0; index < source.length; index += 1) {
+    const key = source.key(index)
+    if (key !== null) target.setItem(key, source.getItem(key)!)
+  }
 }
 
 describe('NavigationRegistry', () => {
@@ -400,6 +409,53 @@ describe('NavigationRegistry', () => {
     pages.dispose()
     outlets.dispose()
     dom.window.close()
+  })
+
+  it('projects an exact Browser route checkpoint after a new-document state loss before review boot can select New room', async () => {
+    const original = new JSDOM('', { url: 'http://127.0.0.1/' })
+    const originalHistory = new BrowserRouteHistoryAdapter(original.window as unknown as Window, true)
+    originalHistory.push(Object.freeze({
+      schemaVersion: 1, owner: 'chatroom', routeId: 'chatroom:room', outlet: 'main',
+      path: '/main/chatroom/room-1', params: Object.freeze({ roomId: 'room-1' }),
+    }))
+    const originalState = original.window.history.state as { readonly key: string; readonly idx: number }
+
+    const dom = new JSDOM('<body><main id="main"></main><nav><div data-sidebar-item="chatroom:chatroom"><button class="cxsi-primary">New room</button></div></nav></body>', {
+      url: 'http://127.0.0.1/',
+    })
+    copySessionStorage(original.window.sessionStorage, dom.window.sessionStorage)
+    // The new Browser document has retained React's key/index but not the
+    // Host route payload; BrowserRouteHistoryAdapter must recover only its
+    // own exact checkpoint before registered routes begin projection.
+    dom.window.history.replaceState({ key: originalState.key, idx: originalState.idx }, '', '/')
+    const history = new BrowserRouteHistoryAdapter(dom.window as unknown as Window, true)
+    const pages = new PageRegistry()
+    const outlets = new OutletRegistry()
+    outlets.declare({
+      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'portal', contextPolicy: 'semantic',
+    }, new FakeOutlet(dom.window.document.getElementById('main')!, 'main:one'), path => path.startsWith('/main/'))
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), history)
+    pages.register('chatroom', { id: 'room', title: { key: 'room' } }, ({ container, params }) => {
+      container.textContent = `room:${String(params.roomId)}`
+    })
+    navigation.register('chatroom', { id: 'room', path: '/main/chatroom/:roomId', outlet: 'main', page: 'room' })
+
+    await navigation.startHistoryProjection()
+    let newRoomActivations = 0
+    dom.window.document.querySelector('button')?.addEventListener('click', () => { newRoomActivations += 1 })
+    activatePlaygroundReviewNavigation(dom.window.document, 'chatroom:chatroom')
+
+    expect(history.snapshot()).toMatchObject({ entry: { routeId: 'chatroom:room', params: { roomId: 'room-1' } } })
+    expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')?.textContent).toContain('room:room-1')
+    expect(newRoomActivations).toBe(0)
+
+    await navigation.dispose()
+    pages.dispose()
+    outlets.dispose()
+    history.dispose()
+    originalHistory.dispose()
+    dom.window.close()
+    original.window.close()
   })
 
   it('moves one mounted page across same-key anchor replacement and disposes on context switch', async () => {

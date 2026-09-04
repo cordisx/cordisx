@@ -85,6 +85,13 @@ function mountNavigator(dom: JSDOM, navigator: FakeCodexNavigator): void {
   })
 }
 
+function copySessionStorage(source: Storage, target: Storage): void {
+  for (let index = 0; index < source.length; index += 1) {
+    const key = source.key(index)
+    if (key !== null) target.setItem(key, source.getItem(key)!)
+  }
+}
+
 describe('CodexRouterHistoryAdapter', () => {
   it('fails closed when the Codex React Router Context navigator is absent', () => {
     const dom = new JSDOM('<div id="root"></div>', { url: 'https://codex.local/native' })
@@ -221,6 +228,68 @@ describe('CodexRouterHistoryAdapter', () => {
 })
 
 describe('BrowserRouteHistoryAdapter', () => {
+  it('restores only an exact Host route checkpoint when a fresh browser document loses route state', () => {
+    const original = new JSDOM('', { url: 'https://playground.cordisx.local/' })
+    const originalAdapter = new BrowserRouteHistoryAdapter(original.window as unknown as Window, true)
+    originalAdapter.push(route('one'))
+    const originalState = original.window.history.state as { readonly key: string; readonly idx: number }
+    expect(originalState).toMatchObject({ key: expect.any(String), idx: 1, __cordisxRouteV1: { params: { roomId: 'one' } } })
+
+    const reloaded = new JSDOM('', { url: 'https://playground.cordisx.local/' })
+    copySessionStorage(original.window.sessionStorage, reloaded.window.sessionStorage)
+    // Reproduces the observed new-document seam: React's key/index survive,
+    // but the exact plugin route field is gone before the Host runtime boots.
+    reloaded.window.history.replaceState({ key: originalState.key, idx: originalState.idx }, '', '/')
+    const restored = new BrowserRouteHistoryAdapter(reloaded.window as unknown as Window, true)
+    expect(restored.snapshot()).toMatchObject({
+      available: true,
+      key: originalState.key,
+      index: originalState.idx,
+      entry: { routeId: 'chatroom:room', params: { roomId: 'one' } },
+    })
+    expect(reloaded.window.history.state).toMatchObject({ __cordisxRouteV1: { owner: 'chatroom', routeId: 'chatroom:room' } })
+
+    const task = new JSDOM('', { url: 'https://playground.cordisx.local/playground/simulator/tasks/lead' })
+    copySessionStorage(original.window.sessionStorage, task.window.sessionStorage)
+    // Even a forged matching history identity cannot claim a Room checkpoint
+    // from the distinct Host task URL.
+    task.window.history.replaceState({ key: originalState.key, idx: originalState.idx }, '', task.window.location.pathname)
+    const taskAdapter = new BrowserRouteHistoryAdapter(task.window as unknown as Window, true)
+    expect(taskAdapter.snapshot()).toMatchObject({ available: true, key: originalState.key, index: originalState.idx })
+    expect(taskAdapter.snapshot().entry).toBeUndefined()
+
+    taskAdapter.dispose()
+    restored.dispose()
+    originalAdapter.dispose()
+    task.window.close()
+    reloaded.window.close()
+    original.window.close()
+  })
+
+  it('does not overwrite a malformed route state from a reload checkpoint', () => {
+    const original = new JSDOM('', { url: 'https://playground.cordisx.local/' })
+    const originalAdapter = new BrowserRouteHistoryAdapter(original.window as unknown as Window, true)
+    originalAdapter.push(route('one'))
+    const originalState = original.window.history.state as { readonly key: string; readonly idx: number }
+
+    const reloaded = new JSDOM('', { url: 'https://playground.cordisx.local/' })
+    copySessionStorage(original.window.sessionStorage, reloaded.window.sessionStorage)
+    reloaded.window.history.replaceState({
+      key: originalState.key,
+      idx: originalState.idx,
+      __cordisxRouteV1: { schemaVersion: 1, owner: 'chatroom' },
+    }, '', '/')
+    const restored = new BrowserRouteHistoryAdapter(reloaded.window as unknown as Window, true)
+    expect(restored.snapshot()).toMatchObject({ available: true, key: originalState.key, index: originalState.idx })
+    expect(restored.snapshot().entry).toBeUndefined()
+    expect(reloaded.window.history.state.__cordisxRouteV1).toEqual({ schemaVersion: 1, owner: 'chatroom' })
+
+    restored.dispose()
+    originalAdapter.dispose()
+    reloaded.window.close()
+    original.window.close()
+  })
+
   it('initializes browser history only for the standalone Playground', () => {
     const dom = new JSDOM('', { url: 'https://playground.cordisx.local/playground/simulator/tasks/task-1' })
     const adapter = new BrowserRouteHistoryAdapter(dom.window as unknown as Window, true)
