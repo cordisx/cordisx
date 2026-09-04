@@ -96,11 +96,13 @@ describe('Agent conversation Shell v7 approval message bubble', () => {
     const actions = [...(bubble?.querySelectorAll<HTMLButtonElement>('.cxa-approval-action') ?? [])]
     expect(actions.map(action => action.dataset.decision)).toEqual(['approve', 'reject'])
     expect(actions.map(action => action.getAttribute('aria-label'))).toEqual(['Approve · Lead', 'Reject · Lead'])
-    expect(actions.every(action => action.querySelector('.cordisx-host-icon') !== null)).toBe(true)
+    expect(actions.map(action => action.getAttribute('title'))).toEqual(['Approve · Lead', 'Reject · Lead'])
+    expect(actions.every(action => action.querySelector('.cordisx-host-icon') !== null && action.textContent === '' && !action.disabled)).toBe(true)
     expect(bubble?.textContent).not.toContain('Cancel')
     expect(AGENT_CONVERSATION_STYLES).toContain('@container cxa-conversation (max-width:560px)')
     expect(AGENT_CONVERSATION_STYLES).toContain('var(--cx-surface-raised,var(--cx-surface))')
     expect(AGENT_CONVERSATION_STYLES).toContain('.cxa-approval-action:focus-visible')
+    expect(AGENT_CONVERSATION_STYLES).toContain('.cxa-approval-action{appearance:none;display:inline-grid;width:32px;height:32px;min-height:32px;padding:0;place-items:center;')
   })
 
   it.each(['approved', 'denied', 'cancelled', 'failed'] as const)('keeps terminal %s on the same item, selected and actionless', state => {
