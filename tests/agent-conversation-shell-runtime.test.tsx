@@ -57,6 +57,10 @@ import {
   CordisXAgentConversationShellService,
   projectAgentConversationShellSnapshotV4,
 } from '../packages/cli/src/renderer/agent-conversation-shell.js'
+import type {
+  PlaygroundScenarioConversationOrigin,
+  PlaygroundScenarioConversationSourceAuthority,
+} from '../packages/cli/src/renderer/playground-scenario-session-scope.js'
 import { CommandRegistry, CordisXCommandService } from '../packages/cli/src/renderer/commands.js'
 import { HostAgentTaskDetailsNavigator } from '../packages/cli/src/renderer/host-ui/AgentTaskDetailsNavigator.js'
 import { CordisXI18nService } from '../packages/cli/src/renderer/i18n.js'
@@ -814,6 +818,64 @@ describe('Agent conversation shell public runtime', () => {
     expect(origin).not.toHaveProperty('room')
     expect(Object.isFrozen(origin)).toBe(true)
     expect(Object.isFrozen(origin?.binding)).toBe(true)
+    registration.dispose(); runtime.dispose(); commands.dispose(); await settle(); dom.window.close()
+  })
+
+  it('keeps a fresh no-room Shell v9 composer command live for its first bootstrap target declaration', async () => {
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    let commandContext: CordisXCommandContext | undefined
+    let commandOrigin: PlaygroundScenarioConversationOrigin | undefined
+    const sourceAuthority: PlaygroundScenarioConversationSourceAuthority = {
+      execute: async (origin, operation) => {
+        commandOrigin = origin
+        return await operation()
+      },
+      fenceBinding: () => {},
+    }
+    commands.register('chatroom', { id: 'create-v9', title: { key: 'create-v9', fallback: 'Create' } }, context => {
+      commandContext = context
+    })
+    const runtime = new AgentConversationShellRegistry(
+      commandService(commands), fakeI18n(), undefined, undefined, undefined,
+      sourceAuthority,
+      owner => owner === 'chatroom'
+        ? 'file:///fixtures/chatroom.ts:chatroom'
+        : undefined,
+    )
+    const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-v9-no-room' })
+    const stream = new PageStream()
+    const registration = runtime.register(plugin, binding => {
+      const snapshot: AgentConversationShellSnapshotV7 = {
+        binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration }, generation: 'snapshot-v9-no-room', snapshotSequence: 0,
+        selection: { kind: 'no-room' }, items: [],
+        composer: { availability: 'available', placeholder: message('composer', 'Message'), disabled: { value: false }, shortcutPolicy: 'enter', submit: { id: 'create-v9' } },
+        headerActions: [],
+      }
+      const subscription = { subscriptionId: 'subscription-v9-no-room', binding: snapshot.binding, generation: snapshot.generation, afterSequence: 0, snapshotSequence: 0 }
+      return {
+        snapshot: async () => snapshot,
+        subscribe: async () => ({ result: { type: 'subscribe' as const, status: 'accepted' as const, code: 'allowed' as const, subscription }, handle: {
+          subscription, pages: stream, closed: new Promise<never>(() => {}), unsubscribe: async () => { stream.close() },
+        } }),
+        dispose() {},
+      }
+    }, undefined, 9)
+    registration.mount(mountContext(dom))
+    await vi.waitFor(() => expect(dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')).not.toBeNull())
+    const draft = dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')?.set
+    setter?.call(draft, 'first delivery creates the Room')
+    draft.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    const send = dom.window.document.querySelector<HTMLButtonElement>('.cxa-send')!
+    await vi.waitFor(() => expect(send.disabled).toBe(false))
+    send.click()
+    await vi.waitFor(() => expect(commandContext?.hostContext).toMatchObject({ scope: 'composer-submit', origin: { commandId: 'create-v9' } }))
+    await vi.waitFor(() => expect(commandOrigin).toBeDefined())
+    expect(commandOrigin).toMatchObject({ owner: 'file:///fixtures/chatroom.ts:chatroom', runs: [], bootstrapOrigin: {
+      commandId: 'create-v9', scope: 'composer-submit',
+    } })
+    expect(commandOrigin?.roomId).toBeUndefined()
     registration.dispose(); runtime.dispose(); commands.dispose(); await settle(); dom.window.close()
   })
 

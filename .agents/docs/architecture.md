@@ -509,14 +509,17 @@ production renderer; production renderer and adapter modules never import
 Playground fixtures or selectors.
 
 Shell v9 extends that command boundary for a fresh Room with no Session-backed
-run. The Host mints one immutable bootstrap command origin before entering the
-composer handler. The plugin may declare each exact `{participantId, memberId,
-runId}` only through `agentAdmissionBootstrapTargets.issue`; the Host returns
-one opaque token per declaration and `agentAdmissionBootstrapReservations.reserve`
-captures the newly acquired exact Agent handle before its private driver
-submission. Tokens are one-shot and fail closed on command completion, target
-or owner substitution, binding/generation/connection replacement, revocation,
-or disposal. The frozen Shell v8 target-origin path is unchanged and has no
+run, including a no-Room composer whose handler creates the Room. The Host
+mints one immutable bootstrap command origin before entering the composer
+handler and retains its authenticated command/binding/generation/execution
+authority without inferring a future Room from the pre-command snapshot. The
+plugin may declare each exact `{participantId, memberId, runId}` only through
+`agentAdmissionBootstrapTargets.issue`; the Host returns one opaque token per
+declaration and `agentAdmissionBootstrapReservations.reserve` captures the
+newly acquired exact Agent handle before its private driver submission. Tokens
+are one-shot and fail closed on command completion, target or owner
+substitution, binding/generation/connection replacement, revocation, or
+disposal. The frozen Shell v8 target-origin path is unchanged and has no
 bootstrap fallback.
 
 The renderer also owns one fixed-height Room header and one reusable

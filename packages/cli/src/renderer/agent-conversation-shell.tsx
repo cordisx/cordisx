@@ -1761,19 +1761,30 @@ class MountedConversation {
             return await this.commands.executeConversationFor(request.ownerId, request.reference, request.invocationKey, request.context)
           }
           // Shell v9 retains a command-scoped bootstrap authority even before
-          // any Room run has a Session. Predecessor versions require a known
-          // Session-backed run before Playground source capture is available.
-          if (this.scenarioSource === undefined || !isComposerSubmit || roomId === undefined
-            || this.record.version !== 9 && runs.length === 0) return await execute()
+          // a Room itself exists. A new-Room composer cannot have a Room or
+          // Session in its pre-command snapshot: the plugin materializes the
+          // exact delivery target inside this still-live command, then v4
+          // binds that declaration. Predecessors remain Room/session-bound.
+          const capturesBootstrapCommand = this.record.version === 9 && isComposerCommand
+          const capturesPredecessorCommand = this.record.version !== 9 && isComposerSubmit
+            && roomId !== undefined && runs.length > 0
+          if (this.scenarioSource === undefined || !(capturesBootstrapCommand || capturesPredecessorCommand)) return await execute()
           const scenarioOwner = this.scenarioOwner?.(this.record.owner, this.record.effect.moduleGeneration)
           if (scenarioOwner === undefined) return await execute()
           const snapshotGeneration = model.generation
           const sourceStillActive = (): boolean => {
-            const currentSelection = this.snapshot?.selection
             if (this.disposed || this.terminal || this.mountContext.signal.aborted || !this.record.active
-              || (this.record.version !== 8 && this.record.version !== 9 && this.snapshot?.generation !== snapshotGeneration) || currentSelection?.kind !== 'room'
-              || currentSelection.roomId !== roomId) return false
-            if (this.record.version === 8 || this.record.version === 9) return true
+              || (this.record.version !== 8 && this.record.version !== 9 && this.snapshot?.generation !== snapshotGeneration)) return false
+            const currentSelection = this.snapshot?.selection
+            if (this.record.version === 9) {
+              // A bootstrap source started from no-room cannot retrospectively
+              // infer the Room created by the handler. Its binding/execution
+              // fence stays live for this command; disposal/replacement still
+              // fences it, while the v4 opaque token fixes the declared target.
+              return roomId === undefined || (currentSelection?.kind === 'room' && currentSelection.roomId === roomId)
+            }
+            if (currentSelection?.kind !== 'room' || currentSelection.roomId !== roomId) return false
+            if (this.record.version === 8) return true
             const currentRuns = currentSelection.activeRuns ?? []
             return runs.every(run => currentRuns.some(current => 'sessionId' in current
               && current.runId === run.runId && current.sessionId === run.sessionId))
@@ -1783,7 +1794,7 @@ class MountedConversation {
             bindingId: this.binding.bindingId,
             ownerGeneration: this.binding.ownerGeneration,
             snapshotGeneration,
-            roomId,
+            ...(roomId === undefined ? {} : { roomId }),
             routeId: this.mountContext.routeId,
             runs,
             active: sourceStillActive,

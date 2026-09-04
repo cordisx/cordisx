@@ -127,7 +127,7 @@ describe('Playground scenario exact Session scope authority', () => {
     authority.dispose()
   })
 
-  it('captures a fresh Shell v9 bootstrap target before any Room run has a Session', async () => {
+  it('captures a fresh Shell v9 bootstrap target before the handler has created a Room or Session', async () => {
     let mounted: AgentRuntimeRouteScope | undefined
     const authority = new PlaygroundScenarioSessionScopeAuthority({
       hostGeneration: 'playground-generation-v9', connectionGeneration: () => 3,
@@ -148,7 +148,7 @@ describe('Playground scenario exact Session scope authority', () => {
     const target = { participantId: 'lead', memberId: 'member-lead', runId: 'room-run-lead' }
     await authority.conversationSource.execute({
       owner: owner.pluginId, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
-      snapshotGeneration: 'snapshot-bootstrap-fresh', roomId: 'room-one', routeId: 'chatroom:room',
+      snapshotGeneration: 'snapshot-bootstrap-fresh', routeId: 'chatroom:room',
       runs: [], active: () => true, bootstrapOrigin: origin,
     }, async () => {
       expect(authority.bootstrapAdmissionTargetActive(owner, origin, target)).toBe(true)
