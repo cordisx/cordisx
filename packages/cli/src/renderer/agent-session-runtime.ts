@@ -755,7 +755,10 @@ export class CordisXAgentSessionRuntime {
     const requester = this.recordForApprovalTarget(target)
     if (requester === undefined) return { status: 'unavailable', code: 'agent-replaced' }
     if (!this.sameOwner(owner, requester.owner)) return { status: 'denied', code: 'not-owner' }
-    if (!await this.allowed(owner, 'approvals.request', requester.id)) return { status: 'denied', code: 'permission-denied' }
+    // Registration is a capability/lifecycle admission only. Dynamic
+    // host-route scopes may not have an active Session route until a later
+    // delegation step; invocation performs the exact permission check.
+    if (this.options.declares?.(owner, 'approvals.request') === false) return { status: 'denied', code: 'permission-denied' }
     if (!this.current(requester)) return { status: 'unavailable', code: 'agent-replaced' }
 
     const registration = Object.freeze({

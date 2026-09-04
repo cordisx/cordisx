@@ -361,7 +361,13 @@ describe('Agent/Session Host authority v1', () => {
 
   it('routes a driver approval through v3 before the single v2 requester ledger is appended', async () => {
     const driver = new Driver()
-    const runtime = new CordisXAgentSessionRuntime({ driver, authorize: async () => true, declares: () => true, now: () => 31 })
+    let routeAuthorized = false
+    const runtime = new CordisXAgentSessionRuntime({
+      driver,
+      authorize: async (_owner, capability) => capability === 'agents.create' || capability === 'agents.resume' || routeAuthorized,
+      declares: () => true,
+      now: () => 31,
+    })
     const makeSetup = (agentId: string, revision: string, name: string): AgentSetup => ({
       definition: { agentId, revision },
       definitions: [{
@@ -394,6 +400,12 @@ describe('Agent/Session Host authority v1', () => {
     }))
     const registered = await runtime.registerRequestResolver(owner, { agent: reviewer.handle.agent, definition: reviewerSetup.definition }, resolver)
     expect(registered).toMatchObject({ status: 'registered', handle: { registration: { owner, requester: { agentId: reviewer.sessionId, definition: reviewerSetup.definition } } } })
+
+    // Dynamic host-route permission is intentionally unavailable until the
+    // later exact Session route is activated; registration itself must not
+    // require that route or create a lease.
+    await expect(driver.ask({ sessionId: reviewer.sessionId, toolName: 'workspace.publish', reason: 'before route activation' })).resolves.toBe('unavailable')
+    routeAuthorized = true
 
     const pending = driver.ask({ sessionId: reviewer.sessionId, toolName: 'workspace.publish', callId: 'driver-call-v3', reason: 'Reviewer requests exact Lead approval.' })
     await vi.waitFor(() => expect(answerer).toHaveBeenCalledTimes(1))
