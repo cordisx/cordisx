@@ -10,7 +10,7 @@ import { buildRendererCompositionSource, type BuildRendererBundleOptions } from 
 import type { CordisXConfig, CordisXConfigPlugin } from './config.js'
 import { findFreeLoopbackPort } from './process.js'
 import { buildLocalDevelopmentPlugin, localDevelopmentPackageInfo } from './development.js'
-import type { CordisXPluginManifestV7 } from '../permission-contracts.js'
+import type { CordisXPluginManifestV7, CordisXPluginManifestV8 } from '../permission-contracts.js'
 import { EntityDirectoryAuthority, type EntityTemplatePayload } from './entity-directory.js'
 import { CONTRACTS_MODULE_PATH, cordisXSharedModuleSource } from './react-virtual-modules.js'
 import { entityInstallationId, entityPluginGeneration, issueOwnerDocumentPrincipalToken } from './owner-document-rpc.js'
@@ -65,7 +65,7 @@ interface DevelopmentGeneration {
   lastSuccessfulAt: string
   readonly packageFiles: readonly string[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
-  readonly manifest?: CordisXPluginManifestV7
+  readonly manifest?: CordisXPluginManifestV7 | CordisXPluginManifestV8
   /** Executable only by the Host-owned isolated Worker boundary. */
   readonly isolatedArtifactSource?: string
   /** Complete esbuild input graph for isolated-worker HMR ownership. */

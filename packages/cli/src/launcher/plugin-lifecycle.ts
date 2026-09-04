@@ -29,6 +29,7 @@ import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
   type CordisXCertifiedPermissionProjectionV1,
   type CordisXPermissionAuthorizationDecisionV4,
   type CordisXPermissionAuthorizationPlanV4,
@@ -39,6 +40,7 @@ import {
   type CordisXPermissionPolicyRecordV4,
   type CordisXCapabilityDeclarationV4,
   type CordisXPluginManifestV7,
+  type CordisXPluginManifestV8,
 } from '../permission-contracts.js'
 import {
   isPermissionPolicyRecordV2,
@@ -60,6 +62,7 @@ import {
   normalizePluginManifestV5,
   normalizePluginManifestV6,
   normalizePluginManifestV7,
+  normalizePluginManifestV8,
 } from '../permission-model-v4.js'
 import {
   PluginActivationStore,
@@ -107,7 +110,7 @@ export interface PluginRuntimeMutation {
     readonly identitySource: string
     readonly readme?: string
     readonly readmes?: Readonly<Record<string, string>>
-    readonly manifest?: CordisXPluginManifestV7
+    readonly manifest?: CordisXPluginManifestV7 | CordisXPluginManifestV8
     readonly development: CordisXLocalDevelopmentSnapshot
   }
   /** Host-only renderer artifact compiled from the authority-resolved immutable runtime module. */
@@ -381,8 +384,8 @@ function authorizationPlanV4(
   certification?: CordisXCertifiedPermissionProjectionV1,
 ): CordisXPermissionAuthorizationPlanV4 {
   if (staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
-    && staged.manifest.runtimeManifest.schemaVersion !== 7) {
-    throw new LifecycleFailure('permission-denied', 'Permission V4 review requires manifest-v5, manifest-v6, or manifest-v7.')
+    && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8) {
+    throw new LifecycleFailure('permission-denied', 'Permission V4 review requires manifest-v5, manifest-v6, manifest-v7, or manifest-v8.')
   }
   const catalog = new CapabilityRiskCatalog()
   return buildPermissionAuthorizationPlanV4({
@@ -713,6 +716,11 @@ export class PluginLifecycleCoordinator {
           const id = (value as { readonly id?: unknown })?.id
           if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
           return normalizePluginManifestV7(value, id, new CapabilityRiskCatalog())
+        },
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V8]: value => {
+          const id = (value as { readonly id?: unknown })?.id
+          if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
+          return normalizePluginManifestV8(value, id, new CapabilityRiskCatalog())
         },
       },
     })
@@ -1473,7 +1481,7 @@ export class PluginLifecycleCoordinator {
       const target = candidate.plugins.find(plugin => plugin.id === pluginId)!
       const staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => { throw classify(error) })
       if (staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
-        && staged.manifest.runtimeManifest.schemaVersion !== 7) return undefined
+        && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8) return undefined
       return authorizationPlanV4(
         staged,
         operation,
@@ -1491,7 +1499,7 @@ export class PluginLifecycleCoordinator {
     if (activeTarget === undefined || activeTarget.enabled) throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
     const staged = await loadStagedPluginPackage(this.options.homeDir, activeTarget.digest).catch(error => { throw classify(error) })
     if (staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
-      && staged.manifest.runtimeManifest.schemaVersion !== 7) return undefined
+      && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8) return undefined
     const { candidate } = this.mutationCandidate(active, 'enable', pluginId)
     await this.store.writeCandidate(candidate)
     const target = candidate.plugins.find(plugin => plugin.id === pluginId)!
