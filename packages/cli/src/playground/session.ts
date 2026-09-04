@@ -61,6 +61,7 @@ import {
 import { EntityDirectoryAuthority } from '../launcher/entity-directory.js'
 import { createEntityBridgeHandler, isEntityBindingRequest } from '../launcher/entity-rpc.js'
 import { parsePlaygroundSessionScenarioCatalog, type PlaygroundSessionScenarioCatalogV1 } from './session-scenario-catalog.js'
+import { playgroundPluginBundleSnapshot } from './plugin-bundle-fixture.js'
 
 export interface PlaygroundFixtureInfo {
   readonly name: string
@@ -215,6 +216,10 @@ export async function createPlaygroundSession(
         `playground.permissionPolicies[${index}]`,
       ))
       : (() => { throw new Error('playground.permissionPolicies must be an array') })()
+  if (playground.pluginBundleFixture !== undefined && typeof playground.pluginBundleFixture !== 'boolean') {
+    throw new Error('playground.pluginBundleFixture must be a boolean')
+  }
+  const includePluginBundleFixture = playground.pluginBundleFixture === true
   const ownsHome = options.homeDir === undefined
   const homeDir = options.homeDir === undefined
     ? await mkdtemp(path.join(os.tmpdir(), 'cordisx-ui-playground-'))
@@ -477,6 +482,7 @@ export async function createPlaygroundSession(
     ...(generation.providerToken === undefined ? {} : { providerBridgeToken: generation.providerToken }),
     profileId: 'playground',
     permission: { profileId: 'playground', policies: generation.permissionPolicies },
+    ...(includePluginBundleFixture ? { pluginBundleSnapshot: playgroundPluginBundleSnapshot(generation.generation) } : {}),
   })
 
   return {

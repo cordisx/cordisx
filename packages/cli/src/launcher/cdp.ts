@@ -117,7 +117,21 @@ const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
 const MARKETPLACE_RECEIVER = '__cordisxMarketplaceReceiveV1'
 const MAX_MARKETPLACE_REQUESTS = 4
 const CDP_REQUEST_TIMEOUT_MS = 5_000
-const CDP_INJECTION_TIMEOUT_MS = 60_000
+const DEFAULT_CDP_INJECTION_TIMEOUT_MS = 60_000
+const MIN_CDP_INJECTION_TIMEOUT_MS = 5_000
+const MAX_CDP_INJECTION_TIMEOUT_MS = 600_000
+
+export function resolveCdpInjectionTimeoutMs(value: string | undefined): number {
+  if (value === undefined || value === '') return DEFAULT_CDP_INJECTION_TIMEOUT_MS
+  if (!/^\d+$/u.test(value)) throw new Error('CORDISX_CDP_INJECTION_TIMEOUT_MS must be an integer number of milliseconds')
+  const timeoutMs = Number(value)
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < MIN_CDP_INJECTION_TIMEOUT_MS || timeoutMs > MAX_CDP_INJECTION_TIMEOUT_MS) {
+    throw new Error(`CORDISX_CDP_INJECTION_TIMEOUT_MS must be between ${MIN_CDP_INJECTION_TIMEOUT_MS} and ${MAX_CDP_INJECTION_TIMEOUT_MS}`)
+  }
+  return timeoutMs
+}
+
+const CDP_INJECTION_TIMEOUT_MS = resolveCdpInjectionTimeoutMs(process.env.CORDISX_CDP_INJECTION_TIMEOUT_MS)
 
 export interface CdpTarget {
   readonly id: string
@@ -227,13 +241,17 @@ class CdpSession {
   }
 }
 
-async function evaluateRuntimeOperation<Value = void>(session: CdpSession, expression: string): Promise<Value> {
+async function evaluateRuntimeOperation<Value = void>(
+  session: CdpSession,
+  expression: string,
+  timeoutMs = CDP_REQUEST_TIMEOUT_MS,
+): Promise<Value> {
   const response = await session.send('Runtime.evaluate', {
     expression,
     awaitPromise: true,
     returnByValue: true,
     allowUnsafeEvalBlockedByCSP: true,
-  })
+  }, timeoutMs)
   const value = (response.result as { value?: unknown } | undefined)?.value as { ok?: unknown; error?: unknown; result?: Value } | undefined
   if (value?.ok !== true) throw new Error(typeof value?.error === 'string' ? value.error : 'renderer lifecycle operation failed')
   return value.result as Value
@@ -1607,7 +1625,7 @@ async function install(
       await evaluateRuntimeOperation(session, `(async () => { try {
         await globalThis.__cordisxBoot
         return { ok: globalThis.__cordisxRuntime !== undefined }
-      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`, CDP_INJECTION_TIMEOUT_MS)
     }
     if (generationRuntime !== undefined) {
       // Reserve this boot-ready renderer before durable recovery. The

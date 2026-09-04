@@ -29,7 +29,29 @@ function focusable(container: HTMLElement): HTMLButtonElement[] {
   return [...container.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
 }
 
-function showFeedback(document: Document, message: string, failed: boolean): void {
+interface MountOwner {
+  active: boolean
+  readonly cleanups: Set<() => void>
+}
+
+function own(owner: MountOwner, cleanup: () => void): () => void {
+  if (!owner.active) {
+    cleanup()
+    return () => {}
+  }
+  owner.cleanups.add(cleanup)
+  return () => { owner.cleanups.delete(cleanup) }
+}
+
+function disposeOwner(owner: MountOwner): void {
+  if (!owner.active) return
+  owner.active = false
+  for (const cleanup of [...owner.cleanups]) cleanup()
+  owner.cleanups.clear()
+}
+
+function showFeedback(document: Document, owner: MountOwner, message: string, failed: boolean): void {
+  if (!owner.active) return
   const toast = document.createElement('div')
   toast.className = 'cordisx-navigation-feedback'
   toast.dataset.tone = failed ? 'danger' : 'neutral'
@@ -37,15 +59,28 @@ function showFeedback(document: Document, message: string, failed: boolean): voi
   toast.setAttribute('aria-live', failed ? 'assertive' : 'polite')
   toast.textContent = message
   document.body.append(toast)
-  document.defaultView?.setTimeout(() => toast.remove(), 2200)
+  const view = document.defaultView
+  let timer: number | undefined
+  let release = (): void => {}
+  const remove = (): void => {
+    if (timer !== undefined) view?.clearTimeout(timer)
+    timer = undefined
+    toast.remove()
+    release()
+  }
+  release = own(owner, remove)
+  timer = view?.setTimeout(remove, 2200)
 }
 
 function confirmAction(
   document: Document,
   action: HostNavigationCollectionAction,
   returnFocus: HTMLElement,
+  owner: MountOwner,
 ): Promise<boolean> {
-  if (action.confirmation === undefined) return Promise.resolve(true)
+  if (!owner.active) return Promise.resolve(false)
+  const confirmation = action.confirmation
+  if (confirmation === undefined) return Promise.resolve(true)
   const copy = hostCopy(document)
   return new Promise(resolve => {
     const backdrop = document.createElement('div')
@@ -57,12 +92,12 @@ function confirmAction(
     const title = document.createElement('div')
     title.className = 'cordisx-navigation-confirm-title'
     title.id = `cordisx-confirm-${action.id}-${Date.now()}`
-    title.textContent = action.confirmation.title
+    title.textContent = confirmation.title
     dialog.setAttribute('aria-labelledby', title.id)
     const description = document.createElement('div')
     description.className = 'cordisx-navigation-confirm-description'
     description.id = `${title.id}-description`
-    description.textContent = action.confirmation.description
+    description.textContent = confirmation.description
     dialog.setAttribute('aria-describedby', description.id)
     const footer = document.createElement('div')
     footer.className = 'cordisx-navigation-confirm-footer'
@@ -73,14 +108,22 @@ function confirmAction(
     const confirm = document.createElement('button')
     confirm.type = 'button'
     confirm.className = 'cordisx-navigation-confirm-button cordisx-navigation-confirm-danger'
-    confirm.textContent = action.confirmation.confirmLabel
+    confirm.textContent = confirmation.confirmLabel
     footer.append(cancel, confirm)
     dialog.append(title, description, footer)
     backdrop.append(dialog)
-    const settle = (accepted: boolean): void => {
+    let settled = false
+    let release = (): void => {}
+    const settle = (accepted: boolean, restoreFocus = true): void => {
+      if (settled) return
+      settled = true
+      cancel.removeEventListener('click', onCancel)
+      confirm.removeEventListener('click', onConfirm)
+      backdrop.removeEventListener('pointerdown', onBackdrop)
       backdrop.remove()
       document.removeEventListener('keydown', onKeyDown, true)
-      if (returnFocus.isConnected) returnFocus.focus()
+      release()
+      if (restoreFocus && owner.active && returnFocus.isConnected) returnFocus.focus()
       resolve(accepted)
     }
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -97,12 +140,16 @@ function confirmAction(
         buttons[next]?.focus()
       }
     }
-    cancel.addEventListener('click', () => settle(false))
-    confirm.addEventListener('click', () => settle(true))
-    backdrop.addEventListener('pointerdown', event => {
+    const onCancel = (): void => settle(false)
+    const onConfirm = (): void => settle(true)
+    const onBackdrop = (event: PointerEvent): void => {
       if (event.target === backdrop) settle(false)
-    })
+    }
+    cancel.addEventListener('click', onCancel)
+    confirm.addEventListener('click', onConfirm)
+    backdrop.addEventListener('pointerdown', onBackdrop)
     document.addEventListener('keydown', onKeyDown, true)
+    release = own(owner, () => settle(false, false))
     document.body.append(backdrop)
     cancel.focus()
   })
@@ -112,22 +159,27 @@ async function invoke(
   document: Document,
   action: HostNavigationCollectionAction,
   returnFocus: HTMLElement,
+  owner: MountOwner,
 ): Promise<void> {
-  if (!await confirmAction(document, action, returnFocus)) return
+  if (!owner.active || !await confirmAction(document, action, returnFocus, owner) || !owner.active) return
+  let failed = false
   try {
     await action.invoke()
-    showFeedback(document, action.success, false)
   } catch {
-    showFeedback(document, action.failure, true)
+    failed = true
   }
+  if (!owner.active) return
+  showFeedback(document, owner, failed ? action.failure : action.success, failed)
 }
 
 function actionButton(
   document: Document,
   action: HostNavigationCollectionAction,
-  returnFocus: HTMLElement,
+  returnFocus: HTMLElement | undefined,
   menuItem: boolean,
-): HTMLButtonElement {
+  owner: MountOwner,
+  beforeInvoke?: () => void,
+): Readonly<{ button: HTMLButtonElement; dispose: () => void }> {
   const button = document.createElement('button')
   button.type = 'button'
   button.className = menuItem ? 'cordisx-navigation-menu-item' : 'cordisx-navigation-direct-action'
@@ -153,12 +205,14 @@ function actionButton(
     button.append(label)
     button.setAttribute('role', 'menuitem')
   }
-  button.addEventListener('click', event => {
+  const onClick = (event: MouseEvent): void => {
     event.preventDefault()
     event.stopPropagation()
-    void invoke(document, action, returnFocus)
-  })
-  return button
+    beforeInvoke?.()
+    void invoke(document, action, returnFocus ?? button, owner)
+  }
+  button.addEventListener('click', onClick)
+  return { button, dispose: () => button.removeEventListener('click', onClick) }
 }
 
 export function mountNavigationCollectionActions(
@@ -166,86 +220,95 @@ export function mountNavigationCollectionActions(
   container: HTMLElement,
   actions: readonly HostNavigationCollectionAction[],
 ): () => void {
+  const owner: MountOwner = { active: true, cleanups: new Set() }
   const direct = actions.filter(action => action.placement === 'direct')
   const overflow = actions.filter(action => action.placement === 'overflow')
-  const disposers: (() => void)[] = []
-  for (const action of direct) container.append(actionButton(document, action, container, false))
-  if (overflow.length === 0) return () => { container.replaceChildren() }
+  for (const action of direct) {
+    const mounted = actionButton(document, action, undefined, false, owner)
+    own(owner, mounted.dispose)
+    container.append(mounted.button)
+  }
 
-  const copy = hostCopy(document)
-  const trigger = document.createElement('button')
-  trigger.type = 'button'
-  trigger.className = 'cordisx-navigation-more-action'
-  trigger.setAttribute('aria-label', copy.more)
-  trigger.setAttribute('aria-haspopup', 'menu')
-  trigger.setAttribute('aria-expanded', 'false')
-  trigger.append(createHostSurfaceIcon(document, 'host:more'))
-  container.append(trigger)
-  let menu: HTMLElement | undefined
-
-  const close = (restoreFocus = true): void => {
-    if (menu === undefined) return
-    menu.remove()
-    menu = undefined
+  if (overflow.length > 0) {
+    const copy = hostCopy(document)
+    const trigger = document.createElement('button')
+    trigger.type = 'button'
+    trigger.className = 'cordisx-navigation-more-action'
+    trigger.setAttribute('aria-label', copy.more)
+    trigger.setAttribute('aria-haspopup', 'menu')
     trigger.setAttribute('aria-expanded', 'false')
-    document.removeEventListener('pointerdown', onOutside, true)
-    document.removeEventListener('keydown', onDocumentKey, true)
-    if (restoreFocus && trigger.isConnected) trigger.focus()
-  }
-  const onOutside = (event: PointerEvent): void => {
-    const path = event.composedPath()
-    if (menu !== undefined && !path.includes(menu) && !path.includes(trigger)) close(false)
-  }
-  const onDocumentKey = (event: KeyboardEvent): void => {
-    if (menu === undefined) return
-    if (event.key === 'Escape') {
+    trigger.append(createHostSurfaceIcon(document, 'host:more'))
+    container.append(trigger)
+    let menu: HTMLElement | undefined
+    let menuDisposers: (() => void)[] = []
+
+    const close = (restoreFocus = true): void => {
+      if (menu === undefined) return
+      for (const dispose of menuDisposers.splice(0)) dispose()
+      menu.remove()
+      menu = undefined
+      trigger.setAttribute('aria-expanded', 'false')
+      document.removeEventListener('pointerdown', onOutside, true)
+      document.removeEventListener('keydown', onDocumentKey, true)
+      if (restoreFocus && owner.active && trigger.isConnected) trigger.focus()
+    }
+    const onOutside = (event: PointerEvent): void => {
+      const path = event.composedPath()
+      if (menu !== undefined && !path.includes(menu) && !path.includes(trigger)) close(false)
+    }
+    const onDocumentKey = (event: KeyboardEvent): void => {
+      if (menu === undefined) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        close()
+        return
+      }
+      const items = focusable(menu)
+      const current = items.indexOf(document.activeElement as HTMLButtonElement)
+      let next: number | undefined
+      if (event.key === 'ArrowDown') next = current < 0 || current === items.length - 1 ? 0 : current + 1
+      else if (event.key === 'ArrowUp') next = current <= 0 ? items.length - 1 : current - 1
+      else if (event.key === 'Home') next = 0
+      else if (event.key === 'End') next = items.length - 1
+      if (next !== undefined) {
+        event.preventDefault()
+        items[next]?.focus()
+      }
+    }
+    const open = (): void => {
+      if (!owner.active || menu !== undefined) return
+      menu = document.createElement('div')
+      menu.className = 'cordisx-navigation-menu'
+      menu.setAttribute('role', 'menu')
+      for (const action of overflow) {
+        const mounted = actionButton(document, action, trigger, true, owner, () => close())
+        menuDisposers.push(mounted.dispose)
+        menu.append(mounted.button)
+      }
+      document.body.append(menu)
+      const rect = trigger.getBoundingClientRect()
+      const menuRect = menu.getBoundingClientRect()
+      const view = document.defaultView!
+      menu.style.left = `${Math.max(8, Math.min(rect.right - menuRect.width, view.innerWidth - menuRect.width - 8))}px`
+      menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, view.innerHeight - menuRect.height - 8))}px`
+      trigger.setAttribute('aria-expanded', 'true')
+      document.addEventListener('pointerdown', onOutside, true)
+      document.addEventListener('keydown', onDocumentKey, true)
+      focusable(menu)[0]?.focus()
+    }
+    const onTrigger = (event: MouseEvent): void => {
       event.preventDefault()
-      close()
-      return
+      event.stopPropagation()
+      if (menu === undefined) open()
+      else close()
     }
-    const items = focusable(menu)
-    const current = items.indexOf(document.activeElement as HTMLButtonElement)
-    let next: number | undefined
-    if (event.key === 'ArrowDown') next = current < 0 || current === items.length - 1 ? 0 : current + 1
-    else if (event.key === 'ArrowUp') next = current <= 0 ? items.length - 1 : current - 1
-    else if (event.key === 'Home') next = 0
-    else if (event.key === 'End') next = items.length - 1
-    if (next !== undefined) {
-      event.preventDefault()
-      items[next]?.focus()
-    }
+    trigger.addEventListener('click', onTrigger)
+    own(owner, () => trigger.removeEventListener('click', onTrigger))
+    own(owner, () => close(false))
   }
-  const open = (): void => {
-    if (menu !== undefined) return
-    menu = document.createElement('div')
-    menu.className = 'cordisx-navigation-menu'
-    menu.setAttribute('role', 'menu')
-    for (const action of overflow) {
-      const button = actionButton(document, action, trigger, true)
-      button.addEventListener('click', () => close(), { once: true })
-      menu.append(button)
-    }
-    document.body.append(menu)
-    const rect = trigger.getBoundingClientRect()
-    const menuRect = menu.getBoundingClientRect()
-    const view = document.defaultView!
-    menu.style.left = `${Math.max(8, Math.min(rect.right - menuRect.width, view.innerWidth - menuRect.width - 8))}px`
-    menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, view.innerHeight - menuRect.height - 8))}px`
-    trigger.setAttribute('aria-expanded', 'true')
-    document.addEventListener('pointerdown', onOutside, true)
-    document.addEventListener('keydown', onDocumentKey, true)
-    focusable(menu)[0]?.focus()
-  }
-  const onTrigger = (event: MouseEvent): void => {
-    event.preventDefault()
-    event.stopPropagation()
-    if (menu === undefined) open()
-    else close()
-  }
-  trigger.addEventListener('click', onTrigger)
-  disposers.push(() => trigger.removeEventListener('click', onTrigger), () => close(false))
+
   return () => {
-    for (const dispose of disposers) dispose()
+    disposeOwner(owner)
     container.replaceChildren()
   }
 }

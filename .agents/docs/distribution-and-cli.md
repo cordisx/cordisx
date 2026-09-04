@@ -144,6 +144,21 @@ boundary:
 platform keychains, device identity, and other operating-system services may
 still be shared unless a future adapter can project them explicitly.
 
+### Development-only CDP injection timeout
+
+Normal renderer injection uses a 60-second timeout. Development and real
+showcase capture bundles can be substantially larger than release bundles and
+may opt into a longer process-local timeout with
+`CORDISX_CDP_INJECTION_TIMEOUT_MS`. The value is milliseconds and must be an
+integer from 5,000 through 600,000. Invalid values fail before injection rather
+than silently changing launcher behavior.
+
+Do not persist this override in the CordisX Home configuration and do not raise
+the product default to accommodate a capture. The homepage capture workflow
+uses `300000`; see
+[`showcase-capture-integration.md`](showcase-capture-integration.md) for the
+ownership and verification boundary.
+
 Version-1 configurations containing `"dataMode": "isolated"` remain accepted
 as a non-destructive alias for `host-isolated`. CordisX does not rewrite that
 file merely by reading it; later profile writes use the explicit spelling.

@@ -4,6 +4,7 @@ import {
   type CordisXExtensionPointControlMode,
   type CordisXHostExtensionPointControlCatalogV1,
   type CordisXLocalizedText,
+  type CordisXNavigationAction,
   type CordisXNavigationCollectionAction,
   type CordisXNavigationCollectionLeadingVisual,
   type CordisXReasoningIntensityPresentation,
@@ -1800,7 +1801,15 @@ class StructuredSurfaceRenderer {
     const collectionGroupIds = new Set(groups.map(group => group.surfaceGroup))
     const renderRows = (items: readonly SurfaceContributionSnapshot[], parent: HTMLElement): void => {
       for (const snapshot of items) {
-        const item = snapshot.item as { label: CordisXLocalizedText; description?: CordisXLocalizedText; icon?: string; command?: { id: string; arguments?: never }; route?: CordisXRouteReference; actions?: readonly CordisXNavigationCollectionAction[] }
+        const item = snapshot.item as {
+          label: CordisXLocalizedText
+          description?: CordisXLocalizedText
+          icon?: string
+          command?: { id: string; arguments?: never }
+          route?: CordisXRouteReference
+          collectionContract?: 'cordisx.navigation-collection/v2'
+          actions?: readonly (CordisXNavigationAction | CordisXNavigationCollectionAction)[]
+        }
         const label = this.text(snapshot, item.label, 'label', sites)
         const description = item.description === undefined ? undefined : this.text(snapshot, item.description, 'description', sites)
         const leadingVisual = this.slots.navigationCollectionLeadingVisual(snapshot.qualifiedId)
@@ -1840,53 +1849,59 @@ class StructuredSurfaceRenderer {
           project()
         }
         const actions = control.actions
-        const actionViews = (item.actions ?? []).map((action, index): HostNavigationCollectionAction => {
-          const path = `actions.${index}`
-          const command = action.kind !== 'command' ? undefined : this.commands.snapshot().find(candidate => (
-            candidate.qualifiedId === (action.command.id.includes(':') ? action.command.id : `${snapshot.owner}:${action.command.id}`)
-          ))
-          const disabledReason = action.disabled.reason === undefined
-            ? undefined
-            : this.text(snapshot, action.disabled.reason as CordisXLocalizedText, `${path}.disabled.reason`, sites)
-          const confirmation = action.kind !== 'command' || action.confirmation === undefined
-            ? undefined
-            : {
-                title: this.text(snapshot, action.confirmation.title as CordisXLocalizedText, `${path}.confirmation.title`, sites),
-                description: this.text(snapshot, action.confirmation.description as CordisXLocalizedText, `${path}.confirmation.description`, sites),
-                confirmLabel: this.text(snapshot, action.confirmation.confirmLabel as CordisXLocalizedText, `${path}.confirmation.confirmLabel`, sites),
-              }
-          return {
-            id: action.id,
-            label: this.text(snapshot, action.label as CordisXLocalizedText, `${path}.label`, sites),
-            ariaLabel: this.text(snapshot, (action.ariaLabel ?? action.label) as CordisXLocalizedText, `${path}.ariaLabel`, sites),
-            ...(action.icon === undefined ? {} : { icon: action.icon }),
-            placement: action.placement,
-            tone: action.tone,
-            pressed: action.pressed,
-            disabled: snapshot.disabled || action.disabled.value || (command?.running ?? 0) > 0,
-            ...(disabledReason === undefined ? {} : { disabledReason }),
-            success: this.text(snapshot, action.feedback.success as CordisXLocalizedText, `${path}.feedback.success`, sites),
-            failure: this.text(snapshot, action.feedback.failure as CordisXLocalizedText, `${path}.feedback.failure`, sites),
-            ...(confirmation === undefined ? {} : { confirmation }),
-            invoke: async () => {
-              if (action.kind === 'command') {
-                await this.commands.executeFor(snapshot.owner, action.command, `nav-action:${snapshot.qualifiedId}:${action.id}`, {
-                  pointId: snapshot.surface,
-                  contributionId: snapshot.qualifiedId,
-                })
-                return
-              }
-              const value = action.kind === 'copy-route-link'
-                ? this.routes.deepLinkFor(snapshot.owner, item.route!)
-                : action.text.value
-              const clipboard = this.document.defaultView?.navigator.clipboard
-              if (clipboard === undefined) throw new Error('clipboard is unavailable')
-              await clipboard.writeText(value)
-            },
+        if (item.collectionContract !== 'cordisx.navigation-collection/v2') {
+          for (const [index, action] of ((item.actions as readonly CordisXNavigationAction[] | undefined) ?? []).entries()) {
+            actions.append(this.button(snapshot, action, `actions.${index}`, sites, 'shortcut'))
           }
-        })
-        if (actionViews.length > 0) {
-          this.navigationActionDisposers.push(mountNavigationCollectionActions(this.document, actions, actionViews))
+        } else {
+          const actionViews = ((item.actions as readonly CordisXNavigationCollectionAction[] | undefined) ?? []).map((action, index): HostNavigationCollectionAction => {
+            const path = `actions.${index}`
+            const command = action.kind !== 'command' ? undefined : this.commands.snapshot().find(candidate => (
+              candidate.qualifiedId === (action.command.id.includes(':') ? action.command.id : `${snapshot.owner}:${action.command.id}`)
+            ))
+            const disabledReason = action.disabled.reason === undefined
+              ? undefined
+              : this.text(snapshot, action.disabled.reason as CordisXLocalizedText, `${path}.disabled.reason`, sites)
+            const confirmation = action.kind !== 'command' || action.confirmation === undefined
+              ? undefined
+              : {
+                  title: this.text(snapshot, action.confirmation.title as CordisXLocalizedText, `${path}.confirmation.title`, sites),
+                  description: this.text(snapshot, action.confirmation.description as CordisXLocalizedText, `${path}.confirmation.description`, sites),
+                  confirmLabel: this.text(snapshot, action.confirmation.confirmLabel as CordisXLocalizedText, `${path}.confirmation.confirmLabel`, sites),
+                }
+            return {
+              id: action.id,
+              label: this.text(snapshot, action.label as CordisXLocalizedText, `${path}.label`, sites),
+              ariaLabel: this.text(snapshot, (action.ariaLabel ?? action.label) as CordisXLocalizedText, `${path}.ariaLabel`, sites),
+              ...(action.icon === undefined ? {} : { icon: action.icon }),
+              placement: action.placement,
+              tone: action.tone,
+              pressed: action.pressed,
+              disabled: snapshot.disabled || action.disabled.value || (command?.running ?? 0) > 0,
+              ...(disabledReason === undefined ? {} : { disabledReason }),
+              success: this.text(snapshot, action.feedback.success as CordisXLocalizedText, `${path}.feedback.success`, sites),
+              failure: this.text(snapshot, action.feedback.failure as CordisXLocalizedText, `${path}.feedback.failure`, sites),
+              ...(confirmation === undefined ? {} : { confirmation }),
+              invoke: async () => {
+                if (action.kind === 'command') {
+                  await this.commands.executeFor(snapshot.owner, action.command, `nav-action:${snapshot.qualifiedId}:${action.id}`, {
+                    pointId: snapshot.surface,
+                    contributionId: snapshot.qualifiedId,
+                  })
+                  return
+                }
+                const value = action.kind === 'copy-route-link'
+                  ? this.routes.deepLinkFor(snapshot.owner, item.route!)
+                  : action.text.value
+                const clipboard = this.document.defaultView?.navigator.clipboard
+                if (clipboard === undefined) throw new Error('clipboard is unavailable')
+                await clipboard.writeText(value)
+              },
+            }
+          })
+          if (actionViews.length > 0) {
+            this.navigationActionDisposers.push(mountNavigationCollectionActions(this.document, actions, actionViews))
+          }
         }
         parent.append(row)
       }

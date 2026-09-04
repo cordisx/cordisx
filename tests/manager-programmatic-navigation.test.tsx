@@ -94,11 +94,11 @@ describe('programmatic Manager identity detail navigation', () => {
       expect(dom.window.document.querySelector('[data-manager-route="entity-overview"]')).not.toBeNull()
 
       await act(async () => {
-        dom.window.document.querySelector<HTMLButtonElement>('.cxr-header [aria-label="返回"]')!.click()
+        dom.window.document.querySelector<HTMLButtonElement>('.cxr-header [aria-label="Back"]')!.click()
         await Promise.resolve()
       })
       expect(dom.window.document.querySelector('[data-manager-route="team"]')).not.toBeNull()
-      await act(async () => dom.window.document.querySelector<HTMLButtonElement>('.cxr-header [aria-label="关闭"]')!.click())
+      await act(async () => dom.window.document.querySelector<HTMLButtonElement>('.cxr-header [aria-label="Close CordisX Manager"]')!.click())
       expect(dom.window.document.querySelector('[data-cordisx-manager-modal="true"]')).toBeNull()
       expect(closeManagerContent).toHaveBeenCalled()
     } finally {

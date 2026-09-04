@@ -98,7 +98,7 @@ describe('settings navigation demo bundle', () => {
     expect(page.closest('.cxr-content')).not.toBeNull()
     // A first-level Manager navigation entry owns the direct Host header: it
     // has its own icon and title, without a history Back control or breadcrumb.
-    expect(dom.window.document.querySelector('.cxr-header-seat button[aria-label="返回"]')).toBeNull()
+    expect(dom.window.document.querySelector('.cxr-header-seat button[aria-label="Back"]')).toBeNull()
     expect(dom.window.document.querySelector('.cxr-header-seat [data-host-icon="host:settings"]')).not.toBeNull()
     expect(dom.window.document.querySelector('.cxr-heading .cxr-breadcrumbs')).toBeNull()
     expect(dom.window.document.querySelector('.cxr-heading p')).toBeNull()
@@ -149,7 +149,7 @@ describe('settings navigation demo bundle', () => {
     item()!.click()
     await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-demo-content]') !== null)
     const priorGeneration = runtime.snapshot().extensionPoints.accessDiagnostics.at(-1)!.request.generation
-    dom.window.document.querySelector<HTMLButtonElement>('.cxr-header button[aria-label="关闭"]')!.click()
+    dom.window.document.querySelector<HTMLButtonElement>('.cxr-header button[aria-label="关闭 CordisX 管理器"]')!.click()
     await waitFor(() => dom.window.document.querySelector('[data-settings-navigation-demo-content]') === null)
     dom.window.eval(bundle)
     await waitFor(() => (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime !== runtime)

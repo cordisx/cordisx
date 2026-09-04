@@ -67,11 +67,13 @@ import type { IconThemePreferencePersistenceContext } from '../launcher/icon-the
 import { PluginActivationStore } from '../launcher/plugin-activation.js'
 import { loadActivatedPluginComposition, loadPluginComposition } from '../launcher/plugin-composition.js'
 import { PluginLifecycleCoordinator } from '../launcher/plugin-lifecycle.js'
+import { PluginBundleCoordinator } from '../launcher/plugin-bundle.js'
 import type { PluginLifecycleBridgeHandler } from '../launcher/plugin-lifecycle-rpc.js'
 import {
   CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
   type CordisXPluginActivationRecordV1,
 } from '../plugin-lifecycle-contracts.js'
+import type { CordisXPluginBundleManagerSnapshotV1 } from '../plugin-bundle-contracts.js'
 import type { RollbackPlan } from '../launcher/packages/authority.js'
 import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
 import { EntityDirectoryAuthority } from '../launcher/entity-directory.js'
@@ -200,6 +202,7 @@ export async function buildRendererComposition(
       readonly activation: CordisXPluginActivationRecordV1
       readonly registryEpoch?: number
     }
+    readonly pluginBundles?: CordisXPluginBundleManagerSnapshotV1
     readonly certifiedPermissionChannelToken?: string
     readonly pluginActivation?: CordisXPluginActivationRecordV1
     readonly initialRegistryEpoch?: number
@@ -248,6 +251,7 @@ export async function buildRendererComposition(
         }),
     generation,
     ...(options.pluginLifecycle === undefined ? {} : { pluginLifecycleBridgeToken: options.pluginLifecycle.token }),
+    ...(options.pluginBundles === undefined ? {} : { pluginBundleSnapshot: options.pluginBundles }),
     ...((options.pluginActivation ?? options.pluginLifecycle?.activation) === undefined
       ? {}
       : { pluginActivation: options.pluginActivation ?? options.pluginLifecycle!.activation }),
@@ -886,12 +890,20 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     })
   }
   const pluginLifecycleBridgeToken = randomBytes(32).toString('hex')
+  const pluginBundleCoordinator = new PluginBundleCoordinator({
+    homeDir: rootFromConfigPath(configPath),
+    profileId: selection.profileId,
+    runtimeGeneration: lifecycleGeneration,
+    pluginLifecycle: pluginLifecycleCoordinator,
+  })
+  pluginLifecycleCoordinator.setBundleClaimGuard(async pluginId => await pluginBundleCoordinator.bundleClaims(pluginId))
   const pluginLifecycle = {
     handler: {
       token: pluginLifecycleBridgeToken,
       profileId: selection.profileId,
       generation: lifecycleGeneration,
       coordinator: pluginLifecycleCoordinator,
+      bundleCoordinator: pluginBundleCoordinator,
     },
     runtime: lifecycleRuntime,
   }
@@ -911,6 +923,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       activation: initialActivation ?? await lifecycleStore.loadActive(),
       ...(recoveryPlan === undefined ? {} : { registryEpoch: recoveryPlan.rollbackRegistryEpoch }),
     },
+    pluginBundles: await pluginBundleCoordinator.snapshot(),
     ...(certifiedPermissionChannelToken === undefined ? {} : { certifiedPermissionChannelToken }),
     ...(channelManager === undefined ? {} : { channelManager }),
     ...(channelCredentialBridgeToken === undefined ? {} : { channelCredentialBridgeToken }),
