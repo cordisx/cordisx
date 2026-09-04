@@ -279,17 +279,6 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-manager-collection-copy span { color: var(--cx-muted,#9ca5b5); font-size: 11px; }
   .cxr-manager-collection-visual { position: relative; display: grid; width: 34px; height: 34px; flex: none; place-items: center; color: var(--cx-muted,#9ca5b5); }
   .cxr-manager-collection-visual > :is(.cordisx-host-icon,.cxm-host-icon) { width: 20px; height: 20px; }
-  .cxr-manager-collection-visual .cxa-avatar { display: grid; width: 32px; height: 32px; overflow: hidden; place-items: center; border: 1px solid var(--cx-border,#353a42); border-radius: 50%; background: var(--cx-hover,rgba(255,255,255,.08)); color: var(--cx-text,#edf0f4); font: 700 9px/1 system-ui,sans-serif; }
-  .cxr-manager-collection-visual .cxa-avatar-initials, .cxr-manager-collection-visual .cxa-avatar-renderer, .cxr-manager-collection-visual .oneworks-avatar, .cxr-manager-collection-visual .oneworks-avatar svg, .cxr-manager-collection-visual .oneworks-avatar canvas { display: grid; width: 100%; height: 100%; place-items: center; }
-  .cxr-manager-collection-avatar-stack > [data-avatar-slot] { position: absolute; display: grid; width: 22px; height: 22px; place-items: center; }
-  .cxr-manager-collection-avatar-stack > [data-avatar-slot="0"] { top: 0; left: 0; z-index: 3; }
-  .cxr-manager-collection-avatar-stack > [data-avatar-slot="1"] { top: 0; right: 0; z-index: 2; }
-  .cxr-manager-collection-avatar-stack > [data-avatar-slot="2"] { bottom: 0; left: 6px; z-index: 1; }
-  .cxr-manager-collection-avatar-stack[data-count="1"] > [data-avatar-slot="0"] { top: 6px; left: 6px; }
-  .cxr-manager-collection-avatar-stack[data-count="2"] > [data-avatar-slot="0"] { top: 6px; }
-  .cxr-manager-collection-avatar-stack[data-count="2"] > [data-avatar-slot="1"] { top: 6px; }
-  .cxr-manager-collection-avatar-stack > [data-avatar-slot] .cxa-avatar { width: 22px; height: 22px; border: 2px solid var(--cx-surface-raised,#20242b); font-size: 6px; }
-  .cxr-manager-collection-avatar-overflow { position: absolute; right: -2px; bottom: -2px; z-index: 4; display: grid; min-width: 18px; height: 18px; place-items: center; border: 2px solid var(--cx-surface-raised,#20242b); border-radius: 999px; padding: 0 2px; background: var(--cx-hover,#343942); color: var(--cx-text,#edf0f4); font-size: 7px; font-weight: 700; }
   .cxr-manager-collection-actions { display: flex; align-items: center; gap: 3px; padding-right: 8px; }
   .cxr-manager-collection-action[data-tone="danger"] { color: var(--cx-danger,#ff6b72); }
   .cxr-manager-collection-overflow { position: relative; display: inline-flex; }

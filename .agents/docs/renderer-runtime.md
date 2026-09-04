@@ -33,108 +33,39 @@ rollback restores last-good visibility, and render errors are contained to an
 empty decorative seat. The complete runtime boundary is specified in
 [`plugin-visuals.md`](plugin-visuals.md).
 
-### Conversation shell
+### Product-owned pages and admission
 
-The production Agent conversation shell is a separate Host-owned renderer
-kernel under `renderer/host-ui/conversation`. Its immutable render model is a
-private, already-localized projection: it contains only bounded room,
-participant, entry, status, action and composer data. The renderer owns the
-single top chrome, the only timeline scroll container, message grouping,
-exact participant AvatarRef rendering, conditional Host-generated initials,
-status announcement, ephemeral draft, fixed composer geometry, focus and
-responsive behavior. An explicit participant AvatarRef is rendered on every
-incoming Agent message. The legacy `host-initials` presentation controls only
-descriptor-less initials in a multi-participant projection. Identity actions
-remain gated by an exact AgentDefinition identity presentation rather than a
-display-name guess.
+Product pages own their complete internal renderer. In particular, Chatroom
+owns its title, messages, member panel, composer, identity interactions,
+avatar mapping, vendor renderer, styles, caches, and fallbacks. CordisX does
+not inject an Agent Conversation Shell and does not render Agent avatars.
+Products consume the public Agent, Session, approval, command, page, route,
+localization, and navigation services directly.
 
-The associated command controller preserves the exact owner id,
-`agent-desktop` shell, binding id, owner generation, separate snapshot
-generation, and a Host-private snapshot-sequence freshness fence. It creates
-scope-discriminated Host command contexts; only message scope carries canonical
-`itemId`, while composer submit
-carries a bounded primitive string. Before execution, the complete request and
-all nested binding, reference, command arguments and context data are cloned
-and deeply frozen, so caller mutation cannot change the observed command. The
-`new-room` selection discriminator directly contains exactly one enabled
-`newRoomAction`; its projection contains
-no timeline and forbids the separate header-action list. Models contain no callback,
-DOM, CSS, media URL, Connector handle or renderer component.
+A page with `chrome: "body-only"` may mount in the generic `main` outlet. The
+plugin then owns all page-internal chrome and the Host supplies only the outlet,
+abort/dispose ordering, accessible page label, focus boundary, and navigation
+lifecycle. This is a generic page policy; the Host has no Chatroom marker or
+conversation-specific exception.
 
-The production adapter preserves the formal v1 compatibility path and consumes
-the exact formal `@cordisx/protocol/agent-conversation-shell/v2` export for
-Agent identity, active runs, presence, acknowledgement sources and reactions. A plugin injects
-`agentConversationShell`, calls `registerSource(factory)`, and gives the
-returned Host-owned `mount` to its normal `pages.register` declaration. The
-Host invokes the factory only after it has issued an immutable binding for the
-current page route; the plugin then supplies only the formal
-`snapshot/subscribe/dispose` source. The adapter validates and clones the
-complete snapshot, exact binding and generation, accepted subscription
-descriptor, replay watermark, serialized cursor, monotonic updates and
-terminal disposal before projecting any data. Registration, page unmount,
-generation replacement and terminal source updates all release the runtime
-handle and source.
+The Agent/Session runtime retains three disjoint Host-owned admission authorities
+for plugin product pages. A Room with an existing Session-backed target uses
+the v3 target-origin path. A Room whose member has no Session-backed target
+uses the v5 Room-target path, whose clone-safe receipt remains bound to the
+same live owner and cannot cross a route or generation replacement. A newly
+created Room that navigates after submission uses the v6 route-declaration
+path and transfers its exact captured Session/message authority into the
+matching same-owner route. Each capability binds the complete
+`PluginOwnerIdentity`, command, connection, execution, Room and target;
+reservations and route claims remain one-shot and fail closed on substitution,
+replacement, revocation, or disposal. These are generic public services and do
+not require a Host-owned conversation renderer.
 
-For Session-compatible Shell v4 identity actions, the same Host Agent/Session
-authority resolves each accepted or recovered `AgentSetup` catalog with the
-established AgentDefinition inheritance, prompt, and avatar rules, then retains
-the complete exact effective catalog on the owned Session and its current Agent
-generation. Shell identity resolution consults this authority alongside the
-byte-preserved AgentLoop v4 catalog, so recovered member and message-avatar
-actions still open the exact identity detail and Recent tasks retains its agent
-label. Owner, Session, connection, or Agent generation replacement removes the
-stale live presentation; unresolved identities continue to use the members
-search fallback. Active Session navigation consumes only the Host-issued
-`AgentDetailReference` carried by the Shell v4 run.
-
-Conversation commands remain normal owner commands registered through
-`ctx.commands`. The Host verifies the renderer freshness fence and injects the
-formal, deeply frozen `AgentConversationShellCommandContext` as
-`CordisXCommandContext.hostContext`; plugins never create that context. This
-data-provider service does not add a manifest permission capability: its
-Cordis injection name is `agentConversationShell`. The UI Playground may
-construct a package-local, debug-only private projection and mount this
-production renderer; production renderer and adapter modules never import
-Playground fixtures or selectors.
-
-Shell v9 extends that command boundary with three disjoint Host-owned
-admission paths. A mounted Room with an exact Session-backed active run receives
-the normal immutable v1 `AgentCommandOrigin`; the plugin uses v3 to issue one
-opaque target capability per known delivery, reserve its exact Agent handle, and
-capture before private driver submission. A mounted Room with no such known
-Session-backed target receives a bootstrap origin, but may use v5 only to
-declare `{roomId, participantId, memberId, runId}` through
-`agentAdmissionBootstrapRoomTargets.issue`. The clone-safe v5 receipt is
-retained with the same live binding and its paired reservation captures the
-newly acquired exact Agent handle before driver submission; it cannot transfer
-across a route or binding replacement. A fresh/no-Room composer, whose handler
-creates a Room and then navigates to it, uses v6 only: the plugin declares each
-exact `{roomId, participantId, memberId, runId, route:{routeId, param:'roomId',
-roomId}}` through `agentAdmissionBootstrapRouteDeclarations.declare`. The Host
-returns one opaque continuation per declaration; an accepted submission records
-the exact `{sessionId, messageId}` under it. When the matching same-owner Room
-route obtains its new Host binding, the Host-only claim atomically moves—not
-copies—that source capture to the new binding before navigation resolves or
-deferred scenario work can run. Every path binds the full
-`PluginOwnerIdentity`, command, binding, connection, execution, Room and exact
-target; a plugin-id match alone never spans generations. The old binding is
-never retained as live authority. Capabilities, receipts, reservations and
-claims are one-shot and fail closed on command completion, target/Room/owner
-substitution, unmatched route activation, binding/generation/connection
-replacement, revocation, or disposal. The frozen Shell v8 target-origin path
-is unchanged and has no bootstrap fallback.
-
-The renderer also owns one fixed-height Room header and one reusable
-`HostConversationRightInspector`. The header projects the Room title and
-description, members/settings/more actions, and a raw composite of the exact
-ordered participant AvatarRefs; it does not infer membership from names or
-decorate the composite with another badge surface. Members, settings, more,
-and Agent identity content all share the same inspector. At sufficient
-container width it is a split pane which compresses the conversation; below
-the container breakpoint it is a drawer with a scrim, focus trap, Escape and
-outside-close behavior, and exact focus return. Resize and snapshot
-replacement preserve the active inspector and focused control. Inspector state
-is local presentation state and does not add native-history entries.
+Product-specific composition is completed before a visual crosses into a
+Host-owned row. Navigation Collection v3 accepts only a generic validated PNG
+snapshot. The Host owns its fixed geometry, decorative accessibility, safe
+image-element construction, replacement, and generation cleanup; it never
+receives avatar, participant, Room, renderer, or vendor semantics.
 
 The public plugin surface follows DeepSeek Harness: plugins declare injected
 services and use `ctx.slots.inject/register` for structured shell data. Both
@@ -422,12 +353,13 @@ Conversation Shell Protocol.
 
 ### Outlet geometry
 
-Page-v2 `body-only` is a general structured chrome policy with a host outlet
-gate. The current adapter accepts it only for `session.content`, whose overlay
-begins below the retained native session header. The host does not create a
-CordisX header/title/close row in that mode; `app` and `main` reject it because
-they cover native chrome. No plugin can supply substitute header DOM, CSS, or a
-selector.
+Page-v2 `body-only` is a general structured chrome policy with a Host outlet
+gate. The current adapter accepts it for `session.content`,
+`manager.settings.content`, and `main`. In `main`, the product owns its full
+page-internal chrome while Host routing and the persistent sidebar retain the
+external navigation boundary. The Host does not create a CordisX
+header/title/close row in that mode; `app` and `manager.content` reject it. No
+plugin can supply Host selectors or mount outside its body seat.
 
 Route and page outlets remain independent overlays. `app` paints through the
 native title-bar and supplies its own draggable chrome with a macOS

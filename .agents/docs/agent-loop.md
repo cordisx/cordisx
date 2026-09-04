@@ -5,8 +5,8 @@
 The renderer Host implements an experimental, plugin-facing `ctx.agentLoop`
 service against the formal `@cordisx/protocol/agent-loop/v1` contract. The
 Protocol remains room-neutral and data-only. Chatroom owns its room data and
-structured state/commands; the Host owns the conversation UI, Agent task
-identity, provider routing, permission decisions, prompt projection, proactive
+structured state/commands and its complete conversation UI; the Host owns Agent
+task identity, provider routing, permission decisions, prompt projection, proactive
 event delivery, and cleanup.
 
 This slice targets the internal text path only. It does not add an external
@@ -131,28 +131,11 @@ Chatroom must not infer provider sessions from `binding.task`, move room,
 member, run-list, leader, recipient selection, mention, organization tree, or
 Channel scope into AgentLoop, or provide conversation DOM.
 
-## Host-owned Agent avatar rendering
+## Product-owned Agent avatar rendering
 
-Conversation participants may carry only the closed Protocol `AgentAvatarRef`
-union. The shell validates and clones it before it enters the immutable Host
-model. URL, path, `data:`, `blob:`, `file:`, and base64-shaped values are
-rejected at this boundary; no ref value is written into DOM attributes.
-
-The Host resolves generated refs into validated, deeply frozen deterministic
-OneWorks Avatar definitions and stores only those successful results in a
-256-entry LRU keyed by algorithm, version, canonical seed, and the generated
-ref's explicit no-revision sentinel (generated v1 has no revision field). Asset,
-definition, and platform refs are not cached; they remain opaque until the
-matching Host-owned broker exists and therefore render typed deterministic
-initials fallback. A missing ref, resolver failure, component exception, or
-renderer error uses the same fallback without changing the conversation model.
-
-The renderer is decorative (`aria-hidden` and inert) because the adjacent Host
-author label already provides the accessible identity. Server rendering and
-the first client render use initials; an effect reads the explicit projected
-Host light/dark theme before mounting the non-interactive, non-autoplay vendor
-renderer. The Host consumes the pinned vendor CSS text and injects its scoped
-Avatar rules once per document under a versioned style marker. Host layout uses
-Host tokens, and reduced-motion disables descendant animation and transition.
-Plugins do not supply components, raw assets, CSS, URLs, paths, or base64
-payloads.
+Agent definitions may carry the closed Protocol `AgentAvatarRef` union as
+product data, but CordisX does not resolve or render it. Chatroom owns its
+mapping, vendor dependency, definitions, cache, fallback, styles,
+accessibility, and page-internal rendering. When Chatroom contributes a visual
+to a Host-owned row, it first captures and composes the final image and sends
+only the bounded generic raster snapshot through Navigation Collection v3.

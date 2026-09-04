@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process'
-import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -179,32 +178,10 @@ try {
 
   const installedCordisXRoot = path.join(runnerDirectory, 'node_modules', 'cordisx')
   const installedCordisXManifest = JSON.parse(await readFile(path.join(installedCordisXRoot, 'package.json'), 'utf8'))
-  const avatarVersion = '1.0.0-rc.8'
-  if (installedCordisXManifest.dependencies?.['@oneworks/avatar'] !== avatarVersion
-    || installedCordisXManifest.dependencies?.['@oneworks/avatar-react'] !== avatarVersion) {
-    throw new Error('installed cordisx must pin both OneWorks Avatar packages to exact RC.8 versions')
+  if (installedCordisXManifest.dependencies?.['@oneworks/avatar'] !== undefined
+    || installedCordisXManifest.dependencies?.['@oneworks/avatar-react'] !== undefined) {
+    throw new Error('installed cordisx must not include product-owned avatar renderers')
   }
-  const installedLock = JSON.parse(await readFile(path.join(runnerDirectory, 'package-lock.json'), 'utf8'))
-  const avatarLock = installedLock.packages?.['node_modules/@oneworks/avatar']
-  const avatarReactLock = installedLock.packages?.['node_modules/@oneworks/avatar-react']
-  if (avatarLock?.version !== avatarVersion
-    || avatarLock?.integrity !== 'sha512-9vKWfiPUlEfVzcO+6Q2QsCmqlINZb2CpXjN4M/JO2+v0IwqsGIcWGaxW44lf3moSQj70lEmnF6F7bZofw7mcXQ==') {
-    throw new Error('installed OneWorks Avatar package version or integrity drifted')
-  }
-  if (avatarReactLock?.version !== avatarVersion
-    || avatarReactLock?.integrity !== 'sha512-fJ+p2LLG5tb3YV5QAAm/3gnkEFuCfMSR/WttpvMv8xNp64Ou6TB4Tz5QE6LqOwgT7q67qrBluZMwDfQUjX++aw=='
-    || avatarReactLock?.dependencies?.['@oneworks/avatar'] !== avatarVersion) {
-    throw new Error('installed OneWorks Avatar React package version, integrity, or singleton pin drifted')
-  }
-  const runnerRequire = createRequire(path.join(runnerDirectory, 'package.json'))
-  const avatarReactManifestPath = path.join(runnerDirectory, 'node_modules', '@oneworks', 'avatar-react', 'package.json')
-  const avatarReactRequire = createRequire(avatarReactManifestPath)
-  const [directAvatarEntry, avatarReactAvatarEntry] = await Promise.all([
-    realpath(runnerRequire.resolve('@oneworks/avatar')),
-    realpath(avatarReactRequire.resolve('@oneworks/avatar')),
-  ])
-  if (directAvatarEntry !== avatarReactAvatarEntry) throw new Error('installed OneWorks Avatar runtime is not a singleton')
-  await access(runnerRequire.resolve('@oneworks/avatar-react/style.css'))
 
   for (const packageName of ['cordisx', 'create-cordisx-plugin']) {
     const packageRoot = path.join(runnerDirectory, 'node_modules', packageName)
@@ -216,33 +193,6 @@ try {
     await access(path.join(packageRoot, 'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'))
   }
 
-  await writeFile(path.join(runnerDirectory, 'conversation-consumer.ts'), `
-import type { Context } from '@deepseek-ai/cordis'
-import type { AgentConversationShellSource } from '@cordisx/protocol/agent-conversation-shell/v3'
-import type { CordisXAgentConversationShellSourceFactoryV3 } from 'cordisx/contracts'
-
-declare const ctx: Context
-const factory: CordisXAgentConversationShellSourceFactoryV3 = (binding): AgentConversationShellSource => ({
-  snapshot: async () => ({
-    binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration }, generation: 'snapshot-1', snapshotSequence: 0, selection: { kind: 'no-room' }, items: [],
-    composer: { availability: 'available', placeholder: { key: 'placeholder', fallback: 'Message' }, disabled: { value: false }, submit: { id: 'create-with-message' } },
-    headerActions: [],
-  }),
-  subscribe: async () => ({ result: { type: 'subscribe', status: 'unavailable', code: 'owner-unavailable' } }),
-  updateRoomSettings: async request => ({
-    type: 'update-room-settings', requestId: request.requestId, binding: request.binding,
-    generation: request.generation, roomId: request.roomId,
-    expectedSnapshotSequence: request.expectedSnapshotSequence,
-    status: 'unavailable', code: 'settings-unavailable',
-  }),
-  dispose() {},
-})
-const registration = ctx.agentConversationShell.registerSource(factory)
-registration.mount satisfies Function
-ctx.commands.register({ id: 'create', title: { key: 'create', fallback: 'Create' } }, command => {
-  if (command.hostContext !== undefined && 'scope' in command.hostContext) command.hostContext.scope satisfies 'header' | 'message' | 'approval' | 'composer-submit'
-})
-`, 'utf8')
   await writeFile(path.join(runnerDirectory, 'connector-consumer.ts'), `
 import type {
   ConnectorEventSubscription,
@@ -270,7 +220,6 @@ import type { ApprovalService } from '@cordisx/protocol/approval/v1'
 import type { PluginRuntimeManifestV6 } from '@cordisx/protocol/plugin-manifest/v6'
 import type { SessionRegistry } from '@cordisx/protocol/sessions/v1'
 import type {
-  CordisXAgentConversationShellSourceFactoryV4,
   CordisXAgentSessionLegacyAcquireRequestV1,
   CordisXAgentSessionLegacyAcquireResultV1,
   CordisXPluginManifestV6,
@@ -278,7 +227,6 @@ import type {
 
 declare const ctx: Context
 declare const legacyRequest: CordisXAgentSessionLegacyAcquireRequestV1
-declare const shellFactory: CordisXAgentConversationShellSourceFactoryV4
 declare const protocolManifestV6: PluginRuntimeManifestV6
 declare const hostManifestV6: CordisXPluginManifestV6
 
@@ -286,9 +234,7 @@ ctx.agents satisfies AgentRegistry
 ctx.sessions satisfies SessionRegistry
 ctx.approvals satisfies ApprovalService
 const migrated: Promise<CordisXAgentSessionLegacyAcquireResultV1> = ctx.agents.acquireLegacyTaskBinding(legacyRequest)
-const registration = ctx.agentConversationShell.registerSourceV4(shellFactory)
 migrated satisfies Promise<CordisXAgentSessionLegacyAcquireResultV1>
-registration.mount satisfies Function
 protocolManifestV6 satisfies CordisXPluginManifestV6
 hostManifestV6 satisfies PluginRuntimeManifestV6
 `, 'utf8')
@@ -328,10 +274,10 @@ import type {
   CordisXOwnerDocumentLoadResultV1,
   CordisXOwnerDocumentReplaceResultV1,
   CordisXOwnerDocumentsV1,
-  CordisXNavigationCollectionSnapshot,
-  CordisXNavigationCollectionSource,
+  CordisXNavigationCollectionSnapshotV3,
+  CordisXNavigationCollectionSourceV3,
+  RasterImageSnapshotV1,
 } from 'cordisx/contracts'
-import { CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS } from 'cordisx/contracts'
 
 declare const ctx: Context
 declare const definition: AgentDefinition
@@ -344,25 +290,28 @@ declare const createCommands: readonly [
   Extract<AgentLoopCommand, { type: 'create-or-bind' }>,
   Extract<AgentLoopCommand, { type: 'create-or-bind' }>,
 ]
-declare const snapshot: CordisXNavigationCollectionSnapshot
-declare const source: CordisXNavigationCollectionSource
+declare const snapshot: CordisXNavigationCollectionSnapshotV3
+declare const source: CordisXNavigationCollectionSourceV3
 declare const avatar: AgentAvatarRef
 
-const roomLeadingVisual = {
-  kind: 'room-composite-avatar',
-  participants: [{ participantId: 'lead', avatar }],
+const raster = {
+  $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/raster-image-snapshot.v1.schema.json',
+  contract: 'cordisx.raster-image-snapshot/v1', schemaVersion: 1,
+  mediaType: 'image/png', encoding: 'base64', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==', width: 1, height: 1,
+} as const satisfies RasterImageSnapshotV1
+const leadingVisual = {
+  kind: 'image', image: raster,
 } satisfies CordisXNavigationCollectionLeadingVisual
-const projectedRooms = {
+const projectedItems = {
   revision: 1,
   items: [{
     id: 'room-one',
     label: { key: 'room.one', fallback: 'Room one' },
-    leadingVisual: roomLeadingVisual,
+    leadingVisual,
     route: { id: 'room', params: { roomId: 'room-one' } },
     order: 0,
   }],
-} satisfies CordisXNavigationCollectionSnapshot
-CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS satisfies 16
+} satisfies CordisXNavigationCollectionSnapshotV3
 
 ctx.agentLoop satisfies BoundAgentLoopClient
 ctx.documents satisfies CordisXOwnerDocumentsV1
@@ -464,9 +413,10 @@ async function persistRoomDelivery(): Promise<CordisXOwnerDocumentLoadResultV1 |
 }
 persistRoomDelivery satisfies () => Promise<CordisXOwnerDocumentLoadResultV1 | CordisXOwnerDocumentReplaceResultV1>
 snapshot.items.map(item => item.route.params?.roomId)
-roomLeadingVisual.participants.map(participant => participant.participantId)
-projectedRooms.items.map(item => item.leadingVisual.participants.length)
+leadingVisual.image.mediaType satisfies 'image/png'
+projectedItems.items.map(item => item.leadingVisual.image.width)
 ctx.slots.registerCollection({
+  contract: 'cordisx.navigation-collection/v3',
   name: 'sidebar.navigation.items',
   id: 'chatroom.rooms',
   group: { id: 'chatroom', label: { key: 'chatroom.rooms', fallback: 'Rooms' } },
@@ -477,7 +427,7 @@ ctx.slots.registerCollection({
       target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true,
       exactOptionalPropertyTypes: true, noEmit: true, skipLibCheck: false,
     },
-    include: ['conversation-consumer.ts', 'connector-consumer.ts', 'agent-session-consumer.ts', 'agent-loop-collection-consumer.ts'],
+    include: ['connector-consumer.ts', 'agent-session-consumer.ts', 'agent-loop-collection-consumer.ts'],
   }, null, 2)}\n`, 'utf8')
   const rootBin = name => path.join(repositoryRoot, 'node_modules', '.bin', process.platform === 'win32' ? `${name}.cmd` : name)
   await run(rootBin('tsc'), ['-p', 'tsconfig.json'], { cwd: runnerDirectory, env: process.env })
@@ -763,7 +713,7 @@ ctx.slots.registerCollection({
   await verifyGeneratedEmbedded(embeddedWorkspaceTarget, cordisxTarball, creatorManifest.version, ['alpha', 'beta'], true)
   await verifyGeneratedEmbedded(embeddedIsolatedTarget, cordisxTarball, creatorManifest.version, ['solo'], false)
 
-  console.log(`[cordisx] installed tarballs verified: licenses, exact singleton OneWorks Avatar RC.8 packages/style export, combined multi-binding AgentLoop, executable v4 create/send concurrent replay/approval/introduction/cancel/subscription, owner documents, and navigation collection${protocolTarball === undefined ? '' : ', exact local Protocol'}, durable outbox reload, local AgentLoop provider composition, conversation-shell and Connector consumer types, CLI, built-in README, both creator commands, standalone/workspace/embedded-isolated/embedded-workspace generated checks, Vite dev dry-run`)
+  console.log(`[cordisx] installed tarballs verified: licenses, no OneWorks Avatar runtime dependency, combined multi-binding AgentLoop, executable v4 create/send concurrent replay/approval/introduction/cancel/subscription, owner documents, and generic raster navigation collection${protocolTarball === undefined ? '' : ', exact local Protocol'}, durable outbox reload, local AgentLoop provider composition, Connector consumer types, CLI, built-in README, both creator commands, standalone/workspace/embedded-isolated/embedded-workspace generated checks, Vite dev dry-run`)
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }

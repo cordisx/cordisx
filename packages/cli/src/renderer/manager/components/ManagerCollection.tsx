@@ -1,9 +1,8 @@
-import type { ManagerCollectionAction, ManagerCollectionItem, ManagerCollectionLeadingVisual } from '@cordisx/protocol/manager-collection/v1'
+import type { ManagerCollectionAction, ManagerCollectionItem } from '@cordisx/protocol/manager-collection/v1'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
 import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
 import type { CordisXIconToken } from '../../../contracts.js'
-import { HostAgentAvatar } from '../../host-ui/conversation/AgentAvatar.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { HostSurfaceIcon } from '../../host-ui/HostSurfaceIcon.js'
 import {
@@ -24,19 +23,10 @@ function ActionIcon({ action }: { readonly action: ManagerCollectionAction }) {
   return <HostIcon token={action.tone === 'danger' ? 'delete' : 'more'} />
 }
 
-function LeadingVisual({ item, title }: { readonly item: ManagerCollectionItem; readonly title: string }) {
+function LeadingVisual({ item }: { readonly item: ManagerCollectionItem }) {
   const visual = item.leadingVisual
   if (visual.kind === 'semantic-icon') return <span className="cxr-manager-collection-visual" data-kind="semantic-icon"><HostSurfaceIcon token={visual.icon} /></span>
-  if (visual.kind === 'avatar') return <span className="cxr-manager-collection-visual" data-kind="avatar"><HostAgentAvatar participant={{ id: item.id, role: 'agent', name: title, avatar: visual.avatar }} /></span>
-  return <AvatarStack visual={visual} />
-}
-
-function AvatarStack({ visual }: { readonly visual: Extract<ManagerCollectionLeadingVisual, { kind: 'avatar-stack' }> }) {
-  const visible = visual.entries.slice(0, 3)
-  return <span className="cxr-manager-collection-visual cxr-manager-collection-avatar-stack" data-kind="avatar-stack" data-count={visual.entries.length}>
-    {visible.map((entry, index) => <span key={entry.id} data-avatar-slot={index}><HostAgentAvatar participant={{ id: entry.id, role: 'agent', name: entry.id, avatar: entry.avatar }} /></span>)}
-    {visual.entries.length > 3 ? <span className="cxr-manager-collection-avatar-overflow">+{visual.entries.length - 3}</span> : null}
-  </span>
+  return <span className="cxr-manager-collection-visual" data-kind="semantic-fallback"><HostSurfaceIcon token="host:chat" /></span>
 }
 
 function enabledMenuItems(root: HTMLElement | null): HTMLButtonElement[] {
@@ -107,7 +97,7 @@ function Row({ item, registry, busy, rememberTrigger }: { readonly item: Manager
   const disabledReason = item.disabled.reason === undefined ? undefined : registry.localized(item.disabled.reason, `item:${item.id}:disabled`)
   return <article className="cxr-manager-collection-row" role="listitem" data-manager-collection-item={item.id} data-disabled={item.disabled.value || undefined}>
     <button type="button" className="cxr-manager-collection-open" disabled={item.disabled.value} aria-label={title} aria-description={disabledReason ?? summary} onClick={() => void registry.open(item.id)}>
-      <LeadingVisual item={item} title={title} />
+      <LeadingVisual item={item} />
       <span className="cxr-manager-collection-copy"><strong>{title}</strong><span>{summary}</span></span>
     </button>
     {direct.length === 0 && overflow.length === 0 ? null : <span className="cxr-manager-collection-actions" onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>

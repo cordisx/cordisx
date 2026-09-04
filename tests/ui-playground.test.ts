@@ -244,8 +244,8 @@ describe('UI Playground', () => {
     expect(styles).toContain('.pg-sidebar .cxsi-primary { display: grid; width: 100%;')
     expect(styles).toContain('.pg-sidebar .cxsi-copy, .pg-sidebar .cxsi-actions')
     expect(seats).not.toContain('pg-workspace-toolbar')
-    expect(seats).toContain('AgentConversationRenderer')
-    expect(seats).toContain('debugFixture')
+    expect(seats).not.toContain('AgentConversationRenderer')
+    expect(seats).toContain('Product pages are supplied only by plugins')
     expect(seats).not.toContain('pg-session-header')
     expect(seats).not.toContain('pg-timeline')
     expect(seats).not.toContain('pg-composer')
@@ -264,10 +264,9 @@ describe('UI Playground', () => {
   })
 
   it('keeps review tasks in one Recent tasks section and excludes Playground fixtures', async () => {
-    const [app, seats, fixtureSource, styles, viteServer] = await Promise.all([
+    const [app, seats, styles, viteServer] = await Promise.all([
       readFile(path.resolve('packages/cli/src/playground/client/App.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/components/HostSeats.tsx'), 'utf8'),
-      readFile(path.resolve('packages/cli/src/playground/client/fixtures/agent-conversation.ts'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/styles.css'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/vite/server.ts'), 'utf8'),
     ])
@@ -290,9 +289,8 @@ describe('UI Playground', () => {
     expect(app).toContain("en ? 'Playground fixtures' : 'Playground 测试场景'")
     expect(app).not.toContain('pg-simulator-task-list')
     expect(app).toContain("fixture.reviewNavigationItem === undefined")
-    expect(seats).toContain("mode === 'review' ? null")
-    expect(fixtureSource).toContain("newRoomTitle: 'Empty conversation fixture'")
-    expect(fixtureSource).toContain("newRoomTitle: '空会话测试场景'")
+    expect(seats).toContain('Product pages are supplied only by plugins')
+    expect(seats).not.toContain('AgentConversationRenderer')
     expect(styles).not.toContain('插件导航贡献会显示在这里')
     expect(viteServer).toContain("url.pathname === '/api/documents'")
     expect(viteServer).toContain('session.handleOwnerDocumentRequest(await requestBody(request))')

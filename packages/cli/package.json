@@ -83,8 +83,6 @@
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
     "@larksuiteoapi/node-sdk": "^1.73.0",
-    "@oneworks/avatar": "1.0.0-rc.8",
-    "@oneworks/avatar-react": "1.0.0-rc.8",
     "@shikitor/core": "1.0.2",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
