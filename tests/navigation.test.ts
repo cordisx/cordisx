@@ -10,7 +10,7 @@ import { CommandRegistry } from '../packages/cli/src/renderer/commands.js'
 import { markAgentConversationPageMount } from '../packages/cli/src/renderer/agent-conversation-page.js'
 import type { CordisXI18nService, LocalizationEffectOwner } from '../packages/cli/src/renderer/i18n.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
-import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
+import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from '../packages/cli/src/renderer/ownership.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import {
   NavigationRegistry,
@@ -101,6 +101,74 @@ async function settle(): Promise<void> {
 }
 
 describe('NavigationRegistry', () => {
+  it('resolves Agent Session routes only through the exact source and generation owner coordinate', async () => {
+    const pluginId = 'org.cordisx.chatroom'
+    const moduleGeneration = 'chatroom-generation-one'
+    const activation: CordisXPluginActivationRecordV1 = {
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1,
+      recordKind: 'active',
+      profileId: 'playground',
+      revision: 1,
+      lastGoodRevision: 1,
+      runtimeGeneration: 'runtime-one',
+      plugins: [{
+        id: pluginId,
+        version: '1.0.0',
+        digest: `sha256:${'a'.repeat(64)}`,
+        moduleGeneration,
+        enabled: true,
+        dependencies: [],
+      }],
+    }
+    const visibility = new GenerationVisibilityCoordinator(activation)
+    const pages = new PageRegistry(visibility)
+    const outlets = new OutletRegistry()
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
+    const source = 'file:///plugins/chatroom-a/index.mjs'
+    const context = new Context().extend({
+      [CORDISX_PLUGIN_ID]: pluginId,
+      [CORDISX_PLUGIN_SOURCE]: source,
+      [CORDISX_PLUGIN_GENERATION]: moduleGeneration,
+    })
+    navigation.register(context, {
+      $schema: CORDISX_ROUTE_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'room-session-detail',
+      path: '/main/chatroom/:roomId/session/:sessionId',
+      outlet: 'main',
+      page: 'room',
+      title: { key: 'route.session.title', fallback: 'Open session' },
+      description: { key: 'route.session.description', fallback: 'Open the exact room session.' },
+    })
+
+    expect(navigation.agentRuntimeRoutesForOwner({ source, pluginId, moduleGeneration })).toEqual([{
+      id: 'room-session-detail',
+      path: '/main/chatroom/:roomId/session/:sessionId',
+      schemaVersion: 2,
+    }])
+    expect(navigation.agentRuntimeRoutesForOwner({
+      source: 'file:///plugins/chatroom-b/index.mjs', pluginId, moduleGeneration,
+    })).toEqual([])
+    expect(navigation.agentRuntimeRoutesForOwner({ source, pluginId, moduleGeneration: 'chatroom-generation-two' })).toEqual([])
+    expect(navigation.agentRuntimeRouteFromHistory({
+      schemaVersion: 1,
+      owner: pluginId,
+      routeId: `${pluginId}:room-session-detail`,
+      outlet: 'main',
+      path: '/main/chatroom/room-one/session/cx-session.reviewer',
+      params: { roomId: 'room-one', sessionId: 'cx-session.reviewer' },
+    })).toMatchObject({
+      owner: { source, pluginId, moduleGeneration },
+      id: 'room-session-detail',
+      schemaVersion: 2,
+    })
+
+    await navigation.dispose()
+    pages.dispose()
+    outlets.dispose()
+  })
+
   it('mounts Host-identified conversation pages in main with one dynamic chrome and one scroll owner', async () => {
     const dom = new JSDOM('<body><main id="main"></main><main id="app"></main></body>')
     const pages = new PageRegistry()
@@ -252,7 +320,10 @@ describe('NavigationRegistry', () => {
     }, new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer'), path => path === '/settings')
     const history = new TestCodexRouteHistory()
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), history)
-    const oldContext = new Context().extend({ [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_GENERATION]: 'demo-1' })
+    const source = 'file:///plugins/demo/index.mjs'
+    const oldContext = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_SOURCE]: source, [CORDISX_PLUGIN_GENERATION]: 'demo-1',
+    })
     pages.register(oldContext, { id: 'settings', title: { key: 'old' } }, ({ container }) => { container.textContent = 'old' })
     navigation.register(oldContext, { id: 'settings', path: '/settings', outlet: 'app', page: 'settings' })
     await navigation.navigate('demo', { id: 'settings' })
@@ -260,13 +331,18 @@ describe('NavigationRegistry', () => {
 
     const handle = visibility.begin('update-demo', previous, candidate)
     const candidateContext = new Context().extend({
-      [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_GENERATION]: 'demo-2', ...visibility.context(handle, 'demo'),
+      [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_SOURCE]: source,
+      [CORDISX_PLUGIN_GENERATION]: 'demo-2', ...visibility.context(handle, 'demo'),
     })
     pages.register(candidateContext, { id: 'settings', title: { key: 'new' } }, ({ container }) => { container.textContent = 'new' })
     navigation.register(candidateContext, { id: 'settings', path: '/settings', outlet: 'app', page: 'settings' })
     expect(navigation.snapshot().pages[0]?.metadata.title).toEqual({ key: 'old' })
     expect(navigation.snapshot(visibility.view(candidateContext)).pages[0]?.metadata.title).toEqual({ key: 'new' })
     expect(navigation.snapshot(visibility.view(candidateContext)).routes).toHaveLength(1)
+    expect(navigation.agentRuntimeRoutesForOwner({
+      source, pluginId: 'demo', moduleGeneration: 'demo-2',
+    }, visibility.view(candidateContext))).toEqual([{ id: 'settings', path: '/settings' }])
+    expect(navigation.agentRuntimeRoutesForOwner({ source, pluginId: 'demo', moduleGeneration: 'demo-2' })).toEqual([])
 
     visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
     await navigation.settled()

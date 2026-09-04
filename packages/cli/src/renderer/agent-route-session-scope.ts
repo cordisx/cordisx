@@ -12,10 +12,11 @@ const paramId = /^[a-z][a-zA-Z0-9]*$/u
 export interface AgentRouteDefinition {
   readonly id: string
   readonly path: string
+  readonly schemaVersion?: 1 | 2
 }
 
 export interface AgentActiveRoute {
-  readonly owner: string
+  readonly owner: PluginOwnerIdentity
   readonly routeId: string
   readonly instanceId: string
   readonly params: Readonly<Record<string, string | number | boolean | null>>
@@ -60,7 +61,7 @@ export type AgentRouteFenceCode = 'route-replaced' | 'plugin-generation-replaced
 
 export interface AgentRouteSessionScopeOptions {
   readonly activeRoute: () => AgentActiveRoute | undefined
-  readonly routes: (owner: string) => readonly AgentRouteDefinition[]
+  readonly routes: (owner: PluginOwnerIdentity) => readonly AgentRouteDefinition[]
   /** Host-only permission-v4 decision seam; it receives an already exact scope. */
   readonly decide: (plan: AgentPermissionPlanV4) => Promise<Readonly<{ authorized: boolean; leaseId?: string }>>
   readonly isLeaseActive?: (owner: PluginOwnerIdentity, leaseId: string) => boolean
@@ -113,8 +114,8 @@ export class AgentRouteSessionScopeAuthority {
       if (installed.owner.generation !== owner.generation) throw new Error('Agent Session permission declaration generation is stale')
       const scope = installed.declaration.scope.sessionIds
       if (isBinding(scope)) {
-        const route = this.options.routes(owner.pluginId).find(item => item.id === scope.routeId)
-        if (route === undefined || !routeHasParam(route.path, scope.param)) {
+        const route = this.options.routes(owner).find(item => item.id === scope.routeId)
+        if (route === undefined || !validRouteBinding(route, scope, installed.declaration.manifestVersion)) {
           throw new Error('dynamic Agent Session scope does not name an owned route parameter')
         }
       }
@@ -127,8 +128,8 @@ export class AgentRouteSessionScopeAuthority {
     const declaration = installed?.owner.generation === owner.generation ? installed.declaration : undefined
     const scope = declaration?.scope.sessionIds
     if (!isBinding(scope)) return undefined
-    const route = this.options.routes(owner.pluginId).find(item => item.id === scope.routeId)
-    return route === undefined || !routeHasParam(route.path, scope.param)
+    const route = this.options.routes(owner).find(item => item.id === scope.routeId)
+    return route === undefined || !validRouteBinding(route, scope, declaration?.manifestVersion)
       ? undefined
       : Object.freeze({ ...route })
   }
@@ -187,11 +188,11 @@ export class AgentRouteSessionScopeAuthority {
     }
     if (!isBinding(scope)) return false
     const active = this.options.activeRoute()
-    if (active === undefined || active.owner !== owner.pluginId || active.routeId !== scope.routeId) return false
+    if (active === undefined || !sameOwner(active.owner, owner) || active.routeId !== scope.routeId) return false
     const value = active.params[scope.param]
     if (typeof value !== 'string' || value !== sessionId || !validSessionId(value)) return false
-    const route = this.options.routes(owner.pluginId).find(item => item.id === scope.routeId)
-    if (route === undefined || !routeHasParam(route.path, scope.param)) return false
+    const route = this.options.routes(owner).find(item => item.id === scope.routeId)
+    if (route === undefined || !validRouteBinding(route, scope, declaration.manifestVersion)) return false
     const key = `${owner.pluginId}\u0000${owner.generation}\u0000${capability}\u0000${sessionId}\u0000${active.instanceId}\u0000${this.options.connectionGeneration()}`
     const existing = this.leases.get(key)
     if (existing?.lease.status === 'active' && (existing.permissionLeaseId === undefined || this.options.isLeaseActive?.(owner, existing.permissionLeaseId) !== false)) return true
@@ -247,7 +248,7 @@ export class AgentRouteSessionScopeAuthority {
 
   private matchesActiveRoute(record: LeaseRecord): boolean {
     const active = this.options.activeRoute()
-    return active !== undefined && active.owner === record.lease.owner.pluginId
+    return active !== undefined && sameOwner(active.owner, record.lease.owner)
       && active.instanceId === record.lease.routeInstanceId
       && active.params[record.routeParam] === record.sessionId
       && record.lease.connectionGeneration === this.options.connectionGeneration()
@@ -269,6 +270,12 @@ export class AgentRouteSessionScopeAuthority {
 function validSessionId(value: string): boolean { return value.length > 0 && value.length <= 512 && !value.includes('*') }
 function routeHasParam(path: string, param: string): boolean {
   return path.split('/').filter(segment => segment === `:${param}`).length === 1
+}
+function validRouteBinding(route: AgentRouteDefinition, scope: AgentRouteScopeBinding, manifestVersion: 5 | 6 | undefined): boolean {
+  return routeHasParam(route.path, scope.param) && (manifestVersion !== 6 || route.schemaVersion === 2)
+}
+function sameOwner(left: PluginOwnerIdentity, right: PluginOwnerIdentity): boolean {
+  return left.pluginId === right.pluginId && left.generation === right.generation
 }
 function isBinding(value: readonly string[] | AgentRouteScopeBinding | undefined): value is AgentRouteScopeBinding {
   return value !== undefined && !Array.isArray(value)

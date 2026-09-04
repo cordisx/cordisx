@@ -68,6 +68,8 @@ export interface PlaygroundScenarioSessionScopeAuthorityOptions {
   readonly currentRoute: () => AgentRuntimeRouteScope | undefined
   /** The exact live Agent owner for source and target Sessions. */
   readonly ownerForSession: (sessionId: string) => PluginOwnerIdentity | undefined
+  /** Host-only authenticated mapping; never derive source coordinates from an opaque owner string. */
+  readonly routeOwner: (owner: PluginOwnerIdentity) => AgentRuntimeRouteScope['owner'] | undefined
   /** Resolves only the installed dynamic declaration owned by this plugin. */
   readonly permissionRoute: (owner: PluginOwnerIdentity, capability: AgentRuntimeCapability) => Readonly<{
     readonly routeId: string
@@ -152,6 +154,12 @@ export class PlaygroundScenarioSessionScopeAuthority {
 
   effectiveRoute(): AgentRuntimeRouteScope | undefined {
     return this.current?.active === true ? this.current.route : this.options.currentRoute()
+  }
+
+  /** Exact Agent authority retained with the supplemental route; never reconstructed from its public owner. */
+  supplementalOwner(): PluginOwnerIdentity | undefined {
+    const current = this.current
+    return current?.active === true ? current.source?.owner : undefined
   }
 
   active(): boolean { return this.current?.active === true && !this.disposed }
@@ -296,13 +304,13 @@ export class PlaygroundScenarioSessionScopeAuthority {
     if (!sameOwner(owner, sourceOwner)) {
       return this.unavailable('owner-mismatch', 'The delegated scenario Session has a different plugin owner or generation.')
     }
-    const [pluginSource, pluginId] = this.splitOwner(owner.pluginId)
-    if (pluginSource === undefined || pluginId === undefined) return this.unavailable('owner-mismatch', 'The delegated scenario Session owner is invalid.')
+    const routeOwner = this.options.routeOwner(owner)
+    if (routeOwner === undefined) return this.unavailable('owner-mismatch', 'The delegated scenario Session owner is invalid.')
     const routeInstanceId = `playground-scenario:${this.options.hostGeneration}:${input.runId}`
     if (!opaque(routeInstanceId)) return this.unavailable('invalid-request', 'The scenario route activation identity is invalid.')
     const route: AgentRuntimeRouteScope = Object.freeze({
       kind: 'host-route', active: true,
-      owner: Object.freeze({ source: pluginSource, pluginId }), routeId: routeDefinition.routeId, routeInstanceId,
+      owner: Object.freeze({ ...routeOwner }), routeId: routeDefinition.routeId, routeInstanceId,
       path: routeDefinition.path, params: Object.freeze({ sessionId: input.targetSessionId }),
     })
     let disposeRoute: () => void
@@ -364,12 +372,6 @@ export class PlaygroundScenarioSessionScopeAuthority {
       record.settle(Object.freeze({ code }))
       this.options.changed(false)
     }
-  }
-
-  private splitOwner(value: string): readonly [string | undefined, string | undefined] {
-    const separator = value.lastIndexOf(':')
-    if (separator <= 0 || separator === value.length - 1) return [undefined, undefined]
-    return [value.slice(0, separator), value.slice(separator + 1)]
   }
 
   private unavailable(

@@ -47,7 +47,7 @@ import { isAgentConversationPageMount, markAgentConversationPageMount } from './
 import { CordisXI18nService, type LocalizationEffectOwner } from './i18n.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
 import { createHostSurfaceIcon } from './icons.js'
-import { ownerFromContext, qualifyOwnedId } from './ownership.js'
+import { ownerFromContext, qualifyOwnedId, sourceFromContext } from './ownership.js'
 import {
   generationVisibilityFromContext,
   type GenerationVisibilityCoordinator,
@@ -513,6 +513,8 @@ export class PageRegistry {
 
 interface RouteRecord {
   readonly owner: string
+  /** Host-authenticated launcher source; never projected through public navigation snapshots. */
+  readonly source?: string
   readonly qualifiedId: string
   readonly generation: PluginGenerationEffectIdentity
   readonly candidateView?: PluginGenerationView
@@ -578,6 +580,24 @@ export interface RouteSnapshot {
   readonly effectivePointPolicy: 'allow' | 'deny'
   readonly pointPolicyReason?: string
   readonly error?: string
+}
+
+/** Host-private coordinate joining Agent authority to one navigation owner. */
+export interface AgentRuntimeNavigationOwner {
+  readonly source: string
+  readonly pluginId: string
+  readonly moduleGeneration: string
+}
+
+/** Host-private route facts admitted to the Agent Session scope authority. */
+export interface AgentRuntimeNavigationRoute {
+  readonly id: string
+  readonly path: string
+  readonly schemaVersion?: 1 | 2
+}
+
+export interface ResolvedAgentRuntimeNavigationRoute extends AgentRuntimeNavigationRoute {
+  readonly owner: AgentRuntimeNavigationOwner
 }
 
 export interface NavigationSnapshot {
@@ -1220,6 +1240,7 @@ export class NavigationRegistry {
   register(ownerOrContext: string | Context, definition: CordisXRouteDefinition): () => void {
     if (this.disposed) throw new Error('CordisX route registry is disposed')
     const owner = typeof ownerOrContext === 'string' ? ownerOrContext : ownerFromContext(ownerOrContext)
+    const source = typeof ownerOrContext === 'string' ? undefined : sourceFromContext(ownerOrContext)
     const generation: PluginGenerationEffectIdentity = typeof ownerOrContext === 'string'
       ? Object.freeze({ pluginId: owner })
       : this.pages.visibility?.effect(ownerOrContext) ?? Object.freeze({ pluginId: owner })
@@ -1241,6 +1262,7 @@ export class NavigationRegistry {
     if (this.records.has(physicalId)) throw new Error(`route ${qualifiedId} is already registered for this generation`)
     const record: RouteRecord = {
       owner,
+      ...(source === undefined ? {} : { source }),
       qualifiedId,
       generation,
       ...(candidateView === undefined ? {} : { candidateView }),
@@ -1259,6 +1281,50 @@ export class NavigationRegistry {
         this.notify()
       }
     }
+  }
+
+  /**
+   * Resolves only routes registered by one exact launcher-authenticated plugin
+   * source and module generation. The public local owner id is never treated as
+   * sufficient authority by itself.
+   */
+  agentRuntimeRoutesForOwner(
+    owner: AgentRuntimeNavigationOwner,
+    view?: PluginGenerationView,
+  ): readonly AgentRuntimeNavigationRoute[] {
+    return Object.freeze(this.visibleRecords(view)
+      .filter(record => record.owner === owner.pluginId
+        && record.source === owner.source
+        && record.generation.moduleGeneration === owner.moduleGeneration)
+      .map(record => Object.freeze({
+        id: record.definition.id,
+        path: record.definition.path,
+        ...(record.definition.schemaVersion === undefined ? {} : { schemaVersion: record.definition.schemaVersion }),
+      })))
+  }
+
+  /** Resolves a persisted Host history entry back to its exact source owner. */
+  agentRuntimeRouteFromHistory(
+    entry: CodexRouteHistoryEntry,
+    view?: PluginGenerationView,
+  ): ResolvedAgentRuntimeNavigationRoute | undefined {
+    const matches = this.visibleRecords(view).filter(record => {
+      if (record.owner !== entry.owner || record.qualifiedId !== entry.routeId
+        || record.source === undefined || record.generation.moduleGeneration === undefined) return false
+      try { return buildPath(record, entry.params) === entry.path } catch { return false }
+    })
+    if (matches.length !== 1) return undefined
+    const record = matches[0]!
+    return Object.freeze({
+      owner: Object.freeze({
+        source: record.source!,
+        pluginId: record.owner,
+        moduleGeneration: record.generation.moduleGeneration!,
+      }),
+      id: record.definition.id,
+      path: record.definition.path,
+      ...(record.definition.schemaVersion === undefined ? {} : { schemaVersion: record.definition.schemaVersion }),
+    })
   }
 
   has(requestingOwner: string, id: string, view?: PluginGenerationView): boolean {
@@ -2781,6 +2847,19 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
 
   snapshot(): NavigationSnapshot {
     return this.registry.snapshot()
+  }
+
+  /** Host-only exact owner lookup for Agent Session permission admission. */
+  agentRuntimeRoutesForOwner(
+    owner: AgentRuntimeNavigationOwner,
+    view?: PluginGenerationView,
+  ): readonly AgentRuntimeNavigationRoute[] {
+    return this.registry.agentRuntimeRoutesForOwner(owner, view)
+  }
+
+  /** Host-only history-to-owner resolution; no source identity is plugin-controlled. */
+  agentRuntimeRouteFromHistory(entry: CodexRouteHistoryEntry): ResolvedAgentRuntimeNavigationRoute | undefined {
+    return this.registry.agentRuntimeRouteFromHistory(entry)
   }
 
   subscribeInternal(listener: () => void): () => void {
