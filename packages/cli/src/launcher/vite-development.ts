@@ -33,6 +33,7 @@ const COMMONJS_INTEROP_LEAVES = [
   'debug',
   'extend',
   'hoist-non-react-statics',
+  'prop-types',
   'raf',
   'react-fast-compare',
   'react-is',
