@@ -40,6 +40,7 @@ import {
   type CordisXStructuredAction,
   type CordisXSurfaceMap,
   type CordisXSurfaceName,
+  type CordisXTransientCanvasPresentation,
   type CordisXTabItem,
   type CordisXPresenterItem,
   type CordisXReasoningIntensityPresentation,
@@ -148,17 +149,6 @@ export interface SurfaceContributionSnapshot {
   readonly currentContext: CordisXExtensionPointCurrentContextState
   readonly control?: CordisXExtensionPointControlCandidateSnapshotV1
 }
-
-/** Host-private authorization seam for one launcher-authenticated control claim. */
-export type HostPrivateControlledSurfaceAccessResolver = (
-  declaration: CordisXExtensionPointControlDeclarationV1,
-  generation: ControlledSurfaceGeneration,
-) => Readonly<{
-  authorized: boolean
-  policy: 'inherit' | 'allow' | 'deny'
-  effectivePolicy: 'allow' | 'deny'
-  reason: string
-}> | undefined
 
 export interface NavigationCollectionGroupSnapshot {
   readonly owner: string
@@ -354,7 +344,7 @@ function assertPresentationOptions(
   options: CordisXContributionPresentationOptions,
 ): void {
   assertKeys(options, ['group', 'order', 'when', 'disabled'], 'surface contribution presentation options')
-  if ((surface === 'manager.settings.tabs' || surface === 'composer.reasoning-intensity' || surface === 'session.backdrop') && options.group !== undefined) {
+  if ((surface === 'manager.settings.tabs' || surface === 'composer.reasoning-intensity' || surface === 'session.backdrop' || surface === 'composer.submit.effects') && options.group !== undefined) {
     throw new Error(`${surface} does not accept a contribution group`)
   }
   if (surface === 'manager.settings.navigation-items'
@@ -513,6 +503,16 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
         || !/^[A-Za-z0-9+/]+={0,2}$/u.test(portrait.data)) throw new Error(`session backdrop stage ${index} portrait data is invalid`)
       assertLocalizedText(portrait.alt, `session backdrop stage ${index} portrait alt`)
     }
+  } else if (surface === 'composer.submit.effects') {
+    const canvas = snapshot as CordisXTransientCanvasPresentation
+    assertKeys(snapshot, ['kind', 'durationMs', 'reducedMotion'], 'transient canvas presentation')
+    if (canvas.kind !== 'isolated-canvas') throw new Error('transient canvas presentation kind is invalid')
+    if (!Number.isInteger(canvas.durationMs) || canvas.durationMs < 100 || canvas.durationMs > 5000) {
+      throw new Error('transient canvas presentation durationMs must be an integer from 100 to 5000')
+    }
+    if (canvas.reducedMotion !== 'skip' && canvas.reducedMotion !== 'static') {
+      throw new Error('transient canvas presentation reducedMotion is invalid')
+    }
   } else if (surface === 'session.banner.items'
     || surface === 'session.turn.footer'
     || surface === 'composer.dock.above'
@@ -590,7 +590,6 @@ export class SurfaceRegistry {
   private readonly disconnectVisibility: (() => void) | undefined
   private resolvers: SurfaceResolvers = { command: () => false, route: () => false }
   private access: ExtensionPointAccessResolver | undefined
-  private hostPrivateControlAccess: HostPrivateControlledSurfaceAccessResolver | undefined
   private controls: ControlledSurfaceCoordinator | undefined
   private disconnectControls: (() => void) | undefined
   private readonly committedControlTransactions = new Map<string, Readonly<{ moduleGeneration: string; transactionId: string; transactionEpoch: string }>>()
@@ -650,12 +649,6 @@ export class SurfaceRegistry {
 
   setAccessResolver(access: ExtensionPointAccessResolver): void {
     this.access = access
-    if (this.controls === undefined) this.notify()
-    else this.controls.invalidate()
-  }
-
-  setHostPrivateControlAccessResolver(access: HostPrivateControlledSurfaceAccessResolver | undefined): void {
-    this.hostPrivateControlAccess = access
     if (this.controls === undefined) this.notify()
     else this.controls.invalidate()
   }
@@ -726,15 +719,21 @@ export class SurfaceRegistry {
     ownerOrContext: string | Context,
     options: CordisXContributionOptions<Name>,
     item: CordisXSurfaceMap[Name],
+    isolatedBinding?: Readonly<{
+      generation: PluginGenerationEffectIdentity
+      candidateView?: PluginGenerationView
+      source: string
+      moduleGeneration: string
+    }>,
   ): CordisXContributionHandle<CordisXSurfaceMap[Name]> {
     if (this.disposed) throw new Error('CordisX surface registry is disposed')
     const owner = typeof ownerOrContext === 'string' ? ownerOrContext : ownerFromContext(ownerOrContext)
-    const generation: PluginGenerationEffectIdentity = typeof ownerOrContext === 'string'
+    const generation: PluginGenerationEffectIdentity = isolatedBinding?.generation ?? (typeof ownerOrContext === 'string'
       ? Object.freeze({ pluginId: owner })
-      : this.visibility?.effect(ownerOrContext) ?? Object.freeze({ pluginId: owner })
-    const candidateView = typeof ownerOrContext === 'string' || generation.transactionId === undefined
+      : this.visibility?.effect(ownerOrContext) ?? Object.freeze({ pluginId: owner }))
+    const candidateView = isolatedBinding?.candidateView ?? (typeof ownerOrContext === 'string' || generation.transactionId === undefined
       ? undefined
-      : this.visibility?.view(ownerOrContext)
+      : this.visibility?.view(ownerOrContext))
     assertLocalId(owner, 'surface owner')
     assertKeys(options, ['name', 'id', 'group', 'order', 'when', 'disabled', 'control'], 'surface contribution options')
     assertLocalId(options.id, 'surface contribution id')
@@ -759,7 +758,7 @@ export class SurfaceRegistry {
       snapshot = undefined
       validationError = error instanceof Error ? error.message : String(error)
     }
-    const source = typeof ownerOrContext === 'string' ? undefined : sourceFromContext(ownerOrContext)
+    const source = isolatedBinding?.source ?? (typeof ownerOrContext === 'string' ? undefined : sourceFromContext(ownerOrContext))
     const controlOrigin = options.control === undefined ? 'legacy-structured' as const : 'explicit' as const
     const controlledPoint = this.controls?.hasPoint(options.name) === true
     const principalHandle = source === undefined || !controlledPoint ? undefined : this.controlPrincipal(source, owner, controlOrigin)
@@ -772,7 +771,7 @@ export class SurfaceRegistry {
       ...(options.order === undefined ? {} : { order: options.order }),
       ...(options.control === undefined ? {} : { control: options.control }),
     })
-    const moduleGeneration = typeof ownerOrContext === 'string' ? undefined : generationFromContext(ownerOrContext)
+    const moduleGeneration = isolatedBinding?.moduleGeneration ?? (typeof ownerOrContext === 'string' ? undefined : generationFromContext(ownerOrContext))
     const controlGeneration: ControlledSurfaceGeneration | undefined = controlDeclaration === undefined ? undefined : Object.freeze({
         principalHandle: principalHandle!,
         principalOrigin: controlOrigin,
@@ -787,8 +786,6 @@ export class SurfaceRegistry {
       generation: controlGeneration!,
       presenter: snapshot,
       hostAccess: () => {
-        const exactGrant = this.hostPrivateControlAccess?.(controlDeclaration!, controlGeneration!)
-        if (exactGrant !== undefined) return exactGrant
         const decision = this.access?.decision(owner, options.name, 'surface', candidateView)
         return decision === undefined
           ? Object.freeze({ authorized: true })
@@ -913,10 +910,7 @@ export class SurfaceRegistry {
             error = `manager settings navigation route ${qualifyOwnedId(record.owner, routeId)} is referenced by multiple contributions: ${ids.join(', ')}`
           }
         }
-        const pointAccess = (record.controlDeclaration === undefined || record.controlGeneration === undefined
-          ? undefined
-          : this.hostPrivateControlAccess?.(record.controlDeclaration, record.controlGeneration))
-          ?? this.access?.decision(record.owner, record.options.name, 'surface', view ?? record.candidateView)
+        const pointAccess = this.access?.decision(record.owner, record.options.name, 'surface', view ?? record.candidateView)
           ?? { policy: 'inherit' as const, effectivePolicy: 'allow' as const, authorized: true }
         const control = record.controlDeclaration === undefined ? undefined : controlSnapshot?.points
           .find(point => point.id === record.controlDeclaration!.identity.pointId)?.candidates
@@ -1376,10 +1370,6 @@ export class CordisXSlotService extends Service implements CordisXSlots {
 
   setAccessResolver(access: ExtensionPointAccessResolver): void {
     this.registry.setAccessResolver(access)
-  }
-
-  setHostPrivateControlAccessResolver(access: HostPrivateControlledSurfaceAccessResolver | undefined): void {
-    this.registry.setHostPrivateControlAccessResolver(access)
   }
 
   setControlCoordinator(controls: ControlledSurfaceCoordinator): void {

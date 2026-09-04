@@ -65,11 +65,12 @@ export interface HostRuntimeServiceDeclaration {
 
 export interface HostResolvedRuntimeManifest {
   readonly $schema: string
-  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6
+  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7
   readonly id: string
   readonly name?: string
   readonly capabilities: readonly unknown[]
   readonly services?: readonly HostRuntimeServiceDeclaration[]
+  readonly execution?: Readonly<{ readonly realm: 'isolated-worker'; readonly interfaces: readonly ['ui.transient-canvas/v1'] }>
 }
 
 export interface ResolvedPackageCandidate {

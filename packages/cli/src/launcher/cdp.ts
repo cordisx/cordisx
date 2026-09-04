@@ -485,13 +485,13 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       const rejected = materialized.find(result => result.status === 'rejected')
       if (rejected !== undefined) throw new Error(`entity template ${rejected.agentId} was rejected: ${rejected.code}`)
     }
-    const runtimeManifest = runtimePackage?.manifest?.runtimeManifest
-    const isolatedArtifactSource = runtimePackage !== undefined
-      && (runtimeManifest?.schemaVersion === 5 || runtimeManifest?.schemaVersion === 6)
-      && runtimeManifest.capabilities.some(capability => (
-        capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
-      ))
-      ? runtimeArtifactSource ?? runtimePackage.artifactSource
+    const runtimeManifest = runtimePackage?.manifest?.runtimeManifest ?? mutation.developmentPackage?.manifest
+    const isolatedArtifactSource = runtimeManifest !== undefined
+      && (runtimeManifest.schemaVersion === 7 || ((runtimeManifest.schemaVersion === 5 || runtimeManifest.schemaVersion === 6)
+        && runtimeManifest.capabilities.some(capability => (
+          capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
+        ))))
+      ? runtimeArtifactSource ?? runtimePackage?.artifactSource
       : undefined
     const candidateLeases = mutation.candidate.plugins.flatMap(item => {
       if (!item.enabled) return []

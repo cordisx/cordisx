@@ -4,6 +4,8 @@ import type {
   HostDomBridgeResult,
   HostDomRootCatalog,
 } from '@cordisx/protocol/host-dom/v1'
+import type { TransientCanvasRegistrationV1 } from '@cordisx/protocol/transient-canvas/v1'
+import type { TransientCanvasStart, TransientCanvasWorkerSink } from './transient-canvas.js'
 
 const FRAME_MESSAGE = 'cordisx.host-dom-worker-frame/v1'
 const WORKER_MESSAGE = 'cordisx.host-dom-worker/v1'
@@ -45,10 +47,11 @@ export interface HostDomWorkerTransportInput {
   readonly bootstrapSource: string
   readonly artifactSource: string
   readonly config: unknown
+  readonly interfaces: readonly ('ui.host-dom/v1' | 'ui.transient-canvas/v1')[]
 }
 
 export interface HostDomWorkerTransport {
-  readonly post: (message: unknown) => void
+  readonly post: (message: unknown, transfer?: readonly Transferable[]) => void
   readonly subscribe: (listener: (message: unknown) => void) => () => void
   readonly terminate: () => void
   readonly destroy: () => void
@@ -63,7 +66,12 @@ export interface HostDomWorkerBoundaryOptions {
   readonly artifactSource: string
   readonly config?: unknown
   /** This client remains in the Host renderer and is never transferred to the worker. */
-  readonly hostDom: BoundHostDomClient
+  readonly hostDom?: BoundHostDomClient
+  readonly transientCanvas?: Readonly<{
+    register(declaration: TransientCanvasRegistrationV1): Promise<void>
+    unregister(id: string): Promise<void>
+    dispose(): void
+  }>
   /** Captured before plugin activation; activation-time global lookup is forbidden. */
   readonly environment: HostDomWorkerEnvironment
   readonly startupTimeoutMs?: number
@@ -167,7 +175,7 @@ function iframeSource(): string {
           clearUrl(artifactUrl); artifactUrl = undefined
         }
       })
-      worker.postMessage({ contract: '${WORKER_MESSAGE}', token: activeToken, type: 'initialize', artifactUrl, config: data.config }, event.ports)
+      worker.postMessage({ contract: '${WORKER_MESSAGE}', token: activeToken, type: 'initialize', artifactUrl, config: data.config, interfaces: data.interfaces }, event.ports)
       clearUrl(bootstrapUrl); bootstrapUrl = undefined
     })
     addEventListener('unload', terminate, { once: true })
@@ -201,6 +209,7 @@ function workerBootstrapSource(): string {
     const NativeMap = globalThis.Map
     const NativePromise = globalThis.Promise
     const NativeSet = globalThis.Set
+    const NativeAbortController = globalThis.AbortController
     const messagePortPrototype = globalThis.MessagePort?.prototype
     const promiseReject = globalThis.Promise.reject.bind(globalThis.Promise)
     const promiseResolve = globalThis.Promise.resolve.bind(globalThis.Promise)
@@ -296,6 +305,9 @@ function workerBootstrapSource(): string {
       const pendingClear = pending.clear.bind(pending)
       let pendingCount = 0
       const cleanups = []
+      const canvasPresenters = new NativeMap()
+      const canvasSessions = new NativeMap()
+      const enabledInterfaces = new NativeSet(arrayIsArray(event.data.interfaces) ? event.data.interfaces : [])
       const fail = (error) => {
         const message = String(error?.message ?? error ?? 'Host DOM worker failed').replace(/[\\u0000-\\u001f\\u007f]/g, ' ').slice(0, 512)
         try { post({ contract: CONTRACT, type: 'status', status: 'error', error: message }) } catch {}
@@ -324,8 +336,35 @@ function workerBootstrapSource(): string {
           else item.reject(new NativeError(typeof message.error === 'string' ? message.error.slice(0, 512) : 'Host DOM RPC failed'))
           return
         }
+        if (message.type === 'canvas-start') {
+          const presenter = canvasPresenters.get(message.registrationId)
+          if (typeof presenter !== 'function' || typeof message.sessionId !== 'string'
+            || typeof message.width !== 'number' || typeof message.height !== 'number'
+            || typeof message.pixelRatio !== 'number' || typeof message.reducedMotion !== 'boolean'
+            || typeof message.startedAt !== 'number' || !message.canvas) return
+          const controller = new NativeAbortController()
+          canvasSessions.set(message.sessionId, controller)
+          const session = freeze({
+            canvas: message.canvas,
+            width: message.width,
+            height: message.height,
+            pixelRatio: message.pixelRatio,
+            reducedMotion: message.reducedMotion,
+            startedAt: message.startedAt,
+            signal: controller.signal,
+          })
+          promiseResolve(applyFunction(presenter, undefined, [session])).catch(fail)
+          return
+        }
+        if (message.type === 'canvas-stop') {
+          const controller = canvasSessions.get(message.sessionId)
+          if (controller) { controller.abort(); canvasSessions.delete(message.sessionId) }
+          return
+        }
         if (message.type !== 'dispose' || disposing) return
         disposing = true; accepting = false
+        for (const controller of canvasSessions.values()) controller.abort()
+        canvasSessions.clear(); canvasPresenters.clear()
         for (const item of pendingValues()) item.reject(new NativeError('Host DOM worker disposed'))
         pendingClear(); pendingCount = 0
         void (async () => {
@@ -358,17 +397,38 @@ function workerBootstrapSource(): string {
         if (!pluginModule || typeof pluginModule !== 'object' || typeof pluginModule.apply !== 'function') {
           throw new Error('artifact must provide one Host-recognized plugin module with apply')
         }
-        const hostDom = freeze({
+        const hostDom = enabledInterfaces.has('ui.host-dom/v1') ? freeze({
           catalog: () => rpc('catalog'),
           request: (request) => rpc('request', request, request?.requestId),
           dispose: () => { if (accepting) void rpc('dispose').catch(() => {}); accepting = false },
-        })
+        }) : undefined
+        const transientCanvas = enabledInterfaces.has('ui.transient-canvas/v1') ? freeze({
+          register: (declaration, presenter) => {
+            const value = snapshot(declaration)
+            if (!value || typeof value.id !== 'string' || typeof presenter !== 'function' || canvasPresenters.has(value.id)) {
+              return promiseReject(new NativeError('invalid or duplicate transient canvas registration'))
+            }
+            canvasPresenters.set(value.id, presenter)
+            return rpc('canvas-register', value).then(() => freeze({
+              dispose: () => {
+                if (!canvasPresenters.has(value.id)) return promiseResolve()
+                canvasPresenters.delete(value.id)
+                return rpc('canvas-unregister', { id: value.id })
+              },
+            }), (error) => { canvasPresenters.delete(value.id); throw error })
+          },
+        }) : undefined
         const onDispose = (cleanup) => {
           if (!accepting || typeof cleanup !== 'function' || cleanups.length >= 32) throw new NativeError('invalid cleanup registration')
           cleanups[cleanups.length] = async () => { const result = cleanup(); if (result !== undefined && !(result instanceof NativePromise)) throw new NativeError('cleanup must return void or Promise<void>'); await result }
         }
         const config = snapshot(event.data.config)
-        const applied = promiseResolve(applyFunction(pluginModule.apply, pluginModule, [freeze({ hostDom, onDispose }), config]))
+        const context = freeze({
+          ...(hostDom === undefined ? {} : { hostDom }),
+          ...(transientCanvas === undefined ? {} : { transientCanvas }),
+          onDispose,
+        })
+        const applied = promiseResolve(applyFunction(pluginModule.apply, pluginModule, [context, config]))
         applyFunction(promiseThen, applied, [(result) => {
           if (result !== undefined) throw new NativeError('plugin apply must return void or Promise<void>')
           post({ contract: CONTRACT, type: 'status', status: 'ready' })
@@ -453,12 +513,13 @@ export function createBrowserHostDomWorkerEnvironment(document: Document): HostD
           bootstrapSource: input.bootstrapSource,
           artifactSource: input.artifactSource,
           config: input.config,
+          interfaces: input.interfaces,
         }, '*', [channel.port2]])
       }
       apply(addEventListener, frame, ['load', start, { once: true }])
       apply(appendChild, input.document.body ?? input.document.documentElement, [frame])
       return {
-        post: message => { apply(portPostMessage, channel.port1, [message]) },
+        post: (message, transfer = []) => { apply(portPostMessage, channel.port1, [message, transfer]) },
         subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) },
         terminate: () => {
           const contentWindow = apply(contentWindowDescriptor, frame, []) as Window | null
@@ -513,6 +574,10 @@ export class HostDomWorkerBoundary {
       bootstrapSource: workerBootstrapSource(),
       artifactSource: options.artifactSource,
       config,
+      interfaces: Object.freeze([
+        ...(options.hostDom === undefined ? [] : ['ui.host-dom/v1' as const]),
+        ...(options.transientCanvas === undefined ? [] : ['ui.transient-canvas/v1' as const]),
+      ]),
     })
     this.releaseTransportListener = this.transport.subscribe(message => { void this.receive(message) })
     this.listeners.add(options.onStatus ?? (() => {}))
@@ -529,6 +594,28 @@ export class HostDomWorkerBoundary {
     this.listeners.add(listener)
     listener(this.currentStatus)
     return () => this.listeners.delete(listener)
+  }
+
+  startTransientCanvas(input: TransientCanvasStart): void {
+    if (this.currentStatus.status !== 'ready') throw new Error('isolated plugin worker is not ready')
+    this.transport.post({
+      contract: WORKER_MESSAGE,
+      token: this.boundaryToken,
+      type: 'canvas-start',
+      sessionId: input.sessionId,
+      registrationId: input.registrationId,
+      canvas: input.canvas,
+      width: input.width,
+      height: input.height,
+      pixelRatio: input.pixelRatio,
+      reducedMotion: input.reducedMotion,
+      startedAt: input.startedAt,
+    }, [input.canvas])
+  }
+
+  stopTransientCanvas(sessionId: string): void {
+    if (this.currentStatus.status !== 'ready') return
+    this.transport.post({ contract: WORKER_MESSAGE, token: this.boundaryToken, type: 'canvas-stop', sessionId })
   }
 
   async dispose(): Promise<void> {
@@ -578,13 +665,13 @@ export class HostDomWorkerBoundary {
 
   private async rpc(message: Record<string, unknown>): Promise<void> {
     const method = message.method
-    const keys = method === 'request'
+    const keys = ['request', 'canvas-register', 'canvas-unregister'].includes(String(method))
       ? ['contract', 'token', 'type', 'sequence', 'requestId', 'method', 'payload']
       : ['contract', 'token', 'type', 'sequence', 'requestId', 'method']
     if (!exact(message, keys)
       || !Number.isSafeInteger(message.sequence) || message.sequence !== this.expectedSequence
       || !boundedRequestId(message.requestId) || this.seenRequestIds.has(message.requestId)
-      || typeof method !== 'string' || !['catalog', 'request', 'dispose'].includes(method)
+      || typeof method !== 'string' || !['catalog', 'request', 'dispose', 'canvas-register', 'canvas-unregister'].includes(method)
       || this.expectedSequence > MAX_REQUESTS || this.inflight >= MAX_INFLIGHT) {
       this.fail('Host DOM worker violated RPC sequence or request bounds')
       return
@@ -597,11 +684,24 @@ export class HostDomWorkerBoundary {
     try {
       let result: HostDomRootCatalog | HostDomBridgeResult | null
       if (method === 'catalog') {
+        if (this.options.hostDom === undefined) throw new Error('Host DOM interface is unavailable')
         result = await this.options.hostDom.catalog()
       } else if (method === 'request') {
+        if (this.options.hostDom === undefined) throw new Error('Host DOM interface is unavailable')
         const payload = jsonSnapshot(message.payload, MAX_RPC_BYTES) as HostDomBridgeRequest
         if (record(payload)?.requestId !== requestId) throw new Error('Host DOM request id does not match its RPC envelope')
         result = await this.options.hostDom.request(payload)
+      } else if (method === 'canvas-register') {
+        if (this.options.transientCanvas === undefined) throw new Error('transient canvas interface is unavailable')
+        const payload = jsonSnapshot(message.payload, MAX_RPC_BYTES) as TransientCanvasRegistrationV1
+        await this.options.transientCanvas.register(payload)
+        result = null
+      } else if (method === 'canvas-unregister') {
+        if (this.options.transientCanvas === undefined) throw new Error('transient canvas interface is unavailable')
+        const payload = jsonSnapshot(message.payload, MAX_RPC_BYTES) as { readonly id?: unknown }
+        if (typeof payload.id !== 'string') throw new Error('transient canvas registration id is invalid')
+        await this.options.transientCanvas.unregister(payload.id)
+        result = null
       } else {
         this.disposeClient()
         result = null
@@ -655,7 +755,8 @@ export class HostDomWorkerBoundary {
   private disposeClient(): void {
     if (this.clientDisposed) return
     this.clientDisposed = true
-    this.options.hostDom.dispose()
+    this.options.hostDom?.dispose()
+    this.options.transientCanvas?.dispose()
   }
 
   private clearStartupTimer(): void {
@@ -672,3 +773,6 @@ export class HostDomWorkerBoundary {
 export function createHostDomWorkerBoundary(options: HostDomWorkerBoundaryOptions): HostDomWorkerBoundary {
   return new HostDomWorkerBoundary(options)
 }
+
+export type IsolatedPluginWorkerBoundary = HostDomWorkerBoundary
+export type IsolatedPluginWorkerSink = TransientCanvasWorkerSink

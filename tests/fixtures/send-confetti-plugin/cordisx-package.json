@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v7.schema.json",
+  "schemaVersion": 7,
+  "id": "send-confetti",
+  "version": "0.1.0",
+  "entry": "./src/send-confetti.ts",
+  "distribution": {
+    "mode": "explicit-local-v1",
+    "signature": "unsupported"
+  },
+  "compatibility": {
+    "runtimeAbi": 1,
+    "protocolSchemas": [
+      "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v7.schema.json",
+      "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json"
+    ]
+  },
+  "dependencies": [],
+  "runtimeManifest": {
+    "path": "./runtime/manifest.json",
+    "schema": "https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v7.schema.json",
+    "digest": "sha256:911601fbf37c9511277977e2145f8f61dea398d401c0ff38e23b63ecfefa3d6f"
+  }
+}

@@ -191,25 +191,6 @@ function localDevelopmentHostConfig(cwd: string): CordisXConfig {
   }
 }
 
-function localDevelopmentControlGrant(
-  identity: Readonly<{ source: string; id: string }>,
-): NonNullable<BuildRendererBundleOptions['localDevelopmentControlGrant']> {
-  return Object.freeze({
-    profile: 'cordisx.composer-submit-celebration/v1',
-    identity: Object.freeze({ source: identity.source, id: identity.id }),
-    pointId: 'composer.toolbar.items',
-    contributionId: 'submit-celebration',
-    claimId: 'submit-celebration',
-    mode: 'proxy',
-    priority: 100,
-    requestedBindings: Object.freeze({
-      properties: Object.freeze(['celebrationProfile'] as const),
-      commands: Object.freeze(['presentCelebration', 'dismissCelebration'] as const),
-      events: Object.freeze(['submitActivated'] as const),
-    }),
-  })
-}
-
 function providerConfigs(config: CordisXConfig, environment: NodeJS.ProcessEnv): readonly CodexProviderConfig[] {
   const local = resolveLocalCodexProviderConfig(config.codex, environment)
   return local === undefined ? config.providers : [...config.providers, local]
@@ -261,7 +242,6 @@ export async function buildRendererComposition(
     readonly pluginActivation?: CordisXPluginActivationRecordV1
     readonly initialRegistryEpoch?: number
     readonly channelManager?: ChannelManagerBundleProjection
-    readonly localDevelopmentControlGrant?: BuildRendererBundleOptions['localDevelopmentControlGrant']
     /** Transient, launcher-created tokens. They are published only in the injected runtime metadata. */
     readonly channelCredentialBridgeToken?: string
     readonly channelActionsBridgeToken?: string
@@ -316,7 +296,6 @@ export async function buildRendererComposition(
       ? {}
       : { initialRegistryEpoch: options.initialRegistryEpoch ?? options.pluginLifecycle!.registryEpoch }),
     ...(options.channelManager === undefined ? {} : { channelManager: options.channelManager }),
-    ...(options.localDevelopmentControlGrant === undefined ? {} : { localDevelopmentControlGrant: options.localDevelopmentControlGrant }),
   } satisfies NonNullable<Parameters<typeof buildRendererBundle>[1]>
   const buildBundle = options.developmentBuild ?? options.internalBuildRendererBundle ?? buildRendererBundle
   const source = await buildBundle(config, bundleOptions)
@@ -611,9 +590,6 @@ async function runDevelopment(
     const composition = await buildRendererComposition(config, stdout, {
       profileId: 'development',
       permission: { profileId: 'development', policies: [], persistent: false },
-      ...(localIdentity === undefined ? {} : {
-        localDevelopmentControlGrant: localDevelopmentControlGrant(localIdentity),
-      }),
       developmentBuild: (nextConfig, options = {}) => activeVite.buildBootstrap(nextConfig, options),
     })
     if (invocation.options.dryRun) {
