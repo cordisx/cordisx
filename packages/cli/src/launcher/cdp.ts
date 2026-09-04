@@ -437,7 +437,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       if (rejected !== undefined) throw new Error(`entity template ${rejected.agentId} was rejected: ${rejected.code}`)
     }
     const runtimeManifest = runtimePackage?.manifest?.runtimeManifest
-    const isolatedArtifactSource = runtimePackage !== undefined && runtimeManifest?.schemaVersion === 5
+    const isolatedArtifactSource = runtimePackage !== undefined
+      && (runtimeManifest?.schemaVersion === 5 || runtimeManifest?.schemaVersion === 6)
       && runtimeManifest.capabilities.some(capability => (
         capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
       ))

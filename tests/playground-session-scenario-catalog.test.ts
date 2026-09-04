@@ -256,9 +256,9 @@ describe('Host Playground Session scenario catalog', () => {
       decide: async plan => ({ authorized: plan.scope.sessionIds.length === 1 }),
       connectionGeneration: () => 1,
     })
-    routeScopes.install(owner.pluginId, [
-      { name: 'approvals.request', required: false, scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
-      { name: 'approvals.answer', required: false, scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
+    routeScopes.install(owner, [
+      { manifestVersion: 6, name: 'approvals.request', required: false, scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
+      { manifestVersion: 6, name: 'approvals.answer', required: false, scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
     ])
     let approvalOutcome: ApprovalOutcome = 'allowed-once'
     scopeAuthority = new PlaygroundScenarioSessionScopeAuthority({

@@ -10,7 +10,7 @@ import {
 import type { CordisXConfig } from './config.js'
 import { CdpPluginLifecycleRuntime } from './cdp.js'
 import { readEntityTemplatePayload, type EntityTemplatePayload } from './entity-directory.js'
-import { PLUGIN_PACKAGE_SCHEMA_V5 } from './packages/manifest.js'
+import { PLUGIN_PACKAGE_SCHEMA_V5, PLUGIN_PACKAGE_SCHEMA_V6 } from './packages/manifest.js'
 import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
 
 const WATCH_INTERVAL_MS = 200
@@ -142,8 +142,9 @@ async function readRendererOnlyPackage(root: string): Promise<{
     throw new Error('local development phase 1 is renderer-only; package dependencies are unavailable')
   }
   if (manifest.entityTemplates === undefined) return { files: [manifestPath], entityTemplates: [] }
-  if (manifest.$schema !== PLUGIN_PACKAGE_SCHEMA_V5 || manifest.schemaVersion !== 5) {
-    throw new Error('local development entityTemplates require plugin-package.v5')
+  if (!((manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V5 && manifest.schemaVersion === 5)
+    || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V6 && manifest.schemaVersion === 6))) {
+    throw new Error('local development entityTemplates require plugin-package.v5 or plugin-package.v6')
   }
   const compatibility = manifest.compatibility
   if (compatibility === null || typeof compatibility !== 'object' || Array.isArray(compatibility)

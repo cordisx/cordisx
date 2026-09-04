@@ -15,7 +15,7 @@ import {
 import type { CordisXPluginDependencyV1 } from '../plugin-lifecycle-contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 import type { CordisXPluginManifestV1 } from '../platform-contracts.js'
-import type { CordisXPluginManifestV4, CordisXPluginManifestV5 } from '../permission-contracts.js'
+import type { CordisXPluginManifestV4, CordisXPluginManifestV5, CordisXPluginManifestV6 } from '../permission-contracts.js'
 
 export interface CordisXConfigPlugin {
   readonly id: string
@@ -24,7 +24,7 @@ export interface CordisXConfigPlugin {
   readonly config: unknown
   readonly revision?: number
   readonly source?: string
-  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5
+  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6
   readonly package?: {
     readonly version: string
     readonly digest: `sha256:${string}`

@@ -8,6 +8,7 @@ import { entityTreeDigest } from '../packages/cli/src/launcher/entity-directory.
 import { createPlaygroundSession } from '../packages/cli/src/playground/session.js'
 
 const PACKAGE_SCHEMA_V5 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v5.schema.json'
+const PACKAGE_SCHEMA_V6 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v6.schema.json'
 const ENTITY_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-file.v1.schema.json'
 const RUNTIME_SCHEMA_V5 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v5.schema.json'
 const roots = new Set<string>()
@@ -23,7 +24,7 @@ async function fixture(): Promise<{
   readonly configPath: string
   readonly entityPath: string
   readonly promptPath: string
-  readonly writeManifest: (digest: `sha256:${string}`, version?: 4 | 5) => Promise<void>
+  readonly writeManifest: (digest: `sha256:${string}`, version?: 4 | 5 | 6) => Promise<void>
 }> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-entity-template-'))
   roots.add(root)
@@ -50,9 +51,9 @@ export function apply() {}
   await writeFile(configPath, JSON.stringify({
     version: 1, providers: [], plugins: [{ id: 'chatroom', entry: './src/chatroom.ts', enabled: true, config: {} }],
   }))
-  const writeManifest = async (digest: `sha256:${string}`, version: 4 | 5 = 5): Promise<void> => {
+  const writeManifest = async (digest: `sha256:${string}`, version: 4 | 5 | 6 = 5): Promise<void> => {
     await writeFile(path.join(root, 'cordisx-package.json'), `${JSON.stringify({
-      $schema: version === 5 ? PACKAGE_SCHEMA_V5 : 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v4.schema.json',
+      $schema: version === 6 ? PACKAGE_SCHEMA_V6 : version === 5 ? PACKAGE_SCHEMA_V5 : 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v4.schema.json',
       schemaVersion: version,
       id: 'chatroom', version: '1.0.0', entry: './src/chatroom.ts',
       distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
@@ -94,7 +95,18 @@ describe('local development package-v5 entity templates', () => {
     expect(third.entityTemplates[0]?.declaration.digest).toBe(thirdEntityDigest)
 
     await value.writeManifest(thirdEntityDigest, 4)
-    await expect(buildLocalDevelopmentPlugin(value.entry)).rejects.toThrow(/require plugin-package\.v5/)
+    await expect(buildLocalDevelopmentPlugin(value.entry)).rejects.toThrow(/require plugin-package\.v5 or plugin-package\.v6/)
+  })
+
+  it('accepts package-v6 entity templates on the local development path', async () => {
+    const value = await fixture()
+    const entityText = await readFile(value.entityPath, 'utf8')
+    const promptText = await readFile(value.promptPath, 'utf8')
+    const digest = entityTreeDigest(entityText, [{ path: './prompts/role.md', text: promptText }])
+    await value.writeManifest(digest, 6)
+    await expect(buildLocalDevelopmentPlugin(value.entry)).resolves.toMatchObject({
+      entityTemplates: [{ declaration: { agentId: 'lead', digest } }],
+    })
   })
 
   it('fails closed for an invalid template path and a digest that does not match exact source bytes', async () => {

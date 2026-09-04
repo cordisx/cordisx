@@ -333,7 +333,12 @@ export class CordisXAgentSessionRuntime {
     const pluginId = scoped[CORDISX_PLUGIN_ID]
     const source = scoped[CORDISX_PLUGIN_SOURCE]
     if (pluginId === undefined || source === undefined) throw new Error('Agent runtime requires a Host-bound plugin context')
-    const key = `${source}\u0000${pluginId}\u0000${generationFromContext(ctx) ?? 'host'}`
+    return this.ownerForPlugin(source, pluginId, generationFromContext(ctx) ?? 'host')
+  }
+
+  /** Host-only stable owner identity shared by permission admission and Context services. */
+  ownerForPlugin(source: string, pluginId: string, moduleGeneration: string): PluginOwnerIdentity {
+    const key = `${source}\u0000${pluginId}\u0000${moduleGeneration}`
     let generation = this.ownerGenerations.get(key)
     if (generation === undefined) {
       generation = ++this.nextOwnerGeneration
