@@ -6,6 +6,7 @@
   "license": "AGPL-3.0-or-later",
   "files": [
     "packages/cli/dist",
+    "packages/cli/package.json",
     "packages/cli/README.md",
     "packages/cli/LICENSE",
     "packages/cli/CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md",

@@ -24,6 +24,7 @@ describe('npm workspace boundary', () => {
       version: '0.1.0-beta.2',
       private: true,
       workspaces: ['packages/*'],
+      files: expect.arrayContaining(['packages/cli/dist', 'packages/cli/package.json']),
       bin: { cordisx: 'packages/cli/dist/src/cli.js' },
       bundledDependencies: ['@cordisx/schemastery-ui'],
     })
