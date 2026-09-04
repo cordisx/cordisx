@@ -95,8 +95,8 @@ describe('Agent/Session Host authority v1', () => {
 
     const { acquireLegacyTaskBinding, create, get, resume } = ctx.agents
     const { get: getSession } = ctx.sessions
-    const { registerAnswerer, request } = ctx.approvals
-    const created = await create({})
+    const { registerAnswerer, registerAuthorityAnswerer, request } = ctx.approvals
+    const created = await create({ setup })
     expect(created).toMatchObject({ status: 'accepted', sessionIdSource: 'host' })
     if (created.status !== 'accepted') throw new Error('agent unavailable')
     expect(created.sessionId).toMatch(/^cx-session\.[A-Za-z0-9-]+$/u)
@@ -106,6 +106,13 @@ describe('Agent/Session Host authority v1', () => {
     const decision = await request({ agent: created.handle.agent, toolName: 'shell' })
     expect(decision).toMatchObject({ outcome: 'allowed-once' })
     expect(decision.id).toMatch(/^cx-approval\.[A-Za-z0-9-]+$/u)
+    await registerAuthorityAnswerer({ agent: created.handle.agent, definition: setup.definition }, async () => 'rejected')
+    const decisionV2 = await request({
+      requester: { agent: created.handle.agent, definition: setup.definition },
+      authority: { agent: created.handle.agent, definition: setup.definition },
+      toolName: 'shell-v2', reason: { kind: 'plain-text', text: 'Exact authority proxy request.' },
+    })
+    expect(decisionV2).toMatchObject({ contract: 'cordisx.approval-decision/v2', outcome: 'rejected' })
     expect(await created.handle.dispose()).toMatchObject({ status: 'accepted' })
     expect(await resume({ sessionId: created.sessionId })).toMatchObject({ status: 'accepted', disposition: 'resumed' })
     expect(await acquireLegacyTaskBinding({
@@ -250,6 +257,90 @@ describe('Agent/Session Host authority v1', () => {
     expect(decision.outcome).toBe('allowed-once')
     const page = await created.handle.agent.session.read({ afterSeq: -1, limit: 10 })
     expect(page).toMatchObject({ status: 'available', page: { events: [{ type: 'approval/asked' }, { type: 'approval/decided' }] } })
+  })
+
+  it('binds approval v2 to exact requester and authority Agents in one requester Session ledger', async () => {
+    const driver = new Driver()
+    const authorization: string[] = []
+    const runtime = new CordisXAgentSessionRuntime({
+      driver,
+      authorize: async (_candidate, capability, sessionId) => {
+        authorization.push(`${capability}:${sessionId ?? ''}`)
+        return true
+      },
+      declares: (_candidate, capability) => capability === 'approvals.answer',
+      now: () => 25,
+    })
+    const reviewerIdentity = { agentId: 'reviewer', revision: 'revision-reviewer-2' }
+    const leadIdentity = { agentId: 'lead', revision: 'revision-lead-2' }
+    const definition = (identity: typeof reviewerIdentity, name: string): AgentSetup => ({
+      definition: identity,
+      definitions: [{
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
+        contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
+        identity, name,
+        promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: `${name} prompt` }],
+        inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
+      }],
+    })
+    const reviewer = await runtime.create(owner, { sessionId: 'cx-session.reviewer-v2', setup: definition(reviewerIdentity, 'Reviewer') })
+    const lead = await runtime.create(owner, { sessionId: 'cx-session.lead-v2', setup: definition(leadIdentity, 'Lead') })
+    if (reviewer.status !== 'accepted' || lead.status !== 'accepted') throw new Error('agents unavailable')
+    const answer = vi.fn(async question => {
+      expect(question).toMatchObject({
+        contract: 'cordisx.approval-question/v2', schemaVersion: 2,
+        requester: { agentId: reviewer.sessionId, sessionId: reviewer.sessionId, definition: reviewerIdentity },
+        authority: { agentId: lead.sessionId, sessionId: lead.sessionId, definition: leadIdentity },
+        reason: { kind: 'plain-text', text: 'Reviewer needs Lead to approve publishing.' },
+      })
+      return 'rejected' as const
+    })
+    const handle = await runtime.registerAuthorityAnswerer(owner, { agent: lead.handle.agent, definition: leadIdentity }, answer)
+    const decision = await runtime.requestApprovalV2(owner, {
+      requester: { agent: reviewer.handle.agent, definition: reviewerIdentity },
+      authority: { agent: lead.handle.agent, definition: leadIdentity },
+      toolName: 'workspace.publish', callId: 'tool-call-v2',
+      reason: { kind: 'plain-text', text: 'Reviewer needs Lead to approve publishing.' },
+    })
+    expect(decision).toMatchObject({
+      contract: 'cordisx.approval-decision/v2', schemaVersion: 2, outcome: 'rejected',
+      requester: { definition: reviewerIdentity }, authority: { definition: leadIdentity },
+    })
+    expect(answer).toHaveBeenCalledTimes(1)
+    expect(authorization).toContain('approvals.request:cx-session.reviewer-v2')
+    expect(authorization).toContain('approvals.answer:cx-session.lead-v2')
+    const read = await reviewer.handle.agent.session.read({ afterSeq: -1, snapshotSeq: 2, limit: 10 })
+    expect(read).toMatchObject({ status: 'available', page: { events: [
+      { seq: 0, type: 'approval/authority-bound', ignorable: true, data: { requester: reviewerIdentity, authority: leadIdentity, reason: { kind: 'plain-text' } } },
+      { seq: 1, type: 'approval/asked', data: { reason: 'Reviewer needs Lead to approve publishing.' } },
+      { seq: 2, type: 'approval/decided', data: { outcome: 'rejected' } },
+    ] } })
+    expect((read.status === 'available' ? read.page.events : []).map(event => event.data && 'id' in event.data ? event.data.id : 'approvalId' in event.data ? event.data.approvalId : undefined))
+      .toEqual([decision.id, decision.id, decision.id])
+    driver.replace()
+    await expect(handle.dispose()).resolves.toEqual({ status: 'closed', code: 'connection-replaced' })
+    await expect(runtime.requestApprovalV2(owner, {
+      requester: { agent: reviewer.handle.agent, definition: reviewerIdentity }, authority: { agent: lead.handle.agent, definition: leadIdentity },
+      toolName: 'workspace.publish', reason: { kind: 'plain-text', text: 'stale' },
+    })).rejects.toThrow('unavailable')
+    await runtime.dispose()
+  })
+
+  it('rejects approval v2 identity substitution before writing durable facts', async () => {
+    const runtime = new CordisXAgentSessionRuntime({ driver: new Driver(), authorize: async () => true, declares: () => true })
+    const created = await runtime.create(owner, { sessionId: 'cx-session.approval-v2-identity', setup })
+    if (created.status !== 'accepted') throw new Error('agent unavailable')
+    await expect(runtime.registerAuthorityAnswerer(owner, {
+      agent: created.handle.agent, definition: { ...setup.definition, revision: 'wrong-revision' },
+    }, async () => 'allowed-once')).rejects.toThrow('unavailable')
+    await expect(runtime.requestApprovalV2(owner, {
+      requester: { agent: created.handle.agent, definition: setup.definition },
+      authority: { agent: created.handle.agent, definition: { ...setup.definition, agentId: 'other-agent' } },
+      toolName: 'workspace.publish', reason: { kind: 'plain-text', text: 'No inferred authority.' },
+    })).rejects.toThrow('unavailable')
+    const snapshot = await created.handle.agent.session.snapshot()
+    expect(snapshot).toMatchObject({ status: 'available', snapshot: { snapshotSeq: -1 } })
+    await runtime.dispose()
   })
 
   it('registers a declared dynamic answerer before route activation and authorizes only at exact invocation', async () => {

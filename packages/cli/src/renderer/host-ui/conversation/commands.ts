@@ -1,4 +1,5 @@
-import type { AgentConversationShellCommandContext } from '@cordisx/protocol/agent-conversation-shell/v3'
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV3 } from '@cordisx/protocol/agent-conversation-shell/v3'
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV7 } from '@cordisx/protocol/agent-conversation-shell/v7'
 import type {
   AgentConversationAction,
   AgentConversationApproval,
@@ -9,7 +10,7 @@ import type {
 } from './model.js'
 import { immutableSnapshot } from '../../validation.js'
 
-export type AgentConversationCommandContext = AgentConversationShellCommandContext
+export type AgentConversationCommandContext = AgentConversationShellCommandContextV3 | AgentConversationShellCommandContextV7
 
 export interface AgentConversationCommandRequest {
   readonly ownerId: string
@@ -84,9 +85,22 @@ export class AgentConversationCommandController {
   runApproval(model: AgentConversationModel, approval: AgentConversationApproval, action: AgentConversationApproval['actions'][number]): Promise<unknown> {
     this.assertCurrent(model)
     if (approval.state !== 'pending' || !approval.actions.includes(action)) throw new Error(`approval ${approval.itemId} action is unavailable`)
-    return this.run(model, `approval:${approval.itemId}:${action.decision}`, action.command, {
-      binding: model.binding, generation: model.generation, scope: 'approval', itemId: approval.itemId, command: action.command,
-    })
+    const authorityBinding = approval.authorityBinding
+    if (approval.requester !== undefined && (authorityBinding === undefined
+      || action.decision !== 'approve' && action.decision !== 'reject')) throw new Error(`approval ${approval.itemId} authority is unavailable`)
+    const context: AgentConversationCommandContext = approval.requester === undefined
+      ? { binding: model.binding, generation: model.generation, scope: 'approval', itemId: approval.itemId, command: action.command }
+      : {
+          binding: model.binding, generation: model.generation, scope: 'approval', itemId: approval.itemId, command: action.command,
+          approval: {
+            sessionId: approval.sessionId,
+            approvalId: approval.approvalId,
+            requester: approval.requester,
+            authority: authorityBinding!,
+            decision: action.decision as 'approve' | 'reject',
+          },
+        }
+    return this.run(model, `approval:${approval.itemId}:${action.decision}`, action.command, context)
   }
 
   runComposer(model: AgentConversationModel, text: string): Promise<unknown> {

@@ -51,15 +51,118 @@ export interface AgentConversationRendererCopy {
   readonly unavailable: string
 }
 
-function ApprovalEntry({ entry, model, commands, copy, onCommandError }: {
+function ApprovalEntry({ entry, model, commands, copy, onCommandError, onOpenMention, onMentionParticipant, onOpenContextMenu }: {
   readonly entry: AgentConversationApproval
   readonly model: AgentConversationModel
   readonly commands: AgentConversationCommandController
   readonly copy: AgentConversationRendererCopy
   readonly onCommandError: (error: unknown) => void
+  readonly onOpenMention: (participantId: string) => void
+  readonly onMentionParticipant: (participantId: string) => void
+  readonly onOpenContextMenu: (target: ConversationContextTarget) => void
 }) {
   const participant = participantFor(model, entry.participantId)
   const chinese = copy.locale.toLowerCase().startsWith('zh')
+  const articleRef = React.useRef<HTMLElement>(null)
+  const approvalActionHadFocus = React.useRef(false)
+  React.useLayoutEffect(() => {
+    if (approvalActionHadFocus.current && entry.state !== 'pending') {
+      articleRef.current?.focus({ preventScroll: true })
+      approvalActionHadFocus.current = false
+    }
+  }, [entry.state])
+  if (entry.requester !== undefined && participant !== undefined) {
+    const authority = participantFor(model, entry.authority.participantId)
+    const authorityName = authority?.name ?? entry.authority.identity.agentId
+    const outcome = entry.state === 'approved' ? (chinese ? '已批准' : 'Approved')
+      : entry.state === 'denied' ? (chinese ? '已拒绝' : 'Rejected')
+        : entry.state === 'cancelled' ? (chinese ? '已取消' : 'Cancelled')
+          : entry.state === 'failed' ? (chinese ? '审批失败' : 'Approval failed')
+            : chinese ? '等待审批' : 'Approval pending'
+    const target = chinese ? `由 ${authorityName} 审批` : `Approval by ${authorityName}`
+    const openAvatarContext = (event: React.MouseEvent<HTMLButtonElement>): void => {
+      event.preventDefault()
+      event.stopPropagation()
+      onOpenContextMenu({
+        kind: 'avatar', x: event.clientX, y: event.clientY,
+        participantId: participant.id, participantName: participant.name, participantRole: participant.role,
+        restoreFocus: event.currentTarget,
+      })
+    }
+    const keyboardAvatarContext = (event: React.KeyboardEvent<HTMLButtonElement>): void => {
+      if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return
+      event.preventDefault()
+      const rect = event.currentTarget.getBoundingClientRect()
+      onOpenContextMenu({
+        kind: 'avatar', x: rect.left + rect.width / 2, y: rect.top + rect.height / 2,
+        participantId: participant.id, participantName: participant.name, participantRole: participant.role,
+        restoreFocus: event.currentTarget,
+      })
+    }
+    return <article
+      ref={articleRef}
+      className="cxa-entry cxa-message cxa-approval-message"
+      data-entry-id={entry.itemId}
+      data-role="agent"
+      data-state={entry.state}
+      data-selected-outcome={entry.state === 'pending' ? undefined : entry.state}
+      role="group"
+      tabIndex={-1}
+      aria-label={`${participant.name}: ${target}, ${outcome}`}
+    >
+      <div className="cxa-message-content">
+        <div className="cxa-message-meta"><button
+          type="button"
+          className="cxa-author cxa-author-button"
+          aria-label={chinese ? `@提及 ${participant.name}` : `Mention @${participant.name}`}
+          onClick={() => onMentionParticipant(participant.id)}
+        >{participant.name}</button></div>
+        <div className="cxa-message-bubble-row">
+          <span className="cxa-message-avatar-seat" data-avatar-seat="visible">
+            <button
+              type="button"
+              className="cx-agent-identity-avatar-button"
+              aria-label={chinese ? `查看 ${participant.name}` : `Open ${participant.name}`}
+              onClick={() => onOpenMention(participant.id)}
+              onContextMenu={openAvatarContext}
+              onKeyDown={keyboardAvatarContext}
+            ><HostAgentAvatar participant={participant} /></button>
+          </span>
+          <div className="cxa-message-bubble-shell"><div className="cxa-message-bubble-anchor">
+            <div className="cxa-message-surface cxa-approval-bubble">
+              <div className="cxa-approval-bubble-copy">
+                <span className="cxa-approval-target">{target}</span>
+                <p className="cxa-approval-reason">{entry.reason.text}</p>
+                {entry.diagnostic === undefined ? null : <p className="cxa-approval-diagnostic" role="status">{entry.diagnostic}</p>}
+              </div>
+              {entry.state === 'pending' ? <div className="cxa-approval-bubble-actions" role="group" aria-label={chinese ? `${authorityName} 的审批操作` : `${authorityName} approval actions`}>
+                {entry.actions.map(action => {
+                  const approve = action.decision === 'approve'
+                  const actionLabel = approve ? (chinese ? '批准' : 'Approve') : (chinese ? '拒绝' : 'Reject')
+                  return <button
+                    key={action.decision}
+                    type="button"
+                    className="cxa-approval-action"
+                    data-decision={action.decision}
+                    aria-label={`${actionLabel} · ${authorityName}`}
+                    title={`${actionLabel} · ${authorityName}`}
+                    onFocus={() => { approvalActionHadFocus.current = true }}
+                    onBlur={event => {
+                      if (articleRef.current?.contains(event.relatedTarget as Node | null) !== true) approvalActionHadFocus.current = false
+                    }}
+                    onClick={() => { void commands.runApproval(model, entry, action).catch(onCommandError) }}
+                  ><HostSurfaceIcon token={approve ? 'host:success' : 'host:close'} /><span>{actionLabel}</span></button>
+                })}
+              </div> : <span className="cxa-approval-outcome" data-state={entry.state} role="status">
+                <HostSurfaceIcon token={entry.state === 'approved' ? 'host:success' : entry.state === 'failed' ? 'host:error' : 'host:close'} />
+                <span>{outcome}</span>
+              </span>}
+            </div>
+          </div></div>
+        </div>
+      </div>
+    </article>
+  }
   const label = entry.state === 'pending'
     ? (chinese ? `${participant?.name ?? 'Agent'} 请求批准` : `${participant?.name ?? 'Agent'} requests approval`)
     : chinese ? `批准状态：${entry.state}` : `Approval: ${entry.state}`
@@ -672,7 +775,7 @@ function Timeline({
             onOpenContextMenu={onOpenContextMenu}
           />
         : entry.kind === 'approval'
-          ? <ApprovalEntry key={entry.itemId} entry={entry} model={model} commands={commands} copy={copy} onCommandError={onCommandError} />
+          ? <ApprovalEntry key={entry.itemId} entry={entry} model={model} commands={commands} copy={copy} onCommandError={onCommandError} onOpenMention={onOpenMention} onMentionParticipant={onMentionParticipant} onOpenContextMenu={onOpenContextMenu} />
         : entry.kind === 'member-presence'
           ? <div key={entry.itemId} className="cxa-entry cxa-status" data-entry-id={entry.itemId} data-state={entry.state} role="status" aria-live="polite">
               <span className="cxa-status-dot" aria-hidden="true" /><span>{presence(entry)}</span>
