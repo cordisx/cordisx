@@ -35,7 +35,7 @@ import type {
 } from '@cordisx/protocol/navigation-collection-actions/v1'
 import type { ComponentType } from 'react'
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
-import type { CordisXPluginManifestV4, CordisXPluginManifestV5, CordisXPluginManifestV6, CordisXPluginManifestV7 } from './permission-contracts.js'
+import type { CordisXPluginManifestV4, CordisXPluginManifestV5, CordisXPluginManifestV6, CordisXPluginManifestV7, CordisXPluginManifestV8 } from './permission-contracts.js'
 import type { CordisXPluginDependencyV1 } from './plugin-lifecycle-contracts.js'
 import type { CordisXExtensionPointControlMode, CordisXExtensionPointControlResultV1 } from './control-contracts.js'
 
@@ -1659,7 +1659,7 @@ export interface CordisXPluginModule {
   readonly icon?: CordisXPluginBrandIcon
   /** User-facing identity; stable ids and manifest names remain untranslated fallbacks. */
   readonly presentation?: CordisXPluginPresentation
-  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7
+  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8
   readonly inject?: readonly string[] | Record<string, unknown>
   readonly Config?: CordisXStandardSchema
   readonly configApplies?: CordisXConfigAppliesInput
@@ -1685,7 +1685,7 @@ export interface CordisXBrowserPlugin {
   readonly config: unknown
   readonly revision: number
   /** Package-authoritative manifest, used instead of executing module metadata when present. */
-  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7
+  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8
   /** Immutable package and module generation metadata owned by the launcher. */
   readonly package?: {
     readonly version: string

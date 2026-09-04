@@ -20,6 +20,8 @@ export const PLUGIN_PACKAGE_SCHEMA_V5 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v5.schema.json'
 export const PLUGIN_PACKAGE_SCHEMA_V6 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v6.schema.json'
+export const PLUGIN_PACKAGE_SCHEMA_V7 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v7.schema.json'
 export const PLUGIN_PACKAGE_SCHEMA_V8 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v8.schema.json'
 export const PLUGIN_RUNTIME_MANIFEST_SCHEMA_V4 =
@@ -28,6 +30,8 @@ export const PLUGIN_RUNTIME_MANIFEST_SCHEMA_V5 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v5.schema.json'
 export const PLUGIN_RUNTIME_MANIFEST_SCHEMA_V6 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v6.schema.json'
+export const PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v7.schema.json'
 export const PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v8.schema.json'
 export const PLUGIN_RUNTIME_MANIFEST_SCHEMAS = [
@@ -37,6 +41,7 @@ export const PLUGIN_RUNTIME_MANIFEST_SCHEMAS = [
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V4,
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V5,
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V6,
+  PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7,
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8,
 ] as const
 
@@ -169,11 +174,13 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
             ? 5
             : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V6 && manifest.schemaVersion === 6
               ? 6
+              : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7
+                ? 7
               : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 && manifest.schemaVersion === 8
                 ? 8
           : undefined
     if (packageVersion === undefined) {
-      throw new PackageLifecycleError('invalid-package-manifest', 'package manifest must use plugin-package.v2, plugin-package.v3, plugin-package.v4, plugin-package.v5, plugin-package.v6, or plugin-package.v8')
+      throw new PackageLifecycleError('invalid-package-manifest', 'package manifest must use plugin-package.v2 through plugin-package.v8')
     }
     const pluginId = string(manifest.id, 'package manifest id')
     if (!LOCAL_ID.test(pluginId)) throw new PackageLifecycleError('invalid-package-manifest', 'package manifest id is invalid')
@@ -205,6 +212,7 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
       || (packageVersion === 2 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V4)
       || (packageVersion < 4 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V5)
       || (packageVersion < 6 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V6)
+      || (packageVersion < 7 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7)
       || (packageVersion !== 8 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8)
       || !DIGEST.test(runtimeDigest)
       || !(compatibility.protocolSchemas as readonly unknown[]).includes(runtimeSchema)) {

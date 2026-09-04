@@ -10,9 +10,9 @@ import {
 import type { CordisXConfig } from './config.js'
 import { CdpPluginLifecycleRuntime } from './cdp.js'
 import { readEntityTemplatePayload, type EntityTemplatePayload } from './entity-directory.js'
-import { PLUGIN_PACKAGE_SCHEMA_V5, PLUGIN_PACKAGE_SCHEMA_V6, PLUGIN_PACKAGE_SCHEMA_V7 } from './packages/manifest.js'
-import type { CordisXPluginManifestV7 } from '../permission-contracts.js'
-import { normalizePluginManifestV7 } from '../permission-model-v4.js'
+import { PLUGIN_PACKAGE_SCHEMA_V5, PLUGIN_PACKAGE_SCHEMA_V6, PLUGIN_PACKAGE_SCHEMA_V7, PLUGIN_PACKAGE_SCHEMA_V8 } from './packages/manifest.js'
+import type { CordisXPluginManifestV7, CordisXPluginManifestV8 } from '../permission-contracts.js'
+import { normalizePluginManifestV7, normalizePluginManifestV8 } from '../permission-model-v4.js'
 import { CapabilityRiskCatalog } from '../capability-risk-catalog.js'
 import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
 
@@ -44,7 +44,7 @@ export interface LocalDevelopmentBuild {
   readonly entityTemplates: readonly EntityTemplatePayload[]
   readonly readme?: string
   readonly readmes?: Readonly<Record<string, string>>
-  readonly manifest?: CordisXPluginManifestV7
+  readonly manifest?: CordisXPluginManifestV7 | CordisXPluginManifestV8
 }
 
 interface LocalDevelopmentBuildOptions {
@@ -87,7 +87,7 @@ export interface LocalDevelopmentPackageInfo {
   /** Exact renderer-only package inputs that must invalidate a development generation. */
   readonly packageFiles: readonly string[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
-  readonly manifest?: CordisXPluginManifestV7
+  readonly manifest?: CordisXPluginManifestV7 | CordisXPluginManifestV8
 }
 
 export async function localDevelopmentPackageInfo(entry: string): Promise<LocalDevelopmentPackageInfo> {
@@ -163,7 +163,7 @@ async function readReadmes(root: string): Promise<{
 async function readRendererOnlyPackage(root: string): Promise<{
   readonly files: readonly string[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
-  readonly manifest?: CordisXPluginManifestV7
+  readonly manifest?: CordisXPluginManifestV7 | CordisXPluginManifestV8
 }> {
   const manifestPath = path.join(root, 'cordisx-package.json')
   const text = await readFile(manifestPath, 'utf8').catch(error => {
@@ -178,9 +178,10 @@ async function readRendererOnlyPackage(root: string): Promise<{
   if (Array.isArray(manifest.dependencies) && manifest.dependencies.length > 0) {
     throw new Error('local development phase 1 is renderer-only; package dependencies are unavailable')
   }
-  let runtimeManifest: CordisXPluginManifestV7 | undefined
+  let runtimeManifest: CordisXPluginManifestV7 | CordisXPluginManifestV8 | undefined
   let runtimeManifestFile: string | undefined
-  if (manifest.runtimeManifest !== undefined && manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7) {
+  if (manifest.runtimeManifest !== undefined && ((manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7)
+    || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 && manifest.schemaVersion === 8))) {
     if (manifest.runtimeManifest === null || typeof manifest.runtimeManifest !== 'object' || Array.isArray(manifest.runtimeManifest)) {
       throw new Error('local development runtimeManifest must be an object')
     }
@@ -198,7 +199,9 @@ async function readRendererOnlyPackage(root: string): Promise<{
     if (actualDigest !== declaration.digest) throw new Error('local development runtimeManifest digest mismatch')
     const packageId = manifest.id
     if (typeof packageId !== 'string') throw new Error('local development package id is required')
-    runtimeManifest = normalizePluginManifestV7(JSON.parse(runtimeText) as unknown, packageId, new CapabilityRiskCatalog())
+    runtimeManifest = manifest.schemaVersion === 8
+      ? normalizePluginManifestV8(JSON.parse(runtimeText) as unknown, packageId, new CapabilityRiskCatalog())
+      : normalizePluginManifestV7(JSON.parse(runtimeText) as unknown, packageId, new CapabilityRiskCatalog())
   }
   if (manifest.entityTemplates === undefined) return {
     files: [manifestPath, ...(runtimeManifestFile === undefined ? [] : [runtimeManifestFile])],
@@ -207,8 +210,9 @@ async function readRendererOnlyPackage(root: string): Promise<{
   }
   if (!((manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V5 && manifest.schemaVersion === 5)
     || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V6 && manifest.schemaVersion === 6)
-    || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7))) {
-    throw new Error('local development entityTemplates require plugin-package.v5, plugin-package.v6, or plugin-package.v7')
+    || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7)
+    || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 && manifest.schemaVersion === 8))) {
+    throw new Error('local development entityTemplates require plugin-package.v5 through plugin-package.v8')
   }
   const compatibility = manifest.compatibility
   if (compatibility === null || typeof compatibility !== 'object' || Array.isArray(compatibility)

@@ -11,6 +11,7 @@ import type {
   CordisXPluginManifestV4,
   CordisXPluginManifestV5,
   CordisXPluginManifestV6,
+  CordisXPluginManifestV7,
   CordisXPluginManifestV8,
   CordisXPointPolicy,
   CordisXPlatformCapability,
@@ -209,6 +210,7 @@ import {
   type HostDomWorkerBoundary,
   type HostDomWorkerEnvironment,
 } from './host-dom-worker.js'
+import { TransientCanvasCoordinator } from './transient-canvas.js'
 import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from './owner-documents.js'
 import { CordisXEntityRegistryServiceV1, type EntityPrincipalBinding } from './entities.js'
 import type { EntityRegistry } from '@cordisx/protocol/entities/v1'
@@ -245,6 +247,8 @@ interface CordisXRuntimeMetadata {
   readonly channelActionsBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
   readonly pluginBundleSnapshot?: CordisXPluginBundleManagerSnapshotV1
+  /** Vite-only targeted reload. The callback never enters plugin Contexts. */
+  readonly developmentReloadPlugin?: (pluginId: string) => Promise<void>
   /** Launcher-only RemoteObject handoff nonce; never an authorization payload. */
   readonly certifiedPermissionChannelToken?: string
   readonly pluginActivation?: CordisXPluginActivationRecordV1
@@ -262,7 +266,7 @@ interface CordisXRuntimeMetadata {
 interface RuntimeBrowserPlugin extends CordisXBrowserPlugin {
   /** Launcher-derived opaque generation for a verified bundled artifact. */
   readonly artifactGeneration?: string
-  /** Source data for one manifest-v5/v6 plugin isolated from the Host renderer. */
+  /** Source data for one manifest-v5/v6/v7 plugin isolated from the Host renderer. */
   readonly isolatedArtifactSource?: string
   readonly development?: CordisXLocalDevelopmentSnapshot
 }
@@ -300,7 +304,7 @@ export type CordisXInternalRendererBootstrap = (host: Readonly<{
 interface PluginController {
   item: RuntimeBrowserPlugin
   readonly identity: CordisXPluginIdentity
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV8
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8
   principal: PluginPrincipalToken
   activation: number
   principalLive: boolean
@@ -563,11 +567,19 @@ function errorMessage(error: unknown): string {
 }
 
 function manifestUsesHostDom(
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV8,
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8,
 ): manifest is CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV8 {
   return (manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 8) && manifest.capabilities.some(capability => (
     capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
   ))
+}
+
+function manifestUsesTransientCanvas(
+  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8,
+): manifest is CordisXPluginManifestV7 {
+  return manifest.schemaVersion === 7
+    && manifest.execution.realm === 'isolated-worker'
+    && manifest.execution.interfaces.includes('ui.transient-canvas/v1')
 }
 
 function controllerHasRuntimeModule(controller: PluginController): boolean {
@@ -586,8 +598,8 @@ function createController(item: RuntimeBrowserPlugin, pluginConsole: PluginConso
     const module = isolated ? undefined : item.moduleFactory?.(pluginConsole.consoleFacade(principal)) ?? item.module
     const boundItem: RuntimeBrowserPlugin = module === undefined || module === item.module ? item : { ...item, module }
     const manifest = normalizePluginManifest(item.manifest ?? module?.manifest, item.id)
-    if (isolated && (item.manifest === undefined || !manifestUsesHostDom(manifest))) {
-      throw new Error('isolated Host DOM artifact requires an authoritative manifest-v5 or manifest-v6 declaration')
+    if (isolated && (item.manifest === undefined || (!manifestUsesHostDom(manifest) && !manifestUsesTransientCanvas(manifest)))) {
+      throw new Error('isolated artifact requires an authoritative isolated-worker manifest')
     }
     return {
       item: boundItem,
@@ -729,7 +741,13 @@ async function start(
   if (lifecycleBridge !== undefined) {
     currentPluginBundles = await lifecycleBridge.bundleSnapshot().catch(() => currentPluginBundles)
   }
-  sharedReactRuntime = installSharedReactRuntime(document)
+  let ownsSharedReactRuntime = false
+  if (globalThis.__cordisxSharedReactRuntime === undefined) {
+    sharedReactRuntime = installSharedReactRuntime(document)
+    ownsSharedReactRuntime = true
+  } else {
+    sharedReactRuntime = globalThis.__cordisxSharedReactRuntime
+  }
   let certifiedPermissionChannel: CertifiedPermissionDocumentChannel | undefined
   try {
   const generationVisibility = new GenerationVisibilityCoordinator(currentActivation, metadata.initialRegistryEpoch)
@@ -1206,8 +1224,8 @@ async function start(
           transactionEpoch: controller.generationView.transactionEpoch,
         }),
       }, controller.generationView)
-      const agentRuntimeManifestVersion = controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 8
-        ? controller.manifest.schemaVersion
+      const agentRuntimeManifestVersion = controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7 || controller.manifest.schemaVersion === 8
+        ? controller.manifest.schemaVersion === 7 ? 6 : controller.manifest.schemaVersion
         : undefined
       const agentRuntimeDeclarations = agentRuntimeManifestVersion !== undefined
         ? controller.manifest.capabilities
@@ -1291,6 +1309,7 @@ async function start(
   let undeclareManagerContentOutlet: (() => void) | undefined
   let unregisterManagerPointCatalog: (() => void) | undefined
   let adapterHandle: CodexAdapterHandle | undefined
+  let transientCanvasCoordinator: TransientCanvasCoordinator | undefined
   let disposeI18nSubscription: (() => void) | undefined
   let disposePermissionSubscription: (() => void) | undefined
   let disposeExtensionPointSubscription: (() => void) | undefined
@@ -1474,7 +1493,7 @@ async function start(
       if (hostDomWorkerEnvironment === undefined) {
         throw new Error('native browser primitives are unavailable for Host DOM worker isolation')
       }
-      const hostDom = hostDomAuthority.bind({
+      const hostDom = !manifestUsesHostDom(controller.manifest) ? undefined : hostDomAuthority.bind({
         ownerKey: JSON.stringify([
           metadata.profileId,
           controller.identity.source,
@@ -1504,19 +1523,40 @@ async function start(
         subscribeInvalidation: listener => broker.subscribe(listener),
       })
       let boundary: HostDomWorkerBoundary | undefined
+      const transientCanvas = !manifestUsesTransientCanvas(controller.manifest) || transientCanvasCoordinator === undefined
+        ? undefined
+        : transientCanvasCoordinator.bind({
+            owner: controller.item.id,
+            source: controller.identity.source,
+            moduleGeneration: moduleGenerationOf(controller),
+            generation: Object.freeze({
+              pluginId: controller.item.id,
+              moduleGeneration: moduleGenerationOf(controller),
+              ...(controller.generationView?.transactionId === undefined ? {} : {
+                transactionId: controller.generationView.transactionId,
+                transactionEpoch: controller.generationView.transactionEpoch,
+              }),
+            }),
+            ...(controller.generationView === undefined ? {} : { candidateView: controller.generationView }),
+            sink: {
+              start: input => boundary?.startTransientCanvas(input),
+              stop: sessionId => boundary?.stopTransientCanvas(sessionId),
+            },
+          })
       try {
-        pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Isolated Host DOM plugin activation started')
+        pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Isolated plugin activation started')
         boundary = createHostDomWorkerBoundary({
           document,
           artifactSource: isolatedArtifactSource,
           config: configuration.get(controller.item.id, controller.generationView),
-          hostDom,
+          ...(hostDom === undefined ? {} : { hostDom }),
+          ...(transientCanvas === undefined ? {} : { transientCanvas }),
           environment: hostDomWorkerEnvironment,
           onStatus: status => {
             if (status.status !== 'error' || controller.hostDomWorker !== boundary) return
             controller.status = 'failed'
             controller.error = status.error
-            notify('host-dom-worker')
+            notify('isolated-worker')
           },
         })
         controller.hostDomWorker = boundary
@@ -1524,15 +1564,16 @@ async function start(
         controller.status = 'active'
         delete controller.error
         delete controller.blockedReason
-        pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Isolated Host DOM plugin activation completed')
+        pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Isolated plugin activation completed')
         return
       } catch (error) {
         await boundary?.dispose().catch(() => undefined)
-        hostDom.dispose()
+        hostDom?.dispose()
+        transientCanvas?.dispose()
         delete controller.hostDomWorker
         controller.status = 'failed'
         controller.error = errorMessage(error)
-        pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Isolated Host DOM plugin activation failed', error)
+        pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Isolated plugin activation failed', error)
         retirePrincipal(controller, 'Plugin disposed after isolated activation failure')
         throw error
       }
@@ -2206,7 +2247,7 @@ async function start(
           policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
           controller.generationView,
         )
-      } else if (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6) {
+      } else if (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7 || controller.manifest.schemaVersion === 8) {
         await broker.setPolicyV2(
           controller.identity,
           capability,
@@ -2390,7 +2431,7 @@ async function start(
     id: string,
     decision: CordisXPermissionAuthorizationDecisionV4,
   ): Promise<void> => authorizePluginWith(id, async controller => {
-    if (controller.manifest.schemaVersion !== 5 && controller.manifest.schemaVersion !== 6) throw new Error(`plugin ${id} does not use permission v4`)
+    if (controller.manifest.schemaVersion !== 5 && controller.manifest.schemaVersion !== 6 && controller.manifest.schemaVersion !== 7 && controller.manifest.schemaVersion !== 8) throw new Error(`plugin ${id} does not use permission v4`)
     await broker.authorizeActivationV4(controller.identity, decision, 'enable', controller.generationView)
   })
 
@@ -2458,7 +2499,7 @@ async function start(
       throw new Error(`local development candidate ${pluginId} is invalid: ${controller.error ?? 'module initialization failed'}`)
     }
     if (replacesTarget && mutation.developmentPackage !== undefined
-      && (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6)
+      && (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7 || controller.manifest.schemaVersion === 8)
       && controller.manifest.services.length > 0) {
       throw new Error('local development phase 1 is renderer-only; manifest services are unavailable')
     }
@@ -2589,7 +2630,7 @@ async function start(
             && mutation.authorizationDecision !== undefined
             && (mutation.operation === 'install' || mutation.operation === 'update' || mutation.operation === 'enable')) {
             if (mutation.authorizationDecision.schemaVersion === 4) {
-              if (candidate.controller.manifest.schemaVersion !== 5 && candidate.controller.manifest.schemaVersion !== 6) throw new Error('permission v4 decision requires manifest-v5 or manifest-v6')
+              if (candidate.controller.manifest.schemaVersion !== 5 && candidate.controller.manifest.schemaVersion !== 6 && candidate.controller.manifest.schemaVersion !== 7 && candidate.controller.manifest.schemaVersion !== 8) throw new Error('permission v4 decision requires manifest-v5, manifest-v6, manifest-v7, or manifest-v8')
               await broker.authorizeActivationV4(
                 candidate.controller.identity,
                 mutation.authorizationDecision,
@@ -2975,6 +3016,8 @@ async function start(
     unbindIconThemeRegistry()
     adapterHandle?.dispose()
     adapterHandle = undefined
+    transientCanvasCoordinator?.dispose()
+    transientCanvasCoordinator = undefined
     undeclareManagerContentOutlet?.()
     undeclareManagerContentOutlet = undefined
     undeclareManagerOutlet?.()
@@ -3001,8 +3044,9 @@ async function start(
     pageFiber = undefined
     await agentConversationShellFiber?.dispose()
     agentConversationShellFiber = undefined
-    sharedReactRuntime?.dispose()
+    if (ownsSharedReactRuntime) sharedReactRuntime?.dispose()
     sharedReactRuntime = undefined
+    ownsSharedReactRuntime = false
     await commandFiber?.dispose()
     commandFiber = undefined
     await platformFiber?.dispose()
@@ -3419,6 +3463,7 @@ async function start(
     commandService.setAccessResolver(extensionPointBroker)
     routeService.setAccessResolver(extensionPointBroker)
     slotService.setAccessResolver(extensionPointBroker)
+    transientCanvasCoordinator = new TransientCanvasCoordinator(document, slotService.registry)
     registrySubscriptions.push(
       extensionPointDescriptors.subscribe(notifyFrom('extension-descriptors')),
       commandService.subscribeInternal(notifyFrom('commands')),
@@ -3428,11 +3473,15 @@ async function start(
       iconThemeRegistry.subscribe(notifyFrom('icon-themes')),
     )
     adapterHandle = metadata.hostKind === 'playground'
-      ? installPlaygroundAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, { profileId: metadata.profileId })
+      ? installPlaygroundAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, {
+          profileId: metadata.profileId,
+          transientCanvas: transientCanvasCoordinator,
+        })
       : installCodexAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, {
           generation,
           adapterVersion: metadata.version,
           profileId: metadata.profileId,
+          transientCanvas: transientCanvasCoordinator,
         })
     const legacyAuthorizationGroups = new Map<string, {
       readonly source: string
@@ -3511,9 +3560,21 @@ async function start(
     certifiedPermissionChannel?.dispose()
     certifiedPermissionChannel = undefined
     routeHistory.dispose()
-    sharedReactRuntime?.dispose()
+    if (ownsSharedReactRuntime) sharedReactRuntime?.dispose()
     sharedReactRuntime = undefined
+    ownsSharedReactRuntime = false
     throw error
+  }
+}
+
+/** Keep the Host React singleton alive while Vite evaluates plugin ESM modules. */
+export function prepareCordisXViteReactRuntime(document: Document): () => void {
+  const runtime = globalThis.__cordisxSharedReactRuntime ?? installSharedReactRuntime(document)
+  let disposed = false
+  return () => {
+    if (disposed) return
+    disposed = true
+    if (globalThis.__cordisxSharedReactRuntime === runtime) runtime.dispose()
   }
 }
 

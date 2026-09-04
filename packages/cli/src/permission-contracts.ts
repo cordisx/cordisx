@@ -7,6 +7,7 @@ import type {
   PluginManifestCapabilityDeclarationV6,
   PluginRuntimeManifestV6,
 } from '@cordisx/protocol/plugin-manifest/v6'
+import type { PluginRuntimeManifestV7 } from '@cordisx/protocol/plugin-manifest/v7'
 import type {
   PluginRuntimeManifestV8,
 } from '@cordisx/protocol/plugin-manifest/v8'
@@ -41,6 +42,10 @@ export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V6 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v6.schema.json'
 export const CORDISX_PLUGIN_PACKAGE_SCHEMA_V6 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v6.schema.json'
+export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v7.schema.json'
+export const CORDISX_PLUGIN_PACKAGE_SCHEMA_V7 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v7.schema.json'
 export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v8.schema.json'
 export const CORDISX_PLUGIN_PACKAGE_SCHEMA_V8 =
@@ -215,6 +220,7 @@ export interface CordisXPluginManifestV5 {
 /** Public Protocol-v6 manifest shape re-exported through `cordisx/contracts`. */
 export type CordisXCapabilityDeclarationV6 = PluginManifestCapabilityDeclarationV6
 export type CordisXPluginManifestV6 = PluginRuntimeManifestV6
+export type CordisXPluginManifestV7 = PluginRuntimeManifestV7
 export type CordisXCapabilityDeclarationV8 = PluginManifestCapabilityDeclarationV6 | PluginRuntimeManifestV8['capabilities'][number]
 export type CordisXPluginManifestV8 = PluginRuntimeManifestV8
 
