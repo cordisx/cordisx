@@ -40,6 +40,49 @@ describe('plugin README composition', () => {
     expect(composition.watchFiles).toEqual([entry, readme])
   })
 
+  it('keeps embedded plugin READMEs scoped below a shared .cordisx package root', async () => {
+    const project = await mkdtemp(path.join(os.tmpdir(), 'cordisx-embedded-readmes-'))
+    temporaryDirectories.push(project)
+    const root = path.join(project, '.cordisx')
+    const firstRoot = path.join(root, 'plugins', 'first')
+    const secondRoot = path.join(root, 'plugins', 'second')
+    const firstEntry = path.join(firstRoot, 'src', 'index.ts')
+    const secondEntry = path.join(secondRoot, 'src', 'index.ts')
+    const firstReadme = path.join(firstRoot, 'README.md')
+    const secondReadme = path.join(secondRoot, 'README.md')
+    await Promise.all([
+      mkdir(path.dirname(firstEntry), { recursive: true }),
+      mkdir(path.dirname(secondEntry), { recursive: true }),
+    ])
+    await Promise.all([
+      writeFile(path.join(root, 'package.json'), '{"name":"embedded-cordisx","private":true,"type":"module"}\n'),
+      writeFile(path.join(root, 'README.md'), '# Shared CordisX environment\n'),
+      writeFile(firstReadme, '# First embedded plugin\n'),
+      writeFile(secondReadme, '# Second embedded plugin\n'),
+      writeFile(firstEntry, 'export function apply() {}\n'),
+      writeFile(secondEntry, 'export function apply() {}\n'),
+    ])
+    const config: CordisXConfig = {
+      version: 1,
+      rootDir: project,
+      projectRoot: project,
+      configRoot: root,
+      codex: { debugPort: 9229 },
+      providers: [],
+      plugins: [
+        { id: 'first', entry: firstEntry, enabled: true, config: {} },
+        { id: 'second', entry: secondEntry, enabled: true, config: {} },
+      ],
+    }
+
+    const composition = await buildRendererCompositionSource(config, { playground: true })
+
+    expect(composition.source).toContain('# First embedded plugin')
+    expect(composition.source).toContain('# Second embedded plugin')
+    expect(composition.source).not.toContain('# Shared CordisX environment')
+    expect(composition.watchFiles).toEqual([firstEntry, secondEntry, firstReadme, secondReadme])
+  })
+
   it('resolves external plugin contracts from the exact Host instead of a shadow package', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-external-contracts-'))
     temporaryDirectories.push(root)

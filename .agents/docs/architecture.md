@@ -25,15 +25,14 @@ CordisX must never label its injected shell integration as an official Codex plu
 ## Runtime
 
 ```text
-cordisx.config.json
-        |
-        v
-launcher -- esbuild browser composition -- plugin modules
-        |
-        v
-loopback CDP -- addScript/evaluate -- Codex renderer
-        |
-        v
+cordisx run/config -- esbuild immutable bundle --+
+                                                  |
+cordisx dev/config -- Vite ESM graph + HMR -------+--> launcher/CDP bootstrap
+                                                          |
+                                                          v
+                                                    Codex renderer
+                                                          |
+                                                          v
 Cordis Context -- SlotService -- semantic slots -- Codex DOM adapter
         |                                  |
         +---- plugin fibers/effects -------+
@@ -41,7 +40,11 @@ Cordis Context -- SlotService -- semantic slots -- Codex DOM adapter
 
 ### Launcher plane
 
-The Node launcher owns configuration, plugin entry resolution, browser bundling, Codex process startup, CDP target discovery, injection identifiers, and cleanup. The browser bundle contains one Cordis copy and all enabled plugin modules so plugin contexts and services share one runtime identity.
+The Node launcher owns configuration, plugin entry resolution, Codex process
+startup, CDP target discovery, injection identifiers, and cleanup. Formal runs
+compose an immutable browser bundle with esbuild. Development runs serve the
+Host and all enabled plugin entries as one Vite ESM graph. Both paths preserve
+one Cordis runtime identity for plugin contexts and services.
 
 Dynamic package delivery evolves that composition into one stable Host runtime
 plus independently built immutable plugin module generations. Configuration
@@ -55,21 +58,45 @@ closure publication order are specified in
 slice lands, the single-bundle behavior in the next sections remains the
 implemented current state.
 
-The explicit `cordisx dev <entry>` path is a separate Host-private source
-plane. It boots one stable renderer runtime, watches the entry's complete
-transitive build graph, and publishes immutable local candidates through the
-same reversible generation transaction used by package lifecycle. Failed
-candidates preserve last-good; successful candidates update the bootstrap only
-for renderer targets discovered later. A rollback advances the shared registry
-epoch monotonically even when its last renderer has closed, then rebuilds that
-future-target bootstrap from the saved last-good configuration and activation
-at the returned rollback epoch. The Host admits only one unresolved generation
-transaction; a live terminal RPC failure retains that fence, and local
-development retries the same rollback before building another candidate.
-Local paths and build diagnostics are
-projected only into Manager and never become public package sources, lifecycle
-snapshots, permission identities, or share targets. Details and the phase-1
-entry-basename id restriction are in
+The explicit `cordisx dev <entry>` and `cordisx dev --config ...` paths use
+Vite as their Host-private development transport:
+
+```text
+Host sources + plugin sources -> Vite server -> HTTP modules/maps -> native renderer
+                                     |                                  |
+                                     +--- Vite HMR WebSocket ------------+
+                                                                        |
+launcher -> CDP small initial entry                  Host HMR / plugin fiber replacement
+```
+
+Vite serves one Host and plugin ESM graph with the Host React singleton and
+React Refresh runtime. A refresh-compatible component module can update through
+React Fast Refresh and retain component state. Plugin entry, manifest, `apply`,
+and other non-refresh-boundary changes invalidate only the owning plugin and run
+the renderer's reversible Cordis generation transaction. Replacement cleans up
+the old fiber; a failed candidate rolls back, and an unsuccessful rollback
+pauses updates. The Host itself can restart without refreshing the native
+document; server-originated Vite full-reload messages become a Host-only restart
+event on Vite's existing channel. Client-originated Vite recovery (such as
+reconnect or a failed circular import) still follows the upstream client's
+page-reload behavior. Updates never carry module source over CDP. Independent
+windows apply updates locally; there is no development-wide atomic publication
+guarantee.
+
+JavaScript source maps are served separately. Before reloading a native target,
+development grants that exact `app://` origin loopback access through CDP and
+enables renderer CSP bypass; cleanup restores the permission to `prompt` and
+disables the bypass. Vite listens only on loopback under a random per-launch
+base path. The launcher owns its server and session state. Dependency optimizer
+data uses the user-private `CORDISX_HOME/cache/native-vite` tree keyed by the
+CLI/workspace roots and runtime dependency versions, so compatible later
+launches of the same workspace can reuse it. Initial bootstrap or
+module validation errors stop the launch; later transform or activation errors
+preserve the active plugin. Config and Node-plane changes still require
+restarting the command. Node services, formal plugin dependency graphs, and
+isolated Host DOM plugins remain outside this renderer transport. Local paths
+and diagnostics stay Host-private. Details and evidence are in
+[`vite-native-development.md`](vite-native-development.md) and
 [`distribution-and-cli.md`](distribution-and-cli.md#explicit-local-development-entry).
 AI-first development uses the same plane with a normal project created by the
 published plugin scaffolder. The launched Host receives that project's exact

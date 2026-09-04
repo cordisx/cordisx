@@ -9,7 +9,7 @@
   "types": "./dist/{{pluginId}}.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "check": "npm run typecheck && npm run build && npm test",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.json && node --test test/manifest.mjs",
     "dev": "cordisx dev ./src/{{pluginId}}.tsx",
     "dev:dry-run": "cordisx dev ./src/{{pluginId}}.tsx --dry-run",
     "test": "node --test test/manifest.mjs",

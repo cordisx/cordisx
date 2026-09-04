@@ -33,8 +33,8 @@ await cp(channelSource, channelDestination, {
 // so an installed `cordisx` tarball never relies on a workspace symlink.
 await mkdir(channelRuntimeDestination, { recursive: true })
 await cp(channelRuntimeSource, channelRuntimeDestination, { recursive: true, force: true })
-// Mirror the complete maintained Skill into dist so npm's existing files
-// allowlist includes it without publishing repository-only source paths.
+// Mirror the complete maintained Skill into dist so the npm package and CLI
+// launcher use the same immutable source tree without publishing source paths.
 await rm(cordisxSkillDestination, { recursive: true, force: true })
 await mkdir(path.dirname(cordisxSkillDestination), { recursive: true })
 await cp(cordisxSkillSource, cordisxSkillDestination, { recursive: true, force: false, errorOnExist: true })

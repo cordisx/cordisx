@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -65,6 +65,14 @@ function installedSkill(home: string): string {
   return path.join(home, '.agents', 'skills', CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME)
 }
 
+function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
+  let resolve!: () => void
+  const promise = new Promise<void>(done => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
 describe('built-in CordisX Skill deployment', () => {
   it('installs the complete Skill into shared HOME without changing another user Skill or cwd', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skill-shared-'))
@@ -129,6 +137,175 @@ describe('built-in CordisX Skill deployment', () => {
     await expect(readFile(path.join(upgraded.targetDir, 'SKILL.md'), 'utf8')).resolves.toContain('revision-two')
     await expect(readFile(path.join(upgraded.targetDir, 'references', 'upgrade.md'), 'utf8')).resolves.toBe('new-file\n')
     await expect(access(path.join(upgraded.targetDir, 'references', 'verification.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('serializes concurrent launch deployments before inspecting or replacing the target', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skill-concurrent-'))
+    const home = path.join(root, 'home')
+    const source = await createSkillSource(root, 'concurrent-revision')
+    const firstLocked = deferred()
+    const releaseFirst = deferred()
+    let secondLocked = false
+
+    const first = deployBundledCordisXSkill(sharedPlan(home), {
+      sourceDir: source,
+      testHooks: {
+        afterLockAcquired: async () => {
+          firstLocked.resolve()
+          await releaseFirst.promise
+        },
+      },
+    })
+    await firstLocked.promise
+    const second = deployBundledCordisXSkill(sharedPlan(home), {
+      sourceDir: source,
+      testHooks: {
+        afterLockAcquired: () => {
+          secondLocked = true
+        },
+      },
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 60))
+    expect(secondLocked).toBe(false)
+    releaseFirst.resolve()
+    const results = await Promise.all([first, second])
+
+    expect(results.map(result => result.status).sort()).toEqual(['installed', 'unchanged'])
+    expect(secondLocked).toBe(true)
+    await expect(readFile(path.join(installedSkill(home), 'SKILL.md'), 'utf8'))
+      .resolves.toContain('concurrent-revision')
+  })
+
+  it('restores and preserves a user edit that lands after the managed target is moved', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skill-moved-edit-'))
+    const home = path.join(root, 'home')
+    const source = await createSkillSource(root, 'revision-one')
+    const plan = sharedPlan(home)
+    await deployBundledCordisXSkill(plan, { sourceDir: source })
+    await writeFile(path.join(source, 'SKILL.md'), '---\nname: cordisx-plugin-development\ndescription: revision-two\n---\n')
+
+    await expect(deployBundledCordisXSkill(plan, {
+      sourceDir: source,
+      testHooks: {
+        afterTargetMovedToBackup: async backupDir => {
+          await writeFile(path.join(backupDir, 'SKILL.md'), 'user-race-edit\n')
+        },
+      },
+    })).rejects.toThrow(CordisXSkillConflictError)
+
+    await expect(readFile(path.join(installedSkill(home), 'SKILL.md'), 'utf8')).resolves.toBe('user-race-edit\n')
+  })
+
+  it('never deletes a directory created concurrently at the target during rollback', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skill-target-race-'))
+    const home = path.join(root, 'home')
+    const source = await createSkillSource(root, 'revision-one')
+    const plan = sharedPlan(home)
+    await deployBundledCordisXSkill(plan, { sourceDir: source })
+    await writeFile(path.join(source, 'SKILL.md'), '---\nname: cordisx-plugin-development\ndescription: revision-two\n---\n')
+    const target = installedSkill(home)
+
+    const racedDeployment = deployBundledCordisXSkill(plan, {
+      sourceDir: source,
+      testHooks: {
+        afterTargetMovedToBackup: async () => {
+          await mkdir(target)
+          await writeFile(path.join(target, 'SKILL.md'), 'concurrent-user-content\n')
+        },
+      },
+    })
+    await expect(racedDeployment).rejects.toBeInstanceOf(CordisXSkillConflictError)
+    await expect(racedDeployment).rejects.toThrow('previous managed copy remains at')
+
+    await expect(readFile(path.join(target, 'SKILL.md'), 'utf8')).resolves.toBe('concurrent-user-content\n')
+    const skillsDir = path.dirname(target)
+    const backup = (await readdir(skillsDir)).find(name => name.startsWith('.cordisx-plugin-development.backup-'))
+    expect(backup).toBeDefined()
+    await expect(readFile(path.join(skillsDir, backup!, 'SKILL.md'), 'utf8')).resolves.toContain('revision-one')
+  })
+
+  it('fails safely on an abandoned deployment lock without changing the target or lock contents', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skill-stale-lock-'))
+    const home = path.join(root, 'home')
+    const source = await createSkillSource(root, 'blocked-revision')
+    const skillsDir = path.join(home, '.agents', 'skills')
+    const lockDir = path.join(skillsDir, '.cordisx-plugin-development.deployment-lock')
+    await mkdir(lockDir, { recursive: true })
+    await writeFile(path.join(lockDir, 'owner-sentinel'), 'unknown-owner\n')
+
+    await expect(deployBundledCordisXSkill(sharedPlan(home), {
+      sourceDir: source,
+      testHooks: { deploymentLockTimeoutMs: 0 },
+    })).rejects.toThrow(CordisXSkillConflictError)
+
+    await expect(access(installedSkill(home))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(path.join(lockDir, 'owner-sentinel'), 'utf8')).resolves.toBe('unknown-owner\n')
+  })
+
+  it('adopts an exact unmanaged copy without rewriting its Skill content', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skill-adopt-'))
+    const home = path.join(root, 'home')
+    const source = await createSkillSource(root, 'manual-exact-copy')
+    const target = installedSkill(home)
+    await mkdir(path.dirname(target), { recursive: true })
+    await cp(source, target, { recursive: true, force: false, errorOnExist: true })
+    const before = await readFile(path.join(target, 'SKILL.md'), 'utf8')
+
+    const result = await deployBundledCordisXSkill(sharedPlan(home), { sourceDir: source })
+
+    expect(result.status).toBe('unchanged')
+    await expect(readFile(path.join(target, 'SKILL.md'), 'utf8')).resolves.toBe(before)
+    await expect(readFile(path.join(target, CORDISX_SKILL_MARKER_FILE), 'utf8')).resolves.toContain(result.contentDigest)
+  })
+
+  it('preserves a marker that replaces CordisX own marker during unmanaged adoption', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skill-adopt-race-'))
+    const home = path.join(root, 'home')
+    const source = await createSkillSource(root, 'manual-exact-copy')
+    const target = installedSkill(home)
+    const markerPath = path.join(target, CORDISX_SKILL_MARKER_FILE)
+    const replacementPath = path.join(target, '.user-marker-replacement')
+    const userMarker = 'user-owned-marker\n'
+    await mkdir(path.dirname(target), { recursive: true })
+    await cp(source, target, { recursive: true, force: false, errorOnExist: true })
+
+    const racedDeployment = deployBundledCordisXSkill(sharedPlan(home), {
+      sourceDir: source,
+      testHooks: {
+        afterAdoptionMarkerWritten: async () => {
+          await writeFile(replacementPath, userMarker)
+          await rename(replacementPath, markerPath)
+        },
+      },
+    })
+    await expect(racedDeployment).rejects.toBeInstanceOf(CordisXSkillConflictError)
+    await expect(racedDeployment).rejects.toThrow('adoption marker changed concurrently')
+
+    await expect(readFile(markerPath, 'utf8')).resolves.toBe(userMarker)
+    await expect(readFile(path.join(target, 'SKILL.md'), 'utf8')).resolves.toContain('manual-exact-copy')
+  })
+
+  it('removes only its own unchanged marker when unmanaged content changes during adoption', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skill-adopt-content-race-'))
+    const home = path.join(root, 'home')
+    const source = await createSkillSource(root, 'manual-exact-copy')
+    const target = installedSkill(home)
+    const markerPath = path.join(target, CORDISX_SKILL_MARKER_FILE)
+    await mkdir(path.dirname(target), { recursive: true })
+    await cp(source, target, { recursive: true, force: false, errorOnExist: true })
+
+    await expect(deployBundledCordisXSkill(sharedPlan(home), {
+      sourceDir: source,
+      testHooks: {
+        afterAdoptionMarkerWritten: async () => {
+          await writeFile(path.join(target, 'SKILL.md'), 'user-edit-during-adoption\n')
+        },
+      },
+    })).rejects.toBeInstanceOf(CordisXSkillConflictError)
+
+    await expect(readFile(path.join(target, 'SKILL.md'), 'utf8')).resolves.toBe('user-edit-during-adoption\n')
+    await expect(access(markerPath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('preserves an unmanaged conflicting target and all sibling Skills', async () => {

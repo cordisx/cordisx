@@ -92,6 +92,20 @@ describe('parseCordisXCli', () => {
     })
   })
 
+  it('parses dev without an explicit path so project config discovery can run', () => {
+    expect(parseCordisXCli(['dev'])).toEqual({
+      action: 'dev',
+      options: {
+        attach: false,
+        system: false,
+        isolated: false,
+        onlineDevtools: false,
+        dryRun: false,
+      },
+      hostArgs: [],
+    })
+  })
+
   it('parses a development composition file without mixing it with a plugin path', () => {
     expect(parseCordisXCli(['dev', '--config', './cordisx.config.json'])).toMatchObject({
       action: 'dev',

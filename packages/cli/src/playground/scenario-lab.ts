@@ -404,7 +404,7 @@ function createCommand(
     commandId: scenarioCommandId(scope, `${scenarioId}:create:${alias}`),
     type: 'create-or-bind',
     definition: definition.identity,
-    definitions,
+    definitions: definitions.length === 0 ? [definition] : definitions as readonly [AgentDefinition, ...AgentDefinition[]],
     target: { mode: 'create' },
   }
 }

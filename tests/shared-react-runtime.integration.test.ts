@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
@@ -102,6 +103,30 @@ describe('shared React plugin runtime', () => {
     await expect(buildRendererBundle(config(path.join(root, 'tests/fixtures/private-react-plugin.tsx'))))
       .rejects.toThrow('must import React and UI components from cordisx/react and cordisx/ui')
   })
+
+  it('binds component-library React and React DOM peers to the production Host singleton', async () => {
+    const directory = await mkdtemp(path.join(root, '.react-peer-test-'))
+    try {
+      const library = path.join(directory, 'node_modules', 'test-peer-component')
+      await mkdir(library, { recursive: true })
+      await writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'peer-plugin', type: 'module' }))
+      await writeFile(path.join(library, 'package.json'), JSON.stringify({ name: 'test-peer-component', type: 'module', main: 'index.js' }))
+      await writeFile(path.join(library, 'index.js'), `export { default as React } from 'react'; export { createPortal } from 'react-dom'; export { createRoot } from 'react-dom/client';`)
+      const entry = path.join(directory, 'index.ts')
+      await writeFile(entry, `import { React, createPortal, createRoot } from 'test-peer-component'; export function apply() { globalThis.__peerRuntime = { React, createPortal, createRoot }; }`)
+      const bundle = await buildRendererBundle(config(entry), { playground: true, generation: 'peer-test', profileId: 'test' })
+      const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { runScripts: 'dangerously', url: 'https://cordisx.local/' })
+      try {
+        dom.window.eval(bundle)
+        await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true')
+        const scope = dom.window as unknown as { __peerRuntime: { React: unknown; createPortal: unknown; createRoot: unknown }; __cordisxSharedReactRuntime: { React: unknown; reactDom: { createPortal: unknown }; reactDomClient: { createRoot: unknown } }; __cordisxRuntime: RuntimeHandle }
+        expect(scope.__peerRuntime.React).toBe(scope.__cordisxSharedReactRuntime.React)
+        expect(scope.__peerRuntime.createPortal).toBe(scope.__cordisxSharedReactRuntime.reactDom.createPortal)
+        expect(scope.__peerRuntime.createRoot).toBe(scope.__cordisxSharedReactRuntime.reactDomClient.createRoot)
+        await scope.__cordisxRuntime.dispose()
+      } finally { dom.window.close() }
+    } finally { await rm(directory, { recursive: true, force: true }) }
+  }, 20_000)
 
   it('does not publish the shared runtime when activation metadata is invalid', async () => {
     const plugin = path.join(root, 'tests/fixtures/shared-react-page-plugin.tsx')

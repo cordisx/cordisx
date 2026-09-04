@@ -56,13 +56,12 @@ function browserSessionStorage(): Storage | undefined {
 }
 
 const initialResetMarker = readPlaygroundPreviewResetMarker(browserSessionStorage())
+const initialResetApplied = readPlaygroundPreviewResetApplied(browserSessionStorage())
 let previewResetBlocked = initialResetMarker !== undefined && initialResetMarker.phase !== 'requesting'
 let state: RuntimeState = {
   status: 'starting',
   plugins: [],
-  ...(readPlaygroundPreviewResetApplied(browserSessionStorage()) === undefined
-    ? {}
-    : { resetApplied: readPlaygroundPreviewResetApplied(browserSessionStorage()) }),
+  ...(initialResetApplied === undefined ? {} : { resetApplied: initialResetApplied }),
 }
 const listeners = new Set<() => void>()
 let timer: ReturnType<typeof setInterval> | undefined
@@ -139,11 +138,10 @@ export function cancelPlaygroundPreviewRuntimeReset(): void {
 }
 
 function resetStateProjection(): Pick<RuntimeState, 'resetServer' | 'resetApplied'> {
+  const applied = readPlaygroundPreviewResetApplied(browserSessionStorage())
   return {
     ...(state.resetServer === undefined ? {} : { resetServer: state.resetServer }),
-    ...(readPlaygroundPreviewResetApplied(browserSessionStorage()) === undefined
-      ? {}
-      : { resetApplied: readPlaygroundPreviewResetApplied(browserSessionStorage()) }),
+    ...(applied === undefined ? {} : { resetApplied: applied }),
   }
 }
 

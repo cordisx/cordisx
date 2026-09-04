@@ -496,4 +496,42 @@ describe('Manager plugin card actions', () => {
       dom.window.close()
     }
   })
+
+  it('keeps targeted reload available for a Vite development plugin without enabling package operations', async () => {
+    const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'https://codex.local/' })
+    const state = snapshot()
+    state.plugins[0] = {
+      ...state.plugins[0]!,
+      source: 'file:///cordisx-local-dev/fixture/base.js',
+      development: {
+        origin: 'local-dev', pluginId: 'base', sourcePath: '/project/.cordisx/plugins/base/src/index.ts', state: 'ready',
+      },
+      developmentReloadAvailable: true,
+    }
+    state.pluginLifecycle = { ...state.pluginLifecycle!, operationsAvailable: false }
+    const operations: CordisXPluginLifecycleOperationV1[] = []
+    const model: ManagerModel = {
+      snapshot: () => state,
+      setPluginBlocked: async () => {}, setPermissionPolicy: async () => {}, subscribe: () => () => {},
+      requestPluginLifecycle: async operation => {
+        operations.push(operation)
+        return result(operation.kind, 'applied', { affectedPluginIds: ['base'] })
+      },
+    }
+    const dispose = installCordisXManager(dom.window.document, model)
+    try {
+      const toggle = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-action="disable"]')!
+      const reload = dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-action="reload"]')!
+      expect(toggle.disabled).toBe(true)
+      expect(reload.disabled).toBe(false)
+      reload.click()
+      await settle()
+      expect(operations).toEqual([{ kind: 'reload', pluginId: 'base' }])
+      dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-menu="base"] .cxc-menu-trigger')!.click()
+      expect(dom.window.document.querySelector('[data-collection-action="uninstall"]')).toBeNull()
+    } finally {
+      dispose()
+      dom.window.close()
+    }
+  })
 })

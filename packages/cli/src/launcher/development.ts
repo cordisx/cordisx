@@ -63,7 +63,7 @@ function pluginId(entry: string): string {
   return name === '' || name === 'host' || name.startsWith('cordisx.') ? 'local-plugin' : name
 }
 
-async function findPackageRoot(entry: string): Promise<string> {
+export async function findPackageRoot(entry: string): Promise<string> {
   let directory = path.dirname(entry)
   while (true) {
     const manifestPath = path.join(directory, 'package.json')
@@ -77,19 +77,35 @@ async function findPackageRoot(entry: string): Promise<string> {
   }
 }
 
-async function packageRoot(entry: string): Promise<{ readonly root: string; readonly version: string }> {
+export interface LocalDevelopmentPackageInfo {
+  readonly root: string
+  readonly version: string
+  /** Exact renderer-only package inputs that must invalidate a development generation. */
+  readonly packageFiles: readonly string[]
+  readonly entityTemplates: readonly EntityTemplatePayload[]
+}
+
+export async function localDevelopmentPackageInfo(entry: string): Promise<LocalDevelopmentPackageInfo> {
   const root = await findPackageRoot(entry)
-  const manifest: { readonly version?: unknown } = await readFile(path.join(root, 'package.json'), 'utf8')
-    .then(text => JSON.parse(text) as { readonly version?: unknown })
-    .catch(error => {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {} as const
-      throw error
-    })
+  const [manifest, rendererPackage]: readonly [
+    { readonly version?: unknown },
+    Awaited<ReturnType<typeof readRendererOnlyPackage>>,
+  ] = await Promise.all([
+    readFile(path.join(root, 'package.json'), 'utf8')
+      .then(text => JSON.parse(text) as { readonly version?: unknown })
+      .catch(error => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {}
+        throw error
+      }),
+    readRendererOnlyPackage(root),
+  ])
   return {
     root,
     version: typeof manifest.version === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)
       ? manifest.version
       : '0.0.0-local-dev',
+    packageFiles: rendererPackage.files,
+    entityTemplates: rendererPackage.entityTemplates,
   }
 }
 
@@ -212,7 +228,7 @@ export async function buildLocalDevelopmentPlugin(
 ): Promise<LocalDevelopmentBuild> {
   const entry = path.resolve(rawEntry)
   await access(entry)
-  const { root, version } = await packageRoot(entry)
+  const { root, version, packageFiles, entityTemplates } = await localDevelopmentPackageInfo(entry)
   const id = pluginId(entry)
   const common = {
     absWorkingDir: root,
@@ -224,15 +240,15 @@ export async function buildLocalDevelopmentPlugin(
     loader: { '.svg': 'text' as const, '.css': 'text' as const, '.png': 'dataurl' as const },
     jsx: 'automatic' as const,
     jsxImportSource: 'cordisx/react',
-    plugins: [cordisXReactVirtualModules()],
+    plugins: [cordisXReactVirtualModules(entry)],
     write: false,
     logLevel: 'silent' as const,
   }
-  const [moduleResult, readmes, packageSource] = await Promise.all([
+  const [moduleResult, readmes] = await Promise.all([
     build({ entryPoints: [entry], format: 'iife', globalName: '__cordisxPluginModule', ...common }),
     readReadmes(root),
-    readRendererOnlyPackage(root),
   ])
+  const packageSource = { files: packageFiles, entityTemplates }
   if (moduleResult.metafile === undefined) {
     throw new Error('local development build produced no dependency metadata')
   }

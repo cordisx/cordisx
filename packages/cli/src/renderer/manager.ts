@@ -149,6 +149,8 @@ export interface ManagerPluginSnapshot {
   }
   /** Host-private local development provenance and build diagnostics. */
   readonly development?: CordisXLocalDevelopmentSnapshot
+  /** The active Vite session can invalidate and reload this plugin on demand. */
+  readonly developmentReloadAvailable?: boolean
 }
 
 export interface ManagerPermissionSnapshot {
@@ -4117,6 +4119,7 @@ export function installCordisXManager(
       const status = lifecycleBusy.get(plugin.id) ?? plugin.status
       const packageOperationReason = packageOperationUnavailableReason(snapshot, plugin)
       const managed = packageOperationReason === undefined
+      const reloadManaged = managed || plugin.developmentReloadAvailable === true
       const globallyBusy = lifecycleInstallBusy || lifecycleBusy.size > 0
       const enable = plugin.status === 'configured-disabled'
       const toggleLabel = enable ? copy('plugins.enable') : copy('plugins.disable')
@@ -4127,7 +4130,7 @@ export function installCordisXManager(
       const toggleReason = toggleDisabled
         ? (!managed ? copy('status.unavailable') : globallyBusy ? copy('plugins.operation-busy') : copy(enable ? 'plugins.enable-unavailable' : 'plugins.disable-unavailable'))
         : undefined
-      const reloadReason = !managed
+      const reloadReason = !reloadManaged
         ? copy('status.unavailable')
         : globallyBusy ? copy('plugins.operation-busy') : plugin.status === 'active' ? undefined : copy('plugins.reload-unavailable')
       const uninstallReason = !managed ? copy('status.unavailable') : (globallyBusy ? copy('plugins.operation-busy') : undefined)
@@ -4160,7 +4163,7 @@ export function installCordisXManager(
           placement: 'direct',
           priority: 3,
           icon: () => createManagerIcon(document, 'reload-plugin'),
-          disabled: !managed || globallyBusy || plugin.status !== 'active',
+          disabled: !reloadManaged || globallyBusy || plugin.status !== 'active',
           ...(reloadReason === undefined ? {} : { unavailableReason: reloadReason }),
           onInvoke: () => { void runPluginLifecycle(snapshot, plugin, 'reload') },
         },

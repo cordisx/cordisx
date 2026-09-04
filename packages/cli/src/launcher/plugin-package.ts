@@ -237,10 +237,10 @@ async function buildArtifact(root: string, entry: string): Promise<{ readonly mo
     target: ['chrome120'],
     sourcemap: false,
     metafile: true,
-    loader: { '.svg': 'text' as const, '.png': 'dataurl' as const },
+    loader: { '.svg': 'text' as const, '.css': 'text' as const, '.png': 'dataurl' as const },
     jsx: 'automatic' as const,
     jsxImportSource: 'cordisx/react',
-    plugins: [cordisXReactVirtualModules()],
+    plugins: [cordisXReactVirtualModules(entry)],
     write: false,
     logLevel: 'silent' as const,
   }

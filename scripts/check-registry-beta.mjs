@@ -83,9 +83,57 @@ async function verifyGeneratedProject(project) {
   ], { cwd: project })
   await run('npm', ['run', 'check'], { cwd: project })
   const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project })
-  if (!dryRun.stdout.includes('[cordisx] bundle ready:') || !dryRun.stdout.includes('"status": "ready"')) {
+  if (!dryRun.stdout.includes('[cordisx] Vite entry ready:')
+    || !dryRun.stdout.includes('"status": "ready"')
+    || !dryRun.stdout.includes('"transport": "vite"')) {
     throw new Error('registry-generated plugin failed cordisx dev --dry-run')
   }
+}
+
+function assertViteProjectDryRun(stdout, pluginIds) {
+  if (!stdout.includes('[cordisx] Vite entry ready:')
+    || !stdout.includes('"status": "ready"')
+    || !stdout.includes('"transport": "vite"')
+    || pluginIds.some(id => !stdout.includes(`"${id}"`))) {
+    throw new Error('registry-generated multi-plugin project failed cordisx dev --dry-run')
+  }
+}
+
+async function verifyGeneratedWorkspace(project, pluginIds) {
+  const manifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'))
+  if (manifest.license !== 'UNLICENSED' || manifest.devDependencies?.cordisx !== version
+    || !Array.isArray(manifest.workspaces)) {
+    throw new Error('registry-generated plugin workspace metadata is invalid')
+  }
+  for (const id of pluginIds) {
+    const plugin = JSON.parse(await readFile(path.join(project, 'plugins', id, 'package.json'), 'utf8'))
+    if (plugin.devDependencies?.cordisx !== version) throw new Error(`registry-generated ${id} dependency mismatch`)
+  }
+  await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error', `--registry=${registry}`], { cwd: project })
+  await run('npm', ['run', 'check'], { cwd: project })
+  const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project })
+  assertViteProjectDryRun(dryRun.stdout, pluginIds)
+}
+
+async function verifyGeneratedEmbedded(project, pluginIds, integrated) {
+  const cordisxRoot = path.join(project, '.cordisx')
+  const manifest = JSON.parse(await readFile(path.join(cordisxRoot, 'package.json'), 'utf8'))
+  if (manifest.license !== 'UNLICENSED' || manifest.devDependencies?.cordisx !== version) {
+    throw new Error('registry-generated embedded package metadata is invalid')
+  }
+  const rootManifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'))
+  if (integrated && !rootManifest.workspaces?.includes('.cordisx')) {
+    throw new Error('registry-generated embedded package did not join the npm workspace')
+  }
+  if (!integrated && rootManifest.workspaces !== undefined) {
+    throw new Error('registry-generated isolated fixture unexpectedly became a workspace')
+  }
+  await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error', `--registry=${registry}`], {
+    cwd: integrated ? project : cordisxRoot,
+  })
+  await run('npm', ['run', 'check'], { cwd: cordisxRoot })
+  const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: cordisxRoot })
+  assertViteProjectDryRun(dryRun.stdout, pluginIds)
 }
 
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-registry-beta-'))
@@ -144,12 +192,47 @@ try {
 
   const createTarget = path.join(temporaryRoot, 'from-npm-create')
   const npxTarget = path.join(temporaryRoot, 'from-npx')
+  const workspaceTarget = path.join(temporaryRoot, 'plugin-workspace')
+  const embeddedWorkspaceTarget = path.join(temporaryRoot, 'embedded-workspace')
+  const embeddedIsolatedTarget = path.join(temporaryRoot, 'embedded-isolated')
+  const creatorBin = path.join(
+    runner,
+    'node_modules',
+    '.bin',
+    process.platform === 'win32' ? 'create-cordisx-plugin.cmd' : 'create-cordisx-plugin',
+  )
   await run('npm', [
     'create', 'cordisx-plugin@beta', createTarget,
   ], { cwd: runner })
   await run('npx', ['--yes', 'create-cordisx-plugin@beta', npxTarget], { cwd: runner })
   await verifyGeneratedProject(createTarget)
   await verifyGeneratedProject(npxTarget)
+
+  await run(creatorBin, [
+    '--mode', 'workspace', workspaceTarget, '--plugin', 'alpha', '--plugin', 'beta',
+  ], { cwd: runner })
+  await verifyGeneratedWorkspace(workspaceTarget, ['alpha', 'beta'])
+
+  for (const project of [embeddedWorkspaceTarget, embeddedIsolatedTarget]) {
+    await mkdir(project, { recursive: true })
+  }
+  await writeFile(path.join(embeddedWorkspaceTarget, 'package.json'), `${JSON.stringify({
+    name: 'embedded-workspace-fixture', private: true, workspaces: [],
+  }, null, 2)}\n`, 'utf8')
+  await writeFile(path.join(embeddedIsolatedTarget, 'package.json'), `${JSON.stringify({
+    name: 'embedded-isolated-fixture', private: true,
+  }, null, 2)}\n`, 'utf8')
+  await run(creatorBin, [
+    '--mode', 'embedded', embeddedWorkspaceTarget, '--plugin', 'alpha', '--package-manager', 'npm',
+  ], { cwd: runner })
+  await run(creatorBin, [
+    '--mode', 'embedded', embeddedWorkspaceTarget, '--plugin', 'beta', '--package-manager', 'npm',
+  ], { cwd: runner })
+  await run(creatorBin, [
+    '--mode', 'embedded', embeddedIsolatedTarget, '--plugin', 'solo', '--integration', 'isolated', '--package-manager', 'npm',
+  ], { cwd: runner })
+  await verifyGeneratedEmbedded(embeddedWorkspaceTarget, ['alpha', 'beta'], true)
+  await verifyGeneratedEmbedded(embeddedIsolatedTarget, ['solo'], false)
 
   for (const packageName of ['cordisx', 'create-cordisx-plugin']) {
     const tags = await npmViewJson([packageName, 'dist-tags'], runner)
@@ -164,6 +247,7 @@ try {
     license: 'AGPL-3.0-or-later',
     pluginException: true,
     creatorForms: ['npm create cordisx-plugin@beta', 'npx create-cordisx-plugin@beta'],
+    creatorModes: ['single', 'workspace', 'embedded-workspace', 'embedded-isolated'],
     latest: '0.0.0',
   }))
 } finally {

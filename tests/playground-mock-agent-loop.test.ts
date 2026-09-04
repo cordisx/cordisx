@@ -162,8 +162,9 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(snapshot.tasks[1]?.effective.promptSections?.map(section => section.kind)).toEqual(['introduction', 'personality', 'memory', 'role'])
     expect(snapshot.tasks[0]?.input).toBe('check token=[redacted] [path redacted] [approval]')
     expect(host.activeTaskPresentations().map(task => task.identity.agentId)).toEqual(['chatroom.generalist'])
+    const leadTrace = snapshot.tasks[0]!
     expect(snapshot.tasks[0]!.detailsUrl).toEqual({
-      url: 'app://-/playground/simulator/tasks/Simulator%20Task%201',
+      url: `app://-/playground/simulator/tasks/${encodeURIComponent(leadTrace.taskRef)}`,
       target: 'host',
     })
     expect(host.taskDetails('Simulator Task 2')?.status).toBe('error')
@@ -172,7 +173,7 @@ describe('Playground deterministic AgentLoop Simulator', () => {
       ['debug:agent-loop/mock/v1', 'execute', '--format', 'text'],
     ])
     expect(JSON.stringify(snapshot)).not.toContain('cxloop-binding')
-    expect(JSON.stringify(snapshot)).not.toContain('debug:agent-loop/mock/v1:task:')
+    expect(leadTrace.detailsUrl.url).not.toContain(encodeURIComponent(leadTrace.debugTaskId))
 
     client.dispose()
     expect(host.snapshot().tasks.every(task => !task.active)).toBe(true)
@@ -422,28 +423,28 @@ describe('Playground deterministic AgentLoop Simulator', () => {
   }, 30_000)
 
   it('projects Simulator tasks into the one Host-owned Recent tasks list and exact Task page', async () => {
-    const [page, app, host] = await Promise.all([
+    const [page, scenarioPage, app, host] = await Promise.all([
       readFile(path.resolve('packages/cli/src/playground/client/components/MockAgentTaskPage.tsx'), 'utf8'),
+      readFile(path.resolve('packages/cli/src/playground/client/components/ScenarioLabPage.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/App.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/renderer/playground-mock-agent-loop.ts'), 'utf8'),
     ])
     expect(page).toContain('data-playground-simulator="true"')
     expect(page).toContain('Mock / Simulator')
-    expect(page).toContain('Ordered definition catalog')
-    expect(page).toContain('Inheritance layers')
-    expect(page).toContain('Structured skill / CLI execution')
-    expect(page).toContain('operationId')
-    expect(page).toContain('participantId')
-    expect(page).toContain('task.execution')
-    expect(page).not.toContain('cxloop-binding')
+    expect(page).toContain('<SimulatorTaskScenarioWorkbench')
+    expect(scenarioPage).toContain('data-playground-scenario-workbench')
+    expect(scenarioPage).toContain('data-source-task-id')
+    expect(scenarioPage).toContain('snapshot.trace')
+    expect(scenarioPage).toContain('operationId')
+    expect(scenarioPage).toContain('participantId')
+    expect(`${page}\n${scenarioPage}`).not.toContain('cxloop-binding')
     expect(app.match(/id="pg-recent-task-list-title"/g)).toHaveLength(1)
     expect(app).toContain('data-playground-recent-tasks')
     expect(app).toContain('data-recent-task-row')
     expect(app).not.toContain('pg-simulator-task-list')
-    expect(app).not.toContain('Simulator tasks')
     expect(app).toContain('task.detailsUrl')
     expect(app).toContain("fixture.reviewNavigationItem === undefined")
     expect(app.indexOf('pg-recent-task-list')).toBeLessThan(app.indexOf('pg-playground-fixtures'))
-    expect(`${host}\n${app}\n${page}`).not.toMatch(/roomLabel|memberLabel|runLabel|Room 1|Leader|Reviewer/u)
+    expect(`${host}\n${app}\n${page}\n${scenarioPage}`).not.toMatch(/roomLabel|memberLabel|runLabel|Room 1|Leader|Reviewer/u)
   })
 })

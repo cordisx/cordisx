@@ -1,4 +1,6 @@
 import * as React from 'react'
+import * as ReactDOM from 'react-dom'
+import * as ReactDOMClient from 'react-dom/client'
 import { createRoot, type Root } from 'react-dom/client'
 import * as jsxRuntime from 'react/jsx-runtime'
 import * as jsxDevRuntime from 'react/jsx-dev-runtime'
@@ -276,6 +278,8 @@ class SharedReactErrorBoundary extends React.Component<ErrorBoundaryProps, Error
 
 export interface SharedReactRuntime {
   readonly React: typeof React
+  readonly reactDom: typeof ReactDOM
+  readonly reactDomClient: typeof ReactDOMClient
   readonly jsxRuntime: typeof jsxRuntime
   readonly jsxDevRuntime: typeof jsxDevRuntime
   readonly ui: Readonly<{
@@ -362,6 +366,8 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
 
   const runtime: SharedReactRuntime = Object.freeze({
     React,
+    reactDom: ReactDOM,
+    reactDomClient: ReactDOMClient,
     jsxRuntime,
     jsxDevRuntime,
     ui: Object.freeze({ Button, Card, EmptyState, Heading, Icon, MarkdownViewer: PublicMarkdownViewer, Select, SelectionRail: PublicSelectionRail, Stack, Text }),

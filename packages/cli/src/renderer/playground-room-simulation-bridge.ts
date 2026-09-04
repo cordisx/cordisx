@@ -253,7 +253,7 @@ function ownerError(ownerGeneration: string): PlaygroundRoomSimulationUnavailabl
 }
 
 export class PlaygroundRoomSimulationBridgeRegistry {
-  private current?: OwnerRegistration
+  private current: OwnerRegistration | undefined
   private revision = 0
   private disposed = false
 

@@ -687,6 +687,7 @@ function MessageEntry({
     {!outgoing || entry.deliveryState !== 'failed' ? null : <span className="cxa-outgoing-error" role="status">{copy.failed}</span>}
   </div>
   const avatarSeatEmpty = !groupEnd || !showAgentAvatar
+  const identityPresentation = mentionPresentations.find(candidate => candidate.participantId === participant.id)?.presentation
   const avatarSeat = participant.role !== 'agent' ? null : <span
     className="cxa-message-avatar-seat"
     data-avatar-seat={avatarSeatEmpty ? 'placeholder' : 'visible'}
@@ -694,7 +695,9 @@ function MessageEntry({
   >
     {avatarSeatEmpty
       ? null
-      : <button
+      : identityPresentation === undefined
+        ? <HostAgentAvatar participant={participant} />
+        : <button
           type="button"
           className="cx-agent-identity-avatar-button"
           aria-label={copy.locale.toLowerCase().startsWith('zh') ? `查看 ${participant.name}` : `Open ${participant.name}`}

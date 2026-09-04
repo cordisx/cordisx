@@ -70,16 +70,90 @@ npx cordisx@beta codex work --data host-isolated
 
 ## Create a plugin
 
-Both creator command forms resolve the beta package when the channel is
-specified:
+The creator supports three project shapes. The original positional command
+continues to create one standalone plugin:
 
 ```bash
 npm create cordisx-plugin@beta my-plugin
 npx create-cordisx-plugin@beta another-plugin
 ```
 
-The generated project owns a version-1 manifest-bearing TypeScript entry, a
-structured toolbar contribution, a README, and check/build/test scripts:
+A repository dedicated to several plugins uses one development composition and
+separate plugin packages:
+
+```bash
+npx create-cordisx-plugin@beta --mode workspace my-plugin-suite \
+  --plugin chatroom --plugin calendar
+```
+
+An existing business project keeps the CordisX environment under `.cordisx`:
+
+```bash
+cd my-business-project
+npx create-cordisx-plugin@beta --mode embedded . \
+  --plugin chatroom --plugin calendar
+```
+
+The generated shapes are:
+
+```text
+my-plugin/
+├── package.json
+├── tsconfig.json
+└── src/
+    ├── my-plugin.tsx
+    └── overview-page.tsx
+
+my-plugin-suite/
+├── package.json
+├── tsconfig.json
+├── tsconfig.base.json
+├── cordisx.config.json
+└── plugins/
+    ├── chatroom/
+    │   ├── package.json
+    │   ├── tsconfig.json
+    │   └── src/
+    │       ├── index.tsx
+    │       └── overview-page.tsx
+    └── calendar/
+        ├── package.json
+        ├── tsconfig.json
+        └── src/
+            ├── index.tsx
+            └── overview-page.tsx
+
+my-business-project/
+└── .cordisx/
+    ├── package.json
+    ├── tsconfig.json
+    ├── config.json
+    └── plugins/
+        ├── chatroom/
+        │   └── src/
+        │       ├── index.tsx
+        │       └── overview-page.tsx
+        └── calendar/
+            └── src/
+                ├── index.tsx
+                └── overview-page.tsx
+```
+
+The embedded form never replaces the business project's TypeScript or package
+configuration. `.cordisx` always owns its `package.json` and `tsconfig.json`.
+With the default `--integration auto`, the creator adds `.cordisx` to an
+existing pnpm, npm, Yarn, or Bun workspace. pnpm updates
+`pnpm-workspace.yaml`; the other supported workspace forms update
+`package.json#workspaces`. The package manager may share storage or use PnP,
+but `.cordisx` remains a separate declared package and dependency boundary.
+Use `--integration isolated` to keep installation and `node_modules` inside
+`.cordisx`, or `--integration workspace` to require a detected workspace.
+`--package-manager npm|pnpm|yarn|bun` makes automation deterministic.
+
+Each generated plugin owns a version-1 manifest-bearing TypeScript entry, a
+structured toolbar contribution, a named component-only React module, and a
+README. Its surrounding standalone, workspace, or `.cordisx` package supplies
+the check, build, test, and development scripts. For a standalone plugin:
 
 ```bash
 cd my-plugin
@@ -89,11 +163,18 @@ npm run dev:dry-run
 npm run dev
 ```
 
-`dev:dry-run` executes `cordisx dev <entry> --dry-run` and bundles the complete
-plugin without launching Codex Desktop. `dev` starts the separate development
-host. The initial template has no marketplace submission, package signing,
-permission grants, execution sandbox, or HMR dependency; plugins remain trusted
-local renderer code.
+For a dedicated workspace, run the same scripts at its root. For embedded
+isolated mode, run them inside `.cordisx`; for workspace integration, install at
+the containing workspace root and run the `.cordisx` package's scripts.
+
+`dev:dry-run` validates the selected entries without launching Codex Desktop.
+`dev` starts one development Host and one Vite server for all configured
+plugins. Changes inside a component-only module use React Fast Refresh and can
+preserve component state. Entry, manifest, `apply()`, and non-refresh-safe
+changes replace the affected Cordis plugin generation with lifecycle cleanup
+and rollback. The initial templates have no marketplace submission, package
+signing, permission grants, or execution sandbox; plugins remain trusted local
+renderer code.
 
 Generated projects start with `license: UNLICENSED` so the plugin author makes
 the licensing choice explicitly. Under the CordisX Independent Plugin
@@ -333,12 +414,11 @@ screenshot is captured.
 
 ## Minimal plugin
 
-Configured TypeScript plugin entries are composed into the renderer bundle.
+Configured TypeScript plugin entries enter the development Vite module graph.
 The plugin surface follows the Cordis service and fiber lifecycle:
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from 'cordisx/contracts'
 
 export const inject = ['i18n', 'commands', 'slots']
 
@@ -368,7 +448,6 @@ plugin consumes committed changes through `ctx.settings.watch()`:
 ```ts
 import Schema from '@deepseek-ai/schemastery'
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from 'cordisx/contracts'
 
 export const Config = Schema.object({
   timeout: Schema.number().default(30).min(1).max(120)

@@ -1,4 +1,4 @@
 interface:
   display_name: "CordisX Plugin Development"
-  short_description: "Assess and build CordisX plugins on public contracts"
-  default_prompt: "Use $cordisx-plugin-development to assess this request and build an installable plugin when CordisX supports it."
+  short_description: "Assess and build CordisX plugins in real projects"
+  default_prompt: "Use $cordisx-plugin-development to assess this request, create or update the plugin in the appropriate project shape when public capabilities support it, and verify its real development loop."

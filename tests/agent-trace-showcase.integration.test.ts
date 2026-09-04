@@ -749,7 +749,7 @@ describe('Agent Trace Showcase renderer integration', () => {
     await runtime.dispose()
   })
 
-  it('applies ask, deny, and allow to exact-session history reads without a fallback importer', async () => {
+  it('keeps historical mode unavailable without a v2 history seat or fallback importer', async () => {
     const { dom, runtime } = await fixture('session-history-permission', { mode: 'historical' })
     expect(runtime.snapshot().permissions).toEqual(expect.arrayContaining([
       expect.objectContaining({ capability: 'agent.history.read', policy: 'ask' }),
@@ -762,10 +762,12 @@ describe('Agent Trace Showcase renderer integration', () => {
     entry.click()
     await settle(20)
     let page = dom.window.document.querySelector<HTMLElement>('[data-agent-trace-showcase="true"]')!
-    expect(page.querySelector<HTMLElement>('.cxt-integrity')?.title).toContain('permission-denied')
-    expect(runtime.snapshot().permissions.find(item => item.capability === 'agent.history.read')).toMatchObject({
-      policy: 'deny', lastRequested: { agentSessionId: 'session-history-permission' },
-    })
+    expect(page.querySelector<HTMLElement>('.cxt-integrity')?.title)
+      .toContain('compatible host provider is unavailable')
+    expect(page.querySelector<HTMLElement>('.cxt-integrity')?.title).toContain('No raw bridge')
+    const deniedHistory = runtime.snapshot().permissions.find(item => item.capability === 'agent.history.read')
+    expect(deniedHistory).toMatchObject({ policy: 'deny' })
+    expect(deniedHistory?.lastRequested).toBeUndefined()
 
     entry.click()
     await settle(4)
@@ -773,13 +775,14 @@ describe('Agent Trace Showcase renderer integration', () => {
     entry.click()
     await settle(20)
     page = dom.window.document.querySelector<HTMLElement>('[data-agent-trace-showcase="true"]')!
-    expect(page.querySelector<HTMLElement>('.cxt-integrity')?.title).toContain('adapter-unavailable: Agent history is unavailable')
-    expect(page.querySelector('.cxt-integrity')?.textContent).toContain('live')
+    expect(page.querySelector<HTMLElement>('.cxt-integrity')?.title)
+      .toContain('compatible host provider is unavailable')
+    expect(page.querySelector('.cxt-integrity')?.textContent).toContain('unavailable')
     expect(dom.window.document.querySelector('[data-cordisx-history-path]')).toBeNull()
     await runtime.dispose()
   })
 
-  it('binds public v2 ledger and controls to each host-issued session without crossing A/B data', async () => {
+  it('keeps an unavailable v2 compatibility page scoped to each host-issued session', async () => {
     const { dom, runtime } = await fixture('session-a', { mode: 'live' })
     expect(runtime.snapshot().permissions).toEqual(expect.arrayContaining([
       ...['agent.events.read', 'agent.history.read', 'agent.messages.append', 'agent.prompt.section', 'agent.prompt.context'].map(capability => expect.objectContaining({
@@ -796,21 +799,12 @@ describe('Agent Trace Showcase renderer integration', () => {
     await settle(20)
     let page = dom.window.document.querySelector<HTMLElement>('[data-agent-trace-showcase="true"]')!
     expect(page).not.toBeNull()
-    expect(page.querySelector('.cxt-badge')?.textContent).toBe('partial')
+    expect(page.querySelector('.cxt-badge')?.textContent).toBe('unavailable')
     expect(page.querySelector('.cxt-integrity')?.textContent).toContain('cordisx.agent-events/v2')
-    expect([...page.querySelectorAll<HTMLButtonElement>('[data-demo-kind]')].every(button => !button.disabled)).toBe(true)
-    page.querySelector<HTMLButtonElement>('[data-demo-kind="inject"]')!.click()
-    page.querySelector<HTMLButtonElement>('[data-demo-kind="system-prompt-section"]')!.click()
-    await settle(20)
-    expect(page.textContent).toContain('agent.inject')
-    expect(page.textContent).toContain('system-prompt.section')
-    expect(page.textContent).toContain('failed')
-    expect(runtime.snapshot().permissions.find(item => item.capability === 'agent.messages.append')).toMatchObject({
-      policy: 'allow', lastRequested: { agentSessionId: 'session-a' },
-    })
-    page.querySelector<HTMLButtonElement>('.cxt-clear')!.click()
-    await settle(5)
-    expect(page.textContent).toContain('released')
+    expect([...page.querySelectorAll<HTMLButtonElement>('[data-demo-kind]')].every(button => button.disabled)).toBe(true)
+    expect(page.querySelector<HTMLButtonElement>('.cxt-clear')?.disabled).toBe(true)
+    expect(runtime.snapshot().permissions.find(item => item.capability === 'agent.messages.append')?.lastRequested)
+      .toBeUndefined()
 
     const selected = dom.window.document.getElementById('selected-thread')!
     const conversation = dom.window.document.getElementById('native-conversation')!

@@ -1,22 +1,12 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { defineReactPage, useState } from 'cordisx/react'
-import { Button, Card, Heading, Stack, Text } from 'cordisx/ui'
+import { defineReactPage } from 'cordisx/react'
 import {
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   CORDISX_ROUTE_SCHEMA_V2,
   type CordisXPluginManifestV1,
 } from 'cordisx/contracts'
-import type {} from 'cordisx/contracts'
-
-type Messages = {
-  'command.open': undefined
-  'page.title': undefined
-  'page.description': undefined
-  'route.title': undefined
-  'route.description': undefined
-  'counter.label': { count: number }
-}
+import { OverviewPage, type Messages } from './overview-page.js'
 
 export const manifest = {
   $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
@@ -48,22 +38,7 @@ const route = {
   description: { key: 'route.description', fallback: 'Open the plugin React example.' },
 } as const
 
-const mountOverview = defineReactPage<Messages>(({ t }) => {
-  const [count, setCount] = useState(0)
-  return (
-    <Stack gap="large">
-      <Heading>{t('page.title')}</Heading>
-      <Card>
-        <Stack gap="medium" align="flex-start">
-          <Text tone="muted">{t('page.description')}</Text>
-          <Button variant="primary" onClick={() => setCount(value => value + 1)}>
-            {t('counter.label', { count })}
-          </Button>
-        </Stack>
-      </Card>
-    </Stack>
-  )
-})
+const mountOverview = defineReactPage<Messages>(OverviewPage)
 
 export function apply(ctx: Context): void {
   ctx.i18n.define<Messages>({

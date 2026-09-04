@@ -29,6 +29,7 @@ for (const required of [
   'template/README.zh-Hans.md',
   'template/_gitignore',
   'template/package.json',
+  'template/src/overview-page.tsx',
   'template/src/{{packageName}}.tsx',
   'template/test/manifest.mjs',
   'template/tsconfig.json',

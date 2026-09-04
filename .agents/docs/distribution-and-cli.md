@@ -115,6 +115,37 @@ Resolution precedence is CLI option, named profile, app default, global
 default, then adapter default. Every resolved launch plan is inspectable through
 `cordisx doctor` without starting the host.
 
+## Bundled plugin-development Skill
+
+The `cordisx` package carries the complete maintained
+`cordisx-plugin-development` Skill under `dist/skills`. Every non-dry-run
+named launch deploys that copy before the Host starts. Shared profiles target
+the `HOME` declared by the resolved launch plan; `host-isolated` profiles
+target their private Host `HOME`. Direct-entry and config-driven Vite
+development use the same deployment path. Attach mode skips deployment because
+the launcher cannot prove the existing Host process's effective `HOME`.
+
+The target marker records a digest over the relative path and bytes of every
+Skill file. Deployments take an adjacent directory-level lock before inspecting
+or changing the target, so concurrent CordisX starts serialize against the same
+Host `HOME`. If the actual target still matches its marker, an equal bundled
+digest is unchanged and a newer bundled digest is installed through a staged,
+verified atomic replacement. The target is checked again after it is moved to
+the private rollback path. Rollback restores that copy only while the target is
+still absent; it never removes a directory or edit that appeared concurrently,
+and reports the preserved rollback path when automatic restoration is unsafe.
+An abandoned or unidentifiable deployment lock fails after a bounded wait and
+is left in place for explicit recovery; CordisX never guesses that another
+process's lock is stale and removes it.
+An unmarked directory whose complete contents exactly equal the bundled Skill
+is adopted by writing only the marker. If verification then fails, CordisX
+removes that marker only after atomically isolating it and proving both its
+original filesystem identity and exact bytes. A marker replaced or edited
+concurrently is restored or retained at a reported recovery path. Any other
+unmarked, invalid, or locally edited target remains untouched and emits a
+non-blocking diagnostic. Structural package or filesystem deployment errors
+remain launch failures. Dry runs never create or update a Skill directory.
+
 ## Independent CordisX launches and explicit Host-root isolation
 
 `dataMode` has two values with deliberately different scopes:
@@ -260,8 +291,8 @@ The beta package boundaries are:
 
 | Package | Owns | Must not imply |
 | --- | --- | --- |
-| `cordisx` | Launcher CLI, home configuration, trusted-local plugin bundling, public contracts, and explicit-entry local generation watch | Marketplace installation, signing, an execution sandbox, enforced capability isolation, or a general-purpose module HMR API |
-| `create-cordisx-plugin` | Directory creation, the versioned minimal template, manifest-bearing entry, project scripts, README, and generated-project verification | Registry/catalog submission, signing, permission grants, marketplace activation, or a watch/reload service |
+| `cordisx` | Launcher CLI, home configuration, trusted-local plugin loading, public contracts, direct Vite development modules, and generation replacement | Marketplace installation, signing, an execution sandbox, or enforced capability isolation |
+| `create-cordisx-plugin` | Standalone, multi-plugin workspace, and embedded project creation; versioned plugin templates; project scripts; workspace integration; and generated-project verification | Registry/catalog submission, signing, permission grants, or marketplace activation |
 
 The scaffolder package exclusively owns
 `packages/create-cordisx-plugin/template`. It is copied from the published
@@ -271,6 +302,99 @@ capabilities by default, uses structured host-owned surfaces, and is testable
 with `cordisx dev <entry> --dry-run`. Template changes and their generated-
 project tests land in the same PR; no second copy is maintained in CordisXMono
 or the docs repository.
+
+### Creator project shapes
+
+The compatible positional form remains the default standalone plugin:
+
+```bash
+npx create-cordisx-plugin@beta my-plugin
+```
+
+Two explicit non-interactive modes cover the other supported product shapes:
+
+```bash
+# A repository dedicated to several independently addressable plugin packages.
+npx create-cordisx-plugin@beta --mode workspace my-suite \
+  --plugin chatroom --plugin calendar
+
+# One or more plugins embedded in an existing business project.
+npx create-cordisx-plugin@beta --mode embedded ./business-project \
+  --plugin chatroom --plugin calendar
+```
+
+The dedicated workspace owns `cordisx.config.json`, a root package and
+TypeScript project, and `plugins/<id>` packages. All configured entries share
+one CordisX development command and Vite server while retaining separate
+plugin ids, source entries, build output, and Cordis generations.
+
+Embedded mode owns the following boundary without restructuring the business
+project:
+
+```text
+business-project/
+└── .cordisx/
+    ├── package.json
+    ├── tsconfig.json
+    ├── config.json
+    ├── .gitignore
+    └── plugins/
+        ├── chatroom/src/
+        │   ├── index.tsx
+        │   └── overview-page.tsx
+        └── calendar/src/
+            ├── index.tsx
+            └── overview-page.tsx
+```
+
+Every embedded config entry is relative to `.cordisx/config.json`. Repeating
+the creator with a new `--plugin` appends that plugin and does not replace
+existing business files, CordisX package fields, TypeScript settings, or plugin
+directories. A collision fails before mutation.
+
+`--integration auto` joins an existing supported workspace and otherwise
+keeps `.cordisx` isolated. pnpm integration adds `.cordisx` to the existing
+`pnpm-workspace.yaml`; npm, Yarn, and Bun integration adds it to the existing
+`package.json#workspaces` declaration. Workspace integration retains an
+independent `.cordisx/package.json` and `.cordisx/tsconfig.json`; the selected
+package manager controls physical dependency storage or PnP. Explicit
+`--integration isolated` keeps the install and `node_modules` within
+`.cordisx`, while `--integration workspace` fails unless a supported workspace
+already exists. `--package-manager npm|pnpm|yarn|bun` is available for
+deterministic, non-interactive creation.
+
+### Project development composition
+
+`cordisx dev` without a positional entry discovers a project composition by
+walking from the current directory towards the filesystem root. At each
+directory it checks `.cordisx/config.json` first, then the compatible
+`cordisx.config.json` root file. The nearest directory wins. `--config <path>`
+selects one file explicitly and skips discovery; `cordisx dev <entry>` keeps
+the single-entry workflow.
+
+The embedded layout separates two path boundaries:
+
+```text
+business-project/                 project root / Vite workspace
+└── .cordisx/                     configuration root
+    ├── package.json
+    ├── tsconfig.json
+    ├── config.json
+    └── plugins/
+        ├── chatroom/src/
+        │   ├── index.tsx
+        │   └── overview-page.tsx
+        └── calendar/src/
+            ├── index.tsx
+            └── overview-page.tsx
+```
+
+`plugins[].entry`, provider data directories, and a relative Codex executable
+resolve from the configuration root. Vite workspace discovery, project-scoped
+Chromium identity, runtime workspace metadata, and other business-project
+semantics use the project root. One configuration may list multiple plugin
+entries; one development command serves them through the same Vite server and
+native Host process. The legacy root file has one shared project/config root.
 
 ### Explicit local development entry
 
@@ -295,33 +419,58 @@ formal package descriptor with non-empty `dependencies`, is unavailable and
 fails the candidate while retaining last-good. Developers must use the formal
 package lifecycle for those Host/service/dependency graphs.
 
-After the first Codex renderer is ready, the launcher watches the complete
-esbuild input graph plus the entry's source-root fallback graph. The fallback
-is required so creating a previously missing import can recover a failed
-build. Changes are debounced and serialized. Every attempt is fenced against
-newer attempts; only the newest ready candidate may publish. A successful
-candidate uses the normal renderer generation transaction. Build, bootstrap,
-manifest, or activation failure leaves the last-good fiber live, while a later
-file change retries and can recover without restarting the Host. A rollback
-blocked by a stale closed renderer also has a controller-owned single backoff
-timer: after CDP target pruning it retries the same transaction, restores the
-last-good bootstrap, and continues the current build without another source
-write. If rollback wins the race before the replacement renderer commits its
-join, the same timer retains and retries the desired build across the temporary
-`no ready renderer` prepare result.
+Both development forms start a launcher-owned loopback Vite server. CDP
+installs a small bootstrap that imports the Vite preamble and entry over HTTP;
+Vite's own WebSocket delivers subsequent HMR notifications. Host source modules
+use Vite and React Refresh. A Host change outside a component refresh boundary
+recreates the CordisX runtime in the same native document. Server-originated
+Vite full-reload messages are translated into a CordisX-only restart. Upstream
+client recovery after a lost connection, a failed circular import, or an initial
+error overlay can still reload the document; those cases are not covered by
+the ordinary HMR guarantee.
 
-The initial Host bootstrap contains no fabricated active plugin. If the first
-build fails, Manager instead receives a Host-private local-development
-diagnostic containing the absolute source path, `building`/`failed` state, and
-the bounded error. Once a candidate publishes, the same diagnostic is shown on
-the real plugin with `ready` and the most recent success time. Installed plugin
-snapshots, public lifecycle results, package sources, and share actions never
-receive that absolute path. The global renderer runtime `snapshot()` is public
-for this purpose and omits both per-plugin development fields and the local
-development collection; only the Host-private React Manager model contains
-them. Stopping `cordisx dev` cancels debounce/poll timers,
-waits for the active attempt, removes CDP installation state, and terminates
-only the launcher's owned Host process/profile resources.
+Local plugin source enters the same Vite ESM module graph as the development
+Host. Vite watches only each entry's reachable modules. Named component-only
+modules are transformed by the Host's React plugin and use React Fast Refresh,
+preserving component state when the boundary accepts the update. Generated
+projects keep lifecycle entry code and React page components in separate
+modules so the default example exercises this path.
+
+An entry, manifest, `apply()` implementation, or update that is not a safe
+React refresh boundary invalidates the affected plugin entry and uses the
+normal renderer stage/publish/complete/finalize generation transaction. The
+old fiber is disposed and its contributions are cleaned up. Activation failure
+rolls back to the previous generation, and a later edit can recover. A failed
+rollback pauses further updates rather than publishing over an unresolved
+transaction. Each renderer handles its own update; this development transport
+does not claim an atomic transaction across multiple native windows.
+
+Initial bootstrap and plugin metadata/module validation must succeed before the
+native Host is declared ready. Those failures are reported by the CLI;
+subsequent transform or activation errors use Vite diagnostics and keep the
+already-running plugin. Ready local-development metadata and source paths remain
+Host-private. Public snapshots omit those paths. Config-file changes and Node
+launcher/bridge changes require restarting the development command. Formal
+package dependency graphs, Node services, and isolated Host DOM plugins are
+outside this renderer development path.
+
+The installed native page's CSP and loopback policy block Vite module and
+WebSocket access by default. Before the development reload, CDP grants
+`loopback-network` to the exact target origin (falling back to the Chromium
+`local-network-access` permission name) and enables `Page.setBypassCSP`. Failure
+and disposal restore the granted permission to `prompt`, disable CSP bypass,
+and never change files inside the official application. The loopback Vite
+server uses a per-launch unguessable base path and Vite's HMR token. JavaScript
+responses reference separate source-map resources, so maps are fetched only
+when requested.
+Stopping the command disposes the development runtime, removes CDP installation
+state, closes Vite, clears in-memory source maps and session state, and releases
+only launcher-owned Host process/profile resources. A stable dependency cache
+under `CORDISX_HOME/cache/native-vite` remains available to later launches of
+the same CLI and workspace roots; symlinked or foreign-owned cache leaves are
+rejected before Vite can use them. See
+[`vite-native-development.md`](vite-native-development.md) for the requirement
+ledger, current native evidence, and cleanup invariants.
 
 New independent plugins begin with the published `create-cordisx-plugin`
 scaffolder. The Agent infers a product slug, creates one normal project, and
@@ -374,8 +523,9 @@ prerelease unless the already published artifact is proven identical.
 Completion requires remote readback, not only `npm pack`: both `beta` tags must
 resolve to the requested versions, both `latest` tags must still resolve to
 `0.0.0`, and a clean temporary directory must install/run `cordisx@beta`, invoke
-both scaffolder command forms, install each generated project, run its
-check/build/test scripts, and bundle its entry with the published
+both scaffolder package command forms and all three creator modes, install each
+generated environment, run its check/build/test scripts, and validate its entry
+graph with the published
 `cordisx dev --dry-run`. Package tests also assert that the tarball includes its
 README, license, bin, built output, and complete template while excluding repo-
 private docs, tests, source-only bins, tokens, and developer configuration.
