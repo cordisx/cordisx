@@ -12,6 +12,7 @@ the homepage repository.
 | Slot Showcase branded welcome destination | Reusable demo capability that changes the example plugin's navigation | `slot-showcase` configuration field `welcomePage`; default `false`. Capture and purpose-built demos opt in. |
 | Longer CDP renderer injection timeout | Development/capture accommodation for unusually large bundles | `CORDISX_CDP_INJECTION_TIMEOUT_MS`; default `60000`, valid range `5000..600000`. Never increase the product default for a capture. |
 | Screenshots, videos, cursor artwork, isolated profile setup, and scene timing | Homepage-owned generated presentation | Keep in `cordisx/cordisx.github.io`; do not duplicate generated media here. |
+| Root README AI-first plugin demo GIFs, MP4/WebM sources, evidence, and recorder | Homepage-owned generated presentation referenced by this repository | Regenerate and verify in `cordisx/cordisx.github.io`; update pinned media URLs here only after the website commit is pushed. Do not copy the recorder or media here. |
 
 The optional welcome route and page still satisfy the normal route-v2/page-v3
 metadata and localization gates. Turning the option off means they are not
@@ -37,6 +38,13 @@ workflow in the `cordisx/cordisx.github.io` repository at
 `.agents/docs/showcase-capture.md`. Product code belongs here; the isolated
 profile, declarative scene, cursor, screenshots, and videos belong to the
 homepage repository.
+
+Before changing the root README AI-first plugin demo or its media references,
+read the dedicated
+[AI-first plugin demo capture workflow](https://github.com/cordisx/cordisx.github.io/blob/main/.agents/docs/ai-plugin-demo-capture.md).
+Regenerate and verify the media in `cordisx/cordisx.github.io`, then update the
+pinned URLs here only after those assets are committed and pushed. Do not copy
+the recorder, fixtures, evidence, or generated media into this repository.
 
 ## Capture composition
 

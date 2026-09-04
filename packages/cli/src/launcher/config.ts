@@ -33,6 +33,7 @@ export interface CordisXConfigPlugin {
     readonly canonicalSource?: string
   }
   readonly readme?: string
+  readonly readmes?: Readonly<Record<string, string>>
   /** Prebuilt lexical module body used only by the launcher local-dev bootstrap. */
   readonly moduleFactorySource?: string
   readonly development?: CordisXLocalDevelopmentSnapshot

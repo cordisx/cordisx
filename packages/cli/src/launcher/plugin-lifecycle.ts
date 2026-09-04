@@ -103,6 +103,7 @@ export interface PluginRuntimeMutation {
     readonly digest: `sha256:${string}`
     readonly identitySource: string
     readonly readme?: string
+    readonly readmes?: Readonly<Record<string, string>>
     readonly development: CordisXLocalDevelopmentSnapshot
   }
   /** Host-only renderer artifact compiled from the authority-resolved immutable runtime module. */

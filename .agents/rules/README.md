@@ -14,3 +14,8 @@
 - Follow [showcase-capture-integration.md](../docs/showcase-capture-integration.md)
   before changing Manager localization, Slot Showcase capture behavior, CDP
   injection timing, or the real Codex Desktop homepage capture workflow.
+- Before changing either root README's AI-first plugin demo, its media URLs, or
+  its regeneration workflow, read the website-owned
+  [AI-first plugin demo capture workflow](https://github.com/cordisx/cordisx.github.io/blob/main/.agents/docs/ai-plugin-demo-capture.md).
+  Keep the recorder and generated media in `cordisx/cordisx.github.io`; do not
+  copy or recreate them in this repository.
