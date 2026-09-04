@@ -1019,6 +1019,7 @@ async function start(
   agentSessionRuntime = new CordisXAgentSessionRuntime({
     driver: agentSessionTransport,
     authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
+    declares: (owner, capability) => agentRouteScopes.declares(owner, capability),
     ...(scenarioSessionScopeAuthority === undefined ? {} : {
       captureSubmission: (owner, sessionId, messageId) => scenarioSessionScopeAuthority.captureSubmission(owner, sessionId, messageId),
     }),

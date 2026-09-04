@@ -44,6 +44,9 @@ describe('Host route-bound Agent Session authorization', () => {
     const { authority, plans } = harness({ active: { owner, routeId: 'room-session-detail', instanceId: 'route-1', params: { sessionId: 'session-1' } } })
     authority.install(owner, [declaration])
     authority.validateInstalledRoutes(owner)
+    expect(authority.declares(owner, 'sessions.subscribe')).toBe(true)
+    expect(authority.declares({ ...owner, generation: owner.generation + 1 }, 'sessions.subscribe')).toBe(false)
+    expect(authority.declares(owner, 'approvals.answer')).toBe(false)
     await expect(authority.authorize(owner, 'sessions.subscribe', 'session-1')).resolves.toBe(true)
     expect(plans).toMatchObject([{ scope: { sessionIds: ['session-1'] } }])
     await expect(authority.authorize(owner, 'sessions.subscribe', 'session-2')).resolves.toBe(false)
@@ -151,6 +154,7 @@ describe('Host route-bound Agent Session authorization', () => {
       required: false,
       scope: { sessionIds: { kind: 'host-route-param', routeId: 'legacy-session-detail', param: 'legacySession' } },
     }])
+    expect(legacy.declares(owner, 'sessions.get')).toBe(true)
     expect(() => legacy.validateInstalledRoutes(owner)).not.toThrow()
     await expect(legacy.authorize(owner, 'sessions.get', 'session-legacy')).resolves.toBe(true)
   })

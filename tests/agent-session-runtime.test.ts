@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AgentCancelCause, AgentOptions, AgentSetup } from '@cordisx/protocol/agents/v1'
 import type { UserMessage } from '@cordisx/protocol/sessions/v1'
 import { Context } from '@deepseek-ai/cordis'
@@ -18,6 +18,7 @@ import {
   CORDISX_PLUGIN_ID,
   CORDISX_PLUGIN_SOURCE,
 } from '../packages/cli/src/renderer/ownership.js'
+import { AgentRouteSessionScopeAuthority, type AgentActiveRoute } from '../packages/cli/src/renderer/agent-route-session-scope.js'
 
 class Driver implements CordisXPrivateAgentDriver {
   private readonly replacement = new Set<() => void>()
@@ -249,6 +250,136 @@ describe('Agent/Session Host authority v1', () => {
     expect(decision.outcome).toBe('allowed-once')
     const page = await created.handle.agent.session.read({ afterSeq: -1, limit: 10 })
     expect(page).toMatchObject({ status: 'available', page: { events: [{ type: 'approval/asked' }, { type: 'approval/decided' }] } })
+  })
+
+  it('registers a declared dynamic answerer before route activation and authorizes only at exact invocation', async () => {
+    const driver = new Driver()
+    let active: AgentActiveRoute | undefined
+    const decisions: string[] = []
+    const routes = new AgentRouteSessionScopeAuthority({
+      activeRoute: () => active,
+      routes: candidate => candidate.pluginId === owner.pluginId && candidate.generation === owner.generation
+        ? [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/session/:sessionId', schemaVersion: 2 }]
+        : [],
+      decide: async plan => { decisions.push(`${plan.capability}:${plan.scope.sessionIds[0]}`); return { authorized: true } },
+      connectionGeneration: () => 1,
+    })
+    routes.install(owner, [
+      { manifestVersion: 6, name: 'approvals.request', required: false, scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
+      { manifestVersion: 6, name: 'approvals.answer', required: false, scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
+    ])
+    routes.validateInstalledRoutes(owner)
+    const runtime = new CordisXAgentSessionRuntime({
+      driver,
+      authorize: async (candidate, capability, sessionId) => capability === 'agents.create'
+        || await routes.authorize(candidate, capability, sessionId),
+      declares: (candidate, capability) => routes.declares(candidate, capability),
+    })
+    const created = await runtime.create(owner, { sessionId: 'cx-session.reviewer' })
+    if (created.status !== 'accepted') throw new Error('agent unavailable')
+    const answerer = vi.fn(async () => 'allowed-once' as const)
+    const handle = await runtime.registerAnswerer(owner, created.handle.agent, answerer)
+    expect(decisions).toEqual([])
+    await expect(runtime.registerAnswerer(owner, created.handle.agent, answerer)).rejects.toThrow('already registered')
+    await expect(runtime.registerAnswerer({ pluginId: 'other:plugin', generation: 1 }, created.handle.agent, answerer))
+      .rejects.toThrow('unavailable')
+
+    await expect(runtime.requestApproval(owner, { agent: created.handle.agent, toolName: 'workspace.publish' }))
+      .resolves.toMatchObject({ outcome: 'unavailable' })
+    active = { owner, routeId: 'room-session-detail', instanceId: 'route-lead', params: { sessionId: 'cx-session.lead' } }
+    await expect(runtime.requestApproval(owner, { agent: created.handle.agent, toolName: 'workspace.publish' }))
+      .resolves.toMatchObject({ outcome: 'unavailable' })
+    expect(answerer).not.toHaveBeenCalled()
+
+    active = { owner, routeId: 'room-session-detail', instanceId: 'route-reviewer', params: { sessionId: 'cx-session.reviewer' } }
+    await expect(runtime.requestApproval(owner, { agent: created.handle.agent, toolName: 'workspace.publish' }))
+      .resolves.toMatchObject({ outcome: 'allowed-once' })
+    expect(answerer).toHaveBeenCalledTimes(1)
+    expect(decisions).toEqual([
+      'approvals.request:cx-session.reviewer',
+      'approvals.answer:cx-session.reviewer',
+    ])
+
+    active = undefined
+    routes.reconcileRoutes()
+    await expect(runtime.requestApproval(owner, { agent: created.handle.agent, toolName: 'workspace.publish' }))
+      .resolves.toMatchObject({ outcome: 'unavailable' })
+    expect(answerer).toHaveBeenCalledTimes(1)
+    driver.replace()
+    await expect(handle.dispose()).resolves.toEqual({ status: 'closed', code: 'agent-replaced' })
+    await expect(handle.dispose()).resolves.toEqual({ status: 'closed', code: 'agent-replaced' })
+    await runtime.dispose()
+  })
+
+  it('preserves static answer scopes and reports the first owner fence on answerer disposal', async () => {
+    const routeScopes = new AgentRouteSessionScopeAuthority({
+      activeRoute: () => undefined,
+      routes: () => [],
+      decide: async () => ({ authorized: true }),
+      connectionGeneration: () => 1,
+    })
+    routeScopes.install(owner, [
+      { manifestVersion: 5, name: 'approvals.request', required: false, scope: { sessionIds: ['cx-session.static-answer'] } },
+      { manifestVersion: 5, name: 'approvals.answer', required: false, scope: { sessionIds: ['cx-session.static-answer'] } },
+    ])
+    const runtime = new CordisXAgentSessionRuntime({
+      driver: new Driver(),
+      authorize: async (candidate, capability, sessionId) => capability === 'agents.create'
+        || await routeScopes.authorize(candidate, capability, sessionId),
+      declares: (candidate, capability) => routeScopes.declares(candidate, capability),
+    })
+    const created = await runtime.create(owner, { sessionId: 'cx-session.static-answer' })
+    if (created.status !== 'accepted') throw new Error('agent unavailable')
+    const handle = await runtime.registerAnswerer(owner, created.handle.agent, async () => 'allowed-once')
+    await expect(runtime.requestApproval(owner, { agent: created.handle.agent, toolName: 'workspace.publish' }))
+      .resolves.toMatchObject({ outcome: 'allowed-once' })
+    runtime.fenceOwner(owner.pluginId, 'plugin-generation-replaced')
+    await expect(handle.dispose()).resolves.toEqual({ status: 'closed', code: 'plugin-generation-replaced' })
+    await runtime.dispose()
+  })
+
+  it('never invokes an answerer fenced while invocation authorization is pending', async () => {
+    const driver = new Driver()
+    let releaseAnswer!: (value: boolean) => void
+    let answerAuthorizationStarted!: () => void
+    const started = new Promise<void>(resolve => { answerAuthorizationStarted = resolve })
+    const answerAuthorization = new Promise<boolean>(resolve => { releaseAnswer = resolve })
+    const answerer = vi.fn(async () => 'allowed-once' as const)
+    const runtime = new CordisXAgentSessionRuntime({
+      driver,
+      declares: (_candidate, capability) => capability === 'approvals.answer',
+      authorize: async (_candidate, capability) => {
+        if (capability === 'approvals.answer') {
+          answerAuthorizationStarted()
+          return await answerAuthorization
+        }
+        return true
+      },
+    })
+    const created = await runtime.create(owner, { sessionId: 'cx-session.pending-answer' })
+    if (created.status !== 'accepted') throw new Error('agent unavailable')
+    const handle = await runtime.registerAnswerer(owner, created.handle.agent, answerer)
+    const request = runtime.requestApproval(owner, { agent: created.handle.agent, toolName: 'workspace.publish' })
+    await started
+    driver.replace()
+    releaseAnswer(true)
+    await expect(request).resolves.toMatchObject({ outcome: 'unavailable' })
+    expect(answerer).not.toHaveBeenCalled()
+    await expect(handle.dispose()).resolves.toEqual({ status: 'closed', code: 'agent-replaced' })
+    await runtime.dispose()
+  })
+
+  it('rejects answerer registration when the exact owner has no declaration', async () => {
+    const runtime = new CordisXAgentSessionRuntime({
+      driver: new Driver(),
+      authorize: async () => true,
+      declares: () => false,
+    })
+    const created = await runtime.create(owner, { sessionId: 'cx-session.undeclared-answerer' })
+    if (created.status !== 'accepted') throw new Error('agent unavailable')
+    await expect(runtime.registerAnswerer(owner, created.handle.agent, async () => 'allowed-once'))
+      .rejects.toThrow('unavailable')
+    await runtime.dispose()
   })
 
   it('resolves a legacy TaskBinding through its owner authority and idempotently resumes the exact SessionId', async () => {
