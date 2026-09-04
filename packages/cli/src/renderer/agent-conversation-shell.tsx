@@ -1669,7 +1669,15 @@ class MountedConversation {
     for (const item of previous.items) {
       if (item.kind !== 'approval' || item.state !== 'pending') continue
       const candidate = nextById.get(item.itemId)
-      if (candidate?.kind !== 'approval' || candidate.state === 'pending') continue
+      // A source replacement may retain a pending approval or replace that
+      // exact item with its authoritative terminal fact. It must never make
+      // the pending item disappear: retaining the prior interactive card
+      // would be stale, and accepting the replacement would erase the
+      // timeline without a durable terminal correlation.
+      if (candidate?.kind !== 'approval') {
+        throw new Error('v7 approval replacement removed a pending approval before its terminal replacement')
+      }
+      if (candidate.state === 'pending') continue
       resolved = true
       if (JSON.stringify([item.participantId, item.memberId, item.runId, item.sessionId, item.approvalId, item.approvalKind, item.requester, item.authority, item.reason])
         !== JSON.stringify([candidate.participantId, candidate.memberId, candidate.runId, candidate.sessionId, candidate.approvalId, candidate.approvalKind, candidate.requester, candidate.authority, candidate.reason])) {
