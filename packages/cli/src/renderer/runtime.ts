@@ -942,12 +942,17 @@ async function start(
   if (metadata.hostKind === 'playground' && metadata.playgroundSessionScenarios?.enabled === true) {
     scenarioSessionScopeAuthority = new PlaygroundScenarioSessionScopeAuthority({
       hostGeneration: generation,
+      connectionGeneration: () => agentRuntimeConnection.generation,
       currentRoute: actualAgentRuntimeRoute,
       ownerForSession: sessionId => scenarioSessionOwner(sessionId),
+      permissionRoute: (owner, capability) => {
+        const route = agentRouteScopes.permissionRoute(owner, capability)
+        return route === undefined ? undefined : { routeId: route.id, path: route.path }
+      },
       authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
-      mountRoute: (baseRouteInstanceId, route) => {
+      mountRoute: route => {
         if (playgroundScenarioAgentRuntimeRoute === undefined) throw new Error('Playground scenario route authority is unavailable')
-        return broker.activatePlaygroundScenarioAgentRuntimeRoute(playgroundScenarioAgentRuntimeRoute, baseRouteInstanceId, route)
+        return broker.activateCapturedPlaygroundScenarioAgentRuntimeRoute(playgroundScenarioAgentRuntimeRoute, route)
       },
       changed: active => { if (!active) agentRouteScopes.reconcileRoutes() },
     })
@@ -963,6 +968,9 @@ async function start(
   const agentSessionRuntime = new CordisXAgentSessionRuntime({
     driver: agentSessionTransport,
     authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
+    ...(scenarioSessionScopeAuthority === undefined ? {} : {
+      captureSubmission: (owner, sessionId, messageId) => scenarioSessionScopeAuthority.captureSubmission(owner, sessionId, messageId),
+    }),
     ...(playgroundAgentSessionPersistence === undefined ? {} : {
       persistence: playgroundAgentSessionPersistence,
       initialSessions: recoveredPlaygroundSessions,
@@ -3205,6 +3213,16 @@ async function start(
           managerNavigationController.openManagerContent(request)
         },
       },
+      ...(scenarioSessionScopeAuthority === undefined ? {} : {
+        scenarioSource: scenarioSessionScopeAuthority.conversationSource,
+        scenarioOwner: (owner: string, moduleGeneration: string | undefined) => {
+          if (moduleGeneration === undefined) return undefined
+          const matches = controllers.filter(controller => controller.item.id === owner
+            && controller.principalLive
+            && moduleGenerationOf(controller) === moduleGeneration)
+          return matches.length === 1 ? `${matches[0]!.item.source}:${matches[0]!.item.id}` : undefined
+        },
+      }),
     })
     await agentConversationShellFiber
     pageFiber = ctx.plugin(CordisXPageService, pluginConsole)

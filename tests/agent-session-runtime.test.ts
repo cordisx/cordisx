@@ -141,6 +141,29 @@ describe('Agent/Session Host authority v1', () => {
     expect(read).toMatchObject({ status: 'available', page: { events: [{ type: 'agent/inbox/spliced' }, { type: 'user/message' }] } })
   })
 
+  it('commits the originating Shell capture only after the driver accepts a submission', async () => {
+    const lifecycle: string[] = []
+    const runtime = new CordisXAgentSessionRuntime({
+      driver: new Driver(), authorize: async () => true,
+      captureSubmission: (_owner, sessionId, messageId) => {
+        lifecycle.push(`capture:${sessionId}:${messageId}`)
+        return {
+          commit: () => { lifecycle.push('commit') },
+          close: () => { lifecycle.push('close') },
+        }
+      },
+    })
+    const created = await runtime.create(owner, { sessionId: 'session-captured-source' })
+    if (created.status !== 'accepted') throw new Error('agent unavailable')
+
+    await expect(created.handle.agent.followup(message('message-captured-source')))
+      .resolves.toMatchObject({ status: 'accepted' })
+    await expect(created.handle.agent.followup(message('message-captured-source')))
+      .resolves.toMatchObject({ status: 'accepted' })
+
+    expect(lifecycle).toEqual(['capture:session-captured-source:message-captured-source', 'commit'])
+  })
+
   it('installs the live fence before replay and closes on connection replacement', async () => {
     const driver = new Driver()
     const runtime = new CordisXAgentSessionRuntime({ driver, authorize: async () => true })

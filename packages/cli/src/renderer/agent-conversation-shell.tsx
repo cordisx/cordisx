@@ -85,6 +85,7 @@ import { CordisXI18nService } from './i18n.js'
 import { HostThemeProjection } from './host-theme.js'
 import { ownerFromContext } from './ownership.js'
 import type { PluginConsoleAspect, PluginPrincipalToken } from './plugin-console.js'
+import type { PlaygroundScenarioConversationSourceAuthority } from './playground-scenario-session-scope.js'
 import { immutableSnapshot, LOCAL_ID_PATTERN, REFERENCE_PATTERN } from './validation.js'
 
 type ProtocolAction = ProtocolActionV3
@@ -95,6 +96,7 @@ type AgentConversationShellPage = AgentConversationShellPageV3
 type AgentConversationShellSnapshot = AgentConversationShellSnapshotV3
 type AgentConversationShellSource = AgentConversationShellSourceV3
 type AgentConversationShellUpdate = AgentConversationShellUpdateV3
+export type PlaygroundScenarioConversationOwnerResolver = (owner: string, moduleGeneration: string | undefined) => string | undefined
 
 function exactKeys(value: object, expected: readonly string[], label: string): void {
   const keys = Object.keys(value)
@@ -1034,6 +1036,8 @@ class MountedConversation {
     private readonly i18n: CordisXI18nService,
     private readonly console: PluginConsoleAspect | undefined,
     private readonly identity: AgentConversationRendererProps['identity'],
+    private readonly scenarioSource: PlaygroundScenarioConversationSourceAuthority | undefined,
+    private readonly scenarioOwner: PlaygroundScenarioConversationOwnerResolver | undefined,
   ) {
     this.root = createRoot(mountContext.container)
     this.detachTheme = new HostThemeProjection(mountContext.document).attach(mountContext.container)
@@ -1052,6 +1056,7 @@ class MountedConversation {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
+    this.scenarioSource?.fenceBinding(this.binding.bindingId, 'route-replaced')
     this.disconnectLocale()
     this.releaseSource()
     for (const site of this.diagnosticSites) this.i18n.clearDiagnosticSite(this.record.owner, site)
@@ -1383,12 +1388,43 @@ class MountedConversation {
           ? projectAgentConversationShellSnapshotV4(this.record.owner, this.snapshot as AgentConversationShellSnapshotV4, localization)
           : projectSnapshot(this.record.owner, this.snapshot as AgentConversationShellSnapshot, localization)
       const controller = new AgentConversationCommandController({
-        execute: async request => await this.commands.executeConversationFor(
-          request.ownerId,
-          request.reference,
-          request.invocationKey,
-          request.context,
-        ),
+        execute: async request => {
+          const execute = async () => await this.commands.executeConversationFor(
+            request.ownerId,
+            request.reference,
+            request.invocationKey,
+            request.context,
+          )
+          if (this.scenarioSource === undefined || request.context.scope !== 'composer-submit'
+            || model.selection.kind !== 'room') return await execute()
+          const scenarioOwner = this.scenarioOwner?.(this.record.owner, this.record.effect.moduleGeneration)
+          if (scenarioOwner === undefined) return await execute()
+          const runs = (model.selection.activeRuns ?? []).flatMap(run => (
+            'sessionId' in run ? [{ runId: run.runId, sessionId: run.sessionId }] : []
+          ))
+          if (runs.length === 0) return await execute()
+          const roomId = model.selection.roomId
+          const snapshotGeneration = model.generation
+          const sourceStillActive = (): boolean => {
+            const currentSelection = this.snapshot?.selection
+            if (this.disposed || this.terminal || this.mountContext.signal.aborted || !this.record.active
+              || this.snapshot?.generation !== snapshotGeneration || currentSelection?.kind !== 'room'
+              || currentSelection.roomId !== roomId) return false
+            const currentRuns = currentSelection.activeRuns ?? []
+            return runs.every(run => currentRuns.some(current => 'sessionId' in current
+              && current.runId === run.runId && current.sessionId === run.sessionId))
+          }
+          return await this.scenarioSource.execute({
+            owner: scenarioOwner,
+            bindingId: this.binding.bindingId,
+            ownerGeneration: this.binding.ownerGeneration,
+            snapshotGeneration,
+            roomId,
+            routeId: this.mountContext.routeId,
+            runs,
+            active: sourceStillActive,
+          }, execute)
+        },
       }, model)
       this.root.render(<AgentConversationRenderer
         model={model}
@@ -1534,6 +1570,8 @@ export class AgentConversationShellRegistry {
     private readonly visibility?: GenerationVisibilityCoordinator,
     private readonly console?: PluginConsoleAspect,
     private readonly identity?: AgentConversationRendererProps['identity'],
+    private readonly scenarioSource?: PlaygroundScenarioConversationSourceAuthority,
+    private readonly scenarioOwner?: PlaygroundScenarioConversationOwnerResolver,
   ) {
     this.disconnectVisibility = visibility?.connect({ notify: () => {
       for (const record of [...this.records]) {
@@ -1581,7 +1619,10 @@ export class AgentConversationShellRegistry {
       let mounted = true
       void host.bind(request).then(result => {
         if (!mounted || !record.active || result.status !== 'accepted') return
-        session = new MountedConversation(record, result.binding, mountContext, this.commands, this.i18n, this.console, this.identity)
+        session = new MountedConversation(
+          record, result.binding, mountContext, this.commands, this.i18n, this.console,
+          this.identity, this.scenarioSource, this.scenarioOwner,
+        )
         record.sessions.add(session)
         session.start()
       }).catch(error => console.error('[cordisx] Agent conversation bind failed', error))
@@ -1620,6 +1661,8 @@ export interface CordisXAgentConversationShellServiceOptions {
   readonly registry?: AgentConversationShellRegistry
   readonly console?: PluginConsoleAspect
   readonly identity?: AgentConversationRendererProps['identity']
+  readonly scenarioSource?: PlaygroundScenarioConversationSourceAuthority
+  readonly scenarioOwner?: PlaygroundScenarioConversationOwnerResolver
 }
 
 /** Fiber-aware public service; the renderer and binding authority stay Host-owned. */
@@ -1637,6 +1680,8 @@ export class CordisXAgentConversationShellService extends Service implements Cor
       generationVisibilityFromContext(ctx),
       options.console,
       options.identity,
+      options.scenarioSource,
+      options.scenarioOwner,
     )
     ctx.effect(() => () => this.registry.dispose(), 'cordisx: Agent conversation shell registry')
   }
