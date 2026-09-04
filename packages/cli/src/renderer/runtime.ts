@@ -411,6 +411,8 @@ export interface RendererPluginMutation {
     readonly digest: `sha256:${string}`
     readonly identitySource: string
     readonly readme?: string
+    /** Launcher-authoritative manifest captured with this exact local build. */
+    readonly manifest?: CordisXBrowserPlugin['manifest']
     readonly development: CordisXLocalDevelopmentSnapshot
   }
   /** Host-only source held as data and executed solely in the isolated Host DOM worker. */
@@ -2537,7 +2539,9 @@ async function start(
     const candidateIsolatedArtifactSource = replacesTarget
       ? mutation.isolatedArtifactSource
       : existing!.item.isolatedArtifactSource
-    const candidateManifest = replacesTarget ? mutation.package?.manifest.runtimeManifest : existing!.item.manifest
+    const candidateManifest = replacesTarget
+      ? mutation.package?.manifest.runtimeManifest ?? mutation.developmentPackage?.manifest
+      : existing!.item.manifest
     const item: RuntimeBrowserPlugin = {
       id: pluginId,
       source: replacesTarget ? replacementPackage!.identitySource : existing!.item.source,
