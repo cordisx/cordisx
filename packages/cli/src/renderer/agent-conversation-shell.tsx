@@ -70,6 +70,11 @@ import type {
   AgentConversationShellSnapshot as AgentConversationShellSnapshotV8,
   AgentConversationShellSource as AgentConversationShellSourceV8,
 } from '@cordisx/protocol/agent-conversation-shell/v8'
+import type {
+  AgentConversationShellCommandContext as AgentConversationShellCommandContextV9,
+  AgentConversationShellSource as AgentConversationShellSourceV9,
+} from '@cordisx/protocol/agent-conversation-shell/v9'
+import type { AgentBootstrapCommandOrigin } from '@cordisx/protocol/agent-admission/v4'
 import * as React from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type {
@@ -83,6 +88,7 @@ import type {
   CordisXAgentConversationShellSourceFactoryV6,
   CordisXAgentConversationShellSourceFactoryV7,
   CordisXAgentConversationShellSourceFactoryV8,
+  CordisXAgentConversationShellSourceFactoryV9,
   CordisXJsonValue,
   CordisXLocalizedText,
   CordisXPageMount,
@@ -1218,11 +1224,11 @@ function rendererCopy(locale: string): AgentConversationRendererCopy {
 }
 
 interface RegisteredSource {
-  readonly version: 3 | 4 | 5 | 6 | 7 | 8
+  readonly version: 3 | 4 | 5 | 6 | 7 | 8 | 9
   readonly owner: string
   readonly ownerGeneration: string
   readonly effect: PluginGenerationEffectIdentity
-  readonly factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2 | CordisXAgentConversationShellSourceFactoryV3 | CordisXAgentConversationShellSourceFactoryV4 | CordisXAgentConversationShellSourceFactoryV5 | CordisXAgentConversationShellSourceFactoryV6 | CordisXAgentConversationShellSourceFactoryV7 | CordisXAgentConversationShellSourceFactoryV8
+  readonly factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2 | CordisXAgentConversationShellSourceFactoryV3 | CordisXAgentConversationShellSourceFactoryV4 | CordisXAgentConversationShellSourceFactoryV5 | CordisXAgentConversationShellSourceFactoryV6 | CordisXAgentConversationShellSourceFactoryV7 | CordisXAgentConversationShellSourceFactoryV8 | CordisXAgentConversationShellSourceFactoryV9
   readonly principal?: PluginPrincipalToken
   readonly sessions: Set<MountedConversation>
   active: boolean
@@ -1259,7 +1265,7 @@ class BoundSourceHost implements AgentConversationShellHost {
 }
 
 class MountedConversation {
-  private source: AgentConversationShellSource | AgentConversationShellSourceV4 | AgentConversationShellSourceV5 | AgentConversationShellSourceV6 | AgentConversationShellSourceV7 | AgentConversationShellSourceV8 | undefined
+  private source: AgentConversationShellSource | AgentConversationShellSourceV4 | AgentConversationShellSourceV5 | AgentConversationShellSourceV6 | AgentConversationShellSourceV7 | AgentConversationShellSourceV8 | AgentConversationShellSourceV9 | undefined
   private subscription: AgentConversationShellSubscription | AgentConversationShellSubscriptionV4 | AgentConversationShellSubscriptionV5 | AgentConversationShellSubscriptionV6 | AgentConversationShellSubscriptionV7 | undefined
   private unsubscribe: (() => void | Promise<unknown>) | undefined
   private snapshot: AgentConversationShellSnapshot | AgentConversationShellSnapshotV4 | AgentConversationShellSnapshotV5 | AgentConversationShellSnapshotV6 | AgentConversationShellSnapshotV7 | AgentConversationShellSnapshotV8 | undefined
@@ -1325,7 +1331,7 @@ class MountedConversation {
       || typeof sourceCandidate.snapshot !== 'function' || typeof sourceCandidate.subscribe !== 'function' || typeof sourceCandidate.dispose !== 'function') {
       throw new Error('conversation source must implement snapshot, subscribe, and dispose')
     }
-    const source = sourceCandidate as unknown as AgentConversationShellSource | AgentConversationShellSourceV4 | AgentConversationShellSourceV5 | AgentConversationShellSourceV6 | AgentConversationShellSourceV7 | AgentConversationShellSourceV8
+    const source = sourceCandidate as unknown as AgentConversationShellSource | AgentConversationShellSourceV4 | AgentConversationShellSourceV5 | AgentConversationShellSourceV6 | AgentConversationShellSourceV7 | AgentConversationShellSourceV8 | AgentConversationShellSourceV9
     this.source = source
     const initial = immutableSnapshot(await this.runPlugin<unknown>('agent-conversation-shell.snapshot', () => source.snapshot()))
     if (this.record.version >= 7) assertSnapshotV7(initial)
@@ -1696,7 +1702,8 @@ class MountedConversation {
           : projectSnapshot(this.record.owner, this.snapshot as AgentConversationShellSnapshot, localization)
       const controller = new AgentConversationCommandController({
         execute: async request => {
-          const isComposerSubmit = request.context.scope === 'composer-submit' && model.selection.kind === 'room'
+          const isComposerCommand = request.context.scope === 'composer-submit'
+          const isComposerSubmit = isComposerCommand && model.selection.kind === 'room'
           const activeRuns = model.selection.kind === 'room' ? model.selection.activeRuns ?? [] : []
           const runs = activeRuns.flatMap(run => (
             'sessionId' in run ? [{
@@ -1725,24 +1732,48 @@ class MountedConversation {
                   room: Object.freeze({ roomId, participantId: run.participantId, memberId: run.memberId, runId: run.runId }),
                 })
               })()
-          const execute = async () => await this.commands.executeConversationFor(
-            request.ownerId,
-            request.reference,
-            request.invocationKey,
-            admissionOrigin === undefined ? request.context : { ...request.context, origin: admissionOrigin } as never,
-          )
-          // v1–v7 and v8 calls without a valid one-run Room origin deliberately
-          // retain their predecessor command behavior.
-          if (this.scenarioSource === undefined || !isComposerSubmit || roomId === undefined || runs.length === 0) return await execute()
+          const bootstrapOrigin: AgentBootstrapCommandOrigin | undefined = this.record.version !== 9 || !isComposerCommand
+            ? undefined
+            : Object.freeze({
+                $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+                contract: 'cordisx.agent-bootstrap-command-origin/v1' as const,
+                schemaVersion: 1 as const,
+                originId: `cx-bootstrap-command-origin.${crypto.randomUUID()}`,
+                binding: Object.freeze({ bindingId: this.binding.bindingId, ownerGeneration: this.binding.ownerGeneration }),
+                generation: this.record.effect.moduleGeneration ?? this.record.ownerGeneration,
+                executionId: request.invocationKey,
+                commandId: request.reference.id,
+                scope: 'composer-submit' as const,
+              })
+          const execute = async () => {
+            if (bootstrapOrigin !== undefined) {
+              if (request.context.scope !== 'composer-submit') throw new Error('Shell v9 bootstrap origin crossed its composer scope')
+              const context: AgentConversationShellCommandContextV9 = { ...request.context, origin: bootstrapOrigin }
+              return await this.commands.executeConversationFor(request.ownerId, request.reference, request.invocationKey, context)
+            }
+            if (admissionOrigin !== undefined) {
+              const context = { ...request.context, origin: admissionOrigin }
+              return await this.commands.executeConversationFor(request.ownerId, request.reference, request.invocationKey, context)
+            }
+            // v1–v7 and frozen v8 calls without a valid one-run Room origin
+            // retain their predecessor command behavior without retyping a v8
+            // context as one that has an origin.
+            return await this.commands.executeConversationFor(request.ownerId, request.reference, request.invocationKey, request.context)
+          }
+          // Shell v9 retains a command-scoped bootstrap authority even before
+          // any Room run has a Session. Predecessor versions require a known
+          // Session-backed run before Playground source capture is available.
+          if (this.scenarioSource === undefined || !isComposerSubmit || roomId === undefined
+            || this.record.version !== 9 && runs.length === 0) return await execute()
           const scenarioOwner = this.scenarioOwner?.(this.record.owner, this.record.effect.moduleGeneration)
           if (scenarioOwner === undefined) return await execute()
           const snapshotGeneration = model.generation
           const sourceStillActive = (): boolean => {
             const currentSelection = this.snapshot?.selection
             if (this.disposed || this.terminal || this.mountContext.signal.aborted || !this.record.active
-              || (this.record.version !== 8 && this.snapshot?.generation !== snapshotGeneration) || currentSelection?.kind !== 'room'
+              || (this.record.version !== 8 && this.record.version !== 9 && this.snapshot?.generation !== snapshotGeneration) || currentSelection?.kind !== 'room'
               || currentSelection.roomId !== roomId) return false
-            if (this.record.version === 8) return true
+            if (this.record.version === 8 || this.record.version === 9) return true
             const currentRuns = currentSelection.activeRuns ?? []
             return runs.every(run => currentRuns.some(current => 'sessionId' in current
               && current.runId === run.runId && current.sessionId === run.sessionId))
@@ -1758,7 +1789,8 @@ class MountedConversation {
             active: sourceStillActive,
           }
           return await this.scenarioSource.execute(
-            admissionOrigin === undefined ? scenarioOrigin : { ...scenarioOrigin, admissionOrigin },
+            bootstrapOrigin !== undefined ? { ...scenarioOrigin, bootstrapOrigin }
+              : admissionOrigin === undefined ? scenarioOrigin : { ...scenarioOrigin, admissionOrigin },
             execute,
           )
         },
@@ -1917,7 +1949,7 @@ export class AgentConversationShellRegistry {
     } })
   }
 
-  register(ctx: Context, factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2 | CordisXAgentConversationShellSourceFactoryV3 | CordisXAgentConversationShellSourceFactoryV4 | CordisXAgentConversationShellSourceFactoryV5 | CordisXAgentConversationShellSourceFactoryV6 | CordisXAgentConversationShellSourceFactoryV7 | CordisXAgentConversationShellSourceFactoryV8, principal?: PluginPrincipalToken, version: 3 | 4 | 5 | 6 | 7 | 8 = 3): CordisXAgentConversationShellRegistration {
+  register(ctx: Context, factory: CordisXAgentConversationShellSourceFactory | CordisXAgentConversationShellSourceFactoryV2 | CordisXAgentConversationShellSourceFactoryV3 | CordisXAgentConversationShellSourceFactoryV4 | CordisXAgentConversationShellSourceFactoryV5 | CordisXAgentConversationShellSourceFactoryV6 | CordisXAgentConversationShellSourceFactoryV7 | CordisXAgentConversationShellSourceFactoryV8 | CordisXAgentConversationShellSourceFactoryV9, principal?: PluginPrincipalToken, version: 3 | 4 | 5 | 6 | 7 | 8 | 9 = 3): CordisXAgentConversationShellRegistration {
     if (this.disposed) throw new Error('Agent conversation shell registry is disposed')
     if (typeof factory !== 'function') throw new Error('Agent conversation shell source factory must be a function')
     const owner = ownerFromContext(ctx)
@@ -2089,6 +2121,17 @@ export class CordisXAgentConversationShellService extends Service implements Cor
       return () => registration?.dispose()
     }, 'agentConversationShell.registerSourceV8()')
     if (registration === undefined) throw new Error('Agent conversation Shell v8 source registration failed')
+    return { mount: registration.mount, dispose: () => { dispose() } }
+  }
+
+  registerSourceV9(factory: CordisXAgentConversationShellSourceFactoryV9): CordisXAgentConversationShellRegistration {
+    const principal = this.console?.tokenFromContext(this.ctx)
+    let registration: CordisXAgentConversationShellRegistration | undefined
+    const dispose = this.ctx.effect(() => {
+      registration = this.registry.register(this.ctx, factory, principal, 9)
+      return () => registration?.dispose()
+    }, 'agentConversationShell.registerSourceV9()')
+    if (registration === undefined) throw new Error('Agent conversation Shell v9 source registration failed')
     return { mount: registration.mount, dispose: () => { dispose() } }
   }
 }

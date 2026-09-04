@@ -2,6 +2,7 @@ import type { AgentRuntimeCapability } from '@cordisx/protocol/agents/v1'
 import type { PluginOwnerIdentity } from '@cordisx/protocol/sessions/v1'
 import type { AgentCommandOrigin } from '@cordisx/protocol/agent-admission/v2'
 import type { AgentAdmissionTarget } from '@cordisx/protocol/agent-admission/v3'
+import type { AgentBootstrapCommandOrigin } from '@cordisx/protocol/agent-admission/v4'
 import type { AgentRuntimeRouteScope } from './platform.js'
 
 export type PlaygroundScenarioSessionScopeClosedCode =
@@ -57,6 +58,8 @@ export interface PlaygroundScenarioConversationOrigin {
   readonly active: () => boolean
   /** Present only for Shell v8: capability created by Host command admission. */
   readonly admissionOrigin?: AgentCommandOrigin
+  /** Present only for Shell v9: Host capability minted before any Room run exists. */
+  readonly bootstrapOrigin?: AgentBootstrapCommandOrigin
 }
 
 /** Host Shell only; never projected through plugin context. */
@@ -253,6 +256,37 @@ export class PlaygroundScenarioSessionScopeAuthority {
     return this.captureAdmissionForTarget(owner, admissionOrigin, admissionOrigin.room, sessionId, agentGeneration, messageId)
   }
 
+  /** Shell v9/v4 declares a newly materialized target while its bootstrap command is live. */
+  bootstrapAdmissionTargetActive(
+    owner: PluginOwnerIdentity,
+    bootstrapOrigin: AgentBootstrapCommandOrigin,
+    target: AgentAdmissionTarget,
+  ): boolean {
+    if (this.disposed || !this.validBootstrapOrigin(bootstrapOrigin)
+      || !opaque(target.participantId) || !opaque(target.memberId) || !opaque(target.runId)) return false
+    const candidates = [...this.commandOrigins].filter(origin => origin.active()
+      && origin.owner === owner.pluginId && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin))
+    return candidates.length === 1
+  }
+
+  captureBootstrapAdmissionTarget(
+    owner: PluginOwnerIdentity,
+    bootstrapOrigin: AgentBootstrapCommandOrigin,
+    target: AgentAdmissionTarget,
+    sessionId: string,
+    agentGeneration: number,
+    messageId: string,
+  ): PlaygroundScenarioSubmissionCapture | undefined {
+    if (!this.bootstrapAdmissionTargetActive(owner, bootstrapOrigin, target)) return undefined
+    const candidates = [...this.commandOrigins].filter(origin => origin.active()
+      && origin.owner === owner.pluginId && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin))
+    if (candidates.length !== 1) return undefined
+    const origin = candidates[0]!
+    if (origin.bindingId !== bootstrapOrigin.binding.bindingId || origin.ownerGeneration !== bootstrapOrigin.binding.ownerGeneration
+      || !sameOwner(this.options.ownerForSession(sessionId), owner)) return undefined
+    return this.captureAdmissionFromConversationOrigin(owner, origin, target, sessionId, agentGeneration, messageId)
+  }
+
   private captureAdmissionForTarget(
     owner: PluginOwnerIdentity,
     admissionOrigin: AgentCommandOrigin,
@@ -280,6 +314,18 @@ export class PlaygroundScenarioSessionScopeAuthority {
     if (origin.bindingId !== admissionOrigin.binding.bindingId || origin.ownerGeneration !== admissionOrigin.binding.ownerGeneration
       || origin.roomId !== admissionOrigin.room.roomId || !sameOwner(this.options.ownerForSession(sessionId), owner)
       || !origin.runs.some(run => run.runId === target.runId && run.participantId === target.participantId && run.memberId === target.memberId)) return undefined
+    return this.captureAdmissionFromConversationOrigin(owner, origin, target, sessionId, agentGeneration, messageId)
+  }
+
+  private captureAdmissionFromConversationOrigin(
+    owner: PluginOwnerIdentity,
+    origin: ConversationOriginRecord,
+    target: AgentAdmissionTarget,
+    sessionId: string,
+    agentGeneration: number,
+    messageId: string,
+  ): PlaygroundScenarioSubmissionCapture | undefined {
+    if (this.disposed || !opaque(sessionId) || !opaque(messageId) || !Number.isSafeInteger(agentGeneration) || agentGeneration < 1) return undefined
     const permissionRoute = this.options.permissionRoute(owner, 'approvals.request')
     if (permissionRoute === undefined || !opaque(permissionRoute.routeId) || !opaque(permissionRoute.path)) return undefined
     const key = sourceKey(sessionId, messageId)
@@ -320,6 +366,21 @@ export class PlaygroundScenarioSessionScopeAuthority {
       && left.generation === right.generation && left.commandId === right.commandId && left.scope === right.scope
       && left.room.roomId === right.room.roomId && left.room.participantId === right.room.participantId
       && left.room.memberId === right.room.memberId && left.room.runId === right.room.runId
+  }
+
+  private validBootstrapOrigin(origin: AgentBootstrapCommandOrigin | undefined): origin is AgentBootstrapCommandOrigin {
+    return origin !== undefined
+      && origin.$schema === 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json'
+      && origin.contract === 'cordisx.agent-bootstrap-command-origin/v1' && origin.schemaVersion === 1
+      && origin.scope === 'composer-submit' && opaque(origin.originId) && opaque(origin.executionId)
+      && opaque(origin.binding.bindingId) && opaque(origin.binding.ownerGeneration)
+      && opaque(origin.generation) && opaque(origin.commandId)
+  }
+
+  private sameBootstrapOrigin(left: AgentBootstrapCommandOrigin | undefined, right: AgentBootstrapCommandOrigin): boolean {
+    return left !== undefined && left.originId === right.originId && left.executionId === right.executionId
+      && left.binding.bindingId === right.binding.bindingId && left.binding.ownerGeneration === right.binding.ownerGeneration
+      && left.generation === right.generation && left.commandId === right.commandId && left.scope === right.scope
   }
 
   reconcileVisibleRoute(): void {
@@ -372,7 +433,11 @@ export class PlaygroundScenarioSessionScopeAuthority {
     if (!opaque(origin.owner) || !opaque(origin.bindingId) || !opaque(origin.ownerGeneration)
       || !opaque(origin.snapshotGeneration) || !opaque(origin.roomId) || !opaque(origin.routeId)
       || typeof origin.active !== 'function' || !origin.active()
-      || !Array.isArray(origin.runs) || origin.runs.length === 0 || origin.runs.length > 64) return false
+      || !Array.isArray(origin.runs) || origin.runs.length > 64) return false
+    if (origin.bootstrapOrigin === undefined && origin.runs.length === 0) return false
+    if (origin.bootstrapOrigin !== undefined && (!this.validBootstrapOrigin(origin.bootstrapOrigin)
+      || origin.bootstrapOrigin.binding.bindingId !== origin.bindingId
+      || origin.bootstrapOrigin.binding.ownerGeneration !== origin.ownerGeneration)) return false
     const seen = new Set<string>()
     for (const run of origin.runs) {
       if (!opaque(run.runId) || !opaque(run.sessionId)) return false

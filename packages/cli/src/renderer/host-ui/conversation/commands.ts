@@ -1,5 +1,7 @@
 import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV3 } from '@cordisx/protocol/agent-conversation-shell/v3'
 import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV7 } from '@cordisx/protocol/agent-conversation-shell/v7'
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV8 } from '@cordisx/protocol/agent-conversation-shell/v8'
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV9 } from '@cordisx/protocol/agent-conversation-shell/v9'
 import type {
   AgentConversationAction,
   AgentConversationApproval,
@@ -10,7 +12,7 @@ import type {
 } from './model.js'
 import { immutableSnapshot } from '../../validation.js'
 
-export type AgentConversationCommandContext = AgentConversationShellCommandContextV3 | AgentConversationShellCommandContextV7
+export type AgentConversationCommandContext = AgentConversationShellCommandContextV3 | AgentConversationShellCommandContextV7 | AgentConversationShellCommandContextV8 | AgentConversationShellCommandContextV9
 
 export interface AgentConversationCommandRequest {
   readonly ownerId: string
