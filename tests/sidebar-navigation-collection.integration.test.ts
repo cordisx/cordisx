@@ -1,13 +1,127 @@
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
 import type { CordisXNavigationCollectionSnapshotV2 } from '../packages/cli/src/contracts.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
+import { activatePlaygroundReviewNavigation, authorizePlaygroundReviewNavigation } from '../packages/cli/src/playground/client/review-navigation.js'
+
+function copySessionStorage(source: Storage, target: Storage): void {
+  for (let index = 0; index < source.length; index += 1) {
+    const key = source.key(index)
+    if (key !== null) target.setItem(key, source.getItem(key)!)
+  }
+}
+
+interface PlaygroundReloadRuntime {
+  snapshot(): {
+    readonly navigation: { readonly outlets: readonly { readonly id: string; readonly activeRoute?: string }[] }
+  }
+  navigate(owner: string, reference: Readonly<{ id: string; params?: Readonly<Record<string, string>> }>): Promise<void>
+  setExtensionPointPolicies(source: string, pluginId: string, policies: readonly { readonly pointId: string; readonly policy: 'inherit' | 'allow' | 'deny' }[]): Promise<void>
+  dispose(): Promise<void>
+}
+
+function playgroundMarkup(): string {
+  return `<!doctype html><html lang="en"><head></head><body>
+    <aside><nav data-cordisx-playground-surface="sidebar.navigation.items"></nav></aside>
+    <main data-cordisx-playground-seat="app"></main>
+    <main data-cordisx-playground-seat="main"></main>
+    <main data-cordisx-playground-seat="session.content"></main>
+  </body></html>`
+}
 
 describe('sidebar navigation collections', () => {
+  it('keeps an exact restored Room history entry pending through review authorization in a fresh Playground document and rejects revoked, foreign, and stale entries', async () => {
+    const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const baseConfig = await loadConfig(path.join(projectRoot, 'cordisx.config.example.json'))
+    const entry = path.join(projectRoot, 'tests/fixtures/navigation-collection-plugin.ts')
+    const source = pathToFileURL(entry).href
+    const config = {
+      ...baseConfig,
+      plugins: [{ id: 'navigation-collection', entry, enabled: true, config: {} }],
+    }
+    const bundle = await buildRendererBundle(config, {
+      playground: true,
+      generation: 'navigation-collection-reload-pending',
+      profileId: 'playground',
+      permission: { profileId: 'playground', bridgeToken: '7'.repeat(64), policies: [] },
+    })
+    const first = new JSDOM(playgroundMarkup(), { runScripts: 'dangerously', url: 'http://127.0.0.1/' })
+    const reloaded = new JSDOM(playgroundMarkup(), { runScripts: 'dangerously', url: 'http://127.0.0.1/' })
+    let firstRuntime: PlaygroundReloadRuntime | undefined
+    let reloadedRuntime: PlaygroundReloadRuntime | undefined
+    try {
+      installPermissionPolicyBridge(first.window)
+      first.window.eval(bundle)
+      await vi.waitFor(() => {
+        expect(first.window.document.documentElement.dataset.cordisxReady).toBe('true')
+        firstRuntime = (first.window as unknown as { __cordisxRuntime?: PlaygroundReloadRuntime }).__cordisxRuntime
+        expect(firstRuntime).toBeDefined()
+      })
+      await firstRuntime!.setExtensionPointPolicies(source, 'navigation-collection', [
+        { pointId: 'sidebar.navigation.items', policy: 'allow' },
+        { pointId: 'main', policy: 'allow' },
+      ])
+      await firstRuntime!.navigate('navigation-collection', { id: 'room', params: { roomId: 'room-1' } })
+      await vi.waitFor(() => expect(firstRuntime!.snapshot().navigation.outlets.find(outlet => outlet.id === 'main'))
+        .toMatchObject({ activeRoute: 'navigation-collection:room' }))
+      const state = first.window.history.state as { readonly key: string; readonly idx: number; readonly __cordisxRouteV1?: unknown }
+      expect(state.__cordisxRouteV1).toMatchObject({ routeId: 'navigation-collection:room', params: { roomId: 'room-1' } })
+      copySessionStorage(first.window.sessionStorage, reloaded.window.sessionStorage)
+      reloaded.window.history.replaceState({ key: state.key, idx: state.idx }, '', '/')
+      await firstRuntime!.dispose()
+      firstRuntime = undefined
+
+      installPermissionPolicyBridge(reloaded.window)
+      reloaded.window.eval(bundle)
+      await vi.waitFor(() => {
+        expect(reloaded.window.document.documentElement.dataset.cordisxReady).toBe('true')
+        reloadedRuntime = (reloaded.window as unknown as { __cordisxRuntime?: PlaygroundReloadRuntime }).__cordisxRuntime
+        expect(reloadedRuntime).toBeDefined()
+      })
+      expect(reloaded.window.history.state.__cordisxRouteV1).toMatchObject({ routeId: 'navigation-collection:room', params: { roomId: 'room-1' } })
+      expect(reloadedRuntime!.snapshot().navigation.outlets.find(outlet => outlet.id === 'main')?.activeRoute).toBeUndefined()
+
+      activatePlaygroundReviewNavigation(reloaded.window.document, 'navigation-collection:new-room')
+      await authorizePlaygroundReviewNavigation(
+        reloadedRuntime! as unknown as Parameters<typeof authorizePlaygroundReviewNavigation>[0],
+        'navigation-collection:new-room',
+      )
+      await vi.waitFor(() => expect(reloadedRuntime!.snapshot().navigation.outlets.find(outlet => outlet.id === 'main'))
+        .toMatchObject({ activeRoute: 'navigation-collection:room' }))
+
+      await reloadedRuntime!.setExtensionPointPolicies(source, 'navigation-collection', [{ pointId: 'main', policy: 'deny' }])
+      await vi.waitFor(() => {
+        expect(reloaded.window.history.state.__cordisxRouteV1).toBeUndefined()
+        expect(reloadedRuntime!.snapshot().navigation.outlets.find(outlet => outlet.id === 'main')?.activeRoute).toBeUndefined()
+      })
+
+      reloaded.window.history.pushState({
+        __cordisxRouteV1: {
+          schemaVersion: 1, owner: 'foreign', routeId: 'foreign:room', outlet: 'main',
+          path: '/main/rooms/room-1', params: { roomId: 'room-1' },
+        },
+      }, '', '/')
+      await vi.waitFor(() => expect(reloaded.window.history.state.__cordisxRouteV1).toBeUndefined())
+
+      reloaded.window.history.pushState({
+        __cordisxRouteV1: {
+          schemaVersion: 1, owner: 'navigation-collection', routeId: 'navigation-collection:stale', outlet: 'main',
+          path: '/main/rooms/room-1', params: { roomId: 'room-1' },
+        },
+      }, '', '/')
+      await vi.waitFor(() => expect(reloaded.window.history.state.__cordisxRouteV1).toBeUndefined())
+    } finally {
+      await firstRuntime?.dispose()
+      await reloadedRuntime?.dispose()
+      first.window.close()
+      reloaded.window.close()
+    }
+  }, 30_000)
+
   it('renders a Host-owned group, atomically inserts rows, and selects exact route params', async () => {
     const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const baseConfig = await loadConfig(path.join(projectRoot, 'cordisx.config.example.json'))

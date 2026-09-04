@@ -2125,6 +2125,17 @@ export class NavigationRegistry {
       qualifyOwnedId(record.owner, record.definition.page),
       record.candidateView,
     )
+    // A reload can restore an exact Host route before the explicit Playground
+    // review authorization has settled. A pending review is not a grant: keep
+    // the exact entry, mount nothing, and let the Host-owned policy
+    // invalidation re-project it after the current owner/point policy settles.
+    // All terminal denials remain fail-closed below.
+    if (routeAccess?.authorized === false && routeAccess.reason === 'permission.review-pending') {
+      const state = this.states.get(record.definition.outlet)
+      if (state?.current !== undefined || state?.mount !== undefined) await this.closeNow(record.definition.outlet)
+      this.notify()
+      return
+    }
     if (this.routeError(record) !== undefined
       || routeAccess?.authorized === false
       || projected.outlet !== record.definition.outlet
