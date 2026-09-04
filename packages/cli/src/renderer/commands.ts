@@ -1,5 +1,6 @@
 import { Context, Service } from '@deepseek-ai/cordis'
-import type { AgentConversationShellCommandContext } from '@cordisx/protocol/agent-conversation-shell/v3'
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV3 } from '@cordisx/protocol/agent-conversation-shell/v3'
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV7 } from '@cordisx/protocol/agent-conversation-shell/v7'
 import type {
   CordisXCommandHandler,
   CordisXCommandMetadata,
@@ -18,6 +19,8 @@ import type { ExtensionPointAccessResolver } from './extension-points.js'
 import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
 import { ICON_TOKEN_PATTERN, assertLocalId, assertLocalizedText, assertReference, immutableSnapshot } from './validation.js'
 import type { PluginConsoleAspect, PluginPrincipalToken } from './plugin-console.js'
+
+type AgentConversationShellCommandContext = AgentConversationShellCommandContextV3 | AgentConversationShellCommandContextV7
 
 interface CommandRecord {
   readonly owner: string

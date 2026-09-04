@@ -1,6 +1,7 @@
 import type { CordisXIconToken, CordisXJsonValue } from '../../../contracts.js'
 import { cloneAgentAvatarRef, type AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity, AgentDetailReference } from '@cordisx/protocol/agents/v1'
+import type { ApprovalAgentBinding, ApprovalReason } from '@cordisx/protocol/approval/v2'
 import type { AgentLoopBindingIdentity, AgentLoopTaskDetailsUrl } from '@cordisx/protocol/agent-loop/v3'
 import type { SessionId, SessionSeq } from '@cordisx/protocol/sessions/v1'
 import type { AgentConversationComposerShortcutPolicy } from '@cordisx/protocol/agent-conversation-shell/v5'
@@ -112,15 +113,45 @@ interface AgentConversationApprovalBase {
   readonly approvalId: string
   readonly approvalKind: 'command' | 'file-change' | 'external-action' | 'other'
   readonly state: 'pending' | 'approved' | 'denied' | 'cancelled' | 'failed'
-  readonly actions: readonly { readonly decision: 'approve' | 'deny' | 'cancel'; readonly command: AgentConversationCommandReference }[]
+  readonly actions: readonly { readonly decision: 'approve' | 'deny' | 'cancel' | 'reject'; readonly command: AgentConversationCommandReference }[]
   readonly rationale?: string
   readonly diagnostic?: string
 }
 
-export type AgentConversationApproval = AgentConversationApprovalBase & (
-  | { readonly binding: AgentLoopBindingIdentity; readonly turn: string }
-  | { readonly sessionId: SessionId; readonly agentGeneration?: number }
-)
+export type AgentConversationApprovalV7 = AgentConversationApprovalBase & {
+  readonly sessionId: SessionId
+  readonly agentGeneration?: number
+  readonly requester: AgentDefinitionIdentity
+  readonly authority: { readonly participantId: string; readonly memberId: string; readonly identity: AgentDefinitionIdentity }
+  readonly reason: ApprovalReason
+  readonly authorityBinding?: ApprovalAgentBinding
+  readonly rationale?: never
+  readonly binding?: never
+  readonly turn?: never
+}
+
+export type AgentConversationApproval =
+  | (AgentConversationApprovalBase & {
+      readonly binding: AgentLoopBindingIdentity
+      readonly turn: string
+      readonly sessionId?: never
+      readonly agentGeneration?: never
+      readonly requester?: never
+      readonly authority?: never
+      readonly reason?: never
+      readonly authorityBinding?: never
+    })
+  | (AgentConversationApprovalBase & {
+      readonly sessionId: SessionId
+      readonly agentGeneration?: number
+      readonly binding?: never
+      readonly turn?: never
+      readonly requester?: never
+      readonly authority?: never
+      readonly reason?: never
+      readonly authorityBinding?: never
+    })
+  | AgentConversationApprovalV7
 
 export type AgentConversationEntry = AgentConversationMessage | AgentConversationStatus | AgentConversationMemberPresence | AgentConversationApproval
 
@@ -295,7 +326,7 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
     assertKnownKeys(entry, entry.kind === 'message'
       ? ['kind', 'itemId', 'messageId', 'sequence', 'authorId', 'body', 'timestamp', 'deliveryState', 'runState', 'ariaLive', 'actions', 'source', 'reactions', 'semantic']
       : entry.kind === 'approval'
-        ? ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'runId', 'binding', 'turn', 'sessionId', 'agentGeneration', 'approvalId', 'approvalKind', 'state', 'actions', 'rationale', 'diagnostic']
+        ? ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'runId', 'binding', 'turn', 'sessionId', 'agentGeneration', 'approvalId', 'approvalKind', 'state', 'actions', 'rationale', 'diagnostic', 'requester', 'authority', 'reason', 'authorityBinding']
       : entry.kind === 'member-presence'
         ? ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'runId', 'sessionId', 'state', 'retryable', 'diagnostic', 'retry']
         : ['kind', 'itemId', 'sequence', 'label', 'state', 'ariaLive'], `entries[${index}]`)
@@ -324,7 +355,7 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
       assertOpaque(entry.participantId, `entries[${index}].participantId`)
       assertOpaque(entry.memberId, `entries[${index}].memberId`)
       assertOpaque(entry.runId, `entries[${index}].runId`)
-      if ('binding' in entry) {
+      if (entry.binding !== undefined) {
         assertAgentLoopHandle(entry.binding.bindingId, `entries[${index}].binding.bindingId`)
         assertAgentLoopHandle(entry.turn, `entries[${index}].turn`)
       } else {
@@ -342,8 +373,28 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
       if (!['pending', 'approved', 'denied', 'cancelled', 'failed'].includes(entry.state)) throw new Error(`entries[${index}].state is invalid`)
       if (entry.state === 'pending' && (entry.actions.length < 1 || entry.actions.length > 3)) throw new Error(`entries[${index}].actions is invalid`)
       if (entry.state !== 'pending' && entry.actions.length !== 0) throw new Error(`entries[${index}].actions require pending state`)
+      if (entry.requester !== undefined) {
+        const v7 = entry as AgentConversationApprovalV7
+        const requester = selection.kind === 'room' ? selection.participants.find(item => item.id === v7.participantId) : undefined
+        const authority = selection.kind === 'room' ? selection.participants.find(item => item.id === v7.authority.participantId) : undefined
+        if (requester?.role !== 'agent' || requester.agentIdentity?.agentId !== v7.requester.agentId || requester.agentIdentity?.revision !== v7.requester.revision) throw new Error(`entries[${index}].requester is invalid`)
+        if (authority?.role !== 'agent' || authority.agentIdentity?.agentId !== v7.authority.identity.agentId || authority.agentIdentity?.revision !== v7.authority.identity.revision) throw new Error(`entries[${index}].authority is invalid`)
+        assertOpaque(v7.authority.memberId, `entries[${index}].authority.memberId`)
+        if (v7.reason.kind !== 'plain-text') throw new Error(`entries[${index}].reason.kind is invalid`)
+        assertText(v7.reason.text, `entries[${index}].reason.text`, 10_000)
+        if (v7.state === 'pending') {
+          if (v7.authorityBinding === undefined || v7.actions.length !== 2
+            || v7.actions[0]?.decision !== 'approve' || v7.actions[1]?.decision !== 'reject') throw new Error(`entries[${index}] pending authority binding is invalid`)
+          assertOpaque(v7.authorityBinding.agentId, `entries[${index}].authorityBinding.agentId`)
+          assertOpaque(v7.authorityBinding.sessionId, `entries[${index}].authorityBinding.sessionId`)
+          if (v7.authorityBinding.agentId !== v7.authorityBinding.sessionId
+            || v7.authorityBinding.definition.agentId !== v7.authority.identity.agentId
+            || v7.authorityBinding.definition.revision !== v7.authority.identity.revision
+            || !Number.isSafeInteger(v7.authorityBinding.agentGeneration) || v7.authorityBinding.agentGeneration < 1) throw new Error(`entries[${index}].authorityBinding is invalid`)
+        } else if (v7.authorityBinding !== undefined) throw new Error(`entries[${index}] terminal authority binding is invokable`)
+      }
       for (const [actionIndex, action] of entry.actions.entries()) {
-        if (!['approve', 'deny', 'cancel'].includes(action.decision)) throw new Error(`entries[${index}].actions[${actionIndex}] decision is invalid`)
+        if (!['approve', 'deny', 'cancel', 'reject'].includes(action.decision)) throw new Error(`entries[${index}].actions[${actionIndex}] decision is invalid`)
         assertCommand(action.command, `entries[${index}].actions[${actionIndex}].command`)
       }
       if (entry.rationale !== undefined) assertText(entry.rationale, `entries[${index}].rationale`, 4_000)

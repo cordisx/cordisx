@@ -1,7 +1,8 @@
 import type { AgentAcquireResult, AgentOptions, AgentSetup } from '@cordisx/protocol/agents/v1'
 import type { EntityBackedAgentRegistry, EntityRegistry } from '@cordisx/protocol/entities/v1'
 import type { AgentLoopTaskBinding } from '@cordisx/protocol/agent-loop/v4'
-import type { ApprovalService } from '@cordisx/protocol/approval/v1'
+import type { ApprovalService as ApprovalServiceV1 } from '@cordisx/protocol/approval/v1'
+import type { ApprovalService as ApprovalServiceV2 } from '@cordisx/protocol/approval/v2'
 import type { SessionId, SessionRegistry } from '@cordisx/protocol/sessions/v1'
 
 export const CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1 =
@@ -58,7 +59,7 @@ declare module '@deepseek-ai/cordis' {
     /** Protocol AgentRegistry plus the Host-owned legacy TaskBinding acquire seam. */
     agents: CordisXAgentRegistryV1
     sessions: SessionRegistry
-    approvals: ApprovalService
+    approvals: ApprovalServiceV1 & ApprovalServiceV2
     entities: EntityRegistry
   }
 }

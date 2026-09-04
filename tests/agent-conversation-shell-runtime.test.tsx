@@ -16,6 +16,10 @@ import type {
   AgentConversationShellSnapshot as AgentConversationShellSnapshotV6,
   AgentConversationShellSubscriptionClosed as AgentConversationShellSubscriptionClosedV6,
 } from '@cordisx/protocol/agent-conversation-shell/v6'
+import type {
+  AgentConversationShellSnapshot as AgentConversationShellSnapshotV7,
+  AgentConversationShellSubscriptionClosed as AgentConversationShellSubscriptionClosedV7,
+} from '@cordisx/protocol/agent-conversation-shell/v7'
 import { Context } from '@deepseek-ai/cordis'
 import { JSDOM } from 'jsdom'
 import { act } from 'react'
@@ -585,6 +589,123 @@ describe('Agent conversation shell public runtime', () => {
       subscription, afterSequence: 2, phase: 'live',
       updates: [{ kind: 'item-updated', sequence: 3, item: { ...terminal, state: 'denied' } }], nextAfterSequence: 3, hasMore: false,
     } as never)
+    await waitForRuntimeState(dom, 'error')
+    expect(unsubscribed).toBe(1)
+    registration.dispose(); runtime.dispose(); commands.dispose()
+    await settle(); dom.window.close()
+  })
+
+  it('keeps every other v7 timeline item when a pending approval is rejected', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
+    const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-v7' })
+    const stream = new PageStream()
+    let unsubscribed = 0
+    let binding: AgentConversationShellBinding | undefined
+    const reviewer = { agentId: 'reviewer', revision: 'reviewer-v7' }
+    const lead = { agentId: 'lead', revision: 'lead-v7' }
+    const pending = (itemId: string, approvalId: string, sequence: number) => ({
+      kind: 'approval' as const, itemId, sequence,
+      participantId: 'agent-reviewer', memberId: 'member-reviewer', runId: 'run-reviewer',
+      sessionId: 'cx-session.reviewer-v7', agentGeneration: 7, approvalId, approvalKind: 'external-action' as const,
+      requester: reviewer,
+      authority: { participantId: 'agent-lead', memberId: 'member-lead', identity: lead },
+      reason: { kind: 'plain-text' as const, text: `Reason for ${approvalId}` },
+      authorityBinding: { agentId: 'cx-session.lead-v7', sessionId: 'cx-session.lead-v7', agentGeneration: 9, definition: lead },
+      state: 'pending' as const,
+      actions: [
+        { decision: 'approve' as const, command: { id: 'approval.answer' } },
+        { decision: 'reject' as const, command: { id: 'approval.answer' } },
+      ] as const,
+    })
+    const registration = runtime.register(plugin, currentBinding => {
+      binding = currentBinding
+      const participants = [
+        { participantId: 'agent-reviewer', role: 'agent' as const, displayName: message('reviewer', 'Reviewer'), agentIdentity: reviewer },
+        { participantId: 'agent-lead', role: 'agent' as const, displayName: message('lead', 'Lead'), agentIdentity: lead },
+      ]
+      const text = {
+        kind: 'message' as const, itemId: 'message-before-approval', messageId: 'message-v7', sequence: 1,
+        source: { kind: 'session-event' as const, sessionId: 'cx-session.reviewer-v7', eventSeq: 1 },
+        author: participants[0]!, semantic: { purpose: 'conversation' as const },
+        body: [{ kind: 'text' as const, text: message('message', 'Keep this message') }], reactions: [],
+        timestamp: '2026-09-04T04:00:00.000Z', deliveryState: 'delivered' as const, runState: 'idle' as const,
+        ariaLive: 'off' as const, actions: [],
+      }
+      const snapshot: AgentConversationShellSnapshotV7 = {
+        binding: { bindingId: currentBinding.bindingId, ownerGeneration: currentBinding.ownerGeneration }, generation: 'snapshot-v7', snapshotSequence: 3,
+        selection: {
+          kind: 'room', roomId: 'room-v7', title: message('room.v7', 'V7 room'), multiParticipant: true,
+          participantPresentation: 'host-initials', participants,
+          activeRuns: [
+            { participantId: 'agent-reviewer', memberId: 'member-reviewer', runId: 'run-reviewer', sessionId: 'cx-session.reviewer-v7', lifecycle: { phase: 'attention' } },
+            { participantId: 'agent-lead', memberId: 'member-lead', runId: 'run-lead', sessionId: 'cx-session.lead-v7', lifecycle: { phase: 'active' } },
+          ],
+        },
+        items: [text, pending('approval-v7-a', 'cx-approval.v7-a', 2), pending('approval-v7-b', 'cx-approval.v7-b', 3)],
+        composer: { availability: 'available', placeholder: message('composer', 'Message'), disabled: { value: false }, shortcutPolicy: 'enter', submit: { id: 'send' } },
+        headerActions: [],
+      }
+      const subscription = { subscriptionId: 'subscription-v7', binding: snapshot.binding, generation: snapshot.generation, afterSequence: 3, snapshotSequence: 3 }
+      const close = (code: AgentConversationShellSubscriptionClosedV7['code']): AgentConversationShellSubscriptionClosedV7 => ({
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-conversation-shell-subscription-close.v7.schema.json',
+        contract: 'cordisx.agent-conversation-shell-subscription-close/v7', schemaVersion: 7,
+        subscriptionId: subscription.subscriptionId, binding: subscription.binding, generation: subscription.generation,
+        status: 'closed', code,
+      })
+      return {
+        snapshot: async () => snapshot,
+        subscribe: async () => ({ result: { type: 'subscribe' as const, status: 'accepted' as const, code: 'allowed' as const, subscription }, handle: {
+          subscription, pages: stream, closed: new Promise<never>(() => {}),
+          unsubscribe: async () => { unsubscribed += 1; stream.close(); return close('unsubscribed') },
+        } }),
+        updateRoomSettings: async request => ({ type: 'update-room-settings' as const, requestId: request.requestId, binding: request.binding, generation: request.generation, roomId: request.roomId, expectedSnapshotSequence: request.expectedSnapshotSequence, status: 'unavailable' as const, code: 'settings-unavailable' as const }),
+        dispose() {},
+      }
+    }, undefined, 7)
+    registration.mount(mountContext(dom))
+    await vi.waitFor(() => expect(dom.window.document.querySelectorAll('[data-entry-id]')).toHaveLength(3))
+    const subscription = { subscriptionId: 'subscription-v7', binding: { bindingId: binding!.bindingId, ownerGeneration: binding!.ownerGeneration }, generation: 'snapshot-v7', afterSequence: 3, snapshotSequence: 3 }
+    const pendingA = pending('approval-v7-a', 'cx-approval.v7-a', 2)
+    const rejectedControl = dom.window.document.querySelector<HTMLButtonElement>('[data-entry-id="approval-v7-a"] [data-decision="reject"]')
+    rejectedControl?.focus()
+    expect(dom.window.document.activeElement).toBe(rejectedControl)
+    const { authorityBinding: _authorityBindingA, agentGeneration: _agentGenerationA, ...durableA } = pendingA
+    const terminalA = { ...durableA, state: 'denied' as const, actions: [] as const }
+    stream.push({ subscription, afterSequence: 3, phase: 'live', updates: [{ kind: 'item-updated', sequence: 4, item: terminalA }], nextAfterSequence: 4, hasMore: false } as never)
+    await vi.waitFor(() => expect(dom.window.document.querySelector('[data-entry-id="approval-v7-a"]')?.getAttribute('data-state')).toBe('denied'))
+    expect(dom.window.document.activeElement).toBe(dom.window.document.querySelector('[data-entry-id="approval-v7-a"]'))
+    expect(dom.window.document.querySelector('[data-entry-id="message-before-approval"]')?.textContent).toContain('Keep this message')
+    expect(dom.window.document.querySelector('[data-entry-id="approval-v7-b"]')).not.toBeNull()
+
+    const incomplete = {
+      ...(await (async () => {
+        const pendingB = pending('approval-v7-b', 'cx-approval.v7-b', 3)
+        const { authorityBinding: _authorityBindingB, agentGeneration: _agentGenerationB, ...durableB } = pendingB
+        const itemB = { ...durableB, state: 'approved' as const, actions: [] as const }
+        return {
+          binding: subscription.binding, generation: 'snapshot-v7', snapshotSequence: 5,
+          selection: {
+            kind: 'room' as const, roomId: 'room-v7', title: message('room.v7', 'V7 room'), multiParticipant: true,
+            participantPresentation: 'host-initials' as const,
+            participants: [
+              { participantId: 'agent-reviewer', role: 'agent' as const, displayName: message('reviewer', 'Reviewer'), agentIdentity: reviewer },
+              { participantId: 'agent-lead', role: 'agent' as const, displayName: message('lead', 'Lead'), agentIdentity: lead },
+            ],
+            activeRuns: [
+              { participantId: 'agent-reviewer', memberId: 'member-reviewer', runId: 'run-reviewer', sessionId: 'cx-session.reviewer-v7', lifecycle: { phase: 'attention' as const } },
+              { participantId: 'agent-lead', memberId: 'member-lead', runId: 'run-lead', sessionId: 'cx-session.lead-v7', lifecycle: { phase: 'active' as const } },
+            ],
+          },
+          items: [terminalA, itemB],
+          composer: { availability: 'available' as const, placeholder: message('composer', 'Message'), disabled: { value: false }, shortcutPolicy: 'enter' as const, submit: { id: 'send' } },
+          headerActions: [],
+        }
+      })()),
+    }
+    stream.push({ subscription, afterSequence: 4, phase: 'live', updates: [{ kind: 'snapshot-replaced', sequence: 5, snapshot: incomplete }], nextAfterSequence: 5, hasMore: false } as never)
     await waitForRuntimeState(dom, 'error')
     expect(unsubscribed).toBe(1)
     registration.dispose(); runtime.dispose(); commands.dispose()

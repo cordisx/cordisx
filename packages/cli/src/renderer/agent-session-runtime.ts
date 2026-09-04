@@ -23,12 +23,22 @@ import type {
   AgentStatusObservation,
 } from '@cordisx/protocol/agents/v1'
 import type {
-  ApprovalAnswerer,
-  ApprovalAnswererHandle,
-  ApprovalDecision,
-  ApprovalQuestion,
-  ApprovalService,
+  ApprovalAnswerer as ApprovalAnswererV1,
+  ApprovalAnswererHandle as ApprovalAnswererHandleV1,
+  ApprovalDecision as ApprovalDecisionV1,
+  ApprovalQuestion as ApprovalQuestionV1,
+  ApprovalService as ApprovalServiceV1,
 } from '@cordisx/protocol/approval/v1'
+import type {
+  ApprovalAgentBinding,
+  ApprovalAgentTarget,
+  ApprovalAnswerer as ApprovalAnswererV2,
+  ApprovalAuthorityAnswererHandle,
+  ApprovalDecision as ApprovalDecisionV2,
+  ApprovalQuestion as ApprovalQuestionV2,
+  ApprovalRequest as ApprovalRequestV2,
+  ApprovalService as ApprovalServiceV2,
+} from '@cordisx/protocol/approval/v2'
 import type {
   ApprovalOutcome,
   AgentCancelCause,
@@ -78,8 +88,10 @@ const DISCARD_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protoc
 const SNAPSHOT_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/session-snapshot.v1.schema.json' as const
 const PAGE_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/session-event-page.v1.schema.json' as const
 const SUBSCRIPTION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/session-subscription-page.v1.schema.json' as const
-const QUESTION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-question.v1.schema.json' as const
-const DECISION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-decision.v1.schema.json' as const
+const QUESTION_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-question.v1.schema.json' as const
+const DECISION_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-decision.v1.schema.json' as const
+const QUESTION_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-question.v2.schema.json' as const
+const DECISION_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-decision.v2.schema.json' as const
 const ENTITY_ACQUIRE_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-agent-acquire-result.v1.schema.json' as const
 
 type EntityAcquireEnvelope = {
@@ -268,8 +280,14 @@ interface AgentSubscriber {
 
 interface AnswererRecord {
   readonly owner: PluginOwnerIdentity
-  readonly answerer: ApprovalAnswerer
+  readonly answerer: ApprovalAnswererV1
   closed?: 'disposed' | 'agent-replaced' | 'plugin-generation-replaced' | 'permission-revoked'
+}
+
+interface AuthorityAnswererRecord {
+  readonly owner: PluginOwnerIdentity
+  readonly answerer: ApprovalAnswererV2
+  closed?: 'disposed' | 'authority-replaced' | 'plugin-generation-replaced' | 'permission-revoked' | 'connection-replaced'
 }
 
 /**
@@ -283,6 +301,7 @@ export class CordisXAgentSessionRuntime {
   private readonly agentCapabilities = new WeakMap<object, AgentRecord>()
   private readonly handleCapabilities = new WeakMap<object, AgentRecord>()
   private readonly answerers = new Map<string, AnswererRecord>()
+  private readonly authorityAnswerers = new Map<string, AuthorityAnswererRecord>()
   private readonly mutations = new Map<string, { readonly fingerprint: string; readonly result: AgentAcquireResult }>()
   private readonly entityMutations = new Map<string, { readonly fingerprint: string; readonly result: AcceptedEntityAcquire }>()
   private nextAgentGeneration = 0
@@ -563,7 +582,7 @@ export class CordisXAgentSessionRuntime {
     return record === undefined ? undefined : this.sessionHandle(owner, record)
   }
 
-  async requestApproval(owner: PluginOwnerIdentity, request: Parameters<ApprovalService['request']>[0]): Promise<ApprovalDecision> {
+  async requestApproval(owner: PluginOwnerIdentity, request: Parameters<ApprovalServiceV1['request']>[0]): Promise<ApprovalDecisionV1> {
     const record = this.recordForAgent(request.agent)
     if (record === undefined || !this.sameOwner(owner, record.owner)
       || !await this.allowed(owner, 'approvals.request', request.agent.id)) {
@@ -589,7 +608,7 @@ export class CordisXAgentSessionRuntime {
     return this.approvalDecision(record, id, request.toolName, request.callId, outcome)
   }
 
-  async registerAnswerer(owner: PluginOwnerIdentity, agent: Agent, answerer: ApprovalAnswerer): Promise<ApprovalAnswererHandle> {
+  async registerAnswerer(owner: PluginOwnerIdentity, agent: Agent, answerer: ApprovalAnswererV1): Promise<ApprovalAnswererHandleV1> {
     const record = this.recordForAgent(agent)
     if (record === undefined || typeof answerer !== 'function' || !this.sameOwner(owner, record.owner)
       || this.options.declares?.(owner, 'approvals.answer') === false) {
@@ -607,7 +626,87 @@ export class CordisXAgentSessionRuntime {
         return { status: 'closed' as const, code: entry.closed! }
       },
     })
-    return handle as ApprovalAnswererHandle
+    return handle as ApprovalAnswererHandleV1
+  }
+
+  async requestApprovalV2(owner: PluginOwnerIdentity, request: ApprovalRequestV2): Promise<ApprovalDecisionV2> {
+    if (!opaque(request.toolName) || request.callId !== undefined && !opaque(request.callId)
+      || request.reason.kind !== 'plain-text' || typeof request.reason.text !== 'string'
+      || request.reason.text.length < 1 || request.reason.text.length > 10_000
+      || /[\u0000\u000B\u000C\u000E-\u001F\u007F]/u.test(request.reason.text)) {
+      throw new Error('Approval request document is invalid')
+    }
+    const requester = this.recordForApprovalTarget(request.requester)
+    const authority = this.recordForApprovalTarget(request.authority)
+    if (requester === undefined || authority === undefined
+      || !this.sameOwner(owner, requester.owner) || !this.sameOwner(owner, authority.owner)) {
+      throw new Error('Approval request live Agent binding is unavailable')
+    }
+    const id = `cx-approval.${crypto.randomUUID()}`
+    if (!await this.allowed(owner, 'approvals.request', requester.id)) {
+      return this.approvalDecisionV2(requester, authority, id, 'unavailable')
+    }
+    const question = this.approvalQuestionV2(requester, authority, id, request.toolName, request.callId, request.reason)
+    const contextAccepted = await this.appendMany(requester.session, [{
+      type: 'approval/authority-bound',
+      data: {
+        approvalId: id,
+        requester: clone(requester.definition!),
+        authority: clone(authority.definition!),
+        reason: clone(request.reason),
+      },
+      ignorable: true,
+    }, {
+      type: 'approval/asked',
+      data: {
+        id, toolName: request.toolName,
+        ...(request.callId === undefined ? {} : { callId: request.callId }),
+        reason: request.reason.text,
+      },
+    }] as const)
+    if (!contextAccepted) return this.approvalDecisionV2(requester, authority, id, 'unavailable')
+
+    const answerer = this.authorityAnswerers.get(this.answererKey(authority))
+    let outcome: ApprovalOutcome = request.signal?.aborted === true ? 'cancelled' : 'unavailable'
+    if (outcome !== 'cancelled' && answerer !== undefined && answerer.closed === undefined
+      && this.current(requester) && this.current(authority)
+      && await this.allowed(answerer.owner, 'approvals.answer', authority.id)
+      && answerer.closed === undefined && this.authorityAnswerers.get(this.answererKey(authority)) === answerer
+      && this.current(requester) && this.current(authority)) {
+      try {
+        const proposed = await answerer.answerer(question)
+        if (!this.current(requester) || !this.current(authority)
+          || answerer.closed !== undefined || this.authorityAnswerers.get(this.answererKey(authority)) !== answerer) outcome = 'unavailable'
+        else if (request.signal?.aborted === true) outcome = 'cancelled'
+        else if (proposed === 'allowed-once' || proposed === 'rejected' || proposed === 'cancelled' || proposed === 'unavailable') outcome = proposed
+      } catch { outcome = 'unavailable' }
+    }
+    if (!await this.append(requester.session, 'approval/decided', { id, outcome })) outcome = 'unavailable'
+    return this.approvalDecisionV2(requester, authority, id, outcome)
+  }
+
+  async registerAuthorityAnswerer(
+    owner: PluginOwnerIdentity,
+    target: ApprovalAgentTarget,
+    answerer: ApprovalAnswererV2,
+  ): Promise<ApprovalAuthorityAnswererHandle> {
+    const authority = this.recordForApprovalTarget(target)
+    if (authority === undefined || typeof answerer !== 'function' || !this.sameOwner(owner, authority.owner)
+      || this.options.declares?.(owner, 'approvals.answer') === false) {
+      throw new Error('Approval authority answerer is unavailable')
+    }
+    const key = this.answererKey(authority)
+    if (this.authorityAnswerers.has(key)) throw new Error('Approval authority answerer is already registered')
+    const entry: AuthorityAnswererRecord = { owner: clone(owner), answerer }
+    this.authorityAnswerers.set(key, entry)
+    const handle = Object.freeze({
+      authority: this.approvalBinding(authority),
+      dispose: async () => {
+        this.closeAuthorityAnswerer(authority, entry, 'disposed')
+        return { status: 'closed' as const, code: entry.closed! }
+      },
+    })
+    return handle as ApprovalAuthorityAnswererHandle
   }
 
   async dispose(): Promise<void> {
@@ -640,6 +739,14 @@ export class CordisXAgentSessionRuntime {
         answerer,
         code === 'plugin-generation-replaced' ? 'plugin-generation-replaced'
           : code === 'permission-revoked' ? 'permission-revoked' : 'agent-replaced',
+      )
+      const authorityAnswerer = this.authorityAnswerers.get(this.answererKey(agent))
+      if (authorityAnswerer !== undefined) this.closeAuthorityAnswerer(
+        agent,
+        authorityAnswerer,
+        code === 'plugin-generation-replaced' ? 'plugin-generation-replaced'
+          : code === 'permission-revoked' ? 'permission-revoked'
+            : code === 'connection-replaced' ? 'connection-replaced' : 'authority-replaced',
       )
       this.disposeAgent(agent, code === 'connection-replaced' ? 'connection-replaced' : 'owner-disposed')
       this.closeSession(agent.session, code === 'connection-replaced' ? 'connection-replaced' : 'host-unavailable', code)
@@ -1034,6 +1141,12 @@ export class CordisXAgentSessionRuntime {
     record.disposed = reason
     const answerer = this.answerers.get(this.answererKey(record))
     if (answerer !== undefined) this.closeAnswerer(record, answerer, 'agent-replaced')
+    const authorityAnswerer = this.authorityAnswerers.get(this.answererKey(record))
+    if (authorityAnswerer !== undefined) this.closeAuthorityAnswerer(
+      record,
+      authorityAnswerer,
+      reason === 'connection-replaced' ? 'connection-replaced' : 'authority-replaced',
+    )
     this.emitLive(record, 'agent/disposed', { reason })
     for (const subscriber of record.live) subscriber.closed = reason === 'connection-replaced' ? 'connection-replaced' : 'agent-replaced'
     record.live.clear()
@@ -1091,6 +1204,15 @@ export class CordisXAgentSessionRuntime {
     if (this.answerers.get(this.answererKey(record)) === answerer) this.answerers.delete(this.answererKey(record))
   }
 
+  private closeAuthorityAnswerer(
+    record: AgentRecord,
+    answerer: AuthorityAnswererRecord,
+    code: NonNullable<AuthorityAnswererRecord['closed']>,
+  ): void {
+    if (answerer.closed === undefined) answerer.closed = code
+    if (this.authorityAnswerers.get(this.answererKey(record)) === answerer) this.authorityAnswerers.delete(this.answererKey(record))
+  }
+
   private emitLive<K extends AgentLiveEvent['type']>(record: AgentRecord, type: K, data: Extract<AgentLiveEvent, { readonly type: K }>['data']): void {
     const event = Object.freeze({ type, agentId: record.id, sessionId: record.id, agentGeneration: record.generation, time: this.now(), data: clone(data) }) as AgentLiveEvent
     for (const subscriber of [...record.live]) if (subscriber.closed === undefined) void subscriber.observer(clone(event))
@@ -1099,6 +1221,13 @@ export class CordisXAgentSessionRuntime {
   private recordForAgent(value: Agent): AgentRecord | undefined {
     const record = this.agentCapabilities.get(value as object)
     return record !== undefined && record.generation === value.generation && this.current(record) ? record : undefined
+  }
+  private recordForApprovalTarget(target: ApprovalAgentTarget): AgentRecord | undefined {
+    const record = this.recordForAgent(target.agent)
+    return record?.definition !== undefined
+      && record.definition.agentId === target.definition.agentId
+      && record.definition.revision === target.definition.revision
+      ? record : undefined
   }
   private current(record: AgentRecord): boolean { return !this.disposed && record.disposed === undefined && this.agents.get(record.id) === record && this.sessionLive(record.session) }
   private sessionLive(record: SessionRecord): boolean { return !this.disposed && record.closed === undefined && this.sessions.get(record.id) === record }
@@ -1152,8 +1281,11 @@ export class CordisXAgentSessionRuntime {
   private admission(messageId: string, status: 'accepted' | 'denied' | 'unavailable', code?: 'source-denied' | 'permission-denied' | 'agent-replaced' | 'host-unavailable'): Agent['send'] extends (...args: never[]) => Promise<infer Result> ? Result : never { return Object.freeze({ $schema: ADMISSION_SCHEMA, contract: 'cordisx.agent-admission/v1', schemaVersion: 1, status, messageId, ...(status === 'accepted' ? {} : { code }) }) as never }
   private discard(messageId: string, status: AgentMessageDiscardResult['status'], code?: string): AgentMessageDiscardResult { return Object.freeze({ $schema: DISCARD_SCHEMA, contract: 'cordisx.agent-message-cancellation-result/v1', schemaVersion: 1, status, messageId, ...(code === undefined ? {} : { code }) }) as AgentMessageDiscardResult }
   private mutation(operation: 'cancel' | 'dispose', mutationId: string | undefined, status: 'accepted' | 'denied' | 'unavailable', code?: string): AgentMutationResult<'cancel'> & AgentMutationResult<'dispose'> { return Object.freeze({ $schema: MUTATION_SCHEMA, contract: 'cordisx.agent-mutation-result/v1', schemaVersion: 1, operation, ...(mutationId === undefined ? {} : { mutationId }), status, ...(code === undefined ? {} : { code }) }) as AgentMutationResult<'cancel'> & AgentMutationResult<'dispose'> }
-  private approvalQuestion(record: AgentRecord, id: string, toolName: string, callId?: string, reason?: string): ApprovalQuestion { return Object.freeze({ $schema: QUESTION_SCHEMA, contract: 'cordisx.approval-question/v1', schemaVersion: 1, id, agentId: record.id, sessionId: record.id, agentGeneration: record.generation, toolName, ...(callId === undefined ? {} : { callId }), ...(reason === undefined ? {} : { reason }) }) }
-  private approvalDecision(record: AgentRecord | Agent, id: string, toolName: string, callId: string | undefined, outcome: ApprovalOutcome): ApprovalDecision { return Object.freeze({ $schema: DECISION_SCHEMA, contract: 'cordisx.approval-decision/v1', schemaVersion: 1, id, agentId: record.id, sessionId: record.session.id, agentGeneration: record.generation, outcome }) }
+  private approvalQuestion(record: AgentRecord, id: string, toolName: string, callId?: string, reason?: string): ApprovalQuestionV1 { return Object.freeze({ $schema: QUESTION_SCHEMA_V1, contract: 'cordisx.approval-question/v1', schemaVersion: 1, id, agentId: record.id, sessionId: record.id, agentGeneration: record.generation, toolName, ...(callId === undefined ? {} : { callId }), ...(reason === undefined ? {} : { reason }) }) }
+  private approvalDecision(record: AgentRecord | Agent, id: string, toolName: string, callId: string | undefined, outcome: ApprovalOutcome): ApprovalDecisionV1 { return Object.freeze({ $schema: DECISION_SCHEMA_V1, contract: 'cordisx.approval-decision/v1', schemaVersion: 1, id, agentId: record.id, sessionId: record.session.id, agentGeneration: record.generation, outcome }) }
+  private approvalBinding(record: AgentRecord): ApprovalAgentBinding { return Object.freeze({ agentId: record.id, sessionId: record.id, agentGeneration: record.generation, definition: clone(record.definition!) }) }
+  private approvalQuestionV2(requester: AgentRecord, authority: AgentRecord, id: string, toolName: string, callId: string | undefined, reason: ApprovalRequestV2['reason']): ApprovalQuestionV2 { return Object.freeze({ $schema: QUESTION_SCHEMA_V2, contract: 'cordisx.approval-question/v2', schemaVersion: 2, id, requester: this.approvalBinding(requester), authority: this.approvalBinding(authority), toolName, ...(callId === undefined ? {} : { callId }), reason: clone(reason) }) }
+  private approvalDecisionV2(requester: AgentRecord, authority: AgentRecord, id: string, outcome: ApprovalOutcome): ApprovalDecisionV2 { return Object.freeze({ $schema: DECISION_SCHEMA_V2, contract: 'cordisx.approval-decision/v2', schemaVersion: 2, id, requester: this.approvalBinding(requester), authority: this.approvalBinding(authority), outcome }) }
 }
 
 const runtimes = new WeakMap<object, CordisXAgentSessionRuntime>()
@@ -1186,8 +1318,16 @@ export class CordisXSessionRegistryServiceV1 extends Service implements SessionR
   constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) { super(ctx, 'sessions'); runtimes.set(this, runtime) }
   get = async (sessionId: string): Promise<Session | undefined> => { const runtime = runtimeFor(this); return await runtime.session(runtime.ownerFromContext(this.ctx), sessionId) }
 }
-export class CordisXApprovalServiceV1 extends Service implements ApprovalService {
+export type CordisXApprovalService = ApprovalServiceV1 & ApprovalServiceV2
+
+export class CordisXApprovalServiceV1 extends Service implements ApprovalServiceV1, ApprovalServiceV2 {
   constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) { super(ctx, 'approvals'); runtimes.set(this, runtime) }
-  request = async (request: Parameters<ApprovalService['request']>[0]): Promise<ApprovalDecision> => { const runtime = runtimeFor(this); return await runtime.requestApproval(runtime.ownerFromContext(this.ctx), request) }
-  registerAnswerer = async (agent: Agent, answerer: ApprovalAnswerer): Promise<ApprovalAnswererHandle> => { const runtime = runtimeFor(this); return await runtime.registerAnswerer(runtime.ownerFromContext(this.ctx), agent, answerer) }
+  request = (async (request: Parameters<ApprovalServiceV1['request']>[0] | Parameters<ApprovalServiceV2['request']>[0]): Promise<ApprovalDecisionV1 | ApprovalDecisionV2> => {
+    const runtime = runtimeFor(this); const owner = runtime.ownerFromContext(this.ctx)
+    return 'requester' in request
+      ? await runtime.requestApprovalV2(owner, request)
+      : await runtime.requestApproval(owner, request)
+  }) as CordisXApprovalService['request']
+  registerAnswerer = async (agent: Agent, answerer: ApprovalAnswererV1): Promise<ApprovalAnswererHandleV1> => { const runtime = runtimeFor(this); return await runtime.registerAnswerer(runtime.ownerFromContext(this.ctx), agent, answerer) }
+  registerAuthorityAnswerer = async (authority: ApprovalAgentTarget, answerer: ApprovalAnswererV2): Promise<ApprovalAuthorityAnswererHandle> => { const runtime = runtimeFor(this); return await runtime.registerAuthorityAnswerer(runtime.ownerFromContext(this.ctx), authority, answerer) }
 }
