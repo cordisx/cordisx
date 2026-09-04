@@ -814,7 +814,7 @@ if (import.meta.hot) {
           // react-markdown reaches these CommonJS leaves through ESM-only
           // dependency chains, so Vite's static scan cannot discover the
           // required default-export interop before the native renderer boots.
-          include: ['debug', 'style-to-js'],
+          include: ['debug', 'extend', 'style-to-js'],
         },
       } : {}),
       resolve: {
