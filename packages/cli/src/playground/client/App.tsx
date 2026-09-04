@@ -202,7 +202,7 @@ export function App() {
   const [resetError, setResetError] = useState<string>()
   const [resetResult, setResetResult] = useState<PlaygroundPreviewResetResult | undefined>(() => readPlaygroundPreviewResetResult(sessionStorage))
   const resetRecoveryStarted = useRef(false)
-  const resetRequestAuthority = useRef<symbol>()
+  const resetRequestAuthority = useRef<symbol | undefined>(undefined)
   const resetRequestOrdinal = useRef(0)
   const shell = useRef<HTMLDivElement>(null)
   const navigationToggle = useRef<HTMLButtonElement>(null)

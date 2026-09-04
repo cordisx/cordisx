@@ -132,6 +132,37 @@ export function resolveCdpInjectionTimeoutMs(value: string | undefined): number 
 }
 
 const CDP_INJECTION_TIMEOUT_MS = resolveCdpInjectionTimeoutMs(process.env.CORDISX_CDP_INJECTION_TIMEOUT_MS)
+const VITE_DISPOSE_EXPRESSION = `(async () => {
+  try {
+    try { await globalThis.__cordisxViteClient?.dispose(); }
+    finally { globalThis.__cordisxSharedReactRuntime?.dispose(); }
+  } finally {
+    try { await globalThis.__cordisxViteHmrDispose?.(); }
+    finally {
+      delete globalThis.__cordisxViteClient;
+      delete globalThis.__cordisxSharedReactRuntime;
+      delete globalThis.__cordisxViteBoot;
+      delete globalThis.__cordisxViteInstallId;
+      delete globalThis.__cordisxViteHmrDispose;
+    }
+  }
+})()`
+
+class CdpInstallationAbortedError extends Error {}
+
+function cdpInstallationAborted(): CdpInstallationAbortedError {
+  return new CdpInstallationAbortedError('CordisX CDP installation aborted')
+}
+
+async function abortable<Value>(promise: Promise<Value>, signal?: AbortSignal): Promise<Value> {
+  if (signal === undefined) return await promise
+  if (signal.aborted) throw cdpInstallationAborted()
+  return await new Promise<Value>((resolve, reject) => {
+    const onAbort = (): void => reject(cdpInstallationAborted())
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
+}
 
 export interface CdpTarget {
   readonly id: string
@@ -728,11 +759,17 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 async function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted === true) return
   await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, milliseconds)
-    signal?.addEventListener('abort', () => {
+    let settled = false
+    const finish = (): void => {
+      if (settled) return
+      settled = true
       clearTimeout(timer)
+      signal?.removeEventListener('abort', finish)
       resolve()
-    }, { once: true })
+    }
+    const timer = setTimeout(finish, milliseconds)
+    signal?.addEventListener('abort', finish, { once: true })
+    if (signal?.aborted === true) finish()
   })
 }
 
@@ -765,7 +802,16 @@ export function injectableTargets(targets: readonly CdpTarget[]): CdpTarget[] {
   return pages.filter(target => targetScore(target) > 0)
 }
 
+function nativeViteTarget(target: CdpTarget): boolean {
+  return target.url === 'app://-' || target.url.startsWith('app://-/')
+}
+
 interface InstalledScript {
+  readonly viteDevelopment?: boolean
+  readonly viteLoopbackPermission?: {
+    readonly name: string
+    readonly origin: string
+  }
   readonly target: CdpTarget
   readonly identifier: string
   readonly session: CdpSession
@@ -807,6 +853,141 @@ interface InstalledScript {
   readonly removePublisherGrantBindingListener?: () => void
   readonly publisherGrantBindingInstalled: boolean
   readonly certifiedPermissionChannel?: CdpCertifiedPermissionChannel
+}
+
+const VITE_LOOPBACK_PERMISSIONS = ['loopback-network', 'local-network-access'] as const
+
+function targetOrigin(target: CdpTarget): string {
+  const match = /^[a-z][a-z0-9+.-]*:\/\/[^/]+/iu.exec(target.url)
+  if (match === null) throw new Error(`target ${target.id} has no permission origin`)
+  return match[0]
+}
+
+async function enableViteLoopbackPermission(
+  session: CdpSession,
+  target: CdpTarget,
+): Promise<{ readonly name: string; readonly origin: string } | undefined> {
+  const origin = targetOrigin(target)
+  const failures: string[] = []
+  for (const name of VITE_LOOPBACK_PERMISSIONS) {
+    try {
+      await session.send('Browser.setPermission', {
+        permission: { name },
+        setting: 'granted',
+        origin,
+        embeddedOrigin: origin,
+      })
+      return { name, origin }
+    } catch (error) {
+      failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  const version: Record<string, unknown> = await session.send('Browser.getVersion').catch(() => ({}))
+  const product = typeof version.product === 'string' ? version.product : ''
+  const major = Number(/\/(\d+)/u.exec(product)?.[1])
+  if (Number.isFinite(major) && major < 142) return undefined
+  throw new Error(`CordisX could not grant loopback access for Vite (${failures.join('; ')})`)
+}
+
+async function restoreViteLoopbackPermission(
+  session: CdpSession,
+  permission: { readonly name: string; readonly origin: string } | undefined,
+): Promise<void> {
+  if (permission === undefined) return
+  await session.send('Browser.setPermission', {
+    permission: { name: permission.name },
+    setting: 'prompt',
+    origin: permission.origin,
+    embeddedOrigin: permission.origin,
+  })
+}
+
+async function connectBrowserCdpSession(port: number): Promise<CdpSession> {
+  const response = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2_000) })
+  if (!response.ok) throw new Error(`CDP browser version returned HTTP ${response.status}`)
+  const value = await response.json() as { readonly webSocketDebuggerUrl?: unknown }
+  if (typeof value.webSocketDebuggerUrl !== 'string') throw new Error('CDP browser endpoint is unavailable')
+  return await CdpSession.connect(value.webSocketDebuggerUrl)
+}
+
+class ViteLoopbackPermissionCoordinator {
+  readonly #origins = new Map<string, {
+    readonly permission: { readonly name: string; readonly origin: string }
+    references: number
+  }>()
+
+  constructor(private readonly port: number) {}
+
+  async acquire(
+    session: CdpSession,
+    target: CdpTarget,
+  ): Promise<{ readonly name: string; readonly origin: string } | undefined> {
+    const origin = targetOrigin(target)
+    const current = this.#origins.get(origin)
+    if (current !== undefined) {
+      current.references += 1
+      return current.permission
+    }
+    const permission = await enableViteLoopbackPermission(session, target)
+    if (permission !== undefined) this.#origins.set(origin, { permission, references: 1 })
+    return permission
+  }
+
+  async release(
+    session: CdpSession,
+    permission: { readonly name: string; readonly origin: string } | undefined,
+  ): Promise<void> {
+    if (permission === undefined) return
+    const current = this.#origins.get(permission.origin)
+    if (current === undefined) return
+    if (current.references === 0) return
+    current.references -= 1
+    if (current.references > 0) return
+    try {
+      await restoreViteLoopbackPermission(session, current.permission)
+    } catch (targetError) {
+      let browser: CdpSession | undefined
+      try {
+        browser = await connectBrowserCdpSession(this.port)
+        await restoreViteLoopbackPermission(browser, current.permission)
+      } catch (browserError) {
+        // Retain the zero-reference grant so a later live target can restore it.
+        throw new AggregateError([targetError, browserError], `CordisX could not restore Vite loopback permission for ${permission.origin}`)
+      } finally {
+        browser?.close()
+      }
+    }
+    this.#origins.delete(permission.origin)
+  }
+}
+
+async function waitForViteBootstrap(
+  session: CdpSession,
+  installId: string,
+  deadline: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  let lastError: Error | undefined
+  while (Date.now() < deadline) {
+    if (signal?.aborted === true) throw cdpInstallationAborted()
+    try {
+      await abortable(evaluateRuntimeOperation(session, `(async () => { try {
+        if (globalThis.__cordisxViteInstallId !== ${JSON.stringify(installId)}) return { ok: false, error: 'cordisx:vite-boot-pending' }
+        if (!globalThis.__cordisxViteBoot) return { ok: false, error: 'cordisx:vite-boot-pending' }
+        await globalThis.__cordisxViteBoot
+        return { ok: globalThis.__cordisxRuntime !== undefined }
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`, Math.max(1, deadline - Date.now())), signal)
+      return
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+      const transient = lastError.message === 'cordisx:vite-boot-pending'
+        || /Execution context was destroyed|Cannot find context|Inspected target navigated|CDP request timed out: Runtime\.evaluate/i.test(lastError.message)
+      if (!transient || session.isClosed()) throw lastError
+      await delay(100, signal)
+    }
+  }
+  throw new Error(`CordisX Vite bootstrap timed out${lastError === undefined ? '' : `: ${lastError.message}`}`)
 }
 
 function installedBindingNames(installed: InstalledScript): readonly string[] {
@@ -1078,6 +1259,9 @@ async function install(
   }>,
   newDocumentSource?: string,
   stale?: InstalledScript,
+  viteDevelopment = false,
+  viteLoopbackPermissions?: ViteLoopbackPermissionCoordinator,
+  signal?: AbortSignal,
 ): Promise<InstalledScript> {
   if (iconThemePreferenceBroadcast !== undefined) {
     if (iconThemePreference === undefined) throw new Error('icon theme preference broadcast requires persistence context')
@@ -1128,6 +1312,8 @@ async function install(
   let generationJoin: ReturnType<CdpPluginLifecycleRuntime['beginJoin']> | undefined
   let removePublisherGrantBindingListener = (): void => {}
   let certifiedPermissionChannel: CdpCertifiedPermissionChannel | undefined
+  let identifier: string | undefined
+  let viteLoopbackPermission: { readonly name: string; readonly origin: string } | undefined
   try {
     if (certifiedPermission !== undefined) {
       certifiedPermissionChannel = new CdpCertifiedPermissionChannel(session, {
@@ -1137,6 +1323,12 @@ async function install(
     }
     await session.send('Runtime.enable')
     await session.send('Page.enable')
+    if (viteDevelopment) {
+      viteLoopbackPermission = viteLoopbackPermissions === undefined
+        ? await enableViteLoopbackPermission(session, target)
+        : await viteLoopbackPermissions.acquire(session, target)
+      await session.send('Page.setBypassCSP', { enabled: true })
+    }
     if (stale !== undefined) {
       await session.send('Page.removeScriptToEvaluateOnNewDocument', {
         identifier: stale.identifier,
@@ -1606,21 +1798,31 @@ async function install(
       })
     }
     const generationRuntime = lifecycle?.runtime ?? developmentRuntime
+    const viteInstallId = viteDevelopment ? randomUUID() : undefined
+    const documentSource = newDocumentSource ?? source
     const added = await session.send(
       'Page.addScriptToEvaluateOnNewDocument',
-      { source: newDocumentSource ?? source },
-      CDP_INJECTION_TIMEOUT_MS,
+      { source: viteInstallId === undefined
+        ? documentSource
+        : `globalThis.__cordisxViteInstallId = ${JSON.stringify(viteInstallId)};\n${documentSource}` },
+      CDP_REQUEST_TIMEOUT_MS,
     )
-    const identifier = added.identifier
+    identifier = added.identifier as string | undefined
     if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')
-    await session.send(
-      'Runtime.evaluate',
-      {
-        expression: source,
-        allowUnsafeEvalBlockedByCSP: true,
-      },
-      CDP_INJECTION_TIMEOUT_MS,
-    )
+    if (viteDevelopment) {
+      const deadline = Date.now() + CDP_INJECTION_TIMEOUT_MS
+      await abortable(session.send('Page.reload', { ignoreCache: true }, CDP_INJECTION_TIMEOUT_MS), signal)
+      await waitForViteBootstrap(session, viteInstallId!, deadline, signal)
+    } else {
+      await session.send(
+        'Runtime.evaluate',
+        {
+          expression: source,
+          allowUnsafeEvalBlockedByCSP: true,
+        },
+        CDP_INJECTION_TIMEOUT_MS,
+      )
+    }
     if (generationRuntime !== undefined || iconThemePreferenceBroadcast !== undefined) {
       await evaluateRuntimeOperation(session, `(async () => { try {
         await globalThis.__cordisxBoot
@@ -1650,6 +1852,8 @@ async function install(
     }
     return {
       target,
+      ...(viteDevelopment ? { viteDevelopment: true } : {}),
+      ...(viteLoopbackPermission === undefined ? {} : { viteLoopbackPermission }),
       identifier,
       session,
       marketplaceController,
@@ -1709,12 +1913,28 @@ async function install(
     unregisterLifecycleSession()
     removePublisherGrantBindingListener()
     await certifiedPermissionChannel?.dispose()
+    if (identifier !== undefined) {
+      await session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }).catch(() => undefined)
+    }
+    if (viteDevelopment) {
+      await session.send('Runtime.evaluate', {
+        expression: VITE_DISPOSE_EXPRESSION,
+        awaitPromise: true,
+        allowUnsafeEvalBlockedByCSP: true,
+      }).catch(() => undefined)
+    }
+    if (viteDevelopment) await session.send('Page.setBypassCSP', { enabled: false }).catch(() => undefined)
+    if (viteLoopbackPermissions === undefined) await restoreViteLoopbackPermission(session, viteLoopbackPermission).catch(() => undefined)
+    else await viteLoopbackPermissions.release(session, viteLoopbackPermission).catch(() => undefined)
     session.close()
     throw error
   }
 }
 
-async function uninstall(installed: InstalledScript): Promise<void> {
+async function uninstall(
+  installed: InstalledScript,
+  viteLoopbackPermissions?: ViteLoopbackPermissionCoordinator,
+): Promise<void> {
   installed.marketplaceController.abort()
   installed.providerController?.abort()
   installed.historyController?.abort()
@@ -1743,6 +1963,19 @@ async function uninstall(installed: InstalledScript): Promise<void> {
   installed.removePublisherGrantBindingListener?.()
   await installed.certifiedPermissionChannel?.dispose()
   try {
+    if (installed.viteDevelopment) {
+      await installed.session.send('Runtime.evaluate', {
+        expression: VITE_DISPOSE_EXPRESSION,
+        awaitPromise: true,
+        allowUnsafeEvalBlockedByCSP: true,
+      }).catch(() => undefined)
+      await installed.session.send('Page.setBypassCSP', { enabled: false }).catch(() => undefined)
+      if (viteLoopbackPermissions === undefined) {
+        await restoreViteLoopbackPermission(installed.session, installed.viteLoopbackPermission).catch(() => undefined)
+      } else {
+        await viteLoopbackPermissions.release(installed.session, installed.viteLoopbackPermission).catch(() => undefined)
+      }
+    }
     await Promise.allSettled([
       installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }),
       installed.session.send('Runtime.evaluate', {
@@ -1790,6 +2023,8 @@ async function uninstall(installed: InstalledScript): Promise<void> {
 }
 
 export interface WatchInjectionOptions {
+  /** Opt-in Vite development only: allow loopback modules, await boot, restore on exit. */
+  readonly viteDevelopment?: boolean
   readonly port: number
   /** Latest immutable bootstrap. Existing renderers are never reinjected when it changes. */
   readonly source: string | (() => string)
@@ -1827,6 +2062,7 @@ export interface WatchInjectionOptions {
 /** Track every current Codex page and keep one removable bootstrap installed per target. */
 export async function watchAndInject(options: WatchInjectionOptions): Promise<void> {
   const installed = new Map<string, InstalledScript>()
+  const viteLoopbackPermissions = new ViteLoopbackPermissionCoordinator(options.port)
   const iconThemePreferenceBroadcast = options.iconThemePreferencePersistence === undefined
     ? undefined
     : options.iconThemePreferenceBroadcastHub ?? new IconThemePreferenceBroadcastHub(
@@ -1838,12 +2074,16 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
   }
   try {
     while (!options.signal.aborted) {
+      let attemptedViteTarget = false
       try {
-        const targets = injectableTargets(await listTargets(options.port))
+        const candidates = injectableTargets(await listTargets(options.port))
+        const targets = options.viteDevelopment === true
+          ? candidates.filter(nativeViteTarget)
+          : candidates
         const live = new Set(targets.map(target => target.id))
         for (const [id, record] of installed) {
           if (live.has(id)) continue
-          await uninstall(record).catch(() => undefined)
+          await uninstall(record, viteLoopbackPermissions).catch(() => undefined)
           installed.delete(id)
         }
         for (const target of targets) {
@@ -1853,7 +2093,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             && !current.session.isClosed()) continue
           let stale: InstalledScript | undefined
           if (current !== undefined) {
-            await uninstall(current).catch(() => undefined)
+            await uninstall(current, viteLoopbackPermissions).catch(() => undefined)
             installed.delete(target.id)
             stale = current
           }
@@ -1863,6 +2103,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           const history = options.agentHistoryHost === undefined || options.agentHistoryBridgeToken === undefined
             ? undefined
             : { host: options.agentHistoryHost, token: options.agentHistoryBridgeToken }
+          attemptedViteTarget = options.viteDevelopment === true
           const record = await install(
             target,
             typeof options.source === 'string' ? options.source : options.source(),
@@ -1886,17 +2127,24 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
                 ? options.newDocumentSource
                 : options.newDocumentSource(),
             stale,
+            options.viteDevelopment,
+            viteLoopbackPermissions,
+            options.signal,
           )
           installed.set(target.id, record)
           options.onReady?.()
           options.onStatus?.(`injected target ${target.id} (${target.title || target.url})`)
         }
       } catch (error) {
+        if (options.signal.aborted) break
+        if (attemptedViteTarget) {
+          throw new Error(`CordisX Vite renderer installation failed: ${error instanceof Error ? error.message : String(error)}`)
+        }
         options.onStatus?.(`waiting for Codex CDP on 127.0.0.1:${options.port}: ${String(error)}`)
       }
       await delay(750, options.signal)
     }
   } finally {
-    await Promise.allSettled([...installed.values()].map(uninstall))
+    await Promise.allSettled([...installed.values()].map(record => uninstall(record, viteLoopbackPermissions)))
   }
 }

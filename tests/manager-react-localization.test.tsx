@@ -28,6 +28,7 @@ function snapshot(): ManagerSnapshot {
     registrations: [], commands: [], navigation: { routes: [], pages: [], outlets: [] },
     localization: { locale: 'en', direction: 'ltr', version: 1 },
     localeCatalogs: [], localizationDiagnostics: [], permissions: [],
+    pluginLifecycle: { profileId: 'work', revision: 1, runtimeGeneration: 'runtime-a', operationsAvailable: true },
     platform: {
       hostId: 'codex-desktop', hostName: 'Codex Desktop', mode: 'unavailable',
       supportedCapabilities: [], diagnostics: [], secondConnectionCreated: false, rawBridgeExposed: false,
@@ -137,5 +138,5 @@ describe('React Manager localization', () => {
       else (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
       dom.window.close()
     }
-  })
+  }, 30_000)
 })

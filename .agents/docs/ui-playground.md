@@ -21,10 +21,14 @@ never expose opaque bindings, provider handles, paths, credentials, or tokens.
 Reset creates a new in-memory Simulator generation with deterministic counters.
 Production bundle construction rejects this backend.
 
-Vite is a development transport, not a second renderer implementation. The
-production `app://` path still uses `buildRendererBundle` and an injected,
-self-contained IIFE. Vite HMR is not claimed for that injected bundle: real
-Codex verification remains a production rebuild and isolated reinjection.
+Vite is a development transport, not a second renderer implementation. Normal
+immutable production startup still uses `buildRendererBundle` and an injected,
+self-contained IIFE. Explicit `cordisx dev` is the native development path: its
+`app://` renderer loads the Host and plugin ESM graph from a launcher-owned Vite
+server and receives updates through Vite HMR. See
+[`vite-native-development.md`](vite-native-development.md). The browser
+Playground remains useful supporting evidence, but does not replace native
+verification.
 
 ```sh
 npm run dev:ui

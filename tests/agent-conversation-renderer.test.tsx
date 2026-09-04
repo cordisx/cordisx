@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createGeneratedAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import { AgentConversationRenderer, type AgentConversationRendererProps } from '../packages/cli/src/renderer/host-ui/conversation/AgentConversationRenderer.js'
 import { HostAgentTaskDetailsNavigator } from '../packages/cli/src/renderer/host-ui/AgentTaskDetailsNavigator.js'
+import { createHostRoomCompositeAvatarProjection } from '../packages/cli/src/renderer/host-ui/RoomCompositeAvatar.js'
 import { HostRoomCompositeAvatar } from '../packages/cli/src/renderer/host-ui/conversation/RoomCompositeAvatar.js'
 import {
   AgentConversationCommandController,
@@ -301,15 +302,15 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(document.querySelectorAll('h2')).toHaveLength(0)
       expect(document.querySelector('.cxa-participants')).toBeNull()
       expect(document.querySelector('.cxa-description-action')?.textContent).toBe('添加群聊介绍')
-      expect([...document.querySelectorAll('.cxa-header-actions .cxa-header-icon-action')].map(button => button.getAttribute('aria-label'))).toEqual(['群成员', '设置', '更多'])
+      expect([...document.querySelectorAll('.cxa-header-actions .cxa-header-icon-action')].map(button => button.getAttribute('aria-label'))).toEqual(['群成员', '设置', '停止', '房间菜单', '更多'])
       expect(document.querySelectorAll('[role="log"]')).toHaveLength(1)
       expect(document.querySelector('[role="log"]')?.getAttribute('data-agent-conversation-scroll-owner')).toBe('timeline')
       expect(document.querySelectorAll('.cxa-status')).toHaveLength(3)
-      expect(document.querySelectorAll('.cxa-room-avatar-cell')).toHaveLength(0)
-      expect(document.querySelector('.cxa-room-avatar-fallback')).not.toBeNull()
-      expect(document.querySelector<HTMLElement>('.cxa-room-avatar')?.dataset.avatarCount).toBe('0')
-      expect(document.querySelectorAll('.cxa-room-avatar-cell .cxa-avatar')).toHaveLength(0)
-      for (const label of ['群成员', '设置', '更多']) {
+      expect(document.querySelectorAll('.cxrv-participant')).toHaveLength(0)
+      expect(document.querySelector('.cxrv-empty')).not.toBeNull()
+      expect(document.querySelector<HTMLElement>('.cxrv-composite')?.dataset.roomCompositeCount).toBe('0')
+      expect(document.querySelectorAll('.cxrv-participant .cxa-avatar')).toHaveLength(0)
+      for (const label of ['群成员', '设置']) {
         await act(async () => document.querySelector<HTMLButtonElement>(`.cxa-header-icon-action[aria-label="${label}"]`)!.click())
         expect(document.querySelectorAll('[data-host-conversation-inspector="true"]')).toHaveLength(1)
         expect(document.querySelector('.cx-conversation-inspector-title')?.textContent).toContain(label === '设置' ? '群聊设置' : label)
@@ -317,6 +318,8 @@ describe('AgentConversationRenderer production DOM', () => {
         expect(document.querySelector('.cx-conversation-inspector-resizer')?.getAttribute('aria-label')).toBe('调整详情栏宽度')
         expect(document.querySelector('.cx-conversation-inspector-header')?.lastElementChild?.getAttribute('aria-label')).toContain('关闭')
       }
+      await act(async () => document.querySelector<HTMLButtonElement>('.cxa-header-icon-action[aria-label="更多"]')!.click())
+      expect(document.querySelector('[data-host-conversation-header-action-overflow="v1"]')).not.toBeNull()
       expect(document.querySelector('[data-agent-conversation-composer]')?.getAttribute('data-agent-conversation-composer')).toBe('fixed')
       const draft = document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
       const send = document.querySelector<HTMLButtonElement>('.cxa-send')!
@@ -351,8 +354,8 @@ describe('AgentConversationRenderer production DOM', () => {
     const controller = new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, single)
     const roomHarness = await render(single, controller)
     try {
-      expect(roomHarness.dom.window.document.querySelectorAll('.cxa-room-avatar-cell .cxa-avatar')).toHaveLength(1)
-      expect(roomHarness.dom.window.document.querySelector('.cxa-room-avatar-fallback')).toBeNull()
+      expect(roomHarness.dom.window.document.querySelectorAll('.cxrv-participant .cxa-avatar')).toHaveLength(1)
+      expect(roomHarness.dom.window.document.querySelector('.cxrv-empty')).toBeNull()
       expect(roomHarness.dom.window.document.querySelectorAll('.cxa-message-avatar-seat > .cxa-avatar')).toHaveLength(1)
     } finally {
       await roomHarness.close()
@@ -422,7 +425,8 @@ describe('AgentConversationRenderer production DOM', () => {
     try {
       const reactions = [...harness.dom.window.document.querySelectorAll<HTMLElement>('.cxa-message-reaction')]
       expect(reactions).toHaveLength(2)
-      expect(reactions.every(reaction => reaction.closest('.cxa-message-surface') !== null)).toBe(true)
+      expect(reactions.every(reaction => reaction.closest('.cxa-message-bubble-shell') !== null)).toBe(true)
+      expect(reactions.every(reaction => reaction.closest('.cxa-message-surface') === null)).toBe(true)
       expect(reactions.map(reaction => reaction.querySelector('.cxa-message-reaction-actor')?.textContent)).toEqual(['Agent Alpha', 'Agent Beta'])
       expect(reactions.map(reaction => reaction.querySelector('.cxa-message-reaction-value')?.textContent)).toEqual(['✅', '✅'])
       expect(reactions.map(reaction => reaction.getAttribute('aria-label'))).toEqual([
@@ -445,7 +449,7 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(styles).toContain('--cxa-compact-pill-padding-block:var(--cx-space-1,4px)')
       expect(styles).toContain('--cxa-compact-pill-padding-inline:var(--cx-space-2,8px)')
       expect(styles).toContain('--cxa-compact-pill-gap:var(--cx-space-1,4px)')
-      expect(styles).toContain('.cxa-message-reaction{display:inline-flex;align-items:center;gap:var(--cxa-compact-pill-gap);padding:var(--cxa-compact-pill-padding-block) var(--cxa-compact-pill-padding-inline)')
+      expect(styles).toContain('.cxa-message-reaction{display:inline-flex;width:max-content;max-width:100%;min-height:26px;flex:0 0 auto;align-items:center;justify-content:center;gap:var(--cxa-compact-pill-gap);padding:var(--cxa-compact-pill-padding-block) var(--cxa-compact-pill-padding-inline)')
 
       const markup = renderToString(<AgentConversationRenderer
         model={model}
@@ -479,7 +483,7 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(human.querySelector('.cxa-message-body')?.textContent).toContain('Review the Host-owned conversation shell')
       expect(human.textContent).not.toContain('You')
       const agents = [...harness.dom.window.document.querySelectorAll<HTMLElement>('.cxa-message[data-role="agent"]')]
-      expect(agents.every(message => message.querySelector('.cxa-message-time')?.closest('.cxa-message-bubble-row') !== null)).toBe(true)
+      expect(agents.every(message => message.querySelector('.cxa-message-time')?.closest('.cxa-message-meta') !== null)).toBe(true)
       expect(human.querySelector('.cxa-message-time')?.nextElementSibling?.classList.contains('cxa-message-surface')).toBe(true)
     } finally {
       await harness.close()
@@ -532,7 +536,7 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(afterHuman.querySelector('.cx-agent-identity-avatar-button')).not.toBeNull()
       expect(reviewerReply.querySelector('.cx-agent-identity-avatar-button')).not.toBeNull()
       expect(intro.querySelector('.cxa-message-meta')?.textContent).toContain('Lead')
-      expect(followup.querySelector('.cxa-message-meta')).toBeNull()
+      expect(followup.querySelector('.cxa-message-meta')).not.toBeNull()
       expect(followup.querySelector('.cxa-author')).toBeNull()
       expect(afterHuman.querySelector('.cxa-message-meta')?.textContent).toContain('Lead')
       expect(reviewerReply.querySelector('.cxa-message-meta')?.textContent).toContain('Reviewer')
@@ -543,23 +547,22 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(introSeat.hasAttribute('inert')).toBe(true)
       expect(followupSeat.dataset.avatarSeat).toBe('visible')
       expect(followupSeat.hasAttribute('aria-hidden')).toBe(false)
-      expect(intro.querySelector('.cxa-message-bubble-row > .cxa-message-avatar-seat + .cxa-message-time + .cxa-message-surface')).not.toBeNull()
-      expect(followup.querySelector('.cxa-message-bubble-row > .cxa-message-avatar-seat + .cxa-message-time + .cxa-message-surface')).not.toBeNull()
+      expect(intro.querySelector('.cxa-message-bubble-row > .cxa-message-avatar-seat + .cxa-message-bubble-shell .cxa-message-surface')).not.toBeNull()
+      expect(followup.querySelector('.cxa-message-bubble-row > .cxa-message-avatar-seat + .cxa-message-bubble-shell .cxa-message-surface')).not.toBeNull()
       for (const message of [intro, followup, afterHuman, reviewerReply]) {
         const time = message.querySelector<HTMLTimeElement>('.cxa-message-time')!
-        expect(time.closest('.cxa-message-bubble-row')).not.toBeNull()
+        expect(time.closest('.cxa-message-meta')).not.toBeNull()
         expect(time.closest('.cxa-message-surface')).toBeNull()
-        expect(time.tabIndex).toBe(0)
+        expect(time.tabIndex).toBe(-1)
         expect(message.getAttribute('aria-label')).toContain(message === reviewerReply ? 'Reviewer' : 'Lead')
       }
       const styles = document.querySelector<HTMLStyleElement>('style[data-agent-conversation-styles]')!.textContent!
-      expect(styles).toContain('.cxa-message-bubble-row{display:flex;min-width:0;max-width:100%;align-items:center;gap:var(--cxa-message-time-gap)}')
-      expect(styles).toContain('.cxa-message-avatar-seat{display:grid;width:var(--cxa-message-avatar-size);height:var(--cxa-message-avatar-size);flex:0 0 var(--cxa-message-avatar-size)')
-      expect(styles).toContain('.cxa-message[data-role="agent"] .cxa-message-meta{width:calc(100% - var(--cxa-message-avatar-size) - var(--cxa-message-time-width) - var(--cxa-message-avatar-gap) - var(--cxa-message-time-gap));margin-inline-start:calc(var(--cxa-message-avatar-size) + var(--cxa-message-time-width) + var(--cxa-message-avatar-gap) + var(--cxa-message-time-gap));padding-inline:0}')
+      expect(styles).toContain('.cxa-message-bubble-row{display:flex;min-width:0;max-width:100%;align-items:stretch;gap:var(--cxa-message-avatar-gap)}')
+      expect(styles).toContain('.cxa-message-avatar-seat{display:grid;width:var(--cxa-message-avatar-size);min-height:var(--cxa-message-avatar-size);height:auto;flex:0 0 var(--cxa-message-avatar-size)')
+      expect(styles).toContain('.cxa-message[data-role="agent"] .cxa-message-meta{max-width:calc(100% - var(--cxa-message-avatar-size) - var(--cxa-message-avatar-gap));margin-inline-start:calc(var(--cxa-message-avatar-size) + var(--cxa-message-avatar-gap));padding-inline:0}')
       expect(styles).toContain('--cxa-message-avatar-size:calc(var(--cxa-message-line-height) + var(--cxa-message-bubble-padding-block) + var(--cxa-message-bubble-padding-block) + var(--cxa-message-bubble-border-width) + var(--cxa-message-bubble-border-width))')
-      expect(styles).toContain('.cxa-message-bubble-row:has(.cxa-message-surface:hover)>.cxa-message-time,.cxa-message-bubble-row:has(.cxa-message-surface:focus-within)>.cxa-message-time,.cxa-message-time:focus-visible{opacity:1}')
-      expect(styles).toContain('.cxa-message-time{display:inline-flex;width:var(--cxa-message-time-width);flex:0 0 var(--cxa-message-time-width);align-items:center;justify-content:flex-end;padding:0;border:0;opacity:0')
-      expect(styles).toContain('.cxa-message[data-role="agent"][data-group-start="false"]{margin-top:calc(var(--cxa-message-group-gap) - var(--cxa-content-space))}')
+      expect(styles).toContain('.cxa-message[data-role="agent"] .cxa-message-content:has(>.cxa-message-bubble-row>.cxa-message-bubble-shell>.cxa-message-bubble-anchor:hover)>.cxa-message-meta>.cxa-message-time')
+      expect(styles).toContain('.cxa-message-time{display:inline-flex;flex:none;align-items:center;padding:0;border:0;opacity:0')
       expect(styles).not.toContain('.cxa-message:hover .cxa-message-time')
     } finally {
       await harness.close()
@@ -577,12 +580,22 @@ describe('AgentConversationRenderer production DOM', () => {
       selection: base.selection.kind !== 'room' ? base.selection : {
         ...base.selection,
         participants: base.selection.participants.map(participant => participant.id === agent?.id
-          ? { ...participant, avatar: createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: participant.id }) }
+          ? {
+              ...participant,
+              avatar: createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: participant.id }),
+              agentIdentity: { agentId: participant.id, revision: 'context-menu-v1' },
+            }
           : participant),
       },
       entries: [message],
     })
-    const harness = await render(model, new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model))
+    const harness = await render(model, new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model), false, {
+      identity: {
+        resolve: identity => ({ identity, name: agent!.name, introduction: 'Exact identity presentation.' }),
+        navigator: new HostAgentTaskDetailsNavigator({ navigateHost: vi.fn(), navigateExternal: vi.fn() }),
+        onSettings: vi.fn(),
+      },
+    })
     try {
       const document = harness.dom.window.document
       const contextMenu = async (target: HTMLElement): Promise<HTMLDivElement> => {
@@ -636,20 +649,20 @@ describe('AgentConversationRenderer production DOM', () => {
     try {
       const agent = harness.dom.window.document.querySelector<HTMLElement>('.cxa-message[data-role="agent"]')!
       const outgoing = harness.dom.window.document.querySelector<HTMLElement>('.cxa-message[data-role="human"]')!
-      expect(agent.querySelector('.cxa-message-avatar-seat > .cxa-avatar')).not.toBeNull()
-      expect(agent.querySelector('.cxa-message-content > .cxa-message-meta + .cxa-message-bubble-row > .cxa-message-time + .cxa-message-surface')).not.toBeNull()
+      expect(agent.querySelector('.cxa-message-avatar-seat .cxa-avatar')).not.toBeNull()
+      expect(agent.querySelector('.cxa-message-content > .cxa-message-meta + .cxa-message-bubble-row > .cxa-message-avatar-seat + .cxa-message-bubble-shell .cxa-message-surface')).not.toBeNull()
       expect(agent.querySelector('.cxa-message-surface')?.textContent).toContain('A long second line')
       for (const state of agent.querySelectorAll('.cxa-message-state')) {
         expect(state.closest('.cxa-message-surface')).not.toBeNull()
       }
-      expect(outgoing.querySelector('.cxa-message-content > .cxa-message-bubble-row > .cxa-message-time + .cxa-message-surface')).not.toBeNull()
+      expect(outgoing.querySelector('.cxa-message-content > .cxa-message-bubble-row .cxa-message-time + .cxa-message-surface')).not.toBeNull()
       expect(harness.dom.window.getComputedStyle(agent).backgroundColor).toMatch(/transparent|rgba\(0, 0, 0, 0\)/)
       const styles = harness.dom.window.document.querySelector<HTMLStyleElement>('style[data-agent-conversation-styles]')!.textContent!
-      expect(styles).toContain('.cxa-message-content{width:fit-content;gap:3px}')
-      expect(styles).toContain('.cxa-message[data-role="agent"] .cxa-message-content{max-width:min(88%,calc(720px + var(--cxa-message-avatar-size) + var(--cxa-message-time-width) + var(--cxa-message-avatar-gap) + var(--cxa-message-time-gap)));justify-items:start}')
+      expect(styles).toContain('.cxa-message-content{position:relative;width:fit-content;gap:3px}')
+      expect(styles).toContain('.cxa-message[data-role="agent"] .cxa-message-content{max-width:min(88%,calc(720px + var(--cxa-message-avatar-size) + var(--cxa-message-avatar-gap)));justify-items:start}')
       expect(styles).toContain('.cxa-message[data-role="human"] .cxa-message-surface')
       expect(styles).toContain('padding:var(--cxa-message-bubble-padding-block) 13px')
-      expect(styles).toContain('width:fit-content;max-width:100%;min-height:var(--cxa-message-avatar-size);gap:7px')
+      expect(styles).toContain('width:fit-content;min-width:0;max-width:100%;min-height:var(--cxa-message-avatar-size);gap:7px')
       expect(styles).toContain('border-radius:15px 15px 15px 4px')
     } finally {
       await harness.close()
@@ -674,13 +687,17 @@ describe('AgentConversationRenderer production DOM', () => {
       })
       const harness = await render(model, new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model))
       try {
-        const composite = harness.dom.window.document.querySelector<HTMLElement>('.cxa-room-avatar')!
-        expect(composite.dataset.participantCount).toBe(String(count))
-        expect(composite.dataset.avatarCount).toBe(String(count))
-        expect([...composite.querySelectorAll<HTMLElement>('.cxa-room-avatar-cell')].map(cell => cell.dataset.participantId))
-          .toEqual(participants.slice(0, count >= 4 ? 3 : count).map(participant => participant.id))
-        expect(composite.querySelectorAll('.cxa-room-avatar-cell')).toHaveLength(count >= 4 ? 3 : count)
-        expect([...composite.querySelectorAll('.cxa-room-avatar-cell')].every(cell => cell.firstElementChild?.classList.contains('cxa-avatar'))).toBe(true)
+        const projection = createHostRoomCompositeAvatarProjection(participants.map(participant => ({
+          participantId: participant.id,
+          avatar: participant.avatar,
+        })))
+        expect(projection.participants.map(participant => participant.participantId)).toEqual(participants.map(participant => participant.id))
+        expect(projection.visible.map(participant => participant.participantId)).toEqual(participants.slice(0, count >= 4 ? 3 : count).map(participant => participant.id))
+        const composite = harness.dom.window.document.querySelector<HTMLElement>('.cxrv-composite')!
+        expect(composite.dataset.roomCompositeCount).toBe(String(count))
+        expect(composite.dataset.roomCompositeCategory).toBe(count >= 4 ? '4+' : String(count))
+        expect(composite.querySelectorAll('.cxrv-participant')).toHaveLength(count >= 4 ? 3 : count)
+        expect([...composite.querySelectorAll('.cxrv-participant')].every(cell => cell.firstElementChild?.classList.contains('cxa-avatar'))).toBe(true)
         expect(harness.dom.window.document.querySelector('.cxa-room-avatar-more')?.textContent ?? '').toBe(count >= 4 ? `+${count - 3}` : '')
         const button = harness.dom.window.document.querySelector<HTMLButtonElement>('.cxa-room-avatar-button')!
         const beforeFocus = harness.dom.window.getComputedStyle(button)
@@ -694,7 +711,6 @@ describe('AgentConversationRenderer production DOM', () => {
         expect([afterFocus.width, afterFocus.height]).toEqual(sizeBeforeFocus)
         if (count === 7) {
           const styles = harness.dom.window.document.querySelector<HTMLStyleElement>('style[data-agent-conversation-styles]')!.textContent!
-          expect(styles).toContain('.cxa-room-avatar[data-count="many"] .cxa-room-avatar-cell[data-index="1"]{right:1px;top:0;z-index:4}')
           expect(styles).toContain('.cxa-room-avatar-more{appearance:none;position:absolute;right:1px;bottom:0;z-index:2')
         }
         const opener = count >= 4
@@ -721,12 +737,16 @@ describe('AgentConversationRenderer production DOM', () => {
     })
     const mixedHarness = await render(mixed, new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, mixed))
     try {
-      const composite = mixedHarness.dom.window.document.querySelector<HTMLElement>('.cxa-room-avatar')!
-      expect(composite.dataset.participantCount).toBe('2')
-      expect(composite.dataset.avatarCount).toBe('2')
-      expect([...composite.querySelectorAll<HTMLElement>('.cxa-room-avatar-cell')].map(cell => cell.dataset.participantId)).toEqual(['with-b', 'with-d'])
-      expect(composite.querySelector('.cxa-room-avatar-more')).toBeNull()
-      expect([...composite.querySelectorAll<HTMLElement>('.cxa-room-avatar-cell')].every(cell => mixedHarness.dom.window.getComputedStyle(cell).borderTopWidth === '0px')).toBe(true)
+      const projection = createHostRoomCompositeAvatarProjection(mixedParticipants.map(participant => ({
+        participantId: participant.id,
+        ...(participant.avatar === undefined ? {} : { avatar: participant.avatar }),
+      })))
+      expect(projection.participants.map(participant => participant.participantId)).toEqual(['with-b', 'with-d'])
+      const composite = mixedHarness.dom.window.document.querySelector<HTMLElement>('.cxrv-composite')!
+      expect(composite.dataset.roomCompositeCount).toBe('2')
+      expect(composite.dataset.roomCompositeCategory).toBe('2')
+      expect(composite.querySelectorAll('.cxrv-participant')).toHaveLength(2)
+      expect(mixedHarness.dom.window.document.querySelector('.cxa-room-avatar-more')).toBeNull()
     } finally {
       await mixedHarness.close()
     }
@@ -738,7 +758,7 @@ describe('AgentConversationRenderer production DOM', () => {
       onOpen={() => undefined}
     />)).window.document
     expect(compact.querySelector('[data-room-avatar-size="compact"]')).not.toBeNull()
-    expect([...compact.querySelectorAll<HTMLElement>('.cxa-room-avatar-cell')].map(cell => cell.dataset.participantId)).toEqual(['with-b', 'with-d'])
+    expect(compact.querySelectorAll('.cxrv-participant')).toHaveLength(2)
     expect(compact.querySelector('.cxa-room-avatar-more')).toBeNull()
   })
 
@@ -754,12 +774,18 @@ describe('AgentConversationRenderer production DOM', () => {
         ...room,
         multiParticipant: false,
         participantPresentation: 'none',
-        participants: [{ ...agent, avatar }],
+        participants: [{ ...agent, avatar, agentIdentity: { agentId: agent.id, revision: 'explicit-avatar-v1' } }],
       },
       entries: [message],
       headerActions: [],
     })
-    const harness = await render(model, new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model))
+    const harness = await render(model, new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model), false, {
+      identity: {
+        resolve: identity => ({ identity, name: agent.name, introduction: 'Exact identity presentation.' }),
+        navigator: new HostAgentTaskDetailsNavigator({ navigateHost: vi.fn(), navigateExternal: vi.fn() }),
+        onSettings: vi.fn(),
+      },
+    })
     try {
       const incoming = harness.dom.window.document.querySelector<HTMLElement>('.cxa-message[data-role="agent"]')!
       const avatarButton = incoming.querySelector<HTMLButtonElement>('.cx-agent-identity-avatar-button')!
@@ -780,7 +806,8 @@ describe('AgentConversationRenderer production DOM', () => {
         avatarButton.click()
         await Promise.resolve()
       })
-      expect(harness.dom.window.document.querySelector<HTMLInputElement>('.cxa-member-search input')?.value).toBe(agent.name)
+      expect(harness.dom.window.document.querySelector('.cx-conversation-inspector-breadcrumb-current')?.textContent).toBe(agent.name)
+      expect(harness.dom.window.document.querySelector('.cx-agent-identity-body')).not.toBeNull()
       await act(async () => {
         avatarButton.dispatchEvent(new harness.dom.window.MouseEvent('contextmenu', { bubbles: true, clientX: 24, clientY: 32 }))
         await Promise.resolve()
@@ -1019,7 +1046,7 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(requests[0]?.context).toMatchObject({ scope: 'composer-submit', submitPayload: 'hello from draft' })
       expect(draft.value).toBe('')
       const focusOrder = [...document.querySelectorAll<HTMLElement>('.cxa-header-actions button,[role="log"],.cxa-draft,.cxa-send')]
-      expect(focusOrder.map(element => element.className)).toEqual(['cxa-header-icon-action', 'cxa-header-icon-action', 'cxa-header-icon-action', 'cxa-timeline', 'cxa-draft', 'cxa-send'])
+      expect(focusOrder.map(element => element.className)).toEqual(['cxa-header-icon-action', 'cxa-header-icon-action', 'cxa-header-icon-action cxa-header-plugin-action', 'cxa-header-icon-action', 'cxa-timeline', 'cxa-draft shikitor-input--attached', 'cxa-send'])
     } finally {
       await harness.close()
     }
@@ -1045,11 +1072,11 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(styles).toContain('.cxa-timeline{min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;')
       expect(styles).toContain('padding:var(--cxa-content-space)')
       expect(styles).toContain('.cxa-timeline-list{display:flex;width:min(100%,var(--cxa-content-max))')
-      expect(styles).toContain('justify-content:flex-start;gap:var(--cxa-content-space);margin:0 auto;padding:0')
+      expect(styles).toContain('justify-content:flex-start;gap:var(--cxa-message-gap);margin:0 auto;padding:0')
       expect(styles).toContain('.cxa-entry{min-width:0;margin:0}')
       expect(styles).toContain('.cxa-composer{display:grid;width:min(100%,var(--cxa-content-max))')
       expect(styles).not.toContain('data-group-start="false"]>.cxa-avatar')
-      expect(styles).toContain('.cxa-message-time{display:inline-flex;width:var(--cxa-message-time-width);flex:0 0 var(--cxa-message-time-width);align-items:center;justify-content:flex-end;padding:0;border:0;opacity:0')
+      expect(styles).toContain('.cxa-message-time{display:inline-flex;flex:none;align-items:center;padding:0;border:0;opacity:0')
       expect(styles).not.toContain('margin-top:-14px')
       expect(styles).not.toMatch(/\.cxa-timeline-list\{[^}]*space-(?:between|around)/u)
       expect(styles).not.toMatch(/\.cxa-timeline-list\{[^}]*flex-grow/u)
@@ -1098,9 +1125,9 @@ describe('AgentConversationRenderer production DOM', () => {
       readFile(path.resolve('packages/cli/src/playground/client/fixtures/agent-conversation.ts'), 'utf8'),
       readFile(path.resolve('packages/cli/src/renderer/host-ui/conversation/styles.ts'), 'utf8'),
     ])
-    expect(renderer).not.toMatch(/playground|HostSeats|\.pg-/i)
+    expect(renderer).not.toMatch(/playground\/client|HostSeats|\.pg-/i)
     expect(renderer).not.toContain('EmptyRoom')
-    expect(renderer).toContain("event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing")
+    expect(renderer).toContain("event.key !== 'Enter' || event.nativeEvent.isComposing")
     expect(renderer).toContain('event.preventDefault()')
     expect(styles).not.toContain('.pg-')
     expect(styles).not.toContain('.cxa-empty')

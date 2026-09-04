@@ -29,7 +29,7 @@ import type { TraceShowcaseStore } from './types.js'
 import { createTraceReactPage } from './react-view.js'
 
 export const name = 'agent-trace-showcase'
-export const inject = ['i18n', 'pages', 'routes', 'slots', 'agentEvents', 'agentHistory', 'agents', 'systemPrompt']
+export const inject = ['i18n', 'pages', 'routes', 'slots', 'agents', 'systemPrompt']
 
 function metadataText(key: string, fallback: string) {
   return Object.freeze({ namespace: 'agent-trace-showcase', key, fallback } as const)
@@ -148,6 +148,32 @@ function configFrom(value: unknown): AgentTraceShowcaseConfig {
   return Config(value === null || typeof value !== 'object' || Array.isArray(value) ? {} : value)
 }
 
+function serviceWithMethods<T>(value: unknown, methods: readonly string[]): T | undefined {
+  if (value === null || typeof value !== 'object') return undefined
+  const candidate = value as Record<string, unknown>
+  return methods.every(method => typeof candidate[method] === 'function') ? value as T : undefined
+}
+
+/**
+ * Resolve only the published v2 compatibility services when the Host provides
+ * them. The unified Agent/Session Host may omit these seats; that is an honest
+ * unavailable state, not permission to reach a private ledger or adapter.
+ */
+function optionalTraceServices(ctx: Context): Readonly<{
+  agentEvents: CordisXAgentEvents | undefined
+  agentHistory: CordisXAgentHistory | undefined
+  agents: CordisXAgents | undefined
+}> {
+  const candidate = ctx as unknown as Record<string, unknown>
+  const reflect = candidate.reflect as { get(name: string): unknown } | undefined
+  const read = (name: string): unknown => reflect === undefined ? candidate[name] : reflect.get(name)
+  return Object.freeze({
+    agentEvents: serviceWithMethods<CordisXAgentEvents>(read('agentEvents'), ['status', 'query', 'subscribe']),
+    agentHistory: serviceWithMethods<CordisXAgentHistory>(read('agentHistory'), ['status', 'query', 'tail']),
+    agents: serviceWithMethods<CordisXAgents>(read('agents'), ['get', 'preStep']),
+  })
+}
+
 export function createTraceShowcaseStore(
   config: AgentTraceShowcaseConfig,
   agentEvents?: CordisXAgentEvents,
@@ -183,6 +209,7 @@ export function installAgentTraceShowcase(
   entry: SessionHeaderEntryAdapter = STRUCTURED_SESSION_HEADER_ENTRY,
 ): void {
   const config = configFrom(rawConfig)
+  const traceServices = optionalTraceServices(ctx)
 
   ctx.i18n.define({
     namespace: 'agent-trace-showcase',
@@ -226,11 +253,11 @@ export function installAgentTraceShowcase(
     TRACE_SESSION_PAGE_METADATA,
     defineReactPage(createTraceReactPage(sessionId => createTraceShowcaseStore(
       config,
-      ctx.agentEvents,
-      ctx.agents,
+      traceServices.agentEvents,
+      traceServices.agents,
       ctx.systemPrompt,
       sessionId,
-      ctx.agentHistory,
+      traceServices.agentHistory,
     ))),
   )
   ctx.routes.register(TRACE_SESSION_ROUTE_DEFINITION)

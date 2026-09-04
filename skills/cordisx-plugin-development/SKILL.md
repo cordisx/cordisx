@@ -1,6 +1,6 @@
 ---
 name: cordisx-plugin-development
-description: Assess the feasibility of a requested CordisX customization, then create, update, debug, or verify an independently installable plugin when public capabilities support it. Use for natural-language requests to customize a CordisX-launched Codex UI, composer/send behavior, celebrations, plugin manifests, contributions, configuration schemas, routes, pages, slots, commands, icons, localization, packaging, or plugin-facing documentation. Identify CordisX or Cordis capability gaps instead of using private Host fallbacks. Do not use for official Codex plugins or unrelated Host-core implementation.
+description: Assess the feasibility of a requested CordisX customization, then create, update, debug, or verify plugins in standalone, dedicated multi-plugin, or embedded business projects. Use for natural-language requests to customize a CordisX-launched Codex UI, React pages, composer or send behavior, celebrations, plugin manifests, contributions, configuration, routes, slots, commands, localization, packaging, Vite development, or plugin-facing documentation. Identify public CordisX or Cordis capability gaps instead of using private Host fallbacks. Do not use for official Codex plugins or unrelated Host-core implementation.
 ---
 
 # CordisX Plugin Development
@@ -10,16 +10,17 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 ## Read the relevant references
 
 - Assess any requested product behavior before scaffolding or editing: [feasibility-assessment.md](references/feasibility-assessment.md)
+- Choose or inspect the project shape and development loop: [project-layouts-and-development.md](references/project-layouts-and-development.md)
 - Start or package a plugin: [plugin-authoring.md](references/plugin-authoring.md)
 - Add any Manager page, contribution, action, collection, or icon: [ui-system.md](references/ui-system.md)
 - Add or change plugin configuration: [schema-configuration.md](references/schema-configuration.md)
 - Run or deliver the result: [verification.md](references/verification.md)
-- Implement a request inside a live scaffolded-plugin session: [live-plugin-development.md](references/live-plugin-development.md)
+- Continue work inside an already-running development session: [live-plugin-development.md](references/live-plugin-development.md)
 
 ## Core contract
 
-- Plugins provide manifests, localized labels, structured schemas, state, commands, icons, and contribution descriptors.
-- Plugins must not provide arbitrary HTML, CSS, selectors, DOM nodes, UI components, custom renderers, popovers, breadcrumbs, tabs, page chrome, or shell navigation.
+- Plugins provide manifests, localized labels, structured schemas, state, commands, icons, contribution descriptors, and React bodies in documented plugin-owned seats.
+- A React body uses `cordisx/react` and `cordisx/ui`. Plugins must not provide arbitrary HTML, CSS, Host selectors or DOM nodes, replacement renderers, popovers, breadcrumbs, tabs, page chrome, or shell navigation.
 - The Host owns DOM, layout, styling, themes, accessibility, search, scrolling, routing chrome, permissions, diagnostics, portals, and cleanup.
 - Treat `manager.content` as a body seat. Do not add a second header, back button, breadcrumb, title/description block, tabs, outer padding, or outer scroll container.
 - Assign spacing to one layer only. A parent may own `gap` or a child may own margin, never both for the same separation.
@@ -28,16 +29,16 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 
 ## Universal workflow
 
-1. Inspect the repository guide, installed CordisX version, public plugin contracts, and actual Host-adapter availability. Classify the request with the feasibility-assessment reference before scaffolding or editing.
-2. Proceed directly for a supported plugin request. If it needs a missing CordisX or Cordis capability, do not scaffold a fake implementation or reach for private Host state; explain the gap and the smallest contribution path. A plugin request alone does not authorize core changes or an external PR.
-3. When `CORDISX_DEV_ENTRY` is set, treat that exact file as the already-watched entry of a CLI-created plugin project and follow the live-plugin workflow. Do not create a second project, launcher, or watcher.
-4. Otherwise, when creating a plugin, infer a concise product slug and run `npm create cordisx-plugin@beta <directory>` before implementation. Keep this scaffolding command as an Agent implementation detail unless the user asks for it.
-5. Locate the closest maintained plugin example, but scaffold rather than copying generated fixtures wholesale.
-6. Define the manifest, localized product copy, structured contributions, config schema, permissions, and lifecycle behavior.
-7. Keep all visual choices inside Host-supported presentation tokens and semantic roles.
-8. Add focused contract and lifecycle tests before relying on visual inspection.
-9. Run the plugin in the real CordisX Playground using an isolated CordisX config/state directory.
-10. Verify reload/dispose, keyboard behavior, light/dark tokens, narrow layout, and honest unavailable states when relevant.
+1. Inspect the repository guide, installed CordisX version, public contracts, active Host adapter, and nearest CordisX project config. Classify the requested behavior with the feasibility reference.
+2. Proceed directly for a supported plugin request. If it needs a missing CordisX or Cordis capability, do not fake it with private Host state; explain the gap and smallest public contribution path. A plugin request alone does not authorize Host-core changes or an external PR.
+3. Select the creation mode from the user's project: one standalone plugin, a dedicated multi-plugin workspace, or `.cordisx/plugins/<id>` embedded in an existing business project. Preserve an existing package-manager workspace instead of rebuilding the project around CordisX.
+4. If `CORDISX_DEV_ENTRY` is set, use that exact legacy single-plugin entry and running launch. For config-driven development, use the explicit or discovered project config and all enabled entries. Do not start a second Vite or Electron process for each plugin.
+5. When creating a plugin, infer a concise product slug and use the maintained `create-cordisx-plugin` generator in the selected mode. Keep the scaffolding command as an implementation detail unless the user asks for it.
+6. Define the manifest, localized product copy, contributions, config schema, permissions, React boundaries, and lifecycle behavior. Put activation effects under Cordis ownership and keep ESM top-level evaluation free of product side effects.
+7. Keep visual choices inside Host-supported components, tokens, and semantic roles. Locate a maintained example, but do not copy generated fixtures wholesale.
+8. Add focused contract, React, and lifecycle tests before visual inspection.
+9. Run the project through `cordisx dev`. Verify automatic file updates and, when relevant, the Manager's development reload for one active local plugin.
+10. Exercise the real isolated native `app://` path for native claims; use Playground evidence only for the behavior it actually hosts.
 11. Report implementation, verification, limitations, and planned work separately.
 
 ## Product boundaries
@@ -50,4 +51,4 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 
 ## Delivery
 
-Provide exact evidence: focused tests, full repository gates required by the owner repo, diff check, and real Playground behavior. If the user is actively reviewing a Playground, keep the current page open and start replacements on a new port until they switch.
+Provide exact evidence: focused tests, owner-repository gates, diff check, generated-project checks, and the relevant real runtime. For Vite/native work, distinguish React Fast Refresh, plugin lifecycle replacement, CordisX renderer restart, and full Electron restart. If the user is actively reviewing a running session, keep it available while validating a replacement separately.

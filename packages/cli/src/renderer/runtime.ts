@@ -1,5 +1,9 @@
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
-import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
+import {
+  CORDISX_PLATFORM_CAPABILITIES,
+  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+  CORDISX_PLUGIN_LIFECYCLE_RESULT_SCHEMA_V1,
+} from '../contracts.js'
 import type {
   CordisXBrowserPlugin,
   CordisXCommandReference,
@@ -242,6 +246,8 @@ interface CordisXRuntimeMetadata {
   readonly channelActionsBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
   readonly pluginBundleSnapshot?: CordisXPluginBundleManagerSnapshotV1
+  /** Vite-only targeted reload. The callback never enters plugin Contexts. */
+  readonly developmentReloadPlugin?: (pluginId: string) => Promise<void>
   /** Launcher-only RemoteObject handoff nonce; never an authorization payload. */
   readonly certifiedPermissionChannelToken?: string
   readonly pluginActivation?: CordisXPluginActivationRecordV1
@@ -679,6 +685,7 @@ async function start(
   let ctx = new Context()
   let disposeInternalBootstrap: (() => void | Promise<void>) | undefined
   let sharedReactRuntime: ReturnType<typeof installSharedReactRuntime> | undefined
+  let ownsSharedReactRuntime = false
   const blockedPlugins = readBlockedPlugins()
   const agentAdapter = new UnavailableCodexHostAdapter()
   let bindingPlatformAdapter: BindingPlatformAdapter | undefined
@@ -766,7 +773,12 @@ async function start(
   if (lifecycleBridge !== undefined) {
     currentPluginBundles = await lifecycleBridge.bundleSnapshot().catch(() => currentPluginBundles)
   }
-  sharedReactRuntime = installSharedReactRuntime(document)
+  if (globalThis.__cordisxSharedReactRuntime === undefined) {
+    sharedReactRuntime = installSharedReactRuntime(document)
+    ownsSharedReactRuntime = true
+  } else {
+    sharedReactRuntime = globalThis.__cordisxSharedReactRuntime
+  }
   let certifiedPermissionChannel: CertifiedPermissionDocumentChannel | undefined
   try {
   const generationVisibility = new GenerationVisibilityCoordinator(currentActivation, metadata.initialRegistryEpoch)
@@ -1903,6 +1915,9 @@ async function start(
             },
           }),
           ...(development === undefined ? {} : { development }),
+          ...(development !== undefined && metadata.developmentReloadPlugin !== undefined
+            ? { developmentReloadAvailable: true }
+            : {}),
           status: controller.status,
           ...(controller.error === undefined ? {} : { error: controller.error }),
           ...(controller.blockedReason === undefined ? {} : { blockedReason: controller.blockedReason }),
@@ -3009,8 +3024,9 @@ async function start(
     pageFiber = undefined
     await agentConversationShellFiber?.dispose()
     agentConversationShellFiber = undefined
-    sharedReactRuntime?.dispose()
+    if (ownsSharedReactRuntime) sharedReactRuntime?.dispose()
     sharedReactRuntime = undefined
+    ownsSharedReactRuntime = false
     await commandFiber?.dispose()
     commandFiber = undefined
     await platformFiber?.dispose()
@@ -3155,6 +3171,27 @@ async function start(
     generationNotificationTrace: () => generationNotificationTrace.map(item => ({ ...item })),
     settleRegistryProjection,
     requestPluginLifecycle: (lifecycleOperation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1> => {
+      if (lifecycleBridge === undefined && lifecycleOperation.kind === 'reload'
+        && metadata.developmentReloadPlugin !== undefined) {
+        const controller = activeController(lifecycleOperation.pluginId)
+        if (controller === undefined || controller.item.development === undefined) {
+          return Promise.reject(new Error('Vite reload is available only for an active local development plugin'))
+        }
+        return metadata.developmentReloadPlugin(lifecycleOperation.pluginId).then(() => ({
+          $schema: CORDISX_PLUGIN_LIFECYCLE_RESULT_SCHEMA_V1,
+          schemaVersion: 1,
+          requestId: typeof globalThis.crypto?.randomUUID === 'function'
+            ? globalThis.crypto.randomUUID()
+            : `vite-reload-${Date.now()}`,
+          profileId: metadata.profileId,
+          operation: 'reload',
+          outcome: 'applied',
+          revision: currentActivation.revision,
+          runtimeGeneration: generation,
+          scope: 'plugin-generation',
+          affectedPluginIds: [lifecycleOperation.pluginId],
+        }))
+      }
       if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
       return lifecycleBridge.request(currentActivation.revision, lifecycleOperation)
     },
@@ -3531,9 +3568,21 @@ async function start(
     certifiedPermissionChannel?.dispose()
     certifiedPermissionChannel = undefined
     routeHistory.dispose()
-    sharedReactRuntime?.dispose()
+    if (ownsSharedReactRuntime) sharedReactRuntime?.dispose()
     sharedReactRuntime = undefined
+    ownsSharedReactRuntime = false
     throw error
+  }
+}
+
+/** Keep the Host React singleton alive while Vite evaluates plugin ESM modules. */
+export function prepareCordisXViteReactRuntime(document: Document): () => void {
+  const runtime = globalThis.__cordisxSharedReactRuntime ?? installSharedReactRuntime(document)
+  let disposed = false
+  return () => {
+    if (disposed) return
+    disposed = true
+    if (globalThis.__cordisxSharedReactRuntime === runtime) runtime.dispose()
   }
 }
 

@@ -18,6 +18,7 @@ export function PluginsPage({ model, snapshot, router }: { readonly model: Manag
     !snapshot.plugins.some(plugin => plugin.id === item.pluginId)
     && (normalized === '' || `${item.pluginId} ${item.sourcePath} ${item.error ?? ''}`.toLocaleLowerCase().includes(normalized))
   )), [normalized, snapshot.localDevelopment, snapshot.plugins])
+  const packageLifecycleAvailable = snapshot.pluginLifecycle?.operationsAvailable === true
   const run = async (plugin: ManagerPluginSnapshot, operation: CordisXPluginLifecycleOperationV1) => {
     if (model.requestPluginLifecycle === undefined) return
     setBusyPluginId(plugin.id)
@@ -49,11 +50,11 @@ export function PluginsPage({ model, snapshot, router }: { readonly model: Manag
               <span className="cxr-card-body"><span className="cxr-card-title">{plugin.name}{plugin.development === undefined ? null : <span className="cxr-badge" data-plugin-origin="local-dev">{managerCopy(snapshot.localization.locale, 'plugins.local-development')}</span>}</span><span className="cxr-card-description">{plugin.description}</span><code className="cxr-card-code">{plugin.id}</code></span>
             </button>
             <span className="cxr-plugin-actions">
-              <IconButton icon={plugin.status === 'configured-disabled' ? 'enable-plugin' : 'disable-plugin'} label={managerCopy(snapshot.localization.locale, plugin.status === 'configured-disabled' ? 'plugins.enable' : 'plugins.disable')} loading={busyPluginId === plugin.id} disabled={model.requestPluginLifecycle === undefined} onClick={() => void run(plugin, plugin.status === 'configured-disabled' ? { kind: 'enable', pluginId: plugin.id } : { kind: 'disable', pluginId: plugin.id, impactToken: '' })} />
-              <IconButton icon="reload-plugin" label={managerCopy(snapshot.localization.locale, 'plugins.reload')} loading={busyPluginId === plugin.id} disabled={model.requestPluginLifecycle === undefined || plugin.status !== 'active'} onClick={() => void run(plugin, { kind: 'reload', pluginId: plugin.id })} />
+              <IconButton icon={plugin.status === 'configured-disabled' ? 'enable-plugin' : 'disable-plugin'} label={managerCopy(snapshot.localization.locale, plugin.status === 'configured-disabled' ? 'plugins.enable' : 'plugins.disable')} loading={busyPluginId === plugin.id} disabled={!packageLifecycleAvailable || model.requestPluginLifecycle === undefined} onClick={() => void run(plugin, plugin.status === 'configured-disabled' ? { kind: 'enable', pluginId: plugin.id } : { kind: 'disable', pluginId: plugin.id, impactToken: '' })} />
+              <IconButton icon="reload-plugin" label={managerCopy(snapshot.localization.locale, 'plugins.reload')} loading={busyPluginId === plugin.id} disabled={model.requestPluginLifecycle === undefined || (plugin.developmentReloadAvailable !== true && !packageLifecycleAvailable) || plugin.status !== 'active'} onClick={() => void run(plugin, { kind: 'reload', pluginId: plugin.id })} />
               <MoreMenu label={`${plugin.name} · ${managerCopy(snapshot.localization.locale, 'plugins.more-actions')}`} items={[
                 { id: 'logs', label: managerCopy(snapshot.localization.locale, 'plugin-tab.logs'), icon: 'diagnostics', onSelect: () => router.navigate({ kind: 'plugin', pluginId: plugin.id, page: 'logs' }) },
-                { id: 'uninstall', label: managerCopy(snapshot.localization.locale, 'plugins.uninstall'), icon: 'uninstall-plugin', disabled: model.requestPluginLifecycle === undefined, onSelect: () => void run(plugin, { kind: 'uninstall', pluginId: plugin.id, impactToken: '' }) },
+                { id: 'uninstall', label: managerCopy(snapshot.localization.locale, 'plugins.uninstall'), icon: 'uninstall-plugin', disabled: !packageLifecycleAvailable || model.requestPluginLifecycle === undefined, onSelect: () => void run(plugin, { kind: 'uninstall', pluginId: plugin.id, impactToken: '' }) },
               ]} />
             </span>
           </div>

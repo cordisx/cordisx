@@ -31,6 +31,14 @@ async function createLocalDevelopmentFixture(root: string): Promise<{
   return { project, entry, configPath, executable }
 }
 
+async function createBuiltinSkillFixture(root: string): Promise<string> {
+  const source = path.join(root, 'builtin-skill')
+  await mkdir(path.join(source, 'agents'), { recursive: true })
+  await writeFile(path.join(source, 'SKILL.md'), '---\nname: cordisx-plugin-development\ndescription: test Skill\n---\n')
+  await writeFile(path.join(source, 'agents', 'openai.yaml'), 'interface:\n  display_name: "CordisX"\n')
+  return source
+}
+
 describe('functional CordisX CLI', () => {
   it('opens one Launcher Certified authority for lifecycle and disposes it after dry-run', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-certified-authority-'))
@@ -187,6 +195,7 @@ describe('functional CordisX CLI', () => {
     const repositorySkill = path.join(project, '.agents', 'skills', 'repository-helper', 'SKILL.md')
     const sharedHome = path.join(root, 'real-home')
     const executable = path.join(root, 'exits-before-injection')
+    const builtinSkillSource = await createBuiltinSkillFixture(root)
     await mkdir(path.dirname(repositorySkill), { recursive: true })
     await writeFile(repositoryGuide, 'repository-guide-sentinel\n')
     await writeFile(repositorySkill, 'repository-skill-sentinel\n')
@@ -199,6 +208,7 @@ describe('functional CordisX CLI', () => {
     ], {
       cwd: project,
       env: { CORDISX_HOME: path.join(root, 'home') },
+      internalBuiltinSkillSourceDir: builtinSkillSource,
       internalSharedHomeDir: sharedHome,
       stdout: line => { output.push(line) },
     })).rejects.toThrow('Host exited before CordisX CDP became ready')
@@ -355,6 +365,7 @@ describe('functional CordisX CLI', () => {
       expect((await stat(target)).mode & 0o777).toBe(0o755)
       await expect(access(path.join(target, 'state'))).rejects.toMatchObject({ code: 'ENOENT' })
       await expect(access(path.join(target, 'projects'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(access(path.join(target, 'cache'))).rejects.toMatchObject({ code: 'ENOENT' })
     }
   })
 
@@ -396,6 +407,7 @@ describe('functional CordisX CLI', () => {
     expect((await stat(home)).mode & 0o777).toBe(0o755)
     await expect(access(path.join(home, 'state'))).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(access(path.join(home, 'projects'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(path.join(home, 'cache'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('uses an isolated homedir for a fresh default ~/.cordisx development Home', async () => {
@@ -420,25 +432,164 @@ describe('functional CordisX CLI', () => {
     }
   })
 
+  it('deploys the bundled Skill before Vite development and preserves a locally edited copy', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-dev-skill-'))
+    const { project, entry, executable } = await createLocalDevelopmentFixture(root)
+    const cordisxHome = path.join(root, 'cordisx-home')
+    const hostHome = path.join(root, 'host-home')
+    const source = await createBuiltinSkillFixture(root)
+    const targetSkill = path.join(hostHome, '.agents', 'skills', 'cordisx-plugin-development', 'SKILL.md')
+    const output: string[] = []
+
+    await expect(runCordisXCli(['dev', entry, '--executable', executable], {
+      cwd: project,
+      env: { CORDISX_HOME: cordisxHome },
+      internalBuiltinSkillSourceDir: source,
+      internalSharedHomeDir: hostHome,
+      stdout: line => { output.push(line) },
+    })).rejects.toThrow('Host exited before CordisX CDP became ready')
+    await expect(readFile(targetSkill, 'utf8')).resolves.toContain('description: test Skill')
+    expect(output.join('\n')).toContain('[cordisx] built-in Skill installed:')
+
+    await writeFile(targetSkill, 'local user edit\n')
+    output.length = 0
+    await expect(runCordisXCli(['dev', entry, '--executable', executable], {
+      cwd: project,
+      env: { CORDISX_HOME: cordisxHome },
+      internalBuiltinSkillSourceDir: source,
+      internalSharedHomeDir: hostHome,
+      stdout: line => { output.push(line) },
+    })).rejects.toThrow('Host exited before CordisX CDP became ready')
+    await expect(readFile(targetSkill, 'utf8')).resolves.toBe('local user edit\n')
+    expect(output.join('\n')).toContain('[cordisx] built-in Skill preserved:')
+  })
+
   it('keeps both direct-entry and config-based development dry-runs write-free', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-dev-dry-run-state-'))
     const { project, entry, configPath } = await createLocalDevelopmentFixture(root)
     const directHome = path.join(root, 'direct-home')
     const configHome = path.join(root, 'config-home')
+    const skillHome = path.join(root, 'skill-home')
+    const skillSource = await createBuiltinSkillFixture(root)
 
     await runCordisXCli(['dev', entry, '--dry-run'], {
       cwd: project,
       env: { CORDISX_HOME: directHome },
+      internalBuiltinSkillSourceDir: skillSource,
+      internalSharedHomeDir: skillHome,
       stdout: () => undefined,
     })
     await runCordisXCli(['dev', '--config', configPath, '--dry-run'], {
       cwd: project,
       env: { CORDISX_HOME: configHome },
+      internalBuiltinSkillSourceDir: skillSource,
+      internalSharedHomeDir: skillHome,
       stdout: () => undefined,
     })
 
     await expect(access(directHome)).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(access(configHome)).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(skillHome)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('discovers an embedded multi-plugin composition from a business-project subdirectory', async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-embedded-project-'))
+    const configRoot = path.join(projectRoot, '.cordisx')
+    const configPath = path.join(configRoot, 'config.json')
+    const nestedCwd = path.join(projectRoot, 'packages', 'business-feature', 'src')
+    const chatroomEntry = path.join(configRoot, 'plugins', 'chatroom', 'src', 'chatroom.tsx')
+    const calendarEntry = path.join(configRoot, 'plugins', 'calendar', 'src', 'calendar.tsx')
+    const home = path.join(projectRoot, '.test-home')
+    await mkdir(path.dirname(chatroomEntry), { recursive: true })
+    await mkdir(path.dirname(calendarEntry), { recursive: true })
+    await mkdir(nestedCwd, { recursive: true })
+    await writeFile(path.join(configRoot, 'package.json'), JSON.stringify({
+      name: 'business-project-cordisx', private: true, version: '1.0.0', type: 'module',
+    }))
+    await writeFile(chatroomEntry, "export const name = 'chatroom'; export function apply() {}\n")
+    await writeFile(calendarEntry, "export const name = 'calendar'; export function apply() {}\n")
+    await writeFile(configPath, JSON.stringify({
+      version: 1,
+      plugins: [
+        { id: 'chatroom', entry: './plugins/chatroom/src/chatroom.tsx' },
+        { id: 'calendar', entry: './plugins/calendar/src/calendar.tsx' },
+      ],
+    }))
+    const output: string[] = []
+
+    await runCordisXCli(['dev', '--dry-run'], {
+      cwd: nestedCwd,
+      env: { CORDISX_HOME: home },
+      stdout: line => { output.push(line) },
+    })
+
+    expect(JSON.parse(output.at(-1)!) as unknown).toEqual(expect.objectContaining({
+      status: 'ready',
+      mode: 'development',
+      transport: 'vite',
+      config: configPath,
+      configPath,
+      projectRoot,
+      configRoot,
+      pluginIds: ['chatroom', 'calendar'],
+    }))
+    await expect(access(home)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('keeps an explicitly selected legacy root composition compatible', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-legacy-project-'))
+    const { project, configPath } = await createLocalDevelopmentFixture(root)
+    const nestedCwd = path.join(project, 'packages', 'feature')
+    const home = path.join(root, 'home')
+    const output: string[] = []
+    await mkdir(nestedCwd, { recursive: true })
+
+    await runCordisXCli(['dev', '--config', path.relative(nestedCwd, configPath), '--dry-run'], {
+      cwd: nestedCwd,
+      env: { CORDISX_HOME: home },
+      stdout: line => { output.push(line) },
+    })
+
+    expect(JSON.parse(output.at(-1)!) as unknown).toEqual(expect.objectContaining({
+      status: 'ready',
+      mode: 'development',
+      transport: 'vite',
+      config: configPath,
+      configPath,
+      projectRoot: project,
+      configRoot: project,
+      pluginIds: [],
+    }))
+    await expect(access(home)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('reports the supported project layouts when implicit development discovery finds no config', async () => {
+    const project = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-missing-project-config-'))
+    await expect(runCordisXCli(['dev', '--dry-run'], {
+      cwd: project,
+      env: { CORDISX_HOME: path.join(project, '.test-home') },
+      stdout: () => undefined,
+    })).rejects.toThrow(
+      `CordisX project config not found from ${project}; create .cordisx/config.json or pass a plugin path/--config`,
+    )
+  })
+
+  it('does not discover the user home config as an embedded development project', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-home-config-exclusion-'))
+    const project = path.join(home, 'work', 'business-project')
+    const homeConfigPath = path.join(home, '.cordisx', 'config.json')
+    await mkdir(project, { recursive: true })
+    await mkdir(path.dirname(homeConfigPath), { recursive: true })
+    await writeFile(homeConfigPath, '{}')
+
+    await expect(runCordisXCli(['dev', '--dry-run'], {
+      cwd: project,
+      env: { CORDISX_HOME: path.dirname(homeConfigPath) },
+      homedir: home,
+      stdout: () => undefined,
+    })).rejects.toThrow(
+      `CordisX project config not found from ${project}; create .cordisx/config.json or pass a plugin path/--config`,
+    )
   })
 
   it('rejects a relative CORDISX_HOME before a development dry-run can write', async () => {

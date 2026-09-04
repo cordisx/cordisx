@@ -2,16 +2,20 @@
 
 A minimal trusted-local CordisX React plugin. Its manifest is exported from
 `src/{{pluginId}}.tsx`, which is also the runtime entry used by CordisX.
+The page component lives in `src/overview-page.tsx` as a named component-only
+module so local development can preserve its state with React Fast Refresh.
 
 ```bash
-npm install
-npm run check
-npm run dev:dry-run
-npm run dev
+{{packageManager}} install
+{{packageManager}} run check
+{{packageManager}} run dev:dry-run
+{{packageManager}} run dev
 ```
 
-`npm run dev:dry-run` bundles the plugin without launching Codex Desktop.
-`npm run dev` launches the separate CordisX development host.
+`{{packageManager}} run dev:dry-run` validates the plugin module graph without
+launching Codex Desktop. `{{packageManager}} run dev` launches the separate
+CordisX development host. Component-only modules use React Fast Refresh;
+manifest, entry, and `apply()` changes replace the plugin generation.
 
 The template intentionally requests no platform capabilities. It contributes a
 structured toolbar route and a React page body. Import React from

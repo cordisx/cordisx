@@ -70,6 +70,9 @@ export interface BuildRendererBundleOptions {
 export interface RendererCompositionSource {
   /** An ESM composition module. The caller chooses whether boot is awaited. */
   readonly source: string
+  /** Host-private composition data reused by alternative development transports. */
+  readonly metadataSource: string
+  readonly pluginsSource: string
   /** Files outside the ESM graph which must invalidate the composition. */
   readonly watchFiles: readonly string[]
 }
@@ -103,6 +106,8 @@ export interface RendererCompositionSourceOptions {
   readonly runtimeImport?: string
   /** Export the awaited runtime handle instead of fire-and-forget production boot. */
   readonly awaitBoot?: boolean
+  /** Let a development module graph supply plugin namespaces without bundling them. */
+  readonly omitPluginModules?: boolean
 }
 
 function importSpecifier(fromDirectory: string, absolutePath: string): string {
@@ -162,7 +167,7 @@ async function readPluginReadmes(entry: string): Promise<PluginReadmes> {
   let directory = entryDirectory
   while (true) {
     const readmes = await readPluginReadmesIn(directory)
-    if (directory === entryDirectory && readmes.files.length > 0) return readmes
+    if (readmes.files.length > 0) return readmes
     const packageRoot = await access(path.join(directory, 'package.json')).then(() => true).catch(() => false)
     if (packageRoot) return readmes
     const parent = path.dirname(directory)
@@ -203,6 +208,10 @@ export async function buildRendererCompositionSource(
       return await readPluginReadmes(plugin.entry)
     })),
     Promise.all(enabled.map(async plugin => {
+      if (sourceOptions.omitPluginModules === true) return {
+        source: '',
+        artifactGeneration: bundledArtifactGeneration(plugin, ''),
+      }
       if (plugin.moduleFactorySource !== undefined) return {
         source: plugin.moduleFactorySource,
         artifactGeneration: bundledArtifactGeneration(plugin, plugin.moduleFactorySource),
@@ -219,7 +228,7 @@ export async function buildRendererCompositionSource(
         jsx: 'automatic',
         jsxImportSource: 'cordisx/react',
         metafile: true,
-        plugins: [cordisXReactVirtualModules()],
+        plugins: [cordisXReactVirtualModules(plugin.entry)],
         write: false,
         logLevel: 'silent',
       })
@@ -252,7 +261,7 @@ export async function buildRendererCompositionSource(
   const composition = `[${config.plugins.map((plugin, pluginIndex) => {
     const index = enabledIndexes.get(plugin.id)
     const isolatedHostDom = index !== undefined && usesHostDomWorker(plugin)
-    const moduleField = index === undefined || isolatedHostDom
+    const moduleField = index === undefined || isolatedHostDom || sourceOptions.omitPluginModules === true
       ? ''
       : `, moduleFactory: (console) => { ${pluginBundles[index]!.source}\nreturn __cordisxPluginModule }`
     const isolatedArtifactField = index === undefined || !isolatedHostDom
@@ -305,6 +314,8 @@ export async function buildRendererCompositionSource(
     : `${imports.join('\n')}\nvoid ${boot}.catch(error => console.error('[cordisx] boot failed', error))\n`
   return {
     source,
+    metadataSource: metadata,
+    pluginsSource: composition,
     watchFiles: [...new Set([
       ...enabled.map(plugin => plugin.entry),
       ...readmes.flatMap(readme => readme.files),

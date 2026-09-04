@@ -15,6 +15,7 @@ interface Registration {
   readonly versionExpression?: string
   readonly titleExpression?: string
   readonly descriptionExpression?: string
+  readonly pageId?: string
   readonly line: number
 }
 
@@ -65,6 +66,10 @@ const expectedRegistrations = [
   'packages/cli/src/plugins/cli-proxy-api/index.ts|route|providers.sessions',
   'packages/create-cordisx-plugin/template/src/{{packageName}}.tsx|page|overview',
   'packages/create-cordisx-plugin/template/src/{{packageName}}.tsx|route|overview',
+  'tests/fixtures/agent-route-owner-coordinate-plugin.ts|page|room',
+  'tests/fixtures/agent-route-owner-coordinate-plugin.ts|route|room-session-detail',
+  'tests/fixtures/agent-session-answerer-chatroom.ts|page|room',
+  'tests/fixtures/agent-session-answerer-chatroom.ts|route|room-session-detail',
   'tests/fixtures/generation-base-plugin.ts|page|generation-base',
   'tests/fixtures/generation-base-plugin.ts|route|generation-base',
   'tests/fixtures/lifecycle-smoke-update/index.ts|page|overview',
@@ -165,6 +170,7 @@ function registrations(file: string, source: string, lineOffset = 0): Registrati
         }))
         const title = property(metadata, 'title')?.initializer
         const description = property(metadata, 'description')?.initializer
+        const page = property(metadata, 'page')?.initializer
         const schema = property(metadata, '$schema')?.initializer
         const version = property(metadata, 'schemaVersion')?.initializer
         result.push({
@@ -176,6 +182,7 @@ function registrations(file: string, source: string, lineOffset = 0): Registrati
           ...(version === undefined ? {} : { versionExpression: version.getText(sourceFile) }),
           ...(title === undefined ? {} : { titleExpression: title.getText(sourceFile) }),
           ...(description === undefined ? {} : { descriptionExpression: description.getText(sourceFile) }),
+          ...(page !== undefined && ts.isStringLiteral(page) ? { pageId: page.text } : {}),
           line: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1 + lineOffset,
         })
       }
@@ -233,8 +240,8 @@ describe('bundled route/page product metadata gate', () => {
   it('keeps route and page purpose metadata distinct for the same destination', async () => {
     const { items } = await bundledRegistrations()
     for (const route of items.filter(item => item.kind === 'route')) {
-      const page = items.find(item => item.kind === 'page' && item.file === route.file && item.id === route.id)
-      expect.soft(page, `${route.file}:${route.line} route ${route.id} has no same-file page registration`).toBeDefined()
+      const page = items.find(item => item.kind === 'page' && item.file === route.file && item.id === (route.pageId ?? route.id))
+      expect.soft(page, `${route.file}:${route.line} route ${route.id} has no same-file page registration for ${route.pageId ?? route.id}`).toBeDefined()
       if (page === undefined) continue
       if (route.titleExpression !== undefined && page.titleExpression !== undefined) {
         expect.soft(route.titleExpression, `${route.file}:${route.line} route ${route.id} reuses its page title message`).not.toBe(page.titleExpression)

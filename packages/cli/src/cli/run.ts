@@ -2,6 +2,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import os from 'node:os'
+import { mkdtemp, rm } from 'node:fs/promises'
 import type { ChildProcess } from 'node:child_process'
 import { resolveHostAdapter } from '../adapters/registry.js'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
@@ -15,10 +16,16 @@ import {
 } from '../config/home-config.js'
 import { buildRendererBundle, type BuildRendererBundleOptions } from '../launcher/bundle.js'
 import { CdpPluginLifecycleRuntime, watchAndInject } from '../launcher/cdp.js'
-import { LocalDevelopmentController, buildLocalDevelopmentPlugin, localDevelopmentPluginIdentity } from '../launcher/development.js'
+import { localDevelopmentPluginIdentity } from '../launcher/development.js'
+import { createNativeViteEntityGenerationHandler, startNativeViteServer } from '../launcher/vite-development.js'
 import { DirectPublisherGrantAuthority, DirectPublisherGrantStore, MacOSMachineIdentityProvider, StaticPublisherKeyRegistry } from '../launcher/publisher-grants.js'
 import { createPublisherGrantBridgeHandler, type PublisherGrantBridgeHandler } from '../launcher/publisher-grant-rpc.js'
-import { loadConfig, type CordisXConfig } from '../launcher/config.js'
+import {
+  findCordisXProjectConfig,
+  loadConfig,
+  resolveCordisXProjectConfig,
+  type CordisXConfig,
+} from '../launcher/config.js'
 import {
   assertLoopbackPortAvailable,
   findFreeLoopbackPort,
@@ -80,7 +87,12 @@ import { EntityDirectoryAuthority } from '../launcher/entity-directory.js'
 import { createEntityBridgeHandler } from '../launcher/entity-rpc.js'
 import { loadStagedPluginPackage } from '../launcher/plugin-package.js'
 import { AgentLoopAuthority } from '../launcher/agent-loop-authority.js'
-import { deployBundledCordisXSkill, deployBundledCordisXSkillToHome } from '../launcher/builtin-skill.js'
+import {
+  CordisXSkillConflictError,
+  deployBundledCordisXSkill,
+  deployBundledCordisXSkillToHome,
+  type CordisXSkillDeploymentResult,
+} from '../launcher/builtin-skill.js'
 import {
   createOwnerDocumentBridgeHandler,
   entityInstallationId,
@@ -93,7 +105,7 @@ const HELP = `Usage:
   cordisx setup
   cordisx config
   cordisx doctor
-  cordisx dev [plugin-path] [--config path] [options] [-- host-arguments...]
+  cordisx dev [plugin-path | --config path] [options] [-- host-arguments...]
 
 Options:
   --attach                 Attach to an existing loopback CDP endpoint
@@ -103,6 +115,7 @@ Options:
   --debug-port <port>      Override the loopback CDP port
   --online-devtools        Allow the official online DevTools frontend
   --dry-run                Resolve and print the plan without starting the host
+  dev without a path       Discover .cordisx/config.json (or cordisx.config.json) upwards
   -h, --help               Show this help`
 
 export interface CordisXCliRuntime {
@@ -124,8 +137,23 @@ export interface CordisXCliRuntime {
   }) => void | Promise<void>
   /** Repository-only source seam for built-in Skill deployment tests. */
   readonly internalBuiltinSkillSourceDir?: string
-  /** Repository-only HOME seam that prevents shared-launch tests from touching the user's real HOME. */
+  /** Repository-only HOME seam that prevents launch tests from touching the user's real HOME. */
   readonly internalSharedHomeDir?: string
+}
+
+async function deployBuiltinSkillWithoutOverwritingUserChanges(
+  deployment: Promise<CordisXSkillDeploymentResult>,
+  stdout: (line: string) => void,
+): Promise<void> {
+  try {
+    const result = await deployment
+    if (result.status !== 'unchanged') {
+      stdout(`[cordisx] built-in Skill ${result.status}: ${result.targetDir}`)
+    }
+  } catch (error) {
+    if (!(error instanceof CordisXSkillConflictError)) throw error
+    stdout(`[cordisx] built-in Skill preserved: ${error.message}`)
+  }
 }
 
 function waitForExit(child: ChildProcess): Promise<void> {
@@ -155,6 +183,8 @@ function localDevelopmentHostConfig(cwd: string): CordisXConfig {
   return {
     version: 1,
     rootDir: cwd,
+    projectRoot: cwd,
+    configRoot: cwd,
     codex: { debugPort: 9229 },
     providers: [],
     plugins: [],
@@ -236,6 +266,8 @@ export async function buildRendererComposition(
     readonly channelCredentialBridgeToken?: string
     readonly channelActionsBridgeToken?: string
     readonly internalBuildRendererBundle?: typeof buildRendererBundle
+    /** Opt-in development transport; normal launches keep immutable package delivery. */
+    readonly developmentBuild?: typeof buildRendererBundle
   } = {},
 ): Promise<RendererComposition> {
   const providerBridgeToken = (config.codex.agentLoopBackend === 'local-cli'
@@ -286,7 +318,7 @@ export async function buildRendererComposition(
     ...(options.channelManager === undefined ? {} : { channelManager: options.channelManager }),
     ...(options.localDevelopmentControlGrant === undefined ? {} : { localDevelopmentControlGrant: options.localDevelopmentControlGrant }),
   } satisfies NonNullable<Parameters<typeof buildRendererBundle>[1]>
-  const buildBundle = options.internalBuildRendererBundle ?? buildRendererBundle
+  const buildBundle = options.developmentBuild ?? options.internalBuildRendererBundle ?? buildRendererBundle
   const source = await buildBundle(config, bundleOptions)
   const newDocumentSource = options.certifiedPermissionChannelToken === undefined
     ? undefined
@@ -295,7 +327,7 @@ export async function buildRendererComposition(
         certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
       })
   const enabled = config.plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id)
-  stdout(`[cordisx] bundle ready: ${source.length} bytes, plugins: ${enabled.join(', ') || '(none)'}`)
+  stdout(`[cordisx] ${options.developmentBuild === undefined ? 'bundle' : 'Vite entry'} ready: ${source.length} bytes, plugins: ${enabled.join(', ') || '(none)'}`)
   return {
     source,
     ...(newDocumentSource === undefined ? {} : { newDocumentSource }),
@@ -438,6 +470,7 @@ async function runInjectedHost(input: {
   readonly iconThemePreferencePersistence?: IconThemePreferencePersistenceContext
   readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
   readonly developmentRuntime?: CdpPluginLifecycleRuntime
+  readonly viteDevelopment?: boolean
   readonly publisherGrant?: PublisherGrantBridgeHandler
   readonly certifiedPermission?: Readonly<{
     authority: LauncherMarketplaceCertifiedAuthority
@@ -481,6 +514,7 @@ async function runInjectedHost(input: {
     ...(input.iconThemePreferencePersistence === undefined ? {} : { iconThemePreferencePersistence: input.iconThemePreferencePersistence }),
     ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
     ...(input.developmentRuntime === undefined ? {} : { developmentRuntime: input.developmentRuntime }),
+    ...(input.viteDevelopment === true ? { viteDevelopment: true } : {}),
     ...(input.publisherGrant === undefined ? {} : { publisherGrant: input.publisherGrant }),
     ...(input.certifiedPermission === undefined ? {} : { certifiedPermission: input.certifiedPermission }),
     onReady: () => {
@@ -496,7 +530,7 @@ async function runInjectedHost(input: {
   let primaryError: unknown
   try {
     if (input.launcher.attach) {
-      await waitForAbort(controller.signal)
+      await Promise.race([waitForAbort(controller.signal), watcher])
       return
     }
     if (input.executable === undefined) throw new Error('host executable was not resolved')
@@ -509,11 +543,14 @@ async function runInjectedHost(input: {
       input.launcher.onlineDevtools,
       input.environment,
     )
-    await waitForHostExitAfterReadiness({
-      childExit: waitForExit(launched),
-      ready: rendererReady,
-      signal: controller.signal,
-    })
+    await Promise.race([
+      waitForHostExitAfterReadiness({
+        childExit: waitForExit(launched),
+        ready: rendererReady,
+        signal: controller.signal,
+      }),
+      watcher,
+    ])
   } catch (error) {
     primaryError = error
     throw error
@@ -541,211 +578,152 @@ async function runDevelopment(
   environment: NodeJS.ProcessEnv,
   homeConfigPath: string,
   homeConfigOptions: HomeConfigPathOptions,
-  runtime: Pick<CordisXCliRuntime, 'internalBuiltinSkillSourceDir' | 'internalSharedHomeDir'>,
+  runtime: CordisXCliRuntime,
 ): Promise<void> {
   const cordisxHomeDir = rootFromConfigPath(homeConfigPath)
+  const entry = invocation.pluginPath === undefined ? undefined : path.resolve(cwd, invocation.pluginPath)
+  const localIdentity = entry === undefined ? undefined : await localDevelopmentPluginIdentity(entry)
+  const location = entry !== undefined
+    ? undefined
+    : invocation.configPath === undefined
+      ? await findCordisXProjectConfig(cwd, { excludeConfigPaths: [homeConfigPath] })
+      : resolveCordisXProjectConfig(invocation.configPath, cwd)
+  if (entry === undefined && location === undefined) {
+    throw new Error(`CordisX project config not found from ${cwd}; create .cordisx/config.json or pass a plugin path/--config`)
+  }
+  const config: CordisXConfig = entry === undefined
+    ? await loadConfig(location!.configPath, { projectRoot: location!.projectRoot })
+    : {
+        ...localDevelopmentHostConfig(cwd),
+        plugins: [{ id: localIdentity!.id, source: localIdentity!.source, entry, enabled: true, config: {} }],
+      }
   if (!invocation.options.dryRun) await ensureCordisXHomeDirectory(homeConfigOptions)
-  const pluginPath = invocation.pluginPath
-  if (pluginPath !== undefined) {
-    const entry = path.resolve(cwd, pluginPath)
-    const config = localDevelopmentHostConfig(cwd)
+  const dryRunCacheRoot = invocation.options.dryRun
+    ? await mkdtemp(path.join(os.tmpdir(), 'cordisx-vite-dry-run-'))
+    : undefined
+  let vite: Awaited<ReturnType<typeof startNativeViteServer>> | undefined
+  try {
+    vite = await startNativeViteServer(config, {
+      cacheRoot: dryRunCacheRoot ?? path.join(cordisxHomeDir, 'cache', 'native-vite'),
+      prebundleHostDependencies: !invocation.options.dryRun,
+    })
+    const activeVite = vite
+    const composition = await buildRendererComposition(config, stdout, {
+      profileId: 'development',
+      permission: { profileId: 'development', policies: [], persistent: false },
+      ...(localIdentity === undefined ? {} : {
+        localDevelopmentControlGrant: localDevelopmentControlGrant(localIdentity),
+      }),
+      developmentBuild: (nextConfig, options = {}) => activeVite.buildBootstrap(nextConfig, options),
+    })
     if (invocation.options.dryRun) {
-      const candidate = await buildLocalDevelopmentPlugin(entry)
-      stdout(`[cordisx] bundle ready: ${candidate.moduleFactorySource.length + candidate.runtimeArtifactSource.length} bytes, plugins: ${candidate.id}`)
       stdout(JSON.stringify({
-        status: 'ready',
-        mode: 'development',
-        origin: 'local-dev',
-        pluginId: candidate.id,
-        sourcePath: entry,
-        watchFileCount: candidate.watchFiles.length,
-        debugPort: invocation.options.debugPort ?? (
-          invocation.options.attach || invocation.options.system ? config.codex.debugPort : 'automatic'
-        ),
+        status: 'ready', mode: 'development', transport: 'vite',
+        ...(entry === undefined
+          ? {
+              config: location!.configPath,
+              configPath: location!.configPath,
+              projectRoot: location!.projectRoot,
+              configRoot: location!.configRoot,
+              pluginIds: config.plugins.map(plugin => plugin.id),
+            }
+          : { origin: 'local-dev', pluginId: localIdentity!.id, sourcePath: entry }),
+        debugPort: invocation.options.debugPort ?? (invocation.options.attach || invocation.options.system ? config.codex.debugPort : 'automatic'),
         hostArgs: invocation.hostArgs,
       }, null, 2))
       return
     }
-    const skillDeployment = await deployBundledCordisXSkillToHome(
-      runtime.internalSharedHomeDir ?? environment.HOME ?? os.homedir(),
-      runtime.internalBuiltinSkillSourceDir === undefined
-        ? {}
-        : { sourceDir: runtime.internalBuiltinSkillSourceDir },
-    )
-    stdout(`[cordisx] built-in Skill ${skillDeployment.status}: ${skillDeployment.targetDir}`)
-    const runtimeGeneration = randomBytes(16).toString('hex')
-    const initialDevelopmentPlugin = await localDevelopmentPluginIdentity(entry)
-    const active: CordisXPluginActivationRecordV1 = {
-      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
-      schemaVersion: 1,
-      recordKind: 'active',
-      profileId: 'development',
-      revision: 0,
-      lastGoodRevision: 0,
-      runtimeGeneration,
-      plugins: [],
+    if (invocation.options.attach) {
+      stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
+    } else {
+      await deployBuiltinSkillWithoutOverwritingUserChanges(
+        deployBundledCordisXSkillToHome(
+          runtime.internalSharedHomeDir ?? environment.HOME ?? runtime.homedir ?? os.homedir(),
+          runtime.internalBuiltinSkillSourceDir === undefined
+            ? {}
+            : { sourceDir: runtime.internalBuiltinSkillSourceDir },
+        ),
+        stdout,
+      )
     }
-    const lifecycleRuntime = new CdpPluginLifecycleRuntime()
-    const composition = await buildRendererComposition(config, stdout, {
-      profileId: 'development',
-      permission: { profileId: 'development', policies: [], persistent: false },
-      generation: runtimeGeneration,
-      pluginActivation: active,
-      initialRegistryEpoch: 0,
-      localDevelopmentControlGrant: localDevelopmentControlGrant(initialDevelopmentPlugin),
-    })
-    const documentLeases = new OwnerDocumentLeaseRegistry({
-      stable: [{ source: initialDevelopmentPlugin.source, pluginId: initialDevelopmentPlugin.id }],
-    })
-    const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
-      secret: composition.ownerDocumentSecret,
-      profileId: 'development',
-      generation: composition.generation,
-      store: new OwnerDocumentStore(cordisxHomeDir),
-      principalAllowed: principal => documentLeases.allowed(principal),
-    })
-    const entityAuthority = new EntityDirectoryAuthority(cordisxHomeDir, 'development')
-    entityAuthority.register({
-      profileId: 'development', installationId: entityInstallationId('development', initialDevelopmentPlugin.id),
-      pluginId: initialDevelopmentPlugin.id, pluginGeneration: 1,
-    }, [])
-    const ownerDocuments = Object.assign(ownerDocumentHandler, { entities: createEntityBridgeHandler({
-      secret: composition.ownerDocumentSecret, profileId: 'development', generation: composition.generation,
-      authority: entityAuthority, principalAllowed: principal => documentLeases.allowed(principal),
-    }) })
-    lifecycleRuntime.setOwnerDocumentAuthority({ leases: documentLeases, issue: ownerDocuments.issue })
-    lifecycleRuntime.setEntityAuthority('development', entityAuthority)
-    let bootstrapSource = composition.source
-    const controller = await LocalDevelopmentController.create({
-      entry,
-      runtimeGeneration,
-      initialConfig: config,
-      runtime: lifecycleRuntime,
-      rebuildBootstrap: composition.rebuild,
-      setBootstrap: source => { bootstrapSource = source },
-      stdout,
-    })
     const debugPort = invocation.options.debugPort ?? (
       invocation.options.attach || invocation.options.system ? config.codex.debugPort : await findFreeLoopbackPort()
     )
     if (!invocation.options.attach && (invocation.options.debugPort !== undefined || invocation.options.system)) {
       await assertLoopbackPortAvailable(debugPort)
     }
-    const executable = invocation.options.attach
-      ? undefined
-      : await resolveCodexExecutable(invocation.options.executable ?? config.codex.executable)
-    const profile = invocation.options.attach || invocation.options.system
-      ? undefined
-      : await prepareIsolatedCodexProfile(config.rootDir, {
-          cordisxHomeDir,
-          ...(invocation.options.profileDir === undefined ? {} : { explicitProfileDir: invocation.options.profileDir }),
-        })
+    const executable = invocation.options.attach ? undefined : await resolveCodexExecutable(invocation.options.executable ?? config.codex.executable)
+    const profile = invocation.options.attach || invocation.options.system ? undefined : await prepareIsolatedCodexProfile(config.rootDir, {
+      cordisxHomeDir,
+      ...(invocation.options.profileDir === undefined ? {} : { explicitProfileDir: invocation.options.profileDir }),
+    })
+    const identities = pluginIdentities(config)
+    const documentLeases = new OwnerDocumentLeaseRegistry({
+      stable: identities.map(identity => ({ source: identity.source, pluginId: identity.id })),
+    })
+    const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
+      secret: composition.ownerDocumentSecret, profileId: 'development', generation: composition.generation,
+      store: new OwnerDocumentStore(cordisxHomeDir),
+      principalAllowed: principal => documentLeases.allowed(principal),
+    })
+    const entityAuthority = new EntityDirectoryAuthority(cordisxHomeDir, 'development')
+    await activeVite.synchronizePluginGenerations(
+      createNativeViteEntityGenerationHandler(entityAuthority, 'development'),
+    )
+    const ownerDocuments = Object.assign(ownerDocumentHandler, { entities: createEntityBridgeHandler({
+      secret: composition.ownerDocumentSecret, profileId: 'development', generation: composition.generation,
+      authority: entityAuthority, principalAllowed: principal => documentLeases.allowed(principal),
+    }) })
+    stdout(`[cordisx] Vite development server: ${activeVite.url}`)
+    const publisherGrant = createPublisherGrantBridgeHandler(new DirectPublisherGrantAuthority(
+        new StaticPublisherKeyRegistry([]), new MacOSMachineIdentityProvider(),
+        await DirectPublisherGrantStore.open(cordisxHomeDir),
+      ))
+    let historyHost: CodexAgentHistoryHost | undefined
+    let providerFleet: ProviderFleet | undefined
+    let resourcesHandedOff = false
     try {
+      historyHost = agentHistoryHost(environment, homeConfigPath, `development:${config.rootDir}`)
+      providerFleet = composition.providerBridgeToken === undefined
+        ? undefined
+        : await ProviderFleet.create(providerConfigs(config, environment), {
+            appServer: { environment }, agentLoopAuthority: await AgentLoopAuthority.open(cordisxHomeDir, 'development'),
+          })
+      resourcesHandedOff = true
       await runInjectedHost({
-        source: () => bootstrapSource,
-        agentHistoryHost: agentHistoryHost(environment, homeConfigPath, `development:${config.rootDir}`),
+        source: composition.source, viteDevelopment: true,
+        agentHistoryHost: historyHost,
         agentHistoryBridgeToken: composition.agentHistoryBridgeToken,
         ownerDocuments,
-        developmentRuntime: lifecycleRuntime,
+        ...(providerFleet === undefined || composition.providerBridgeToken === undefined ? {} : {
+          providerFleet,
+          providerBridgeToken: composition.providerBridgeToken,
+        }),
         ...(executable === undefined ? {} : { executable }),
-        debugPort,
-        hostArgs: invocation.hostArgs,
-        launcher: invocation.options,
+        debugPort, hostArgs: invocation.hostArgs, launcher: invocation.options,
         ...(profile === undefined ? {} : { profile }),
-        environment: {
-          CORDISX_DEV_ENTRY: entry,
-          CORDISX_DEV_MODE: 'explicit-entry',
-        },
-        publisherGrant: createPublisherGrantBridgeHandler(new DirectPublisherGrantAuthority(
-          new StaticPublisherKeyRegistry([]),
-          new MacOSMachineIdentityProvider(),
-          await DirectPublisherGrantStore.open(cordisxHomeDir),
-        )),
-        onReady: () => { void controller.start().catch(error => stdout(`[cordisx] local-dev start failed: ${String(error)}`)) },
+        ...(entry === undefined ? {} : {
+          environment: {
+            CORDISX_DEV_ENTRY: entry,
+            CORDISX_DEV_MODE: 'explicit-entry',
+          },
+        }),
+        publisherGrant,
         stdout,
       })
     } finally {
-      await controller.stop()
+      if (!resourcesHandedOff) {
+        historyHost?.dispose()
+        await providerFleet?.close()
+      }
     }
-    return
+  } finally {
+    try {
+      await vite?.close()
+    } finally {
+      if (dryRunCacheRoot !== undefined) await rm(dryRunCacheRoot, { recursive: true, force: true })
+    }
   }
-
-  const config = await loadConfig(path.resolve(cwd, invocation.configPath ?? 'cordisx.config.json'))
-  const composition = await buildRendererComposition(config, stdout, {
-    profileId: 'development',
-    permission: { profileId: 'development', policies: [], persistent: false },
-  })
-  if (invocation.options.dryRun) {
-    stdout(JSON.stringify({
-      status: 'ready',
-      mode: 'development',
-      config: path.resolve(cwd, invocation.configPath ?? 'cordisx.config.json'),
-      debugPort: invocation.options.debugPort ?? (
-        invocation.options.attach || invocation.options.system ? config.codex.debugPort : 'automatic'
-      ),
-      hostArgs: invocation.hostArgs,
-    }, null, 2))
-    return
-  }
-  const debugPort = invocation.options.debugPort ?? (
-    invocation.options.attach || invocation.options.system ? config.codex.debugPort : await findFreeLoopbackPort()
-  )
-  if (!invocation.options.attach && (invocation.options.debugPort !== undefined || invocation.options.system)) {
-    await assertLoopbackPortAvailable(debugPort)
-  }
-  const executable = invocation.options.attach
-    ? undefined
-    : await resolveCodexExecutable(invocation.options.executable ?? config.codex.executable)
-  const profile = invocation.options.attach || invocation.options.system
-    ? undefined
-    : await prepareIsolatedCodexProfile(config.rootDir, {
-        cordisxHomeDir,
-        ...(invocation.options.profileDir === undefined ? {} : { explicitProfileDir: invocation.options.profileDir }),
-      })
-  const developmentIdentities = new Map(pluginIdentities(config).map(identity => [identity.id, identity.source]))
-  const documentLeases = new OwnerDocumentLeaseRegistry({
-    stable: [...developmentIdentities].map(([pluginId, source]) => ({ pluginId, source })),
-  })
-  const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
-    secret: composition.ownerDocumentSecret,
-    profileId: 'development',
-    generation: composition.generation,
-    store: new OwnerDocumentStore(cordisxHomeDir),
-    principalAllowed: principal => documentLeases.allowed(principal),
-  })
-  const developmentEntityAuthority = new EntityDirectoryAuthority(cordisxHomeDir, 'development')
-  for (const plugin of config.plugins.filter(item => item.enabled)) developmentEntityAuthority.register({
-    profileId: 'development', installationId: entityInstallationId('development', plugin.id),
-    pluginId: plugin.id, pluginGeneration: 1,
-  }, [])
-  const ownerDocuments = Object.assign(ownerDocumentHandler, { entities: createEntityBridgeHandler({
-    secret: composition.ownerDocumentSecret, profileId: 'development', generation: composition.generation,
-    authority: developmentEntityAuthority, principalAllowed: principal => documentLeases.allowed(principal),
-  }) })
-  await runInjectedHost({
-    source: composition.source,
-    agentHistoryHost: agentHistoryHost(environment, homeConfigPath, `development:${config.rootDir}`),
-    agentHistoryBridgeToken: composition.agentHistoryBridgeToken,
-    ownerDocuments,
-    ...(composition.providerBridgeToken === undefined ? {} : {
-      providerFleet: await ProviderFleet.create(providerConfigs(config, environment), {
-        appServer: { environment },
-        agentLoopAuthority: await AgentLoopAuthority.open(cordisxHomeDir, 'development'),
-      }),
-      providerBridgeToken: composition.providerBridgeToken,
-    }),
-    ...(executable === undefined ? {} : { executable }),
-    debugPort,
-    hostArgs: invocation.hostArgs,
-    launcher: invocation.options,
-    ...(profile === undefined ? {} : { profile }),
-    publisherGrant: createPublisherGrantBridgeHandler(new DirectPublisherGrantAuthority(
-      new StaticPublisherKeyRegistry([]),
-      new MacOSMachineIdentityProvider(),
-      await DirectPublisherGrantStore.open(cordisxHomeDir),
-    )),
-    stdout,
-  })
 }
 
 /** Execute one CLI invocation. Exported for package-level integration tests. */
@@ -840,7 +818,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     ? undefined
     : randomBytes(32).toString('hex')
   try {
-  const configuredComposition = await loadConfig(configPath, { profileId: selection.profileId })
+  const configuredComposition = await loadConfig(configPath, {
+    profileId: selection.profileId,
+    projectRoot: rootFromConfigPath(configPath),
+  })
   const currentHomeConfig = await loadHomeConfig(configPath)
   const publisherGrant = createPublisherGrantBridgeHandler(new DirectPublisherGrantAuthority(
     new StaticPublisherKeyRegistry(currentHomeConfig.publisherGrantIssuers),
@@ -1091,6 +1072,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       await providerFleet?.close()
       return
     }
+    stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
     try {
       await runInjectedHost({
       source: rendererComposition.source,
@@ -1157,15 +1139,17 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   const debugPort = invocation.options.debugPort ?? await findFreeLoopbackPort()
   if (invocation.options.debugPort !== undefined) await assertLoopbackPortAvailable(debugPort)
   await adapter.prepareLaunch(plan)
-  const skillDeployment = await deployBundledCordisXSkill(plan, {
-    ...(runtime.internalBuiltinSkillSourceDir === undefined
-      ? {}
-      : { sourceDir: runtime.internalBuiltinSkillSourceDir }),
-    ...(runtime.internalSharedHomeDir === undefined
-      ? {}
-      : { sharedHomeOverride: runtime.internalSharedHomeDir }),
-  })
-  stdout(`[cordisx] built-in Skill ${skillDeployment.status}: ${skillDeployment.targetDir}`)
+  await deployBuiltinSkillWithoutOverwritingUserChanges(
+    deployBundledCordisXSkill(plan, {
+      ...(runtime.internalBuiltinSkillSourceDir === undefined
+        ? {}
+        : { sourceDir: runtime.internalBuiltinSkillSourceDir }),
+      ...(runtime.internalSharedHomeDir === undefined
+        ? {}
+        : { sharedHomeOverride: runtime.internalSharedHomeDir }),
+    }),
+    stdout,
+  )
   stdout(`[cordisx] loopback CDP port: ${debugPort}`)
   const chromiumProfile = plan.chromiumProfile
   const profile = chromiumProfile.mode === 'independent'

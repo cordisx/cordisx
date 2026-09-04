@@ -957,7 +957,7 @@ describe('Agent conversation shell public runtime', () => {
     expect(dom.window.document.querySelector('.cxa-participants')).toBeNull()
     expect(dom.window.document.querySelector('.cxa-description-action')?.textContent).toBe('Add a room description')
     expect(dom.window.document.querySelectorAll('[data-agent-conversation-scroll-owner="timeline"]')).toHaveLength(1)
-    expect(dom.window.document.querySelectorAll('.cxa-room-avatar-cell .cxa-avatar')).toHaveLength(1)
+    expect(dom.window.document.querySelectorAll('.cxrv-participant .cxa-avatar')).toHaveLength(1)
     expect(dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')?.disabled).toBe(true)
 
     stream.push({

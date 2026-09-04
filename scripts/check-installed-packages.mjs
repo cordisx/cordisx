@@ -86,9 +86,66 @@ async function verifyGeneratedProject(project, cordisxTarball, expectedVersion) 
   })
   await run('npm', ['run', 'check'], { cwd: project, env: process.env })
   const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project, env: process.env })
-  if (!dryRun.stdout.includes('[cordisx] bundle ready:') || !dryRun.stdout.includes('"status": "ready"')) {
+  if (!dryRun.stdout.includes('[cordisx] Vite entry ready:')
+    || !dryRun.stdout.includes('"status": "ready"')
+    || !dryRun.stdout.includes('"transport": "vite"')) {
     throw new Error('generated plugin was not accepted by cordisx dev --dry-run')
   }
+}
+
+async function usePackedCordisX(packagePath, cordisxTarball, expectedVersion) {
+  const manifest = JSON.parse(await readFile(packagePath, 'utf8'))
+  if (manifest.devDependencies?.cordisx !== expectedVersion) {
+    throw new Error(`generated CordisX dependency must be ${expectedVersion}`)
+  }
+  manifest.devDependencies.cordisx = `file:${cordisxTarball}`
+  await writeFile(packagePath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+}
+
+function assertViteProjectDryRun(stdout, pluginIds) {
+  if (!stdout.includes('[cordisx] Vite entry ready:')
+    || !stdout.includes('"status": "ready"')
+    || !stdout.includes('"transport": "vite"')
+    || pluginIds.some(id => !stdout.includes(`"${id}"`))) {
+    throw new Error('generated multi-plugin project was not accepted by cordisx dev --dry-run')
+  }
+}
+
+async function verifyGeneratedWorkspace(project, cordisxTarball, expectedVersion, pluginIds) {
+  const manifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'))
+  if (manifest.license !== 'UNLICENSED' || !Array.isArray(manifest.workspaces)) {
+    throw new Error('generated plugin workspace metadata is invalid')
+  }
+  await usePackedCordisX(path.join(project, 'package.json'), cordisxTarball, expectedVersion)
+  for (const id of pluginIds) {
+    await usePackedCordisX(path.join(project, 'plugins', id, 'package.json'), cordisxTarball, expectedVersion)
+  }
+  await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: project, env: process.env })
+  await run('npm', ['run', 'check'], { cwd: project, env: process.env })
+  const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project, env: process.env })
+  assertViteProjectDryRun(dryRun.stdout, pluginIds)
+}
+
+async function verifyGeneratedEmbedded(project, cordisxTarball, expectedVersion, pluginIds, integrated) {
+  const cordisxRoot = path.join(project, '.cordisx')
+  const manifestPath = path.join(cordisxRoot, 'package.json')
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+  if (manifest.license !== 'UNLICENSED') throw new Error('embedded CordisX package license choice is not explicit')
+  const rootManifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'))
+  if (integrated && !rootManifest.workspaces?.includes('.cordisx')) {
+    throw new Error('embedded CordisX package did not join the npm workspace')
+  }
+  if (!integrated && rootManifest.workspaces !== undefined) {
+    throw new Error('isolated embedded fixture unexpectedly became a workspace')
+  }
+  await usePackedCordisX(manifestPath, cordisxTarball, expectedVersion)
+  await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], {
+    cwd: integrated ? project : cordisxRoot,
+    env: process.env,
+  })
+  await run('npm', ['run', 'check'], { cwd: cordisxRoot, env: process.env })
+  const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: cordisxRoot, env: process.env })
+  assertViteProjectDryRun(dryRun.stdout, pluginIds)
 }
 
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-installed-check-'))
@@ -662,6 +719,9 @@ ctx.slots.registerCollection({
 
   const createTarget = path.join(temporaryRoot, 'from-npm-create')
   const npxTarget = path.join(temporaryRoot, 'from-npx')
+  const workspaceTarget = path.join(temporaryRoot, 'plugin-workspace')
+  const embeddedWorkspaceTarget = path.join(temporaryRoot, 'embedded-workspace')
+  const embeddedIsolatedTarget = path.join(temporaryRoot, 'embedded-isolated')
   await run('npm', ['create', 'cordisx-plugin', createTarget], {
     cwd: runnerDirectory,
     env: process.env,
@@ -677,7 +737,33 @@ ctx.slots.registerCollection({
   await verifyGeneratedProject(createTarget, cordisxTarball, creatorManifest.version)
   await verifyGeneratedProject(npxTarget, cordisxTarball, creatorManifest.version)
 
-  console.log(`[cordisx] installed tarballs verified: licenses, exact singleton OneWorks Avatar RC.8 packages/style export, combined multi-binding AgentLoop, executable v4 create/send concurrent replay/approval/introduction/cancel/subscription, owner documents, and navigation collection${protocolTarball === undefined ? '' : ', exact local Protocol'}, durable outbox reload, local AgentLoop provider composition, conversation-shell and Connector consumer types, CLI, built-in README, both creator forms, generated checks, dev dry-run`)
+  await run(executable('create-cordisx-plugin'), [
+    '--mode', 'workspace', workspaceTarget, '--plugin', 'alpha', '--plugin', 'beta',
+  ], { cwd: runnerDirectory, env: process.env })
+  await verifyGeneratedWorkspace(workspaceTarget, cordisxTarball, creatorManifest.version, ['alpha', 'beta'])
+
+  for (const project of [embeddedWorkspaceTarget, embeddedIsolatedTarget]) {
+    await mkdir(project, { recursive: true })
+  }
+  await writeFile(path.join(embeddedWorkspaceTarget, 'package.json'), `${JSON.stringify({
+    name: 'embedded-workspace-fixture', private: true, workspaces: [],
+  }, null, 2)}\n`, 'utf8')
+  await writeFile(path.join(embeddedIsolatedTarget, 'package.json'), `${JSON.stringify({
+    name: 'embedded-isolated-fixture', private: true,
+  }, null, 2)}\n`, 'utf8')
+  await run(executable('create-cordisx-plugin'), [
+    '--mode', 'embedded', embeddedWorkspaceTarget, '--plugin', 'alpha', '--package-manager', 'npm',
+  ], { cwd: runnerDirectory, env: process.env })
+  await run(executable('create-cordisx-plugin'), [
+    '--mode', 'embedded', embeddedWorkspaceTarget, '--plugin', 'beta', '--package-manager', 'npm',
+  ], { cwd: runnerDirectory, env: process.env })
+  await run(executable('create-cordisx-plugin'), [
+    '--mode', 'embedded', embeddedIsolatedTarget, '--plugin', 'solo', '--integration', 'isolated', '--package-manager', 'npm',
+  ], { cwd: runnerDirectory, env: process.env })
+  await verifyGeneratedEmbedded(embeddedWorkspaceTarget, cordisxTarball, creatorManifest.version, ['alpha', 'beta'], true)
+  await verifyGeneratedEmbedded(embeddedIsolatedTarget, cordisxTarball, creatorManifest.version, ['solo'], false)
+
+  console.log(`[cordisx] installed tarballs verified: licenses, exact singleton OneWorks Avatar RC.8 packages/style export, combined multi-binding AgentLoop, executable v4 create/send concurrent replay/approval/introduction/cancel/subscription, owner documents, and navigation collection${protocolTarball === undefined ? '' : ', exact local Protocol'}, durable outbox reload, local AgentLoop provider composition, conversation-shell and Connector consumer types, CLI, built-in README, both creator commands, standalone/workspace/embedded-isolated/embedded-workspace generated checks, Vite dev dry-run`)
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }

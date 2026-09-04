@@ -446,57 +446,42 @@ form, lifecycle result, or last-good package metadata.
 
 ### Host-private local development generations
 
-Direct `cordisx dev <entry>` generations reuse the renderer transaction and
-readiness boundary but do not enter the durable package authority. The
-launcher builds an immutable candidate from the transitive esbuild graph,
-stages it beside the live fiber, publishes only after readiness, and disposes
-the old fiber only in the normal completion phase. It must not reinject or
-dispose the whole CordisX runtime while calling that operation a plugin reload.
-New renderer targets receive the latest successful immutable bootstrap; an
-already installed renderer changes only through the transaction.
-This phase is renderer-only. Runtime manifest `services` and formal package
-`dependencies` are rejected as unavailable before publication; local-dev does
-not pretend that a renderer fiber also started Node services or resolved a
-package dependency graph. Those declarations require the formal package
-authority.
+Both direct `cordisx dev <entry>` and config-driven development remain outside
+the durable package authority. One launcher-owned Vite server exposes the Host
+and every enabled plugin entry as one ESM graph. A component-only React module
+may update through Fast Refresh. Entry, manifest, `apply`, and other
+non-refresh-boundary changes invalidate the owning plugin and replace its
+Cordis generation through the renderer transaction, including old-fiber
+cleanup and last-good rollback. The Manager's explicit reload action uses the
+same targeted plugin boundary and is available only for an active local-
+development plugin. It does not expose package enable, disable, or uninstall.
 
-The local entry's absolute path and build status are Host-private Manager
-diagnostics. They are not `plugin-package-source`, canonical source,
+This development path is renderer-only. Runtime manifest `services` and formal
+package `dependencies` are rejected; a renderer fiber does not claim to have
+started Node services or resolved a package dependency graph. Those declarations
+require the formal package authority. Project config, dependency installation,
+and Node-side launcher or bridge changes require restarting the development
+command.
+
+The local entry's absolute path and readiness state are Host-private Manager
+metadata. They are not `plugin-package-source`, canonical source,
 activation-journal, permission identity, public lifecycle result, or share
-metadata. They are also removed from the plugin-facing/global renderer runtime
-`snapshot()`; React Manager receives them through a separate Host-private model.
-Before a first successful generation, Manager may show a
-launcher-owned source diagnostic but must not synthesize an active plugin row.
-After success it associates the diagnostic with the actual active plugin.
-Build/readiness failure retains last-good and exposes the most recent bounded
-error; repair creates a new fenced attempt. If a stale renderer makes rollback
-temporarily unavailable, one controller-owned backoff timer retries that same
-transaction and restores its bootstrap before rebuilding the latest source; it
-does not require another file write after target pruning. The same single timer
-covers the following join gap: rollback may finish after a stale target is
-pruned but before its replacement commits a ready join. A transient prepare
-failure retains the desired build and retries after admission rather than
-consuming the fingerprint. Watcher shutdown removes poll, debounce, and retry
-timers and waits for the single
-in-flight attempt before the CDP runtime is disposed.
+metadata, and the plugin-facing/global runtime snapshot omits them. Every
+native renderer applies Vite updates locally; local development does not claim
+an atomic transaction across windows.
 
-A renderer joins the Host generation participant set only after its bootstrap,
-recovery projection, and local diagnostic synchronization finish. Immediately
-after boot readiness it first holds an atomic join reservation: the reserved
-session participates in durable cold-start rollback while new prepare/register
-operations remain fenced. Successful recovery and synchronization commit the
-reservation into a normal session; failure aborts it and target injection
-retries. Host-private development state carries a monotonic join version. The
-reservation replays state until that version is current, then compares and
-moves the renderer into the normal session set in one synchronous critical
-section; an update either precedes that move and forces another replay, or
-follows it and broadcasts to the now-normal session. A concurrent generation
-fence rejects a target that loses the initial reservation race. Terminal
-renderer rollback receipts are bounded and
-idempotent; a partial multi-renderer rollback or finalize can therefore retry
-the same Host transaction without admitting an overlapping generation. Both
-published and unpublished Host-authorized rollback use the canonical monotonic
-rollback epoch.
+The durable package lifecycle retains its separate multi-renderer generation
+authority. A renderer joins that participant set only after bootstrap and
+recovery projection finish. Immediately after boot readiness it first holds an
+atomic join reservation: the reserved session participates in durable
+cold-start rollback while new prepare/register operations remain fenced.
+Successful recovery commits the reservation into a normal session; failure
+aborts it and target injection retries. A concurrent generation fence rejects
+a target that loses the initial reservation race. Terminal renderer rollback
+receipts are bounded and idempotent; a partial multi-renderer rollback or
+finalize can therefore retry the same Host transaction without admitting an
+overlapping generation. Both published and unpublished Host-authorized rollback
+use the canonical monotonic rollback epoch.
 
 The installed-plugin page is a searchable list with states for installing,
 updating, enabling, disabling, reloading, uninstalling, blocked, permission
