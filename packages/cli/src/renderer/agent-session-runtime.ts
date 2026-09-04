@@ -40,6 +40,16 @@ import type {
   ApprovalService as ApprovalServiceV2,
 } from '@cordisx/protocol/approval/v2'
 import type {
+  ApprovalRequestResolver,
+  ApprovalRequestResolverClosed,
+  ApprovalRequestResolverHandle,
+  ApprovalRequestResolverRegisterResult,
+  ApprovalRequestRoutingQuestion,
+  ApprovalRequestRoutingRegistration,
+  ApprovalRequestRoutingResult,
+  ApprovalService as ApprovalServiceV3,
+} from '@cordisx/protocol/approval/v3'
+import type {
   ApprovalOutcome,
   AgentCancelCause,
   MessageId,
@@ -92,6 +102,10 @@ const QUESTION_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-pr
 const DECISION_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-decision.v1.schema.json' as const
 const QUESTION_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-question.v2.schema.json' as const
 const DECISION_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-decision.v2.schema.json' as const
+const ROUTING_REGISTRATION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-registration.v1.schema.json' as const
+const ROUTING_QUESTION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-question.v1.schema.json' as const
+const ROUTING_RESULT_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-result.v1.schema.json' as const
+const ROUTING_CLOSE_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-resolver-close.v1.schema.json' as const
 const ENTITY_ACQUIRE_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-agent-acquire-result.v1.schema.json' as const
 
 type EntityAcquireEnvelope = {
@@ -106,6 +120,12 @@ type AcceptedEntityAcquire = Extract<EntityAgentAcquireResult, { readonly status
 const clone = <Value>(value: Value): Value => structuredClone(value)
 const opaque = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 512
 const ownerKey = (owner: PluginOwnerIdentity) => `${owner.pluginId}\u0000${owner.generation}`
+const plainObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
+const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean => {
+  const actual = Object.keys(value).sort()
+  const expected = [...keys].sort()
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index])
+}
 
 type CordisXDriverSessionEventType =
   | 'turn/start' | 'turn/end' | 'step/start' | 'step/end'
@@ -290,6 +310,18 @@ interface AuthorityAnswererRecord {
   closed?: 'disposed' | 'authority-replaced' | 'plugin-generation-replaced' | 'permission-revoked' | 'connection-replaced'
 }
 
+interface RequestResolverRecord {
+  readonly owner: PluginOwnerIdentity
+  readonly requester: AgentRecord
+  readonly resolver: ApprovalRequestResolver
+  readonly registration: ApprovalRequestRoutingRegistration
+  readonly connectionGeneration: number
+  readonly controllers: Set<AbortController>
+  readonly closed: Promise<ApprovalRequestResolverClosed>
+  resolveClosed: (value: ApprovalRequestResolverClosed) => void
+  terminal?: ApprovalRequestResolverClosed
+}
+
 /**
  * Host-private AgentFactory/session append authority. Public values are only
  * produced through its three Cordis services below; callers never receive a
@@ -302,11 +334,14 @@ export class CordisXAgentSessionRuntime {
   private readonly handleCapabilities = new WeakMap<object, AgentRecord>()
   private readonly answerers = new Map<string, AnswererRecord>()
   private readonly authorityAnswerers = new Map<string, AuthorityAnswererRecord>()
+  private readonly requestResolvers = new Map<string, RequestResolverRecord>()
+  private readonly routeRequiredRequesters = new Set<string>()
   private readonly mutations = new Map<string, { readonly fingerprint: string; readonly result: AgentAcquireResult }>()
   private readonly entityMutations = new Map<string, { readonly fingerprint: string; readonly result: AcceptedEntityAcquire }>()
   private nextAgentGeneration = 0
   private nextSubscriptionGeneration = 0
   private nextOwnerGeneration = 0
+  private connectionGeneration = 1
   private readonly ownerGenerations = new Map<string, number>()
   private readonly legacyResolvers = new Map<string, { readonly token: object; readonly resolve: CordisXLegacyAgentLoopBindingResolver }>()
   private readonly legacyMutations = new Map<string, { readonly fingerprint: string; readonly result: CordisXAgentSessionLegacyAcquireResultV1 }>()
@@ -709,6 +744,48 @@ export class CordisXAgentSessionRuntime {
     return handle as ApprovalAuthorityAnswererHandle
   }
 
+  async registerRequestResolver(
+    owner: PluginOwnerIdentity,
+    target: ApprovalAgentTarget,
+    resolver: ApprovalRequestResolver,
+  ): Promise<ApprovalRequestResolverRegisterResult> {
+    if (typeof resolver !== 'function' || !plainObject(target) || !plainObject(target.definition)) {
+      return { status: 'unavailable', code: 'unsupported' }
+    }
+    const requester = this.recordForApprovalTarget(target)
+    if (requester === undefined) return { status: 'unavailable', code: 'agent-replaced' }
+    if (!this.sameOwner(owner, requester.owner)) return { status: 'denied', code: 'not-owner' }
+    if (!await this.allowed(owner, 'approvals.request', requester.id)) return { status: 'denied', code: 'permission-denied' }
+    if (!this.current(requester)) return { status: 'unavailable', code: 'agent-replaced' }
+
+    const registration = Object.freeze({
+      $schema: ROUTING_REGISTRATION_SCHEMA,
+      contract: 'cordisx.approval-request-routing-registration/v1' as const,
+      schemaVersion: 1 as const,
+      registrationId: `cx-approval-route.${crypto.randomUUID()}`,
+      owner: clone(owner),
+      requester: this.approvalBinding(requester),
+    })
+    let resolveClosed!: (value: ApprovalRequestResolverClosed) => void
+    const closed = new Promise<ApprovalRequestResolverClosed>(resolve => { resolveClosed = resolve })
+    const record: RequestResolverRecord = {
+      owner: clone(owner), requester, resolver, registration,
+      connectionGeneration: this.connectionGeneration,
+      controllers: new Set(), closed, resolveClosed,
+    }
+    const key = this.answererKey(requester)
+    const previous = this.requestResolvers.get(key)
+    if (previous !== undefined) this.closeRequestResolver(previous, 'requester-replaced')
+    this.routeRequiredRequesters.add(key)
+    this.requestResolvers.set(key, record)
+    const handle = Object.freeze({
+      registration,
+      closed,
+      dispose: async () => this.closeRequestResolver(record, 'disposed'),
+    })
+    return { status: 'registered', handle: handle as ApprovalRequestResolverHandle }
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) return
     this.unsubscribeReplacement()
@@ -747,6 +824,13 @@ export class CordisXAgentSessionRuntime {
         code === 'plugin-generation-replaced' ? 'plugin-generation-replaced'
           : code === 'permission-revoked' ? 'permission-revoked'
             : code === 'connection-replaced' ? 'connection-replaced' : 'authority-replaced',
+      )
+      const requestResolver = this.requestResolvers.get(this.answererKey(agent))
+      if (requestResolver !== undefined) this.closeRequestResolver(
+        requestResolver,
+        code === 'plugin-generation-replaced' ? 'plugin-generation-replaced'
+          : code === 'permission-revoked' ? 'permission-revoked'
+            : code === 'connection-replaced' ? 'connection-replaced' : 'requester-replaced',
       )
       this.disposeAgent(agent, code === 'connection-replaced' ? 'connection-replaced' : 'owner-disposed')
       this.closeSession(agent.session, code === 'connection-replaced' ? 'connection-replaced' : 'host-unavailable', code)
@@ -1041,10 +1125,64 @@ export class CordisXAgentSessionRuntime {
   private async requestDriverApproval(request: CordisXDriverApprovalRequest): Promise<ApprovalOutcome> {
     const record = this.agents.get(request.sessionId)
     if (record === undefined || !this.current(record)) return 'unavailable'
+    const key = this.answererKey(record)
+    const resolver = this.requestResolvers.get(key)
+    if (resolver !== undefined) return await this.routeDriverApproval(record, resolver, request)
+    if (this.routeRequiredRequesters.has(key)) return 'unavailable'
     const decision = await this.requestApproval(record.owner, {
       agent: this.agent(record.owner, record), toolName: request.toolName,
       ...(request.callId === undefined ? {} : { callId: request.callId }),
       ...(request.reason === undefined ? {} : { reason: request.reason }),
+    })
+    return decision.outcome
+  }
+
+  private async routeDriverApproval(
+    requester: AgentRecord,
+    resolver: RequestResolverRecord,
+    request: CordisXDriverApprovalRequest,
+  ): Promise<ApprovalOutcome> {
+    if (!opaque(request.toolName) || request.callId !== undefined && !opaque(request.callId)
+      || typeof request.reason !== 'string' || request.reason.length < 1 || request.reason.length > 10_000
+      || /[\u0000\u000B\u000C\u000E-\u001F\u007F]/u.test(request.reason)
+      || !this.requestResolverCurrent(requester, resolver)) return 'unavailable'
+    const controller = new AbortController()
+    resolver.controllers.add(controller)
+    const question: ApprovalRequestRoutingQuestion = Object.freeze({
+      $schema: ROUTING_QUESTION_SCHEMA,
+      contract: 'cordisx.approval-request-routing-question/v1',
+      schemaVersion: 1,
+      routingId: `cx-approval-routing.${crypto.randomUUID()}`,
+      registration: clone(resolver.registration),
+      requester: this.approvalBinding(requester),
+      toolName: request.toolName,
+      ...(request.callId === undefined ? {} : { callId: request.callId }),
+      reason: { kind: 'plain-text' as const, text: request.reason },
+    })
+    let result: ApprovalRequestRoutingResult
+    try {
+      result = clone(await resolver.resolver(clone(question), controller.signal))
+    } catch {
+      return 'unavailable'
+    } finally {
+      resolver.controllers.delete(controller)
+    }
+    if (controller.signal.aborted || !this.requestResolverCurrent(requester, resolver)
+      || !this.validRoutingResult(result, question, resolver.registration)) return 'unavailable'
+    if (result.status !== 'accepted') return 'unavailable'
+    const resolvedRequester = this.recordForApprovalBinding(result.requester)
+    const authority = this.recordForApprovalBinding(result.authority)
+    if (resolvedRequester !== requester || authority === undefined
+      || !this.sameOwner(resolver.owner, resolvedRequester.owner) || !this.sameOwner(resolver.owner, authority.owner)
+      || !await this.allowed(resolver.owner, 'approvals.request', requester.id)
+      || !await this.allowed(resolver.owner, 'approvals.answer', authority.id)
+      || !this.requestResolverCurrent(requester, resolver) || !this.current(authority)) return 'unavailable'
+    const decision = await this.requestApprovalV2(resolver.owner, {
+      requester: { agent: this.agent(resolver.owner, requester), definition: clone(requester.definition!) },
+      authority: { agent: this.agent(resolver.owner, authority), definition: clone(authority.definition!) },
+      toolName: request.toolName,
+      ...(request.callId === undefined ? {} : { callId: request.callId }),
+      reason: clone(question.reason),
     })
     return decision.outcome
   }
@@ -1147,6 +1285,11 @@ export class CordisXAgentSessionRuntime {
       authorityAnswerer,
       reason === 'connection-replaced' ? 'connection-replaced' : 'authority-replaced',
     )
+    const requestResolver = this.requestResolvers.get(this.answererKey(record))
+    if (requestResolver !== undefined) this.closeRequestResolver(
+      requestResolver,
+      reason === 'connection-replaced' ? 'connection-replaced' : 'requester-replaced',
+    )
     this.emitLive(record, 'agent/disposed', { reason })
     for (const subscriber of record.live) subscriber.closed = reason === 'connection-replaced' ? 'connection-replaced' : 'agent-replaced'
     record.live.clear()
@@ -1162,6 +1305,7 @@ export class CordisXAgentSessionRuntime {
   }
 
   private connectionReplaced(): void {
+    this.connectionGeneration += 1
     for (const agent of this.agents.values()) this.disposeAgent(agent, 'connection-replaced')
     for (const session of this.sessions.values()) this.closeSession(session, 'connection-replaced')
   }
@@ -1213,6 +1357,37 @@ export class CordisXAgentSessionRuntime {
     if (this.authorityAnswerers.get(this.answererKey(record)) === answerer) this.authorityAnswerers.delete(this.answererKey(record))
   }
 
+  private closeRequestResolver(
+    resolver: RequestResolverRecord,
+    code: ApprovalRequestResolverClosed['code'],
+  ): ApprovalRequestResolverClosed {
+    if (resolver.terminal !== undefined) return resolver.terminal
+    const closed: ApprovalRequestResolverClosed = Object.freeze({
+      $schema: ROUTING_CLOSE_SCHEMA,
+      contract: 'cordisx.approval-request-resolver-close/v1',
+      schemaVersion: 1,
+      registration: clone(resolver.registration),
+      status: 'closed',
+      code,
+    })
+    resolver.terminal = closed
+    for (const controller of resolver.controllers) controller.abort()
+    resolver.controllers.clear()
+    if (this.requestResolvers.get(this.answererKey(resolver.requester)) === resolver) {
+      this.requestResolvers.delete(this.answererKey(resolver.requester))
+    }
+    resolver.resolveClosed(closed)
+    return closed
+  }
+
+  private requestResolverCurrent(requester: AgentRecord, resolver: RequestResolverRecord): boolean {
+    return resolver.terminal === undefined
+      && resolver.requester === requester
+      && resolver.connectionGeneration === this.connectionGeneration
+      && this.requestResolvers.get(this.answererKey(requester)) === resolver
+      && this.current(requester)
+  }
+
   private emitLive<K extends AgentLiveEvent['type']>(record: AgentRecord, type: K, data: Extract<AgentLiveEvent, { readonly type: K }>['data']): void {
     const event = Object.freeze({ type, agentId: record.id, sessionId: record.id, agentGeneration: record.generation, time: this.now(), data: clone(data) }) as AgentLiveEvent
     for (const subscriber of [...record.live]) if (subscriber.closed === undefined) void subscriber.observer(clone(event))
@@ -1228,6 +1403,49 @@ export class CordisXAgentSessionRuntime {
       && record.definition.agentId === target.definition.agentId
       && record.definition.revision === target.definition.revision
       ? record : undefined
+  }
+  private recordForApprovalBinding(value: unknown): AgentRecord | undefined {
+    if (!plainObject(value) || !hasExactKeys(value, ['agentId', 'sessionId', 'agentGeneration', 'definition'])
+      || !opaque(value.agentId) || value.sessionId !== value.agentId
+      || !Number.isSafeInteger(value.agentGeneration) || (value.agentGeneration as number) < 1
+      || !plainObject(value.definition) || !hasExactKeys(value.definition, ['agentId', 'revision'])
+      || !opaque(value.definition.agentId) || !opaque(value.definition.revision)
+      || value.definition.agentId === '*' || value.definition.revision === '*') return undefined
+    const record = this.agents.get(value.agentId)
+    return record !== undefined && record.generation === value.agentGeneration && this.current(record)
+      && record.definition?.agentId === value.definition.agentId
+      && record.definition.revision === value.definition.revision ? record : undefined
+  }
+  private validRoutingResult(
+    value: unknown,
+    question: ApprovalRequestRoutingQuestion,
+    registration: ApprovalRequestRoutingRegistration,
+  ): value is ApprovalRequestRoutingResult {
+    if (!plainObject(value) || value.$schema !== ROUTING_RESULT_SCHEMA
+      || value.contract !== 'cordisx.approval-request-routing-result/v1' || value.schemaVersion !== 1
+      || value.routingId !== question.routingId || !this.sameRoutingRegistration(value.registration, registration)) return false
+    if (value.status === 'unavailable') return hasExactKeys(value, ['$schema', 'contract', 'schemaVersion', 'routingId', 'registration', 'status', 'code'])
+      && (value.code === 'mapping-unavailable' || value.code === 'authority-unavailable')
+    return value.status === 'accepted' && value.code === 'routed'
+      && hasExactKeys(value, ['$schema', 'contract', 'schemaVersion', 'routingId', 'registration', 'status', 'code', 'requester', 'authority'])
+      && this.sameApprovalBinding(value.requester, question.requester)
+      && this.recordForApprovalBinding(value.requester) !== undefined
+      && this.recordForApprovalBinding(value.authority) !== undefined
+  }
+  private sameApprovalBinding(left: unknown, right: ApprovalAgentBinding): boolean {
+    if (!plainObject(left) || !hasExactKeys(left, ['agentId', 'sessionId', 'agentGeneration', 'definition'])
+      || !plainObject(left.definition) || !hasExactKeys(left.definition, ['agentId', 'revision'])) return false
+    return left.agentId === right.agentId && left.sessionId === right.sessionId
+      && left.agentGeneration === right.agentGeneration && plainObject(left.definition)
+      && left.definition.agentId === right.definition.agentId && left.definition.revision === right.definition.revision
+  }
+  private sameRoutingRegistration(left: unknown, right: ApprovalRequestRoutingRegistration): boolean {
+    if (!plainObject(left) || !hasExactKeys(left, ['$schema', 'contract', 'schemaVersion', 'registrationId', 'owner', 'requester'])
+      || left.$schema !== right.$schema || left.contract !== right.contract || left.schemaVersion !== right.schemaVersion
+      || left.registrationId !== right.registrationId || !plainObject(left.owner)
+      || !hasExactKeys(left.owner, ['pluginId', 'generation'])) return false
+    return left.owner.pluginId === right.owner.pluginId && left.owner.generation === right.owner.generation
+      && this.sameApprovalBinding(left.requester, right.requester)
   }
   private current(record: AgentRecord): boolean { return !this.disposed && record.disposed === undefined && this.agents.get(record.id) === record && this.sessionLive(record.session) }
   private sessionLive(record: SessionRecord): boolean { return !this.disposed && record.closed === undefined && this.sessions.get(record.id) === record }
@@ -1318,9 +1536,9 @@ export class CordisXSessionRegistryServiceV1 extends Service implements SessionR
   constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) { super(ctx, 'sessions'); runtimes.set(this, runtime) }
   get = async (sessionId: string): Promise<Session | undefined> => { const runtime = runtimeFor(this); return await runtime.session(runtime.ownerFromContext(this.ctx), sessionId) }
 }
-export type CordisXApprovalService = ApprovalServiceV1 & ApprovalServiceV2
+export type CordisXApprovalService = ApprovalServiceV1 & ApprovalServiceV2 & ApprovalServiceV3
 
-export class CordisXApprovalServiceV1 extends Service implements ApprovalServiceV1, ApprovalServiceV2 {
+export class CordisXApprovalServiceV1 extends Service implements ApprovalServiceV1, ApprovalServiceV2, ApprovalServiceV3 {
   constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) { super(ctx, 'approvals'); runtimes.set(this, runtime) }
   request = (async (request: Parameters<ApprovalServiceV1['request']>[0] | Parameters<ApprovalServiceV2['request']>[0]): Promise<ApprovalDecisionV1 | ApprovalDecisionV2> => {
     const runtime = runtimeFor(this); const owner = runtime.ownerFromContext(this.ctx)
@@ -1330,4 +1548,5 @@ export class CordisXApprovalServiceV1 extends Service implements ApprovalService
   }) as CordisXApprovalService['request']
   registerAnswerer = async (agent: Agent, answerer: ApprovalAnswererV1): Promise<ApprovalAnswererHandleV1> => { const runtime = runtimeFor(this); return await runtime.registerAnswerer(runtime.ownerFromContext(this.ctx), agent, answerer) }
   registerAuthorityAnswerer = async (authority: ApprovalAgentTarget, answerer: ApprovalAnswererV2): Promise<ApprovalAuthorityAnswererHandle> => { const runtime = runtimeFor(this); return await runtime.registerAuthorityAnswerer(runtime.ownerFromContext(this.ctx), authority, answerer) }
+  registerRequestResolver = async (requester: ApprovalAgentTarget, resolver: ApprovalRequestResolver): Promise<ApprovalRequestResolverRegisterResult> => { const runtime = runtimeFor(this); return await runtime.registerRequestResolver(runtime.ownerFromContext(this.ctx), requester, resolver) }
 }

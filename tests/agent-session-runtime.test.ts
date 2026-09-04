@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentCancelCause, AgentOptions, AgentSetup } from '@cordisx/protocol/agents/v1'
+import type { ApprovalQuestion as ApprovalQuestionV2 } from '@cordisx/protocol/approval/v2'
 import type { UserMessage } from '@cordisx/protocol/sessions/v1'
+import type { ApprovalRequestRoutingQuestion, ApprovalRequestRoutingResult } from '@cordisx/protocol/approval/v3'
 import { Context } from '@deepseek-ai/cordis'
 import {
   CordisXAgentRegistryServiceV1,
@@ -22,15 +24,21 @@ import { AgentRouteSessionScopeAuthority, type AgentActiveRoute } from '../packa
 
 class Driver implements CordisXPrivateAgentDriver {
   private readonly replacement = new Set<() => void>()
+  private readonly approvals = new Set<(request: { readonly sessionId: string; readonly toolName: string; readonly callId?: string; readonly reason?: string }) => Promise<'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'>>()
   readonly submitted: string[] = []
   async create(): Promise<{ readonly status: 'accepted' }> { return { status: 'accepted' } }
   async resume(): Promise<{ readonly status: 'accepted' }> { return { status: 'accepted' } }
   async submit(input: { readonly message: UserMessage }): Promise<'accepted'> { this.submitted.push(input.message.id); return 'accepted' }
   async discard(): Promise<'accepted'> { return 'accepted' }
   async cancel(_input: { readonly cause: AgentCancelCause; readonly keepInbox: boolean }): Promise<'accepted'> { return 'accepted' }
+  onApprovalRequest(listener: (request: { readonly sessionId: string; readonly toolName: string; readonly callId?: string; readonly reason?: string }) => Promise<'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'>): () => void { this.approvals.add(listener); return () => this.approvals.delete(listener) }
+  async ask(request: { readonly sessionId: string; readonly toolName: string; readonly callId?: string; readonly reason?: string }): Promise<'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'> {
+    const listener = [...this.approvals][0]
+    return listener === undefined ? 'unavailable' : await listener(request)
+  }
   onReplacement(listener: () => void): () => void { this.replacement.add(listener); return () => this.replacement.delete(listener) }
   replace(): void { for (const listener of this.replacement) listener() }
-  dispose(): void { this.replacement.clear() }
+  dispose(): void { this.replacement.clear(); this.approvals.clear() }
 }
 
 const owner = { pluginId: 'registry:test', generation: 1 } as const
@@ -95,7 +103,7 @@ describe('Agent/Session Host authority v1', () => {
 
     const { acquireLegacyTaskBinding, create, get, resume } = ctx.agents
     const { get: getSession } = ctx.sessions
-    const { registerAnswerer, registerAuthorityAnswerer, request } = ctx.approvals
+    const { registerAnswerer, registerAuthorityAnswerer, registerRequestResolver, request } = ctx.approvals
     const created = await create({ setup })
     expect(created).toMatchObject({ status: 'accepted', sessionIdSource: 'host' })
     if (created.status !== 'accepted') throw new Error('agent unavailable')
@@ -113,6 +121,14 @@ describe('Agent/Session Host authority v1', () => {
       toolName: 'shell-v2', reason: { kind: 'plain-text', text: 'Exact authority proxy request.' },
     })
     expect(decisionV2).toMatchObject({ contract: 'cordisx.approval-decision/v2', outcome: 'rejected' })
+    const routed = await registerRequestResolver({ agent: created.handle.agent, definition: setup.definition }, question => ({
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-result.v1.schema.json',
+      contract: 'cordisx.approval-request-routing-result/v1', schemaVersion: 1,
+      routingId: question.routingId, registration: question.registration,
+      status: 'unavailable', code: 'mapping-unavailable',
+    }))
+    expect(routed.status).toBe('registered')
+    if (routed.status === 'registered') await expect(routed.handle.dispose()).resolves.toMatchObject({ status: 'closed', code: 'disposed' })
     expect(await created.handle.dispose()).toMatchObject({ status: 'accepted' })
     expect(await resume({ sessionId: created.sessionId })).toMatchObject({ status: 'accepted', disposition: 'resumed' })
     expect(await acquireLegacyTaskBinding({
@@ -340,6 +356,108 @@ describe('Agent/Session Host authority v1', () => {
     })).rejects.toThrow('unavailable')
     const snapshot = await created.handle.agent.session.snapshot()
     expect(snapshot).toMatchObject({ status: 'available', snapshot: { snapshotSeq: -1 } })
+    await runtime.dispose()
+  })
+
+  it('routes a driver approval through v3 before the single v2 requester ledger is appended', async () => {
+    const driver = new Driver()
+    const runtime = new CordisXAgentSessionRuntime({ driver, authorize: async () => true, declares: () => true, now: () => 31 })
+    const makeSetup = (agentId: string, revision: string, name: string): AgentSetup => ({
+      definition: { agentId, revision },
+      definitions: [{
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
+        contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
+        identity: { agentId, revision }, name,
+        promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: `${name} prompt` }],
+        inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
+      }],
+    })
+    const reviewerSetup = makeSetup('reviewer', 'reviewer-driver-v3', 'Reviewer')
+    const leadSetup = makeSetup('lead', 'lead-driver-v3', 'Lead')
+    const reviewer = await runtime.create(owner, { sessionId: 'cx-session.driver-reviewer', setup: reviewerSetup })
+    const lead = await runtime.create(owner, { sessionId: 'cx-session.driver-lead', setup: leadSetup })
+    if (reviewer.status !== 'accepted' || lead.status !== 'accepted') throw new Error('agents unavailable')
+    let answer!: (outcome: 'allowed-once') => void
+    const decision = new Promise<'allowed-once'>(resolve => { answer = resolve })
+    let liveQuestion: ApprovalQuestionV2 | undefined
+    const answerer = vi.fn(async (question: ApprovalQuestionV2) => { liveQuestion = question; return await decision })
+    await runtime.registerAuthorityAnswerer(owner, { agent: lead.handle.agent, definition: leadSetup.definition }, answerer)
+    const resolver = vi.fn((question: ApprovalRequestRoutingQuestion): ApprovalRequestRoutingResult => ({
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-result.v1.schema.json',
+      contract: 'cordisx.approval-request-routing-result/v1', schemaVersion: 1,
+      routingId: question.routingId, registration: question.registration,
+      status: 'accepted', code: 'routed', requester: question.requester,
+      authority: {
+        agentId: lead.sessionId, sessionId: lead.sessionId, agentGeneration: lead.agentGeneration,
+        definition: leadSetup.definition,
+      },
+    }))
+    const registered = await runtime.registerRequestResolver(owner, { agent: reviewer.handle.agent, definition: reviewerSetup.definition }, resolver)
+    expect(registered).toMatchObject({ status: 'registered', handle: { registration: { owner, requester: { agentId: reviewer.sessionId, definition: reviewerSetup.definition } } } })
+
+    const pending = driver.ask({ sessionId: reviewer.sessionId, toolName: 'workspace.publish', callId: 'driver-call-v3', reason: 'Reviewer requests exact Lead approval.' })
+    await vi.waitFor(() => expect(answerer).toHaveBeenCalledTimes(1))
+    expect(resolver).toHaveBeenCalledWith(expect.objectContaining({
+      contract: 'cordisx.approval-request-routing-question/v1', requester: expect.objectContaining({ agentId: reviewer.sessionId }),
+      toolName: 'workspace.publish', callId: 'driver-call-v3', reason: { kind: 'plain-text', text: 'Reviewer requests exact Lead approval.' },
+    }), expect.any(AbortSignal))
+    const inFlight = await reviewer.handle.agent.session.read({ afterSeq: -1, snapshotSeq: 1, limit: 10 })
+    expect(inFlight).toMatchObject({ status: 'available', page: { events: [
+      { seq: 0, type: 'approval/authority-bound', ignorable: true, data: { requester: reviewerSetup.definition, authority: leadSetup.definition } },
+      { seq: 1, type: 'approval/asked', data: { reason: 'Reviewer requests exact Lead approval.' } },
+    ] } })
+    if (inFlight.status !== 'available' || liveQuestion === undefined) throw new Error('pending approval unavailable')
+    const asked = inFlight.page.events.find(event => event.type === 'approval/asked')
+    if (asked?.type !== 'approval/asked') throw new Error('asked fact unavailable')
+    expect(liveQuestion).toMatchObject({
+      requester: { definition: reviewerSetup.definition },
+      authority: { definition: leadSetup.definition },
+      reason: { text: asked.data.reason },
+    })
+    answer('allowed-once')
+    await expect(pending).resolves.toBe('allowed-once')
+    const completed = await reviewer.handle.agent.session.read({ afterSeq: -1, snapshotSeq: 2, limit: 10 })
+    expect(completed).toMatchObject({ status: 'available', page: { events: [
+      { type: 'approval/authority-bound' }, { type: 'approval/asked' }, { type: 'approval/decided', data: { outcome: 'allowed-once' } },
+    ] } })
+    await runtime.dispose()
+  })
+
+  it('keeps adopted driver approval bindings fail-closed while never-registered bindings retain v1', async () => {
+    const driver = new Driver()
+    const runtime = new CordisXAgentSessionRuntime({ driver, authorize: async () => true, declares: () => true })
+    const routed = await runtime.create(owner, { sessionId: 'cx-session.driver-routed', setup })
+    const legacy = await runtime.create(owner, { sessionId: 'cx-session.driver-legacy', setup })
+    if (routed.status !== 'accepted' || legacy.status !== 'accepted') throw new Error('agents unavailable')
+    const malformed = await runtime.registerRequestResolver(owner, { agent: routed.handle.agent, definition: setup.definition }, question => ({
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-result.v1.schema.json',
+      contract: 'cordisx.approval-request-routing-result/v1', schemaVersion: 1,
+      routingId: `${question.routingId}-wrong`, registration: question.registration,
+      status: 'unavailable', code: 'mapping-unavailable',
+    }))
+    if (malformed.status !== 'registered') throw new Error('resolver unavailable')
+    await expect(driver.ask({ sessionId: routed.sessionId, toolName: 'shell', reason: 'route me' })).resolves.toBe('unavailable')
+    await expect(malformed.handle.dispose()).resolves.toMatchObject({ code: 'disposed' })
+    await expect(driver.ask({ sessionId: routed.sessionId, toolName: 'shell', reason: 'still route required' })).resolves.toBe('unavailable')
+    expect(await routed.handle.agent.session.snapshot()).toMatchObject({ status: 'available', snapshot: { snapshotSeq: -1 } })
+
+    await expect(driver.ask({ sessionId: legacy.sessionId, toolName: 'shell' })).resolves.toBe('unavailable')
+    expect(await legacy.handle.agent.session.read({ afterSeq: -1, snapshotSeq: 1, limit: 10 })).toMatchObject({
+      status: 'available', page: { events: [{ type: 'approval/asked' }, { type: 'approval/decided' }] },
+    })
+
+    const first = await runtime.registerRequestResolver(owner, { agent: routed.handle.agent, definition: setup.definition }, () => { throw new Error('stale') })
+    const second = await runtime.registerRequestResolver(owner, { agent: routed.handle.agent, definition: setup.definition }, question => ({
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-result.v1.schema.json',
+      contract: 'cordisx.approval-request-routing-result/v1', schemaVersion: 1,
+      routingId: question.routingId, registration: question.registration,
+      status: 'unavailable', code: 'authority-unavailable',
+    }))
+    if (first.status !== 'registered' || second.status !== 'registered') throw new Error('replacement unavailable')
+    await expect(first.handle.closed).resolves.toMatchObject({ code: 'requester-replaced' })
+    await first.handle.dispose()
+    driver.replace()
+    await expect(second.handle.closed).resolves.toMatchObject({ code: 'connection-replaced' })
     await runtime.dispose()
   })
 
