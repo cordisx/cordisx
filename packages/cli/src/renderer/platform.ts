@@ -878,6 +878,8 @@ interface AgentRuntimeLeaseRecord {
   readonly capability: AgentRuntimeCapability
   readonly connection: AgentRuntimeConnection
   readonly routeInstanceId?: string
+  /** The requester route may be distinct from a v8-approved authority Session. */
+  readonly routeSessionId?: string
   readonly moduleGeneration?: string
 }
 
@@ -913,6 +915,18 @@ function isHostRouteSessionScopeBinding(value: unknown): value is Readonly<{ kin
     && (value as { kind?: unknown }).kind === 'host-route-param'
     && typeof (value as { routeId?: unknown }).routeId === 'string'
     && (value as { param?: unknown }).param === 'sessionId'
+}
+
+/** The v8 answer declaration binds a distinct authority only to its requester route. */
+function isApprovalAuthorityRequesterRouteScope(value: unknown): value is Readonly<{
+  kind: 'approval-authority-requester-route'
+  requester: Readonly<{ kind: 'host-route-param'; routeId: string; param: 'sessionId' }>
+}> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)
+    || !Object.keys(value).every(key => key === 'kind' || key === 'requester')
+    || (value as { kind?: unknown }).kind !== 'approval-authority-requester-route') return false
+  const requester = (value as { requester?: unknown }).requester
+  return isHostRouteSessionScopeBinding(requester)
 }
 
 export class PermissionBroker {
@@ -1167,8 +1181,9 @@ export class PermissionBroker {
     ))
     if (declaration === undefined) return Object.freeze({ authorized: false })
     const declaredSessionIds = 'sessionIds' in declaration.scope ? declaration.scope.sessionIds : undefined
+    const authorityRequester = 'authorityRequester' in declaration.scope ? declaration.scope.authorityRequester : undefined
     const rationale = 'rationale' in declaration ? declaration.rationale : undefined
-    if (!this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds)) return Object.freeze({ authorized: false })
+    if (!this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)) return Object.freeze({ authorized: false })
     const policyKey = this.agentRuntimePolicyKey(registration, input.capability, input.sessionId)
     const policy = this.policyRecords.get(policyKey)
     if (!developmentAutoApprove && isPermissionPolicyRecordV4(policy) && policy.policy === 'deny-persistent') {
@@ -1178,7 +1193,7 @@ export class PermissionBroker {
       const record = this.agentRuntimePolicyRecord(registration, input.capability, input.sessionId, 'allow-persistent')
       try { await this.persistV4([record]) } catch { return Object.freeze({ authorized: false }) }
       if (!this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-        || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds)) {
+        || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)) {
         return Object.freeze({ authorized: false })
       }
       this.policyRecords.set(permissionRecordKeyV4(record), record)
@@ -1217,14 +1232,14 @@ export class PermissionBroker {
       }
       if (decision !== 'allow' && decision !== 'allow-once') return Object.freeze({ authorized: false })
       if (!this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-        || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds)) {
+        || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)) {
         return Object.freeze({ authorized: false })
       }
       if (decision === 'allow') {
         const record = this.agentRuntimePolicyRecord(registration, input.capability, input.sessionId, 'allow-persistent')
         try { await this.persistV4([record]) } catch { return Object.freeze({ authorized: false }) }
         if (!this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-          || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds)) {
+          || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)) {
           return Object.freeze({ authorized: false })
         }
         this.policyRecords.set(permissionRecordKeyV4(record), record)
@@ -1243,7 +1258,9 @@ export class PermissionBroker {
     this.agentRuntimeLeases.set(lease.leaseId, Object.freeze({
       lease, identity: Object.freeze({ ...input.identity }), capability: input.capability,
       connection: Object.freeze({ ...input.connection }),
-      ...(input.scopeSource.kind === 'host-route' ? { routeInstanceId: input.scopeSource.routeInstanceId } : {}),
+      ...(input.scopeSource.kind === 'host-route'
+        ? { routeInstanceId: input.scopeSource.routeInstanceId, routeSessionId: input.scopeSource.params.sessionId }
+        : {}),
       ...(registration.generation.moduleGeneration === undefined ? {} : { moduleGeneration: registration.generation.moduleGeneration }),
     }))
     return Object.freeze({ authorized: true, lease })
@@ -1257,7 +1274,7 @@ export class PermissionBroker {
       && lease.moduleGeneration === registration.generation.moduleGeneration
       && sameAgentRuntimeConnection(lease.connection, this.agentRuntimeConnection)
       && (lease.routeInstanceId === undefined || this.agentRuntimeRouteValues().some(route => (
-        route.routeInstanceId === lease.routeInstanceId && route.params.sessionId === lease.lease.sessionId
+        route.routeInstanceId === lease.routeInstanceId && route.params.sessionId === (lease.routeSessionId ?? lease.lease.sessionId)
         && route.owner.source === identity.source && route.owner.pluginId === identity.id
       )))
   }
@@ -1380,32 +1397,44 @@ export class PermissionBroker {
     registration: Registration,
     input: Readonly<{ sessionId: string; capability: AgentRuntimeCapability; scopeSource: AgentRuntimeScopeSource }>,
     declaredScope: unknown,
+    authorityRequester: unknown,
   ): boolean {
     if (input.scopeSource.kind === 'host-create') {
       return input.capability === 'agents.create'
         && input.scopeSource.reservedSessionId === input.sessionId
-        && declaredScope === undefined
+        && declaredScope === undefined && authorityRequester === undefined
     }
     if (input.scopeSource.kind === 'host-exact') {
       return input.scopeSource.exactSessionId === input.sessionId
+        && authorityRequester === undefined
         && (declaredScope === undefined || (Array.isArray(declaredScope) && declaredScope.includes(input.sessionId)))
     }
-    if (Array.isArray(declaredScope)) return declaredScope.length === 1 && declaredScope[0] === input.sessionId
+    if (Array.isArray(declaredScope)) return authorityRequester === undefined
+      && declaredScope.length === 1 && declaredScope[0] === input.sessionId
     const source = input.scopeSource
     const route = this.agentRuntimeRouteValues().find(candidate => (
       candidate.owner.source === registration.identity.source
       && candidate.owner.pluginId === registration.identity.id
       && candidate.routeInstanceId === source.routeInstanceId
     ))
-    return route !== undefined
-      && route.routeInstanceId === source.routeInstanceId
-      && route.routeId === source.routeId
-      && route.path === source.path
-      && route.params.sessionId === source.params.sessionId
-      && route.params.sessionId === input.sessionId
-      && isHostRouteSessionScopeBinding(declaredScope)
-      && declaredScope.routeId === route.routeId
-      && declaredScope.param === 'sessionId'
+    if (route === undefined
+      || route.routeInstanceId !== source.routeInstanceId
+      || route.routeId !== source.routeId
+      || route.path !== source.path
+      || route.params.sessionId !== source.params.sessionId) return false
+    if (isHostRouteSessionScopeBinding(declaredScope)) {
+      return authorityRequester === undefined
+        && route.params.sessionId === input.sessionId
+        && declaredScope.routeId === route.routeId
+        && declaredScope.param === 'sessionId'
+    }
+    return declaredScope === undefined
+      && registration.manifest.schemaVersion === 8
+      && input.capability === 'approvals.answer'
+      && input.sessionId !== route.params.sessionId
+      && isApprovalAuthorityRequesterRouteScope(authorityRequester)
+      && authorityRequester.requester.routeId === route.routeId
+      && authorityRequester.requester.param === 'sessionId'
   }
 
   private agentRuntimePolicyRecord(
