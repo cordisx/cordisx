@@ -811,10 +811,10 @@ if (import.meta.hot) {
           entries: [rendererPath, ...initialGenerations
             .filter(item => item.isolatedArtifactSource === undefined)
             .map(item => item.realEntry)],
-          // react-markdown reaches this CommonJS leaf through an ESM-only
-          // dependency chain, so Vite's static scan cannot discover the
+          // react-markdown reaches these CommonJS leaves through ESM-only
+          // dependency chains, so Vite's static scan cannot discover the
           // required default-export interop before the native renderer boots.
-          include: ['style-to-js'],
+          include: ['debug', 'style-to-js'],
         },
       } : {}),
       resolve: {
