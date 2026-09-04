@@ -58,6 +58,9 @@ import {
   CordisXAgentRegistryServiceV1,
   CordisXAgentSessionRuntime,
   CordisXApprovalServiceV1,
+  CordisXAgentAdmissionReservationService,
+  CordisXAgentAdmissionTargetOriginService,
+  CordisXAgentAdmissionTargetReservationService,
   CordisXSessionRegistryServiceV1,
   type CordisXPrivateAgentDriver,
 } from './agent-session-runtime.js'
@@ -358,6 +361,9 @@ interface PluginController {
   agentRegistryFiber?: Fiber
   sessionRegistryFiber?: Fiber
   approvalServiceFiber?: Fiber
+  agentAdmissionReservationFiber?: Fiber
+  agentAdmissionTargetOriginFiber?: Fiber
+  agentAdmissionTargetReservationFiber?: Fiber
   unregisterAgentSessionMigration?: () => void
   fiber?: Fiber
   status: ManagerPluginStatus
@@ -1086,6 +1092,9 @@ async function start(
     declares: (owner, capability) => agentRouteScopes.declares(owner, capability),
     ...(scenarioSessionScopeAuthority === undefined ? {} : {
       captureSubmission: (owner, sessionId, messageId) => scenarioSessionScopeAuthority.captureSubmission(owner, sessionId, messageId),
+      captureAdmission: (owner, origin, sessionId, generation, messageId) => scenarioSessionScopeAuthority.captureAdmission(owner, origin, sessionId, generation, messageId),
+      admissionTargetActive: (owner, origin, target) => scenarioSessionScopeAuthority.admissionTargetActive(owner, origin, target),
+      captureAdmissionTarget: (owner, origin, target, sessionId, generation, messageId) => scenarioSessionScopeAuthority.captureAdmissionTarget(owner, origin, target, sessionId, generation, messageId),
     }),
     ...(playgroundAgentSessionPersistence === undefined ? {} : {
       persistence: playgroundAgentSessionPersistence,
@@ -1443,6 +1452,12 @@ async function start(
       const owner = `${controller.item.source}:${controller.item.id}`
       agentRouteScopes.revoke(owner, 'plugin-generation-replaced')
       agentSessionRuntime.fenceOwner(owner, 'plugin-generation-replaced')
+      await controller.agentAdmissionTargetReservationFiber?.dispose()
+      delete controller.agentAdmissionTargetReservationFiber
+      await controller.agentAdmissionTargetOriginFiber?.dispose()
+      delete controller.agentAdmissionTargetOriginFiber
+      await controller.agentAdmissionReservationFiber?.dispose()
+      delete controller.agentAdmissionReservationFiber
       await controller.approvalServiceFiber?.dispose()
       delete controller.approvalServiceFiber
       await controller.sessionRegistryFiber?.dispose()
@@ -1690,7 +1705,7 @@ async function start(
         }
       },
     })
-    pluginContext = ctx.isolate('connectors').isolate('agentLoop').isolate('agents').isolate('sessions').isolate('approvals').isolate('entities').isolate('documents').extend({
+    pluginContext = ctx.isolate('connectors').isolate('agentLoop').isolate('agents').isolate('sessions').isolate('approvals').isolate('agentAdmission').isolate('entities').isolate('documents').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
@@ -1723,6 +1738,12 @@ async function start(
       await controller.sessionRegistryFiber
       controller.approvalServiceFiber = pluginContext.plugin(CordisXApprovalServiceV1, agentSessionRuntime)
       await controller.approvalServiceFiber
+      controller.agentAdmissionReservationFiber = pluginContext.plugin(CordisXAgentAdmissionReservationService, agentSessionRuntime)
+      await controller.agentAdmissionReservationFiber
+      controller.agentAdmissionTargetOriginFiber = pluginContext.plugin(CordisXAgentAdmissionTargetOriginService, agentSessionRuntime)
+      await controller.agentAdmissionTargetOriginFiber
+      controller.agentAdmissionTargetReservationFiber = pluginContext.plugin(CordisXAgentAdmissionTargetReservationService, agentSessionRuntime)
+      await controller.agentAdmissionTargetReservationFiber
       pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Plugin activation started')
       controller.fiber = pluginContext.plugin(
         pluginFromModule(module),
@@ -1741,6 +1762,12 @@ async function start(
       pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Plugin activation failed', error)
       await controller.fiber?.dispose()
       delete controller.fiber
+      await controller.agentAdmissionTargetReservationFiber?.dispose()
+      delete controller.agentAdmissionTargetReservationFiber
+      await controller.agentAdmissionTargetOriginFiber?.dispose()
+      delete controller.agentAdmissionTargetOriginFiber
+      await controller.agentAdmissionReservationFiber?.dispose()
+      delete controller.agentAdmissionReservationFiber
       await controller.approvalServiceFiber?.dispose()
       delete controller.approvalServiceFiber
       await controller.sessionRegistryFiber?.dispose()
@@ -2963,6 +2990,12 @@ async function start(
       delete controller.agentLoopClient
       await controller.unregisterAgentLoop?.()
       delete controller.unregisterAgentLoop
+      await controller.agentAdmissionTargetReservationFiber?.dispose()
+      delete controller.agentAdmissionTargetReservationFiber
+      await controller.agentAdmissionTargetOriginFiber?.dispose()
+      delete controller.agentAdmissionTargetOriginFiber
+      await controller.agentAdmissionReservationFiber?.dispose()
+      delete controller.agentAdmissionReservationFiber
       await controller.approvalServiceFiber?.dispose()
       delete controller.approvalServiceFiber
       await controller.sessionRegistryFiber?.dispose()

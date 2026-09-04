@@ -1,5 +1,7 @@
 import type { AgentRuntimeCapability } from '@cordisx/protocol/agents/v1'
 import type { PluginOwnerIdentity } from '@cordisx/protocol/sessions/v1'
+import type { AgentCommandOrigin } from '@cordisx/protocol/agent-admission/v2'
+import type { AgentAdmissionTarget } from '@cordisx/protocol/agent-admission/v3'
 import type { AgentRuntimeRouteScope } from './platform.js'
 
 export type PlaygroundScenarioSessionScopeClosedCode =
@@ -46,8 +48,15 @@ export interface PlaygroundScenarioConversationOrigin {
   readonly snapshotGeneration: string
   readonly roomId: string
   readonly routeId: string
-  readonly runs: readonly Readonly<{ readonly runId: string; readonly sessionId: string }>[]
+  readonly runs: readonly Readonly<{
+    readonly runId: string
+    readonly sessionId: string
+    readonly participantId?: string
+    readonly memberId?: string
+  }>[]
   readonly active: () => boolean
+  /** Present only for Shell v8: capability created by Host command admission. */
+  readonly admissionOrigin?: AgentCommandOrigin
 }
 
 /** Host Shell only; never projected through plugin context. */
@@ -57,6 +66,8 @@ export interface PlaygroundScenarioConversationSourceAuthority {
 }
 
 export interface PlaygroundScenarioSubmissionCapture {
+  /** True only while the exact command/owner/connection source authority remains live. */
+  active(): boolean
   commit(): void
   close(): void
 }
@@ -185,6 +196,9 @@ export class PlaygroundScenarioSessionScopeAuthority {
     this.sources.set(key, source)
     let open = true
     return Object.freeze({
+      active: () => open && this.sources.get(key) === source && source.active && !this.disposed
+        && origin.active() && source.connectionGeneration === this.options.connectionGeneration()
+        && sameOwner(this.options.ownerForSession(sessionId), owner),
       commit: () => {
         if (!open) return
         open = false
@@ -202,6 +216,110 @@ export class PlaygroundScenarioSessionScopeAuthority {
         this.retireSource(source, 'completed')
       },
     })
+  }
+
+  /**
+   * v2 pre-submit capture. The admitted handle is authoritative: unlike the
+   * frozen v1 fallback it may be a Session created inside the command handler.
+   */
+  admissionTargetActive(owner: PluginOwnerIdentity, admissionOrigin: AgentCommandOrigin, target: AgentAdmissionTarget): boolean {
+    if (this.disposed || !opaque(target.participantId) || !opaque(target.memberId) || !opaque(target.runId)) return false
+    const candidates = [...this.commandOrigins].filter(origin => origin.active()
+      && origin.owner === owner.pluginId && this.sameAdmissionOrigin(origin.admissionOrigin, admissionOrigin)
+      && origin.runs.some(run => run.runId === target.runId
+        && run.participantId === target.participantId && run.memberId === target.memberId))
+    return candidates.length === 1
+  }
+
+  captureAdmissionTarget(
+    owner: PluginOwnerIdentity,
+    admissionOrigin: AgentCommandOrigin,
+    target: AgentAdmissionTarget,
+    sessionId: string,
+    agentGeneration: number,
+    messageId: string,
+  ): PlaygroundScenarioSubmissionCapture | undefined {
+    if (!this.admissionTargetActive(owner, admissionOrigin, target)) return undefined
+    return this.captureAdmissionForTarget(owner, admissionOrigin, target, sessionId, agentGeneration, messageId)
+  }
+
+  captureAdmission(
+    owner: PluginOwnerIdentity,
+    admissionOrigin: AgentCommandOrigin,
+    sessionId: string,
+    agentGeneration: number,
+    messageId: string,
+  ): PlaygroundScenarioSubmissionCapture | undefined {
+    return this.captureAdmissionForTarget(owner, admissionOrigin, admissionOrigin.room, sessionId, agentGeneration, messageId)
+  }
+
+  private captureAdmissionForTarget(
+    owner: PluginOwnerIdentity,
+    admissionOrigin: AgentCommandOrigin,
+    target: AgentAdmissionTarget,
+    sessionId: string,
+    agentGeneration: number,
+    messageId: string,
+  ): PlaygroundScenarioSubmissionCapture | undefined {
+    if (this.disposed || !opaque(sessionId) || !opaque(messageId) || !Number.isSafeInteger(agentGeneration) || agentGeneration < 1) return undefined
+    const candidates = [...this.commandOrigins].filter(origin => origin.active()
+      && origin.owner === owner.pluginId
+      && origin.admissionOrigin?.originId === admissionOrigin.originId
+      && origin.admissionOrigin.executionId === admissionOrigin.executionId
+      && origin.admissionOrigin.binding.bindingId === admissionOrigin.binding.bindingId
+      && origin.admissionOrigin.binding.ownerGeneration === admissionOrigin.binding.ownerGeneration
+      && origin.admissionOrigin.generation === admissionOrigin.generation
+      && origin.admissionOrigin.commandId === admissionOrigin.commandId
+      && origin.admissionOrigin.scope === admissionOrigin.scope
+      && origin.admissionOrigin.room.roomId === admissionOrigin.room.roomId
+      && origin.admissionOrigin.room.participantId === admissionOrigin.room.participantId
+      && origin.admissionOrigin.room.memberId === admissionOrigin.room.memberId
+      && origin.admissionOrigin.room.runId === admissionOrigin.room.runId)
+    if (candidates.length !== 1) return undefined
+    const origin = candidates[0]!
+    if (origin.bindingId !== admissionOrigin.binding.bindingId || origin.ownerGeneration !== admissionOrigin.binding.ownerGeneration
+      || origin.roomId !== admissionOrigin.room.roomId || !sameOwner(this.options.ownerForSession(sessionId), owner)
+      || !origin.runs.some(run => run.runId === target.runId && run.participantId === target.participantId && run.memberId === target.memberId)) return undefined
+    const permissionRoute = this.options.permissionRoute(owner, 'approvals.request')
+    if (permissionRoute === undefined || !opaque(permissionRoute.routeId) || !opaque(permissionRoute.path)) return undefined
+    const key = sourceKey(sessionId, messageId)
+    if (this.sources.has(key)) return undefined
+    const source: CapturedSourceRecord = {
+      key, origin, owner: Object.freeze({ ...owner }), sourceMessageId: messageId, sourceSessionId: sessionId,
+      roomRunId: target.runId, permissionRoute: Object.freeze({ ...permissionRoute }),
+      connectionGeneration: this.options.connectionGeneration(), active: true, committed: false,
+    }
+    this.sources.set(key, source)
+    let open = true
+    return Object.freeze({
+      active: () => open && this.sources.get(key) === source && source.active && !this.disposed
+        && origin.active() && source.connectionGeneration === this.options.connectionGeneration()
+        && sameOwner(this.options.ownerForSession(sessionId), owner),
+      commit: () => {
+        if (!open) return
+        open = false
+        if (this.sources.get(key) !== source || !source.active) return
+        if (!origin.active() || this.disposed || !sameOwner(this.options.ownerForSession(sessionId), owner)
+          || source.connectionGeneration !== this.options.connectionGeneration()) {
+          this.retireSource(source, 'stale')
+          return
+        }
+        source.committed = true
+      },
+      close: () => {
+        if (!open) return
+        open = false
+        this.retireSource(source, 'completed')
+      },
+    })
+  }
+
+  private sameAdmissionOrigin(left: AgentCommandOrigin | undefined, right: AgentCommandOrigin): boolean {
+    return left !== undefined && left.originId === right.originId && left.executionId === right.executionId
+      && left.binding.bindingId === right.binding.bindingId && left.binding.ownerGeneration === right.binding.ownerGeneration
+      && left.generation === right.generation && left.commandId === right.commandId && left.scope === right.scope
+      && left.room.roomId === right.room.roomId && left.room.participantId === right.room.participantId
+      && left.room.memberId === right.room.memberId && left.room.runId === right.room.runId
   }
 
   reconcileVisibleRoute(): void {
@@ -239,7 +357,15 @@ export class PlaygroundScenarioSessionScopeAuthority {
     })
     this.commandOrigins.add(record)
     try { return await operation() }
-    finally { this.commandOrigins.delete(record) }
+    finally {
+      this.commandOrigins.delete(record)
+      // An unsubmitted v2 reservation has no durable authority after its
+      // command completes. A committed source remains available only for the
+      // ensuing deterministic scenario activation.
+      for (const source of [...this.sources.values()]) {
+        if (source.origin === record && !source.committed) this.retireSource(source, 'completed')
+      }
+    }
   }
 
   private validOrigin(origin: PlaygroundScenarioConversationOrigin): boolean {
