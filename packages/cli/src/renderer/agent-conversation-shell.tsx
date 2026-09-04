@@ -75,6 +75,7 @@ import type {
   AgentConversationShellSource as AgentConversationShellSourceV9,
 } from '@cordisx/protocol/agent-conversation-shell/v9'
 import type { AgentBootstrapCommandOrigin } from '@cordisx/protocol/agent-admission/v4'
+import type { PluginOwnerIdentity } from '@cordisx/protocol/sessions/v1'
 import * as React from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type {
@@ -129,7 +130,7 @@ type AgentConversationShellPage = AgentConversationShellPageV3
 type AgentConversationShellSnapshot = AgentConversationShellSnapshotV3
 type AgentConversationShellSource = AgentConversationShellSourceV3
 type AgentConversationShellUpdate = AgentConversationShellUpdateV3
-export type PlaygroundScenarioConversationOwnerResolver = (owner: string, moduleGeneration: string | undefined) => string | undefined
+export type PlaygroundScenarioConversationOwnerResolver = (owner: string, moduleGeneration: string | undefined) => PluginOwnerIdentity | undefined
 
 function exactKeys(value: object, expected: readonly string[], label: string): void {
   const keys = Object.keys(value)
@@ -1240,7 +1241,12 @@ class BoundSourceHost implements AgentConversationShellHost {
     private readonly issueBindingId: () => string,
   ) {}
 
-  async bind(requestInput: AgentConversationShellBindRequest): Promise<AgentConversationShellBindResult> {
+  bind(requestInput: AgentConversationShellBindRequest): Promise<AgentConversationShellBindResult> {
+    return Promise.resolve(this.bindNow(requestInput))
+  }
+
+  /** The Host page mount needs the authenticated binding before navigation resolves. */
+  bindNow(requestInput: AgentConversationShellBindRequest): AgentConversationShellBindResult {
     const request = immutableSnapshot(requestInput)
     plainObject(request, 'bind request')
     exactKeys(request, ['requestId', 'ownerGeneration', 'routeSelection'], 'bind request')
@@ -1763,8 +1769,9 @@ class MountedConversation {
           // Shell v9 retains a command-scoped bootstrap authority even before
           // a Room itself exists. A new-Room composer cannot have a Room or
           // Session in its pre-command snapshot: the plugin materializes the
-          // exact delivery target inside this still-live command, then v4
-          // binds that declaration. Predecessors remain Room/session-bound.
+          // exact delivery target inside this still-live command, then v6
+          // binds its declared Room-route continuation. Predecessors remain
+          // Room/session-bound.
           const capturesBootstrapCommand = this.record.version === 9 && isComposerCommand
           const capturesPredecessorCommand = this.record.version !== 9 && isComposerSubmit
             && roomId !== undefined && runs.length > 0
@@ -1790,7 +1797,7 @@ class MountedConversation {
               && current.runId === run.runId && current.sessionId === run.sessionId))
           }
           const scenarioOrigin = {
-            owner: scenarioOwner,
+            owner: scenarioOwner.pluginId,
             bindingId: this.binding.bindingId,
             ownerGeneration: this.binding.ownerGeneration,
             snapshotGeneration,
@@ -1995,17 +2002,34 @@ export class AgentConversationShellRegistry {
           ...(typeof selected === 'string' && selected !== '' ? { selectedRoomParam: selected } : {}),
         },
       })
-      let session: MountedConversation | undefined
       let mounted = true
-      void host.bind(request).then(result => {
-        if (!mounted || !record.active || result.status !== 'accepted') return
+      const result = host.bindNow(request)
+      let session: MountedConversation | undefined
+      if (result.status === 'accepted' && mounted && record.active) {
+        const roomId = mountContext.params.roomId
+        const routeId = mountContext.routeDefinitionId
+        const scenarioOwner = this.scenarioOwner?.(record.owner, record.effect.moduleGeneration)
+        if (scenarioOwner !== undefined && typeof roomId === 'string' && roomId !== ''
+          && typeof routeId === 'string' && routeId !== '') {
+          // A v6 continuation can be claimed only here, while the Host owns
+          // the newly issued binding and the exact local Room route records.
+          this.scenarioSource?.claimBootstrapRoute({
+            owner: scenarioOwner,
+            binding: Object.freeze({
+              binding: Object.freeze({ bindingId: result.binding.bindingId, ownerGeneration: result.binding.ownerGeneration }),
+              generation: record.effect.moduleGeneration ?? record.ownerGeneration,
+              route: Object.freeze({ routeId, param: 'roomId' as const, roomId }),
+            }),
+            active: () => mounted && record.active && !mountContext.signal.aborted,
+          })
+        }
         session = new MountedConversation(
           record, result.binding, mountContext, this.commands, this.i18n, this.console,
           this.identity, this.scenarioSource, this.scenarioOwner,
         )
         record.sessions.add(session)
         session.start()
-      }).catch(error => console.error('[cordisx] Agent conversation bind failed', error))
+      }
       return () => {
         mounted = false
         session?.dispose()

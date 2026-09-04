@@ -10,6 +10,8 @@ import {
   CordisXAgentAdmissionTargetReservationService,
   CordisXAgentAdmissionBootstrapTargetService,
   CordisXAgentAdmissionBootstrapReservationService,
+  CordisXAgentAdmissionBootstrapRouteDeclarationService,
+  CordisXAgentAdmissionBootstrapRouteReservationService,
   CordisXAgentSessionRuntime,
   CordisXApprovalServiceV1,
   CordisXSessionRegistryServiceV1,
@@ -118,6 +120,10 @@ describe('Agent/Session Host authority v1', () => {
     await bootstrapTargets
     const bootstrapReservations = ctx.plugin(CordisXAgentAdmissionBootstrapReservationService, runtime)
     await bootstrapReservations
+    const bootstrapRouteDeclarations = ctx.plugin(CordisXAgentAdmissionBootstrapRouteDeclarationService, runtime)
+    await bootstrapRouteDeclarations
+    const bootstrapRouteReservations = ctx.plugin(CordisXAgentAdmissionBootstrapRouteReservationService, runtime)
+    await bootstrapRouteReservations
 
     const { acquireLegacyTaskBinding, create, get, resume } = ctx.agents
     const { get: getSession } = ctx.sessions
@@ -1030,5 +1036,147 @@ describe('Agent/Session Host authority v1', () => {
     await expect(ownerReservation.reservation.submit()).rejects.toThrow('unavailable')
     expect(ownerDriver.submitted).toEqual([])
     await ownerRuntime.dispose()
+  })
+
+  it.each([1, 2, 3])('declares, reserves, submits, and Host-claims one v6 Room route continuation per fresh target for N=%i', async count => {
+    const driver = new Driver()
+    let commandActive = true
+    const origin = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
+      originId: `bootstrap-route-origin-${count}`, binding: { bindingId: 'bootstrap-route-old-binding', ownerGeneration: 'bootstrap-route-owner-generation' },
+      generation: 'bootstrap-route-plugin-generation', executionId: `bootstrap-route-execution-${count}`, commandId: 'composer.submit', scope: 'composer-submit' as const,
+    }
+    const targets = Array.from({ length: count }, (_, index) => ({
+      roomId: 'room-bootstrap-route', participantId: ['leader', 'reviewer', 'integrator'][index]!,
+      memberId: `member-${index + 1}`, runId: `run-${index + 1}`,
+      route: { routeId: 'room', param: 'roomId' as const, roomId: 'room-bootstrap-route' },
+    }))
+    const sessions = new Map(targets.map((target, index) => [target.runId, `cx-session.bootstrap-route-${count}-${index}`]))
+    const messages = new Map<string, string>()
+    const runtime = new CordisXAgentSessionRuntime({
+      driver, authorize: async () => true,
+      bootstrapAdmissionRouteTargetActive: (_owner, candidate, target) => commandActive && candidate.originId === origin.originId
+        && targets.some(value => value.roomId === target.roomId && value.participantId === target.participantId
+          && value.memberId === target.memberId && value.runId === target.runId && value.route.routeId === target.route.routeId),
+      bootstrapAdmissionRouteClaimActive: (_owner, candidate) => commandActive && candidate.originId === origin.originId,
+      captureBootstrapAdmissionRouteTarget: (_owner, candidate, target, _continuation, sessionId, _generation, messageId) => {
+        if (!commandActive || candidate.originId !== origin.originId || sessions.get(target.runId) !== sessionId) return undefined
+        messages.set(target.runId, messageId)
+        return { active: () => commandActive, commit: () => {}, close: () => {} }
+      },
+    })
+    const declarations = await Promise.all(targets.map(target => runtime.declareAdmissionBootstrapRoute(owner, { origin, target })))
+    expect(declarations.every(value => value.status === 'declared')).toBe(true)
+    const handles = await Promise.all(targets.map(async target => {
+      const created = await runtime.create(owner, { sessionId: sessions.get(target.runId)!, setup })
+      if (created.status !== 'accepted') throw new Error('fresh v6 target was not acquired')
+      return created.handle
+    }))
+    const reservations = await Promise.all(declarations.map(async (declaration, index) => {
+      if (declaration.status !== 'declared') throw new Error('v6 declaration denied')
+      return await runtime.reserveAdmissionBootstrapRoute(owner, {
+        handle: handles[index]!, continuation: declaration.continuation, message: { text: `fresh v6 delivery ${index + 1}` },
+      })
+    }))
+    expect(reservations.every(value => value.status === 'reserved')).toBe(true)
+    await Promise.all(reservations.map(async reservation => {
+      if (reservation.status !== 'reserved') throw new Error('v6 reservation denied')
+      await expect(reservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
+    }))
+    expect(driver.submitted).toHaveLength(count)
+    for (const [index, declaration] of declarations.entries()) {
+      if (declaration.status !== 'declared') throw new Error('v6 declaration denied')
+      const target = targets[index]!
+      const result = runtime.claimAdmissionBootstrapRoute(owner, {
+        continuation: declaration.continuation,
+        binding: {
+          binding: { bindingId: `bootstrap-route-new-binding-${index}`, ownerGeneration: origin.binding.ownerGeneration },
+          generation: origin.generation, route: target.route,
+        },
+        source: { sessionId: sessions.get(target.runId)!, messageId: messages.get(target.runId)! },
+      })
+      expect(result).toMatchObject({ status: 'claimed', code: 'claimed', receipt: { target, source: { sessionId: sessions.get(target.runId)! } } })
+    }
+    await runtime.dispose()
+  })
+
+  it('fails closed for v6 cross-Room, cross-target, premature, reused, and command-complete continuations', async () => {
+    const driver = new Driver()
+    let commandActive = true
+    let capturedMessage: string | undefined
+    const origin = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
+      originId: 'bootstrap-route-fences', binding: { bindingId: 'bootstrap-route-old', ownerGeneration: 'bootstrap-route-owner' },
+      generation: 'bootstrap-route-generation', executionId: 'bootstrap-route-execution', commandId: 'composer.submit', scope: 'composer-submit' as const,
+    }
+    const target = {
+      roomId: 'room-fences', participantId: 'leader', memberId: 'member-leader', runId: 'run-leader',
+      route: { routeId: 'room', param: 'roomId' as const, roomId: 'room-fences' },
+    }
+    const runtime = new CordisXAgentSessionRuntime({
+      driver, authorize: async () => true,
+      bootstrapAdmissionRouteTargetActive: (_owner, candidate) => commandActive
+        && [origin.originId, 'bootstrap-route-complete'].includes(candidate.originId),
+      bootstrapAdmissionRouteClaimActive: (_owner, candidate) => commandActive
+        && [origin.originId, 'bootstrap-route-complete'].includes(candidate.originId),
+      captureBootstrapAdmissionRouteTarget: (_owner, _candidate, current, _continuation, sessionId, _generation, messageId) => {
+        if (current.runId !== target.runId || sessionId !== 'cx-session.bootstrap-route-fences') return undefined
+        capturedMessage = messageId
+        return { active: () => commandActive, commit: () => {}, close: () => {} }
+      },
+    })
+    const created = await runtime.create(owner, { sessionId: 'cx-session.bootstrap-route-fences', setup })
+    if (created.status !== 'accepted') throw new Error('v6 fence target unavailable')
+    const declaration = await runtime.declareAdmissionBootstrapRoute(owner, { origin, target })
+    if (declaration.status !== 'declared') throw new Error('v6 declaration denied')
+    await expect(runtime.declareAdmissionBootstrapRoute(owner, { origin, target })).resolves.toMatchObject({ status: 'denied', code: 'duplicate-target' })
+    await expect(runtime.declareAdmissionBootstrapRoute(owner, {
+      origin,
+      target: { ...target, roomId: 'room-foreign', route: { ...target.route, roomId: 'room-foreign' } },
+    })).resolves.toMatchObject({ status: 'denied', code: 'cross-room' })
+    expect(runtime.claimAdmissionBootstrapRoute(owner, {
+      continuation: declaration.continuation,
+      binding: { binding: { bindingId: 'new-binding', ownerGeneration: origin.binding.ownerGeneration }, generation: origin.generation, route: target.route },
+      source: { sessionId: 'cx-session.bootstrap-route-fences', messageId: 'cx-message.premature' },
+    })).toMatchObject({ status: 'denied', code: 'not-submitted' })
+    const reservation = await runtime.reserveAdmissionBootstrapRoute(owner, {
+      handle: created.handle, continuation: declaration.continuation, message: { text: 'fenced route submission' },
+    })
+    if (reservation.status !== 'reserved') throw new Error('v6 reservation denied')
+    await expect(reservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
+    expect(runtime.claimAdmissionBootstrapRoute(owner, {
+      continuation: declaration.continuation,
+      binding: { binding: { bindingId: 'new-binding', ownerGeneration: origin.binding.ownerGeneration }, generation: origin.generation, route: target.route },
+      source: { sessionId: 'cx-session.bootstrap-route-fences', messageId: 'cx-message.cross-target' },
+    })).toMatchObject({ status: 'denied', code: 'source-mismatch' })
+    expect(runtime.claimAdmissionBootstrapRoute(owner, {
+      continuation: declaration.continuation,
+      binding: { binding: { bindingId: 'new-binding', ownerGeneration: origin.binding.ownerGeneration }, generation: origin.generation, route: target.route },
+      source: { sessionId: 'cx-session.bootstrap-route-fences', messageId: capturedMessage! },
+    })).toMatchObject({ status: 'claimed' })
+    expect(runtime.claimAdmissionBootstrapRoute(owner, {
+      continuation: declaration.continuation,
+      binding: { binding: { bindingId: 'new-binding-again', ownerGeneration: origin.binding.ownerGeneration }, generation: origin.generation, route: target.route },
+      source: { sessionId: 'cx-session.bootstrap-route-fences', messageId: capturedMessage! },
+    })).toMatchObject({ status: 'denied', code: 'reused' })
+
+    const completed = await runtime.declareAdmissionBootstrapRoute(owner, {
+      origin: { ...origin, originId: 'bootstrap-route-complete' }, target,
+    })
+    if (completed.status !== 'declared') throw new Error('v6 completion declaration denied')
+    const completedReservation = await runtime.reserveAdmissionBootstrapRoute(owner, {
+      handle: created.handle, continuation: completed.continuation, message: { text: 'before command completes' },
+    })
+    if (completedReservation.status !== 'reserved') throw new Error('v6 completion reservation denied')
+    await expect(completedReservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
+    commandActive = false
+    expect(runtime.claimAdmissionBootstrapRoute(owner, {
+      continuation: completed.continuation,
+      binding: { binding: { bindingId: 'new-binding-after-complete', ownerGeneration: origin.binding.ownerGeneration }, generation: origin.generation, route: target.route },
+      source: { sessionId: 'cx-session.bootstrap-route-fences', messageId: capturedMessage! },
+    })).toMatchObject({ status: 'denied', code: 'command-complete' })
+    await runtime.dispose()
   })
 })

@@ -513,14 +513,20 @@ run, including a no-Room composer whose handler creates the Room. The Host
 mints one immutable bootstrap command origin before entering the composer
 handler and retains its authenticated command/binding/generation/execution
 authority without inferring a future Room from the pre-command snapshot. The
-plugin may declare each exact `{participantId, memberId, runId}` only through
-`agentAdmissionBootstrapTargets.issue`; the Host returns one opaque token per
-declaration and `agentAdmissionBootstrapReservations.reserve` captures the
-newly acquired exact Agent handle before its private driver submission. Tokens
-are one-shot and fail closed on command completion, target or owner
-substitution, binding/generation/connection replacement, revocation, or
-disposal. The frozen Shell v8 target-origin path is unchanged and has no
-bootstrap fallback.
+plugin may declare each exact
+`{roomId, participantId, memberId, runId, route:{routeId, param:'roomId', roomId}}`
+only through `agentAdmissionBootstrapRouteDeclarations.declare`. The Host
+returns one opaque continuation per declaration; its paired reservation captures
+the newly acquired exact Agent handle before private driver submission. An
+accepted submission records the exact `{sessionId, messageId}` under that
+continuation. When the matching same-owner Room route obtains its new Host
+binding, the Host-only claim atomically moves—not copies—that source capture to
+the new binding before navigation resolves or deferred scenario work can run.
+The old binding is never retained as live authority. Continuations and claims
+are one-shot and fail closed on command completion, target/Room/owner
+substitution, unmatched route activation, binding/generation/connection
+replacement, revocation, or disposal. The frozen Shell v8 target-origin path
+is unchanged and has no bootstrap fallback.
 
 The renderer also owns one fixed-height Room header and one reusable
 `HostConversationRightInspector`. The header projects the Room title and
