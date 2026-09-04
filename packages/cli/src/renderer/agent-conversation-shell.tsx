@@ -1665,27 +1665,29 @@ class MountedConversation {
     next: AgentConversationShellSnapshotV7,
   ): void {
     const nextById = new Map(next.items.map(item => [item.itemId, item] as const))
-    let resolved = false
+    let approvalTimelineEstablished = false
     for (const item of previous.items) {
-      if (item.kind !== 'approval' || item.state !== 'pending') continue
+      if (item.kind !== 'approval') continue
+      approvalTimelineEstablished = true
       const candidate = nextById.get(item.itemId)
-      // A source replacement may retain a pending approval or replace that
-      // exact item with its authoritative terminal fact. It must never make
-      // the pending item disappear: retaining the prior interactive card
-      // would be stale, and accepting the replacement would erase the
-      // timeline without a durable terminal correlation.
+      // Shell v7 exposes no item-removal, timeline-reset, or retention
+      // discontinuity. Once a source has established an approval timeline,
+      // every replacement on that same live binding must retain it. A source
+      // that needs to compact history has to close/rebind; it cannot erase
+      // durable Room facts through snapshot-replaced.
       if (candidate?.kind !== 'approval') {
-        throw new Error('v7 approval replacement removed a pending approval before its terminal replacement')
+        throw new Error('v7 approval replacement removed an established approval from its timeline')
       }
-      if (candidate.state === 'pending') continue
-      resolved = true
       if (JSON.stringify([item.participantId, item.memberId, item.runId, item.sessionId, item.approvalId, item.approvalKind, item.requester, item.authority, item.reason])
         !== JSON.stringify([candidate.participantId, candidate.memberId, candidate.runId, candidate.sessionId, candidate.approvalId, candidate.approvalKind, candidate.requester, candidate.authority, candidate.reason])) {
         throw new Error('v7 approval replacement changed its durable association')
       }
       if (candidate.agentGeneration !== undefined && candidate.agentGeneration !== item.agentGeneration) throw new Error('v7 approval replacement changed its generation')
+      if (item.state !== 'pending' && JSON.stringify(candidate) !== JSON.stringify(item)) {
+        throw new Error('v7 approval replacement rewrote an established terminal approval')
+      }
     }
-    if (!resolved) return
+    if (!approvalTimelineEstablished) return
     for (const item of previous.items) {
       if (!nextById.has(item.itemId)) throw new Error('v7 approval replacement removed an existing timeline item')
     }
