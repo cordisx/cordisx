@@ -765,6 +765,58 @@ describe('Agent conversation shell public runtime', () => {
     registration.dispose(); runtime.dispose(); commands.dispose(); await settle(); dom.window.close()
   })
 
+  it('always gives a fresh Shell v9 Room composer a frozen bootstrap origin before a run exists', async () => {
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    let commandContext: CordisXCommandContext | undefined
+    commands.register('chatroom', { id: 'send-v9', title: { key: 'send-v9', fallback: 'Send' } }, context => { commandContext = context })
+    const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
+    const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-v9' })
+    const stream = new PageStream()
+    let binding: AgentConversationShellBinding | undefined
+    const registration = runtime.register(plugin, currentBinding => {
+      binding = currentBinding
+      const snapshot: AgentConversationShellSnapshotV7 = {
+        binding: { bindingId: currentBinding.bindingId, ownerGeneration: currentBinding.ownerGeneration }, generation: 'snapshot-v9', snapshotSequence: 0,
+        selection: {
+          kind: 'room', roomId: 'room-v9-fresh', title: message('room.v9', 'Fresh v9 room'), multiParticipant: false, participantPresentation: 'none',
+          participants: [{ participantId: 'lead', role: 'agent', displayName: message('lead', 'Lead') }], activeRuns: [],
+        },
+        items: [], composer: { availability: 'available', placeholder: message('composer', 'Message'), disabled: { value: false }, shortcutPolicy: 'enter', submit: { id: 'send-v9' } }, headerActions: [],
+      }
+      const subscription = { subscriptionId: 'subscription-v9', binding: snapshot.binding, generation: snapshot.generation, afterSequence: 0, snapshotSequence: 0 }
+      return {
+        snapshot: async () => snapshot,
+        subscribe: async () => ({ result: { type: 'subscribe' as const, status: 'accepted' as const, code: 'allowed' as const, subscription }, handle: {
+          subscription, pages: stream, closed: new Promise<never>(() => {}), unsubscribe: async () => { stream.close() },
+        } }),
+        dispose() {},
+      }
+    }, undefined, 9)
+    registration.mount(mountContext(dom, { roomId: 'room-v9-fresh' }))
+    await vi.waitFor(() => expect(dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')).not.toBeNull())
+    const draft = dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')?.set
+    setter?.call(draft, 'bootstrap first delivery')
+    draft.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    const send = dom.window.document.querySelector<HTMLButtonElement>('.cxa-send')!
+    await vi.waitFor(() => expect(send.disabled).toBe(false))
+    send.click()
+    await vi.waitFor(() => expect(commandContext?.hostContext).toMatchObject({
+      scope: 'composer-submit', origin: {
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json',
+        binding: { bindingId: binding!.bindingId, ownerGeneration: binding!.ownerGeneration }, generation: binding!.ownerGeneration,
+        commandId: 'send-v9', scope: 'composer-submit',
+      },
+    }))
+    const origin = (commandContext?.hostContext as { readonly origin?: Record<string, unknown> }).origin
+    expect(origin).toBeDefined()
+    expect(origin).not.toHaveProperty('room')
+    expect(Object.isFrozen(origin)).toBe(true)
+    expect(Object.isFrozen(origin?.binding)).toBe(true)
+    registration.dispose(); runtime.dispose(); commands.dispose(); await settle(); dom.window.close()
+  })
+
   it('opens recovered Shell v4 AgentSetup identity details from members and avatars, then fences stale generations', async () => {
     const dom = installDom()
     const commands = new CommandRegistry()

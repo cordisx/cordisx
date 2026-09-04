@@ -89,6 +89,16 @@ import type {
   AgentAdmissionTargetReservationResult,
   AgentAdmissionTargetReservationService,
 } from '@cordisx/protocol/agent-admission/v3'
+import type {
+  AgentAdmissionBootstrapReservationRequest,
+  AgentAdmissionBootstrapReservationResult,
+  AgentAdmissionBootstrapReservationService,
+  AgentAdmissionBootstrapTargetOrigin,
+  AgentAdmissionBootstrapTargetRequest,
+  AgentAdmissionBootstrapTargetResult,
+  AgentAdmissionBootstrapTargetService,
+  AgentBootstrapCommandOrigin,
+} from '@cordisx/protocol/agent-admission/v4'
 import type { PluginApprovalAuthorityLeaseV8 } from '@cordisx/protocol/plugin-manifest/v8'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from './service.js'
 import { generationFromContext } from './ownership.js'
@@ -233,6 +243,21 @@ export interface CordisXAgentSessionRuntimeOptions {
   readonly captureAdmissionTarget?: (
     owner: PluginOwnerIdentity,
     origin: AgentCommandOrigin,
+    target: AgentAdmissionTarget,
+    sessionId: string,
+    agentGeneration: number,
+    messageId: MessageId,
+  ) => PlaygroundScenarioSubmissionCapture | undefined
+  /** Shell v9/v4 only: validates one target declared under a live bootstrap command. */
+  readonly bootstrapAdmissionTargetActive?: (
+    owner: PluginOwnerIdentity,
+    origin: AgentBootstrapCommandOrigin,
+    target: AgentAdmissionTarget,
+  ) => boolean
+  /** Shell v9/v4 only: captures an exact newly admitted target before driver submission. */
+  readonly captureBootstrapAdmissionTarget?: (
+    owner: PluginOwnerIdentity,
+    origin: AgentBootstrapCommandOrigin,
     target: AgentAdmissionTarget,
     sessionId: string,
     agentGeneration: number,
@@ -400,6 +425,17 @@ export class CordisXAgentSessionRuntime {
     reserved: boolean
   }>>()
   private readonly issuedAdmissionTargets = new Set<string>()
+  /** Opaque v4 bootstrap capabilities are isolated from target-bound v3 tokens. */
+  private readonly bootstrapAdmissionTargets = new Map<string, Readonly<{
+    owner: PluginOwnerIdentity
+    origin: AgentBootstrapCommandOrigin
+    target: AgentAdmissionTarget
+    connectionGeneration: number
+    reserved: boolean
+    handleId?: string
+    handleGeneration?: number
+  }>>()
+  private readonly issuedBootstrapAdmissionTargets = new Set<string>()
   private disposed = false
   private readonly unsubscribeReplacement: () => void
   private readonly unsubscribeDriverEvents: () => void
@@ -855,6 +891,7 @@ export class CordisXAgentSessionRuntime {
     this.unsubscribeDriverClaimed()
     await Promise.all([...this.sessions.values()].map(session => session.appendQueue))
     this.disposed = true
+    this.clearAdmissionCapabilities()
     for (const agent of this.agents.values()) this.disposeAgent(agent, 'runtime-disposed')
     for (const session of this.sessions.values()) this.closeSession(session, 'host-unavailable')
     this.options.driver.dispose()
@@ -880,7 +917,20 @@ export class CordisXAgentSessionRuntime {
       && left.room.memberId === right.room.memberId && left.room.runId === right.room.runId
   }
 
+  private validBootstrapAdmissionOrigin(origin: AgentBootstrapCommandOrigin | undefined): origin is AgentBootstrapCommandOrigin {
+    return origin !== undefined
+      && origin.$schema === 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json'
+      && origin.contract === 'cordisx.agent-bootstrap-command-origin/v1' && origin.schemaVersion === 1
+      && origin.scope === 'composer-submit' && opaque(origin.originId) && opaque(origin.executionId)
+      && opaque(origin.binding.bindingId) && opaque(origin.binding.ownerGeneration)
+      && opaque(origin.generation) && opaque(origin.commandId)
+  }
+
   private targetIssueKey(owner: PluginOwnerIdentity, origin: AgentCommandOrigin, target: AgentAdmissionTarget): string {
+    return `${ownerKey(owner)}\u0000${origin.originId}\u0000${origin.executionId}\u0000${target.participantId}\u0000${target.memberId}\u0000${target.runId}`
+  }
+
+  private bootstrapTargetIssueKey(owner: PluginOwnerIdentity, origin: AgentBootstrapCommandOrigin, target: AgentAdmissionTarget): string {
     return `${ownerKey(owner)}\u0000${origin.originId}\u0000${origin.executionId}\u0000${target.participantId}\u0000${target.memberId}\u0000${target.runId}`
   }
 
@@ -954,6 +1004,96 @@ export class CordisXAgentSessionRuntime {
     return { status: 'reserved', reservation: reservation as never }
   }
 
+  /**
+   * Shell v9/v4 target declaration. A bootstrap origin has no pre-existing
+   * Room target, so the Host binds exactly one opaque capability only while
+   * the command/binding/owner-generation/connection authority remains live.
+   */
+  async issueAdmissionBootstrapTarget(owner: PluginOwnerIdentity, request: AgentAdmissionBootstrapTargetRequest): Promise<AgentAdmissionBootstrapTargetResult> {
+    if (this.disposed || !this.validBootstrapAdmissionOrigin(request.origin) || !this.validAdmissionTarget(request.target)) {
+      return { status: 'denied', code: 'origin-denied' }
+    }
+    if (this.options.bootstrapAdmissionTargetActive?.(owner, request.origin, request.target) !== true) {
+      return { status: 'denied', code: 'target-denied' }
+    }
+    const issueKey = this.bootstrapTargetIssueKey(owner, request.origin, request.target)
+    if (this.issuedBootstrapAdmissionTargets.has(issueKey)) return { status: 'denied', code: 'reused' }
+    const token = `cx-admission-bootstrap-target-origin.${crypto.randomUUID()}`
+    const origin = Object.freeze({
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-admission-bootstrap-target-origin.v4.schema.json' as const,
+      contract: 'cordisx.agent-admission-bootstrap-target-origin/v4' as const,
+      schemaVersion: 4 as const,
+      token,
+    }) as AgentAdmissionBootstrapTargetOrigin
+    this.issuedBootstrapAdmissionTargets.add(issueKey)
+    this.bootstrapAdmissionTargets.set(token, Object.freeze({
+      owner: Object.freeze(clone(owner)), origin: Object.freeze(clone(request.origin)), target: Object.freeze(clone(request.target)),
+      connectionGeneration: this.connectionGeneration, reserved: false,
+    }))
+    return { status: 'issued', origin }
+  }
+
+  /**
+   * The v4 reservation captures the exact newly acquired handle before the
+   * private driver can observe a submission. It never degrades to agent.send.
+   */
+  async reserveAdmissionBootstrapTarget(owner: PluginOwnerIdentity, request: AgentAdmissionBootstrapReservationRequest): Promise<AgentAdmissionBootstrapReservationResult> {
+    if (this.disposed || request.origin === undefined || request.message === undefined
+      || request.origin.$schema !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-admission-bootstrap-target-origin.v4.schema.json'
+      || request.origin.contract !== 'cordisx.agent-admission-bootstrap-target-origin/v4' || request.origin.schemaVersion !== 4
+      || typeof request.origin.token !== 'string' || request.origin.token.length < 1 || request.origin.token.length > 4_096
+      || typeof request.message.text !== 'string' || request.message.text.length < 1 || request.message.text.length > 65_536) {
+      return { status: 'denied', code: 'origin-denied' }
+    }
+    const issued = this.bootstrapAdmissionTargets.get(request.origin.token)
+    if (issued === undefined || !this.sameOwner(owner, issued.owner)) return { status: 'denied', code: 'not-owner' }
+    if (issued.reserved) return { status: 'denied', code: 'reused' }
+    if (issued.connectionGeneration !== this.connectionGeneration
+      || this.options.bootstrapAdmissionTargetActive?.(owner, issued.origin, issued.target) !== true) {
+      return { status: 'denied', code: 'command-complete' }
+    }
+    const record = this.handleCapabilities.get(request.handle as object)
+    if (record === undefined || record.generation !== request.handle.agent.generation || !this.current(record)) {
+      return { status: 'denied', code: 'stale' }
+    }
+    if (!this.sameOwner(owner, record.owner)) return { status: 'denied', code: 'not-owner' }
+    const messageId = `cx-message.${crypto.randomUUID()}` as MessageId
+    const message = Object.freeze({
+      id: messageId, role: 'user' as const, content: Object.freeze([{ type: 'text' as const, text: request.message.text }]),
+      source: Object.freeze({ kind: 'plugin' as const, pluginId: owner.pluginId, generation: owner.generation }),
+    }) as UserMessage
+    const sourceCapture = this.options.captureBootstrapAdmissionTarget?.(
+      owner, issued.origin, issued.target, record.id, record.generation, messageId,
+    )
+    if (sourceCapture === undefined) return { status: 'denied', code: 'target-mismatch' }
+    if (!sourceCapture.active() || this.options.bootstrapAdmissionTargetActive?.(owner, issued.origin, issued.target) !== true) {
+      sourceCapture.close()
+      return { status: 'denied', code: 'command-complete' }
+    }
+    this.bootstrapAdmissionTargets.set(request.origin.token, Object.freeze({
+      ...issued, reserved: true, handleId: record.id, handleGeneration: record.generation,
+    }))
+    let used = false; let revoked = false
+    const reservation = Object.freeze({
+      reservationId: `cx-admission-bootstrap-reservation.${crypto.randomUUID()}`,
+      submit: async () => {
+        const current = this.bootstrapAdmissionTargets.get(request.origin.token)
+        if (used || revoked || current === undefined || !current.reserved
+          || current.handleId !== record.id || current.handleGeneration !== record.generation
+          || current.connectionGeneration !== this.connectionGeneration || !this.current(record) || !sourceCapture.active()
+          || this.options.bootstrapAdmissionTargetActive?.(owner, issued.origin, issued.target) !== true) {
+          throw new Error('agent-admission bootstrap reservation unavailable')
+        }
+        used = true
+        const result = await this.submitAdmission(owner, record, message, 'next-turn', true, sourceCapture)
+        if (result.status !== 'accepted') throw new Error('agent-admission bootstrap submit denied')
+        return result
+      },
+      revoke: async () => { if (!revoked && !used) sourceCapture.close(); revoked = true },
+    })
+    return { status: 'reserved', reservation: reservation as never }
+  }
+
   async reserveAdmission(owner: PluginOwnerIdentity, request: AgentAdmissionReservationRequest): Promise<AgentAdmissionReservationResult> {
     if (this.disposed || !this.validAdmissionOrigin(request.origin) || request.message === undefined
       || typeof request.message.text !== 'string' || request.message.text.length < 1 || request.message.text.length > 65_536) {
@@ -996,6 +1136,7 @@ export class CordisXAgentSessionRuntime {
 
   /** Route, permission, and plugin-generation authorities fence by Host-bound owner only. */
   fenceOwner(ownerPluginId: string, code: Exclude<SessionSubscriptionCloseCode, 'unsubscribed' | 'observer-failed'>): void {
+    this.clearAdmissionCapabilitiesForOwner(ownerPluginId)
     for (const agent of this.agents.values()) {
       if (agent.owner.pluginId !== ownerPluginId) continue
       const answerer = this.answerers.get(this.answererKey(agent))
@@ -1503,8 +1644,31 @@ export class CordisXAgentSessionRuntime {
 
   private connectionReplaced(): void {
     this.connectionGeneration += 1
+    this.clearAdmissionCapabilities()
     for (const agent of this.agents.values()) this.disposeAgent(agent, 'connection-replaced')
     for (const session of this.sessions.values()) this.closeSession(session, 'connection-replaced')
+  }
+
+  private clearAdmissionCapabilitiesForOwner(ownerPluginId: string): void {
+    if (!opaque(ownerPluginId)) return
+    for (const [token, issued] of this.targetAdmissionOrigins) {
+      if (issued.owner.pluginId === ownerPluginId) this.targetAdmissionOrigins.delete(token)
+    }
+    for (const [token, issued] of this.bootstrapAdmissionTargets) {
+      if (issued.owner.pluginId === ownerPluginId) this.bootstrapAdmissionTargets.delete(token)
+    }
+    const prefix = `${ownerPluginId}\u0000`
+    for (const key of this.issuedAdmissionTargets) if (key.startsWith(prefix)) this.issuedAdmissionTargets.delete(key)
+    for (const key of this.issuedBootstrapAdmissionTargets) if (key.startsWith(prefix)) this.issuedBootstrapAdmissionTargets.delete(key)
+    for (const key of this.reservedAdmissionOrigins) if (key.startsWith(prefix)) this.reservedAdmissionOrigins.delete(key)
+  }
+
+  private clearAdmissionCapabilities(): void {
+    this.targetAdmissionOrigins.clear()
+    this.bootstrapAdmissionTargets.clear()
+    this.issuedAdmissionTargets.clear()
+    this.issuedBootstrapAdmissionTargets.clear()
+    this.reservedAdmissionOrigins.clear()
   }
 
   private async deliver(subscriber: SessionSubscriber, page: Parameters<SessionEventObserver>[0]): Promise<void> {
@@ -1772,5 +1936,23 @@ export class CordisXAgentAdmissionTargetReservationService extends Service imple
   reserve = async (request: AgentAdmissionTargetReservationRequest): Promise<AgentAdmissionTargetReservationResult> => {
     const runtime = runtimeFor(this)
     return await runtime.reserveAdmissionTarget(runtime.ownerFromContext(this.ctx), request)
+  }
+}
+
+/** Host-owned v4 issuer for a target created under one Shell v9 bootstrap command. */
+export class CordisXAgentAdmissionBootstrapTargetService extends Service implements AgentAdmissionBootstrapTargetService {
+  constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) { super(ctx, 'agentAdmissionBootstrapTargets'); runtimes.set(this, runtime) }
+  issue = async (request: AgentAdmissionBootstrapTargetRequest): Promise<AgentAdmissionBootstrapTargetResult> => {
+    const runtime = runtimeFor(this)
+    return await runtime.issueAdmissionBootstrapTarget(runtime.ownerFromContext(this.ctx), request)
+  }
+}
+
+/** Host-owned v4 reservation for one opaque bootstrap target; it never exposes a driver. */
+export class CordisXAgentAdmissionBootstrapReservationService extends Service implements AgentAdmissionBootstrapReservationService {
+  constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) { super(ctx, 'agentAdmissionBootstrapReservations'); runtimes.set(this, runtime) }
+  reserve = async (request: AgentAdmissionBootstrapReservationRequest): Promise<AgentAdmissionBootstrapReservationResult> => {
+    const runtime = runtimeFor(this)
+    return await runtime.reserveAdmissionBootstrapTarget(runtime.ownerFromContext(this.ctx), request)
   }
 }

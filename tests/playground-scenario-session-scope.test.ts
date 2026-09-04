@@ -127,6 +127,45 @@ describe('Playground scenario exact Session scope authority', () => {
     authority.dispose()
   })
 
+  it('captures a fresh Shell v9 bootstrap target before any Room run has a Session', async () => {
+    let mounted: AgentRuntimeRouteScope | undefined
+    const authority = new PlaygroundScenarioSessionScopeAuthority({
+      hostGeneration: 'playground-generation-v9', connectionGeneration: () => 3,
+      currentRoute: () => undefined,
+      ownerForSession: sessionId => ['cx-session.created-in-command', 'cx-session.delegated'].includes(sessionId) ? owner : undefined,
+      routeOwner: agentOwner => agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation ? plugin : undefined,
+      permissionRoute: () => ({ routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }),
+      authorize: async () => true,
+      mountRoute: route => { mounted = route; return () => { mounted = undefined } },
+      changed: () => {},
+    })
+    const origin = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
+      originId: 'bootstrap-origin-fresh', binding: { bindingId: 'binding-bootstrap-fresh', ownerGeneration: 'owner-generation-one' },
+      generation: 'plugin-generation-one', executionId: 'execution-bootstrap-fresh', commandId: 'chatroom.message.submit', scope: 'composer-submit' as const,
+    }
+    const target = { participantId: 'lead', memberId: 'member-lead', runId: 'room-run-lead' }
+    await authority.conversationSource.execute({
+      owner: owner.pluginId, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
+      snapshotGeneration: 'snapshot-bootstrap-fresh', roomId: 'room-one', routeId: 'chatroom:room',
+      runs: [], active: () => true, bootstrapOrigin: origin,
+    }, async () => {
+      expect(authority.bootstrapAdmissionTargetActive(owner, origin, target)).toBe(true)
+      const capture = authority.captureBootstrapAdmissionTarget(owner, origin, target, 'cx-session.created-in-command', 1, 'cx-message.bootstrap-fresh')
+      expect(capture?.active()).toBe(true)
+      capture?.commit()
+    })
+    const activated = await authority.client.activate({
+      runId: 'scenario-bootstrap-fresh', sourceMessageId: 'cx-message.bootstrap-fresh',
+      sourceSessionId: 'cx-session.created-in-command', targetSessionId: 'cx-session.delegated',
+    })
+    expect(activated.status).toBe('available')
+    expect(mounted?.params.sessionId).toBe('cx-session.delegated')
+    if (activated.status === 'available') activated.handle.close()
+    authority.dispose()
+  })
+
   it('fails closed when origin capture is missing, crossed, stale, or navigated away before activation', async () => {
     let shellActive = true
     let sourceOwner = owner

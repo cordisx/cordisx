@@ -14,6 +14,7 @@ import type {
 } from '@cordisx/protocol/agent-conversation-shell/v3'
 import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV7 } from '@cordisx/protocol/agent-conversation-shell/v7'
 import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV8 } from '@cordisx/protocol/agent-conversation-shell/v8'
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV9 } from '@cordisx/protocol/agent-conversation-shell/v9'
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { ManagerCollectionRegistryV1 } from '@cordisx/protocol/manager-collection/v1'
 import type { ManagerContentNavigationDeclarationV2 } from '@cordisx/protocol/manager-content-navigation/v2'
@@ -1075,7 +1076,7 @@ export interface CordisXCommandContext {
   readonly arguments: CordisXJsonValue | undefined
   readonly signal: AbortSignal
   readonly invocationKey: string
-  readonly hostContext?: CordisXSurfaceInvocationContextV1 | AgentConversationShellCommandContext | AgentConversationShellCommandContextV7 | AgentConversationShellCommandContextV8
+  readonly hostContext?: CordisXSurfaceInvocationContextV1 | AgentConversationShellCommandContext | AgentConversationShellCommandContextV7 | AgentConversationShellCommandContextV8 | AgentConversationShellCommandContextV9
 }
 
 export interface CordisXSurfaceInvocationContextV1 {
@@ -1411,6 +1412,12 @@ export type CordisXAgentConversationShellSourceFactoryV8 = (
 ) => import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellSource>
 
+/** Shell v9 gives composer handlers a Host-issued bootstrap origin before a Room run exists. */
+export type CordisXAgentConversationShellSourceFactoryV9 = (
+  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellBinding>,
+) => import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellSource
+  | Promise<import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellSource>
+
 /** Host-owned page mount paired with one fiber-owned source registration. */
 export interface CordisXAgentConversationShellRegistration {
   readonly mount: CordisXPageMount
@@ -1432,6 +1439,8 @@ export interface CordisXAgentConversationShell {
   registerSourceV7(factory: CordisXAgentConversationShellSourceFactoryV7): CordisXAgentConversationShellRegistration
   /** Shell v8 attaches a Host-generated command origin only to composer submit. */
   registerSourceV8(factory: CordisXAgentConversationShellSourceFactoryV8): CordisXAgentConversationShellRegistration
+  /** Shell v9 always gives composer submit a Host-issued bootstrap command origin. */
+  registerSourceV9(factory: CordisXAgentConversationShellSourceFactoryV9): CordisXAgentConversationShellRegistration
 }
 
 export interface CordisXRouteDefinition<Outlet extends CordisXOutletName = CordisXOutletName> {
