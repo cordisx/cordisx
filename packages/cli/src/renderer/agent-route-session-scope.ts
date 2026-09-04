@@ -142,6 +142,13 @@ export class AgentRouteSessionScopeAuthority {
           throw new Error('dynamic Agent Session scope does not name an owned route parameter')
         }
       }
+      const authorityRequester = installed.declaration.scope.authorityRequester
+      if (authorityRequester !== undefined) {
+        const route = this.options.routes(owner).find(item => item.id === authorityRequester.requester.routeId)
+        if (route === undefined || !validRouteBinding(route, authorityRequester.requester, 8)) {
+          throw new Error('invalid approval authority requester route declaration')
+        }
+      }
     }
   }
 
@@ -167,9 +174,14 @@ export class AgentRouteSessionScopeAuthority {
     const declaration = installed?.owner.generation === owner.generation ? installed.declaration : undefined
     if (declaration === undefined) return false
     const scope = declaration.scope.sessionIds
-    if (!isBinding(scope)) return true
-    const route = this.options.routes(owner).find(item => item.id === scope.routeId)
-    return route !== undefined && validRouteBinding(route, scope, declaration.manifestVersion)
+    if (isBinding(scope)) {
+      const route = this.options.routes(owner).find(item => item.id === scope.routeId)
+      if (route === undefined || !validRouteBinding(route, scope, declaration.manifestVersion)) return false
+    }
+    const authorityRequester = declaration.scope.authorityRequester
+    if (authorityRequester === undefined) return true
+    const route = this.options.routes(owner).find(item => item.id === authorityRequester.requester.routeId)
+    return route !== undefined && validRouteBinding(route, authorityRequester.requester, 8)
   }
 
   uninstall(owner: PluginOwnerIdentity): void {
@@ -318,7 +330,7 @@ export class AgentRouteSessionScopeAuthority {
     const authorityRequester = declaration.scope.authorityRequester
     if (authorityRequester !== undefined && (declaration.manifestVersion !== 8 || declaration.name !== 'approvals.answer'
       || declaration.required || authorityRequester.kind !== 'approval-authority-requester-route'
-      || !validRouteBinding(this.options.routes(owner).find(route => route.id === authorityRequester.requester.routeId) ?? { id: '', path: '', schemaVersion: 1 }, authorityRequester.requester, 8))) {
+      || !localId.test(authorityRequester.requester.routeId) || authorityRequester.requester.param !== 'sessionId')) {
       throw new Error('invalid approval authority requester route declaration')
     }
     return Object.freeze({ owner: Object.freeze({ ...owner }), declaration: Object.freeze({ ...declaration, scope: Object.freeze({
@@ -380,7 +392,7 @@ function routeHasParam(path: string, param: string): boolean {
   return path.split('/').filter(segment => segment === `:${param}`).length === 1
 }
 function validRouteBinding(route: AgentRouteDefinition, scope: AgentRouteScopeBinding, manifestVersion: 5 | 6 | 8 | undefined): boolean {
-  return routeHasParam(route.path, scope.param) && (manifestVersion !== 6 || route.schemaVersion === 2)
+  return routeHasParam(route.path, scope.param) && ((manifestVersion !== 6 && manifestVersion !== 8) || route.schemaVersion === 2)
 }
 function sameOwner(left: PluginOwnerIdentity, right: PluginOwnerIdentity): boolean {
   return left.pluginId === right.pluginId && left.generation === right.generation
