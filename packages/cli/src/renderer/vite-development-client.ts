@@ -116,7 +116,7 @@ export class NativeViteDevelopmentClient {
           development: plugin.development!,
           ...(plugin.readme === undefined ? {} : { readme: plugin.readme }),
           ...(plugin.readmes === undefined ? {} : { readmes: plugin.readmes }),
-          ...(plugin.manifest?.schemaVersion !== 7 ? {} : { manifest: plugin.manifest }),
+          ...(plugin.manifest === undefined ? {} : { manifest: plugin.manifest }),
         },
         ...(plugin.isolatedArtifactSource === undefined ? {} : {
           isolatedArtifactSource: plugin.isolatedArtifactSource,
