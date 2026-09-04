@@ -263,12 +263,10 @@ describe('Host Playground Session scenario catalog', () => {
     let approvalOutcome: ApprovalOutcome = 'allowed-once'
     scopeAuthority = new PlaygroundScenarioSessionScopeAuthority({
       hostGeneration: 'playground-generation-one',
-      currentRoute: () => ({
-        kind: 'host-route', active: true, owner: { source: 'file:///fixtures/chatroom.ts', pluginId: 'chatroom' },
-        routeId: 'room-session-detail', routeInstanceId: 'main:lead-route',
-        path: '/main/chatroom/:roomId/run/:runId/session/:sessionId', params: { sessionId: binding.sessionId! },
-      }),
+      connectionGeneration: () => 1,
+      currentRoute: () => undefined,
       ownerForSession: sessionId => runtime?.ownerForSession(sessionId),
+      permissionRoute: () => ({ routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }),
       authorize: async (agentOwner, capability, sessionId) => {
         const authorized = await routeScopes.authorize(agentOwner, capability, sessionId)
         if (authorized && capability === 'approvals.request') {
@@ -289,10 +287,16 @@ describe('Host Playground Session scenario catalog', () => {
       authorize: async (agentOwner, capability, sessionId) => capability === 'approvals.request' || capability === 'approvals.answer'
         ? await routeScopes.authorize(agentOwner, capability, sessionId)
         : true,
+      captureSubmission: (agentOwner, sessionId, messageId) => scopeAuthority.captureSubmission(agentOwner, sessionId, messageId),
     })
     const lead = await runtime.create(owner, { sessionId: binding.sessionId!, setup: setup('chatroom.generalist', 'Lead') })
     if (lead.status !== 'accepted') throw new Error('Lead Session create failed')
-    await lead.handle.agent.followup(message('cx-message.delegated-approval', 'delegated'))
+    const originatingCommand = async (messageId: string, code: string) => await scopeAuthority.conversationSource.execute({
+      owner: owner.pluginId, bindingId: `binding-${messageId}`, ownerGeneration: 'owner-generation-one',
+      snapshotGeneration: 'snapshot-generation-one', roomId: 'room-one', routeId: 'chatroom:room',
+      runs: [{ runId: 'room-run-lead', sessionId: binding.sessionId! }], active: () => true,
+    }, async () => await lead.handle.agent.followup(message(messageId, code)))
+    await originatingCommand('cx-message.delegated-approval', 'delegated')
     await lead.handle.agent.whenIdle()
 
     const reviewer = await readAll(runtime, 'cx-session.reviewer')
@@ -303,10 +307,10 @@ describe('Host Playground Session scenario catalog', () => {
     })
     expect(reviewer.find(event => event.type === 'playground/scenario' && event.data.stepType === 'activate-session-scope'))
       .toMatchObject({ data: { actor: 'reviewer', phase: 'step-started' } })
-    expect(scopeAuthority.effectiveRoute()?.params.sessionId).toBe(binding.sessionId)
+    expect(scopeAuthority.effectiveRoute()).toBeUndefined()
 
     approvalOutcome = 'rejected'
-    await lead.handle.agent.followup(message('cx-message.delegated-rejected', 'delegated-rejected'))
+    await originatingCommand('cx-message.delegated-rejected', 'delegated-rejected')
     await lead.handle.agent.whenIdle()
     const rejectedReviewer = await readAll(runtime, 'cx-session.reviewer')
     expect(rejectedReviewer.findLast(event => event.type === 'approval/decided')).toMatchObject({ data: { outcome: 'rejected' } })
@@ -431,6 +435,7 @@ describe('Host Playground Session scenario catalog', () => {
             close: () => { if (active) { active = false; settle({ code: 'completed' }) } },
           }) }
         },
+        release: () => {},
       })
       const firstObservations = { delegations: 0, operationIds: [] as string[] }
       const firstDriver = new DeterministicAgentSessionTransport({

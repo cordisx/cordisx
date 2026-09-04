@@ -69,6 +69,7 @@ import {
 } from '../agent-session-migration-contracts.js'
 import { resolveAgentDefinitionCatalog, type CordisXResolvedAgentDefinition } from './agent-loop.js'
 import { presentationForDefinition, type CordisXAgentDefinitionPresentation } from './agent-loop-v4.js'
+import type { PlaygroundScenarioSubmissionCapture } from './playground-scenario-session-scope.js'
 
 const ACQUIRE_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-acquire-result.v1.schema.json' as const
 const ADMISSION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-admission.v1.schema.json' as const
@@ -152,6 +153,12 @@ export interface CordisXAgentSessionRuntimeOptions {
   readonly now?: () => number
   readonly persistence?: CordisXSessionEventPersistence
   readonly initialSessions?: readonly CordisXPersistedSession[]
+  /** Host Playground only: captures the current Shell authority for an accepted submission. */
+  readonly captureSubmission?: (
+    owner: PluginOwnerIdentity,
+    sessionId: string,
+    messageId: MessageId,
+  ) => PlaygroundScenarioSubmissionCapture | undefined
 }
 
 export interface CordisXPersistedSession {
@@ -700,9 +707,19 @@ export class CordisXAgentSessionRuntime {
       if (!await this.allowed(owner, 'agents.message.submit', record.id)) return this.admission(message.id, 'denied', 'permission-denied')
       const prior = record.pending.get(message.id)
       if (prior !== undefined) return this.admission(message.id, 'accepted')
-      const submitted = await this.options.driver.submit({ sessionId: record.id, message: clone(message), target, wakeup })
-      if (submitted === 'replayed') return this.admission(message.id, 'accepted')
-      if (submitted !== 'accepted') return this.admission(message.id, 'unavailable', 'host-unavailable')
+      const sourceCapture = this.options.captureSubmission?.(owner, record.id, message.id)
+      let submitted: Awaited<ReturnType<CordisXPrivateAgentDriver['submit']>>
+      try { submitted = await this.options.driver.submit({ sessionId: record.id, message: clone(message), target, wakeup }) }
+      catch (error) { sourceCapture?.close(); throw error }
+      if (submitted === 'replayed') {
+        sourceCapture?.close()
+        return this.admission(message.id, 'accepted')
+      }
+      if (submitted !== 'accepted') {
+        sourceCapture?.close()
+        return this.admission(message.id, 'unavailable', 'host-unavailable')
+      }
+      sourceCapture?.commit()
       const stored = clone(message)
       record.pending.set(stored.id, { message: stored, target })
       const appended = await this.appendMany(record.session, [

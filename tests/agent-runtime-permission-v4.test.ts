@@ -191,6 +191,33 @@ describe('Agent Session permission-v4 Host authority', () => {
       .toThrow('authority is invalid')
   })
 
+  it('mounts a captured Shell scenario route without consulting a transient foreground route', async () => {
+    const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), prompt)
+    broker.register(identity, manifest)
+    broker.replaceAgentRuntimeConnection(connection)
+    const seed = broker.createDevelopmentAgentRuntimePolicySeedAuthority()
+    await broker.seedAgentRuntimePolicies(seed, identity, [
+      { capability: 'sessions.subscribe', sessionIds: ['room-a-reviewer'], policy: 'allow-persistent' },
+    ])
+    const authority = broker.createPlaygroundScenarioAgentRuntimeRouteAuthority()
+    const scenarioRoute = {
+      ...route, routeInstanceId: 'playground-scenario:captured-run', params: { sessionId: 'room-a-reviewer' },
+    }
+
+    const close = broker.activateCapturedPlaygroundScenarioAgentRuntimeRoute(authority, scenarioRoute)
+    const reviewer = await broker.authorizeAgentRuntime({
+      identity, capability: 'sessions.subscribe', sessionId: 'room-a-reviewer',
+      scopeSource: {
+        kind: 'host-route', routeInstanceId: scenarioRoute.routeInstanceId,
+        routeId: scenarioRoute.routeId, path: scenarioRoute.path, params: scenarioRoute.params,
+      }, connection,
+    })
+
+    expect(reviewer.authorized).toBe(true)
+    close()
+    expect(broker.isAgentRuntimeLeaseActive(identity, reviewer.lease!.leaseId)).toBe(false)
+  })
+
   it('closes active and queued prompts when the plugin generation is replaced', async () => {
     const dom = new JSDOM('<html><body></body></html>', { pretendToBeVisual: true })
     const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), new BrowserPermissionPrompt(dom.window.document))

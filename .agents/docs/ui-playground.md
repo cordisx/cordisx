@@ -124,10 +124,15 @@ Steps support `assistant-reply`, `final-summary`, `tool-call`, `tool-result`,
 actor only after the existing Room bridge admits a Session whose exact Agent
 identity and task text match the declaration. `activate-session-scope` requires
 that bound actor and derives its exact Session, plugin owner, and route from
-Host authorities; it accepts none of those values from the fixture. It keeps
-the visible Lead route intact while the delegated exact route is active, waits
-for normal `approvals.request` authorization, and closes on the first run,
-route, generation, permission, connection, reset, or disposal fence. Scenario
+Host authorities; it accepts none of those values from the fixture. The Host
+captures the originating Shell Room binding, active run, source Session, and
+source MessageId while the composer command is accepted, then commits that
+capability only when the same Agent submission is accepted. Asynchronous
+scenario steps therefore never recover authority from a transient foreground
+route lookup. It keeps the visible Lead route intact while the delegated exact
+route is active, waits for normal `approvals.request` authorization, and closes
+on the first run, Room unmount/navigation, generation, permission, connection,
+reset, or disposal fence. Scenario
 progress is an ignorable Host SessionEvent in
 the same durable Session ledger; tool, approval, assistant, and terminal facts
 use their existing SessionEvent variants. The run identity derives from source

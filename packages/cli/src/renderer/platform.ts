@@ -1304,6 +1304,32 @@ export class PermissionBroker {
     }
   }
 
+  /** Host Playground Shell only: mount an exact route from a captured Room binding. */
+  activateCapturedPlaygroundScenarioAgentRuntimeRoute(
+    authority: PlaygroundScenarioAgentRuntimeRouteAuthority,
+    scope: AgentRuntimeRouteScope,
+  ): () => void {
+    if (!this.playgroundScenarioAgentRuntimeRouteAuthorities.has(authority)) {
+      throw new Error('Playground scenario Agent Session route authority is invalid')
+    }
+    if (!validAgentRuntimeRoute(scope) || this.playgroundScenarioAgentRuntimeRoutes.has(scope.routeInstanceId)) {
+      throw new Error('Playground scenario captured Agent Session route scope is invalid')
+    }
+    const record = Object.freeze({
+      route: Object.freeze({ ...scope, owner: Object.freeze({ ...scope.owner }), params: Object.freeze({ ...scope.params }) }),
+      baseRouteInstanceId: scope.routeInstanceId,
+    })
+    this.playgroundScenarioAgentRuntimeRoutes.set(scope.routeInstanceId, record)
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      if (this.playgroundScenarioAgentRuntimeRoutes.get(scope.routeInstanceId) !== record) return
+      this.playgroundScenarioAgentRuntimeRoutes.delete(scope.routeInstanceId)
+      this.fenceAgentRuntimeRouteInstance(scope.routeInstanceId, 'route-replaced')
+    }
+  }
+
   async seedAgentRuntimePolicies(
     authority: DevelopmentAgentRuntimePolicySeedAuthority,
     identity: CordisXPluginIdentity,

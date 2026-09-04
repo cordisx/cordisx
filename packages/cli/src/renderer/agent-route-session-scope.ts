@@ -110,6 +110,17 @@ export class AgentRouteSessionScopeAuthority {
     }
   }
 
+  /** Host-only readback of one installed exact dynamic permission route. */
+  permissionRoute(owner: PluginOwnerIdentity, capability: AgentRuntimeCapability): AgentRouteDefinition | undefined {
+    const declaration = this.declarations.get(owner.pluginId)?.find(item => item.declaration.name === capability)?.declaration
+    const scope = declaration?.scope.sessionIds
+    if (!isBinding(scope)) return undefined
+    const route = this.options.routes(owner.pluginId).find(item => item.id === scope.routeId)
+    return route === undefined || !routeHasParam(route.path, scope.param)
+      ? undefined
+      : Object.freeze({ ...route })
+  }
+
   uninstall(owner: string): void { this.fence(owner, 'plugin-generation-replaced') }
 
   subscribe(listener: (owner: string, sessionId: string, code: AgentRouteFenceCode) => void): () => void {

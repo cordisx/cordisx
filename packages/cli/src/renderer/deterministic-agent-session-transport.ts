@@ -406,6 +406,11 @@ export class DeterministicAgentSessionTransport implements CordisXPrivateAgentDr
       }
       for (const actor of scenario.actors.values()) this.releaseScenarioActor(actor)
       scenario.scopeActivation?.close()
+      this.scenarioSessionScope?.release({
+        sourceMessageId: scenario.sourceMessageId,
+        sourceSessionId: leadSessionId,
+        runId: scenario.runId,
+      })
       this.scenarioRuns.delete(scenario)
     }
   }
@@ -470,6 +475,7 @@ export class DeterministicAgentSessionTransport implements CordisXPrivateAgentDr
       )
       const activated = await client.activate({
         runId: scenario.runId,
+        sourceMessageId: scenario.sourceMessageId,
         sourceSessionId: lead.sessionId,
         targetSessionId: actor.sessionId,
       })
