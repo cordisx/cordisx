@@ -88,6 +88,45 @@ describe('Playground scenario exact Session scope authority', () => {
     expect(mounted).toBeUndefined()
   })
 
+  it('activates a single newly admitted Session scope only after its v2 command capture commits', async () => {
+    let mounted: AgentRuntimeRouteScope | undefined
+    const authority = new PlaygroundScenarioSessionScopeAuthority({
+      hostGeneration: 'playground-generation-v2', connectionGeneration: () => 2,
+      currentRoute: () => undefined,
+      ownerForSession: sessionId => ['cx-session.lead', 'cx-session.created-in-command', 'cx-session.delegated'].includes(sessionId) ? owner : undefined,
+      routeOwner: agentOwner => agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation ? plugin : undefined,
+      permissionRoute: () => ({ routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }),
+      authorize: async () => true,
+      mountRoute: route => { mounted = route; return () => { mounted = undefined } },
+      changed: () => {},
+    })
+    const origin = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json',
+      contract: 'cordisx.agent-command-origin/v1', schemaVersion: 1 as const,
+      originId: 'origin-single-target', binding: { bindingId: 'binding-single-target', ownerGeneration: 'owner-generation-one' },
+      generation: 'plugin-generation-one', executionId: 'execution-single-target', commandId: 'chatroom.message.submit', scope: 'composer-submit' as const,
+      room: { roomId: 'room-one', participantId: 'lead', memberId: 'member-lead', runId: 'room-run-lead' },
+    }
+    await authority.conversationSource.execute({
+      owner: owner.pluginId, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
+      snapshotGeneration: 'snapshot-single-target', roomId: origin.room.roomId, routeId: 'chatroom:room',
+      runs: [{ runId: origin.room.runId, sessionId: 'cx-session.lead', participantId: origin.room.participantId, memberId: origin.room.memberId }], active: () => true, admissionOrigin: origin,
+    }, async () => {
+      const capture = authority.captureAdmission(owner, origin, 'cx-session.created-in-command', 1, 'cx-message.created-in-command')
+      expect(capture?.active()).toBe(true)
+      capture?.commit()
+    })
+    const activated = await authority.client.activate({
+      runId: 'scenario-single-target', sourceMessageId: 'cx-message.created-in-command',
+      sourceSessionId: 'cx-session.created-in-command', targetSessionId: 'cx-session.delegated',
+    })
+    expect(activated.status).toBe('available')
+    expect(mounted?.params.sessionId).toBe('cx-session.delegated')
+    if (activated.status === 'available') activated.handle.close()
+    await expect(activated.status === 'available' ? activated.handle.closed : Promise.resolve()).resolves.toMatchObject({ code: 'completed' })
+    authority.dispose()
+  })
+
   it('fails closed when origin capture is missing, crossed, stale, or navigated away before activation', async () => {
     let shellActive = true
     let sourceOwner = owner

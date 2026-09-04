@@ -712,6 +712,59 @@ describe('Agent conversation shell public runtime', () => {
     await settle(); dom.window.close()
   })
 
+  it.each([1, 2, 3])('issues one immutable Shell v8 command origin for N=%i exact Room deliveries', async count => {
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    let commandContext: CordisXCommandContext | undefined
+    commands.register('chatroom', { id: 'send-v8', title: { key: 'send-v8', fallback: 'Send' } }, context => { commandContext = context })
+    const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
+    const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-v8' })
+    const stream = new PageStream()
+    let binding: AgentConversationShellBinding | undefined
+    const registration = runtime.register(plugin, currentBinding => {
+      binding = currentBinding
+      const snapshot: AgentConversationShellSnapshotV7 = {
+        binding: { bindingId: currentBinding.bindingId, ownerGeneration: currentBinding.ownerGeneration }, generation: 'snapshot-v8', snapshotSequence: 0,
+        selection: {
+          kind: 'room', roomId: 'room-v8', title: message('room.v8', 'V8 room'), multiParticipant: false, participantPresentation: 'none',
+          participants: Array.from({ length: count }, (_, index) => ({ participantId: ['lead', 'reviewer', 'integrator'][index]!, role: 'agent' as const, displayName: message(`participant-${index}`, `Participant ${index + 1}`) })),
+          activeRuns: Array.from({ length: count }, (_, index) => ({
+            participantId: ['lead', 'reviewer', 'integrator'][index]!, memberId: `member-${index + 1}`, runId: `run-${index + 1}`,
+            sessionId: `cx-session.${index + 1}`, lifecycle: { phase: 'active' as const },
+          })),
+        },
+        items: [], composer: { availability: 'available', placeholder: message('composer', 'Message'), disabled: { value: false }, shortcutPolicy: 'enter', submit: { id: 'send-v8' } }, headerActions: [],
+      }
+      const subscription = { subscriptionId: 'subscription-v8', binding: snapshot.binding, generation: snapshot.generation, afterSequence: 0, snapshotSequence: 0 }
+      return {
+        snapshot: async () => snapshot,
+        subscribe: async () => ({ result: { type: 'subscribe' as const, status: 'accepted' as const, code: 'allowed' as const, subscription }, handle: {
+          subscription, pages: stream, closed: new Promise<never>(() => {}), unsubscribe: async () => { stream.close() },
+        } }),
+        dispose() {},
+      }
+    }, undefined, 8)
+    registration.mount(mountContext(dom, { roomId: 'room-v8' }))
+    await vi.waitFor(() => expect(dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')).not.toBeNull())
+    const draft = dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')?.set
+    setter?.call(draft, 'single-target reservation')
+    draft.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    const send = dom.window.document.querySelector<HTMLButtonElement>('.cxa-send')!
+    await vi.waitFor(() => expect(send.disabled).toBe(false))
+    send.click()
+    await vi.waitFor(() => expect(commandContext?.hostContext).toMatchObject({
+      scope: 'composer-submit', origin: {
+        binding: { bindingId: binding!.bindingId, ownerGeneration: binding!.ownerGeneration }, generation: binding!.ownerGeneration,
+        commandId: 'send-v8', room: { roomId: 'room-v8', participantId: 'lead', memberId: 'member-1', runId: 'run-1' },
+      },
+    }))
+    const origin = (commandContext?.hostContext as { readonly origin?: object }).origin
+    expect(Object.isFrozen(origin)).toBe(true)
+    expect(Object.isFrozen((origin as { readonly binding: object }).binding)).toBe(true)
+    registration.dispose(); runtime.dispose(); commands.dispose(); await settle(); dom.window.close()
+  })
+
   it('opens recovered Shell v4 AgentSetup identity details from members and avatars, then fences stale generations', async () => {
     const dom = installDom()
     const commands = new CommandRegistry()

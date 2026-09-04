@@ -5,6 +5,7 @@ import type { ApprovalService as ApprovalServiceV1 } from '@cordisx/protocol/app
 import type { ApprovalService as ApprovalServiceV2 } from '@cordisx/protocol/approval/v2'
 import type { ApprovalService as ApprovalServiceV3 } from '@cordisx/protocol/approval/v3'
 import type { AgentAdmissionReservationService } from '@cordisx/protocol/agent-admission/v2'
+import type { AgentAdmissionTargetOriginService, AgentAdmissionTargetReservationService } from '@cordisx/protocol/agent-admission/v3'
 import type { SessionId, SessionRegistry } from '@cordisx/protocol/sessions/v1'
 
 export const CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1 =
@@ -62,7 +63,12 @@ declare module '@deepseek-ai/cordis' {
     agents: CordisXAgentRegistryV1
     sessions: SessionRegistry
     approvals: ApprovalServiceV1 & ApprovalServiceV2 & ApprovalServiceV3
+    /** Host-owned v2 one-shot pre-submit admission; it never exposes a driver. */
     agentAdmission: AgentAdmissionReservationService
+    /** Host-owned v3 issuer for one exact Shell delivery; opaque tokens are command-scoped. */
+    agentAdmissionOrigins: AgentAdmissionTargetOriginService
+    /** Host-owned v3 one-shot reservation for an issued target origin; it never exposes a driver. */
+    agentAdmissionReservations: AgentAdmissionTargetReservationService
     entities: EntityRegistry
   }
 }

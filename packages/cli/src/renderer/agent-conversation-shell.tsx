@@ -1325,7 +1325,7 @@ class MountedConversation {
       || typeof sourceCandidate.snapshot !== 'function' || typeof sourceCandidate.subscribe !== 'function' || typeof sourceCandidate.dispose !== 'function') {
       throw new Error('conversation source must implement snapshot, subscribe, and dispose')
     }
-    const source = sourceCandidate as unknown as AgentConversationShellSource | AgentConversationShellSourceV4 | AgentConversationShellSourceV5 | AgentConversationShellSourceV6 | AgentConversationShellSourceV7
+    const source = sourceCandidate as unknown as AgentConversationShellSource | AgentConversationShellSourceV4 | AgentConversationShellSourceV5 | AgentConversationShellSourceV6 | AgentConversationShellSourceV7 | AgentConversationShellSourceV8
     this.source = source
     const initial = immutableSnapshot(await this.runPlugin<unknown>('agent-conversation-shell.snapshot', () => source.snapshot()))
     if (this.record.version >= 7) assertSnapshotV7(initial)
@@ -1696,18 +1696,46 @@ class MountedConversation {
           : projectSnapshot(this.record.owner, this.snapshot as AgentConversationShellSnapshot, localization)
       const controller = new AgentConversationCommandController({
         execute: async request => {
+          const isComposerSubmit = request.context.scope === 'composer-submit' && model.selection.kind === 'room'
+          const activeRuns = model.selection.kind === 'room' ? model.selection.activeRuns ?? [] : []
+          const runs = activeRuns.flatMap(run => (
+            'sessionId' in run ? [{
+              runId: run.runId, sessionId: run.sessionId,
+              participantId: run.participantId, memberId: run.memberId,
+            }] : []
+          ))
+          const roomId = model.selection.kind === 'room' ? model.selection.roomId : undefined
+          const admissionOrigin = this.record.version !== 8 || !isComposerSubmit || roomId === undefined
+            || activeRuns.length < 1
+            ? undefined
+            : (() => {
+                // The v1 origin remains the exact command authority. v3 mints
+                // a separate opaque capability for every resolved delivery.
+                const run = activeRuns[0]!
+                return Object.freeze({
+                  $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json' as const,
+                  contract: 'cordisx.agent-command-origin/v1' as const,
+                  schemaVersion: 1 as const,
+                  originId: `cx-command-origin.${crypto.randomUUID()}`,
+                  binding: Object.freeze({ bindingId: this.binding.bindingId, ownerGeneration: this.binding.ownerGeneration }),
+                  generation: this.record.effect.moduleGeneration ?? this.record.ownerGeneration,
+                  executionId: request.invocationKey,
+                  commandId: request.reference.id,
+                  scope: 'composer-submit' as const,
+                  room: Object.freeze({ roomId, participantId: run.participantId, memberId: run.memberId, runId: run.runId }),
+                })
+              })()
           const execute = async () => await this.commands.executeConversationFor(
-            request.ownerId, request.reference, request.invocationKey, request.context,
+            request.ownerId,
+            request.reference,
+            request.invocationKey,
+            admissionOrigin === undefined ? request.context : { ...request.context, origin: admissionOrigin } as never,
           )
-          if (this.scenarioSource === undefined || request.context.scope !== 'composer-submit'
-            || model.selection.kind !== 'room') return await execute()
+          // v1–v7 and v8 calls without a valid one-run Room origin deliberately
+          // retain their predecessor command behavior.
+          if (this.scenarioSource === undefined || !isComposerSubmit || roomId === undefined || runs.length === 0) return await execute()
           const scenarioOwner = this.scenarioOwner?.(this.record.owner, this.record.effect.moduleGeneration)
           if (scenarioOwner === undefined) return await execute()
-          const runs = (model.selection.activeRuns ?? []).flatMap(run => (
-            'sessionId' in run ? [{ runId: run.runId, sessionId: run.sessionId }] : []
-          ))
-          if (runs.length === 0) return await execute()
-          const roomId = model.selection.roomId
           const snapshotGeneration = model.generation
           const sourceStillActive = (): boolean => {
             const currentSelection = this.snapshot?.selection
@@ -1719,30 +1747,6 @@ class MountedConversation {
             return runs.every(run => currentRuns.some(current => 'sessionId' in current
               && current.runId === run.runId && current.sessionId === run.sessionId))
           }
-          const moduleGeneration = this.record.effect.moduleGeneration
-          const admissionOrigin = this.record.version !== 8 || moduleGeneration === undefined || (model.selection.activeRuns ?? []).length !== 1
-            ? undefined
-            : (() => {
-                const run = model.selection.activeRuns![0]!
-                return Object.freeze({
-                  $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json' as const,
-                  contract: 'cordisx.agent-command-origin/v1' as const,
-                  schemaVersion: 1 as const,
-                  originId: `cx-command-origin.${crypto.randomUUID()}`,
-                  binding: Object.freeze({ bindingId: this.binding.bindingId, ownerGeneration: this.binding.ownerGeneration }),
-                  generation: moduleGeneration!,
-                  executionId: request.invocationKey,
-                  commandId: request.reference.id,
-                  scope: 'composer-submit' as const,
-                  room: Object.freeze({ roomId, participantId: run.participantId, memberId: run.memberId, runId: run.runId }),
-                })
-              })()
-          const executeWithOrigin = async () => await this.commands.executeConversationFor(
-            request.ownerId,
-            request.reference,
-            request.invocationKey,
-            admissionOrigin === undefined ? request.context : { ...request.context, origin: admissionOrigin } as never,
-          )
           const scenarioOrigin = {
             owner: scenarioOwner,
             bindingId: this.binding.bindingId,
@@ -1753,9 +1757,10 @@ class MountedConversation {
             runs,
             active: sourceStillActive,
           }
-          return admissionOrigin === undefined
-            ? await this.scenarioSource.execute(scenarioOrigin, executeWithOrigin)
-            : await this.scenarioSource.execute({ ...scenarioOrigin, admissionOrigin }, executeWithOrigin)
+          return await this.scenarioSource.execute(
+            admissionOrigin === undefined ? scenarioOrigin : { ...scenarioOrigin, admissionOrigin },
+            execute,
+          )
         },
       }, model)
       this.root.render(<AgentConversationRenderer

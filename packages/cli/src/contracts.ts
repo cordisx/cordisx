@@ -1045,7 +1045,7 @@ export interface CordisXCommandContext {
   readonly arguments: CordisXJsonValue | undefined
   readonly signal: AbortSignal
   readonly invocationKey: string
-  readonly hostContext?: CordisXSurfaceInvocationContextV1 | AgentConversationShellCommandContext | AgentConversationShellCommandContextV7
+  readonly hostContext?: CordisXSurfaceInvocationContextV1 | AgentConversationShellCommandContext | AgentConversationShellCommandContextV7 | AgentConversationShellCommandContextV8
 }
 
 export interface CordisXSurfaceInvocationContextV1 {
@@ -1400,7 +1400,7 @@ export interface CordisXAgentConversationShell {
   registerSourceV6(factory: CordisXAgentConversationShellSourceFactoryV6): CordisXAgentConversationShellRegistration
   /** Shell v7 binds requester-authored approvals to one exact live authority. */
   registerSourceV7(factory: CordisXAgentConversationShellSourceFactoryV7): CordisXAgentConversationShellRegistration
-  /** Shell v8 supplies a Host-generated one-shot Agent admission origin. */
+  /** Shell v8 attaches a Host-generated command origin only to composer submit. */
   registerSourceV8(factory: CordisXAgentConversationShellSourceFactoryV8): CordisXAgentConversationShellRegistration
 }
 
