@@ -151,7 +151,7 @@ function ApprovalEntry({ entry, model, commands, copy, onCommandError, onOpenMen
                       if (articleRef.current?.contains(event.relatedTarget as Node | null) !== true) approvalActionHadFocus.current = false
                     }}
                     onClick={() => { void commands.runApproval(model, entry, action).catch(onCommandError) }}
-                  ><HostSurfaceIcon token={approve ? 'host:success' : 'host:close'} /><span>{actionLabel}</span></button>
+                  ><HostSurfaceIcon token={approve ? 'host:success' : 'host:close'} /></button>
                 })}
               </div> : <span className="cxa-approval-outcome" data-state={entry.state} role="status">
                 <HostSurfaceIcon token={entry.state === 'approved' ? 'host:success' : entry.state === 'failed' ? 'host:error' : 'host:close'} />
