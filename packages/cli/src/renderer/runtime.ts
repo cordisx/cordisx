@@ -1705,7 +1705,7 @@ async function start(
         }
       },
     })
-    pluginContext = ctx.isolate('connectors').isolate('agentLoop').isolate('agents').isolate('sessions').isolate('approvals').isolate('agentAdmission').isolate('entities').isolate('documents').extend({
+    pluginContext = ctx.isolate('connectors').isolate('agentLoop').isolate('agents').isolate('sessions').isolate('approvals').isolate('agentAdmission').isolate('agentAdmissionOrigins').isolate('agentAdmissionReservations').isolate('agentAdmissionBootstrapTargets').isolate('agentAdmissionBootstrapReservations').isolate('entities').isolate('documents').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
