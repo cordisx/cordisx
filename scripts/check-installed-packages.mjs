@@ -63,7 +63,15 @@ async function expectMissing(target, label) {
 
 async function verifyGeneratedProject(project, cordisxTarball, expectedVersion) {
   const packagePath = path.join(project, 'package.json')
-  const manifest = JSON.parse(await readFile(packagePath, 'utf8'))
+  const [manifestSource, englishReadme, simplifiedChineseReadme] = await Promise.all([
+    readFile(packagePath, 'utf8'),
+    readFile(path.join(project, 'README.md'), 'utf8'),
+    readFile(path.join(project, 'README.zh-Hans.md'), 'utf8'),
+  ])
+  const manifest = JSON.parse(manifestSource)
+  if (!englishReadme.includes('CordisX plugin') || !simplifiedChineseReadme.includes('CordisX')) {
+    throw new Error('generated plugin must include English and Simplified Chinese README fallbacks')
+  }
   if (manifest.license !== 'UNLICENSED') {
     throw new Error('generated plugin must leave its author an explicit license choice')
   }

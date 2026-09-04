@@ -323,6 +323,37 @@ them. Stopping `cordisx dev` cancels debounce/poll timers,
 waits for the active attempt, removes CDP installation state, and terminates
 only the launcher's owned Host process/profile resources.
 
+New independent plugins begin with the published `create-cordisx-plugin`
+scaffolder. The Agent infers a product slug, creates one normal project, and
+then launches its generated entry through `cordisx dev <entry>`. CordisX does
+not create or reuse a shared scratch plugin. Each generated project retains its
+own package metadata, README, localization, tests, and future distribution
+choices.
+
+Creation remains private and `UNLICENSED` by default. Publication metadata is
+requested only when the user asks to share or publish, and an already explicit
+publication request is not followed by a redundant confirmation.
+
+Before a direct-entry Host starts, CordisX deploys its bundled
+plugin-development Skill into the Host's effective `HOME` and projects two
+launcher-owned environment facts into the process: `CORDISX_DEV_ENTRY` is the
+absolute watched entry and `CORDISX_DEV_MODE` is `explicit-entry`. The Skill
+directs the in-session Codex agent to edit that exact scaffolded project and to
+use only versioned public contracts. Saving the entry follows the normal
+debounced candidate build, generation transaction, last-good retention, and
+cleanup described above; neither the agent nor the Skill starts or restarts
+CordisX.
+
+Direct-entry development may carry one launcher-authenticated, Host-private
+control grant for the maintained submit-celebration profile. The grant matches
+the stable local-development source and plugin id plus the exact
+`composer.toolbar.items` contribution/claim ids, `proxy` mode, priority, safe
+binding lists, and `cordisx.composer-submit-celebration/v1` profile. It does
+not authorize another contribution or another plugin. The normal Permission
+Broker remains the authority for every non-matching extension-point request.
+The grant is bundled only into the launcher-created renderer composition and
+is omitted from public runtime/control snapshots.
+
 Publishing is allowed only from merged `main` through
 `.github/workflows/release-beta.yml`, on a GitHub-hosted runner with OIDC and the
 `npm-beta` GitHub environment. Each npm package configures that exact repository,

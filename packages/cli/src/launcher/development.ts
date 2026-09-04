@@ -40,6 +40,7 @@ export interface LocalDevelopmentBuild {
   readonly watchFiles: readonly string[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
   readonly readme?: string
+  readonly readmes?: Readonly<Record<string, string>>
 }
 
 interface LocalDevelopmentBuildOptions {
@@ -111,15 +112,28 @@ export async function localDevelopmentPluginIdentity(rawEntry: string): Promise<
   return { id: pluginId(resolved.entry), source: resolved.identitySource }
 }
 
-async function readReadme(root: string): Promise<{ readonly text?: string; readonly files: readonly string[] }> {
+async function readReadmes(root: string): Promise<{
+  readonly default?: string
+  readonly localized: Readonly<Record<string, string>>
+  readonly files: readonly string[]
+}> {
   const names = await readdir(root).catch(() => [])
   const files = names
     .filter(name => /^README(?:\.[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)?\.(?:md|markdown)$/iu.test(name))
     .map(name => path.join(root, name))
     .sort()
-  const fallback = files.find(file => /^README\.(?:md|markdown)$/iu.test(path.basename(file)))
+  const values = await Promise.all(files.map(async file => {
+    const match = /^README(?:\.([A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*))?\.(?:md|markdown)$/iu.exec(path.basename(file))
+    return {
+      file,
+      locale: match?.[1]?.toLocaleLowerCase(),
+      source: await readFile(file, 'utf8'),
+    }
+  }))
+  const fallback = values.find(value => value.locale === undefined)?.source
   return {
-    ...(fallback === undefined ? {} : { text: await readFile(fallback, 'utf8') }),
+    ...(fallback === undefined ? {} : { default: fallback }),
+    localized: Object.fromEntries(values.flatMap(value => value.locale === undefined ? [] : [[value.locale, value.source]])),
     files,
   }
 }
@@ -214,9 +228,9 @@ export async function buildLocalDevelopmentPlugin(
     write: false,
     logLevel: 'silent' as const,
   }
-  const [moduleResult, readme, packageSource] = await Promise.all([
+  const [moduleResult, readmes, packageSource] = await Promise.all([
     build({ entryPoints: [entry], format: 'iife', globalName: '__cordisxPluginModule', ...common }),
-    readReadme(root),
+    readReadmes(root),
     readRendererOnlyPackage(root),
   ])
   if (moduleResult.metafile === undefined) {
@@ -238,7 +252,9 @@ export async function buildLocalDevelopmentPlugin(
     .update('\0')
     .update(version)
     .update('\0')
-    .update(readme.text ?? '')
+    .update(readmes.default ?? '')
+    .update('\0')
+    .update(JSON.stringify(readmes.localized))
     .update('\0')
     .update(JSON.stringify(packageSource.entityTemplates))
     .digest('hex')}` as const
@@ -256,11 +272,17 @@ export async function buildLocalDevelopmentPlugin(
       entry,
       path.join(root, 'package.json'),
       ...packageSource.files,
-      ...readme.files,
+      ...readmes.files,
       ...absoluteInputs(root, moduleResult.metafile.inputs),
     ])].sort(),
     entityTemplates: packageSource.entityTemplates,
-    ...(readme.text === undefined ? {} : { readme: readme.text }),
+    ...(readmes.default === undefined ? {} : { readme: readmes.default }),
+    ...(Object.keys(readmes.localized).length === 0 ? {} : {
+      readmes: {
+        ...(readmes.default === undefined ? {} : { default: readmes.default }),
+        ...readmes.localized,
+      },
+    }),
   }
 }
 
@@ -604,6 +626,7 @@ export class LocalDevelopmentController {
         moduleFactorySource: build.moduleFactorySource,
         development: readyState,
         ...(build.readme === undefined ? {} : { readme: build.readme }),
+        ...(build.readmes === undefined ? {} : { readmes: build.readmes }),
       }],
     }
     let nextBootstrap: string
@@ -656,6 +679,7 @@ export class LocalDevelopmentController {
           identitySource: this.identitySource,
           development: readyState,
           ...(build.readme === undefined ? {} : { readme: build.readme }),
+          ...(build.readmes === undefined ? {} : { readmes: build.readmes }),
         },
       })
       if (attempt !== this.desiredAttempt || this.stopped) {
