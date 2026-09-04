@@ -89,6 +89,7 @@ import type {
   AgentAdmissionTargetReservationResult,
   AgentAdmissionTargetReservationService,
 } from '@cordisx/protocol/agent-admission/v3'
+import type { PluginApprovalAuthorityLeaseV8 } from '@cordisx/protocol/plugin-manifest/v8'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from './service.js'
 import { generationFromContext } from './ownership.js'
 import {
@@ -193,6 +194,16 @@ export interface CordisXPrivateAgentDriver {
 export interface CordisXAgentSessionRuntimeOptions {
   readonly driver: CordisXPrivateAgentDriver
   readonly authorize: (owner: PluginOwnerIdentity, capability: AgentRuntimeCapability, sessionId?: string) => Promise<boolean>
+  /** Host-only v8 authority lease minting after an accepted v3 resolver correlation. */
+  readonly mintApprovalAuthorityLease?: (owner: PluginOwnerIdentity, input: {
+    readonly routingId: string
+    readonly registrationId: string
+    readonly requester: ApprovalAgentBinding
+    readonly authority: ApprovalAgentBinding
+  }) => Promise<PluginApprovalAuthorityLeaseV8 | undefined>
+  readonly requiresApprovalAuthorityLease?: (owner: PluginOwnerIdentity) => boolean
+  readonly approvalAuthorityLeaseActive?: (owner: PluginOwnerIdentity, lease: PluginApprovalAuthorityLeaseV8, requester: ApprovalAgentBinding, authority: ApprovalAgentBinding) => boolean
+  readonly releaseApprovalAuthorityLease?: (lease: PluginApprovalAuthorityLeaseV8) => void
   /** Host-only manifest/route declaration check; it must not materialize permission authority. */
   readonly declares?: (owner: PluginOwnerIdentity, capability: AgentRuntimeCapability) => boolean
   readonly now?: () => number
@@ -708,7 +719,7 @@ export class CordisXAgentSessionRuntime {
     return handle as ApprovalAnswererHandleV1
   }
 
-  async requestApprovalV2(owner: PluginOwnerIdentity, request: ApprovalRequestV2): Promise<ApprovalDecisionV2> {
+  async requestApprovalV2(owner: PluginOwnerIdentity, request: ApprovalRequestV2, authorityLease?: PluginApprovalAuthorityLeaseV8): Promise<ApprovalDecisionV2> {
     if (!opaque(request.toolName) || request.callId !== undefined && !opaque(request.callId)
       || request.reason.kind !== 'plain-text' || typeof request.reason.text !== 'string'
       || request.reason.text.length < 1 || request.reason.text.length > 10_000
@@ -749,7 +760,9 @@ export class CordisXAgentSessionRuntime {
     let outcome: ApprovalOutcome = request.signal?.aborted === true ? 'cancelled' : 'unavailable'
     if (outcome !== 'cancelled' && answerer !== undefined && answerer.closed === undefined
       && this.current(requester) && this.current(authority)
-      && await this.allowed(answerer.owner, 'approvals.answer', authority.id)
+      && (authorityLease === undefined
+        ? await this.allowed(answerer.owner, 'approvals.answer', authority.id)
+        : this.options.approvalAuthorityLeaseActive?.(answerer.owner, authorityLease, this.approvalBinding(requester), this.approvalBinding(authority)) === true)
       && answerer.closed === undefined && this.authorityAnswerers.get(this.answererKey(authority)) === answerer
       && this.current(requester) && this.current(authority)) {
       try {
@@ -1351,16 +1364,24 @@ export class CordisXAgentSessionRuntime {
     if (resolvedRequester !== requester || authority === undefined
       || !this.sameOwner(resolver.owner, resolvedRequester.owner) || !this.sameOwner(resolver.owner, authority.owner)
       || !await this.allowed(resolver.owner, 'approvals.request', requester.id)
-      || !await this.allowed(resolver.owner, 'approvals.answer', authority.id)
+      || (this.options.requiresApprovalAuthorityLease?.(resolver.owner) !== true
+        && !await this.allowed(resolver.owner, 'approvals.answer', authority.id))
       || !this.requestResolverCurrent(requester, resolver) || !this.current(authority)) return 'unavailable'
+    const authorityLease = await this.options.mintApprovalAuthorityLease?.(resolver.owner, {
+      routingId: question.routingId, registrationId: resolver.registration.registrationId,
+      requester: this.approvalBinding(requester), authority: this.approvalBinding(authority),
+    })
+    if (authorityLease === undefined && this.options.requiresApprovalAuthorityLease?.(resolver.owner) === true) return 'unavailable'
+    try {
     const decision = await this.requestApprovalV2(resolver.owner, {
       requester: { agent: this.agent(resolver.owner, requester), definition: clone(requester.definition!) },
       authority: { agent: this.agent(resolver.owner, authority), definition: clone(authority.definition!) },
       toolName: request.toolName,
       ...(request.callId === undefined ? {} : { callId: request.callId }),
       reason: clone(question.reason),
-    })
+    }, authorityLease)
     return decision.outcome
+    } finally { if (authorityLease !== undefined) this.options.releaseApprovalAuthorityLease?.(authorityLease) }
   }
 
   private emitDriverStatus(event: CordisXDriverAgentStatus): void {

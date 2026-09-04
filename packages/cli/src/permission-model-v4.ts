@@ -6,7 +6,7 @@ import {
   CORDISX_PERMISSION_POLICY_SCHEMA_V4,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
   type CordisXCapabilityDeclarationV4,
   type CordisXCapabilityDeclarationV5,
   type CordisXCertifiedPermissionProjectionV1,
@@ -20,7 +20,7 @@ import {
   type CordisXPermissionScopeV4,
   type CordisXPluginManifestV5,
   type CordisXPluginManifestV6,
-  type CordisXPluginManifestV7,
+  type CordisXPluginManifestV8,
   type CordisXPluginServiceConfigurationV4,
   type CordisXPluginServiceDeclarationV4,
 } from './permission-contracts.js'
@@ -412,37 +412,56 @@ export function normalizePluginManifestV6(
   }) as CordisXPluginManifestV6
 }
 
-export function normalizePluginManifestV7(
+/** Additive v8: only approval answer may bind a distinct authority to its requester route. */
+export function normalizePluginManifestV8(
   value: unknown,
   expectedId: string,
   catalog: PermissionCapabilityCatalogBoundaryV4,
-): CordisXPluginManifestV7 {
+): CordisXPluginManifestV8 {
   const manifest = object(value, 'plugin manifest')
-  exact(manifest, ['$schema', 'schemaVersion', 'id', 'name', 'capabilities', 'services', 'execution'], 'plugin manifest')
-  if (manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 || manifest.schemaVersion !== 7) {
-    throw new Error('plugin manifest schema is unsupported')
-  }
-  if (Array.isArray(manifest.capabilities) && manifest.capabilities.some(capability => (
-    capability !== null && typeof capability === 'object' && !Array.isArray(capability)
-      && isHostDomPermissionCapability((capability as Record<string, unknown>).name)
-  ))) throw new Error('plugin manifest-v7 must not declare Host DOM capabilities')
-  const { execution: _execution, ...baseManifest } = manifest
-  const base = normalizePluginManifestV6({ ...baseManifest,
-    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
-    schemaVersion: 6,
-  }, expectedId, catalog)
-  const execution = object(manifest.execution, 'plugin manifest.execution')
-  exact(execution, ['realm', 'interfaces'], 'plugin manifest.execution')
-  if (execution.realm !== 'isolated-worker' || !Array.isArray(execution.interfaces)
-    || execution.interfaces.length !== 1 || execution.interfaces[0] !== 'ui.transient-canvas/v1') {
-    throw new Error('plugin manifest.execution must select only ui.transient-canvas/v1 in isolated-worker')
-  }
-  return Object.freeze({
-    ...base,
-    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
-    schemaVersion: 7,
-    execution: Object.freeze({ realm: 'isolated-worker', interfaces: Object.freeze(['ui.transient-canvas/v1'] as const) }),
-  }) as CordisXPluginManifestV7
+  exact(manifest, ['$schema', 'schemaVersion', 'id', 'name', 'capabilities', 'services'], 'plugin manifest')
+  if (manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 || manifest.schemaVersion !== 8) throw new Error('plugin manifest schema is unsupported')
+  const id = nonEmpty(manifest.id, 'plugin manifest.id', 96)
+  if (!LOCAL_ID.test(id) || id !== expectedId) throw new Error('plugin manifest id does not match its Host identity')
+  if (!Array.isArray(manifest.capabilities) || manifest.capabilities.length > 36) throw new Error('plugin manifest.capabilities must be an array of at most 36 items')
+  const seen = new Set<string>()
+  const capabilities = Object.freeze(manifest.capabilities.map((candidate, index) => {
+    const label = `plugin manifest.capabilities[${index}]`
+    const declaration = object(candidate, label)
+    let normalized: unknown
+    if (declaration.name === 'approvals.answer' && declaration.scope !== null
+      && typeof declaration.scope === 'object' && !Array.isArray(declaration.scope)
+      && 'authorityRequester' in declaration.scope) {
+      exact(declaration, ['name', 'required', 'rationale', 'security', 'scope'], label)
+      if (declaration.required !== false) throw new Error(`${label}.required is invalid`)
+      const scope = object(declaration.scope, `${label}.scope`)
+      exact(scope, ['authorityRequester'], `${label}.scope`)
+      const authorityRequester = object(scope.authorityRequester, `${label}.scope.authorityRequester`)
+      exact(authorityRequester, ['kind', 'requester'], `${label}.scope.authorityRequester`)
+      const requester = object(authorityRequester.requester, `${label}.scope.authorityRequester.requester`)
+      exact(requester, ['kind', 'routeId', 'param'], `${label}.scope.authorityRequester.requester`)
+      if (authorityRequester.kind !== 'approval-authority-requester-route' || requester.kind !== 'host-route-param'
+        || typeof requester.routeId !== 'string' || !LOCAL_ID.test(requester.routeId) || requester.param !== 'sessionId') throw new Error(`${label}.scope.authorityRequester is invalid`)
+      normalized = Object.freeze({
+        name: 'approvals.answer' as const, required: false as const,
+        ...(declaration.rationale === undefined ? {} : { rationale: normalizePermissionRationaleV2(declaration.rationale, `${label}.rationale`) }),
+        ...(declaration.security === undefined ? {} : { security: normalizePermissionSecurityV2(declaration.security, `${label}.security`) }),
+        scope: Object.freeze({ authorityRequester: Object.freeze({ kind: 'approval-authority-requester-route' as const, requester: Object.freeze({ kind: 'host-route-param' as const, routeId: requester.routeId, param: 'sessionId' as const }) }) }),
+      })
+    } else {
+      normalized = normalizeAgentRuntimeDeclarationV6(candidate, label) ?? normalizeLegacyCapabilityDeclarationV6(candidate, label)
+    }
+    const name = (normalized as { name: string }).name
+    if (seen.has(name)) throw new Error(`duplicate capability declaration: ${name}`)
+    seen.add(name)
+    if (!AGENT_RUNTIME_CAPABILITIES.has(name as AgentRuntimeCapability)) catalog.assertScope(name as CordisXPermissionCapabilityV4, (normalized as CordisXCapabilityDeclarationV4).scope)
+    return normalized
+  }))
+  if (!Array.isArray(manifest.services) || manifest.services.length > 16) throw new Error('plugin manifest.services must be an array of at most 16 items')
+  const services = Object.freeze(manifest.services.map((candidate, index) => serviceDeclaration(candidate, `plugin manifest.services[${index}]`)))
+  if (new Set(services.map(item => item.id)).size !== services.length) throw new Error('duplicate service declaration')
+  return Object.freeze({ $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V8, schemaVersion: 8, id,
+    ...(manifest.name === undefined ? {} : { name: nonEmpty(manifest.name, 'plugin manifest.name', 200) }), capabilities, services }) as CordisXPluginManifestV8
 }
 
 function normalizedForFingerprint(value: unknown): unknown {
