@@ -27,7 +27,17 @@ const SHARED_MODULES = new Set([
   'cordisx/react/jsx-dev-runtime',
   'cordisx/ui',
 ])
-const COMMONJS_INTEROP_LEAVES = ['debug', 'extend', 'raf', 'style-to-js'] as const
+const COMMONJS_INTEROP_LEAVES = [
+  'classnames',
+  'dayjs',
+  'debug',
+  'extend',
+  'hoist-non-react-statics',
+  'raf',
+  'react-fast-compare',
+  'react-is',
+  'style-to-js',
+] as const
 const sourceMode = import.meta.url.endsWith('.ts')
 const extension = sourceMode ? 'ts' : 'js'
 const rendererPath = fileURLToPath(new URL(`../renderer/runtime.${extension}`, import.meta.url))
