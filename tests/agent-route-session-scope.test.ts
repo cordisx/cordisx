@@ -158,4 +158,38 @@ describe('Host route-bound Agent Session authorization', () => {
     expect(() => legacy.validateInstalledRoutes(owner)).not.toThrow()
     await expect(legacy.authorize(owner, 'sessions.get', 'session-legacy')).resolves.toBe(true)
   })
+
+  it('defers V8 authority-requester route lookup until the same owner has registered its route, then requires exact route-v2/sessionId', () => {
+    let mounted = false
+    const authority = new AgentRouteSessionScopeAuthority({
+      activeRoute: () => undefined,
+      routes: candidate => !mounted || candidate.pluginId !== owner.pluginId || candidate.generation !== owner.generation
+        ? []
+        : [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/session/:sessionId', schemaVersion: 2 }],
+      decide: async () => ({ authorized: true }),
+      connectionGeneration: () => 1,
+    })
+    const answer = {
+      manifestVersion: 8 as const,
+      name: 'approvals.answer' as const,
+      required: false,
+      scope: { authorityRequester: { kind: 'approval-authority-requester-route' as const, requester: { kind: 'host-route-param' as const, routeId: 'room-session-detail', param: 'sessionId' } } },
+    }
+    expect(() => authority.install(owner, [answer])).not.toThrow()
+    expect(authority.declares(owner, 'approvals.answer')).toBe(false)
+    expect(() => authority.validateInstalledRoutes(owner)).toThrow('invalid approval authority requester route declaration')
+    mounted = true
+    expect(() => authority.validateInstalledRoutes(owner)).not.toThrow()
+    expect(authority.declares(owner, 'approvals.answer')).toBe(true)
+
+    const legacyRoute = new AgentRouteSessionScopeAuthority({
+      activeRoute: () => undefined,
+      routes: () => [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/session/:sessionId', schemaVersion: 1 }],
+      decide: async () => ({ authorized: true }),
+      connectionGeneration: () => 1,
+    })
+    legacyRoute.install(owner, [answer])
+    expect(() => legacyRoute.validateInstalledRoutes(owner)).toThrow('invalid approval authority requester route declaration')
+    expect(() => authority.install(owner, [{ ...answer, scope: { authorityRequester: { ...answer.scope.authorityRequester, requester: { ...answer.scope.authorityRequester.requester, param: 'otherSession' } } } }])).toThrow('invalid approval authority requester route declaration')
+  })
 })
