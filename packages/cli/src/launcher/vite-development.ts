@@ -312,9 +312,9 @@ export async function startNativeViteServer(
     const current = generations.get(plugin.id)
     if (current !== undefined) return current
     const info = await localDevelopmentPackageInfo(plugin.entry)
-    const isolatedBuild = info.manifest === undefined
-      ? undefined
-      : await buildLocalDevelopmentPlugin(plugin.entry, { sourcemap: false })
+    const isolatedBuild = info.manifest?.schemaVersion === 7
+      ? await buildLocalDevelopmentPlugin(plugin.entry, { sourcemap: false })
+      : undefined
     if (isolatedBuild !== undefined && isolatedBuild.id !== plugin.id) {
       throw new Error(`isolated development plugin id ${isolatedBuild.id} does not match config id ${plugin.id}`)
     }
@@ -344,9 +344,9 @@ export async function startNativeViteServer(
   const bumpGeneration = async (plugin: CordisXConfigPlugin): Promise<DevelopmentGeneration> => {
     const previous = await ensureGeneration(plugin)
     const info = await localDevelopmentPackageInfo(plugin.entry)
-    const isolatedBuild = info.manifest === undefined
-      ? undefined
-      : await buildLocalDevelopmentPlugin(plugin.entry, { sourcemap: false })
+    const isolatedBuild = info.manifest?.schemaVersion === 7
+      ? await buildLocalDevelopmentPlugin(plugin.entry, { sourcemap: false })
+      : undefined
     if (isolatedBuild !== undefined && isolatedBuild.id !== plugin.id) {
       throw new Error(`isolated development plugin id ${isolatedBuild.id} does not match config id ${plugin.id}`)
     }
