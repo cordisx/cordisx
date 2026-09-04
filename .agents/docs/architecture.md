@@ -455,6 +455,16 @@ Schemastery configuration remain Host-owned. The public authoring and lifecycle
 contract is specified in
 [`plugin-react-runtime.md`](plugin-react-runtime.md).
 
+The renderer also mounts one generation-aware `ctx.visuals` registry for
+bounded Host visual seats. An exact source owner and local provider id select a
+trusted React renderer. The Host passes only detached, deeply frozen opaque
+JSON data and its current light/dark theme; it never passes a Context, node,
+selector, or action authority. Registrations belong to the calling Cordis
+fiber, candidate generations stay hidden until the shared publication flip,
+rollback restores last-good visibility, and render errors are contained to an
+empty decorative seat. The complete runtime boundary is specified in
+[`plugin-visuals.md`](plugin-visuals.md).
+
 The production Agent conversation shell is a separate Host-owned renderer
 kernel under `renderer/host-ui/conversation`. Its immutable render model is a
 private, already-localized projection: it contains only bounded room,

@@ -101,6 +101,7 @@ import { CordisXCommandService } from './commands.js'
 import { CordisXAgentConversationShellService } from './agent-conversation-shell.js'
 import { HostAgentTaskDetailsNavigator, navigateHostTaskDetailsSameDocument } from './host-ui/AgentTaskDetailsNavigator.js'
 import { CordisXI18nService } from './i18n.js'
+import { CordisXVisualService } from './visuals.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
 import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter } from './codex-router-history.js'
 import {
@@ -1332,6 +1333,7 @@ async function start(
   let settingsFiber: Fiber | undefined
   let configRendererFiber: Fiber | undefined
   let iconThemeFiber: Fiber | undefined
+  let visualFiber: Fiber | undefined
   let channelManagerFiber: Fiber | undefined
   let playgroundRoomSimulationBridgeFiber: Fiber | undefined
   let disposeManager: (() => void) | undefined
@@ -3111,6 +3113,8 @@ async function start(
     configRendererFiber = undefined
     await iconThemeFiber?.dispose()
     iconThemeFiber = undefined
+    await visualFiber?.dispose()
+    visualFiber = undefined
     await channelManagerFiber?.dispose()
     channelManagerFiber = undefined
     await playgroundRoomSimulationBridgeFiber?.dispose()
@@ -3407,6 +3411,8 @@ async function start(
     await configRendererFiber
     iconThemeFiber = ctx.plugin(CordisXIconThemeService, iconThemeRegistry)
     await iconThemeFiber
+    visualFiber = ctx.plugin(CordisXVisualService)
+    await visualFiber
     channelManagerFiber = metadata.channelManager === undefined && serviceConfigBridge === undefined
       ? ctx.plugin(CordisXChannelManagerService)
       : ctx.plugin(CordisXChannelManagerService, {
