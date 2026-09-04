@@ -173,6 +173,10 @@ Navigation retains a Host-private route-owner coordinate containing the
 launcher-authenticated source, local plugin id, and module generation. Agent
 authority resolves through that coordinate without parsing its composite
 ledger owner, so equal local ids from another source cannot capture a route.
+An approval answerer is a same-owner lifecycle registration, not a permission
+grant: registration requires the installed declaration and a valid owned route
+definition but creates no route lease. The exact active Session route and
+permission policy are rechecked immediately before every handler invocation.
 No Room identifier is reinterpreted as Session authority and no approval-specific
 ledger or writer exists.
 An explicitly enabled Playground scenario may temporarily add one exact

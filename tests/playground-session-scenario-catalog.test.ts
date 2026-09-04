@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { AgentSetup } from '@cordisx/protocol/agents/v1'
+import type { Agent, AgentSetup } from '@cordisx/protocol/agents/v1'
 import type { ApprovalOutcome, UserMessage } from '@cordisx/protocol/sessions/v1'
 import { buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
 import { PlaygroundAgentSessionStore } from '../packages/cli/src/playground/agent-session-store.js'
@@ -119,6 +119,7 @@ function delegatedApprovalCatalog(): PlaygroundSessionScenarioCatalogV1 {
 function bridgeFor(
   runtime: () => CordisXAgentSessionRuntime,
   observations: { delegations: number; operationIds: string[] },
+  prepareReviewer?: (agent: Agent) => Promise<void>,
 ): PlaygroundRoomSimulationForwardingClient {
   const unavailable = { status: 'unavailable' as const, code: 'unsupported', message: 'not used' }
   return {
@@ -138,6 +139,7 @@ function bridgeFor(
         if (created.status !== 'accepted') throw new Error('Reviewer Session create failed')
         reviewer = created.handle.agent
       }
+      await prepareReviewer?.(reviewer)
       const admitted = await reviewer.followup(message(`cx-message.delegated.${observations.delegations}`, request.task))
       if (admitted.status !== 'accepted') throw new Error('Reviewer task admission failed')
       return { status: 'available', ownerGeneration: binding.ownerGeneration, value: {
@@ -262,6 +264,7 @@ describe('Host Playground Session scenario catalog', () => {
       { manifestVersion: 6, name: 'approvals.answer', required: false, scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
     ])
     let approvalOutcome: ApprovalOutcome = 'allowed-once'
+    let reviewerAnswererRegistered = false
     scopeAuthority = new PlaygroundScenarioSessionScopeAuthority({
       hostGeneration: 'playground-generation-one',
       connectionGeneration: () => 1,
@@ -269,19 +272,16 @@ describe('Host Playground Session scenario catalog', () => {
       ownerForSession: sessionId => runtime?.ownerForSession(sessionId),
       routeOwner: agentOwner => agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation ? plugin : undefined,
       permissionRoute: () => ({ routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }),
-      authorize: async (agentOwner, capability, sessionId) => {
-        const authorized = await routeScopes.authorize(agentOwner, capability, sessionId)
-        if (authorized && capability === 'approvals.request') {
-          const agent = await runtime.get(agentOwner, sessionId)
-          if (agent !== undefined) await runtime.registerAnswerer(agentOwner, agent, async () => approvalOutcome)
-        }
-        return authorized
-      },
+      authorize: async (agentOwner, capability, sessionId) => await routeScopes.authorize(agentOwner, capability, sessionId),
       mountRoute: () => () => {},
       changed: () => routeScopes.reconcileRoutes(),
     })
     const driver = new DeterministicAgentSessionTransport({
-      scenarioCatalog: scopedCatalog, roomBridge: bridgeFor(() => runtime, observations),
+      scenarioCatalog: scopedCatalog, roomBridge: bridgeFor(() => runtime, observations, async reviewer => {
+        if (reviewerAnswererRegistered) return
+        await runtime.registerAnswerer(owner, reviewer, async () => approvalOutcome)
+        reviewerAnswererRegistered = true
+      }),
       scenarioSessionScope: scopeAuthority.client, delegationTimeoutMs: 1_000,
     })
     runtime = new CordisXAgentSessionRuntime({
@@ -289,6 +289,7 @@ describe('Host Playground Session scenario catalog', () => {
       authorize: async (agentOwner, capability, sessionId) => capability === 'approvals.request' || capability === 'approvals.answer'
         ? await routeScopes.authorize(agentOwner, capability, sessionId)
         : true,
+      declares: (agentOwner, capability) => routeScopes.declares(agentOwner, capability),
       captureSubmission: (agentOwner, sessionId, messageId) => scopeAuthority.captureSubmission(agentOwner, sessionId, messageId),
     })
     const lead = await runtime.create(owner, { sessionId: binding.sessionId!, setup: setup('chatroom.generalist', 'Lead') })

@@ -150,6 +150,8 @@ export interface CordisXPrivateAgentDriver {
 export interface CordisXAgentSessionRuntimeOptions {
   readonly driver: CordisXPrivateAgentDriver
   readonly authorize: (owner: PluginOwnerIdentity, capability: AgentRuntimeCapability, sessionId?: string) => Promise<boolean>
+  /** Host-only manifest/route declaration check; it must not materialize permission authority. */
+  readonly declares?: (owner: PluginOwnerIdentity, capability: AgentRuntimeCapability) => boolean
   readonly now?: () => number
   readonly persistence?: CordisXSessionEventPersistence
   readonly initialSessions?: readonly CordisXPersistedSession[]
@@ -563,7 +565,8 @@ export class CordisXAgentSessionRuntime {
 
   async requestApproval(owner: PluginOwnerIdentity, request: Parameters<ApprovalService['request']>[0]): Promise<ApprovalDecision> {
     const record = this.recordForAgent(request.agent)
-    if (record === undefined || !await this.allowed(owner, 'approvals.request', request.agent.id)) {
+    if (record === undefined || !this.sameOwner(owner, record.owner)
+      || !await this.allowed(owner, 'approvals.request', request.agent.id)) {
       return this.approvalDecision(request.agent, crypto.randomUUID(), request.toolName, request.callId, 'unavailable')
     }
     const id = `cx-approval.${crypto.randomUUID()}`
@@ -573,7 +576,10 @@ export class CordisXAgentSessionRuntime {
     }
     const answerer = this.answerers.get(this.answererKey(record))
     let outcome: ApprovalOutcome = 'unavailable'
-    if (answerer !== undefined && answerer.closed === undefined && await this.allowed(answerer.owner, 'approvals.answer', record.id)) {
+    if (answerer !== undefined && answerer.closed === undefined
+      && await this.allowed(answerer.owner, 'approvals.answer', record.id)
+      && answerer.closed === undefined && this.answerers.get(this.answererKey(record)) === answerer
+      && this.current(record)) {
       try {
         const proposed = await answerer.answerer(question)
         if (proposed === 'allowed-once' || proposed === 'rejected' || proposed === 'cancelled' || proposed === 'unavailable') outcome = proposed
@@ -585,18 +591,20 @@ export class CordisXAgentSessionRuntime {
 
   async registerAnswerer(owner: PluginOwnerIdentity, agent: Agent, answerer: ApprovalAnswerer): Promise<ApprovalAnswererHandle> {
     const record = this.recordForAgent(agent)
-    if (record === undefined || typeof answerer !== 'function' || !await this.allowed(owner, 'approvals.answer', agent.id)) {
+    if (record === undefined || typeof answerer !== 'function' || !this.sameOwner(owner, record.owner)
+      || this.options.declares?.(owner, 'approvals.answer') === false) {
       throw new Error('Approval answerer is unavailable')
     }
+    const key = this.answererKey(record)
+    if (this.answerers.has(key)) throw new Error('Approval answerer is already registered')
     const entry: AnswererRecord = { owner: clone(owner), answerer }
-    this.answerers.set(this.answererKey(record), entry)
+    this.answerers.set(key, entry)
     const handle = Object.freeze({
       agentId: record.id,
       agentGeneration: record.generation,
       dispose: async () => {
-        if (entry.closed === undefined) entry.closed = 'disposed'
-        this.answerers.delete(this.answererKey(record))
-        return { status: 'closed' as const, code: 'disposed' as const }
+        this.closeAnswerer(record, entry, 'disposed')
+        return { status: 'closed' as const, code: entry.closed! }
       },
     })
     return handle as ApprovalAnswererHandle
@@ -626,6 +634,13 @@ export class CordisXAgentSessionRuntime {
   fenceOwner(ownerPluginId: string, code: Exclude<SessionSubscriptionCloseCode, 'unsubscribed' | 'observer-failed'>): void {
     for (const agent of this.agents.values()) {
       if (agent.owner.pluginId !== ownerPluginId) continue
+      const answerer = this.answerers.get(this.answererKey(agent))
+      if (answerer !== undefined) this.closeAnswerer(
+        agent,
+        answerer,
+        code === 'plugin-generation-replaced' ? 'plugin-generation-replaced'
+          : code === 'permission-revoked' ? 'permission-revoked' : 'agent-replaced',
+      )
       this.disposeAgent(agent, code === 'connection-replaced' ? 'connection-replaced' : 'owner-disposed')
       this.closeSession(agent.session, code === 'connection-replaced' ? 'connection-replaced' : 'host-unavailable', code)
     }
@@ -1017,7 +1032,8 @@ export class CordisXAgentSessionRuntime {
   private disposeAgent(record: AgentRecord, reason: 'owner-disposed' | 'runtime-disposed' | 'connection-replaced'): void {
     if (record.disposed !== undefined) return
     record.disposed = reason
-    this.answerers.delete(this.answererKey(record))
+    const answerer = this.answerers.get(this.answererKey(record))
+    if (answerer !== undefined) this.closeAnswerer(record, answerer, 'agent-replaced')
     this.emitLive(record, 'agent/disposed', { reason })
     for (const subscriber of record.live) subscriber.closed = reason === 'connection-replaced' ? 'connection-replaced' : 'agent-replaced'
     record.live.clear()
@@ -1064,6 +1080,15 @@ export class CordisXAgentSessionRuntime {
     for (const session of this.sessions.values()) {
       if (session.subscribers.has(subscriber)) { this.closeSubscriber(session, subscriber, code); return }
     }
+  }
+
+  private closeAnswerer(
+    record: AgentRecord,
+    answerer: AnswererRecord,
+    code: NonNullable<AnswererRecord['closed']>,
+  ): void {
+    if (answerer.closed === undefined) answerer.closed = code
+    if (this.answerers.get(this.answererKey(record)) === answerer) this.answerers.delete(this.answererKey(record))
   }
 
   private emitLive<K extends AgentLiveEvent['type']>(record: AgentRecord, type: K, data: Extract<AgentLiveEvent, { readonly type: K }>['data']): void {

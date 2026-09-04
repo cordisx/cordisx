@@ -134,6 +134,21 @@ export class AgentRouteSessionScopeAuthority {
       : Object.freeze({ ...route })
   }
 
+  /**
+   * Registration-time declaration check. This never reads an active route,
+   * asks for a permission decision, or creates a lease. Dynamic declarations
+   * are accepted only when their exact owned route definition is valid.
+   */
+  declares(owner: PluginOwnerIdentity, capability: AgentRuntimeCapability): boolean {
+    const installed = this.declarations.get(owner.pluginId)?.find(item => item.declaration.name === capability)
+    const declaration = installed?.owner.generation === owner.generation ? installed.declaration : undefined
+    if (declaration === undefined) return false
+    const scope = declaration.scope.sessionIds
+    if (!isBinding(scope)) return true
+    const route = this.options.routes(owner).find(item => item.id === scope.routeId)
+    return route !== undefined && validRouteBinding(route, scope, declaration.manifestVersion)
+  }
+
   uninstall(owner: PluginOwnerIdentity): void {
     if (this.generations.get(owner.pluginId) !== owner.generation) return
     this.fence(owner.pluginId, 'plugin-generation-replaced')
