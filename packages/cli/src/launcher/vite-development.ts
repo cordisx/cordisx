@@ -807,9 +807,15 @@ if (import.meta.hot) {
       appType: 'custom',
       plugins: [integration, react()],
       ...(serverOptions.prebundleHostDependencies === true ? {
-        optimizeDeps: { entries: [rendererPath, ...initialGenerations
-          .filter(item => item.isolatedArtifactSource === undefined)
-          .map(item => item.realEntry)] },
+        optimizeDeps: {
+          entries: [rendererPath, ...initialGenerations
+            .filter(item => item.isolatedArtifactSource === undefined)
+            .map(item => item.realEntry)],
+          // react-markdown reaches this CommonJS leaf through an ESM-only
+          // dependency chain, so Vite's static scan cannot discover the
+          // required default-export interop before the native renderer boots.
+          include: ['style-to-js'],
+        },
       } : {}),
       resolve: {
         dedupe: ['react', 'react-dom'],
