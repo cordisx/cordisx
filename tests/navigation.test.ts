@@ -27,6 +27,7 @@ import {
   ExtensionPointDescriptorRegistry,
   ExtensionPointPolicyBroker,
   MemoryExtensionPointPolicyStore,
+  type ExtensionPointAccessResolver,
 } from '../packages/cli/src/renderer/extension-points.js'
 import { TestCodexRouteHistory } from './helpers/codex-route-history.js'
 import { activatePlaygroundReviewNavigation } from '../packages/cli/src/playground/client/review-navigation.js'
@@ -448,6 +449,96 @@ describe('NavigationRegistry', () => {
     expect(history.snapshot()).toMatchObject({ entry: { routeId: 'chatroom:room', params: { roomId: 'room-1' } } })
     expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')?.textContent).toContain('room:room-1')
     expect(newRoomActivations).toBe(0)
+
+    await navigation.dispose()
+    pages.dispose()
+    outlets.dispose()
+    history.dispose()
+    originalHistory.dispose()
+    dom.window.close()
+    original.window.close()
+  })
+
+  it('holds an exact reloaded Room route while Host review access is pending, then mounts only after authorization and clears terminal denials', async () => {
+    const original = new JSDOM('', { url: 'http://127.0.0.1/' })
+    const originalHistory = new BrowserRouteHistoryAdapter(original.window as unknown as Window, true)
+    originalHistory.push(Object.freeze({
+      schemaVersion: 1, owner: 'chatroom', routeId: 'chatroom:room', outlet: 'main',
+      path: '/main/chatroom/room-1', params: Object.freeze({ roomId: 'room-1' }),
+    }))
+    const originalState = original.window.history.state as { readonly key: string; readonly idx: number }
+
+    const dom = new JSDOM('<body><main id="main"></main><nav><div data-sidebar-item="chatroom:chatroom"><button class="cxsi-primary">New room</button></div></nav></body>', {
+      url: 'http://127.0.0.1/',
+    })
+    copySessionStorage(original.window.sessionStorage, dom.window.sessionStorage)
+    dom.window.history.replaceState({ key: originalState.key, idx: originalState.idx }, '', '/')
+    const history = new BrowserRouteHistoryAdapter(dom.window as unknown as Window, true)
+    const pages = new PageRegistry()
+    const outlets = new OutletRegistry()
+    outlets.declare({
+      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'portal', contextPolicy: 'semantic',
+    }, new FakeOutlet(dom.window.document.getElementById('main')!, 'main:one'), path => path.startsWith('/main/'))
+    let accessState: 'pending' | 'allowed' | 'denied' | 'stale' = 'pending'
+    const accessDecision = () => accessState === 'allowed'
+      ? { policy: 'allow' as const, effectivePolicy: 'allow' as const, authorized: true }
+      : accessState === 'pending'
+        ? { policy: 'inherit' as const, effectivePolicy: 'deny' as const, authorized: false, reason: 'permission.review-pending' }
+        : accessState === 'denied'
+          ? { policy: 'deny' as const, effectivePolicy: 'deny' as const, authorized: false, reason: 'permission.denied-persistent' }
+          : { policy: 'inherit' as const, effectivePolicy: 'deny' as const, authorized: false, reason: 'permission.identity-unavailable' }
+    const access: ExtensionPointAccessResolver = {
+      decision: () => accessDecision(),
+      surfaceAnchorSupport: () => ({ supported: true }),
+      authorizeSurfaceCommand: () => accessDecision(),
+      authorizeSurfaceRoute: () => accessDecision(),
+      authorizeOutletRoute: () => accessDecision(),
+      authorizeOutletPage: () => accessDecision(),
+      authorizeOutletPageCommand: () => accessDecision(),
+    }
+    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), history, undefined, access)
+    pages.register('chatroom', { id: 'room', title: { key: 'room' } }, ({ container, params }) => {
+      container.textContent = `room:${String(params.roomId)}`
+    })
+    navigation.register('chatroom', { id: 'room', path: '/main/chatroom/:roomId', outlet: 'main', page: 'room' })
+
+    await navigation.startHistoryProjection()
+    let newRoomActivations = 0
+    dom.window.document.querySelector('button')?.addEventListener('click', () => { newRoomActivations += 1 })
+    activatePlaygroundReviewNavigation(dom.window.document, 'chatroom:chatroom')
+    expect(history.snapshot()).toMatchObject({ entry: { owner: 'chatroom', routeId: 'chatroom:room', params: { roomId: 'room-1' } } })
+    expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')).toBeNull()
+    expect(newRoomActivations).toBe(0)
+
+    accessState = 'allowed'
+    await navigation.invalidatePointPolicies()
+    expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')?.textContent).toContain('room:room-1')
+
+    accessState = 'denied'
+    await navigation.invalidatePointPolicies()
+    expect(history.snapshot().entry).toBeUndefined()
+    expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')).toBeNull()
+
+    dom.window.history.pushState({
+      __cordisxRouteV1: {
+        schemaVersion: 1, owner: 'foreign', routeId: 'foreign:room', outlet: 'main',
+        path: '/main/chatroom/room-1', params: { roomId: 'room-1' },
+      },
+    }, '', '/')
+    await settle()
+    await navigation.settled()
+    expect(history.snapshot().entry).toBeUndefined()
+
+    accessState = 'stale'
+    dom.window.history.pushState({
+      __cordisxRouteV1: {
+        schemaVersion: 1, owner: 'chatroom', routeId: 'chatroom:room', outlet: 'main',
+        path: '/main/chatroom/room-1', params: { roomId: 'room-1' },
+      },
+    }, '', '/')
+    await settle()
+    await navigation.settled()
+    expect(history.snapshot().entry).toBeUndefined()
 
     await navigation.dispose()
     pages.dispose()
