@@ -24,7 +24,8 @@ import type {
   PlaygroundRoomSimulationForwardingClient,
 } from '../packages/cli/src/renderer/playground-room-simulation-bridge.js'
 
-const owner = { pluginId: 'file:///fixtures/chatroom.ts:chatroom', generation: 1 } as const
+const plugin = { source: 'file:///fixtures/chatroom.ts', pluginId: 'chatroom' } as const
+const owner = { pluginId: `${plugin.source}:${plugin.pluginId}`, generation: 1 } as const
 const binding: PlaygroundRoomSimulationBinding = Object.freeze({
   contract: 'cordisx.playground-room-simulation-binding/v1', sessionId: 'cx-session.lead',
   roomId: 'room-one', runId: 'lead-run', memberId: 'lead-member', bindingId: 'binding-one',
@@ -246,12 +247,12 @@ describe('Host Playground Session scenario catalog', () => {
       activeRoute: () => {
         const route = scopeAuthority.effectiveRoute()
         return route === undefined ? undefined : {
-          owner: `${route.owner.source}:${route.owner.pluginId}`, routeId: route.routeId,
+          owner, routeId: route.routeId,
           instanceId: route.routeInstanceId, params: route.params,
         }
       },
-      routes: pluginId => pluginId === owner.pluginId
-        ? [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }]
+      routes: plugin => plugin.pluginId === owner.pluginId && plugin.generation === owner.generation
+        ? [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId', schemaVersion: 2 }]
         : [],
       decide: async plan => ({ authorized: plan.scope.sessionIds.length === 1 }),
       connectionGeneration: () => 1,
@@ -266,6 +267,7 @@ describe('Host Playground Session scenario catalog', () => {
       connectionGeneration: () => 1,
       currentRoute: () => undefined,
       ownerForSession: sessionId => runtime?.ownerForSession(sessionId),
+      routeOwner: agentOwner => agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation ? plugin : undefined,
       permissionRoute: () => ({ routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }),
       authorize: async (agentOwner, capability, sessionId) => {
         const authorized = await routeScopes.authorize(agentOwner, capability, sessionId)

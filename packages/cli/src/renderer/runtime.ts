@@ -51,12 +51,17 @@ import {
   CordisXAgentSessionRuntime,
   CordisXApprovalServiceV1,
   CordisXSessionRegistryServiceV1,
+  type CordisXPrivateAgentDriver,
 } from './agent-session-runtime.js'
 import { CodexDesktopAgentSessionTransport, UnavailableAgentSessionTransport } from './codex-desktop-agent-session-transport.js'
 import { DeterministicAgentSessionTransport } from './deterministic-agent-session-transport.js'
 import { PlaygroundScenarioSessionScopeAuthority } from './playground-scenario-session-scope.js'
 import { projectPlaygroundAgentSessions } from './playground-agent-session-projection.js'
-import { AgentRouteSessionScopeAuthority, type AgentRuntimePermissionDeclaration } from './agent-route-session-scope.js'
+import {
+  AgentRouteSessionScopeAuthority,
+  type AgentActiveRoute,
+  type AgentRuntimePermissionDeclaration,
+} from './agent-route-session-scope.js'
 import {
   CordisXConnectorBroker,
   type CordisXBoundConnectorClient,
@@ -867,38 +872,76 @@ async function start(
   let activeAgentRuntimeRouteInstance: string | undefined
   let reconcilingAgentRuntimeRoute = false
   let agentRuntimeRouteDisposed = false
-  const actualAgentRuntimeRoute = (): AgentRuntimeRouteScope | undefined => {
+  let agentSessionRuntime!: CordisXAgentSessionRuntime
+  const agentOwnerControllers = new Map<string, PluginController>()
+  const agentOwnerKey = (owner: AgentActiveRoute['owner']): string => `${owner.pluginId}\u0000${owner.generation}`
+  const agentOwnerForController = (controller: PluginController): AgentActiveRoute['owner'] => {
+    const owner = agentSessionRuntime.ownerForPlugin(
+      controller.item.source,
+      controller.item.id,
+      moduleGenerationOf(controller),
+    )
+    agentOwnerControllers.set(agentOwnerKey(owner), controller)
+    return owner
+  }
+  const controllerForAgentOwner = (owner: AgentActiveRoute['owner']): PluginController | undefined => {
+    const controller = agentOwnerControllers.get(agentOwnerKey(owner))
+    return controller !== undefined && controller.principalLive ? controller : undefined
+  }
+  const actualAgentRuntimeRoute = (): Readonly<{
+    readonly scope: AgentRuntimeRouteScope
+    readonly owner: AgentActiveRoute['owner']
+  }> | undefined => {
     const snapshot = routeHistory.snapshot()
     const entry = snapshot.entry
-    const controller = entry === undefined ? undefined : controllers.find(item => `${item.item.source}:${item.item.id}` === entry.owner)
-    const route = entry === undefined ? undefined : routeService?.snapshot().routes.find(item => item.qualifiedId === entry.routeId)
+    const route = entry === undefined ? undefined : routeService?.agentRuntimeRouteFromHistory(entry)
+    const controller = route === undefined ? undefined : controllers.find(item => (
+      item.item.source === route.owner.source
+      && item.item.id === route.owner.pluginId
+      && moduleGenerationOf(item) === route.owner.moduleGeneration
+    ))
     const sessionId = entry?.params.sessionId
     if (entry === undefined || controller === undefined || route === undefined || typeof sessionId !== 'string' || sessionId === '*') return undefined
     return Object.freeze({
-      kind: 'host-route' as const, active: true as const,
-      owner: Object.freeze({ source: controller.item.source, pluginId: controller.item.id }),
-      routeId: route.id, routeInstanceId: `${entry.outlet}:${snapshot.key ?? 'unkeyed'}`,
-      path: route.definition.path, params: Object.freeze({ sessionId }),
+      owner: agentOwnerForController(controller),
+      scope: Object.freeze({
+        kind: 'host-route' as const, active: true as const,
+        owner: Object.freeze({ source: controller.item.source, pluginId: controller.item.id }),
+        routeId: route.id, routeInstanceId: `${entry.outlet}:${snapshot.key ?? 'unkeyed'}`,
+        path: route.path, params: Object.freeze({ sessionId }),
+      }),
     })
   }
-  const effectiveAgentRuntimeRoute = (): AgentRuntimeRouteScope | undefined => (
-    scenarioSessionScopeAuthority?.effectiveRoute() ?? actualAgentRuntimeRoute()
-  )
-  const agentRouteScopes = new AgentRouteSessionScopeAuthority({
-    activeRoute: () => {
-      const route = effectiveAgentRuntimeRoute()
-      return route === undefined ? undefined : {
-        owner: `${route.owner.source}:${route.owner.pluginId}`,
-        routeId: route.routeId,
-        instanceId: route.routeInstanceId,
-        params: route.params,
+  const agentRouteScopes: AgentRouteSessionScopeAuthority = new AgentRouteSessionScopeAuthority({
+    activeRoute: (): AgentActiveRoute | undefined => {
+      const supplementalOwner = scenarioSessionScopeAuthority?.supplementalOwner()
+      if (supplementalOwner !== undefined) {
+        const route = scenarioSessionScopeAuthority?.effectiveRoute()
+        return route === undefined ? undefined : {
+          owner: supplementalOwner,
+          routeId: route.routeId,
+          instanceId: route.routeInstanceId,
+          params: route.params,
+        }
+      }
+      const actual = actualAgentRuntimeRoute()
+      return actual === undefined ? undefined : {
+        owner: actual.owner,
+        routeId: actual.scope.routeId,
+        instanceId: actual.scope.routeInstanceId,
+        params: actual.scope.params,
       }
     },
-    routes: owner => (routeService?.snapshot().routes ?? [])
-      .filter(route => route.owner === owner)
-      .map(route => ({ id: route.id, path: route.definition.path })),
+    routes: owner => {
+      const controller = controllerForAgentOwner(owner)
+      return controller === undefined ? [] : routeService?.agentRuntimeRoutesForOwner({
+        source: controller.item.source,
+        pluginId: controller.item.id,
+        moduleGeneration: moduleGenerationOf(controller),
+      }, controller.generationView) ?? []
+    },
     decide: async plan => {
-      const controller = controllers.find(candidate => `${candidate.item.source}:${candidate.item.id}` === plan.owner.pluginId)
+      const controller = controllerForAgentOwner(plan.owner)
       if (controller === undefined) return Object.freeze({ authorized: false })
       const input = {
         identity: controller.identity,
@@ -913,7 +956,7 @@ async function start(
       return Object.freeze({ authorized: decision.authorized, ...(decision.lease === undefined ? {} : { leaseId: decision.lease.leaseId }) })
     },
     isLeaseActive: (owner, leaseId) => {
-      const identity = controllers.find(controller => `${controller.item.source}:${controller.item.id}` === owner.pluginId)?.identity
+      const identity = controllerForAgentOwner(owner)?.identity
       return identity !== undefined && broker.isAgentRuntimeLeaseActive(identity, leaseId)
     },
     connectionGeneration: () => agentRuntimeConnection.generation,
@@ -930,11 +973,11 @@ async function start(
         agentRouteScopes.reconcileRoutes()
         return
       }
-      if (activeAgentRuntimeRouteInstance !== undefined && activeAgentRuntimeRouteInstance !== route.routeInstanceId) {
+      if (activeAgentRuntimeRouteInstance !== undefined && activeAgentRuntimeRouteInstance !== route.scope.routeInstanceId) {
         broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
       }
-      broker.replaceAgentRuntimeRouteScope(route)
-      activeAgentRuntimeRouteInstance = route.routeInstanceId
+      broker.replaceAgentRuntimeRouteScope(route.scope)
+      activeAgentRuntimeRouteInstance = route.scope.routeInstanceId
       if (scenarioSessionScopeAuthority?.active() !== true) agentRouteScopes.reconcileRoutes()
     } finally {
       reconcilingAgentRuntimeRoute = false
@@ -944,8 +987,15 @@ async function start(
     scenarioSessionScopeAuthority = new PlaygroundScenarioSessionScopeAuthority({
       hostGeneration: generation,
       connectionGeneration: () => agentRuntimeConnection.generation,
-      currentRoute: actualAgentRuntimeRoute,
+      currentRoute: () => actualAgentRuntimeRoute()?.scope,
       ownerForSession: sessionId => scenarioSessionOwner(sessionId),
+      routeOwner: owner => {
+        const controller = controllerForAgentOwner(owner)
+        return controller === undefined ? undefined : Object.freeze({
+          source: controller.item.source,
+          pluginId: controller.item.id,
+        })
+      },
       permissionRoute: (owner, capability) => {
         const route = agentRouteScopes.permissionRoute(owner, capability)
         return route === undefined ? undefined : { routeId: route.id, path: route.path }
@@ -958,7 +1008,7 @@ async function start(
       changed: active => { if (!active) agentRouteScopes.reconcileRoutes() },
     })
   }
-  const agentSessionTransport = metadata.hostKind === 'playground'
+  const agentSessionTransport: CordisXPrivateAgentDriver = metadata.hostKind === 'playground'
     ? new DeterministicAgentSessionTransport({
         recoveredSessions: recoveredPlaygroundSessions,
         ...(metadata.playgroundSessionScenarios === undefined ? {} : { scenarioCatalog: metadata.playgroundSessionScenarios }),
@@ -966,7 +1016,7 @@ async function start(
         ...(scenarioSessionScopeAuthority === undefined ? {} : { scenarioSessionScope: scenarioSessionScopeAuthority.client }),
       })
     : desktopAgentSessionTransport ?? new UnavailableAgentSessionTransport()
-  const agentSessionRuntime = new CordisXAgentSessionRuntime({
+  agentSessionRuntime = new CordisXAgentSessionRuntime({
     driver: agentSessionTransport,
     authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
     ...(scenarioSessionScopeAuthority === undefined ? {} : {
@@ -1143,10 +1193,7 @@ async function start(
             ))
           .map(item => Object.freeze({ ...item, manifestVersion: agentRuntimeManifestVersion }))
         : []
-      agentRouteScopes.install(
-        agentSessionRuntime.ownerForPlugin(controller.item.source, controller.item.id, moduleGenerationOf(controller)),
-        agentRuntimeDeclarations,
-      )
+      agentRouteScopes.install(agentOwnerForController(controller), agentRuntimeDeclarations)
     }
     const configSchema = moduleConfigSchema(controller.item.module)
     const configApplies = controller.item.isolatedArtifactSource === undefined
@@ -1174,11 +1221,9 @@ async function start(
     controller.unregisterExtensionPoints?.()
     delete controller.unregisterExtensionPoints
     const owner = `${controller.item.source}:${controller.item.id}`
-    agentRouteScopes.uninstall(agentSessionRuntime.ownerForPlugin(
-      controller.item.source,
-      controller.item.id,
-      moduleGenerationOf(controller),
-    ))
+    const agentOwner = agentOwnerForController(controller)
+    agentRouteScopes.uninstall(agentOwner)
+    agentOwnerControllers.delete(agentOwnerKey(agentOwner))
     agentSessionRuntime.fenceOwner(owner, 'plugin-generation-replaced')
     configuration.unregister(
       controller.item.id,

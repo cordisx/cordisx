@@ -25,6 +25,7 @@ function harness(input: { readonly owner?: typeof owner | undefined; readonly au
     currentRoute: () => visible,
     ownerForSession: sessionId => sessionId === 'cx-session.lead' ? owner
       : sessionId === 'cx-session.reviewer' ? input.owner ?? owner : undefined,
+    routeOwner: agentOwner => agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation ? plugin : undefined,
     permissionRoute: () => ({ routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }),
     authorize: async (_owner, capability, sessionId) => {
       authorizations.push({ capability, sessionId, effective: authority.effectiveRoute() })
@@ -51,6 +52,7 @@ describe('Playground scenario exact Session scope authority', () => {
       hostGeneration: 'playground-generation-captured', connectionGeneration: () => 4,
       currentRoute: () => undefined,
       ownerForSession: sessionId => ['cx-session.lead', 'cx-session.reviewer'].includes(sessionId) ? owner : undefined,
+      routeOwner: agentOwner => agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation ? plugin : undefined,
       permissionRoute: (_owner, capability) => capability === 'approvals.request'
         ? { routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }
         : undefined,
@@ -94,6 +96,7 @@ describe('Playground scenario exact Session scope authority', () => {
       hostGeneration: 'playground-generation-captured', connectionGeneration: () => connectionGeneration,
       currentRoute: () => undefined,
       ownerForSession: sessionId => ['cx-session.lead', 'cx-session.reviewer'].includes(sessionId) ? sourceOwner : undefined,
+      routeOwner: agentOwner => agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation ? plugin : undefined,
       permissionRoute: () => ({ routeId: 'room-session-detail', path: '/room/:sessionId' }),
       authorize: async () => true, mountRoute: () => () => {}, changed: () => {},
     })
@@ -224,6 +227,7 @@ describe('Playground scenario exact Session scope authority', () => {
     authority = new PlaygroundScenarioSessionScopeAuthority({
       hostGeneration: 'playground-generation-one', connectionGeneration: () => 1, currentRoute: () => visible,
       ownerForSession: () => owner, authorize: async () => await decision, changed: () => {},
+      routeOwner: agentOwner => agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation ? plugin : undefined,
       permissionRoute: () => ({ routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }),
       mountRoute: () => () => {},
     })

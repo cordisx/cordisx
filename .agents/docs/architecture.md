@@ -169,6 +169,10 @@ through the existing permission-v4 policy and lease ledger. Static lists remain
 non-empty, unique, and non-wildcard. Route, plugin generation, connection, or
 policy replacement revokes the lease; foreign owners, stale generations,
 inactive routes, malformed values, and duplicate declarations fail closed.
+Navigation retains a Host-private route-owner coordinate containing the
+launcher-authenticated source, local plugin id, and module generation. Agent
+authority resolves through that coordinate without parsing its composite
+ledger owner, so equal local ids from another source cannot capture a route.
 No Room identifier is reinterpreted as Session authority and no approval-specific
 ledger or writer exists.
 An explicitly enabled Playground scenario may temporarily add one exact
