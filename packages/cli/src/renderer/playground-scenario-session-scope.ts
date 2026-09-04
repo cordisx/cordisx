@@ -47,7 +47,8 @@ export interface PlaygroundScenarioConversationOrigin {
   readonly bindingId: string
   readonly ownerGeneration: string
   readonly snapshotGeneration: string
-  readonly roomId: string
+  /** Undefined only for a Shell v9 new-Room bootstrap command. */
+  readonly roomId?: string
   readonly routeId: string
   readonly runs: readonly Readonly<{
     readonly runId: string
@@ -431,11 +432,12 @@ export class PlaygroundScenarioSessionScopeAuthority {
 
   private validOrigin(origin: PlaygroundScenarioConversationOrigin): boolean {
     if (!opaque(origin.owner) || !opaque(origin.bindingId) || !opaque(origin.ownerGeneration)
-      || !opaque(origin.snapshotGeneration) || !opaque(origin.roomId) || !opaque(origin.routeId)
+      || !opaque(origin.snapshotGeneration) || !opaque(origin.routeId)
       || typeof origin.active !== 'function' || !origin.active()
       || !Array.isArray(origin.runs) || origin.runs.length > 64) return false
-    if (origin.bootstrapOrigin === undefined && origin.runs.length === 0) return false
+    if (origin.bootstrapOrigin === undefined && (origin.runs.length === 0 || !opaque(origin.roomId))) return false
     if (origin.bootstrapOrigin !== undefined && (!this.validBootstrapOrigin(origin.bootstrapOrigin)
+      || origin.roomId !== undefined && !opaque(origin.roomId)
       || origin.bootstrapOrigin.binding.bindingId !== origin.bindingId
       || origin.bootstrapOrigin.binding.ownerGeneration !== origin.ownerGeneration)) return false
     const seen = new Set<string>()
