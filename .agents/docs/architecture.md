@@ -249,6 +249,15 @@ definition but creates no route lease. The exact active Session route and
 permission policy are rechecked immediately before every handler invocation.
 No Room identifier is reinterpreted as Session authority and no approval-specific
 ledger or writer exists.
+Plugin manifest v8 additionally permits only `approvals.answer` to declare an
+`authorityRequester` route scope. After the Host has accepted the exact v3
+requester/authority correlation, the requester route's `:sessionId` remains
+the route fence while the ordinary policy record and leased target remain the
+distinct authority Session. The broker retains both values so the lease is
+active only on that same requester route instance; `host-create` and
+`host-exact` sources cannot obtain this authority scope. Route, owner,
+connection, resolver, answerer, or generation replacement still retires it
+fail closed.
 An explicitly enabled Playground scenario may temporarily add one exact
 delegated Session route to that same broker without replacing the visible Lead
 Room route. The Host derives its owner and route identity from the active Lead
