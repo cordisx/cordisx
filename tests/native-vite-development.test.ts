@@ -1,5 +1,5 @@
 import { getEventListeners, once } from 'node:events'
-import { access, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import WebSocket, { WebSocketServer } from 'ws'
@@ -53,7 +53,18 @@ describe('native Vite development transport', () => {
     }
     const first = await startNativeViteServer(config, { cacheRoot, prebundleHostDependencies: true })
     viteCacheDirectories.push(first.cacheDir)
-    await expect(access(path.join(first.cacheDir, 'deps', '_metadata.json'))).resolves.toBeUndefined()
+    const metadataPath = path.join(first.cacheDir, 'deps', '_metadata.json')
+    await expect(access(metadataPath)).resolves.toBeUndefined()
+    const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as {
+      readonly optimized?: Readonly<Record<string, unknown>>
+    }
+    expect(Object.keys(metadata.optimized ?? {})).toEqual(expect.arrayContaining([
+      'react',
+      'react/jsx-runtime',
+      'react/jsx-dev-runtime',
+      'react-dom',
+      'react-dom/client',
+    ]))
     await first.close()
 
     const second = await startNativeViteServer(config, { cacheRoot, prebundleHostDependencies: true })

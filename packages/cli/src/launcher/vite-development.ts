@@ -41,6 +41,13 @@ const COMMONJS_INTEROP_LEAVES = [
   'use-sync-external-store/shim',
   'use-sync-external-store/shim/index.js',
 ] as const
+const SHARED_REACT_INTEROP_LEAVES = [
+  'react',
+  'react/jsx-runtime',
+  'react/jsx-dev-runtime',
+  'react-dom',
+  'react-dom/client',
+] as const
 const sourceMode = import.meta.url.endsWith('.ts')
 const extension = sourceMode ? 'ts' : 'js'
 const rendererPath = fileURLToPath(new URL(`../renderer/runtime.${extension}`, import.meta.url))
@@ -838,7 +845,13 @@ if (import.meta.hot) {
           // Host and plugin ESM graphs can reach these CommonJS leaves after
           // Vite's static scan. Resolve only installed leaves at their owning
           // boundary so fixtures need not install unrelated product peers.
-          include: commonJsInteropLeaves.map(item => item.specifier),
+          // Shared React is reached through Host virtual modules. Prebundle
+          // every CommonJS entry before injection so Vite never invalidates a
+          // loaded React DOM graph during an on-demand dependency restart.
+          include: [
+            ...SHARED_REACT_INTEROP_LEAVES,
+            ...commonJsInteropLeaves.map(item => item.specifier),
+          ],
         },
       } : {}),
       resolve: {
