@@ -1336,6 +1336,8 @@ export interface CordisXPageMountContext<
   readonly document: Document
   readonly signal: AbortSignal
   readonly routeId: string
+  /** Exact local route declaration id, supplied by the Host route registry when available. */
+  readonly routeDefinitionId?: string
   readonly outlet: CordisXOutletName
   readonly params: Readonly<Record<string, CordisXJsonScalar>>
   readonly navigation: CordisXPageNavigation

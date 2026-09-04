@@ -300,6 +300,7 @@ describe('Agent conversation shell public runtime', () => {
         return await operation()
       },
       fenceBinding: (value: string) => { fences.push(value) },
+      claimBootstrapRoute: () => {},
     }
     commands.register('chatroom', { id: 'send', title: { key: 'send', fallback: 'Send' } }, () => {
       expect((observed as { active(): boolean }).active()).toBe(true)
@@ -307,7 +308,7 @@ describe('Agent conversation shell public runtime', () => {
     const runtime = new AgentConversationShellRegistry(
       commandService(commands), fakeI18n(), undefined, undefined, undefined,
       sourceAuthority, owner => owner === 'chatroom'
-        ? 'file:///plugins/chatroom.ts:chatroom'
+        ? { pluginId: 'file:///plugins/chatroom.ts:chatroom', generation: 1 }
         : undefined,
     )
     const plugin = new Context().extend({
@@ -821,6 +822,47 @@ describe('Agent conversation shell public runtime', () => {
     registration.dispose(); runtime.dispose(); commands.dispose(); await settle(); dom.window.close()
   })
 
+  it('Host-claims a matching v6 Room route continuation synchronously when the new binding mounts', () => {
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    const claims: Array<{ readonly owner: string; readonly routeId: string; readonly roomId: string; readonly bindingId: string }> = []
+    const sourceAuthority: PlaygroundScenarioConversationSourceAuthority = {
+      execute: async (_origin, operation) => await operation(),
+      fenceBinding: () => {},
+      claimBootstrapRoute: input => {
+        claims.push({ owner: input.owner.pluginId, routeId: input.binding.route.routeId, roomId: input.binding.route.roomId, bindingId: input.binding.binding.bindingId })
+      },
+    }
+    const runtime = new AgentConversationShellRegistry(
+      commandService(commands), fakeI18n(), undefined, undefined, undefined,
+      sourceAuthority,
+      owner => owner === 'chatroom' ? { pluginId: 'file:///fixtures/chatroom.ts:chatroom', generation: 1 } : undefined,
+    )
+    const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-v9-route-claim' })
+    const registration = runtime.register(plugin, binding => {
+      const snapshot: AgentConversationShellSnapshotV7 = {
+        binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration }, generation: 'snapshot-v9-route-claim', snapshotSequence: 0,
+        selection: { kind: 'room', roomId: 'room-after-submit', title: message('room.route', 'Route claim room'), multiParticipant: false, participantPresentation: 'none', participants: [], activeRuns: [] },
+        items: [], composer: { availability: 'available', placeholder: message('composer', 'Message'), disabled: { value: false }, shortcutPolicy: 'enter', submit: { id: 'send-v9-route-claim' } }, headerActions: [],
+      }
+      const subscription = { subscriptionId: 'subscription-v9-route-claim', binding: snapshot.binding, generation: snapshot.generation, afterSequence: 0, snapshotSequence: 0 }
+      return {
+        snapshot: async () => snapshot,
+        subscribe: async () => ({ result: { type: 'subscribe' as const, status: 'accepted' as const, code: 'allowed' as const, subscription }, handle: {
+          subscription, pages: { async *[Symbol.asyncIterator]() { await new Promise<void>(() => {}) } }, closed: new Promise<never>(() => {}), unsubscribe: async () => {},
+        } }),
+        dispose() {},
+      }
+    }, undefined, 9)
+    const unmount = registration.mount({ ...mountContext(dom, { roomId: 'room-after-submit' }), routeDefinitionId: 'room' })
+    expect(claims).toHaveLength(1)
+    expect(claims[0]).toMatchObject({
+      owner: 'file:///fixtures/chatroom.ts:chatroom', routeId: 'room', roomId: 'room-after-submit', bindingId: expect.any(String),
+    })
+    unmount?.()
+    registration.dispose(); runtime.dispose(); commands.dispose(); dom.window.close()
+  })
+
   it('keeps a fresh no-room Shell v9 composer command live for its first bootstrap target declaration', async () => {
     const dom = installDom()
     const commands = new CommandRegistry()
@@ -832,6 +874,7 @@ describe('Agent conversation shell public runtime', () => {
         return await operation()
       },
       fenceBinding: () => {},
+      claimBootstrapRoute: () => {},
     }
     commands.register('chatroom', { id: 'create-v9', title: { key: 'create-v9', fallback: 'Create' } }, context => {
       commandContext = context
@@ -840,7 +883,7 @@ describe('Agent conversation shell public runtime', () => {
       commandService(commands), fakeI18n(), undefined, undefined, undefined,
       sourceAuthority,
       owner => owner === 'chatroom'
-        ? 'file:///fixtures/chatroom.ts:chatroom'
+        ? { pluginId: 'file:///fixtures/chatroom.ts:chatroom', generation: 1 }
         : undefined,
     )
     const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-v9-no-room' })

@@ -1,8 +1,16 @@
 import type { AgentRuntimeCapability } from '@cordisx/protocol/agents/v1'
-import type { PluginOwnerIdentity } from '@cordisx/protocol/sessions/v1'
+import type { MessageId, PluginOwnerIdentity } from '@cordisx/protocol/sessions/v1'
 import type { AgentCommandOrigin } from '@cordisx/protocol/agent-admission/v2'
 import type { AgentAdmissionTarget } from '@cordisx/protocol/agent-admission/v3'
 import type { AgentBootstrapCommandOrigin } from '@cordisx/protocol/agent-admission/v4'
+import type {
+  AgentAdmissionBootstrapRouteBinding,
+  AgentAdmissionBootstrapRouteClaimReceipt,
+  AgentAdmissionBootstrapRouteClaimRequest,
+  AgentAdmissionBootstrapRouteClaimResult,
+  AgentAdmissionBootstrapRouteContinuation,
+  AgentAdmissionBootstrapRouteTarget,
+} from '@cordisx/protocol/agent-admission/v6'
 import type { AgentRuntimeRouteScope } from './platform.js'
 
 export type PlaygroundScenarioSessionScopeClosedCode =
@@ -67,6 +75,15 @@ export interface PlaygroundScenarioConversationOrigin {
 export interface PlaygroundScenarioConversationSourceAuthority {
   execute<Value>(origin: PlaygroundScenarioConversationOrigin, operation: () => Promise<Value>): Promise<Value>
   fenceBinding(bindingId: string, code: PlaygroundScenarioSessionScopeClosedCode): void
+  /** Host-only v6 transfer at a matching Room route mount; never exposed to plugins. */
+  claimBootstrapRoute(input: PlaygroundScenarioBootstrapRouteActivation): void
+}
+
+/** Host-generated route binding presented only by the Shell mount lifecycle. */
+export interface PlaygroundScenarioBootstrapRouteActivation {
+  readonly owner: PluginOwnerIdentity
+  readonly binding: AgentAdmissionBootstrapRouteBinding
+  readonly active: () => boolean
 }
 
 export interface PlaygroundScenarioSubmissionCapture {
@@ -99,6 +116,19 @@ export interface PlaygroundScenarioSessionScopeAuthorityOptions {
   readonly mountRoute: (route: AgentRuntimeRouteScope) => () => void
   /** Reconcile the single normal permission/route authority after a change. */
   readonly changed: (active: boolean) => void
+  /** Validates one exact same-owner registered Room route before v6 declaration. */
+  readonly bootstrapRouteRegistered?: (owner: PluginOwnerIdentity, target: AgentAdmissionBootstrapRouteTarget) => boolean
+  /** Keeps the Host command live through old-binding replacement, but not after handler completion. */
+  readonly bootstrapRouteClaimActive?: (
+    owner: PluginOwnerIdentity,
+    origin: AgentBootstrapCommandOrigin,
+    target: AgentAdmissionBootstrapRouteTarget,
+  ) => boolean
+  /** Calls the Host-only v6 continuation claim; plugins never receive this seam. */
+  readonly claimBootstrapRoute?: (
+    owner: PluginOwnerIdentity,
+    request: AgentAdmissionBootstrapRouteClaimRequest,
+  ) => AgentAdmissionBootstrapRouteClaimResult
 }
 
 interface ConversationOriginRecord extends PlaygroundScenarioConversationOrigin {
@@ -116,6 +146,14 @@ interface CapturedSourceRecord {
   readonly connectionGeneration: number
   active: boolean
   committed: boolean
+  routeContinuation?: {
+    readonly continuation: AgentAdmissionBootstrapRouteContinuation
+    readonly target: AgentAdmissionBootstrapRouteTarget
+    readonly origin: AgentBootstrapCommandOrigin
+    state: 'captured' | 'pending-route-claim' | 'claimed'
+    receipt?: AgentAdmissionBootstrapRouteClaimReceipt
+    rebound?: PlaygroundScenarioBootstrapRouteActivation
+  }
   scenarioRunId?: string
 }
 
@@ -161,6 +199,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
   readonly conversationSource: PlaygroundScenarioConversationSourceAuthority = Object.freeze({
     execute: async <Value>(origin: PlaygroundScenarioConversationOrigin, operation: () => Promise<Value>) => await this.executeConversation(origin, operation),
     fenceBinding: (bindingId: string, code: PlaygroundScenarioSessionScopeClosedCode) => { this.fenceBinding(bindingId, code) },
+    claimBootstrapRoute: (input: PlaygroundScenarioBootstrapRouteActivation) => { this.claimBootstrapRoute(input) },
   })
 
   constructor(private readonly options: PlaygroundScenarioSessionScopeAuthorityOptions) {
@@ -288,6 +327,97 @@ export class PlaygroundScenarioSessionScopeAuthority {
     return this.captureAdmissionFromConversationOrigin(owner, origin, target, sessionId, agentGeneration, messageId)
   }
 
+  /**
+   * Shell v9/v6 adds the exact Room route to a fresh bootstrap target. The
+   * route is checked against the registered same-owner declaration while the
+   * command is still live; no pre-command Room snapshot is consulted.
+   */
+  bootstrapAdmissionRouteTargetActive(
+    owner: PluginOwnerIdentity,
+    bootstrapOrigin: AgentBootstrapCommandOrigin,
+    target: AgentAdmissionBootstrapRouteTarget,
+  ): boolean {
+    if (this.disposed || !this.validBootstrapOrigin(bootstrapOrigin) || !this.validBootstrapRouteTarget(target)
+      || this.options.bootstrapRouteRegistered?.(owner, target) !== true) return false
+    const candidates = [...this.commandOrigins].filter(origin => origin.active()
+      && origin.owner === owner.pluginId && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin))
+    return candidates.length === 1
+  }
+
+  /** A v6 claim may follow old-binding disposal, but never command completion. */
+  bootstrapAdmissionRouteClaimActive(
+    owner: PluginOwnerIdentity,
+    bootstrapOrigin: AgentBootstrapCommandOrigin,
+    target: AgentAdmissionBootstrapRouteTarget,
+  ): boolean {
+    if (this.disposed || !this.validBootstrapOrigin(bootstrapOrigin) || !this.validBootstrapRouteTarget(target)
+      || this.options.bootstrapRouteClaimActive?.(owner, bootstrapOrigin, target) !== true) return false
+    return [...this.commandOrigins].filter(origin => origin.owner === owner.pluginId
+      && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin)).length === 1
+  }
+
+  /**
+   * Captures a v6 source under the opaque continuation before the driver sees
+   * submission. Its close callback can still retire a committed pending claim
+   * when owner, connection, or continuation lifecycle is fenced.
+   */
+  captureBootstrapAdmissionRouteTarget(
+    owner: PluginOwnerIdentity,
+    bootstrapOrigin: AgentBootstrapCommandOrigin,
+    target: AgentAdmissionBootstrapRouteTarget,
+    continuation: AgentAdmissionBootstrapRouteContinuation,
+    sessionId: string,
+    agentGeneration: number,
+    messageId: string,
+  ): PlaygroundScenarioSubmissionCapture | undefined {
+    if (!this.bootstrapAdmissionRouteTargetActive(owner, bootstrapOrigin, target)
+      || !this.validBootstrapRouteContinuation(continuation)
+      || !opaque(sessionId) || !opaque(messageId) || !Number.isSafeInteger(agentGeneration) || agentGeneration < 1) return undefined
+    const candidates = [...this.commandOrigins].filter(origin => origin.active()
+      && origin.owner === owner.pluginId && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin))
+    if (candidates.length !== 1) return undefined
+    const origin = candidates[0]!
+    if (origin.bindingId !== bootstrapOrigin.binding.bindingId || origin.ownerGeneration !== bootstrapOrigin.binding.ownerGeneration
+      || !sameOwner(this.options.ownerForSession(sessionId), owner)) return undefined
+    const permissionRoute = this.options.permissionRoute(owner, 'approvals.request')
+    if (permissionRoute === undefined || !opaque(permissionRoute.routeId) || !opaque(permissionRoute.path)) return undefined
+    const key = sourceKey(sessionId, messageId)
+    if (this.sources.has(key)) return undefined
+    const source: CapturedSourceRecord = {
+      key, origin, owner: Object.freeze({ ...owner }), sourceMessageId: messageId, sourceSessionId: sessionId,
+      roomRunId: target.runId, permissionRoute: Object.freeze({ ...permissionRoute }),
+      connectionGeneration: this.options.connectionGeneration(), active: true, committed: false,
+      routeContinuation: {
+        continuation, target: Object.freeze(structuredClone(target)), origin: Object.freeze(structuredClone(bootstrapOrigin)), state: 'captured',
+      },
+    }
+    this.sources.set(key, source)
+    let open = true
+    let closed = false
+    return Object.freeze({
+      active: () => open && !closed && this.sources.get(key) === source && source.active && !this.disposed
+        && origin.active() && source.connectionGeneration === this.options.connectionGeneration()
+        && sameOwner(this.options.ownerForSession(sessionId), owner),
+      commit: () => {
+        if (!open || closed) return
+        open = false
+        if (this.sources.get(key) !== source || !source.active) return
+        if (!origin.active() || this.disposed || !sameOwner(this.options.ownerForSession(sessionId), owner)
+          || source.connectionGeneration !== this.options.connectionGeneration()) {
+          this.retireSource(source, 'stale')
+          return
+        }
+        source.committed = true
+      },
+      close: () => {
+        if (closed) return
+        closed = true
+        open = false
+        this.retireSource(source, 'completed')
+      },
+    })
+  }
+
   private captureAdmissionForTarget(
     owner: PluginOwnerIdentity,
     admissionOrigin: AgentCommandOrigin,
@@ -384,9 +514,85 @@ export class PlaygroundScenarioSessionScopeAuthority {
       && left.generation === right.generation && left.commandId === right.commandId && left.scope === right.scope
   }
 
+  private validBootstrapRouteTarget(target: AgentAdmissionBootstrapRouteTarget | undefined): target is AgentAdmissionBootstrapRouteTarget {
+    return target !== undefined && opaque(target.roomId) && opaque(target.participantId) && opaque(target.memberId) && opaque(target.runId)
+      && target.route !== undefined && opaque(target.route.routeId) && target.route.param === 'roomId'
+      && opaque(target.route.roomId) && target.route.roomId === target.roomId
+  }
+
+  private validBootstrapRouteContinuation(value: AgentAdmissionBootstrapRouteContinuation | undefined): value is AgentAdmissionBootstrapRouteContinuation {
+    return value !== undefined
+      && value.$schema === 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-admission-bootstrap-route-continuation.v6.schema.json'
+      && value.contract === 'cordisx.agent-admission-bootstrap-route-continuation/v6'
+      && value.schemaVersion === 6 && opaque(value.token)
+  }
+
+  private sourceLive(source: CapturedSourceRecord): boolean {
+    if (!source.active || this.disposed || source.connectionGeneration !== this.options.connectionGeneration()) return false
+    const route = source.routeContinuation
+    if (route?.state === 'pending-route-claim') return false
+    if (route?.state === 'claimed') return route.rebound !== undefined && route.rebound.active()
+      && sameOwner(this.options.ownerForSession(source.sourceSessionId), source.owner)
+    return source.origin.active() && sameOwner(this.options.ownerForSession(source.sourceSessionId), source.owner)
+  }
+
+  /** Host-only, synchronous claim performed from the matching newly mounted Room route. */
+  private claimBootstrapRoute(input: PlaygroundScenarioBootstrapRouteActivation): void {
+    if (this.disposed || !opaque(input.owner.pluginId) || !Number.isSafeInteger(input.owner.generation)
+      || !opaque(input.binding.binding.bindingId) || !opaque(input.binding.binding.ownerGeneration)
+      || !opaque(input.binding.generation) || !opaque(input.binding.route.routeId)
+      || input.binding.route.param !== 'roomId' || !opaque(input.binding.route.roomId)
+      || typeof input.active !== 'function' || !input.active()) return
+    const candidates = [...this.sources.values()].filter(source => {
+      const route = source.routeContinuation
+      return source.active && source.committed && route !== undefined && route.state === 'pending-route-claim'
+        && this.commandOrigins.has(source.origin)
+        && sameOwner(source.owner, input.owner)
+        && route.target.roomId === input.binding.route.roomId
+        && route.target.route.routeId === input.binding.route.routeId
+        && route.target.route.param === input.binding.route.param
+        && route.target.route.roomId === input.binding.route.roomId
+    })
+    if (candidates.length !== 1) {
+      for (const source of candidates) this.retireSource(source, 'route-replaced')
+      return
+    }
+    const source = candidates[0]!
+    const route = source.routeContinuation!
+    if (route.origin.binding.ownerGeneration !== input.binding.binding.ownerGeneration
+      || route.origin.generation !== input.binding.generation
+      || route.origin.binding.bindingId === input.binding.binding.bindingId
+      || source.connectionGeneration !== this.options.connectionGeneration()
+      || !sameOwner(this.options.ownerForSession(source.sourceSessionId), source.owner)) {
+      this.retireSource(source, 'route-replaced')
+      return
+    }
+    const request: AgentAdmissionBootstrapRouteClaimRequest = {
+      continuation: route.continuation,
+      binding: input.binding,
+      source: { sessionId: source.sourceSessionId, messageId: source.sourceMessageId as MessageId },
+    }
+    if (!this.bootstrapAdmissionRouteClaimActive(source.owner, route.origin, route.target)) {
+      this.retireSource(source, 'route-replaced')
+      return
+    }
+    const result = this.options.claimBootstrapRoute?.(source.owner, request)
+    if (result?.status !== 'claimed') {
+      this.retireSource(source, 'route-replaced')
+      return
+    }
+    route.state = 'claimed'
+    route.receipt = result.receipt
+    route.rebound = Object.freeze({
+      owner: Object.freeze({ ...input.owner }), binding: Object.freeze(structuredClone(input.binding)), active: input.active,
+    })
+  }
+
   reconcileVisibleRoute(): void {
     const source = this.current?.source
-    if (source !== undefined && (!source.active || !source.origin.active())) this.retireSource(source, 'route-replaced')
+    if (source !== undefined && (!source.active || source.routeContinuation?.state !== 'pending-route-claim' && !this.sourceLive(source))) {
+      this.retireSource(source, 'route-replaced')
+    }
   }
 
   fenceSession(sessionId: string, code: Exclude<PlaygroundScenarioSessionScopeClosedCode, 'completed' | 'authorization-unavailable' | 'disposed'>): void {
@@ -421,11 +627,12 @@ export class PlaygroundScenarioSessionScopeAuthority {
     try { return await operation() }
     finally {
       this.commandOrigins.delete(record)
-      // An unsubmitted v2 reservation has no durable authority after its
-      // command completes. A committed source remains available only for the
-      // ensuing deterministic scenario activation.
+      // An unsubmitted reservation has no durable authority after command
+      // completion. A v6 source must have already moved to its exact new Room
+      // binding; pending continuations never survive a completed command.
       for (const source of [...this.sources.values()]) {
-        if (source.origin === record && !source.committed) this.retireSource(source, 'completed')
+        if (source.origin === record && (!source.committed || source.routeContinuation?.state !== undefined
+          && source.routeContinuation.state !== 'claimed')) this.retireSource(source, 'completed')
       }
     }
   }
@@ -453,7 +660,18 @@ export class PlaygroundScenarioSessionScopeAuthority {
   private fenceBinding(bindingId: string, code: PlaygroundScenarioSessionScopeClosedCode): void {
     if (!opaque(bindingId)) return
     for (const source of [...this.sources.values()]) {
-      if (source.origin.bindingId === bindingId) this.retireSource(source, code)
+      const route = source.routeContinuation
+      if (route?.state === 'claimed' && route.rebound?.binding.binding.bindingId === bindingId) {
+        this.retireSource(source, code)
+        continue
+      }
+      if (source.origin.bindingId !== bindingId) continue
+      if (code === 'route-replaced' && source.committed && route !== undefined && route.state !== 'claimed') {
+        route.state = 'pending-route-claim'
+        continue
+      }
+      if (route?.state === 'claimed') continue
+      this.retireSource(source, code)
     }
   }
 
@@ -480,9 +698,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
     if (source === undefined) {
       return this.unavailable('source-route-unavailable', 'The scenario source Session has no captured exact Room authority.')
     }
-    if (!source.active || !source.committed || !source.origin.active()
-      || source.connectionGeneration !== this.options.connectionGeneration()
-      || !sameOwner(this.options.ownerForSession(input.sourceSessionId), source.owner)) {
+    if (!source.committed || !this.sourceLive(source)) {
       this.retireSource(source, 'stale')
       return this.unavailable('stale', 'The captured scenario source authority is stale.')
     }
@@ -515,8 +731,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
     const handle: PlaygroundScenarioSessionScopeHandle = Object.freeze({
       runId: input.runId, sessionId: input.targetSessionId, routeInstanceId, closed,
       active: () => record.active && this.current === record && !this.disposed
-        && (record.source === undefined || record.source.active && record.source.origin.active()
-          && record.source.connectionGeneration === this.options.connectionGeneration()),
+        && (record.source === undefined || this.sourceLive(record.source)),
       close: () => { if (record.active && this.current === record) this.retire(record, 'completed') },
     })
     record = {
@@ -527,8 +742,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
     this.options.changed(true)
     let authorized = false
     try { authorized = await this.options.authorize(owner, 'approvals.request', input.targetSessionId) } catch { authorized = false }
-    if (!record.active || this.current !== record || this.disposed
-      || !source.active || !source.origin.active() || source.connectionGeneration !== this.options.connectionGeneration()) {
+    if (!record.active || this.current !== record || this.disposed || !this.sourceLive(source)) {
       if (record.active) this.retire(record, 'route-replaced')
       return this.unavailable('stale', 'The scenario Session scope was fenced before authorization completed.')
     }

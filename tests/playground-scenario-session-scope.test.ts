@@ -166,6 +166,81 @@ describe('Playground scenario exact Session scope authority', () => {
     authority.dispose()
   })
 
+  it('moves a submitted fresh v6 bootstrap source to its exact new Room binding before scenario activation', async () => {
+    let oldBindingActive = true
+    let newBindingActive = true
+    let mounted: AgentRuntimeRouteScope | undefined
+    let claim: { readonly sessionId: string; readonly messageId: string; readonly bindingId: string } | undefined
+    const authority = new PlaygroundScenarioSessionScopeAuthority({
+      hostGeneration: 'playground-generation-v6', connectionGeneration: () => 6,
+      currentRoute: () => undefined,
+      ownerForSession: sessionId => ['cx-session.v6-lead', 'cx-session.v6-reviewer'].includes(sessionId) ? owner : undefined,
+      routeOwner: agentOwner => agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation ? plugin : undefined,
+      permissionRoute: () => ({ routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }),
+      bootstrapRouteRegistered: (_owner, target) => target.route.routeId === 'room' && target.route.param === 'roomId'
+        && target.route.roomId === 'room-v6',
+      // The command remains retained through the old binding's route replacement.
+      bootstrapRouteClaimActive: () => true,
+      claimBootstrapRoute: (_owner, request) => {
+        claim = { sessionId: request.source.sessionId, messageId: request.source.messageId, bindingId: request.binding.binding.bindingId }
+        return { status: 'claimed', code: 'claimed', receipt: {} } as never
+      },
+      authorize: async () => true,
+      mountRoute: route => { mounted = route; return () => { mounted = undefined } },
+      changed: () => {},
+    })
+    const origin = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
+      originId: 'bootstrap-route-origin', binding: { bindingId: 'bootstrap-route-old-binding', ownerGeneration: 'bootstrap-route-owner' },
+      generation: 'bootstrap-route-generation', executionId: 'bootstrap-route-execution', commandId: 'chatroom.submit', scope: 'composer-submit' as const,
+    }
+    const target = {
+      roomId: 'room-v6', participantId: 'leader', memberId: 'member-leader', runId: 'run-leader',
+      route: { routeId: 'room', param: 'roomId' as const, roomId: 'room-v6' },
+    }
+    const continuation = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-admission-bootstrap-route-continuation.v6.schema.json' as const,
+      contract: 'cordisx.agent-admission-bootstrap-route-continuation/v6' as const, schemaVersion: 6 as const, token: 'bootstrap-route-continuation',
+    } as never
+    await authority.conversationSource.execute({
+      owner: owner.pluginId, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
+      snapshotGeneration: 'snapshot-bootstrap-v6', routeId: 'chatroom:new-room', runs: [], active: () => oldBindingActive, bootstrapOrigin: origin,
+    }, async () => {
+      expect(authority.bootstrapAdmissionRouteTargetActive(owner, origin, target)).toBe(true)
+      const capture = authority.captureBootstrapAdmissionRouteTarget(
+        owner, origin, target, continuation, 'cx-session.v6-lead', 1, 'cx-message.v6-fresh',
+      )
+      expect(capture?.active()).toBe(true)
+      capture?.commit()
+      oldBindingActive = false
+      authority.conversationSource.fenceBinding(origin.binding.bindingId, 'route-replaced')
+      authority.conversationSource.claimBootstrapRoute({
+        owner,
+        binding: {
+          binding: { bindingId: 'bootstrap-route-new-binding', ownerGeneration: origin.binding.ownerGeneration },
+          generation: origin.generation, route: target.route,
+        },
+        active: () => newBindingActive,
+      })
+    })
+    expect(claim).toEqual({ sessionId: 'cx-session.v6-lead', messageId: 'cx-message.v6-fresh', bindingId: 'bootstrap-route-new-binding' })
+    const activated = await authority.client.activate({
+      runId: 'scenario-v6-route-rebind', sourceMessageId: 'cx-message.v6-fresh',
+      sourceSessionId: 'cx-session.v6-lead', targetSessionId: 'cx-session.v6-reviewer',
+    })
+    expect(activated.status).toBe('available')
+    expect(mounted?.params.sessionId).toBe('cx-session.v6-reviewer')
+    newBindingActive = false
+    authority.conversationSource.fenceBinding('bootstrap-route-new-binding', 'route-replaced')
+    if (activated.status === 'available') await expect(activated.handle.closed).resolves.toEqual({ code: 'route-replaced' })
+    expect(await authority.client.activate({
+      runId: 'scenario-v6-route-reuse', sourceMessageId: 'cx-message.v6-fresh',
+      sourceSessionId: 'cx-session.v6-lead', targetSessionId: 'cx-session.v6-reviewer',
+    })).toMatchObject({ status: 'unavailable', code: 'source-route-unavailable' })
+    authority.dispose()
+  })
+
   it('fails closed when origin capture is missing, crossed, stale, or navigated away before activation', async () => {
     let shellActive = true
     let sourceOwner = owner

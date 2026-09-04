@@ -7,6 +7,7 @@ import type { ApprovalService as ApprovalServiceV3 } from '@cordisx/protocol/app
 import type { AgentAdmissionReservationService } from '@cordisx/protocol/agent-admission/v2'
 import type { AgentAdmissionTargetOriginService, AgentAdmissionTargetReservationService } from '@cordisx/protocol/agent-admission/v3'
 import type { AgentAdmissionBootstrapReservationService, AgentAdmissionBootstrapTargetService } from '@cordisx/protocol/agent-admission/v4'
+import type { AgentAdmissionBootstrapRouteDeclarationService, AgentAdmissionBootstrapRouteReservationService } from '@cordisx/protocol/agent-admission/v6'
 import type { SessionId, SessionRegistry } from '@cordisx/protocol/sessions/v1'
 
 export const CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1 =
@@ -74,6 +75,10 @@ declare module '@deepseek-ai/cordis' {
     agentAdmissionBootstrapTargets: AgentAdmissionBootstrapTargetService
     /** Host-owned v4 one-shot reservation for a bootstrap target; it never exposes a driver. */
     agentAdmissionBootstrapReservations: AgentAdmissionBootstrapReservationService
+    /** Host-owned v6 declaration for one exact Room target plus its matching future Room route. */
+    agentAdmissionBootstrapRouteDeclarations: AgentAdmissionBootstrapRouteDeclarationService
+    /** Host-owned v6 pre-submit reservation; Host alone may later claim its continuation. */
+    agentAdmissionBootstrapRouteReservations: AgentAdmissionBootstrapRouteReservationService
     entities: EntityRegistry
   }
 }

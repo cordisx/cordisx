@@ -2447,6 +2447,7 @@ export class NavigationRegistry {
         document: content.ownerDocument,
         signal: abort.signal,
         routeId: entry.record.qualifiedId,
+        routeDefinitionId: entry.record.definition.id,
         outlet: name as CordisXOutletName,
         params: entry.params,
         navigation: {

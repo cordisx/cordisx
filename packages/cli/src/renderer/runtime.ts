@@ -60,6 +60,8 @@ import {
   CordisXAgentAdmissionTargetReservationService,
   CordisXAgentAdmissionBootstrapReservationService,
   CordisXAgentAdmissionBootstrapTargetService,
+  CordisXAgentAdmissionBootstrapRouteDeclarationService,
+  CordisXAgentAdmissionBootstrapRouteReservationService,
   CordisXSessionRegistryServiceV1,
   type CordisXPrivateAgentDriver,
 } from './agent-session-runtime.js'
@@ -324,6 +326,8 @@ interface PluginController {
   agentAdmissionTargetReservationFiber?: Fiber
   agentAdmissionBootstrapTargetFiber?: Fiber
   agentAdmissionBootstrapReservationFiber?: Fiber
+  agentAdmissionBootstrapRouteDeclarationFiber?: Fiber
+  agentAdmissionBootstrapRouteReservationFiber?: Fiber
   unregisterAgentSessionMigration?: () => void
   fiber?: Fiber
   status: ManagerPluginStatus
@@ -1037,6 +1041,18 @@ async function start(
         const route = agentRouteScopes.permissionRoute(owner, capability)
         return route === undefined ? undefined : { routeId: route.id, path: route.path }
       },
+      bootstrapRouteRegistered: (owner, target) => {
+        const controller = controllerForAgentOwner(owner)
+        const route = controller === undefined ? undefined : routeService?.agentRuntimeRoutesForOwner({
+          source: controller.item.source,
+          pluginId: controller.item.id,
+          moduleGeneration: moduleGenerationOf(controller),
+        }, controller.generationView).find(candidate => candidate.id === target.route.routeId)
+        return route !== undefined && target.route.param === 'roomId' && target.route.roomId === target.roomId
+          && route.path.split('/').filter(segment => segment === ':roomId').length === 1
+      },
+      bootstrapRouteClaimActive: (owner, origin, target) => scenarioSessionScopeAuthority?.bootstrapAdmissionRouteClaimActive(owner, origin, target) === true,
+      claimBootstrapRoute: (owner, request) => agentSessionRuntime.claimAdmissionBootstrapRoute(owner, request),
       authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
       mountRoute: route => {
         if (playgroundScenarioAgentRuntimeRoute === undefined) throw new Error('Playground scenario route authority is unavailable')
@@ -1068,6 +1084,9 @@ async function start(
       captureAdmissionTarget: (owner, origin, target, sessionId, generation, messageId) => scenarioSessionScopeAuthority.captureAdmissionTarget(owner, origin, target, sessionId, generation, messageId),
       bootstrapAdmissionTargetActive: (owner, origin, target) => scenarioSessionScopeAuthority.bootstrapAdmissionTargetActive(owner, origin, target),
       captureBootstrapAdmissionTarget: (owner, origin, target, sessionId, generation, messageId) => scenarioSessionScopeAuthority.captureBootstrapAdmissionTarget(owner, origin, target, sessionId, generation, messageId),
+      bootstrapAdmissionRouteTargetActive: (owner, origin, target) => scenarioSessionScopeAuthority.bootstrapAdmissionRouteTargetActive(owner, origin, target),
+      bootstrapAdmissionRouteClaimActive: (owner, origin, target) => scenarioSessionScopeAuthority.bootstrapAdmissionRouteClaimActive(owner, origin, target),
+      captureBootstrapAdmissionRouteTarget: (owner, origin, target, continuation, sessionId, generation, messageId) => scenarioSessionScopeAuthority.captureBootstrapAdmissionRouteTarget(owner, origin, target, continuation, sessionId, generation, messageId),
     }),
     ...(playgroundAgentSessionPersistence === undefined ? {} : {
       persistence: playgroundAgentSessionPersistence,
@@ -1426,6 +1445,10 @@ async function start(
       const owner = `${controller.item.source}:${controller.item.id}`
       agentRouteScopes.revoke(owner, 'plugin-generation-replaced')
       agentSessionRuntime.fenceOwner(owner, 'plugin-generation-replaced')
+      await controller.agentAdmissionBootstrapRouteReservationFiber?.dispose()
+      delete controller.agentAdmissionBootstrapRouteReservationFiber
+      await controller.agentAdmissionBootstrapRouteDeclarationFiber?.dispose()
+      delete controller.agentAdmissionBootstrapRouteDeclarationFiber
       await controller.agentAdmissionBootstrapReservationFiber?.dispose()
       delete controller.agentAdmissionBootstrapReservationFiber
       await controller.agentAdmissionBootstrapTargetFiber?.dispose()
@@ -1748,6 +1771,10 @@ async function start(
       await controller.agentAdmissionBootstrapTargetFiber
       controller.agentAdmissionBootstrapReservationFiber = pluginContext.plugin(CordisXAgentAdmissionBootstrapReservationService, agentSessionRuntime)
       await controller.agentAdmissionBootstrapReservationFiber
+      controller.agentAdmissionBootstrapRouteDeclarationFiber = pluginContext.plugin(CordisXAgentAdmissionBootstrapRouteDeclarationService, agentSessionRuntime)
+      await controller.agentAdmissionBootstrapRouteDeclarationFiber
+      controller.agentAdmissionBootstrapRouteReservationFiber = pluginContext.plugin(CordisXAgentAdmissionBootstrapRouteReservationService, agentSessionRuntime)
+      await controller.agentAdmissionBootstrapRouteReservationFiber
       pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Plugin activation started')
       controller.fiber = pluginContext.plugin(
         pluginFromModule(module),
@@ -1766,6 +1793,10 @@ async function start(
       pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Plugin activation failed', error)
       await controller.fiber?.dispose()
       delete controller.fiber
+      await controller.agentAdmissionBootstrapRouteReservationFiber?.dispose()
+      delete controller.agentAdmissionBootstrapRouteReservationFiber
+      await controller.agentAdmissionBootstrapRouteDeclarationFiber?.dispose()
+      delete controller.agentAdmissionBootstrapRouteDeclarationFiber
       await controller.agentAdmissionBootstrapReservationFiber?.dispose()
       delete controller.agentAdmissionBootstrapReservationFiber
       await controller.agentAdmissionBootstrapTargetFiber?.dispose()
@@ -2993,6 +3024,10 @@ async function start(
       delete controller.agentLoopClient
       await controller.unregisterAgentLoop?.()
       delete controller.unregisterAgentLoop
+      await controller.agentAdmissionBootstrapRouteReservationFiber?.dispose()
+      delete controller.agentAdmissionBootstrapRouteReservationFiber
+      await controller.agentAdmissionBootstrapRouteDeclarationFiber?.dispose()
+      delete controller.agentAdmissionBootstrapRouteDeclarationFiber
       await controller.agentAdmissionBootstrapReservationFiber?.dispose()
       delete controller.agentAdmissionBootstrapReservationFiber
       await controller.agentAdmissionBootstrapTargetFiber?.dispose()
@@ -3413,7 +3448,7 @@ async function start(
           const matches = controllers.filter(controller => controller.item.id === owner
             && controller.principalLive
             && moduleGenerationOf(controller) === moduleGeneration)
-          return matches.length === 1 ? `${matches[0]!.item.source}:${matches[0]!.item.id}` : undefined
+          return matches.length === 1 ? agentOwnerForController(matches[0]!) : undefined
         },
       }),
     })
