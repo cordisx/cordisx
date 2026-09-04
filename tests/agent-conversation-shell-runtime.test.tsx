@@ -709,7 +709,7 @@ describe('Agent conversation shell public runtime', () => {
     await settle(); dom.window.close()
   })
 
-  it('fails closed when a v7 replacement drops a pending approval before its terminal replacement', async () => {
+  it('fails closed when a v7 replacement drops the established timeline after terminal approval', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const dom = installDom()
     const commands = new CommandRegistry()
@@ -787,12 +787,36 @@ describe('Agent conversation shell public runtime', () => {
     registration.mount(mountContext(dom))
     await vi.waitFor(() => expect(dom.window.document.querySelectorAll('[data-entry-id]')).toHaveLength(3))
     const subscription = { subscriptionId: 'subscription-v7-missing-pending', binding: { bindingId: binding!.bindingId, ownerGeneration: binding!.ownerGeneration }, generation: 'snapshot-v7-missing-pending', afterSequence: 3, snapshotSequence: 3 }
-    const collapsed: AgentConversationShellSnapshotV7 = {
+    const pending = initialSnapshot!.items.find(item => item.itemId === 'pending-approval')!
+    if (pending.kind !== 'approval') throw new Error('pending approval fixture is invalid')
+    const { authorityBinding: _authorityBinding, agentGeneration: _agentGeneration, ...terminalBase } = pending
+    const terminal = { ...terminalBase, state: 'denied' as const, actions: [] as const }
+    const terminalReplacement: AgentConversationShellSnapshotV7 = {
       ...initialSnapshot!, snapshotSequence: 4,
-      // Reproduces the malformed C snapshot: only an older delegation remains.
-      items: [initialSnapshot!.items[0]!],
+      items: [initialSnapshot!.items[0]!, terminal, initialSnapshot!.items[2]!],
     }
-    stream.push({ subscription, afterSequence: 3, phase: 'live', updates: [{ kind: 'snapshot-replaced', sequence: 4, snapshot: collapsed }], nextAfterSequence: 4, hasMore: false } as never)
+    stream.push({ subscription, afterSequence: 3, phase: 'live', updates: [{ kind: 'snapshot-replaced', sequence: 4, snapshot: terminalReplacement }], nextAfterSequence: 4, hasMore: false } as never)
+    await vi.waitFor(() => expect(dom.window.document.querySelector('[data-entry-id="pending-approval"]')?.getAttribute('data-state')).toBe('denied'))
+    expect(dom.window.document.querySelector('[data-entry-id="pending-approval"] .cxa-approval-action')).toBeNull()
+    const rejectionReply = {
+      ...initialSnapshot!.items[2]!, kind: 'message' as const, itemId: 'rejection-reply', messageId: 'rejection-reply', sequence: 4,
+      source: { kind: 'session-event' as const, sessionId: pending.sessionId, eventSeq: 32 }, semantic: { purpose: 'conversation' as const },
+      body: [{ kind: 'text' as const, text: message('rejection-reply', 'Lead rejected the request.') }],
+      timestamp: '2026-09-05T00:00:02.000Z',
+    }
+    const fullTerminalTimeline: AgentConversationShellSnapshotV7 = {
+      ...terminalReplacement, snapshotSequence: 5,
+      items: [...terminalReplacement.items, rejectionReply],
+    }
+    stream.push({ subscription, afterSequence: 4, phase: 'live', updates: [{ kind: 'snapshot-replaced', sequence: 5, snapshot: fullTerminalTimeline }], nextAfterSequence: 5, hasMore: false } as never)
+    await vi.waitFor(() => expect(dom.window.document.querySelectorAll('[data-entry-id]')).toHaveLength(4))
+    const collapsed: AgentConversationShellSnapshotV7 = {
+      ...fullTerminalTimeline, snapshotSequence: 6,
+      // Reproduces C694's 553-to-554 post-terminal collapse: only an old
+      // delegation remains after the terminal fact and its rejection reply.
+      items: [fullTerminalTimeline.items[0]!],
+    }
+    stream.push({ subscription, afterSequence: 5, phase: 'live', updates: [{ kind: 'snapshot-replaced', sequence: 6, snapshot: collapsed }], nextAfterSequence: 6, hasMore: false } as never)
     await waitForRuntimeState(dom, 'error')
     expect(unsubscribed).toBe(1)
     registration.dispose(); runtime.dispose(); commands.dispose()
