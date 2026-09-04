@@ -781,7 +781,7 @@ function manifestHostDomDeclarationsV4(
     : Object.freeze([])
 }
 
-function isAgentRuntimePermission(value: string): boolean {
+function isAgentRuntimePermission(value: string): value is AgentRuntimeCapability {
   return value.startsWith('agents.') || value.startsWith('sessions.') || value.startsWith('approvals.')
 }
 
@@ -1160,10 +1160,15 @@ export class PermissionBroker {
     const registration = this.registration(input.identity, input.view)
     if (registration === undefined || !validAgentRuntimeSessionId(input.sessionId)
       || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-      || (registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6)) return Object.freeze({ authorized: false })
-    const declaration = registration.manifest.capabilities.find(item => item.name === input.capability)
+      || (registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6
+        && registration.manifest.schemaVersion !== 7 && registration.manifest.schemaVersion !== 8)) return Object.freeze({ authorized: false })
+    const declaration = registration.manifest.capabilities.find((item): item is Extract<typeof item, { readonly name: AgentRuntimeCapability }> => (
+      item.name === input.capability && isAgentRuntimePermission(item.name)
+    ))
     if (declaration === undefined) return Object.freeze({ authorized: false })
-    if (!this.validAgentRuntimeScopeSource(registration, input, declaration.scope.sessionIds)) return Object.freeze({ authorized: false })
+    const declaredSessionIds = 'sessionIds' in declaration.scope ? declaration.scope.sessionIds : undefined
+    const rationale = 'rationale' in declaration ? declaration.rationale : undefined
+    if (!this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds)) return Object.freeze({ authorized: false })
     const policyKey = this.agentRuntimePolicyKey(registration, input.capability, input.sessionId)
     const policy = this.policyRecords.get(policyKey)
     if (!developmentAutoApprove && isPermissionPolicyRecordV4(policy) && policy.policy === 'deny-persistent') {
@@ -1173,7 +1178,7 @@ export class PermissionBroker {
       const record = this.agentRuntimePolicyRecord(registration, input.capability, input.sessionId, 'allow-persistent')
       try { await this.persistV4([record]) } catch { return Object.freeze({ authorized: false }) }
       if (!this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-        || !this.validAgentRuntimeScopeSource(registration, input, declaration.scope.sessionIds)) {
+        || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds)) {
         return Object.freeze({ authorized: false })
       }
       this.policyRecords.set(permissionRecordKeyV4(record), record)
@@ -1182,7 +1187,7 @@ export class PermissionBroker {
       const promptDeclaration: CordisXCapabilityDeclaration = Object.freeze({
         name: input.capability as CordisXPlatformCapability,
         required: declaration.required,
-        reason: declaration.rationale?.description ?? Object.freeze({
+        reason: rationale?.description ?? Object.freeze({
           namespace: 'permission', key: `agent-runtime.${input.capability}`,
           fallback: `${input.capability} for one exact Agent Session`,
         }),
@@ -1212,14 +1217,14 @@ export class PermissionBroker {
       }
       if (decision !== 'allow' && decision !== 'allow-once') return Object.freeze({ authorized: false })
       if (!this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-        || !this.validAgentRuntimeScopeSource(registration, input, declaration.scope.sessionIds)) {
+        || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds)) {
         return Object.freeze({ authorized: false })
       }
       if (decision === 'allow') {
         const record = this.agentRuntimePolicyRecord(registration, input.capability, input.sessionId, 'allow-persistent')
         try { await this.persistV4([record]) } catch { return Object.freeze({ authorized: false }) }
         if (!this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-          || !this.validAgentRuntimeScopeSource(registration, input, declaration.scope.sessionIds)) {
+          || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds)) {
           return Object.freeze({ authorized: false })
         }
         this.policyRecords.set(permissionRecordKeyV4(record), record)

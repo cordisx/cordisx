@@ -1,7 +1,12 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
-import type { CordisXPluginManifestV5 } from '../packages/cli/src/permission-contracts.js'
-import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 } from '../packages/cli/src/permission-contracts.js'
+import type { CordisXPluginManifestV5, CordisXPluginManifestV6, CordisXPluginManifestV7, CordisXPluginManifestV8 } from '../packages/cli/src/permission-contracts.js'
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
+} from '../packages/cli/src/permission-contracts.js'
 import { normalizePluginManifestV5 } from '../packages/cli/src/permission-model-v4.js'
 import { BrowserPermissionPrompt, MemoryPermissionPolicyStore, PermissionBroker, type PermissionPrompt } from '../packages/cli/src/renderer/platform.js'
 
@@ -80,6 +85,40 @@ describe('Agent Session permission-v4 Host authority', () => {
         policy: 'allow-persistent',
       }),
     ])
+  })
+
+  it('admits explicit local-development Agent runtime authorization for every supported manifest predecessor through v8, and rejects unknown versions', async () => {
+    const manifests: readonly (CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8)[] = [
+      manifest,
+      { ...manifest, $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V6, schemaVersion: 6 },
+      { ...manifest, $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V7, schemaVersion: 7 },
+      { ...manifest, $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V8, schemaVersion: 8 },
+    ]
+    for (const candidate of manifests) {
+      const store = new MemoryPermissionPolicyStore()
+      const broker = new PermissionBroker(store, prompt)
+      broker.register(identity, candidate)
+      broker.replaceAgentRuntimeConnection(connection)
+      const authority = broker.createDevelopmentAgentRuntimeAuthorizationAuthority()
+      const result = await broker.authorizeDevelopmentAgentRuntime(authority, {
+        identity, capability: 'agents.create', sessionId: `cx-session.manifest-v${candidate.schemaVersion}`,
+        scopeSource: { kind: 'host-create', reservedSessionId: `cx-session.manifest-v${candidate.schemaVersion}` }, connection,
+      })
+      expect(result.authorized).toBe(true)
+      expect(store.readV4()).toEqual([expect.objectContaining({
+        key: expect.objectContaining({ capability: 'agents.create', scope: { sessionIds: [`cx-session.manifest-v${candidate.schemaVersion}`] } }),
+        policy: 'allow-persistent',
+      })])
+    }
+
+    const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), prompt)
+    broker.register(identity, { ...manifest, $schema: 'https://example.invalid/plugin-manifest.v9.schema.json', schemaVersion: 9 } as never)
+    broker.replaceAgentRuntimeConnection(connection)
+    const authority = broker.createDevelopmentAgentRuntimeAuthorizationAuthority()
+    await expect(broker.authorizeDevelopmentAgentRuntime(authority, {
+      identity, capability: 'agents.create', sessionId: 'cx-session.unknown',
+      scopeSource: { kind: 'host-create', reservedSessionId: 'cx-session.unknown' }, connection,
+    })).resolves.toEqual({ authorized: false })
   })
 
   it('admits one unbound Session capability only through its Host-issued exact scope', async () => {
