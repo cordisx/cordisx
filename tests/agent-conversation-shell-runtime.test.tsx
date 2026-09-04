@@ -12,6 +12,10 @@ import type {
   AgentConversationShellSnapshot as AgentConversationShellSnapshotV5,
   AgentConversationShellSubscriptionClosed as AgentConversationShellSubscriptionClosedV5,
 } from '@cordisx/protocol/agent-conversation-shell/v5'
+import type {
+  AgentConversationShellSnapshot as AgentConversationShellSnapshotV6,
+  AgentConversationShellSubscriptionClosed as AgentConversationShellSubscriptionClosedV6,
+} from '@cordisx/protocol/agent-conversation-shell/v6'
 import { Context } from '@deepseek-ai/cordis'
 import { JSDOM } from 'jsdom'
 import { act } from 'react'
@@ -488,6 +492,99 @@ describe('Agent conversation shell public runtime', () => {
       contract: 'cordisx.agent-conversation-shell-subscription-close/v4',
       schemaVersion: 4,
     } as unknown as AgentConversationShellSubscriptionClosedV5)
+    await waitForRuntimeState(dom, 'error')
+    expect(unsubscribed).toBe(1)
+    registration.dispose(); runtime.dispose(); commands.dispose()
+    await settle(); dom.window.close()
+  })
+
+  it('accepts a v6 pending-to-actionless-terminal page and rejects a later terminal rewrite', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
+    const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'generation-v6' })
+    const stream = new PageStream()
+    let unsubscribed = 0
+    let binding: AgentConversationShellBinding | undefined
+    const registration = runtime.register(plugin, currentBinding => {
+      binding = currentBinding
+      const participant = { participantId: 'agent-reviewer', role: 'agent' as const, displayName: message('reviewer', 'Reviewer') }
+      const pending = {
+        kind: 'approval' as const, itemId: 'approval-v6', sequence: 1,
+        participantId: participant.participantId, memberId: 'member-reviewer', runId: 'run-reviewer',
+        sessionId: 'cx-session.v6-reviewer', agentGeneration: 9, approvalId: 'cx-approval.v6-review',
+        approvalKind: 'command' as const, state: 'pending' as const,
+        actions: [{ decision: 'approve' as const, command: { id: 'approval.answer' } }] as const,
+      }
+      const snapshot: AgentConversationShellSnapshotV6 = {
+        binding: { bindingId: currentBinding.bindingId, ownerGeneration: currentBinding.ownerGeneration },
+        generation: 'snapshot-v6', snapshotSequence: 1,
+        selection: {
+          kind: 'room', roomId: 'room-v6', title: message('room.v6', 'V6 room'),
+          multiParticipant: false, participantPresentation: 'none', participants: [participant],
+          activeRuns: [{
+            participantId: participant.participantId, memberId: pending.memberId, runId: pending.runId,
+            sessionId: pending.sessionId, lifecycle: { phase: 'attention' },
+          }],
+        },
+        items: [pending],
+        composer: {
+          availability: 'unavailable', placeholder: message('composer.v6', 'Message'), disabled: { value: true },
+          shortcutPolicy: 'enter', submit: { id: 'send' },
+        },
+        headerActions: [],
+      }
+      const subscription = {
+        subscriptionId: 'subscription-v6', binding: snapshot.binding, generation: snapshot.generation,
+        afterSequence: 1, snapshotSequence: 1,
+      }
+      const close = (code: AgentConversationShellSubscriptionClosedV6['code']): AgentConversationShellSubscriptionClosedV6 => ({
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-conversation-shell-subscription-close.v6.schema.json',
+        contract: 'cordisx.agent-conversation-shell-subscription-close/v6', schemaVersion: 6,
+        subscriptionId: subscription.subscriptionId, binding: subscription.binding, generation: subscription.generation,
+        status: 'closed', code,
+      })
+      return {
+        snapshot: async () => snapshot,
+        subscribe: async () => ({
+          result: { type: 'subscribe' as const, status: 'accepted' as const, code: 'allowed' as const, subscription },
+          handle: {
+            subscription, pages: stream, closed: new Promise<never>(() => {}),
+            unsubscribe: async () => { unsubscribed += 1; stream.close(); return close('unsubscribed') },
+          },
+        }),
+        updateRoomSettings: async request => ({
+          type: 'update-room-settings' as const, requestId: request.requestId, binding: request.binding,
+          generation: request.generation, roomId: request.roomId, expectedSnapshotSequence: request.expectedSnapshotSequence,
+          status: 'unavailable' as const, code: 'settings-unavailable' as const,
+        }),
+        dispose() {},
+      }
+    }, undefined, 6)
+    registration.mount(mountContext(dom))
+    await vi.waitFor(() => expect(dom.window.document.querySelectorAll('.cxa-approval-actions button')).toHaveLength(1))
+    const subscription = {
+      subscriptionId: 'subscription-v6',
+      binding: { bindingId: binding!.bindingId, ownerGeneration: binding!.ownerGeneration },
+      generation: 'snapshot-v6', afterSequence: 1, snapshotSequence: 1,
+    }
+    const terminal = {
+      kind: 'approval' as const, itemId: 'approval-v6', sequence: 1,
+      participantId: 'agent-reviewer', memberId: 'member-reviewer', runId: 'run-reviewer',
+      sessionId: 'cx-session.v6-reviewer', approvalId: 'cx-approval.v6-review',
+      approvalKind: 'command' as const, state: 'approved' as const, actions: [] as const,
+    }
+    stream.push({
+      subscription, afterSequence: 1, phase: 'live',
+      updates: [{ kind: 'item-updated', sequence: 2, item: terminal }], nextAfterSequence: 2, hasMore: false,
+    } as never)
+    await vi.waitFor(() => expect(dom.window.document.querySelector('.cxa-approval')?.getAttribute('data-state')).toBe('approved'))
+    expect(dom.window.document.querySelector('.cxa-approval-actions')).toBeNull()
+    stream.push({
+      subscription, afterSequence: 2, phase: 'live',
+      updates: [{ kind: 'item-updated', sequence: 3, item: { ...terminal, state: 'denied' } }], nextAfterSequence: 3, hasMore: false,
+    } as never)
     await waitForRuntimeState(dom, 'error')
     expect(unsubscribed).toBe(1)
     registration.dispose(); runtime.dispose(); commands.dispose()

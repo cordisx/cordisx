@@ -1363,6 +1363,11 @@ export type CordisXAgentConversationShellSourceFactoryV5 = (
 ) => import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellSource>
 
+export type CordisXAgentConversationShellSourceFactoryV6 = (
+  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellBinding>,
+) => import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellSource
+  | Promise<import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellSource>
+
 /** Host-owned page mount paired with one fiber-owned source registration. */
 export interface CordisXAgentConversationShellRegistration {
   readonly mount: CordisXPageMount
@@ -1378,6 +1383,8 @@ export interface CordisXAgentConversationShell {
   registerSourceV4(factory: CordisXAgentConversationShellSourceFactoryV4): CordisXAgentConversationShellRegistration
   /** Shell v5 adds only the explicit Host-owned composer shortcut policy. */
   registerSourceV5(factory: CordisXAgentConversationShellSourceFactoryV5): CordisXAgentConversationShellRegistration
+  /** Shell v6 adds immutable actionless terminal approval replay. */
+  registerSourceV6(factory: CordisXAgentConversationShellSourceFactoryV6): CordisXAgentConversationShellRegistration
 }
 
 export interface CordisXRouteDefinition<Outlet extends CordisXOutletName = CordisXOutletName> {

@@ -119,7 +119,7 @@ interface AgentConversationApprovalBase {
 
 export type AgentConversationApproval = AgentConversationApprovalBase & (
   | { readonly binding: AgentLoopBindingIdentity; readonly turn: string }
-  | { readonly sessionId: SessionId; readonly agentGeneration: number }
+  | { readonly sessionId: SessionId; readonly agentGeneration?: number }
 )
 
 export type AgentConversationEntry = AgentConversationMessage | AgentConversationStatus | AgentConversationMemberPresence | AgentConversationApproval
@@ -329,7 +329,13 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
         assertAgentLoopHandle(entry.turn, `entries[${index}].turn`)
       } else {
         assertOpaque(entry.sessionId, `entries[${index}].sessionId`)
-        if (!Number.isSafeInteger(entry.agentGeneration) || entry.agentGeneration < 1) throw new Error(`entries[${index}].agentGeneration is invalid`)
+        if (entry.state === 'pending' && (!Number.isSafeInteger(entry.agentGeneration) || entry.agentGeneration! < 1)) {
+          throw new Error(`entries[${index}].agentGeneration is invalid`)
+        }
+        if (entry.state !== 'pending' && entry.agentGeneration !== undefined
+          && (!Number.isSafeInteger(entry.agentGeneration) || entry.agentGeneration < 1)) {
+          throw new Error(`entries[${index}].agentGeneration is invalid`)
+        }
       }
       assertAgentLoopHandle(entry.approvalId, `entries[${index}].approvalId`)
       if (!participantIds.has(entry.participantId)) throw new Error(`entries[${index}] approval association is invalid`)
