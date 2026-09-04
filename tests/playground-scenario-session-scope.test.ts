@@ -179,8 +179,6 @@ describe('Playground scenario exact Session scope authority', () => {
       permissionRoute: () => ({ routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }),
       bootstrapRouteRegistered: (_owner, target) => target.route.routeId === 'room' && target.route.param === 'roomId'
         && target.route.roomId === 'room-v6',
-      // The command remains retained through the old binding's route replacement.
-      bootstrapRouteClaimActive: () => true,
       claimBootstrapRoute: (_owner, request) => {
         claim = { sessionId: request.source.sessionId, messageId: request.source.messageId, bindingId: request.binding.binding.bindingId }
         return { status: 'claimed', code: 'claimed', receipt: {} } as never
