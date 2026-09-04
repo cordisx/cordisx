@@ -1051,7 +1051,6 @@ async function start(
         return route !== undefined && target.route.param === 'roomId' && target.route.roomId === target.roomId
           && route.path.split('/').filter(segment => segment === ':roomId').length === 1
       },
-      bootstrapRouteClaimActive: (owner, origin, target) => scenarioSessionScopeAuthority?.bootstrapAdmissionRouteClaimActive(owner, origin, target) === true,
       claimBootstrapRoute: (owner, request) => agentSessionRuntime.claimAdmissionBootstrapRoute(owner, request),
       authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
       mountRoute: route => {

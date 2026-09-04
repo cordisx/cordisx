@@ -118,12 +118,6 @@ export interface PlaygroundScenarioSessionScopeAuthorityOptions {
   readonly changed: (active: boolean) => void
   /** Validates one exact same-owner registered Room route before v6 declaration. */
   readonly bootstrapRouteRegistered?: (owner: PluginOwnerIdentity, target: AgentAdmissionBootstrapRouteTarget) => boolean
-  /** Keeps the Host command live through old-binding replacement, but not after handler completion. */
-  readonly bootstrapRouteClaimActive?: (
-    owner: PluginOwnerIdentity,
-    origin: AgentBootstrapCommandOrigin,
-    target: AgentAdmissionBootstrapRouteTarget,
-  ) => boolean
   /** Calls the Host-only v6 continuation claim; plugins never receive this seam. */
   readonly claimBootstrapRoute?: (
     owner: PluginOwnerIdentity,
@@ -351,7 +345,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
     target: AgentAdmissionBootstrapRouteTarget,
   ): boolean {
     if (this.disposed || !this.validBootstrapOrigin(bootstrapOrigin) || !this.validBootstrapRouteTarget(target)
-      || this.options.bootstrapRouteClaimActive?.(owner, bootstrapOrigin, target) !== true) return false
+    ) return false
     return [...this.commandOrigins].filter(origin => origin.owner === owner.pluginId
       && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin)).length === 1
   }

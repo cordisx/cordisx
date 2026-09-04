@@ -27,6 +27,7 @@ import {
   CORDISX_PLUGIN_SOURCE,
 } from '../packages/cli/src/renderer/ownership.js'
 import { AgentRouteSessionScopeAuthority, type AgentActiveRoute } from '../packages/cli/src/renderer/agent-route-session-scope.js'
+import { PlaygroundScenarioSessionScopeAuthority } from '../packages/cli/src/renderer/playground-scenario-session-scope.js'
 
 class Driver implements CordisXPrivateAgentDriver {
   private readonly replacement = new Set<() => void>()
@@ -1099,6 +1100,98 @@ describe('Agent/Session Host authority v1', () => {
       expect(result).toMatchObject({ status: 'claimed', code: 'claimed', receipt: { target, source: { sessionId: sessions.get(target.runId)! } } })
     }
     await runtime.dispose()
+  })
+
+  it('composes v6 claim liveness through the retained live command, before command completion or scenario activation', async () => {
+    const driver = new Driver()
+    let oldBindingActive = true
+    let newBindingActive = true
+    let runtime!: CordisXAgentSessionRuntime
+    const lifecycle: string[] = []
+    const origin = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
+      originId: 'bootstrap-route-composed-origin',
+      binding: { bindingId: 'bootstrap-route-composed-old-binding', ownerGeneration: 'bootstrap-route-composed-owner-generation' },
+      generation: 'bootstrap-route-composed-plugin-generation', executionId: 'bootstrap-route-composed-execution',
+      commandId: 'composer.submit', scope: 'composer-submit' as const,
+    }
+    const target = {
+      roomId: 'room-bootstrap-route-composed', participantId: 'leader', memberId: 'member-leader', runId: 'run-leader',
+      route: { routeId: 'room', param: 'roomId' as const, roomId: 'room-bootstrap-route-composed' },
+    }
+    const sourceSessionId = 'cx-session.bootstrap-route-composed-lead'
+    const authority = new PlaygroundScenarioSessionScopeAuthority({
+      hostGeneration: 'playground-bootstrap-route-composed', connectionGeneration: () => 1,
+      currentRoute: () => undefined,
+      ownerForSession: sessionId => sessionId === sourceSessionId || sessionId === 'cx-session.bootstrap-route-composed-reviewer'
+        ? owner : undefined,
+      routeOwner: agentOwner => agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation
+        ? { source: 'file:///fixtures/registry.ts', pluginId: 'registry' } : undefined,
+      permissionRoute: () => ({ routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }),
+      bootstrapRouteRegistered: (_owner, candidate) => candidate.roomId === target.roomId && candidate.route.routeId === target.route.routeId
+        && candidate.route.param === target.route.param && candidate.route.roomId === target.route.roomId,
+      claimBootstrapRoute: (claimOwner, request) => {
+        lifecycle.push('claim')
+        return runtime.claimAdmissionBootstrapRoute(claimOwner, request)
+      },
+      authorize: async () => true,
+      mountRoute: () => () => {},
+      changed: () => {},
+    })
+    runtime = new CordisXAgentSessionRuntime({
+      driver, authorize: async () => true,
+      bootstrapAdmissionRouteTargetActive: (claimOwner, candidate, declaredTarget) =>
+        authority.bootstrapAdmissionRouteTargetActive(claimOwner, candidate, declaredTarget),
+      bootstrapAdmissionRouteClaimActive: (claimOwner, candidate, declaredTarget) =>
+        authority.bootstrapAdmissionRouteClaimActive(claimOwner, candidate, declaredTarget),
+      captureBootstrapAdmissionRouteTarget: (claimOwner, candidate, declaredTarget, continuation, sessionId, generation, messageId) =>
+        authority.captureBootstrapAdmissionRouteTarget(claimOwner, candidate, declaredTarget, continuation, sessionId, generation, messageId),
+    })
+
+    await authority.conversationSource.execute({
+      owner: owner.pluginId, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
+      snapshotGeneration: 'bootstrap-route-composed-snapshot', routeId: 'chatroom:new-room', runs: [],
+      active: () => oldBindingActive, bootstrapOrigin: origin,
+    }, async () => {
+      const declaration = await runtime.declareAdmissionBootstrapRoute(owner, { origin, target })
+      expect(declaration.status).toBe('declared')
+      if (declaration.status !== 'declared') throw new Error('bootstrap route target was not declared')
+      const created = await runtime.create(owner, { sessionId: sourceSessionId, setup })
+      expect(created.status).toBe('accepted')
+      if (created.status !== 'accepted') throw new Error('bootstrap route Session was not created')
+      const reservation = await runtime.reserveAdmissionBootstrapRoute(owner, {
+        handle: created.handle, continuation: declaration.continuation, message: { text: 'fresh room source' },
+      })
+      expect(reservation.status).toBe('reserved')
+      if (reservation.status !== 'reserved') throw new Error('bootstrap route reservation was not created')
+      await expect(reservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
+      lifecycle.push('submitted')
+
+      oldBindingActive = false
+      authority.conversationSource.fenceBinding(origin.binding.bindingId, 'route-replaced')
+      authority.conversationSource.claimBootstrapRoute({
+        owner,
+        binding: {
+          binding: { bindingId: 'bootstrap-route-composed-new-binding', ownerGeneration: origin.binding.ownerGeneration },
+          generation: origin.generation, route: target.route,
+        },
+        active: () => newBindingActive,
+      })
+    })
+    lifecycle.push('command-completed')
+
+    const activated = await authority.client.activate({
+      runId: 'scenario-bootstrap-route-composed', sourceMessageId: driver.submitted[0]!,
+      sourceSessionId, targetSessionId: 'cx-session.bootstrap-route-composed-reviewer',
+    })
+    lifecycle.push('scenario-tick')
+    expect(activated.status).toBe('available')
+    expect(lifecycle).toEqual(['submitted', 'claim', 'command-completed', 'scenario-tick'])
+    if (activated.status === 'available') activated.handle.close()
+    newBindingActive = false
+    await runtime.dispose()
+    authority.dispose()
   })
 
   it('fails closed for v6 cross-Room, cross-target, premature, reused, and command-complete continuations', async () => {

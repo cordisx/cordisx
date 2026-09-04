@@ -825,11 +825,13 @@ describe('Agent conversation shell public runtime', () => {
   it('Host-claims a matching v6 Room route continuation synchronously when the new binding mounts', () => {
     const dom = installDom()
     const commands = new CommandRegistry()
+    let mountReturned = false
     const claims: Array<{ readonly owner: string; readonly routeId: string; readonly roomId: string; readonly bindingId: string }> = []
     const sourceAuthority: PlaygroundScenarioConversationSourceAuthority = {
       execute: async (_origin, operation) => await operation(),
       fenceBinding: () => {},
       claimBootstrapRoute: input => {
+        expect(mountReturned).toBe(false)
         claims.push({ owner: input.owner.pluginId, routeId: input.binding.route.routeId, roomId: input.binding.route.roomId, bindingId: input.binding.binding.bindingId })
       },
     }
@@ -855,6 +857,7 @@ describe('Agent conversation shell public runtime', () => {
       }
     }, undefined, 9)
     const unmount = registration.mount({ ...mountContext(dom, { roomId: 'room-after-submit' }), routeDefinitionId: 'room' })
+    mountReturned = true
     expect(claims).toHaveLength(1)
     expect(claims[0]).toMatchObject({
       owner: 'file:///fixtures/chatroom.ts:chatroom', routeId: 'room', roomId: 'room-after-submit', bindingId: expect.any(String),
