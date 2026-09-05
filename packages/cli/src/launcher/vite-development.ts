@@ -481,7 +481,6 @@ export async function startNativeViteServer(
     return `
 import { installCordisX, prepareCordisXViteReactRuntime } from ${JSON.stringify(hostImport)};
 import { NativeViteDevelopmentClient } from ${JSON.stringify(helperImport)};
-${pluginImports.map((id, index) => `import * as p${index} from ${JSON.stringify(id)};`).join('\n')}
 const previous = globalThis.__cordisxViteClient;
 if (previous) await previous.dispose(true);
 const disposeSharedReactRuntime = prepareCordisXViteReactRuntime(document);
@@ -523,7 +522,10 @@ const stagePluginGeneration = async (pluginId, moduleGeneration) => {
   };
 };
 try {
-  const modules = await Promise.all([${plugins.map((_, index) => `p${index}.load()`).join(',')}]);
+  // Plugins can import cordisx/react. Load them only after the Host has
+  // published the shared React runtime; static ESM imports would evaluate
+  // before prepareCordisXViteReactRuntime() on a cold renderer.
+  const modules = await Promise.all(pluginUrls.map(url => import(/* @vite-ignore */ url).then(module => module.load())));
   const initial = descriptors.map(plugin => {
     const artifact = modules.find(item => item.plugin.id === plugin.id);
     return artifact ? withDescriptor(artifact) : { plugin, ownerDocumentBindings: [] };
