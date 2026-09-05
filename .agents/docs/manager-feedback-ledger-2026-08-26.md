@@ -1,5 +1,12 @@
 # Manager feedback ledger — 2026-08-26
 
+Type: historical delivery record for the 2026-08-26 feedback batch. Retained
+statuses and gates describe that batch, not the state of a later checkout or a
+new task's owner assignments. Use [Manager design](manager-content-design.md),
+[Host forms](host-form-system.md), and the
+[current delivery rule](https://github.com/cordisx/cordisx/blob/main/.agents/rules/functional-delivery.md) for new work. No item
+is promoted to verified, formally merged, or accepted by archiving this record.
+
 This document is the bounded implementation and acceptance ledger for the
 Manager feedback collected on 2026-08-26. It is the follow-up source of truth
 for this batch. It records reusable engineering requirements rather than

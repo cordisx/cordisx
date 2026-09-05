@@ -1,5 +1,13 @@
 # CordisX development plan
 
+Type: historical planning record. The stages below preserve the sequence and
+status vocabulary recorded during development, including the dated 2026-08-23
+feasibility/Manager slice. Undated follow-ups are not a current release or
+remaining-work ledger. Read the [architecture overview](architecture.md) and
+[topic index](README.md) for current implementation references; re-check source
+and delivery evidence before resuming any item. This classification does not
+mark a stage complete or imply publication or user acceptance.
+
 The work is split so each change has one reviewable responsibility and a focused validation boundary.
 
 ## Stage 0 — feasibility spike
@@ -248,3 +256,31 @@ Package portable task UI as standard MCP UI resources. A CordisX package may car
 - an optional CordisX shell entry for local host augmentation.
 
 The two entries must feature-detect capabilities and remain independently usable. The MCP path must not require CordisX.
+
+## Historical feasibility evidence and open questions
+
+The following source and installed-App observations were recorded with the
+initial 2026-08-22 architecture. They are retained for provenance, not current
+compatibility evidence. The old open-question list below is also historical;
+consult current distribution, lifecycle, and security references before treating
+any item as an unresolved decision.
+
+The initial design is based on two source snapshots inspected on 2026-08-22:
+
+- `qqheling/codexplusplus@a114ae5`: launches Codex with a loopback CDP port, selects the Codex page target, installs scripts with `Page.addScriptToEvaluateOnNewDocument`, evaluates them in the current document, and repairs UI changes with DOM observation.
+- `deepseek-ai/deepseek-harness@b150a55`: uses Cordis fibers and reversible effects for plugin lifetime, loads browser client modules separately from the agent loop, and exposes named slots instead of making each plugin patch a shell component directly.
+
+The installed macOS host inspected during the spike is `/Applications/ChatGPT.app` 26.818.41509 (bundle 6962, identifier `com.openai.codex`). Its child process names still identify Codex renderers. The launcher therefore probes both the older standalone `Codex.app` location and the current unified `ChatGPT.app` location.
+
+### Questions retained from the original architecture
+
+- Whether the long-term distribution unit is an npm package, a signed archive, or a Codex universal plugin plus a CordisX-specific UI entry.
+- Whether isolated UI should use an iframe, a dedicated Electron utility process, or both.
+- Whether a future explicitly declared host-replacement protocol should allow one winner or require an explicit user choice; the structured-contribution slice does not expose replacement slots.
+- A public signed-package source and transparency policy after the local-only
+  package generation boundary is proven.
+
+
+### Feasibility-era compatibility observation
+
+The version-0.1 bundle and lifecycle were verified in a simulated renderer DOM. The installed 26.818.41509 host can also be exercised through an isolated second process, so live probes no longer require restarting the user's active application.

@@ -4,14 +4,14 @@ import { MANAGER_ICON_SEMANTICS, MANAGER_ICON_TOKENS } from '../packages/cli/src
 
 describe('Manager icon token audit table', () => {
   it('covers every current token exactly once', async () => {
-    const source = await readFile(new URL('../docs/icon-theme-manager-token-map.md', import.meta.url), 'utf8')
+    const source = await readFile(new URL('../.agents/docs/icon-theme-manager-token-map.md', import.meta.url), 'utf8')
     const rows = [...source.matchAll(/^\| `([^`]+?)` \|/gmu)].map(match => match[1]!)
     expect([...rows].sort()).toEqual([...MANAGER_ICON_TOKENS].sort())
     expect(new Set(rows).size).toBe(rows.length)
   })
 
   it('records all 13 formally mapped semantics as current', async () => {
-    const source = await readFile(new URL('../docs/icon-theme-manager-token-map.md', import.meta.url), 'utf8')
+    const source = await readFile(new URL('../.agents/docs/icon-theme-manager-token-map.md', import.meta.url), 'utf8')
     const targets = [
       'action.move', 'action.export', 'action.follow', 'action.pause', 'action.resume',
       'action.favorite', 'action.import', 'action.enable', 'action.disable', 'action.submit',

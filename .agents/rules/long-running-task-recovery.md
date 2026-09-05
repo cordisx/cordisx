@@ -47,8 +47,9 @@ head, or a passing focused test is not a formal merge.
 ## Reconstruct a requirement ledger, not only a commit ledger
 
 Before resuming implementation, rewrite the user-visible requirements as one
-bounded ledger. Mark every item `unimplemented`, `implemented`, `verified`, or
-`formally merged`, and attach the evidence that justifies the state. Include
+bounded ledger. Keep implementation state, scoped verification evidence,
+formal merge SHA, and explicit user acceptance separate using
+[functional delivery](functional-delivery.md#start-from-a-requirement-ledger). Include
 late feedback and screenshot annotations; a newer PR does not erase an older
 unresolved requirement.
 
@@ -84,17 +85,21 @@ after its formal merge commit exists.
    observable.
 2. Land the Host primitive or platform implementation next, including its
    full owning-repository validation.
-3. Rebase consumers on that formal merge before they change shared Manager
-   rendering or real-renderer smoke coverage.
+3. Update each consumer branch from its own repository's formal main and
+   consume the provider's formal merge through the normal dependency mechanism
+   before changing shared Manager rendering or real-renderer smoke coverage.
 4. Run final cross-feature validation only after the compatible owner commits
    exist.
 5. Update CordisXMono in a separate final commit that pins exact compatible
    commits. Keep `roadmap` as `update = none` unless separately authorized.
 
-For a user-visible claim, require the scoped tests plus a real isolated
-`app://` renderer check when the change affects Manager DOM, a launcher, a
-native-surface adapter, or a lifecycle boundary. Do not substitute JSDOM,
-stale screenshots, or a previous feature branch for current formal evidence.
+For a production-usability claim about a launcher, Manager DOM, native-surface
+adapter, or lifecycle boundary, require the scoped checks and real isolated
+`app://` evidence in [functional delivery](functional-delivery.md#prove-the-production-composition).
+Intermediate previews and active pure-style feedback follow that rule's lower
+readiness stage; they must not be relabeled as production or formal proof.
+Do not substitute JSDOM, stale screenshots, or a previous feature branch for
+current formal evidence.
 
 ## Close the incident without hiding uncertainty
 

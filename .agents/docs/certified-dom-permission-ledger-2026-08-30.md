@@ -1,5 +1,12 @@
 # Certified Host DOM permission delivery ledger
 
+Type: historical candidate record for the 2026-08-30 delivery batch. The SHAs,
+local check counts, and pending gates below are recorded evidence, not a claim
+about the current checkout. Read [Platform capabilities](platform-capabilities.md)
+and [renderer trust composition](renderer-runtime.md#built-in-manager-plane)
+for current implementation boundaries. This record does not establish a later
+formal merge, real-App result, publication, or acceptance.
+
 Status: Host candidate implementation. The normative Protocol manifest-v5,
 permission-v4, capability-catalog-v3, root-catalog-v1, and bounded Host DOM
 bridge contracts are formally merged at
