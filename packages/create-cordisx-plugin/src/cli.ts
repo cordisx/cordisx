@@ -191,9 +191,38 @@ function pluginConfig(ids: readonly string[]): string {
 }
 
 function manifestTest(ids: readonly string[], modulePath: (id: string) => string): string {
-  const imports = ids.map((id, index) => `import * as plugin${index} from '${modulePath(id)}'`).join('\n')
+  const imports = ids.map((id, index) => `const plugin${index} = await import('${modulePath(id)}')`).join('\n')
   const cases = ids.map((id, index) => `  ['${id}', plugin${index}],`).join('\n')
-  return `${imports}\nimport assert from 'node:assert/strict'\nimport test from 'node:test'\n\nconst plugins = [\n${cases}\n]\n\ntest('all configured CordisX plugins export matching manifests', () => {\n  for (const [id, plugin] of plugins) {\n    assert.equal(plugin.manifest.schemaVersion, 1)\n    assert.equal(plugin.manifest.id, id)\n    assert.equal(typeof plugin.apply, 'function')\n  }\n})\n`
+  return `import assert from 'node:assert/strict'
+import test from 'node:test'
+
+const component = () => null
+const noop = () => undefined
+const React = new Proxy({ Fragment: Symbol('Fragment'), Suspense: component, lazy: () => component }, {
+  get(target, property) { return Reflect.get(target, property) ?? noop },
+})
+globalThis.__cordisxSharedReactRuntime = {
+  React,
+  defineReactPage: page => page,
+  jsxRuntime: { Fragment: React.Fragment, jsx: component, jsxs: component },
+  jsxDevRuntime: { Fragment: React.Fragment, jsxDEV: component },
+  ui: new Proxy({}, { get: () => component }),
+}
+
+${imports}
+
+const plugins = [
+${cases}
+]
+
+test('all configured CordisX plugins export matching manifests', () => {
+  for (const [id, plugin] of plugins) {
+    assert.equal(plugin.manifest.schemaVersion, 1)
+    assert.equal(plugin.manifest.id, id)
+    assert.equal(typeof plugin.apply, 'function')
+  }
+})
+`
 }
 
 function projectBuildScript(configName: string): string {
