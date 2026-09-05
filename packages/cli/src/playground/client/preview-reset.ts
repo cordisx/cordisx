@@ -139,6 +139,39 @@ export function playgroundPreviewResetEpochMatches(
     && applied.generation === server.generation
 }
 
+export type PlaygroundPreviewResetEpochReconciliation = 'bootstrap' | 'unchanged'
+
+/**
+ * A Vite server mints generation zero when it starts; that is a server-instance
+ * handshake, not an explicit request to clear a Playground. Adopt it without
+ * touching retained preview state or entering reset recovery.
+ *
+ * A non-requesting recovery marker at generation zero can only have been left
+ * by a prior server instance or the old bootstrap path. It is not authority to
+ * clear an external home, so discard it together with its stale result.
+ */
+export function reconcilePlaygroundPreviewBootstrapEpoch(
+  storage: Storage | undefined,
+  server: PlaygroundPreviewResetEpoch,
+): PlaygroundPreviewResetEpochReconciliation {
+  if (server.generation !== 0) return 'unchanged'
+  const applied = readPlaygroundPreviewResetApplied(storage)
+  const marker = readPlaygroundPreviewResetMarker(storage)
+  const staleRecovery = marker !== undefined && marker.phase !== 'requesting'
+  if (!staleRecovery && playgroundPreviewResetEpochMatches(applied, server)) return 'unchanged'
+
+  if (storage !== undefined) {
+    if (staleRecovery) {
+      clearPlaygroundPreviewResetMarker(storage)
+      storage.removeItem(PLAYGROUND_PREVIEW_RESET_RESULT_KEY)
+    }
+    if (!playgroundPreviewResetEpochMatches(applied, server)) {
+      writePlaygroundPreviewResetApplied(storage, server)
+    }
+  }
+  return 'bootstrap'
+}
+
 export interface PlaygroundPreviewResetDisposition {
   readonly complete: boolean
   readonly confirmationOpen: boolean

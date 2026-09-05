@@ -259,6 +259,14 @@ events. Existing v1 ledgers without setup remain valid. Old composition tokens
 fail closed, and an explicit Playground reset clears this ledger with the other
 fixture state. This store is not installed in production or Desktop, whose
 current native Agent Session transport remains the persistence authority.
+A Vite Playground server's generation-zero reset epoch is only a new server
+instance bootstrap handshake: a fresh or returned document records it without
+clearing client keys, writing a reset-recovery marker, blocking composition,
+redirecting, or requiring retained Room and Session projections to be empty.
+Only an explicit reset transition (which advances the server generation) may
+start destructive reset recovery. A non-requesting recovery marker observed at
+generation zero is stale rather than reset authority and is discarded; it can
+never prompt a destructive confirmation for an external retained home.
 The `dev:ui` session mints that provenance only for enabled, non-built-in local
 entries explicitly named by the source Playground composition. It compiles
 them through the normal verified local-development builder, carries its full

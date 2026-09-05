@@ -133,6 +133,36 @@ describe('stable Playground configuration materialization', () => {
     }
   }, 30_000)
 
+  it('starts a new external-home server at generation zero without resetting retained owner or Session records', async () => {
+    const value = await fixture()
+    const initialized = await createPlaygroundSession(value.sourcePath, { homeDir: value.homeDir })
+    await initialized.close()
+    const retainedOwner = path.join(value.homeDir, 'state', 'owner-documents', 'v1', 'retained-room.json')
+    const retainedSessions = path.join(value.homeDir, 'state', 'playground-agent-sessions', 'v1', 'ledger.json')
+    await mkdir(path.dirname(retainedOwner), { recursive: true })
+    await mkdir(path.dirname(retainedSessions), { recursive: true })
+    await writeFile(retainedOwner, '{"rooms":3,"items":7}\n')
+    await writeFile(retainedSessions, '{"sessions":6}\n')
+    const launcherBefore = await readFile(value.launcherPath, 'utf8')
+    const homeBefore = await readFile(value.homeConfigPath, 'utf8')
+
+    const server = await startVitePlayground({ configPath: value.sourcePath, homeDir: value.homeDir })
+    try {
+      const epoch = await fetch(new URL('/api/reset-state', server.url)).then(async response => {
+        expect(response.ok).toBe(true)
+        return await response.json() as { readonly version: number; readonly instanceId: string; readonly generation: number }
+      })
+      expect(epoch).toMatchObject({ version: 1, generation: 0 })
+      expect(epoch.instanceId).not.toBe('')
+      expect(await readFile(value.launcherPath, 'utf8')).toBe(launcherBefore)
+      expect(await readFile(value.homeConfigPath, 'utf8')).toBe(homeBefore)
+      expect(await readFile(retainedOwner, 'utf8')).toBe('{"rooms":3,"items":7}\n')
+      expect(await readFile(retainedSessions, 'utf8')).toBe('{"sessions":6}\n')
+    } finally {
+      await server.close()
+    }
+  }, 30_000)
+
   it('fails closed on an existing malformed document without rewriting either config', async () => {
     const value = await fixture()
     const initialized = await createPlaygroundSession(value.sourcePath, { homeDir: value.homeDir })
