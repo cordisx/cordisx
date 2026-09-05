@@ -48,6 +48,9 @@ const HOST_COMPOSER_OVERRIDES = `
 .cxa-composer>.shikitor--attached+textarea.cxa-draft.shikitor-input--attached:not([data-cordisx-shikitor-fallback]){color:CanvasText!important;-webkit-text-fill-color:CanvasText!important;caret-color:CanvasText!important;forced-color-adjust:auto}
 .cxa-composer>.shikitor--attached+textarea.cxa-draft.shikitor-input--attached:not([data-cordisx-shikitor-fallback])::placeholder{color:GrayText!important;-webkit-text-fill-color:GrayText!important}
 .cxa-composer>.shikitor--attached+textarea.cxa-draft.shikitor-input--attached:not([data-cordisx-shikitor-fallback])::selection{color:HighlightText!important;-webkit-text-fill-color:HighlightText!important;background:Highlight!important}
+.cxa-composer>.shikitor--attached+textarea.cxa-draft.shikitor-input--attached[data-cordisx-shikitor-native-text="true"]:not([data-cordisx-shikitor-fallback]){color:CanvasText!important;-webkit-text-fill-color:CanvasText!important;caret-color:CanvasText!important}
+.cxa-composer>.shikitor--attached+textarea.cxa-draft.shikitor-input--attached[data-cordisx-shikitor-native-text="true"]:not([data-cordisx-shikitor-fallback])::placeholder{color:GrayText!important;-webkit-text-fill-color:GrayText!important}
+.cxa-composer>.shikitor--attached+textarea.cxa-draft.shikitor-input--attached[data-cordisx-shikitor-native-text="true"]:not([data-cordisx-shikitor-fallback])::selection{color:HighlightText!important;-webkit-text-fill-color:HighlightText!important;background:Highlight!important}
 }
 `
 
