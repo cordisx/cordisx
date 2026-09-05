@@ -63,10 +63,11 @@ changes remain Host-owned.
 
 ## Runtime and ownership
 
-The immutable package path compiles plugins with automatic JSX and replaces
-`cordisx/react`, both JSX runtime subpaths, and `cordisx/ui` with generation-
-local virtual modules. Those modules resolve to one frozen Host runtime object;
-they do not embed another renderer.
+The immutable package path consumes the plugin's Vite ESM graph with automatic
+JSX already compiled. Imports of `cordisx/react`, both JSX runtime subpaths,
+React peers, and `cordisx/ui` resolve to generation-local Host modules backed by
+one frozen runtime object; they do not embed another renderer. Dynamic React
+components, their CSS, and static assets retain graph-relative lazy loading.
 
 During `cordisx dev`, plugin source joins the Host's Vite ESM graph directly.
 The same virtual imports resolve to the Host singleton. Refresh-compatible
@@ -94,14 +95,15 @@ Plugins remain trusted local renderer code, not isolated or sandboxed code.
 
 ## Requirement ledger
 
-| Requirement                                                             | Candidate state | Evidence required for the next state                                                                                                                                                                  |
-| ----------------------------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Plugin imports React without installing React                           | verified        | generated package installs only `cordisx`, then passes typecheck/build/test/dry-run                                                                                                                   |
-| JSX and Hooks execute on the Host React singleton                       | verified        | production renderer composition asserts strict React identity and interactive state update                                                                                                            |
-| Plugin can reuse Host components without installing a component library | verified        | production renderer composition renders the `cordisx/ui` classes and interaction                                                                                                                      |
-| Plugin-bundled React is rejected                                        | verified        | normal renderer bundle and immutable package artifact tests reject private React                                                                                                                      |
-| React roots and effects clean up with page/runtime lifecycle            | verified        | integration test observes effect cleanup and removal of DOM/style/global state                                                                                                                        |
-| Generated React plugin is the default scaffold                          | verified        | package contents plus a fresh project using only file-installed `cordisx` pass typecheck, build, manifest test, and `dev:dry-run`                                                                     |
-| Development React component is a Fast Refresh boundary                  | verified        | Vite transforms the generated component with Refresh registration, self-acceptance, and boundary validation; focused HMR tests deliver a component update without full reload                         |
-| Entry and explicit Manager reload preserve plugin lifecycle ownership   | verified        | Vite invalidates only the selected local-development plugin and the runtime keeps install/enable/disable/uninstall gated by the package lifecycle                                                     |
-| Real isolated Playground interaction                                    | verified        | isolated loopback Playground activated the generated plugin, navigated its page-v3 body, clicked `0` to `1`, retained one root/style, logged no error, then removed its tab, port, and temporary Home |
+| Requirement | Candidate state | Evidence required for the next state |
+| --- | --- | --- |
+| Plugin imports React without installing React | verified | generated package installs only `cordisx`, then passes typecheck/build/test/dry-run |
+| JSX and Hooks execute on the Host React singleton | verified | production renderer composition asserts strict React identity and interactive state update |
+| Plugin can reuse Host components without installing a component library | verified | production renderer composition renders the `cordisx/ui` classes and interaction |
+| Plugin-bundled React is rejected | verified | normal renderer bundle and immutable package artifact tests reject private React |
+| React roots and effects clean up with page/runtime lifecycle | verified | integration test observes effect cleanup and removal of DOM/style/global state |
+| Generated React plugin is the default scaffold | verified | package contents plus a fresh project using only file-installed `cordisx` pass typecheck, Vite graph build, manifest test, and `dev:dry-run` |
+| Production dynamic imports preserve lazy resources | verified | installed graph requests no lazy chunk/CSS/asset at registration, loads them after the page trigger, and reuses the same-generation cache |
+| Development React component is a Fast Refresh boundary | verified | Vite transforms the generated component with Refresh registration, self-acceptance, and boundary validation; focused HMR tests deliver a component update without full reload |
+| Entry and explicit Manager reload preserve plugin lifecycle ownership | verified | Vite invalidates only the selected local-development plugin and the runtime keeps install/enable/disable/uninstall gated by the package lifecycle |
+| Real isolated Playground interaction | verified | isolated loopback Playground activated the generated plugin, navigated its page-v3 body, clicked `0` to `1`, retained one root/style, logged no error, then removed its tab, port, and temporary Home |

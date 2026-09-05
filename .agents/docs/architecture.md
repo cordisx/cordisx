@@ -32,7 +32,7 @@ impersonate or replace Desktop's current connection.
 ## Runtime
 
 ```text
-explicit-entry bundle / dynamic package generations / Vite development graph
+explicit-entry bundle / immutable package ESM graphs / Vite development graph
                                   |
                          launcher + CDP bootstrap
                                   |

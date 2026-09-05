@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -62,6 +62,16 @@ async function expectMissing(target, label) {
   throw new Error(`${label} must not be created by --dry-run: ${target}`)
 }
 
+async function verifyGeneratedViteGraph(graphRoot, label) {
+  const manifest = JSON.parse(await readFile(path.join(graphRoot, 'manifest.json'), 'utf8'))
+  const entry = Object.values(manifest).find(item => item?.isEntry === true)
+  if (entry?.file !== 'module.js' || !Array.isArray(entry.dynamicImports) || entry.dynamicImports.length === 0) {
+    throw new Error(`${label} did not emit the expected lazy Vite ESM entry`)
+  }
+  const chunks = await readdir(path.join(graphRoot, 'chunks'))
+  if (!chunks.some(file => file.endsWith('.js'))) throw new Error(`${label} did not emit a lazy JavaScript chunk`)
+}
+
 async function verifyGeneratedProject(project, cordisxTarball, expectedVersion) {
   const packagePath = path.join(project, 'package.json')
   const [manifestSource, englishReadme, simplifiedChineseReadme] = await Promise.all([
@@ -86,6 +96,7 @@ async function verifyGeneratedProject(project, cordisxTarball, expectedVersion) 
     env: process.env,
   })
   await run('npm', ['run', 'check'], { cwd: project, env: process.env })
+  await verifyGeneratedViteGraph(path.join(project, 'dist'), 'generated standalone plugin')
   const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project, env: process.env })
   if (
     !dryRun.stdout.includes('[cordisx] Vite entry ready:')
@@ -127,6 +138,9 @@ async function verifyGeneratedWorkspace(project, cordisxTarball, expectedVersion
   }
   await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: project, env: process.env })
   await run('npm', ['run', 'check'], { cwd: project, env: process.env })
+  for (const id of pluginIds) {
+    await verifyGeneratedViteGraph(path.join(project, 'plugins', id, 'dist'), `generated workspace plugin ${id}`)
+  }
   const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project, env: process.env })
   assertViteProjectDryRun(dryRun.stdout, pluginIds)
 }
@@ -149,6 +163,9 @@ async function verifyGeneratedEmbedded(project, cordisxTarball, expectedVersion,
     env: process.env,
   })
   await run('npm', ['run', 'check'], { cwd: cordisxRoot, env: process.env })
+  for (const id of pluginIds) {
+    await verifyGeneratedViteGraph(path.join(cordisxRoot, 'dist', id), `generated embedded plugin ${id}`)
+  }
   const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: cordisxRoot, env: process.env })
   assertViteProjectDryRun(dryRun.stdout, pluginIds)
 }

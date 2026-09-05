@@ -4,6 +4,10 @@ Status: implemented and verified by focused transport, CDP, runtime, Manager,
 and isolated native `app://` runs. Both targeted Manager-channel reload and
 automatic source replacement reached ready in the native application.
 
+This reference covers development transport only. Production plugin builds use
+separate immutable Vite ESM graphs with lazy chunks, CSS, and assets. Installed
+generations do not connect to this development server or its HMR WebSocket.
+
 ## Requirement ledger
 
 | Requirement                                                                                   | State       | Evidence                                                                                                                                                                                                                     |

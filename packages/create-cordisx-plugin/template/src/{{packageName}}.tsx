@@ -1,12 +1,13 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { defineReactPage } from 'cordisx/react'
+import { defineReactPage, lazy, Suspense } from 'cordisx/react'
 import {
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   CORDISX_ROUTE_SCHEMA_V2,
   type CordisXPluginManifestV1,
+  type CordisXReactPageProps,
 } from 'cordisx/contracts'
-import { type Messages, OverviewPage } from './overview-page.js'
+import type { Messages } from './overview-page.js'
 
 export const manifest = {
   $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
@@ -38,7 +39,16 @@ const route = {
   description: { key: 'route.description', fallback: 'Open the plugin React example.' },
 } as const
 
-const mountOverview = defineReactPage<Messages>(OverviewPage)
+const OverviewPage = lazy(async () => {
+  const module = await import('./overview-page.js')
+  return { default: module.OverviewPage }
+})
+
+function OverviewPageBoundary(props: CordisXReactPageProps<Messages>) {
+  return <Suspense fallback={null}><OverviewPage {...props} /></Suspense>
+}
+
+const mountOverview = defineReactPage<Messages>(OverviewPageBoundary)
 
 export function apply(ctx: Context): void {
   ctx.i18n.define<Messages>({

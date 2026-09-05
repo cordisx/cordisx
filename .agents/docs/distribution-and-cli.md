@@ -328,6 +328,14 @@ TypeScript project, and `plugins/<id>` packages. All configured entries share
 one CordisX development command and Vite server while retaining separate
 plugin ids, source entries, build output, and Cordis generations.
 
+Production build output is deliberately per plugin. A normal Vite Rollup-input
+build writes `module.js`, content-addressed `chunks/` and `assets/`, and
+`manifest.json`; CSS splitting and external static assets remain enabled.
+Dedicated workspaces and embedded projects invoke each plugin's Vite config
+separately, so an immutable generation never depends on a chunk owned by
+another plugin id. Development config entries continue to point at source and
+retain the single shared Vite/HMR server described below.
+
 Embedded mode owns the following boundary without restructuring the business
 project:
 
@@ -335,6 +343,7 @@ project:
 business-project/
 └── .cordisx/
     ├── package.json
+    ├── scripts/build-plugins.mjs
     ├── tsconfig.json
     ├── config.json
     ├── .gitignore
@@ -351,6 +360,10 @@ Every embedded config entry is relative to `.cordisx/config.json`. Repeating
 the creator with a new `--plugin` appends that plugin and does not replace
 existing business files, CordisX package fields, TypeScript settings, or plugin
 directories. A collision fails before mutation.
+
+Each embedded plugin also owns a `vite.config.ts`. Its graph is emitted under
+`.cordisx/dist/<plugin-id>/`; the build driver reads the project config and
+builds every id separately.
 
 `--integration auto` joins an existing supported workspace and otherwise
 keeps `.cordisx` isolated. pnpm integration adds `.cordisx` to the existing

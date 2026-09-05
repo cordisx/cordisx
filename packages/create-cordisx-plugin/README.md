@@ -49,11 +49,26 @@ back without changing the business project.
 
 Every generated plugin includes a version-1 manifest, a structured toolbar
 route, and a component-only React page module. Its standalone, workspace, or
-embedded development environment supplies TypeScript build, manifest test, and
-`cordisx dev --dry-run` commands. The environment installs only CordisX
-development dependencies: React, React DOM, their types, JSX runtimes, and the
-initial CordisX component set are provided by the Host through `cordisx/react`
-and `cordisx/ui`. Plugin artifacts that bundle a private React copy are rejected.
+embedded environment supplies typecheck, production Vite build, manifest test,
+and `cordisx dev --dry-run` commands. Production output uses a stable
+`dist/module.js` entry plus content-addressed `chunks/`, `assets/`, and a Vite
+`manifest.json`. CSS and static assets remain external files, and dynamic
+imports load their graph only when reached. Workspaces and embedded projects
+build each plugin separately so independently replaceable generations never
+share output chunks.
+
+The generated `dist/manifest.json` is Vite metadata for the author build only.
+It is not the formal CordisX `artifact.json` and is never copied to the
+immutable store root. A portable CordisX package manifest points its browser
+entry at the prebuilt `dist/module.js`; the Host validates the complete adjacent
+graph and synthesizes its own store-level `artifact.json`. Do not substitute
+the Vite manifest for a CordisX package or runtime manifest.
+
+Development remains one CordisX-owned Vite server and HMR graph using the
+original source entries. The environment installs no private React runtime:
+React, React DOM, their types, JSX runtimes, and the initial CordisX component
+set are provided by the Host through `cordisx/react` and `cordisx/ui`. Plugin
+artifacts that bundle a private React copy are rejected.
 
 The generated route and page use closed route-v2/page-v3 documents with real
 localized title and description dictionaries. Canonical ids, path, outlet,

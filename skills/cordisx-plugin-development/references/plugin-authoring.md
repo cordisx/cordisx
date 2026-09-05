@@ -7,6 +7,8 @@
 - Do not copy development fixtures as production packages without auditing every field.
 - Keep plugin id, display name, descriptions, permissions, contributions, package files, runtime localization, and both `README.md` and `README.zh-Hans.md` explicit.
 - Include build, focused tests, package inspection, and install/dry-run checks appropriate to the owner repository.
+- Preserve the complete generated `dist/` Vite graph. The package allowlist must include its manifest, entry, chunks, CSS, and assets; do not copy only `module.js`.
+- Point a portable package manifest at the prebuilt `dist/module.js`; keep local development config entries pointed at source for Vite/HMR.
 - Declare license and distribution metadata intentionally.
 - Keep a newly created plugin private and `UNLICENSED` by default. Ask only for missing publication metadata when the user requests sharing or publication; an explicit publication request is already authorization and must not trigger redundant confirmation.
 
@@ -37,5 +39,6 @@ not take over headers, breadcrumbs, tabs, navigation, or outer scrolling.
 - Abort or dispose in-flight work before publishing a replacement generation.
 - Keep top-level plugin modules declarative. Vite evaluates ESM before Cordis creates the owning plugin fiber, so subscriptions, timers, registrations, and other product effects belong in `apply(ctx)` or a Cordis-owned service.
 - Put React components intended for Fast Refresh in component modules with refresh-compatible exports. Keep manifest and `apply` exports in the plugin entry so changes there can replace the owning plugin generation cleanly.
+- Put expensive pages, renderers, editors, or asset catalogs behind source-level `import()`. Import their CSS from the lazy module so registration and unrelated pages do not request it.
 - Never keep a hidden DOM fallback or raw bridge when the structured contribution is unavailable.
 - Never expose secrets through renderer-safe descriptors, diagnostics, logs, screenshots, or config values. Use Host-supported secret references.
