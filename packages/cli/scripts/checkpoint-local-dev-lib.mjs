@@ -1,13 +1,15 @@
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { access, chmod, lstat, mkdir, readFile, readlink, readdir, stat } from 'node:fs/promises'
+import { access, chmod, lstat, mkdir, readdir, readFile, readlink, stat } from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
 
 export const REPORT_SCHEMA = 'cordisx.checkpoint.local-development/v1'
 
 export function sha256(value) {
-  return createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex')
+  return createHash('sha256').update(
+    typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value),
+  ).digest('hex')
 }
 
 export async function pathExists(target) {
@@ -36,7 +38,9 @@ export async function freeLoopbackPort() {
 }
 
 export function repositoryStatus(repoRoot) {
-  return execFileSync('git', ['-C', repoRoot, 'status', '--porcelain=v1', '--untracked-files=all'], { encoding: 'utf8' })
+  return execFileSync('git', ['-C', repoRoot, 'status', '--porcelain=v1', '--untracked-files=all'], {
+    encoding: 'utf8',
+  })
 }
 
 export async function mode(target) {
@@ -76,7 +80,13 @@ async function treeRecords(root, target, output) {
   }
   if (value.isFile()) {
     const content = await readFile(target)
-    output.push({ path: relative, kind: 'file', size: content.length, sha256: sha256(content), mode: value.mode & 0o777 })
+    output.push({
+      path: relative,
+      kind: 'file',
+      size: content.length,
+      sha256: sha256(content),
+      mode: value.mode & 0o777,
+    })
     return
   }
   if (!value.isDirectory()) {
@@ -96,7 +106,9 @@ export async function snapshotRuntimePaths(root, targets) {
   const output = []
   for (const target of [...new Set(targets.map(item => path.resolve(resolvedRoot, item)))].sort()) {
     const relative = path.relative(resolvedRoot, target)
-    if (relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error(`snapshot target escapes root: ${target}`)
+    if (relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new Error(`snapshot target escapes root: ${target}`)
+    }
     await treeRecords(resolvedRoot, target, output)
   }
   return { root: resolvedRoot, records: output, sha256: sha256(output) }
@@ -117,7 +129,9 @@ export function parseCheckpointArgs(argv, defaults = {}) {
     values[name] = value
     index += 1
   }
-  if (values.cli !== undefined && values['cli-bin'] !== undefined) throw new Error('--cli and --cli-bin are mutually exclusive')
+  if (values.cli !== undefined && values['cli-bin'] !== undefined) {
+    throw new Error('--cli and --cli-bin are mutually exclusive')
+  }
   if (values.executable === undefined) throw new Error('--executable is required')
   for (const name of ['executable', 'artifacts', 'repo-root', 'cli', 'cli-bin']) {
     if (values[name] !== undefined && !path.isAbsolute(values[name])) throw new Error(`--${name} must be absolute`)

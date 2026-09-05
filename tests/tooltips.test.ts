@@ -4,7 +4,14 @@ import { dismissHostTooltips, HostTooltipController } from '../packages/cli/src/
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
   return {
-    x: left, y: top, left, top, right: left + width, bottom: top + height, width, height,
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
     toJSON: () => ({}),
   } as DOMRect
 }
@@ -14,7 +21,9 @@ describe('HostTooltipController', () => {
 
   it('renders a native-token tooltip through body and clamps it inside the viewport', async () => {
     vi.useFakeTimers()
-    const dom = new JSDOM('<html class="electron-dark"><body><aside style="overflow:hidden"><button id="action">action</button></aside></body></html>')
+    const dom = new JSDOM(
+      '<html class="electron-dark"><body><aside style="overflow:hidden"><button id="action">action</button></aside></body></html>',
+    )
     Object.defineProperty(dom.window, 'innerWidth', { value: 300 })
     Object.defineProperty(dom.window, 'innerHeight', { value: 200 })
     const action = dom.window.document.getElementById('action')!
@@ -46,7 +55,9 @@ describe('HostTooltipController', () => {
     expect(tooltip.dataset.cordisxAppTheme).toBe('light')
 
     let escapedToDocument = false
-    dom.window.document.addEventListener('keydown', () => { escapedToDocument = true })
+    dom.window.document.addEventListener('keydown', () => {
+      escapedToDocument = true
+    })
     const escape = new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
     action.dispatchEvent(escape)
     expect(escape.defaultPrevented).toBe(true)

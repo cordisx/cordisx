@@ -424,18 +424,25 @@ export const inject = ['i18n', 'commands', 'slots']
 
 export function apply(ctx: Context) {
   ctx.i18n.define({
-    namespace: 'example', locale: 'en', default: true,
+    namespace: 'example',
+    locale: 'en',
+    default: true,
     messages: { 'hello.title': 'Say hello' },
   })
   ctx.commands.register({
-    id: 'hello', title: { namespace: 'example', key: 'hello.title' },
+    id: 'hello',
+    title: { namespace: 'example', key: 'hello.title' },
   }, () => console.info('hello'))
   ctx.slots.register({
-    name: 'workspace.toolbar.items', id: 'hello', order: 10,
+    name: 'workspace.toolbar.items',
+    id: 'hello',
+    order: 10,
   }, {
-    anchor: 'workspace.primary', placement: 'after',
+    anchor: 'workspace.primary',
+    placement: 'after',
     label: { namespace: 'example', key: 'hello.title' },
-    icon: 'host:open', command: { id: 'hello' },
+    icon: 'host:open',
+    command: { id: 'hello' },
   })
 }
 ```
@@ -462,7 +469,9 @@ export function apply(ctx: Context, config: { timeout: number }) {
   useTimeout(config.timeout)
   ctx.settings.watch<{ timeout: number }>(next => useTimeout(next.timeout))
   ctx.configRenderers.register({
-    id: 'duration', selector: { role: 'duration' }, order: 10,
+    id: 'duration',
+    selector: { role: 'duration' },
+    order: 10,
   }, (container, field) => {
     const input = container.ownerDocument.createElement('input')
     input.type = 'range'

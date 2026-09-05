@@ -19,22 +19,31 @@ import type {
 } from '@cordisx/protocol/manager-content-navigation/v5'
 import type { CordisXLocalizedText } from '../contracts.js'
 import {
-  ConfigRevisionConflictError,
   type ConfigMutationOperation,
+  ConfigRevisionConflictError,
   type ManagerPluginConfigSnapshot,
   type PluginConfigurationRegistry,
 } from './configuration.js'
 import type { PluginGenerationView } from './generation-visibility.js'
 import { immutableSnapshot } from './validation.js'
 
-const COMMAND_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-command.v1.schema.json' as const
-const RESULT_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-result.v1.schema.json' as const
-const PAGE_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-subscription-page.v1.schema.json' as const
-const PAGE_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-subscription-page.v2.schema.json' as const
-const CLOSE_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-subscription-close.v1.schema.json' as const
+const COMMAND_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-command.v1.schema.json' as const
+const RESULT_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-result.v1.schema.json' as const
+const PAGE_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-subscription-page.v1.schema.json' as const
+const PAGE_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-subscription-page.v2.schema.json' as const
+const CLOSE_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-subscription-close.v1.schema.json' as const
 
 type SourceUnavailableCode = 'owner-unavailable' | 'stale-generation' | 'binding-replaced' | 'disposed'
-export type ManagerContentConfigDisposeReason = 'explicit' | 'declaration-replaced' | 'generation-replaced' | 'owner-disposed'
+export type ManagerContentConfigDisposeReason =
+  | 'explicit'
+  | 'declaration-replaced'
+  | 'generation-replaced'
+  | 'owner-disposed'
 type CloseCode = ManagerContentConfigSubscriptionClosedV1['code']
 
 function immutable<Value>(value: Value): Value {
@@ -53,7 +62,9 @@ function sameStructuredValue(left: unknown, right: unknown): boolean {
   const leftKeys = Object.keys(leftRecord).sort()
   const rightKeys = Object.keys(rightRecord).sort()
   return leftKeys.length === rightKeys.length
-    && leftKeys.every((key, index) => key === rightKeys[index] && sameStructuredValue(leftRecord[key], rightRecord[key]))
+    && leftKeys.every((key, index) =>
+      key === rightKeys[index] && sameStructuredValue(leftRecord[key], rightRecord[key])
+    )
 }
 
 function opaqueId(prefix: string): string {
@@ -175,7 +186,10 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
   readonly binding: ManagerContentConfigBindingV1
   readonly source: ConfigSource
   private readonly subscriptions = new Set<SubscriptionRecord>()
-  private readonly commands = new Map<string, { readonly command: ManagerContentConfigCommandV1; readonly result: ManagerContentConfigResultV1 }>()
+  private readonly commands = new Map<
+    string,
+    { readonly command: ManagerContentConfigCommandV1; readonly result: ManagerContentConfigResultV1 }
+  >()
   private readonly materializations = new Set<string>()
   private readonly unsubscribeConfiguration: () => void
   private sequence = 0
@@ -203,7 +217,9 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
     this.view = input.view
     this.body = immutable(input.body)
     const descriptor = this.descriptor()
-    if (descriptor.identity.pluginId !== input.owner) throw new Error('manager content config owner identity does not match the configuration registry')
+    if (descriptor.identity.pluginId !== input.owner) {
+      throw new Error('manager content config owner identity does not match the configuration registry')
+    }
     if (descriptor.scope.generation !== input.moduleGeneration) {
       throw new Error('manager content config declaration has a stale plugin generation')
     }
@@ -211,8 +227,14 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
       throw new Error('manager content config namespace does not match the declaring owner')
     }
     if (input.body.defaultMaterialization !== undefined) {
-      if (input.body.defaultMaterialization.mode !== 'missing-only') throw new Error('manager content config default mode is unsupported')
-      this.options.configuration.managerContentMissingDefaults(this.owner, input.body.defaultMaterialization.fields, this.view)
+      if (input.body.defaultMaterialization.mode !== 'missing-only') {
+        throw new Error('manager content config default mode is unsupported')
+      }
+      this.options.configuration.managerContentMissingDefaults(
+        this.owner,
+        input.body.defaultMaterialization.fields,
+        this.view,
+      )
     }
     this.binding = immutable({
       bindingId: opaqueId('cx-manager-config'),
@@ -235,19 +257,21 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
     this.assertAvailable()
     return this.contractVersion === 2
       ? this.options.configuration.managerContentHostDescriptor(
-          this.owner,
-          this.options.locale(),
-          (message, site) => this.options.resolveText?.(this.owner, message, site) ?? message.fallback ?? message.key,
-          this.view,
-        )
+        this.owner,
+        this.options.locale(),
+        (message, site) => this.options.resolveText?.(this.owner, message, site) ?? message.fallback ?? message.key,
+        this.view,
+      )
       : this.options.configuration.descriptor(this.owner, this.options.locale(), this.view)
   }
 
   close(reason: ManagerContentConfigDisposeReason): void {
     if (this.unavailable !== undefined) return
-    this.unavailable = reason === 'generation-replaced' ? 'stale-generation'
-      : reason === 'declaration-replaced' ? 'binding-replaced'
-        : 'disposed'
+    this.unavailable = reason === 'generation-replaced'
+      ? 'stale-generation'
+      : reason === 'declaration-replaced'
+      ? 'binding-replaced'
+      : 'disposed'
     this.unsubscribeConfiguration()
     this.sequence += 1
     const update = immutable<ConfigUpdate>({ kind: 'disposed', sequence: this.sequence, reason })
@@ -296,8 +320,14 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
       },
     }
     return this.contractVersion === 2
-      ? immutable({ ...projection, configuration: descriptor as ManagerContentPluginConfigFormProjectionV2['configuration'] })
-      : immutable({ ...projection, configuration: descriptor as ManagerContentPluginConfigFormProjectionV1['configuration'] })
+      ? immutable({
+        ...projection,
+        configuration: descriptor as ManagerContentPluginConfigFormProjectionV2['configuration'],
+      })
+      : immutable({
+        ...projection,
+        configuration: descriptor as ManagerContentPluginConfigFormProjectionV1['configuration'],
+      })
   }
 
   private availability(): SourceUnavailableCode | undefined {
@@ -305,12 +335,14 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
     try {
       const descriptor = this.descriptor()
       if (descriptor.scope.generation !== this.moduleGeneration) return 'stale-generation'
-      if (!bindingEquals(this.binding, {
-        ...this.binding,
-        identity: descriptor.identity,
-        scope: descriptor.scope,
-        namespace: descriptor.namespace,
-      })) return 'binding-replaced'
+      if (
+        !bindingEquals(this.binding, {
+          ...this.binding,
+          identity: descriptor.identity,
+          scope: descriptor.scope,
+          namespace: descriptor.namespace,
+        })
+      ) return 'binding-replaced'
       return undefined
     } catch {
       return 'owner-unavailable'
@@ -342,16 +374,32 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
   }
 
   private currentRevision(): number {
-    try { return this.descriptor().revision } catch { return this.lastBody.configuration.revision }
+    try {
+      return this.descriptor().revision
+    } catch {
+      return this.lastBody.configuration.revision
+    }
   }
 
-  private unavailableResult(command: ManagerContentConfigCommandV1, code:
-    'not-writable' | 'owner-unavailable' | 'stale-generation' | 'binding-replaced' | 'disposed' | 'persistence-failed' | 'plugin-restart-failed' | 'service-restart-failed' | 'rollback-failed'): ManagerContentConfigResultV1 {
+  private unavailableResult(
+    command: ManagerContentConfigCommandV1,
+    code:
+      | 'not-writable'
+      | 'owner-unavailable'
+      | 'stale-generation'
+      | 'binding-replaced'
+      | 'disposed'
+      | 'persistence-failed'
+      | 'plugin-restart-failed'
+      | 'service-restart-failed'
+      | 'rollback-failed',
+  ): ManagerContentConfigResultV1 {
     return immutable({ ...this.commandFence(command), status: 'unavailable', code, revision: this.currentRevision() })
   }
 
   private validateCommand(command: ManagerContentConfigCommandV1): ManagerContentConfigResultV1 | undefined {
-    if (command === null || typeof command !== 'object'
+    if (
+      command === null || typeof command !== 'object'
       || command.$schema !== COMMAND_SCHEMA
       || command.contract !== 'cordisx.manager-content-config-command/v1'
       || command.schemaVersion !== 1
@@ -360,7 +408,8 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
       || command.commandId.length > 256
       || !Number.isInteger(command.expectedRevision)
       || command.expectedRevision < 0
-      || !bindingEquals(command.binding, this.binding)) {
+      || !bindingEquals(command.binding, this.binding)
+    ) {
       return this.unavailableResult(command, 'binding-replaced')
     }
     const unavailable = this.availability()
@@ -369,8 +418,11 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
     if (!descriptor.writable) return this.unavailableResult(command, 'not-writable')
     if (command.expectedRevision !== descriptor.revision) {
       return immutable({
-        ...this.commandFence(command), status: 'conflict', code: 'revision-conflict',
-        revision: descriptor.revision, currentRevision: descriptor.revision,
+        ...this.commandFence(command),
+        status: 'conflict',
+        code: 'revision-conflict',
+        revision: descriptor.revision,
+        currentRevision: descriptor.revision,
       })
     }
     return undefined
@@ -381,8 +433,11 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
     if (previous !== undefined) {
       if (sameStructuredValue(previous.command, command)) return previous.result
       return immutable({
-        ...this.commandFence(command), status: 'conflict', code: 'command-conflict',
-        revision: this.currentRevision(), currentRevision: this.currentRevision(),
+        ...this.commandFence(command),
+        status: 'conflict',
+        code: 'command-conflict',
+        revision: this.currentRevision(),
+        currentRevision: this.currentRevision(),
       })
     }
     const rejected = this.validateCommand(command)
@@ -395,19 +450,50 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
     return result
   }
 
-  private validateDraft(command: Extract<ManagerContentConfigCommandV1, { operation: 'draft.validate' }>): ManagerContentConfigResultV1 {
+  private validateDraft(
+    command: Extract<ManagerContentConfigCommandV1, { operation: 'draft.validate' }>,
+  ): ManagerContentConfigResultV1 {
     try {
-      this.options.configuration.stage(this.owner, command.expectedRevision, command.operations as readonly ConfigMutationOperation[])
-      return immutable({ ...this.commandFence(command), status: 'validated', code: 'valid', revision: command.expectedRevision, validation: { state: 'valid' } })
+      this.options.configuration.stage(
+        this.owner,
+        command.expectedRevision,
+        command.operations as readonly ConfigMutationOperation[],
+      )
+      return immutable({
+        ...this.commandFence(command),
+        status: 'validated',
+        code: 'valid',
+        revision: command.expectedRevision,
+        validation: { state: 'valid' },
+      })
     } catch (error) {
       if (error instanceof ConfigRevisionConflictError) {
-        return immutable({ ...this.commandFence(command), status: 'conflict', code: 'revision-conflict', revision: error.actualRevision, currentRevision: error.actualRevision })
+        return immutable({
+          ...this.commandFence(command),
+          status: 'conflict',
+          code: 'revision-conflict',
+          revision: error.actualRevision,
+          currentRevision: error.actualRevision,
+        })
       }
       const message = errorMessage(error)
-      if (message.startsWith('secret-path:')) return immutable({ ...this.commandFence(command), status: 'rejected', code: 'secret-path', revision: this.currentRevision() })
+      if (message.startsWith('secret-path:')) {
+        return immutable({
+          ...this.commandFence(command),
+          status: 'rejected',
+          code: 'secret-path',
+          revision: this.currentRevision(),
+        })
+      }
       return immutable({
-        ...this.commandFence(command), status: 'rejected', code: 'validation-failed', revision: this.currentRevision(),
-        validation: { state: 'invalid', issues: [{ code: 'invalid', message: { key: 'manager.config.invalid', fallback: message } }] },
+        ...this.commandFence(command),
+        status: 'rejected',
+        code: 'validation-failed',
+        revision: this.currentRevision(),
+        validation: {
+          state: 'invalid',
+          issues: [{ code: 'invalid', message: { key: 'manager.config.invalid', fallback: message } }],
+        },
       })
     }
   }
@@ -421,57 +507,107 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
       await this.options.update(this.owner, command.expectedRevision, operations)
       const descriptor = this.descriptor()
       if (descriptor.applies === 'app-restart') {
-        return immutable({ ...this.commandFence(command), status: 'staged', code, revision: descriptor.revision, applies: 'app-restart' })
+        return immutable({
+          ...this.commandFence(command),
+          status: 'staged',
+          code,
+          revision: descriptor.revision,
+          applies: 'app-restart',
+        })
       }
       return immutable({
-        ...this.commandFence(command), status: 'applied', code, revision: descriptor.revision,
-        applies: descriptor.applies, resultingGeneration: descriptor.scope.generation,
+        ...this.commandFence(command),
+        status: 'applied',
+        code,
+        revision: descriptor.revision,
+        applies: descriptor.applies,
+        resultingGeneration: descriptor.scope.generation,
       })
     } catch (error) {
       if (error instanceof ConfigRevisionConflictError || /revision conflict/iu.test(errorMessage(error))) {
         const revision = error instanceof ConfigRevisionConflictError ? error.actualRevision : this.currentRevision()
-        return immutable({ ...this.commandFence(command), status: 'conflict', code: 'revision-conflict', revision, currentRevision: revision })
-      }
-      const message = errorMessage(error)
-      if (message.startsWith('secret-path:')) return immutable({ ...this.commandFence(command), status: 'rejected', code: 'secret-path', revision: this.currentRevision() })
-      if (/validation|invalid|required|must /iu.test(message)) {
         return immutable({
-          ...this.commandFence(command), status: 'rejected', code: 'validation-failed', revision: this.currentRevision(),
-          validation: { state: 'invalid', issues: [{ code: 'invalid', message: { key: 'manager.config.invalid', fallback: message } }] },
+          ...this.commandFence(command),
+          status: 'conflict',
+          code: 'revision-conflict',
+          revision,
+          currentRevision: revision,
         })
       }
-      const unavailable = /service-restart/iu.test(message) ? 'service-restart-failed'
-        : /plugin restart/iu.test(message) ? 'plugin-restart-failed'
-          : /rollback/iu.test(message) ? 'rollback-failed'
-            : /writable|read-only/iu.test(message) ? 'not-writable'
-              : 'persistence-failed'
+      const message = errorMessage(error)
+      if (message.startsWith('secret-path:')) {
+        return immutable({
+          ...this.commandFence(command),
+          status: 'rejected',
+          code: 'secret-path',
+          revision: this.currentRevision(),
+        })
+      }
+      if (/validation|invalid|required|must /iu.test(message)) {
+        return immutable({
+          ...this.commandFence(command),
+          status: 'rejected',
+          code: 'validation-failed',
+          revision: this.currentRevision(),
+          validation: {
+            state: 'invalid',
+            issues: [{ code: 'invalid', message: { key: 'manager.config.invalid', fallback: message } }],
+          },
+        })
+      }
+      const unavailable = /service-restart/iu.test(message)
+        ? 'service-restart-failed'
+        : /plugin restart/iu.test(message)
+        ? 'plugin-restart-failed'
+        : /rollback/iu.test(message)
+        ? 'rollback-failed'
+        : /writable|read-only/iu.test(message)
+        ? 'not-writable'
+        : 'persistence-failed'
       return this.unavailableResult(command, unavailable)
     }
   }
 
-  private async materialize(command: Extract<ManagerContentConfigCommandV1, { operation: 'defaults.materialize' }>): Promise<ManagerContentConfigResultV1> {
+  private async materialize(
+    command: Extract<ManagerContentConfigCommandV1, { operation: 'defaults.materialize' }>,
+  ): Promise<ManagerContentConfigResultV1> {
     const declaration = this.body.defaultMaterialization
     if (declaration === undefined) {
-      return immutable({ ...this.commandFence(command), status: 'rejected', code: 'default-not-declared', revision: this.currentRevision() })
+      return immutable({
+        ...this.commandFence(command),
+        status: 'rejected',
+        code: 'default-not-declared',
+        revision: this.currentRevision(),
+      })
     }
     try {
-      const prepared = this.options.configuration.managerContentMissingDefaults(this.owner, declaration.fields, this.view)
+      const prepared = this.options.configuration.managerContentMissingDefaults(
+        this.owner,
+        declaration.fields,
+        this.view,
+      )
       if (prepared.allPresent) {
         const already = this.materializations.has(command.materializationId)
         this.materializations.add(command.materializationId)
         return immutable({
-          ...this.commandFence(command), status: 'preserved', code: already ? 'already-materialized' : 'values-present',
+          ...this.commandFence(command),
+          status: 'preserved',
+          code: already ? 'already-materialized' : 'values-present',
           revision: this.currentRevision(),
         })
       }
       const result = await this.save(command, prepared.operations, 'defaults-materialized')
-      if (result.status === 'applied' || result.status === 'staged') this.materializations.add(command.materializationId)
+      if (result.status === 'applied' || result.status === 'staged') {
+        this.materializations.add(command.materializationId)
+      }
       return result
     } catch (error) {
       const message = errorMessage(error)
-      const code = message.startsWith('secret-path:') ? 'secret-path'
-        : message.startsWith('default-not-declared:') ? 'default-not-declared'
-          : 'default-schema-mismatch'
+      const code = message.startsWith('secret-path:')
+        ? 'secret-path'
+        : message.startsWith('default-not-declared:')
+        ? 'default-not-declared'
+        : 'default-schema-mismatch'
       return immutable({ ...this.commandFence(command), status: 'rejected', code, revision: this.currentRevision() })
     }
   }
@@ -495,8 +631,16 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
     next = immutable({ ...next, sequence: this.sequence })
     this.lastBody = next
     const update: ConfigUpdate = this.contractVersion === 2
-      ? immutable({ kind: 'snapshot-replaced', sequence: this.sequence, body: next as ManagerContentPluginConfigFormProjectionV2 })
-      : immutable({ kind: 'snapshot-replaced', sequence: this.sequence, body: next as ManagerContentPluginConfigFormProjectionV1 })
+      ? immutable({
+        kind: 'snapshot-replaced',
+        sequence: this.sequence,
+        body: next as ManagerContentPluginConfigFormProjectionV2,
+      })
+      : immutable({
+        kind: 'snapshot-replaced',
+        sequence: this.sequence,
+        body: next as ManagerContentPluginConfigFormProjectionV1,
+      })
     for (const subscription of this.subscriptions) this.push(subscription, update, 'live')
   }
 
@@ -517,15 +661,25 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
     const record: SubscriptionRecord = {
       descriptor,
       queue,
-      closed: new Promise(resolve => { resolveClosed = resolve }),
+      closed: new Promise(resolve => {
+        resolveClosed = resolve
+      }),
       resolveClosed,
       settled: false,
     }
     this.subscriptions.add(record)
     if (afterSequence < this.sequence) {
       const update: ConfigUpdate = this.contractVersion === 2
-        ? immutable({ kind: 'snapshot-replaced', sequence: this.sequence, body: this.lastBody as ManagerContentPluginConfigFormProjectionV2 })
-        : immutable({ kind: 'snapshot-replaced', sequence: this.sequence, body: this.lastBody as ManagerContentPluginConfigFormProjectionV1 })
+        ? immutable({
+          kind: 'snapshot-replaced',
+          sequence: this.sequence,
+          body: this.lastBody as ManagerContentPluginConfigFormProjectionV2,
+        })
+        : immutable({
+          kind: 'snapshot-replaced',
+          sequence: this.sequence,
+          body: this.lastBody as ManagerContentPluginConfigFormProjectionV1,
+        })
       this.push(record, update, 'replay')
     }
     const subscription = Object.freeze({
@@ -564,7 +718,10 @@ class ManagerContentConfigBindingHandleImpl implements ManagerContentConfigBindi
     }))
   }
 
-  private settle(record: SubscriptionRecord, code: CloseCode | ManagerContentConfigDisposeReason): ManagerContentConfigSubscriptionClosedV1 {
+  private settle(
+    record: SubscriptionRecord,
+    code: CloseCode | ManagerContentConfigDisposeReason,
+  ): ManagerContentConfigSubscriptionClosedV1 {
     if (record.result !== undefined) return record.result
     const result = immutable<ManagerContentConfigSubscriptionClosedV1>({
       $schema: CLOSE_SCHEMA,

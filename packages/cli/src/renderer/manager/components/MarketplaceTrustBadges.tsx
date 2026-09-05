@@ -12,8 +12,10 @@ const COPY = {
   en: {
     official: 'Official',
     certified: 'Certified',
-    officialTooltip: 'Publisher identity created and maintained by CordisX. It affects Marketplace identity, filters, and ordering only, never permissions.',
-    certifiedTooltip: 'CordisX reviewed this exact versioned artifact under the stated policy. It does not affect Marketplace ordering or guarantee absolute safety.',
+    officialTooltip:
+      'Publisher identity created and maintained by CordisX. It affects Marketplace identity, filters, and ordering only, never permissions.',
+    certifiedTooltip:
+      'CordisX reviewed this exact versioned artifact under the stated policy. It does not affect Marketplace ordering or guarantee absolute safety.',
   },
 } as const
 
@@ -34,14 +36,36 @@ export function MarketplaceTrustBadges({ plugin, locale }: {
 }) {
   const copy = COPY[productLocale(locale)]
   if (plugin.official === undefined && plugin.certification === undefined) return null
-  return <span className="cxr-marketplace-trust-badges">
-    {plugin.official === undefined ? null : <span className="cxr-marketplace-trust-badge" data-trust-dimension="official"
-      role="img" aria-label={`${copy.official}：${copy.officialTooltip}`} title={copy.officialTooltip}>
-      <HostIcon token="marketplace-official" /><span>{copy.official}</span>
-    </span>}
-    {plugin.certification === undefined ? null : <span className="cxr-marketplace-trust-badge" data-trust-dimension="certified"
-      role="img" aria-label={`${copy.certified}：${copy.certifiedTooltip}`} title={copy.certifiedTooltip}>
-      <HostIcon token="marketplace-certified" /><span>{copy.certified}</span>
-    </span>}
-  </span>
+  return (
+    <span className="cxr-marketplace-trust-badges">
+      {plugin.official === undefined
+        ? null
+        : (
+          <span
+            className="cxr-marketplace-trust-badge"
+            data-trust-dimension="official"
+            role="img"
+            aria-label={`${copy.official}：${copy.officialTooltip}`}
+            title={copy.officialTooltip}
+          >
+            <HostIcon token="marketplace-official" />
+            <span>{copy.official}</span>
+          </span>
+        )}
+      {plugin.certification === undefined
+        ? null
+        : (
+          <span
+            className="cxr-marketplace-trust-badge"
+            data-trust-dimension="certified"
+            role="img"
+            aria-label={`${copy.certified}：${copy.certifiedTooltip}`}
+            title={copy.certifiedTooltip}
+          >
+            <HostIcon token="marketplace-certified" />
+            <span>{copy.certified}</span>
+          </span>
+        )}
+    </span>
+  )
 }

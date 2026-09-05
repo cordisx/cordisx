@@ -45,8 +45,14 @@ function object(value: unknown): Record<string, unknown> | undefined {
 
 function errorShape(value: unknown): RpcErrorShape | undefined {
   const candidate = object(value)
-  if (candidate === undefined || typeof candidate.code !== 'number' || typeof candidate.message !== 'string') return undefined
-  return { code: candidate.code, message: candidate.message, ...(candidate.data === undefined ? {} : { data: candidate.data }) }
+  if (candidate === undefined || typeof candidate.code !== 'number' || typeof candidate.message !== 'string') {
+    return undefined
+  }
+  return {
+    code: candidate.code,
+    message: candidate.message,
+    ...(candidate.data === undefined ? {} : { data: candidate.data }),
+  }
 }
 
 /** Minimal newline-delimited request client. Raw protocol messages never leave this module. */
@@ -67,7 +73,9 @@ export class JsonLineRpcClient {
 
   request<Result>(method: string, params: unknown, signal?: AbortSignal): Promise<Result> {
     if (this.closed) return Promise.reject(new JsonLineRpcError('RPC client is closed'))
-    if (!/^[a-zA-Z][a-zA-Z0-9._/-]{0,127}$/.test(method)) return Promise.reject(new JsonLineRpcError('RPC method is invalid'))
+    if (!/^[a-zA-Z][a-zA-Z0-9._/-]{0,127}$/.test(method)) {
+      return Promise.reject(new JsonLineRpcError('RPC method is invalid'))
+    }
     if (signal?.aborted === true) return Promise.reject(new JsonLineRpcError(`RPC request aborted: ${method}`))
     const id = this.nextId++
     return new Promise<Result>((resolve, reject) => {
@@ -138,11 +146,15 @@ export class JsonLineRpcClient {
       this.receive(line.toString('utf8').replace(/\r$/, ''))
       if (this.closed) return
     }
-    if (this.buffer.byteLength > this.maxLineBytes) this.protocolFailure(new JsonLineRpcError('RPC line exceeds maximum size'))
+    if (this.buffer.byteLength > this.maxLineBytes) {
+      this.protocolFailure(new JsonLineRpcError('RPC line exceeds maximum size'))
+    }
   }
 
-  private readonly onInputError = (error: Error): void => this.protocolFailure(new JsonLineRpcError(`RPC input failed: ${error.message}`))
-  private readonly onOutputError = (error: Error): void => this.protocolFailure(new JsonLineRpcError(`RPC output failed: ${error.message}`))
+  private readonly onInputError = (error: Error): void =>
+    this.protocolFailure(new JsonLineRpcError(`RPC input failed: ${error.message}`))
+  private readonly onOutputError = (error: Error): void =>
+    this.protocolFailure(new JsonLineRpcError(`RPC output failed: ${error.message}`))
   private readonly onInputEnd = (): void => this.protocolFailure(new JsonLineRpcError('RPC input ended'))
 
   private receive(line: string): void {
@@ -165,7 +177,11 @@ export class JsonLineRpcClient {
       } else {
         void Promise.resolve(handler(message.method, message.params)).then(
           result => this.write({ id: message.id, result }),
-          error => this.write({ id: message.id, error: { code: -32603, message: error instanceof Error ? error.message : String(error) } }),
+          error =>
+            this.write({
+              id: message.id,
+              error: { code: -32603, message: error instanceof Error ? error.message : String(error) },
+            }),
         ).catch(() => undefined)
       }
       return
@@ -181,7 +197,9 @@ export class JsonLineRpcClient {
     pending.removeAbort()
     const rpcError = errorShape(message.error)
     if (rpcError !== undefined) {
-      pending.reject(new JsonLineRpcError(`${pending.method} failed: ${rpcError.message}`, rpcError.code, rpcError.data))
+      pending.reject(
+        new JsonLineRpcError(`${pending.method} failed: ${rpcError.message}`, rpcError.code, rpcError.data),
+      )
     } else if (Object.hasOwn(message, 'result')) {
       pending.resolve(message.result)
     } else {
@@ -192,7 +210,9 @@ export class JsonLineRpcClient {
   private write(value: unknown): Promise<void> {
     if (this.closed) return Promise.reject(new JsonLineRpcError('RPC client is closed'))
     const line = `${JSON.stringify(value)}\n`
-    if (Buffer.byteLength(line) > this.maxLineBytes) return Promise.reject(new JsonLineRpcError('RPC request exceeds maximum size'))
+    if (Buffer.byteLength(line) > this.maxLineBytes) {
+      return Promise.reject(new JsonLineRpcError('RPC request exceeds maximum size'))
+    }
     return new Promise((resolve, reject) => {
       this.options.output.write(line, (error?: Error | null) => error == null ? resolve() : reject(error))
     })

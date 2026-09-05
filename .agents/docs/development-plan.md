@@ -280,7 +280,6 @@ The installed macOS host inspected during the spike is `/Applications/ChatGPT.ap
 - A public signed-package source and transparency policy after the local-only
   package generation boundary is proven.
 
-
 ### Feasibility-era compatibility observation
 
 The version-0.1 bundle and lifecycle were verified in a simulated renderer DOM. The installed 26.818.41509 host can also be exercised through an isolated second process, so live probes no longer require restarting the user's active application.

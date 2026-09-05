@@ -13,10 +13,21 @@ export function ManagerTabs<T extends string>({ label, tabs, value, onChange }: 
   readonly value: T
   readonly onChange: (value: T) => void
 }) {
-  return <div className="cxr-tabs" role="tablist" aria-label={label}>
-    {tabs.map(tab => <button key={tab.id} type="button" role="tab" data-plugin-detail-tab={tab.id} aria-selected={value === tab.id} onClick={() => onChange(tab.id)}>
-      <HostIcon token={tab.icon} state={value === tab.id ? 'active' : 'default'} />
-      <span>{tab.label}</span>
-    </button>)}
-  </div>
+  return (
+    <div className="cxr-tabs" role="tablist" aria-label={label}>
+      {tabs.map(tab => (
+        <button
+          key={tab.id}
+          type="button"
+          role="tab"
+          data-plugin-detail-tab={tab.id}
+          aria-selected={value === tab.id}
+          onClick={() => onChange(tab.id)}
+        >
+          <HostIcon token={tab.icon} state={value === tab.id ? 'active' : 'default'} />
+          <span>{tab.label}</span>
+        </button>
+      ))}
+    </div>
+  )
 }

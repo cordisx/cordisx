@@ -41,21 +41,27 @@ const TOOLS = [
 
 const ICON_ATTRIBUTIONS = [
   {
-    name: 'Reicon', url: 'https://github.com/dqev/reicon', license: 'MIT',
+    name: 'Reicon',
+    url: 'https://github.com/dqev/reicon',
+    license: 'MIT',
     description: {
       'zh-CN': 'CordisX 默认系统图标。Reicon 的基础图标说明包含 Solar Icons 与 Zappicon 来源。',
       en: 'Default CordisX system icons. Reicon credits Solar Icons and Zappicon as base-icon sources.',
     },
   },
   {
-    name: 'Zappicon', url: 'https://zappicon.com/license', license: 'Zappicon License',
+    name: 'Zappicon',
+    url: 'https://zappicon.com/license',
+    license: 'Zappicon License',
     description: {
       'zh-CN': 'Reicon 标明的基础图标来源；CordisX 按上游许可归因使用。',
       en: 'A base-icon source credited by Reicon; used by CordisX with upstream license attribution.',
     },
   },
   {
-    name: 'Solar Icons · 480 Design', url: 'https://solar-icons.vercel.app/', license: 'CC BY 4.0',
+    name: 'Solar Icons · 480 Design',
+    url: 'https://solar-icons.vercel.app/',
+    license: 'CC BY 4.0',
     description: {
       'zh-CN': 'Reicon 标明的基础图标来源，由 480 Design 设计。',
       en: 'A base-icon source credited by Reicon, designed by 480 Design.',
@@ -90,35 +96,105 @@ function initials(name: string): string {
 export function AcknowledgementsPage({ locale: localeSource }: { readonly locale: string }) {
   const locale = productLocale(localeSource)
   const copy = COPY[locale]
-  return <section className="cxr-page cxr-acknowledgements">
-    <section className="cxr-ack-section" aria-labelledby="cxr-ack-projects-title">
-      <header><h3 id="cxr-ack-projects-title">{copy.projects}</h3></header>
-      <ul className="cxr-ack-grid cxr-tool-grid">
-        {TOOLS.map(tool => <li key={tool.name}><a className="cxr-tool-icon" href={tool.url} target="_blank" rel="noopener noreferrer" title={tool.name} aria-label={locale === 'zh-CN' ? `${tool.name}（${copy.opensInNewWindow}）` : `${tool.name} (${copy.opensInNewWindow})`}>
-          <img src={tool.iconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
-        </a></li>)}
-      </ul>
+  return (
+    <section className="cxr-page cxr-acknowledgements">
+      <section className="cxr-ack-section" aria-labelledby="cxr-ack-projects-title">
+        <header>
+          <h3 id="cxr-ack-projects-title">{copy.projects}</h3>
+        </header>
+        <ul className="cxr-ack-grid cxr-tool-grid">
+          {TOOLS.map(tool => (
+            <li key={tool.name}>
+              <a
+                className="cxr-tool-icon"
+                href={tool.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={tool.name}
+                aria-label={locale === 'zh-CN'
+                  ? `${tool.name}（${copy.opensInNewWindow}）`
+                  : `${tool.name} (${copy.opensInNewWindow})`}
+              >
+                <img src={tool.iconUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section className="cxr-ack-section" aria-labelledby="cxr-ack-icons-title">
+        <header>
+          <h3 id="cxr-ack-icons-title">{copy.icons}</h3>
+          <p>{copy.iconNotice}</p>
+        </header>
+        <ul className="cxr-ack-grid cxr-license-grid">
+          {ICON_ATTRIBUTIONS.map(item => (
+            <li key={item.name}>
+              <a
+                className="cxr-ack-card"
+                href={item.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={locale === 'zh-CN'
+                  ? `${item.name}（${copy.opensInNewWindow}）`
+                  : `${item.name} (${copy.opensInNewWindow})`}
+              >
+                <span className="cxr-ack-card-body">
+                  <strong>{item.name}</strong>
+                  <span>{item.description[locale]}</span>
+                  <code>{item.license}</code>
+                </span>
+                <HostIcon token="external-link" />
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section className="cxr-ack-section" aria-labelledby="cxr-ack-contributors-title">
+        <header>
+          <h3 id="cxr-ack-contributors-title">{copy.contributors}</h3>
+        </header>
+        {CONTRIBUTORS.length === 0
+          ? <div className="cxr-empty cxr-ack-empty">{copy.empty}</div>
+          : (
+            <ul className="cxr-ack-grid cxr-contributor-grid">
+              {CONTRIBUTORS.map(contributor => {
+                const content = (
+                  <>
+                    <span className="cxr-ack-avatar" aria-hidden="true">
+                      {contributor.avatarUrl === undefined
+                        ? initials(contributor.name)
+                        : <img src={contributor.avatarUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />}
+                    </span>
+                    <span className="cxr-ack-card-body">
+                      <strong>{contributor.name}</strong>
+                      <span>{contributor.contribution[locale]}</span>
+                    </span>
+                    {contributor.profileUrl === undefined ? null : <HostIcon token="external-link" />}
+                  </>
+                )
+                return (
+                  <li key={contributor.name}>
+                    {contributor.profileUrl !== undefined
+                      ? (
+                        <a
+                          className="cxr-ack-card"
+                          href={contributor.profileUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label={locale === 'zh-CN'
+                            ? `${contributor.name}（${copy.opensInNewWindow}）`
+                            : `${contributor.name} (${copy.opensInNewWindow})`}
+                        >
+                          {content}
+                        </a>
+                      )
+                      : <div className="cxr-ack-card">{content}</div>}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+      </section>
     </section>
-    <section className="cxr-ack-section" aria-labelledby="cxr-ack-icons-title">
-      <header><h3 id="cxr-ack-icons-title">{copy.icons}</h3><p>{copy.iconNotice}</p></header>
-      <ul className="cxr-ack-grid cxr-license-grid">
-        {ICON_ATTRIBUTIONS.map(item => <li key={item.name}><a className="cxr-ack-card" href={item.url} target="_blank" rel="noopener noreferrer" aria-label={locale === 'zh-CN' ? `${item.name}（${copy.opensInNewWindow}）` : `${item.name} (${copy.opensInNewWindow})`}>
-          <span className="cxr-ack-card-body"><strong>{item.name}</strong><span>{item.description[locale]}</span><code>{item.license}</code></span><HostIcon token="external-link" />
-        </a></li>)}
-      </ul>
-    </section>
-    <section className="cxr-ack-section" aria-labelledby="cxr-ack-contributors-title">
-      <header><h3 id="cxr-ack-contributors-title">{copy.contributors}</h3></header>
-      {CONTRIBUTORS.length === 0
-        ? <div className="cxr-empty cxr-ack-empty">{copy.empty}</div>
-        : <ul className="cxr-ack-grid cxr-contributor-grid">
-          {CONTRIBUTORS.map(contributor => {
-            const content = <><span className="cxr-ack-avatar" aria-hidden="true">{contributor.avatarUrl === undefined ? initials(contributor.name) : <img src={contributor.avatarUrl} alt="" loading="lazy" referrerPolicy="no-referrer" />}</span><span className="cxr-ack-card-body"><strong>{contributor.name}</strong><span>{contributor.contribution[locale]}</span></span>{contributor.profileUrl === undefined ? null : <HostIcon token="external-link" />}</>
-            return <li key={contributor.name}>{contributor.profileUrl !== undefined
-              ? <a className="cxr-ack-card" href={contributor.profileUrl} target="_blank" rel="noopener noreferrer" aria-label={locale === 'zh-CN' ? `${contributor.name}（${copy.opensInNewWindow}）` : `${contributor.name} (${copy.opensInNewWindow})`}>{content}</a>
-              : <div className="cxr-ack-card">{content}</div>}</li>
-          })}
-        </ul>}
-    </section>
-  </section>
+  )
 }

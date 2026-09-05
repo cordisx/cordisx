@@ -3,7 +3,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ensureHomeConfig, loadHomeConfig } from '../packages/cli/src/config/home-config.js'
-import { CORDISX_PERMISSION_POLICY_SCHEMA_V2, CORDISX_PERMISSION_POLICY_SCHEMA_V3, CORDISX_PERMISSION_POLICY_SCHEMA_V4 } from '../packages/cli/src/permission-contracts.js'
+import {
+  CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+  CORDISX_PERMISSION_POLICY_SCHEMA_V3,
+  CORDISX_PERMISSION_POLICY_SCHEMA_V4,
+} from '../packages/cli/src/permission-contracts.js'
 import { normalizePermissionPolicyRecordV2 } from '../packages/cli/src/permission-model-v2.js'
 import { normalizePermissionPolicyRecordV3 } from '../packages/cli/src/permission-model-v3.js'
 import { normalizePermissionPolicyRecordV4 } from '../packages/cli/src/permission-model-v4.js'
@@ -88,11 +92,13 @@ describe('single permission persistence ledger v2 transition', () => {
     let payload: { requestId: string; token: string; records: unknown[] } | undefined
     globals.__cordisxPermissionPolicyRequestV1 = (text) => {
       payload = JSON.parse(text) as typeof payload
-      queueMicrotask(() => globals.__cordisxPermissionPolicyReceiveV1?.(JSON.stringify({
-        requestId: payload?.requestId,
-        ok: true,
-        value: [next],
-      })))
+      queueMicrotask(() =>
+        globals.__cordisxPermissionPolicyReceiveV1?.(JSON.stringify({
+          requestId: payload?.requestId,
+          ok: true,
+          value: [next],
+        }))
+      )
     }
     const store = BindingPermissionPolicyStore.connect(token, [legacy])
     try {
@@ -129,11 +135,13 @@ describe('single permission persistence ledger v2 transition', () => {
     let payload: { requestId: string; token: string; records: unknown[] } | undefined
     globals.__cordisxPermissionPolicyRequestV1 = (text) => {
       payload = JSON.parse(text) as typeof payload
-      queueMicrotask(() => globals.__cordisxPermissionPolicyReceiveV1?.(JSON.stringify({
-        requestId: payload?.requestId,
-        ok: true,
-        value: [next],
-      })))
+      queueMicrotask(() =>
+        globals.__cordisxPermissionPolicyReceiveV1?.(JSON.stringify({
+          requestId: payload?.requestId,
+          ok: true,
+          value: [next],
+        }))
+      )
     }
     const store = BindingPermissionPolicyStore.connect(token, [])
     try {
@@ -141,7 +149,9 @@ describe('single permission persistence ledger v2 transition', () => {
       expect(payload).toEqual({ requestId: expect.any(String), token, records: [next] })
       expect(store.readV3()).toEqual([next])
       expect(parsePermissionBindingRequest({ requestId: 'request-v3', token, records: [next] }, {
-        profileId: 'work', token, identities: [identity],
+        profileId: 'work',
+        token,
+        identities: [identity],
       })).toMatchObject({ records: [{ schemaVersion: 3, policy: 'deny-persistent' }] })
     } finally {
       store.dispose()
@@ -160,11 +170,13 @@ describe('single permission persistence ledger v2 transition', () => {
     let payload: { requestId: string; token: string; records: unknown[] } | undefined
     globals.__cordisxPermissionPolicyRequestV1 = text => {
       payload = JSON.parse(text) as typeof payload
-      queueMicrotask(() => globals.__cordisxPermissionPolicyReceiveV1?.(JSON.stringify({
-        requestId: payload?.requestId,
-        ok: true,
-        value: records,
-      })))
+      queueMicrotask(() =>
+        globals.__cordisxPermissionPolicyReceiveV1?.(JSON.stringify({
+          requestId: payload?.requestId,
+          ok: true,
+          value: records,
+        }))
+      )
     }
     const store = BindingPermissionPolicyStore.connect(token, [])
     try {
@@ -173,7 +185,9 @@ describe('single permission persistence ledger v2 transition', () => {
       expect(store.readV2()).toEqual([records[0]])
       expect(store.readV4()).toEqual([records[1]])
       expect(parsePermissionBindingRequest({ requestId: 'request-v4', token, records }, {
-        profileId: 'work', token, identities: [identity],
+        profileId: 'work',
+        token,
+        identities: [identity],
       })).toMatchObject({ records: [{ schemaVersion: 2 }, { schemaVersion: 4, policy: 'deny-persistent' }] })
     } finally {
       store.dispose()
@@ -205,9 +219,11 @@ describe('single permission persistence ledger v2 transition', () => {
   })
 
   it('never serializes allow-once because v2 persistent policy rejects it', () => {
-    expect(() => normalizePermissionPolicyRecordV2({
-      ...v2(),
-      policy: 'allow-once',
-    })).toThrow('policy is unsupported')
+    expect(() =>
+      normalizePermissionPolicyRecordV2({
+        ...v2(),
+        policy: 'allow-once',
+      })
+    ).toThrow('policy is unsupported')
   })
 })

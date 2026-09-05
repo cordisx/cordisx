@@ -2,10 +2,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { defineReactPage } from 'cordisx/react'
 import {
+  CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   CORDISX_ROUTE_SCHEMA_V2,
-  CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
   type CordisXLocalizedText,
   type CordisXMessageParams,
   type CordisXPluginManifestV1,
@@ -56,7 +56,9 @@ export const presentation = {
 /** Real first-level Manager navigation demo: the Host owns navigation and page chrome. */
 export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})): void {
   ctx.i18n.define<Messages>({
-    namespace: name, locale: 'en', default: true,
+    namespace: name,
+    locale: 'en',
+    default: true,
     messages: {
       'plugin.name': 'Settings Navigation Demo',
       'plugin.description': 'Demonstrates Host-rendered settings navigation and a controlled page.',
@@ -68,7 +70,8 @@ export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})):
     },
   })
   ctx.i18n.define<Messages>({
-    namespace: name, locale: 'zh-CN',
+    namespace: name,
+    locale: 'zh-CN',
     messages: {
       'plugin.name': '设置导航演示',
       'plugin.description': '演示由 Host 渲染的设置导航和受控页面。',
@@ -80,18 +83,35 @@ export function apply(ctx: Context, config: SettingsTabDemoConfig = Config({})):
     },
   })
   ctx.pages.register<Messages>({
-    $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3, id: 'navigation', title: message('page.title'),
-    description: message('page.description'), icon: 'host:settings', chrome: 'standard',
+    $schema: CORDISX_PAGE_SCHEMA_V3,
+    schemaVersion: 3,
+    id: 'navigation',
+    title: message('page.title'),
+    description: message('page.description'),
+    icon: 'host:settings',
+    chrome: 'standard',
   }, defineReactPage<Messages>(createSettingsNavigationPage(config.demoValue)))
   ctx.routes.register({
-    $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2, id: 'navigation', path: '/manager/extensions/settings-tab-demo',
-    outlet: 'manager.content', page: 'navigation', title: message('route.title'), description: message('route.description'),
+    $schema: CORDISX_ROUTE_SCHEMA_V2,
+    schemaVersion: 2,
+    id: 'navigation',
+    path: '/manager/extensions/settings-tab-demo',
+    outlet: 'manager.content',
+    page: 'navigation',
+    title: message('route.title'),
+    description: message('route.description'),
   })
   ctx.managerContent.register({
-    $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1, schemaVersion: 1,
-    id: 'root', route: { id: 'navigation' }, header: { title: { kind: 'route' } },
+    $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
+    schemaVersion: 1,
+    id: 'root',
+    route: { id: 'navigation' },
+    header: { title: { kind: 'route' } },
   })
   ctx.slots.register({
-    name: 'manager.settings.navigation-items', id: 'navigation', group: 'after-settings', order: 160,
+    name: 'manager.settings.navigation-items',
+    id: 'navigation',
+    group: 'after-settings',
+    order: 160,
   }, { route: { id: 'navigation' } })
 }

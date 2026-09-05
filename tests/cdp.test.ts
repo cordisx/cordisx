@@ -7,19 +7,25 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   CdpLifecycleRequestGate,
   CdpPluginLifecycleRuntime,
+  type CdpTarget,
   iconThemePreferenceDeliveryEvaluation,
   injectableTargets,
   resolveCdpInjectionTimeoutMs,
   serviceConfigResponseEvaluation,
   watchAndInject,
-  type CdpTarget,
 } from '../packages/cli/src/launcher/cdp.js'
 import type { PluginRuntimeMutation } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import { PluginPermissionIdentityRegistry } from '../packages/cli/src/launcher/permission-rpc.js'
-import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
+import {
+  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+  type CordisXPluginActivationRecordV1,
+} from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import type { RollbackPlan } from '../packages/cli/src/launcher/packages/authority.js'
 import { ensureHomeConfig, loadHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
-import { ICON_THEME_PREFERENCE_BINDING, IconThemePreferenceBroadcastHub } from '../packages/cli/src/launcher/icon-theme-rpc.js'
+import {
+  ICON_THEME_PREFERENCE_BINDING,
+  IconThemePreferenceBroadcastHub,
+} from '../packages/cli/src/launcher/icon-theme-rpc.js'
 import { BrowserIconThemePreferenceBridge } from '../packages/cli/src/renderer/icon-theme-preference-binding.js'
 import { OwnerDocumentLeaseRegistry } from '../packages/cli/src/launcher/owner-document-rpc.js'
 
@@ -32,14 +38,20 @@ function deferred<Value = void>(): {
   readonly resolve: (value: Value) => void
 } {
   let resolve!: (value: Value) => void
-  const promise = new Promise<Value>(done => { resolve = done })
+  const promise = new Promise<Value>(done => {
+    resolve = done
+  })
   return { promise, resolve }
 }
 
 function iconThemeReceiverPayload(expression: string): Record<string, unknown> | undefined {
   const encoded = expression.match(/receiver\(((?:"(?:\\.|[^"\\])*")|(?:'(?:\\.|[^'\\])*'))\)/u)?.[1]
   if (encoded === undefined) return undefined
-  try { return JSON.parse(JSON.parse(encoded) as string) as Record<string, unknown> } catch { return undefined }
+  try {
+    return JSON.parse(JSON.parse(encoded) as string) as Record<string, unknown>
+  } catch {
+    return undefined
+  }
 }
 
 function readyLeaseEcho(payload: Record<string, unknown> | undefined): Record<string, unknown> {
@@ -50,12 +62,14 @@ function readyLeaseEcho(payload: Record<string, unknown> | undefined): Record<st
 
 describe('injectableTargets', () => {
   it('keeps Codex renderer pages and excludes unrelated Electron pages', () => {
-    expect(injectableTargets([
-      target('settings', 'Settings'),
-      target('codex', 'Codex'),
-      target('avatar', 'Codex', 'app://-/index.html?initialRoute=%2Favatar-overlay'),
-      target('auth', 'Authentication'),
-    ]).map(item => item.id)).toEqual(['codex'])
+    expect(
+      injectableTargets([
+        target('settings', 'Settings'),
+        target('codex', 'Codex'),
+        target('avatar', 'Codex', 'app://-/index.html?initialRoute=%2Favatar-overlay'),
+        target('auth', 'Authentication'),
+      ]).map(item => item.id),
+    ).toEqual(['codex'])
   })
 
   it('fails closed when branding is absent instead of injecting an unrelated page', () => {
@@ -96,10 +110,12 @@ describe('watchAndInject session replacement', () => {
     const address = server.address()
     if (typeof address === 'string') throw new Error('fixture websocket did not bind a TCP port')
     const connections: import('ws').WebSocket[] = []
-    const requests: Array<Array<{
-      readonly method: string
-      readonly params: Record<string, unknown>
-    }>> = []
+    const requests: Array<
+      Array<{
+        readonly method: string
+        readonly params: Record<string, unknown>
+      }>
+    > = []
     const activeScripts = new Map<string, string>()
     let nextScript = 1
     server.on('connection', connection => {
@@ -127,13 +143,18 @@ describe('watchAndInject session replacement', () => {
       })
     })
     const originalFetch = globalThis.fetch
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify([{
-      id: 'reconnected-target',
-      title: 'Codex',
-      url: 'app://-/index.html',
-      type: 'page',
-      webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
-    }]), { status: 200 })) as typeof fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify([{
+          id: 'reconnected-target',
+          title: 'Codex',
+          url: 'app://-/index.html',
+          type: 'page',
+          webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
+        }]),
+        { status: 200 },
+      )
+    ) as typeof fetch
     const ready = [deferred(), deferred()] as const
     let readyCount = 0
     const abort = new AbortController()
@@ -144,7 +165,9 @@ describe('watchAndInject session replacement', () => {
       signal: abort.signal,
       agentHistoryHost: {} as never,
       agentHistoryBridgeToken: 'a'.repeat(64),
-      onReady: () => { ready[Math.min(readyCount++, 1)]!.resolve() },
+      onReady: () => {
+        ready[Math.min(readyCount++, 1)]!.resolve()
+      },
     })
     try {
       await ready[0].promise
@@ -162,13 +185,16 @@ describe('watchAndInject session replacement', () => {
       const replacement = requests[1]!
       const removeScriptIndex = replacement.findIndex(request =>
         request.method === 'Page.removeScriptToEvaluateOnNewDocument'
-        && request.params.identifier === 'bootstrap-1')
+        && request.params.identifier === 'bootstrap-1'
+      )
       const removedBindings = replacement
         .filter(request => request.method === 'Runtime.removeBinding')
         .map(request => String(request.params.name))
         .sort()
       const firstAddBindingIndex = replacement.findIndex(request => request.method === 'Runtime.addBinding')
-      const addScriptIndex = replacement.findIndex(request => request.method === 'Page.addScriptToEvaluateOnNewDocument')
+      const addScriptIndex = replacement.findIndex(request =>
+        request.method === 'Page.addScriptToEvaluateOnNewDocument'
+      )
       expect(removeScriptIndex).toBeGreaterThanOrEqual(0)
       expect(removedBindings).toEqual(firstAddedBindings)
       expect(removeScriptIndex).toBeLessThan(firstAddBindingIndex)
@@ -235,13 +261,18 @@ describe('watchAndInject session replacement', () => {
       })
     })
     const originalFetch = globalThis.fetch
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify([{
-      id: 'failed-removal-target',
-      title: 'Codex',
-      url: 'app://-/index.html',
-      type: 'page',
-      webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
-    }]), { status: 200 })) as typeof fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify([{
+          id: 'failed-removal-target',
+          title: 'Codex',
+          url: 'app://-/index.html',
+          type: 'page',
+          webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
+        }]),
+        { status: 200 },
+      )
+    ) as typeof fetch
     const ready = [deferred(), deferred()] as const
     let readyCount = 0
     const abort = new AbortController()
@@ -250,7 +281,9 @@ describe('watchAndInject session replacement', () => {
       source: 'current-live-bootstrap',
       newDocumentSource: () => futureSources[Math.min(futureSourceBuilds++, 1)]!,
       signal: abort.signal,
-      onReady: () => { ready[Math.min(readyCount++, 1)]!.resolve() },
+      onReady: () => {
+        ready[Math.min(readyCount++, 1)]!.resolve()
+      },
     })
     try {
       await ready[0].promise
@@ -259,14 +292,18 @@ describe('watchAndInject session replacement', () => {
       await ready[1].promise
 
       expect(staleRemovalErrors).toBe(1)
-      expect(activeScripts).toEqual(new Map([
-        ['failed-removal-bootstrap-1', futureSources[0]],
-        ['failed-removal-bootstrap-2', futureSources[1]],
-      ]))
+      expect(activeScripts).toEqual(
+        new Map([
+          ['failed-removal-bootstrap-1', futureSources[0]],
+          ['failed-removal-bootstrap-2', futureSources[1]],
+        ]),
+      )
       const executed: string[] = []
       ;(globalThis as typeof globalThis & {
         __cordisxReconnectBootstrap?: (generation: string) => void
-      }).__cordisxReconnectBootstrap = generation => { executed.push(generation) }
+      }).__cordisxReconnectBootstrap = generation => {
+        executed.push(generation)
+      }
       for (const source of activeScripts.values()) Function(source)()
       expect(executed).toEqual(['stale-generation', 'current-generation'])
     } finally {
@@ -363,7 +400,8 @@ describe('icon theme preference document delivery', () => {
           method: string
           params?: { expression?: string; contextId?: number }
         }
-        const respond = (result: Record<string, unknown>): void => connection.send(JSON.stringify({ id: request.id, result }))
+        const respond = (result: Record<string, unknown>): void =>
+          connection.send(JSON.stringify({ id: request.id, result }))
         if (request.method === 'Page.addScriptToEvaluateOnNewDocument') {
           respond({ identifier: 'icon-theme-document-fixture' })
           return
@@ -378,8 +416,10 @@ describe('icon theme preference document delivery', () => {
           sendReady(41)
           return
         }
-        if (expression.includes('const receiver = globalThis.__cordisxIconThemePreferenceReceiveV1')
-          && expression.includes('return ack')) {
+        if (
+          expression.includes('const receiver = globalThis.__cordisxIconThemePreferenceReceiveV1')
+          && expression.includes('return ack')
+        ) {
           const deliveryPayload = iconThemeReceiverPayload(expression)
           const contextId = request.params?.contextId
           const context = contextId === undefined ? undefined : contexts.get(contextId)
@@ -413,8 +453,10 @@ describe('icon theme preference document delivery', () => {
               return
             }
           }
-          if (contextId === 43 && deliveryPayload?.kind === 'document-ready-probe'
-            && permanentHeldReadyRequestId === undefined) {
+          if (
+            contextId === 43 && deliveryPayload?.kind === 'document-ready-probe'
+            && permanentHeldReadyRequestId === undefined
+          ) {
             permanentHeldReadyRequestId = request.id
             permanentHeldReadyPayload = deliveryPayload
             permanentFirstPending.resolve()
@@ -427,8 +469,10 @@ describe('icon theme preference document delivery', () => {
             respond({ exceptionDetails: { text: 'permanent document receiver failure' } })
             return
           }
-          if (contextId === 43 && deliveryPayload?.kind === 'document-ready'
-            && deliveryPayload.synchronization === 'pending') {
+          if (
+            contextId === 43 && deliveryPayload?.kind === 'document-ready'
+            && deliveryPayload.synchronization === 'pending'
+          ) {
             permanentContextPendingResponses += 1
             const ack = globalThis.__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify(deliveryPayload))
             respond({ result: { value: ack } })
@@ -449,11 +493,15 @@ describe('icon theme preference document delivery', () => {
             return
           }
           context.revision = Math.max(context.revision, minimum)
-          respond({ result: { value: {
-            documentEpoch: context.epoch,
-            currentRevision: context.revision,
-            ...readyLeaseEcho(deliveryPayload),
-          } } })
+          respond({
+            result: {
+              value: {
+                documentEpoch: context.epoch,
+                currentRevision: context.revision,
+                ...readyLeaseEcho(deliveryPayload),
+              },
+            },
+          })
           if (contextId === 41 && context.revision === 0 && bootRequestId !== undefined) {
             connection.send(JSON.stringify({ id: bootRequestId, result: { result: { value: { ok: true } } } }))
             bootRequestId = undefined
@@ -504,8 +552,12 @@ describe('icon theme preference document delivery', () => {
         register: async receiver => {
           const registration = await reservation.register(receiver)
           return {
-            get currentRevision() { return registration.currentRevision },
-            get synchronization() { return registration.synchronization },
+            get currentRevision() {
+              return registration.currentRevision
+            },
+            get synchronization() {
+              return registration.synchronization
+            },
             respondReady: async (probeAck, respond) => {
               const status = await registration.respondReady(probeAck, respond)
               if (identity.executionContextId === 42 && status.synchronization === 'complete') {
@@ -519,10 +571,18 @@ describe('icon theme preference document delivery', () => {
       }
     })
     const originalFetch = globalThis.fetch
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify([{
-      id: 'same-target', title: 'Codex', url: 'app://-/index.html', type: 'page',
-      webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
-    }]), { status: 200 })) as typeof fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify([{
+          id: 'same-target',
+          title: 'Codex',
+          url: 'app://-/index.html',
+          type: 'page',
+          webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
+        }]),
+        { status: 200 },
+      )
+    ) as typeof fetch
     const abort = new AbortController()
     const watching = watchAndInject({
       port: address.port,
@@ -543,31 +603,37 @@ describe('icon theme preference document delivery', () => {
         requestId: string,
         expectedPreferenceRevision: number,
         expectedProfileRevision: number,
-      ): void => socket?.send(JSON.stringify({
-        method: 'Runtime.bindingCalled',
-        params: {
-          name: ICON_THEME_PREFERENCE_BINDING,
-          executionContextId: 41,
-          payload: JSON.stringify({
-            version: 1,
-            token,
-            requestId,
-            scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-document-test' },
-            expectedPreferenceRevision,
-            expectedProfileRevision,
-            selectedProfileRevision: expectedProfileRevision + 1,
-            candidate: {
-              providerId: 'builtin:reicon', namespace: 'reicon', providerVersion: '1.2.1', providerGeneration: 'reicon-1.2.1',
-            },
-          }),
-        },
-      }))
+      ): void =>
+        socket?.send(JSON.stringify({
+          method: 'Runtime.bindingCalled',
+          params: {
+            name: ICON_THEME_PREFERENCE_BINDING,
+            executionContextId: 41,
+            payload: JSON.stringify({
+              version: 1,
+              token,
+              requestId,
+              scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-document-test' },
+              expectedPreferenceRevision,
+              expectedProfileRevision,
+              selectedProfileRevision: expectedProfileRevision + 1,
+              candidate: {
+                providerId: 'builtin:reicon',
+                namespace: 'reicon',
+                providerVersion: '1.2.1',
+                providerGeneration: 'reicon-1.2.1',
+              },
+            }),
+          },
+        }))
 
       sendSelection('select-winner', 0, 0)
       await pendingSuccessResponse.promise
       expect((await loadHomeConfig(configPath)).apps.codex?.profiles.default?.iconTheme?.revision).toBe(1)
       expect(bindingResponses.get('select-winner')).toMatchObject({
-        ok: true, value: { revision: 1 }, synchronization: 'pending',
+        ok: true,
+        value: { revision: 1 },
+        synchronization: 'pending',
       })
       expect(contextOneDeliveryAttempts).toBe(2)
 
@@ -577,7 +643,10 @@ describe('icon theme preference document delivery', () => {
       sendSelection('recover-winner', 0, 1)
       await recoveredConflictResponse.promise
       expect(bindingResponses.get('recover-winner')).toMatchObject({
-        ok: false, code: 'conflict', currentPreference: { revision: 1 }, synchronization: 'complete',
+        ok: false,
+        code: 'conflict',
+        currentPreference: { revision: 1 },
+        synchronization: 'complete',
       })
       expect(contexts.get(41)?.revision).toBe(1)
 
@@ -611,14 +680,20 @@ describe('icon theme preference document delivery', () => {
       contextOneDeliveryAttempts = 0
       globalThis.__cordisxIconThemePreferenceRequestV1 = payload => {
         const ready = JSON.parse(payload) as { documentEpoch?: string }
-        if (typeof ready.documentEpoch === 'string') contexts.set(42, { epoch: ready.documentEpoch, revision: contexts.get(42)?.revision ?? 0 })
+        if (typeof ready.documentEpoch === 'string') {
+          contexts.set(42, { epoch: ready.documentEpoch, revision: contexts.get(42)?.revision ?? 0 })
+        }
         socket?.send(JSON.stringify({
           method: 'Runtime.bindingCalled',
           params: { name: ICON_THEME_PREFERENCE_BINDING, executionContextId: 42, payload },
         }))
       }
       browserBridge = new BrowserIconThemePreferenceBridge(
-        token, 'codex', 'default', 'host-document-test', undefined,
+        token,
+        'codex',
+        'default',
+        'host-document-test',
+        undefined,
       )
       sendSelection('conflict-navigation', 1, 2)
       await navigationConflictResponse.promise
@@ -627,13 +702,18 @@ describe('icon theme preference document delivery', () => {
       await contextTwoReadyFinalized.promise
 
       expect(bindingResponses.get('conflict-navigation')).toMatchObject({
-        ok: false, code: 'conflict', currentPreference: { revision: 2 }, synchronization: 'pending',
+        ok: false,
+        code: 'conflict',
+        currentPreference: { revision: 2 },
+        synchronization: 'pending',
       })
       expect(secondContextFirstRevision).toBe(2)
       expect(contexts.get(42)).toMatchObject({ revision: 2 })
       expect(contexts.get(42)?.epoch).toMatch(/^doc_/u)
       expect(secondContextPendingReady).toMatchObject({
-        synchronization: 'pending', requiredRevision: 2, currentRevision: 0,
+        synchronization: 'pending',
+        requiredRevision: 2,
+        currentRevision: 0,
       })
       expect(secondContextDeliveryAttempts).toBe(3)
       expect(destroyedSelectionResponses).toBeGreaterThanOrEqual(1)
@@ -649,7 +729,11 @@ describe('icon theme preference document delivery', () => {
         }))
       }
       permanentBrowserBridge = new BrowserIconThemePreferenceBridge(
-        token, 'codex', 'default', 'host-document-test', undefined,
+        token,
+        'codex',
+        'default',
+        'host-document-test',
+        undefined,
       )
       const permanentlyPending = permanentBrowserBridge.ready()
       await permanentFirstPending.promise
@@ -689,7 +773,10 @@ describe('icon theme preference document delivery', () => {
             expectedProfileRevision: 3,
             selectedProfileRevision: 4,
             candidate: {
-              providerId: 'plugin:aurora:aurora', namespace: 'aurora', providerVersion: '2.1.0', providerGeneration: 'aurora-3',
+              providerId: 'plugin:aurora:aurora',
+              namespace: 'aurora',
+              providerVersion: '2.1.0',
+              providerGeneration: 'aurora-3',
             },
           }),
         },
@@ -725,7 +812,9 @@ describe('icon theme preference document delivery', () => {
     const servers = [new WebSocketServer({ port: 0 }), new WebSocketServer({ port: 0 })] as const
     await Promise.all(servers.map(async server => await once(server, 'listening')))
     const addresses = servers.map(server => server.address())
-    if (addresses.some(address => typeof address === 'string')) throw new Error('fixture websocket did not bind TCP ports')
+    if (addresses.some(address => typeof address === 'string')) {
+      throw new Error('fixture websocket did not bind TCP ports')
+    }
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-icon-theme-cdp-profile-reservation-'))
     const configPath = path.join(root, '.cordisx', 'config.json')
     await ensureHomeConfig(configPath)
@@ -756,7 +845,8 @@ describe('icon theme preference document delivery', () => {
             method: string
             params?: { expression?: string; contextId?: number }
           }
-          const respond = (result: Record<string, unknown>): void => connection.send(JSON.stringify({ id: request.id, result }))
+          const respond = (result: Record<string, unknown>): void =>
+            connection.send(JSON.stringify({ id: request.id, result }))
           if (request.method === 'Page.addScriptToEvaluateOnNewDocument') {
             respond({ identifier: `profile-reservation-${index}` })
             return
@@ -777,9 +867,13 @@ describe('icon theme preference document delivery', () => {
           }
           const payload = iconThemeReceiverPayload(expression)
           if (expression.includes('return ack')) {
-            if (payload?.kind === 'sync') revisions[index] = Number((payload.value as { revision?: unknown })?.revision ?? revisions[index])
-            if (index === 0 && holdLinearReadyResponses && payload?.kind === 'document-ready'
-              && payload.requestId === 'ready-profile-linear') {
+            if (payload?.kind === 'sync') {
+              revisions[index] = Number((payload.value as { revision?: unknown })?.revision ?? revisions[index])
+            }
+            if (
+              index === 0 && holdLinearReadyResponses && payload?.kind === 'document-ready'
+              && payload.requestId === 'ready-profile-linear'
+            ) {
               linearReadyResponseCount += 1
               if (linearReadyResponseCount === 1) {
                 heldLinearOldResponseRequestId = request.id
@@ -795,13 +889,19 @@ describe('icon theme preference document delivery', () => {
                 return
               }
             }
-            respond({ result: { value: {
-              documentEpoch: epochs[index],
-              currentRevision: revisions[index],
-              ...readyLeaseEcho(payload),
-            } } })
+            respond({
+              result: {
+                value: {
+                  documentEpoch: epochs[index],
+                  currentRevision: revisions[index],
+                  ...readyLeaseEcho(payload),
+                },
+              },
+            })
             if (payload?.kind === 'document-ready') readyComplete[index]!.resolve()
-            if (payload?.kind === 'document-ready' && payload.requestId === 'ready-profile-linear') linearReadyResponse.resolve(payload)
+            if (payload?.kind === 'document-ready' && payload.requestId === 'ready-profile-linear') {
+              linearReadyResponse.resolve(payload)
+            }
             return
           }
           respond({ result: { value: true } })
@@ -827,8 +927,12 @@ describe('icon theme preference document delivery', () => {
           if (identity.targetId === 'target-b') await releaseTargetBRegister.promise
           const registration = await reservation.register(receiver)
           return {
-            get currentRevision() { return registration.currentRevision },
-            get synchronization() { return registration.synchronization },
+            get currentRevision() {
+              return registration.currentRevision
+            },
+            get synchronization() {
+              return registration.synchronization
+            },
             respondReady: async (probeAck, respond) => {
               const status = await registration.respondReady(probeAck, respond)
               if (status.synchronization === 'complete') {
@@ -846,35 +950,49 @@ describe('icon theme preference document delivery', () => {
       }
     })
     const originalFetch = globalThis.fetch
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify(addresses.map((address, index) => ({
-      id: index === 0 ? 'target-a' : 'target-b',
-      title: `Codex ${index}`,
-      url: 'app://-/index.html',
-      type: 'page',
-      webSocketDebuggerUrl: `ws://127.0.0.1:${(address as { port: number }).port}`,
-    }))), { status: 200 })) as typeof fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify(addresses.map((address, index) => ({
+          id: index === 0 ? 'target-a' : 'target-b',
+          title: `Codex ${index}`,
+          url: 'app://-/index.html',
+          type: 'page',
+          webSocketDebuggerUrl: `ws://127.0.0.1:${(address as { port: number }).port}`,
+        }))),
+        { status: 200 },
+      )
+    ) as typeof fetch
     const abort = new AbortController()
     const watching = watchAndInject({
       port: (addresses[0] as { port: number }).port,
       source: 'void 0',
       signal: abort.signal,
       iconThemePreferencePersistence: {
-        configPath, appId: 'codex', profileId: 'default', hostGeneration: 'host-profile-reservation', token,
+        configPath,
+        appId: 'codex',
+        profileId: 'default',
+        hostGeneration: 'host-profile-reservation',
+        token,
       },
       iconThemePreferenceBroadcastHub: hub,
     })
-    const sendReady = (index: number): void => sockets[index]?.send(JSON.stringify({
-      method: 'Runtime.bindingCalled',
-      params: {
-        name: ICON_THEME_PREFERENCE_BINDING,
-        executionContextId: 70 + index,
-        payload: JSON.stringify({
-          version: 1, kind: 'document-ready', token, requestId: `ready-profile-${index}`,
-          scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-profile-reservation' },
-          documentEpoch: epochs[index], currentRevision: revisions[index],
-        }),
-      },
-    }))
+    const sendReady = (index: number): void =>
+      sockets[index]?.send(JSON.stringify({
+        method: 'Runtime.bindingCalled',
+        params: {
+          name: ICON_THEME_PREFERENCE_BINDING,
+          executionContextId: 70 + index,
+          payload: JSON.stringify({
+            version: 1,
+            kind: 'document-ready',
+            token,
+            requestId: `ready-profile-${index}`,
+            scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-profile-reservation' },
+            documentEpoch: epochs[index],
+            currentRevision: revisions[index],
+          }),
+        },
+      }))
     try {
       await Promise.all(installed.map(item => item.promise))
       sendReady(0)
@@ -888,17 +1006,26 @@ describe('icon theme preference document delivery', () => {
           name: ICON_THEME_PREFERENCE_BINDING,
           executionContextId: 70,
           payload: JSON.stringify({
-            version: 1, token, requestId: 'profile-wide-selection',
+            version: 1,
+            token,
+            requestId: 'profile-wide-selection',
             scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-profile-reservation' },
-            expectedPreferenceRevision: 0, expectedProfileRevision: 0, selectedProfileRevision: 1,
+            expectedPreferenceRevision: 0,
+            expectedProfileRevision: 0,
+            selectedProfileRevision: 1,
             candidate: {
-              providerId: 'builtin:reicon', namespace: 'reicon', providerVersion: '1.2.1', providerGeneration: 'reicon-1.2.1',
+              providerId: 'builtin:reicon',
+              namespace: 'reicon',
+              providerVersion: '1.2.1',
+              providerGeneration: 'reicon-1.2.1',
             },
           }),
         },
       }))
       expect(await selectionResponse.promise).toMatchObject({
-        ok: true, value: { revision: 1 }, synchronization: 'pending',
+        ok: true,
+        value: { revision: 1 },
+        synchronization: 'pending',
       })
       expect(hub.current()).toMatchObject({ revision: 1 })
       releaseTargetBRegister.resolve()
@@ -913,9 +1040,13 @@ describe('icon theme preference document delivery', () => {
           name: ICON_THEME_PREFERENCE_BINDING,
           executionContextId: 70,
           payload: JSON.stringify({
-            version: 1, kind: 'document-ready', token, requestId: 'ready-profile-linear',
+            version: 1,
+            kind: 'document-ready',
+            token,
+            requestId: 'ready-profile-linear',
             scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-profile-reservation' },
-            documentEpoch: epochs[0], currentRevision: 1,
+            documentEpoch: epochs[0],
+            currentRevision: 1,
           }),
         },
       }))
@@ -932,8 +1063,10 @@ describe('icon theme preference document delivery', () => {
                 ...current.apps.codex!.profiles.default!,
                 iconTheme: {
                   revision: 2,
-                  providerId: 'plugin:aurora:aurora', namespace: 'aurora',
-                  providerVersion: '2.1.0', providerGeneration: 'aurora-3',
+                  providerId: 'plugin:aurora:aurora',
+                  namespace: 'aurora',
+                  providerVersion: '2.1.0',
+                  providerGeneration: 'aurora-3',
                 },
               },
             },
@@ -946,39 +1079,61 @@ describe('icon theme preference document delivery', () => {
           name: ICON_THEME_PREFERENCE_BINDING,
           executionContextId: 70,
           payload: JSON.stringify({
-            version: 1, token, requestId: 'profile-linear-conflict',
+            version: 1,
+            token,
+            requestId: 'profile-linear-conflict',
             scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-profile-reservation' },
-            expectedPreferenceRevision: 1, expectedProfileRevision: 1, selectedProfileRevision: 2,
+            expectedPreferenceRevision: 1,
+            expectedProfileRevision: 1,
+            selectedProfileRevision: 2,
             candidate: {
-              providerId: 'builtin:reicon', namespace: 'reicon', providerVersion: '1.2.1', providerGeneration: 'reicon-1.2.1',
+              providerId: 'builtin:reicon',
+              namespace: 'reicon',
+              providerVersion: '1.2.1',
+              providerGeneration: 'reicon-1.2.1',
             },
           }),
         },
       }))
       expect(await linearConflictResponse.promise).toMatchObject({
-        ok: false, code: 'conflict', currentPreference: { revision: 2 }, synchronization: 'pending',
+        ok: false,
+        code: 'conflict',
+        currentPreference: { revision: 2 },
+        synchronization: 'pending',
       })
       expect(hub.current()).toMatchObject({ revision: 2 })
       expect(revisions[0]).toBe(2)
       await linearLatestResponseHeld.promise
       sockets[0]?.send(JSON.stringify({
         id: heldLinearOldResponseRequestId,
-        result: { result: { value: {
-          documentEpoch: epochs[0], currentRevision: 1,
-          ...readyLeaseEcho(heldLinearOldResponsePayload),
-        } } },
+        result: {
+          result: {
+            value: {
+              documentEpoch: epochs[0],
+              currentRevision: 1,
+              ...readyLeaseEcho(heldLinearOldResponsePayload),
+            },
+          },
+        },
       }))
       await Promise.resolve()
       expect(targetACompletedReadyCount).toBe(1)
       sockets[0]?.send(JSON.stringify({
         id: heldLinearLatestResponseRequestId,
-        result: { result: { value: {
-          documentEpoch: epochs[0], currentRevision: 2,
-          ...readyLeaseEcho(heldLinearLatestResponsePayload),
-        } } },
+        result: {
+          result: {
+            value: {
+              documentEpoch: epochs[0],
+              currentRevision: 2,
+              ...readyLeaseEcho(heldLinearLatestResponsePayload),
+            },
+          },
+        },
       }))
       await expect(linearReadyResponse.promise).resolves.toMatchObject({
-        synchronization: 'complete', requiredRevision: 2, currentRevision: 2,
+        synchronization: 'complete',
+        requiredRevision: 2,
+        currentRevision: 2,
       })
       await linearReadyFinalized.promise
       await expect(hub.broadcast(hub.current()!)).resolves.toMatchObject({ pending: 0 })
@@ -1040,22 +1195,23 @@ describe('icon theme preference document delivery', () => {
       [52, 'document_epoch_new'],
       [53, 'document_epoch_close'],
     ])
-    const sendReady = (contextId: number, currentRevision: number): void => connectionRef?.send(JSON.stringify({
-      method: 'Runtime.bindingCalled',
-      params: {
-        name: ICON_THEME_PREFERENCE_BINDING,
-        executionContextId: contextId,
-        payload: JSON.stringify({
-          version: 1,
-          kind: 'document-ready',
-          token,
-          requestId: `ready-${contextId}-${currentRevision}-${context52CompleteCount}`,
-          scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-replacement-test' },
-          documentEpoch: epochs.get(contextId),
-          currentRevision,
-        }),
-      },
-    }))
+    const sendReady = (contextId: number, currentRevision: number): void =>
+      connectionRef?.send(JSON.stringify({
+        method: 'Runtime.bindingCalled',
+        params: {
+          name: ICON_THEME_PREFERENCE_BINDING,
+          executionContextId: contextId,
+          payload: JSON.stringify({
+            version: 1,
+            kind: 'document-ready',
+            token,
+            requestId: `ready-${contextId}-${currentRevision}-${context52CompleteCount}`,
+            scope: { appId: 'codex', profileId: 'default', hostGeneration: 'host-replacement-test' },
+            documentEpoch: epochs.get(contextId),
+            currentRevision,
+          }),
+        },
+      }))
     server.on('connection', connection => {
       connectionRef = connection
       connection.on('message', data => {
@@ -1064,7 +1220,8 @@ describe('icon theme preference document delivery', () => {
           method: string
           params?: { expression?: string; contextId?: number }
         }
-        const respond = (result: Record<string, unknown>): void => connection.send(JSON.stringify({ id: request.id, result }))
+        const respond = (result: Record<string, unknown>): void =>
+          connection.send(JSON.stringify({ id: request.id, result }))
         if (request.method === 'Page.addScriptToEvaluateOnNewDocument') {
           respond({ identifier: 'icon-theme-replacement-fixture' })
           return
@@ -1105,7 +1262,11 @@ describe('icon theme preference document delivery', () => {
           }
         }
         if (payload?.kind === 'document-ready-probe') {
-          respond({ result: { value: { documentEpoch: epochs.get(contextId!), currentRevision: contextRevisions.get(contextId!) ?? 0 } } })
+          respond({
+            result: {
+              value: { documentEpoch: epochs.get(contextId!), currentRevision: contextRevisions.get(contextId!) ?? 0 },
+            },
+          })
           return
         }
         if (payload?.kind === 'document-ready') {
@@ -1115,9 +1276,15 @@ describe('icon theme preference document delivery', () => {
             return
           }
           const currentRevision = Number(payload.currentRevision ?? 0)
-          respond({ result: { value: {
-            documentEpoch: epochs.get(contextId!), currentRevision, ...readyLeaseEcho(payload),
-          } } })
+          respond({
+            result: {
+              value: {
+                documentEpoch: epochs.get(contextId!),
+                currentRevision,
+                ...readyLeaseEcho(payload),
+              },
+            },
+          })
           if (contextId === 52 && payload.synchronization === 'complete') {
             context52CompleteCount += 1
             if (context52CompleteCount === 1) newDocumentComplete.resolve()
@@ -1134,10 +1301,18 @@ describe('icon theme preference document delivery', () => {
       })
     })
     const originalFetch = globalThis.fetch
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify([{
-      id: 'same-target', title: 'Codex', url: 'app://-/index.html', type: 'page',
-      webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
-    }]), { status: 200 })) as typeof fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify([{
+          id: 'same-target',
+          title: 'Codex',
+          url: 'app://-/index.html',
+          type: 'page',
+          webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
+        }]),
+        { status: 200 },
+      )
+    ) as typeof fetch
     const abort = new AbortController()
     const watching = watchAndInject({
       port: address.port,
@@ -1167,7 +1342,10 @@ describe('icon theme preference document delivery', () => {
             expectedProfileRevision: 0,
             selectedProfileRevision: 1,
             candidate: {
-              providerId: 'builtin:reicon', namespace: 'reicon', providerVersion: '1.2.1', providerGeneration: 'reicon-1.2.1',
+              providerId: 'builtin:reicon',
+              namespace: 'reicon',
+              providerVersion: '1.2.1',
+              providerGeneration: 'reicon-1.2.1',
             },
           }),
         },
@@ -1214,7 +1392,14 @@ function activation(revision: number, generation: string): CordisXPluginActivati
     revision,
     lastGoodRevision: 0,
     runtimeGeneration: 'runtime-1',
-    plugins: [{ id: 'demo', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}`, moduleGeneration: generation, enabled: revision === 0, dependencies: [] }],
+    plugins: [{
+      id: 'demo',
+      version: '1.0.0',
+      digest: `sha256:${'a'.repeat(64)}`,
+      moduleGeneration: generation,
+      enabled: revision === 0,
+      dependencies: [],
+    }],
   }
 }
 
@@ -1227,9 +1412,21 @@ describe('CdpPluginLifecycleRuntime', () => {
         if (method !== 'Runtime.evaluate') return {}
         const expression = String(params.expression ?? '')
         expressions.push(expression)
-        if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
-        } } } }
+        if (expression.includes('stagePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
+        }
         return { result: { value: { ok: true, result: true } } }
       },
     }
@@ -1278,7 +1475,9 @@ describe('CdpPluginLifecycleRuntime', () => {
 
   it('projects exact document lease tokens with package generation stage and restores them on rollback', async () => {
     const runtime = new CdpPluginLifecycleRuntime()
-    const leases = new OwnerDocumentLeaseRegistry({ active: [{ source: 'file:///demo-old.js', pluginId: 'demo', moduleGeneration: 'demo-old' }] })
+    const leases = new OwnerDocumentLeaseRegistry({
+      active: [{ source: 'file:///demo-old.js', pluginId: 'demo', moduleGeneration: 'demo-old' }],
+    })
     runtime.setOwnerDocumentAuthority({
       leases,
       issue: (identity, moduleGeneration) => ({ ...identity, moduleGeneration, token: `signed-${moduleGeneration}` }),
@@ -1286,34 +1485,87 @@ describe('CdpPluginLifecycleRuntime', () => {
     const previous = activation(0, 'demo-old')
     const candidateBase = activation(1, 'demo-new')
     const candidate = { ...candidateBase, plugins: candidateBase.plugins.map(item => ({ ...item, enabled: true })) }
-    let transactionEpoch = ''; let stagedExpression = ''
+    let transactionEpoch = ''
+    let stagedExpression = ''
     const unregister = runtime.register({
       async send(_method: string, params: Record<string, unknown>) {
         const expression = String(params.expression ?? '')
         if (expression.includes('stagePluginMutation')) {
           stagedExpression = expression
-          return { result: { value: { ok: true, result: { transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1 } } } }
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: { transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1 },
+              },
+            },
+          }
         }
-        if (expression.includes('rollbackPluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch, registryEpoch: 2, active: previous, disposedAfter: candidate,
-        } } } }
+        if (expression.includes('rollbackPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  registryEpoch: 2,
+                  active: previous,
+                  disposedAfter: candidate,
+                },
+              },
+            },
+          }
+        }
         return { result: { value: undefined } }
       },
     } as never)
-    const fence = runtime.prepare('tx'); transactionEpoch = fence.transactionEpoch
+    const fence = runtime.prepare('tx')
+    transactionEpoch = fence.transactionEpoch
     await runtime.stage({
-      transactionId: 'tx', ...fence, afterRegistryEpoch: 1, operation: 'update', previous, candidate,
-      targetId: 'demo', affectedPluginIds: ['demo'],
+      transactionId: 'tx',
+      ...fence,
+      afterRegistryEpoch: 1,
+      operation: 'update',
+      previous,
+      candidate,
+      targetId: 'demo',
+      affectedPluginIds: ['demo'],
       package: {
-        manifest: { id: 'demo' }, digest: `sha256:${'b'.repeat(64)}`, moduleSource: '', artifactSource: 'void 0',
-        serviceModules: [], identitySource: 'file:///demo-new.js',
+        manifest: { id: 'demo' },
+        digest: `sha256:${'b'.repeat(64)}`,
+        moduleSource: '',
+        artifactSource: 'void 0',
+        serviceModules: [],
+        identitySource: 'file:///demo-new.js',
       } as never,
     })
     expect(stagedExpression).toContain('signed-demo-new')
-    expect(leases.allowed({ profileId: 'work', generation: 'runtime-1', moduleGeneration: 'demo-new', identity: { source: 'file:///demo-new.js', pluginId: 'demo' } })).toBe(true)
-    expect(leases.allowed({ profileId: 'work', generation: 'runtime-1', moduleGeneration: 'demo-old', identity: { source: 'file:///demo-old.js', pluginId: 'demo' } })).toBe(false)
+    expect(
+      leases.allowed({
+        profileId: 'work',
+        generation: 'runtime-1',
+        moduleGeneration: 'demo-new',
+        identity: { source: 'file:///demo-new.js', pluginId: 'demo' },
+      }),
+    ).toBe(true)
+    expect(
+      leases.allowed({
+        profileId: 'work',
+        generation: 'runtime-1',
+        moduleGeneration: 'demo-old',
+        identity: { source: 'file:///demo-old.js', pluginId: 'demo' },
+      }),
+    ).toBe(false)
     await runtime.rollback('tx')
-    expect(leases.allowed({ profileId: 'work', generation: 'runtime-1', moduleGeneration: 'demo-old', identity: { source: 'file:///demo-old.js', pluginId: 'demo' } })).toBe(true)
+    expect(
+      leases.allowed({
+        profileId: 'work',
+        generation: 'runtime-1',
+        moduleGeneration: 'demo-old',
+        identity: { source: 'file:///demo-old.js', pluginId: 'demo' },
+      }),
+    ).toBe(true)
     unregister()
   })
 
@@ -1321,12 +1573,19 @@ describe('CdpPluginLifecycleRuntime', () => {
     const runtime = new CdpPluginLifecycleRuntime()
     const sourcePath = '/absolute/plugin/join-state.ts'
     await runtime.updateDevelopmentStatus({
-      origin: 'local-dev', pluginId: 'join-state', sourcePath, state: 'ready',
+      origin: 'local-dev',
+      pluginId: 'join-state',
+      sourcePath,
+      state: 'ready',
     })
     let releaseReady!: () => void
     let readyStarted!: () => void
-    const readyGate = new Promise<void>(resolve => { releaseReady = resolve })
-    const readyObserved = new Promise<void>(resolve => { readyStarted = resolve })
+    const readyGate = new Promise<void>(resolve => {
+      releaseReady = resolve
+    })
+    const readyObserved = new Promise<void>(resolve => {
+      readyStarted = resolve
+    })
     const expressions: string[] = []
     const session = {
       async send(_method: string, params: Record<string, unknown>) {
@@ -1343,7 +1602,11 @@ describe('CdpPluginLifecycleRuntime', () => {
     const synchronizing = runtime.synchronizeDevelopmentStatus(session as never)
     await readyObserved
     await runtime.updateDevelopmentStatus({
-      origin: 'local-dev', pluginId: 'join-state', sourcePath, state: 'failed', error: 'new failure',
+      origin: 'local-dev',
+      pluginId: 'join-state',
+      sourcePath,
+      state: 'failed',
+      error: 'new failure',
     })
     releaseReady()
     const version = await synchronizing
@@ -1364,28 +1627,40 @@ describe('CdpPluginLifecycleRuntime', () => {
     if (typeof address === 'string') throw new Error('fixture websocket did not bind a TCP port')
     let releaseBoot!: () => void
     let bootBlocked = true
-    const bootGate = new Promise<void>(resolve => { releaseBoot = resolve })
+    const bootGate = new Promise<void>(resolve => {
+      releaseBoot = resolve
+    })
     server.on('connection', socket => {
       socket.on('message', data => {
         void (async () => {
           const request = JSON.parse(String(data)) as { id: number; method: string; params?: { expression?: string } }
-          if (request.method === 'Runtime.evaluate'
+          if (
+            request.method === 'Runtime.evaluate'
             && request.params?.expression?.includes('await globalThis.__cordisxBoot') === true
-            && bootBlocked) await bootGate
+            && bootBlocked
+          ) await bootGate
           const result = request.method === 'Page.addScriptToEvaluateOnNewDocument'
             ? { identifier: `fixture-${request.id}` }
             : request.method === 'Runtime.evaluate'
-              ? { result: { value: { ok: true, result: true } } }
-              : {}
+            ? { result: { value: { ok: true, result: true } } }
+            : {}
           socket.send(JSON.stringify({ id: request.id, result }))
         })()
       })
     })
     const originalFetch = globalThis.fetch
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify([{
-      id: 'joining-renderer', title: 'Codex', url: 'app://-/index.html', type: 'page',
-      webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
-    }]), { status: 200 })) as typeof fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify([{
+          id: 'joining-renderer',
+          title: 'Codex',
+          url: 'app://-/index.html',
+          type: 'page',
+          webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
+        }]),
+        { status: 200 },
+      )
+    ) as typeof fetch
     const statuses: string[] = []
     const abort = new AbortController()
     const watching = watchAndInject({
@@ -1393,7 +1668,9 @@ describe('CdpPluginLifecycleRuntime', () => {
       source: 'void 0',
       signal: abort.signal,
       developmentRuntime: runtime,
-      onStatus: message => { statuses.push(message) },
+      onStatus: message => {
+        statuses.push(message)
+      },
     })
     try {
       await new Promise(resolve => setTimeout(resolve, 30))
@@ -1401,12 +1678,20 @@ describe('CdpPluginLifecycleRuntime', () => {
       expect(fence.expectedRegistryEpoch).toBe(0)
       releaseBoot()
       bootBlocked = false
-      for (let attempt = 0; attempt < 50 && !statuses.some(item => item.includes('during a plugin generation transaction')); attempt += 1) {
+      for (
+        let attempt = 0;
+        attempt < 50 && !statuses.some(item => item.includes('during a plugin generation transaction'));
+        attempt += 1
+      ) {
         await new Promise(resolve => setTimeout(resolve, 20))
       }
       expect(statuses).toContainEqual(expect.stringContaining('during a plugin generation transaction'))
       runtime.cancelPreparation('join-race')
-      for (let attempt = 0; attempt < 80 && !statuses.some(item => item.includes('injected target joining-renderer')); attempt += 1) {
+      for (
+        let attempt = 0;
+        attempt < 80 && !statuses.some(item => item.includes('injected target joining-renderer'));
+        attempt += 1
+      ) {
         await new Promise(resolve => setTimeout(resolve, 20))
       }
       expect(statuses).toContainEqual(expect.stringContaining('injected target joining-renderer'))
@@ -1453,16 +1738,23 @@ describe('CdpPluginLifecycleRuntime', () => {
           const result = request.method === 'Page.addScriptToEvaluateOnNewDocument'
             ? { identifier: `cold-${request.id}` }
             : request.method !== 'Runtime.evaluate'
-              ? {}
-              : expression.includes('recoverPluginMutation')
-                ? { result: { value: { ok: true, result: {
+            ? {}
+            : expression.includes('recoverPluginMutation')
+            ? {
+              result: {
+                value: {
+                  ok: true,
+                  result: {
                     transactionId: plan.transactionId,
                     transactionEpoch: plan.transactionEpoch,
                     registryEpoch: plan.rollbackRegistryEpoch,
                     active: previous,
                     disposedAfter: candidate,
-                  } } } }
-                : { result: { value: { ok: true, result: true } } }
+                  },
+                },
+              },
+            }
+            : { result: { value: { ok: true, result: true } } }
           socket.send(JSON.stringify({ id: request.id, result }))
         })()
       })
@@ -1480,10 +1772,18 @@ describe('CdpPluginLifecycleRuntime', () => {
       },
     }
     const originalFetch = globalThis.fetch
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify([{
-      id: 'cold-renderer', title: 'Codex', url: 'app://-/index.html', type: 'page',
-      webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
-    }]), { status: 200 })) as typeof fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify([{
+          id: 'cold-renderer',
+          title: 'Codex',
+          url: 'app://-/index.html',
+          type: 'page',
+          webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
+        }]),
+        { status: 200 },
+      )
+    ) as typeof fetch
     const statuses: string[] = []
     const abort = new AbortController()
     const watching = watchAndInject({
@@ -1491,10 +1791,16 @@ describe('CdpPluginLifecycleRuntime', () => {
       source: 'void 0',
       signal: abort.signal,
       pluginLifecycle: { handler: handler as never, runtime },
-      onStatus: message => { statuses.push(message) },
+      onStatus: message => {
+        statuses.push(message)
+      },
     })
     try {
-      for (let attempt = 0; attempt < 80 && !statuses.some(item => item.includes('injected target cold-renderer')); attempt += 1) {
+      for (
+        let attempt = 0;
+        attempt < 80 && !statuses.some(item => item.includes('injected target cold-renderer'));
+        attempt += 1
+      ) {
         await new Promise(resolve => setTimeout(resolve, 20))
       }
       expect(recovered).toBe(true)
@@ -1517,7 +1823,9 @@ describe('CdpPluginLifecycleRuntime', () => {
     const unregisterFirst = runtime.register(first)
     const fence = runtime.prepare('in-flight')
     expect(fence.expectedRegistryEpoch).toBe(0)
-    expect(() => runtime.register(second)).toThrow('cannot register a CordisX renderer during a plugin generation transaction')
+    expect(() => runtime.register(second)).toThrow(
+      'cannot register a CordisX renderer during a plugin generation transaction',
+    )
     runtime.cancelPreparation('in-flight')
     const unregisterSecond = runtime.register(second)
     unregisterSecond()
@@ -1556,14 +1864,36 @@ describe('CdpPluginLifecycleRuntime', () => {
         const expression = String(params.expression ?? '')
         if (expression.includes('stagePluginMutation')) {
           stageCalls[index]! += 1
-          return { result: { value: fail ? { ok: false, error: 'fixture readiness failure' } : {
-            ok: true,
-            result: { transactionId: 'tx', transactionEpoch: 'tx:formal', expectedRegistryEpoch: 0, afterRegistryEpoch: 1 },
-          } } }
+          return {
+            result: {
+              value: fail ? { ok: false, error: 'fixture readiness failure' } : {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch: 'tx:formal',
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
         }
-        if (expression.includes('rollbackPluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch: 'tx:formal', registryEpoch: 2, active: previous, disposedAfter: candidate,
-        } } } }
+        if (expression.includes('rollbackPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch: 'tx:formal',
+                  registryEpoch: 2,
+                  active: previous,
+                  disposedAfter: candidate,
+                },
+              },
+            },
+          }
+        }
         return {}
       },
     })
@@ -1582,7 +1912,11 @@ describe('CdpPluginLifecycleRuntime', () => {
     }
     await expect(runtime.stage(mutation)).rejects.toThrow('fixture readiness failure')
     expect(stageCalls).toEqual([1, 1])
-    await expect(runtime.rollback('tx')).resolves.toMatchObject({ registryEpoch: 2, active: previous, disposedAfter: candidate })
+    await expect(runtime.rollback('tx')).resolves.toMatchObject({
+      registryEpoch: 2,
+      active: previous,
+      disposedAfter: candidate,
+    })
     expect(runtime.prepare('tx-after-rollback')).toMatchObject({ expectedRegistryEpoch: 2 })
   })
 
@@ -1595,9 +1929,21 @@ describe('CdpPluginLifecycleRuntime', () => {
     const unregister = runtime.register({
       async send(_method: string, params: Record<string, unknown>) {
         const expression = String(params.expression ?? '')
-        if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
-        } } } }
+        if (expression.includes('stagePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
+        }
         return { result: { value: undefined } }
       },
     } as never)
@@ -1649,34 +1995,98 @@ describe('CdpPluginLifecycleRuntime', () => {
     const unregister = runtime.register({
       async send(_method: string, params: Record<string, unknown>) {
         const expression = String(params.expression ?? '')
-        if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
-        } } } }
-        if (expression.includes('publishPluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch, registryEpoch: 1, active: candidate,
-        } } } }
-        if (expression.includes('completePluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch, registryEpoch: 1, active: candidate, disposedAfter: previous,
-        } } } }
-        if (expression.includes('finalizePluginMutation')) return { result: { value: { ok: false, error: 'fixture finalize failure' } } }
-        if (expression.includes('rollbackPluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch, registryEpoch: 2, active: previous, disposedAfter: candidate,
-        } } } }
+        if (expression.includes('stagePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('publishPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  registryEpoch: 1,
+                  active: candidate,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('completePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  registryEpoch: 1,
+                  active: candidate,
+                  disposedAfter: previous,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('finalizePluginMutation')) {
+          return { result: { value: { ok: false, error: 'fixture finalize failure' } } }
+        }
+        if (expression.includes('rollbackPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  registryEpoch: 2,
+                  active: previous,
+                  disposedAfter: candidate,
+                },
+              },
+            },
+          }
+        }
         return {}
       },
     } as never)
     const fence = runtime.prepare('tx')
     transactionEpoch = fence.transactionEpoch
     await runtime.stage({
-      transactionId: 'tx', ...fence, afterRegistryEpoch: 1, operation: 'disable', previous, candidate,
-      targetId: 'demo', affectedPluginIds: ['demo'],
+      transactionId: 'tx',
+      ...fence,
+      afterRegistryEpoch: 1,
+      operation: 'disable',
+      previous,
+      candidate,
+      targetId: 'demo',
+      affectedPluginIds: ['demo'],
     })
     await runtime.publish('tx')
     await runtime.complete('tx')
     await expect(runtime.finalize('tx')).rejects.toThrow('fixture finalize failure')
-    expect(() => runtime.register({ send: async () => ({}) } as never)).toThrow('during a plugin generation transaction')
+    expect(() => runtime.register({ send: async () => ({}) } as never)).toThrow(
+      'during a plugin generation transaction',
+    )
 
-    await expect(runtime.rollback('tx')).resolves.toMatchObject({ registryEpoch: 2, active: previous, disposedAfter: candidate })
+    await expect(runtime.rollback('tx')).resolves.toMatchObject({
+      registryEpoch: 2,
+      active: previous,
+      disposedAfter: candidate,
+    })
     const unregisterReplacement = runtime.register({ send: async () => ({}) } as never)
     expect(runtime.prepare('replacement-finalize')).toMatchObject({ expectedRegistryEpoch: 2 })
     runtime.cancelPreparation('replacement-finalize')
@@ -1695,15 +2105,42 @@ describe('CdpPluginLifecycleRuntime', () => {
       const unregister = runtime.register({
         async send(_method: string, params: Record<string, unknown>) {
           const expression = String(params.expression ?? '')
-          if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
-            transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
-          } } } }
+          if (expression.includes('stagePluginMutation')) {
+            return {
+              result: {
+                value: {
+                  ok: true,
+                  result: {
+                    transactionId: 'tx',
+                    transactionEpoch,
+                    expectedRegistryEpoch: 0,
+                    afterRegistryEpoch: 1,
+                  },
+                },
+              },
+            }
+          }
           if (expression.includes(`${terminal}PluginMutation`)) {
             terminalAttempts += 1
-            if (terminalAttempts === 1) return { result: { value: { ok: false, error: `fixture ${terminal} failure` } } }
-            return { result: { value: { ok: true, result: terminal === 'rollback' ? {
-              transactionId: 'tx', transactionEpoch, registryEpoch: 0, active: previous, disposedAfter: candidate,
-            } : true } } }
+            if (terminalAttempts === 1) {
+              return { result: { value: { ok: false, error: `fixture ${terminal} failure` } } }
+            }
+            return {
+              result: {
+                value: {
+                  ok: true,
+                  result: terminal === 'rollback'
+                    ? {
+                      transactionId: 'tx',
+                      transactionEpoch,
+                      registryEpoch: 0,
+                      active: previous,
+                      disposedAfter: candidate,
+                    }
+                    : true,
+                },
+              },
+            }
           }
           return {}
         },
@@ -1711,21 +2148,41 @@ describe('CdpPluginLifecycleRuntime', () => {
       const fence = runtime.prepare('tx')
       transactionEpoch = fence.transactionEpoch
       await runtime.stage({
-        transactionId: 'tx', ...fence, afterRegistryEpoch: 1, operation: 'disable', previous, candidate,
-        targetId: 'demo', affectedPluginIds: ['demo'],
-        ...(terminal === 'rollback' ? { package: {
-          manifest: { id: 'demo' }, digest: `sha256:${'b'.repeat(64)}`, moduleSource: '', artifactSource: 'void 0',
-          serviceModules: [], identitySource: 'file:///demo-new.js',
-        } as never } : {}),
+        transactionId: 'tx',
+        ...fence,
+        afterRegistryEpoch: 1,
+        operation: 'disable',
+        previous,
+        candidate,
+        targetId: 'demo',
+        affectedPluginIds: ['demo'],
+        ...(terminal === 'rollback'
+          ? {
+            package: {
+              manifest: { id: 'demo' },
+              digest: `sha256:${'b'.repeat(64)}`,
+              moduleSource: '',
+              artifactSource: 'void 0',
+              serviceModules: [],
+              identitySource: 'file:///demo-new.js',
+            } as never,
+          }
+          : {}),
       })
       if (terminal === 'rollback') expect(permissions.allowed({ id: 'demo', source: 'file:///demo-new.js' })).toBe(true)
-      const terminate = async (): Promise<unknown> => terminal === 'rollback' ? await runtime.rollback('tx') : await runtime.abort('tx')
+      const terminate = async (): Promise<unknown> =>
+        terminal === 'rollback' ? await runtime.rollback('tx') : await runtime.abort('tx')
       await expect(terminate()).rejects.toThrow(`fixture ${terminal} failure`)
-      expect(() => runtime.register({ send: async () => ({}) } as never)).toThrow('during a plugin generation transaction')
-      expect(() => runtime.prepare(`overlap-${terminal}`)).toThrow('another plugin generation transaction is unresolved')
+      expect(() => runtime.register({ send: async () => ({}) } as never)).toThrow(
+        'during a plugin generation transaction',
+      )
+      expect(() => runtime.prepare(`overlap-${terminal}`)).toThrow(
+        'another plugin generation transaction is unresolved',
+      )
       if (terminal === 'rollback') expect(permissions.allowed({ id: 'demo', source: 'file:///demo-new.js' })).toBe(true)
-      if (terminal === 'rollback') await expect(terminate()).resolves.toMatchObject({ active: previous, disposedAfter: candidate })
-      else await expect(terminate()).resolves.toBeUndefined()
+      if (terminal === 'rollback') {
+        await expect(terminate()).resolves.toMatchObject({ active: previous, disposedAfter: candidate })
+      } else await expect(terminate()).resolves.toBeUndefined()
       if (terminal === 'rollback') expect(permissions.allowed({ id: 'demo', source: 'file:///demo-old.js' })).toBe(true)
 
       const unregisterReplacement = runtime.register({ send: async () => ({}) } as never)
@@ -1744,13 +2201,37 @@ describe('CdpPluginLifecycleRuntime', () => {
     const session = (active: CordisXPluginActivationRecordV1) => ({
       async send(_method: string, params: Record<string, unknown>) {
         const expression = String(params.expression ?? '')
-        if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
-        } } } }
-        if (expression.includes('rollbackPluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch, registryEpoch: 0, active,
-          disposedAfter: active === previous ? candidate : previous,
-        } } } }
+        if (expression.includes('stagePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('rollbackPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  registryEpoch: 0,
+                  active,
+                  disposedAfter: active === previous ? candidate : previous,
+                },
+              },
+            },
+          }
+        }
         return {}
       },
     })
@@ -1759,11 +2240,19 @@ describe('CdpPluginLifecycleRuntime', () => {
     const fence = runtime.prepare('tx')
     transactionEpoch = fence.transactionEpoch
     await runtime.stage({
-      transactionId: 'tx', ...fence, afterRegistryEpoch: 1, operation: 'disable', previous, candidate,
-      targetId: 'demo', affectedPluginIds: ['demo'],
+      transactionId: 'tx',
+      ...fence,
+      afterRegistryEpoch: 1,
+      operation: 'disable',
+      previous,
+      candidate,
+      targetId: 'demo',
+      affectedPluginIds: ['demo'],
     })
     await expect(runtime.rollback('tx')).rejects.toThrow('rollback observations disagree')
-    expect(() => runtime.register({ send: async () => ({}) } as never)).toThrow('during a plugin generation transaction')
+    expect(() => runtime.register({ send: async () => ({}) } as never)).toThrow(
+      'during a plugin generation transaction',
+    )
 
     unregisterDivergent()
     await expect(runtime.rollback('tx')).resolves.toMatchObject({ active: previous, disposedAfter: candidate })
@@ -1780,26 +2269,60 @@ describe('CdpPluginLifecycleRuntime', () => {
     const unregister = runtime.register({
       async send(_method: string, params: Record<string, unknown>) {
         const expression = String(params.expression ?? '')
-        if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
-        } } } }
-        if (expression.includes('publishPluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch, registryEpoch: 1, active: candidate,
-        } } } }
+        if (expression.includes('stagePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('publishPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  registryEpoch: 1,
+                  active: candidate,
+                },
+              },
+            },
+          }
+        }
         return {}
       },
     } as never)
     const fence = runtime.prepare('tx')
     transactionEpoch = fence.transactionEpoch
     await runtime.stage({
-      transactionId: 'tx', ...fence, afterRegistryEpoch: 1, operation: 'disable', previous, candidate,
-      targetId: 'demo', affectedPluginIds: ['demo'],
+      transactionId: 'tx',
+      ...fence,
+      afterRegistryEpoch: 1,
+      operation: 'disable',
+      previous,
+      candidate,
+      targetId: 'demo',
+      affectedPluginIds: ['demo'],
     })
     await expect(runtime.publish('tx')).resolves.toMatchObject({ registryEpoch: 1, active: candidate })
 
     unregister()
     await expect(runtime.complete('tx')).rejects.toThrow('cleanup observations disagree')
-    await expect(runtime.rollback('tx')).resolves.toMatchObject({ registryEpoch: 2, active: previous, disposedAfter: candidate })
+    await expect(runtime.rollback('tx')).resolves.toMatchObject({
+      registryEpoch: 2,
+      active: previous,
+      disposedAfter: candidate,
+    })
     const unregisterReplacement = runtime.register({ send: async () => ({}) } as never)
     expect(runtime.prepare('replacement-after-publish')).toMatchObject({ expectedRegistryEpoch: 2 })
     runtime.cancelPreparation('replacement-after-publish')
@@ -1815,10 +2338,22 @@ describe('CdpPluginLifecycleRuntime', () => {
       async send(_method: string, params: Record<string, unknown>) {
         const expression = String(params.expression ?? '')
         expressions.push(expression)
-        if (expression.includes('recoverPluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch: 'tx:formal', registryEpoch: 2,
-          active: previous, disposedAfter: candidate,
-        } } } }
+        if (expression.includes('recoverPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch: 'tx:formal',
+                  registryEpoch: 2,
+                  active: previous,
+                  disposedAfter: candidate,
+                },
+              },
+            },
+          }
+        }
         if (expression.includes('adoptRecoveredActivation')) return { result: { value: { ok: true } } }
         return {}
       },
@@ -1842,7 +2377,10 @@ describe('CdpPluginLifecycleRuntime', () => {
       rollbackRegistryEpoch: 2,
     }
     await expect(runtime.recoverRollback(plan)).resolves.toMatchObject({
-      transactionId: 'tx', registryEpoch: 2, active: previous, disposedAfter: candidate,
+      transactionId: 'tx',
+      registryEpoch: 2,
+      active: previous,
+      disposedAfter: candidate,
     })
     const restored = { ...previous, recordKind: 'active' as const, revision: 2, lastGoodRevision: 0 }
     await runtime.adoptRecoveredActivation(restored, 2)
@@ -1861,7 +2399,9 @@ describe('CdpLifecycleRequestGate', () => {
 
     await gate.run(async () => 1, async value => {
       values.push(value)
-      followUp = gate.run(async () => 2, async next => { values.push(next) })
+      followUp = gate.run(async () => 2, async next => {
+        values.push(next)
+      })
     })
     await followUp
 
@@ -1871,8 +2411,12 @@ describe('CdpLifecycleRequestGate', () => {
   it('rejects a genuinely concurrent lifecycle task', async () => {
     const gate = new CdpLifecycleRequestGate()
     let release!: () => void
-    const blocked = new Promise<void>(resolve => { release = resolve })
-    const active = gate.run(async () => { await blocked }, async () => undefined)
+    const blocked = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const active = gate.run(async () => {
+      await blocked
+    }, async () => undefined)
 
     await expect(gate.run(async () => undefined, async () => undefined)).rejects.toThrow(/already active/)
     release()

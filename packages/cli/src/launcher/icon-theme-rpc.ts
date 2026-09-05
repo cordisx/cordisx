@@ -1,8 +1,5 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto'
-import {
-  updateHomeConfigAtomic,
-  type HomeConfigIconThemePreference,
-} from '../config/home-config.js'
+import { type HomeConfigIconThemePreference, updateHomeConfigAtomic } from '../config/home-config.js'
 
 export const ICON_THEME_PREFERENCE_BINDING = '__cordisxIconThemePreferenceRequestV1'
 export const ICON_THEME_PREFERENCE_RECEIVER = '__cordisxIconThemePreferenceReceiveV1'
@@ -11,7 +8,8 @@ export const MAX_ICON_THEME_PREFERENCE_REQUEST_BYTES = 16 * 1024
 const ID = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const PROVIDER_ID = /^(?:builtin:[a-z0-9][a-z0-9._-]{0,63}|plugin:[a-z0-9][a-z0-9._-]{0,63}:[a-z0-9][a-z0-9._-]{0,63})$/
 const GENERATION = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
-const SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+const SEMVER =
+  /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
 
 export interface IconThemePreferenceCandidate {
   readonly providerId: HomeConfigIconThemePreference['providerId']
@@ -172,10 +170,12 @@ function samePreference(left: HomeConfigIconThemePreference, right: HomeConfigIc
 function candidate(value: unknown): IconThemePreferenceCandidate {
   const item = object(value, 'icon theme preference candidate')
   exact(item, ['providerId', 'namespace', 'providerVersion', 'providerGeneration'], 'icon theme preference candidate')
-  if (typeof item.providerId !== 'string' || !PROVIDER_ID.test(item.providerId)
+  if (
+    typeof item.providerId !== 'string' || !PROVIDER_ID.test(item.providerId)
     || typeof item.namespace !== 'string' || !ID.test(item.namespace)
     || typeof item.providerVersion !== 'string' || !SEMVER.test(item.providerVersion)
-    || typeof item.providerGeneration !== 'string' || !GENERATION.test(item.providerGeneration)) {
+    || typeof item.providerGeneration !== 'string' || !GENERATION.test(item.providerGeneration)
+  ) {
     throw new Error('icon theme preference candidate is invalid')
   }
   return {
@@ -192,20 +192,35 @@ export function parseIconThemePreferenceBindingRequest(
 ): IconThemePreferenceBindingRequest {
   const request = object(value, 'icon theme preference request')
   exact(request, [
-    'version', 'token', 'requestId', 'scope', 'expectedPreferenceRevision',
-    'expectedProfileRevision', 'selectedProfileRevision', 'candidate',
+    'version',
+    'token',
+    'requestId',
+    'scope',
+    'expectedPreferenceRevision',
+    'expectedProfileRevision',
+    'selectedProfileRevision',
+    'candidate',
   ], 'icon theme preference request')
   if (request.version !== 1) throw new Error('icon theme preference request version is invalid')
-  if (typeof request.token !== 'string' || !sameToken(request.token, context.token)) throw new Error('icon theme preference token is invalid')
-  if (typeof request.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(request.requestId)) throw new Error('icon theme preference request id is invalid')
+  if (typeof request.token !== 'string' || !sameToken(request.token, context.token)) {
+    throw new Error('icon theme preference token is invalid')
+  }
+  if (typeof request.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(request.requestId)) {
+    throw new Error('icon theme preference request id is invalid')
+  }
   const scope = object(request.scope, 'icon theme preference scope')
   exact(scope, ['appId', 'profileId', 'hostGeneration'], 'icon theme preference scope')
-  if (scope.appId !== context.appId || scope.profileId !== context.profileId || scope.hostGeneration !== context.hostGeneration) {
+  if (
+    scope.appId !== context.appId || scope.profileId !== context.profileId
+    || scope.hostGeneration !== context.hostGeneration
+  ) {
     throw new Error('icon theme preference scope is stale or spoofed')
   }
   const expectedProfileRevision = revision(request.expectedProfileRevision, 'icon theme expected profile revision')
   const selectedProfileRevision = revision(request.selectedProfileRevision, 'icon theme selected profile revision')
-  if (selectedProfileRevision !== expectedProfileRevision + 1) throw new Error('icon theme profile revision transition is invalid')
+  if (selectedProfileRevision !== expectedProfileRevision + 1) {
+    throw new Error('icon theme profile revision transition is invalid')
+  }
   return {
     requestId: request.requestId,
     expectedPreferenceRevision: revision(request.expectedPreferenceRevision, 'icon theme expected preference revision'),
@@ -220,13 +235,26 @@ export function parseIconThemePreferenceDocumentReadyRequest(
   context: Omit<IconThemePreferencePersistenceContext, 'configPath'>,
 ): IconThemePreferenceDocumentReadyRequest {
   const request = object(value, 'icon theme preference document ready request')
-  exact(request, ['version', 'kind', 'token', 'requestId', 'scope', 'documentEpoch', 'currentRevision'], 'icon theme preference document ready request')
-  if (request.version !== 1 || request.kind !== 'document-ready') throw new Error('icon theme preference document ready version is invalid')
-  if (typeof request.token !== 'string' || !sameToken(request.token, context.token)) throw new Error('icon theme preference token is invalid')
-  if (typeof request.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(request.requestId)) throw new Error('icon theme preference request id is invalid')
+  exact(
+    request,
+    ['version', 'kind', 'token', 'requestId', 'scope', 'documentEpoch', 'currentRevision'],
+    'icon theme preference document ready request',
+  )
+  if (request.version !== 1 || request.kind !== 'document-ready') {
+    throw new Error('icon theme preference document ready version is invalid')
+  }
+  if (typeof request.token !== 'string' || !sameToken(request.token, context.token)) {
+    throw new Error('icon theme preference token is invalid')
+  }
+  if (typeof request.requestId !== 'string' || !/^[A-Za-z0-9_-]{1,96}$/.test(request.requestId)) {
+    throw new Error('icon theme preference request id is invalid')
+  }
   const scope = object(request.scope, 'icon theme preference scope')
   exact(scope, ['appId', 'profileId', 'hostGeneration'], 'icon theme preference scope')
-  if (scope.appId !== context.appId || scope.profileId !== context.profileId || scope.hostGeneration !== context.hostGeneration) {
+  if (
+    scope.appId !== context.appId || scope.profileId !== context.profileId
+    || scope.hostGeneration !== context.hostGeneration
+  ) {
     throw new Error('icon theme preference scope is stale or spoofed')
   }
   if (typeof request.documentEpoch !== 'string' || !/^[A-Za-z0-9_-]{8,96}$/.test(request.documentEpoch)) {
@@ -246,7 +274,9 @@ export async function persistIconThemePreference(
   let persisted: HomeConfigIconThemePreference | undefined
   await updateHomeConfigAtomic(current => {
     const app = Object.hasOwn(current.apps, context.appId) ? current.apps[context.appId] : undefined
-    const profile = app !== undefined && Object.hasOwn(app.profiles, context.profileId) ? app.profiles[context.profileId] : undefined
+    const profile = app !== undefined && Object.hasOwn(app.profiles, context.profileId)
+      ? app.profiles[context.profileId]
+      : undefined
     if (app === undefined || profile === undefined) throw new Error('icon theme preference profile is unavailable')
     const actualRevision = profile.iconTheme?.revision ?? 0
     if (actualRevision !== request.expectedPreferenceRevision) {
@@ -279,7 +309,9 @@ export function iconThemePreferenceBridgeError(error: unknown): {
 } {
   if (error instanceof IconThemePreferenceConflictError) {
     return {
-      code: 'conflict', error: error.message, actualRevision: error.actualRevision,
+      code: 'conflict',
+      error: error.message,
+      actualRevision: error.actualRevision,
       ...(error.currentPreference === undefined ? {} : { currentPreference: error.currentPreference }),
     }
   }
@@ -342,7 +374,9 @@ export class IconThemePreferenceBroadcastHub {
     }
   }
 
-  async register(identity: IconThemePreferenceDocumentIdentity & IconThemePreferenceDocumentReceiver): Promise<IconThemePreferenceDocumentRegistration> {
+  async register(
+    identity: IconThemePreferenceDocumentIdentity & IconThemePreferenceDocumentReceiver,
+  ): Promise<IconThemePreferenceDocumentRegistration> {
     const reservation = this.reserve(identity)
     const registration = await reservation.register({ receive: identity.receive })
     await registration.respondReady(
@@ -361,8 +395,10 @@ export class IconThemePreferenceBroadcastHub {
     const entries = await this.serialize(() => {
       if (this.winner !== undefined) {
         if (preference.revision < this.winner.revision) return []
-        if (preference.revision === this.winner.revision
-          && !samePreference(preference, this.winner)) {
+        if (
+          preference.revision === this.winner.revision
+          && !samePreference(preference, this.winner)
+        ) {
           throw new Error('icon theme preference winner revision is divergent')
         }
       }
@@ -376,7 +412,9 @@ export class IconThemePreferenceBroadcastHub {
           lease.cancellation.abort()
         }
       }
-      const pending = [...this.receivers.values()].filter(entry => entry.active && entry.ackedRevision < preference.revision)
+      const pending = [...this.receivers.values()].filter(entry =>
+        entry.active && entry.ackedRevision < preference.revision
+      )
       for (const entry of pending) entry.pending = { ...preference }
       return pending.filter(entry => entry.receiver !== undefined)
     })
@@ -419,7 +457,8 @@ export class IconThemePreferenceBroadcastHub {
   }
 
   private pendingCount(): number {
-    return [...this.receivers.values()].filter(entry => entry.active && (entry.booting || entry.pending !== undefined)).length
+    return [...this.receivers.values()].filter(entry => entry.active && (entry.booting || entry.pending !== undefined))
+      .length
   }
 
   private async activate(
@@ -432,14 +471,19 @@ export class IconThemePreferenceBroadcastHub {
     }
     entry.receiver = receiver
     return {
-      get currentRevision() { return entry.ackedRevision },
-      get synchronization() { return entry.pending === undefined ? 'complete' as const : 'pending' as const },
+      get currentRevision() {
+        return entry.ackedRevision
+      },
+      get synchronization() {
+        return entry.pending === undefined ? 'complete' as const : 'pending' as const
+      },
       respondReady: async (probeAck, respond) => {
-        await this.serializeEntry(entry, async () => await this.serialize(() => {
-          this.assertActiveAck(key, entry, probeAck, 0)
-          entry.ackedRevision = Math.max(entry.ackedRevision, probeAck.currentRevision)
-          this.refreshPending(entry)
-        }))
+        await this.serializeEntry(entry, async () =>
+          await this.serialize(() => {
+            this.assertActiveAck(key, entry, probeAck, 0)
+            entry.ackedRevision = Math.max(entry.ackedRevision, probeAck.currentRevision)
+            this.refreshPending(entry)
+          }))
         if (entry.pending !== undefined) await this.enqueue(entry)
         // A ready request normally needs one response. One replacement lease is
         // allowed when a higher durable winner invalidates an in-flight response.
@@ -477,16 +521,21 @@ export class IconThemePreferenceBroadcastHub {
     minimumRevision = entry.ackedRevision,
   ): void {
     this.assertActive(key, entry)
-    if (ack.documentEpoch !== entry.identity.documentEpoch
+    if (
+      ack.documentEpoch !== entry.identity.documentEpoch
       || !Number.isSafeInteger(ack.currentRevision)
-      || ack.currentRevision < minimumRevision) {
+      || ack.currentRevision < minimumRevision
+    ) {
       throw new Error('icon theme preference ready acknowledgement is stale')
     }
   }
 
   private assertActive(key: string, entry: IconThemePreferenceDocumentState): void {
     const documentKey = `${key}\u0000${entry.identity.documentEpoch}\u0000${entry.identity.executionContextId}`
-    if (!entry.active || this.receivers.get(key) !== entry || entry.documentKey !== documentKey || entry.identity.signal.aborted) {
+    if (
+      !entry.active || this.receivers.get(key) !== entry || entry.documentKey !== documentKey
+      || entry.identity.signal.aborted
+    ) {
       throw new Error('icon theme preference ready acknowledgement is stale')
     }
   }
@@ -500,28 +549,31 @@ export class IconThemePreferenceBroadcastHub {
     key: string,
     entry: IconThemePreferenceDocumentState,
   ): Promise<IconThemePreferenceReadyLease> {
-    return await this.serializeEntry(entry, async () => await this.serialize(() => {
-      this.assertActive(key, entry)
-      this.refreshPending(entry)
-      const requiredRevision = this.winner?.revision ?? entry.ackedRevision
-      const previous = entry.readyLease
-      if (previous !== undefined) previous.cancellation.abort()
-      const lease: IconThemePreferenceReadyLease = {
-        token: `ready_${randomUUID().replaceAll('-', '_')}`,
-        revision: this.nextReadyLeaseRevision++,
-        requiredRevision,
-        documentKey: entry.documentKey,
-        entryGeneration: entry.entryGeneration,
-        status: {
-          synchronization: entry.pending === undefined && entry.ackedRevision >= requiredRevision ? 'complete' : 'pending',
+    return await this.serializeEntry(entry, async () =>
+      await this.serialize(() => {
+        this.assertActive(key, entry)
+        this.refreshPending(entry)
+        const requiredRevision = this.winner?.revision ?? entry.ackedRevision
+        const previous = entry.readyLease
+        if (previous !== undefined) previous.cancellation.abort()
+        const lease: IconThemePreferenceReadyLease = {
+          token: `ready_${randomUUID().replaceAll('-', '_')}`,
+          revision: this.nextReadyLeaseRevision++,
           requiredRevision,
-          currentRevision: entry.ackedRevision,
-        },
-        cancellation: new AbortController(),
-      }
-      entry.readyLease = lease
-      return lease
-    }))
+          documentKey: entry.documentKey,
+          entryGeneration: entry.entryGeneration,
+          status: {
+            synchronization: entry.pending === undefined && entry.ackedRevision >= requiredRevision
+              ? 'complete'
+              : 'pending',
+            requiredRevision,
+            currentRevision: entry.ackedRevision,
+          },
+          cancellation: new AbortController(),
+        }
+        entry.readyLease = lease
+        return lease
+      }))
   }
 
   private async respondWithReadyLease(
@@ -533,7 +585,9 @@ export class IconThemePreferenceBroadcastHub {
   ): Promise<IconThemePreferenceReadyResponseAck> {
     this.assertExternalCallUnlocked('ready response')
     let rejectCancelled!: (error: Error) => void
-    const cancelled = new Promise<never>((_resolve, reject) => { rejectCancelled = reject })
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      rejectCancelled = reject
+    })
     const onAbort = (): void => rejectCancelled(new Error('icon theme preference ready response lease was invalidated'))
     lease.cancellation.signal.addEventListener('abort', onAbort, { once: true })
     if (lease.cancellation.signal.aborted) onAbort()
@@ -558,34 +612,37 @@ export class IconThemePreferenceBroadcastHub {
     lease: IconThemePreferenceReadyLease,
     responseAck: IconThemePreferenceReadyResponseAck | undefined,
   ): Promise<IconThemePreferenceDocumentSynchronization | undefined> {
-    return await this.serializeEntry(entry, async () => await this.serialize(() => {
-      this.assertActive(key, entry)
-      const latestRequiredRevision = this.winner?.revision ?? entry.ackedRevision
-      if (entry.readyLease !== lease
-        || lease.cancellation.signal.aborted
-        || lease.documentKey !== entry.documentKey
-        || lease.entryGeneration !== entry.entryGeneration
-        || lease.requiredRevision < latestRequiredRevision
-        || responseAck === undefined
-        || responseAck.readyLeaseToken !== lease.token
-        || responseAck.readyLeaseRevision !== lease.revision) {
-        return undefined
-      }
-      this.assertActiveAck(key, entry, responseAck, lease.status.currentRevision)
-      entry.ackedRevision = Math.max(entry.ackedRevision, responseAck.currentRevision)
-      this.refreshPending(entry)
-      const finalRequiredRevision = this.winner?.revision ?? entry.ackedRevision
-      if (lease.requiredRevision < finalRequiredRevision) return undefined
-      entry.readyLease = undefined
-      const converged = entry.pending === undefined && entry.ackedRevision >= finalRequiredRevision
-      const finalStatus: IconThemePreferenceDocumentSynchronization = {
-        synchronization: lease.status.synchronization === 'complete' && converged ? 'complete' : 'pending',
-        requiredRevision: finalRequiredRevision,
-        currentRevision: entry.ackedRevision,
-      }
-      if (finalStatus.synchronization === 'complete') entry.booting = false
-      return finalStatus
-    }))
+    return await this.serializeEntry(entry, async () =>
+      await this.serialize(() => {
+        this.assertActive(key, entry)
+        const latestRequiredRevision = this.winner?.revision ?? entry.ackedRevision
+        if (
+          entry.readyLease !== lease
+          || lease.cancellation.signal.aborted
+          || lease.documentKey !== entry.documentKey
+          || lease.entryGeneration !== entry.entryGeneration
+          || lease.requiredRevision < latestRequiredRevision
+          || responseAck === undefined
+          || responseAck.readyLeaseToken !== lease.token
+          || responseAck.readyLeaseRevision !== lease.revision
+        ) {
+          return undefined
+        }
+        this.assertActiveAck(key, entry, responseAck, lease.status.currentRevision)
+        entry.ackedRevision = Math.max(entry.ackedRevision, responseAck.currentRevision)
+        this.refreshPending(entry)
+        const finalRequiredRevision = this.winner?.revision ?? entry.ackedRevision
+        if (lease.requiredRevision < finalRequiredRevision) return undefined
+        entry.readyLease = undefined
+        const converged = entry.pending === undefined && entry.ackedRevision >= finalRequiredRevision
+        const finalStatus: IconThemePreferenceDocumentSynchronization = {
+          synchronization: lease.status.synchronization === 'complete' && converged ? 'complete' : 'pending',
+          requiredRevision: finalRequiredRevision,
+          currentRevision: entry.ackedRevision,
+        }
+        if (finalStatus.synchronization === 'complete') entry.booting = false
+        return finalStatus
+      }))
   }
 
   private deactivate(key: string, entry: IconThemePreferenceDocumentState): void {
@@ -601,7 +658,9 @@ export class IconThemePreferenceBroadcastHub {
   }
 
   private assertExternalCallUnlocked(label: string): void {
-    if (this.operationDepth !== 0) throw new Error(`icon theme preference ${label} cannot run under the profile operation lock`)
+    if (this.operationDepth !== 0) {
+      throw new Error(`icon theme preference ${label} cannot run under the profile operation lock`)
+    }
   }
 
   private async enqueue(
@@ -654,7 +713,10 @@ export class IconThemePreferenceBroadcastHub {
     })
   }
 
-  private async serializeEntry<Value>(entry: IconThemePreferenceDocumentState, operation: () => Promise<Value>): Promise<Value> {
+  private async serializeEntry<Value>(
+    entry: IconThemePreferenceDocumentState,
+    operation: () => Promise<Value>,
+  ): Promise<Value> {
     const delivery = entry.tail.then(operation)
     // Keep serialization usable after failure. The pending state and returned
     // result make failure observable without losing the durable winner.

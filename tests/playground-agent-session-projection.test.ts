@@ -22,10 +22,18 @@ const setup: AgentSetup = {
   definition: { agentId: 'chatroom.generalist', revision: 'session-projection-1' },
   definitions: [{
     $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
-    contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
+    contract: 'cordisx.agent-definition/v1',
+    schemaVersion: 1,
     identity: { agentId: 'chatroom.generalist', revision: 'session-projection-1' },
     name: 'Chatroom Generalist',
-    inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
+    inherit: {
+      promptSections: 'none',
+      rules: 'none',
+      skills: 'none',
+      tools: 'none',
+      mcpServers: 'none',
+      runtimeDefaults: 'none',
+    },
     promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Answer the Room.' }],
   }],
 }
@@ -34,18 +42,30 @@ const reviewerSetup: AgentSetup = {
   definition: { agentId: 'chatroom.reviewer', revision: 'session-projection-1' },
   definitions: [{
     $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
-    contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
+    contract: 'cordisx.agent-definition/v1',
+    schemaVersion: 1,
     identity: { agentId: 'chatroom.reviewer', revision: 'session-projection-1' },
     name: 'Chatroom Reviewer',
-    inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
+    inherit: {
+      promptSections: 'none',
+      rules: 'none',
+      skills: 'none',
+      tools: 'none',
+      mcpServers: 'none',
+      runtimeDefaults: 'none',
+    },
     promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Review the Room.' }],
   }],
 }
 
 const message = (id: string, text: string, correlationId: string): UserMessage => ({
-  id, role: 'user', content: [{ type: 'text', text }],
+  id,
+  role: 'user',
+  content: [{ type: 'text', text }],
   source: {
-    kind: 'plugin', pluginId: owner.pluginId, generation: owner.generation,
+    kind: 'plugin',
+    pluginId: owner.pluginId,
+    generation: owner.generation,
     correlation: { namespace: 'chatroom.room-run', id: correlationId },
   },
 })
@@ -54,23 +74,38 @@ const settle = async (): Promise<void> => await new Promise(resolve => setTimeou
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>()
-  get length(): number { return this.values.size }
-  clear(): void { this.values.clear() }
-  getItem(key: string): string | null { return this.values.get(key) ?? null }
-  key(index: number): string | null { return [...this.values.keys()][index] ?? null }
-  removeItem(key: string): void { this.values.delete(key) }
-  setItem(key: string, value: string): void { this.values.set(key, value) }
+  get length(): number {
+    return this.values.size
+  }
+  clear(): void {
+    this.values.clear()
+  }
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null
+  }
+  key(index: number): string | null {
+    return [...this.values.keys()][index] ?? null
+  }
+  removeItem(key: string): void {
+    this.values.delete(key)
+  }
+  setItem(key: string, value: string): void {
+    this.values.set(key, value)
+  }
 }
 
 describe('Playground Agent/Session native task projection', () => {
   it('projects Room facts into one recent task and its exact Simulator detail without a second ledger', async () => {
     const runtime = new CordisXAgentSessionRuntime({
-      driver: new DeterministicAgentSessionTransport(), authorize: async () => true,
+      driver: new DeterministicAgentSessionTransport(),
+      authorize: async () => true,
     })
     const created = await runtime.create(owner, { sessionId: 'cx-session.room-one.run-one', setup })
     if (created.status !== 'accepted') throw new Error('Agent/Session fixture create failed')
     expect(projectPlaygroundAgentSessions(runtime.playgroundProjection())?.tasks).toMatchObject([{
-      taskRef: 'cx-session.room-one.run-one', status: 'created', events: [],
+      taskRef: 'cx-session.room-one.run-one',
+      status: 'created',
+      events: [],
     }])
     await created.handle.agent.followup(message('cx-message.room-one.1', 'hi [tool] [approval]', 'room-one/run-one'))
     await settle()
@@ -79,7 +114,11 @@ describe('Playground Agent/Session native task projection', () => {
     const authorityOnlyStorage = new MemoryStorage()
     expect(mergePlaygroundSimulatorTaskSnapshots(authorityOnlyStorage, undefined, authority)?.tasks).toHaveLength(1)
     expect(readPlaygroundSimulatorTaskSnapshots(authorityOnlyStorage)).toBeUndefined()
-    expect([...Array(authorityOnlyStorage.length).keys()].map(index => authorityOnlyStorage.getItem(authorityOnlyStorage.key(index)!)).join('\n'))
+    expect(
+      [...Array(authorityOnlyStorage.length).keys()].map(index =>
+        authorityOnlyStorage.getItem(authorityOnlyStorage.key(index)!)
+      ).join('\n'),
+    )
       .not.toContain('cx-session.room-one.run-one')
     const storage = new MemoryStorage()
     const {
@@ -91,13 +130,19 @@ describe('Playground Agent/Session native task projection', () => {
     } = structuredClone(authority!.tasks[0]!)
     const legacyTask = {
       ...legacyBase,
-      taskRef: 'debug:agent-loop/mock/v1:legacy', origin: 'simulator' as const,
+      taskRef: 'debug:agent-loop/mock/v1:legacy',
+      origin: 'simulator' as const,
       debugTaskId: 'Legacy AgentLoop fixture',
-      detailsUrl: { url: 'app://-/playground/simulator/tasks/debug%3Aagent-loop%2Fmock%2Fv1%3Alegacy', target: 'host' as const },
+      detailsUrl: {
+        url: 'app://-/playground/simulator/tasks/debug%3Aagent-loop%2Fmock%2Fv1%3Alegacy',
+        target: 'host' as const,
+      },
       events: [],
     }
     const recent = mergePlaygroundSimulatorTaskSnapshots(storage, {
-      namespace: authority!.namespace, label: authority!.label, tasks: [legacyTask],
+      namespace: authority!.namespace,
+      label: authority!.label,
+      tasks: [legacyTask],
     }, authority)
     expect(recent?.tasks).toHaveLength(2)
     const sessionTask = recent?.tasks.find(task => task.taskRef === 'cx-session.room-one.run-one')
@@ -118,31 +163,54 @@ describe('Playground Agent/Session native task projection', () => {
       sessionEvent: { data: { source: { correlation: { namespace: 'chatroom.room-run', id: 'room-one/run-one' } } } },
     })
     expect(events.find(event => event.sessionEvent?.type === 'assistant/message')).toMatchObject({
-      type: 'semantic.message', detail: 'Playground Agent/Session fixture approval: unavailable',
+      type: 'semantic.message',
+      detail: 'Playground Agent/Session fixture approval: unavailable',
     })
     expect(events.find(event => event.sessionEvent?.type === 'tool/call')).toMatchObject({
       type: 'tool.call',
-      detail: expect.stringContaining('Tool use · playground.fixture.echo · playground-tool:cx-session.room-one.run-one:1'),
+      detail: expect.stringContaining(
+        'Tool use · playground.fixture.echo · playground-tool:cx-session.room-one.run-one:1',
+      ),
     })
     expect(events.find(event => event.sessionEvent?.type === 'tool/result')).toMatchObject({
       type: 'tool.result',
-      detail: expect.stringContaining('Tool result · playground.fixture.echo · playground-tool:cx-session.room-one.run-one:1'),
+      detail: expect.stringContaining(
+        'Tool result · playground.fixture.echo · playground-tool:cx-session.room-one.run-one:1',
+      ),
     })
-    expect(events.find(event => event.sessionEvent?.type === 'approval/asked')).toMatchObject({ type: 'approval.required' })
-    expect(events.find(event => event.sessionEvent?.type === 'approval/decided')).toMatchObject({ type: 'semantic.message' })
+    expect(events.find(event => event.sessionEvent?.type === 'approval/asked')).toMatchObject({
+      type: 'approval.required',
+    })
+    expect(events.find(event => event.sessionEvent?.type === 'approval/decided')).toMatchObject({
+      type: 'semantic.message',
+    })
     const detailController = new PlaygroundScenarioLabController(sessionTask!)
     const trace = detailController.getSnapshot().trace
-    expect(trace.find(event => (event.payload as { event?: { sessionEvent?: { type?: string } } }).event?.sessionEvent?.type === 'user/message'))
+    expect(
+      trace.find(event =>
+        (event.payload as { event?: { sessionEvent?: { type?: string } } }).event?.sessionEvent?.type === 'user/message'
+      ),
+    )
       .toMatchObject({ direction: 'chatroom-to-agent-host', summary: 'hi [tool] [approval]' })
-    expect(trace.find(event => (event.payload as { event?: { sessionEvent?: { type?: string } } }).event?.sessionEvent?.type === 'assistant/message'))
-      .toMatchObject({ direction: 'agent-host-to-chatroom', summary: 'Playground Agent/Session fixture approval: unavailable' })
+    expect(
+      trace.find(event =>
+        (event.payload as { event?: { sessionEvent?: { type?: string } } }).event?.sessionEvent?.type
+          === 'assistant/message'
+      ),
+    )
+      .toMatchObject({
+        direction: 'agent-host-to-chatroom',
+        summary: 'Playground Agent/Session fixture approval: unavailable',
+      })
     detailController.dispose()
 
     const locations: string[] = []
     const view = {
       history: {
         state: null,
-        pushState: (_data: unknown, _unused: string, url?: string | URL | null) => { locations.push(String(url)) },
+        pushState: (_data: unknown, _unused: string, url?: string | URL | null) => {
+          locations.push(String(url))
+        },
       },
       dispatchEvent: () => true,
     }
@@ -151,8 +219,12 @@ describe('Playground Agent/Session native task projection', () => {
     expect(simulatorTaskIdFromPath(locations[0]!)).toBe('cx-session.room-one.run-one')
     const agentDetailLocations: string[] = []
     const agentDetailNavigator = new HostAgentTaskDetailsNavigator({
-      navigateHost: url => { agentDetailLocations.push(url) },
-      navigateExternal: () => { throw new Error('Agent/Session details must stay Host-owned') },
+      navigateHost: url => {
+        agentDetailLocations.push(url)
+      },
+      navigateExternal: () => {
+        throw new Error('Agent/Session details must stay Host-owned')
+      },
     })
     await agentDetailNavigator.navigateAgentDetail(sessionTask!.agentDetail!, sessionTask!.sessionId!)
     expect(agentDetailLocations).toEqual(['app://-/playground/simulator/tasks/cx-session.room-one.run-one'])
@@ -166,7 +238,9 @@ describe('Playground Agent/Session native task projection', () => {
     try {
       const firstStore = new PlaygroundAgentSessionStore(home)
       const first = new CordisXAgentSessionRuntime({
-        driver: new DeterministicAgentSessionTransport(), authorize: async () => true, persistence: firstStore,
+        driver: new DeterministicAgentSessionTransport(),
+        authorize: async () => true,
+        persistence: firstStore,
       })
       const one = await first.create(owner, { sessionId: 'cx-session.room-one', setup })
       const two = await first.create(owner, { sessionId: 'cx-session.room-two', setup: reviewerSetup })
@@ -183,8 +257,10 @@ describe('Playground Agent/Session native task projection', () => {
       const secondStore = new PlaygroundAgentSessionStore(home)
       const recovered = await secondStore.load()
       const second = new CordisXAgentSessionRuntime({
-        driver: new DeterministicAgentSessionTransport(recovered), authorize: async () => true,
-        persistence: secondStore, initialSessions: recovered,
+        driver: new DeterministicAgentSessionTransport(recovered),
+        authorize: async () => true,
+        persistence: secondStore,
+        initialSessions: recovered,
       })
       const replay = projectPlaygroundAgentSessions(second.playgroundProjection())
       expect(replay?.tasks).toHaveLength(2)
@@ -192,10 +268,18 @@ describe('Playground Agent/Session native task projection', () => {
         ['cx-session.room-one', 'Chatroom Generalist'],
         ['cx-session.room-two', 'Chatroom Reviewer'],
       ])
-      expect(second.definitionPresentation(setup.definition)).toMatchObject({ name: 'Chatroom Generalist', introduction: 'Answer the Room.' })
-      expect(second.definitionPresentation(reviewerSetup.definition)).toMatchObject({ name: 'Chatroom Reviewer', introduction: 'Review the Room.' })
-      expect(replay?.tasks.find(task => task.taskRef === 'cx-session.room-one')?.events
-        .find(event => event.sessionEvent?.type === 'assistant/message')).toMatchObject({
+      expect(second.definitionPresentation(setup.definition)).toMatchObject({
+        name: 'Chatroom Generalist',
+        introduction: 'Answer the Room.',
+      })
+      expect(second.definitionPresentation(reviewerSetup.definition)).toMatchObject({
+        name: 'Chatroom Reviewer',
+        introduction: 'Review the Room.',
+      })
+      expect(
+        replay?.tasks.find(task => task.taskRef === 'cx-session.room-one')?.events
+          .find(event => event.sessionEvent?.type === 'assistant/message'),
+      ).toMatchObject({
         sessionEvent: { data: { message: { id: 'deterministic-assistant.cx-session.room-one.1' } } },
       })
       const resumed = await second.resume(owner, { sessionId: 'cx-session.room-one' })

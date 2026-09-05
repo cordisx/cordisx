@@ -5,9 +5,13 @@ import { BrandMark } from '../../host-ui/BrandMark.js'
 import { HostSurfaceIcon } from '../../host-ui/HostSurfaceIcon.js'
 import type { ManagerIconToken } from '../../icons.js'
 import { sortManagerSettingsNavigationItems } from '../../manager-settings-navigation.js'
-import { primaryFor, type ManagerPrimaryPage, type ManagerRouter } from '../model/routes.js'
+import { type ManagerPrimaryPage, type ManagerRouter, primaryFor } from '../model/routes.js'
 
-const core: readonly { readonly page: ManagerPrimaryPage; readonly icon: ManagerIconToken; readonly copy: Parameters<typeof managerCopy>[1] }[] = [
+const core: readonly {
+  readonly page: ManagerPrimaryPage
+  readonly icon: ManagerIconToken
+  readonly copy: Parameters<typeof managerCopy>[1]
+}[] = [
   { page: 'plugins', icon: 'plugins', copy: 'manager.nav.plugins' },
   { page: 'plugin-bundles', icon: 'plugins', copy: 'manager.nav.plugin-bundles' },
   { page: 'extension-points', icon: 'outlets', copy: 'manager.nav.extension-points' },
@@ -45,7 +49,13 @@ export function Navigation({ snapshot, router }: NavigationProps) {
   return (
     <nav className="cxr-nav" aria-label={managerCopy(locale, 'manager.navigation')}>
       {core.map(item => (
-        <button key={item.page} type="button" data-tab={item.page} {...(primary === item.page ? { 'aria-current': 'page' as const } : {})} onClick={() => router.navigate({ kind: 'primary', page: item.page })}>
+        <button
+          key={item.page}
+          type="button"
+          data-tab={item.page}
+          {...(primary === item.page ? { 'aria-current': 'page' as const } : {})}
+          onClick={() => router.navigate({ kind: 'primary', page: item.page })}
+        >
           <HostIcon token={item.icon} state={primary === item.page ? 'active' : 'default'} />
           <span>{managerCopy(locale, item.copy)}</span>
         </button>
@@ -53,7 +63,12 @@ export function Navigation({ snapshot, router }: NavigationProps) {
       {contributions.filter(item => item.group === 'before-settings').map(item => contributed(item, router))}
       {contributions.filter(item => item.group === 'after-settings').map(item => contributed(item, router))}
       <span className="cxr-nav-spacer" />
-      <button type="button" data-tab="about" {...(primary === 'about' ? { 'aria-current': 'page' as const } : {})} onClick={() => router.navigate({ kind: 'primary', page: 'about' })}>
+      <button
+        type="button"
+        data-tab="about"
+        {...(primary === 'about' ? { 'aria-current': 'page' as const } : {})}
+        onClick={() => router.navigate({ kind: 'primary', page: 'about' })}
+      >
         <BrandMark />
         <span>{managerCopy(locale, 'manager.nav.about')}</span>
       </button>

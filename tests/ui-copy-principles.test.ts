@@ -19,7 +19,9 @@ describe('UI copy principles', () => {
   it('keeps configuration out of retired global placeholder pages', async () => {
     const manager = await readFile(managerPath, 'utf8')
     const primaryNavigation = section(manager, 'const tabs: readonly', 'let routeState')
-    expect(manager).toContain('CORDISX_BUILTIN_MANAGER_SETTINGS_TABS: readonly ManagerSettingsTabSnapshot[] = Object.freeze([])')
+    expect(manager).toContain(
+      'CORDISX_BUILTIN_MANAGER_SETTINGS_TABS: readonly ManagerSettingsTabSnapshot[] = Object.freeze([])',
+    )
     expect(manager).toContain("{ id: 'plugins', icon: 'plugins', label: copy('manager.nav.plugins') }")
     expect(manager).not.toContain("{ id: 'settings', label: '配置'")
     expect(manager).not.toContain('renderRuntimeSettings')
@@ -45,7 +47,10 @@ describe('UI copy principles', () => {
 
   it('keeps diagnostics and documentation as the home for developer terminology', async () => {
     const [manager, trace, cliProxy, principles] = await Promise.all([
-      readFile(managerPath, 'utf8'), readFile(tracePath, 'utf8'), readFile(cliProxyPath, 'utf8'), readFile(principlesPath, 'utf8'),
+      readFile(managerPath, 'utf8'),
+      readFile(tracePath, 'utf8'),
+      readFile(cliProxyPath, 'utf8'),
+      readFile(principlesPath, 'utf8'),
     ])
     const runtime = section(manager, 'const appendRuntimeDiagnostics', "if (activeFacet === 'logs')")
     const marketplaceDetail = section(manager, 'const renderMarketplaceDetail', 'const marketplaceSourceState')
@@ -98,7 +103,9 @@ describe('UI copy principles', () => {
     expect(primaryCollections).toContain("copy('extension.search-placeholder')")
     expect(primaryCollections).toContain("copy('routes.search-placeholder')")
     expect(primaryCollections).toContain("'plugins.demo.form-schema-gallery-description'")
-    expect(managerCopy('en', 'plugins.demo.slot-showcase-description')).toBe('Explore plugins, navigation, pages, and status.')
+    expect(managerCopy('en', 'plugins.demo.slot-showcase-description')).toBe(
+      'Explore plugins, navigation, pages, and status.',
+    )
     expect(managerCopy('zh-CN', 'plugins.demo.slot-showcase-description')).toBe('查看插件、导航、页面与状态。')
   })
 
@@ -117,7 +124,9 @@ describe('UI copy principles', () => {
     expect(manager).toContain('width: 32px; min-width: 32px; height: 32px; min-height: 32px;')
     expect(manager).toContain('.cxm-content[data-manager-list-page="true"] { display: flex; overflow: hidden; }')
     expect(manager).toContain('.cxm-fixed-list-collection .cxc-list { min-height: 0; flex: 1 1 auto; overflow: auto;')
-    expect(manager).toContain('.cxm-content:has(.cxm-console-panel) { display: flex; flex-direction: column; overflow: hidden; }')
+    expect(manager).toContain(
+      '.cxm-content:has(.cxm-console-panel) { display: flex; flex-direction: column; overflow: hidden; }',
+    )
     expect(manager).toContain('.cxm-console-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }')
     expect(runtime).toContain("create(document, 'section', 'cxm-runtime-overview')")
     expect(runtime).toContain("copy('runtime.status-details')")
@@ -125,7 +134,7 @@ describe('UI copy principles', () => {
     expect(runtime).not.toContain("'cxm-error', plugin.error")
     expect(manager).toContain("panel.classList.add('cxm-console-panel')")
     expect(manager).not.toContain("create(document, 'div', 'cxm-console-summary')")
-    expect(manager).toContain("appendRuntimeDiagnostics(panel)")
+    expect(manager).toContain('appendRuntimeDiagnostics(panel)')
   })
 
   it('keeps shared tabs complete when their content area becomes narrow', async () => {

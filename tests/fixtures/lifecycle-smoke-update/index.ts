@@ -28,9 +28,11 @@ export function apply(ctx: Context): void {
     messages: {
       'navigation.title': 'Lifecycle smoke update',
       'route.overview.title': 'Open lifecycle update candidate',
-      'route.overview.description': 'Open the staged replacement used to verify atomic local-package updates and rollback.',
+      'route.overview.description':
+        'Open the staged replacement used to verify atomic local-package updates and rollback.',
       'page.overview.title': 'Lifecycle update candidate',
-      'page.overview.description': 'Shows the replacement generation used by the Manager update, rollback, and cleanup smoke.',
+      'page.overview.description':
+        'Shows the replacement generation used by the Manager update, rollback, and cleanup smoke.',
     },
   })
   ctx.i18n.define({
@@ -45,7 +47,9 @@ export function apply(ctx: Context): void {
     },
   })
   const label = message('navigation.title', 'Lifecycle smoke update')
-  ctx.commands.register({ id: 'invoke', title: label }, () => { counters.invoke += 1 })
+  ctx.commands.register({ id: 'invoke', title: label }, () => {
+    counters.invoke += 1
+  })
   ctx.pages.register({
     $schema: CORDISX_PAGE_SCHEMA_V3,
     schemaVersion: 3,
@@ -70,5 +74,7 @@ export function apply(ctx: Context): void {
     icon: 'host:refresh',
     route: { id: 'overview' },
   })
-  ctx.effect(() => () => { counters.dispose += 1 }, 'lifecycle smoke cleanup')
+  ctx.effect(() => () => {
+    counters.dispose += 1
+  }, 'lifecycle smoke cleanup')
 }

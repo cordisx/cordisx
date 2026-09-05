@@ -7,14 +7,20 @@ function initialHistory(storage?: Storage): readonly ManagerRoute[] {
   if (storage === undefined) return [{ kind: 'primary', page: 'plugins' }]
   try {
     const value = JSON.parse(storage.getItem(PLAYGROUND_ROUTE_KEY) ?? 'null')
-    return Array.isArray(value) && value.length > 0 ? value as readonly ManagerRoute[] : [{ kind: 'primary', page: 'plugins' }]
-  } catch { return [{ kind: 'primary', page: 'plugins' }] }
+    return Array.isArray(value) && value.length > 0
+      ? value as readonly ManagerRoute[]
+      : [{ kind: 'primary', page: 'plugins' }]
+  } catch {
+    return [{ kind: 'primary', page: 'plugins' }]
+  }
 }
 
 export function useManagerRouter(storage?: Storage): ManagerRouter {
   const [history, setHistory] = useState<readonly ManagerRoute[]>(() => initialHistory(storage))
   const route = history.at(-1) ?? { kind: 'primary' as const, page: 'plugins' as const }
-  useEffect(() => { storage?.setItem(PLAYGROUND_ROUTE_KEY, JSON.stringify(history)) }, [history, storage])
+  useEffect(() => {
+    storage?.setItem(PLAYGROUND_ROUTE_KEY, JSON.stringify(history))
+  }, [history, storage])
   const navigate = useCallback((next: ManagerRoute) => {
     setHistory(current => [...current, next])
   }, [])

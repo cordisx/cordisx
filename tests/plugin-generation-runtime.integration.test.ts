@@ -16,7 +16,8 @@ import {
 } from '../packages/cli/src/contracts.js'
 
 const digest = (character: string): `sha256:${string}` => `sha256:${character.repeat(64)}`
-const source = (id: string, character: string): string => `file:///cordisx-store/sha256/${character.repeat(64)}/${id}.js`
+const source = (id: string, character: string): string =>
+  `file:///cordisx-store/sha256/${character.repeat(64)}/${id}.js`
 
 function packageManifest(id: string): CordisXPluginPackageManifestV1 {
   return {
@@ -47,15 +48,40 @@ function activation(generation: string): CordisXPluginActivationRecordV1 {
     lastGoodRevision: 1,
     runtimeGeneration: generation,
     plugins: [
-      { id: 'generation-base', version: '1.0.0', digest: digest('a'), moduleGeneration: 'generation-base-a', enabled: true, dependencies: [] },
-      { id: 'generation-consumer', version: '1.0.0', digest: digest('b'), moduleGeneration: 'generation-consumer-a', enabled: true, dependencies: [{ id: 'generation-base', version: '1.0.0' }] },
-      { id: 'generation-unrelated', version: '1.0.0', digest: digest('c'), moduleGeneration: 'generation-unrelated-a', enabled: true, dependencies: [] },
+      {
+        id: 'generation-base',
+        version: '1.0.0',
+        digest: digest('a'),
+        moduleGeneration: 'generation-base-a',
+        enabled: true,
+        dependencies: [],
+      },
+      {
+        id: 'generation-consumer',
+        version: '1.0.0',
+        digest: digest('b'),
+        moduleGeneration: 'generation-consumer-a',
+        enabled: true,
+        dependencies: [{ id: 'generation-base', version: '1.0.0' }],
+      },
+      {
+        id: 'generation-unrelated',
+        version: '1.0.0',
+        digest: digest('c'),
+        moduleGeneration: 'generation-unrelated-a',
+        enabled: true,
+        dependencies: [],
+      },
     ],
   }
 }
 
 interface RuntimeHandle {
-  snapshot(): { plugins: readonly { id: string; status: string; package?: { moduleGeneration: string } }[]; registrations: readonly { owner: string }[]; navigation: { routes: readonly { owner: string }[]; pages: readonly { owner: string }[] } }
+  snapshot(): {
+    plugins: readonly { id: string; status: string; package?: { moduleGeneration: string } }[]
+    registrations: readonly { owner: string }[]
+    navigation: { routes: readonly { owner: string }[]; pages: readonly { owner: string }[] }
+  }
   stagePluginMutation(mutation: unknown, module?: CordisXPluginModule): Promise<unknown>
   publishPluginMutation(transactionId: string): Promise<unknown>
   completePluginMutation(transactionId: string): Promise<unknown>
@@ -70,14 +96,21 @@ interface RuntimeHandle {
 }
 
 async function bootRuntime(bundle: string): Promise<{ readonly dom: JSDOM; readonly runtime: RuntimeHandle }> {
-  const dom = new JSDOM('<!doctype html><html><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>', {
-    runScripts: 'dangerously',
-    url: 'https://codex.local/native',
-  })
+  const dom = new JSDOM(
+    '<!doctype html><html><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>',
+    {
+      runScripts: 'dangerously',
+      url: 'https://codex.local/native',
+    },
+  )
   Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
   Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
   dom.window.eval(bundle)
-  for (let attempt = 0; attempt < 50 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
+  for (
+    let attempt = 0;
+    attempt < 50 && dom.window.document.documentElement.dataset.cordisxReady !== 'true';
+    attempt += 1
+  ) {
     await new Promise(resolve => setTimeout(resolve, 10))
   }
   const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime
@@ -149,19 +182,28 @@ describe('renderer plugin generation transactions', () => {
       transactionId: 'multi-renderer-rollback',
       revision: 2,
       lastGoodRevision: 1,
-      plugins: active.plugins.map(item => item.id === 'generation-unrelated'
-        ? item
-        : { ...item, moduleGeneration: `${item.id}-disabled`, enabled: false }),
+      plugins: active.plugins.map(item =>
+        item.id === 'generation-unrelated'
+          ? item
+          : { ...item, moduleGeneration: `${item.id}-disabled`, enabled: false }
+      ),
     }
     await host.stage({
-      transactionId: 'multi-renderer-rollback', ...fence, afterRegistryEpoch: 1,
-      operation: 'disable', previous: active, candidate, targetId: 'generation-base',
+      transactionId: 'multi-renderer-rollback',
+      ...fence,
+      afterRegistryEpoch: 1,
+      operation: 'disable',
+      previous: active,
+      candidate,
+      targetId: 'generation-base',
       affectedPluginIds: ['generation-base', 'generation-consumer'],
     })
     await expect(host.rollback('multi-renderer-rollback')).rejects.toThrow('fixture terminal transport failure')
     expect(() => host.prepare('overlap')).toThrow('another plugin generation transaction is unresolved')
     await expect(host.rollback('multi-renderer-rollback')).resolves.toMatchObject({
-      registryEpoch: 2, active, disposedAfter: candidate,
+      registryEpoch: 2,
+      active,
+      disposedAfter: candidate,
     })
     const replay = await first.runtime.rollbackPluginMutation('multi-renderer-rollback')
     expect(replay).toMatchObject({ registryEpoch: 2, active, disposedAfter: candidate })
@@ -169,13 +211,20 @@ describe('renderer plugin generation transactions', () => {
     const finalizeCandidate: CordisXPluginActivationRecordV1 = {
       ...candidate,
       transactionId: 'multi-renderer-finalize',
-      plugins: active.plugins.map(item => item.id === 'generation-unrelated'
-        ? item
-        : { ...item, moduleGeneration: `${item.id}-finalize-disabled`, enabled: false }),
+      plugins: active.plugins.map(item =>
+        item.id === 'generation-unrelated'
+          ? item
+          : { ...item, moduleGeneration: `${item.id}-finalize-disabled`, enabled: false }
+      ),
     }
     await host.stage({
-      transactionId: 'multi-renderer-finalize', ...finalizeFence, afterRegistryEpoch: 3,
-      operation: 'disable', previous: active, candidate: finalizeCandidate, targetId: 'generation-base',
+      transactionId: 'multi-renderer-finalize',
+      ...finalizeFence,
+      afterRegistryEpoch: 3,
+      operation: 'disable',
+      previous: active,
+      candidate: finalizeCandidate,
+      targetId: 'generation-base',
       affectedPluginIds: ['generation-base', 'generation-consumer'],
     })
     await host.publish('multi-renderer-finalize')
@@ -183,7 +232,9 @@ describe('renderer plugin generation transactions', () => {
     await expect(host.finalize('multi-renderer-finalize')).rejects.toThrow('fixture finalize transport failure')
     expect(() => host.prepare('overlap-finalize')).toThrow('another plugin generation transaction is unresolved')
     await expect(host.rollback('multi-renderer-finalize')).resolves.toMatchObject({
-      registryEpoch: 4, active, disposedAfter: finalizeCandidate,
+      registryEpoch: 4,
+      active,
+      disposedAfter: finalizeCandidate,
     })
     expect(host.prepare('after-retry')).toMatchObject({ expectedRegistryEpoch: 4 })
     host.cancelPreparation('after-retry')
@@ -224,14 +275,23 @@ describe('renderer plugin generation transactions', () => {
       })),
     }
     const bundle = await buildRendererBundle(config, { generation, profileId: 'work', pluginActivation: active })
-    const dom = new JSDOM('<!doctype html><html><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>', {
-      runScripts: 'dangerously',
-      url: 'https://codex.local/native',
-    })
+    const dom = new JSDOM(
+      '<!doctype html><html><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>',
+      {
+        runScripts: 'dangerously',
+        url: 'https://codex.local/native',
+      },
+    )
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
-    Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
+    Object.defineProperty(dom.window, 'fetch', {
+      value: async () => ({ ok: false, status: 503, text: async () => '' }),
+    })
     dom.window.eval(bundle)
-    for (let attempt = 0; attempt < 50 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 50 && dom.window.document.documentElement.dataset.cordisxReady !== 'true';
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime!
@@ -244,7 +304,9 @@ describe('renderer plugin generation transactions', () => {
     const beforeStage = runtime.snapshot()
     await runtime.settleRegistryProjection()
     let notifications = 0
-    const unsubscribe = runtime.subscribe(() => { notifications += 1 })
+    const unsubscribe = runtime.subscribe(() => {
+      notifications += 1
+    })
 
     const nextBase = dom.window.eval(`({ apply(ctx) {
       const state = globalThis.__cordisxGenerationBase
@@ -257,9 +319,13 @@ describe('renderer plugin generation transactions', () => {
       transactionId: 'update-base',
       revision: 2,
       lastGoodRevision: 1,
-      plugins: active.plugins.map(item => item.id === 'generation-base'
-        ? { ...item, digest: digest('d'), moduleGeneration: 'generation-base-b' }
-        : item.id === 'generation-consumer' ? { ...item, moduleGeneration: 'generation-consumer-b' } : item),
+      plugins: active.plugins.map(item =>
+        item.id === 'generation-base'
+          ? { ...item, digest: digest('d'), moduleGeneration: 'generation-base-b' }
+          : item.id === 'generation-consumer'
+          ? { ...item, moduleGeneration: 'generation-consumer-b' }
+          : item
+      ),
     }
     const decision = {
       $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
@@ -271,9 +337,17 @@ describe('renderer plugin generation transactions', () => {
       decisions: [],
     }
     await runtime.stagePluginMutation({
-      transactionId: 'update-base', operation: 'update', previous: active, candidate, targetId: 'generation-base',
+      transactionId: 'update-base',
+      operation: 'update',
+      previous: active,
+      candidate,
+      targetId: 'generation-base',
       affectedPluginIds: ['generation-base', 'generation-consumer'],
-      package: { manifest: packageManifest('generation-base'), digest: digest('d'), identitySource: source('generation-base', 'd') },
+      package: {
+        manifest: packageManifest('generation-base'),
+        digest: digest('d'),
+        identitySource: source('generation-base', 'd'),
+      },
       authorizationDecision: decision,
     }, nextBase)
     expect(globals.__cordisxGenerationBase).toEqual({ apply: 2, dispose: 0 })
@@ -294,8 +368,12 @@ describe('renderer plugin generation transactions', () => {
       plugins: candidate.plugins.map(item => item.id === 'generation-unrelated' ? item : { ...item, enabled: false }),
     }
     await runtime.stagePluginMutation({
-      transactionId: 'disable-base', operation: 'disable', previous: active, candidate: disabledCandidate,
-      targetId: 'generation-base', affectedPluginIds: ['generation-base', 'generation-consumer'],
+      transactionId: 'disable-base',
+      operation: 'disable',
+      previous: active,
+      candidate: disabledCandidate,
+      targetId: 'generation-base',
+      affectedPluginIds: ['generation-base', 'generation-consumer'],
       authorizationDecision: decision,
     })
     await runtime.publishPluginMutation('disable-base')
@@ -310,10 +388,17 @@ describe('renderer plugin generation transactions', () => {
 
     const failing = dom.window.eval(`({ apply() { throw new Error('readiness rejected') } })`) as CordisXPluginModule
     await expect(runtime.stagePluginMutation({
-      transactionId: 'update-fail', operation: 'update', previous: active,
-      candidate: { ...candidate, transactionId: 'update-fail' }, targetId: 'generation-base',
+      transactionId: 'update-fail',
+      operation: 'update',
+      previous: active,
+      candidate: { ...candidate, transactionId: 'update-fail' },
+      targetId: 'generation-base',
       affectedPluginIds: ['generation-base', 'generation-consumer'],
-      package: { manifest: packageManifest('generation-base'), digest: digest('d'), identitySource: source('generation-base', 'd') },
+      package: {
+        manifest: packageManifest('generation-base'),
+        digest: digest('d'),
+        identitySource: source('generation-base', 'd'),
+      },
       authorizationDecision: decision,
     }, failing)).rejects.toThrow('readiness rejected')
     await runtime.abortPluginMutation('update-fail')
@@ -325,7 +410,9 @@ describe('renderer plugin generation transactions', () => {
     )
     expect(notifications).toBe(0)
 
-    await expect(runtime.reloadPluginGeneration('generation-base', 'stale', generation)).rejects.toThrow('stale plugin module generation')
+    await expect(runtime.reloadPluginGeneration('generation-base', 'stale', generation)).rejects.toThrow(
+      'stale plugin module generation',
+    )
     await runtime.reloadPluginGeneration('generation-base', 'generation-base-a', generation)
     expect(globals.__cordisxGenerationBase.apply).toBe(4)
     expect(globals.__cordisxGenerationConsumer.apply).toBe(3)
@@ -333,23 +420,39 @@ describe('renderer plugin generation transactions', () => {
     notifications = 0
 
     await runtime.stagePluginMutation({
-      transactionId: 'update-after-cleanup', operation: 'update', previous: active,
-      candidate: { ...candidate, transactionId: 'update-after-cleanup' }, targetId: 'generation-base',
+      transactionId: 'update-after-cleanup',
+      operation: 'update',
+      previous: active,
+      candidate: { ...candidate, transactionId: 'update-after-cleanup' },
+      targetId: 'generation-base',
       affectedPluginIds: ['generation-base', 'generation-consumer'],
-      package: { manifest: packageManifest('generation-base'), digest: digest('d'), identitySource: source('generation-base', 'd') },
+      package: {
+        manifest: packageManifest('generation-base'),
+        digest: digest('d'),
+        identitySource: source('generation-base', 'd'),
+      },
       authorizationDecision: decision,
     }, nextBase)
     await runtime.publishPluginMutation('update-after-cleanup')
-    expect(runtime.snapshot().plugins.find(item => item.id === 'generation-base')?.package?.moduleGeneration).toBe('generation-base-b')
+    expect(runtime.snapshot().plugins.find(item => item.id === 'generation-base')?.package?.moduleGeneration).toBe(
+      'generation-base-b',
+    )
     await runtime.completePluginMutation('update-after-cleanup')
     await runtime.rollbackPluginMutation('update-after-cleanup')
-    expect(runtime.snapshot().plugins.find(item => item.id === 'generation-base')?.package?.moduleGeneration).toBe('generation-base-a')
-    expect(runtime.snapshot().plugins.find(item => item.id === 'generation-consumer')?.package?.moduleGeneration).toBe('generation-consumer-a')
+    expect(runtime.snapshot().plugins.find(item => item.id === 'generation-base')?.package?.moduleGeneration).toBe(
+      'generation-base-a',
+    )
+    expect(runtime.snapshot().plugins.find(item => item.id === 'generation-consumer')?.package?.moduleGeneration).toBe(
+      'generation-consumer-a',
+    )
     expect(globals.__cordisxGenerationUnrelated).toEqual({ apply: 1, dispose: 0 })
     expect(notifications).toBe(2)
     const batchesByEpoch = runtime.generationNotificationTrace()
       .filter(item => item.source === 'generation-batch' && !item.suppressed)
-      .reduce((result, item) => result.set(item.registryEpoch, (result.get(item.registryEpoch) ?? 0) + 1), new Map<number, number>())
+      .reduce(
+        (result, item) => result.set(item.registryEpoch, (result.get(item.registryEpoch) ?? 0) + 1),
+        new Map<number, number>(),
+      )
     expect(batchesByEpoch.size).toBe(4)
     expect([...batchesByEpoch.values()].every(count => count === 1)).toBe(true)
     notifications = 0
@@ -363,8 +466,12 @@ describe('renderer plugin generation transactions', () => {
       plugins: active.plugins.filter(item => item.id === 'generation-unrelated'),
     }
     await runtime.stagePluginMutation({
-      transactionId: 'uninstall-base', operation: 'uninstall', previous: active, candidate: uninstallCandidate,
-      targetId: 'generation-base', affectedPluginIds: ['generation-base', 'generation-consumer'],
+      transactionId: 'uninstall-base',
+      operation: 'uninstall',
+      previous: active,
+      candidate: uninstallCandidate,
+      targetId: 'generation-base',
+      affectedPluginIds: ['generation-base', 'generation-consumer'],
     })
     expect(notifications).toBe(0)
     await runtime.commitPluginMutation('uninstall-base')

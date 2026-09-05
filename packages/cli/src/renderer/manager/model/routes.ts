@@ -9,7 +9,12 @@ export type ManagerRoute =
   | { readonly kind: 'primary'; readonly page: ManagerPrimaryPage }
   | { readonly kind: 'plugin'; readonly pluginId: string; readonly page: PluginDetailPage }
   | { readonly kind: 'plugin-bundle'; readonly bundleId: string; readonly page: PluginBundleDetailPage }
-  | { readonly kind: 'permission'; readonly pluginId: string; readonly capability: CordisXPermissionCapabilityV4; readonly fingerprint: string }
+  | {
+    readonly kind: 'permission'
+    readonly pluginId: string
+    readonly capability: CordisXPermissionCapabilityV4
+    readonly fingerprint: string
+  }
   | { readonly kind: 'extension-point'; readonly pointId: string }
   | { readonly kind: 'route'; readonly qualifiedId: string }
   | { readonly kind: 'page'; readonly qualifiedId: string }

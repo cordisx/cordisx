@@ -69,7 +69,8 @@ describe('isolated transient canvas extension', () => {
     const runtime = setup()
     try {
       await runtime.bound.register({
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
         schemaVersion: 1,
         id: 'sparkles',
         pointId: 'composer.submit.effects',
@@ -90,7 +91,9 @@ describe('isolated transient canvas extension', () => {
         canvas: runtime.transferred,
         reducedMotion: false,
       })
-      const canvas = runtime.dom.window.document.querySelector<HTMLCanvasElement>('[data-cordisx-transient-canvas="sparkles"]')
+      const canvas = runtime.dom.window.document.querySelector<HTMLCanvasElement>(
+        '[data-cordisx-transient-canvas="sparkles"]',
+      )
       expect(canvas?.style.pointerEvents).toBe('none')
       expect(canvas?.getAttribute('aria-hidden')).toBe('true')
       expect(runtime.starts[0]).not.toHaveProperty('document')
@@ -100,11 +103,13 @@ describe('isolated transient canvas extension', () => {
       expect(runtime.dom.window.document.querySelector('[data-cordisx-transient-canvas]')).toBeNull()
       expect(runtime.stops).toEqual([runtime.starts[0]!.sessionId])
 
-      runtime.button.form!.dispatchEvent(new runtime.dom.window.SubmitEvent('submit', {
-        bubbles: true,
-        cancelable: true,
-        submitter: runtime.button,
-      }))
+      runtime.button.form!.dispatchEvent(
+        new runtime.dom.window.SubmitEvent('submit', {
+          bubbles: true,
+          cancelable: true,
+          submitter: runtime.button,
+        }),
+      )
       await Promise.resolve()
       expect(runtime.starts).toHaveLength(2)
       vi.advanceTimersByTime(800)
@@ -119,7 +124,8 @@ describe('isolated transient canvas extension', () => {
     const runtime = setup(true)
     try {
       await expect(runtime.bound.register({
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
         schemaVersion: 1,
         id: 'too-long',
         pointId: 'composer.submit.effects',
@@ -127,18 +133,21 @@ describe('isolated transient canvas extension', () => {
         reducedMotion: 'skip',
       })).rejects.toThrow(/durationMs/u)
       await runtime.bound.register({
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
         schemaVersion: 1,
         id: 'quiet',
         pointId: 'composer.submit.effects',
         durationMs: 500,
         reducedMotion: 'skip',
       })
-      runtime.button.form!.dispatchEvent(new runtime.dom.window.SubmitEvent('submit', {
-        bubbles: true,
-        cancelable: true,
-        submitter: runtime.button,
-      }))
+      runtime.button.form!.dispatchEvent(
+        new runtime.dom.window.SubmitEvent('submit', {
+          bubbles: true,
+          cancelable: true,
+          submitter: runtime.button,
+        }),
+      )
       await Promise.resolve()
       expect(runtime.starts).toEqual([])
       expect(runtime.dom.window.document.querySelector('[data-cordisx-transient-canvas]')).toBeNull()

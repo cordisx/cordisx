@@ -40,7 +40,10 @@ export interface HostServiceConfigContract {
   readonly initialConfiguration: JsonValue
   parseStored(value: unknown): JsonValue
   normalizeMutation(value: unknown, current: JsonValue): JsonValue
-  project(value: JsonValue, secretState: (secretRef: string | undefined) => HostSecretState): HostServiceConfigProjection
+  project(
+    value: JsonValue,
+    secretState: (secretRef: string | undefined) => HostSecretState,
+  ): HostServiceConfigProjection
 }
 
 export interface HostServiceConfigDescriptor {
@@ -78,27 +81,29 @@ export type HostServiceConfigErrorCode =
   | 'secret-ref-failed'
   | 'disposed'
 
-export type HostServiceConfigMutationResult = {
-  readonly contract: 'cordisx.service-config-result/v1'
-  readonly schemaVersion: 1
-  readonly identity: HostServiceConfigIdentity
-  readonly scope: { readonly profileId: string; readonly generation: string }
-  readonly revision: number
-} & (
-  | {
-    readonly status: 'applied'
-    readonly configApplies: 'service-restart'
-    readonly serviceGeneration: string
+export type HostServiceConfigMutationResult =
+  & {
+    readonly contract: 'cordisx.service-config-result/v1'
+    readonly schemaVersion: 1
+    readonly identity: HostServiceConfigIdentity
+    readonly scope: { readonly profileId: string; readonly generation: string }
+    readonly revision: number
   }
-  | {
-    readonly status: 'staged'
-    readonly configApplies: 'app-restart'
-  }
-  | {
-    readonly status: 'conflict' | 'rejected'
-    readonly error: { readonly code: HostServiceConfigErrorCode; readonly message: string }
-  }
-)
+  & (
+    | {
+      readonly status: 'applied'
+      readonly configApplies: 'service-restart'
+      readonly serviceGeneration: string
+    }
+    | {
+      readonly status: 'staged'
+      readonly configApplies: 'app-restart'
+    }
+    | {
+      readonly status: 'conflict' | 'rejected'
+      readonly error: { readonly code: HostServiceConfigErrorCode; readonly message: string }
+    }
+  )
 
 export interface HostServiceConfigNarrowApiOptions {
   readonly contract: HostServiceConfigContract
@@ -273,7 +278,8 @@ export class HostServiceConfigNarrowApi {
       const current = this.options.contract.parseStored(state.config)
       const candidate = this.options.contract.normalizeMutation(request.configuration, current)
       const applies = this.options.contract.configApplies
-      const staged = await this.persist(async () => await this.persistence.stage({
+      const staged = await this.persist(async () =>
+        await this.persistence.stage({
           profileId: this.options.profileId,
           pluginId: this.identity.pluginId,
           serviceId: this.identity.serviceId,
@@ -283,7 +289,8 @@ export class HostServiceConfigNarrowApi {
           config: candidate,
           applies,
           initialConfig: this.initialConfiguration,
-        }, this.options.configPath))
+        }, this.options.configPath)
+      )
       const candidateScope = {
         profileId: this.options.profileId,
         pluginId: this.identity.pluginId,
@@ -296,10 +303,12 @@ export class HostServiceConfigNarrowApi {
       if (applies === 'app-restart') {
         let committed: Awaited<ReturnType<typeof commitServiceConfigCandidate>>
         try {
-          committed = await this.persist(async () => await this.persistence.commit(
-            { ...candidateScope, applies },
-            this.options.configPath,
-          ))
+          committed = await this.persist(async () =>
+            await this.persistence.commit(
+              { ...candidateScope, applies },
+              this.options.configPath,
+            )
+          )
         } catch (error) {
           await this.persistence.abort(candidateScope, this.options.configPath).catch(() => undefined)
           throw error
@@ -316,10 +325,12 @@ export class HostServiceConfigNarrowApi {
       }
       let committed: Awaited<ReturnType<typeof commitServiceConfigCandidate>>
       try {
-        committed = await this.persist(async () => await this.persistence.commit(
-          { ...candidateScope, applies },
-          this.options.configPath,
-        ))
+        committed = await this.persist(async () =>
+          await this.persistence.commit(
+            { ...candidateScope, applies },
+            this.options.configPath,
+          )
+        )
       } catch (error) {
         await restarted.rollback().catch(rollbackError => {
           throw new Error(`failed to persist service configuration; rollback failed: ${boundedMessage(rollbackError)}`)
@@ -382,9 +393,11 @@ export class HostServiceConfigNarrowApi {
     if (request.contract !== 'cordisx.service-config-mutation/v1' || request.schemaVersion !== 1) {
       throw new Error('service configuration mutation contract is unsupported')
     }
-    if (request.identity.source !== this.identity.source
+    if (
+      request.identity.source !== this.identity.source
       || request.identity.pluginId !== this.identity.pluginId
-      || request.identity.serviceId !== this.identity.serviceId) {
+      || request.identity.serviceId !== this.identity.serviceId
+    ) {
       throw new Error('service configuration identity is stale or spoofed')
     }
     if (request.scope.profileId !== this.options.profileId || request.scope.generation !== this.options.generation) {

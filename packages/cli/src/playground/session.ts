@@ -8,7 +8,7 @@ import {
   buildRendererCompositionSource,
   type RendererCompositionSource,
 } from '../launcher/bundle.js'
-import { loadConfig, parseConfigDocument, type CordisXConfig } from '../launcher/config.js'
+import { type CordisXConfig, loadConfig, parseConfigDocument } from '../launcher/config.js'
 import {
   loadValidatedConfigDocument,
   materializeValidatedConfigDocument,
@@ -16,16 +16,12 @@ import {
 } from '../config/home-config.js'
 import { createLauncherConfigBridgeHandler } from '../launcher/launcher-plugin-config.js'
 import { buildLocalDevelopmentPlugin } from '../launcher/development.js'
+import { PlaygroundAgentSessionStore, type PlaygroundAgentSessionStoreRequest } from './agent-session-store.js'
+import { configBridgeError, type ConfigBridgeHandler, parseConfigBindingRequest } from '../launcher/config-rpc.js'
 import {
-  PlaygroundAgentSessionStore,
-  type PlaygroundAgentSessionStoreRequest,
-} from './agent-session-store.js'
-import {
-  configBridgeError,
-  parseConfigBindingRequest,
-  type ConfigBridgeHandler,
-} from '../launcher/config-rpc.js'
-import { createChannelCredentialBridgeHandler, type ChannelCredentialBridgeHandler } from '../launcher/channel-credential-rpc.js'
+  type ChannelCredentialBridgeHandler,
+  createChannelCredentialBridgeHandler,
+} from '../launcher/channel-credential-rpc.js'
 import { createChannelHostServiceConfigContract, projectLocalChannelManager } from '../launcher/channel-service.js'
 import { HostServiceConfigNarrowApi } from '../launcher/service-config.js'
 import {
@@ -34,7 +30,7 @@ import {
   serviceConfigBridgeError,
   type ServiceConfigBridgeHandler,
 } from '../launcher/service-config-rpc.js'
-import { LauncherKeychainError, LauncherSecretStore, type LauncherKeychainBackend } from '../launcher/secret-store.js'
+import { type LauncherKeychainBackend, LauncherKeychainError, LauncherSecretStore } from '../launcher/secret-store.js'
 import {
   handleProviderBindingRequest,
   MAX_PROVIDER_REQUEST_BYTES,
@@ -42,8 +38,8 @@ import {
   parseProviderBindingRequest,
 } from '../launcher/provider-rpc.js'
 import {
-  normalizePersistedPermissionPolicyRecord,
   type CordisXPersistedPermissionPolicyRecord,
+  normalizePersistedPermissionPolicyRecord,
 } from '../permission-persistence.js'
 import { resolveLocalCodexProviderConfig } from '../providers/config.js'
 import type { CodexProviderConfig } from '../providers/contracts.js'
@@ -53,14 +49,17 @@ import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
 import {
   createOwnerDocumentBridgeHandler,
   entityInstallationId,
-  OwnerDocumentLeaseRegistry,
   ownerDocumentBridgeError,
-  parseOwnerDocumentBindingRequest,
   type OwnerDocumentBridgeHandler,
+  OwnerDocumentLeaseRegistry,
+  parseOwnerDocumentBindingRequest,
 } from '../launcher/owner-document-rpc.js'
 import { EntityDirectoryAuthority } from '../launcher/entity-directory.js'
 import { createEntityBridgeHandler, isEntityBindingRequest } from '../launcher/entity-rpc.js'
-import { parsePlaygroundSessionScenarioCatalog, type PlaygroundSessionScenarioCatalogV1 } from './session-scenario-catalog.js'
+import {
+  parsePlaygroundSessionScenarioCatalog,
+  type PlaygroundSessionScenarioCatalogV1,
+} from './session-scenario-catalog.js'
 import { playgroundPluginBundleSnapshot } from './plugin-bundle-fixture.js'
 
 export interface PlaygroundFixtureInfo {
@@ -124,16 +123,26 @@ export interface PlaygroundEffectiveConfigCommit {
 class PlaygroundCredentialBackend implements LauncherKeychainBackend {
   private readonly values = new Map<string, string>()
 
-  private key(service: string, account: string): string { return `${service}\u0000${account}` }
+  private key(service: string, account: string): string {
+    return `${service}\u0000${account}`
+  }
   async read(service: string, account: string): Promise<string> {
     const value = this.values.get(this.key(service, account))
     if (value === undefined) throw new LauncherKeychainError('MISSING')
     return value
   }
-  async upsert(service: string, account: string, value: string): Promise<void> { this.values.set(this.key(service, account), value) }
-  async remove(service: string, account: string): Promise<void> { this.values.delete(this.key(service, account)) }
-  async status(service: string, account: string): Promise<'set' | 'unset'> { return this.values.has(this.key(service, account)) ? 'set' : 'unset' }
-  clear(): void { this.values.clear() }
+  async upsert(service: string, account: string, value: string): Promise<void> {
+    this.values.set(this.key(service, account), value)
+  }
+  async remove(service: string, account: string): Promise<void> {
+    this.values.delete(this.key(service, account))
+  }
+  async status(service: string, account: string): Promise<'set' | 'unset'> {
+    return this.values.has(this.key(service, account)) ? 'set' : 'unset'
+  }
+  clear(): void {
+    this.values.clear()
+  }
 }
 
 function fixtureInfo(source: Record<string, unknown>, sourcePath: string): PlaygroundFixtureInfo {
@@ -145,8 +154,11 @@ function fixtureInfo(source: Record<string, unknown>, sourcePath: string): Playg
     ? metadata.name
     : path.basename(sourcePath)
   const reviewNavigationItem = metadata?.reviewNavigationItem
-  if (reviewNavigationItem !== undefined
-    && (typeof reviewNavigationItem !== 'string' || !/^[a-z][a-z0-9-]{0,63}:[a-z][a-z0-9-]{0,63}$/.test(reviewNavigationItem))) {
+  if (
+    reviewNavigationItem !== undefined
+    && (typeof reviewNavigationItem !== 'string'
+      || !/^[a-z][a-z0-9-]{0,63}:[a-z][a-z0-9-]{0,63}$/.test(reviewNavigationItem))
+  ) {
     throw new Error('playground.reviewNavigationItem must be an exact owner-qualified contribution id')
   }
   return {
@@ -167,8 +179,12 @@ async function externalPlaygroundHome(input: string, sourcePath: string): Promis
   const homeDir = path.resolve(input)
   const protectedRoots = [path.parse(homeDir).root, os.homedir(), process.cwd(), path.dirname(sourcePath)]
     .map(candidate => path.resolve(candidate))
-  if (protectedRoots.some(root => homeDir === root || path.relative(homeDir, root) === ''
-    || (!path.relative(homeDir, root).startsWith('..') && !path.isAbsolute(path.relative(homeDir, root))))) {
+  if (
+    protectedRoots.some(root =>
+      homeDir === root || path.relative(homeDir, root) === ''
+      || (!path.relative(homeDir, root).startsWith('..') && !path.isAbsolute(path.relative(homeDir, root)))
+    )
+  ) {
     throw new Error('Playground external home cannot contain a protected root')
   }
   try {
@@ -211,11 +227,15 @@ export async function createPlaygroundSession(
   const previewPermissionPolicies = playground.permissionPolicies === undefined
     ? []
     : Array.isArray(playground.permissionPolicies)
-      ? playground.permissionPolicies.map((policy, index) => normalizePersistedPermissionPolicyRecord(
+    ? playground.permissionPolicies.map((policy, index) =>
+      normalizePersistedPermissionPolicyRecord(
         policy,
         `playground.permissionPolicies[${index}]`,
-      ))
-      : (() => { throw new Error('playground.permissionPolicies must be an array') })()
+      )
+    )
+    : (() => {
+      throw new Error('playground.permissionPolicies must be an array')
+    })()
   if (playground.pluginBundleFixture !== undefined && typeof playground.pluginBundleFixture !== 'boolean') {
     throw new Error('playground.pluginBundleFixture must be a boolean')
   }
@@ -274,7 +294,8 @@ export async function createPlaygroundSession(
     let launcherPresent = false
     let servicePresent = false
     try {
-      launcherDocument = (await loadValidatedConfigDocument(configPath, 'Playground launcher config', parseLauncher)).document
+      launcherDocument =
+        (await loadValidatedConfigDocument(configPath, 'Playground launcher config', parseLauncher)).document
       launcherPresent = true
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
@@ -291,12 +312,18 @@ export async function createPlaygroundSession(
     if (!servicePresent) parseHomeConfig(materializedServiceConfig)
     if (!launcherPresent) {
       launcherDocument = (await materializeValidatedConfigDocument(
-        configPath, 'Playground launcher config', materialized, parseLauncher,
+        configPath,
+        'Playground launcher config',
+        materialized,
+        parseLauncher,
       )).value.document
     }
     if (!servicePresent) {
       await materializeValidatedConfigDocument(
-        serviceConfigPath, 'Playground home config', materializedServiceConfig, parseHomeConfig,
+        serviceConfigPath,
+        'Playground home config',
+        materializedServiceConfig,
+        parseHomeConfig,
       )
     }
   }
@@ -337,7 +364,9 @@ export async function createPlaygroundSession(
       return { plugin, build: await buildLocalDevelopmentPlugin(plugin.entry, { sourcemap: false }) }
     }))
     const successfulAt = new Date().toISOString()
-    const localDevelopmentByPlugin = new Map(localDevelopmentBuilds.flatMap(item => item === undefined ? [] : [[item.plugin.id, item] as const]))
+    const localDevelopmentByPlugin = new Map(
+      localDevelopmentBuilds.flatMap(item => item === undefined ? [] : [[item.plugin.id, item] as const]),
+    )
     const config: CordisXConfig = {
       ...loadedConfig,
       plugins: loadedConfig.plugins.map(plugin => {
@@ -349,8 +378,11 @@ export async function createPlaygroundSession(
           source: `${identityPrefix}${plugin.id}.js`,
           moduleFactorySource: local.build.moduleFactorySource,
           development: {
-            origin: 'local-dev', pluginId: plugin.id, sourcePath: plugin.entry,
-            state: 'ready', lastSuccessfulAt: successfulAt,
+            origin: 'local-dev',
+            pluginId: plugin.id,
+            sourcePath: plugin.entry,
+            state: 'ready',
+            lastSuccessfulAt: successfulAt,
           },
           ...(local.build.readme === undefined ? {} : { readme: local.build.readme }),
         }
@@ -362,7 +394,9 @@ export async function createPlaygroundSession(
       return [[`${pathToFileURL(plugin.entry).href}\u0000${plugin.id}`, plugin.source] as const]
     }))
     const permissionPolicies = previewPermissionPolicies.map(record => {
-      const source = developmentIdentityByConfiguredIdentity.get(`${record.key.identity.source}\u0000${record.key.identity.pluginId}`)
+      const source = developmentIdentityByConfiguredIdentity.get(
+        `${record.key.identity.source}\u0000${record.key.identity.pluginId}`,
+      )
       if (source === undefined) return record
       return normalizePersistedPermissionPolicyRecord({
         ...record,
@@ -377,8 +411,8 @@ export async function createPlaygroundSession(
     const providerConfigs: readonly CodexProviderConfig[] = mockAgentLoop
       ? []
       : localProvider === undefined
-        ? config.providers
-        : [...config.providers, localProvider]
+      ? config.providers
+      : [...config.providers, localProvider]
     const providerFleet = providerConfigs.some(provider => provider.enabled)
       ? await ProviderFleet.create(providerConfigs, { appServer: { environment: process.env } })
       : undefined
@@ -407,8 +441,10 @@ export async function createPlaygroundSession(
     })
     for (const plugin of config.plugins.filter(item => item.enabled)) {
       const binding = {
-        profileId: 'playground', installationId: entityInstallationId('playground', plugin.id),
-        pluginId: plugin.id, pluginGeneration: 1,
+        profileId: 'playground',
+        installationId: entityInstallationId('playground', plugin.id),
+        pluginId: plugin.id,
+        pluginGeneration: 1,
       } as const
       const local = localDevelopmentByPlugin.get(plugin.id)?.build
       const templates = local?.entityTemplates ?? []
@@ -416,32 +452,47 @@ export async function createPlaygroundSession(
       if (local !== undefined && templates.length > 0) {
         const results = await entityAuthority.materialize(binding, local.version, local.digest, templates)
         const rejected = results.find(result => result.status === 'rejected')
-        if (rejected !== undefined) throw new Error(`entity template ${rejected.agentId} was rejected: ${rejected.code}`)
+        if (rejected !== undefined) {
+          throw new Error(`entity template ${rejected.agentId} was rejected: ${rejected.code}`)
+        }
       }
     }
-    const documents = Object.assign(ownerDocuments, { entities: createEntityBridgeHandler({
-      secret: documentSecret, profileId: 'playground', generation, authority: entityAuthority,
-      principalAllowed: principal => documentLeases.allowed(principal),
-    }) })
+    const documents = Object.assign(ownerDocuments, {
+      entities: createEntityBridgeHandler({
+        secret: documentSecret,
+        profileId: 'playground',
+        generation,
+        authority: entityAuthority,
+        principalAllowed: principal => documentLeases.allowed(principal),
+      }),
+    })
     const channelPlugin = config.plugins.find(plugin => plugin.id === 'channel')
     const channelConfig = channelPlugin === undefined ? undefined : new HostServiceConfigNarrowApi({
       contract: createChannelHostServiceConfigContract({
         source: channelPlugin.source ?? pathToFileURL(channelPlugin.entry).href,
-        pluginId: 'channel', serviceId: 'runtime',
+        pluginId: 'channel',
+        serviceId: 'runtime',
       }) as unknown as ConstructorParameters<typeof HostServiceConfigNarrowApi>[0]['contract'],
-      profileId: 'playground', generation, ownerToken: serviceConfigToken,
-      configPath: serviceConfigPath, writable: true, authorize: () => true,
+      profileId: 'playground',
+      generation,
+      ownerToken: serviceConfigToken,
+      configPath: serviceConfigPath,
+      writable: true,
+      authorize: () => true,
       restartService: async () => ({
         generation: `playground-service-${randomBytes(8).toString('hex')}`,
         rollback: async () => undefined,
       }),
     })
     const serviceConfig = channelConfig === undefined ? undefined : createServiceConfigBridgeHandler({
-      token: serviceConfigToken, profileId: 'playground', generation,
+      token: serviceConfigToken,
+      profileId: 'playground',
+      generation,
       services: [{ pluginId: 'channel', serviceId: 'runtime', api: channelConfig }],
     })
     const credential = channelConfig === undefined ? undefined : createChannelCredentialBridgeHandler({
-      token: credentialToken, profileId: 'playground',
+      token: credentialToken,
+      profileId: 'playground',
       store: new LauncherSecretStore({ platform: 'darwin', backend: credentialBackend }),
       service: channelConfig,
     })
@@ -453,7 +504,15 @@ export async function createPlaygroundSession(
       writable: channelDescriptor.writable,
     })
     const next: PlaygroundGeneration = {
-      generation, token, agentSessionStoreToken, config, localDevelopmentWatchFiles, permissionPolicies, bridge, documents, documentSecret,
+      generation,
+      token,
+      agentSessionStoreToken,
+      config,
+      localDevelopmentWatchFiles,
+      permissionPolicies,
+      bridge,
+      documents,
+      documentSecret,
       ...(channelConfig === undefined ? {} : { channelConfig }),
       ...(serviceConfig === undefined ? {} : { serviceConfig }),
       ...(credential === undefined ? {} : { credential }),
@@ -482,7 +541,9 @@ export async function createPlaygroundSession(
     ...(generation.providerToken === undefined ? {} : { providerBridgeToken: generation.providerToken }),
     profileId: 'playground',
     permission: { profileId: 'playground', policies: generation.permissionPolicies },
-    ...(includePluginBundleFixture ? { pluginBundleSnapshot: playgroundPluginBundleSnapshot(generation.generation) } : {}),
+    ...(includePluginBundleFixture
+      ? { pluginBundleSnapshot: playgroundPluginBundleSnapshot(generation.generation) }
+      : {}),
   })
 
   return {
@@ -531,8 +592,10 @@ export async function createPlaygroundSession(
               : undefined
             const key = `${parsed.identity.source}\u0000${parsed.identity.pluginId}`
             const lastPublished = publishedConfigRevisions.get(key)
-            if (Number.isInteger(revision) && (revision as number) > 0
-              && (lastPublished === undefined || revision as number > lastPublished)) {
+            if (
+              Number.isInteger(revision) && (revision as number) > 0
+              && (lastPublished === undefined || revision as number > lastPublished)
+            ) {
               publishedConfigRevisions.set(key, revision as number)
               options.onEffectiveConfigCommitted?.({
                 generation: requestGeneration.generation,
@@ -553,12 +616,24 @@ export async function createPlaygroundSession(
       try {
         const parsed = JSON.parse(raw) as Record<string, unknown>
         requestId = typeof parsed.requestId === 'string' && parsed.requestId !== '' ? parsed.requestId : 'invalid'
-        if (parsed.version !== 1 || parsed.token !== active.agentSessionStoreToken
-          || parsed.runtimeGeneration !== active.generation || requestId === 'invalid') {
+        if (
+          parsed.version !== 1 || parsed.token !== active.agentSessionStoreToken
+          || parsed.runtimeGeneration !== active.generation || requestId === 'invalid'
+        ) {
           return { requestId, ok: true, value: { status: 'unavailable', code: 'generation-conflict' } }
         }
-        const { version: _version, requestId: _requestId, token: _token, runtimeGeneration: _runtimeGeneration, ...request } = parsed
-        return { requestId, ok: true, value: await agentSessionStore.handle(request as unknown as PlaygroundAgentSessionStoreRequest) }
+        const {
+          version: _version,
+          requestId: _requestId,
+          token: _token,
+          runtimeGeneration: _runtimeGeneration,
+          ...request
+        } = parsed
+        return {
+          requestId,
+          ok: true,
+          value: await agentSessionStore.handle(request as unknown as PlaygroundAgentSessionStoreRequest),
+        }
       } catch {
         return { requestId, ok: true, value: { status: 'unavailable', code: 'invalid-request' } }
       }
@@ -582,14 +657,19 @@ export async function createPlaygroundSession(
           : await active.documents.replace(parsed)
         return { requestId, ok: true, value: result }
       } catch (error) {
-        if (entityRequest) return { requestId, ok: false, error: error instanceof Error ? error.message : 'entity request rejected' }
+        if (entityRequest) {
+          return { requestId, ok: false, error: error instanceof Error ? error.message : 'entity request rejected' }
+        }
         return { requestId, ok: true, value: ownerDocumentBridgeError() }
       }
     },
     async handleServiceConfigRequest(raw) {
       if (active?.serviceConfig === undefined) throw new Error('Playground has no active Channel configuration service')
       const parsed = parseServiceConfigBindingRequest(
-        JSON.parse(raw), active.serviceConfig.token, active.serviceConfig.profileId, active.serviceConfig.generation,
+        JSON.parse(raw),
+        active.serviceConfig.token,
+        active.serviceConfig.profileId,
+        active.serviceConfig.generation,
       )
       try {
         return { requestId: parsed.requestId, ok: true, value: await active.serviceConfig.handle(parsed) }
@@ -608,10 +688,14 @@ export async function createPlaygroundSession(
       }
     },
     async handleProviderRequest(raw) {
-      if (active?.providerFleet === undefined || active.providerToken === undefined) throw new Error('Playground has no active provider service')
+      if (active?.providerFleet === undefined || active.providerToken === undefined) {
+        throw new Error('Playground has no active provider service')
+      }
       let requestId = 'invalid'
       try {
-        if (Buffer.byteLength(raw) > MAX_PROVIDER_REQUEST_BYTES) throw new Error('provider request exceeds maximum size')
+        if (Buffer.byteLength(raw) > MAX_PROVIDER_REQUEST_BYTES) {
+          throw new Error('provider request exceeds maximum size')
+        }
         if (activeProviderRequests >= MAX_PROVIDER_REQUESTS) throw new Error('too many concurrent provider requests')
         const request = parseProviderBindingRequest(JSON.parse(raw), active.providerToken)
         requestId = request.requestId

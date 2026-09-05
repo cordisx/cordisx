@@ -6,11 +6,11 @@ import {
 } from '../packages/cli/src/contracts.js'
 import {
   installCordisXManager,
-  projectManagerBreadcrumbs,
-  requestPluginAuthorization,
   type ManagerModel,
   type ManagerPermissionSnapshot,
   type ManagerSnapshot,
+  projectManagerBreadcrumbs,
+  requestPluginAuthorization,
 } from '../packages/cli/src/renderer/manager.js'
 
 const identity = { source: 'file:///plugins/demo/index.ts', id: 'demo' }
@@ -51,7 +51,14 @@ function snapshot(
     version: '0.1.0',
     plugins: [
       { id: 'demo', source: identity.source, name: 'Demo', inject: [], config: {}, status: 'active' },
-      { id: 'empty', source: 'file:///plugins/empty/index.ts', name: 'Empty', inject: [], config: {}, status: 'active' },
+      {
+        id: 'empty',
+        source: 'file:///plugins/empty/index.ts',
+        name: 'Empty',
+        inject: [],
+        config: {},
+        status: 'active',
+      },
     ],
     registrations: [],
     commands: [],
@@ -150,9 +157,12 @@ describe('Platform permission presentation hierarchy', () => {
     const { dom, dispose } = install(state)
     try {
       const content = openPluginTab(dom.window.document, 'demo', 'permissions')
-      expect([...content.querySelectorAll('[data-permission-item]')].map(item => item.getAttribute('aria-label'))).toEqual([
-        '读取 Agent 事件', '读取 Agent 历史', '追加 Agent 消息',
-      ])
+      expect([...content.querySelectorAll('[data-permission-item]')].map(item => item.getAttribute('aria-label')))
+        .toEqual([
+          '读取 Agent 事件',
+          '读取 Agent 历史',
+          '追加 Agent 消息',
+        ])
       dom.window.document.querySelector<HTMLButtonElement>('[data-permission-open="agent.events.read"]')?.click()
       expect(dom.window.document.querySelector('[data-breadcrumb-current]')?.textContent).toBe('读取 Agent 事件')
     } finally {
@@ -162,7 +172,9 @@ describe('Platform permission presentation hierarchy', () => {
   })
 
   it('reviews required and optional declarations once with persistent allow as the primary action', async () => {
-    const dom = new JSDOM('<!doctype html><html class="electron-dark"><head></head><body></body></html>', { url: 'https://codex.local/' })
+    const dom = new JSDOM('<!doctype html><html class="electron-dark"><head></head><body></body></html>', {
+      url: 'https://codex.local/',
+    })
     const permissions = [
       permission('models.read', { required: true, reasonText: '读取当前账号模型' }),
       permission('turns.submit', { reasonText: '提交后续消息', policy: 'deny' }),
@@ -253,30 +265,62 @@ describe('Platform permission presentation hierarchy', () => {
       const content = openPluginTab(dom.window.document, 'demo', 'permissions')
       expect(content.querySelector('[role="tabpanel"][aria-label="权限"]')).not.toBeNull()
       expect(content.querySelectorAll('[role="listitem"][data-permission-item]')).toHaveLength(7)
-      expect([...content.querySelectorAll('[data-permission-item]')].map(item => item.getAttribute('aria-label'))).toEqual([
-        '读取可用模型', '查看任务列表', '查看任务内容', '创建任务', '管理任务', '提交消息', '控制对话轮次',
-      ])
-      const capabilityIcons = [...content.querySelectorAll<HTMLElement>('.cxm-capability-icon[aria-hidden="true"][data-host-icon-key]')]
+      expect([...content.querySelectorAll('[data-permission-item]')].map(item => item.getAttribute('aria-label')))
+        .toEqual([
+          '读取可用模型',
+          '查看任务列表',
+          '查看任务内容',
+          '创建任务',
+          '管理任务',
+          '提交消息',
+          '控制对话轮次',
+        ])
+      const capabilityIcons = [
+        ...content.querySelectorAll<HTMLElement>('.cxm-capability-icon[aria-hidden="true"][data-host-icon-key]'),
+      ]
       expect(capabilityIcons).toHaveLength(7)
       expect(capabilityIcons.map(icon => icon.dataset.hostIconKey)).toEqual([
-        'models-read', 'tasks-catalog-read', 'tasks-content-read', 'tasks-create', 'tasks-control', 'turns-submit', 'turns-control',
+        'models-read',
+        'tasks-catalog-read',
+        'tasks-content-read',
+        'tasks-create',
+        'tasks-control',
+        'turns-submit',
+        'turns-control',
       ])
-      expect(content.querySelector('[data-permission-item="tasks.create"] .cxm-required-badge')?.textContent).toBe('必需')
+      expect(content.querySelector('[data-permission-item="tasks.create"] .cxm-required-badge')?.textContent).toBe(
+        '必需',
+      )
       expect(content.querySelector('[data-permission-item="models.read"] .cxm-required-badge')).toBeNull()
       expect(content.querySelectorAll('[data-permission-availability]')).toHaveLength(0)
       expect(content.querySelectorAll('[data-permission-capability]')).toHaveLength(7)
-      const unavailablePolicies = [...content.querySelectorAll<TestTDesignSelect>('t-select[data-permission-capability]')]
+      const unavailablePolicies = [
+        ...content.querySelectorAll<TestTDesignSelect>('t-select[data-permission-capability]'),
+      ]
       expect(unavailablePolicies.every(policy => !policy.disabled)).toBe(true)
-      expect(unavailablePolicies.every(policy => policy.options.map(option => option.label).join() === '每次询问,始终允许,始终拒绝')).toBe(true)
+      expect(
+        unavailablePolicies.every(policy =>
+          policy.options.map(option => option.label).join() === '每次询问,始终允许,始终拒绝'
+        ),
+      ).toBe(true)
       expect(content.querySelector('.cxm-slot-card')).toBeNull()
       expect([...content.querySelectorAll('h3')].map(item => item.textContent)).not.toContain('权限策略')
 
       const text = content.textContent ?? ''
-      for (const hidden of [
-        'models.read', '{}', '最近使用', '拒绝次数', 'Required capability denied',
-        'current-connection-client-unavailable', '二次连接', '原始 bridge', '不是安全沙箱',
-        '插件声明所需能力；Host 负责策略选择、持久化与执行。',
-      ]) expect(text).not.toContain(hidden)
+      for (
+        const hidden of [
+          'models.read',
+          '{}',
+          '最近使用',
+          '拒绝次数',
+          'Required capability denied',
+          'current-connection-client-unavailable',
+          '二次连接',
+          '原始 bridge',
+          '不是安全沙箱',
+          '插件声明所需能力；Host 负责策略选择、持久化与执行。',
+        ]
+      ) expect(text).not.toContain(hidden)
     } finally {
       dispose()
       dom.window.close()
@@ -292,8 +336,14 @@ describe('Platform permission presentation hierarchy', () => {
       const createTask = content.querySelector<TestTDesignSelect>('t-select[data-permission-capability="tasks.create"]')
       expect(models).not.toBeNull()
       expect(createTask).not.toBeNull()
-      expect(models!.options.map(option => [option.value, option.label])).toEqual([['ask', '每次询问'], ['allow', '始终允许'], ['deny', '始终拒绝']])
-      expect(createTask!.options.map(option => [option.value, option.label])).toEqual([['ask', '每次询问'], ['allow', '始终允许'], ['deny', '始终拒绝']])
+      expect(models!.options.map(option => [option.value, option.label])).toEqual([['ask', '每次询问'], [
+        'allow',
+        '始终允许',
+      ], ['deny', '始终拒绝']])
+      expect(createTask!.options.map(option => [option.value, option.label])).toEqual([['ask', '每次询问'], [
+        'allow',
+        '始终允许',
+      ], ['deny', '始终拒绝']])
       expect(models!.disabled).toBe(false)
       expect(createTask!.disabled).toBe(false)
       expect(content.querySelector('[data-permission-capability="tasks.catalog.read"]')).not.toBeNull()
@@ -313,7 +363,9 @@ describe('Platform permission presentation hierarchy', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-permission-open="tasks.create"]')?.click()
       const detail = dom.window.document.querySelector<HTMLElement>('[data-permission-detail="tasks.create"]')
       expect(detail).not.toBeNull()
-      const breadcrumb = [...dom.window.document.querySelectorAll<HTMLElement>('.cxm-breadcrumb-action, .cxm-breadcrumb-current')]
+      const breadcrumb = [
+        ...dom.window.document.querySelectorAll<HTMLElement>('.cxm-breadcrumb-action, .cxm-breadcrumb-current'),
+      ]
       expect(breadcrumb.map(item => item.textContent)).toEqual(['插件', 'Demo', '权限', '创建任务'])
       expect(breadcrumb.slice(0, -1).every(item => item.matches('button[data-breadcrumb-target]'))).toBe(true)
       expect(breadcrumb.at(-1)?.matches('span[aria-current="page"]')).toBe(true)
@@ -338,7 +390,8 @@ describe('Platform permission presentation hierarchy', () => {
       expect(policies).toEqual([])
       dom.window.document.querySelector<HTMLButtonElement>('.cxm-back')?.click()
       expect(dom.window.document.querySelector('[data-permission-detail]')).toBeNull()
-      expect(dom.window.document.querySelector('[data-plugin-detail-tab="permissions"]')?.getAttribute('aria-selected')).toBe('true')
+      expect(dom.window.document.querySelector('[data-plugin-detail-tab="permissions"]')?.getAttribute('aria-selected'))
+        .toBe('true')
       expect(dom.window.document.querySelector('[role="tabpanel"][aria-label="权限"]')).not.toBeNull()
     } finally {
       dispose()
@@ -348,7 +401,8 @@ describe('Platform permission presentation hierarchy', () => {
 
   it('shows the exact trace for a Certified auto-approved DOM permission', () => {
     const certification = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v1.schema.json' as const,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v1.schema.json' as const,
       schemaVersion: 1 as const,
       kind: 'cordisx-certified-permission-eligibility' as const,
       status: 'active' as const,
@@ -359,8 +413,15 @@ describe('Platform permission presentation hierarchy', () => {
       reviewPolicy: { id: 'cordisx-marketplace-review' as const, version: '1.0.0' },
       reviewedAt: '2026-08-29T00:00:00.000Z',
       expiresAt: '2026-09-30T00:00:00.000Z',
-      evidence: { kind: 'protected-marketplace-review' as const, reference: 'https://github.com/cordisx/marketplace/pull/123' },
-      feed: { generatedAt: '2026-08-30T00:00:00.000Z', root: 'https://marketplace.example/feed.json', authority: 'cordisx.marketplace.codeowners/v1' as const },
+      evidence: {
+        kind: 'protected-marketplace-review' as const,
+        reference: 'https://github.com/cordisx/marketplace/pull/123',
+      },
+      feed: {
+        generatedAt: '2026-08-30T00:00:00.000Z',
+        root: 'https://marketplace.example/feed.json',
+        authority: 'cordisx.marketplace.codeowners/v1' as const,
+      },
       fingerprint: `sha256:${'c'.repeat(64)}` as const,
       revision: '2026-08-30T00:00:00.000Z',
     }
@@ -390,8 +451,11 @@ describe('Platform permission presentation hierarchy', () => {
     const { dom, dispose } = install(state)
     try {
       openPluginTab(dom.window.document, 'demo', 'permissions')
-      dom.window.document.querySelector<HTMLButtonElement>('[data-permission-open="ui.extension-points.render"]')?.click()
-      const trace = dom.window.document.querySelector<HTMLElement>('[data-permission-authorization-origin="certified-implicit"]')
+      dom.window.document.querySelector<HTMLButtonElement>('[data-permission-open="ui.extension-points.render"]')
+        ?.click()
+      const trace = dom.window.document.querySelector<HTMLElement>(
+        '[data-permission-authorization-origin="certified-implicit"]',
+      )
       expect(trace?.textContent).toContain('认证自动批准的 DOM 权限')
       expect(trace?.textContent).toContain('demo@1.2.3')
       expect(trace?.textContent).toContain('https://github.com/cordisx/marketplace/pull/123')
@@ -430,8 +494,12 @@ describe('Platform permission presentation hierarchy', () => {
 
       const breadcrumbs = dom.window.document.querySelector<HTMLElement>('.cxm-breadcrumbs')
       expect(breadcrumbs?.dataset.breadcrumbOverflowCount).toBe('2')
-      expect([...dom.window.document.querySelectorAll<HTMLElement>('.cxm-breadcrumb-list > .cxm-breadcrumb-item > .cxm-breadcrumb-action, .cxm-breadcrumb-list > .cxm-breadcrumb-item > .cxm-breadcrumb-current')]
-        .map(item => item.textContent)).toEqual(['插件', '创建任务'])
+      expect(
+        [...dom.window.document.querySelectorAll<HTMLElement>(
+          '.cxm-breadcrumb-list > .cxm-breadcrumb-item > .cxm-breadcrumb-action, .cxm-breadcrumb-list > .cxm-breadcrumb-item > .cxm-breadcrumb-current',
+        )]
+          .map(item => item.textContent),
+      ).toEqual(['插件', '创建任务'])
       const overflow = dom.window.document.querySelector<HTMLDetailsElement>('.cxm-breadcrumb-overflow')
       expect(overflow?.querySelector('summary')?.getAttribute('aria-label')).toBe('显示省略的上级页面')
       const menuItems = [...(overflow?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])]
@@ -479,7 +547,9 @@ describe('Platform permission presentation hierarchy', () => {
     try {
       const runtime = openPluginTab(dom.window.document, 'demo', 'runtime')
       expect(runtime.querySelector('[data-runtime-lifecycle="demo"]')).toBeNull()
-      expect(runtime.querySelector('[data-plugin-runtime-action="demo"]')?.getAttribute('aria-label')).toBe('Block plugin')
+      expect(runtime.querySelector('[data-plugin-runtime-action="demo"]')?.getAttribute('aria-label')).toBe(
+        'Block plugin',
+      )
       const logs = openPluginTab(dom.window.document, 'demo', 'logs')
       const diagnostics = logs.querySelector<HTMLDetailsElement>('details[data-runtime-diagnostics="platform"]')
       expect(logs.querySelector('[data-runtime-lifecycle="demo"]')).toBeNull()

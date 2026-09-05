@@ -1,5 +1,6 @@
 export const OFFICIAL_MARKETPLACE_SOURCE = 'https://raw.githubusercontent.com/cordisx/marketplace/main/marketplace.json'
-export const MARKETPLACE_SOURCE_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-source.v1.schema.json'
+export const MARKETPLACE_SOURCE_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-source.v1.schema.json'
 export const MARKETPLACE_SOURCES_KEY = 'cordisx.manager.marketplaceSources.v1'
 export const MARKETPLACE_SOURCE_RECORDS_KEY = 'cordisx.manager.marketplaceSources.v2'
 
@@ -34,7 +35,9 @@ interface PersistedMarketplaceSourcesV2 {
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} 必须是 JSON object`)
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} 必须是 JSON object`)
+  }
   return value as Record<string, unknown>
 }
 
@@ -46,7 +49,10 @@ function assertKeys(value: Record<string, unknown>, allowed: readonly string[], 
 
 function localText(value: unknown, label: string, maxLength: number): string | undefined {
   if (value === undefined) return undefined
-  if (typeof value !== 'string' || value.length === 0 || value.length > maxLength || value.trim() !== value || value.trim() === '') {
+  if (
+    typeof value !== 'string' || value.length === 0 || value.length > maxLength || value.trim() !== value
+    || value.trim() === ''
+  ) {
     throw new Error(`${label} 必须是已裁剪的 1-${maxLength} 字符文本`)
   }
   return value
@@ -125,7 +131,11 @@ function persistedSources(value: unknown): MarketplaceSourceRecord[] | undefined
     const source = record(item, `sources[${index}]`)
     assertKeys(source, ['url', 'enabled', 'local'], `sources[${index}]`)
     if (typeof source.url !== 'string' || typeof source.enabled !== 'boolean') throw new Error(`sources[${index}] 无效`)
-    return { url: source.url, enabled: source.enabled, ...(source.local === undefined ? {} : { local: source.local as MarketplaceSourceLocalOverrides }) }
+    return {
+      url: source.url,
+      enabled: source.enabled,
+      ...(source.local === undefined ? {} : { local: source.local as MarketplaceSourceLocalOverrides }),
+    }
   }))
 }
 
@@ -145,7 +155,9 @@ export function parseMarketplaceSourceImport(value: string): MarketplaceSourceRe
   if (source.$schema !== MARKETPLACE_SOURCE_SCHEMA_V1 || source.schemaVersion !== 1) {
     throw new Error('剪贴板内容不是受支持的 marketplace-source.v1')
   }
-  if (typeof source.url !== 'string' || typeof source.enabled !== 'boolean') throw new Error('marketplace-source.v1 缺少 url 或 enabled')
+  if (typeof source.url !== 'string' || typeof source.enabled !== 'boolean') {
+    throw new Error('marketplace-source.v1 缺少 url 或 enabled')
+  }
   const local = normalizeLocal(source.local)
   return normalizeMarketplaceSourceRecord({
     url: source.url,
@@ -159,11 +171,15 @@ export class BrowserMarketplaceSourceStore {
 
   constructor(private readonly storage: MarketplaceStorage | undefined) {
     this.sources = this.read()
-    try { this.persist() } catch { /* normalized startup state remains usable even when profile storage is unavailable */ }
+    try {
+      this.persist()
+    } catch { /* normalized startup state remains usable even when profile storage is unavailable */ }
   }
 
   snapshot(): readonly MarketplaceSourceRecord[] {
-    return this.sources.map(source => Object.freeze({ ...source, ...(source.local === undefined ? {} : { local: Object.freeze({ ...source.local }) }) }))
+    return this.sources.map(source =>
+      Object.freeze({ ...source, ...(source.local === undefined ? {} : { local: Object.freeze({ ...source.local }) }) })
+    )
   }
 
   replace(values: readonly MarketplaceSourceRecord[]): readonly MarketplaceSourceRecord[] {

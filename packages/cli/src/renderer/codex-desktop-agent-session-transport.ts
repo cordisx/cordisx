@@ -1,8 +1,8 @@
 import type { AgentOptions } from '@cordisx/protocol/agents/v1'
 import type { ApprovalOutcome, UserMessage } from '@cordisx/protocol/sessions/v1'
 import type {
-  CordisXDriverApprovalRequest,
   CordisXDriverAgentStatus,
+  CordisXDriverApprovalRequest,
   CordisXDriverMessageClaimed,
   CordisXDriverSessionEvent,
   CordisXPrivateAgentDriver,
@@ -10,7 +10,10 @@ import type {
 
 /** Exact observed Desktop build; this closed Host-only pin must be re-audited on upgrades. */
 export const CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN = Object.freeze({
-  appVersion: '26.818.61809', buildNumber: '7019', buildFlavor: 'prod', hostId: 'local',
+  appVersion: '26.818.61809',
+  buildNumber: '7019',
+  buildFlavor: 'prod',
+  hostId: 'local',
 })
 
 interface ElectronBridge {
@@ -100,13 +103,17 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       readonly location?: Location
     }
     const bridge = page.electronBridge
-    if (page.codexWindowType !== 'electron' || page.location?.href !== 'app://-/index.html'
-      || typeof bridge?.sendMessageFromView !== 'function' || typeof bridge.getSentryInitOptions !== 'function') return undefined
+    if (
+      page.codexWindowType !== 'electron' || page.location?.href !== 'app://-/index.html'
+      || typeof bridge?.sendMessageFromView !== 'function' || typeof bridge.getSentryInitOptions !== 'function'
+    ) return undefined
     try {
       const options = object(await bridge.getSentryInitOptions())
-      if (options?.appVersion !== CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN.appVersion
+      if (
+        options?.appVersion !== CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN.appVersion
         || options.buildNumber !== CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN.buildNumber
-        || options.buildFlavor !== CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN.buildFlavor) return undefined
+        || options.buildFlavor !== CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN.buildFlavor
+      ) return undefined
       return new CodexDesktopAgentSessionTransport(bridge as Required<ElectronBridge>)
     } catch {
       return undefined
@@ -114,7 +121,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
   }
 
   async create(input: { readonly sessionId: string; readonly options: AgentOptions }): Promise<
-    { readonly status: 'accepted'; readonly detail: { readonly kind: 'host'; readonly ref: string } }
+    | { readonly status: 'accepted'; readonly detail: { readonly kind: 'host'; readonly ref: string } }
     | { readonly status: 'unavailable'; readonly code: 'host-unavailable' | 'unsupported' }
   > {
     if (this.disposed || this.connectionReplaced) return { status: 'unavailable', code: 'host-unavailable' }
@@ -124,7 +131,9 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     try {
       const result = object(await this.request('thread/start', { model, cwd: '' }))
       const threadId = text(object(result?.thread)?.id)
-      if (threadId === undefined || this.byThread.has(threadId)) return { status: 'unavailable', code: 'host-unavailable' }
+      if (threadId === undefined || this.byThread.has(threadId)) {
+        return { status: 'unavailable', code: 'host-unavailable' }
+      }
       const session: NativeSession = { sessionId: input.sessionId, threadId, nextTurn: 0, queue: [], status: 'idle' }
       this.sessions.set(input.sessionId, session)
       this.byThread.set(threadId, session)
@@ -135,12 +144,13 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
   }
 
   async resume(input: { readonly sessionId: string }): Promise<
-    { readonly status: 'accepted'; readonly detail: { readonly kind: 'host'; readonly ref: string } }
+    | { readonly status: 'accepted'; readonly detail: { readonly kind: 'host'; readonly ref: string } }
     | { readonly status: 'unavailable'; readonly code: 'host-unavailable' | 'unsupported' }
   > {
     if (this.disposed || this.connectionReplaced) return { status: 'unavailable', code: 'host-unavailable' }
     const known = this.sessions.get(input.sessionId)
-    const threadId = known?.threadId ?? (input.sessionId.startsWith('codex-thread:') ? input.sessionId.slice('codex-thread:'.length) : input.sessionId)
+    const threadId = known?.threadId
+      ?? (input.sessionId.startsWith('codex-thread:') ? input.sessionId.slice('codex-thread:'.length) : input.sessionId)
     try {
       const result = object(await this.request('thread/resume', { threadId }))
       const resumed = text(object(result?.thread)?.id)
@@ -173,7 +183,9 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     return await this.startTurn(session, input.message)
   }
 
-  async discard(input: { readonly sessionId: string; readonly messageId: string }): Promise<'accepted' | 'not-found' | 'already-claimed' | 'unavailable'> {
+  async discard(
+    input: { readonly sessionId: string; readonly messageId: string },
+  ): Promise<'accepted' | 'not-found' | 'already-claimed' | 'unavailable'> {
     const session = this.sessions.get(input.sessionId)
     if (this.disposed || session === undefined) return 'unavailable'
     const index = session.queue.findIndex(item => item.message.id === input.messageId)
@@ -185,7 +197,9 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     return 'not-found'
   }
 
-  async cancel(input: { readonly sessionId: string; readonly keepInbox: boolean }): Promise<'accepted' | 'unavailable'> {
+  async cancel(
+    input: { readonly sessionId: string; readonly keepInbox: boolean },
+  ): Promise<'accepted' | 'unavailable'> {
     const session = this.sessions.get(input.sessionId)
     const active = session?.active
     if (this.disposed || session === undefined || active === undefined || active.terminal) return 'unavailable'
@@ -244,14 +258,19 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     session.starting = { ordinal, message: clone(message) }
     this.emitStatus({ sessionId: session.sessionId, status: 'running' })
     try {
-      const result = object(await this.request('turn/start', {
-        threadId: session.threadId, input, clientUserMessageId: message.id,
-      }))
+      const result = object(
+        await this.request('turn/start', {
+          threadId: session.threadId,
+          input,
+          clientUserMessageId: message.id,
+        }),
+      )
       const turnId = text(object(result?.turn)?.id)
       if (turnId === undefined) throw new Error('turn/start returned no turn id')
       const observed = session.active as ActiveTurn | undefined
-      if (observed === undefined) session.active = { id: turnId, ordinal, terminal: false, assistant: new Map(), emittedTools: new Set() }
-      else if (observed.id !== turnId) throw new Error('turn/start notification did not match response')
+      if (observed === undefined) {
+        session.active = { id: turnId, ordinal, terminal: false, assistant: new Map(), emittedTools: new Set() }
+      } else if (observed.id !== turnId) throw new Error('turn/start notification did not match response')
       delete session.starting
       this.deferClaim(session.sessionId, message.id, ordinal)
       return 'accepted'
@@ -268,7 +287,10 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     if (input === undefined || active === undefined || active.terminal) return 'unavailable'
     try {
       await this.request('turn/steer', {
-        threadId: session.threadId, expectedTurnId: active.id, input, clientUserMessageId: message.id,
+        threadId: session.threadId,
+        expectedTurnId: active.id,
+        input,
+        clientUserMessageId: message.id,
       })
       this.deferClaim(session.sessionId, message.id, active.ordinal)
       return 'accepted'
@@ -372,8 +394,9 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     if (pending === undefined) return
     this.pending.delete(requestId)
     clearTimeout(pending.timer)
-    if (message?.error !== undefined) pending.reject(new Error(text(object(message.error)?.message) ?? 'Codex Desktop request failed'))
-    else pending.resolve(message?.result)
+    if (message?.error !== undefined) {
+      pending.reject(new Error(text(object(message.error)?.message) ?? 'Codex Desktop request failed'))
+    } else pending.resolve(message?.result)
   }
 
   private receiveNotification(message: Record<string, unknown> | undefined): void {
@@ -401,9 +424,15 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       const delta = typeof params.delta === 'string' ? params.delta : undefined
       if (itemId === undefined || delta === undefined) return
       active.assistant.set(itemId, (active.assistant.get(itemId) ?? '') + delta)
-      this.emit({ sessionId: session.sessionId, type: 'assistant/chunk', data: {
-        turn: active.ordinal, step: 1, chunk: { type: 'text-delta', index: 0, text: delta },
-      } })
+      this.emit({
+        sessionId: session.sessionId,
+        type: 'assistant/chunk',
+        data: {
+          turn: active.ordinal,
+          step: 1,
+          chunk: { type: 'text-delta', index: 0, text: delta },
+        },
+      })
       return
     }
     if (method === 'item/completed' || method === 'item/started') {
@@ -413,7 +442,12 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     if (method === 'turn/completed') this.completeTurn(session, active, nativeTurn)
   }
 
-  private observeItem(session: NativeSession, active: ActiveTurn, item: Record<string, unknown> | undefined, completed: boolean): void {
+  private observeItem(
+    session: NativeSession,
+    active: ActiveTurn,
+    item: Record<string, unknown> | undefined,
+    completed: boolean,
+  ): void {
     if (item === undefined) return
     const kind = text(item?.type)
     const itemId = text(item?.id)
@@ -422,51 +456,102 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       const content = text(item?.text) ?? active.assistant.get(itemId) ?? ''
       active.assistant.delete(itemId)
       const block = { type: 'text' as const, text: content }
-      this.emit({ sessionId: session.sessionId, type: 'assistant/message', data: {
-        turn: active.ordinal, step: 1,
-        message: {
-          id: itemId, role: 'assistant', content: [block],
-          source: { kind: 'model', provider: 'codex-desktop', model: 'current-thread' },
+      this.emit({
+        sessionId: session.sessionId,
+        type: 'assistant/message',
+        data: {
+          turn: active.ordinal,
+          step: 1,
+          message: {
+            id: itemId,
+            role: 'assistant',
+            content: [block],
+            source: { kind: 'model', provider: 'codex-desktop', model: 'current-thread' },
+          },
         },
-      } })
+      })
       return
     }
     const tool = this.toolObservation(item, completed)
     if (tool === undefined) return
     if (!active.emittedTools.has(itemId)) {
       active.emittedTools.add(itemId)
-      this.emit({ sessionId: session.sessionId, type: 'tool/call', data: {
-        turn: active.ordinal, step: 1, callId: itemId, name: tool.name, arguments: tool.arguments,
-      } })
+      this.emit({
+        sessionId: session.sessionId,
+        type: 'tool/call',
+        data: {
+          turn: active.ordinal,
+          step: 1,
+          callId: itemId,
+          name: tool.name,
+          arguments: tool.arguments,
+        },
+      })
     }
-    if (completed) this.emit({ sessionId: session.sessionId, type: 'tool/result', data: {
-      turn: active.ordinal, step: 1,
-      message: {
-        id: `tool-result:${itemId}`, role: 'user',
-        content: [{ type: 'tool-result', toolCallId: itemId, content: [{ type: 'text', text: tool.result }], ...(tool.error ? { isError: true } : {}) }],
-        source: { kind: 'tool', callId: itemId },
-      },
-      ...(tool.error ? { error: { name: tool.name, code: 'native-tool-failed' } } : {}),
-      meta: { nativeItemType: text(item.type) ?? 'unknown' },
-    } })
+    if (completed) {
+      this.emit({
+        sessionId: session.sessionId,
+        type: 'tool/result',
+        data: {
+          turn: active.ordinal,
+          step: 1,
+          message: {
+            id: `tool-result:${itemId}`,
+            role: 'user',
+            content: [{
+              type: 'tool-result',
+              toolCallId: itemId,
+              content: [{ type: 'text', text: tool.result }],
+              ...(tool.error ? { isError: true } : {}),
+            }],
+            source: { kind: 'tool', callId: itemId },
+          },
+          ...(tool.error ? { error: { name: tool.name, code: 'native-tool-failed' } } : {}),
+          meta: { nativeItemType: text(item.type) ?? 'unknown' },
+        },
+      })
+    }
   }
 
-  private toolObservation(item: Record<string, unknown>, completed: boolean): { name: string; arguments: string; result: string; error: boolean } | undefined {
+  private toolObservation(
+    item: Record<string, unknown>,
+    completed: boolean,
+  ): { name: string; arguments: string; result: string; error: boolean } | undefined {
     const kind = text(item.type)
     if (kind === 'commandExecution') {
       const command = typeof item.command === 'string' ? item.command : JSON.stringify(item.command ?? '')
-      return { name: 'codex.commandExecution', arguments: JSON.stringify({ command }), result: completed ? text(item.aggregatedOutput) ?? '' : '', error: item.status === 'failed' }
+      return {
+        name: 'codex.commandExecution',
+        arguments: JSON.stringify({ command }),
+        result: completed ? text(item.aggregatedOutput) ?? '' : '',
+        error: item.status === 'failed',
+      }
     }
     if (kind === 'fileChange') {
-      return { name: 'codex.fileChange', arguments: JSON.stringify(item.changes ?? []), result: completed ? String(item.status ?? 'completed') : '', error: item.status === 'failed' }
+      return {
+        name: 'codex.fileChange',
+        arguments: JSON.stringify(item.changes ?? []),
+        result: completed ? String(item.status ?? 'completed') : '',
+        error: item.status === 'failed',
+      }
     }
     if (kind === 'mcpToolCall') {
       const server = text(item.server) ?? 'mcp'
       const tool = text(item.tool) ?? 'tool'
-      return { name: `${server}.${tool}`, arguments: JSON.stringify(item.arguments ?? {}), result: completed ? JSON.stringify(item.result ?? item.error ?? null) : '', error: item.error !== undefined || item.status === 'failed' }
+      return {
+        name: `${server}.${tool}`,
+        arguments: JSON.stringify(item.arguments ?? {}),
+        result: completed ? JSON.stringify(item.result ?? item.error ?? null) : '',
+        error: item.error !== undefined || item.status === 'failed',
+      }
     }
     if (kind === 'dynamicToolCall') {
-      return { name: text(item.tool) ?? 'codex.dynamicTool', arguments: JSON.stringify(item.arguments ?? {}), result: completed ? JSON.stringify(item.content ?? item.error ?? null) : '', error: item.error !== undefined || item.status === 'failed' }
+      return {
+        name: text(item.tool) ?? 'codex.dynamicTool',
+        arguments: JSON.stringify(item.arguments ?? {}),
+        result: completed ? JSON.stringify(item.content ?? item.error ?? null) : '',
+        error: item.error !== undefined || item.status === 'failed',
+      }
     }
     return undefined
   }
@@ -479,8 +564,14 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     const reason = status === 'completed'
       ? { kind: 'completed' as const }
       : status === 'interrupted'
-        ? { kind: 'interrupted' as const }
-        : { kind: 'error' as const, error: { message: text(error?.message) ?? 'Codex Desktop turn failed', code: text(error?.code) ?? status ?? 'turn-failed' } }
+      ? { kind: 'interrupted' as const }
+      : {
+        kind: 'error' as const,
+        error: {
+          message: text(error?.message) ?? 'Codex Desktop turn failed',
+          code: text(error?.code) ?? status ?? 'turn-failed',
+        },
+      }
     this.emit({ sessionId: session.sessionId, type: 'step/end', data: { turn: active.ordinal, step: 1 } })
     this.emit({ sessionId: session.sessionId, type: 'turn/end', data: { turn: active.ordinal, reason } })
     if (session.active === active) delete session.active
@@ -507,22 +598,33 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     const params = object(request?.params)
     const threadId = text(params?.threadId)
     const session = threadId === undefined ? undefined : this.byThread.get(threadId)
-    if (method === undefined || requestId === undefined || params === undefined || session === undefined || !this.isApprovalMethod(method)) return
+    if (
+      method === undefined || requestId === undefined || params === undefined || session === undefined
+      || !this.isApprovalMethod(method)
+    ) return
     event.stopImmediatePropagation()
     event.preventDefault()
     void this.answerNativeApproval(requestId, method, params, session)
   }
 
-  private async answerNativeApproval(requestId: string, method: string, params: Record<string, unknown>, session: NativeSession): Promise<void> {
+  private async answerNativeApproval(
+    requestId: string,
+    method: string,
+    params: Record<string, unknown>,
+    session: NativeSession,
+  ): Promise<void> {
     const itemId = text(params.itemId)
     const toolName = method.includes('commandExecution') || method === 'execCommandApproval'
       ? 'codex.commandExecution'
       : method.includes('fileChange') || method === 'applyPatchApproval'
-        ? 'codex.fileChange'
-        : method.includes('permissions') ? 'codex.permissions' : 'codex.approval'
+      ? 'codex.fileChange'
+      : method.includes('permissions')
+      ? 'codex.permissions'
+      : 'codex.approval'
     let outcome: ApprovalOutcome = 'unavailable'
     const request: CordisXDriverApprovalRequest = {
-      sessionId: session.sessionId, toolName,
+      sessionId: session.sessionId,
+      toolName,
       ...(itemId === undefined ? {} : { callId: itemId }),
       ...(text(params.reason) === undefined ? {} : { reason: text(params.reason)! }),
     }
@@ -537,8 +639,10 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     const decision = outcome === 'allowed-once' ? 'accept' : outcome === 'cancelled' ? 'cancel' : 'decline'
     try {
       await this.bridge.sendMessageFromView({
-        type: 'mcp-response', hostId: CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN.hostId,
-        requestMethod: method, response: { id: requestId, result: { decision } },
+        type: 'mcp-response',
+        hostId: CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN.hostId,
+        requestMethod: method,
+        response: { id: requestId, result: { decision } },
       })
     } catch {
       // The Session authority already records fail-closed unavailable/denied.
@@ -567,11 +671,23 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
 }
 
 export class UnavailableAgentSessionTransport implements CordisXPrivateAgentDriver {
-  async create(): Promise<{ readonly status: 'unavailable'; readonly code: 'host-unavailable' }> { return { status: 'unavailable', code: 'host-unavailable' } }
-  async resume(): Promise<{ readonly status: 'unavailable'; readonly code: 'host-unavailable' }> { return { status: 'unavailable', code: 'host-unavailable' } }
-  async submit(): Promise<'unavailable'> { return 'unavailable' }
-  async discard(): Promise<'unavailable'> { return 'unavailable' }
-  async cancel(): Promise<'unavailable'> { return 'unavailable' }
-  onReplacement(): () => void { return () => {} }
+  async create(): Promise<{ readonly status: 'unavailable'; readonly code: 'host-unavailable' }> {
+    return { status: 'unavailable', code: 'host-unavailable' }
+  }
+  async resume(): Promise<{ readonly status: 'unavailable'; readonly code: 'host-unavailable' }> {
+    return { status: 'unavailable', code: 'host-unavailable' }
+  }
+  async submit(): Promise<'unavailable'> {
+    return 'unavailable'
+  }
+  async discard(): Promise<'unavailable'> {
+    return 'unavailable'
+  }
+  async cancel(): Promise<'unavailable'> {
+    return 'unavailable'
+  }
+  onReplacement(): () => void {
+    return () => {}
+  }
   dispose(): void {}
 }

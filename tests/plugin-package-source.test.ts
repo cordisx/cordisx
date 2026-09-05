@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import os from 'node:os'
 import path from 'node:path'
@@ -7,11 +7,11 @@ import { c as createTar } from 'tar'
 import { afterEach, describe, expect, it } from 'vitest'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../packages/cli/src/platform-contracts.js'
 import {
-  PackageLifecycleAuthority,
   createHostPermissionReviewAuthority,
   hashPackageTree,
-  stagePluginPackageSourceV1,
   type HostResolvedRuntimeManifest,
+  PackageLifecycleAuthority,
+  stagePluginPackageSourceV1,
 } from '../packages/cli/src/launcher/packages/index.js'
 import { loadStagedPluginPackage, removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import {
@@ -19,7 +19,8 @@ import {
   type CordisXPluginActivationRecordV1,
 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 
-const packageSchema = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v2.schema.json'
+const packageSchema =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v2.schema.json'
 const temporary = new Set<string>()
 
 afterEach(async () => {
@@ -47,21 +48,30 @@ async function fixture(id = 'source-fixture') {
   const runtimeText = `${JSON.stringify(runtime, null, 2)}\n`
   await writeFile(path.join(source, 'runtime.json'), runtimeText)
   await writeFile(path.join(source, 'src/index.ts'), 'export function apply() {}\n')
-  await writeFile(path.join(source, 'cordisx-package.json'), `${JSON.stringify({
-    $schema: packageSchema,
-    schemaVersion: 2,
-    id,
-    version: '1.0.0',
-    entry: './src/index.ts',
-    distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
-    compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V1] },
-    dependencies: [],
-    runtimeManifest: {
-      path: './runtime.json',
-      schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
-      digest: `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`,
-    },
-  }, null, 2)}\n`)
+  await writeFile(
+    path.join(source, 'cordisx-package.json'),
+    `${
+      JSON.stringify(
+        {
+          $schema: packageSchema,
+          schemaVersion: 2,
+          id,
+          version: '1.0.0',
+          entry: './src/index.ts',
+          distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
+          compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V1] },
+          dependencies: [],
+          runtimeManifest: {
+            path: './runtime.json',
+            schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+            digest: `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`,
+          },
+        },
+        null,
+        2,
+      )
+    }\n`,
+  )
   return { root, homeDir, source, runtime }
 }
 
@@ -97,7 +107,10 @@ describe('formal source-v1 and package-v2 edge adapter', () => {
       }, { homeDir, runtimeValidators })
       expect(staged.manifest).toMatchObject({ id: 'source-fixture', version: '1.0.0' })
       expect(await loadStagedPluginPackage(homeDir, staged.digest)).toMatchObject({ digest: staged.digest })
-      const stored = await readFile(path.join(homeDir, 'packages', 'sha256', staged.digest.slice(7), 'manifest.json'), 'utf8')
+      const stored = await readFile(
+        path.join(homeDir, 'packages', 'sha256', staged.digest.slice(7), 'manifest.json'),
+        'utf8',
+      )
       expect(stored).toContain('cordisx.launcher-staged-package/v3')
       expect(stored).not.toContain('"capabilities"')
       await removeStagedPluginPackage(homeDir, staged.digest)
@@ -171,7 +184,9 @@ describe('formal source-v1 and package-v2 edge adapter', () => {
       location: pathToFileURL(source).href,
     }, { homeDir, runtimeValidators })
     const permissionAuthority = createHostPermissionReviewAuthority(
-      async () => { throw new Error('permission review is not expected') },
+      async () => {
+        throw new Error('permission review is not expected')
+      },
       async () => undefined,
     )
     const options = {

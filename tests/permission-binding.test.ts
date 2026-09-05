@@ -25,11 +25,13 @@ describe('renderer permission persistence binding', () => {
     let payload: Record<string, unknown> | undefined
     globals.__cordisxPermissionPolicyRequestV1 = (text) => {
       payload = JSON.parse(text) as Record<string, unknown>
-      queueMicrotask(() => globals.__cordisxPermissionPolicyReceiveV1?.(JSON.stringify({
-        requestId: payload?.requestId,
-        ok: true,
-        value: [record],
-      })))
+      queueMicrotask(() =>
+        globals.__cordisxPermissionPolicyReceiveV1?.(JSON.stringify({
+          requestId: payload?.requestId,
+          ok: true,
+          value: [record],
+        }))
+      )
     }
     const store = BindingPermissionPolicyStore.connect(token, [])
     try {
@@ -46,14 +48,20 @@ describe('renderer permission persistence binding', () => {
     const allow = createPermissionPolicyRecord({
       profileId: 'work',
       identity: { source: 'file:///plugins/demo.js', id: 'demo' },
-      capability: 'models.read', scope: {}, policy: 'allow',
+      capability: 'models.read',
+      scope: {},
+      policy: 'allow',
     })
     const deny = { ...allow, policy: 'deny' as const }
     globals.__cordisxPermissionPolicyRequestV1 = (text) => {
       const payload = JSON.parse(text) as { requestId: string }
-      queueMicrotask(() => globals.__cordisxPermissionPolicyReceiveV1?.(JSON.stringify({
-        requestId: payload.requestId, ok: true, value: [deny],
-      })))
+      queueMicrotask(() =>
+        globals.__cordisxPermissionPolicyReceiveV1?.(JSON.stringify({
+          requestId: payload.requestId,
+          ok: true,
+          value: [deny],
+        }))
+      )
     }
     const store = BindingPermissionPolicyStore.connect('token', [])
     try {

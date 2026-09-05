@@ -107,7 +107,10 @@ export function unwrapTDesignChangeValue<Value>(payload: unknown): Value | undef
   return payload as Value | undefined
 }
 
-function normalizeTDesignProps(element: TDesignElement, props: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+function normalizeTDesignProps(
+  element: TDesignElement,
+  props: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
   const change = props.onChange
   if (typeof change !== 'function') return props
   return {
@@ -141,36 +144,38 @@ function normalizeTDesignProps(element: TDesignElement, props: Readonly<Record<s
   }
 }
 
-const HOST_TDESIGN_TOKENS = Object.freeze({
-  '--td-brand-color': 'var(--cx-primary)',
-  '--td-brand-color-hover': 'color-mix(in srgb, var(--cx-primary) 88%, var(--cx-text))',
-  '--td-brand-color-active': 'color-mix(in srgb, var(--cx-primary) 78%, var(--cx-text))',
-  '--td-brand-color-disabled': 'color-mix(in srgb, var(--cx-primary) 45%, var(--cx-surface))',
-  '--td-brand-color-light': 'color-mix(in srgb, var(--cx-primary) 12%, var(--cx-surface))',
-  '--td-brand-color-light-hover': 'color-mix(in srgb, var(--cx-primary) 20%, var(--cx-surface))',
-  '--td-brand-color-focus': 'color-mix(in srgb, var(--cx-focus) 26%, transparent)',
-  '--td-text-color-primary': 'var(--cx-text)',
-  '--td-text-color-secondary': 'var(--cx-muted)',
-  '--td-text-color-placeholder': 'color-mix(in srgb, var(--cx-muted) 78%, transparent)',
-  '--td-text-color-disabled': 'color-mix(in srgb, var(--cx-text) 68%, var(--cx-surface))',
-  '--td-text-color-anti': 'var(--cx-primary-text)',
-  '--td-bg-color-container': 'var(--cx-surface)',
-  '--td-bg-color-container-hover': 'var(--cx-hover)',
-  '--td-bg-color-container-active': 'var(--cx-pressed)',
-  '--td-bg-color-container-select': 'var(--cx-pressed)',
-  '--td-bg-color-secondarycontainer': 'var(--cx-surface-raised)',
-  '--td-bg-color-secondarycontainer-hover': 'var(--cx-hover)',
-  '--td-bg-color-secondarycontainer-active': 'var(--cx-pressed)',
-  '--td-bg-color-component': 'var(--cx-surface-raised)',
-  '--td-bg-color-specialcomponent': 'var(--cx-surface-raised)',
-  '--td-bg-color-component-hover': 'var(--cx-hover)',
-  '--td-bg-color-component-active': 'var(--cx-pressed)',
-  '--td-bg-color-component-disabled': 'color-mix(in srgb, var(--cx-surface-raised) 70%, var(--cx-muted))',
-  '--td-border-level-2-color': 'var(--cx-border)',
-  '--td-error-color': 'var(--cx-danger)',
-  '--td-warning-color': 'var(--cx-warning, var(--cx-primary))',
-  '--td-success-color': 'var(--cx-success, var(--cx-primary))',
-} satisfies Readonly<Record<string, string>>)
+const HOST_TDESIGN_TOKENS = Object.freeze(
+  {
+    '--td-brand-color': 'var(--cx-primary)',
+    '--td-brand-color-hover': 'color-mix(in srgb, var(--cx-primary) 88%, var(--cx-text))',
+    '--td-brand-color-active': 'color-mix(in srgb, var(--cx-primary) 78%, var(--cx-text))',
+    '--td-brand-color-disabled': 'color-mix(in srgb, var(--cx-primary) 45%, var(--cx-surface))',
+    '--td-brand-color-light': 'color-mix(in srgb, var(--cx-primary) 12%, var(--cx-surface))',
+    '--td-brand-color-light-hover': 'color-mix(in srgb, var(--cx-primary) 20%, var(--cx-surface))',
+    '--td-brand-color-focus': 'color-mix(in srgb, var(--cx-focus) 26%, transparent)',
+    '--td-text-color-primary': 'var(--cx-text)',
+    '--td-text-color-secondary': 'var(--cx-muted)',
+    '--td-text-color-placeholder': 'color-mix(in srgb, var(--cx-muted) 78%, transparent)',
+    '--td-text-color-disabled': 'color-mix(in srgb, var(--cx-text) 68%, var(--cx-surface))',
+    '--td-text-color-anti': 'var(--cx-primary-text)',
+    '--td-bg-color-container': 'var(--cx-surface)',
+    '--td-bg-color-container-hover': 'var(--cx-hover)',
+    '--td-bg-color-container-active': 'var(--cx-pressed)',
+    '--td-bg-color-container-select': 'var(--cx-pressed)',
+    '--td-bg-color-secondarycontainer': 'var(--cx-surface-raised)',
+    '--td-bg-color-secondarycontainer-hover': 'var(--cx-hover)',
+    '--td-bg-color-secondarycontainer-active': 'var(--cx-pressed)',
+    '--td-bg-color-component': 'var(--cx-surface-raised)',
+    '--td-bg-color-specialcomponent': 'var(--cx-surface-raised)',
+    '--td-bg-color-component-hover': 'var(--cx-hover)',
+    '--td-bg-color-component-active': 'var(--cx-pressed)',
+    '--td-bg-color-component-disabled': 'color-mix(in srgb, var(--cx-surface-raised) 70%, var(--cx-muted))',
+    '--td-border-level-2-color': 'var(--cx-border)',
+    '--td-error-color': 'var(--cx-danger)',
+    '--td-warning-color': 'var(--cx-warning, var(--cx-primary))',
+    '--td-success-color': 'var(--cx-success, var(--cx-primary))',
+  } satisfies Readonly<Record<string, string>>,
+)
 
 function ensureInstalled(document: Document): void {
   if (installed || !canInstall(document)) return
@@ -290,7 +295,10 @@ export function bindTDesignTextareaRows(element: TDesignElement, rows: number): 
       observer?.observe(native, { attributes: true, attributeFilter: ['style', 'rows'] })
     }
     if (native.rows !== rows) native.rows = rows
-    if (native.style.getPropertyValue('min-height') !== minimum || native.style.getPropertyPriority('min-height') !== 'important') {
+    if (
+      native.style.getPropertyValue('min-height') !== minimum
+      || native.style.getPropertyPriority('min-height') !== 'important'
+    ) {
       native.style.setProperty('min-height', minimum, 'important')
     }
   }
@@ -493,8 +501,9 @@ export function createTDesignSelect<Value>(
       option.setAttribute('aria-disabled', String(options[index]?.disabled === true))
     })
     listbox.setAttribute('aria-busy', String(element.getAttribute('aria-busy') === 'true'))
-    if (expanded && renderedOptions[active] !== undefined) element.setAttribute('aria-activedescendant', renderedOptions[active]!.id)
-    else element.removeAttribute('aria-activedescendant')
+    if (expanded && renderedOptions[active] !== undefined) {
+      element.setAttribute('aria-activedescendant', renderedOptions[active]!.id)
+    } else element.removeAttribute('aria-activedescendant')
   }
 
   const positionListbox = (): void => {
@@ -586,7 +595,10 @@ export function createTDesignSelect<Value>(
     element.style.setProperty('--cxf-select-value-icon-dark', `url("${option.darkIconUri ?? option.iconUri}")`)
     element.style.setProperty('--cxf-select-value-icon-size', `${option.iconSize ?? 20}px`)
     if (input === undefined) return
-    input.style.setProperty('background-image', 'var(--cxf-select-value-icon-current, var(--cxf-select-value-icon-light))')
+    input.style.setProperty(
+      'background-image',
+      'var(--cxf-select-value-icon-current, var(--cxf-select-value-icon-light))',
+    )
     input.style.setProperty('background-position', 'left center')
     input.style.setProperty('background-repeat', 'no-repeat')
     input.style.setProperty('background-size', 'var(--cxf-select-value-icon-size) var(--cxf-select-value-icon-size)')
@@ -610,7 +622,11 @@ export function createTDesignSelect<Value>(
 
   const update = (): void => {
     setTDesignProps(element, {
-      options: options.map(option => ({ label: option.label, value: option.value, disabled: option.disabled === true })),
+      options: options.map(option => ({
+        label: option.label,
+        value: option.value,
+        disabled: option.disabled === true,
+      })),
       value: selected,
       placeholder: config.placeholder,
       disabled: config.disabled === true,
@@ -718,7 +734,9 @@ export function createTDesignSelect<Value>(
     dispose()
   })
   observer?.observe(document.documentElement, { childList: true, subtree: true })
-  document.defaultView?.queueMicrotask(() => { if (element.isConnected) connectedOnce = true })
+  document.defaultView?.queueMicrotask(() => {
+    if (element.isConnected) connectedOnce = true
+  })
   const abandonIfNeverMounted = (): void => {
     if (!element.isConnected && !connectedOnce) dispose()
   }
@@ -771,8 +789,12 @@ export function createTDesignSelect<Value>(
     if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
       typeahead += event.key.toLocaleLowerCase()
       if (typeaheadTimer !== undefined) document.defaultView?.clearTimeout(typeaheadTimer)
-      typeaheadTimer = document.defaultView?.setTimeout(() => { typeahead = '' }, 650)
-      const match = options.findIndex(option => !option.disabled && option.label.toLocaleLowerCase().startsWith(typeahead))
+      typeaheadTimer = document.defaultView?.setTimeout(() => {
+        typeahead = ''
+      }, 650)
+      const match = options.findIndex(option =>
+        !option.disabled && option.label.toLocaleLowerCase().startsWith(typeahead)
+      )
       if (match >= 0) {
         event.preventDefault()
         expanded = true
@@ -861,7 +883,9 @@ export function createTDesignMultiSelect<Value>(
     const width = Math.min(Math.max(rect.width, 176), view.innerWidth - gutter * 2)
     listbox.style.inlineSize = `${width}px`
     listbox.style.maxBlockSize = `${Math.max(96, Math.min(288, (openAbove ? above : below) - gutter))}px`
-    listbox.style.insetInlineStart = `${Math.min(Math.max(gutter, rect.left), Math.max(gutter, view.innerWidth - width - gutter))}px`
+    listbox.style.insetInlineStart = `${
+      Math.min(Math.max(gutter, rect.left), Math.max(gutter, view.innerWidth - width - gutter))
+    }px`
     listbox.style.insetBlockStart = openAbove
       ? `${Math.max(gutter, rect.top - Math.min(listbox.scrollHeight, Math.max(96, above - gutter)) - 4)}px`
       : `${Math.min(view.innerHeight - gutter, rect.bottom + 4)}px`
@@ -887,7 +911,11 @@ export function createTDesignMultiSelect<Value>(
   }
   const update = (): void => {
     setTDesignProps(element, {
-      options: options.map(option => ({ label: option.label, value: option.value, disabled: option.disabled === true })),
+      options: options.map(option => ({
+        label: option.label,
+        value: option.value,
+        disabled: option.disabled === true,
+      })),
       value: selected,
       multiple: true,
       placeholder: config.placeholder,
@@ -900,9 +928,16 @@ export function createTDesignMultiSelect<Value>(
         config.onChange(selected)
         update()
       },
-      onClear: () => { selected = []; config.onChange(selected); update() },
+      onClear: () => {
+        selected = []
+        config.onChange(selected)
+        update()
+      },
       onPopupVisibleChange: (visible: boolean) => {
-        if (!config.readonly && !config.disabled && visible) { expanded = true; update() }
+        if (!config.readonly && !config.disabled && visible) {
+          expanded = true
+          update()
+        }
       },
     })
     element.dataset.selectedValues = JSON.stringify(selected)
@@ -914,10 +949,12 @@ export function createTDesignMultiSelect<Value>(
       option.setAttribute('aria-selected', String(isSelected))
       setTDesignProps(option, { selected: isSelected, multiple: true })
     })
-    if (expanded) document.defaultView?.requestAnimationFrame(() => {
-      positionListbox()
-      listbox.querySelector<HTMLElement>('t-option[data-active="true"]')?.scrollIntoView?.({ block: 'nearest' })
-    })
+    if (expanded) {
+      document.defaultView?.requestAnimationFrame(() => {
+        positionListbox()
+        listbox.querySelector<HTMLElement>('t-option[data-active="true"]')?.scrollIntoView?.({ block: 'nearest' })
+      })
+    }
     scheduleAccessibilityPatch(document, patchAccessibility)
   }
   const choose = (index: number): void => {
@@ -934,8 +971,18 @@ export function createTDesignMultiSelect<Value>(
     rendered.setAttribute('role', 'option')
     rendered.tabIndex = -1
     rendered.textContent = option.label
-    setTDesignProps(rendered, { label: option.label, content: option.label, value: String(index), disabled: option.disabled === true, selected: selectedAt(index), multiple: true })
-    rendered.addEventListener('click', event => { event.preventDefault(); choose(index) })
+    setTDesignProps(rendered, {
+      label: option.label,
+      content: option.label,
+      value: String(index),
+      disabled: option.disabled === true,
+      selected: selectedAt(index),
+      multiple: true,
+    })
+    rendered.addEventListener('click', event => {
+      event.preventDefault()
+      choose(index)
+    })
     listbox.append(rendered)
   })
   let disposed = false
@@ -951,7 +998,10 @@ export function createTDesignMultiSelect<Value>(
     listbox.remove()
   }
   const closeFromOutside = (event: Event): void => {
-    if (!element.isConnected) { dispose(); return }
+    if (!element.isConnected) {
+      dispose()
+      return
+    }
     if (!expanded) return
     const path = event.composedPath()
     if (path.includes(element) || path.includes(listbox)) return
@@ -963,41 +1013,84 @@ export function createTDesignMultiSelect<Value>(
   document.defaultView?.addEventListener('scroll', positionListbox, true)
   let connectedOnce = false
   observer = document.defaultView === null ? undefined : new document.defaultView.MutationObserver(() => {
-    if (element.isConnected) { connectedOnce = true; return }
+    if (element.isConnected) {
+      connectedOnce = true
+      return
+    }
     if (connectedOnce) dispose()
   })
   observer?.observe(document.documentElement, { childList: true, subtree: true })
-  const abandon = (): void => { if (!element.isConnected && !connectedOnce) dispose() }
-  if (typeof document.defaultView?.requestAnimationFrame === 'function') document.defaultView.requestAnimationFrame(abandon)
-  else document.defaultView?.setTimeout(abandon, 0)
+  const abandon = (): void => {
+    if (!element.isConnected && !connectedOnce) dispose()
+  }
+  if (typeof document.defaultView?.requestAnimationFrame === 'function') {
+    document.defaultView.requestAnimationFrame(abandon)
+  } else document.defaultView?.setTimeout(abandon, 0)
   element.addEventListener('keydown', event => {
     if (config.disabled || config.readonly) return
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault(); expanded = true
-      active = seek(active + (event.key === 'ArrowDown' ? 1 : -1), event.key === 'ArrowDown' ? 1 : -1); update(); return
+      event.preventDefault()
+      expanded = true
+      active = seek(active + (event.key === 'ArrowDown' ? 1 : -1), event.key === 'ArrowDown' ? 1 : -1)
+      update()
+      return
     }
     if (event.key === 'Home' || event.key === 'End') {
-      event.preventDefault(); expanded = true
-      active = seek(event.key === 'Home' ? 0 : options.length - 1, event.key === 'Home' ? 1 : -1); update(); return
+      event.preventDefault()
+      expanded = true
+      active = seek(event.key === 'Home' ? 0 : options.length - 1, event.key === 'Home' ? 1 : -1)
+      update()
+      return
     }
     if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault(); if (!expanded) { expanded = true; update() } else choose(active); return
+      event.preventDefault()
+      if (!expanded) {
+        expanded = true
+        update()
+      } else choose(active)
+      return
     }
-    if (event.key === 'Escape' && expanded) { event.preventDefault(); expanded = false; update(); element.focus(); return }
+    if (event.key === 'Escape' && expanded) {
+      event.preventDefault()
+      expanded = false
+      update()
+      element.focus()
+      return
+    }
     if ((event.key === 'Backspace' || event.key === 'Delete') && config.clearable && selected.length > 0) {
-      event.preventDefault(); selected = []; config.onChange(selected); update(); return
+      event.preventDefault()
+      selected = []
+      config.onChange(selected)
+      update()
+      return
     }
     if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
       typeahead += event.key.toLocaleLowerCase()
       if (typeaheadTimer !== undefined) document.defaultView?.clearTimeout(typeaheadTimer)
-      typeaheadTimer = document.defaultView?.setTimeout(() => { typeahead = '' }, 650)
-      const match = options.findIndex(option => !option.disabled && option.label.toLocaleLowerCase().startsWith(typeahead))
-      if (match >= 0) { event.preventDefault(); expanded = true; active = match; update() }
+      typeaheadTimer = document.defaultView?.setTimeout(() => {
+        typeahead = ''
+      }, 650)
+      const match = options.findIndex(option =>
+        !option.disabled && option.label.toLocaleLowerCase().startsWith(typeahead)
+      )
+      if (match >= 0) {
+        event.preventDefault()
+        expanded = true
+        active = match
+        update()
+      }
     }
   })
   Object.defineProperty(element, 'selectedValues', { get: () => selected })
-  element.setSelectedValues = (value: readonly Value[], notify = false): void => { selected = [...value]; if (notify) config.onChange(selected); update() }
-  element.setBusy = (busy: boolean): void => { setTDesignProps(element, { disabled: busy || config.disabled === true, loading: busy }); element.setAttribute('aria-busy', String(busy)) }
+  element.setSelectedValues = (value: readonly Value[], notify = false): void => {
+    selected = [...value]
+    if (notify) config.onChange(selected)
+    update()
+  }
+  element.setBusy = (busy: boolean): void => {
+    setTDesignProps(element, { disabled: busy || config.disabled === true, loading: busy })
+    element.setAttribute('aria-busy', String(busy))
+  }
   element.dispose = dispose
   update()
   return element
@@ -1040,7 +1133,11 @@ export function createTDesignTagInput<Value extends string | number>(
     element.dataset.tagValues = JSON.stringify(values)
   }
   Object.defineProperty(element, 'values', { get: () => values })
-  element.setValues = (value: readonly Value[], notify = false): void => { values = [...value]; if (notify) config.onChange(values); update() }
+  element.setValues = (value: readonly Value[], notify = false): void => {
+    values = [...value]
+    if (notify) config.onChange(values)
+    update()
+  }
   update()
   return element
 }
@@ -1076,10 +1173,12 @@ export function createTDesignButton(
     if (name !== 'content') element.setAttribute(name, String(value))
   }
   setTDesignProps(element, buttonProps)
-  if (element.type === 'submit') element.addEventListener('click', event => {
-    event.preventDefault()
-    element.closest('form')?.requestSubmit()
-  })
+  if (element.type === 'submit') {
+    element.addEventListener('click', event => {
+      event.preventDefault()
+      element.closest('form')?.requestSubmit()
+    })
+  }
   return element
 }
 

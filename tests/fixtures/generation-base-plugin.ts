@@ -1,7 +1,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from 'cordisx/contracts'
 
-interface State { apply: number; dispose: number }
+interface State {
+  apply: number
+  dispose: number
+}
 function state(): State {
   const value = globalThis as typeof globalThis & { __cordisxGenerationBase?: State }
   return value.__cordisxGenerationBase ??= { apply: 0, dispose: 0 }
@@ -23,7 +26,8 @@ export function apply(ctx: Context): void {
       'route.title': 'Open generation base',
       'route.description': 'Open the dependency root used by renderer generation transaction tests.',
       'page.title': 'Generation base state',
-      'page.description': 'Shows the active base-plugin generation while dependent plugins are switched or rolled back.',
+      'page.description':
+        'Shows the active base-plugin generation while dependent plugins are switched or rolled back.',
     },
   })
   ctx.i18n.define({
@@ -63,5 +67,7 @@ export function apply(ctx: Context): void {
     icon: 'host:open',
     route: { id: 'generation-base' },
   })
-  ctx.effect(() => () => { value.dispose += 1 }, 'generation base fixture cleanup')
+  ctx.effect(() => () => {
+    value.dispose += 1
+  }, 'generation base fixture cleanup')
 }

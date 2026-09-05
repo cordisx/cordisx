@@ -78,9 +78,12 @@ Minimal registration:
 ```ts
 import type { TransientCanvasPluginContextV1 } from 'cordisx/contracts'
 
-export async function apply(ctx: TransientCanvasPluginContextV1): Promise<void> {
+export async function apply(
+  ctx: TransientCanvasPluginContextV1,
+): Promise<void> {
   const handle = await ctx.transientCanvas.register({
-    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
+    $schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
     schemaVersion: 1,
     id: 'my-effect',
     pointId: 'composer.submit.effects',

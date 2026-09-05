@@ -18,7 +18,9 @@ describe('localized plugin README selection', () => {
   })
 
   it('prefers an exact locale, then language, then README.md', () => {
-    expect(selectPluginReadme({ ...plugin, readmes: { ...plugin.readmes, 'fr-ca': 'README canadien' } }, 'fr-CA')).toBe('README canadien')
+    expect(selectPluginReadme({ ...plugin, readmes: { ...plugin.readmes, 'fr-ca': 'README canadien' } }, 'fr-CA')).toBe(
+      'README canadien',
+    )
     expect(selectPluginReadme(plugin, 'fr-BE')).toBe('README français')
     expect(selectPluginReadme(plugin, 'de-DE')).toBe('Default README')
   })

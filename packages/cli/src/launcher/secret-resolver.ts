@@ -1,4 +1,4 @@
-import { createMacOSKeychainBackend, LauncherKeychainError, type LauncherKeychainBackend } from './secret-store.js'
+import { createMacOSKeychainBackend, type LauncherKeychainBackend, LauncherKeychainError } from './secret-store.js'
 const ENV_SECRET = /^host-secret:env\/([A-Za-z_][A-Za-z0-9_]{0,127})$/
 const KEYCHAIN_SECRET = /^keychain:([A-Za-z0-9][A-Za-z0-9._:/-]{0,500})$/
 
@@ -50,8 +50,8 @@ export async function resolveLauncherSecret(
     value = options.readKeychain !== undefined
       ? await options.readKeychain(service, account)
       : options.keychainBackend !== undefined
-        ? await options.keychainBackend.read(service, account)
-        : await createMacOSKeychainBackend().read(service, account)
+      ? await options.keychainBackend.read(service, account)
+      : await createMacOSKeychainBackend().read(service, account)
   } catch (error) {
     if (error instanceof LauncherKeychainError && error.code === 'UNAVAILABLE') {
       throw new LauncherSecretResolutionError('SECRET_UNAVAILABLE')

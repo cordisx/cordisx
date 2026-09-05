@@ -7,21 +7,56 @@
  */
 
 export type FormDescriptorKind =
-  | 'string' | 'number' | 'natural' | 'boolean' | 'array' | 'object'
-  | 'tuple' | 'dict' | 'map' | 'set' | 'union' | 'intersect' | 'literal'
-  | 'transform' | 'any' | 'never' | 'unknown'
+  | 'string'
+  | 'number'
+  | 'natural'
+  | 'boolean'
+  | 'array'
+  | 'object'
+  | 'tuple'
+  | 'dict'
+  | 'map'
+  | 'set'
+  | 'union'
+  | 'intersect'
+  | 'literal'
+  | 'transform'
+  | 'any'
+  | 'never'
+  | 'unknown'
 
 export type FormPresenterKind =
-  | 'choice.select' | 'choice.radio' | 'choice.segmented'
-  | 'number.input' | 'number.stepper' | 'number.slider'
-  | 'array.scalar-tags' | 'array.scalar-rows'
-  | 'array.object-auto' | 'array.object-dialog' | 'array.object-page'
+  | 'choice.select'
+  | 'choice.radio'
+  | 'choice.segmented'
+  | 'number.input'
+  | 'number.stepper'
+  | 'number.slider'
+  | 'array.scalar-tags'
+  | 'array.scalar-rows'
+  | 'array.object-auto'
+  | 'array.object-dialog'
+  | 'array.object-page'
 
 export type FormPrimitive =
-  | 'input' | 'textarea' | 'secret' | 'path-input' | 'date-picker'
-  | 'time-picker' | 'color-picker' | 'number-input' | 'checkbox' | 'switch'
-  | 'select' | 'radio' | 'slider' | 'multi-select' | 'tag-input'
-  | 'object-array' | 'json-textarea' | 'unsupported'
+  | 'input'
+  | 'textarea'
+  | 'secret'
+  | 'path-input'
+  | 'date-picker'
+  | 'time-picker'
+  | 'color-picker'
+  | 'number-input'
+  | 'checkbox'
+  | 'switch'
+  | 'select'
+  | 'radio'
+  | 'slider'
+  | 'multi-select'
+  | 'tag-input'
+  | 'object-array'
+  | 'json-textarea'
+  | 'unsupported'
 
 export type FormControlLayout = 'fill' | 'compact'
 
@@ -83,16 +118,37 @@ export interface FormIssue {
 }
 
 const presenterKinds = new Set<FormPresenterKind>([
-  'choice.select', 'choice.radio', 'choice.segmented',
-  'number.input', 'number.stepper', 'number.slider',
-  'array.scalar-tags', 'array.scalar-rows',
-  'array.object-auto', 'array.object-dialog', 'array.object-page',
+  'choice.select',
+  'choice.radio',
+  'choice.segmented',
+  'number.input',
+  'number.stepper',
+  'number.slider',
+  'array.scalar-tags',
+  'array.scalar-rows',
+  'array.object-auto',
+  'array.object-dialog',
+  'array.object-page',
 ])
 
 const descriptorKinds = new Set<FormDescriptorKind>([
-  'string', 'number', 'natural', 'boolean', 'array', 'object', 'tuple',
-  'dict', 'map', 'set', 'union', 'intersect', 'literal', 'transform', 'any',
-  'never', 'unknown',
+  'string',
+  'number',
+  'natural',
+  'boolean',
+  'array',
+  'object',
+  'tuple',
+  'dict',
+  'map',
+  'set',
+  'union',
+  'intersect',
+  'literal',
+  'transform',
+  'any',
+  'never',
+  'unknown',
 ])
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -110,11 +166,15 @@ function boundedInteger(value: unknown, lower: number, upper: number): number | 
 /** Parse only the closed v1 presentation vocabulary from untrusted metadata. */
 export function normalizeFormPresentation(value: unknown): FormPresentation | undefined {
   const input = record(value)
-  if (input?.version !== 1 || typeof input.kind !== 'string' || !presenterKinds.has(input.kind as FormPresenterKind)) return undefined
+  if (input?.version !== 1 || typeof input.kind !== 'string' || !presenterKinds.has(input.kind as FormPresenterKind)) {
+    return undefined
+  }
   const rawOptions = record(input.options)
   const options: FormPresenterOptions = {
     ...(rawOptions?.density === 'compact' || rawOptions?.density === 'regular' ? { density: rawOptions.density } : {}),
-    ...(boundedInteger(rawOptions?.maxInlineItems, 1, 64) === undefined ? {} : { maxInlineItems: boundedInteger(rawOptions?.maxInlineItems, 1, 64)! }),
+    ...(boundedInteger(rawOptions?.maxInlineItems, 1, 64) === undefined
+      ? {}
+      : { maxInlineItems: boundedInteger(rawOptions?.maxInlineItems, 1, 64)! }),
     ...(typeof rawOptions?.allowReorder === 'boolean' ? { allowReorder: rawOptions.allowReorder } : {}),
   }
   return {
@@ -131,19 +191,25 @@ export function normalizeFormPresentation(value: unknown): FormPresentation | un
  */
 export function normalizeFormDescriptor(value: unknown, path: readonly string[] = []): FormDescriptor | undefined {
   const input = record(value)
-  if (input === undefined || typeof input.type !== 'string' || !descriptorKinds.has(input.type as FormDescriptorKind)) return undefined
-  const readChoices = (value: unknown): readonly FormChoice[] | undefined => Array.isArray(value)
-    ? value.flatMap(choice => {
-      const item = record(choice)
-      if (item === undefined || typeof item.label !== 'string' || !['string', 'number', 'boolean'].includes(typeof item.value) && item.value !== null) return []
-      return [{
-        label: item.label,
-        value: item.value as FormChoice['value'],
-        ...(typeof item.description === 'string' ? { description: item.description } : {}),
-        ...(typeof item.disabled === 'boolean' ? { disabled: item.disabled } : {}),
-      }]
-    })
-    : undefined
+  if (input === undefined || typeof input.type !== 'string' || !descriptorKinds.has(input.type as FormDescriptorKind)) {
+    return undefined
+  }
+  const readChoices = (value: unknown): readonly FormChoice[] | undefined =>
+    Array.isArray(value)
+      ? value.flatMap(choice => {
+        const item = record(choice)
+        if (
+          item === undefined || typeof item.label !== 'string'
+          || !['string', 'number', 'boolean'].includes(typeof item.value) && item.value !== null
+        ) return []
+        return [{
+          label: item.label,
+          value: item.value as FormChoice['value'],
+          ...(typeof item.description === 'string' ? { description: item.description } : {}),
+          ...(typeof item.disabled === 'boolean' ? { disabled: item.disabled } : {}),
+        }]
+      })
+      : undefined
   const fields = Array.isArray(input.fields)
     ? input.fields.flatMap((child, index) => {
       const childInput = record(child)
@@ -173,11 +239,17 @@ export function normalizeFormDescriptor(value: unknown, path: readonly string[] 
     ...(typeof input.max === 'number' ? { max: input.max } : {}),
     ...(typeof input.step === 'number' ? { step: input.step } : {}),
     ...(readChoices(input.choices) === undefined ? {} : { choices: readChoices(input.choices)! }),
-    ...(typeof input.itemType === 'string' && descriptorKinds.has(input.itemType as FormDescriptorKind) ? { itemType: input.itemType as FormDescriptorKind } : {}),
-    ...(normalizeFormDescriptor(input.item, [...path, '*']) === undefined ? {} : { item: normalizeFormDescriptor(input.item, [...path, '*'])! }),
+    ...(typeof input.itemType === 'string' && descriptorKinds.has(input.itemType as FormDescriptorKind)
+      ? { itemType: input.itemType as FormDescriptorKind }
+      : {}),
+    ...(normalizeFormDescriptor(input.item, [...path, '*']) === undefined
+      ? {}
+      : { item: normalizeFormDescriptor(input.item, [...path, '*'])! }),
     ...(fields === undefined ? {} : { fields }),
     ...(variants === undefined ? {} : { variants }),
-    ...(normalizeFormPresentation(input.presentation) === undefined ? {} : { presentation: normalizeFormPresentation(input.presentation)! }),
+    ...(normalizeFormPresentation(input.presentation) === undefined
+      ? {}
+      : { presentation: normalizeFormPresentation(input.presentation)! }),
   }
 }
 
@@ -197,14 +269,22 @@ function basePrimitive(field: FormDescriptor): FormPrimitive {
   if (field.type === 'boolean') return field.role === 'switch' ? 'switch' : 'checkbox'
   if (field.type === 'number' || field.type === 'natural') return field.role === 'slider' ? 'slider' : 'number-input'
   if (field.type === 'string') {
-    if (field.role === 'textarea' || field.role === 'multiline' || field.role === 'code' || field.role === 'json') return 'textarea'
-    if (field.role === 'path' || field.role === 'file' || field.role === 'directory' || field.role === 'url' || field.role === 'link') return 'path-input'
+    if (field.role === 'textarea' || field.role === 'multiline' || field.role === 'code' || field.role === 'json') {
+      return 'textarea'
+    }
+    if (
+      field.role === 'path' || field.role === 'file' || field.role === 'directory' || field.role === 'url'
+      || field.role === 'link'
+    ) return 'path-input'
     if (field.role === 'date' || field.role === 'datetime') return 'date-picker'
     if (field.role === 'time') return 'time-picker'
     if (field.role === 'color') return 'color-picker'
     return 'input'
   }
-  if (field.type === 'object' || field.type === 'tuple' || field.type === 'dict' || field.type === 'map' || field.type === 'set' || field.type === 'intersect') return 'json-textarea'
+  if (
+    field.type === 'object' || field.type === 'tuple' || field.type === 'dict' || field.type === 'map'
+    || field.type === 'set' || field.type === 'intersect'
+  ) return 'json-textarea'
   return 'unsupported'
 }
 
@@ -228,12 +308,17 @@ export function resolveFormPresenter(field: FormDescriptor): PresenterResolution
       diagnostic: { code: 'unsupported-presenter', detail: `Presenter ${requested.kind} does not match ${field.type}` },
     }
   }
-  const primitive: FormPrimitive = requested.kind === 'choice.select' ? 'select'
-    : requested.kind === 'choice.radio' || requested.kind === 'choice.segmented' ? 'radio'
-      : requested.kind === 'number.slider' ? 'slider'
-        : requested.kind === 'number.input' || requested.kind === 'number.stepper' ? 'number-input'
-          : requested.kind === 'array.scalar-tags' || requested.kind === 'array.scalar-rows' ? (field.choices === undefined ? 'tag-input' : 'multi-select')
-            : 'object-array'
+  const primitive: FormPrimitive = requested.kind === 'choice.select'
+    ? 'select'
+    : requested.kind === 'choice.radio' || requested.kind === 'choice.segmented'
+    ? 'radio'
+    : requested.kind === 'number.slider'
+    ? 'slider'
+    : requested.kind === 'number.input' || requested.kind === 'number.stepper'
+    ? 'number-input'
+    : requested.kind === 'array.scalar-tags' || requested.kind === 'array.scalar-rows'
+    ? (field.choices === undefined ? 'tag-input' : 'multi-select')
+    : 'object-array'
   return { primitive, layout: primitiveLayout(primitive), requested }
 }
 
@@ -241,18 +326,34 @@ export function resolveFormPresenter(field: FormDescriptor): PresenterResolution
 export function validateFormValue(field: FormDescriptor, value: unknown): readonly FormIssue[] {
   const issues: FormIssue[] = []
   if (field.required && (value === undefined || value === null || value === '')) issues.push({ code: 'required' })
-  if (typeof value === 'string' && (field.min !== undefined && value.length < field.min || field.max !== undefined && value.length > field.max)) issues.push({ code: 'length' })
-  if (field.type !== 'array' && field.choices !== undefined && value !== undefined && !field.choices.some(choice => Object.is(choice.value, value))) issues.push({ code: 'choice' })
+  if (
+    typeof value === 'string'
+    && (field.min !== undefined && value.length < field.min || field.max !== undefined && value.length > field.max)
+  ) issues.push({ code: 'length' })
+  if (
+    field.type !== 'array' && field.choices !== undefined && value !== undefined
+    && !field.choices.some(choice => Object.is(choice.value, value))
+  ) issues.push({ code: 'choice' })
   if ((field.type === 'number' || field.type === 'natural') && value !== undefined) {
     if (typeof value !== 'number' || !Number.isFinite(value)) issues.push({ code: 'number' })
     else {
-      if (field.min !== undefined && value < field.min || field.max !== undefined && value > field.max) issues.push({ code: 'range' })
-      if (field.step !== undefined && field.min !== undefined && Math.abs((value - field.min) / field.step - Math.round((value - field.min) / field.step)) > 1e-9) issues.push({ code: 'step' })
+      if (field.min !== undefined && value < field.min || field.max !== undefined && value > field.max) {
+        issues.push({ code: 'range' })
+      }
+      if (
+        field.step !== undefined && field.min !== undefined
+        && Math.abs((value - field.min) / field.step - Math.round((value - field.min) / field.step)) > 1e-9
+      ) issues.push({ code: 'step' })
     }
   }
   if (field.type === 'array' && value !== undefined) {
-    if (!Array.isArray(value) || field.min !== undefined && value.length < field.min || field.max !== undefined && value.length > field.max) issues.push({ code: 'array' })
-    else if (field.choices !== undefined && value.some(item => !field.choices!.some(choice => Object.is(choice.value, item)))) issues.push({ code: 'choice' })
+    if (
+      !Array.isArray(value) || field.min !== undefined && value.length < field.min
+      || field.max !== undefined && value.length > field.max
+    ) issues.push({ code: 'array' })
+    else if (
+      field.choices !== undefined && value.some(item => !field.choices!.some(choice => Object.is(choice.value, item)))
+    ) issues.push({ code: 'choice' })
   }
   return issues
 }
@@ -268,13 +369,27 @@ export class FormDraft {
     this.#committed = committed instanceof Map ? new Map(committed) : new Map(Object.entries(committed))
   }
 
-  set(path: readonly string[], value: unknown): void { this.#operations.set(path.join('.'), { kind: 'set', value }) }
-  unset(path: readonly string[]): void { this.#operations.set(path.join('.'), { kind: 'unset' }) }
-  rollback(path: readonly string[]): void { this.#operations.delete(path.join('.')) }
-  reset(): void { this.#operations.clear() }
-  operation(path: readonly string[]): FormDraftOperation | undefined { return this.#operations.get(path.join('.')) }
-  isDirty(path?: readonly string[]): boolean { return path === undefined ? this.#operations.size > 0 : this.#operations.has(path.join('.')) }
-  operations(): ReadonlyMap<string, FormDraftOperation> { return new Map(this.#operations) }
+  set(path: readonly string[], value: unknown): void {
+    this.#operations.set(path.join('.'), { kind: 'set', value })
+  }
+  unset(path: readonly string[]): void {
+    this.#operations.set(path.join('.'), { kind: 'unset' })
+  }
+  rollback(path: readonly string[]): void {
+    this.#operations.delete(path.join('.'))
+  }
+  reset(): void {
+    this.#operations.clear()
+  }
+  operation(path: readonly string[]): FormDraftOperation | undefined {
+    return this.#operations.get(path.join('.'))
+  }
+  isDirty(path?: readonly string[]): boolean {
+    return path === undefined ? this.#operations.size > 0 : this.#operations.has(path.join('.'))
+  }
+  operations(): ReadonlyMap<string, FormDraftOperation> {
+    return new Map(this.#operations)
+  }
   value(path: readonly string[], defaultValue?: unknown): unknown {
     const operation = this.operation(path)
     if (operation?.kind === 'set') return operation.value

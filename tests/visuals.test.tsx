@@ -4,33 +4,39 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type {
-  CordisXVisualData,
-  CordisXVisualRenderer,
-  CordisXVisuals,
-} from '../packages/cli/src/contracts.js'
+import type { CordisXVisualData, CordisXVisualRenderer, CordisXVisuals } from '../packages/cli/src/contracts.js'
 import type { CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
-import { cloneVisualData, CordisXVisualService, HostVisual, VisualRegistry } from '../packages/cli/src/renderer/visuals.js'
+import {
+  cloneVisualData,
+  CordisXVisualService,
+  HostVisual,
+  VisualRegistry,
+} from '../packages/cli/src/renderer/visuals.js'
 
 function installDom(): JSDOM {
-  const dom = new JSDOM('<!doctype html><html><body><main data-cordisx-app-theme="light"><div id="root"></div></main></body></html>', {
-    pretendToBeVisual: true,
-    url: 'https://host.invalid/',
-  })
+  const dom = new JSDOM(
+    '<!doctype html><html><body><main data-cordisx-app-theme="light"><div id="root"></div></main></body></html>',
+    {
+      pretendToBeVisual: true,
+      url: 'https://host.invalid/',
+    },
+  )
   const browser = dom.window
-  for (const [name, value] of [
-    ['window', browser],
-    ['document', browser.document],
-    ['HTMLElement', browser.HTMLElement],
-    ['Element', browser.Element],
-    ['Node', browser.Node],
-    ['MutationObserver', browser.MutationObserver],
-    ['getComputedStyle', browser.getComputedStyle.bind(browser)],
-    ['IS_REACT_ACT_ENVIRONMENT', true],
-  ] as const) vi.stubGlobal(name, value)
+  for (
+    const [name, value] of [
+      ['window', browser],
+      ['document', browser.document],
+      ['HTMLElement', browser.HTMLElement],
+      ['Element', browser.Element],
+      ['Node', browser.Node],
+      ['MutationObserver', browser.MutationObserver],
+      ['getComputedStyle', browser.getComputedStyle.bind(browser)],
+      ['IS_REACT_ACT_ENVIRONMENT', true],
+    ] as const
+  ) vi.stubGlobal(name, value)
   return dom
 }
 
@@ -126,10 +132,14 @@ describe('visual provider runtime', () => {
     try {
       root = createRoot(dom.window.document.getElementById('root')!)
       const input = { label: 'Operational', detail: { code: 200 } }
-      await act(async () => root!.render(<>
-        <HostVisual owner="status.plugin" id="health-badge" data={input} />
-        <HostVisual owner="other.plugin" id="health-badge" data={input} />
-      </>))
+      await act(async () =>
+        root!.render(
+          <>
+            <HostVisual owner="status.plugin" id="health-badge" data={input} />
+            <HostVisual owner="other.plugin" id="health-badge" data={input} />
+          </>,
+        )
+      )
       expect(dom.window.document.querySelectorAll('[data-health-theme]')).toHaveLength(1)
       expect(dom.window.document.querySelectorAll('[data-other-theme]')).toHaveLength(1)
       expect(dom.window.document.querySelector('[data-health-theme]')?.textContent).toBe('Operational')
@@ -138,11 +148,15 @@ describe('visual provider runtime', () => {
       expect(Object.isFrozen(projections[0])).toBe(true)
       expect(Object.isFrozen((projections[0] as typeof input).detail)).toBe(true)
 
-      await act(async () => { dom.window.document.documentElement.dataset.theme = 'dark' })
+      await act(async () => {
+        dom.window.document.documentElement.dataset.theme = 'dark'
+      })
       expect(dom.window.document.querySelector('[data-health-theme]')?.getAttribute('data-health-theme')).toBe('dark')
 
       let removeChart = () => undefined
-      await act(async () => { removeChart = registry.register(unrelated, 'trend-chart', () => <i />) })
+      await act(async () => {
+        removeChart = registry.register(unrelated, 'trend-chart', () => <i />)
+      })
       expect(cleanup).not.toHaveBeenCalled()
       await act(async () => pluginFiber.dispose())
       expect(cleanup).toHaveBeenCalledOnce()
@@ -173,7 +187,9 @@ describe('visual provider runtime', () => {
     const removePrevious = registry.register(oldContext, 'sparkline', previous)
     expect(() => registry.register(oldContext, 'sparkline', previous)).toThrow(/already registered/)
     let notifications = 0
-    const unsubscribe = registry.subscribe(() => { notifications += 1 })
+    const unsubscribe = registry.subscribe(() => {
+      notifications += 1
+    })
     const handle = visibility.begin('visual-update', before, after)
     const nextContext = new Context().extend({
       [CORDISX_PLUGIN_ID]: 'metrics.plugin',
@@ -215,19 +231,28 @@ describe('visual provider runtime', () => {
     let root: Root | undefined
     try {
       root = createRoot(dom.window.document.getElementById('root')!)
-      await act(async () => root!.render(<>
-        <HostVisual owner="badge.plugin" id="broken-badge" data={{ fail: true }} />
-        <HostVisual owner="badge.plugin" id="missing-badge" data={{ value: 1 }} />
-        <HostVisual owner="badge.plugin" id="broken-badge" data={{ value: undefined }} />
-        <button type="button">Host action</button>
-      </>))
+      await act(async () =>
+        root!.render(
+          <>
+            <HostVisual owner="badge.plugin" id="broken-badge" data={{ fail: true }} />
+            <HostVisual owner="badge.plugin" id="missing-badge" data={{ value: 1 }} />
+            <HostVisual owner="badge.plugin" id="broken-badge" data={{ value: undefined }} />
+            <button type="button">Host action</button>
+          </>,
+        )
+      )
       expect(dom.window.document.querySelectorAll('[data-cordisx-visual]')).toHaveLength(3)
-      expect([...dom.window.document.querySelectorAll('[data-cordisx-visual]')].every(item => item.textContent === '')).toBe(true)
+      expect([...dom.window.document.querySelectorAll('[data-cordisx-visual]')].every(item => item.textContent === ''))
+        .toBe(true)
       expect(dom.window.document.querySelector('button')?.textContent).toBe('Host action')
-      await act(async () => root!.render(<>
-        <HostVisual owner="badge.plugin" id="broken-badge" data={{ fail: false }} />
-        <button type="button">Host action</button>
-      </>))
+      await act(async () =>
+        root!.render(
+          <>
+            <HostVisual owner="badge.plugin" id="broken-badge" data={{ fail: false }} />
+            <button type="button">Host action</button>
+          </>,
+        )
+      )
       expect(dom.window.document.querySelector('[data-cordisx-visual]')?.textContent).toBe('Recovered')
       expect(dom.window.document.querySelector('button')?.textContent).toBe('Host action')
     } finally {

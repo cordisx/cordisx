@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  CordisXCliParseError,
-  parseCordisXCli,
-} from '../packages/cli/src/cli/parse.js'
+import { CordisXCliParseError, parseCordisXCli } from '../packages/cli/src/cli/parse.js'
 
 describe('parseCordisXCli', () => {
   it('parses the default launch without inventing an app or profile', () => {
@@ -117,12 +114,14 @@ describe('parseCordisXCli', () => {
       .toThrow('--data is not valid with cordisx dev')
   })
 
-  it.each([
-    [['--help'], { action: 'help' }],
-    [['-h'], { action: 'help' }],
-    [['help'], { action: 'help' }],
-    [['codex', '--help'], { action: 'help' }],
-  ] as const)('returns help as an action for %j', (argv, expected) => {
+  it.each(
+    [
+      [['--help'], { action: 'help' }],
+      [['-h'], { action: 'help' }],
+      [['help'], { action: 'help' }],
+      [['codex', '--help'], { action: 'help' }],
+    ] as const,
+  )('returns help as an action for %j', (argv, expected) => {
     expect(parseCordisXCli(argv)).toEqual(expected)
   })
 
@@ -200,7 +199,8 @@ describe('parseCordisXCli', () => {
       '--isolated is only valid with cordisx dev; use --data host-isolated for a separate Host root',
     )
     expect(parseCordisXCli(['dev', '--isolated', '--dry-run'])).toMatchObject({
-      action: 'dev', options: { isolated: true },
+      action: 'dev',
+      options: { isolated: true },
     })
     expect(() => parseCordisXCli(['codex', 'work', '--attach'])).toThrowError(
       '--attach cannot select a named profile',

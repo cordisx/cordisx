@@ -2,8 +2,8 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import {
   BrowserRouteHistoryAdapter,
-  CodexRouterHistoryAdapter,
   type CodexRouteHistoryEntry,
+  CodexRouterHistoryAdapter,
 } from '../packages/cli/src/renderer/codex-router-history.js'
 
 function route(roomId: string): CodexRouteHistoryEntry {
@@ -65,7 +65,9 @@ class FakeCodexNavigator {
 
   listen(listener: (update: unknown) => void): () => void {
     this.listener = listener
-    return () => { if (this.listener === listener) this.listener = undefined }
+    return () => {
+      if (this.listener === listener) this.listener = undefined
+    }
   }
 }
 
@@ -108,7 +110,10 @@ describe('CodexRouterHistoryAdapter', () => {
     Object.defineProperty(navigator, 'push', { configurable: true, writable: false, value: navigator.push })
     mountNavigator(dom, navigator)
     const adapter = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
-    expect(adapter.snapshot()).toMatchObject({ available: false, reason: expect.stringContaining('cannot be observed') })
+    expect(adapter.snapshot()).toMatchObject({
+      available: false,
+      reason: expect.stringContaining('cannot be observed'),
+    })
     adapter.dispose()
     dom.window.close()
   })
@@ -118,7 +123,9 @@ describe('CodexRouterHistoryAdapter', () => {
     const navigator = new FakeCodexNavigator('/local/thread-one', { native: true })
     mountNavigator(dom, navigator)
     let reactUpdates = 0
-    const reactListener = () => { reactUpdates += 1 }
+    const reactListener = () => {
+      reactUpdates += 1
+    }
     navigator.listen(reactListener)
     const originalPush = navigator.push
     const originalReplace = navigator.replace
@@ -126,7 +133,11 @@ describe('CodexRouterHistoryAdapter', () => {
     const adapter = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
 
     const pushed = adapter.push(route('one'))
-    expect(pushed).toMatchObject({ available: true, index: 1, entry: { routeId: 'chatroom:room', params: { roomId: 'one' } } })
+    expect(pushed).toMatchObject({
+      available: true,
+      index: 1,
+      entry: { routeId: 'chatroom:room', params: { roomId: 'one' } },
+    })
     expect(navigator.location).toMatchObject({ pathname: '/local/thread-one' })
     expect(navigator.location.state).toMatchObject({ native: true, __cordisxRouteV1: { params: { roomId: 'one' } } })
     expect(dom.window.history.length).toBe(1)
@@ -154,7 +165,9 @@ describe('CodexRouterHistoryAdapter', () => {
   it('rolls back the current-only reload checkpoint when a native write fails', () => {
     const dom = new JSDOM('', { url: 'https://codex.local/index.html' })
     const navigator = new FakeCodexNavigator()
-    navigator.push = () => { throw new Error('native push failed') }
+    navigator.push = () => {
+      throw new Error('native push failed')
+    }
     mountNavigator(dom, navigator)
     const adapter = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
 
@@ -173,7 +186,9 @@ describe('CodexRouterHistoryAdapter', () => {
     navigator.listen(() => {})
     const adapter = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
     let changes = 0
-    adapter.subscribe(() => { changes += 1 })
+    adapter.subscribe(() => {
+      changes += 1
+    })
     adapter.push(route('one'))
     adapter.push(route('two'))
 
@@ -212,7 +227,9 @@ describe('CodexRouterHistoryAdapter', () => {
     const reloadedNavigator = new FakeCodexNavigator('/local/thread-one')
     mountNavigator(dom, reloadedNavigator)
     let reactUpdates = 0
-    reloadedNavigator.listen(() => { reactUpdates += 1 })
+    reloadedNavigator.listen(() => {
+      reactUpdates += 1
+    })
     const restored = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
     expect(restored.snapshot()).toMatchObject({ available: true, index: 0, entry: { params: { roomId: 'two' } } })
     expect(reloadedNavigator.entries).toHaveLength(1)
@@ -233,7 +250,11 @@ describe('BrowserRouteHistoryAdapter', () => {
     const originalAdapter = new BrowserRouteHistoryAdapter(original.window as unknown as Window, true)
     originalAdapter.push(route('one'))
     const originalState = original.window.history.state as { readonly key: string; readonly idx: number }
-    expect(originalState).toMatchObject({ key: expect.any(String), idx: 1, __cordisxRouteV1: { params: { roomId: 'one' } } })
+    expect(originalState).toMatchObject({
+      key: expect.any(String),
+      idx: 1,
+      __cordisxRouteV1: { params: { roomId: 'one' } },
+    })
 
     const reloaded = new JSDOM('', { url: 'https://playground.cordisx.local/' })
     copySessionStorage(original.window.sessionStorage, reloaded.window.sessionStorage)
@@ -247,13 +268,19 @@ describe('BrowserRouteHistoryAdapter', () => {
       index: originalState.idx,
       entry: { routeId: 'chatroom:room', params: { roomId: 'one' } },
     })
-    expect(reloaded.window.history.state).toMatchObject({ __cordisxRouteV1: { owner: 'chatroom', routeId: 'chatroom:room' } })
+    expect(reloaded.window.history.state).toMatchObject({
+      __cordisxRouteV1: { owner: 'chatroom', routeId: 'chatroom:room' },
+    })
 
     const task = new JSDOM('', { url: 'https://playground.cordisx.local/playground/simulator/tasks/lead' })
     copySessionStorage(original.window.sessionStorage, task.window.sessionStorage)
     // Even a forged matching history identity cannot claim a Room checkpoint
     // from the distinct Host task URL.
-    task.window.history.replaceState({ key: originalState.key, idx: originalState.idx }, '', task.window.location.pathname)
+    task.window.history.replaceState(
+      { key: originalState.key, idx: originalState.idx },
+      '',
+      task.window.location.pathname,
+    )
     const taskAdapter = new BrowserRouteHistoryAdapter(task.window as unknown as Window, true)
     expect(taskAdapter.snapshot()).toMatchObject({ available: true, key: originalState.key, index: originalState.idx })
     expect(taskAdapter.snapshot().entry).toBeUndefined()
@@ -274,11 +301,15 @@ describe('BrowserRouteHistoryAdapter', () => {
 
     const reloaded = new JSDOM('', { url: 'https://playground.cordisx.local/' })
     copySessionStorage(original.window.sessionStorage, reloaded.window.sessionStorage)
-    reloaded.window.history.replaceState({
-      key: originalState.key,
-      idx: originalState.idx,
-      __cordisxRouteV1: { schemaVersion: 1, owner: 'chatroom' },
-    }, '', '/')
+    reloaded.window.history.replaceState(
+      {
+        key: originalState.key,
+        idx: originalState.idx,
+        __cordisxRouteV1: { schemaVersion: 1, owner: 'chatroom' },
+      },
+      '',
+      '/',
+    )
     const restored = new BrowserRouteHistoryAdapter(reloaded.window as unknown as Window, true)
     expect(restored.snapshot()).toMatchObject({ available: true, key: originalState.key, index: originalState.idx })
     expect(restored.snapshot().entry).toBeUndefined()
@@ -310,7 +341,10 @@ describe('BrowserRouteHistoryAdapter', () => {
   it('fails closed outside Playground when a browser key/index seam is absent', () => {
     const dom = new JSDOM('', { url: 'https://codex.local/native' })
     const adapter = new BrowserRouteHistoryAdapter(dom.window as unknown as Window)
-    expect(adapter.snapshot()).toMatchObject({ available: false, reason: expect.stringContaining('key and non-negative integer idx') })
+    expect(adapter.snapshot()).toMatchObject({
+      available: false,
+      reason: expect.stringContaining('key and non-negative integer idx'),
+    })
     adapter.dispose()
     dom.window.close()
   })

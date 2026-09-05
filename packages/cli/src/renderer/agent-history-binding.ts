@@ -42,8 +42,14 @@ export interface AgentHistoryBindingCaller {
 
 export interface CordisXAgentHistoryAdapter {
   status(): CordisXAgentHistoryStatus
-  query(input: CordisXAgentHistoryQuery, caller: AgentHistoryBindingCaller): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>>
-  tail(input: CordisXAgentHistoryTailQuery, caller: AgentHistoryBindingCaller): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>>
+  query(
+    input: CordisXAgentHistoryQuery,
+    caller: AgentHistoryBindingCaller,
+  ): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>>
+  tail(
+    input: CordisXAgentHistoryTailQuery,
+    caller: AgentHistoryBindingCaller,
+  ): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>>
   dispose(): void
 }
 
@@ -88,11 +94,17 @@ export class BindingAgentHistoryAdapter implements CordisXAgentHistoryAdapter {
     return clone(this.adapterStatus)
   }
 
-  async query(input: CordisXAgentHistoryQuery, caller: AgentHistoryBindingCaller): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>> {
+  async query(
+    input: CordisXAgentHistoryQuery,
+    caller: AgentHistoryBindingCaller,
+  ): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>> {
     return await this.result('query', input, caller)
   }
 
-  async tail(input: CordisXAgentHistoryTailQuery, caller: AgentHistoryBindingCaller): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>> {
+  async tail(
+    input: CordisXAgentHistoryTailQuery,
+    caller: AgentHistoryBindingCaller,
+  ): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>> {
     return await this.result('tail', input, caller)
   }
 
@@ -115,11 +127,18 @@ export class BindingAgentHistoryAdapter implements CordisXAgentHistoryAdapter {
     try {
       return clone(await this.request<CordisXPlatformResult<CordisXAgentHistoryPage>>(operation, input, caller))
     } catch {
-      return { ok: false, error: { code: 'adapter-unavailable', message: 'Agent history bridge request failed', retryable: true } }
+      return {
+        ok: false,
+        error: { code: 'adapter-unavailable', message: 'Agent history bridge request failed', retryable: true },
+      }
     }
   }
 
-  private request<Value>(operation: 'status' | 'query' | 'tail', input: unknown, caller: AgentHistoryBindingCaller | undefined): Promise<Value> {
+  private request<Value>(
+    operation: 'status' | 'query' | 'tail',
+    input: unknown,
+    caller: AgentHistoryBindingCaller | undefined,
+  ): Promise<Value> {
     if (this.closed) return Promise.reject(new Error('Agent history bridge is closed'))
     const requestId = typeof globalThis.crypto?.randomUUID === 'function'
       ? globalThis.crypto.randomUUID()
@@ -131,7 +150,15 @@ export class BindingAgentHistoryAdapter implements CordisXAgentHistoryAdapter {
       }, REQUEST_TIMEOUT_MS)
       this.pending.set(requestId, { resolve: value => resolve(value as Value), reject, timer })
       try {
-        this.binding(JSON.stringify({ requestId, token: this.token, operation, ...(caller === undefined ? {} : { caller }), input }))
+        this.binding(
+          JSON.stringify({
+            requestId,
+            token: this.token,
+            operation,
+            ...(caller === undefined ? {} : { caller }),
+            input,
+          }),
+        )
       } catch (error) {
         this.pending.delete(requestId)
         clearTimeout(timer)
@@ -174,11 +201,17 @@ export class UnavailableAgentHistoryAdapter implements CordisXAgentHistoryAdapte
   }
 
   async query(): Promise<CordisXPlatformResult<never>> {
-    return { ok: false, error: { code: 'adapter-unavailable', message: 'Agent history is unavailable', retryable: true } }
+    return {
+      ok: false,
+      error: { code: 'adapter-unavailable', message: 'Agent history is unavailable', retryable: true },
+    }
   }
 
   async tail(): Promise<CordisXPlatformResult<never>> {
-    return { ok: false, error: { code: 'adapter-unavailable', message: 'Agent history is unavailable', retryable: true } }
+    return {
+      ok: false,
+      error: { code: 'adapter-unavailable', message: 'Agent history is unavailable', retryable: true },
+    }
   }
 
   dispose(): void {}

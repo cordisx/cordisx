@@ -2,8 +2,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import {
-  buildRendererCompositionSource,
   type BuildRendererBundleOptions,
+  buildRendererCompositionSource,
 } from '../../packages/cli/src/launcher/bundle.js'
 import type { CordisXConfig } from '../../packages/cli/src/launcher/config.js'
 
@@ -19,7 +19,9 @@ export async function buildConnectorProductionBundle(
   const marker = composition.source.lastIndexOf(bootMarker)
   if (marker < 0) throw new Error('production composition boot marker is unavailable')
   const fixtureImport = `import { installConnectorProductionFixture } from ${JSON.stringify(fixturePath)}\n`
-  const source = `${fixtureImport}${composition.source.slice(0, marker)}, installConnectorProductionFixture${composition.source.slice(marker)}`
+  const source = `${fixtureImport}${composition.source.slice(0, marker)}, installConnectorProductionFixture${
+    composition.source.slice(marker)
+  }`
   const result = await build({
     stdin: { contents: source, resolveDir: config.rootDir, sourcefile: 'connector-production-smoke-composition.ts' },
     bundle: true,

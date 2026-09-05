@@ -6,12 +6,12 @@ import { TextDecoder, TextEncoder } from 'node:util'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  CORDISX_AGENT_DEFINITION_SCHEMA_V1,
-  CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V1,
   type AgentDefinition,
   type AgentLoopCommand,
   type AgentLoopEvent,
   type BoundAgentLoopClient,
+  CORDISX_AGENT_DEFINITION_SCHEMA_V1,
+  CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V1,
 } from '../packages/cli/src/agent-loop-contracts.js'
 import { buildRendererBundle, buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
@@ -32,7 +32,12 @@ import {
 import { CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT } from '../packages/cli/src/renderer/host-ui/AgentTaskDetailsNavigator.js'
 
 const inherit: AgentDefinition['inherit'] = {
-  promptSections: 'append', rules: 'append', skills: 'append', tools: 'merge', mcpServers: 'merge', runtimeDefaults: 'merge',
+  promptSections: 'append',
+  rules: 'append',
+  skills: 'append',
+  tools: 'merge',
+  mcpServers: 'merge',
+  runtimeDefaults: 'merge',
 }
 
 function definition(agentId: string, input: Partial<AgentDefinition> = {}): AgentDefinition {
@@ -65,7 +70,10 @@ function createCommand(
 
 function sendCommand(
   commandId: string,
-  binding: Extract<Awaited<ReturnType<ReturnType<CordisXAgentLoopBroker['bind']>['createOrBind']>>, { status: 'accepted' }>['binding'],
+  binding: Extract<
+    Awaited<ReturnType<ReturnType<CordisXAgentLoopBroker['bind']>['createOrBind']>>,
+    { status: 'accepted' }
+  >['binding'],
   text: string,
 ): Extract<AgentLoopCommand, { type: 'send' }> {
   return {
@@ -101,11 +109,15 @@ describe('Playground deterministic AgentLoop Simulator', () => {
         { sectionId: 'personality', kind: 'personality', text: 'Concise' },
         { sectionId: 'memory', kind: 'memory', text: 'Room memory' },
       ],
-      rules: ['room-isolation'], skills: ['summarize'], tools: { include: ['read'] }, mcpServers: { exclude: ['external'] },
+      rules: ['room-isolation'],
+      skills: ['summarize'],
+      tools: { include: ['read'] },
+      mcpServers: { exclude: ['external'] },
       runtimeDefaults: { adapterId: 'codex', effort: 'medium' },
     })
     const reviewer = definition('chatroom.reviewer', {
-      name: 'Chatroom Reviewer', extends: [lead.identity],
+      name: 'Chatroom Reviewer',
+      extends: [lead.identity],
       promptSections: [{ sectionId: 'reviewer-role', kind: 'role', text: 'Review the assigned work.' }],
       rules: ['public-summary-only'],
     })
@@ -113,14 +125,19 @@ describe('Playground deterministic AgentLoop Simulator', () => {
       client.createOrBind(createCommand('create-lead', lead, [lead])),
       client.createOrBind(createCommand('create-reviewer', reviewer, [lead, reviewer])),
     ])
-    if (leadCreate.status !== 'accepted' || reviewerCreate.status !== 'accepted') throw new Error('Simulator bindings were not accepted')
+    if (leadCreate.status !== 'accepted' || reviewerCreate.status !== 'accepted') {
+      throw new Error('Simulator bindings were not accepted')
+    }
     expect(leadCreate.binding.binding).not.toEqual(reviewerCreate.binding.binding)
     expect(leadCreate.binding.task).not.toBe(reviewerCreate.binding.task)
 
     const [leadSubscription, reviewerSubscription] = await Promise.all([
-      client.subscribe(leadCreate.binding, -1), client.subscribe(reviewerCreate.binding, -1),
+      client.subscribe(leadCreate.binding, -1),
+      client.subscribe(reviewerCreate.binding, -1),
     ])
-    if (leadSubscription.status !== 'accepted' || reviewerSubscription.status !== 'accepted') throw new Error('Simulator subscriptions were not accepted')
+    if (leadSubscription.status !== 'accepted' || reviewerSubscription.status !== 'accepted') {
+      throw new Error('Simulator subscriptions were not accepted')
+    }
     const leadPages = leadSubscription.handle.pages[Symbol.asyncIterator]()
     const reviewerPages = reviewerSubscription.handle.pages[Symbol.asyncIterator]()
     await Promise.all([leadPages.next(), reviewerPages.next()])
@@ -144,7 +161,8 @@ describe('Playground deterministic AgentLoop Simulator', () => {
       { type: 'message', message: { role: 'assistant', content: [{ text: 'Completed successfully.' }] } },
       { type: 'lifecycle', lifecycle: { phase: 'turn.completed' } },
     ])
-    const assistantBody = leadLifecycle.value?.events.find(event => event.type === 'message')?.message.content[0]?.text ?? ''
+    const assistantBody = leadLifecycle.value?.events.find(event => event.type === 'message')?.message.content[0]?.text
+      ?? ''
     expect(assistantBody).toBe('Completed successfully.')
     expect(assistantBody).not.toMatch(/Mock|Simulator|chatroom\.generalist|@r1|processed:/i)
     expect(reviewerLifecycle.value?.subscription.binding).toEqual(reviewerCreate.binding.binding)
@@ -154,12 +172,21 @@ describe('Playground deterministic AgentLoop Simulator', () => {
 
     const snapshot = host.snapshot()
     expect(snapshot.label).toBe('Mock / Simulator')
-    expect(snapshot.tasks.map(task => [task.agentLabel, task.identity.agentId, task.identity.revision, task.status])).toEqual([
-      ['Chatroom Agent', 'chatroom.generalist', 'r1', 'completed'],
-      ['Chatroom Reviewer', 'chatroom.reviewer', 'r1', 'error'],
+    expect(snapshot.tasks.map(task => [task.agentLabel, task.identity.agentId, task.identity.revision, task.status]))
+      .toEqual([
+        ['Chatroom Agent', 'chatroom.generalist', 'r1', 'completed'],
+        ['Chatroom Reviewer', 'chatroom.reviewer', 'r1', 'error'],
+      ])
+    expect(snapshot.tasks[1]?.layers.map(layer => layer.identity.agentId)).toEqual([
+      'chatroom.generalist',
+      'chatroom.reviewer',
     ])
-    expect(snapshot.tasks[1]?.layers.map(layer => layer.identity.agentId)).toEqual(['chatroom.generalist', 'chatroom.reviewer'])
-    expect(snapshot.tasks[1]?.effective.promptSections?.map(section => section.kind)).toEqual(['introduction', 'personality', 'memory', 'role'])
+    expect(snapshot.tasks[1]?.effective.promptSections?.map(section => section.kind)).toEqual([
+      'introduction',
+      'personality',
+      'memory',
+      'role',
+    ])
     expect(snapshot.tasks[0]?.input).toBe('check token=[redacted] [path redacted] [approval]')
     expect(host.activeTaskPresentations().map(task => task.identity.agentId)).toEqual(['chatroom.generalist'])
     const leadTrace = snapshot.tasks[0]!
@@ -184,11 +211,26 @@ describe('Playground deterministic AgentLoop Simulator', () => {
   it('navigates create-time task URLs through history and rejects unapproved URL schemes', async () => {
     const dom = new JSDOM('<!doctype html>', { url: 'http://127.0.0.1/' })
     const hostNavigations: string[] = []
-    dom.window.addEventListener(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT, () => hostNavigations.push(dom.window.location.pathname))
-    dom.window.history.replaceState({
-      key: 'room-entry', idx: 1,
-      __cordisxRouteV1: { schemaVersion: 1, owner: 'chatroom', routeId: 'room', outlet: 'main', path: '/main/chatroom/:roomId', params: { roomId: 'room-1' } },
-    }, '', '/')
+    dom.window.addEventListener(
+      CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT,
+      () => hostNavigations.push(dom.window.location.pathname),
+    )
+    dom.window.history.replaceState(
+      {
+        key: 'room-entry',
+        idx: 1,
+        __cordisxRouteV1: {
+          schemaVersion: 1,
+          owner: 'chatroom',
+          routeId: 'room',
+          outlet: 'main',
+          path: '/main/chatroom/:roomId',
+          params: { roomId: 'room-1' },
+        },
+      },
+      '',
+      '/',
+    )
     expect(navigateTaskDetails(dom.window, {
       url: 'app://-/playground/simulator/tasks/Simulator%20Task%201',
       target: 'host',
@@ -205,11 +247,40 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(simulatorTaskIdFromPath(dom.window.location.pathname)).toBe('Simulator Task 1')
 
     const opened: string[] = []
-    expect(navigateTaskDetails(dom.window, { target: 'external', url: 'https://example.com/task' }, url => opened.push(url.href))).toBe(true)
-    expect(navigateTaskDetails(dom.window, { target: 'external', url: 'codex://task/example' }, url => opened.push(url.href))).toBe(true)
-    expect(navigateTaskDetails(dom.window, { target: 'external', url: 'claude://task/example' }, url => opened.push(url.href))).toBe(true)
-    for (const url of ['http://example.com', 'file:///tmp/task', 'data:text/plain,task', 'javascript:alert(1)', 'blob:https://example.com/id', 'not a url']) {
-      expect(navigateTaskDetails(dom.window, { target: 'external', url }, target => opened.push(target.href))).toBe(false)
+    expect(
+      navigateTaskDetails(
+        dom.window,
+        { target: 'external', url: 'https://example.com/task' },
+        url => opened.push(url.href),
+      ),
+    ).toBe(true)
+    expect(
+      navigateTaskDetails(
+        dom.window,
+        { target: 'external', url: 'codex://task/example' },
+        url => opened.push(url.href),
+      ),
+    ).toBe(true)
+    expect(
+      navigateTaskDetails(
+        dom.window,
+        { target: 'external', url: 'claude://task/example' },
+        url => opened.push(url.href),
+      ),
+    ).toBe(true)
+    for (
+      const url of [
+        'http://example.com',
+        'file:///tmp/task',
+        'data:text/plain,task',
+        'javascript:alert(1)',
+        'blob:https://example.com/id',
+        'not a url',
+      ]
+    ) {
+      expect(navigateTaskDetails(dom.window, { target: 'external', url }, target => opened.push(target.href))).toBe(
+        false,
+      )
     }
     expect(taskNavigationTarget({ target: 'host', url: 'https://example.com/task' })).toBeUndefined()
     expect(opened).toHaveLength(3)
@@ -218,28 +289,54 @@ describe('Playground deterministic AgentLoop Simulator', () => {
 
   it('resets deterministically and records changed effective prompt snapshots only from actual create inputs', async () => {
     const first = new PlaygroundMockAgentLoopHost()
-    const base = definition('lead', { promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Version one' }] })
+    const base = definition('lead', {
+      promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Version one' }],
+    })
     const prepared = await first.prepare(base as never)
     if (!prepared.ok) throw new Error('Simulator preparation failed')
-    await first.create({ ...base, sourceDefinitions: [base.identity] }, prepared.value, { target: base.identity, definitions: [base] })
-    const firstTask = (await first.create({ ...base, sourceDefinitions: [base.identity] }, prepared.value, { target: base.identity, definitions: [base] }))
+    await first.create({ ...base, sourceDefinitions: [base.identity] }, prepared.value, {
+      target: base.identity,
+      definitions: [base],
+    })
+    const firstTask = await first.create({ ...base, sourceDefinitions: [base.identity] }, prepared.value, {
+      target: base.identity,
+      definitions: [base],
+    })
     if (!firstTask.ok) throw new Error('Simulator create failed')
     const createTimeUrl = first.snapshot().tasks[1]?.detailsUrl
     expect((await first.bind(firstTask.value.task)).ok).toBe(true)
     expect(first.snapshot().tasks[1]?.detailsUrl).toEqual(createTimeUrl)
-    const changed = definition('lead', { identity: { agentId: 'lead', revision: 'r2' }, promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Version two' }] })
-    await first.create({ ...changed, sourceDefinitions: [changed.identity] }, prepared.value, { target: changed.identity, definitions: [changed] })
-    expect(first.snapshot().tasks.map(task => task.effective.promptSections?.[0]?.text)).toEqual(['Version one', 'Version one', 'Version two'])
+    const changed = definition('lead', {
+      identity: { agentId: 'lead', revision: 'r2' },
+      promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Version two' }],
+    })
+    await first.create({ ...changed, sourceDefinitions: [changed.identity] }, prepared.value, {
+      target: changed.identity,
+      definitions: [changed],
+    })
+    expect(first.snapshot().tasks.map(task => task.effective.promptSections?.[0]?.text)).toEqual([
+      'Version one',
+      'Version one',
+      'Version two',
+    ])
 
     const reset = new PlaygroundMockAgentLoopHost()
     expect(reset.snapshot().tasks).toEqual([])
-    await reset.create({ ...base, sourceDefinitions: [base.identity] }, prepared.value, { target: base.identity, definitions: [base] })
+    await reset.create({ ...base, sourceDefinitions: [base.identity] }, prepared.value, {
+      target: base.identity,
+      definitions: [base],
+    })
     expect(reset.snapshot().tasks[0]?.debugTaskId).toBe('Simulator Task 1')
   })
 
   it('restores the Host-private task registry across one browser session without changing bind semantics', async () => {
     let stored: string | undefined
-    const persistence = { read: () => stored, write: (value: string) => { stored = value } }
+    const persistence = {
+      read: () => stored,
+      write: (value: string) => {
+        stored = value
+      },
+    }
     const agent = definition('session.agent', {
       promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Persisted session prompt' }],
     })
@@ -247,14 +344,17 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     const prepared = await first.prepare()
     if (!prepared.ok) throw new Error('Simulator preparation failed')
     const created = await first.create({ ...agent, sourceDefinitions: [agent.identity] }, prepared.value, {
-      target: agent.identity, definitions: [agent],
+      target: agent.identity,
+      definitions: [agent],
     })
     if (!created.ok) throw new Error('Simulator create failed')
     await first.send(created.value, [{ kind: 'text', text: 'persist this trace' }])
 
     const restored = new PlaygroundMockAgentLoopHost(undefined, persistence)
     expect(restored.snapshot().tasks).toMatchObject([{
-      debugTaskId: 'Simulator Task 1', input: 'persist this trace', identity: { agentId: 'session.agent' },
+      debugTaskId: 'Simulator Task 1',
+      input: 'persist this trace',
+      identity: { agentId: 'session.agent' },
     }])
     const rebound = await restored.bind(created.value.task)
     expect(rebound).toMatchObject({ ok: true, value: { detailsUrl: created.value.detailsUrl } })
@@ -272,7 +372,10 @@ describe('Playground deterministic AgentLoop Simulator', () => {
       const config = await loadConfig(configPath)
       expect(config.codex.agentLoopBackend).toBe('mock')
       await expect(buildRendererCompositionSource(config)).rejects.toThrow('only in the explicit UI Playground')
-      const composition = await buildRendererCompositionSource(config, { playground: true }, { runtimeImport: '/runtime.ts', awaitBoot: true })
+      const composition = await buildRendererCompositionSource(config, { playground: true }, {
+        runtimeImport: '/runtime.ts',
+        awaitBoot: true,
+      })
       expect(composition.source).toContain('hostKind: "playground"')
       expect(composition.source).toContain('agentLoopBackend: "mock"')
       expect(composition.source).not.toContain('codex-local')
@@ -287,12 +390,15 @@ describe('Playground deterministic AgentLoop Simulator', () => {
   it('never creates a Provider Fleet for a mock Playground generation even when local-cli config is enabled', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-agent-loop-simulator-provider-'))
     const configPath = path.join(root, 'cordisx.config.json')
-    await writeFile(configPath, JSON.stringify({
-      version: 1,
-      codex: { agentLoopBackend: 'mock', executable: '/must-not-start/codex' },
-      providers: [],
-      plugins: [],
-    }))
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        codex: { agentLoopBackend: 'mock', executable: '/must-not-start/codex' },
+        providers: [],
+        plugins: [],
+      }),
+    )
     const createFleet = vi.spyOn(ProviderFleet, 'create')
     const session = await createPlaygroundSession(configPath)
     try {
@@ -313,7 +419,8 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     const prepared = await host.prepare()
     if (!prepared.ok) throw new Error('Simulator preparation failed')
     const created = await host.create({ ...lead, sourceDefinitions: [lead.identity] }, prepared.value, {
-      target: lead.identity, definitions: [lead],
+      target: lead.identity,
+      definitions: [lead],
     })
     if (!created.ok) throw new Error('Simulator create failed')
 
@@ -358,69 +465,102 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     broker.dispose()
   })
 
-  it('boots the same bundled ctx.agentLoop client without a provider bridge and returns only normal public events', async () => {
-    const root = path.resolve('.')
-    const entry = path.join(root, 'tests/fixtures/agent-loop-runtime-plugin.ts')
-    const base = await loadConfig(path.join(root, 'cordisx.config.example.json'))
-    const identity = { source: pathToFileURL(entry).href, id: 'agent-loop-runtime' }
-    const manifest = {
-      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
-      schemaVersion: 1 as const,
-      id: identity.id,
-      name: 'AgentLoop Runtime Fixture',
-      capabilities: (['tasks.create', 'tasks.content.read', 'turns.submit'] as const).map(name => ({
-        name, required: true, reason: { key: `mock.${name}`, fallback: name }, scope: {},
-      })),
-    }
-    const policies = (['tasks.create', 'tasks.content.read', 'turns.submit'] as const).map(capability => createPermissionPolicyRecord({
-      profileId: 'playground', identity, capability, scope: {}, policy: 'allow',
-    }))
-    const bundle = await buildRendererBundle({
-      ...base,
-      codex: { ...base.codex, agentLoopBackend: 'mock' },
-      providers: [],
-      plugins: [{ id: identity.id, entry, enabled: true, config: {}, manifest }],
-    }, { playground: true, generation: 'mock-runtime-test', permission: { profileId: 'playground', policies } })
-    const dom = new JSDOM(`<!doctype html><html><body>
+  it(
+    'boots the same bundled ctx.agentLoop client without a provider bridge and returns only normal public events',
+    async () => {
+      const root = path.resolve('.')
+      const entry = path.join(root, 'tests/fixtures/agent-loop-runtime-plugin.ts')
+      const base = await loadConfig(path.join(root, 'cordisx.config.example.json'))
+      const identity = { source: pathToFileURL(entry).href, id: 'agent-loop-runtime' }
+      const manifest = {
+        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+        schemaVersion: 1 as const,
+        id: identity.id,
+        name: 'AgentLoop Runtime Fixture',
+        capabilities: (['tasks.create', 'tasks.content.read', 'turns.submit'] as const).map(name => ({
+          name,
+          required: true,
+          reason: { key: `mock.${name}`, fallback: name },
+          scope: {},
+        })),
+      }
+      const policies = (['tasks.create', 'tasks.content.read', 'turns.submit'] as const).map(capability =>
+        createPermissionPolicyRecord({
+          profileId: 'playground',
+          identity,
+          capability,
+          scope: {},
+          policy: 'allow',
+        })
+      )
+      const bundle = await buildRendererBundle({
+        ...base,
+        codex: { ...base.codex, agentLoopBackend: 'mock' },
+        providers: [],
+        plugins: [{ id: identity.id, entry, enabled: true, config: {}, manifest }],
+      }, { playground: true, generation: 'mock-runtime-test', permission: { profileId: 'playground', policies } })
+      const dom = new JSDOM(
+        `<!doctype html><html><body>
       <button data-cordisx-playground-manager-trigger>Manager</button>
       <nav data-cordisx-playground-surface="sidebar.navigation.items"></nav>
       <main data-cordisx-playground-seat="app"></main><main data-cordisx-playground-seat="main"></main><main data-cordisx-playground-seat="session.content"></main>
-    </body></html>`, { runScripts: 'dangerously', url: 'http://127.0.0.1/' })
-    Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
-    Object.defineProperty(dom.window, 'structuredClone', { value: globalThis.structuredClone })
-    Object.defineProperty(dom.window, 'TextEncoder', { value: TextEncoder })
-    Object.defineProperty(dom.window, 'TextDecoder', { value: TextDecoder })
-    dom.window.eval(bundle)
-    await (dom.window as unknown as { __cordisxBoot?: Promise<unknown> }).__cordisxBoot
-    const fixture = (dom.window as unknown as { __cordisxAgentLoopRuntimeFixture?: { client: BoundAgentLoopClient } }).__cordisxAgentLoopRuntimeFixture
-    if (fixture === undefined) throw new Error('ctx.agentLoop fixture did not mount')
-    const lead = definition('chatroom.generalist', { promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Lead prompt' }] })
-    const created = await fixture.client.createOrBind(createCommand('bundle-create', lead, [lead]))
-    if (created.status !== 'accepted') throw new Error(`bundled Simulator create was not accepted: ${JSON.stringify(created)}`)
-    const subscribed = await fixture.client.subscribe(created.binding, -1)
-    if (subscribed.status !== 'accepted') throw new Error('bundled Simulator subscribe was not accepted')
-    const pages = subscribed.handle.pages[Symbol.asyncIterator]()
-    await pages.next()
-    expect(await fixture.client.send(sendCommand('bundle-send', created.binding, 'bundled hello'))).toMatchObject({ status: 'accepted' })
-    await pages.next()
-    const terminalEvents: AgentLoopEvent[] = []
-    while (!terminalEvents.some(event => event.type === 'lifecycle' && event.lifecycle.phase === 'turn.completed')) {
-      const page = await Promise.race([
-        pages.next(),
-        new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error('Simulator terminal event timeout')), 2_000)),
+    </body></html>`,
+        { runScripts: 'dangerously', url: 'http://127.0.0.1/' },
+      )
+      Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
+      Object.defineProperty(dom.window, 'structuredClone', { value: globalThis.structuredClone })
+      Object.defineProperty(dom.window, 'TextEncoder', { value: TextEncoder })
+      Object.defineProperty(dom.window, 'TextDecoder', { value: TextDecoder })
+      dom.window.eval(bundle)
+      await (dom.window as unknown as { __cordisxBoot?: Promise<unknown> }).__cordisxBoot
+      const fixture = (dom.window as unknown as { __cordisxAgentLoopRuntimeFixture?: { client: BoundAgentLoopClient } })
+        .__cordisxAgentLoopRuntimeFixture
+      if (fixture === undefined) throw new Error('ctx.agentLoop fixture did not mount')
+      const lead = definition('chatroom.generalist', {
+        promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: 'Lead prompt' }],
+      })
+      const created = await fixture.client.createOrBind(createCommand('bundle-create', lead, [lead]))
+      if (created.status !== 'accepted') {
+        throw new Error(
+          `bundled Simulator create was not accepted: ${JSON.stringify(created)}`,
+        )
+      }
+      const subscribed = await fixture.client.subscribe(created.binding, -1)
+      if (subscribed.status !== 'accepted') throw new Error('bundled Simulator subscribe was not accepted')
+      const pages = subscribed.handle.pages[Symbol.asyncIterator]()
+      await pages.next()
+      expect(await fixture.client.send(sendCommand('bundle-send', created.binding, 'bundled hello'))).toMatchObject({
+        status: 'accepted',
+      })
+      await pages.next()
+      const terminalEvents: AgentLoopEvent[] = []
+      while (!terminalEvents.some(event => event.type === 'lifecycle' && event.lifecycle.phase === 'turn.completed')) {
+        const page = await Promise.race([
+          pages.next(),
+          new Promise<never>((_resolve, reject) =>
+            setTimeout(() => reject(new Error('Simulator terminal event timeout')), 2_000)
+          ),
+        ])
+        terminalEvents.push(...(page.value?.events ?? []))
+      }
+      expect(terminalEvents).toMatchObject([
+        { type: 'message', message: { role: 'assistant', content: [{ text: 'Completed successfully.' }] } },
+        { type: 'lifecycle', lifecycle: { phase: 'turn.completed' } },
       ])
-      terminalEvents.push(...(page.value?.events ?? []))
-    }
-    expect(terminalEvents).toMatchObject([
-      { type: 'message', message: { role: 'assistant', content: [{ text: 'Completed successfully.' }] } },
-      { type: 'lifecycle', lifecycle: { phase: 'turn.completed' } },
-    ])
-    const trace = (dom.window as unknown as { __cordisxRuntime?: { playgroundMockAgentLoop?(): { tasks: readonly { identity: { agentId: string } }[] }; dispose(): Promise<void> } }).__cordisxRuntime?.playgroundMockAgentLoop?.()
-    expect(trace?.tasks).toMatchObject([{ identity: { agentId: 'chatroom.generalist' } }])
-    expect((dom.window as unknown as { __cordisxProviderRequestV1?: unknown }).__cordisxProviderRequestV1).toBeUndefined()
-    await (dom.window as unknown as { __cordisxRuntime?: { dispose(): Promise<void> } }).__cordisxRuntime?.dispose()
-    dom.window.close()
-  }, 30_000)
+      const trace = (dom.window as unknown as {
+        __cordisxRuntime?: {
+          playgroundMockAgentLoop?(): { tasks: readonly { identity: { agentId: string } }[] }
+          dispose(): Promise<void>
+        }
+      }).__cordisxRuntime?.playgroundMockAgentLoop?.()
+      expect(trace?.tasks).toMatchObject([{ identity: { agentId: 'chatroom.generalist' } }])
+      expect((dom.window as unknown as { __cordisxProviderRequestV1?: unknown }).__cordisxProviderRequestV1)
+        .toBeUndefined()
+      await (dom.window as unknown as { __cordisxRuntime?: { dispose(): Promise<void> } }).__cordisxRuntime?.dispose()
+      dom.window.close()
+    },
+    30_000,
+  )
 
   it('projects Simulator tasks into the one Host-owned Recent tasks list and exact Task page', async () => {
     const [page, scenarioPage, app, host] = await Promise.all([
@@ -443,8 +583,10 @@ describe('Playground deterministic AgentLoop Simulator', () => {
     expect(app).toContain('data-recent-task-row')
     expect(app).not.toContain('pg-simulator-task-list')
     expect(app).toContain('task.detailsUrl')
-    expect(app).toContain("fixture.reviewNavigationItem === undefined")
+    expect(app).toContain('fixture.reviewNavigationItem === undefined')
     expect(app.indexOf('pg-recent-task-list')).toBeLessThan(app.indexOf('pg-playground-fixtures'))
-    expect(`${host}\n${app}\n${page}\n${scenarioPage}`).not.toMatch(/roomLabel|memberLabel|runLabel|Room 1|Leader|Reviewer/u)
+    expect(`${host}\n${app}\n${page}\n${scenarioPage}`).not.toMatch(
+      /roomLabel|memberLabel|runLabel|Room 1|Leader|Reviewer/u,
+    )
   })
 })

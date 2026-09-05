@@ -19,7 +19,9 @@ export interface HostSchemaFormProps {
   readonly onError?: (error: unknown) => void
 }
 
-function fieldKey(field: CordisXConfigFieldSnapshot): string { return field.path.join('.') }
+function fieldKey(field: CordisXConfigFieldSnapshot): string {
+  return field.path.join('.')
+}
 
 /**
  * Host-owned adapter for a small structured schema. It deliberately reuses the
@@ -27,7 +29,15 @@ function fieldKey(field: CordisXConfigFieldSnapshot): string { return field.path
  * state, and submit/error contract instead of making a surface-specific form.
  */
 export function HostSchemaForm({
-  fields, locale, id, resetKey, submitLabel, savingLabel, onSubmit, onSubmitted, onError,
+  fields,
+  locale,
+  id,
+  resetKey,
+  submitLabel,
+  savingLabel,
+  onSubmit,
+  onSubmitted,
+  onError,
 }: HostSchemaFormProps) {
   const [interactive, setInteractive] = React.useState(false)
   const [operations, setOperations] = React.useState<ReadonlyMap<string, unknown>>(() => new Map())
@@ -43,7 +53,9 @@ export function HostSchemaForm({
   // TDesign field controls own their post-mount focus/measurement lifecycle.
   // Mount them after the inspector shell commits so the same components work
   // in a split pane, drawer, and an independently mounted settings page.
-  React.useEffect(() => { setInteractive(true) }, [])
+  React.useEffect(() => {
+    setInteractive(true)
+  }, [])
 
   const draft = React.useMemo(() => {
     const next = new FormDraft(Object.fromEntries(fields.map(field => [fieldKey(field), field.value])))
@@ -53,7 +65,10 @@ export function HostSchemaForm({
     }
     return next
   }, [fields, operations])
-  const valueFor = React.useCallback((field: CordisXConfigFieldSnapshot) => draft.value(field.path, field.defaultValue), [draft])
+  const valueFor = React.useCallback(
+    (field: CordisXConfigFieldSnapshot) => draft.value(field.path, field.defaultValue),
+    [draft],
+  )
   const dirty = operations.size > 0
   const saving = state === 'saving'
   const change = React.useCallback((field: CordisXConfigFieldSnapshot, value: unknown) => {
@@ -104,34 +119,64 @@ export function HostSchemaForm({
     }
   }, [dirty, fields, locale, onError, onSubmit, onSubmitted, saving, valueFor])
 
-  return <div className="cxf-react-form-shell" data-host-schema-form={id} data-state={state}>
-    <style data-host-schema-form-styles="true">{HOST_FORM_REACT_STYLES}</style>
-    {interactive ? <Form className="cxf-react-form" onSubmit={event => { event.e?.preventDefault(); void submit() }}>
-      <div className="cxf-form-body">
-        <div className="cxf-form-grid">{fields.map((field, index) => {
-          const key = fieldKey(field)
-          const value = valueFor(field)
-          const issueText = issues.get(key)
-          const disabledField = saving && !field.disabled ? { ...field, disabled: true } : field
-          return <HostFieldRow
-            key={key}
-            field={disabledField}
-            value={value}
-            changed={operations.has(key)}
-            locale={locale}
-            idPrefix={id}
-            controlId={`cx-schema-${id}-${index}`}
-            fieldActions="static"
-            {...(issueText === undefined ? {} : { issueText })}
-            onChange={next => change(field, next)}
-          />
-        })}</div>
-        {message === undefined ? null : <div className="cxr-notice cxf-alert" data-tone="error" role="status">{message}</div>}
-      </div>
-      <div className="cxf-form-actions">
-        <span className="cxf-status" data-state={state} role="status">{saving ? savingLabel : ''}</span>
-        <div className="cxf-form-action-buttons"><Button type="button" theme="primary" loading={saving} disabled={!dirty || saving} onClick={() => { void submit() }}>{saving ? savingLabel : submitLabel}</Button></div>
-      </div>
-    </Form> : null}
-  </div>
+  return (
+    <div className="cxf-react-form-shell" data-host-schema-form={id} data-state={state}>
+      <style data-host-schema-form-styles="true">{HOST_FORM_REACT_STYLES}</style>
+      {interactive
+        ? (
+          <Form
+            className="cxf-react-form"
+            onSubmit={event => {
+              event.e?.preventDefault()
+              void submit()
+            }}
+          >
+            <div className="cxf-form-body">
+              <div className="cxf-form-grid">
+                {fields.map((field, index) => {
+                  const key = fieldKey(field)
+                  const value = valueFor(field)
+                  const issueText = issues.get(key)
+                  const disabledField = saving && !field.disabled ? { ...field, disabled: true } : field
+                  return (
+                    <HostFieldRow
+                      key={key}
+                      field={disabledField}
+                      value={value}
+                      changed={operations.has(key)}
+                      locale={locale}
+                      idPrefix={id}
+                      controlId={`cx-schema-${id}-${index}`}
+                      fieldActions="static"
+                      {...(issueText === undefined ? {} : { issueText })}
+                      onChange={next => change(field, next)}
+                    />
+                  )
+                })}
+              </div>
+              {message === undefined
+                ? null
+                : <div className="cxr-notice cxf-alert" data-tone="error" role="status">{message}</div>}
+            </div>
+            <div className="cxf-form-actions">
+              <span className="cxf-status" data-state={state} role="status">{saving ? savingLabel : ''}</span>
+              <div className="cxf-form-action-buttons">
+                <Button
+                  type="button"
+                  theme="primary"
+                  loading={saving}
+                  disabled={!dirty || saving}
+                  onClick={() => {
+                    void submit()
+                  }}
+                >
+                  {saving ? savingLabel : submitLabel}
+                </Button>
+              </div>
+            </div>
+          </Form>
+        )
+        : null}
+    </div>
+  )
 }

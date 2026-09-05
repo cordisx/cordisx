@@ -80,7 +80,9 @@ export function createSidebarItem(document: Document, options: SidebarItemOption
       if (disabled) primary.setAttribute('aria-disabled', 'true')
       else primary.removeAttribute('aria-disabled')
     },
-    setActivate(next) { activate = next },
+    setActivate(next) {
+      activate = next
+    },
     dispose() {
       if (disposed) return
       disposed = true

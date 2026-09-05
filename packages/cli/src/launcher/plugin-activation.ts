@@ -1,15 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import {
-  chmod,
-  lstat,
-  mkdir,
-  open,
-  readFile,
-  readdir,
-  rename,
-  unlink,
-} from 'node:fs/promises'
+import { chmod, lstat, mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import {
   CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
@@ -20,7 +11,8 @@ import {
 
 const ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const GENERATION = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
-const VERSION = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+const VERSION =
+  /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
 const DIGEST = /^sha256:[a-f0-9]{64}$/
 
 function object(value: unknown, label: string): Record<string, unknown> {
@@ -57,12 +49,16 @@ function activationItem(value: unknown, label: string): CordisXPluginActivationI
   const raw = object(value, label)
   exactKeys(raw, ['id', 'version', 'digest', 'moduleGeneration', 'enabled', 'dependencies', 'canonicalSource'], label)
   if (typeof raw.enabled !== 'boolean') throw new Error(`${label}.enabled must be a boolean`)
-  if (!Array.isArray(raw.dependencies) || raw.dependencies.length > 32) throw new Error(`${label}.dependencies is invalid`)
+  if (!Array.isArray(raw.dependencies) || raw.dependencies.length > 32) {
+    throw new Error(`${label}.dependencies is invalid`)
+  }
   let canonicalSource: string | undefined
   if (raw.canonicalSource !== undefined) {
     if (typeof raw.canonicalSource !== 'string') throw new Error(`${label}.canonicalSource is invalid`)
     const url = new URL(raw.canonicalSource)
-    if (url.protocol !== 'https:' || url.search !== '' || url.hash !== '') throw new Error(`${label}.canonicalSource is invalid`)
+    if (url.protocol !== 'https:' || url.search !== '' || url.hash !== '') {
+      throw new Error(`${label}.canonicalSource is invalid`)
+    }
     canonicalSource = raw.canonicalSource
   }
   return {
@@ -80,8 +76,15 @@ function activationItem(value: unknown, label: string): CordisXPluginActivationI
 export function normalizePluginActivation(value: unknown): CordisXPluginActivationRecordV1 {
   const raw = object(value, 'activation')
   exactKeys(raw, [
-    '$schema', 'schemaVersion', 'recordKind', 'transactionId', 'profileId', 'revision',
-    'lastGoodRevision', 'runtimeGeneration', 'plugins',
+    '$schema',
+    'schemaVersion',
+    'recordKind',
+    'transactionId',
+    'profileId',
+    'revision',
+    'lastGoodRevision',
+    'runtimeGeneration',
+    'plugins',
   ], 'activation')
   if (raw.$schema !== CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 || raw.schemaVersion !== 1) {
     throw new Error('activation schema is unsupported')
@@ -134,7 +137,9 @@ export function validatePluginActivationGraph(plugins: readonly CordisXPluginAct
       if (target.version !== dependency.version) {
         throw new Error(`plugin ${plugin.id} requires ${dependency.id}@${dependency.version}, found ${target.version}`)
       }
-      if (plugin.enabled && !target.enabled) throw new Error(`enabled plugin ${plugin.id} depends on disabled ${dependency.id}`)
+      if (plugin.enabled && !target.enabled) {
+        throw new Error(`enabled plugin ${plugin.id} depends on disabled ${dependency.id}`)
+      }
     }
   }
   topologicalPluginOrder(plugins)
@@ -217,7 +222,9 @@ async function publishAtomic(filePath: string, value: unknown): Promise<void> {
 
 async function readActivation(filePath: string): Promise<CordisXPluginActivationRecordV1> {
   const metadata = await lstat(filePath)
-  if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('plugin activation target must be a regular file')
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error('plugin activation target must be a regular file')
+  }
   return normalizePluginActivation(JSON.parse(await readFile(filePath, 'utf8')) as unknown)
 }
 
@@ -274,7 +281,9 @@ export class PluginActivationStore {
 
   async writeCandidate(record: CordisXPluginActivationRecordV1): Promise<void> {
     const normalized = normalizePluginActivation(record)
-    if (normalized.recordKind !== 'candidate' || normalized.transactionId === undefined) throw new Error('candidate record is required')
+    if (normalized.recordKind !== 'candidate' || normalized.transactionId === undefined) {
+      throw new Error('candidate record is required')
+    }
     if (normalized.profileId !== this.profileId || normalized.runtimeGeneration !== this.runtimeGeneration) {
       throw new Error('candidate activation scope is stale')
     }
@@ -287,7 +296,9 @@ export class PluginActivationStore {
 
   async loadCandidate(transactionId: string): Promise<CordisXPluginActivationRecordV1> {
     const record = await readActivation(this.candidatePath(transactionId))
-    if (record.recordKind !== 'candidate' || record.transactionId !== transactionId) throw new Error('candidate activation identity is stale')
+    if (record.recordKind !== 'candidate' || record.transactionId !== transactionId) {
+      throw new Error('candidate activation identity is stale')
+    }
     if (record.profileId !== this.profileId || record.runtimeGeneration !== this.runtimeGeneration) {
       throw new Error('candidate activation scope is stale')
     }
@@ -343,10 +354,12 @@ export class PluginActivationStore {
       if (error.code === 'ENOENT') return []
       throw error
     })
-    return await Promise.all(entries
-      .filter(entry => entry.isFile() && entry.name.endsWith('.json'))
-      .sort((left, right) => left.name.localeCompare(right.name))
-      .map(entry => readActivation(path.join(directory, entry.name))))
+    return await Promise.all(
+      entries
+        .filter(entry => entry.isFile() && entry.name.endsWith('.json'))
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .map(entry => readActivation(path.join(directory, entry.name))),
+    )
   }
 
   async listLastGood(): Promise<readonly CordisXPluginActivationRecordV1[]> {
@@ -355,10 +368,12 @@ export class PluginActivationStore {
       if (error.code === 'ENOENT') return []
       throw error
     })
-    return await Promise.all(entries
-      .filter(entry => entry.isFile() && entry.name.endsWith('.json'))
-      .sort((left, right) => left.name.localeCompare(right.name))
-      .map(entry => readActivation(path.join(directory, entry.name))))
+    return await Promise.all(
+      entries
+        .filter(entry => entry.isFile() && entry.name.endsWith('.json'))
+        .sort((left, right) => left.name.localeCompare(right.name))
+        .map(entry => readActivation(path.join(directory, entry.name))),
+    )
   }
 
   async releaseLastGood(revision: number): Promise<void> {

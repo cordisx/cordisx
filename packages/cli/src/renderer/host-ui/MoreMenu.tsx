@@ -12,9 +12,23 @@ export interface MoreMenuItem {
 }
 
 export function MoreMenu({ label, items }: { readonly label: string; readonly items: readonly MoreMenuItem[] }) {
-  const options: DropdownOption[] = items.map(item => ({ value: item.id, content: item.label, prefixIcon: <HostIcon token={item.icon} />, ...(item.disabled === undefined ? {} : { disabled: item.disabled }) }))
-  return <Dropdown trigger="click" placement="bottom-right" options={options} minColumnWidth={180}
-    onClick={item => items.find(candidate => candidate.id === item.value)?.onSelect()}>
-    <span><IconButton icon="more" label={label} aria-haspopup="menu" /></span>
-  </Dropdown>
+  const options: DropdownOption[] = items.map(item => ({
+    value: item.id,
+    content: item.label,
+    prefixIcon: <HostIcon token={item.icon} />,
+    ...(item.disabled === undefined ? {} : { disabled: item.disabled }),
+  }))
+  return (
+    <Dropdown
+      trigger="click"
+      placement="bottom-right"
+      options={options}
+      minColumnWidth={180}
+      onClick={item => items.find(candidate => candidate.id === item.value)?.onSelect()}
+    >
+      <span>
+        <IconButton icon="more" label={label} aria-haspopup="menu" />
+      </span>
+    </Dropdown>
+  )
 }

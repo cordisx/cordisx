@@ -6,14 +6,14 @@ not a claim that paid-package installation or a payment flow is live.
 
 ## Ownership and boundary
 
-| Surface | Owner | Current state |
-| --- | --- | --- |
-| Statement/commerce schema and vectors | `cordisx-protocol` | formally merged at `8391922` |
-| Signature verification, device proof, trusted time, lifecycle gate | `cordisx` launcher | formally merged at `be523daf` |
-| Marketplace v4 parsing and Manager authorization controls | `cordisx` Host | this delivery candidate |
-| Issuer key registration | `config.publisherGrantIssuers` in Host-private home configuration | this delivery candidate |
-| Optional activation registry | dedicated service owner | planned enhancement |
-| Payment, checkout, webhook, refunds, tax, invoices, KYC | publisher | intentionally out of scope |
+| Surface                                                            | Owner                                                             | Current state                 |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------- | ----------------------------- |
+| Statement/commerce schema and vectors                              | `cordisx-protocol`                                                | formally merged at `8391922`  |
+| Signature verification, device proof, trusted time, lifecycle gate | `cordisx` launcher                                                | formally merged at `be523daf` |
+| Marketplace v4 parsing and Manager authorization controls          | `cordisx` Host                                                    | this delivery candidate       |
+| Issuer key registration                                            | `config.publisherGrantIssuers` in Host-private home configuration | this delivery candidate       |
+| Optional activation registry                                       | dedicated service owner                                           | planned enhancement           |
+| Payment, checkout, webhook, refunds, tax, invoices, KYC            | publisher                                                         | intentionally out of scope    |
 
 The Manager can request only a public device challenge, import a statement, or
 read a scoped authorization projection through a narrow launcher binding. It
@@ -53,15 +53,15 @@ PublisherGrant state into that repository.
 
 ## Threat model and controls
 
-| Threat | Control | Residual boundary |
-| --- | --- | --- |
-| Forged or altered grant | Host-registered Ed25519 key and canonical signing input | issuer key compromise needs rotation/revoke |
-| Sandbox/live confusion | issuer key lookup includes environment | production issuer registration is required |
-| Replayed statement | statement id is byte-fingerprinted | direct grants are pre-bound, not generic redemption codes |
-| Copy grant to another machine | device-key hash and local proof of possession | same private key theft remains an endpoint compromise |
-| Wall-clock rollback | persist non-decreasing accepted statement time | no global clock oracle in a fully offline flow |
-| Offline/network failure | bounded `expiresAt + offlineGraceSeconds` | new activation never falls back locally |
-| Payment/refund inference | no payment inputs or webhooks exist | publisher must issue revoke/renew |
+| Threat                        | Control                                                 | Residual boundary                                         |
+| ----------------------------- | ------------------------------------------------------- | --------------------------------------------------------- |
+| Forged or altered grant       | Host-registered Ed25519 key and canonical signing input | issuer key compromise needs rotation/revoke               |
+| Sandbox/live confusion        | issuer key lookup includes environment                  | production issuer registration is required                |
+| Replayed statement            | statement id is byte-fingerprinted                      | direct grants are pre-bound, not generic redemption codes |
+| Copy grant to another machine | device-key hash and local proof of possession           | same private key theft remains an endpoint compromise     |
+| Wall-clock rollback           | persist non-decreasing accepted statement time          | no global clock oracle in a fully offline flow            |
+| Offline/network failure       | bounded `expiresAt + offlineGraceSeconds`               | new activation never falls back locally                   |
+| Payment/refund inference      | no payment inputs or webhooks exist                     | publisher must issue revoke/renew                         |
 
 ## Optional registry enhancement
 

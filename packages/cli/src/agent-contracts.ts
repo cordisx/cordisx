@@ -123,7 +123,17 @@ export interface CordisXAgentEventDataMap {
   }
   readonly 'item.lifecycle': {
     readonly phase: 'started' | 'updated' | 'completed' | 'failed' | 'cancelled'
-    readonly kind: 'user-message' | 'assistant-message' | 'reasoning' | 'plan' | 'tool-call' | 'tool-result' | 'command' | 'file-change' | 'compaction' | 'other'
+    readonly kind:
+      | 'user-message'
+      | 'assistant-message'
+      | 'reasoning'
+      | 'plan'
+      | 'tool-call'
+      | 'tool-result'
+      | 'command'
+      | 'file-change'
+      | 'compaction'
+      | 'other'
     readonly status?: string
   }
   readonly 'message.observed': { readonly message: CordisXUserMessage }
@@ -182,7 +192,8 @@ export type CordisXAgentEvent<Type extends CordisXAgentEventType = CordisXAgentE
 }
 
 export type CordisXAgentEventDraft<Type extends CordisXAgentEventType = CordisXAgentEventType> =
-  Omit<CordisXAgentEvent<Type>, 'contract' | 'schemaVersion' | 'eventId' | 'seq' | 'time'> & {
+  & Omit<CordisXAgentEvent<Type>, 'contract' | 'schemaVersion' | 'eventId' | 'seq' | 'time'>
+  & {
     readonly time?: number
   }
 
@@ -348,10 +359,10 @@ export interface CordisXAgentDeliverySnapshot {
 export type CordisXAgentDeliveryCancelResult =
   | { readonly ok: true; readonly snapshot: CordisXAgentDeliverySnapshot }
   | {
-      readonly ok: false
-      readonly reason: 'irreversible' | 'terminal' | 'stale-generation' | 'owner-mismatch'
-      readonly snapshot: CordisXAgentDeliverySnapshot
-    }
+    readonly ok: false
+    readonly reason: 'irreversible' | 'terminal' | 'stale-generation' | 'owner-mismatch'
+    readonly snapshot: CordisXAgentDeliverySnapshot
+  }
 
 export interface CordisXAgentDeliveryHandle {
   readonly deliveryId: string
@@ -381,7 +392,11 @@ export type CordisXPreStepDecision =
   | { readonly kind: 'continue' }
   | { readonly kind: 'append'; readonly messages: readonly CordisXAgentMessageInput[] }
   | { readonly kind: 'reject'; readonly reason: string }
-  | { readonly kind: 'transform'; readonly operations: readonly CordisXPreStepOperation[]; readonly append?: readonly CordisXAgentMessageInput[] }
+  | {
+    readonly kind: 'transform'
+    readonly operations: readonly CordisXPreStepOperation[]
+    readonly append?: readonly CordisXAgentMessageInput[]
+  }
 
 export interface CordisXPreStepInput {
   readonly sessionId: string
@@ -390,7 +405,9 @@ export interface CordisXPreStepInput {
   readonly messages: readonly CordisXUserMessage[]
 }
 
-export type CordisXPreStepHandler = (input: CordisXPreStepInput) => CordisXPreStepDecision | Promise<CordisXPreStepDecision>
+export type CordisXPreStepHandler = (
+  input: CordisXPreStepInput,
+) => CordisXPreStepDecision | Promise<CordisXPreStepDecision>
 
 export interface CordisXAgents {
   get(sessionId: string): CordisXAgent

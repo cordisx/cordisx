@@ -13,7 +13,9 @@ export function assertReference(value: string, label: string): void {
 }
 
 export function assertLocalizedText(value: unknown, label: string): asserts value is CordisXLocalizedText {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be LocalizedText`)
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be LocalizedText`)
+  }
   const message = value as Partial<CordisXLocalizedText>
   const unknown = Object.keys(value).find(key => !['namespace', 'key', 'params', 'fallback'].includes(key))
   if (unknown !== undefined) throw new Error(`${label} has unknown field ${unknown}`)
@@ -50,8 +52,10 @@ function cloneValue(value: unknown, seen: Set<object>): unknown {
   const constructor = prototype === null ? undefined : Object.prototype.hasOwnProperty.call(prototype, 'constructor')
     ? (prototype as { constructor?: unknown }).constructor
     : undefined
-  if (Object.prototype.toString.call(value) !== '[object Object]'
-    || (constructor !== undefined && (typeof constructor !== 'function' || constructor.name !== 'Object'))) {
+  if (
+    Object.prototype.toString.call(value) !== '[object Object]'
+    || (constructor !== undefined && (typeof constructor !== 'function' || constructor.name !== 'Object'))
+  ) {
     throw new Error('structured contribution must contain plain objects only')
   }
   const result: Record<string, unknown> = {}
@@ -87,7 +91,9 @@ export function assertWhenExpression(condition: CordisXWhen | undefined): void {
   if ('key' in condition) {
     assertLocalId(condition.key, 'when context key')
     const operator = ['exists', 'equals', 'notEquals'].filter(key => key in condition)
-    if (operator.length !== 1 || Object.keys(condition).length !== 2) throw new Error('when key condition must contain exactly one operator')
+    if (operator.length !== 1 || Object.keys(condition).length !== 2) {
+      throw new Error('when key condition must contain exactly one operator')
+    }
   }
   if ('all' in condition) {
     if (Object.keys(condition).length !== 1) throw new Error('when.all has unknown fields')

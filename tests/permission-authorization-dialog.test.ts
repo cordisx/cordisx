@@ -68,7 +68,12 @@ function localizedRequest(initial: 'en' | 'zh-CN' = 'en') {
   return {
     request: {
       project: () => ({
-        plugin: { name: 'Demo', source: 'file:///plugins/demo.js', trust: 'unverified' as const, icon: 'host:settings' },
+        plugin: {
+          name: 'Demo',
+          source: 'file:///plugins/demo.js',
+          trust: 'unverified' as const,
+          icon: 'host:settings',
+        },
         availability: {
           'models.read': {
             status: 'supported' as const,
@@ -87,7 +92,9 @@ function localizedRequest(initial: 'en' | 'zh-CN' = 'en') {
       }),
       subscribeLocale: (next: () => void) => {
         listener = next
-        return () => { if (listener === next) listener = undefined }
+        return () => {
+          if (listener === next) listener = undefined
+        }
       },
     },
     setLocale(next: 'en' | 'zh-CN') {
@@ -140,7 +147,8 @@ describe('Host-owned permission authorization dialog', () => {
     expect(panel.querySelectorAll('[role="listitem"]')).toHaveLength(3)
     expect(panel.querySelectorAll('.cxp-item .cxp-item')).toHaveLength(0)
     expect(panel.querySelectorAll('fieldset')).toHaveLength(3)
-    expect(panel.querySelectorAll('[data-permission-action="cancel"], [data-permission-action="confirm"]')).toHaveLength(2)
+    expect(panel.querySelectorAll('[data-permission-action="cancel"], [data-permission-action="confirm"]'))
+      .toHaveLength(2)
     expect(panel.querySelectorAll('button[data-permission-decision]')).toHaveLength(0)
     expect(panel.querySelectorAll('[data-host-form-primitive="radio"]')).not.toHaveLength(0)
     expect(panel.querySelector('[data-permission-action="confirm"]')?.classList.contains('cxf-button')).toBe(true)
@@ -193,7 +201,9 @@ describe('Host-owned permission authorization dialog', () => {
 
     localization.setLocale('zh-CN')
     expect(overlay.querySelector('h2')?.textContent).toBe('安装前确认权限')
-    expect(overlay.querySelector('[data-permission-capability="agent.events.read"] h3')?.textContent).toBe('读取 Agent 事件')
+    expect(overlay.querySelector('[data-permission-capability="agent.events.read"] h3')?.textContent).toBe(
+      '读取 Agent 事件',
+    )
     expect(instance.window.document.activeElement).toBe(identity)
     expect(identity.checked).toBe(true)
 
@@ -247,16 +257,25 @@ describe('Host-owned permission authorization dialog', () => {
     const survivingResult = dialog.show(surviving, localizedRequest().request)
     const queuedResult = dialog.show(staleQueued, localizedRequest().request)
     await mounted()
-    expect(instance.window.document.querySelector<HTMLElement>('[data-permission-authorization]')?.dataset.permissionAuthorization)
+    expect(
+      instance.window.document.querySelector<HTMLElement>('[data-permission-authorization]')?.dataset
+        .permissionAuthorization,
+    )
       .toBe(staleActive.plan.planId)
 
     dialog.cancel(staleQueued.plan.planId, staleQueued.plan.binding)
     await expect(queuedResult).resolves.toEqual({ status: 'cancelled' })
-    expect(instance.window.document.querySelector<HTMLElement>('[data-permission-authorization]')?.dataset.permissionAuthorization)
+    expect(
+      instance.window.document.querySelector<HTMLElement>('[data-permission-authorization]')?.dataset
+        .permissionAuthorization,
+    )
       .toBe(staleActive.plan.planId)
 
     dialog.cancel(staleActive.plan.planId, { ...staleActive.plan.binding, moduleGeneration: 'module-other' })
-    expect(instance.window.document.querySelector<HTMLElement>('[data-permission-authorization]')?.dataset.permissionAuthorization)
+    expect(
+      instance.window.document.querySelector<HTMLElement>('[data-permission-authorization]')?.dataset
+        .permissionAuthorization,
+    )
       .toBe(staleActive.plan.planId)
     dialog.cancel(staleActive.plan.planId, staleActive.plan.binding)
     await expect(activeResult).resolves.toEqual({ status: 'cancelled' })
@@ -299,7 +318,8 @@ describe('Host-owned permission authorization dialog', () => {
     const dialog = new BrowserPermissionAuthorizationDialog(instance.window.document)
     const pending = dialog.show(viewModel(), localizedRequest().request)
     await mounted()
-    const css = instance.window.document.querySelector<HTMLStyleElement>('[data-permission-authorization-style]')!.textContent
+    const css =
+      instance.window.document.querySelector<HTMLStyleElement>('[data-permission-authorization-style]')!.textContent
     expect(css).toContain('var(--cx-surface)')
     expect(css).toContain('var(--cx-backdrop)')
     expect(css).toContain('var(--cx-focus)')

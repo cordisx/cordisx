@@ -47,16 +47,18 @@ function pluginFromModule(value: unknown): LauncherChannelServiceModule {
   const candidate = typeof namespace.apply === 'function'
     ? namespace
     : namespace.default !== null && typeof namespace.default === 'object'
-      ? namespace.default as Record<string, unknown>
-      : undefined
+    ? namespace.default as Record<string, unknown>
+    : undefined
   if (candidate === undefined || typeof candidate.apply !== 'function') {
     throw new Error('Channel service module must export apply() or a default Cordis plugin object')
   }
   if (candidate.name !== undefined && typeof candidate.name !== 'string') {
     throw new Error('Channel service module name must be a string')
   }
-  if (candidate.inject !== undefined && !Array.isArray(candidate.inject)
-    && (candidate.inject === null || typeof candidate.inject !== 'object')) {
+  if (
+    candidate.inject !== undefined && !Array.isArray(candidate.inject)
+    && (candidate.inject === null || typeof candidate.inject !== 'object')
+  ) {
     throw new Error('Channel service module inject declaration is invalid')
   }
   return Object.freeze({
@@ -72,9 +74,11 @@ function pluginFromModule(value: unknown): LauncherChannelServiceModule {
 export async function loadLauncherChannelServiceModule(
   access: LauncherChannelServiceModuleAccess,
 ): Promise<LauncherChannelServiceModule> {
-  if (access.serviceKind !== 'channel-adapter'
+  if (
+    access.serviceKind !== 'channel-adapter'
     || !/^\.\/(?:services\/)?[a-z0-9][a-z0-9._-]{0,95}\.mjs$/.test(access.runtimeEntry)
-    || !path.isAbsolute(access.artifactDirectory)) {
+    || !path.isAbsolute(access.artifactDirectory)
+  ) {
     throw new Error('Channel service module projection is invalid')
   }
   const root = await realpath(access.artifactDirectory)
@@ -85,7 +89,9 @@ export async function loadLauncherChannelServiceModule(
     throw new Error('Channel service module entry is not a bounded regular file')
   }
   const source = await readFile(entry, 'utf8')
-  if (source.includes('sourceMappingURL=')) throw new Error('Channel service module must not load an external source map')
+  if (source.includes('sourceMappingURL=')) {
+    throw new Error('Channel service module must not load an external source map')
+  }
   return pluginFromModule(await import(`${pathToFileURL(entry).href}?integrity=${access.packageIdentity.integrity}`))
 }
 
@@ -107,9 +113,11 @@ export class LauncherChannelServiceHost {
     configuration?: unknown,
   ): Promise<ActiveLauncherChannelService> {
     if (this.#disposed) throw new Error('Channel service host is disposed')
-    if (access.pluginIdentity.pluginId !== access.packageIdentity.pluginId
+    if (
+      access.pluginIdentity.pluginId !== access.packageIdentity.pluginId
       || access.pluginIdentity.source.length < 1
-      || access.pluginIdentity.generation.length < 1) {
+      || access.pluginIdentity.generation.length < 1
+    ) {
       throw new Error('Channel service identity is not bound to its authority projection')
     }
     if (access.configuration.kind === 'none' && configuration !== undefined) {

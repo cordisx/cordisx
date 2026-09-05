@@ -2,8 +2,8 @@ import type {
   CordisXAgent,
   CordisXAgentDeliveryHandle,
   CordisXAgentEvent,
-  CordisXAgentEventSource,
   CordisXAgentEvents,
+  CordisXAgentEventSource,
   CordisXAgents,
   CordisXSystemPrompt,
 } from 'cordisx/contracts'
@@ -22,10 +22,16 @@ import type {
 
 const RENDERED_LIMIT = 500
 const PROTOCOL_HEAD = '08dcdc11aae38ea9c0e91e4ad17cf31b8c756747'
-const LIVE_OPERATIONS = Object.freeze([
-  'followup', 'steer', 'inject', 'pre-step',
-  'system-prompt-section', 'system-prompt-context',
-] as const)
+const LIVE_OPERATIONS = Object.freeze(
+  [
+    'followup',
+    'steer',
+    'inject',
+    'pre-step',
+    'system-prompt-section',
+    'system-prompt-context',
+  ] as const,
+)
 
 function pluginAttribution(source: CordisXAgentEventSource): TracePluginAttribution | undefined {
   if (source.kind !== 'plugin') return undefined
@@ -72,17 +78,23 @@ function deliverySemantic(data: { readonly target?: string; readonly wakeup?: bo
 
 function semanticType(event: CordisXAgentEvent): string {
   if (event.type === 'message.observed') return 'user.message'
-  if (event.type === 'message.delivery') return deliverySemantic(event.data as { readonly target?: string; readonly wakeup?: boolean })
+  if (event.type === 'message.delivery') {
+    return deliverySemantic(event.data as { readonly target?: string; readonly wakeup?: boolean })
+  }
   if (event.type === 'input.contribution') return (event.data as { readonly kind: string }).kind
   if (event.type === 'item.lifecycle') return `item.${(event.data as { readonly kind?: string }).kind ?? 'other'}`
-  if (event.type === 'content.chunk') return `content.${(event.data as { readonly channel?: string }).channel ?? 'other'}`
+  if (event.type === 'content.chunk') {
+    return `content.${(event.data as { readonly channel?: string }).channel ?? 'other'}`
+  }
   if (event.type === 'diagnostic') return `diagnostic.${(event.data as { readonly code?: string }).code ?? 'unknown'}`
   return event.type
 }
 
 function textSummary(event: CordisXAgentEvent): string | undefined {
   if (event.type !== 'message.observed') return undefined
-  const message = (event.data as { readonly message?: { readonly content?: ReadonlyArray<{ readonly type?: string; readonly text?: string }> } }).message
+  const message = (event.data as {
+    readonly message?: { readonly content?: ReadonlyArray<{ readonly type?: string; readonly text?: string }> }
+  }).message
   const text = message?.content?.filter(block => block.type === 'text').map(block => block.text ?? '').join(' ').trim()
   if (text === undefined || text === '') return undefined
   return text.length <= 180 ? text : `${text.slice(0, 177)}…`
@@ -93,10 +105,16 @@ function summary(event: CordisXAgentEvent): string {
   if (text !== undefined) return text
   if (event.type === 'message.delivery') {
     const data = event.data as { readonly stage?: string; readonly target?: string; readonly wakeup?: boolean }
-    return `Delivery ${data.stage ?? 'updated'} for ${data.target ?? 'unknown target'}${data.wakeup === true ? ' with wakeup' : ''}.`
+    return `Delivery ${data.stage ?? 'updated'} for ${data.target ?? 'unknown target'}${
+      data.wakeup === true ? ' with wakeup' : ''
+    }.`
   }
   if (event.type === 'input.contribution') {
-    const data = event.data as { readonly kind?: string; readonly stage?: string; readonly diagnostic?: { readonly message?: string } }
+    const data = event.data as {
+      readonly kind?: string
+      readonly stage?: string
+      readonly diagnostic?: { readonly message?: string }
+    }
     return data.diagnostic?.message ?? `${data.kind ?? 'Input contribution'} ${data.stage ?? 'updated'}.`
   }
   if (event.type === 'content.chunk') {
@@ -113,9 +131,9 @@ function phase(event: CordisXAgentEvent): TracePhase | undefined {
   const value = (event.data as { readonly stage?: string; readonly phase?: string }).stage
     ?? (event.data as { readonly phase?: string }).phase
   return value === 'requested' || value === 'permission' || value === 'queued' || value === 'claimed'
-    || value === 'registered' || value === 'evaluated' || value === 'projected'
-    || value === 'forwarded' || value === 'released' || value === 'failed'
-    || value === 'expired' || value === 'cancelled'
+      || value === 'registered' || value === 'evaluated' || value === 'projected'
+      || value === 'forwarded' || value === 'released' || value === 'failed'
+      || value === 'expired' || value === 'cancelled'
     ? value
     : undefined
 }
@@ -171,7 +189,7 @@ export function projectAgentEvent(event: CordisXAgentEvent, origin: TraceEvent['
     ...(projectedPermission === undefined ? {} : { permission: projectedPermission }),
     payload: event.data as unknown as Readonly<Record<string, unknown>>,
     modelConsumption: (event.type === 'message.delivery' || event.type === 'input.contribution')
-      && (projectedPhase === 'projected' || projectedPhase === 'forwarded')
+        && (projectedPhase === 'projected' || projectedPhase === 'forwarded')
       ? 'unproved'
       : 'not-applicable',
   })
@@ -248,12 +266,15 @@ export class LiveTraceShowcaseStore implements TraceShowcaseStore {
     return () => this.listeners.delete(listener)
   }
 
-  async loadEarlier(): Promise<void> { await this.operation }
+  async loadEarlier(): Promise<void> {
+    await this.operation
+  }
 
   async requestDemo(request: TraceDemoRequest): Promise<string> {
     if (this.disposed) throw new Error('Agent Trace live provider is disposed')
     const id = `agent-trace-showcase-${request.kind}-${++this.demoCounter}`
-    const content = request.content ?? `[Agent Trace Showcase demo:${request.kind}] Explicitly requested for ${this.sessionId}.`
+    const content = request.content
+      ?? `[Agent Trace Showcase demo:${request.kind}] Explicitly requested for ${this.sessionId}.`
     if (request.kind === 'pre-step') {
       const dispose = this.systemPreStep(id, content)
       this.contributions.set(id, dispose)
@@ -270,8 +291,8 @@ export class LiveTraceShowcaseStore implements TraceShowcaseStore {
     const handle = request.kind === 'followup'
       ? this.agent.followup(content)
       : request.kind === 'steer'
-        ? this.agent.steer(content)
-        : this.agent.inject(content)
+      ? this.agent.steer(content)
+      : this.agent.inject(content)
     this.deliveryHandles.set(handle.deliveryId, handle)
     this.scheduleSync()
     return handle.deliveryId
@@ -299,7 +320,9 @@ export class LiveTraceShowcaseStore implements TraceShowcaseStore {
     return cleared
   }
 
-  async settled(): Promise<void> { await this.operation }
+  async settled(): Promise<void> {
+    await this.operation
+  }
 
   dispose(): void {
     if (this.disposed) return
@@ -339,7 +362,9 @@ export class LiveTraceShowcaseStore implements TraceShowcaseStore {
     const remaining = this.windowSize - this.events.length
     if (remaining <= 0) {
       this.boundaryReached = true
-      this.withDiagnostic(`The live projection reached its configured ${this.windowSize}-event window; later events are not loaded.`)
+      this.withDiagnostic(
+        `The live projection reached its configured ${this.windowSize}-event window; later events are not loaded.`,
+      )
       return
     }
     const afterSeq = this.events.at(-1)?.seq ?? -1
@@ -362,7 +387,9 @@ export class LiveTraceShowcaseStore implements TraceShowcaseStore {
     this.events.push(...additions)
     if (result.value.nextAfterSeq !== undefined || this.events.length >= this.windowSize) {
       this.boundaryReached = true
-      this.withDiagnostic(`The live projection reached its configured ${this.windowSize}-event window; later events are not loaded.`)
+      this.withDiagnostic(
+        `The live projection reached its configured ${this.windowSize}-event window; later events are not loaded.`,
+      )
     }
     this.notify()
   }

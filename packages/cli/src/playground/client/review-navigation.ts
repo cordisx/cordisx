@@ -37,7 +37,9 @@ export function activatePlaygroundReviewNavigation(
     const seat = document.querySelector<HTMLElement>('[data-cordisx-playground-surface="sidebar.navigation.items"]')
     const MutationObserverConstructor = document.defaultView?.MutationObserver
     if (seat !== null && MutationObserverConstructor !== undefined) {
-      observer = new MutationObserverConstructor(() => { activate() })
+      observer = new MutationObserverConstructor(() => {
+        activate()
+      })
       observer.observe(seat, { childList: true, subtree: true })
     }
   }
@@ -60,7 +62,8 @@ export async function authorizePlaygroundReviewNavigation(
   const snapshot = runtime.snapshot()
   const registration = snapshot.registrations.find(candidate =>
     candidate.qualifiedId === qualifiedContributionId
-    && candidate.surface === 'sidebar.navigation.items')
+    && candidate.surface === 'sidebar.navigation.items'
+  )
   if (registration === undefined || registration.authorized) return
   if (registration.pointPolicyReason !== 'permission.review-pending') return
   const plugin = snapshot.plugins.find(candidate => candidate.id === registration.owner)
@@ -69,9 +72,11 @@ export async function authorizePlaygroundReviewNavigation(
   const routeId = registration.item?.route?.id
   const route = routeId === undefined
     ? undefined
-    : snapshot.navigation.routes.find(candidate =>
-      candidate.owner === registration.owner && candidate.id === routeId)
+    : snapshot.navigation.routes.find(candidate => candidate.owner === registration.owner && candidate.id === routeId)
   if (route !== undefined) pointIds.push(route.definition.outlet)
-  await runtime.setExtensionPointPolicies(plugin.source, registration.owner,
-    [...new Set(pointIds)].map(pointId => ({ pointId, policy: 'allow' })))
+  await runtime.setExtensionPointPolicies(
+    plugin.source,
+    registration.owner,
+    [...new Set(pointIds)].map(pointId => ({ pointId, policy: 'allow' })),
+  )
 }

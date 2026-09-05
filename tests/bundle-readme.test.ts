@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -93,15 +93,23 @@ describe('plugin README composition', () => {
     await mkdir(shadowPackage, { recursive: true })
     await Promise.all([
       writeFile(path.join(pluginRoot, 'package.json'), '{"name":"fixture-plugin","type":"module"}\n'),
-      writeFile(path.join(shadowPackage, 'package.json'), JSON.stringify({
-        name: 'cordisx', type: 'module', exports: { './contracts': './contracts.js' },
-      })),
+      writeFile(
+        path.join(shadowPackage, 'package.json'),
+        JSON.stringify({
+          name: 'cordisx',
+          type: 'module',
+          exports: { './contracts': './contracts.js' },
+        }),
+      ),
       writeFile(path.join(shadowPackage, 'contracts.js'), 'export const SHADOW_CONTRACT = "stale"\n'),
-      writeFile(entry, `
+      writeFile(
+        entry,
+        `
         import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from 'cordisx/contracts'
         export const schemas = [CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2]
         export function apply() {}
-      `),
+      `,
+      ),
     ])
     const config: CordisXConfig = {
       version: 1,
@@ -122,10 +130,13 @@ describe('plugin README composition', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-host-dom-worker-bundle-'))
     temporaryDirectories.push(root)
     const entry = path.join(root, 'host-dom-plugin.ts')
-    await writeFile(entry, `
+    await writeFile(
+      entry,
+      `
       globalThis.__hostDomRendererExecutionWouldBeABug = true
       export function apply() {}
-    `)
+    `,
+    )
     const config: CordisXConfig = {
       version: 1,
       rootDir: root,

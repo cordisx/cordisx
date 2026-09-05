@@ -49,7 +49,10 @@ export function resolveLocalCodexProviderConfig(
   const userHome = environment.HOME
   const codexHome = typeof configuredHome === 'string' && configuredHome.trim() !== ''
     ? path.resolve(configuredHome)
-    : path.join(typeof userHome === 'string' && userHome.trim() !== '' ? path.resolve(userHome) : os.homedir(), '.codex')
+    : path.join(
+      typeof userHome === 'string' && userHome.trim() !== '' ? path.resolve(userHome) : os.homedir(),
+      '.codex',
+    )
   return Object.freeze({
     id: 'codex-local',
     kind: 'local-codex',
@@ -75,9 +78,19 @@ export function resolveProviderConfigs(
   const result = value.map((item, index): CliProxyProviderConfig => {
     const label = `config.providers[${index}]`
     const provider = object(item, label)
-    const unknown = Object.keys(provider).find(key => ![
-      'id', 'kind', 'displayName', 'baseUrl', 'apiKeyEnv', 'codexExecutable', 'dataDir', 'enabled', 'timeoutMs',
-    ].includes(key))
+    const unknown = Object.keys(provider).find(key =>
+      ![
+        'id',
+        'kind',
+        'displayName',
+        'baseUrl',
+        'apiKeyEnv',
+        'codexExecutable',
+        'dataDir',
+        'enabled',
+        'timeoutMs',
+      ].includes(key)
+    )
     if (unknown !== undefined) throw new Error(`${label} contains unknown field ${unknown}`)
     const id = text(provider.id, `${label}.id`, 96)
     if (!PROVIDER_ID.test(id)) throw new Error(`${label}.id is invalid`)
@@ -97,7 +110,9 @@ export function resolveProviderConfigs(
     const normalizedRoot = process.platform === 'win32' ? codexHome.toLowerCase() : codexHome
     if (dataRoots.has(normalizedRoot)) throw new Error(`${label}.dataDir must be unique per provider`)
     dataRoots.add(normalizedRoot)
-    if (provider.enabled !== undefined && typeof provider.enabled !== 'boolean') throw new Error(`${label}.enabled must be boolean`)
+    if (provider.enabled !== undefined && typeof provider.enabled !== 'boolean') {
+      throw new Error(`${label}.enabled must be boolean`)
+    }
     const timeoutMs = provider.timeoutMs ?? 30_000
     if (!Number.isInteger(timeoutMs) || (timeoutMs as number) < 1_000 || (timeoutMs as number) > 120_000) {
       throw new Error(`${label}.timeoutMs must be an integer between 1000 and 120000`)

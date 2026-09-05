@@ -5,13 +5,23 @@ import { snapshotConsoleValue } from '../packages/cli/src/renderer/plugin-consol
 
 function entry(overrides: Partial<CordisXPluginConsoleEntryV1> = {}): CordisXPluginConsoleEntryV1 {
   return {
-    contract: 'cordisx.plugin-console-entry/v1', schemaVersion: 1,
-    entryId: 'entry-1', seq: 1, time: 1_700_000_000_000,
-    plugin: { source: 'file:///plugin.ts', pluginId: 'plugin' }, generation: 'plugin:g1',
-    coverage: 'scoped-console', kind: 'console', method: 'log', source: 'console.log',
-    message: 'x=4 payload Array(2)', args: [
-      snapshotConsoleValue('x=%d'), snapshotConsoleValue(4),
-      snapshotConsoleValue({ nested: { ok: true } }), snapshotConsoleValue([1, 2]),
+    contract: 'cordisx.plugin-console-entry/v1',
+    schemaVersion: 1,
+    entryId: 'entry-1',
+    seq: 1,
+    time: 1_700_000_000_000,
+    plugin: { source: 'file:///plugin.ts', pluginId: 'plugin' },
+    generation: 'plugin:g1',
+    coverage: 'scoped-console',
+    kind: 'console',
+    method: 'log',
+    source: 'console.log',
+    message: 'x=4 payload Array(2)',
+    args: [
+      snapshotConsoleValue('x=%d'),
+      snapshotConsoleValue(4),
+      snapshotConsoleValue({ nested: { ok: true } }),
+      snapshotConsoleValue([1, 2]),
     ],
     ...overrides,
   }
@@ -34,8 +44,28 @@ describe('Luna Console entry projection', () => {
   it('keeps every Host boundary event independent and restores Error stacks', () => {
     const failure = new Error('boom')
     failure.stack = 'Error: boom\n    at plugin.ts:1:1'
-    const requested = entry({ entryId: 'request', coverage: 'host-mediated', kind: 'invocation', source: 'tools.call', message: 'Call requested', correlationId: 'call-1', phase: 'requested', args: [] })
-    const terminal = entry({ entryId: 'failure', coverage: 'host-mediated', kind: 'invocation', method: 'error', source: 'tools.call', message: 'Call failed', correlationId: 'call-1', phase: 'failure', args: [snapshotConsoleValue(failure)], stack: failure.stack })
+    const requested = entry({
+      entryId: 'request',
+      coverage: 'host-mediated',
+      kind: 'invocation',
+      source: 'tools.call',
+      message: 'Call requested',
+      correlationId: 'call-1',
+      phase: 'requested',
+      args: [],
+    })
+    const terminal = entry({
+      entryId: 'failure',
+      coverage: 'host-mediated',
+      kind: 'invocation',
+      method: 'error',
+      source: 'tools.call',
+      message: 'Call failed',
+      correlationId: 'call-1',
+      phase: 'failure',
+      args: [snapshotConsoleValue(failure)],
+      stack: failure.stack,
+    })
     const projectedRequest = projectPluginConsoleEntryForLuna(requested)
     const projectedTerminal = projectPluginConsoleEntryForLuna(terminal)
     expect(projectedRequest.args).toEqual(['Call requested'])

@@ -93,7 +93,9 @@ function rankText(candidate: MarketplaceSearchCandidate, normalizedQuery: string
     return { tier: 'primary-prefix', order: TEXT_TIER_ORDER['primary-prefix'], score: 80 }
   }
   if (terms.every(term => primary.includes(term))) {
-    const wholeTermMatches = terms.filter(term => id.split(/[._-]/).includes(term) || name.split(' ').includes(term)).length
+    const wholeTermMatches = terms.filter(term =>
+      id.split(/[._-]/).includes(term) || name.split(' ').includes(term)
+    ).length
     return { tier: 'all-primary-terms', order: TEXT_TIER_ORDER['all-primary-terms'], score: 60 + wholeTermMatches }
   }
   if (terms.every(term => catalog.includes(term))) {
@@ -141,8 +143,10 @@ export function rankMarketplacePlugins<Candidate extends MarketplaceSearchCandid
     })
   }
 
-  ranked.sort((left, right) => left.tierOrder - right.tierOrder
+  ranked.sort((left, right) =>
+    left.tierOrder - right.tierOrder
     || right.ranking.scoreWithinTier - left.ranking.scoreWithinTier
-    || compareStableIdentity(left.ranking.stableIdentity, right.ranking.stableIdentity))
+    || compareStableIdentity(left.ranking.stableIdentity, right.ranking.stableIdentity)
+  )
   return ranked.map(({ plugin, ranking }) => ({ plugin, ranking }))
 }

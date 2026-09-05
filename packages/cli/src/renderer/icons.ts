@@ -1,25 +1,27 @@
 import {
-  isSemanticIconKey,
   type IconState,
   type IconVariant,
+  isSemanticIconKey,
   type NormalizedVectorCommand,
   type NormalizedVectorDescriptor,
   type SemanticIconKey,
 } from '../icon-theme-contracts.js'
 import {
   BUILTIN_HOST_SURFACE_ICON_KEYS,
+  type BuiltinHostSurfaceIconKey,
   resolveBuiltinHostSurfaceIconDescriptor,
   resolveBuiltinReiconDescriptor,
-  type BuiltinHostSurfaceIconKey,
 } from './reicon-icon-backend.js'
-import { resolveHostTheme, type HostAppTheme } from './host-theme.js'
+import { type HostAppTheme, resolveHostTheme } from './host-theme.js'
 import type { IconThemeRegistry } from './icon-theme-registry.js'
 
 const documentRegistries = new WeakMap<Document, IconThemeRegistry>()
 
 export function bindIconThemeRegistry(document: Document, registry: IconThemeRegistry): () => void {
   documentRegistries.set(document, registry)
-  return () => { if (documentRegistries.get(document) === registry) documentRegistries.delete(document) }
+  return () => {
+    if (documentRegistries.get(document) === registry) documentRegistries.delete(document)
+  }
 }
 
 export function iconThemeRegistryForDocument(document: Document): IconThemeRegistry | undefined {
@@ -27,16 +29,63 @@ export function iconThemeRegistryForDocument(document: Document): IconThemeRegis
 }
 
 export const MANAGER_ICON_TOKENS = [
-  'add', 'back', 'capability-fallback', 'close', 'configuration', 'copy', 'delete', 'edit', 'move', 'console-clear', 'console-copy',
-  'console-export', 'console-follow', 'console-pause', 'console-resume', 'contributions', 'acknowledgements',
-  'diagnostics', 'document', 'external-link', 'launcher', 'marketplace', 'marketplace-certified',
-  'marketplace-official', 'marketplace-source-add', 'marketplace-source-copy',
-  'marketplace-source-edit', 'marketplace-source-move-down', 'marketplace-source-move-up',
-  'models-read', 'outlets', 'overview', 'permissions', 'plugins', 'point-info', 'routes',
-  'runtime', 'search', 'settings', 'tasks-catalog-read', 'tasks-content-read', 'tasks-control',
-  'tasks-create', 'turns-control', 'turns-submit', 'authors-source', 'disable-plugin',
-  'enable-plugin', 'favorite', 'favorite-active', 'import-plugin', 'more', 'reload-plugin',
-  'reset-configuration', 'save-configuration', 'share-plugin', 'uninstall-plugin',
+  'add',
+  'back',
+  'capability-fallback',
+  'close',
+  'configuration',
+  'copy',
+  'delete',
+  'edit',
+  'move',
+  'console-clear',
+  'console-copy',
+  'console-export',
+  'console-follow',
+  'console-pause',
+  'console-resume',
+  'contributions',
+  'acknowledgements',
+  'diagnostics',
+  'document',
+  'external-link',
+  'launcher',
+  'marketplace',
+  'marketplace-certified',
+  'marketplace-official',
+  'marketplace-source-add',
+  'marketplace-source-copy',
+  'marketplace-source-edit',
+  'marketplace-source-move-down',
+  'marketplace-source-move-up',
+  'models-read',
+  'outlets',
+  'overview',
+  'permissions',
+  'plugins',
+  'point-info',
+  'routes',
+  'runtime',
+  'search',
+  'settings',
+  'tasks-catalog-read',
+  'tasks-content-read',
+  'tasks-control',
+  'tasks-create',
+  'turns-control',
+  'turns-submit',
+  'authors-source',
+  'disable-plugin',
+  'enable-plugin',
+  'favorite',
+  'favorite-active',
+  'import-plugin',
+  'more',
+  'reload-plugin',
+  'reset-configuration',
+  'save-configuration',
+  'share-plugin',
+  'uninstall-plugin',
 ] as const
 
 export type ManagerIconToken = typeof MANAGER_ICON_TOKENS[number]
@@ -105,18 +154,35 @@ export const MANAGER_ICON_SEMANTICS: Readonly<Partial<Record<ManagerIconToken, S
 })
 
 const HOST_SURFACE_ICON_MAP: Readonly<Record<string, SemanticIconKey>> = Object.freeze({
-  'host:analytics': 'navigation.dashboard', 'host:back': 'action.back',
-  'host:calendar': 'content.calendar', 'host:close': 'action.close', 'host:error': 'status.error',
+  'host:analytics': 'navigation.dashboard',
+  'host:back': 'action.back',
+  'host:calendar': 'content.calendar',
+  'host:close': 'action.close',
+  'host:error': 'status.error',
   'host:chat': 'navigation.channels',
-  'host:copy': 'action.copy', 'host:delete': 'action.delete',
-  'host:files': 'content.files', 'host:folder': 'content.folder', 'host:history': 'navigation.history',
-  'host:info': 'status.info', 'host:layers': 'content.layers', 'host:key': 'content.key',
+  'host:copy': 'action.copy',
+  'host:delete': 'action.delete',
+  'host:files': 'content.files',
+  'host:folder': 'content.folder',
+  'host:history': 'navigation.history',
+  'host:info': 'status.info',
+  'host:layers': 'content.layers',
+  'host:key': 'content.key',
   'host:marketplace': 'navigation.marketplace',
-  'host:more': 'action.more', 'host:new': 'action.add', 'host:open': 'action.external-link',
-  'host:palette': 'content.palette', 'host:playground': 'navigation.overview',
-  'host:refresh': 'action.refresh', 'host:reset': 'action.reset', 'host:review': 'control.check',
-  'host:settings': 'action.settings', 'host:save': 'action.save', 'host:clock': 'content.clock',
-  'host:success': 'status.success', 'host:warning': 'status.warning', 'host:tags': 'content.tags',
+  'host:more': 'action.more',
+  'host:new': 'action.add',
+  'host:open': 'action.external-link',
+  'host:palette': 'content.palette',
+  'host:playground': 'navigation.overview',
+  'host:refresh': 'action.refresh',
+  'host:reset': 'action.reset',
+  'host:review': 'control.check',
+  'host:settings': 'action.settings',
+  'host:save': 'action.save',
+  'host:clock': 'content.clock',
+  'host:success': 'status.success',
+  'host:warning': 'status.warning',
+  'host:tags': 'content.tags',
 })
 
 export interface HostIconRenderOptions {
@@ -150,7 +216,9 @@ function normalizedVariant(options: HostIconRenderOptions): IconVariant {
 export function normalizedVectorCommandData(command: NormalizedVectorCommand): string {
   if (command.op === 'move') return `M${command.x} ${command.y}`
   if (command.op === 'line') return `L${command.x} ${command.y}`
-  if (command.op === 'cubic') return `C${command.x1} ${command.y1} ${command.x2} ${command.y2} ${command.x} ${command.y}`
+  if (command.op === 'cubic') {
+    return `C${command.x1} ${command.y1} ${command.x2} ${command.y2} ${command.x} ${command.y}`
+  }
   if (command.op === 'quadratic') return `Q${command.x1} ${command.y1} ${command.x} ${command.y}`
   return 'Z'
 }
@@ -255,7 +323,10 @@ export function renderHostIconSvg(
   options: HostIconRenderOptions = {},
 ): { readonly svg: SVGSVGElement; readonly resolution: HostIconResolution } {
   const result = resolveHostIcon(document, requestedKey, options)
-  return { svg: renderNormalizedIconSvg(document, result.descriptor, result.resolution, options.size), resolution: result.resolution }
+  return {
+    svg: renderNormalizedIconSvg(document, result.descriptor, result.resolution, options.size),
+    resolution: result.resolution,
+  }
 }
 
 export function renderHostSurfaceIconSvg(
@@ -271,7 +342,9 @@ export function renderHostSurfaceIconSvg(
   const privateSurfaceKey = (BUILTIN_HOST_SURFACE_ICON_KEYS as readonly string[]).includes(requested)
     ? requested as BuiltinHostSurfaceIconKey
     : undefined
-  if (privateSurfaceKey === undefined) return renderHostIconSvg(document, key ?? requested, { ...options, theme, state, variant })
+  if (privateSurfaceKey === undefined) {
+    return renderHostIconSvg(document, key ?? requested, { ...options, theme, state, variant })
+  }
   const resolution: HostIconResolution = {
     key: requested,
     provider: 'builtin:reicon',
@@ -297,7 +370,10 @@ export function renderManagerIconSvg(
   options: HostIconRenderOptions = {},
 ): { readonly svg: SVGSVGElement; readonly resolution: HostIconResolution } {
   const result = resolveManagerIcon(document, token, options)
-  return { svg: renderNormalizedIconSvg(document, result.descriptor, result.resolution, options.size), resolution: result.resolution }
+  return {
+    svg: renderNormalizedIconSvg(document, result.descriptor, result.resolution, options.size),
+    resolution: result.resolution,
+  }
 }
 
 export function createManagerIcon(
@@ -312,11 +388,13 @@ export function createManagerIcon(
   icon.setAttribute('aria-hidden', 'true')
   icon.draggable = false
   const state = options.state ?? (token === 'favorite-active' ? 'favorite' : 'default')
-  icon.append(renderManagerIconSvg(document, token, {
-    ...options,
-    state,
-    theme: options.theme ?? resolveHostTheme(document).theme,
-  }).svg)
+  icon.append(
+    renderManagerIconSvg(document, token, {
+      ...options,
+      state,
+      theme: options.theme ?? resolveHostTheme(document).theme,
+    }).svg,
+  )
   return icon
 }
 

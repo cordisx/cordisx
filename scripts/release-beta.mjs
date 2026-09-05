@@ -117,8 +117,12 @@ function assertPublishedMetadata(pkg, manifest, packed, metadata) {
   if (metadata.dist?.integrity !== packed.integrity) throw new Error(`${pkg.name} registry tarball integrity mismatch`)
   if (metadata.license !== manifest.license) throw new Error(`${pkg.name} registry license mismatch`)
   if (!sameRepository(metadata.repository, manifest)) throw new Error(`${pkg.name} registry repository mismatch`)
-  if (JSON.stringify(metadata.bin) !== JSON.stringify(manifest.bin)) throw new Error(`${pkg.name} registry bin mismatch`)
-  if (JSON.stringify(metadata.engines) !== JSON.stringify(manifest.engines)) throw new Error(`${pkg.name} registry engines mismatch`)
+  if (JSON.stringify(metadata.bin) !== JSON.stringify(manifest.bin)) {
+    throw new Error(`${pkg.name} registry bin mismatch`)
+  }
+  if (JSON.stringify(metadata.engines) !== JSON.stringify(manifest.engines)) {
+    throw new Error(`${pkg.name} registry engines mismatch`)
+  }
 }
 
 async function readBack(pkg, manifest, packed) {

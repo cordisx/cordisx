@@ -7,11 +7,13 @@ export const inject = ['i18n', 'commands', 'agentEvents', 'platform', 'pages', '
 
 const message = (key: string, fallback: string) => ({ namespace: 'permission-v3-smoke', key, fallback } as const)
 
-const domSmokePage = defineReactPage(() => createElement(
-  'section',
-  { 'data-permission-v3-smoke-page': 'true' },
-  'Permission v3 controlled-rendering smoke after update',
-))
+const domSmokePage = defineReactPage(() =>
+  createElement(
+    'section',
+    { 'data-permission-v3-smoke-page': 'true' },
+    'Permission v3 controlled-rendering smoke after update',
+  )
+)
 
 /** Update probe for scope expansion and module-generation invalidation. */
 export function apply(ctx: Context): void {
@@ -61,6 +63,9 @@ export function apply(ctx: Context): void {
     outlet: 'main',
     page: 'dom-smoke',
     title: message('route.title', 'Open permission v3 smoke'),
-    description: message('route.description', 'Requests the exact controlled main outlet through the Host broker after update.'),
+    description: message(
+      'route.description',
+      'Requests the exact controlled main outlet through the Host broker after update.',
+    ),
   })
 }

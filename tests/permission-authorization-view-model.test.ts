@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildPermissionAuthorizationPlanV2,
   CapabilityRiskCatalog,
   HOST_CAPABILITY_RISK_ENTRIES,
-  buildPermissionAuthorizationPlanV2,
 } from '../packages/cli/src/capability-risk-catalog.js'
 import {
-  PermissionAuthorizationViewModel,
   type PermissionAuthorizationProjectionInput,
+  PermissionAuthorizationViewModel,
 } from '../packages/cli/src/permission-authorization-view-model.js'
 import { CORDISX_PERMISSION_LOCALE_CATALOGS } from '../packages/cli/src/permission-locales.js'
 import type { CordisXCapabilityDeclarationV2 } from '../packages/cli/src/permission-contracts.js'

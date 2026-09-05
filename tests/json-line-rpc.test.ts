@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { JsonLineRpcClient } from '../packages/cli/src/providers/json-line-rpc.js'
 
 function line(stream: PassThrough): Promise<Record<string, unknown>> {
-  return new Promise(resolve => stream.once('data', chunk => resolve(JSON.parse(String(chunk)) as Record<string, unknown>)))
+  return new Promise(resolve =>
+    stream.once('data', chunk => resolve(JSON.parse(String(chunk)) as Record<string, unknown>))
+  )
 }
 
 describe('JSON-line RPC client', () => {
@@ -38,11 +40,25 @@ describe('JSON-line RPC client', () => {
     const input = new PassThrough()
     const output = new PassThrough()
     const client = new JsonLineRpcClient({
-      input, output, timeoutMs: 1_000,
-      onRequest: async (method, params) => ({ method, approvalId: (params as { approvalId: string }).approvalId, decision: 'decline' }),
+      input,
+      output,
+      timeoutMs: 1_000,
+      onRequest: async (method, params) => ({
+        method,
+        approvalId: (params as { approvalId: string }).approvalId,
+        decision: 'decline',
+      }),
     })
     const response = line(output)
-    input.write(`${JSON.stringify({ id: 'approval-1', method: 'item/commandExecution/requestApproval', params: { approvalId: 'opaque-1' } })}\n`)
+    input.write(
+      `${
+        JSON.stringify({
+          id: 'approval-1',
+          method: 'item/commandExecution/requestApproval',
+          params: { approvalId: 'opaque-1' },
+        })
+      }\n`,
+    )
     await expect(response).resolves.toEqual({
       id: 'approval-1',
       result: { method: 'item/commandExecution/requestApproval', approvalId: 'opaque-1', decision: 'decline' },

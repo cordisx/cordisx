@@ -3,7 +3,10 @@ import { Context } from '@deepseek-ai/cordis'
 import { CommandRegistry } from '../packages/cli/src/renderer/commands.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
-import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
+import {
+  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+  type CordisXPluginActivationRecordV1,
+} from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import {
   CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1,
   type CordisXCommandContext,
@@ -28,8 +31,12 @@ describe('CommandRegistry', () => {
       lastGoodRevision: 1,
       runtimeGeneration: 'runtime-1',
       plugins: [{
-        id: 'demo', version: '1.0.0', digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`,
-        moduleGeneration, enabled: true, dependencies: [],
+        id: 'demo',
+        version: '1.0.0',
+        digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`,
+        moduleGeneration,
+        enabled: true,
+        dependencies: [],
       }],
     })
     const previous = record(1, 'demo-1')
@@ -39,7 +46,9 @@ describe('CommandRegistry', () => {
     const oldContext = new Context().extend({ [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_GENERATION]: 'demo-1' })
     let oldAborted = false
     const removeOld = registry.register(oldContext, { id: 'run', title: { key: 'run' } }, ({ signal }) => {
-      signal.addEventListener('abort', () => { oldAborted = true })
+      signal.addEventListener('abort', () => {
+        oldAborted = true
+      })
       return new Promise(() => {})
     })
     void registry.execute('demo', { id: 'run' })
@@ -51,7 +60,9 @@ describe('CommandRegistry', () => {
       ...visibility.context(handle, 'demo'),
     })
     let candidateCalls = 0
-    registry.register(candidateContext, { id: 'run', title: { key: 'run' } }, () => { candidateCalls += 1 })
+    registry.register(candidateContext, { id: 'run', title: { key: 'run' } }, () => {
+      candidateCalls += 1
+    })
     expect(registry.snapshot()).toHaveLength(1)
     await registry.execute(candidateContext, { id: 'run' })
     expect(candidateCalls).toBe(1)
@@ -72,7 +83,9 @@ describe('CommandRegistry', () => {
     let received: unknown
     registry.register('alpha', { id: 'run', title: { key: 'run' }, public: true }, async (context) => {
       received = context.arguments
-      await new Promise<void>(resolve => { release = resolve })
+      await new Promise<void>(resolve => {
+        release = resolve
+      })
       return 'done'
     })
 
@@ -94,14 +107,18 @@ describe('CommandRegistry', () => {
     const registry = new CommandRegistry()
     let aborted = false
     const remove = registry.register('demo', { id: 'slow', title: { key: 'slow' } }, ({ signal }) => {
-      signal.addEventListener('abort', () => { aborted = true })
+      signal.addEventListener('abort', () => {
+        aborted = true
+      })
       return new Promise(() => {})
     })
     void registry.execute('demo', { id: 'slow' })
     remove()
     expect(aborted).toBe(true)
 
-    registry.register('demo', { id: 'fail', title: { key: 'fail' } }, () => { throw new Error('boom') })
+    registry.register('demo', { id: 'fail', title: { key: 'fail' } }, () => {
+      throw new Error('boom')
+    })
     await expect(registry.execute('demo', { id: 'fail' })).rejects.toThrow('boom')
     expect(registry.snapshot()[0]?.lastError).toBe('boom')
     registry.dispose()
@@ -115,16 +132,20 @@ describe('CommandRegistry', () => {
     broker.register(identity)
     const registry = new CommandRegistry(broker)
     let executions = 0
-    registry.register('demo', { id: 'open', title: { key: 'open' } }, () => { executions += 1 })
+    registry.register('demo', { id: 'open', title: { key: 'open' } }, () => {
+      executions += 1
+    })
     broker.setPolicy(identity, 'sidebar.navigation.items', 'deny')
 
     await expect(registry.execute('demo', { id: 'open' }, 'stale', {
-      pointId: 'sidebar.navigation.items', contributionId: 'demo:navigation',
+      pointId: 'sidebar.navigation.items',
+      contributionId: 'demo:navigation',
     })).rejects.toThrow(/denied/)
     expect(executions).toBe(0)
     await expect(registry.execute('demo', { id: 'open' }, 'direct')).resolves.toBeUndefined()
     await expect(registry.execute('demo', { id: 'open' }, 'allowed', {
-      pointId: 'sidebar.footer.before-control', contributionId: 'demo:footer',
+      pointId: 'sidebar.footer.before-control',
+      contributionId: 'demo:footer',
     })).resolves.toBeUndefined()
     expect(executions).toBe(2)
     registry.dispose()
@@ -139,7 +160,9 @@ describe('CommandRegistry', () => {
     broker.register({ source: 'https://plugins.example/demo', id: 'demo' })
     const registry = new CommandRegistry(broker)
     let received: CordisXCommandContext | undefined
-    registry.register('demo', { id: 'trace', title: { key: 'trace' } }, context => { received = context })
+    registry.register('demo', { id: 'trace', title: { key: 'trace' } }, context => {
+      received = context
+    })
     const hostContext = {
       $schema: CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1,
       schemaVersion: 1 as const,
@@ -154,7 +177,9 @@ describe('CommandRegistry', () => {
     }
 
     await registry.execute('demo', { id: 'trace', arguments: { sessionId: 'spoofed' } }, 'surface', {
-      pointId: 'session.header.actions', contributionId: 'demo:trace', context: hostContext,
+      pointId: 'session.header.actions',
+      contributionId: 'demo:trace',
+      context: hostContext,
     })
     expect(received?.hostContext).toEqual(hostContext)
     expect(Object.isFrozen(received?.hostContext)).toBe(true)
@@ -163,11 +188,12 @@ describe('CommandRegistry', () => {
     await registry.execute('demo', { id: 'trace', arguments: { hostContext } as never }, 'direct')
     expect(received?.hostContext).toBeUndefined()
     await expect(registry.execute('demo', { id: 'trace' }, 'mismatch', {
-      pointId: 'composer.toolbar.items', contributionId: 'demo:trace', context: hostContext,
+      pointId: 'composer.toolbar.items',
+      contributionId: 'demo:trace',
+      context: hostContext,
     })).rejects.toThrow(/does not match/)
     registry.dispose()
     broker.dispose()
     descriptors.dispose()
   })
-
 })

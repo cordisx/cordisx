@@ -1,5 +1,5 @@
 /** @jsxImportSource react */
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 
 export interface PublicSelectionRailOption {
   readonly value: string
@@ -60,10 +60,18 @@ export function PublicSelectionRail({
     if (current < 0 || enabled.length === 0) return
     const delta = orientation === 'vertical'
       ? event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : undefined
-      : event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : undefined
-    const next = event.key === 'Home' ? 0
-      : event.key === 'End' ? enabled.length - 1
-        : delta === undefined ? undefined : (current + delta + enabled.length) % enabled.length
+      : event.key === 'ArrowRight'
+      ? 1
+      : event.key === 'ArrowLeft'
+      ? -1
+      : undefined
+    const next = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+      ? enabled.length - 1
+      : delta === undefined
+      ? undefined
+      : (current + delta + enabled.length) % enabled.length
     if (next === undefined) return
     event.preventDefault()
     event.stopPropagation()
@@ -72,28 +80,37 @@ export function PublicSelectionRail({
     onChange(option.value)
     queueMicrotask(() => elements.current.get(option.value)?.focus({ preventScroll: true }))
   }
-  return <div
-    className={joinClassName('cxr-ui-selection-rail', className)}
-    role="tablist"
-    aria-label={ariaLabel}
-    aria-orientation={orientation}
-    data-layout={orientation}
-  >
-    {options.map(option => <button
-      ref={element => { if (element === null) elements.current.delete(option.value); else elements.current.set(option.value, element) }}
-      key={option.value}
-      type="button"
-      className="cxr-ui-selection-rail-item"
-      role="tab"
-      aria-selected={option.value === value}
-      aria-controls={option.controls}
-      tabIndex={option.value === tabbableValue ? 0 : -1}
-      disabled={option.disabled}
-      onClick={() => onChange(option.value)}
-      onKeyDown={event => move(event, option.value)}
+  return (
+    <div
+      className={joinClassName('cxr-ui-selection-rail', className)}
+      role="tablist"
+      aria-label={ariaLabel}
+      aria-orientation={orientation}
+      data-layout={orientation}
     >
-      <span className="cxr-ui-selection-rail-label">{option.label}</span>
-      {option.description === undefined ? null : <span className="cxr-ui-selection-rail-description">{option.description}</span>}
-    </button>)}
-  </div>
+      {options.map(option => (
+        <button
+          ref={element => {
+            if (element === null) elements.current.delete(option.value)
+            else elements.current.set(option.value, element)
+          }}
+          key={option.value}
+          type="button"
+          className="cxr-ui-selection-rail-item"
+          role="tab"
+          aria-selected={option.value === value}
+          aria-controls={option.controls}
+          tabIndex={option.value === tabbableValue ? 0 : -1}
+          disabled={option.disabled}
+          onClick={() => onChange(option.value)}
+          onKeyDown={event => move(event, option.value)}
+        >
+          <span className="cxr-ui-selection-rail-label">{option.label}</span>
+          {option.description === undefined
+            ? null
+            : <span className="cxr-ui-selection-rail-description">{option.description}</span>}
+        </button>
+      ))}
+    </div>
+  )
 }

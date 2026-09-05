@@ -7,29 +7,29 @@ import {
   bindChannelPluginContext,
   CHANNEL_SERVICE_CONFIG_SCHEMA_V1,
   ChannelGenerationFencedError,
+  type ChannelInboundEnvelope,
   ChannelIntegrityError,
+  type ChannelPluginIdentity,
   ChannelRuntime,
+  type ChannelThreadRef,
+  type ChannelUserInput,
   CordisXChannelService,
   parseChannelServiceConfig,
   parseChannelServiceConfigurationDeclaration,
   projectChannelServiceConfig,
-  type ChannelInboundEnvelope,
-  type ChannelPluginIdentity,
-  type ChannelThreadRef,
-  type ChannelUserInput,
 } from '../packages/channel-runtime/src/index.js'
 import {
   ManualChannelClock,
+  simulatedAdapterFromConfig,
+  SimulatedChannelAdapter,
+  simulatedInput,
+  SimulatedPermissionBroker,
+  SimulatedTaskGateway,
   SIMULATOR_ADAPTER_IDENTITY,
   SIMULATOR_CHANNEL_SERVICE_CONFIG,
   SIMULATOR_CHANNEL_SERVICE_DECLARATION,
   SIMULATOR_CONSUMER_IDENTITY,
   STATIC_NOTIFIER_NO_CONFIG_DECLARATION,
-  SimulatedChannelAdapter,
-  SimulatedPermissionBroker,
-  SimulatedTaskGateway,
-  simulatedAdapterFromConfig,
-  simulatedInput,
 } from '../packages/channel-runtime/src/simulator.js'
 
 const temporaryRoots: string[] = []
@@ -114,7 +114,9 @@ describe('Channel service configuration compliance', () => {
       schema: expect.objectContaining({
         projection: expect.objectContaining({
           kind: 'schemastery',
-          form: expect.objectContaining({ fields: [expect.objectContaining({ presenter: { kind: 'array.object-page', version: 1 } })] }),
+          form: expect.objectContaining({
+            fields: [expect.objectContaining({ presenter: { kind: 'array.object-page', version: 1 } })],
+          }),
         }),
       }),
       revision: 4,
@@ -149,22 +151,28 @@ describe('Channel service configuration compliance', () => {
       lastGoodRevision: 0,
       writable: false,
     })).toBeUndefined()
-    expect(() => projectChannelServiceConfig({
-      declaration: STATIC_NOTIFIER_NO_CONFIG_DECLARATION,
-      configuration: {},
-      identity: {
-        source: 'file:///opt/cordisx/plugins/static-notifier.mjs',
-        pluginId: 'static-notifier',
-        serviceId: 'notifier',
-      },
-      scope: { profileId: 'default', generation: 'launcher-1' },
-      revision: 0,
-      lastGoodRevision: 0,
-      writable: false,
-    })).toThrow('must not receive a configuration value')
-    expect(() => parseChannelServiceConfigurationDeclaration({
-      kind: 'host', schema: CHANNEL_SERVICE_CONFIG_SCHEMA_V1, configApplies: 'live',
-    })).toThrow('unsupported')
+    expect(() =>
+      projectChannelServiceConfig({
+        declaration: STATIC_NOTIFIER_NO_CONFIG_DECLARATION,
+        configuration: {},
+        identity: {
+          source: 'file:///opt/cordisx/plugins/static-notifier.mjs',
+          pluginId: 'static-notifier',
+          serviceId: 'notifier',
+        },
+        scope: { profileId: 'default', generation: 'launcher-1' },
+        revision: 0,
+        lastGoodRevision: 0,
+        writable: false,
+      })
+    ).toThrow('must not receive a configuration value')
+    expect(() =>
+      parseChannelServiceConfigurationDeclaration({
+        kind: 'host',
+        schema: CHANNEL_SERVICE_CONFIG_SCHEMA_V1,
+        configApplies: 'live',
+      })
+    ).toThrow('unsupported')
   })
 
   it('fails closed on plaintext/inline secrets, incompatible transport, and consumer routing fields', () => {
@@ -176,14 +184,19 @@ describe('Channel service configuration compliance', () => {
     const inline = structuredClone(base) as { connections: Array<Record<string, unknown>> }
     inline.connections[0] = {
       ref: { adapterId: 'feishu', accountId: 'operations', tenantId: 'tenant-a' },
-      adapterKind: 'feishu', enabled: true, transport: { mode: 'websocket' }, secretRef: 'inline:plaintext-token',
+      adapterKind: 'feishu',
+      enabled: true,
+      transport: { mode: 'websocket' },
+      secretRef: 'inline:plaintext-token',
     }
     expect(() => parseChannelServiceConfig(inline)).toThrow('secretRef is invalid')
 
     const transport = structuredClone(base) as { connections: Array<Record<string, unknown>> }
     transport.connections[0] = {
       ref: { adapterId: 'wechat-service', accountId: 'official', tenantId: 'tenant-a' },
-      adapterKind: 'wechat-service', enabled: true, transport: { mode: 'websocket' },
+      adapterKind: 'wechat-service',
+      enabled: true,
+      transport: { mode: 'websocket' },
       secretRef: 'keychain:cordisx/channel/wechat/official',
     }
     expect(() => parseChannelServiceConfig(transport)).toThrow('not supported by wechat-service')
@@ -333,7 +346,9 @@ describe('launcher-side Channel runtime and simulator', () => {
       localPath: '/tmp/secret',
     }]
 
-    await expect(handle.receive(unsafe as unknown as ChannelInboundEnvelope)).rejects.toBeInstanceOf(ChannelIntegrityError)
+    await expect(handle.receive(unsafe as unknown as ChannelInboundEnvelope)).rejects.toBeInstanceOf(
+      ChannelIntegrityError,
+    )
     expect(gateway.callCount()).toBe(0)
     expect(runtime.snapshot().accounts[0]?.inbound.pending).toBe(0)
     await runtime.dispose()
@@ -361,7 +376,9 @@ describe('launcher-side Channel runtime and simulator', () => {
     const { handle: firstHandle, runtime } = await fixture()
     const firstAdapter = new SimulatedChannelAdapter({ configurationRevision: 1 })
     const replacement = await runtime.activate(firstAdapter, SIMULATOR_ADAPTER_IDENTITY)
-    await expect(firstHandle.receive(createEnvelope('stale-generation'))).rejects.toBeInstanceOf(ChannelGenerationFencedError)
+    await expect(firstHandle.receive(createEnvelope('stale-generation'))).rejects.toBeInstanceOf(
+      ChannelGenerationFencedError,
+    )
 
     const failed = new SimulatedChannelAdapter({ configurationRevision: 3, failStart: true })
     await expect(runtime.activate(failed, SIMULATOR_ADAPTER_IDENTITY)).rejects.toThrow('start failure')
@@ -375,7 +392,9 @@ describe('launcher-side Channel runtime and simulator', () => {
     await replacement.drainInbound()
     await replacement.dispose()
     expect(firstAdapter.stopReasons).toEqual(['disposed'])
-    await expect(replacement.receive(createEnvelope('disposed-generation'))).rejects.toBeInstanceOf(ChannelGenerationFencedError)
+    await expect(replacement.receive(createEnvelope('disposed-generation'))).rejects.toBeInstanceOf(
+      ChannelGenerationFencedError,
+    )
     await runtime.dispose()
   })
 })
@@ -408,7 +427,9 @@ describe('Node Cordis Channel service', () => {
     const observed: string[] = []
     const disposeSubscription = await consumerContext.channel.messages.subscribe(
       { account: adapter.descriptor.ref, userId: 'alice' },
-      event => { observed.push(`${event.delivery}:${event.input.source.event.eventId}`) },
+      event => {
+        observed.push(`${event.delivery}:${event.input.source.event.eventId}`)
+      },
     )
     await adapter.emit(envelope('cross-plugin-event', { kind: 'list' }))
     await vi.waitFor(() => expect(observed).toEqual(['live-experimental:cross-plugin-event']))

@@ -34,36 +34,65 @@ import type {
 } from '@cordisx/protocol/agent-loop/v4'
 import type { Context } from '@deepseek-ai/cordis'
 
-export const CORDISX_AGENT_DEFINITION_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json' as const
-export const CORDISX_AGENT_LOOP_TASK_BINDING_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v1.schema.json' as const
-export const CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-command.v1.schema.json' as const
-export const CORDISX_AGENT_LOOP_RESULT_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-result.v1.schema.json' as const
-export const CORDISX_AGENT_LOOP_EVENT_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event.v1.schema.json' as const
-export const CORDISX_AGENT_LOOP_EVENT_SUBSCRIPTION_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-subscription.v1.schema.json' as const
-export const CORDISX_AGENT_LOOP_EVENT_PAGE_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-page.v1.schema.json' as const
-export const CORDISX_BOUND_AGENT_LOOP_CLIENT_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-bound-client.v1.schema.json' as const
+export const CORDISX_AGENT_DEFINITION_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json' as const
+export const CORDISX_AGENT_LOOP_TASK_BINDING_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v1.schema.json' as const
+export const CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-command.v1.schema.json' as const
+export const CORDISX_AGENT_LOOP_RESULT_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-result.v1.schema.json' as const
+export const CORDISX_AGENT_LOOP_EVENT_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event.v1.schema.json' as const
+export const CORDISX_AGENT_LOOP_EVENT_SUBSCRIPTION_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-subscription.v1.schema.json' as const
+export const CORDISX_AGENT_LOOP_EVENT_PAGE_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-page.v1.schema.json' as const
+export const CORDISX_BOUND_AGENT_LOOP_CLIENT_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-bound-client.v1.schema.json' as const
 
-export const CORDISX_AGENT_LOOP_TASK_BINDING_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v2.schema.json' as const
-export const CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-command.v2.schema.json' as const
-export const CORDISX_AGENT_LOOP_RESULT_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-result.v2.schema.json' as const
-export const CORDISX_AGENT_LOOP_EVENT_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event.v2.schema.json' as const
-export const CORDISX_AGENT_LOOP_EVENT_SUBSCRIPTION_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-subscription.v2.schema.json' as const
-export const CORDISX_AGENT_LOOP_EVENT_PAGE_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-page.v2.schema.json' as const
-export const CORDISX_BOUND_AGENT_LOOP_CLIENT_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-bound-client.v2.schema.json' as const
-export const CORDISX_AGENT_LOOP_TASK_BINDING_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v3.schema.json' as const
-export const CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-command.v3.schema.json' as const
-export const CORDISX_AGENT_LOOP_RESULT_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-result.v3.schema.json' as const
-export const CORDISX_AGENT_LOOP_EVENT_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event.v3.schema.json' as const
-export const CORDISX_AGENT_LOOP_EVENT_SUBSCRIPTION_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-subscription.v3.schema.json' as const
-export const CORDISX_AGENT_LOOP_EVENT_PAGE_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-page.v3.schema.json' as const
-export const CORDISX_BOUND_AGENT_LOOP_CLIENT_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-bound-client.v3.schema.json' as const
-export const CORDISX_AGENT_LOOP_TASK_BINDING_SCHEMA_V4 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v4.schema.json' as const
-export const CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V4 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-command.v4.schema.json' as const
-export const CORDISX_AGENT_LOOP_RESULT_SCHEMA_V4 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-result.v4.schema.json' as const
-export const CORDISX_AGENT_LOOP_EVENT_SCHEMA_V4 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event.v4.schema.json' as const
-export const CORDISX_AGENT_LOOP_EVENT_SUBSCRIPTION_SCHEMA_V4 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-subscription.v4.schema.json' as const
-export const CORDISX_AGENT_LOOP_EVENT_PAGE_SCHEMA_V4 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-page.v4.schema.json' as const
-export const CORDISX_BOUND_AGENT_LOOP_CLIENT_SCHEMA_V4 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-bound-client.v4.schema.json' as const
+export const CORDISX_AGENT_LOOP_TASK_BINDING_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v2.schema.json' as const
+export const CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-command.v2.schema.json' as const
+export const CORDISX_AGENT_LOOP_RESULT_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-result.v2.schema.json' as const
+export const CORDISX_AGENT_LOOP_EVENT_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event.v2.schema.json' as const
+export const CORDISX_AGENT_LOOP_EVENT_SUBSCRIPTION_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-subscription.v2.schema.json' as const
+export const CORDISX_AGENT_LOOP_EVENT_PAGE_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-page.v2.schema.json' as const
+export const CORDISX_BOUND_AGENT_LOOP_CLIENT_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-bound-client.v2.schema.json' as const
+export const CORDISX_AGENT_LOOP_TASK_BINDING_SCHEMA_V3 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v3.schema.json' as const
+export const CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V3 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-command.v3.schema.json' as const
+export const CORDISX_AGENT_LOOP_RESULT_SCHEMA_V3 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-result.v3.schema.json' as const
+export const CORDISX_AGENT_LOOP_EVENT_SCHEMA_V3 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event.v3.schema.json' as const
+export const CORDISX_AGENT_LOOP_EVENT_SUBSCRIPTION_SCHEMA_V3 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-subscription.v3.schema.json' as const
+export const CORDISX_AGENT_LOOP_EVENT_PAGE_SCHEMA_V3 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-page.v3.schema.json' as const
+export const CORDISX_BOUND_AGENT_LOOP_CLIENT_SCHEMA_V3 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-bound-client.v3.schema.json' as const
+export const CORDISX_AGENT_LOOP_TASK_BINDING_SCHEMA_V4 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v4.schema.json' as const
+export const CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V4 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-command.v4.schema.json' as const
+export const CORDISX_AGENT_LOOP_RESULT_SCHEMA_V4 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-result.v4.schema.json' as const
+export const CORDISX_AGENT_LOOP_EVENT_SCHEMA_V4 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event.v4.schema.json' as const
+export const CORDISX_AGENT_LOOP_EVENT_SUBSCRIPTION_SCHEMA_V4 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-subscription.v4.schema.json' as const
+export const CORDISX_AGENT_LOOP_EVENT_PAGE_SCHEMA_V4 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-event-page.v4.schema.json' as const
+export const CORDISX_BOUND_AGENT_LOOP_CLIENT_SCHEMA_V4 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-bound-client.v4.schema.json' as const
 
 export type {
   AgentDefinition,
@@ -116,9 +145,9 @@ export type {
 } from '@cordisx/protocol/agent-loop/v3'
 
 export type {
-  AgentLoopAuthorizationOutcome as AgentLoopAuthorizationOutcomeV4,
   AgentLoopApprovalDecision,
   AgentLoopApprovalDecisionResult,
+  AgentLoopAuthorizationOutcome as AgentLoopAuthorizationOutcomeV4,
   AgentLoopCancelMemberSelfIntroductionResult,
   AgentLoopCommand as AgentLoopCommandV4,
   AgentLoopCreateOrBindResult as AgentLoopCreateOrBindResultV4,
@@ -142,9 +171,21 @@ export type {
  * Protocol client for the version they import.
  */
 export interface CompatibleBoundAgentLoopClient {
-  readonly $schema: BoundAgentLoopClientV1['$schema'] & BoundAgentLoopClientV2['$schema'] & BoundAgentLoopClientV3['$schema'] & BoundAgentLoopClientV4['$schema']
-  readonly contract: BoundAgentLoopClientV1['contract'] & BoundAgentLoopClientV2['contract'] & BoundAgentLoopClientV3['contract'] & BoundAgentLoopClientV4['contract']
-  readonly schemaVersion: BoundAgentLoopClientV1['schemaVersion'] & BoundAgentLoopClientV2['schemaVersion'] & BoundAgentLoopClientV3['schemaVersion'] & BoundAgentLoopClientV4['schemaVersion']
+  readonly $schema:
+    & BoundAgentLoopClientV1['$schema']
+    & BoundAgentLoopClientV2['$schema']
+    & BoundAgentLoopClientV3['$schema']
+    & BoundAgentLoopClientV4['$schema']
+  readonly contract:
+    & BoundAgentLoopClientV1['contract']
+    & BoundAgentLoopClientV2['contract']
+    & BoundAgentLoopClientV3['contract']
+    & BoundAgentLoopClientV4['contract']
+  readonly schemaVersion:
+    & BoundAgentLoopClientV1['schemaVersion']
+    & BoundAgentLoopClientV2['schemaVersion']
+    & BoundAgentLoopClientV3['schemaVersion']
+    & BoundAgentLoopClientV4['schemaVersion']
   readonly durableLedger: BoundAgentLoopClientV4['durableLedger']
   createOrBind(command: Parameters<BoundAgentLoopClientV1['createOrBind']>[0]): Promise<AgentLoopCreateOrBindResultV1>
   createOrBind(command: Parameters<BoundAgentLoopClientV2['createOrBind']>[0]): Promise<AgentLoopCreateOrBindResultV2>
@@ -158,14 +199,30 @@ export interface CompatibleBoundAgentLoopClient {
   subscribe(binding: AgentLoopTaskBindingV2, afterSequence: number): Promise<AgentLoopSubscribeRuntimeResultV2>
   subscribe(binding: AgentLoopTaskBindingV3, afterSequence: number): Promise<AgentLoopSubscribeRuntimeResultV3>
   subscribe(binding: AgentLoopTaskBindingV4, afterSequence: number): Promise<AgentLoopSubscribeRuntimeResultV4>
-  decideApproval(command: Parameters<BoundAgentLoopClientV4['decideApproval']>[0]): Promise<AgentLoopApprovalDecisionResultV4>
-  decideApproval(command: Parameters<BoundAgentLoopClientV3['decideApproval']>[0]): Promise<AgentLoopApprovalDecisionResultV3>
-  requestMemberSelfIntroduction(command: Parameters<BoundAgentLoopClientV4['requestMemberSelfIntroduction']>[0]): Promise<AgentLoopRequestMemberSelfIntroductionResultV4>
-  requestMemberSelfIntroduction(command: Parameters<BoundAgentLoopClientV3['requestMemberSelfIntroduction']>[0]): Promise<AgentLoopRequestMemberSelfIntroductionResultV3>
-  cancelMemberSelfIntroduction(command: Parameters<BoundAgentLoopClientV4['cancelMemberSelfIntroduction']>[0]): Promise<AgentLoopCancelMemberSelfIntroductionResultV4>
-  cancelMemberSelfIntroduction(command: Parameters<BoundAgentLoopClientV3['cancelMemberSelfIntroduction']>[0]): Promise<AgentLoopCancelMemberSelfIntroductionResultV3>
+  decideApproval(
+    command: Parameters<BoundAgentLoopClientV4['decideApproval']>[0],
+  ): Promise<AgentLoopApprovalDecisionResultV4>
+  decideApproval(
+    command: Parameters<BoundAgentLoopClientV3['decideApproval']>[0],
+  ): Promise<AgentLoopApprovalDecisionResultV3>
+  requestMemberSelfIntroduction(
+    command: Parameters<BoundAgentLoopClientV4['requestMemberSelfIntroduction']>[0],
+  ): Promise<AgentLoopRequestMemberSelfIntroductionResultV4>
+  requestMemberSelfIntroduction(
+    command: Parameters<BoundAgentLoopClientV3['requestMemberSelfIntroduction']>[0],
+  ): Promise<AgentLoopRequestMemberSelfIntroductionResultV3>
+  cancelMemberSelfIntroduction(
+    command: Parameters<BoundAgentLoopClientV4['cancelMemberSelfIntroduction']>[0],
+  ): Promise<AgentLoopCancelMemberSelfIntroductionResultV4>
+  cancelMemberSelfIntroduction(
+    command: Parameters<BoundAgentLoopClientV3['cancelMemberSelfIntroduction']>[0],
+  ): Promise<AgentLoopCancelMemberSelfIntroductionResultV3>
   dispose(): void
 }
 
-declare module '@deepseek-ai/cordis' { interface Context { readonly agentLoop: CompatibleBoundAgentLoopClient } }
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    readonly agentLoop: CompatibleBoundAgentLoopClient
+  }
+}
 export type AgentLoopContext = Context

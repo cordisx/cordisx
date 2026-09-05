@@ -3,8 +3,8 @@ import { access } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
-  CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
+  CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   type CordisXPermissionAuthorizationDecisionV1,
   type CordisXPermissionAuthorizationPlanV1,
@@ -21,7 +21,12 @@ import {
   type CordisXPluginLifecycleRequestV1,
   type CordisXPluginLifecycleResultV1,
 } from '../plugin-lifecycle-contracts.js'
-import { createPermissionPolicyRecord, normalizePermissionScope, permissionRecordKey, permissionScopeFingerprint } from '../permissions.js'
+import {
+  createPermissionPolicyRecord,
+  normalizePermissionScope,
+  permissionRecordKey,
+  permissionScopeFingerprint,
+} from '../permissions.js'
 import {
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
@@ -30,32 +35,29 @@ import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
+  type CordisXCapabilityDeclarationV4,
   type CordisXCertifiedPermissionProjectionV1,
-  type CordisXPermissionAuthorizationDecisionV4,
-  type CordisXPermissionAuthorizationPlanV4,
   type CordisXPermissionAuthorizationDecisionV2,
+  type CordisXPermissionAuthorizationDecisionV4,
   type CordisXPermissionAuthorizationPlanV2,
+  type CordisXPermissionAuthorizationPlanV4,
   type CordisXPermissionDecisionV2,
   type CordisXPermissionPolicyRecordV2,
   type CordisXPermissionPolicyRecordV4,
-  type CordisXCapabilityDeclarationV4,
   type CordisXPluginManifestV7,
   type CordisXPluginManifestV8,
 } from '../permission-contracts.js'
 import {
+  type CordisXPersistedPermissionPolicyRecord,
   isPermissionPolicyRecordV2,
   isPermissionPolicyRecordV4,
-  type CordisXPersistedPermissionPolicyRecord,
 } from '../permission-persistence.js'
 import {
-  CapabilityRiskCatalog,
   buildPermissionAuthorizationPlanV2,
   buildPermissionAuthorizationPlanV4,
+  CapabilityRiskCatalog,
 } from '../capability-risk-catalog.js'
-import {
-  assertPermissionAuthorizationDecisionV2,
-  normalizePluginManifestV4,
-} from '../permission-model-v2.js'
+import { assertPermissionAuthorizationDecisionV2, normalizePluginManifestV4 } from '../permission-model-v2.js'
 import {
   assertPermissionAuthorizationDecisionV4,
   normalizeCertifiedPermissionProjectionV1,
@@ -73,16 +75,16 @@ import {
 import {
   loadStagedPluginPackage,
   runtimeManifestV1,
-  stageLocalPluginPackage,
   type StagedPluginPackage,
+  stageLocalPluginPackage,
 } from './plugin-package.js'
 import { stagePluginPackageSourceV1 } from './packages/delivery.js'
 import type { PluginPackageSourceV1 } from './packages/source.js'
 import {
-  PackageLifecycleAuthority,
+  type CandidateAccess,
   createHostPermissionReviewAuthority,
   createHostRegistryReceiptAuthority,
-  type CandidateAccess,
+  PackageLifecycleAuthority,
   type PreparedCandidate,
   type RollbackAccess,
 } from './packages/authority.js'
@@ -115,7 +117,10 @@ export interface PluginRuntimeMutation {
   }
   /** Host-only renderer artifact compiled from the authority-resolved immutable runtime module. */
   readonly runtimeArtifactSource?: string
-  readonly authorizationDecision?: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV4
+  readonly authorizationDecision?:
+    | CordisXPermissionAuthorizationDecisionV1
+    | CordisXPermissionAuthorizationDecisionV2
+    | CordisXPermissionAuthorizationDecisionV4
 }
 
 /** Stable renderer adapter. `stage` is reversible until `commit` acknowledges durable publication. */
@@ -167,20 +172,28 @@ interface CoordinatorOptions {
   readonly permissionPolicies: readonly CordisXPersistedPermissionPolicyRecord[]
   readonly loadPermissionPolicies?: () => Promise<readonly CordisXPersistedPermissionPolicyRecord[]>
   /** Launcher-owned trust lookup. Renderer/plugin requests cannot populate this projection. */
-  readonly certifiedPermissionForArtifact?: (artifact: Readonly<{
-    source: string
-    pluginId: string
-    version: string
-    integrity: `sha256:${string}`
-  }>) => Promise<CordisXCertifiedPermissionProjectionV1 | undefined>
+  readonly certifiedPermissionForArtifact?: (
+    artifact: Readonly<{
+      source: string
+      pluginId: string
+      version: string
+      integrity: `sha256:${string}`
+    }>,
+  ) => Promise<CordisXCertifiedPermissionProjectionV1 | undefined>
   readonly runtime: PluginLifecycleRuntime
   readonly reservedPluginIds?: readonly string[]
 }
 
 interface PendingPermissionReview {
   readonly candidateId: string
-  readonly plan: CordisXPermissionAuthorizationPlanV1 | CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV4
-  readonly decision: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV4
+  readonly plan:
+    | CordisXPermissionAuthorizationPlanV1
+    | CordisXPermissionAuthorizationPlanV2
+    | CordisXPermissionAuthorizationPlanV4
+  readonly decision:
+    | CordisXPermissionAuthorizationDecisionV1
+    | CordisXPermissionAuthorizationDecisionV2
+    | CordisXPermissionAuthorizationDecisionV4
 }
 
 export interface HostPermissionLifecycleReviewV2Request {
@@ -245,13 +258,23 @@ function safeError(code: CordisXPluginLifecycleErrorCode): string {
 function classify(error: unknown): LifecycleFailure {
   if (error instanceof LifecycleFailure) return error
   const message = error instanceof Error ? error.message : String(error)
-  if (message.includes('runtime ABI') || message.includes('protocol')) return new LifecycleFailure('incompatible-runtime', safeError('incompatible-runtime'))
+  if (message.includes('runtime ABI') || message.includes('protocol')) {
+    return new LifecycleFailure('incompatible-runtime', safeError('incompatible-runtime'))
+  }
   if (message.includes('integrity')) return new LifecycleFailure('integrity-failed', safeError('integrity-failed'))
-  if (message.includes('missing dependency')) return new LifecycleFailure('dependency-missing', safeError('dependency-missing'))
-  if (message.includes('requires') && message.includes('found')) return new LifecycleFailure('dependency-version', safeError('dependency-version'))
+  if (message.includes('missing dependency')) {
+    return new LifecycleFailure('dependency-missing', safeError('dependency-missing'))
+  }
+  if (message.includes('requires') && message.includes('found')) {
+    return new LifecycleFailure('dependency-version', safeError('dependency-version'))
+  }
   if (message.includes('cycle')) return new LifecycleFailure('dependency-cycle', safeError('dependency-cycle'))
-  if (message.includes('build') || message.includes('bundle a second')) return new LifecycleFailure('build-failed', safeError('build-failed'))
-  if (message.includes('manifest') || message.includes('package.')) return new LifecycleFailure('invalid-manifest', safeError('invalid-manifest'))
+  if (message.includes('build') || message.includes('bundle a second')) {
+    return new LifecycleFailure('build-failed', safeError('build-failed'))
+  }
+  if (message.includes('manifest') || message.includes('package.')) {
+    return new LifecycleFailure('invalid-manifest', safeError('invalid-manifest'))
+  }
   return new LifecycleFailure('invalid-source', safeError('invalid-source'))
 }
 
@@ -261,7 +284,10 @@ function resultBase(
   },
   active: CordisXPluginActivationRecordV1,
   operation = request.operation.kind,
-): Pick<CordisXPluginLifecycleResultV1, '$schema' | 'schemaVersion' | 'requestId' | 'profileId' | 'operation' | 'revision' | 'runtimeGeneration'> {
+): Pick<
+  CordisXPluginLifecycleResultV1,
+  '$schema' | 'schemaVersion' | 'requestId' | 'profileId' | 'operation' | 'revision' | 'runtimeGeneration'
+> {
   return {
     $schema: CORDISX_PLUGIN_LIFECYCLE_RESULT_SCHEMA_V1,
     schemaVersion: 1,
@@ -288,7 +314,11 @@ function identity(staged: StagedPluginPackage): CordisXPluginIdentity {
   return { source: staged.identitySource, id: staged.manifest.id }
 }
 
-function equalScope(left: unknown, right: unknown, capability: Parameters<typeof permissionScopeFingerprint>[0]): boolean {
+function equalScope(
+  left: unknown,
+  right: unknown,
+  capability: Parameters<typeof permissionScopeFingerprint>[0],
+): boolean {
   return permissionScopeFingerprint(capability, normalizePermissionScope(left))
     === permissionScopeFingerprint(capability, normalizePermissionScope(right))
 }
@@ -383,9 +413,14 @@ function authorizationPlanV4(
   policiesV4: readonly CordisXPermissionPolicyRecordV4[],
   certification?: CordisXCertifiedPermissionProjectionV1,
 ): CordisXPermissionAuthorizationPlanV4 {
-  if (staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
-    && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8) {
-    throw new LifecycleFailure('permission-denied', 'Permission V4 review requires manifest-v5, manifest-v6, manifest-v7, or manifest-v8.')
+  if (
+    staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
+    && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8
+  ) {
+    throw new LifecycleFailure(
+      'permission-denied',
+      'Permission V4 review requires manifest-v5, manifest-v6, manifest-v7, or manifest-v8.',
+    )
   }
   const catalog = new CapabilityRiskCatalog()
   return buildPermissionAuthorizationPlanV4({
@@ -399,7 +434,9 @@ function authorizationPlanV4(
       moduleGeneration,
       requestId,
     },
-    declarations: staged.manifest.runtimeManifest.capabilities.filter(isLegacyPermissionDeclarationV4) as readonly CordisXCapabilityDeclarationV4[],
+    declarations: staged.manifest.runtimeManifest.capabilities.filter(
+      isLegacyPermissionDeclarationV4,
+    ) as readonly CordisXCapabilityDeclarationV4[],
     policiesV2,
     policiesV4,
     ...(certification === undefined ? {} : { certification }),
@@ -423,10 +460,12 @@ function validateDecisionV2(
   } catch {
     throw new LifecycleFailure('permission-denied', safeError('permission-denied'))
   }
-  if (decision.decisions.some(item => (
-    plan.declarations.find(declaration => declaration.capability === item.capability)?.required === true
+  if (
+    decision.decisions.some(item => (
+      plan.declarations.find(declaration => declaration.capability === item.capability)?.required === true
       && item.decision.startsWith('deny')
-  ))) throw new LifecycleFailure('permission-denied', safeError('permission-denied'))
+    ))
+  ) throw new LifecycleFailure('permission-denied', safeError('permission-denied'))
 }
 
 function validateDecisionV4(
@@ -438,13 +477,17 @@ function validateDecisionV4(
   } catch {
     throw new LifecycleFailure('permission-denied', safeError('permission-denied'))
   }
-  if (plan.declarations.some(item => item.required
-    && item.authorizationMode === 'persistent-policy'
-    && item.policy === 'deny-persistent')
+  if (
+    plan.declarations.some(item =>
+      item.required
+      && item.authorizationMode === 'persistent-policy'
+      && item.policy === 'deny-persistent'
+    )
     || decision.decisions.some(selected => (
-    plan.declarations.find(item => item.capability === selected.capability)?.required === true
+      plan.declarations.find(item => item.capability === selected.capability)?.required === true
       && selected.decision.startsWith('deny')
-  ))) throw new LifecycleFailure('permission-denied', safeError('permission-denied'))
+    ))
+  ) throw new LifecycleFailure('permission-denied', safeError('permission-denied'))
 }
 
 function allowedDecisionV2(plan: CordisXPermissionAuthorizationPlanV2): CordisXPermissionAuthorizationDecisionV2 {
@@ -493,22 +536,26 @@ function validateDecision(
   plan: CordisXPermissionAuthorizationPlanV1,
   decision: CordisXPermissionAuthorizationDecisionV1,
 ): void {
-  if (decision.$schema === undefined
+  if (
+    decision.$schema === undefined
     || decision.schemaVersion !== 1
     || decision.planId !== plan.planId
     || decision.operation !== plan.operation
     || decision.profileId !== plan.profileId
     || decision.identity.source !== plan.identity.source
     || decision.identity.pluginId !== plan.identity.pluginId
-    || !Array.isArray(decision.decisions)) {
+    || !Array.isArray(decision.decisions)
+  ) {
     throw new LifecycleFailure('permission-denied', safeError('permission-denied'))
   }
   const declarations = new Map(plan.declarations.map(item => [item.capability, item]))
   const seen = new Set<string>()
   for (const item of decision.decisions) {
     const declaration = declarations.get(item.capability)
-    if (declaration === undefined || seen.has(item.capability)
-      || !equalScope(item.scope, declaration.scope, item.capability)) {
+    if (
+      declaration === undefined || seen.has(item.capability)
+      || !equalScope(item.scope, declaration.scope, item.capability)
+    ) {
       throw new LifecycleFailure('permission-denied', safeError('permission-denied'))
     }
     seen.add(item.capability)
@@ -535,7 +582,13 @@ function allowedDecision(plan: CordisXPermissionAuthorizationPlanV1): CordisXPer
   }
 }
 
-function impactToken(profileId: string, revision: number, operation: string, pluginId: string, affected: readonly string[]): string {
+function impactToken(
+  profileId: string,
+  revision: number,
+  operation: string,
+  pluginId: string,
+  affected: readonly string[],
+): string {
   return createHash('sha256')
     .update(JSON.stringify([profileId, revision, operation, pluginId, affected]))
     .digest('hex')
@@ -545,9 +598,11 @@ function withGenerations(
   plugins: readonly CordisXPluginActivationItemV1[],
   affected: ReadonlySet<string>,
 ): readonly CordisXPluginActivationItemV1[] {
-  return plugins.map(plugin => affected.has(plugin.id)
-    ? { ...plugin, moduleGeneration: `${plugin.id}-${randomUUID()}` }
-    : plugin)
+  return plugins.map(plugin =>
+    affected.has(plugin.id)
+      ? { ...plugin, moduleGeneration: `${plugin.id}-${randomUUID()}` }
+      : plugin
+  )
 }
 
 function runtimeObservation(record: CordisXPluginActivationRecordV1, registryEpoch: number): PackageRuntimeObservation {
@@ -607,7 +662,9 @@ export class PluginLifecycleCoordinator {
       return {
         planId: pending.plan.planId,
         planRevision: input.permissionPlanRevision,
-        decisionId: `${input.transactionId}:${createHash('sha256').update(JSON.stringify(pending.decision)).digest('hex')}`,
+        decisionId: `${input.transactionId}:${
+          createHash('sha256').update(JSON.stringify(pending.decision)).digest('hex')
+        }`,
         decisionFingerprint: createHash('sha256').update(JSON.stringify(pending.decision)).digest('hex'),
         requiredSatisfied: true,
         unresolvedRequired: [],
@@ -652,13 +709,17 @@ export class PluginLifecycleCoordinator {
     return (await this.permissionPolicies()).filter(isPermissionPolicyRecordV4)
   }
 
-  private async certifiedPermission(staged: StagedPluginPackage): Promise<CordisXCertifiedPermissionProjectionV1 | undefined> {
+  private async certifiedPermission(
+    staged: StagedPluginPackage,
+  ): Promise<CordisXCertifiedPermissionProjectionV1 | undefined> {
     const lookup = this.options.certifiedPermissionForArtifact
-    if (lookup === undefined || !staged.manifest.runtimeManifest.capabilities.some(declaration => {
-      if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return false
-      const name = (declaration as { readonly name?: unknown }).name
-      return name === 'ui.extension-points.render' || name === 'ui.host-dom.read' || name === 'ui.host-dom.modify'
-    })) return undefined
+    if (
+      lookup === undefined || !staged.manifest.runtimeManifest.capabilities.some(declaration => {
+        if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return false
+        const name = (declaration as { readonly name?: unknown }).name
+        return name === 'ui.extension-points.render' || name === 'ui.host-dom.read' || name === 'ui.host-dom.modify'
+      })
+    ) return undefined
     const projection = await lookup({
       source: staged.identitySource,
       pluginId: staged.manifest.id,
@@ -758,13 +819,17 @@ export class PluginLifecycleCoordinator {
     const authority = await this.authority
     const completed = [...prepared.completed]
     for (const { access: rollbackAccess, plan } of prepared.rollbacks) {
-      if (this.options.runtime.recoverRollback === undefined) throw new Error('shared registry rollback recovery is unavailable')
+      if (this.options.runtime.recoverRollback === undefined) {
+        throw new Error('shared registry rollback recovery is unavailable')
+      }
       const restored = await this.options.runtime.recoverRollback(plan)
-      if (restored.transactionId !== plan.transactionId
+      if (
+        restored.transactionId !== plan.transactionId
         || restored.transactionEpoch !== plan.transactionEpoch
         || restored.registryEpoch !== plan.rollbackRegistryEpoch
         || JSON.stringify(restored.active.plugins) !== JSON.stringify(plan.rollbackTarget.plugins)
-        || JSON.stringify(restored.disposedAfter.plugins) !== JSON.stringify(plan.expectedPublished.plugins)) {
+        || JSON.stringify(restored.disposedAfter.plugins) !== JSON.stringify(plan.expectedPublished.plugins)
+      ) {
         throw new Error('shared registry recovery observation is stale')
       }
       const receipt = this.receiptAuthority.issueRollback({
@@ -784,10 +849,16 @@ export class PluginLifecycleCoordinator {
   }
 
   private async active(request: CordisXPluginLifecycleRequestV1): Promise<CordisXPluginActivationRecordV1> {
-    if (request.profileId !== this.options.profileId) throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
-    if (request.runtimeGeneration !== this.options.runtimeGeneration) throw new LifecycleFailure('stale-generation', safeError('stale-generation'), 'conflict')
+    if (request.profileId !== this.options.profileId) {
+      throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
+    }
+    if (request.runtimeGeneration !== this.options.runtimeGeneration) {
+      throw new LifecycleFailure('stale-generation', safeError('stale-generation'), 'conflict')
+    }
     const active = await this.store.loadActive()
-    if (request.expectedRevision !== active.revision) throw new LifecycleFailure('stale-revision', safeError('stale-revision'), 'conflict')
+    if (request.expectedRevision !== active.revision) {
+      throw new LifecycleFailure('stale-revision', safeError('stale-revision'), 'conflict')
+    }
     return active
   }
 
@@ -820,10 +891,14 @@ export class PluginLifecycleCoordinator {
   }
 
   /** Plan one already immutable package. Bundle install uses this dependency-first. */
-  async inspectStagedPackage(staged: StagedPluginPackage, requestId = `bundle-plugin-${randomUUID()}`): Promise<CordisXPluginLifecycleResultV1> {
+  async inspectStagedPackage(
+    staged: StagedPluginPackage,
+    requestId = `bundle-plugin-${randomUUID()}`,
+  ): Promise<CordisXPluginLifecycleResultV1> {
     const active = await this.store.loadActive()
     const request: CordisXPluginLifecycleRequestV1 = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-lifecycle-operation.v1.schema.json',
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-lifecycle-operation.v1.schema.json',
       schemaVersion: 1,
       requestId,
       profileId: this.options.profileId,
@@ -847,7 +922,9 @@ export class PluginLifecycleCoordinator {
       throw new LifecycleFailure('operation-unavailable', 'A launcher-configured plugin already owns this id.')
     }
     const existing = active.plugins.find(plugin => plugin.id === staged.manifest.id)
-    if (existing?.digest === staged.digest) throw new LifecycleFailure('operation-unavailable', 'This exact package is already active.')
+    if (existing?.digest === staged.digest) {
+      throw new LifecycleFailure('operation-unavailable', 'This exact package is already active.')
+    }
     const operation = existing === undefined ? 'install' : 'update'
     const nextItem: CordisXPluginActivationItemV1 = {
       id: staged.manifest.id,
@@ -863,10 +940,12 @@ export class PluginLifecycleCoordinator {
       : active.plugins.map(plugin => plugin.id === nextItem.id ? nextItem : plugin)
     let affected = existing === undefined
       ? [nextItem.id]
-      : [...new Set([
+      : [
+        ...new Set([
           ...pluginDependentClosure(active.plugins, nextItem.id),
           ...pluginDependentClosure(provisional, nextItem.id),
-        ])]
+        ]),
+      ]
     const order = topologicalPluginOrder(provisional)
     affected = order.filter(id => affected.includes(id))
     const plugins = withGenerations(provisional, new Set(affected)).map(plugin => (
@@ -891,7 +970,13 @@ export class PluginLifecycleCoordinator {
     }
     await this.store.writeCandidate(candidate)
     const plan = staged.manifest.runtimeManifest.schemaVersion === 1
-      ? authorizationPlan(staged, operation, this.options.profileId, this.options.runtimeGeneration, await this.permissionPoliciesV1())
+      ? authorizationPlan(
+        staged,
+        operation,
+        this.options.profileId,
+        this.options.runtimeGeneration,
+        await this.permissionPoliciesV1(),
+      )
       : undefined
     return {
       ...resultBase(request, active, operation),
@@ -911,41 +996,56 @@ export class PluginLifecycleCoordinator {
     },
     active: CordisXPluginActivationRecordV1,
     candidateId: string,
-    decision: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV4,
+    decision:
+      | CordisXPermissionAuthorizationDecisionV1
+      | CordisXPermissionAuthorizationDecisionV2
+      | CordisXPermissionAuthorizationDecisionV4,
     operation: 'install' | 'update',
   ): Promise<CordisXPluginLifecycleResultV1> {
     const candidate = await this.store.loadCandidate(candidateId).catch(() => {
       throw new LifecycleFailure('stale-revision', safeError('stale-revision'), 'conflict')
     })
-    if (candidate.lastGoodRevision !== active.revision) throw new LifecycleFailure('stale-revision', safeError('stale-revision'), 'conflict')
+    if (candidate.lastGoodRevision !== active.revision) {
+      throw new LifecycleFailure('stale-revision', safeError('stale-revision'), 'conflict')
+    }
     const targetId = changedTarget(active, candidate)
     const existing = active.plugins.some(plugin => plugin.id === targetId)
-    if ((operation === 'install') === existing) throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
+    if ((operation === 'install') === existing) {
+      throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
+    }
     const target = candidate.plugins.find(plugin => plugin.id === targetId)!
-    const staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => { throw classify(error) })
+    const staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => {
+      throw classify(error)
+    })
     const plan = decision.schemaVersion === 4
       ? authorizationPlanV4(
-          staged,
-          operation,
-          this.options.profileId,
-          this.options.runtimeGeneration,
-          target.moduleGeneration,
-          candidateId,
-          await this.permissionPoliciesV2(),
-          await this.permissionPoliciesV4(),
-          await this.certifiedPermission(staged),
-        )
+        staged,
+        operation,
+        this.options.profileId,
+        this.options.runtimeGeneration,
+        target.moduleGeneration,
+        candidateId,
+        await this.permissionPoliciesV2(),
+        await this.permissionPoliciesV4(),
+        await this.certifiedPermission(staged),
+      )
       : decision.schemaVersion === 2
-        ? authorizationPlanV2(
-          staged,
-          operation,
-          this.options.profileId,
-          this.options.runtimeGeneration,
-          target.moduleGeneration,
-          candidateId,
-          await this.permissionPoliciesV2(),
-        )
-        : authorizationPlan(staged, operation, this.options.profileId, this.options.runtimeGeneration, await this.permissionPoliciesV1())
+      ? authorizationPlanV2(
+        staged,
+        operation,
+        this.options.profileId,
+        this.options.runtimeGeneration,
+        target.moduleGeneration,
+        candidateId,
+        await this.permissionPoliciesV2(),
+      )
+      : authorizationPlan(
+        staged,
+        operation,
+        this.options.profileId,
+        this.options.runtimeGeneration,
+        await this.permissionPoliciesV1(),
+      )
     if (decision.schemaVersion === 4) validateDecisionV4(plan as CordisXPermissionAuthorizationPlanV4, decision)
     else if (decision.schemaVersion === 2) validateDecisionV2(plan as CordisXPermissionAuthorizationPlanV2, decision)
     else validateDecision(plan as CordisXPermissionAuthorizationPlanV1, decision)
@@ -1014,14 +1114,20 @@ export class PluginLifecycleCoordinator {
     }
   }
 
-  private formalRuntime(): (PluginLifecycleRuntime & Required<Pick<PluginLifecycleRuntime,
-  'prepare' | 'publish' | 'complete' | 'finalize' | 'rollback'>>) | undefined {
+  private formalRuntime():
+    | (
+      & PluginLifecycleRuntime
+      & Required<Pick<PluginLifecycleRuntime, 'prepare' | 'publish' | 'complete' | 'finalize' | 'rollback'>>
+    )
+    | undefined
+  {
     const runtime = this.options.runtime
     return runtime.prepare === undefined || runtime.publish === undefined
-      || runtime.complete === undefined || runtime.finalize === undefined || runtime.rollback === undefined
+        || runtime.complete === undefined || runtime.finalize === undefined || runtime.rollback === undefined
       ? undefined
-      : runtime as PluginLifecycleRuntime & Required<Pick<PluginLifecycleRuntime,
-        'prepare' | 'publish' | 'complete' | 'finalize' | 'rollback'>>
+      : runtime as
+        & PluginLifecycleRuntime
+        & Required<Pick<PluginLifecycleRuntime, 'prepare' | 'publish' | 'complete' | 'finalize' | 'rollback'>>
   }
 
   private async activateWithAuthority(input: {
@@ -1030,8 +1136,14 @@ export class PluginLifecycleCoordinator {
     readonly candidate: CordisXPluginActivationRecordV1
     readonly targetId: string
     readonly staged?: StagedPluginPackage
-    readonly authorizationPlan: CordisXPermissionAuthorizationPlanV1 | CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV4
-    readonly authorizationDecision: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV4
+    readonly authorizationPlan:
+      | CordisXPermissionAuthorizationPlanV1
+      | CordisXPermissionAuthorizationPlanV2
+      | CordisXPermissionAuthorizationPlanV4
+    readonly authorizationDecision:
+      | CordisXPermissionAuthorizationDecisionV1
+      | CordisXPermissionAuthorizationDecisionV2
+      | CordisXPermissionAuthorizationDecisionV4
   }): Promise<CordisXPluginActivationRecordV1 | undefined> {
     const runtime = this.formalRuntime()
     if (runtime === undefined) return undefined
@@ -1072,8 +1184,10 @@ export class PluginLifecycleCoordinator {
       const stagePlan = await authority.requestActivation(access)
       activationRequested = true
       const resolvedStage = await authority.resolveCandidate(access, 'stage')
-      if (resolvedStage.candidateFingerprint !== prepared.candidateFingerprint
-        || JSON.stringify(resolvedStage.affectedPluginIds) !== JSON.stringify(stagePlan.affectedPluginIds)) {
+      if (
+        resolvedStage.candidateFingerprint !== prepared.candidateFingerprint
+        || JSON.stringify(resolvedStage.affectedPluginIds) !== JSON.stringify(stagePlan.affectedPluginIds)
+      ) {
         throw new Error('Host candidate plan changed across plan and stage boundaries')
       }
       await authority.resolveImpact({
@@ -1114,12 +1228,14 @@ export class PluginLifecycleCoordinator {
         authorizationDecision: input.authorizationDecision,
       })
       if (readiness === undefined) throw new Error('shared registry readiness observation is unavailable')
-      if (readiness.transactionId !== transactionId
+      if (
+        readiness.transactionId !== transactionId
         || readiness.transactionEpoch !== resolvedStage.transactionEpoch
         || readiness.expectedRegistryEpoch !== resolvedStage.expectedRegistryEpoch
         || readiness.afterRegistryEpoch !== resolvedStage.afterRegistryEpoch
         || JSON.stringify(runtimeObservation(readiness.observation, readiness.afterRegistryEpoch))
-          !== JSON.stringify(runtimeObservation(input.candidate, resolvedStage.afterRegistryEpoch))) {
+          !== JSON.stringify(runtimeObservation(input.candidate, resolvedStage.afterRegistryEpoch))
+      ) {
         throw new Error('shared registry readiness observation is stale')
       }
       if (stageResolutionFailure !== undefined) throw stageResolutionFailure
@@ -1140,16 +1256,20 @@ export class PluginLifecycleCoordinator {
       }, 'publish')
       const publication = await runtime.publish(transactionId)
       published = true
-      if (publication.transactionEpoch !== publishPlan.transactionEpoch
+      if (
+        publication.transactionEpoch !== publishPlan.transactionEpoch
         || publication.registryEpoch !== publishPlan.afterRegistryEpoch
-        || JSON.stringify(publication.active.plugins) !== JSON.stringify(input.candidate.plugins)) {
+        || JSON.stringify(publication.active.plugins) !== JSON.stringify(input.candidate.plugins)
+      ) {
         throw new Error('shared registry publication observation is stale')
       }
       const committed = await authority.commit(access)
       const cleanup = await runtime.complete(transactionId)
-      if (cleanup.registryEpoch !== publishPlan.afterRegistryEpoch
+      if (
+        cleanup.registryEpoch !== publishPlan.afterRegistryEpoch
         || JSON.stringify(cleanup.active.plugins) !== JSON.stringify(input.candidate.plugins)
-        || JSON.stringify(cleanup.disposedAfter.plugins) !== JSON.stringify(input.active.plugins)) {
+        || JSON.stringify(cleanup.disposedAfter.plugins) !== JSON.stringify(input.active.plugins)
+      ) {
         throw new Error('retiring generation cleanup observation is stale')
       }
       const commitReceipt = this.receiptAuthority.issueCommit({
@@ -1198,7 +1318,9 @@ export class PluginLifecycleCoordinator {
           } catch (rollbackError) {
             throw new LifecycleFailure(
               'rollback-failed',
-              `${safeError('rollback-failed')} (${error instanceof Error ? error.message : String(error)}; ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)})`,
+              `${safeError('rollback-failed')} (${error instanceof Error ? error.message : String(error)}; ${
+                rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+              })`,
               'rollback-failed',
             )
           }
@@ -1230,9 +1352,14 @@ export class PluginLifecycleCoordinator {
       plugins = active.plugins.filter(plugin => !removed.has(plugin.id))
     } else {
       const changed = new Set(affected)
-      plugins = withGenerations(active.plugins.map(plugin => changed.has(plugin.id)
-        ? { ...plugin, enabled: operation === 'enable' ? true : false }
-        : plugin), changed)
+      plugins = withGenerations(
+        active.plugins.map(plugin =>
+          changed.has(plugin.id)
+            ? { ...plugin, enabled: operation === 'enable' ? true : false }
+            : plugin
+        ),
+        changed,
+      )
     }
     validatePluginActivationGraph(plugins)
     const transactionId = `plugin-${randomUUID()}`
@@ -1264,9 +1391,17 @@ export class PluginLifecycleCoordinator {
     const expectedImpact = impactToken(active.profileId, active.revision, operation, pluginId, affected)
     if (operation !== 'enable' && confirmedImpactToken !== expectedImpact) {
       const target = active.plugins.find(plugin => plugin.id === pluginId)!
-      const staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => { throw classify(error) })
+      const staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => {
+        throw classify(error)
+      })
       const plan = staged.manifest.runtimeManifest.schemaVersion === 1
-        ? authorizationPlan(staged, 'install', this.options.profileId, this.options.runtimeGeneration, await this.permissionPoliciesV1())
+        ? authorizationPlan(
+          staged,
+          'install',
+          this.options.profileId,
+          this.options.runtimeGeneration,
+          await this.permissionPoliciesV1(),
+        )
         : undefined
       return {
         ...resultBase(request, active, operation),
@@ -1280,11 +1415,19 @@ export class PluginLifecycleCoordinator {
       }
     }
     let staged: StagedPluginPackage | undefined
-    let reviewPlan: CordisXPermissionAuthorizationPlanV1 | CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV4
-    let reviewDecision: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV4
+    let reviewPlan:
+      | CordisXPermissionAuthorizationPlanV1
+      | CordisXPermissionAuthorizationPlanV2
+      | CordisXPermissionAuthorizationPlanV4
+    let reviewDecision:
+      | CordisXPermissionAuthorizationDecisionV1
+      | CordisXPermissionAuthorizationDecisionV2
+      | CordisXPermissionAuthorizationDecisionV4
     if (operation === 'enable') {
       const target = active.plugins.find(plugin => plugin.id === pluginId)!
-      staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => { throw classify(error) })
+      staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => {
+        throw classify(error)
+      })
       if (staged.manifest.runtimeManifest.schemaVersion !== 1) {
         return {
           ...resultBase(request, active, operation),
@@ -1296,7 +1439,13 @@ export class PluginLifecycleCoordinator {
           package: packageSummary(staged),
         }
       }
-      const plan = authorizationPlan(staged, 'enable', this.options.profileId, this.options.runtimeGeneration, await this.permissionPoliciesV1())
+      const plan = authorizationPlan(
+        staged,
+        'enable',
+        this.options.profileId,
+        this.options.runtimeGeneration,
+        await this.permissionPoliciesV1(),
+      )
       if (authorizationDecision === undefined) {
         return {
           ...resultBase(request, active, operation),
@@ -1314,7 +1463,9 @@ export class PluginLifecycleCoordinator {
       reviewDecision = authorizationDecision
     } else {
       const target = active.plugins.find(plugin => plugin.id === pluginId)!
-      const reviewStaged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => { throw classify(error) })
+      const reviewStaged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => {
+        throw classify(error)
+      })
       if (reviewStaged.manifest.runtimeManifest.schemaVersion === 1) {
         reviewPlan = authorizationPlan(
           reviewStaged,
@@ -1425,12 +1576,16 @@ export class PluginLifecycleCoordinator {
     const reviewTarget = input.target
     if (reviewTarget.kind === 'candidate') {
       const candidate = await this.store.loadCandidate(reviewTarget.candidateId)
-      if (candidate.lastGoodRevision !== active.revision) throw new LifecycleFailure('stale-revision', safeError('stale-revision'), 'conflict')
+      if (candidate.lastGoodRevision !== active.revision) {
+        throw new LifecycleFailure('stale-revision', safeError('stale-revision'), 'conflict')
+      }
       const pluginId = changedTarget(active, candidate)
       const existing = active.plugins.some(plugin => plugin.id === pluginId)
       const operation = existing ? 'update' : 'install'
       const target = candidate.plugins.find(plugin => plugin.id === pluginId)!
-      const staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => { throw classify(error) })
+      const staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => {
+        throw classify(error)
+      })
       if (staged.manifest.runtimeManifest.schemaVersion !== 4) return undefined
       return authorizationPlanV2(
         staged,
@@ -1444,8 +1599,12 @@ export class PluginLifecycleCoordinator {
     }
     const pluginId = reviewTarget.pluginId
     const activeTarget = active.plugins.find(plugin => plugin.id === pluginId)
-    if (activeTarget === undefined || activeTarget.enabled) throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
-    const staged = await loadStagedPluginPackage(this.options.homeDir, activeTarget.digest).catch(error => { throw classify(error) })
+    if (activeTarget === undefined || activeTarget.enabled) {
+      throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
+    }
+    const staged = await loadStagedPluginPackage(this.options.homeDir, activeTarget.digest).catch(error => {
+      throw classify(error)
+    })
     if (staged.manifest.runtimeManifest.schemaVersion !== 4) return undefined
     const { candidate } = this.mutationCandidate(active, 'enable', pluginId)
     await this.store.writeCandidate(candidate)
@@ -1475,13 +1634,19 @@ export class PluginLifecycleCoordinator {
     const reviewTarget = input.target
     if (reviewTarget.kind === 'candidate') {
       const candidate = await this.store.loadCandidate(reviewTarget.candidateId)
-      if (candidate.lastGoodRevision !== active.revision) throw new LifecycleFailure('stale-revision', safeError('stale-revision'), 'conflict')
+      if (candidate.lastGoodRevision !== active.revision) {
+        throw new LifecycleFailure('stale-revision', safeError('stale-revision'), 'conflict')
+      }
       const pluginId = changedTarget(active, candidate)
       const operation = active.plugins.some(plugin => plugin.id === pluginId) ? 'update' : 'install'
       const target = candidate.plugins.find(plugin => plugin.id === pluginId)!
-      const staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => { throw classify(error) })
-      if (staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
-        && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8) return undefined
+      const staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => {
+        throw classify(error)
+      })
+      if (
+        staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
+        && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8
+      ) return undefined
       return authorizationPlanV4(
         staged,
         operation,
@@ -1496,10 +1661,16 @@ export class PluginLifecycleCoordinator {
     }
     const pluginId = reviewTarget.pluginId
     const activeTarget = active.plugins.find(plugin => plugin.id === pluginId)
-    if (activeTarget === undefined || activeTarget.enabled) throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
-    const staged = await loadStagedPluginPackage(this.options.homeDir, activeTarget.digest).catch(error => { throw classify(error) })
-    if (staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
-      && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8) return undefined
+    if (activeTarget === undefined || activeTarget.enabled) {
+      throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
+    }
+    const staged = await loadStagedPluginPackage(this.options.homeDir, activeTarget.digest).catch(error => {
+      throw classify(error)
+    })
+    if (
+      staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
+      && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8
+    ) return undefined
     const { candidate } = this.mutationCandidate(active, 'enable', pluginId)
     await this.store.writeCandidate(candidate)
     const target = candidate.plugins.find(plugin => plugin.id === pluginId)!
@@ -1584,13 +1755,22 @@ export class PluginLifecycleCoordinator {
     })
     const before = active.plugins.find(plugin => plugin.id === pluginId)
     const after = candidate.plugins.find(plugin => plugin.id === pluginId)
-    if (candidate.lastGoodRevision !== active.revision || before === undefined || before.enabled || after?.enabled !== true
-      || before.digest !== after.digest || before.version !== after.version || before.moduleGeneration === after.moduleGeneration
+    if (
+      candidate.lastGoodRevision !== active.revision || before === undefined || before.enabled
+      || after?.enabled !== true
+      || before.digest !== after.digest || before.version !== after.version
+      || before.moduleGeneration === after.moduleGeneration
       || candidate.plugins.length !== active.plugins.length
-      || active.plugins.some(item => item.id !== pluginId && JSON.stringify(item) !== JSON.stringify(candidate.plugins.find(next => next.id === item.id)))) {
+      || active.plugins.some(item =>
+        item.id !== pluginId
+        && JSON.stringify(item) !== JSON.stringify(candidate.plugins.find(next => next.id === item.id))
+      )
+    ) {
       throw new LifecycleFailure('stale-revision', safeError('stale-revision'), 'conflict')
     }
-    const staged = await loadStagedPluginPackage(this.options.homeDir, after.digest).catch(error => { throw classify(error) })
+    const staged = await loadStagedPluginPackage(this.options.homeDir, after.digest).catch(error => {
+      throw classify(error)
+    })
     const plan = authorizationPlanV2(
       staged,
       'enable',
@@ -1668,13 +1848,22 @@ export class PluginLifecycleCoordinator {
     })
     const before = active.plugins.find(plugin => plugin.id === pluginId)
     const after = candidate.plugins.find(plugin => plugin.id === pluginId)
-    if (candidate.lastGoodRevision !== active.revision || before === undefined || before.enabled || after?.enabled !== true
-      || before.digest !== after.digest || before.version !== after.version || before.moduleGeneration === after.moduleGeneration
+    if (
+      candidate.lastGoodRevision !== active.revision || before === undefined || before.enabled
+      || after?.enabled !== true
+      || before.digest !== after.digest || before.version !== after.version
+      || before.moduleGeneration === after.moduleGeneration
       || candidate.plugins.length !== active.plugins.length
-      || active.plugins.some(item => item.id !== pluginId && JSON.stringify(item) !== JSON.stringify(candidate.plugins.find(next => next.id === item.id)))) {
+      || active.plugins.some(item =>
+        item.id !== pluginId
+        && JSON.stringify(item) !== JSON.stringify(candidate.plugins.find(next => next.id === item.id))
+      )
+    ) {
       throw new LifecycleFailure('stale-revision', safeError('stale-revision'), 'conflict')
     }
-    const staged = await loadStagedPluginPackage(this.options.homeDir, after.digest).catch(error => { throw classify(error) })
+    const staged = await loadStagedPluginPackage(this.options.homeDir, after.digest).catch(error => {
+      throw classify(error)
+    })
     const plan = authorizationPlanV4(
       staged,
       'enable',
@@ -1739,7 +1928,10 @@ export class PluginLifecycleCoordinator {
     }
   }
 
-  private async planFor(item: CordisXPluginActivationItemV1, operation: 'install' | 'update' | 'enable'): Promise<CordisXPermissionAuthorizationPlanV1> {
+  private async planFor(
+    item: CordisXPluginActivationItemV1,
+    operation: 'install' | 'update' | 'enable',
+  ): Promise<CordisXPermissionAuthorizationPlanV1> {
     return authorizationPlan(
       await loadStagedPluginPackage(this.options.homeDir, item.digest),
       operation,
@@ -1753,7 +1945,10 @@ export class PluginLifecycleCoordinator {
     return await this.handleRequest(request, false)
   }
 
-  private async handleRequest(request: CordisXPluginLifecycleRequestV1, bundleMutation: boolean): Promise<CordisXPluginLifecycleResultV1> {
+  private async handleRequest(
+    request: CordisXPluginLifecycleRequestV1,
+    bundleMutation: boolean,
+  ): Promise<CordisXPluginLifecycleResultV1> {
     let active: CordisXPluginActivationRecordV1
     try {
       active = await this.active(request)
@@ -1765,21 +1960,49 @@ export class PluginLifecycleCoordinator {
       const operation = request.operation
       if (operation.kind === 'inspect-local') return await this.inspect(request, active, operation.sourceDirectory)
       if (operation.kind === 'install' || operation.kind === 'update') {
-        return await this.applyPackage(request, active, operation.candidateId, operation.authorizationDecision, operation.kind)
+        return await this.applyPackage(
+          request,
+          active,
+          operation.candidateId,
+          operation.authorizationDecision,
+          operation.kind,
+        )
       }
       if (operation.kind === 'enable') {
-        return await this.applyStateMutation(request, active, 'enable', operation.pluginId, operation.authorizationDecision)
+        return await this.applyStateMutation(
+          request,
+          active,
+          'enable',
+          operation.pluginId,
+          operation.authorizationDecision,
+        )
       }
       if (operation.kind === 'disable' || operation.kind === 'uninstall') {
         if (!bundleMutation && this.bundleClaimGuard !== undefined) {
           const owners = await this.bundleClaimGuard(operation.pluginId)
-          if (owners.length > 0) throw new LifecycleFailure('operation-unavailable', `This plugin is managed by bundle${owners.length === 1 ? '' : 's'}: ${owners.join(', ')}.`)
+          if (owners.length > 0) {
+            throw new LifecycleFailure(
+              'operation-unavailable',
+              `This plugin is managed by bundle${owners.length === 1 ? '' : 's'}: ${owners.join(', ')}.`,
+            )
+          }
         }
-        return await this.applyStateMutation(request, active, operation.kind, operation.pluginId, undefined, operation.impactToken)
+        return await this.applyStateMutation(
+          request,
+          active,
+          operation.kind,
+          operation.pluginId,
+          undefined,
+          operation.impactToken,
+        )
       }
-      if (operation.kind !== 'reload') throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
+      if (operation.kind !== 'reload') {
+        throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
+      }
       const item = active.plugins.find(plugin => plugin.id === operation.pluginId)
-      if (item === undefined || !item.enabled) throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
+      if (item === undefined || !item.enabled) {
+        throw new LifecycleFailure('operation-unavailable', safeError('operation-unavailable'))
+      }
       await this.options.runtime.reload({
         pluginId: item.id,
         moduleGeneration: item.moduleGeneration,

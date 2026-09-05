@@ -6,7 +6,7 @@ import {
   CORDISX_ROUTE_SCHEMA_V2,
   type CordisXPluginManifestV1,
 } from 'cordisx/contracts'
-import { OverviewPage, type Messages } from './overview-page.js'
+import { type Messages, OverviewPage } from './overview-page.js'
 
 export const manifest = {
   $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,

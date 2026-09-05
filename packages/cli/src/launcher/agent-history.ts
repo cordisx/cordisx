@@ -122,11 +122,19 @@ function phase(value: unknown): CordisXAgentEventDataMap['item.lifecycle']['phas
 function itemKind(value: unknown): CordisXAgentEventDataMap['item.lifecycle']['kind'] {
   const normalized = text(value)?.replaceAll(/[^a-z0-9]+/gi, '').toLowerCase() ?? ''
   if (normalized.includes('user') && normalized.includes('message')) return 'user-message'
-  if ((normalized.includes('agent') || normalized.includes('assistant')) && normalized.includes('message')) return 'assistant-message'
+  if ((normalized.includes('agent') || normalized.includes('assistant')) && normalized.includes('message')) {
+    return 'assistant-message'
+  }
   if (normalized.includes('reason')) return 'reasoning'
   if (normalized.includes('plan')) return 'plan'
-  if (normalized.includes('functioncalloutput') || normalized.includes('toolresult') || normalized.includes('customtoolcalloutput')) return 'tool-result'
-  if (normalized.includes('functioncall') || normalized.includes('toolcall') || normalized.includes('dynamictoolcall') || normalized.includes('websearch')) return 'tool-call'
+  if (
+    normalized.includes('functioncalloutput') || normalized.includes('toolresult')
+    || normalized.includes('customtoolcalloutput')
+  ) return 'tool-result'
+  if (
+    normalized.includes('functioncall') || normalized.includes('toolcall') || normalized.includes('dynamictoolcall')
+    || normalized.includes('websearch')
+  ) return 'tool-call'
   if (normalized.includes('command') || normalized.includes('exec')) return 'command'
   if (normalized.includes('filechange') || normalized.includes('patch')) return 'file-change'
   if (normalized.includes('compact')) return 'compaction'
@@ -147,7 +155,10 @@ function inside(root: string, candidate: string): boolean {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
 }
 
-function failure(code: 'invalid-request' | 'adapter-unavailable' | 'permission-scope-denied', message: string): CordisXPlatformResult<never> {
+function failure(
+  code: 'invalid-request' | 'adapter-unavailable' | 'permission-scope-denied',
+  message: string,
+): CordisXPlatformResult<never> {
   return { ok: false, error: { code, message } }
 }
 
@@ -192,12 +203,16 @@ export class CodexAgentHistoryHost {
       ? persistentSecret(options.cacheDir)
       : Promise.resolve(Buffer.from(options.secret))
     this.roots = [path.join(options.codexHome, 'sessions'), path.join(options.codexHome, 'archived_sessions')]
-    this.profileIdPromise = this.secretPromise.then(secret => this.digest(secret, `profile\0${options.profileName}\0${path.resolve(options.codexHome)}`))
+    this.profileIdPromise = this.secretPromise.then(secret =>
+      this.digest(secret, `profile\0${options.profileName}\0${path.resolve(options.codexHome)}`)
+    )
   }
 
   async status(): Promise<CordisXAgentHistoryStatus> {
     const profileId = await this.profileIdPromise
-    const available = (await Promise.all(this.roots.map(async root => await stat(root).then(value => value.isDirectory()).catch(() => false))))
+    const available = (await Promise.all(
+      this.roots.map(async root => await stat(root).then(value => value.isDirectory()).catch(() => false)),
+    ))
       .some(Boolean)
     return {
       hostId: AGENT_HISTORY_HOST_ID,
@@ -213,7 +228,10 @@ export class CodexAgentHistoryHost {
     }
   }
 
-  async query(input: CordisXAgentHistoryQuery, caller: AgentHistoryCaller): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>> {
+  async query(
+    input: CordisXAgentHistoryQuery,
+    caller: AgentHistoryCaller,
+  ): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>> {
     const normalized = this.normalizeQuery(input)
     if (!normalized.ok) return normalized
     const profileId = await this.profileIdPromise
@@ -222,7 +240,9 @@ export class CodexAgentHistoryHost {
     const binding = input.cursor === undefined
       ? undefined
       : this.consumeCursor(input.cursor, 'page', normalized.value, caller, profileId, state.snapshotId)
-    if (input.cursor !== undefined && binding === undefined) return failure('invalid-request', 'Agent history cursor is invalid or stale')
+    if (input.cursor !== undefined && binding === undefined) {
+      return failure('invalid-request', 'Agent history cursor is invalid or stale')
+    }
     const end = binding?.eventIndex ?? state.events.length
     const start = Math.max(0, end - normalized.value.limit)
     return {
@@ -231,7 +251,10 @@ export class CodexAgentHistoryHost {
     }
   }
 
-  async tail(input: CordisXAgentHistoryTailQuery, caller: AgentHistoryCaller): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>> {
+  async tail(
+    input: CordisXAgentHistoryTailQuery,
+    caller: AgentHistoryCaller,
+  ): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>> {
     const normalized = this.normalizeQuery(input)
     if (!normalized.ok) return normalized
     const profileId = await this.profileIdPromise
@@ -239,7 +262,9 @@ export class CodexAgentHistoryHost {
     if (previous === undefined) return failure('invalid-request', 'Agent history tail cursor is invalid or stale')
     const state = await this.index(normalized.value.sessionId, normalized.value.payloadPolicy)
     if (state === undefined) return { ok: true, value: await this.unavailablePage(normalized.value) }
-    if (previous.snapshotId !== state.snapshotId && (state.sourceChanged > 0 || previous.eventIndex > state.events.length)) {
+    if (
+      previous.snapshotId !== state.snapshotId && (state.sourceChanged > 0 || previous.eventIndex > state.events.length)
+    ) {
       return failure('invalid-request', 'Agent history source changed before the tail cursor')
     }
     const start = Math.min(previous.eventIndex, state.events.length)
@@ -255,12 +280,20 @@ export class CodexAgentHistoryHost {
     this.cursors.clear()
   }
 
-  private normalizeQuery(input: CordisXAgentHistoryQuery | CordisXAgentHistoryTailQuery): CordisXPlatformResult<Required<Pick<CordisXAgentHistoryQuery, 'sessionId' | 'limit' | 'payloadPolicy'>>> {
-    if (!safeSessionId(input.sessionId)) return failure('invalid-request', 'sessionId is not a valid Codex history identity')
+  private normalizeQuery(
+    input: CordisXAgentHistoryQuery | CordisXAgentHistoryTailQuery,
+  ): CordisXPlatformResult<Required<Pick<CordisXAgentHistoryQuery, 'sessionId' | 'limit' | 'payloadPolicy'>>> {
+    if (!safeSessionId(input.sessionId)) {
+      return failure('invalid-request', 'sessionId is not a valid Codex history identity')
+    }
     const limit = input.limit ?? 500
-    if (!Number.isInteger(limit) || limit < 1 || limit > 500) return failure('invalid-request', 'Agent history limit must be between 1 and 500')
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      return failure('invalid-request', 'Agent history limit must be between 1 and 500')
+    }
     const payloadPolicy = input.payloadPolicy ?? 'referenced'
-    if (!['referenced', 'summarized', 'inline'].includes(payloadPolicy)) return failure('invalid-request', 'Agent history payload policy is invalid')
+    if (!['referenced', 'summarized', 'inline'].includes(payloadPolicy)) {
+      return failure('invalid-request', 'Agent history payload policy is invalid')
+    }
     return { ok: true, value: { sessionId: input.sessionId, limit, payloadPolicy } }
   }
 
@@ -270,8 +303,17 @@ export class CodexAgentHistoryHost {
     const metadata = await stat(filePath)
     const source = { dev: metadata.dev, ino: metadata.ino, size: metadata.size, mtimeMs: metadata.mtimeMs }
     let state = this.indexes.get(`${sessionId}\0${policy}`)
-    if (state === undefined || state.source.dev !== source.dev || state.source.ino !== source.ino || source.size < state.offset) {
-      state = await this.newIndex(filePath, source, sessionId, policy, state === undefined ? 0 : state.sourceChanged + 1)
+    if (
+      state === undefined || state.source.dev !== source.dev || state.source.ino !== source.ino
+      || source.size < state.offset
+    ) {
+      state = await this.newIndex(
+        filePath,
+        source,
+        sessionId,
+        policy,
+        state === undefined ? 0 : state.sourceChanged + 1,
+      )
       this.indexes.set(`${sessionId}\0${policy}`, state)
     } else {
       state.filePath = filePath
@@ -284,7 +326,13 @@ export class CodexAgentHistoryHost {
     return state
   }
 
-  private async newIndex(filePath: string, source: SourceIdentity, sessionId: string, policy: CordisXAgentHistoryPayloadPolicy, sourceChanged: number): Promise<SessionIndex> {
+  private async newIndex(
+    filePath: string,
+    source: SourceIdentity,
+    sessionId: string,
+    policy: CordisXAgentHistoryPayloadPolicy,
+    sourceChanged: number,
+  ): Promise<SessionIndex> {
     return {
       filePath,
       source,
@@ -305,13 +353,19 @@ export class CodexAgentHistoryHost {
     }
   }
 
-  private async advance(state: SessionIndex, sessionId: string, policy: CordisXAgentHistoryPayloadPolicy): Promise<void> {
+  private async advance(
+    state: SessionIndex,
+    sessionId: string,
+    policy: CordisXAgentHistoryPayloadPolicy,
+  ): Promise<void> {
     if (state.complete && state.offset >= state.source.size) return
     const handle = await open(state.filePath, 'r')
     let scanned = 0
     const startedAt = this.now()
     try {
-      while (state.offset < state.source.size && scanned < this.maxScanBytes && this.now() - startedAt < this.maxScanMs) {
+      while (
+        state.offset < state.source.size && scanned < this.maxScanBytes && this.now() - startedAt < this.maxScanMs
+      ) {
         const length = Math.min(READ_CHUNK_BYTES, state.source.size - state.offset, this.maxScanBytes - scanned)
         const chunk = Buffer.allocUnsafe(length)
         const result = await handle.read(chunk, 0, length, state.offset)
@@ -336,7 +390,12 @@ export class CodexAgentHistoryHost {
     }
   }
 
-  private async consumeBytes(state: SessionIndex, bytes: Buffer, sessionId: string, policy: CordisXAgentHistoryPayloadPolicy): Promise<void> {
+  private async consumeBytes(
+    state: SessionIndex,
+    bytes: Buffer,
+    sessionId: string,
+    policy: CordisXAgentHistoryPayloadPolicy,
+  ): Promise<void> {
     let cursor = 0
     while (cursor < bytes.length) {
       const newline = bytes.indexOf(0x0a, cursor)
@@ -372,27 +431,45 @@ export class CodexAgentHistoryHost {
     }
   }
 
-  private async projectRecord(state: SessionIndex, envelope: Record<string, unknown>, sessionId: string, policy: CordisXAgentHistoryPayloadPolicy, offset: number): Promise<void> {
+  private async projectRecord(
+    state: SessionIndex,
+    envelope: Record<string, unknown>,
+    sessionId: string,
+    policy: CordisXAgentHistoryPayloadPolicy,
+    offset: number,
+  ): Promise<void> {
     const payload = record(envelope.payload) ?? {}
     const type = text(envelope.type)
-    const eventTime = timestamp(envelope.timestamp) ?? timestamp(payload.timestamp) ?? number(payload.completed_at_ms) ?? number(payload.started_at_ms) ?? 0
+    const eventTime = timestamp(envelope.timestamp) ?? timestamp(payload.timestamp) ?? number(payload.completed_at_ms)
+      ?? number(payload.started_at_ms) ?? 0
     const ordinal = Number.isInteger(envelope.ordinal) ? String(envelope.ordinal) : `offset-${offset}`
     if (type === 'session_meta') {
       const nativeSession = text(payload.id) ?? text(payload.session_id)
-      if (nativeSession !== undefined && nativeSession !== sessionId) throw new Error('Agent history session identity mismatch')
-      await this.addEvent(state, sessionId, eventTime, `session:${ordinal}`, 'session.lifecycle', 'inferred', { phase: 'resumed', history: 'partial' })
+      if (nativeSession !== undefined && nativeSession !== sessionId) {
+        throw new Error('Agent history session identity mismatch')
+      }
+      await this.addEvent(state, sessionId, eventTime, `session:${ordinal}`, 'session.lifecycle', 'inferred', {
+        phase: 'resumed',
+        history: 'partial',
+      })
       return
     }
     if (type === 'turn_context') {
       const turnId = text(payload.turn_id)
       if (turnId === undefined) return
       state.currentTurnId = turnId
-      await this.addEvent(state, sessionId, eventTime, `turn:${turnId}:started`, 'turn.lifecycle', 'observed', { phase: 'started', status: 'history-context' }, { turnId })
+      await this.addEvent(state, sessionId, eventTime, `turn:${turnId}:started`, 'turn.lifecycle', 'observed', {
+        phase: 'started',
+        status: 'history-context',
+      }, { turnId })
       return
     }
     if (type === 'compacted') {
       state.compacted = true
-      await this.addEvent(state, sessionId, eventTime, `compaction:${ordinal}`, 'session.lifecycle', 'observed', { phase: 'compacted', history: 'partial' })
+      await this.addEvent(state, sessionId, eventTime, `compaction:${ordinal}`, 'session.lifecycle', 'observed', {
+        phase: 'compacted',
+        history: 'partial',
+      })
       return
     }
     if (type === 'response_item') {
@@ -409,16 +486,25 @@ export class CodexAgentHistoryHost {
     const turnId = text(payload.turn_id) ?? state.currentTurnId
     if (eventType === 'task_started' && turnId !== undefined) {
       state.currentTurnId = turnId
-      await this.addEvent(state, sessionId, eventTime, `turn:${turnId}:started`, 'turn.lifecycle', 'observed', { phase: 'started', status: 'started' }, { turnId })
+      await this.addEvent(state, sessionId, eventTime, `turn:${turnId}:started`, 'turn.lifecycle', 'observed', {
+        phase: 'started',
+        status: 'started',
+      }, { turnId })
       return
     }
     if ((eventType === 'task_complete' || eventType === 'task_completed') && turnId !== undefined) {
-      await this.addEvent(state, sessionId, eventTime, `turn:${turnId}:completed`, 'turn.lifecycle', 'observed', { phase: 'completed', status: statusText(payload.status) ?? 'completed' }, { turnId })
+      await this.addEvent(state, sessionId, eventTime, `turn:${turnId}:completed`, 'turn.lifecycle', 'observed', {
+        phase: 'completed',
+        status: statusText(payload.status) ?? 'completed',
+      }, { turnId })
       return
     }
     if (eventType === 'context_compacted') {
       state.compacted = true
-      await this.addEvent(state, sessionId, eventTime, `compaction:${ordinal}`, 'session.lifecycle', 'observed', { phase: 'compacted', history: 'partial' })
+      await this.addEvent(state, sessionId, eventTime, `compaction:${ordinal}`, 'session.lifecycle', 'observed', {
+        phase: 'compacted',
+        history: 'partial',
+      })
       return
     }
     const legacyKinds: Readonly<Record<string, CordisXAgentEventDataMap['item.lifecycle']['kind']>> = {
@@ -430,7 +516,16 @@ export class CodexAgentHistoryHost {
     }
     const kind = eventType === undefined ? undefined : legacyKinds[eventType]
     if (kind === undefined) return
-    await this.projectItem(state, sessionId, eventTime, { ...payload, type: eventType }, ordinal, policy, 'completed', kind)
+    await this.projectItem(
+      state,
+      sessionId,
+      eventTime,
+      { ...payload, type: eventType },
+      ordinal,
+      policy,
+      'completed',
+      kind,
+    )
   }
 
   private async projectItem(
@@ -448,8 +543,8 @@ export class CodexAgentHistoryHost {
     const kind = forcedKind ?? (itemType === 'message' && role === 'user'
       ? 'user-message'
       : itemType === 'message' && (role === 'assistant' || role === 'agent')
-        ? 'assistant-message'
-        : itemKind(itemType))
+      ? 'assistant-message'
+      : itemKind(itemType))
     const turnId = text(item.turn_id) ?? state.currentTurnId
     if (turnId === undefined) return
     const nativeId = text(item.id) ?? text(item.item_id)
@@ -474,13 +569,13 @@ export class CodexAgentHistoryHost {
     const content = policy === 'inline' && rawText !== undefined
       ? [{ type: 'text' as const, text: this.redact(rawText, state).slice(0, 4_000) }]
       : [{
-          type: 'reference' as const,
-          ref,
-          mediaType: 'text/plain',
-          ...(policy === 'summarized' && rawText !== undefined
-            ? { summary: this.redact(rawText, state).replaceAll(/\s+/g, ' ').slice(0, 240) }
-            : {}),
-        }]
+        type: 'reference' as const,
+        ref,
+        mediaType: 'text/plain',
+        ...(policy === 'summarized' && rawText !== undefined
+          ? { summary: this.redact(rawText, state).replaceAll(/\s+/g, ' ').slice(0, 240) }
+          : {}),
+      }]
     await this.addEvent(state, sessionId, eventTime, `message:${messageId}:observed`, 'message.observed', 'observed', {
       message: {
         id: messageId,
@@ -555,7 +650,12 @@ export class CodexAgentHistoryHost {
   }
 
   private adapterSource() {
-    return { kind: 'adapter' as const, adapterId: AGENT_HISTORY_ADAPTER_ID, adapterVersion: AGENT_HISTORY_ADAPTER_VERSION, hostId: AGENT_HISTORY_HOST_ID }
+    return {
+      kind: 'adapter' as const,
+      adapterId: AGENT_HISTORY_ADAPTER_ID,
+      adapterVersion: AGENT_HISTORY_ADAPTER_VERSION,
+      hostId: AGENT_HISTORY_HOST_ID,
+    }
   }
 
   private async page(
@@ -571,19 +671,51 @@ export class CodexAgentHistoryHost {
     const events = state.events.slice(start, end).map(item => item.event)
     const diagnostics: CordisXAgentHistoryDiagnostic[] = []
     if (!state.complete) diagnostics.push({ code: 'history-indexing', severity: 'info', count: 1 })
-    if (state.corruptLines > 0) diagnostics.push({ code: 'history-corrupt-line', severity: 'warning', count: state.corruptLines })
-    if (state.oversizedLines > 0) diagnostics.push({ code: 'history-oversized-line', severity: 'warning', count: state.oversizedLines })
-    if (state.redactedFields > 0) diagnostics.push({ code: 'history-content-redacted', severity: 'info', count: state.redactedFields })
-    if (state.sourceChanged > 0) diagnostics.push({ code: 'history-source-changed', severity: 'warning', count: state.sourceChanged })
+    if (state.corruptLines > 0) {
+      diagnostics.push({ code: 'history-corrupt-line', severity: 'warning', count: state.corruptLines })
+    }
+    if (state.oversizedLines > 0) {
+      diagnostics.push({ code: 'history-oversized-line', severity: 'warning', count: state.oversizedLines })
+    }
+    if (state.redactedFields > 0) {
+      diagnostics.push({ code: 'history-content-redacted', severity: 'info', count: state.redactedFields })
+    }
+    if (state.sourceChanged > 0) {
+      diagnostics.push({ code: 'history-source-changed', severity: 'warning', count: state.sourceChanged })
+    }
     const nextCursor = hasEarlier
-      ? this.cursor({ kind: 'page', sessionId: input.sessionId, snapshotId: state.snapshotId, profileId, ownerKey: caller.ownerKey, generation: caller.generation, policy: input.payloadPolicy, limit: input.limit, eventIndex: start, expiresAt: this.now() + CURSOR_TTL_MS })
+      ? this.cursor({
+        kind: 'page',
+        sessionId: input.sessionId,
+        snapshotId: state.snapshotId,
+        profileId,
+        ownerKey: caller.ownerKey,
+        generation: caller.generation,
+        policy: input.payloadPolicy,
+        limit: input.limit,
+        eventIndex: start,
+        expiresAt: this.now() + CURSOR_TTL_MS,
+      })
       : undefined
     const tailCursor = state.tailAvailable
-      ? this.cursor({ kind: 'tail', sessionId: input.sessionId, snapshotId: state.snapshotId, profileId, ownerKey: caller.ownerKey, generation: caller.generation, policy: input.payloadPolicy, limit: input.limit, eventIndex: end, expiresAt: this.now() + CURSOR_TTL_MS })
+      ? this.cursor({
+        kind: 'tail',
+        sessionId: input.sessionId,
+        snapshotId: state.snapshotId,
+        profileId,
+        ownerKey: caller.ownerKey,
+        generation: caller.generation,
+        policy: input.payloadPolicy,
+        limit: input.limit,
+        eventIndex: end,
+        expiresAt: this.now() + CURSOR_TTL_MS,
+      })
       : undefined
     const coverageState = state.complete
       ? diagnostics.some(item => item.severity === 'warning') ? 'partial' : 'complete'
-      : state.events.length === 0 ? 'indexing' : 'partial'
+      : state.events.length === 0
+      ? 'indexing'
+      : 'partial'
     const range = events.length === 0
       ? {}
       : { fromSeq: events[0]!.seq, toSeq: events.at(-1)!.seq }
@@ -595,7 +727,13 @@ export class CodexAgentHistoryHost {
       limit: input.limit,
       requestedPayloadPolicy: input.payloadPolicy,
       effectivePayloadPolicy: input.payloadPolicy,
-      source: { kind: 'historical', adapterId: AGENT_HISTORY_ADAPTER_ID, adapterVersion: AGENT_HISTORY_ADAPTER_VERSION, hostId: AGENT_HISTORY_HOST_ID, profileId },
+      source: {
+        kind: 'historical',
+        adapterId: AGENT_HISTORY_ADAPTER_ID,
+        adapterVersion: AGENT_HISTORY_ADAPTER_VERSION,
+        hostId: AGENT_HISTORY_HOST_ID,
+        profileId,
+      },
       coverage: {
         state: coverageState,
         ...(state.earliestTime === undefined ? {} : { earliestTime: state.earliestTime }),
@@ -614,7 +752,9 @@ export class CodexAgentHistoryHost {
     }
   }
 
-  private async unavailablePage(input: Required<Pick<CordisXAgentHistoryQuery, 'sessionId' | 'limit' | 'payloadPolicy'>>): Promise<CordisXAgentHistoryPage> {
+  private async unavailablePage(
+    input: Required<Pick<CordisXAgentHistoryQuery, 'sessionId' | 'limit' | 'payloadPolicy'>>,
+  ): Promise<CordisXAgentHistoryPage> {
     const profileId = await this.profileIdPromise
     const snapshotId = await this.fingerprint(`unavailable\0${input.sessionId}\0${profileId}`)
     return {
@@ -625,8 +765,21 @@ export class CodexAgentHistoryHost {
       limit: input.limit,
       requestedPayloadPolicy: input.payloadPolicy,
       effectivePayloadPolicy: 'referenced',
-      source: { kind: 'historical', adapterId: AGENT_HISTORY_ADAPTER_ID, adapterVersion: AGENT_HISTORY_ADAPTER_VERSION, hostId: AGENT_HISTORY_HOST_ID, profileId },
-      coverage: { state: 'unavailable', compacted: false, corruptLines: 0, oversizedLines: 0, redactedFields: 0, tailAvailable: false },
+      source: {
+        kind: 'historical',
+        adapterId: AGENT_HISTORY_ADAPTER_ID,
+        adapterVersion: AGENT_HISTORY_ADAPTER_VERSION,
+        hostId: AGENT_HISTORY_HOST_ID,
+        profileId,
+      },
+      coverage: {
+        state: 'unavailable',
+        compacted: false,
+        corruptLines: 0,
+        oversizedLines: 0,
+        redactedFields: 0,
+        tailAvailable: false,
+      },
       events: [],
       diagnostics: [{ code: 'history-unavailable', severity: 'warning', count: 1 }],
     }
@@ -648,7 +801,8 @@ export class CodexAgentHistoryHost {
   ): CursorBinding | undefined {
     this.pruneCursors()
     const binding = this.cursors.get(token)
-    if (binding === undefined
+    if (
+      binding === undefined
       || binding.kind !== kind
       || binding.sessionId !== input.sessionId
       || binding.profileId !== profileId
@@ -656,7 +810,8 @@ export class CodexAgentHistoryHost {
       || binding.generation !== caller.generation
       || binding.policy !== input.payloadPolicy
       || binding.limit !== input.limit
-      || (snapshotId !== undefined && binding.snapshotId !== snapshotId)) return undefined
+      || (snapshotId !== undefined && binding.snapshotId !== snapshotId)
+    ) return undefined
     return binding
   }
 
@@ -693,8 +848,13 @@ export class CodexAgentHistoryHost {
       }
     }
     if (candidates.length === 0) return undefined
-    const ranked = await Promise.all(candidates.map(async candidate => ({ candidate, metadata: await stat(candidate) })))
-    ranked.sort((left, right) => right.metadata.mtimeMs - left.metadata.mtimeMs || right.metadata.size - left.metadata.size || left.candidate.localeCompare(right.candidate))
+    const ranked = await Promise.all(
+      candidates.map(async candidate => ({ candidate, metadata: await stat(candidate) })),
+    )
+    ranked.sort((left, right) =>
+      right.metadata.mtimeMs - left.metadata.mtimeMs || right.metadata.size - left.metadata.size
+      || left.candidate.localeCompare(right.candidate)
+    )
     return ranked[0]?.candidate
   }
 
@@ -728,8 +888,16 @@ export class CodexAgentHistoryHost {
     return envelope?.type === 'session_meta' && (payload?.id === sessionId || payload?.session_id === sessionId)
   }
 
-  private async sourceSnapshot(source: SourceIdentity, sessionId: string, policy: CordisXAgentHistoryPayloadPolicy): Promise<string> {
-    return await this.fingerprint(`snapshot\0${sessionId}\0${source.dev}\0${source.ino}\0${source.size}\0${Math.floor(source.mtimeMs)}\0${policy}\0${AGENT_HISTORY_ADAPTER_VERSION}`)
+  private async sourceSnapshot(
+    source: SourceIdentity,
+    sessionId: string,
+    policy: CordisXAgentHistoryPayloadPolicy,
+  ): Promise<string> {
+    return await this.fingerprint(
+      `snapshot\0${sessionId}\0${source.dev}\0${source.ino}\0${source.size}\0${
+        Math.floor(source.mtimeMs)
+      }\0${policy}\0${AGENT_HISTORY_ADAPTER_VERSION}`,
+    )
   }
 
   private async fingerprint(value: string): Promise<string> {

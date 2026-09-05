@@ -15,7 +15,9 @@ const request = {
 
 describe('host-owned permission prompt', () => {
   it('makes persistent allow primary while keeping allow-once non-persistent and the hierarchy flat', async () => {
-    const dom = new JSDOM('<!doctype html><html class="electron-dark"><body></body></html>', { pretendToBeVisual: true })
+    const dom = new JSDOM('<!doctype html><html class="electron-dark"><body></body></html>', {
+      pretendToBeVisual: true,
+    })
     const prompt = new BrowserPermissionPrompt(dom.window.document)
     const pending = prompt.request(request)
     await Promise.resolve()

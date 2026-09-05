@@ -1,0 +1,42 @@
+{
+  "$schema": "https://dprint.dev/schemas/v0.json",
+  "indentWidth": 2,
+  "newLineKind": "lf",
+  "typescript": {
+    "quoteStyle": "preferSingle",
+    "semiColons": "asi",
+    "jsx.quoteStyle": "preferDouble",
+    "module.sortImportDeclarations": "maintain",
+    "module.sortExportDeclarations": "maintain"
+  },
+  "markdown": {
+    "textWrap": "maintain"
+  },
+  "includes": [
+    "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx,json,jsonc,md}"
+  ],
+  // Formatting excludes build outputs and the npm-generated lock; source generators and tests remain included.
+  "excludes": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+    "package-lock.json",
+    // Preserve the bytes of the versioned public Host migration schema.
+    "packages/cli/schemas/agent-session-legacy-acquire.v1.schema.json",
+    // Security smoke packages pin the original runtime-manifest bytes.
+    "examples/plugins/permission-v2-smoke/runtime.json",
+    "examples/plugins/permission-v2-smoke/cordisx-package.json",
+    "examples/plugins/permission-v2-smoke-expanded/runtime.json",
+    "examples/plugins/permission-v2-smoke-expanded/cordisx-package.json",
+    // Preserve the mechanically bundled upstream TDesign artifact.
+    "packages/cli/src/renderer/vendor/tdesign-web-components-1.2.10.ts",
+    // Preserve output from generate-manager-collection-unicode.mjs and generate-contributors.mjs.
+    "packages/cli/src/renderer/manager-collection-unicode-17.generated.ts",
+    "packages/cli/src/renderer/manager/data/contributors.generated.ts"
+  ],
+  "plugins": [
+    "npm:@dprint/typescript@0.96.1",
+    "npm:@dprint/json@0.23.0",
+    "npm:@dprint/markdown@0.23.3"
+  ]
+}

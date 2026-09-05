@@ -1,7 +1,7 @@
 import {
-  rankMarketplacePlugins,
   type MarketplaceRankingExplanation,
   type MarketplaceSearchCandidate,
+  rankMarketplacePlugins,
 } from './marketplace-ranking.js'
 import {
   evaluateMarketplaceTrust,
@@ -10,36 +10,34 @@ import {
   type MarketplaceOfficialRecord,
   type MarketplaceTrustEvaluation,
 } from './marketplace-trust.js'
-import {
-  BrowserMarketplaceFeedCache,
-  marketplaceCacheAge,
-} from './marketplace-cache.js'
+import { BrowserMarketplaceFeedCache, marketplaceCacheAge } from './marketplace-cache.js'
 import {
   BrowserMarketplaceSourceStore,
-  OFFICIAL_MARKETPLACE_SOURCE,
-  normalizeMarketplaceSource,
-  parseMarketplaceSourceImport,
   type MarketplaceSourceRecord,
   type MarketplaceStorage,
+  normalizeMarketplaceSource,
+  OFFICIAL_MARKETPLACE_SOURCE,
+  parseMarketplaceSourceImport,
 } from './marketplace-source.js'
 
 export {
+  isOfficialMarketplaceSource,
   MARKETPLACE_SOURCE_RECORDS_KEY,
   MARKETPLACE_SOURCE_SCHEMA_V1,
   MARKETPLACE_SOURCES_KEY,
-  OFFICIAL_MARKETPLACE_SOURCE,
-  isOfficialMarketplaceSource,
-  normalizeMarketplaceSource,
-  parseMarketplaceSourceImport,
   type MarketplaceSourceImportV1,
   type MarketplaceSourceLocalOverrides,
   type MarketplaceSourceRecord,
   type MarketplaceStorage,
+  normalizeMarketplaceSource,
+  OFFICIAL_MARKETPLACE_SOURCE,
+  parseMarketplaceSourceImport,
 } from './marketplace-source.js'
 
 const MAX_FEED_BYTES = 2 * 1024 * 1024
 const PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9._-]*$/
-const SEMVER_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+const SEMVER_PATTERN =
+  /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
 const PLUGIN_SCHEMAS = Object.freeze({
   1: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v1.schema.json',
   2: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v2.schema.json',
@@ -269,7 +267,13 @@ function canonicalLocale(value: unknown, label: string): string {
   return canonical
 }
 
-function localizedStrings(value: unknown, label: string, maxItems: number, maxLength: number, minItems = 1): readonly string[] {
+function localizedStrings(
+  value: unknown,
+  label: string,
+  maxItems: number,
+  maxLength: number,
+  minItems = 1,
+): readonly string[] {
   if (!Array.isArray(value) || value.length < minItems || value.length > maxItems) {
     throw new Error(`${label} 必须包含 ${minItems}-${maxItems} 个字符串`)
   }
@@ -287,7 +291,10 @@ function parsePluginLocalizations(
   if (value === undefined) return Object.freeze({})
   const localizations = record(value)
   if (Object.keys(localizations).length > 32) throw new Error(`${label} 最多包含 32 个 locale`)
-  const parsed: Record<string, MarketplacePluginLocalization> = Object.create(null) as Record<string, MarketplacePluginLocalization>
+  const parsed: Record<string, MarketplacePluginLocalization> = Object.create(null) as Record<
+    string,
+    MarketplacePluginLocalization
+  >
   for (const [localeValue, rawLocalization] of Object.entries(localizations)) {
     const locale = canonicalLocale(localeValue, `${label}.${localeValue}`)
     if (locale === fallbackLocale) throw new Error(`${label} 不得重复 fallbackLocale ${locale}`)
@@ -304,8 +311,12 @@ function parsePluginLocalizations(
       ? undefined
       : localizedStrings(localization.keywords, `${label}.${locale}.keywords`, 20, 64, 0)
     parsed[locale] = Object.freeze({
-      ...(localization.name === undefined ? {} : { name: requiredString(localization.name, `${label}.${locale}.name`, 80) }),
-      ...(localization.description === undefined ? {} : { description: requiredString(localization.description, `${label}.${locale}.description`, 280) }),
+      ...(localization.name === undefined
+        ? {}
+        : { name: requiredString(localization.name, `${label}.${locale}.name`, 80) }),
+      ...(localization.description === undefined
+        ? {}
+        : { description: requiredString(localization.description, `${label}.${locale}.description`, 280) }),
       ...(authors === undefined ? {} : { authors }),
       ...(keywords === undefined ? {} : { keywords }),
     })
@@ -321,7 +332,10 @@ function parseFeedLocalizations(
   if (value === undefined) return Object.freeze({})
   const localizations = record(value)
   if (Object.keys(localizations).length > 32) throw new Error(`${label} 最多包含 32 个 locale`)
-  const parsed: Record<string, MarketplaceFeedLocalization> = Object.create(null) as Record<string, MarketplaceFeedLocalization>
+  const parsed: Record<string, MarketplaceFeedLocalization> = Object.create(null) as Record<
+    string,
+    MarketplaceFeedLocalization
+  >
   for (const [localeValue, rawLocalization] of Object.entries(localizations)) {
     const locale = canonicalLocale(localeValue, `${label}.${localeValue}`)
     if (locale === fallbackLocale) throw new Error(`${label} 不得重复 fallbackLocale ${locale}`)
@@ -334,7 +348,11 @@ function parseFeedLocalizations(
 }
 
 function canonicalDisplayLocale(value: string): string {
-  try { return Intl.getCanonicalLocales(value)[0] ?? 'en' } catch { return 'en' }
+  try {
+    return Intl.getCanonicalLocales(value)[0] ?? 'en'
+  } catch {
+    return 'en'
+  }
 }
 
 function currentLocaleChain(value: string): readonly string[] {
@@ -359,7 +377,10 @@ function projectLocalizedField<T>(
 }
 
 /** Reproject cached feed metadata without refetching it. */
-export function projectMarketplacePlugin(plugin: MarketplaceCatalogPlugin, currentLocale: string): MarketplacePluginProjection {
+export function projectMarketplacePlugin(
+  plugin: MarketplaceCatalogPlugin,
+  currentLocale: string,
+): MarketplacePluginProjection {
   const authorNames = projectLocalizedField(
     plugin.authors.map(author => author.name),
     plugin.localizations,
@@ -369,9 +390,27 @@ export function projectMarketplacePlugin(plugin: MarketplaceCatalogPlugin, curre
   )
   const authors = plugin.authors.map((author, index) => ({ ...author, name: authorNames[index] ?? author.name }))
   const name = projectLocalizedField(plugin.name, plugin.localizations, 'name', currentLocale, plugin.fallbackLocale)
-  const description = projectLocalizedField(plugin.description, plugin.localizations, 'description', currentLocale, plugin.fallbackLocale)
-  const keywords = projectLocalizedField(plugin.keywords, plugin.localizations, 'keywords', currentLocale, plugin.fallbackLocale)
-  const feedName = projectLocalizedField(plugin.feedName, plugin.feedLocalizations, 'name', currentLocale, plugin.feedFallbackLocale)
+  const description = projectLocalizedField(
+    plugin.description,
+    plugin.localizations,
+    'description',
+    currentLocale,
+    plugin.fallbackLocale,
+  )
+  const keywords = projectLocalizedField(
+    plugin.keywords,
+    plugin.localizations,
+    'keywords',
+    currentLocale,
+    plugin.fallbackLocale,
+  )
+  const feedName = projectLocalizedField(
+    plugin.feedName,
+    plugin.feedLocalizations,
+    'name',
+    currentLocale,
+    plugin.feedFallbackLocale,
+  )
   const searchMetadata = [
     name,
     description,
@@ -386,12 +425,14 @@ export function projectMarketplacePlugin(plugin: MarketplaceCatalogPlugin, curre
   ]
   for (const locale of [...new Set([...currentLocaleChain(currentLocale), plugin.fallbackLocale, 'en'])]) {
     const localization = plugin.localizations[locale]
-    if (localization !== undefined) searchMetadata.push(
-      localization.name ?? '',
-      localization.description ?? '',
-      ...(localization.authors ?? []),
-      ...(localization.keywords ?? []),
-    )
+    if (localization !== undefined) {
+      searchMetadata.push(
+        localization.name ?? '',
+        localization.description ?? '',
+        ...(localization.authors ?? []),
+        ...(localization.keywords ?? []),
+      )
+    }
     const feedLocalization = plugin.feedLocalizations[locale]
     if (feedLocalization?.name !== undefined) searchMetadata.push(feedLocalization.name)
   }
@@ -411,7 +452,10 @@ export function projectMarketplacePlugin(plugin: MarketplaceCatalogPlugin, curre
   })
 }
 
-export function projectMarketplaceSourceName(source: MarketplaceSourceSnapshot, currentLocale: string): string | undefined {
+export function projectMarketplaceSourceName(
+  source: MarketplaceSourceSnapshot,
+  currentLocale: string,
+): string | undefined {
   if (source.local?.name !== undefined) return source.local.name
   if (source.name === undefined) return undefined
   return projectLocalizedField(
@@ -424,7 +468,10 @@ export function projectMarketplaceSourceName(source: MarketplaceSourceSnapshot, 
 }
 
 /** Project remote feed metadata with profile-local overrides without changing source identity or trust. */
-export function projectMarketplaceSource(source: MarketplaceSourceSnapshot, currentLocale: string): MarketplaceSourceProjection {
+export function projectMarketplaceSource(
+  source: MarketplaceSourceSnapshot,
+  currentLocale: string,
+): MarketplaceSourceProjection {
   const remoteName = source.name === undefined
     ? undefined
     : projectLocalizedField(
@@ -437,10 +484,14 @@ export function projectMarketplaceSource(source: MarketplaceSourceSnapshot, curr
   const officialChinese = canonicalDisplayLocale(currentLocale).toLowerCase().startsWith('zh')
   const name = source.local?.name
     ?? remoteName
-    ?? (source.official ? (officialChinese ? 'CordisX 官方插件商店' : 'CordisX Official Marketplace') : new URL(source.url).hostname)
+    ?? (source.official
+      ? (officialChinese ? 'CordisX 官方插件商店' : 'CordisX Official Marketplace')
+      : new URL(source.url).hostname)
   const description = source.local?.description
     ?? (source.official
-      ? (officialChinese ? '由 CordisX 维护的默认插件发现来源。' : 'The default plugin discovery source maintained by CordisX.')
+      ? (officialChinese
+        ? '由 CordisX 维护的默认插件发现来源。'
+        : 'The default plugin discovery source maintained by CordisX.')
       : undefined)
   const searchValues = [
     name,
@@ -502,7 +553,9 @@ function optionalHttpsUrl(value: unknown, label: string): string | undefined {
   if (value === undefined) return undefined
   const text = requiredString(value, label, 2048)
   const url = new URL(text)
-  if (url.protocol !== 'https:' || url.username !== '' || url.password !== '') throw new Error(`${label} 必须是无凭据 HTTPS URL`)
+  if (url.protocol !== 'https:' || url.username !== '' || url.password !== '') {
+    throw new Error(`${label} 必须是无凭据 HTTPS URL`)
+  }
   return url.href
 }
 
@@ -515,13 +568,19 @@ function parseArtifact(value: unknown, label: string): MarketplaceArtifact | und
   const packageName = requiredString(artifact.packageName, `${label}.packageName`, 214)
   if (!/^npm:@[a-z0-9][a-z0-9._-]*$/.test(publisherIdentity)) throw new Error(`${label}.publisherIdentity 不受支持`)
   if (!/^@[a-z0-9][a-z0-9._-]*$/.test(packageNamespace)) throw new Error(`${label}.packageNamespace 不受支持`)
-  if (!/^@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/.test(packageName)) throw new Error(`${label}.packageName 不受支持`)
-  if (publisherIdentity !== `npm:${packageNamespace}`) throw new Error(`${label}.publisherIdentity 与 packageNamespace 不匹配`)
+  if (!/^@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/.test(packageName)) {
+    throw new Error(`${label}.packageName 不受支持`)
+  }
+  if (publisherIdentity !== `npm:${packageNamespace}`) {
+    throw new Error(`${label}.publisherIdentity 与 packageNamespace 不匹配`)
+  }
   if (!packageName.startsWith(`${packageNamespace}/`)) throw new Error(`${label}.packageName 不属于 packageNamespace`)
   const downloadUrl = requiredString(artifact.downloadUrl, `${label}.downloadUrl`, 2048)
   const parsedDownload = new URL(downloadUrl)
-  if (parsedDownload.protocol !== 'https:' || parsedDownload.username !== '' || parsedDownload.password !== ''
-    || parsedDownload.search !== '' || parsedDownload.hash !== '' || parsedDownload.href !== downloadUrl) {
+  if (
+    parsedDownload.protocol !== 'https:' || parsedDownload.username !== '' || parsedDownload.password !== ''
+    || parsedDownload.search !== '' || parsedDownload.hash !== '' || parsedDownload.href !== downloadUrl
+  ) {
     throw new Error(`${label}.downloadUrl 必须是 canonical HTTPS artifact URL`)
   }
   const integrity = requiredString(artifact.integrity, `${label}.integrity`, 71)
@@ -532,20 +591,36 @@ function parseArtifact(value: unknown, label: string): MarketplaceArtifact | und
 function parseCommerce(value: unknown, label: string): MarketplaceCommerceDescriptor | undefined {
   if (value === undefined) return undefined
   const commerce = record(value)
-  assertKeys(commerce, ['$schema', 'schemaVersion', 'mode', 'purchaseUrl', 'manageUrl', 'recoveryUrl', 'authorization'], label)
-  if (commerce.$schema !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/commerce-descriptor.v1.schema.json' || commerce.schemaVersion !== 1 || commerce.mode !== 'external-publisher-v1') {
+  assertKeys(
+    commerce,
+    ['$schema', 'schemaVersion', 'mode', 'purchaseUrl', 'manageUrl', 'recoveryUrl', 'authorization'],
+    label,
+  )
+  if (
+    commerce.$schema
+      !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/commerce-descriptor.v1.schema.json'
+    || commerce.schemaVersion !== 1 || commerce.mode !== 'external-publisher-v1'
+  ) {
     throw new Error(`${label} schema 不受支持`)
   }
   const purchaseUrl = optionalHttpsUrl(commerce.purchaseUrl, `${label}.purchaseUrl`)
   if (purchaseUrl === undefined) throw new Error(`${label}.purchaseUrl 是必填 HTTPS URL`)
   const authorization = record(commerce.authorization)
   assertKeys(authorization, ['method', 'environment'], `${label}.authorization`)
-  if (authorization.method !== 'publisher-grant.v1' || (authorization.environment !== 'sandbox' && authorization.environment !== 'live')) {
+  if (
+    authorization.method !== 'publisher-grant.v1'
+    || (authorization.environment !== 'sandbox' && authorization.environment !== 'live')
+  ) {
     throw new Error(`${label}.authorization 不受支持`)
   }
   const manageUrl = optionalHttpsUrl(commerce.manageUrl, `${label}.manageUrl`)
   const recoveryUrl = optionalHttpsUrl(commerce.recoveryUrl, `${label}.recoveryUrl`)
-  return { purchaseUrl, ...(manageUrl === undefined ? {} : { manageUrl }), ...(recoveryUrl === undefined ? {} : { recoveryUrl }), environment: authorization.environment }
+  return {
+    purchaseUrl,
+    ...(manageUrl === undefined ? {} : { manageUrl }),
+    ...(recoveryUrl === undefined ? {} : { recoveryUrl }),
+    environment: authorization.environment,
+  }
 }
 
 /** Canonical plugin source used with the lowercase plugin id as cross-feed identity. */
@@ -571,7 +646,9 @@ export function marketplacePluginIdentity(source: string, id: string): string {
 function parsePlugin(value: unknown, index: number): MarketplacePlugin {
   const plugin = record(value)
   const schemaVersion = plugin.schemaVersion
-  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4) throw new Error(`plugins[${index}].schemaVersion 不受支持`)
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4) {
+    throw new Error(`plugins[${index}].schemaVersion 不受支持`)
+  }
   assertKeys(plugin, [
     '$schema',
     'schemaVersion',
@@ -617,10 +694,14 @@ function parsePlugin(value: unknown, index: number): MarketplacePlugin {
   })
 
   const keywordsValue = plugin.keywords ?? []
-  if (!Array.isArray(keywordsValue) || keywordsValue.length > 20) throw new Error(`plugins[${index}].keywords 必须是最多 20 项的数组`)
+  if (!Array.isArray(keywordsValue) || keywordsValue.length > 20) {
+    throw new Error(`plugins[${index}].keywords 必须是最多 20 项的数组`)
+  }
   const keywords = keywordsValue.map((value, keywordIndex) => {
     const keyword = requiredString(value, `plugins[${index}].keywords[${keywordIndex}]`, 32)
-    if (!/^[a-z0-9][a-z0-9-]*$/.test(keyword)) throw new Error(`plugins[${index}].keywords[${keywordIndex}] 不是规范 keyword`)
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(keyword)) {
+      throw new Error(`plugins[${index}].keywords[${keywordIndex}] 不是规范 keyword`)
+    }
     return keyword
   })
   if (new Set(keywords).size !== keywords.length) throw new Error(`plugins[${index}].keywords 包含重复项`)
@@ -660,7 +741,9 @@ function parsePlugin(value: unknown, index: number): MarketplacePlugin {
 export function parseMarketplaceFeed(value: unknown, options?: MarketplaceFeedParseOptions): ParsedFeed {
   const feed = record(value)
   const schemaVersion = feed.schemaVersion
-  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4) throw new Error('schemaVersion 不受支持')
+  if (schemaVersion !== 1 && schemaVersion !== 2 && schemaVersion !== 3 && schemaVersion !== 4) {
+    throw new Error('schemaVersion 不受支持')
+  }
   assertKeys(feed, [
     '$schema',
     'schemaVersion',
@@ -680,24 +763,42 @@ export function parseMarketplaceFeed(value: unknown, options?: MarketplaceFeedPa
   if (homepage === undefined) throw new Error('homepage 是必填 HTTPS URL')
   if (!Array.isArray(feed.plugins)) throw new Error('plugins 必须是数组')
   const plugins = feed.plugins.map(parsePlugin)
-  if (plugins.some(plugin => plugin.schemaVersion !== schemaVersion)) throw new Error('feed 与 plugin schemaVersion 必须一致')
+  if (plugins.some(plugin => plugin.schemaVersion !== schemaVersion)) {
+    throw new Error('feed 与 plugin schemaVersion 必须一致')
+  }
   const identities = new Set<string>()
   for (const plugin of plugins) {
     const identity = marketplacePluginIdentity(plugin.source, plugin.id)
     if (identities.has(identity)) throw new Error(`feed 内存在重复插件 ${plugin.source} / ${plugin.id}`)
     identities.add(identity)
   }
-  const sorted = [...plugins].sort((left, right) => left.source.localeCompare(right.source)
+  const sorted = [...plugins].sort((left, right) =>
+    left.source.localeCompare(right.source)
     || left.id.localeCompare(right.id)
-    || left.version.localeCompare(right.version))
-  if (plugins.some((plugin, index) => plugin !== sorted[index])) throw new Error('plugins 没有按照 source/id/version 确定性排序')
+    || left.version.localeCompare(right.version)
+  )
+  if (plugins.some((plugin, index) => plugin !== sorted[index])) {
+    throw new Error('plugins 没有按照 source/id/version 确定性排序')
+  }
   const trust = schemaVersion >= 3
-    ? evaluateMarketplaceTrust(value, plugins.map(plugin => ({ ...plugin, identity: marketplacePluginIdentity(plugin.source, plugin.id) })), options ?? {
-      feedUrl: OFFICIAL_MARKETPLACE_SOURCE,
-      trustedRoots: [],
-    })
+    ? evaluateMarketplaceTrust(
+      value,
+      plugins.map(plugin => ({ ...plugin, identity: marketplacePluginIdentity(plugin.source, plugin.id) })),
+      options ?? {
+        feedUrl: OFFICIAL_MARKETPLACE_SOURCE,
+        trustedRoots: [],
+      },
+    )
     : undefined
-  return { schemaVersion, fallbackLocale, name, localizations, homepage, plugins, ...(trust === undefined ? {} : { trust }) }
+  return {
+    schemaVersion,
+    fallbackLocale,
+    name,
+    localizations,
+    homepage,
+    plugins,
+    ...(trust === undefined ? {} : { trust }),
+  }
 }
 
 const DEFAULT_RETRY_DELAYS = Object.freeze([250, 1_000])
@@ -720,7 +821,9 @@ async function abortableSleep(milliseconds: number, signal: AbortSignal): Promis
   })
 }
 
-function sourceIdentity(record: MarketplaceSourceRecord): Pick<MarketplaceSourceSnapshot, 'url' | 'enabled' | 'official' | 'local'> {
+function sourceIdentity(
+  record: MarketplaceSourceRecord,
+): Pick<MarketplaceSourceSnapshot, 'url' | 'enabled' | 'official' | 'local'> {
   return {
     url: record.url,
     enabled: record.enabled,
@@ -767,7 +870,12 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
   snapshot(): MarketplaceSnapshot {
     return {
       sources: this.sourceRecords.map(source => source.url),
-      sourceRecords: this.sourceRecords.map(source => Object.freeze({ ...source, ...(source.local === undefined ? {} : { local: Object.freeze({ ...source.local }) }) })),
+      sourceRecords: this.sourceRecords.map(source =>
+        Object.freeze({
+          ...source,
+          ...(source.local === undefined ? {} : { local: Object.freeze({ ...source.local }) }),
+        })
+      ),
       sourceStates: [...this.sourceStates],
       plugins: [...this.plugins],
       duplicates: [...this.duplicates],
@@ -897,7 +1005,10 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
       const cached = this.cache.get(source.url)
       if (cached === undefined) return this.idleState(source)
       try {
-        const feed = parseMarketplaceFeed(JSON.parse(cached.text) as unknown, { feedUrl: source.url, trustedRoots: this.trustedRoots })
+        const feed = parseMarketplaceFeed(JSON.parse(cached.text) as unknown, {
+          feedUrl: source.url,
+          trustedRoots: this.trustedRoots,
+        })
         const stale = marketplaceCacheAge(cached, this.now()) > this.staleAfterMs
         const result: LoadResult = {
           state: this.feedState(source, feed, stale ? 'stale' : 'fresh', 0, cached.storedAt),
@@ -961,7 +1072,11 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
     }
   }
 
-  private async load(source: MarketplaceSourceRecord, signal: AbortSignal, previous: LoadResult | undefined): Promise<LoadResult> {
+  private async load(
+    source: MarketplaceSourceRecord,
+    signal: AbortSignal,
+    previous: LoadResult | undefined,
+  ): Promise<LoadResult> {
     let attempts = 0
     let lastError = '插件商店加载失败'
     const totalAttempts = this.retryDelays.length + 1
@@ -971,8 +1086,10 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
         const loaded = await this.loadOnce(source.url, signal)
         const previousTrustRevision = previous?.feed?.trust?.generatedAt
         const nextTrustRevision = loaded.feed.trust?.generatedAt
-        if (previousTrustRevision !== undefined && nextTrustRevision !== undefined
-          && Date.parse(nextTrustRevision) < Date.parse(previousTrustRevision)) {
+        if (
+          previousTrustRevision !== undefined && nextTrustRevision !== undefined
+          && Date.parse(nextTrustRevision) < Date.parse(previousTrustRevision)
+        ) {
           throw new MarketplaceLoadError('Marketplace trust feed generatedAt 不能回退', false)
         }
         const storedAt = this.now()
@@ -987,9 +1104,18 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
       }
     }
     if (previous?.feed !== undefined) {
-      const lastSuccess = previous.state.lastSuccessAt === undefined ? this.now() : Date.parse(previous.state.lastSuccessAt)
+      const lastSuccess = previous.state.lastSuccessAt === undefined
+        ? this.now()
+        : Date.parse(previous.state.lastSuccessAt)
       return {
-        state: this.feedState(source, previous.feed, 'stale', attempts, Number.isFinite(lastSuccess) ? lastSuccess : this.now(), lastError),
+        state: this.feedState(
+          source,
+          previous.feed,
+          'stale',
+          attempts,
+          Number.isFinite(lastSuccess) ? lastSuccess : this.now(),
+          lastError,
+        ),
         feed: previous.feed,
       }
     }
@@ -1006,7 +1132,10 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
     }
   }
 
-  private async loadOnce(url: string, signal: AbortSignal): Promise<{ readonly feed: ParsedFeed; readonly text: string }> {
+  private async loadOnce(
+    url: string,
+    signal: AbortSignal,
+  ): Promise<{ readonly feed: ParsedFeed; readonly text: string }> {
     if (this.fetcher === undefined) throw new MarketplaceLoadError('当前 renderer 不提供 fetch', false)
     let response: MarketplaceResponse
     try {
@@ -1014,9 +1143,16 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
     } catch (error) {
       throw new MarketplaceLoadError(error instanceof Error ? error.message : String(error), true)
     }
-    if (!response.ok) throw new MarketplaceLoadError(`HTTP ${response.status}`, response.status === 408 || response.status === 429 || response.status >= 500)
+    if (!response.ok) {
+      throw new MarketplaceLoadError(
+        `HTTP ${response.status}`,
+        response.status === 408 || response.status === 429 || response.status >= 500,
+      )
+    }
     let text: string
-    try { text = await response.text() } catch (error) {
+    try {
+      text = await response.text()
+    } catch (error) {
       throw new MarketplaceLoadError(error instanceof Error ? error.message : String(error), true)
     }
     if (new Blob([text]).size > MAX_FEED_BYTES) throw new MarketplaceLoadError('feed 超过 2 MiB 限制', false)
@@ -1039,10 +1175,12 @@ export class BrowserMarketplaceModel implements MarketplaceModel {
         const identity = marketplacePluginIdentity(plugin.source, plugin.id)
         const pluginTrust = result.feed.trust?.byPluginIdentity.get(identity)
         const activeCertification = pluginTrust?.certification !== undefined
-          && Date.parse(pluginTrust.certification.expiresAt) > this.now()
+            && Date.parse(pluginTrust.certification.expiresAt) > this.now()
           ? pluginTrust.certification
           : undefined
-        const activeCertifiedPermission = activeCertification === undefined ? undefined : pluginTrust?.certifiedPermission
+        const activeCertifiedPermission = activeCertification === undefined
+          ? undefined
+          : pluginTrust?.certifiedPermission
         const winner = winners.get(identity)
         if (winner !== undefined) {
           duplicates.push({ identity, winnerFeedUrl: winner.feedUrl, duplicateFeedUrl: source.url })

@@ -4,8 +4,8 @@ import {
   type PluginConfigDocument,
 } from '../config/plugin-config.js'
 import { updateConfigDocumentAtomic } from '../config/home-config.js'
-import { parseConfigDocument, type CordisXConfig } from './config.js'
-import { createConfigBridgeHandler, type ConfigBridgeHandler } from './config-rpc.js'
+import { type CordisXConfig, parseConfigDocument } from './config.js'
+import { type ConfigBridgeHandler, createConfigBridgeHandler } from './config-rpc.js'
 
 /**
  * Persist renderer-owned plugin configuration inside a launcher composition.
@@ -20,7 +20,9 @@ export function createLauncherPluginConfigCandidateStore(
     const updated = await updateConfigDocumentAtomic(
       configPath,
       'launcher config',
-      value => { parseConfigDocument(value, configPath, { profileId }) },
+      value => {
+        parseConfigDocument(value, configPath, { profileId })
+      },
       async current => {
         const ledger = await updater(current as unknown as PluginConfigDocument)
         return { ...current, plugins: ledger.plugins }

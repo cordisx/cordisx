@@ -1,22 +1,22 @@
 import {
+  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
   type CordisXCapabilityScope,
+  type CordisXIconToken,
   type CordisXLocalizationDiagnostic,
   type CordisXLocalizationSnapshot,
-  CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
+  type CordisXLocalizedText,
   type CordisXPermissionAuthorizationDecisionV1,
-  type CordisXPermissionPolicy,
   type CordisXPermissionAuthorizationPlanV1,
+  type CordisXPermissionPolicy,
   type CordisXPlatformAdapterStatus,
   type CordisXPlatformCapability,
-  type CordisXPluginIdentity,
-  type CordisXPluginConsolePageV1,
   type CordisXPluginConsoleEntryV1,
+  type CordisXPluginConsolePageV1,
   type CordisXPluginConsoleValueSummaryV1,
-  type CordisXIconToken,
-  type CordisXLocalizedText,
-  type CordisXRouteReference,
+  type CordisXPluginIdentity,
   type CordisXPluginLifecycleOperationV1,
   type CordisXPluginLifecycleResultV1,
+  type CordisXRouteReference,
 } from '../contracts.js'
 import type { LocaleCatalogSnapshot } from './i18n.js'
 import type {
@@ -32,11 +32,6 @@ import type {
 import { PermissionAuthorizationViewModel } from '../permission-authorization-view-model.js'
 import {
   BrowserMarketplaceModel,
-  OFFICIAL_MARKETPLACE_SOURCE,
-  normalizeMarketplaceSource,
-  projectMarketplacePlugin,
-  projectMarketplaceSource,
-  searchMarketplaceCatalog,
   type MarketplaceCatalogEligibility,
   type MarketplaceCatalogPlugin,
   type MarketplaceFetcher,
@@ -44,6 +39,11 @@ import {
   type MarketplaceSourceRecord,
   type MarketplaceSourceSnapshot,
   type MarketplaceStorage,
+  normalizeMarketplaceSource,
+  OFFICIAL_MARKETPLACE_SOURCE,
+  projectMarketplacePlugin,
+  projectMarketplaceSource,
+  searchMarketplaceCatalog,
 } from './marketplace.js'
 import type { MarketplaceCertificationRecord } from './marketplace-trust.js'
 import { highlightSafeMarkdownCodeBlocks, renderSafeMarkdown } from './markdown.js'
@@ -53,14 +53,14 @@ import {
   createHostSurfaceIcon,
   createManagerIcon,
   hostSurfaceIconKey,
+  type ManagerIconToken,
   renderHostIconSvg,
   renderManagerIconSvg,
-  type ManagerIconToken,
 } from './icons.js'
 import type {
   ManagedManagerPageMount,
-  ManagerContentPresentation,
   ManagedSettingsPageMount,
+  ManagerContentPresentation,
   NavigationPageSnapshot,
   NavigationSnapshot,
   RouteSnapshot,
@@ -86,7 +86,11 @@ import type {
 } from './configuration.js'
 import type { CordisXConfigFieldSnapshot, CordisXJsonValue } from '../contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
-import type { HostServiceConfigDescriptor, HostServiceConfigMutation, HostServiceConfigMutationResult } from '../launcher/service-config.js'
+import type {
+  HostServiceConfigDescriptor,
+  HostServiceConfigMutation,
+  HostServiceConfigMutationResult,
+} from '../launcher/service-config.js'
 import type {
   CordisXCapabilityAvailabilityState,
   CordisXCapabilityProviderFamily,
@@ -96,10 +100,16 @@ import cordisxMarkDark from '../../assets/brand/cordisx-mark-dark.svg'
 import cordisxMarkLight from '../../assets/brand/cordisx-mark-light.svg'
 import { HostTooltipController } from './tooltips.js'
 import { HostThemeProjection, resolveHostTheme } from './host-theme.js'
-import { HOST_FORM_STYLES, HostFormAdapter, hostConfigApplyMessage, selectHostFormPrimitive, validateHostFormValue } from './host-form.js'
 import {
-  HOST_COLLECTION_STYLES,
+  HOST_FORM_STYLES,
+  hostConfigApplyMessage,
+  HostFormAdapter,
+  selectHostFormPrimitive,
+  validateHostFormValue,
+} from './host-form.js'
+import {
   createHostCollection,
+  HOST_COLLECTION_STYLES,
   type HostCollectionAction,
   type HostCollectionItem,
   type HostCollectionStatus,
@@ -124,8 +134,19 @@ import lunaDomViewerCss from 'luna-dom-viewer/luna-dom-viewer.css'
 import lunaObjectViewerCss from 'luna-object-viewer/luna-object-viewer.css'
 
 export type ManagerPluginStatus =
-  | 'active' | 'blocked' | 'permission-blocked' | 'configured-disabled' | 'failed'
-  | 'installing' | 'updating' | 'enabling' | 'disabling' | 'reloading' | 'uninstalling' | 'rolling-back' | 'rollback-failed'
+  | 'active'
+  | 'blocked'
+  | 'permission-blocked'
+  | 'configured-disabled'
+  | 'failed'
+  | 'installing'
+  | 'updating'
+  | 'enabling'
+  | 'disabling'
+  | 'reloading'
+  | 'uninstalling'
+  | 'rolling-back'
+  | 'rollback-failed'
 
 export interface ManagerPluginSnapshot {
   readonly id: string
@@ -257,7 +278,11 @@ export interface ManagerModel {
   clearPluginConsole?(id: string): void
   subscribePluginConsole?(listener: (pluginId: string) => void): () => void
   setPluginBlocked(id: string, blocked: boolean): Promise<void>
-  updatePluginConfig?(id: string, expectedRevision: number, operations: readonly ConfigMutationOperation[]): Promise<void>
+  updatePluginConfig?(
+    id: string,
+    expectedRevision: number,
+    operations: readonly ConfigMutationOperation[],
+  ): Promise<void>
   /** Host-owned launcher services are rendered only inside their owning plugin detail. */
   listServiceConfigs?(pluginId: string): Promise<readonly HostServiceConfigDescriptor[]>
   updateServiceConfig?(mutation: HostServiceConfigMutation): Promise<HostServiceConfigMutationResult>
@@ -280,20 +305,33 @@ export interface ManagerModel {
   permissionAuthorizationPlanV2?(id: string): CordisXPermissionAuthorizationPlanV2 | undefined
   authorizePluginV2?(id: string, decision: CordisXPermissionAuthorizationDecisionV2): Promise<void>
   permissionLifecycleReviewPlanV2?(
-    target: { readonly kind: 'candidate'; readonly candidateId: string } | { readonly kind: 'enable'; readonly pluginId: string },
+    target: { readonly kind: 'candidate'; readonly candidateId: string } | {
+      readonly kind: 'enable'
+      readonly pluginId: string
+    },
   ): Promise<CordisXPermissionAuthorizationPlanV2 | undefined>
   applyPermissionLifecycleReviewV2?(
     decision: CordisXPermissionAuthorizationDecisionV2,
   ): Promise<CordisXPluginLifecycleResultV1>
   permissionLifecycleReviewPlanV4?(
-    target: { readonly kind: 'candidate'; readonly candidateId: string } | { readonly kind: 'enable'; readonly pluginId: string },
+    target: { readonly kind: 'candidate'; readonly candidateId: string } | {
+      readonly kind: 'enable'
+      readonly pluginId: string
+    },
   ): Promise<CordisXPermissionAuthorizationPlanV4 | undefined>
   applyPermissionLifecycleReviewV4?(
     decision: CordisXPermissionAuthorizationDecisionV4,
   ): Promise<CordisXPluginLifecycleResultV1>
   requestPluginLifecycle?(operation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1>
-  requestPluginBundleLifecycle?(operation: CordisXPluginBundleLifecycleOperationV1): Promise<CordisXPluginBundleLifecycleResultV1>
-  setExtensionPointPolicy?(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
+  requestPluginBundleLifecycle?(
+    operation: CordisXPluginBundleLifecycleOperationV1,
+  ): Promise<CordisXPluginBundleLifecycleResultV1>
+  setExtensionPointPolicy?(
+    source: string,
+    pluginId: string,
+    pointId: string,
+    policy: 'inherit' | 'allow' | 'deny',
+  ): Promise<void>
   setExtensionPointControlAuthorization?(
     expectedPolicyRevision: number,
     reference: Readonly<{
@@ -306,9 +344,15 @@ export interface ManagerModel {
     }>,
     policy: 'inherit' | 'allow' | 'deny',
   ): Promise<void>
-  setExtensionPointControlGroupChoice?(expectedPolicyRevision: number, choice: ControlledSurfaceGroupChoice): Promise<void>
+  setExtensionPointControlGroupChoice?(
+    expectedPolicyRevision: number,
+    choice: ControlledSurfaceGroupChoice,
+  ): Promise<void>
   /** Host-private exact selection; plugin-facing runtime snapshots cannot invoke it. */
-  selectIconTheme?(expectedProfileRevision: number, candidate: Pick<RedactedIconThemeProvider, 'providerId' | 'namespace' | 'providerVersion' | 'providerGeneration'>): Promise<void>
+  selectIconTheme?(
+    expectedProfileRevision: number,
+    candidate: Pick<RedactedIconThemeProvider, 'providerId' | 'namespace' | 'providerVersion' | 'providerGeneration'>,
+  ): Promise<void>
   /** Whether the launcher can durably CAS this profile's selection. */
   readonly iconThemePreferenceWritable?: boolean
   mountSettingsTab?(id: string, panelBody: HTMLElement): Promise<ManagedSettingsPageMount>
@@ -318,7 +362,10 @@ export interface ManagerModel {
     id: string,
     reference: CordisXRouteReference,
     container: HTMLElement,
-    navigation: { readonly navigate: (reference: CordisXRouteReference) => Promise<void>; readonly back: () => Promise<void> },
+    navigation: {
+      readonly navigate: (reference: CordisXRouteReference) => Promise<void>
+      readonly back: () => Promise<void>
+    },
   ): Promise<ManagedManagerPageMount>
   closeManagerContent?(): Promise<void>
   subscribe(listener: () => void): () => void
@@ -333,7 +380,12 @@ type LocalTabIcon = ManagerIconToken
 type ManagerRouteState =
   | { readonly kind: 'primary'; readonly primary: ManagerTab }
   | { readonly kind: 'plugin'; readonly pluginId: string; readonly facet: PluginDetailTab }
-  | { readonly kind: 'permission'; readonly pluginId: string; readonly capability: CordisXPermissionCapabilityV4; readonly fingerprint: string }
+  | {
+    readonly kind: 'permission'
+    readonly pluginId: string
+    readonly capability: CordisXPermissionCapabilityV4
+    readonly fingerprint: string
+  }
   | { readonly kind: 'marketplace'; readonly identity: string; readonly facet: MarketplaceDetailTab }
   | { readonly kind: 'marketplace-source'; readonly page: MarketplaceSourcePage; readonly url?: string }
   | { readonly kind: 'extension-point'; readonly pointId: string; readonly facet: ExtensionPointDetailTab }
@@ -1467,7 +1519,11 @@ export function projectPluginConsoleValueForLuna(snapshot: CordisXPluginConsoleV
   if (snapshot.type === 'null') return null
   if (snapshot.type === 'boolean' || snapshot.type === 'number' || snapshot.type === 'string') return snapshot.value
   if (snapshot.type === 'bigint') {
-    try { return BigInt(String(snapshot.value ?? snapshot.preview).replace(/n$/u, '')) } catch { return snapshot.preview }
+    try {
+      return BigInt(String(snapshot.value ?? snapshot.preview).replace(/n$/u, ''))
+    } catch {
+      return snapshot.preview
+    }
   }
   if (snapshot.type === 'error') {
     const name = snapshot.name ?? 'Error'
@@ -1475,7 +1531,9 @@ export function projectPluginConsoleValueForLuna(snapshot: CordisXPluginConsoleV
     const message = snapshot.preview.startsWith(prefix) ? snapshot.preview.slice(prefix.length) : snapshot.preview
     const error = new Error(message)
     error.name = name
-    if (snapshot.stack !== undefined) Object.defineProperty(error, 'stack', { configurable: true, value: snapshot.stack })
+    if (snapshot.stack !== undefined) {
+      Object.defineProperty(error, 'stack', { configurable: true, value: snapshot.stack })
+    }
     return error
   }
   if (snapshot.type === 'array') {
@@ -1487,7 +1545,9 @@ export function projectPluginConsoleValueForLuna(snapshot: CordisXPluginConsoleV
     const value: Record<string, unknown> = {}
     for (const item of snapshot.entries ?? []) {
       Object.defineProperty(value, item.key, {
-        configurable: true, enumerable: true, writable: false,
+        configurable: true,
+        enumerable: true,
+        writable: false,
         value: projectPluginConsoleValueForLuna(item.value),
       })
     }
@@ -1516,7 +1576,9 @@ export function projectPluginConsoleEntryForLuna(entry: CordisXPluginConsoleEntr
 
 function pluginConsoleEntryCopyText(entry: CordisXPluginConsoleEntryV1): string {
   const args = entry.args.map(argument => argument.preview).join(' ')
-  return `${lunaConsoleTime(entry.time, true)} ${entry.method} ${entry.source} ${entry.kind === 'console' ? args || entry.message : `${entry.message}${args === '' ? '' : ` ${args}`}`}`
+  return `${lunaConsoleTime(entry.time, true)} ${entry.method} ${entry.source} ${
+    entry.kind === 'console' ? args || entry.message : `${entry.message}${args === '' ? '' : ` ${args}`}`
+  }`
 }
 
 /**
@@ -1524,7 +1586,10 @@ function pluginConsoleEntryCopyText(entry: CordisXPluginConsoleEntryV1): string 
  * `args` array intact: collapsing it into message text would change native
  * console.* semantics and lose the ownership fence carried by every entry.
  */
-export function serializePluginConsoleExport(page: CordisXPluginConsolePageV1, exportedAt = new Date().toISOString()): string {
+export function serializePluginConsoleExport(
+  page: CordisXPluginConsolePageV1,
+  exportedAt = new Date().toISOString(),
+): string {
   const entries = page.entries.filter(entry => (
     entry.plugin.source === page.plugin.source && entry.plugin.pluginId === page.plugin.pluginId
   ))
@@ -1546,7 +1611,9 @@ function summarizePluginConsole(page: CordisXPluginConsolePageV1): PluginConsole
   const successes = page.entries.filter(entry => entry.kind === 'invocation' && entry.phase === 'success').length
   const failures = page.entries.filter(entry => entry.kind === 'invocation' && entry.phase === 'failure').length
   const denials = page.entries.filter(entry => entry.kind === 'permission' && entry.phase === 'deny').length
-  const durations = page.entries.filter(entry => entry.kind === 'invocation' && entry.durationMs !== undefined).map(entry => entry.durationMs!)
+  const durations = page.entries.filter(entry => entry.kind === 'invocation' && entry.durationMs !== undefined).map(
+    entry => entry.durationMs!,
+  )
   const sources = new Map<string, { calls: number; items: number; bytes: number }>()
   for (const entry of page.entries) {
     if (entry.kind === 'invocation' && entry.phase === 'requested') {
@@ -1566,23 +1633,32 @@ function summarizePluginConsole(page: CordisXPluginConsolePageV1): PluginConsole
     successes,
     failures,
     denials,
-    averageDurationMs: durations.length === 0 ? undefined : durations.reduce((sum, value) => sum + value, 0) / durations.length,
-    consumption: [...sources].map(([source, value]) => `${source}: ${value.calls} calls${value.items === 0 ? '' : ` · ${value.items} items`}${value.bytes === 0 ? '' : ` · ${value.bytes} B`}`),
+    averageDurationMs: durations.length === 0
+      ? undefined
+      : durations.reduce((sum, value) => sum + value, 0) / durations.length,
+    consumption: [...sources].map(([source, value]) =>
+      `${source}: ${value.calls} calls${value.items === 0 ? '' : ` · ${value.items} items`}${
+        value.bytes === 0 ? '' : ` · ${value.bytes} B`
+      }`
+    ),
   }
 }
 
 function capabilityPresentation(capability: CordisXPermissionCapabilityV4): CapabilityPresentation {
-  const known = (CAPABILITY_PRESENTATIONS as Readonly<Partial<Record<CordisXPermissionCapabilityV4, CapabilityPresentation>>>)[capability]
+  const known =
+    (CAPABILITY_PRESENTATIONS as Readonly<Partial<Record<CordisXPermissionCapabilityV4, CapabilityPresentation>>>)[
+      capability
+    ]
   if (known !== undefined) return known
   const group = String(capability).split('.')[0]
   return {
     name: group === 'models'
       ? '使用模型能力'
       : group === 'tasks'
-        ? '使用任务能力'
-        : group === 'turns'
-          ? '使用对话能力'
-          : '使用宿主能力',
+      ? '使用任务能力'
+      : group === 'turns'
+      ? '使用对话能力'
+      : '使用宿主能力',
     icon: 'capability-fallback',
   }
 }
@@ -1595,8 +1671,8 @@ function capabilityAvailabilityLabel(status: CordisXCapabilityAvailabilityState,
   return status === 'supported'
     ? managerCopy(locale, 'runtime.availability-supported')
     : status === 'degraded'
-      ? managerCopy(locale, 'runtime.availability-degraded')
-      : managerCopy(locale, 'runtime.unavailable')
+    ? managerCopy(locale, 'runtime.availability-degraded')
+    : managerCopy(locale, 'runtime.unavailable')
 }
 
 function createPermissionPolicySelect(
@@ -1609,7 +1685,9 @@ function createPermissionPolicySelect(
     `${capabilityPresentation(permission.capability).name}的权限策略`,
     (['ask', 'allow', 'deny'] as const).map(value => ({ value, label: POLICY_LABELS[value] })),
     permission.policy,
-    value => { if (value !== undefined) void onChange(value, policy) },
+    value => {
+      if (value !== undefined) void onChange(value, policy)
+    },
   )
   policy.classList.add('cxm-permission-policy-select')
   policy.dataset.hostFormPrimitive = 'select'
@@ -1709,21 +1787,35 @@ export async function requestPluginAuthorization(
       const choiceLabel = create(document, 'div', 'cxm-authorization-choice cxf-choice')
       choiceLabel.append(choice, create(document, 'span', undefined, `当前：${POLICY_LABELS[declaration.policy]}`))
       item.append(
-        create(document, 'div', 'cxm-authorization-name', `${presentation.name} · ${declaration.required ? '必需' : '可选'}`),
-        create(document, 'div', 'cxm-authorization-reason', projected?.reasonText ?? declaration.reason.fallback ?? declaration.reason.key),
+        create(
+          document,
+          'div',
+          'cxm-authorization-name',
+          `${presentation.name} · ${declaration.required ? '必需' : '可选'}`,
+        ),
+        create(
+          document,
+          'div',
+          'cxm-authorization-reason',
+          projected?.reasonText ?? declaration.reason.fallback ?? declaration.reason.key,
+        ),
         choiceLabel,
       )
       list.append(item)
     }
     dialog.append(list)
     const actions = create(document, 'div', 'cxm-authorization-actions')
-    const finish = (decision: CordisXPermissionAuthorizationDecisionV1['decisions'][number]['decision'] | undefined): void => {
+    const finish = (
+      decision: CordisXPermissionAuthorizationDecisionV1['decisions'][number]['decision'] | undefined,
+    ): void => {
       detachTheme()
       overlay.remove()
-      resolve(decision === undefined ? undefined : decisionEnvelope(
-        decision,
-        capability => choices.get(capability)?.checked === true,
-      ))
+      resolve(
+        decision === undefined ? undefined : decisionEnvelope(
+          decision,
+          capability => choices.get(capability)?.checked === true,
+        ),
+      )
     }
     const cancel = forms.button('取消')
     cancel.dataset.authorizationDecision = 'cancel'
@@ -1765,20 +1857,25 @@ export async function requestPluginAuthorizationV2(
   const availability = Object.fromEntries(plan.declarations.flatMap(declaration => {
     const permission = permissions.find(item => item.capability === declaration.capability)
     if (permission === undefined) return []
-    return [[declaration.capability, Object.freeze({
-      status: permission.availability.status,
-      reason: Object.freeze({
-        namespace: 'cordisx.permission.host',
-        key: `availability.${declaration.capability}`,
-        fallback: permission.availability.reasonText,
+    return [[
+      declaration.capability,
+      Object.freeze({
+        status: permission.availability.status,
+        reason: Object.freeze({
+          namespace: 'cordisx.permission.host',
+          key: `availability.${declaration.capability}`,
+          fallback: permission.availability.reasonText,
+        }),
+        providerIds: Object.freeze(permission.availability.providers.map(provider => provider.providerId)),
       }),
-      providerIds: Object.freeze(permission.availability.providers.map(provider => provider.providerId)),
-    })]]
-  })) as Partial<Record<CordisXPermissionCapabilityV2, {
-    readonly status: 'supported' | 'degraded' | 'unavailable'
-    readonly reason: CordisXLocalizedText
-    readonly providerIds: readonly string[]
-  }>>
+    ]]
+  })) as Partial<
+    Record<CordisXPermissionCapabilityV2, {
+      readonly status: 'supported' | 'degraded' | 'unavailable'
+      readonly reason: CordisXLocalizedText
+      readonly providerIds: readonly string[]
+    }>
+  >
   const dialog = new BrowserPermissionAuthorizationDialog(document)
   try {
     const result = await dialog.show(new PermissionAuthorizationViewModel(plan), {
@@ -1809,15 +1906,18 @@ export async function requestPluginAuthorizationV4(
   const availability = Object.fromEntries(plan.declarations.flatMap(declaration => {
     const permission = permissions.find(item => item.capability === declaration.capability)
     if (permission === undefined) return []
-    return [[declaration.capability, Object.freeze({
-      status: permission.availability.status,
-      reason: Object.freeze({
-        namespace: 'cordisx.permission.host',
-        key: `availability.${declaration.capability}`,
-        fallback: permission.availability.reasonText,
+    return [[
+      declaration.capability,
+      Object.freeze({
+        status: permission.availability.status,
+        reason: Object.freeze({
+          namespace: 'cordisx.permission.host',
+          key: `availability.${declaration.capability}`,
+          fallback: permission.availability.reasonText,
+        }),
+        providerIds: Object.freeze(permission.availability.providers.map(provider => provider.providerId)),
       }),
-      providerIds: Object.freeze(permission.availability.providers.map(provider => provider.providerId)),
-    })]]
+    ]]
   }))
   const dialog = new BrowserPermissionAuthorizationDialog(document)
   try {
@@ -1864,7 +1964,10 @@ function createLocalTabs(
     button.tabIndex = item.id === active ? 0 : -1
     button.setAttribute(dataAttribute, item.id)
     const visibleContent = create(document, 'span', 'cxm-tab-content')
-    visibleContent.append(createManagerIcon(document, item.icon, 'cxm-tab-icon'), create(document, 'span', undefined, item.label))
+    visibleContent.append(
+      createManagerIcon(document, item.icon, 'cxm-tab-icon'),
+      create(document, 'span', undefined, item.label),
+    )
     button.replaceChildren(visibleContent)
     button.addEventListener('click', () => activate(item.id))
     button.addEventListener('keydown', (event) => {
@@ -1943,23 +2046,29 @@ function createPluginIcon(document: Document, name: string, source?: string): HT
 function pluginStatusDescription(plugin: ManagerPluginSnapshot, status: ManagerPluginStatus, locale: string): string {
   const reason = status === 'failed' || status === 'rollback-failed'
     ? plugin.error
-    : status === 'blocked' || status === 'permission-blocked' ? plugin.blockedReason ?? plugin.error : undefined
+    : status === 'blocked' || status === 'permission-blocked'
+    ? plugin.blockedReason ?? plugin.error
+    : undefined
   const label = statusLabel(status, locale)
   if (reason === undefined) return label
   return productLocale(locale) === 'zh-CN' ? `${label}：${reason}` : `${label}: ${reason}`
 }
 
-function pluginCollectionStatus(plugin: ManagerPluginSnapshot, status: ManagerPluginStatus, locale: string): HostCollectionStatus {
+function pluginCollectionStatus(
+  plugin: ManagerPluginSnapshot,
+  status: ManagerPluginStatus,
+  locale: string,
+): HostCollectionStatus {
   const tone = status === 'active'
     ? 'success'
     : status === 'failed' || status === 'rollback-failed'
-      ? 'danger'
-      : status === 'installing' || status === 'updating' || status === 'enabling' || status === 'disabling'
+    ? 'danger'
+    : status === 'installing' || status === 'updating' || status === 'enabling' || status === 'disabling'
         || status === 'reloading' || status === 'uninstalling' || status === 'rolling-back'
-        ? 'progress'
-        : status === 'blocked' || status === 'permission-blocked'
-          ? 'warning'
-          : 'neutral'
+    ? 'progress'
+    : status === 'blocked' || status === 'permission-blocked'
+    ? 'warning'
+    : 'neutral'
   return { label: statusLabel(status, locale), tone, detail: pluginStatusDescription(plugin, status, locale) }
 }
 
@@ -1983,18 +2092,27 @@ function matchesManagerSearch(query: string, fields: readonly string[]): boolean
 
 function marketplaceTextTierLabel(tier: MarketplaceRankingExplanation['textTier']): string {
   switch (tier) {
-    case 'exact-identity': return '插件标识精确命中'
-    case 'exact-name': return '插件名称精确命中'
-    case 'primary-prefix': return '插件标识或名称前缀命中'
-    case 'all-primary-terms': return '插件标识或名称完整词项命中'
-    case 'all-catalog-terms': return '目录元数据完整词项命中'
-    case 'partial-catalog': return '目录元数据部分词项命中'
-    case 'browse': return '无关键词浏览'
+    case 'exact-identity':
+      return '插件标识精确命中'
+    case 'exact-name':
+      return '插件名称精确命中'
+    case 'primary-prefix':
+      return '插件标识或名称前缀命中'
+    case 'all-primary-terms':
+      return '插件标识或名称完整词项命中'
+    case 'all-catalog-terms':
+      return '目录元数据完整词项命中'
+    case 'partial-catalog':
+      return '目录元数据部分词项命中'
+    case 'browse':
+      return '无关键词浏览'
   }
 }
 
 function marketplaceRankingDescription(ranking: MarketplaceRankingExplanation): string {
-  return `排序依据：${marketplaceTextTierLabel(ranking.textTier)}；官方产品优先级 +${ranking.officialPriority}。官方优先级只在同一文本相关性层级内生效；认证状态不参与排序。`
+  return `排序依据：${
+    marketplaceTextTierLabel(ranking.textTier)
+  }；官方产品优先级 +${ranking.officialPriority}。官方优先级只在同一文本相关性层级内生效；认证状态不参与排序。`
 }
 
 function marketplaceCertifiedDetailCopy(
@@ -2005,23 +2123,26 @@ function marketplaceCertifiedDetailCopy(
   const policy = `${certification.reviewPolicy.id} ${certification.reviewPolicy.version}`
   return chinese
     ? [
-        `CordisX 已按策略 ${policy} 审核当前 ${version} 版本的明确制品，并认定其代码符合该版本策略。新版本或制品变化后必须重新认证。`,
-        '认证不是绝对安全保证，也不放宽沙箱、生命周期或安装审核。仅权限目录明确标记的界面能力可免去显式确认；Host 仍会按当前范围和运行实例创建可撤销、可审计的授权，其他权限照常确认。',
-        'v1 信任根是受保护的 Marketplace 合入链；当前不声称存在制品密码学签名。',
-      ]
+      `CordisX 已按策略 ${policy} 审核当前 ${version} 版本的明确制品，并认定其代码符合该版本策略。新版本或制品变化后必须重新认证。`,
+      '认证不是绝对安全保证，也不放宽沙箱、生命周期或安装审核。仅权限目录明确标记的界面能力可免去显式确认；Host 仍会按当前范围和运行实例创建可撤销、可审计的授权，其他权限照常确认。',
+      'v1 信任根是受保护的 Marketplace 合入链；当前不声称存在制品密码学签名。',
+    ]
     : [
-        `CordisX reviewed the exact artifact for version ${version} under policy ${policy} and determined that its code conforms to that policy version. A new version or changed artifact requires a new certification.`,
-        'Certification is not an absolute safety guarantee and does not relax sandbox, lifecycle, or installation review. Only interface capabilities explicitly marked in the permission catalog may omit explicit confirmation. The Host still creates a revocable, audited authorization for the current scope and runtime instance; every other permission prompts normally.',
-        'The v1 trust root is the protected Marketplace merge chain; no cryptographic artifact signature is claimed.',
-      ]
+      `CordisX reviewed the exact artifact for version ${version} under policy ${policy} and determined that its code conforms to that policy version. A new version or changed artifact requires a new certification.`,
+      'Certification is not an absolute safety guarantee and does not relax sandbox, lifecycle, or installation review. Only interface capabilities explicitly marked in the permission catalog may omit explicit confirmation. The Host still creates a revocable, audited authorization for the current scope and runtime instance; every other permission prompts normally.',
+      'The v1 trust root is the protected Marketplace merge chain; no cryptographic artifact signature is claimed.',
+    ]
 }
 
 function activateManagerListRow(row: HTMLButtonElement, action: () => void): void {
   row.addEventListener('click', event => {
     const selection = row.ownerDocument.defaultView?.getSelection()
-    if (event.detail > 0 && selection !== undefined && selection !== null && !selection.isCollapsed && selection.toString() !== ''
+    if (
+      event.detail > 0 && selection !== undefined && selection !== null && !selection.isCollapsed
+      && selection.toString() !== ''
       && selection.anchorNode !== null && selection.focusNode !== null
-      && row.contains(selection.anchorNode) && row.contains(selection.focusNode)) return
+      && row.contains(selection.anchorNode) && row.contains(selection.focusNode)
+    ) return
     action()
   })
   row.addEventListener('keydown', event => {
@@ -2080,10 +2201,18 @@ interface PublisherGrantBridgeWindow extends Window {
   __cordisxPublisherGrantRequestV1?: (payload: string) => void
   __cordisxPublisherGrantReceiveV1?: (payload: string) => void
 }
-interface PublisherGrantClient { request(operation: 'challenge' | 'import' | 'status', value?: unknown): Promise<unknown>; dispose(): void }
+interface PublisherGrantClient {
+  request(operation: 'challenge' | 'import' | 'status', value?: unknown): Promise<unknown>
+  dispose(): void
+}
 function createPublisherGrantClient(view: Window | null): PublisherGrantClient {
   if (view === null || typeof (view as PublisherGrantBridgeWindow).__cordisxPublisherGrantRequestV1 !== 'function') {
-    return { async request() { throw new Error('PublisherGrant launcher bridge is unavailable') }, dispose() {} }
+    return {
+      async request() {
+        throw new Error('PublisherGrant launcher bridge is unavailable')
+      },
+      dispose() {},
+    }
   }
   const bridge = view as PublisherGrantBridgeWindow
   const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; timer: number }>()
@@ -2093,9 +2222,12 @@ function createPublisherGrantClient(view: Window | null): PublisherGrantClient {
       if (typeof payload.requestId !== 'string') return
       const request = pending.get(payload.requestId)
       if (request === undefined) return
-      view.clearTimeout(request.timer); pending.delete(payload.requestId)
+      view.clearTimeout(request.timer)
+      pending.delete(payload.requestId)
       if (payload.ok === true) request.resolve(payload.value)
-      else request.reject(new Error(typeof payload.error === 'string' ? payload.error : 'PublisherGrant request failed'))
+      else {request.reject(
+          new Error(typeof payload.error === 'string' ? payload.error : 'PublisherGrant request failed'),
+        )}
     } catch { /* keep pending request timeout authoritative */ }
   }
   bridge.__cordisxPublisherGrantReceiveV1 = receiver
@@ -2104,16 +2236,33 @@ function createPublisherGrantClient(view: Window | null): PublisherGrantClient {
     async request(operation, value) {
       return await new Promise((resolve, reject) => {
         const requestId = `grant-${Date.now().toString(36)}-${(++sequence).toString(36)}`
-        const timer = view.setTimeout(() => { pending.delete(requestId); reject(new Error('PublisherGrant launcher bridge timed out')) }, 12_000)
+        const timer = view.setTimeout(() => {
+          pending.delete(requestId)
+          reject(new Error('PublisherGrant launcher bridge timed out'))
+        }, 12_000)
         pending.set(requestId, { resolve, reject, timer })
         try {
-          bridge.__cordisxPublisherGrantRequestV1?.(JSON.stringify({ version: 1, requestId, operation, ...(operation === 'import' ? { statement: value } : operation === 'status' ? { target: value } : {}) }))
-        } catch (error) { view.clearTimeout(timer); pending.delete(requestId); reject(error instanceof Error ? error : new Error(String(error))) }
+          bridge.__cordisxPublisherGrantRequestV1?.(
+            JSON.stringify({
+              version: 1,
+              requestId,
+              operation,
+              ...(operation === 'import' ? { statement: value } : operation === 'status' ? { target: value } : {}),
+            }),
+          )
+        } catch (error) {
+          view.clearTimeout(timer)
+          pending.delete(requestId)
+          reject(error instanceof Error ? error : new Error(String(error)))
+        }
       })
     },
     dispose() {
       if (bridge.__cordisxPublisherGrantReceiveV1 === receiver) delete bridge.__cordisxPublisherGrantReceiveV1
-      for (const request of pending.values()) { view.clearTimeout(request.timer); request.reject(new Error('CordisX manager disposed')) }
+      for (const request of pending.values()) {
+        view.clearTimeout(request.timer)
+        request.reject(new Error('CordisX manager disposed'))
+      }
       pending.clear()
     },
   }
@@ -2126,7 +2275,9 @@ function createMarketplaceFetcher(view: Window | null): MarketplaceFetcherHandle
   const bridge = view as MarketplaceBridgeWindow
   if (typeof bridge.__cordisxMarketplaceRequestV1 !== 'function') {
     return {
-      ...(typeof view.fetch === 'function' ? { fetcher: (url: string, init: RequestInit) => view.fetch(url, init) } : {}),
+      ...(typeof view.fetch === 'function'
+        ? { fetcher: (url: string, init: RequestInit) => view.fetch(url, init) }
+        : {}),
       dispose: () => {},
     }
   }
@@ -2153,36 +2304,37 @@ function createMarketplaceFetcher(view: Window | null): MarketplaceFetcherHandle
   }
   bridge.__cordisxMarketplaceReceiveV1 = receiver
 
-  const fetcher: MarketplaceFetcher = async (url, init) => await new Promise((resolve, reject) => {
-    const requestId = `${Date.now().toString(36)}-${(++marketplaceRequestSequence).toString(36)}`
-    const timeout = view.setTimeout(() => {
-      pending.delete(requestId)
-      reject(new Error('marketplace launcher bridge timed out'))
-    }, 12_000)
-    const signal = init.signal
-    const abort = (): void => {
-      view.clearTimeout(timeout)
-      pending.delete(requestId)
-      reject(new Error('marketplace launcher bridge aborted'))
-    }
-    const cleanup = (): void => {
-      view.clearTimeout(timeout)
-      signal?.removeEventListener('abort', abort)
-      pending.delete(requestId)
-    }
-    pending.set(requestId, { resolve, reject, cleanup })
-    signal?.addEventListener('abort', abort, { once: true })
-    if (signal?.aborted === true) {
-      abort()
-      return
-    }
-    try {
-      bridge.__cordisxMarketplaceRequestV1?.(JSON.stringify({ requestId, url }))
-    } catch (error) {
-      cleanup()
-      reject(error instanceof Error ? error : new Error(String(error)))
-    }
-  })
+  const fetcher: MarketplaceFetcher = async (url, init) =>
+    await new Promise((resolve, reject) => {
+      const requestId = `${Date.now().toString(36)}-${(++marketplaceRequestSequence).toString(36)}`
+      const timeout = view.setTimeout(() => {
+        pending.delete(requestId)
+        reject(new Error('marketplace launcher bridge timed out'))
+      }, 12_000)
+      const signal = init.signal
+      const abort = (): void => {
+        view.clearTimeout(timeout)
+        pending.delete(requestId)
+        reject(new Error('marketplace launcher bridge aborted'))
+      }
+      const cleanup = (): void => {
+        view.clearTimeout(timeout)
+        signal?.removeEventListener('abort', abort)
+        pending.delete(requestId)
+      }
+      pending.set(requestId, { resolve, reject, cleanup })
+      signal?.addEventListener('abort', abort, { once: true })
+      if (signal?.aborted === true) {
+        abort()
+        return
+      }
+      try {
+        bridge.__cordisxMarketplaceRequestV1?.(JSON.stringify({ requestId, url }))
+      } catch (error) {
+        cleanup()
+        reject(error instanceof Error ? error : new Error(String(error)))
+      }
+    })
 
   return {
     fetcher,
@@ -2212,7 +2364,7 @@ export function installCordisXManager(
   let renderedLocale = model.snapshot().localization.locale
   const copy = (key: Parameters<typeof managerCopy>[1]): string => managerCopy(renderedLocale, key)
   const ownedPortals = new Map<HTMLElement, () => void>()
-  const mountPortal = <Element extends HTMLElement>(portal: Element): (() => void) => {
+  const mountPortal = <Element extends HTMLElement>(portal: Element): () => void => {
     const detachTheme = theme.attach(portal)
     ownedPortals.set(portal, detachTheme)
     ;(document.body ?? document.documentElement).append(portal)
@@ -2225,7 +2377,8 @@ export function installCordisXManager(
   document.getElementById(MANAGER_STYLE_ID)?.remove()
   const style = create(document, 'style')
   style.id = MANAGER_STYLE_ID
-  style.textContent = `${lunaObjectViewerCss}\n${lunaDataGridCss}\n${lunaDomViewerCss}\n${lunaConsoleCss}\n${HOST_COLLECTION_STYLES}\n${MANAGER_STYLES}\n${HOST_THEME_OVERLAY_STYLES}`
+  style.textContent =
+    `${lunaObjectViewerCss}\n${lunaDataGridCss}\n${lunaDomViewerCss}\n${lunaConsoleCss}\n${HOST_COLLECTION_STYLES}\n${MANAGER_STYLES}\n${HOST_THEME_OVERLAY_STYLES}`
   ;(document.head ?? document.documentElement).append(style)
 
   const trigger = create(document, 'button')
@@ -2320,7 +2473,9 @@ export function installCordisXManager(
     }
   }
 
-  const localizeTabs = <T extends string>(items: readonly LocalizedTab<T>[]): readonly { readonly id: T; readonly label: string; readonly icon: LocalTabIcon }[] => (
+  const localizeTabs = <T extends string>(
+    items: readonly LocalizedTab<T>[],
+  ): readonly { readonly id: T; readonly label: string; readonly icon: LocalTabIcon }[] => (
     items.map(item => ({ id: item.id, label: copy(item.copyKey), icon: item.icon }))
   )
 
@@ -2346,12 +2501,12 @@ export function installCordisXManager(
     const search = options.search === undefined
       ? { icon: () => createManagerIcon(document, 'search'), clearIcon: () => createManagerIcon(document, 'close') }
       : 'enabled' in options.search
-        ? options.search
-        : {
-            icon: () => createManagerIcon(document, 'search'),
-            clearIcon: () => createManagerIcon(document, 'close'),
-            ...options.search,
-          }
+      ? options.search
+      : {
+        icon: () => createManagerIcon(document, 'search'),
+        clearIcon: () => createManagerIcon(document, 'close'),
+        ...options.search,
+      }
     const view = createHostCollection(document, {
       ...options,
       moreIcon: options.moreIcon ?? (() => createManagerIcon(document, 'more')),
@@ -2382,7 +2537,11 @@ export function installCordisXManager(
     if (options.pressed !== undefined) button.setAttribute('aria-pressed', String(options.pressed))
     button.disabled = options.disabled === true
     button.append(createManagerIcon(document, icon))
-    tooltips.attach(button, () => options.description === undefined ? label : `${label} · ${options.description}`, 'top')
+    tooltips.attach(
+      button,
+      () => options.description === undefined ? label : `${label} · ${options.description}`,
+      'top',
+    )
     return button
   }
   let pluginQuery = ''
@@ -2396,9 +2555,13 @@ export function installCordisXManager(
   const pluginRouteQueries = new Map<string, string>()
   const favoritePluginIds = (() => {
     try {
-      const stored = JSON.parse(safeStorage(document.defaultView)?.getItem('cordisx.manager.favoritePlugins.v1') ?? '[]')
+      const stored = JSON.parse(
+        safeStorage(document.defaultView)?.getItem('cordisx.manager.favoritePlugins.v1') ?? '[]',
+      )
       return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : [])
-    } catch { return new Set<string>() }
+    } catch {
+      return new Set<string>()
+    }
   })()
   let consoleQuery = ''
   let consoleMethod = 'all'
@@ -2505,7 +2668,9 @@ export function installCordisXManager(
 
   const hideForExternalNavigation = (): void => {
     disposeHostCollections()
-    if (managerContentMount !== undefined || managerContentMountId !== undefined) void resetManagerContent().catch(() => {})
+    if (managerContentMount !== undefined || managerContentMountId !== undefined) {
+      void resetManagerContent().catch(() => {})
+    }
     modal.hidden = true
     trigger.setAttribute('aria-expanded', 'false')
   }
@@ -2520,7 +2685,10 @@ export function installCordisXManager(
 
   const documentationLink = (label: string, href: string): HTMLAnchorElement => {
     const link = configureExternalLink(create(document, 'a', 'cxm-action'), href)
-    link.append(create(document, 'span', undefined, label), createManagerIcon(document, 'external-link', 'cxm-action-icon'))
+    link.append(
+      create(document, 'span', undefined, label),
+      createManagerIcon(document, 'external-link', 'cxm-action-icon'),
+    )
     return link
   }
 
@@ -2543,7 +2711,9 @@ export function installCordisXManager(
     const next = favoritePlugins(snapshot)
     if (favorite) next.add(pluginId)
     else next.delete(pluginId)
-    try { safeStorage(document.defaultView)?.setItem(favoriteStorageKey(snapshot), JSON.stringify([...next].sort())) } catch {}
+    try {
+      safeStorage(document.defaultView)?.setItem(favoriteStorageKey(snapshot), JSON.stringify([...next].sort()))
+    } catch {}
   }
 
   const requestLifecycleConfirmation = (
@@ -2552,178 +2722,189 @@ export function installCordisXManager(
     affectedPluginIds: readonly string[],
     confirmLabel: string,
     danger = false,
-  ): Promise<boolean> => new Promise(resolve => {
-    const overlay = create(document, 'div', 'cxm-lifecycle-overlay')
-    let unmountOverlay = (): void => {}
-    overlay.setAttribute('role', 'dialog')
-    overlay.setAttribute('aria-modal', 'true')
-    const panel = create(document, 'div', 'cxm-lifecycle-dialog')
-    const heading = create(document, 'h2', undefined, title)
-    panel.append(heading, create(document, 'p', undefined, description))
-    if (affectedPluginIds.length > 0) {
-      panel.append(create(document, 'div', 'cxm-lifecycle-impact', `影响插件：${affectedPluginIds.join('、')}`))
-    }
-    const actions = create(document, 'div', 'cxm-lifecycle-actions')
-    const finish = (confirmed: boolean): void => {
-      unmountOverlay()
-      resolve(confirmed)
-    }
-    panel.classList.add('cxf-scope')
-    const cancel = forms.button('取消')
-    cancel.addEventListener('click', () => finish(false), { once: true })
-    const confirm = forms.button(confirmLabel, { variant: danger ? 'default' : 'primary', tone: danger ? 'danger' : 'default' })
-    confirm.addEventListener('click', () => finish(true), { once: true })
-    overlay.addEventListener('keydown', event => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      event.stopPropagation()
-      finish(false)
-    })
-    actions.append(cancel, confirm)
-    panel.append(actions)
-    overlay.append(panel)
-    unmountOverlay = mountPortal(overlay)
-    cancel.focus()
-  })
-
-  const requestLocalPackageDirectory = (invoker?: HTMLElement): Promise<string | undefined> => new Promise(resolve => {
-    const overlay = create(document, 'div', 'cxm-lifecycle-overlay')
-    const HTMLElementCtor = document.defaultView?.HTMLElement
-    const returnFocus = invoker ?? (HTMLElementCtor !== undefined && document.activeElement instanceof HTMLElementCtor
-        ? document.activeElement
-        : undefined)
-    let unmountOverlay = (): void => {}
-    overlay.setAttribute('role', 'dialog')
-    overlay.setAttribute('aria-modal', 'true')
-    const panel = create(document, 'div', 'cxm-lifecycle-dialog cxm-local-import-dialog')
-    panel.classList.add('cxf-scope')
-    const header = create(document, 'div', 'cxm-lifecycle-header')
-    const heading = create(document, 'h2', undefined, '导入本地插件')
-    heading.id = 'cxm-local-package-directory-heading'
-    overlay.setAttribute('aria-labelledby', heading.id)
-    const close = managerIconAction('close', '关闭')
-    close.dataset.importLocalClose = 'true'
-    header.append(heading, close)
-    // The Host overlay title plus the labelled directory control already
-    // explains this bounded operation. Do not add a second title/CTA shell.
-    panel.append(header)
-    const form = forms.form('local-package-directory')
-    form.classList.add('cxm-local-import-form')
-    const field = create(document, 'div', 'cxm-local-import-field')
-    const label = create(document, 'label', 'cxf-label', '插件目录')
-    label.id = 'cxm-local-package-directory-label'
-    label.htmlFor = 'cxm-local-package-directory'
-    const error = create(document, 'p', 'cxm-local-import-error')
-    error.id = 'cxm-local-package-directory-error'
-    error.setAttribute('role', 'alert')
-    error.hidden = true
-    let pathValue = ''
-    let inspect: TDesignButtonElement | undefined
-    const validPath = (value: string): boolean => value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value)
-    const updatePath = (value: string): void => {
-      pathValue = value.trim()
-      const message = pathValue === '' ? undefined : validPath(pathValue) ? undefined : '请选择目录或输入绝对路径'
-      error.textContent = message ?? ''
-      error.hidden = message === undefined
-      field.dataset.invalid = String(!error.hidden)
-      if (error.hidden) control?.focusTarget?.removeAttribute('aria-invalid')
-      else control?.focusTarget?.setAttribute('aria-invalid', 'true')
-      if (inspect !== undefined) setTDesignDisabled(inspect, !validPath(pathValue))
-    }
-    const pathField: CordisXConfigFieldSnapshot = {
-      namespace: 'cordisx.host', path: ['localPackageDirectory'], type: 'string', role: 'directory', value: '', disabled: false, required: true,
-    }
-    const control = forms.control(pathField, 'cxm-local-package-directory', value => {
-      updatePath(typeof value === 'string' ? value : '')
-    })
-    control.focusTarget?.setAttribute('aria-labelledby', label.id)
-    control.focusTarget?.setAttribute('aria-describedby', error.id)
-    control.focusTarget?.setAttribute('data-import-local-path', '')
-    const directoryControl = create(document, 'div', 'cxm-directory-control')
-    const picker = create(document, 'input', 'cxm-visually-hidden')
-    picker.type = 'file'
-    picker.tabIndex = -1
-    picker.setAttribute('webkitdirectory', '')
-    picker.setAttribute('directory', '')
-    picker.dataset.importLocalPicker = 'true'
-    const choose = managerIconAction('import-plugin', '选择插件目录', { className: 'cxm-directory-picker' })
-    choose.dataset.importLocalChoose = 'true'
-    choose.addEventListener('click', () => picker.click())
-    picker.addEventListener('change', () => {
-      const file = picker.files?.[0] as (File & { readonly path?: string }) | undefined
-      const filePath = file?.path
-      const relative = file?.webkitRelativePath
-      if (filePath === undefined || relative === undefined || relative === '') {
-        pathValue = ''
-        setTDesignProps(control.focusTarget as TDesignElement, { value: '', defaultValue: '' })
-        error.textContent = '当前环境无法读取目录路径，请粘贴绝对路径'
-        error.hidden = false
-        field.dataset.invalid = 'true'
-        control.focusTarget?.setAttribute('aria-invalid', 'true')
-        if (inspect !== undefined) setTDesignDisabled(inspect, true)
-        control.focusTarget?.focus()
-        return
+  ): Promise<boolean> =>
+    new Promise(resolve => {
+      const overlay = create(document, 'div', 'cxm-lifecycle-overlay')
+      let unmountOverlay = (): void => {}
+      overlay.setAttribute('role', 'dialog')
+      overlay.setAttribute('aria-modal', 'true')
+      const panel = create(document, 'div', 'cxm-lifecycle-dialog')
+      const heading = create(document, 'h2', undefined, title)
+      panel.append(heading, create(document, 'p', undefined, description))
+      if (affectedPluginIds.length > 0) {
+        panel.append(create(document, 'div', 'cxm-lifecycle-impact', `影响插件：${affectedPluginIds.join('、')}`))
       }
-      const separator = filePath.includes('\\') ? '\\' : '/'
-      const relativePath = relative.replaceAll('/', separator)
-      const rootName = relative.split('/')[0] ?? ''
-      const root = filePath.endsWith(relativePath)
-        ? `${filePath.slice(0, -relativePath.length)}${rootName}`
-        : filePath.slice(0, Math.max(filePath.lastIndexOf(separator), 0))
-      setTDesignProps(control.focusTarget as TDesignElement, { value: root })
-      ;(control.focusTarget as TDesignElement & { onChange?: (value: string) => void }).onChange?.(root)
-      updatePath(root)
-      control.focusTarget?.focus()
-    })
-    directoryControl.append(control.root, choose)
-    field.append(label, directoryControl, picker, error)
-    const actions = create(document, 'div', 'cxf-actions cxm-local-import-actions')
-    const restoreInvokerFocus = (): void => {
-      const currentInvoker = invoker?.isConnected === true
-        ? invoker
-        : document.querySelector<HTMLElement>('[data-import-local-plugin]')
-      ;(currentInvoker ?? returnFocus)?.focus({ preventScroll: true })
-    }
-    const finish = (value?: string): void => {
-      unmountOverlay()
-      restoreInvokerFocus()
-      resolve(value)
-      document.defaultView?.setTimeout(() => {
-        restoreInvokerFocus()
-      }, 0)
-    }
-    close.addEventListener('click', () => finish(), { once: true })
-    const cancel = forms.button('取消')
-    cancel.addEventListener('click', () => finish(), { once: true })
-    inspect = forms.button('检查并导入', { type: 'submit', variant: 'primary' })
-    setTDesignDisabled(inspect, true)
-    inspect.setAttribute('data-import-local-submit', '')
-    form.addEventListener('submit', event => {
-      event.preventDefault()
-      if (!validPath(pathValue)) {
-        error.textContent = pathValue === '' ? '请选择插件目录' : '请选择目录或输入绝对路径'
-        error.hidden = false
-        field.dataset.invalid = 'true'
-        control.focusTarget?.setAttribute('aria-invalid', 'true')
-        control.focusTarget?.focus()
-        return
+      const actions = create(document, 'div', 'cxm-lifecycle-actions')
+      const finish = (confirmed: boolean): void => {
+        unmountOverlay()
+        resolve(confirmed)
       }
-      finish(pathValue)
-    })
-    form.addEventListener('keydown', event => {
-      if (event.key === 'Escape') {
+      panel.classList.add('cxf-scope')
+      const cancel = forms.button('取消')
+      cancel.addEventListener('click', () => finish(false), { once: true })
+      const confirm = forms.button(confirmLabel, {
+        variant: danger ? 'default' : 'primary',
+        tone: danger ? 'danger' : 'default',
+      })
+      confirm.addEventListener('click', () => finish(true), { once: true })
+      overlay.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return
         event.preventDefault()
         event.stopPropagation()
-        finish()
-      }
+        finish(false)
+      })
+      actions.append(cancel, confirm)
+      panel.append(actions)
+      overlay.append(panel)
+      unmountOverlay = mountPortal(overlay)
+      cancel.focus()
     })
-    actions.append(cancel, inspect)
-    form.append(field, actions)
-    panel.append(form)
-    overlay.append(panel)
-    unmountOverlay = mountPortal(overlay)
-    control.focusTarget?.focus()
-  })
+
+  const requestLocalPackageDirectory = (invoker?: HTMLElement): Promise<string | undefined> =>
+    new Promise(resolve => {
+      const overlay = create(document, 'div', 'cxm-lifecycle-overlay')
+      const HTMLElementCtor = document.defaultView?.HTMLElement
+      const returnFocus = invoker ?? (HTMLElementCtor !== undefined && document.activeElement instanceof HTMLElementCtor
+        ? document.activeElement
+        : undefined)
+      let unmountOverlay = (): void => {}
+      overlay.setAttribute('role', 'dialog')
+      overlay.setAttribute('aria-modal', 'true')
+      const panel = create(document, 'div', 'cxm-lifecycle-dialog cxm-local-import-dialog')
+      panel.classList.add('cxf-scope')
+      const header = create(document, 'div', 'cxm-lifecycle-header')
+      const heading = create(document, 'h2', undefined, '导入本地插件')
+      heading.id = 'cxm-local-package-directory-heading'
+      overlay.setAttribute('aria-labelledby', heading.id)
+      const close = managerIconAction('close', '关闭')
+      close.dataset.importLocalClose = 'true'
+      header.append(heading, close)
+      // The Host overlay title plus the labelled directory control already
+      // explains this bounded operation. Do not add a second title/CTA shell.
+      panel.append(header)
+      const form = forms.form('local-package-directory')
+      form.classList.add('cxm-local-import-form')
+      const field = create(document, 'div', 'cxm-local-import-field')
+      const label = create(document, 'label', 'cxf-label', '插件目录')
+      label.id = 'cxm-local-package-directory-label'
+      label.htmlFor = 'cxm-local-package-directory'
+      const error = create(document, 'p', 'cxm-local-import-error')
+      error.id = 'cxm-local-package-directory-error'
+      error.setAttribute('role', 'alert')
+      error.hidden = true
+      let pathValue = ''
+      let inspect: TDesignButtonElement | undefined
+      const validPath = (value: string): boolean => value.startsWith('/') || /^[A-Za-z]:[\\/]/u.test(value)
+      const updatePath = (value: string): void => {
+        pathValue = value.trim()
+        const message = pathValue === '' ? undefined : validPath(pathValue) ? undefined : '请选择目录或输入绝对路径'
+        error.textContent = message ?? ''
+        error.hidden = message === undefined
+        field.dataset.invalid = String(!error.hidden)
+        if (error.hidden) control?.focusTarget?.removeAttribute('aria-invalid')
+        else control?.focusTarget?.setAttribute('aria-invalid', 'true')
+        if (inspect !== undefined) setTDesignDisabled(inspect, !validPath(pathValue))
+      }
+      const pathField: CordisXConfigFieldSnapshot = {
+        namespace: 'cordisx.host',
+        path: ['localPackageDirectory'],
+        type: 'string',
+        role: 'directory',
+        value: '',
+        disabled: false,
+        required: true,
+      }
+      const control = forms.control(pathField, 'cxm-local-package-directory', value => {
+        updatePath(typeof value === 'string' ? value : '')
+      })
+      control.focusTarget?.setAttribute('aria-labelledby', label.id)
+      control.focusTarget?.setAttribute('aria-describedby', error.id)
+      control.focusTarget?.setAttribute('data-import-local-path', '')
+      const directoryControl = create(document, 'div', 'cxm-directory-control')
+      const picker = create(document, 'input', 'cxm-visually-hidden')
+      picker.type = 'file'
+      picker.tabIndex = -1
+      picker.setAttribute('webkitdirectory', '')
+      picker.setAttribute('directory', '')
+      picker.dataset.importLocalPicker = 'true'
+      const choose = managerIconAction('import-plugin', '选择插件目录', { className: 'cxm-directory-picker' })
+      choose.dataset.importLocalChoose = 'true'
+      choose.addEventListener('click', () => picker.click())
+      picker.addEventListener('change', () => {
+        const file = picker.files?.[0] as (File & { readonly path?: string }) | undefined
+        const filePath = file?.path
+        const relative = file?.webkitRelativePath
+        if (filePath === undefined || relative === undefined || relative === '') {
+          pathValue = ''
+          setTDesignProps(control.focusTarget as TDesignElement, { value: '', defaultValue: '' })
+          error.textContent = '当前环境无法读取目录路径，请粘贴绝对路径'
+          error.hidden = false
+          field.dataset.invalid = 'true'
+          control.focusTarget?.setAttribute('aria-invalid', 'true')
+          if (inspect !== undefined) setTDesignDisabled(inspect, true)
+          control.focusTarget?.focus()
+          return
+        }
+        const separator = filePath.includes('\\') ? '\\' : '/'
+        const relativePath = relative.replaceAll('/', separator)
+        const rootName = relative.split('/')[0] ?? ''
+        const root = filePath.endsWith(relativePath)
+          ? `${filePath.slice(0, -relativePath.length)}${rootName}`
+          : filePath.slice(0, Math.max(filePath.lastIndexOf(separator), 0))
+        setTDesignProps(control.focusTarget as TDesignElement, { value: root })
+        ;(control.focusTarget as TDesignElement & { onChange?: (value: string) => void }).onChange?.(root)
+        updatePath(root)
+        control.focusTarget?.focus()
+      })
+      directoryControl.append(control.root, choose)
+      field.append(label, directoryControl, picker, error)
+      const actions = create(document, 'div', 'cxf-actions cxm-local-import-actions')
+      const restoreInvokerFocus = (): void => {
+        const currentInvoker = invoker?.isConnected === true
+          ? invoker
+          : document.querySelector<HTMLElement>('[data-import-local-plugin]')
+        ;(currentInvoker ?? returnFocus)?.focus({ preventScroll: true })
+      }
+      const finish = (value?: string): void => {
+        unmountOverlay()
+        restoreInvokerFocus()
+        resolve(value)
+        document.defaultView?.setTimeout(() => {
+          restoreInvokerFocus()
+        }, 0)
+      }
+      close.addEventListener('click', () => finish(), { once: true })
+      const cancel = forms.button('取消')
+      cancel.addEventListener('click', () => finish(), { once: true })
+      inspect = forms.button('检查并导入', { type: 'submit', variant: 'primary' })
+      setTDesignDisabled(inspect, true)
+      inspect.setAttribute('data-import-local-submit', '')
+      form.addEventListener('submit', event => {
+        event.preventDefault()
+        if (!validPath(pathValue)) {
+          error.textContent = pathValue === '' ? '请选择插件目录' : '请选择目录或输入绝对路径'
+          error.hidden = false
+          field.dataset.invalid = 'true'
+          control.focusTarget?.setAttribute('aria-invalid', 'true')
+          control.focusTarget?.focus()
+          return
+        }
+        finish(pathValue)
+      })
+      form.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          finish()
+        }
+      })
+      actions.append(cancel, inspect)
+      form.append(field, actions)
+      panel.append(form)
+      overlay.append(panel)
+      unmountOverlay = mountPortal(overlay)
+      control.focusTarget?.focus()
+    })
 
   const lifecycleFailure = (result: CordisXPluginLifecycleResultV1): Error | undefined => {
     if (result.outcome === 'applied' || result.outcome === 'planned') return undefined
@@ -2749,10 +2930,12 @@ export function installCordisXManager(
     let packageId: string | undefined
     try {
       const inspection = await requestLifecycle({ kind: 'inspect-local', sourceDirectory })
-      if (inspection.outcome !== 'planned'
+      if (
+        inspection.outcome !== 'planned'
         || inspection.candidateId === undefined
         || inspection.package === undefined
-        || (inspection.operation !== 'install' && inspection.operation !== 'update')) {
+        || (inspection.operation !== 'install' && inspection.operation !== 'update')
+      ) {
         throw new Error('本地包检查没有返回可应用的候选版本')
       }
       packageId = inspection.package.id
@@ -2861,7 +3044,9 @@ export function installCordisXManager(
             document,
             plugin,
             planV4,
-            snapshot.permissions.filter(item => item.identity.id === plugin.id && item.identity.source === plugin.source),
+            snapshot.permissions.filter(item =>
+              item.identity.id === plugin.id && item.identity.source === plugin.source
+            ),
           )
           if (decision === undefined) return
           result = await model.applyPermissionLifecycleReviewV4(decision)
@@ -2871,7 +3056,9 @@ export function installCordisXManager(
             document,
             plugin,
             planV2,
-            snapshot.permissions.filter(item => item.identity.id === plugin.id && item.identity.source === plugin.source),
+            snapshot.permissions.filter(item =>
+              item.identity.id === plugin.id && item.identity.source === plugin.source
+            ),
           )
           if (decision === undefined) return
           result = await model.applyPermissionLifecycleReviewV2(decision)
@@ -2881,7 +3068,9 @@ export function installCordisXManager(
             document,
             plugin,
             plan.authorizationPlan,
-            snapshot.permissions.filter(item => item.identity.id === plugin.id && item.identity.source === plugin.source),
+            snapshot.permissions.filter(item =>
+              item.identity.id === plugin.id && item.identity.source === plugin.source
+            ),
           )
           if (decision === undefined) return
           result = await requestLifecycle({ kind: 'enable', pluginId: plugin.id, authorizationDecision: decision })
@@ -2973,9 +3162,10 @@ export function installCordisXManager(
     return 'plugins'
   }
 
-  const currentSettingsTab = (): string => routeState.kind === 'settings'
-    ? routeState.tabId
-    : MANAGER_SETTINGS_FALLBACK
+  const currentSettingsTab = (): string =>
+    routeState.kind === 'settings'
+      ? routeState.tabId
+      : MANAGER_SETTINGS_FALLBACK
 
   const settingsNavigationItems = (snapshot: ManagerSnapshot): readonly ManagerSettingsNavigationItemSnapshot[] => (
     sortManagerSettingsNavigationItems(snapshot.settingsNavigationItems ?? [])
@@ -2985,7 +3175,8 @@ export function installCordisXManager(
     localizeTabs(PLUGIN_DETAIL_TABS).find(item => item.id === id) ?? localizeTabs(PLUGIN_DETAIL_TABS)[0]!
   )
   const extensionPointFacet = (id: ExtensionPointDetailTab): ReturnType<typeof localizeTabs>[number] => (
-    localizeTabs(EXTENSION_POINT_DETAIL_TABS).find(item => item.id === id) ?? localizeTabs(EXTENSION_POINT_DETAIL_TABS)[0]!
+    localizeTabs(EXTENSION_POINT_DETAIL_TABS).find(item => item.id === id)
+      ?? localizeTabs(EXTENSION_POINT_DETAIL_TABS)[0]!
   )
   const marketplaceFacet = (id: MarketplaceDetailTab): ReturnType<typeof localizeTabs>[number] => (
     localizeTabs(MARKETPLACE_DETAIL_TABS).find(item => item.id === id) ?? localizeTabs(MARKETPLACE_DETAIL_TABS)[0]!
@@ -3022,7 +3213,11 @@ export function installCordisXManager(
         primary,
         segments: [
           root('plugins'),
-          { id: `plugin:${route.pluginId}`, label: plugin?.name ?? route.pluginId, target: { kind: 'plugin', pluginId: route.pluginId, facet: 'readme' } },
+          {
+            id: `plugin:${route.pluginId}`,
+            label: plugin?.name ?? route.pluginId,
+            target: { kind: 'plugin', pluginId: route.pluginId, facet: 'readme' },
+          },
           { id: `plugin:${route.pluginId}:facet:${route.facet}`, label: facet.label },
         ],
       }
@@ -3034,9 +3229,20 @@ export function installCordisXManager(
         primary,
         segments: [
           root('plugins'),
-          { id: `plugin:${route.pluginId}`, label: plugin?.name ?? route.pluginId, target: { kind: 'plugin', pluginId: route.pluginId, facet: 'readme' } },
-          { id: `plugin:${route.pluginId}:facet:permissions`, label: pluginFacet('permissions').label, target: { kind: 'plugin', pluginId: route.pluginId, facet: 'permissions' } },
-          { id: `plugin:${route.pluginId}:permission:${route.fingerprint}`, label: capabilityPresentation(route.capability).name },
+          {
+            id: `plugin:${route.pluginId}`,
+            label: plugin?.name ?? route.pluginId,
+            target: { kind: 'plugin', pluginId: route.pluginId, facet: 'readme' },
+          },
+          {
+            id: `plugin:${route.pluginId}:facet:permissions`,
+            label: pluginFacet('permissions').label,
+            target: { kind: 'plugin', pluginId: route.pluginId, facet: 'permissions' },
+          },
+          {
+            id: `plugin:${route.pluginId}:permission:${route.fingerprint}`,
+            label: capabilityPresentation(route.capability).name,
+          },
         ],
       }
     }
@@ -3048,7 +3254,11 @@ export function installCordisXManager(
         primary,
         segments: [
           root('extension-points'),
-          { id: `extension-point:${route.pointId}`, label: point?.titleProjection.text ?? route.pointId, target: { kind: 'extension-point', pointId: route.pointId, facet: 'usage' } },
+          {
+            id: `extension-point:${route.pointId}`,
+            label: point?.titleProjection.text ?? route.pointId,
+            target: { kind: 'extension-point', pointId: route.pointId, facet: 'usage' },
+          },
           { id: `extension-point:${route.pointId}:facet:${route.facet}`, label: facet.label },
         ],
       }
@@ -3077,14 +3287,20 @@ export function installCordisXManager(
     }
     if (route.kind === 'marketplace') {
       const plugin = marketplace.snapshot().plugins.find(item => item.identity === route.identity)
-      const projection = plugin === undefined ? undefined : projectMarketplacePlugin(plugin, snapshot.localization.locale)
+      const projection = plugin === undefined
+        ? undefined
+        : projectMarketplacePlugin(plugin, snapshot.localization.locale)
       const facet = marketplaceFacet(route.facet)
       return {
         id: `marketplace:${route.identity}:${route.facet}`,
         primary,
         segments: [
           root('marketplace'),
-          { id: `marketplace:${route.identity}`, label: projection?.name ?? '已移除的插件', target: { kind: 'marketplace', identity: route.identity, facet: 'overview' } },
+          {
+            id: `marketplace:${route.identity}`,
+            label: projection?.name ?? '已移除的插件',
+            target: { kind: 'marketplace', identity: route.identity, facet: 'overview' },
+          },
           { id: `marketplace:${route.identity}:facet:${route.facet}`, label: facet.label },
         ],
       }
@@ -3093,7 +3309,9 @@ export function installCordisXManager(
       const source = route.url === undefined
         ? undefined
         : marketplace.snapshot().sourceStates.find(item => item.url === route.url)
-      const projection = source === undefined ? undefined : projectMarketplaceSource(source, snapshot.localization.locale)
+      const projection = source === undefined
+        ? undefined
+        : projectMarketplaceSource(source, snapshot.localization.locale)
       const sourceRoot: ManagerBreadcrumbSegment = {
         id: 'marketplace-sources',
         label: managerCopy(snapshot.localization.locale, 'marketplace.source.index-heading'),
@@ -3110,7 +3328,10 @@ export function installCordisXManager(
         return {
           id: 'marketplace-source:create',
           primary,
-          segments: [root('marketplace'), sourceRoot, { id: 'marketplace-source:create', label: managerCopy(snapshot.localization.locale, 'marketplace.source.create') }],
+          segments: [root('marketplace'), sourceRoot, {
+            id: 'marketplace-source:create',
+            label: managerCopy(snapshot.localization.locale, 'marketplace.source.create'),
+          }],
         }
       }
       return {
@@ -3119,7 +3340,10 @@ export function installCordisXManager(
         segments: [
           root('marketplace'),
           sourceRoot,
-          { id: `marketplace-source:edit:${route.url ?? ''}`, label: projection?.name ?? managerCopy(snapshot.localization.locale, 'marketplace.source.edit-heading') },
+          {
+            id: `marketplace-source:edit:${route.url ?? ''}`,
+            label: projection?.name ?? managerCopy(snapshot.localization.locale, 'marketplace.source.edit-heading'),
+          },
         ],
       }
     }
@@ -3131,8 +3355,14 @@ export function installCordisXManager(
         primary,
         segments: [
           root('plugins'),
-          { id: `manager-content:${route.id}`, label: item?.pageTitle ?? route.id, target: { kind: 'manager-content', id: route.id, reference: item?.route ?? route.reference } },
-          ...(projection?.parent === undefined ? [] : [{ id: `manager-content:${route.id}:${route.reference.id}`, label: projection.title }]),
+          {
+            id: `manager-content:${route.id}`,
+            label: item?.pageTitle ?? route.id,
+            target: { kind: 'manager-content', id: route.id, reference: item?.route ?? route.reference },
+          },
+          ...(projection?.parent === undefined
+            ? []
+            : [{ id: `manager-content:${route.id}:${route.reference.id}`, label: projection.title }]),
         ],
       }
     }
@@ -3152,24 +3382,35 @@ export function installCordisXManager(
         if (!declared) return { kind: 'plugin', pluginId: plugin.id, facet: 'permissions' }
       }
     }
-    if (candidate.kind === 'extension-point' && !snapshot.extensionPoints?.points.some(item => item.id === candidate.pointId)) {
+    if (
+      candidate.kind === 'extension-point'
+      && !snapshot.extensionPoints?.points.some(item => item.id === candidate.pointId)
+    ) {
       return { kind: 'primary', primary: 'extension-points' }
     }
-    if (candidate.kind === 'route' && !snapshot.navigation.routes.some(item => item.qualifiedId === candidate.qualifiedId)) {
+    if (
+      candidate.kind === 'route' && !snapshot.navigation.routes.some(item => item.qualifiedId === candidate.qualifiedId)
+    ) {
       return { kind: 'primary', primary: 'routes' }
     }
-    if (candidate.kind === 'page' && !snapshot.navigation.pages.some(item => item.qualifiedId === candidate.qualifiedId)) {
+    if (
+      candidate.kind === 'page' && !snapshot.navigation.pages.some(item => item.qualifiedId === candidate.qualifiedId)
+    ) {
       return { kind: 'primary', primary: 'routes' }
     }
     if (candidate.kind === 'marketplace') {
       const marketplaceSnapshot = marketplace.snapshot()
-      if (!marketplaceSnapshot.loading && !marketplaceSnapshot.plugins.some(item => item.identity === candidate.identity)) {
+      if (
+        !marketplaceSnapshot.loading && !marketplaceSnapshot.plugins.some(item => item.identity === candidate.identity)
+      ) {
         return { kind: 'primary', primary: 'marketplace' }
       }
     }
     if (candidate.kind === 'marketplace-source') {
       if (candidate.page === 'edit') {
-        if (candidate.url === undefined || !marketplace.snapshot().sourceRecords.some(item => item.url === candidate.url)) {
+        if (
+          candidate.url === undefined || !marketplace.snapshot().sourceRecords.some(item => item.url === candidate.url)
+        ) {
           return { kind: 'marketplace-source', page: 'index' }
         }
       } else if (candidate.url !== undefined) {
@@ -3177,10 +3418,12 @@ export function installCordisXManager(
       }
     }
     if (candidate.kind === 'settings') return { kind: 'primary', primary: 'plugins' }
-    if (candidate.kind === 'manager-content'
+    if (
+      candidate.kind === 'manager-content'
       && (!settingsNavigationItems(snapshot).some(item => item.id === candidate.id)
         || (model.managerContentPresentation !== undefined
-          && model.managerContentPresentation(candidate.id, candidate.reference) === undefined))) {
+          && model.managerContentPresentation(candidate.id, candidate.reference) === undefined))
+    ) {
       return { kind: 'primary', primary: 'plugins' }
     }
     return candidate
@@ -3244,7 +3487,9 @@ export function installCordisXManager(
           const action = create(document, 'button', 'cxm-breadcrumb-action', segment.label)
           action.type = 'button'
           action.dataset.breadcrumbTarget = segment.id
-          action.addEventListener('click', () => { void navigateRoute(segment.target!) })
+          action.addEventListener('click', () => {
+            void navigateRoute(segment.target!)
+          })
           item.append(action)
         }
         list.append(item)
@@ -3297,7 +3542,13 @@ export function installCordisXManager(
     content.scrollTop = listScrollPositions.get(activePrimary()) ?? 0
   }
 
-  const createListSearch = (id: string, label: string, placeholder: string, value: string, onChange: (value: string) => void): HTMLDivElement => {
+  const createListSearch = (
+    id: string,
+    label: string,
+    placeholder: string,
+    value: string,
+    onChange: (value: string) => void,
+  ): HTMLDivElement => {
     const root = create(document, 'div', 'cxm-list-search')
     root.dataset.listSearch = id
     root.setAttribute('role', 'search')
@@ -3346,7 +3597,9 @@ export function installCordisXManager(
       back.type = 'button'
       back.setAttribute('aria-label', copy('manager.back'))
       back.append(createManagerIcon(document, 'back', 'cxm-back-icon'))
-      back.addEventListener('click', () => { void navigateBack() })
+      back.addEventListener('click', () => {
+        void navigateBack()
+      })
       // History owns the one stable leading seat. Do not place a decorative
       // icon next to Back: it shifts the title and creates duplicate chrome.
       row.append(back)
@@ -3354,8 +3607,8 @@ export function installCordisXManager(
       const icon = options.brand === true
         ? createAdaptiveBrandMark(document)
         : String(options.icon ?? 'plugins').startsWith('host:')
-          ? createHostSurfaceIcon(document, options.icon as CordisXIconToken)
-          : createManagerIcon(document, options.icon === undefined ? 'plugins' : options.icon as ManagerIconToken)
+        ? createHostSurfaceIcon(document, options.icon as CordisXIconToken)
+        : createManagerIcon(document, options.icon === undefined ? 'plugins' : options.icon as ManagerIconToken)
       icon.classList.add('cxm-heading-leading', 'cxm-heading-icon')
       icon.setAttribute('aria-hidden', 'true')
       row.append(icon)
@@ -3369,7 +3622,10 @@ export function installCordisXManager(
     // such as “Plugin details” or “Configuration” expands shared chrome
     // without adding context; primary pages may retain a distinct purpose.
     const description = headingCopy?.trim()
-    if (pageRoute.segments.length <= 1 && description !== undefined && description !== '' && description !== current.trim()) {
+    if (
+      pageRoute.segments.length <= 1 && description !== undefined && description !== ''
+      && description !== current.trim()
+    ) {
       heading.append(create(document, 'p', undefined, description))
     }
   }
@@ -3432,7 +3688,8 @@ export function installCordisXManager(
     usage?: ExtensionPointPluginUsageSnapshot,
   ): ExtensionPointRowStatus | undefined => {
     const catalogText = snapshot.extensionPoints?.catalogText
-    const descriptorError = snapshot.extensionPoints?.descriptorDiagnostics.some(item => item.pointId === point.id) === true
+    const descriptorError =
+      snapshot.extensionPoints?.descriptorDiagnostics.some(item => item.pointId === point.id) === true
       || point.titleProjection.diagnostic !== undefined
       || point.descriptionProjection.diagnostic !== undefined
     if (descriptorError || usage?.authorized === false) {
@@ -3445,10 +3702,18 @@ export function installCordisXManager(
       }
     }
     if (point.effectiveAdapterSupport === 'unsupported') {
-      return { state: 'unavailable', text: catalogText?.status.unavailable.text ?? '[[catalog.status.unavailable]]', icon: 'host:error' }
+      return {
+        state: 'unavailable',
+        text: catalogText?.status.unavailable.text ?? '[[catalog.status.unavailable]]',
+        icon: 'host:error',
+      }
     }
     if (point.effectiveAdapterSupport === 'unverified') {
-      return { state: 'pending', text: catalogText?.status.pending.text ?? '[[catalog.status.pending]]', icon: 'host:warning' }
+      return {
+        state: 'pending',
+        text: catalogText?.status.pending.text ?? '[[catalog.status.pending]]',
+        icon: 'host:warning',
+      }
     }
     return undefined
   }
@@ -3502,10 +3767,10 @@ export function installCordisXManager(
       const status: HostCollectionStatus | undefined = rowStatus === undefined
         ? undefined
         : {
-            label: rowStatus.text,
-            tone: rowStatus.state === 'pending' ? 'warning' : 'danger',
-            detail: rowStatus.text,
-          }
+          label: rowStatus.text,
+          tone: rowStatus.state === 'pending' ? 'warning' : 'danger',
+          detail: rowStatus.text,
+        }
       return {
         id: point.id,
         title: point.titleProjection.text,
@@ -3522,7 +3787,16 @@ export function installCordisXManager(
           point.currentContext,
           point.currentContextCode ?? '',
           point.currentContextDetail ?? '',
-          ...(point.anchors ?? []).flatMap(anchor => [anchor.id, anchor.adapterSupport, anchor.effectiveAdapterSupport, anchor.currentContext, anchor.availabilityCode ?? '', anchor.availabilityDetail ?? '']),
+          ...(point.anchors ?? []).flatMap(
+            anchor => [
+              anchor.id,
+              anchor.adapterSupport,
+              anchor.effectiveAdapterSupport,
+              anchor.currentContext,
+              anchor.availabilityCode ?? '',
+              anchor.availabilityDetail ?? '',
+            ],
+          ),
           ...point.plugins.flatMap(plugin => [plugin.name, plugin.identity.id, plugin.identity.source]),
           ...point.plugins.flatMap(plugin => plugin.registrations.map(item => item.id)),
           ...point.plugins.flatMap(plugin => plugin.routes.map(item => item.qualifiedId)),
@@ -3532,7 +3806,11 @@ export function installCordisXManager(
         onOpen: () => {
           rememberListScroll()
           operationError = undefined
-          void navigateRoute({ kind: 'extension-point', pointId: point.id, facet: rowStatus === undefined ? 'usage' : 'diagnostics' })
+          void navigateRoute({
+            kind: 'extension-point',
+            pointId: point.id,
+            facet: rowStatus === undefined ? 'usage' : 'diagnostics',
+          })
         },
       }
     })
@@ -3545,7 +3823,9 @@ export function installCordisXManager(
         label: copy('extension.search-label'),
         placeholder: copy('extension.search-placeholder'),
         query: extensionPointQuery,
-        onQueryChange: value => { extensionPointQuery = value },
+        onQueryChange: value => {
+          extensionPointQuery = value
+        },
       },
       emptyLabel: copy('extension.empty'),
       noMatchesLabel: copy('extension.no-matches'),
@@ -3568,9 +3848,17 @@ export function installCordisXManager(
       return
     }
     const activeFacet = routeState.kind === 'extension-point' ? routeState.facet : 'usage'
-    content.append(createLocalTabs(document, localizeTabs(EXTENSION_POINT_DETAIL_TABS), activeFacet, 'data-extension-point-detail-tab', (tab) => {
-      void navigateRoute({ kind: 'extension-point', pointId: id, facet: tab as ExtensionPointDetailTab })
-    }))
+    content.append(
+      createLocalTabs(
+        document,
+        localizeTabs(EXTENSION_POINT_DETAIL_TABS),
+        activeFacet,
+        'data-extension-point-detail-tab',
+        (tab) => {
+          void navigateRoute({ kind: 'extension-point', pointId: id, facet: tab as ExtensionPointDetailTab })
+        },
+      ),
+    )
 
     if (activeFacet === 'usage') {
       const panel = createTabPanel(document, '使用情况')
@@ -3580,22 +3868,28 @@ export function installCordisXManager(
         `搜索${point.titleProjection.text}的插件与贡献`,
         '搜索插件、贡献名称或 id…',
         query,
-        value => { extensionPointUsageQueries.set(point.id, value) },
+        value => {
+          extensionPointUsageQueries.set(point.id, value)
+        },
       ))
       const filteredUsages = point.plugins.flatMap(usage => {
         const pluginMatches = matchesManagerSearch(query, [usage.name, usage.description ?? '', usage.identity.id])
-        const registrations = usage.registrations.filter(registration => pluginMatches || matchesManagerSearch(query, [
-          registration.titleText,
-          registration.descriptionText ?? '',
-          registration.id,
-          registration.qualifiedId,
-        ]))
-        const routes = usage.routes.filter(route => pluginMatches || matchesManagerSearch(query, [
-          route.definition.path,
-          route.definition.outlet,
-          route.qualifiedId,
-          `${route.owner}:${route.definition.page}`,
-        ]))
+        const registrations = usage.registrations.filter(registration =>
+          pluginMatches || matchesManagerSearch(query, [
+            registration.titleText,
+            registration.descriptionText ?? '',
+            registration.id,
+            registration.qualifiedId,
+          ])
+        )
+        const routes = usage.routes.filter(route =>
+          pluginMatches || matchesManagerSearch(query, [
+            route.definition.path,
+            route.definition.outlet,
+            route.qualifiedId,
+            `${route.owner}:${route.definition.page}`,
+          ])
+        )
         if (!pluginMatches && registrations.length === 0 && routes.length === 0) return []
         return [{ usage, registrations, routes }]
       })
@@ -3628,14 +3922,14 @@ export function installCordisXManager(
             if (value === undefined) return
             policy.setBusy(true)
             void (async () => {
-          operationError = undefined
-          try {
+              operationError = undefined
+              try {
                 await model.setExtensionPointPolicy?.(usage.identity.source, usage.identity.id, point.id, value)
-          } catch (error) {
-            operationError = error instanceof Error ? error.message : String(error)
-          } finally {
-            renderContent()
-          }
+              } catch (error) {
+                operationError = error instanceof Error ? error.message : String(error)
+              } finally {
+                renderContent()
+              }
             })()
           },
           { disabled: model.setExtensionPointPolicy === undefined },
@@ -3646,12 +3940,25 @@ export function installCordisXManager(
         const resources = create(document, 'div', 'cxm-usage-resources')
         if (point.kind === 'surface') {
           for (const registration of registrations) {
-            const state = !registration.valid ? '无效' : !registration.authorized ? '已拒绝' : registration.rendered ? '已渲染' : registration.pending ? '等待宿主锚点' : '已登记'
+            const state = !registration.valid
+              ? '无效'
+              : !registration.authorized
+              ? '已拒绝'
+              : registration.rendered
+              ? '已渲染'
+              : registration.pending
+              ? '等待宿主锚点'
+              : '已登记'
             const resource = create(document, 'div', 'cxm-resource-row')
             resource.dataset.contributionId = registration.id
             resource.append(
               create(document, 'span', 'cxm-resource-title', registration.titleText),
-              create(document, 'span', 'cxm-resource-description', `${registration.descriptionText ?? '结构化贡献'} · ${state}`),
+              create(
+                document,
+                'span',
+                'cxm-resource-description',
+                `${registration.descriptionText ?? '结构化贡献'} · ${state}`,
+              ),
               create(document, 'code', 'cxm-resource-id', registration.id),
             )
             resources.append(resource)
@@ -3663,7 +3970,12 @@ export function installCordisXManager(
             resource.dataset.routeContributionId = route.qualifiedId
             resource.append(
               create(document, 'span', 'cxm-resource-title', route.definition.path),
-              create(document, 'span', 'cxm-resource-description', `在 ${route.definition.outlet} 中打开 ${pageId} · ${route.authorized ? '已授权' : '已拒绝'}`),
+              create(
+                document,
+                'span',
+                'cxm-resource-description',
+                `在 ${route.definition.outlet} 中打开 ${pageId} · ${route.authorized ? '已授权' : '已拒绝'}`,
+              ),
               create(document, 'code', 'cxm-resource-id', route.qualifiedId),
             )
             resources.append(resource)
@@ -3681,11 +3993,29 @@ export function installCordisXManager(
     if (activeFacet === 'information') {
       const panel = createTabPanel(document, '点位信息')
       const fields = create(document, 'div', 'cxm-detail-grid')
-      const outlet = point.kind === 'outlet' ? snapshot.navigation.outlets.find(item => item.id === point.id) : undefined
-      const maturityLabel = point.maturity === 'stable' ? '稳定' : point.maturity === 'experimental' ? '实验性' : '协议保留'
-      const supportLabel = point.effectiveAdapterSupport === 'supported' ? '已支持' : point.effectiveAdapterSupport === 'unverified' ? '尚未验证' : '不支持'
-      const declaredSupportLabel = point.adapterSupport === 'supported' ? '已支持' : point.adapterSupport === 'unverified' ? '尚未验证' : '不支持'
-      const contextLabel = point.currentContext === 'active' ? '当前已挂载' : point.currentContext === 'inactive' ? '当前上下文未激活' : '当前页面未挂载'
+      const outlet = point.kind === 'outlet'
+        ? snapshot.navigation.outlets.find(item => item.id === point.id)
+        : undefined
+      const maturityLabel = point.maturity === 'stable'
+        ? '稳定'
+        : point.maturity === 'experimental'
+        ? '实验性'
+        : '协议保留'
+      const supportLabel = point.effectiveAdapterSupport === 'supported'
+        ? '已支持'
+        : point.effectiveAdapterSupport === 'unverified'
+        ? '尚未验证'
+        : '不支持'
+      const declaredSupportLabel = point.adapterSupport === 'supported'
+        ? '已支持'
+        : point.adapterSupport === 'unverified'
+        ? '尚未验证'
+        : '不支持'
+      const contextLabel = point.currentContext === 'active'
+        ? '当前已挂载'
+        : point.currentContext === 'inactive'
+        ? '当前上下文未激活'
+        : '当前页面未挂载'
       const rows: readonly (readonly [string, string])[] = [
         ['稳定标识', point.id],
         ['类型', point.kind === 'surface' ? '结构化界面点位' : '覆盖页面出口'],
@@ -3693,14 +4023,20 @@ export function installCordisXManager(
         ['宿主图标', point.icon],
         ['成熟度', maturityLabel],
         ['适配器支持', supportLabel],
-        ...(point.effectiveAdapterSupport === point.adapterSupport ? [] : [['目录声明支持', declaredSupportLabel]] as const),
+        ...(point.effectiveAdapterSupport === point.adapterSupport
+          ? []
+          : [['目录声明支持', declaredSupportLabel]] as const),
         ['当前上下文', contextLabel],
         ...(point.currentContextCode === undefined ? [] : [['上下文代码', point.currentContextCode]] as const),
         ...(point.currentContextDetail === undefined ? [] : [['上下文详情', point.currentContextDetail]] as const),
-        ...(point.anchors ?? []).map(anchor => [
-          `语义锚点 ${anchor.id}`,
-          `${anchor.placements.join('/')} · ${anchor.effectiveAdapterSupport} · ${anchor.currentContext}${anchor.availabilityCode === undefined ? '' : ` · ${anchor.availabilityCode}`}${anchor.availabilityDetail === undefined ? '' : ` · ${anchor.availabilityDetail}`}`,
-        ] as const),
+        ...(point.anchors ?? []).map(anchor =>
+          [
+            `语义锚点 ${anchor.id}`,
+            `${anchor.placements.join('/')} · ${anchor.effectiveAdapterSupport} · ${anchor.currentContext}${
+              anchor.availabilityCode === undefined ? '' : ` · ${anchor.availabilityCode}`
+            }${anchor.availabilityDetail === undefined ? '' : ` · ${anchor.availabilityDetail}`}`,
+          ] as const
+        ),
         ...(outlet === undefined ? [] : [
           ['覆盖方式', outlet.placement],
           ['上下文', outlet.contextKey ?? '等待宿主上下文'],
@@ -3708,7 +4044,10 @@ export function installCordisXManager(
       ]
       for (const [label, value] of rows) {
         const field = create(document, 'div', 'cxm-field')
-        field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
+        field.append(
+          create(document, 'div', 'cxm-field-label', label),
+          create(document, 'div', 'cxm-field-value', value),
+        )
         fields.append(field)
       }
       panel.append(fields)
@@ -3724,9 +4063,18 @@ export function installCordisXManager(
         ...(anchor.availabilityCode === undefined ? [] : [`${anchor.id} · ${anchor.availabilityCode}`]),
         ...(anchor.availabilityDetail === undefined ? [] : [`${anchor.id} · ${anchor.availabilityDetail}`]),
       ]),
-      ...(snapshot.extensionPoints?.descriptorDiagnostics.filter(item => item.pointId === point.id).map(item => `${item.code} · ${item.message}`) ?? []),
-      ...(snapshot.extensionPoints?.policyDiagnostics.filter(item => item.identity.pointId === point.id).map(item => `${item.code} · ${item.message}`) ?? []),
-      ...(snapshot.extensionPoints?.accessDiagnostics.filter(item => item.request.identity.pointId === point.id).map(item => `${item.request.operation} · ${item.authorized ? '允许' : '拒绝'}${item.reason === undefined ? '' : ` · ${item.reason}`}`) ?? []),
+      ...(snapshot.extensionPoints?.descriptorDiagnostics.filter(item => item.pointId === point.id).map(item =>
+        `${item.code} · ${item.message}`
+      ) ?? []),
+      ...(snapshot.extensionPoints?.policyDiagnostics.filter(item => item.identity.pointId === point.id).map(item =>
+        `${item.code} · ${item.message}`
+      ) ?? []),
+      ...(snapshot.extensionPoints?.accessDiagnostics.filter(item => item.request.identity.pointId === point.id).map(
+        item =>
+          `${item.request.operation} · ${item.authorized ? '允许' : '拒绝'}${
+            item.reason === undefined ? '' : ` · ${item.reason}`
+          }`,
+      ) ?? []),
     ]
     if (diagnostics.length === 0) panel.append(create(document, 'div', 'cxm-empty', '当前没有与这个扩展点相关的诊断'))
     for (const diagnostic of diagnostics) panel.append(create(document, 'div', 'cxm-error', diagnostic))
@@ -3772,17 +4120,24 @@ export function installCordisXManager(
     if (item.productMetadata.diagnostics.length === 0) return undefined
     const fields = item.productMetadata.diagnostics.map(diagnostic => diagnostic.field)
     const zh = managerLanguage(snapshot) === 'zh'
-    const names = fields.map(field => field === 'title'
-      ? (zh ? '标题' : 'title')
-      : (zh ? '说明' : 'description'))
+    const names = fields.map(field =>
+      field === 'title'
+        ? (zh ? '标题' : 'title')
+        : (zh ? '说明' : 'description')
+    )
     const diagnostic = create(document, 'div', 'cxm-route-metadata-diagnostic')
     diagnostic.dataset.metadataDiagnostic = fields.join(',')
     diagnostic.title = item.productMetadata.diagnostics.map(entry => `${entry.code}: ${entry.message}`).join('\n')
     diagnostic.append(
       createManagerIcon(document, 'diagnostics'),
-      create(document, 'span', undefined, zh
-        ? `贡献作者应补充本地化${names.join('、')} metadata`
-        : `Contribution author should add localized ${names.join(' and ')} metadata`),
+      create(
+        document,
+        'span',
+        undefined,
+        zh
+          ? `贡献作者应补充本地化${names.join('、')} metadata`
+          : `Contribution author should add localized ${names.join(' and ')} metadata`,
+      ),
     )
     return diagnostic
   }
@@ -3848,7 +4203,12 @@ export function installCordisXManager(
     const metadataDiagnostic = createRouteMetadataDiagnostic(snapshot, route)
     if (metadataDiagnostic !== undefined) body.append(metadataDiagnostic)
     if (!route.valid || !route.authorized) {
-      const state = create(document, 'span', 'cxm-route-state', route.error ?? (route.authorized ? '路由不可用' : '扩展点策略已拒绝'))
+      const state = create(
+        document,
+        'span',
+        'cxm-route-state',
+        route.error ?? (route.authorized ? '路由不可用' : '扩展点策略已拒绝'),
+      )
       state.dataset.routeState = route.valid ? 'denied' : 'invalid'
       body.append(state)
     }
@@ -3900,13 +4260,13 @@ export function installCordisXManager(
     const description = route.productMetadata.description ?? missingMetadataText(snapshot, 'description')
     const status: HostCollectionStatus | undefined = !route.valid || !route.authorized
       ? {
-          label: route.valid ? '已拒绝' : '无效',
-          tone: 'danger',
-          detail: route.error ?? (route.authorized ? '路由不可用' : '扩展点策略已拒绝'),
-        }
+        label: route.valid ? '已拒绝' : '无效',
+        tone: 'danger',
+        detail: route.error ?? (route.authorized ? '路由不可用' : '扩展点策略已拒绝'),
+      }
       : route.productMetadata.diagnostics.length > 0
-        ? { label: '内容信息待补充', tone: 'warning', detail: '内容信息待补充' }
-        : undefined
+      ? { label: '内容信息待补充', tone: 'warning', detail: '内容信息待补充' }
+      : undefined
     return {
       id: `route:${route.qualifiedId}`,
       title,
@@ -3966,10 +4326,12 @@ export function installCordisXManager(
   const renderRouteList = (snapshot: ManagerSnapshot): void => {
     setHeading(copy('routes.heading'), snapshot, { icon: 'routes' })
     const items: HostCollectionItem[] = [
-      ...snapshot.navigation.routes.map(route => routeCollectionItem(snapshot, route, () => {
-        rememberListScroll()
-        void navigateRoute({ kind: 'route', qualifiedId: route.qualifiedId })
-      })),
+      ...snapshot.navigation.routes.map(route =>
+        routeCollectionItem(snapshot, route, () => {
+          rememberListScroll()
+          void navigateRoute({ kind: 'route', qualifiedId: route.qualifiedId })
+        })
+      ),
       ...snapshot.navigation.pages.map(page => {
         const routes = snapshot.navigation.routes.filter(route => (
           qualifiedNavigationId(route.owner, route.definition.page) === page.qualifiedId
@@ -3989,7 +4351,9 @@ export function installCordisXManager(
         label: copy('routes.search-label'),
         placeholder: copy('routes.search-placeholder'),
         query: routeQuery,
-        onQueryChange: value => { routeQuery = value },
+        onQueryChange: value => {
+          routeQuery = value
+        },
       },
       emptyLabel: copy('routes.empty'),
       noMatchesLabel: copy('routes.no-matches'),
@@ -4019,10 +4383,10 @@ export function installCordisXManager(
     const presentation = outlet?.activeRoute !== route.qualifiedId
       ? '未打开'
       : outlet.presentation === 'presented'
-        ? '展示中'
-        : outlet.presentation === 'suspended'
-          ? `已暂停${outlet.suspendedBy === undefined ? '' : ` · 由 ${outlet.suspendedBy} 覆盖`}`
-          : '未打开'
+      ? '展示中'
+      : outlet.presentation === 'suspended'
+      ? `已暂停${outlet.suspendedBy === undefined ? '' : ` · 由 ${outlet.suspendedBy} 覆盖`}`
+      : '未打开'
     const routeSection = createRoutePageSection(
       'detail-route',
       '路由',
@@ -4031,12 +4395,14 @@ export function installCordisXManager(
     )
     routeSection.list.append(createRouteProductRow(snapshot, route))
     const statusFields = create(document, 'div', 'cxm-detail-grid')
-    for (const [label, value] of [
-      ['路由状态', !route.valid ? '无效' : route.authorized ? '已授权' : '已拒绝'],
-      ['页面注册', page === undefined ? '缺失' : '已注册'],
-      ['出口状态', outlet === undefined ? '未声明' : outlet.available ? '可用' : '不可用'],
-      ['展示状态', presentation],
-    ]) {
+    for (
+      const [label, value] of [
+        ['路由状态', !route.valid ? '无效' : route.authorized ? '已授权' : '已拒绝'],
+        ['页面注册', page === undefined ? '缺失' : '已注册'],
+        ['出口状态', outlet === undefined ? '未声明' : outlet.available ? '可用' : '不可用'],
+        ['展示状态', presentation],
+      ]
+    ) {
       const field = create(document, 'div', 'cxm-field')
       field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
       statusFields.append(field)
@@ -4097,19 +4463,27 @@ export function installCordisXManager(
   const renderPluginList = (snapshot: ManagerSnapshot): void => {
     setHeading(copy('manager.nav.plugins'), snapshot, { icon: 'plugins' })
     content.dataset.managerListPage = 'true'
-    const install = managerIconAction('import-plugin', lifecycleInstallBusy ? copy('plugins.install-checking') : copy('plugins.install'), {
-      className: 'cxm-toolbar-icon-action',
-      disabled: lifecycleInstallBusy
-        || lifecycleBusy.size > 0
-        || snapshot.pluginLifecycle?.operationsAvailable !== true
-        || model.requestPluginLifecycle === undefined,
-    })
+    const install = managerIconAction(
+      'import-plugin',
+      lifecycleInstallBusy ? copy('plugins.install-checking') : copy('plugins.install'),
+      {
+        className: 'cxm-toolbar-icon-action',
+        disabled: lifecycleInstallBusy
+          || lifecycleBusy.size > 0
+          || snapshot.pluginLifecycle?.operationsAvailable !== true
+          || model.requestPluginLifecycle === undefined,
+      },
+    )
     install.dataset.installLocalPlugin = 'true'
     install.dataset.importLocalPlugin = 'true'
-    install.addEventListener('click', () => { void runLocalPackageInstall(install) })
+    install.addEventListener('click', () => {
+      void runLocalPackageInstall(install)
+    })
 
     const favorites = favoritePlugins(snapshot)
-    const plugins = [...snapshot.plugins].sort((left, right) => Number(favorites.has(right.id)) - Number(favorites.has(left.id)))
+    const plugins = [...snapshot.plugins].sort((left, right) =>
+      Number(favorites.has(right.id)) - Number(favorites.has(left.id))
+    )
     const demoDescriptionKeys: Readonly<Partial<Record<string, Parameters<typeof managerCopy>[1]>>> = {
       'slot-showcase': 'plugins.demo.slot-showcase-description',
       'hello-toolbar': 'plugins.demo.hello-toolbar-description',
@@ -4128,12 +4502,22 @@ export function installCordisXManager(
       const sourceActionReason = sourceReason === undefined ? undefined : copy('status.unavailable')
       const favorite = favorites.has(plugin.id)
       const toggleReason = toggleDisabled
-        ? (!managed ? copy('status.unavailable') : globallyBusy ? copy('plugins.operation-busy') : copy(enable ? 'plugins.enable-unavailable' : 'plugins.disable-unavailable'))
+        ? (!managed
+          ? copy('status.unavailable')
+          : globallyBusy
+          ? copy('plugins.operation-busy')
+          : copy(enable ? 'plugins.enable-unavailable' : 'plugins.disable-unavailable'))
         : undefined
       const reloadReason = !reloadManaged
         ? copy('status.unavailable')
-        : globallyBusy ? copy('plugins.operation-busy') : plugin.status === 'active' ? undefined : copy('plugins.reload-unavailable')
-      const uninstallReason = !managed ? copy('status.unavailable') : (globallyBusy ? copy('plugins.operation-busy') : undefined)
+        : globallyBusy
+        ? copy('plugins.operation-busy')
+        : plugin.status === 'active'
+        ? undefined
+        : copy('plugins.reload-unavailable')
+      const uninstallReason = !managed
+        ? copy('status.unavailable')
+        : (globallyBusy ? copy('plugins.operation-busy') : undefined)
       const actions: HostCollectionAction[] = [
         {
           id: enable ? 'enable' : 'disable',
@@ -4143,7 +4527,9 @@ export function installCordisXManager(
           icon: () => createManagerIcon(document, enable ? 'enable-plugin' : 'disable-plugin'),
           disabled: toggleDisabled,
           ...(toggleReason === undefined ? {} : { unavailableReason: toggleReason }),
-          onInvoke: () => { void runPluginLifecycle(snapshot, plugin, enable ? 'enable' : 'disable') },
+          onInvoke: () => {
+            void runPluginLifecycle(snapshot, plugin, enable ? 'enable' : 'disable')
+          },
         },
         {
           id: 'favorite',
@@ -4165,7 +4551,9 @@ export function installCordisXManager(
           icon: () => createManagerIcon(document, 'reload-plugin'),
           disabled: !reloadManaged || globallyBusy || plugin.status !== 'active',
           ...(reloadReason === undefined ? {} : { unavailableReason: reloadReason }),
-          onInvoke: () => { void runPluginLifecycle(snapshot, plugin, 'reload') },
+          onInvoke: () => {
+            void runPluginLifecycle(snapshot, plugin, 'reload')
+          },
         },
         {
           id: 'share',
@@ -4174,17 +4562,21 @@ export function installCordisXManager(
           icon: () => createManagerIcon(document, 'share-plugin'),
           disabled: sourceReason !== undefined,
           ...(sourceActionReason === undefined ? {} : { unavailableReason: sourceActionReason }),
-          onInvoke: () => { void sharePlugin(plugin)
-            .catch(error => { operationError = error instanceof Error ? error.message : String(error) })
-            .finally(() => {
-              pendingPluginMenuFocus = plugin.id
-              renderContent()
-              queueMicrotask(() => {
-                const card = [...content.querySelectorAll<HTMLElement>('[data-plugin-card]')]
-                  .find(candidate => candidate.dataset.pluginCard === plugin.id)
-                card?.querySelector<HTMLElement>('.cxc-menu-trigger')?.focus()
+          onInvoke: () => {
+            void sharePlugin(plugin)
+              .catch(error => {
+                operationError = error instanceof Error ? error.message : String(error)
               })
-            }) },
+              .finally(() => {
+                pendingPluginMenuFocus = plugin.id
+                renderContent()
+                queueMicrotask(() => {
+                  const card = [...content.querySelectorAll<HTMLElement>('[data-plugin-card]')]
+                    .find(candidate => candidate.dataset.pluginCard === plugin.id)
+                  card?.querySelector<HTMLElement>('.cxc-menu-trigger')?.focus()
+                })
+              })
+          },
         },
         {
           id: 'source',
@@ -4193,7 +4585,9 @@ export function installCordisXManager(
           icon: () => createManagerIcon(document, 'authors-source'),
           disabled: sourceReason !== undefined,
           ...(sourceActionReason === undefined ? {} : { unavailableReason: sourceActionReason }),
-          onInvoke: () => { openPluginSource(plugin) },
+          onInvoke: () => {
+            openPluginSource(plugin)
+          },
         },
         {
           id: 'diagnostics',
@@ -4213,7 +4607,9 @@ export function installCordisXManager(
           icon: () => createManagerIcon(document, 'uninstall-plugin'),
           disabled: !managed || globallyBusy,
           ...(uninstallReason === undefined ? {} : { unavailableReason: uninstallReason }),
-          onInvoke: () => { void runPluginLifecycle(snapshot, plugin, 'uninstall', true) },
+          onInvoke: () => {
+            void runPluginLifecycle(snapshot, plugin, 'uninstall', true)
+          },
         },
       ]
       const visibleActions = actions.filter(action => action.placement === 'direct' || action.disabled !== true)
@@ -4222,7 +4618,9 @@ export function installCordisXManager(
       return {
         id: plugin.id,
         title: plugin.name,
-        description: demoDescriptionKey === undefined ? plugin.description ?? copy('plugins.local-description') : copy(demoDescriptionKey),
+        description: demoDescriptionKey === undefined
+          ? plugin.description ?? copy('plugins.local-description')
+          : copy(demoDescriptionKey),
         machineId: plugin.id,
         searchText: [plugin.source, ...plugin.inject, ...registrations.flatMap(item => [item.surface, item.id])],
         icon: () => createPluginIcon(document, plugin.name, plugin.icon),
@@ -4246,7 +4644,9 @@ export function installCordisXManager(
         placeholder: copy('plugins.search-placeholder'),
         clearLabel: copy('plugins.search-clear'),
         query: pluginQuery,
-        onQueryChange: value => { pluginQuery = value },
+        onQueryChange: value => {
+          pluginQuery = value
+        },
       },
       emptyLabel: copy('plugins.empty'),
       noMatchesLabel: copy('plugins.no-matches'),
@@ -4341,13 +4741,18 @@ export function installCordisXManager(
     detail.append(intro)
 
     const info = forms.section('权限信息')
-    for (const [label, value] of [
-      ['申请类型', permission.required ? '必需权限' : '可选权限'],
-      ['可用状态', capabilityAvailabilityLabel(permission.availability.status)],
-      ['能力标识', permission.capability],
-    ]) {
+    for (
+      const [label, value] of [
+        ['申请类型', permission.required ? '必需权限' : '可选权限'],
+        ['可用状态', capabilityAvailabilityLabel(permission.availability.status)],
+        ['能力标识', permission.capability],
+      ]
+    ) {
       const row = create(document, 'div', 'cxm-settings-info-row')
-      row.append(create(document, 'div', 'cxm-settings-info-label', label), create(document, 'div', 'cxm-settings-info-value', value))
+      row.append(
+        create(document, 'div', 'cxm-settings-info-label', label),
+        create(document, 'div', 'cxm-settings-info-value', value),
+      )
       info.content.append(row)
     }
     detail.append(info.root)
@@ -4361,16 +4766,24 @@ export function installCordisXManager(
       )
       authorization.root.dataset.permissionAuthorizationOrigin = permission.authorizationOrigin
       if (permission.certification !== undefined) {
-        for (const [label, value] of [
-          ['制品', `${permission.certification.pluginId}@${permission.certification.version}`],
-          ['完整性', permission.certification.integrity],
-          ['审核策略', `${permission.certification.reviewPolicy.id}@${permission.certification.reviewPolicy.version}`],
-          ['证据', permission.certification.evidence.reference],
-          ['投影 revision', permission.certification.revision],
-          ['投影 fingerprint', permission.certification.fingerprint],
-        ]) {
+        for (
+          const [label, value] of [
+            ['制品', `${permission.certification.pluginId}@${permission.certification.version}`],
+            ['完整性', permission.certification.integrity],
+            [
+              '审核策略',
+              `${permission.certification.reviewPolicy.id}@${permission.certification.reviewPolicy.version}`,
+            ],
+            ['证据', permission.certification.evidence.reference],
+            ['投影 revision', permission.certification.revision],
+            ['投影 fingerprint', permission.certification.fingerprint],
+          ]
+        ) {
           const row = create(document, 'div', 'cxm-settings-info-row')
-          row.append(create(document, 'div', 'cxm-settings-info-label', label), create(document, 'div', 'cxm-settings-info-value', value))
+          row.append(
+            create(document, 'div', 'cxm-settings-info-label', label),
+            create(document, 'div', 'cxm-settings-info-value', value),
+          )
           authorization.content.append(row)
         }
       }
@@ -4419,7 +4832,10 @@ export function installCordisXManager(
           create(document, 'span', 'cxm-permission-name', provider.providerNameText),
           create(document, 'span', 'cxm-permission-reason', provider.reasonText),
         )
-        providerItem.append(copy, create(document, 'span', 'cxm-kind-badge', capabilityAvailabilityLabel(provider.status)))
+        providerItem.append(
+          copy,
+          create(document, 'span', 'cxm-kind-badge', capabilityAvailabilityLabel(provider.status)),
+        )
         if (provider.scope !== undefined && hasCapabilityScope(provider.scope)) {
           const scope = create(document, 'pre', 'cxm-code', formatConfig(provider.scope))
           scope.dataset.permissionProviderScope = provider.providerId
@@ -4432,9 +4848,12 @@ export function installCordisXManager(
 
     detail.append(createSectionTitle(document, '本次运行审计'))
     const target = permission.lastRequested === undefined ? '无' : JSON.stringify(permission.lastRequested)
-    const audit = permission.lastUsedAt === undefined && permission.lastDeniedAt === undefined && permission.denialCount === 0
-      ? '本次运行尚无调用记录'
-      : `最近目标：${target} · 最近允许：${permission.lastUsedAt ?? '无'} · 最近拒绝：${permission.lastDeniedAt ?? '无'} · 拒绝次数：${permission.denialCount}`
+    const audit =
+      permission.lastUsedAt === undefined && permission.lastDeniedAt === undefined && permission.denialCount === 0
+        ? '本次运行尚无调用记录'
+        : `最近目标：${target} · 最近允许：${permission.lastUsedAt ?? '无'} · 最近拒绝：${
+          permission.lastDeniedAt ?? '无'
+        } · 拒绝次数：${permission.denialCount}`
     detail.append(create(document, 'p', 'cxm-copy cxm-permission-audit', audit))
     if (operationError !== undefined) detail.append(create(document, 'div', 'cxm-error', operationError))
     content.append(detail)
@@ -4460,22 +4879,35 @@ export function installCordisXManager(
     if (plugin.id !== 'cli-proxy-api' || model.listServiceConfigs === undefined) return
     const seat = create(document, 'div', 'cxm-plugin-service-config')
     seat.dataset.pluginServiceConfig = plugin.id
-    seat.append(forms.empty(productLocale(model.snapshot().localization.locale) === 'zh-CN' ? '正在读取 Provider 配置…' : 'Loading Provider configuration…'))
+    seat.append(
+      forms.empty(
+        productLocale(model.snapshot().localization.locale) === 'zh-CN'
+          ? '正在读取 Provider 配置…'
+          : 'Loading Provider configuration…',
+      ),
+    )
     panel.append(seat)
 
     const unavailable = (reason: unknown): string => {
       const code = reason instanceof Error ? reason.message : String(reason)
-      if (code === 'permission-denied') return productLocale(model.snapshot().localization.locale) === 'zh-CN'
-        ? '没有权限查看 Provider 配置。' : 'You do not have permission to view Provider configuration.'
+      if (code === 'permission-denied') {
+        return productLocale(model.snapshot().localization.locale) === 'zh-CN'
+          ? '没有权限查看 Provider 配置。'
+          : 'You do not have permission to view Provider configuration.'
+      }
       return productLocale(model.snapshot().localization.locale) === 'zh-CN'
-        ? 'Provider 配置当前不可用。' : 'Provider configuration is currently unavailable.'
+        ? 'Provider 配置当前不可用。'
+        : 'Provider configuration is currently unavailable.'
     }
     const render = (descriptors: readonly HostServiceConfigDescriptor[]): void => {
       if (!seat.isConnected) return
       seat.replaceChildren()
       if (descriptors.length === 0) {
-        seat.append(forms.empty(productLocale(model.snapshot().localization.locale) === 'zh-CN'
-          ? 'Provider 配置当前不可用。' : 'Provider configuration is currently unavailable.'))
+        seat.append(forms.empty(
+          productLocale(model.snapshot().localization.locale) === 'zh-CN'
+            ? 'Provider 配置当前不可用。'
+            : 'Provider configuration is currently unavailable.',
+        ))
         return
       }
       for (const descriptor of descriptors) {
@@ -4485,8 +4917,12 @@ export function installCordisXManager(
           ? (runtime ? 'Provider 连接' : '下次启动')
           : (runtime ? 'Provider connections' : 'Next launch')
         const description = productLocale(locale) === 'zh-CN'
-          ? (runtime ? '保存后重启 Provider 服务；当前连接不会被伪造成原生连接。' : '保存为下次应用启动候选值；重启应用后生效。')
-          : (runtime ? 'Saving restarts the Provider service; it never impersonates the native connection.' : 'Saved as the next app-start candidate and takes effect after restart.')
+          ? (runtime
+            ? '保存后重启 Provider 服务；当前连接不会被伪造成原生连接。'
+            : '保存为下次应用启动候选值；重启应用后生效。')
+          : (runtime
+            ? 'Saving restarts the Provider service; it never impersonates the native connection.'
+            : 'Saved as the next app-start candidate and takes effect after restart.')
         const section = forms.section(title, description)
         section.root.dataset.serviceConfig = descriptor.identity.serviceId
         section.root.dataset.configApplies = descriptor.configApplies
@@ -4505,7 +4941,13 @@ export function installCordisXManager(
           disabled: !descriptor.writable,
           required: true,
         }
-        const item = forms.item({ id: `cxm-service-${descriptor.identity.serviceId}-providers`, label: field.label!, ...(field.description === undefined ? {} : { help: field.description }), required: true, fullWidth: true })
+        const item = forms.item({
+          id: `cxm-service-${descriptor.identity.serviceId}-providers`,
+          label: field.label!,
+          ...(field.description === undefined ? {} : { help: field.description }),
+          required: true,
+          fullWidth: true,
+        })
         item.root.dataset.serviceConfigPath = `${descriptor.identity.serviceId}.providers`
         const candidate = (typeof globalThis.structuredClone === 'function'
           ? globalThis.structuredClone(descriptor.configuration)
@@ -4529,9 +4971,14 @@ export function installCordisXManager(
         status.setAttribute('role', 'status')
         if (descriptor.restartRequired) {
           status.dataset.state = 'dirty'
-          status.textContent = productLocale(locale) === 'zh-CN' ? '已有候选配置，重启应用后生效。' : 'A candidate is waiting for app restart.'
+          status.textContent = productLocale(locale) === 'zh-CN'
+            ? '已有候选配置，重启应用后生效。'
+            : 'A candidate is waiting for app restart.'
         }
-        const save = forms.button(productLocale(locale) === 'zh-CN' ? '保存 Provider 配置' : 'Save Provider configuration', { type: 'submit', variant: 'primary' })
+        const save = forms.button(
+          productLocale(locale) === 'zh-CN' ? '保存 Provider 配置' : 'Save Provider configuration',
+          { type: 'submit', variant: 'primary' },
+        )
         setTDesignDisabled(save, true)
         footer.append(status, save)
         form.append(section.root, footer)
@@ -4543,25 +4990,38 @@ export function installCordisXManager(
           status.dataset.state = 'saving'
           status.textContent = hostConfigApplyMessage(descriptor.configApplies, 'saving', locale)
           const mutation: HostServiceConfigMutation = {
-            contract: 'cordisx.service-config-mutation/v1', schemaVersion: 1,
-            identity: descriptor.identity, scope: descriptor.scope, expectedRevision: descriptor.revision,
+            contract: 'cordisx.service-config-mutation/v1',
+            schemaVersion: 1,
+            identity: descriptor.identity,
+            scope: descriptor.scope,
+            expectedRevision: descriptor.revision,
             configuration: candidate as unknown as HostServiceConfigMutation['configuration'],
           }
           void model.updateServiceConfig(mutation).then(async result => {
             if (result.status === 'rejected' || result.status === 'conflict') {
               const text = result.error.code === 'permission-denied'
-                ? (productLocale(locale) === 'zh-CN' ? '没有权限修改 Provider 配置。' : 'You do not have permission to modify Provider configuration.')
+                ? (productLocale(locale) === 'zh-CN'
+                  ? '没有权限修改 Provider 配置。'
+                  : 'You do not have permission to modify Provider configuration.')
                 : result.error.code === 'conflict'
-                  ? (productLocale(locale) === 'zh-CN' ? '配置已更新，请重新检查后再保存。' : 'Configuration changed; review it before saving again.')
-                  : (productLocale(locale) === 'zh-CN' ? 'Provider 配置未保存。' : 'Provider configuration was not saved.')
+                ? (productLocale(locale) === 'zh-CN'
+                  ? '配置已更新，请重新检查后再保存。'
+                  : 'Configuration changed; review it before saving again.')
+                : (productLocale(locale) === 'zh-CN'
+                  ? 'Provider 配置未保存。'
+                  : 'Provider configuration was not saved.')
               status.dataset.state = 'error'
               status.textContent = text
               return
             }
             status.dataset.state = 'saved'
             status.textContent = result.status === 'staged'
-              ? (productLocale(locale) === 'zh-CN' ? '已保存，重启应用后生效。' : 'Saved; it takes effect after app restart.')
-              : (productLocale(locale) === 'zh-CN' ? '已保存，Provider 服务已重启。' : 'Saved; the Provider service restarted.')
+              ? (productLocale(locale) === 'zh-CN'
+                ? '已保存，重启应用后生效。'
+                : 'Saved; it takes effect after app restart.')
+              : (productLocale(locale) === 'zh-CN'
+                ? '已保存，Provider 服务已重启。'
+                : 'Saved; the Provider service restarted.')
             dirty = false
             const fresh = await model.listServiceConfigs?.(plugin.id)
             if (fresh !== undefined) render(fresh)
@@ -4574,9 +5034,11 @@ export function installCordisXManager(
         })
         seat.append(form)
         if (descriptor.secrets.length > 0) {
-          seat.append(forms.note(productLocale(locale) === 'zh-CN'
-            ? '凭据仅以安全引用保存；此处不会显示或读取凭据值。'
-            : 'Credentials are stored only as secure references; values are never displayed or read here.'))
+          seat.append(forms.note(
+            productLocale(locale) === 'zh-CN'
+              ? '凭据仅以安全引用保存；此处不会显示或读取凭据值。'
+              : 'Credentials are stored only as secure references; values are never displayed or read here.',
+          ))
         }
       }
     }
@@ -4600,8 +5062,12 @@ export function installCordisXManager(
     // retains its label, help, a11y relationship, and disabled TDesign chrome;
     // only actions and custom renderer mounting remain edit-only below.
     const visibleFields = descriptor.fields
-    const editableFields = descriptor.writable ? visibleFields.filter(field => !field.disabled
-      && !sensitiveRoles.includes(field.role ?? '') && selectHostFormPrimitive(field) !== 'unsupported') : []
+    const editableFields = descriptor.writable
+      ? visibleFields.filter(field =>
+        !field.disabled
+        && !sensitiveRoles.includes(field.role ?? '') && selectHostFormPrimitive(field) !== 'unsupported'
+      )
+      : []
     if (visibleFields.length === 0) {
       panel.append(forms.empty(managerCopy(locale, 'form.empty-no-fields')))
       renderPluginServiceConfiguration(plugin, panel)
@@ -4610,7 +5076,13 @@ export function installCordisXManager(
 
     let draft = configDrafts.get(plugin.id)
     if (draft === undefined) {
-      draft = { baseRevision: descriptor.revision, values: new Map(), operations: new Map(), issues: new Map(), state: 'pristine' }
+      draft = {
+        baseRevision: descriptor.revision,
+        values: new Map(),
+        operations: new Map(),
+        issues: new Map(),
+        state: 'pristine',
+      }
       configDrafts.set(plugin.id, draft)
     } else if (draft.baseRevision !== descriptor.revision && draft.operations.size === 0) {
       draft.baseRevision = descriptor.revision
@@ -4631,7 +5103,11 @@ export function installCordisXManager(
         if (existing !== undefined) return existing
         const title = field.group.title
         if (title !== undefined || needsGeneralHeading) {
-          const section = forms.section(title ?? managerCopy(locale, 'form.section-general'), field.group.description, field.group.icon)
+          const section = forms.section(
+            title ?? managerCopy(locale, 'form.section-general'),
+            field.group.description,
+            field.group.icon,
+          )
           groupGrids.set(field.group.id, section.content)
           form.append(section.root)
           return section.content
@@ -4666,7 +5142,9 @@ export function installCordisXManager(
         ...(field.description === undefined ? {} : { help: field.description }),
         required: field.required,
         ...(field.icon === undefined ? {} : { icon: field.icon }),
-        fullWidth: sensitive || ['textarea', 'json-textarea', 'path-input', 'tag-input', 'multi-select', 'object-array', 'unsupported'].includes(primitive),
+        fullWidth: sensitive
+          || ['textarea', 'json-textarea', 'path-input', 'tag-input', 'multi-select', 'object-array', 'unsupported']
+            .includes(primitive),
       })
       item.root.dataset.configPath = field.path.join('.')
       item.root.dataset.hostFormPrimitive = primitive
@@ -4681,9 +5159,12 @@ export function installCordisXManager(
 
       const setDraft = (value: unknown, issue?: string): void => {
         draft!.values.set(pathKey, value)
-        draft!.operations.set(pathKey, value === undefined
-          ? { op: 'unset', path: field.path }
-          : { op: 'set', path: field.path, value: value as CordisXJsonValue })
+        draft!.operations.set(
+          pathKey,
+          value === undefined
+            ? { op: 'unset', path: field.path }
+            : { op: 'set', path: field.path, value: value as CordisXJsonValue },
+        )
         const locale = model.snapshot().localization.locale
         const validationIssue = issue ?? validateHostFormValue(field, value, locale)
         if (validationIssue === undefined) draft!.issues.delete(pathKey)
@@ -4699,8 +5180,13 @@ export function installCordisXManager(
           status.textContent = hostConfigApplyMessage(descriptor.applies, 'dirty', locale)
         }
         if (actions !== undefined && !actions.isConnected) form.insertBefore(actions, form.firstChild)
-        if (submit !== undefined) setTDesignDisabled(submit, !descriptor.writable || busyPluginId !== undefined
-          || draft!.operations.size === 0 || draft!.issues.size > 0)
+        if (submit !== undefined) {
+          setTDesignDisabled(
+            submit,
+            !descriptor.writable || busyPluginId !== undefined
+              || draft!.operations.size === 0 || draft!.issues.size > 0,
+          )
+        }
       }
       const renderedField = {
         ...field,
@@ -4783,11 +5269,16 @@ export function installCordisXManager(
       const status = create(document, 'span', 'cxf-status')
       status.dataset.state = draft.state
       status.setAttribute('role', 'status')
-      status.textContent = draft.state === 'saving' ? hostConfigApplyMessage(descriptor.applies, 'saving', locale)
-        : draft.state === 'saved' ? hostConfigApplyMessage(descriptor.applies, 'saved', locale)
-          : draft.operations.size > 0 ? hostConfigApplyMessage(descriptor.applies, 'dirty', locale) : ''
+      status.textContent = draft.state === 'saving'
+        ? hostConfigApplyMessage(descriptor.applies, 'saving', locale)
+        : draft.state === 'saved'
+        ? hostConfigApplyMessage(descriptor.applies, 'saved', locale)
+        : draft.operations.size > 0
+        ? hostConfigApplyMessage(descriptor.applies, 'dirty', locale)
+        : ''
       const resetDraft = forms.button(managerCopy(locale, 'form.undo-changes'), {
-        action: 'undo', density: 'icon',
+        action: 'undo',
+        density: 'icon',
         ...(descriptor.actionIcons?.reset === undefined ? {} : { icon: descriptor.actionIcons.reset }),
       })
       setTDesignDisabled(resetDraft, draft.operations.size === 0 || busyPluginId !== undefined)
@@ -4799,13 +5290,26 @@ export function installCordisXManager(
         delete draft!.message
         renderContent()
       })
-      submit = forms.button(busyPluginId === plugin.id ? managerCopy(locale, 'form.saving') : managerCopy(locale, 'form.save-configuration'), {
-        type: 'submit', variant: 'primary', density: 'icon', action: 'save',
-        ...(descriptor.actionIcons?.save === undefined ? {} : { icon: descriptor.actionIcons.save }),
-      })
-      setTDesignDisabled(submit, !descriptor.writable || busyPluginId !== undefined || draft.operations.size === 0 || draft.issues.size > 0)
+      submit = forms.button(
+        busyPluginId === plugin.id
+          ? managerCopy(locale, 'form.saving')
+          : managerCopy(locale, 'form.save-configuration'),
+        {
+          type: 'submit',
+          variant: 'primary',
+          density: 'icon',
+          action: 'save',
+          ...(descriptor.actionIcons?.save === undefined ? {} : { icon: descriptor.actionIcons.save }),
+        },
+      )
+      setTDesignDisabled(
+        submit,
+        !descriptor.writable || busyPluginId !== undefined || draft.operations.size === 0 || draft.issues.size > 0,
+      )
       actions.append(status, resetDraft, submit)
-      if (draft.operations.size > 0 || ['saving', 'saved', 'conflict', 'error'].includes(draft.state)) form.insertBefore(actions, form.firstChild)
+      if (draft.operations.size > 0 || ['saving', 'saved', 'conflict', 'error'].includes(draft.state)) {
+        form.insertBefore(actions, form.firstChild)
+      }
       form.addEventListener('submit', async (event) => {
         event.preventDefault()
         if (model.updatePluginConfig === undefined || draft!.operations.size === 0 || draft!.issues.size > 0) return
@@ -4839,7 +5343,9 @@ export function installCordisXManager(
     }
     panel.append(form)
     if (!descriptor.writable) panel.append(forms.note(managerCopy(locale, 'form.readonly-note')))
-    if (draft.message !== undefined) panel.append(forms.alert(draft.message, draft.state === 'saved' ? 'info' : 'error'))
+    if (draft.message !== undefined) {
+      panel.append(forms.alert(draft.message, draft.state === 'saved' ? 'info' : 'error'))
+    }
     renderPluginServiceConfiguration(plugin, panel)
   }
 
@@ -4874,7 +5380,9 @@ export function installCordisXManager(
     const entriesByRecord = new WeakMap<LunaLogRecord, CordisXPluginConsoleEntryV1>()
     let pendingEntry: CordisXPluginConsoleEntryV1 | undefined
     const isAtBottom = (): boolean => container.scrollHeight - container.clientHeight - container.scrollTop <= 4
-    const syncLatest = (): void => { latest.hidden = state.follow || container.scrollHeight <= container.clientHeight + 4 }
+    const syncLatest = (): void => {
+      latest.hidden = state.follow || container.scrollHeight <= container.clientHeight + 4
+    }
     const scrollToLatest = (): void => {
       state.follow = true
       container.scrollTop = container.scrollHeight
@@ -4886,14 +5394,18 @@ export function installCordisXManager(
       state.follow = isAtBottom()
       syncLatest()
     }
-    const focusReplacement = (): void => queueMicrotask(() => {
-      ;[...document.querySelectorAll<HTMLElement>('[data-plugin-console]')]
-        .find(item => item.dataset.pluginConsole === pluginId)?.focus()
-    })
+    const focusReplacement = (): void =>
+      queueMicrotask(() => {
+        ;[...document.querySelectorAll<HTMLElement>('[data-plugin-console]')]
+          .find(item => item.dataset.pluginConsole === pluginId)?.focus()
+      })
     const selectRelative = (offset: number): void => {
       if (projections.length === 0) return
       const current = projections.findIndex(item => item.entry.entryId === selectedConsoleEntry)
-      const next = Math.max(0, Math.min(projections.length - 1, (current < 0 ? (offset > 0 ? -1 : projections.length) : current) + offset))
+      const next = Math.max(
+        0,
+        Math.min(projections.length - 1, (current < 0 ? (offset > 0 ? -1 : projections.length) : current) + offset),
+      )
       selectedConsoleEntry = projections[next]?.entry.entryId
       state.scrollTop = container.scrollTop
       renderContent()
@@ -4905,7 +5417,9 @@ export function installCordisXManager(
         selectRelative(event.key === 'ArrowDown' ? 1 : -1)
         return
       }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'c' && selectedConsoleEntry !== undefined) {
+      if (
+        (event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'c' && selectedConsoleEntry !== undefined
+      ) {
         const selected = projections.find(item => item.entry.entryId === selectedConsoleEntry)?.entry
         if (selected !== undefined) {
           event.preventDefault()
@@ -4935,12 +5449,12 @@ export function installCordisXManager(
           viewer?.renderViewport()
           restoreScroll()
         })
-      } else queueMicrotask(() => {
-        if (!destroyed) {
-          viewer?.renderViewport()
-          restoreScroll()
-        }
-      })
+      } else {queueMicrotask(() => {
+          if (!destroyed) {
+            viewer?.renderViewport()
+            restoreScroll()
+          }
+        })}
     }
     const mount = {
       destroy: (): void => {
@@ -4961,7 +5475,7 @@ export function installCordisXManager(
     lunaConsoleMounts.add(mount)
     void import('luna-console').then(module => {
       if (destroyed || !container.isConnected) return
-      const Constructor = module.default as unknown as new (
+      const Constructor = module.default as unknown as new(
         target: HTMLElement,
         options?: {
           readonly asyncRender?: boolean
@@ -4974,8 +5488,13 @@ export function installCordisXManager(
         },
       ) => LunaConsoleViewer
       viewer = new Constructor(container, {
-        asyncRender: false, showHeader: true, accessGetter: false, unenumerable: true,
-        lazyEvaluation: false, maxNum: 2000, theme: desiredTheme,
+        asyncRender: false,
+        showHeader: true,
+        accessGetter: false,
+        unenumerable: true,
+        lazyEvaluation: false,
+        maxNum: 2000,
+        theme: desiredTheme,
       })
       viewer.on('insert', (record) => {
         if (pendingEntry === undefined) return
@@ -5016,7 +5535,9 @@ export function installCordisXManager(
       if (destroyed) return
       container.classList.remove('cxm-console-luna')
       const reason = error instanceof Error ? error.message : 'unknown renderer error'
-      container.replaceChildren(create(document, 'div', 'cxm-console-empty', `Luna Console 正文组件加载失败：${reason}`))
+      container.replaceChildren(
+        create(document, 'div', 'cxm-console-empty', `Luna Console 正文组件加载失败：${reason}`),
+      )
     })
   }
 
@@ -5059,9 +5580,11 @@ export function installCordisXManager(
       return
     }
     const activeFacet = routeState.kind === 'plugin' ? routeState.facet : 'readme'
-    content.append(createLocalTabs(document, localizeTabs(PLUGIN_DETAIL_TABS), activeFacet, 'data-plugin-detail-tab', (tab) => {
-      void navigateRoute({ kind: 'plugin', pluginId: id, facet: tab as PluginDetailTab })
-    }))
+    content.append(
+      createLocalTabs(document, localizeTabs(PLUGIN_DETAIL_TABS), activeFacet, 'data-plugin-detail-tab', (tab) => {
+        void navigateRoute({ kind: 'plugin', pluginId: id, facet: tab as PluginDetailTab })
+      }),
+    )
 
     if (activeFacet === 'readme') {
       const panel = createTabPanel(document, copy('plugin-tab.readme'))
@@ -5089,7 +5612,9 @@ export function installCordisXManager(
 
     if (activeFacet === 'permissions') {
       const panel = createTabPanel(document, copy('plugin-tab.permissions'))
-      const permissions = snapshot.permissions.filter(item => item.identity.source === plugin.source && item.identity.id === plugin.id)
+      const permissions = snapshot.permissions.filter(item =>
+        item.identity.source === plugin.source && item.identity.id === plugin.id
+      )
       if (permissions.length === 0) {
         panel.append(create(document, 'div', 'cxm-empty', '该插件没有申请任何权限。'))
       }
@@ -5114,7 +5639,12 @@ export function installCordisXManager(
         open.append(createCapabilityIcon(document, permission.capability), copy)
         activateManagerListRow(open, () => {
           operationError = undefined
-          void navigateRoute({ kind: 'permission', pluginId: plugin.id, capability: permission.capability, fingerprint: permission.fingerprint })
+          void navigateRoute({
+            kind: 'permission',
+            pluginId: plugin.id,
+            capability: permission.capability,
+            fingerprint: permission.fingerprint,
+          })
         })
         const control = create(document, 'div', 'cxm-permission-control')
         control.append(
@@ -5156,14 +5686,40 @@ export function installCordisXManager(
       if (plugin.configuration !== undefined && !plugin.configuration.writable) {
         const configSchema = plugin.configuration.schemaKind === 'schemastery'
           ? 'Schemastery'
-          : plugin.configuration.schemaKind === 'standard' ? 'Standard Schema' : copy('runtime.not-declared')
-        const configurationDiagnostics = create(document, 'div', 'cxm-copy', `${copy('runtime.configuration')}: ${configSchema} · ${plugin.configuration.applies} · ${copy('runtime.revision')} ${plugin.configuration.revision} · ${copy('runtime.last-good')} ${plugin.configuration.lastGoodRevision} · ${copy('runtime.writer')} ${plugin.configuration.writable ? copy('runtime.available') : copy('runtime.unavailable')}`)
+          : plugin.configuration.schemaKind === 'standard'
+          ? 'Standard Schema'
+          : copy('runtime.not-declared')
+        const configurationDiagnostics = create(
+          document,
+          'div',
+          'cxm-copy',
+          `${copy('runtime.configuration')}: ${configSchema} · ${plugin.configuration.applies} · ${
+            copy('runtime.revision')
+          } ${plugin.configuration.revision} · ${
+            copy('runtime.last-good')
+          } ${plugin.configuration.lastGoodRevision} · ${copy('runtime.writer')} ${
+            plugin.configuration.writable ? copy('runtime.available') : copy('runtime.unavailable')
+          }`,
+        )
         configurationDiagnostics.dataset.configDiagnostics = plugin.id
         diagnosticsBody.append(configurationDiagnostics)
         hasDiagnostics = true
       }
-      for (const provider of (snapshot.capabilityProviders ?? []).filter(item => item.kind !== 'current-connection' && item.status !== 'supported')) {
-        diagnosticsBody.append(create(document, 'div', 'cxm-copy', `${provider.providerNameText} · ${capabilityAvailabilityLabel(provider.status, snapshot.localization.locale)} · ${provider.reasonText}`))
+      for (
+        const provider of (snapshot.capabilityProviders ?? []).filter(item =>
+          item.kind !== 'current-connection' && item.status !== 'supported'
+        )
+      ) {
+        diagnosticsBody.append(
+          create(
+            document,
+            'div',
+            'cxm-copy',
+            `${provider.providerNameText} · ${
+              capabilityAvailabilityLabel(provider.status, snapshot.localization.locale)
+            } · ${provider.reasonText}`,
+          ),
+        )
         hasDiagnostics = true
       }
       const adapter = snapshot.platform
@@ -5171,13 +5727,23 @@ export function installCordisXManager(
         diagnosticsBody.append(create(document, 'div', 'cxm-error', `${diagnostic.code} · ${diagnostic.message}`))
         hasDiagnostics = true
       }
-      const unattributed = (model.pluginConsole?.(plugin.id)?.unattributedEntries ?? 0)
+      const unattributed = model.pluginConsole?.(plugin.id)?.unattributedEntries ?? 0
       if (unattributed > 0 && dismissedConsoleWarnings.get(plugin.id) !== unattributed) {
         const warning = create(document, 'div', 'cxm-notice cxm-console-warning')
         warning.dataset.tone = 'warning'
-        warning.append(create(document, 'span', undefined, copy('console.ownership-warning').replace('{count}', String(unattributed))))
+        warning.append(
+          create(
+            document,
+            'span',
+            undefined,
+            copy('console.ownership-warning').replace('{count}', String(unattributed)),
+          ),
+        )
         const dismissWarning = managerIconAction('close', copy('console.dismiss-ownership-warning'))
-        dismissWarning.addEventListener('click', () => { dismissedConsoleWarnings.set(plugin.id, unattributed); renderContent() })
+        dismissWarning.addEventListener('click', () => {
+          dismissedConsoleWarnings.set(plugin.id, unattributed)
+          renderContent()
+        })
         warning.append(dismissWarning)
         diagnosticsBody.append(warning)
         hasDiagnostics = true
@@ -5200,55 +5766,94 @@ export function installCordisXManager(
       const hasDetail = plugin.error !== undefined || plugin.blockedReason !== undefined
       statusCopy.append(
         create(document, 'span', 'cxm-runtime-status-label', statusLabel(plugin.status, snapshot.localization.locale)),
-        create(document, 'span', 'cxm-runtime-status-meta', hasDetail ? copy('runtime.status-details') : copy('runtime.healthy')),
+        create(
+          document,
+          'span',
+          'cxm-runtime-status-meta',
+          hasDetail ? copy('runtime.status-details') : copy('runtime.healthy'),
+        ),
       )
       status.append(icon, statusCopy)
       if (plugin.status !== 'configured-disabled') {
-        const action = managerIconAction(restorable ? 'enable-plugin' : 'disable-plugin', restorable ? copy('runtime.reauthorize') : copy('runtime.block-plugin'), { disabled: busyPluginId !== undefined })
+        const action = managerIconAction(
+          restorable ? 'enable-plugin' : 'disable-plugin',
+          restorable ? copy('runtime.reauthorize') : copy('runtime.block-plugin'),
+          { disabled: busyPluginId !== undefined },
+        )
         action.dataset.pluginRuntimeAction = plugin.id
         action.addEventListener('click', async () => {
           busyPluginId = plugin.id
           renderContent()
-          try { if (restorable) await authorizeAndRestore(plugin); else await model.setPluginBlocked(plugin.id, true) }
-          catch (error) { operationError = error instanceof Error ? error.message : String(error) }
-          finally { busyPluginId = undefined; renderContent() }
+          try {
+            if (restorable) await authorizeAndRestore(plugin)
+            else await model.setPluginBlocked(plugin.id, true)
+          } catch (error) {
+            operationError = error instanceof Error ? error.message : String(error)
+          } finally {
+            busyPluginId = undefined
+            renderContent()
+          }
         })
         status.append(action)
       }
       const facts = create(document, 'div', 'cxm-runtime-status-facts')
-      for (const [label, value] of [
-        [copy('runtime.active-contributions'), pluginRegistrations.filter(item => item.visible && item.valid).length],
-        [copy('runtime.commands'), pluginCommands.length],
-      ] as const) {
+      for (
+        const [label, value] of [
+          [copy('runtime.active-contributions'), pluginRegistrations.filter(item => item.visible && item.valid).length],
+          [copy('runtime.commands'), pluginCommands.length],
+        ] as const
+      ) {
         const fact = create(document, 'span', 'cxm-runtime-status-fact')
         fact.append(create(document, 'strong', undefined, String(value)), create(document, 'span', undefined, label))
         facts.append(fact)
       }
       overview.append(status, facts)
       const consolePage = model.pluginConsole?.(plugin.id) ?? {
-        contract: 'cordisx.plugin-console-page/v1' as const, schemaVersion: 1 as const,
-        plugin: { source: plugin.source, pluginId: plugin.id }, generation: 'manager-unavailable',
-        generatedAt: Date.now(), partialObservability: true, entries: [],
+        contract: 'cordisx.plugin-console-page/v1' as const,
+        schemaVersion: 1 as const,
+        plugin: { source: plugin.source, pluginId: plugin.id },
+        generation: 'manager-unavailable',
+        generatedAt: Date.now(),
+        partialObservability: true,
+        entries: [],
       }
       const consoleSummary = summarizePluginConsole(consolePage)
       const consoleOverview = create(document, 'section', 'cxm-runtime-console-summary')
       consoleOverview.dataset.runtimeConsoleSummary = plugin.id
       consoleOverview.setAttribute('aria-label', copy('console.performance'))
-      for (const [label, value] of [
-        [copy('console.requests'), consoleSummary.requests],
-        [copy('console.successes'), consoleSummary.successes],
-        [copy('console.failures'), consoleSummary.failures],
-        [copy('console.denied'), consoleSummary.denials],
-      ] as const) {
+      for (
+        const [label, value] of [
+          [copy('console.requests'), consoleSummary.requests],
+          [copy('console.successes'), consoleSummary.successes],
+          [copy('console.failures'), consoleSummary.failures],
+          [copy('console.denied'), consoleSummary.denials],
+        ] as const
+      ) {
         const metric = create(document, 'div', 'cxm-runtime-console-metric')
         metric.append(create(document, 'strong', undefined, String(value)), create(document, 'span', undefined, label))
         consoleOverview.append(metric)
       }
       const performance = create(document, 'details', 'cxm-runtime-console-performance')
-      performance.append(create(document, 'summary', undefined, `${copy('console.performance')} ${consoleSummary.averageDurationMs === undefined ? '—' : `${consoleSummary.averageDurationMs.toFixed(1)}ms`}`))
-      performance.append(create(document, 'div', 'cxm-runtime-console-performance-body', consoleSummary.consumption.length === 0
-        ? copy('console.no-host-api-metrics')
-        : consoleSummary.consumption.join('   ')))
+      performance.append(
+        create(
+          document,
+          'summary',
+          undefined,
+          `${copy('console.performance')} ${
+            consoleSummary.averageDurationMs === undefined ? '—' : `${consoleSummary.averageDurationMs.toFixed(1)}ms`
+          }`,
+        ),
+      )
+      performance.append(
+        create(
+          document,
+          'div',
+          'cxm-runtime-console-performance-body',
+          consoleSummary.consumption.length === 0
+            ? copy('console.no-host-api-metrics')
+            : consoleSummary.consumption.join('   '),
+        ),
+      )
       consoleOverview.append(performance)
       overview.append(consoleOverview)
       panel.append(overview)
@@ -5264,11 +5869,17 @@ export function installCordisXManager(
       const panel = createTabPanel(document, copy('plugin-tab.logs'))
       panel.classList.add('cxm-console-panel')
       const livePage = model.pluginConsole?.(plugin.id) ?? {
-        contract: 'cordisx.plugin-console-page/v1', schemaVersion: 1,
-        plugin: { source: plugin.source, pluginId: plugin.id }, generation: 'manager-unavailable',
-        generatedAt: Date.now(), partialObservability: true, entries: [],
+        contract: 'cordisx.plugin-console-page/v1',
+        schemaVersion: 1,
+        plugin: { source: plugin.source, pluginId: plugin.id },
+        generation: 'manager-unavailable',
+        generatedAt: Date.now(),
+        partialObservability: true,
+        entries: [],
       }
-      if (consolePaused && (consolePausedPage === undefined || consolePausedPage.plugin.pluginId !== plugin.id)) consolePausedPage = livePage
+      if (consolePaused && (consolePausedPage === undefined || consolePausedPage.plugin.pluginId !== plugin.id)) {
+        consolePausedPage = livePage
+      }
       const page = consolePaused ? consolePausedPage ?? livePage : livePage
       const sources = [...new Set(page.entries.map(entry => entry.source))].sort()
       const normalizedQuery = consoleQuery.trim().toLocaleLowerCase()
@@ -5278,7 +5889,10 @@ export function installCordisXManager(
           || consoleKind === 'host-api' && (entry.kind === 'invocation' || entry.kind === 'permission')
           || entry.kind === consoleKind)
         && (consoleSource === 'all' || entry.source === consoleSource)
-        && (normalizedQuery === '' || `${entry.message} ${entry.source} ${entry.correlationId ?? ''} ${entry.args.map(argument => argument.preview).join(' ')}`.toLocaleLowerCase().includes(normalizedQuery))
+        && (normalizedQuery === ''
+          || `${entry.message} ${entry.source} ${entry.correlationId ?? ''} ${
+            entry.args.map(argument => argument.preview).join(' ')
+          }`.toLocaleLowerCase().includes(normalizedQuery))
       ))
       const projections = filtered.map(projectPluginConsoleEntryForLuna)
       const controls = create(document, 'div', 'cxm-console-controls')
@@ -5287,22 +5901,37 @@ export function installCordisXManager(
       search.placeholder = copy('console.search-placeholder')
       search.value = consoleQuery
       search.dataset.consoleSearch = plugin.id
-      search.addEventListener('input', () => { consoleQuery = search.value; renderContent() })
-      const select = (label: string, value: string, values: readonly string[], change: (value: string) => void): TDesignSelectElement<string> => forms.select(
-        label,
-        values.map(item => ({ value: item, label: item === 'all' ? copy('console.all') : item })),
-        value,
-        next => {
-          if (next === undefined) return
-          change(next)
-          renderContent()
-        },
-      )
+      search.addEventListener('input', () => {
+        consoleQuery = search.value
+        renderContent()
+      })
+      const select = (
+        label: string,
+        value: string,
+        values: readonly string[],
+        change: (value: string) => void,
+      ): TDesignSelectElement<string> =>
+        forms.select(
+          label,
+          values.map(item => ({ value: item, label: item === 'all' ? copy('console.all') : item })),
+          value,
+          next => {
+            if (next === undefined) return
+            change(next)
+            renderContent()
+          },
+        )
       controls.append(
         search,
-        select(copy('console.level'), consoleMethod, ['all', 'debug', 'log', 'info', 'warn', 'error'], value => { consoleMethod = value }),
-        select(copy('console.kind'), consoleKind, ['all', 'host-api', 'console', 'lifecycle', 'diagnostic'], value => { consoleKind = value }),
-        select(copy('console.source'), consoleSource, ['all', ...sources], value => { consoleSource = value }),
+        select(copy('console.level'), consoleMethod, ['all', 'debug', 'log', 'info', 'warn', 'error'], value => {
+          consoleMethod = value
+        }),
+        select(copy('console.kind'), consoleKind, ['all', 'host-api', 'console', 'lifecycle', 'diagnostic'], value => {
+          consoleKind = value
+        }),
+        select(copy('console.source'), consoleSource, ['all', ...sources], value => {
+          consoleSource = value
+        }),
       )
       const scrollState = consoleScrollStates.get(plugin.id) ?? { follow: true, scrollTop: 0 }
       consoleScrollStates.set(plugin.id, scrollState)
@@ -5332,11 +5961,18 @@ export function installCordisXManager(
           event.stopPropagation()
           button.click()
         })
-        tooltips.attach(button, () => options.description === undefined ? label : `${label} · ${options.description}`, 'top', 80)
+        tooltips.attach(
+          button,
+          () => options.description === undefined ? label : `${label} · ${options.description}`,
+          'top',
+          80,
+        )
         return button
       }
       const pauseLabel = consolePaused ? copy('console.resume') : copy('console.pause')
-      const pause = iconAction('pause', consolePaused ? 'console-resume' : 'console-pause', pauseLabel, { pressed: consolePaused }, () => {
+      const pause = iconAction('pause', consolePaused ? 'console-resume' : 'console-pause', pauseLabel, {
+        pressed: consolePaused,
+      }, () => {
         consolePaused = !consolePaused
         consolePausedPage = consolePaused ? model.pluginConsole?.(plugin.id) ?? livePage : undefined
         renderContent()
@@ -5356,10 +5992,18 @@ export function installCordisXManager(
         renderContent()
       })
       const selected = page.entries.find(entry => entry.entryId === selectedConsoleEntry)
-      const copyButton = iconAction('copy', 'console-copy', copy('console.copy'), { disabled: selected === undefined }, () => {
-        if (selected !== undefined) void copyConsoleText(pluginConsoleEntryCopyText(selected)).catch(() => undefined)
-      })
-      const exportButton = iconAction('export', 'console-export', copy('console.export'), { disabled: page.entries.length === 0 }, () => {
+      const copyButton = iconAction(
+        'copy',
+        'console-copy',
+        copy('console.copy'),
+        { disabled: selected === undefined },
+        () => {
+          if (selected !== undefined) void copyConsoleText(pluginConsoleEntryCopyText(selected)).catch(() => undefined)
+        },
+      )
+      const exportButton = iconAction('export', 'console-export', copy('console.export'), {
+        disabled: page.entries.length === 0,
+      }, () => {
         exportPluginConsole(plugin.id, page)
       })
       actionToolbar.append(pause, autoScroll, clear, copyButton, exportButton)
@@ -5371,11 +6015,20 @@ export function installCordisXManager(
       const frame = create(document, 'div', 'cxm-console-frame')
       frame.dataset.pluginConsole = plugin.id
       if (projections.length === 0) {
-        frame.append(create(document, 'div', 'cxm-console-empty', page.entries.length === 0 ? copy('console.empty') : copy('console.no-matches')))
+        frame.append(
+          create(
+            document,
+            'div',
+            'cxm-console-empty',
+            page.entries.length === 0 ? copy('console.empty') : copy('console.no-matches'),
+          ),
+        )
       } else {
         frame.classList.add('cxm-console-luna')
       }
-      const latest = managerIconAction('console-follow', copy('console.back-to-latest'), { className: 'cxm-console-latest' })
+      const latest = managerIconAction('console-follow', copy('console.back-to-latest'), {
+        className: 'cxm-console-latest',
+      })
       latest.hidden = true
       body.append(frame, latest)
       if (selected !== undefined) {
@@ -5385,7 +6038,10 @@ export function installCordisXManager(
         const inspectorHead = create(document, 'div', 'cxm-console-inspector-head')
         inspectorHead.append(create(document, 'span', undefined, copy('console.entry-details')))
         const closeInspector = managerIconAction('close', copy('console.close-details'))
-        closeInspector.addEventListener('click', () => { selectedConsoleEntry = undefined; renderContent() })
+        closeInspector.addEventListener('click', () => {
+          selectedConsoleEntry = undefined
+          renderContent()
+        })
         inspectorHead.append(closeInspector)
         const grid = create(document, 'dl', 'cxm-console-inspector-grid')
         const metadata: readonly (readonly [string, string | number | undefined])[] = [
@@ -5398,12 +6054,33 @@ export function installCordisXManager(
           [copy('console.field.correlation'), selected.correlationId],
           [copy('console.field.phase'), selected.phase],
           [copy('console.field.status'), selected.status],
-          [copy('console.field.duration'), selected.durationMs === undefined ? undefined : `${selected.durationMs.toFixed(1)}ms`],
+          [
+            copy('console.field.duration'),
+            selected.durationMs === undefined ? undefined : `${selected.durationMs.toFixed(1)}ms`,
+          ],
           [copy('console.field.session'), selected.sessionId],
-          [copy('console.field.trigger'), selected.trigger === undefined ? undefined : `${selected.trigger.kind}${selected.trigger.registrationId === undefined ? '' : ` · ${selected.trigger.registrationId}`}`],
-          [copy('console.field.owner'), selected.effectiveOwner === undefined ? undefined : `${selected.effectiveOwner.pluginId} · ${selected.effectiveOwner.source}`],
-          [copy('console.field.request-metrics'), selected.request === undefined ? undefined : JSON.stringify(selected.request)],
-          [copy('console.field.result-metrics'), selected.result === undefined ? undefined : JSON.stringify(selected.result)],
+          [
+            copy('console.field.trigger'),
+            selected.trigger === undefined
+              ? undefined
+              : `${selected.trigger.kind}${
+                selected.trigger.registrationId === undefined ? '' : ` · ${selected.trigger.registrationId}`
+              }`,
+          ],
+          [
+            copy('console.field.owner'),
+            selected.effectiveOwner === undefined
+              ? undefined
+              : `${selected.effectiveOwner.pluginId} · ${selected.effectiveOwner.source}`,
+          ],
+          [
+            copy('console.field.request-metrics'),
+            selected.request === undefined ? undefined : JSON.stringify(selected.request),
+          ],
+          [
+            copy('console.field.result-metrics'),
+            selected.result === undefined ? undefined : JSON.stringify(selected.result),
+          ],
         ]
         for (const [label, value] of metadata) {
           if (value === undefined) continue
@@ -5423,30 +6100,44 @@ export function installCordisXManager(
 
     if (activeFacet === 'extension-points') {
       const panel = createTabPanel(document, copy('plugin-tab.extension-points'))
-      const points = (snapshot.extensionPoints?.points ?? []).filter(point => point.plugins.some(usage => (
-        usage.identity.source === plugin.source && usage.identity.id === plugin.id
-      )))
+      const points = (snapshot.extensionPoints?.points ?? []).filter(point =>
+        point.plugins.some(usage => (
+          usage.identity.source === plugin.source && usage.identity.id === plugin.id
+        ))
+      )
       const query = pluginExtensionPointQueries.get(plugin.id) ?? ''
       const items: HostCollectionItem[] = points.map(point => {
-        const usage = point.plugins.find(item => item.identity.source === plugin.source && item.identity.id === plugin.id)
+        const usage = point.plugins.find(item =>
+          item.identity.source === plugin.source && item.identity.id === plugin.id
+        )
         const rowStatus = extensionPointRowStatus(snapshot, point, usage)
         const status: HostCollectionStatus | undefined = rowStatus === undefined
           ? undefined
-          : { label: rowStatus.text, tone: rowStatus.state === 'pending' ? 'warning' : 'danger', detail: rowStatus.text }
+          : {
+            label: rowStatus.text,
+            tone: rowStatus.state === 'pending' ? 'warning' : 'danger',
+            detail: rowStatus.text,
+          }
         return {
           id: point.id,
           title: point.titleProjection.text,
           description: point.descriptionProjection.text,
           machineId: point.id,
           searchText: [
-            ...(usage?.registrations.flatMap(item => [item.titleText, item.descriptionText ?? '', item.id, item.qualifiedId]) ?? []),
+            ...(usage?.registrations.flatMap(
+              item => [item.titleText, item.descriptionText ?? '', item.id, item.qualifiedId],
+            ) ?? []),
             ...(usage?.routes.flatMap(item => [item.qualifiedId, item.definition.path, item.definition.outlet]) ?? []),
           ],
           icon: () => createHostSurfaceIcon(document, point.icon),
           ...(status === undefined ? {} : { status }),
           onOpen: () => {
             operationError = undefined
-            void navigateRoute({ kind: 'extension-point', pointId: point.id, facet: rowStatus === undefined ? 'usage' : 'diagnostics' })
+            void navigateRoute({
+              kind: 'extension-point',
+              pointId: point.id,
+              facet: rowStatus === undefined ? 'usage' : 'diagnostics',
+            })
           },
         }
       })
@@ -5459,7 +6150,9 @@ export function installCordisXManager(
           label: `搜索${plugin.name}的扩展点与贡献`,
           placeholder: '搜索扩展点、介绍、贡献名称或 id…',
           query,
-          onQueryChange: value => { pluginExtensionPointQueries.set(plugin.id, value) },
+          onQueryChange: value => {
+            pluginExtensionPointQueries.set(plugin.id, value)
+          },
         },
         emptyLabel: '当前插件没有使用任何扩展点',
         noMatchesLabel: '没有匹配的扩展点或贡献',
@@ -5470,16 +6163,21 @@ export function installCordisXManager(
 
     const panel = createTabPanel(document, copy('plugin-tab.routes'))
     const query = pluginRouteQueries.get(plugin.id) ?? ''
-    const routesForPage = (page: NavigationPageSnapshot): readonly RouteSnapshot[] => pluginRoutes.filter(route => (
-      qualifiedNavigationId(route.owner, route.definition.page) === page.qualifiedId
-    ))
+    const routesForPage = (page: NavigationPageSnapshot): readonly RouteSnapshot[] =>
+      pluginRoutes.filter(route => (
+        qualifiedNavigationId(route.owner, route.definition.page) === page.qualifiedId
+      ))
     const items: HostCollectionItem[] = [
-      ...pluginRoutes.map(route => routeCollectionItem(snapshot, route, () => {
-        void navigateRoute({ kind: 'route', qualifiedId: route.qualifiedId })
-      })),
-      ...pluginPages.map(page => pageCollectionItem(snapshot, page, routesForPage(page), () => {
-        void navigateRoute({ kind: 'page', qualifiedId: page.qualifiedId })
-      })),
+      ...pluginRoutes.map(route =>
+        routeCollectionItem(snapshot, route, () => {
+          void navigateRoute({ kind: 'route', qualifiedId: route.qualifiedId })
+        })
+      ),
+      ...pluginPages.map(page =>
+        pageCollectionItem(snapshot, page, routesForPage(page), () => {
+          void navigateRoute({ kind: 'page', qualifiedId: page.qualifiedId })
+        })
+      ),
     ]
     mountHostCollection(panel, {
       id: `plugin-routes-${plugin.id}`,
@@ -5489,7 +6187,9 @@ export function installCordisXManager(
         label: `搜索${plugin.name}的路由与页面`,
         placeholder: '搜索标题、说明、位置、页面或 id…',
         query,
-        onQueryChange: value => { pluginRouteQueries.set(plugin.id, value) },
+        onQueryChange: value => {
+          pluginRouteQueries.set(plugin.id, value)
+        },
       },
       emptyLabel: '当前插件没有注册路由或页面',
       noMatchesLabel: '没有匹配的路由或页面',
@@ -5563,7 +6263,8 @@ export function installCordisXManager(
       if (closePluginActionMenu === closeMenu) closePluginActionMenu = () => {}
       if (restoreFocus && trigger.isConnected) trigger.focus()
     }
-    const enabledItems = (): HTMLButtonElement[] => [...popup.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')]
+    const enabledItems =
+      (): HTMLButtonElement[] => [...popup.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')]
     const positionMenu = (): void => {
       if (!popup.isConnected || !trigger.isConnected) return closeMenu(false)
       const triggerRect = trigger.getBoundingClientRect()
@@ -5593,8 +6294,12 @@ export function installCordisXManager(
       const next = event.key === 'ArrowDown'
         ? enabled[(current + 1 + enabled.length) % enabled.length]
         : event.key === 'ArrowUp'
-          ? enabled[(current - 1 + enabled.length) % enabled.length]
-          : event.key === 'Home' ? enabled[0] : event.key === 'End' ? enabled.at(-1) : undefined
+        ? enabled[(current - 1 + enabled.length) % enabled.length]
+        : event.key === 'Home'
+        ? enabled[0]
+        : event.key === 'End'
+        ? enabled.at(-1)
+        : undefined
       if (next === undefined) return
       event.preventDefault()
       event.stopPropagation()
@@ -5610,15 +6315,21 @@ export function installCordisXManager(
 
   const sourceMenuItems = (): readonly ManagerActionMenuItem[] => [
     {
-      id: 'create', label: copy('marketplace.source-menu.create'), icon: 'marketplace-source-add',
+      id: 'create',
+      label: copy('marketplace.source-menu.create'),
+      icon: 'marketplace-source-add',
       invoke: () => navigateRoute({ kind: 'marketplace-source', page: 'create' }),
     },
     {
-      id: 'clipboard', label: copy('marketplace.source-menu.clipboard'), icon: 'marketplace-source-copy',
+      id: 'clipboard',
+      label: copy('marketplace.source-menu.clipboard'),
+      icon: 'marketplace-source-copy',
       invoke: () => importMarketplaceSourceFromClipboard(),
     },
     {
-      id: 'manage', label: copy('marketplace.source-menu.manage'), icon: 'marketplace-source-edit',
+      id: 'manage',
+      label: copy('marketplace.source-menu.manage'),
+      icon: 'marketplace-source-edit',
       invoke: () => navigateRoute({ kind: 'marketplace-source', page: 'index' }),
     },
   ]
@@ -5627,11 +6338,19 @@ export function installCordisXManager(
     if (plugin.commerce === undefined || publisherGrantStatuses.get(plugin.identity) === 'loading') return
     publisherGrantStatuses.set(plugin.identity, 'loading')
     try {
-      const value = await publisherGrantClient.request('status', { pluginId: plugin.id, version: plugin.version }) as { status?: unknown }
+      const value = await publisherGrantClient.request('status', { pluginId: plugin.id, version: plugin.version }) as {
+        status?: unknown
+      }
       const status = typeof value?.status === 'string' ? value.status : 'unavailable'
-      if (publisherGrantStatuses.get(plugin.identity) !== status) { publisherGrantStatuses.set(plugin.identity, status); renderContent() }
+      if (publisherGrantStatuses.get(plugin.identity) !== status) {
+        publisherGrantStatuses.set(plugin.identity, status)
+        renderContent()
+      }
     } catch {
-      if (publisherGrantStatuses.get(plugin.identity) !== 'unavailable') { publisherGrantStatuses.set(plugin.identity, 'unavailable'); renderContent() }
+      if (publisherGrantStatuses.get(plugin.identity) !== 'unavailable') {
+        publisherGrantStatuses.set(plugin.identity, 'unavailable')
+        renderContent()
+      }
     }
   }
 
@@ -5659,9 +6378,14 @@ export function installCordisXManager(
     certifiedFilter.type = 'button'
     certifiedFilter.dataset.marketplaceCertifiedOnly = 'true'
     certifiedFilter.setAttribute('aria-pressed', String(marketplaceCertifiedOnly))
-    certifiedFilter.setAttribute('aria-label', marketplaceCertifiedOnly ? copy('marketplace.filter-all') : copy('marketplace.filter-certified'))
+    certifiedFilter.setAttribute(
+      'aria-label',
+      marketplaceCertifiedOnly ? copy('marketplace.filter-all') : copy('marketplace.filter-certified'),
+    )
     certifiedFilter.append(
-      createManagerIcon(document, 'marketplace-certified', undefined, { state: marketplaceCertifiedOnly ? 'active' : 'default' }),
+      createManagerIcon(document, 'marketplace-certified', undefined, {
+        state: marketplaceCertifiedOnly ? 'active' : 'default',
+      }),
       create(document, 'span', undefined, copy('marketplace.filter-certified-only')),
     )
     certifiedFilter.addEventListener('click', () => {
@@ -5673,9 +6397,14 @@ export function installCordisXManager(
     officialFilter.type = 'button'
     officialFilter.dataset.marketplaceOfficialOnly = 'true'
     officialFilter.setAttribute('aria-pressed', String(marketplaceOfficialOnly))
-    officialFilter.setAttribute('aria-label', marketplaceOfficialOnly ? copy('marketplace.filter-all') : copy('marketplace.filter-official'))
+    officialFilter.setAttribute(
+      'aria-label',
+      marketplaceOfficialOnly ? copy('marketplace.filter-all') : copy('marketplace.filter-official'),
+    )
     officialFilter.append(
-      createManagerIcon(document, 'marketplace-official', undefined, { state: marketplaceOfficialOnly ? 'active' : 'default' }),
+      createManagerIcon(document, 'marketplace-official', undefined, {
+        state: marketplaceOfficialOnly ? 'active' : 'default',
+      }),
       create(document, 'span', undefined, copy('marketplace.filter-official-only')),
     )
     officialFilter.addEventListener('click', () => {
@@ -5688,7 +6417,9 @@ export function installCordisXManager(
       currentLocale: managerSnapshot.localization.locale,
       certifiedOnly: marketplaceCertifiedOnly,
       officialOnly: marketplaceOfficialOnly,
-      ...(model.marketplaceEligibility === undefined ? {} : { eligibility: plugin => model.marketplaceEligibility!(plugin) }),
+      ...(model.marketplaceEligibility === undefined
+        ? {}
+        : { eligibility: plugin => model.marketplaceEligibility!(plugin) }),
     })
     const results = create(document, 'div', 'cxm-marketplace-results')
     results.dataset.marketplaceResultsScroll = 'true'
@@ -5700,10 +6431,10 @@ export function installCordisXManager(
       const status: HostCollectionStatus | undefined = trustLabels.length === 0
         ? undefined
         : {
-            label: trustLabels.join('、'),
-            tone: plugin.certification === undefined ? 'neutral' : 'success',
-            detail: trustLabels.join('、'),
-          }
+          label: trustLabels.join('、'),
+          tone: plugin.certification === undefined ? 'neutral' : 'success',
+          detail: trustLabels.join('、'),
+        }
       return {
         id: plugin.identity,
         title: metadata.name,
@@ -5761,20 +6492,24 @@ export function installCordisXManager(
         if (title !== null && (plugin.official !== undefined || plugin.certification !== undefined)) {
           const titleRow = create(document, 'span', 'cxm-marketplace-title-row')
           const badges = create(document, 'span', 'cxm-marketplace-trust-badges')
-          if (plugin.official !== undefined) badges.append(createMarketplaceTrustBadge(
-            'official',
-            copy('marketplace.official'),
-            productLocale(managerSnapshot.localization.locale) === 'zh-CN'
-              ? 'CordisX 官方发布者身份；只影响 Marketplace 身份、筛选与排序，不改变权限。'
-              : 'CordisX Official publisher identity. It affects Marketplace identity, filtering, and ordering only, never permissions.',
-          ))
-          if (plugin.certification !== undefined) badges.append(createMarketplaceTrustBadge(
-            'certified',
-            copy('marketplace.certified'),
-            productLocale(managerSnapshot.localization.locale) === 'zh-CN'
-              ? 'CordisX 已审核当前版本的明确制品；不参与排序，也不代表绝对安全。'
-              : 'CordisX reviewed this exact versioned artifact. It does not affect ordering or guarantee absolute safety.',
-          ))
+          if (plugin.official !== undefined) {
+            badges.append(createMarketplaceTrustBadge(
+              'official',
+              copy('marketplace.official'),
+              productLocale(managerSnapshot.localization.locale) === 'zh-CN'
+                ? 'CordisX 官方发布者身份；只影响 Marketplace 身份、筛选与排序，不改变权限。'
+                : 'CordisX Official publisher identity. It affects Marketplace identity, filtering, and ordering only, never permissions.',
+            ))
+          }
+          if (plugin.certification !== undefined) {
+            badges.append(createMarketplaceTrustBadge(
+              'certified',
+              copy('marketplace.certified'),
+              productLocale(managerSnapshot.localization.locale) === 'zh-CN'
+                ? 'CordisX 已审核当前版本的明确制品；不参与排序，也不代表绝对安全。'
+                : 'CordisX reviewed this exact versioned artifact. It does not affect ordering or guarantee absolute safety.',
+            ))
+          }
           title.replaceWith(titleRow)
           titleRow.append(title, badges)
         }
@@ -5801,31 +6536,55 @@ export function installCordisXManager(
     const metadata = projectMarketplacePlugin(plugin, managerSnapshot.localization.locale)
     const chinese = productLocale(managerSnapshot.localization.locale) === 'zh-CN'
     const activeFacet = routeState.kind === 'marketplace' ? routeState.facet : 'overview'
-    content.append(createLocalTabs(document, localizeTabs(MARKETPLACE_DETAIL_TABS), activeFacet, 'data-marketplace-detail-tab', (tab) => {
-      void navigateRoute({ kind: 'marketplace', identity: identityValue, facet: tab as MarketplaceDetailTab })
-    }))
+    content.append(
+      createLocalTabs(
+        document,
+        localizeTabs(MARKETPLACE_DETAIL_TABS),
+        activeFacet,
+        'data-marketplace-detail-tab',
+        (tab) => {
+          void navigateRoute({ kind: 'marketplace', identity: identityValue, facet: tab as MarketplaceDetailTab })
+        },
+      ),
+    )
 
     if (activeFacet === 'overview') {
       const panel = createTabPanel(document, copy('marketplace-tab.overview'))
       panel.append(create(document, 'p', 'cxm-detail-description', metadata.description))
       const fields = create(document, 'div', 'cxm-detail-grid')
-      for (const [label, value] of [
-        ['版本', `v${plugin.version}`],
-        ['CordisX 兼容范围', plugin.compatibility.cordisx],
-        ['许可证', plugin.license],
-        ['插件标识', plugin.id],
-      ]) {
+      for (
+        const [label, value] of [
+          ['版本', `v${plugin.version}`],
+          ['CordisX 兼容范围', plugin.compatibility.cordisx],
+          ['许可证', plugin.license],
+          ['插件标识', plugin.id],
+        ]
+      ) {
         const field = create(document, 'div', 'cxm-field')
-        field.append(create(document, 'div', 'cxm-field-label', label), create(document, 'div', 'cxm-field-value', value))
+        field.append(
+          create(document, 'div', 'cxm-field-label', label),
+          create(document, 'div', 'cxm-field-value', value),
+        )
         fields.append(field)
       }
       panel.append(fields)
       if (plugin.official !== undefined || plugin.certification !== undefined) {
-        panel.append(createSectionTitle(document, chinese ? 'Marketplace 身份与审核信息' : 'Marketplace identity and review information'))
+        panel.append(
+          createSectionTitle(
+            document,
+            chinese ? 'Marketplace 身份与审核信息' : 'Marketplace identity and review information',
+          ),
+        )
         const trustList = create(document, 'div', 'cxm-marketplace-trust-list')
         const appendEvidence = (target: HTMLElement, href: string): void => {
-          const evidence = configureExternalLink(create(document, 'a', 'cxm-action cxm-marketplace-trust-evidence'), href)
-          evidence.append(create(document, 'span', undefined, chinese ? '查看受保护审核证据' : 'View protected review evidence'), createManagerIcon(document, 'external-link', 'cxm-action-icon'))
+          const evidence = configureExternalLink(
+            create(document, 'a', 'cxm-action cxm-marketplace-trust-evidence'),
+            href,
+          )
+          evidence.append(
+            create(document, 'span', undefined, chinese ? '查看受保护审核证据' : 'View protected review evidence'),
+            createManagerIcon(document, 'external-link', 'cxm-action-icon'),
+          )
           target.append(evidence)
         }
         if (plugin.official !== undefined) {
@@ -5833,27 +6592,52 @@ export function installCordisXManager(
           const item = create(document, 'section', 'cxm-marketplace-trust-item')
           item.dataset.marketplaceTrustDimension = 'official'
           const title = create(document, 'div', 'cxm-marketplace-trust-title')
-          title.append(createManagerIcon(document, 'marketplace-official'), create(document, 'span', undefined, chinese ? '官方' : 'Official'))
+          title.append(
+            createManagerIcon(document, 'marketplace-official'),
+            create(document, 'span', undefined, chinese ? '官方' : 'Official'),
+          )
           item.append(
             title,
-            create(document, 'p', 'cxm-marketplace-trust-copy', `${official.label.fallback}。${official.description.fallback}`),
-            create(document, 'p', 'cxm-marketplace-trust-copy', chinese
-              ? '“官方”表示该插件由 CordisX 团队通过受信任发布者、源码仓库与包命名空间创建并持续维护。它只影响 Marketplace 身份、筛选和同等相关性内的产品排序；不会改变 PermissionBroker 决策，也不自动等于“已认证”。'
-              : 'Official means CordisX creates and maintains this plugin through a trusted publisher, source repository, and package namespace. It affects Marketplace identity, filters, and ordering among equally relevant results only. It never changes PermissionBroker decisions or automatically means Certified.'),
+            create(
+              document,
+              'p',
+              'cxm-marketplace-trust-copy',
+              `${official.label.fallback}。${official.description.fallback}`,
+            ),
+            create(
+              document,
+              'p',
+              'cxm-marketplace-trust-copy',
+              chinese
+                ? '“官方”表示该插件由 CordisX 团队通过受信任发布者、源码仓库与包命名空间创建并持续维护。它只影响 Marketplace 身份、筛选和同等相关性内的产品排序；不会改变 PermissionBroker 决策，也不自动等于“已认证”。'
+                : 'Official means CordisX creates and maintains this plugin through a trusted publisher, source repository, and package namespace. It affects Marketplace identity, filters, and ordering among equally relevant results only. It never changes PermissionBroker decisions or automatically means Certified.',
+            ),
           )
           appendEvidence(item, official.reviewer.evidenceRef)
           trustList.append(item)
         }
         if (plugin.certification !== undefined) {
           const certification = plugin.certification
-          const [reviewSummary, permissionBoundary, trustRootBoundary] = marketplaceCertifiedDetailCopy(certification, plugin.version, chinese)
+          const [reviewSummary, permissionBoundary, trustRootBoundary] = marketplaceCertifiedDetailCopy(
+            certification,
+            plugin.version,
+            chinese,
+          )
           const item = create(document, 'section', 'cxm-marketplace-trust-item')
           item.dataset.marketplaceTrustDimension = 'certified'
           const title = create(document, 'div', 'cxm-marketplace-trust-title')
-          title.append(createManagerIcon(document, 'marketplace-certified'), create(document, 'span', undefined, chinese ? '已认证' : 'Certified'))
+          title.append(
+            createManagerIcon(document, 'marketplace-certified'),
+            create(document, 'span', undefined, chinese ? '已认证' : 'Certified'),
+          )
           item.append(
             title,
-            create(document, 'p', 'cxm-marketplace-trust-copy', `${certification.label.fallback}。${certification.description.fallback}`),
+            create(
+              document,
+              'p',
+              'cxm-marketplace-trust-copy',
+              `${certification.label.fallback}。${certification.description.fallback}`,
+            ),
             create(document, 'p', 'cxm-marketplace-trust-copy', reviewSummary),
             create(document, 'p', 'cxm-marketplace-trust-copy', permissionBoundary),
             create(document, 'p', 'cxm-marketplace-trust-copy', trustRootBoundary),
@@ -5862,7 +6646,12 @@ export function installCordisXManager(
           trustList.append(item)
         }
         panel.append(trustList)
-        const boundary = create(document, 'div', 'cxm-notice', chinese ? '认证不是绝对安全保证。' : 'Certification is not an absolute safety guarantee.')
+        const boundary = create(
+          document,
+          'div',
+          'cxm-notice',
+          chinese ? '认证不是绝对安全保证。' : 'Certification is not an absolute safety guarantee.',
+        )
         boundary.dataset.marketplaceTrustBoundary = 'true'
         panel.append(boundary)
       }
@@ -5876,48 +6665,139 @@ export function installCordisXManager(
         const commerce = create(document, 'section', 'cxm-marketplace-trust-item')
         commerce.dataset.publisherGrant = plugin.id
         const current = publisherGrantStatuses.get(plugin.identity)
-        const label = current === 'authorized' ? '已授权' : current === 'refresh-due' ? '即将到期' : current === 'grace' ? '离线宽限期' : current === 'expired' ? '已过期' : current === 'device-mismatch' ? '设备不匹配' : current === 'revoked' ? '已撤销' : current === 'invalid-signature' ? '签名无效' : current === 'loading' ? '正在检查授权…' : '未授权'
+        const label = current === 'authorized'
+          ? '已授权'
+          : current === 'refresh-due'
+          ? '即将到期'
+          : current === 'grace'
+          ? '离线宽限期'
+          : current === 'expired'
+          ? '已过期'
+          : current === 'device-mismatch'
+          ? '设备不匹配'
+          : current === 'revoked'
+          ? '已撤销'
+          : current === 'invalid-signature'
+          ? '签名无效'
+          : current === 'loading'
+          ? '正在检查授权…'
+          : '未授权'
         commerce.append(create(document, 'p', 'cxm-marketplace-trust-copy', `授权状态：${label}`))
-        commerce.append(create(document, 'p', 'cxm-marketplace-trust-copy', 'CordisX 只验证开发者签名的授权声明。付款、退款和售后由开发者负责。'))
+        commerce.append(
+          create(
+            document,
+            'p',
+            'cxm-marketplace-trust-copy',
+            'CordisX 只验证开发者签名的授权声明。付款、退款和售后由开发者负责。',
+          ),
+        )
         const actions = create(document, 'div', 'cxm-manager-inline-actions')
         const purchase = create(document, 'button', 'cxm-action')
-        purchase.type = 'button'; purchase.dataset.publisherGrantPurchase = plugin.id
-        purchase.append(create(document, 'span', undefined, '前往开发者购买'), createManagerIcon(document, 'external-link', 'cxm-action-icon'))
-        purchase.addEventListener('click', () => { void (async () => {
-          try {
-            const challenge = await publisherGrantClient.request('challenge')
-            const href = new URL(plugin.commerce!.purchaseUrl)
-            href.searchParams.set('cordisxDeviceChallenge', btoa(unescape(encodeURIComponent(JSON.stringify(challenge))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')))
-            document.defaultView?.open(href.href, '_blank', 'noopener,noreferrer')
-          } catch { publisherGrantStatuses.set(plugin.identity, 'unavailable'); renderContent() }
-        })() })
+        purchase.type = 'button'
+        purchase.dataset.publisherGrantPurchase = plugin.id
+        purchase.append(
+          create(document, 'span', undefined, '前往开发者购买'),
+          createManagerIcon(document, 'external-link', 'cxm-action-icon'),
+        )
+        purchase.addEventListener('click', () => {
+          void (async () => {
+            try {
+              const challenge = await publisherGrantClient.request('challenge')
+              const href = new URL(plugin.commerce!.purchaseUrl)
+              href.searchParams.set(
+                'cordisxDeviceChallenge',
+                btoa(
+                  unescape(encodeURIComponent(JSON.stringify(challenge))).replaceAll('+', '-').replaceAll('/', '_')
+                    .replaceAll('=', ''),
+                ),
+              )
+              document.defaultView?.open(href.href, '_blank', 'noopener,noreferrer')
+            } catch {
+              publisherGrantStatuses.set(plugin.identity, 'unavailable')
+              renderContent()
+            }
+          })()
+        })
         const copyChallenge = create(document, 'button', 'cxm-action')
-        copyChallenge.type = 'button'; copyChallenge.dataset.publisherGrantChallenge = plugin.id
+        copyChallenge.type = 'button'
+        copyChallenge.dataset.publisherGrantChallenge = plugin.id
         copyChallenge.append(create(document, 'span', undefined, '复制设备挑战'))
-        copyChallenge.addEventListener('click', () => { void (async () => {
-          try { const challenge = await publisherGrantClient.request('challenge'); await document.defaultView?.navigator.clipboard?.writeText(JSON.stringify(challenge)); copyChallenge.replaceChildren('已复制') } catch { copyChallenge.replaceChildren('设备密钥不可用') }
-        })() })
+        copyChallenge.addEventListener('click', () => {
+          void (async () => {
+            try {
+              const challenge = await publisherGrantClient.request('challenge')
+              await document.defaultView?.navigator.clipboard?.writeText(JSON.stringify(challenge))
+              copyChallenge.replaceChildren('已复制')
+            } catch {
+              copyChallenge.replaceChildren('设备密钥不可用')
+            }
+          })()
+        })
         const importGrant = create(document, 'button', 'cxm-action')
-        importGrant.type = 'button'; importGrant.dataset.publisherGrantImport = plugin.id; importGrant.append(create(document, 'span', undefined, '导入授权声明'))
+        importGrant.type = 'button'
+        importGrant.dataset.publisherGrantImport = plugin.id
+        importGrant.append(create(document, 'span', undefined, '导入授权声明'))
         importGrant.addEventListener('click', () => {
-          const input = create(document, 'input') as HTMLInputElement; input.type = 'file'; input.accept = 'application/json,.json'; input.hidden = true
-          input.addEventListener('change', () => { void (async () => {
-            const file = input.files?.[0]; if (file === undefined) return
-            try { const result = await publisherGrantClient.request('import', JSON.parse(await file.text())) as { status?: unknown }; publisherGrantStatuses.set(plugin.identity, typeof result?.status === 'string' ? result.status : 'unavailable') } catch { publisherGrantStatuses.set(plugin.identity, 'invalid-signature') }
-            input.remove(); renderContent()
-          })() }, { once: true })
-          document.body?.append(input); input.click()
+          const input = create(document, 'input') as HTMLInputElement
+          input.type = 'file'
+          input.accept = 'application/json,.json'
+          input.hidden = true
+          input.addEventListener('change', () => {
+            void (async () => {
+              const file = input.files?.[0]
+              if (file === undefined) return
+              try {
+                const result = await publisherGrantClient.request('import', JSON.parse(await file.text())) as {
+                  status?: unknown
+                }
+                publisherGrantStatuses.set(
+                  plugin.identity,
+                  typeof result?.status === 'string' ? result.status : 'unavailable',
+                )
+              } catch {
+                publisherGrantStatuses.set(plugin.identity, 'invalid-signature')
+              }
+              input.remove()
+              renderContent()
+            })()
+          }, { once: true })
+          document.body?.append(input)
+          input.click()
         })
         const importClipboard = create(document, 'button', 'cxm-action')
-        importClipboard.type = 'button'; importClipboard.dataset.publisherGrantClipboard = plugin.id; importClipboard.append(create(document, 'span', undefined, '从剪贴板导入'))
-        importClipboard.addEventListener('click', () => { void (async () => {
-          try { const text = await document.defaultView?.navigator.clipboard?.readText(); const result = await publisherGrantClient.request('import', JSON.parse(text ?? '')) as { status?: unknown }; publisherGrantStatuses.set(plugin.identity, typeof result?.status === 'string' ? result.status : 'unavailable') } catch { publisherGrantStatuses.set(plugin.identity, 'invalid-signature') }
-          renderContent()
-        })() })
+        importClipboard.type = 'button'
+        importClipboard.dataset.publisherGrantClipboard = plugin.id
+        importClipboard.append(create(document, 'span', undefined, '从剪贴板导入'))
+        importClipboard.addEventListener('click', () => {
+          void (async () => {
+            try {
+              const text = await document.defaultView?.navigator.clipboard?.readText()
+              const result = await publisherGrantClient.request('import', JSON.parse(text ?? '')) as {
+                status?: unknown
+              }
+              publisherGrantStatuses.set(
+                plugin.identity,
+                typeof result?.status === 'string' ? result.status : 'unavailable',
+              )
+            } catch {
+              publisherGrantStatuses.set(plugin.identity, 'invalid-signature')
+            }
+            renderContent()
+          })()
+        })
         actions.append(purchase, copyChallenge, importGrant, importClipboard)
-        if (plugin.commerce.manageUrl !== undefined) { const manage = configureExternalLink(create(document, 'a', 'cxm-action'), plugin.commerce.manageUrl); manage.append('管理授权'); actions.append(manage) }
-        if (plugin.commerce.recoveryUrl !== undefined) { const recover = configureExternalLink(create(document, 'a', 'cxm-action'), plugin.commerce.recoveryUrl); recover.append('恢复授权'); actions.append(recover) }
-        commerce.append(actions); panel.append(commerce)
+        if (plugin.commerce.manageUrl !== undefined) {
+          const manage = configureExternalLink(create(document, 'a', 'cxm-action'), plugin.commerce.manageUrl)
+          manage.append('管理授权')
+          actions.append(manage)
+        }
+        if (plugin.commerce.recoveryUrl !== undefined) {
+          const recover = configureExternalLink(create(document, 'a', 'cxm-action'), plugin.commerce.recoveryUrl)
+          recover.append('恢复授权')
+          actions.append(recover)
+        }
+        commerce.append(actions)
+        panel.append(commerce)
       }
       content.append(panel)
       return
@@ -5930,9 +6810,15 @@ export function installCordisXManager(
       const row = create(document, 'div', 'cxm-link-row')
       row.setAttribute('role', 'listitem')
       const copy = create(document, 'div', 'cxm-link-row-copy')
-      copy.append(create(document, 'div', 'cxm-link-row-title', label), create(document, 'code', 'cxm-link-row-value', value))
+      copy.append(
+        create(document, 'div', 'cxm-link-row-title', label),
+        create(document, 'code', 'cxm-link-row-value', value),
+      )
       const link = configureExternalLink(create(document, 'a', 'cxm-action'), href)
-      link.append(create(document, 'span', undefined, '打开'), createManagerIcon(document, 'external-link', 'cxm-action-icon'))
+      link.append(
+        create(document, 'span', undefined, '打开'),
+        createManagerIcon(document, 'external-link', 'cxm-action-icon'),
+      )
       row.append(copy, link)
       links.append(row)
     }
@@ -5957,17 +6843,18 @@ export function installCordisXManager(
   const marketplaceSourceState = (
     record: MarketplaceSourceRecord,
     snapshot = marketplace.snapshot(),
-  ): MarketplaceSourceSnapshot => snapshot.sourceStates.find(item => item.url === record.url) ?? {
-    url: record.url,
-    enabled: record.enabled,
-    official: record.url === OFFICIAL_MARKETPLACE_SOURCE,
-    ...(record.local === undefined ? {} : { local: record.local }),
-    status: 'loading',
-    phase: record.enabled ? 'idle' : 'disabled',
-    stale: false,
-    revalidating: false,
-    attempts: 0,
-  }
+  ): MarketplaceSourceSnapshot =>
+    snapshot.sourceStates.find(item => item.url === record.url) ?? {
+      url: record.url,
+      enabled: record.enabled,
+      official: record.url === OFFICIAL_MARKETPLACE_SOURCE,
+      ...(record.local === undefined ? {} : { local: record.local }),
+      status: 'loading',
+      phase: record.enabled ? 'idle' : 'disabled',
+      stale: false,
+      revalidating: false,
+      attempts: 0,
+    }
 
   const runMarketplaceSourceOperation = async (
     operation: () => Promise<void>,
@@ -5995,7 +6882,9 @@ export function installCordisXManager(
   const sourceErrorAlert = (): HTMLElement | undefined => {
     if (sourceOperationError === undefined) return undefined
     const alert = forms.alert(sourceOperationError, 'error')
-    if (sourceOperationDiagnostic !== undefined && sourceOperationDiagnostic !== '') alert.title = sourceOperationDiagnostic
+    if (sourceOperationDiagnostic !== undefined && sourceOperationDiagnostic !== '') {
+      alert.title = sourceOperationDiagnostic
+    }
     return alert
   }
 
@@ -6015,7 +6904,9 @@ export function installCordisXManager(
     }
     if (value === undefined || value === null) return
     const imported = await runMarketplaceSourceOperation(
-      async () => { await marketplace.importSource(value!) },
+      async () => {
+        await marketplace.importSource(value!)
+      },
       copy('marketplace.source.imported'),
     )
     if (imported) await navigateRoute({ kind: 'marketplace-source', page: 'index' })
@@ -6029,10 +6920,16 @@ export function installCordisXManager(
     const toolbar = create(document, 'div', 'cxm-marketplace-source-toolbar')
     const add = managerIconAction('marketplace-source-add', copy('marketplace.source.add'), { disabled: sourcesBusy })
     add.dataset.marketplaceSourceCreate = 'true'
-    add.addEventListener('click', () => { void navigateRoute({ kind: 'marketplace-source', page: 'create' }) })
-    const clipboard = managerIconAction('marketplace-source-copy', copy('marketplace.source-menu.clipboard'), { disabled: sourcesBusy })
+    add.addEventListener('click', () => {
+      void navigateRoute({ kind: 'marketplace-source', page: 'create' })
+    })
+    const clipboard = managerIconAction('marketplace-source-copy', copy('marketplace.source-menu.clipboard'), {
+      disabled: sourcesBusy,
+    })
     clipboard.dataset.marketplaceSourceClipboard = 'true'
-    clipboard.addEventListener('click', () => { void importMarketplaceSourceFromClipboard() })
+    clipboard.addEventListener('click', () => {
+      void importMarketplaceSourceFromClipboard()
+    })
     toolbar.append(add, clipboard)
     page.append(toolbar)
     if (sourceOperationNotice !== undefined) page.append(forms.alert(sourceOperationNotice, 'info'))
@@ -6045,22 +6942,28 @@ export function installCordisXManager(
       const status = !record.enabled
         ? { label: copy('marketplace.source.disabled'), tone: 'neutral' as const }
         : state.status === 'failed'
-          ? { label: copy('marketplace.source.failed'), tone: 'danger' as const }
-          : state.revalidating
-            ? { label: copy('marketplace.source.updating'), tone: 'progress' as const }
-            : state.stale
-              ? { label: copy('marketplace.source.cached'), tone: 'warning' as const }
-              : undefined
+        ? { label: copy('marketplace.source.failed'), tone: 'danger' as const }
+        : state.revalidating
+        ? { label: copy('marketplace.source.updating'), tone: 'progress' as const }
+        : state.stale
+        ? { label: copy('marketplace.source.cached'), tone: 'warning' as const }
+        : undefined
       return {
         id: record.url,
         title: projection.name,
         description: projection.description ?? copy('marketplace.source.no-description'),
         machineId: record.url,
         searchText: projection.searchValues,
-        icon: () => createManagerIcon(document, record.url === OFFICIAL_MARKETPLACE_SOURCE ? 'marketplace-official' : 'marketplace'),
+        icon: () =>
+          createManagerIcon(
+            document,
+            record.url === OFFICIAL_MARKETPLACE_SOURCE ? 'marketplace-official' : 'marketplace',
+          ),
         ...(status === undefined ? {} : { status }),
         openLabel: `${copy('marketplace.source.open')} · ${projection.name}`,
-        onOpen: () => { void navigateRoute({ kind: 'marketplace-source', page: 'edit', url: record.url }) },
+        onOpen: () => {
+          void navigateRoute({ kind: 'marketplace-source', page: 'edit', url: record.url })
+        },
         actions: [
           {
             id: record.enabled ? 'disable' : 'enable',
@@ -6070,31 +6973,62 @@ export function installCordisXManager(
             disabled: sourcesBusy,
             onInvoke: async () => {
               await runMarketplaceSourceOperation(
-                async () => { await marketplace.setSourceEnabled(record.url, !record.enabled) },
+                async () => {
+                  await marketplace.setSourceEnabled(record.url, !record.enabled)
+                },
                 record.enabled ? copy('marketplace.source.disabled-notice') : copy('marketplace.source.enabled-notice'),
               )
             },
           },
           {
-            id: 'edit', label: copy('marketplace.source.edit'), icon: () => createManagerIcon(document, 'marketplace-source-edit'), placement: 'overflow',
+            id: 'edit',
+            label: copy('marketplace.source.edit'),
+            icon: () => createManagerIcon(document, 'marketplace-source-edit'),
+            placement: 'overflow',
             disabled: sourcesBusy,
-            onInvoke: () => { void navigateRoute({ kind: 'marketplace-source', page: 'edit', url: record.url }) },
+            onInvoke: () => {
+              void navigateRoute({ kind: 'marketplace-source', page: 'edit', url: record.url })
+            },
           },
           {
-            id: 'move-up', label: copy('marketplace.source.move-up'), icon: () => createManagerIcon(document, 'marketplace-source-move-up'), placement: 'overflow',
+            id: 'move-up',
+            label: copy('marketplace.source.move-up'),
+            icon: () => createManagerIcon(document, 'marketplace-source-move-up'),
+            placement: 'overflow',
             disabled: sourcesBusy || index === 0,
-            onInvoke: async () => { await runMarketplaceSourceOperation(async () => { await marketplace.moveSource(record.url, index - 1) }, copy('marketplace.source.moved-notice')) },
+            onInvoke: async () => {
+              await runMarketplaceSourceOperation(async () => {
+                await marketplace.moveSource(record.url, index - 1)
+              }, copy('marketplace.source.moved-notice'))
+            },
           },
           {
-            id: 'move-down', label: copy('marketplace.source.move-down'), icon: () => createManagerIcon(document, 'marketplace-source-move-down'), placement: 'overflow',
+            id: 'move-down',
+            label: copy('marketplace.source.move-down'),
+            icon: () => createManagerIcon(document, 'marketplace-source-move-down'),
+            placement: 'overflow',
             disabled: sourcesBusy || index === snapshot.sourceRecords.length - 1,
-            onInvoke: async () => { await runMarketplaceSourceOperation(async () => { await marketplace.moveSource(record.url, index + 1) }, copy('marketplace.source.moved-notice')) },
+            onInvoke: async () => {
+              await runMarketplaceSourceOperation(async () => {
+                await marketplace.moveSource(record.url, index + 1)
+              }, copy('marketplace.source.moved-notice'))
+            },
           },
           {
-            id: 'remove', label: copy('marketplace.source.remove'), icon: () => createManagerIcon(document, 'uninstall-plugin'), placement: 'overflow', tone: 'danger',
+            id: 'remove',
+            label: copy('marketplace.source.remove'),
+            icon: () => createManagerIcon(document, 'uninstall-plugin'),
+            placement: 'overflow',
+            tone: 'danger',
             disabled: sourcesBusy || record.url === OFFICIAL_MARKETPLACE_SOURCE,
-            ...(record.url === OFFICIAL_MARKETPLACE_SOURCE ? { unavailableReason: copy('marketplace.source.official-remove-unavailable') } : {}),
-            onInvoke: async () => { await runMarketplaceSourceOperation(async () => { await marketplace.removeSource(record.url) }, copy('marketplace.source.removed-notice')) },
+            ...(record.url === OFFICIAL_MARKETPLACE_SOURCE
+              ? { unavailableReason: copy('marketplace.source.official-remove-unavailable') }
+              : {}),
+            onInvoke: async () => {
+              await runMarketplaceSourceOperation(async () => {
+                await marketplace.removeSource(record.url)
+              }, copy('marketplace.source.removed-notice'))
+            },
           },
         ],
       }
@@ -6110,7 +7044,9 @@ export function installCordisXManager(
         placeholder: copy('marketplace.source.search-placeholder'),
         clearLabel: copy('marketplace.source.search-clear'),
         query: sourceQuery,
-        onQueryChange: query => { sourceQuery = query },
+        onQueryChange: query => {
+          sourceQuery = query
+        },
         icon: () => createManagerIcon(document, 'search'),
         clearIcon: () => createManagerIcon(document, 'close'),
       },
@@ -6132,8 +7068,13 @@ export function installCordisXManager(
   ): void => {
     const isCreate = mode === 'create'
     const state = existing === undefined ? undefined : marketplaceSourceState(existing)
-    const projection = state === undefined ? undefined : projectMarketplaceSource(state, managerSnapshot.localization.locale)
-    setHeading(isCreate ? copy('marketplace.source.create-heading') : copy('marketplace.source.edit-heading'), managerSnapshot)
+    const projection = state === undefined
+      ? undefined
+      : projectMarketplaceSource(state, managerSnapshot.localization.locale)
+    setHeading(
+      isCreate ? copy('marketplace.source.create-heading') : copy('marketplace.source.edit-heading'),
+      managerSnapshot,
+    )
     const page = create(document, 'section', 'cxm-marketplace-source-page cxf-scope')
     page.dataset.marketplaceSourcePage = mode
     const form = forms.form(`marketplace-source-${mode}`)
@@ -6147,21 +7088,40 @@ export function installCordisXManager(
       isCreate ? copy('marketplace.source.url-help') : copy('marketplace.source.readonly-url-help'),
     )
     if (isCreate) {
-      const urlItem = forms.item({ id: 'cxm-marketplace-source-url', label: copy('marketplace.source.url-label'), required: true, fullWidth: true })
+      const urlItem = forms.item({
+        id: 'cxm-marketplace-source-url',
+        label: copy('marketplace.source.url-label'),
+        required: true,
+        fullWidth: true,
+      })
       sourceUrlItem = urlItem
       const field: CordisXConfigFieldSnapshot = {
-        namespace: 'cordisx.host', path: ['marketplaceSource', 'url'], type: 'string', role: 'url', value: urlValue, disabled: sourcesBusy, required: true,
+        namespace: 'cordisx.host',
+        path: ['marketplaceSource', 'url'],
+        type: 'string',
+        role: 'url',
+        value: urlValue,
+        disabled: sourcesBusy,
+        required: true,
       }
       const control = forms.control(field, 'cxm-marketplace-source-url', value => {
         urlValue = typeof value === 'string' ? value.trim() : ''
-        urlItem.setError(urlValue === '' || /^https:\/\//iu.test(urlValue) ? undefined : copy('marketplace.source.url-invalid'))
+        urlItem.setError(
+          urlValue === '' || /^https:\/\//iu.test(urlValue) ? undefined : copy('marketplace.source.url-invalid'),
+        )
       })
-      setTDesignProps(control.focusTarget as TDesignElement, { placeholder: 'https://example.com/cordisx-marketplace.json' })
+      setTDesignProps(control.focusTarget as TDesignElement, {
+        placeholder: 'https://example.com/cordisx-marketplace.json',
+      })
       forms.connect(urlItem, control)
       urlItem.control.append(control.root)
       identitySection.content.append(urlItem.root)
     } else {
-      const urlItem = forms.item({ id: 'cxm-marketplace-source-url-readonly', label: copy('marketplace.source.url-label'), fullWidth: true })
+      const urlItem = forms.item({
+        id: 'cxm-marketplace-source-url-readonly',
+        label: copy('marketplace.source.url-label'),
+        fullWidth: true,
+      })
       const value = create(document, 'div', 'cxm-marketplace-source-readonly', existing!.url)
       value.dataset.marketplaceSourceCanonicalUrl = existing!.url
       urlItem.control.append(value)
@@ -6180,7 +7140,12 @@ export function installCordisXManager(
     ): void => {
       const item = forms.item({ id, label, help, fullWidth: role === 'textarea' })
       const field: CordisXConfigFieldSnapshot = {
-        namespace: 'cordisx.host', path: ['marketplaceSource', 'local', id], type: 'string', value, disabled: sourcesBusy, required: false,
+        namespace: 'cordisx.host',
+        path: ['marketplaceSource', 'local', id],
+        type: 'string',
+        value,
+        disabled: sourcesBusy,
+        required: false,
         ...(role === undefined ? {} : { role }),
       }
       const control = forms.control(field, id, next => onChange(typeof next === 'string' ? next : ''))
@@ -6188,12 +7153,42 @@ export function installCordisXManager(
       item.control.append(control.root)
       localSection.content.append(item.root)
     }
-    appendTextField('cxm-marketplace-source-name', copy('marketplace.source.name-label'), undefined, nameValue, value => { nameValue = value }, copy('marketplace.source.name-help'))
-    appendTextField('cxm-marketplace-source-description', copy('marketplace.source.description-label'), 'textarea', descriptionValue, value => { descriptionValue = value }, copy('marketplace.source.description-help'))
-    appendTextField('cxm-marketplace-source-note', copy('marketplace.source.note-label'), 'textarea', noteValue, value => { noteValue = value }, copy('marketplace.source.note-help'))
+    appendTextField(
+      'cxm-marketplace-source-name',
+      copy('marketplace.source.name-label'),
+      undefined,
+      nameValue,
+      value => {
+        nameValue = value
+      },
+      copy('marketplace.source.name-help'),
+    )
+    appendTextField(
+      'cxm-marketplace-source-description',
+      copy('marketplace.source.description-label'),
+      'textarea',
+      descriptionValue,
+      value => {
+        descriptionValue = value
+      },
+      copy('marketplace.source.description-help'),
+    )
+    appendTextField(
+      'cxm-marketplace-source-note',
+      copy('marketplace.source.note-label'),
+      'textarea',
+      noteValue,
+      value => {
+        noteValue = value
+      },
+      copy('marketplace.source.note-help'),
+    )
     form.append(localSection.root)
 
-    const submit = forms.button(isCreate ? copy('marketplace.source.create') : copy('marketplace.source.save'), { type: 'submit', variant: 'primary' })
+    const submit = forms.button(isCreate ? copy('marketplace.source.create') : copy('marketplace.source.save'), {
+      type: 'submit',
+      variant: 'primary',
+    })
     setTDesignDisabled(submit, sourcesBusy)
     const actions = create(document, 'div', 'cxf-actions')
     actions.append(submit)
@@ -6232,7 +7227,9 @@ export function installCordisXManager(
         ...(Object.keys(local).length === 0 ? {} : { local }),
       }
       void runMarketplaceSourceOperation(
-        async () => { await marketplace.upsertSource(source) },
+        async () => {
+          await marketplace.upsertSource(source)
+        },
         isCreate ? copy('marketplace.source.added') : copy('marketplace.source.saved'),
       ).then(saved => {
         if (saved) void navigateRoute({ kind: 'marketplace-source', page: 'index' })
@@ -6244,7 +7241,10 @@ export function installCordisXManager(
     content.append(page)
   }
 
-  const renderMarketplaceSourcePage = (managerSnapshot: ManagerSnapshot, route: Extract<ManagerRouteState, { kind: 'marketplace-source' }>): void => {
+  const renderMarketplaceSourcePage = (
+    managerSnapshot: ManagerSnapshot,
+    route: Extract<ManagerRouteState, { kind: 'marketplace-source' }>,
+  ): void => {
     if (route.page === 'index') return renderMarketplaceSourceIndex(managerSnapshot)
     if (route.page === 'create') return renderMarketplaceSourceForm(managerSnapshot, 'create')
     const source = marketplace.snapshot().sourceRecords.find(item => item.url === route.url)
@@ -6318,7 +7318,9 @@ export function installCordisXManager(
       settingsTransitioning = false
       renderContent()
       if (!tab.builtin) {
-        if (model.mountSettingsTab === undefined || settingsPanelBody === undefined) throw new Error('manager settings page mount is unavailable')
+        if (model.mountSettingsTab === undefined || settingsPanelBody === undefined) {
+          throw new Error('manager settings page mount is unavailable')
+        }
         settingsPanel?.setAttribute('aria-busy', 'true')
         settingsPanelBody.replaceChildren()
         settingsMountId = id
@@ -6409,7 +7411,9 @@ export function installCordisXManager(
       icon.classList.add('cxm-tab-icon', 'cxm-settings-tab-icon')
       visibleContent.append(icon, create(document, 'span', undefined, item.title))
       button.append(visibleContent)
-      button.addEventListener('click', () => { void activateSettingsTab(item.id, true) })
+      button.addEventListener('click', () => {
+        void activateSettingsTab(item.id, true)
+      })
       button.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
@@ -6439,9 +7443,13 @@ export function installCordisXManager(
     settingsPanel?.removeAttribute('aria-busy')
     if (!settingsTab.startsWith('host:')) {
       settingsPanel?.setAttribute('aria-busy', 'true')
-      settingsPanelBody.append(create(document, 'div', 'cxm-notice', settingsTransitioning ? '正在切换配置页面…' : '正在加载插件配置页面…'))
+      settingsPanelBody.append(
+        create(document, 'div', 'cxm-notice', settingsTransitioning ? '正在切换配置页面…' : '正在加载插件配置页面…'),
+      )
     }
-    if (settingsError !== undefined) settingsPanelBody.append(create(document, 'div', 'cxm-error', `插件配置页面错误：${settingsError}`))
+    if (settingsError !== undefined) {
+      settingsPanelBody.append(create(document, 'div', 'cxm-error', `插件配置页面错误：${settingsError}`))
+    }
   }
 
   const disposeSettingsForRouteChange = async (): Promise<void> => {
@@ -6504,16 +7512,20 @@ export function installCordisXManager(
     | undefined
 
   const managerContentReferenceKey = (reference: CordisXRouteReference): string => (
-    `${reference.id}\u0000${JSON.stringify(Object.entries(reference.params ?? {}).sort(([left], [right]) => left.localeCompare(right)))}`
+    `${reference.id}\u0000${
+      JSON.stringify(Object.entries(reference.params ?? {}).sort(([left], [right]) => left.localeCompare(right)))
+    }`
   )
 
-  const managerContentKey = (id: string, reference: CordisXRouteReference): string => `${id}\u0000${managerContentReferenceKey(reference)}`
+  const managerContentKey = (id: string, reference: CordisXRouteReference): string =>
+    `${id}\u0000${managerContentReferenceKey(reference)}`
 
   // Encode each local-id code point independently. Concatenated punctuation
   // cannot alias: e.g. "a.b" and "a-b" deliberately produce different IDs.
-  const managerContentDomIdPart = (value: string): string => [...value]
-    .map(character => character.codePointAt(0)!.toString(16))
-    .join('-')
+  const managerContentDomIdPart = (value: string): string =>
+    [...value]
+      .map(character => character.codePointAt(0)!.toString(16))
+      .join('-')
 
   const managerContentPanelId = (id: string): string => `cordisx-manager-content-panel-${managerContentDomIdPart(id)}`
 
@@ -6536,7 +7548,10 @@ export function installCordisXManager(
     const item = settingsNavigationItems(model.snapshot()).find(candidate => candidate.id === id)
     if (item === undefined || managerContentTransitioning) return
     const resolvedReference = reference ?? item.route
-    if (model.managerContentPresentation !== undefined && model.managerContentPresentation(id, resolvedReference) === undefined) return
+    if (
+      model.managerContentPresentation !== undefined
+      && model.managerContentPresentation(id, resolvedReference) === undefined
+    ) return
     const previousRoute = routeState
     const nextRoute: ManagerRouteState = { kind: 'manager-content', id, reference: resolvedReference }
     const mountKey = managerContentKey(id, resolvedReference)
@@ -6569,12 +7584,15 @@ export function installCordisXManager(
           const active = routeState
           if (active.kind !== 'manager-content') return
           const presentation = model.managerContentPresentation?.(active.id, active.reference)
-          if (presentation?.parent !== undefined) await activateManagerContent(active.id, presentation.parent, { kind: 'navigation' })
-          else await navigateBack()
+          if (presentation?.parent !== undefined) {
+            await activateManagerContent(active.id, presentation.parent, { kind: 'navigation' })
+          } else await navigateBack()
         },
       })
-      if (token !== managerContentTransition || routeState.kind !== 'manager-content'
-        || routeState.id !== id || managerContentKey(id, routeState.reference) !== mountKey) {
+      if (
+        token !== managerContentTransition || routeState.kind !== 'manager-content'
+        || routeState.id !== id || managerContentKey(id, routeState.reference) !== mountKey
+      ) {
         mount.abort()
         await mount.dispose()
         return
@@ -6653,7 +7671,9 @@ export function installCordisXManager(
         icon.classList.add('cxm-tab-icon')
         visibleContent.append(icon, create(document, 'span', undefined, tab.label))
         button.append(visibleContent)
-        const activate = (): void => { void activateManagerContent(id, tab.route, { kind: 'tab', id: tab.id }, false) }
+        const activate = (): void => {
+          void activateManagerContent(id, tab.route, { kind: 'tab', id: tab.id }, false)
+        }
         button.addEventListener('click', activate)
         button.addEventListener('keydown', event => {
           if (event.key === 'Enter' || event.key === ' ') {
@@ -6686,16 +7706,23 @@ export function installCordisXManager(
     managerContentRoot.dataset.managerContentId = id
     managerContentRoot.dataset.managerContentRoute = reference.id
     if (managerContentMountId !== mountKey) {
-      managerContentRoot.replaceChildren(create(document, 'div', 'cxm-notice', managerContentTransitioning ? '正在切换插件页面…' : '插件页面尚未加载。'))
+      managerContentRoot.replaceChildren(
+        create(document, 'div', 'cxm-notice', managerContentTransitioning ? '正在切换插件页面…' : '插件页面尚未加载。'),
+      )
       if (!managerContentTransitioning && managerContentError === undefined) {
         queueMicrotask(() => {
-          if (routeState.kind !== 'manager-content' || routeState.id !== id
-            || managerContentKey(id, routeState.reference) !== mountKey || managerContentMountId === mountKey || managerContentTransitioning) return
+          if (
+            routeState.kind !== 'manager-content' || routeState.id !== id
+            || managerContentKey(id, routeState.reference) !== mountKey || managerContentMountId === mountKey
+            || managerContentTransitioning
+          ) return
           void activateManagerContent(id, reference, undefined, false)
         })
       }
     }
-    if (managerContentError !== undefined) managerContentRoot.append(create(document, 'div', 'cxm-error', '无法打开插件页面。'))
+    if (managerContentError !== undefined) {
+      managerContentRoot.append(create(document, 'div', 'cxm-error', '无法打开插件页面。'))
+    }
   }
 
   const syncSettingsNavigation = (snapshot: ManagerSnapshot): void => {
@@ -6735,11 +7762,15 @@ export function installCordisXManager(
         }
         if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
         event.preventDefault()
-        const candidates = [...nav.querySelectorAll<HTMLButtonElement>('.cxm-nav-button')].filter(candidate => !candidate.disabled)
+        const candidates = [...nav.querySelectorAll<HTMLButtonElement>('.cxm-nav-button')].filter(candidate =>
+          !candidate.disabled
+        )
         const index = candidates.indexOf(button)
-        const next = event.key === 'Home' ? candidates[0]
-          : event.key === 'End' ? candidates.at(-1)
-            : candidates.at((index + (event.key === 'ArrowDown' ? 1 : -1) + candidates.length) % candidates.length)
+        const next = event.key === 'Home'
+          ? candidates[0]
+          : event.key === 'End'
+          ? candidates.at(-1)
+          : candidates.at((index + (event.key === 'ArrowDown' ? 1 : -1) + candidates.length) % candidates.length)
         next?.focus()
       })
       navButtons.set(`manager-content:${item.id}`, button)
@@ -6842,20 +7873,28 @@ export function installCordisXManager(
       const surfaceToken = icon?.dataset.hostIcon
       const managerToken = icon?.dataset.hostIconKey as ManagerIconToken | undefined
       if (icon !== null && icon !== undefined && managerToken !== undefined && surfaceToken === undefined) {
-        icon.replaceChildren(renderManagerIconSvg(document, managerToken, {
-          state: selected ? 'active' : 'default',
-          theme: resolveHostTheme(document).theme,
-        }).svg)
+        icon.replaceChildren(
+          renderManagerIconSvg(document, managerToken, {
+            state: selected ? 'active' : 'default',
+            theme: resolveHostTheme(document).theme,
+          }).svg,
+        )
       } else if (surfaceToken !== undefined) {
         const key = hostSurfaceIconKey(surfaceToken)
-        if (icon !== null && icon !== undefined && key !== undefined) icon.replaceChildren(renderHostIconSvg(document, key, {
-          state: selected ? 'active' : 'default',
-          theme: resolveHostTheme(document).theme,
-        }).svg)
+        if (icon !== null && icon !== undefined && key !== undefined) {
+          icon.replaceChildren(
+            renderHostIconSvg(document, key, {
+              state: selected ? 'active' : 'default',
+              theme: resolveHostTheme(document).theme,
+            }).svg,
+          )
+        }
       }
     }
     if (removedActiveManagerContent) queueMicrotask(() => navButtons.get('plugins')?.focus())
-    if (routeState.kind === 'permission') return renderPermissionDetail(snapshot, routeState.pluginId, routeState.capability, routeState.fingerprint)
+    if (routeState.kind === 'permission') {
+      return renderPermissionDetail(snapshot, routeState.pluginId, routeState.capability, routeState.fingerprint)
+    }
     if (routeState.kind === 'plugin') return renderPluginDetail(snapshot, routeState.pluginId)
     if (routeState.kind === 'marketplace') return renderMarketplaceDetail(snapshot, routeState.identity)
     if (routeState.kind === 'marketplace-source') return renderMarketplaceSourcePage(snapshot, routeState)
@@ -6891,7 +7930,9 @@ export function installCordisXManager(
     marketplaceCollectionView = undefined
     settingsMount?.abort()
     if (settingsMount !== undefined || settingsMountId !== undefined) void resetSettings().catch(() => {})
-    if (managerContentMount !== undefined || managerContentMountId !== undefined) void resetManagerContent().catch(() => {})
+    if (managerContentMount !== undefined || managerContentMountId !== undefined) {
+      void resetManagerContent().catch(() => {})
+    }
     modal.hidden = true
     trigger.setAttribute('aria-expanded', 'false')
     trigger.focus()
@@ -6936,11 +7977,15 @@ export function installCordisXManager(
       }
       if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
       event.preventDefault()
-      const candidates = [...nav.querySelectorAll<HTMLButtonElement>('.cxm-nav-button')].filter(candidate => !candidate.disabled)
+      const candidates = [...nav.querySelectorAll<HTMLButtonElement>('.cxm-nav-button')].filter(candidate =>
+        !candidate.disabled
+      )
       const index = candidates.indexOf(button)
-      const next = event.key === 'Home' ? candidates[0]
-        : event.key === 'End' ? candidates.at(-1)
-          : candidates.at((index + (event.key === 'ArrowDown' ? 1 : -1) + candidates.length) % candidates.length)
+      const next = event.key === 'Home'
+        ? candidates[0]
+        : event.key === 'End'
+        ? candidates.at(-1)
+        : candidates.at((index + (event.key === 'ArrowDown' ? 1 : -1) + candidates.length) % candidates.length)
       next?.focus()
     })
   }
@@ -6971,16 +8016,20 @@ export function installCordisXManager(
   })
   const themeObserver = Observer === undefined ? undefined : new Observer(syncHostUiTheme)
   if (document.documentElement !== null) observer?.observe(document.documentElement, { childList: true, subtree: true })
-  if (document.documentElement !== null) themeObserver?.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['class', 'style', 'data-theme', 'data-color-theme', 'data-color-scheme'],
-  })
+  if (document.documentElement !== null) {
+    themeObserver?.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'style', 'data-theme', 'data-color-theme', 'data-color-scheme'],
+    })
+  }
   reconcile()
   renderContent()
   const unsubscribeRuntime = model.subscribe(renderContent)
   const unsubscribePluginConsole = model.subscribePluginConsole?.(pluginId => {
-    if (!consolePaused && routeState.kind === 'plugin' && routeState.pluginId === pluginId
-      && (routeState.facet === 'runtime' || routeState.facet === 'logs')) renderContent()
+    if (
+      !consolePaused && routeState.kind === 'plugin' && routeState.pluginId === pluginId
+      && (routeState.facet === 'runtime' || routeState.facet === 'logs')
+    ) renderContent()
   }) ?? (() => {})
   const unsubscribeMarketplace = marketplace.subscribe(renderContent)
   void marketplace.reload()

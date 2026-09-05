@@ -137,24 +137,35 @@ function json(value: unknown, label: string, seen = new Set<object>()): JsonValu
   if (typeof value !== 'object') throw new Error(`${label} must be lossless JSON`)
   if (seen.has(value)) throw new Error(`${label} is circular`)
   const prototype = Object.getPrototypeOf(value)
-  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) throw new Error(`${label} must be plain JSON`)
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    throw new Error(`${label} must be plain JSON`)
+  }
   seen.add(value)
   try {
     if (Array.isArray(value)) return value.map((item, index) => json(item, `${label}[${index}]`, seen))
     const output: Record<string, JsonValue> = Object.create(null) as Record<string, JsonValue>
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      if (key === '__proto__' || key === 'prototype' || key === 'constructor') throw new Error(`${label} contains a reserved key`)
+      if (key === '__proto__' || key === 'prototype' || key === 'constructor') {
+        throw new Error(`${label} contains a reserved key`)
+      }
       output[key] = json(item, `${label}.${key}`, seen)
     }
     return output
-  } finally { seen.delete(value) }
+  } finally {
+    seen.delete(value)
+  }
 }
 
 function optionalActor(value: Record<string, unknown>, label: string): { readonly actor?: string } {
   return value.actor === undefined ? {} : { actor: actor(value.actor, `${label}.actor`) }
 }
 
-function parseSteps(value: unknown, label: string, budget: { count: number }, depth = 0): readonly PlaygroundSessionScenarioStep[] {
+function parseSteps(
+  value: unknown,
+  label: string,
+  budget: { count: number },
+  depth = 0,
+): readonly PlaygroundSessionScenarioStep[] {
   if (!Array.isArray(value) || value.length === 0) throw new Error(`${label} must be a non-empty array`)
   if (depth > MAX_BRANCH_DEPTH) throw new Error(`${label} exceeds the branch depth limit`)
   const steps = value.map((candidate, index): PlaygroundSessionScenarioStep => {
@@ -166,12 +177,25 @@ function parseSteps(value: unknown, label: string, budget: { count: number }, de
     const withActor = optionalActor(item, stepLabel)
     if (type === 'assistant-reply' || type === 'final-summary') {
       exactKeys(item, ['type', 'actor', 'text', 'stream'], stepLabel)
-      if (item.stream !== undefined && typeof item.stream !== 'boolean') throw new Error(`${stepLabel}.stream must be a boolean`)
-      return Object.freeze({ type, ...withActor, text: boundedString(item.text, `${stepLabel}.text`), ...(item.stream === undefined ? {} : { stream: item.stream }) })
+      if (item.stream !== undefined && typeof item.stream !== 'boolean') {
+        throw new Error(`${stepLabel}.stream must be a boolean`)
+      }
+      return Object.freeze({
+        type,
+        ...withActor,
+        text: boundedString(item.text, `${stepLabel}.text`),
+        ...(item.stream === undefined ? {} : { stream: item.stream }),
+      })
     }
     if (type === 'tool-call') {
       exactKeys(item, ['type', 'actor', 'call', 'name', 'arguments'], stepLabel)
-      return Object.freeze({ type, ...withActor, call: handle(item.call, `${stepLabel}.call`), name: handle(item.name, `${stepLabel}.name`), ...(item.arguments === undefined ? {} : { arguments: json(item.arguments, `${stepLabel}.arguments`) }) })
+      return Object.freeze({
+        type,
+        ...withActor,
+        call: handle(item.call, `${stepLabel}.call`),
+        name: handle(item.name, `${stepLabel}.name`),
+        ...(item.arguments === undefined ? {} : { arguments: json(item.arguments, `${stepLabel}.arguments`) }),
+      })
     }
     if (type === 'tool-result') {
       exactKeys(item, ['type', 'actor', 'call', 'content', 'error'], stepLabel)
@@ -179,9 +203,18 @@ function parseSteps(value: unknown, label: string, budget: { count: number }, de
       if (item.error !== undefined) {
         const input = object(item.error, `${stepLabel}.error`)
         exactKeys(input, ['name', 'code'], `${stepLabel}.error`)
-        error = Object.freeze({ name: handle(input.name, `${stepLabel}.error.name`), code: handle(input.code, `${stepLabel}.error.code`) })
+        error = Object.freeze({
+          name: handle(input.name, `${stepLabel}.error.name`),
+          code: handle(input.code, `${stepLabel}.error.code`),
+        })
       }
-      return Object.freeze({ type, ...withActor, call: handle(item.call, `${stepLabel}.call`), content: boundedString(item.content, `${stepLabel}.content`), ...(error === undefined ? {} : { error }) })
+      return Object.freeze({
+        type,
+        ...withActor,
+        call: handle(item.call, `${stepLabel}.call`),
+        content: boundedString(item.content, `${stepLabel}.content`),
+        ...(error === undefined ? {} : { error }),
+      })
     }
     if (type === 'approval-request') {
       exactKeys(item, ['type', 'actor', 'request', 'toolName', 'reason', 'branches'], stepLabel)
@@ -190,10 +223,17 @@ function parseSteps(value: unknown, label: string, budget: { count: number }, de
         const input = object(item.branches, `${stepLabel}.branches`)
         exactKeys(input, OUTCOMES, `${stepLabel}.branches`)
         branches = Object.create(null) as Partial<Record<ApprovalOutcome, readonly PlaygroundSessionScenarioStep[]>>
-        for (const outcome of OUTCOMES) if (input[outcome] !== undefined) branches[outcome] = parseSteps(input[outcome], `${stepLabel}.branches.${outcome}`, budget, depth + 1)
+        for (const outcome of OUTCOMES) {
+          if (input[outcome] !== undefined) {
+            branches[outcome] = parseSteps(input[outcome], `${stepLabel}.branches.${outcome}`, budget, depth + 1)
+          }
+        }
       }
       return Object.freeze({
-        type, ...withActor, request: handle(item.request, `${stepLabel}.request`), toolName: handle(item.toolName, `${stepLabel}.toolName`),
+        type,
+        ...withActor,
+        request: handle(item.request, `${stepLabel}.request`),
+        toolName: handle(item.toolName, `${stepLabel}.toolName`),
         ...(item.reason === undefined ? {} : { reason: boundedString(item.reason, `${stepLabel}.reason`) }),
         ...(branches === undefined ? {} : { branches: Object.freeze(branches) }),
       })
@@ -203,8 +243,12 @@ function parseSteps(value: unknown, label: string, budget: { count: number }, de
       const alias = actor(item.as, `${stepLabel}.as`)
       if (alias === 'lead') throw new Error(`${stepLabel}.as cannot replace the lead actor`)
       return Object.freeze({
-        type, ...withActor, as: alias, memberId: handle(item.memberId, `${stepLabel}.memberId`),
-        targetAgentId: handle(item.targetAgentId, `${stepLabel}.targetAgentId`), task: boundedString(item.task, `${stepLabel}.task`),
+        type,
+        ...withActor,
+        as: alias,
+        memberId: handle(item.memberId, `${stepLabel}.memberId`),
+        targetAgentId: handle(item.targetAgentId, `${stepLabel}.targetAgentId`),
+        task: boundedString(item.task, `${stepLabel}.task`),
       })
     }
     if (type === 'activate-session-scope') {
@@ -218,7 +262,12 @@ function parseSteps(value: unknown, label: string, budget: { count: number }, de
     }
     if (type === 'failure') {
       exactKeys(item, ['type', 'actor', 'message', 'code'], stepLabel)
-      return Object.freeze({ type, ...withActor, message: boundedString(item.message, `${stepLabel}.message`), code: handle(item.code, `${stepLabel}.code`) })
+      return Object.freeze({
+        type,
+        ...withActor,
+        message: boundedString(item.message, `${stepLabel}.message`),
+        code: handle(item.code, `${stepLabel}.code`),
+      })
     }
     if (type === 'cancel') {
       exactKeys(item, ['type', 'actor', 'reason'], stepLabel)
@@ -234,15 +283,24 @@ export function parsePlaygroundSessionScenarioCatalog(value: unknown): Playgroun
   if (value === undefined) return undefined
   const root = object(value, 'playground.sessionScenarios')
   exactKeys(root, ['version', 'revision', 'enabled', 'scenarios'], 'playground.sessionScenarios')
-  if (root.version !== PLAYGROUND_SESSION_SCENARIO_CATALOG_VERSION) throw new Error('playground.sessionScenarios.version must be 1')
+  if (root.version !== PLAYGROUND_SESSION_SCENARIO_CATALOG_VERSION) {
+    throw new Error('playground.sessionScenarios.version must be 1')
+  }
   if (typeof root.enabled !== 'boolean') throw new Error('playground.sessionScenarios.enabled must be a boolean')
   const revision = handle(root.revision, 'playground.sessionScenarios.revision')
   const input = object(root.scenarios, 'playground.sessionScenarios.scenarios')
   const entries = Object.entries(input)
-  if (entries.length > MAX_SCENARIOS) throw new Error(`playground.sessionScenarios.scenarios exceeds the ${MAX_SCENARIOS}-scenario limit`)
-  const scenarios: Record<string, PlaygroundSessionScenarioDefinition> = Object.create(null) as Record<string, PlaygroundSessionScenarioDefinition>
+  if (entries.length > MAX_SCENARIOS) {
+    throw new Error(`playground.sessionScenarios.scenarios exceeds the ${MAX_SCENARIOS}-scenario limit`)
+  }
+  const scenarios: Record<string, PlaygroundSessionScenarioDefinition> = Object.create(null) as Record<
+    string,
+    PlaygroundSessionScenarioDefinition
+  >
   for (const [code, candidate] of entries) {
-    if (!CODE.test(code)) throw new Error(`playground.sessionScenarios.scenarios code ${JSON.stringify(code)} is invalid`)
+    if (!CODE.test(code)) {
+      throw new Error(`playground.sessionScenarios.scenarios code ${JSON.stringify(code)} is invalid`)
+    }
     const label = `playground.sessionScenarios.scenarios.${code}`
     const item = object(candidate, label)
     exactKeys(item, ['entryAgentId', 'label', 'steps'], label)

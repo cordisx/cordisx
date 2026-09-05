@@ -65,9 +65,11 @@ export interface ChannelServiceConfigDescriptorV1 {
   readonly configuration: {
     readonly contract: 'cordisx.channel-service-config/v1'
     readonly schemaVersion: 1
-    readonly connections: ReadonlyArray<Omit<ChannelServiceConnectionConfig, 'secretRef'> & {
-      readonly secretState: ChannelSecretState
-    }>
+    readonly connections: ReadonlyArray<
+      Omit<ChannelServiceConnectionConfig, 'secretRef'> & {
+        readonly secretState: ChannelSecretState
+      }
+    >
   }
 }
 
@@ -134,7 +136,10 @@ function exactKeys(value: Record<string, unknown>, allowed: readonly string[], l
 }
 
 function text(value: unknown, label: string, maximum: number, pattern?: RegExp): string {
-  if (typeof value !== 'string' || value.length < 1 || value.length > maximum || pattern !== undefined && !pattern.test(value)) {
+  if (
+    typeof value !== 'string' || value.length < 1 || value.length > maximum
+    || pattern !== undefined && !pattern.test(value)
+  ) {
     throw new TypeError(`${label} is invalid`)
   }
   return value
@@ -159,7 +164,11 @@ function array(value: unknown, label: string, minimum: number, maximum: number):
   return value
 }
 
-function distinct<T>(values: readonly T[], label: string, key: (value: T) => string = value => String(value)): readonly T[] {
+function distinct<T>(
+  values: readonly T[],
+  label: string,
+  key: (value: T) => string = value => String(value),
+): readonly T[] {
   const seen = new Set<string>()
   for (const value of values) {
     const identity = key(value)
@@ -198,19 +207,25 @@ function parseTransport(value: unknown, label: string): ChannelServiceTransportC
       callbackAlias: text(transport.callbackAlias, `${label}.callbackAlias`, 128, CALLBACK_ALIAS),
     }
   }
-  if (transport.callbackAlias !== undefined) throw new TypeError(`${label}.callbackAlias is supported only for webhook mode`)
+  if (transport.callbackAlias !== undefined) {
+    throw new TypeError(`${label}.callbackAlias is supported only for webhook mode`)
+  }
   return { mode }
 }
 
 function allowedModes(kind: ChannelAdapterKind): ReadonlySet<ChannelTransportMode> {
   switch (kind) {
-    case 'simulator': return new Set(['simulator'])
+    case 'simulator':
+      return new Set(['simulator'])
     case 'feishu':
     case 'lark':
-    case 'wecom-intelligent-bot': return new Set(['websocket', 'webhook'])
+    case 'wecom-intelligent-bot':
+      return new Set(['websocket', 'webhook'])
     case 'wecom-enterprise-app':
-    case 'wechat-service': return new Set(['webhook'])
-    case 'wecom-message-push': return new Set(['outbound-webhook'])
+    case 'wechat-service':
+      return new Set(['webhook'])
+    case 'wecom-message-push':
+      return new Set(['outbound-webhook'])
   }
 }
 
@@ -269,7 +284,13 @@ const ChannelConnectionConfigSchema = Schema.object({
 function channelConnectionSchemasteryProjection(): {
   readonly kind: 'schemastery'
   readonly envelope: Readonly<Record<string, unknown>>
-  readonly form: { readonly version: 1; readonly fields: readonly { readonly path: readonly ['connections']; readonly presenter: { readonly version: 1; readonly kind: 'array.object-page' } }[] }
+  readonly form: {
+    readonly version: 1
+    readonly fields: readonly {
+      readonly path: readonly ['connections']
+      readonly presenter: { readonly version: 1; readonly kind: 'array.object-page' }
+    }[]
+  }
 } {
   return Object.freeze({
     kind: 'schemastery' as const,
@@ -290,9 +311,12 @@ export function parseChannelServiceConfig(value: unknown): ChannelServiceConfigV
   if (config.contract !== 'cordisx.channel-service-config/v1' || config.schemaVersion !== 1) {
     throw new TypeError('Channel service configuration contract/version is unsupported')
   }
-  const connections = distinct(array(config.connections, 'Channel service configuration.connections', 0, 64)
-    .map((item, index) => parseConnection(item, `Channel service configuration.connections[${index}]`)),
-  'Channel service configuration.connections', connection => tenantKey(connection.ref))
+  const connections = distinct(
+    array(config.connections, 'Channel service configuration.connections', 0, 64)
+      .map((item, index) => parseConnection(item, `Channel service configuration.connections[${index}]`)),
+    'Channel service configuration.connections',
+    connection => tenantKey(connection.ref),
+  )
   return immutable({
     contract: 'cordisx.channel-service-config/v1',
     schemaVersion: 1,
@@ -307,9 +331,11 @@ export function parseChannelServiceConfigurationDeclaration(value: unknown): Cha
     return Object.freeze({ kind: 'none' })
   }
   exactKeys(declaration, ['kind', 'schema', 'configApplies'], 'Channel service configuration declaration')
-  if (declaration.kind !== 'host'
+  if (
+    declaration.kind !== 'host'
     || declaration.schema !== CHANNEL_SERVICE_CONFIG_SCHEMA_V1
-    || declaration.configApplies !== 'restart') {
+    || declaration.configApplies !== 'restart'
+  ) {
     throw new TypeError('Channel service Host configuration declaration is unsupported')
   }
   return Object.freeze({
@@ -364,7 +390,9 @@ export function projectChannelServiceConfig(
   const configuration = parseChannelServiceConfig(input.configuration)
   const currentRevision = revision(input.revision, 'Channel service config revision')
   const lastGoodRevision = revision(input.lastGoodRevision, 'Channel service config lastGoodRevision')
-  if (lastGoodRevision > currentRevision) throw new TypeError('Channel service config lastGoodRevision exceeds revision')
+  if (lastGoodRevision > currentRevision) {
+    throw new TypeError('Channel service config lastGoodRevision exceeds revision')
+  }
   const generation = text(input.scope.generation, 'Channel service config scope.generation', 128, GENERATION)
   if (typeof input.writable !== 'boolean') throw new TypeError('Channel service config writable must be a boolean')
 
@@ -466,9 +494,9 @@ export function createChannelHostServiceConfigContract(
           connection.adapterKind === 'simulator'
             ? []
             : [{
-                path: ['connections', String(index), 'secretRef'],
-                set: secretState(connection.secretRef) === 'ready',
-              }]
+              path: ['connections', String(index), 'secretRef'],
+              set: secretState(connection.secretRef) === 'ready',
+            }]
         )),
       })
     },

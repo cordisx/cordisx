@@ -20,7 +20,10 @@ interface IconThemePreferenceReadyResponseAck extends IconThemePreferenceDeliver
 
 interface Pending {
   readonly expectedRevision: number
-  readonly candidate: Pick<RedactedIconThemeProvider, 'providerId' | 'namespace' | 'providerVersion' | 'providerGeneration'>
+  readonly candidate: Pick<
+    RedactedIconThemeProvider,
+    'providerId' | 'namespace' | 'providerVersion' | 'providerGeneration'
+  >
   readonly resolve: (preference: HomeConfigIconThemePreference) => void
   readonly reject: (error: Error) => void
   readonly timer: ReturnType<typeof setTimeout>
@@ -89,7 +92,9 @@ export class BrowserIconThemePreferenceBridge {
     globalThis[RECEIVER] = this.receive
   }
 
-  revision(): number { return this.preferenceRevision }
+  revision(): number {
+    return this.preferenceRevision
+  }
 
   current(): HomeConfigIconThemePreference | undefined {
     return this.preference === undefined ? undefined : { ...this.preference }
@@ -109,7 +114,9 @@ export class BrowserIconThemePreferenceBridge {
       requiredRevision = Math.max(requiredRevision, status.requiredRevision)
       if (status.synchronization === 'complete') return
       if (round === READY_RETRY_DELAYS_MS.length) {
-        throw new Error(`Icon theme preference document remains pending at revision ${status.currentRevision}; required ${requiredRevision}`)
+        throw new Error(
+          `Icon theme preference document remains pending at revision ${status.currentRevision}; required ${requiredRevision}`,
+        )
       }
       await this.waitForReadyRetry(READY_RETRY_DELAYS_MS[round]!)
     }
@@ -118,7 +125,9 @@ export class BrowserIconThemePreferenceBridge {
   private requestReady(requiredRevision: number): Promise<IconThemePreferenceReadyStatus> {
     if (this.closed) return Promise.reject(new Error('Icon theme preference persistence bridge is closed'))
     const binding = globalThis[BINDING]
-    if (typeof binding !== 'function') return Promise.reject(new Error('Icon theme preference persistence bridge is unavailable'))
+    if (typeof binding !== 'function') {
+      return Promise.reject(new Error('Icon theme preference persistence bridge is unavailable'))
+    }
     const requestId = typeof globalThis.crypto?.randomUUID === 'function'
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -175,7 +184,9 @@ export class BrowserIconThemePreferenceBridge {
   ): Promise<HomeConfigIconThemePreference> {
     if (this.closed) return Promise.reject(new Error('Icon theme preference persistence bridge is closed'))
     const binding = globalThis[BINDING]
-    if (typeof binding !== 'function') return Promise.reject(new Error('Icon theme preference persistence bridge is unavailable'))
+    if (typeof binding !== 'function') {
+      return Promise.reject(new Error('Icon theme preference persistence bridge is unavailable'))
+    }
     const requestId = typeof globalThis.crypto?.randomUUID === 'function'
       ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -249,7 +260,11 @@ export class BrowserIconThemePreferenceBridge {
       readyLeaseToken?: unknown
       readyLeaseRevision?: unknown
     }
-    try { response = JSON.parse(payload) as typeof response } catch { throw new Error('icon theme preference response is invalid') }
+    try {
+      response = JSON.parse(payload) as typeof response
+    } catch {
+      throw new Error('icon theme preference response is invalid')
+    }
     if (response.kind === 'sync') {
       if (validPreference(response.value)) this.acceptPreference(response.value)
       return this.deliveryAck()
@@ -263,7 +278,9 @@ export class BrowserIconThemePreferenceBridge {
       if (response.ok !== true) {
         this.readyPending.delete(response.requestId)
         clearTimeout(pending.timer)
-        pending.reject(new Error(typeof response.code === 'string' ? response.code : 'icon-theme-document-ready-rejected'))
+        pending.reject(
+          new Error(typeof response.code === 'string' ? response.code : 'icon-theme-document-ready-rejected'),
+        )
         return this.deliveryAck()
       }
       const leaseRevision = response.readyLeaseRevision
@@ -279,13 +296,15 @@ export class BrowserIconThemePreferenceBridge {
         || (currentRevision as number) !== this.preferenceRevision
         || (requiredRevision as number) < (currentRevision as number)
       if (staleLease) throw new Error('icon theme preference document ready response lease is stale')
-      if (response.documentEpoch !== this.documentEpoch
+      if (
+        response.documentEpoch !== this.documentEpoch
         || (currentRevision as number) < 0
         || (requiredRevision as number) < pending.expectedRevision
         || (synchronization !== 'complete' && synchronization !== 'pending')
         || (synchronization === 'complete' && ((currentRevision as number) < (requiredRevision as number)
           || this.preferenceRevision < (requiredRevision as number)))
-        || (synchronization === 'pending' && (currentRevision as number) >= (requiredRevision as number))) {
+        || (synchronization === 'pending' && (currentRevision as number) >= (requiredRevision as number))
+      ) {
         throw new Error('icon theme preference document ready acknowledgement is invalid')
       }
       pending.acceptedLeaseRevision = leaseRevision as number
@@ -319,11 +338,13 @@ export class BrowserIconThemePreferenceBridge {
       return this.deliveryAck()
     }
     const preference = response.value
-    if (preference.revision !== pending.expectedRevision + 1
+    if (
+      preference.revision !== pending.expectedRevision + 1
       || preference.providerId !== pending.candidate.providerId
       || preference.namespace !== pending.candidate.namespace
       || preference.providerVersion !== pending.candidate.providerVersion
-      || preference.providerGeneration !== pending.candidate.providerGeneration) {
+      || preference.providerGeneration !== pending.candidate.providerGeneration
+    ) {
       pending.reject(new Error('Icon theme preference persistence response was mismatched'))
       return this.deliveryAck()
     }

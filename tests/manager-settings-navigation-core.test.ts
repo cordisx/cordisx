@@ -3,10 +3,10 @@ import { createGeneratedAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import {
-  CORDISX_PAGE_SCHEMA_V3,
-  CORDISX_ROUTE_SCHEMA_V2,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3,
+  CORDISX_PAGE_SCHEMA_V3,
+  CORDISX_ROUTE_SCHEMA_V2,
   type CordisXLocalizationSeat,
 } from '../packages/cli/src/contracts.js'
 import type { CordisXI18nService, LocalizationEffectOwner } from '../packages/cli/src/renderer/i18n.js'
@@ -15,16 +15,19 @@ import {
   sortManagerSettingsNavigationItems,
 } from '../packages/cli/src/renderer/manager-settings-navigation.js'
 import {
-  NavigationRegistry,
   ManagerContentNavigationRegistry,
-  OutletRegistry,
-  PageRegistry,
+  NavigationRegistry,
   type OutletController,
   type OutletHostSnapshot,
+  OutletRegistry,
+  PageRegistry,
 } from '../packages/cli/src/renderer/navigation.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
-import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
+import {
+  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+  type CordisXPluginActivationRecordV1,
+} from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import { TestCodexRouteHistory } from './helpers/codex-route-history.js'
 import { SurfaceRegistry } from '../packages/cli/src/renderer/surfaces.js'
 import { HostContextStore } from '../packages/cli/src/renderer/validation.js'
@@ -45,8 +48,12 @@ class FakeOutlet implements OutletController {
     return () => this.listeners.delete(listener)
   }
 
-  show(): void { this.shows += 1 }
-  hide(): void { this.hides += 1 }
+  show(): void {
+    this.shows += 1
+  }
+  hide(): void {
+    this.hides += 1
+  }
 }
 
 function fakeI18n(): CordisXI18nService {
@@ -62,18 +69,26 @@ function fakeI18n(): CordisXI18nService {
         t: key => String(key),
         message: (key, params) => ({ key, ...(params === undefined ? {} : { params }) }),
         getSnapshot: () => ({ locale: 'en', direction: 'ltr', version: 0 }),
-        subscribe: listener => own(() => { void listener; return () => {} }),
+        subscribe: listener =>
+          own(() => {
+            void listener
+            return () => {}
+          }),
         effect: setup => own(() => setup({ locale: 'en', direction: 'ltr', version: 0 })),
-        bindText: (node, message) => own(() => {
-          const previous = node.textContent
-          node.textContent = message.fallback ?? message.key
-          return () => { node.textContent = previous }
-        }),
-        bindAttribute: (element, name, message) => own(() => {
-          const previous = element.getAttribute(name)
-          element.setAttribute(name, message.fallback ?? message.key)
-          return () => previous === null ? element.removeAttribute(name) : element.setAttribute(name, previous)
-        }),
+        bindText: (node, message) =>
+          own(() => {
+            const previous = node.textContent
+            node.textContent = message.fallback ?? message.key
+            return () => {
+              node.textContent = previous
+            }
+          }),
+        bindAttribute: (element, name, message) =>
+          own(() => {
+            const previous = element.getAttribute(name)
+            element.setAttribute(name, message.fallback ?? message.key)
+            return () => previous === null ? element.removeAttribute(name) : element.setAttribute(name, previous)
+          }),
       }
     },
   } as unknown as CordisXI18nService
@@ -86,34 +101,57 @@ describe('Manager Settings navigation core', () => {
     surfaces.setResolvers({
       command: () => false,
       route: () => false,
-      managerSettingsNavigationRoute: (_owner, id) => id === 'ready' || id === 'shared'
-        ? { state: 'available' }
-        : id === 'invalid'
+      managerSettingsNavigationRoute: (_owner, id) =>
+        id === 'ready' || id === 'shared'
+          ? { state: 'available' }
+          : id === 'invalid'
           ? { state: 'invalid', detail: 'route is outside the Manager family' }
           : { state: 'pending', detail: 'route is unresolved' },
     })
 
-    expect(() => surfaces.register('demo', {
-      name: 'manager.settings.navigation-items', id: 'missing-group',
-    } as never, { route: { id: 'ready' } })).toThrow(/requires group/)
-    expect(() => surfaces.register('demo', {
-      name: 'manager.settings.navigation-items', id: 'bad-group', group: 'default',
-    } as never, { route: { id: 'ready' } })).toThrow(/requires group/)
-    expect(() => surfaces.register('demo', {
-      name: 'manager.settings.tabs', id: 'content', group: 'after-settings',
-    } as never, { title: { key: 'content' }, icon: 'host:settings', route: { id: 'ready' } })).toThrow(/does not accept/)
+    expect(() =>
+      surfaces.register('demo', {
+        name: 'manager.settings.navigation-items',
+        id: 'missing-group',
+      } as never, { route: { id: 'ready' } })
+    ).toThrow(/requires group/)
+    expect(() =>
+      surfaces.register('demo', {
+        name: 'manager.settings.navigation-items',
+        id: 'bad-group',
+        group: 'default',
+      } as never, { route: { id: 'ready' } })
+    ).toThrow(/requires group/)
+    expect(() =>
+      surfaces.register('demo', {
+        name: 'manager.settings.tabs',
+        id: 'content',
+        group: 'after-settings',
+      } as never, { title: { key: 'content' }, icon: 'host:settings', route: { id: 'ready' } })
+    ).toThrow(/does not accept/)
 
     const ready = surfaces.register('demo', {
-      name: 'manager.settings.navigation-items', id: 'ready', group: 'after-settings', order: 20,
+      name: 'manager.settings.navigation-items',
+      id: 'ready',
+      group: 'after-settings',
+      order: 20,
     }, { route: { id: 'ready' } })
     surfaces.register('demo', {
-      name: 'manager.settings.navigation-items', id: 'pending', group: 'before-settings', order: 10,
+      name: 'manager.settings.navigation-items',
+      id: 'pending',
+      group: 'before-settings',
+      order: 10,
     }, { route: { id: 'pending' } })
     surfaces.register('demo', {
-      name: 'manager.settings.navigation-items', id: 'invalid', group: 'after-settings', order: 10,
+      name: 'manager.settings.navigation-items',
+      id: 'invalid',
+      group: 'after-settings',
+      order: 10,
     }, { route: { id: 'invalid' } })
     surfaces.register('demo', {
-      name: 'manager.settings.navigation-items', id: 'free-header', group: 'after-settings',
+      name: 'manager.settings.navigation-items',
+      id: 'free-header',
+      group: 'after-settings',
     }, { route: { id: 'ready' }, title: { key: 'forbidden' }, html: '<b>forbidden</b>' } as never)
 
     expect(surfaces.snapshot().find(item => item.id === 'ready')).toMatchObject({ valid: true, pending: false })
@@ -121,16 +159,24 @@ describe('Manager Settings navigation core', () => {
     expect(surfaces.snapshot().find(item => item.id === 'invalid')).toMatchObject({ valid: false, pending: false })
     expect(surfaces.snapshot().find(item => item.id === 'free-header')?.error).toMatch(/unknown field/)
     surfaces.register('demo', {
-      name: 'manager.settings.navigation-items', id: 'shared-a', group: 'before-settings',
+      name: 'manager.settings.navigation-items',
+      id: 'shared-a',
+      group: 'before-settings',
     }, { route: { id: 'shared' } })
     surfaces.register('demo', {
-      name: 'manager.settings.navigation-items', id: 'shared-b', group: 'after-settings',
+      name: 'manager.settings.navigation-items',
+      id: 'shared-b',
+      group: 'after-settings',
     }, { route: { id: 'shared' } })
     const duplicateDestinations = surfaces.snapshot().filter(item => item.id.startsWith('shared-'))
     expect(duplicateDestinations.every(item => !item.valid)).toBe(true)
     expect(duplicateDestinations[0]?.error).toContain('demo:shared-a, demo:shared-b')
     ready.updateOptions({ group: 'before-settings', order: -5, disabled: { value: true } })
-    expect(surfaces.snapshot().find(item => item.id === 'ready')).toMatchObject({ group: 'before-settings', order: -5, disabled: true })
+    expect(surfaces.snapshot().find(item => item.id === 'ready')).toMatchObject({
+      group: 'before-settings',
+      order: -5,
+      disabled: true,
+    })
 
     surfaces.dispose()
     contexts.dispose()
@@ -147,10 +193,18 @@ describe('Manager Settings navigation core', () => {
     const sorted = sortManagerSettingsNavigationItems(input)
 
     expect(sorted.map(item => item.id)).toEqual([
-      'zeta:first', 'alpha:a', 'alpha:z', 'zeta:a', 'alpha:last',
+      'zeta:first',
+      'alpha:a',
+      'alpha:z',
+      'zeta:a',
+      'alpha:last',
     ])
     expect(input.map(item => item.id)).toEqual([
-      'alpha:last', 'zeta:a', 'alpha:z', 'alpha:a', 'zeta:first',
+      'alpha:last',
+      'zeta:a',
+      'alpha:z',
+      'alpha:a',
+      'zeta:first',
     ])
     expect(Object.isFrozen(sorted)).toBe(true)
     expect(compareManagerSettingsNavigationItems(sorted[0]!, sorted[1]!)).toBeLessThan(0)
@@ -164,9 +218,14 @@ describe('Manager Settings navigation core', () => {
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory(), contexts)
 
     navigation.register('demo', {
-      $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2,
-      id: 'ready', path: '/manager/extensions/demo', outlet: 'manager.content', page: 'ready',
-      title: { key: 'route.title' }, description: { key: 'route.description' },
+      $schema: CORDISX_ROUTE_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'ready',
+      path: '/manager/extensions/demo',
+      outlet: 'manager.content',
+      page: 'ready',
+      title: { key: 'route.title' },
+      description: { key: 'route.description' },
     })
     expect(navigation.managerSettingsNavigationRoute('demo', 'ready')).toMatchObject({ state: 'pending' })
 
@@ -175,16 +234,29 @@ describe('Manager Settings navigation core', () => {
     const previousDocument = globalThis.document
     Object.assign(globalThis, { window: dom.window, document: dom.window.document })
     const controller = new FakeOutlet(dom.window.document.getElementById('manager')!)
-    outlets.declare({
-      schemaVersion: 1, id: 'manager.content', authority: 'host-adapter', scope: 'manager',
-      preferredPlacement: 'absolute', contextPolicy: 'semantic', presentationGroup: 'manager',
-    }, controller, path => path.startsWith('/manager/extensions/'))
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'manager.content',
+        authority: 'host-adapter',
+        scope: 'manager',
+        preferredPlacement: 'absolute',
+        contextPolicy: 'semantic',
+        presentationGroup: 'manager',
+      },
+      controller,
+      path => path.startsWith('/manager/extensions/'),
+    )
     expect(navigation.managerSettingsNavigationRoute('demo', 'ready')).toMatchObject({ state: 'pending' })
 
     pages.register('demo', {
-      $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3,
-      id: 'ready', title: { key: 'page.title' }, description: { key: 'page.description' },
-      icon: 'host:layers', chrome: 'standard',
+      $schema: CORDISX_PAGE_SCHEMA_V3,
+      schemaVersion: 3,
+      id: 'ready',
+      title: { key: 'page.title' },
+      description: { key: 'page.description' },
+      icon: 'host:layers',
+      chrome: 'standard',
     }, context => {
       const body = context.document.createElement('p')
       body.dataset.demoManagerContent = 'true'
@@ -194,7 +266,12 @@ describe('Manager Settings navigation core', () => {
     })
     expect(navigation.managerSettingsNavigationRoute('demo', 'ready')).toMatchObject({
       state: 'available',
-      resolved: { owner: 'demo', qualifiedId: 'demo:ready', definition: { outlet: 'manager.content' }, page: { qualifiedId: 'demo:ready' } },
+      resolved: {
+        owner: 'demo',
+        qualifiedId: 'demo:ready',
+        definition: { outlet: 'manager.content' },
+        page: { qualifiedId: 'demo:ready' },
+      },
     })
     const managerBody = dom.window.document.createElement('section')
     dom.window.document.body.append(managerBody)
@@ -210,32 +287,69 @@ describe('Manager Settings navigation core', () => {
 
     for (const [id, title] of [['configuration', 'Configuration'], ['logs', 'Logs']] as const) {
       pages.register('demo', {
-        $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3, id,
-        title: { key: `page.${id}`, fallback: title }, description: { key: `description.${id}`, fallback: `${title} body` },
-        icon: 'host:layers', chrome: 'standard',
+        $schema: CORDISX_PAGE_SCHEMA_V3,
+        schemaVersion: 3,
+        id,
+        title: { key: `page.${id}`, fallback: title },
+        description: { key: `description.${id}`, fallback: `${title} body` },
+        icon: 'host:layers',
+        chrome: 'standard',
       }, () => undefined)
     }
     navigation.register('demo', {
-      $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2,
-      id: 'configuration', path: '/manager/extensions/demo/:accountId', outlet: 'manager.content', page: 'configuration',
-      title: { key: 'route.configuration' }, description: { key: 'route.configuration.description' },
+      $schema: CORDISX_ROUTE_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'configuration',
+      path: '/manager/extensions/demo/:accountId',
+      outlet: 'manager.content',
+      page: 'configuration',
+      title: { key: 'route.configuration' },
+      description: { key: 'route.configuration.description' },
     })
     navigation.register('demo', {
-      $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2,
-      id: 'logs', path: '/manager/extensions/demo/:accountId/logs', outlet: 'manager.content', page: 'logs',
-      title: { key: 'route.logs' }, description: { key: 'route.logs.description' },
+      $schema: CORDISX_ROUTE_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'logs',
+      path: '/manager/extensions/demo/:accountId/logs',
+      outlet: 'manager.content',
+      page: 'logs',
+      title: { key: 'route.logs' },
+      description: { key: 'route.logs.description' },
     })
     const configuration = { id: 'configuration', params: { accountId: 'account-1' } } as const
     const logs = { id: 'logs', params: { accountId: 'account-1' } } as const
-    navigation.managerContent.registerRecordTitles('demo', [{ id: 'account-1', title: { key: 'account', fallback: 'Ada' } }])
+    navigation.managerContent.registerRecordTitles('demo', [{
+      id: 'account-1',
+      title: { key: 'account', fallback: 'Ada' },
+    }])
     navigation.managerContent.register('demo', {
-      $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1, schemaVersion: 1, id: 'account-configuration', route: configuration,
-      parentRoute: { id: 'ready' }, header: { title: { kind: 'record', recordIdParam: 'accountId', fallback: { key: 'account.fallback', fallback: 'Account' } } },
+      $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
+      schemaVersion: 1,
+      id: 'account-configuration',
+      route: configuration,
+      parentRoute: { id: 'ready' },
+      header: {
+        title: {
+          kind: 'record',
+          recordIdParam: 'accountId',
+          fallback: { key: 'account.fallback', fallback: 'Account' },
+        },
+      },
       tabs: [{ id: 'configuration', route: configuration }, { id: 'logs', route: logs }],
     })
     navigation.managerContent.register('demo', {
-      $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1, schemaVersion: 1, id: 'account-logs', route: logs,
-      parentRoute: { id: 'ready' }, header: { title: { kind: 'record', recordIdParam: 'accountId', fallback: { key: 'account.fallback', fallback: 'Account' } } },
+      $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
+      schemaVersion: 1,
+      id: 'account-logs',
+      route: logs,
+      parentRoute: { id: 'ready' },
+      header: {
+        title: {
+          kind: 'record',
+          recordIdParam: 'accountId',
+          fallback: { key: 'account.fallback', fallback: 'Account' },
+        },
+      },
       tabs: [{ id: 'configuration', route: configuration }],
     })
     const presentation = navigation.managerContentPresentation('demo', configuration)
@@ -246,38 +360,67 @@ describe('Manager Settings navigation core', () => {
     expect(navigation.managerContentPresentation('demo', logs)).toBeUndefined()
 
     pages.register('demo', {
-      $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3,
-      id: 'missing-icon', title: { key: 'title' }, description: { key: 'description' },
+      $schema: CORDISX_PAGE_SCHEMA_V3,
+      schemaVersion: 3,
+      id: 'missing-icon',
+      title: { key: 'title' },
+      description: { key: 'description' },
     }, () => undefined)
     navigation.register('demo', {
-      $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2,
-      id: 'missing-icon', path: '/manager/extensions/missing-icon', outlet: 'manager.content', page: 'missing-icon',
-      title: { key: 'title' }, description: { key: 'description' },
+      $schema: CORDISX_ROUTE_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'missing-icon',
+      path: '/manager/extensions/missing-icon',
+      outlet: 'manager.content',
+      page: 'missing-icon',
+      title: { key: 'title' },
+      description: { key: 'description' },
     })
     expect(navigation.managerSettingsNavigationRoute('demo', 'missing-icon')).toMatchObject({ state: 'invalid' })
 
     pages.register('demo', {
-      $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3,
-      id: 'body', title: { key: 'title' }, description: { key: 'description' }, icon: 'host:info', chrome: 'body-only',
+      $schema: CORDISX_PAGE_SCHEMA_V3,
+      schemaVersion: 3,
+      id: 'body',
+      title: { key: 'title' },
+      description: { key: 'description' },
+      icon: 'host:info',
+      chrome: 'body-only',
     }, () => undefined)
     navigation.register('demo', {
-      $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2,
-      id: 'body', path: '/manager/extensions/body', outlet: 'manager.content', page: 'body',
-      title: { key: 'title' }, description: { key: 'description' },
+      $schema: CORDISX_ROUTE_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'body',
+      path: '/manager/extensions/body',
+      outlet: 'manager.content',
+      page: 'body',
+      title: { key: 'title' },
+      description: { key: 'description' },
     })
     expect(navigation.managerSettingsNavigationRoute('demo', 'body')).toMatchObject({ state: 'invalid' })
 
     navigation.register('demo', {
-      $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2,
-      id: 'root', path: '/manager/extensions', outlet: 'manager.content', page: 'ready',
-      title: { key: 'title' }, description: { key: 'description' },
+      $schema: CORDISX_ROUTE_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'root',
+      path: '/manager/extensions',
+      outlet: 'manager.content',
+      page: 'ready',
+      title: { key: 'title' },
+      description: { key: 'description' },
     })
     expect(navigation.managerSettingsNavigationRoute('demo', 'root')).toMatchObject({ state: 'invalid' })
 
     navigation.register('demo', {
-      $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2,
-      id: 'when', path: '/manager/extensions/when', outlet: 'manager.content', page: 'ready',
-      title: { key: 'title' }, description: { key: 'description' }, when: { key: 'enabled', equals: true },
+      $schema: CORDISX_ROUTE_SCHEMA_V2,
+      schemaVersion: 2,
+      id: 'when',
+      path: '/manager/extensions/when',
+      outlet: 'manager.content',
+      page: 'ready',
+      title: { key: 'title' },
+      description: { key: 'description' },
+      when: { key: 'enabled', equals: true },
     })
     expect(navigation.managerSettingsNavigationRoute('demo', 'when')).toMatchObject({ state: 'pending' })
 
@@ -296,29 +439,47 @@ describe('Manager Settings navigation core', () => {
     const outlets = new OutletRegistry()
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory(), contexts)
     const dom = new JSDOM('<body><main id="manager"></main></body>')
-    outlets.declare({
-      schemaVersion: 1, id: 'manager.content', authority: 'host-adapter', scope: 'manager',
-      preferredPlacement: 'absolute', contextPolicy: 'semantic', presentationGroup: 'manager',
-    }, new FakeOutlet(dom.window.document.getElementById('manager')!), path => path.startsWith('/manager/extensions/'))
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'manager.content',
+        authority: 'host-adapter',
+        scope: 'manager',
+        preferredPlacement: 'absolute',
+        contextPolicy: 'semantic',
+        presentationGroup: 'manager',
+      },
+      new FakeOutlet(dom.window.document.getElementById('manager')!),
+      path => path.startsWith('/manager/extensions/'),
+    )
     const avatar = createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'lead' })
     const root = { id: 'team' } as const
     const overview = { id: 'entity-overview', params: { entityId: 'lead' } } as const
     const prompts = { id: 'entity-prompts', params: { entityId: 'lead' } } as const
 
-    for (const [id, path, title] of [
-      ['team', '/manager/extensions/chatroom', 'Team Architecture'],
-      ['entity-overview', '/manager/extensions/chatroom/:entityId', 'Overview'],
-      ['entity-prompts', '/manager/extensions/chatroom/:entityId/prompts', 'Prompts'],
-    ] as const) {
+    for (
+      const [id, path, title] of [
+        ['team', '/manager/extensions/chatroom', 'Team Architecture'],
+        ['entity-overview', '/manager/extensions/chatroom/:entityId', 'Overview'],
+        ['entity-prompts', '/manager/extensions/chatroom/:entityId/prompts', 'Prompts'],
+      ] as const
+    ) {
       pages.register('chatroom', {
-        $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3, id,
+        $schema: CORDISX_PAGE_SCHEMA_V3,
+        schemaVersion: 3,
+        id,
         title: { key: `page.${id}`, fallback: title },
         description: { key: `page.${id}.description`, fallback: `${title} content` },
-        icon: 'host:layers', chrome: 'standard',
+        icon: 'host:layers',
+        chrome: 'standard',
       }, () => undefined)
       navigation.register('chatroom', {
-        $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2, id, path,
-        outlet: 'manager.content', page: id,
+        $schema: CORDISX_ROUTE_SCHEMA_V2,
+        schemaVersion: 2,
+        id,
+        path,
+        outlet: 'manager.content',
+        page: id,
         title: { key: `route.${id}`, fallback: title },
         description: { key: `route.${id}.description`, fallback: `${title} route` },
       })
@@ -354,29 +515,37 @@ describe('Manager Settings navigation core', () => {
       ],
     })
 
-    expect(navigation.managerContentAgentDefinitionTarget({ agentId: 'lead', revision: 'sha256:lead-r1' })).toMatchObject({
-      owner: 'chatroom', route: overview, parent: root,
-    })
-    expect(navigation.managerContentAgentDefinitionTarget({ agentId: 'lead', revision: 'sha256:stale' })).toBeUndefined()
+    expect(navigation.managerContentAgentDefinitionTarget({ agentId: 'lead', revision: 'sha256:lead-r1' }))
+      .toMatchObject({
+        owner: 'chatroom',
+        route: overview,
+        parent: root,
+      })
+    expect(navigation.managerContentAgentDefinitionTarget({ agentId: 'lead', revision: 'sha256:stale' }))
+      .toBeUndefined()
     for (const reference of [overview, prompts]) {
       expect(navigation.managerContentPresentation('chatroom', reference)).toMatchObject({
         recordSummary: {
-          title: 'Lead', description: 'Coordinates the team.',
+          title: 'Lead',
+          description: 'Coordinates the team.',
           leadingVisual: { kind: 'agent-avatar', avatar },
         },
       })
     }
     expect(navigation.managerContentPresentation('chatroom', prompts)?.tabs.map(tab => [tab.id, tab.active])).toEqual([
-      ['overview', false], ['prompts', true],
+      ['overview', false],
+      ['prompts', true],
     ])
-    expect(() => navigation.managerContent.register('other-owner', {
-      $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3,
-      schemaVersion: 3,
-      id: 'duplicate-lead',
-      route: { id: 'elsewhere' },
-      header: { title: { kind: 'route' } },
-      subject: { kind: 'agent-definition', identity: { agentId: 'lead', revision: 'sha256:lead-r1' } },
-    })).toThrow(/already claimed/)
+    expect(() =>
+      navigation.managerContent.register('other-owner', {
+        $schema: CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3,
+        schemaVersion: 3,
+        id: 'duplicate-lead',
+        route: { id: 'elsewhere' },
+        header: { title: { kind: 'route' } },
+        subject: { kind: 'agent-definition', identity: { agentId: 'lead', revision: 'sha256:lead-r1' } },
+      })
+    ).toThrow(/already claimed/)
 
     await navigation.dispose()
     pages.dispose()
@@ -387,13 +556,21 @@ describe('Manager Settings navigation core', () => {
 
   it('atomically fences the old exact subject when its plugin generation is replaced', () => {
     const activation = (revision: number, generation: string): CordisXPluginActivationRecordV1 => ({
-      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, schemaVersion: 1,
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1,
       recordKind: revision === 1 ? 'active' : 'candidate',
       ...(revision === 1 ? {} : { transactionId: 'replace-chatroom' }),
-      profileId: 'work', revision, lastGoodRevision: 1, runtimeGeneration: 'runtime-1',
+      profileId: 'work',
+      revision,
+      lastGoodRevision: 1,
+      runtimeGeneration: 'runtime-1',
       plugins: [{
-        id: 'chatroom', version: '1.0.0', digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`,
-        moduleGeneration: generation, enabled: true, dependencies: [],
+        id: 'chatroom',
+        version: '1.0.0',
+        digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`,
+        moduleGeneration: generation,
+        enabled: true,
+        dependencies: [],
       }],
     })
     const previous = activation(1, 'chatroom-g1')
@@ -408,19 +585,29 @@ describe('Manager Settings navigation core', () => {
       header: { title: { kind: 'route' as const } },
       subject: { kind: 'agent-definition' as const, identity: { agentId: 'lead', revision: 'sha256:lead' } },
     })
-    const oldContext = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'chatroom-g1' })
+    const oldContext = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'chatroom',
+      [CORDISX_PLUGIN_GENERATION]: 'chatroom-g1',
+    })
     registry.register(oldContext, declaration('old-lead', 'old-overview'))
-    expect(registry.resolveAgentDefinitionSubject({ agentId: 'lead', revision: 'sha256:lead' })?.route.id).toBe('old-overview')
+    expect(registry.resolveAgentDefinitionSubject({ agentId: 'lead', revision: 'sha256:lead' })?.route.id).toBe(
+      'old-overview',
+    )
 
     const handle = visibility.begin('replace-chatroom', previous, candidate)
     const candidateContext = new Context().extend({
-      [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'chatroom-g2', ...visibility.context(handle, 'chatroom'),
+      [CORDISX_PLUGIN_ID]: 'chatroom',
+      [CORDISX_PLUGIN_GENERATION]: 'chatroom-g2',
+      ...visibility.context(handle, 'chatroom'),
     })
     registry.register(candidateContext, declaration('new-lead', 'new-overview'))
-    expect(registry.resolveAgentDefinitionSubject({ agentId: 'lead', revision: 'sha256:lead' })?.route.id).toBe('old-overview')
+    expect(registry.resolveAgentDefinitionSubject({ agentId: 'lead', revision: 'sha256:lead' })?.route.id).toBe(
+      'old-overview',
+    )
     visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
-    expect(registry.resolveAgentDefinitionSubject({ agentId: 'lead', revision: 'sha256:lead' })?.route.id).toBe('new-overview')
+    expect(registry.resolveAgentDefinitionSubject({ agentId: 'lead', revision: 'sha256:lead' })?.route.id).toBe(
+      'new-overview',
+    )
     registry.dispose()
   })
-
 })

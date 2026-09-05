@@ -50,11 +50,21 @@ interface PlaygroundRouteSnapshot {
 
 interface PlaygroundRuntime {
   snapshot(): PlaygroundRuntimeSnapshot
-  setExtensionPointPolicy(source: string, pluginId: string, pointId: string, policy: 'inherit' | 'allow' | 'deny'): Promise<void>
-  setExtensionPointPolicies(source: string, pluginId: string, policies: readonly { readonly pointId: string; readonly policy: 'inherit' | 'allow' | 'deny' }[]): Promise<void>
+  setExtensionPointPolicy(
+    source: string,
+    pluginId: string,
+    pointId: string,
+    policy: 'inherit' | 'allow' | 'deny',
+  ): Promise<void>
+  setExtensionPointPolicies(
+    source: string,
+    pluginId: string,
+    policies: readonly { readonly pointId: string; readonly policy: 'inherit' | 'allow' | 'deny' }[],
+  ): Promise<void>
   playgroundMockAgentLoop?(): import('../../renderer/playground-mock-agent-loop.js').PlaygroundMockAgentLoopSnapshot
   resetPlaygroundMockAgentLoop?(): Readonly<{ before: number; after: number }>
-  readonly playgroundRoomSimulationBridge?: import('../../renderer/playground-room-simulation-bridge.js').PlaygroundRoomSimulationForwardingClient
+  readonly playgroundRoomSimulationBridge?:
+    import('../../renderer/playground-room-simulation-bridge.js').PlaygroundRoomSimulationForwardingClient
   playgroundRouteHistory?(): Readonly<{
     available: boolean
     canGoBack: boolean

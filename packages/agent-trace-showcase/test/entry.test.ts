@@ -2,15 +2,15 @@ import type { Context } from '@deepseek-ai/cordis'
 import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from 'cordisx/contracts'
 import { describe, expect, it } from 'vitest'
 import {
+  type SessionHeaderEntryAdapter,
   SURFACE_CONTRIBUTION_V3_SCHEMA,
   TRACE_SESSION_HEADER_ACTION,
-  type SessionHeaderEntryAdapter,
 } from '../src/entry.js'
 import {
-  TRACE_SESSION_PAGE_METADATA,
-  TRACE_SESSION_ROUTE_DEFINITION,
   installAgentTraceShowcase,
   manifest,
+  TRACE_SESSION_PAGE_METADATA,
+  TRACE_SESSION_ROUTE_DEFINITION,
 } from '../src/index.js'
 
 describe('Agent Trace session header contribution', () => {
@@ -24,10 +24,14 @@ describe('Agent Trace session header contribution', () => {
       order: 10,
       item: {
         label: {
-          namespace: 'agent-trace-showcase', key: 'action.open', fallback: 'Open Agent Trace Timeline',
+          namespace: 'agent-trace-showcase',
+          key: 'action.open',
+          fallback: 'Open Agent Trace Timeline',
         },
         ariaLabel: {
-          namespace: 'agent-trace-showcase', key: 'action.open', fallback: 'Open Agent Trace Timeline',
+          namespace: 'agent-trace-showcase',
+          key: 'action.open',
+          fallback: 'Open Agent Trace Timeline',
         },
         icon: 'host:history',
         route: { id: 'session.timeline' },
@@ -40,10 +44,23 @@ describe('Agent Trace session header contribution', () => {
 
   it('contains no renderer, selector, free-DOM, or private identity escape hatch', () => {
     const serialized = JSON.stringify(TRACE_SESSION_HEADER_ACTION).toLocaleLowerCase()
-    for (const forbidden of [
-      'html', 'svg', 'css', 'selector', 'dom', 'node', 'mount', 'renderer',
-      'sessionid', 'providerid', 'remotesessionid', 'platformsession', 'additionalcontext',
-    ]) {
+    for (
+      const forbidden of [
+        'html',
+        'svg',
+        'css',
+        'selector',
+        'dom',
+        'node',
+        'mount',
+        'renderer',
+        'sessionid',
+        'providerid',
+        'remotesessionid',
+        'platformsession',
+        'additionalcontext',
+      ]
+    ) {
       expect(serialized).not.toContain(forbidden)
     }
     expect(TRACE_SESSION_HEADER_ACTION.item.icon.startsWith('host:')).toBe(true)
@@ -59,10 +76,13 @@ describe('Agent Trace session header contribution', () => {
       outlet: 'session.content',
       page: 'session.timeline',
       title: {
-        namespace: 'agent-trace-showcase', key: 'route.timeline.title', fallback: 'Open Agent Trace',
+        namespace: 'agent-trace-showcase',
+        key: 'route.timeline.title',
+        fallback: 'Open Agent Trace',
       },
       description: {
-        namespace: 'agent-trace-showcase', key: 'route.timeline.description',
+        namespace: 'agent-trace-showcase',
+        key: 'route.timeline.description',
         fallback: 'Use the conversation header action to open the Agent Trace Timeline for the active session.',
       },
     })
@@ -71,10 +91,13 @@ describe('Agent Trace session header contribution', () => {
       schemaVersion: 3,
       id: 'session.timeline',
       title: {
-        namespace: 'agent-trace-showcase', key: 'page.timeline.title', fallback: 'Agent Trace Timeline',
+        namespace: 'agent-trace-showcase',
+        key: 'page.timeline.title',
+        fallback: 'Agent Trace Timeline',
       },
       description: {
-        namespace: 'agent-trace-showcase', key: 'page.timeline.description',
+        namespace: 'agent-trace-showcase',
+        key: 'page.timeline.description',
         fallback: 'Inspect input, model, tool, delivery, and prompt-contribution events for the active Agent session.',
       },
       icon: 'host:history',
@@ -94,7 +117,10 @@ describe('Agent Trace session header contribution', () => {
       i18n: { define: (catalog: { locale: string; messages: Record<string, string> }) => catalogs.push(catalog) },
       pages: { register: (metadata: unknown) => pages.push(metadata) },
       routes: { register: (definition: unknown) => routes.push(definition) },
-      agentEvents: {}, agentHistory: {}, agents: {}, systemPrompt: {},
+      agentEvents: {},
+      agentHistory: {},
+      agents: {},
+      systemPrompt: {},
       effect: (setup: () => unknown) => setup(),
     } as unknown as Context
     const entry = { register: () => () => undefined } as SessionHeaderEntryAdapter
@@ -108,9 +134,11 @@ describe('Agent Trace session header contribution', () => {
     const chinese = catalogs.find(catalog => catalog.locale === 'zh-CN')!.messages
     expect(english).toMatchObject({
       'route.timeline.title': 'Open Agent Trace',
-      'route.timeline.description': 'Use the conversation header action to open the Agent Trace Timeline for the active session.',
+      'route.timeline.description':
+        'Use the conversation header action to open the Agent Trace Timeline for the active session.',
       'page.timeline.title': 'Agent Trace Timeline',
-      'page.timeline.description': 'Inspect input, model, tool, delivery, and prompt-contribution events for the active Agent session.',
+      'page.timeline.description':
+        'Inspect input, model, tool, delivery, and prompt-contribution events for the active Agent session.',
     })
     expect(chinese).toMatchObject({
       'route.timeline.title': '打开 Agent Trace',
@@ -124,7 +152,9 @@ describe('Agent Trace session header contribution', () => {
 
   it('declares only the five optional public capabilities used by live and historical modes', () => {
     expect(manifest.capabilities.map(capability => ({
-      name: capability.name, required: capability.required, scope: capability.scope,
+      name: capability.name,
+      required: capability.required,
+      scope: capability.scope,
     }))).toEqual([
       { name: 'agent.events.read', required: false, scope: {} },
       { name: 'agent.history.read', required: false, scope: {} },

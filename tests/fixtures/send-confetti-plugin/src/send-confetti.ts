@@ -14,7 +14,8 @@ const colors = ['#ff4d6d', '#ffd166', '#06d6a0', '#4cc9f0', '#8b5cf6', '#ff8c42'
 
 export async function apply(ctx: TransientCanvasPluginContextV1): Promise<void> {
   const handle = await ctx.transientCanvas.register({
-    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
+    $schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
     schemaVersion: 1,
     id: 'confetti',
     pointId: 'composer.submit.effects',

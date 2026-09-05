@@ -4,9 +4,9 @@ import {
   MARKETPLACE_SOURCE_RECORDS_KEY,
   MARKETPLACE_SOURCE_SCHEMA_V1,
   MARKETPLACE_SOURCES_KEY,
+  type MarketplaceStorage,
   OFFICIAL_MARKETPLACE_SOURCE,
   parseMarketplaceSourceImport,
-  type MarketplaceStorage,
 } from '../packages/cli/src/renderer/marketplace-source.js'
 import {
   BrowserMarketplaceFeedCache,
@@ -81,20 +81,24 @@ describe('Marketplace source store', () => {
       enabled: false,
       local: { name: 'Preview', description: 'Preview plugins.', note: 'Enable after review.' },
     })
-    expect(() => parseMarketplaceSourceImport(JSON.stringify({
-      $schema: MARKETPLACE_SOURCE_SCHEMA_V1,
-      schemaVersion: 1,
-      url: 'https://plugins.example/catalog.json',
-      enabled: true,
-      official: true,
-    }))).toThrow('不支持的字段: official')
-    expect(() => parseMarketplaceSourceImport(JSON.stringify({
-      $schema: MARKETPLACE_SOURCE_SCHEMA_V1,
-      schemaVersion: 1,
-      url: 'https://plugins.example/catalog.json',
-      enabled: true,
-      local: { name: ' Preview ' },
-    }))).toThrow('已裁剪')
+    expect(() =>
+      parseMarketplaceSourceImport(JSON.stringify({
+        $schema: MARKETPLACE_SOURCE_SCHEMA_V1,
+        schemaVersion: 1,
+        url: 'https://plugins.example/catalog.json',
+        enabled: true,
+        official: true,
+      }))
+    ).toThrow('不支持的字段: official')
+    expect(() =>
+      parseMarketplaceSourceImport(JSON.stringify({
+        $schema: MARKETPLACE_SOURCE_SCHEMA_V1,
+        schemaVersion: 1,
+        url: 'https://plugins.example/catalog.json',
+        enabled: true,
+        local: { name: ' Preview ' },
+      }))
+    ).toThrow('已裁剪')
   })
 })
 
@@ -118,10 +122,13 @@ describe('Marketplace last-good cache', () => {
 
   it('discards corrupt persisted entries without changing source configuration', () => {
     const storage = new MemoryStorage()
-    storage.setItem(MARKETPLACE_FEED_CACHE_KEY, JSON.stringify({
-      schemaVersion: 1,
-      entries: [{ url: 'http://localhost/feed', text: '{}', storedAt: 1 }],
-    }))
+    storage.setItem(
+      MARKETPLACE_FEED_CACHE_KEY,
+      JSON.stringify({
+        schemaVersion: 1,
+        entries: [{ url: 'http://localhost/feed', text: '{}', storedAt: 1 }],
+      }),
+    )
     const cache = new BrowserMarketplaceFeedCache(storage)
     expect(cache.get(OFFICIAL_MARKETPLACE_SOURCE)).toBeUndefined()
   })

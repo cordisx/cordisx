@@ -1,8 +1,5 @@
 import type { EntityTemplateDeclaration } from '@cordisx/protocol/entities/v1'
-import type {
-  CordisXPluginActivationRecordV1,
-  CordisXPluginDependencyV1,
-} from '../../plugin-lifecycle-contracts.js'
+import type { CordisXPluginActivationRecordV1, CordisXPluginDependencyV1 } from '../../plugin-lifecycle-contracts.js'
 
 export type LocalPackageSourceKind = 'local-directory' | 'local-package' | 'downloaded-tarball'
 
@@ -70,7 +67,9 @@ export interface HostResolvedRuntimeManifest {
   readonly name?: string
   readonly capabilities: readonly unknown[]
   readonly services?: readonly HostRuntimeServiceDeclaration[]
-  readonly execution?: Readonly<{ readonly realm: 'isolated-worker'; readonly interfaces: readonly ['ui.transient-canvas/v1'] }>
+  readonly execution?: Readonly<
+    { readonly realm: 'isolated-worker'; readonly interfaces: readonly ['ui.transient-canvas/v1'] }
+  >
 }
 
 export interface ResolvedPackageCandidate {
@@ -114,12 +113,14 @@ export interface PackageRuntimeObservation {
   readonly profileActivationRevision: number
   readonly registryEpoch: number
   readonly runtimeGeneration: string
-  readonly plugins: Readonly<Record<string, {
-    readonly version: string
-    readonly digest: `sha256:${string}`
-    readonly moduleGeneration: string
-    readonly dependencies: readonly PackageDependency[]
-  }>>
+  readonly plugins: Readonly<
+    Record<string, {
+      readonly version: string
+      readonly digest: `sha256:${string}`
+      readonly moduleGeneration: string
+      readonly dependencies: readonly PackageDependency[]
+    }>
+  >
 }
 
 declare const candidateTokenBrand: unique symbol

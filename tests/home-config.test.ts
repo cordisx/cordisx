@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -13,7 +13,7 @@ import {
 } from '../packages/cli/src/config/home-config.js'
 import { createPermissionPolicyRecord } from '../packages/cli/src/permissions.js'
 
-async function fixturePath(): Promise<{ root: string, configPath: string }> {
+async function fixturePath(): Promise<{ root: string; configPath: string }> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-home-config-'))
   return { root, configPath: path.join(root, '.cordisx', 'config.json') }
 }
@@ -98,20 +98,29 @@ describe('CordisX home configuration', () => {
     }
     const parsed = parseHomeConfig({
       ...base,
-      apps: { codex: { ...base.apps.codex, profiles: { default: { ...base.apps.codex!.profiles.default, iconTheme: exact } } } },
+      apps: {
+        codex: {
+          ...base.apps.codex,
+          profiles: { default: { ...base.apps.codex!.profiles.default, iconTheme: exact } },
+        },
+      },
     })
     expect(parsed.apps.codex?.profiles.default?.iconTheme).toEqual(exact)
 
-    for (const iconTheme of [
-      { ...exact, revision: -1 },
-      { ...exact, providerId: 'plugin:spoof' },
-      { ...exact, providerGeneration: '../private/path' },
-      { ...exact, descriptors: [] },
-      'corrupted',
-    ]) {
+    for (
+      const iconTheme of [
+        { ...exact, revision: -1 },
+        { ...exact, providerId: 'plugin:spoof' },
+        { ...exact, providerGeneration: '../private/path' },
+        { ...exact, descriptors: [] },
+        'corrupted',
+      ]
+    ) {
       const recovered = parseHomeConfig({
         ...base,
-        apps: { codex: { ...base.apps.codex, profiles: { default: { ...base.apps.codex!.profiles.default, iconTheme } } } },
+        apps: {
+          codex: { ...base.apps.codex, profiles: { default: { ...base.apps.codex!.profiles.default, iconTheme } } },
+        },
       })
       expect(recovered.apps.codex?.profiles.default?.iconTheme).toBeUndefined()
       expect(recovered.apps.codex?.profiles.default?.dataMode).toBe('shared')
@@ -123,52 +132,66 @@ describe('CordisX home configuration', () => {
       .toThrow('config.version must be 1')
     expect(() => parseHomeConfig({ ...createDefaultHomeConfig(), extra: true }))
       .toThrow('config.extra is not supported')
-    expect(() => parseHomeConfig({
-      ...createDefaultHomeConfig(),
-      apps: { codex: { defaultProfile: 'missing', profiles: {} } },
-    })).toThrow('references missing profile')
-    expect(() => parseHomeConfig({
-      ...createDefaultHomeConfig(),
-      plugins: [
-        { id: 'demo', entry: './demo.ts' },
-        { id: 'demo', entry: './other.ts' },
-      ],
-    })).toThrow('duplicate plugin id: demo')
-    expect(() => parseHomeConfig({
-      ...createDefaultHomeConfig(),
-      permissions: [{
-        ...createPermissionPolicyRecord({
-          profileId: 'default',
-          identity: { source: 'file:///plugins/demo.js', id: 'demo' },
-          capability: 'models.read',
-          scope: {},
-          policy: 'allow',
-        }),
-        policy: 'allow-once',
-      }],
-    })).toThrow('policy is unsupported')
-    expect(() => parseHomeConfig({
-      ...createDefaultHomeConfig(),
-      marketplaceTrustSources: [{ url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true, certified: true }],
-    })).toThrow('certified is not supported')
-    expect(() => parseHomeConfig({
-      ...createDefaultHomeConfig(),
-      marketplaceTrustSources: [{ url: 'http://marketplace.example/feed.json', enabled: true }],
-    })).toThrow('must be an HTTPS URL')
-    expect(() => parseHomeConfig({
-      ...createDefaultHomeConfig(),
-      marketplaceTrustSources: [
-        { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true },
-        { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: false },
-      ],
-    })).toThrow('duplicate Marketplace trust source')
-    expect(() => parseHomeConfig({
-      ...createDefaultHomeConfig(),
-      marketplaceTrustSources: Array.from({ length: 9 }, (_, index) => ({
-        url: `https://marketplace.example/${index}.json`,
-        enabled: true,
-      })),
-    })).toThrow('at most 8 sources')
+    expect(() =>
+      parseHomeConfig({
+        ...createDefaultHomeConfig(),
+        apps: { codex: { defaultProfile: 'missing', profiles: {} } },
+      })
+    ).toThrow('references missing profile')
+    expect(() =>
+      parseHomeConfig({
+        ...createDefaultHomeConfig(),
+        plugins: [
+          { id: 'demo', entry: './demo.ts' },
+          { id: 'demo', entry: './other.ts' },
+        ],
+      })
+    ).toThrow('duplicate plugin id: demo')
+    expect(() =>
+      parseHomeConfig({
+        ...createDefaultHomeConfig(),
+        permissions: [{
+          ...createPermissionPolicyRecord({
+            profileId: 'default',
+            identity: { source: 'file:///plugins/demo.js', id: 'demo' },
+            capability: 'models.read',
+            scope: {},
+            policy: 'allow',
+          }),
+          policy: 'allow-once',
+        }],
+      })
+    ).toThrow('policy is unsupported')
+    expect(() =>
+      parseHomeConfig({
+        ...createDefaultHomeConfig(),
+        marketplaceTrustSources: [{ url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true, certified: true }],
+      })
+    ).toThrow('certified is not supported')
+    expect(() =>
+      parseHomeConfig({
+        ...createDefaultHomeConfig(),
+        marketplaceTrustSources: [{ url: 'http://marketplace.example/feed.json', enabled: true }],
+      })
+    ).toThrow('must be an HTTPS URL')
+    expect(() =>
+      parseHomeConfig({
+        ...createDefaultHomeConfig(),
+        marketplaceTrustSources: [
+          { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: true },
+          { url: DEFAULT_MARKETPLACE_TRUST_SOURCE, enabled: false },
+        ],
+      })
+    ).toThrow('duplicate Marketplace trust source')
+    expect(() =>
+      parseHomeConfig({
+        ...createDefaultHomeConfig(),
+        marketplaceTrustSources: Array.from({ length: 9 }, (_, index) => ({
+          url: `https://marketplace.example/${index}.json`,
+          enabled: true,
+        })),
+      })
+    ).toThrow('at most 8 sources')
   })
 
   it('migrates a legacy config to the Launcher-owned official trust root without consulting renderer state', () => {
@@ -207,18 +230,22 @@ describe('CordisX home configuration', () => {
   })
 
   it('treats prototype-looking app and profile ids as ordinary own keys', () => {
-    expect(() => parseHomeConfig({
-      version: 1,
-      defaultApp: 'constructor',
-      plugins: [],
-      apps: {},
-    })).toThrow('config.defaultApp references missing app: constructor')
-    expect(() => parseHomeConfig({
-      version: 1,
-      defaultApp: 'codex',
-      plugins: [],
-      apps: { codex: { defaultProfile: 'constructor', profiles: {} } },
-    })).toThrow('defaultProfile references missing profile: constructor')
+    expect(() =>
+      parseHomeConfig({
+        version: 1,
+        defaultApp: 'constructor',
+        plugins: [],
+        apps: {},
+      })
+    ).toThrow('config.defaultApp references missing app: constructor')
+    expect(() =>
+      parseHomeConfig({
+        version: 1,
+        defaultApp: 'codex',
+        plugins: [],
+        apps: { codex: { defaultProfile: 'constructor', profiles: {} } },
+      })
+    ).toThrow('defaultProfile references missing profile: constructor')
     const parsed = parseHomeConfig({
       version: 1,
       defaultApp: 'codex',
@@ -249,23 +276,26 @@ describe('CordisX home configuration', () => {
     expect(await readFile(configPath, 'utf8')).toBe(invalid)
   })
 
-  it.skipIf(process.platform === 'win32')('rejects a symbolic-link target without following or replacing it', async () => {
-    const { root, configPath } = await fixturePath()
-    await mkdir(path.dirname(configPath), { recursive: true, mode: 0o700 })
-    await chmod(path.dirname(configPath), 0o700)
-    const targetPath = path.join(root, 'outside-config.json')
-    const targetContents = `${JSON.stringify(createDefaultHomeConfig())}\n`
-    await writeFile(targetPath, targetContents)
-    await symlink(targetPath, configPath)
+  it.skipIf(process.platform === 'win32')(
+    'rejects a symbolic-link target without following or replacing it',
+    async () => {
+      const { root, configPath } = await fixturePath()
+      await mkdir(path.dirname(configPath), { recursive: true, mode: 0o700 })
+      await chmod(path.dirname(configPath), 0o700)
+      const targetPath = path.join(root, 'outside-config.json')
+      const targetContents = `${JSON.stringify(createDefaultHomeConfig())}\n`
+      await writeFile(targetPath, targetContents)
+      await symlink(targetPath, configPath)
 
-    await expect(loadHomeConfig(configPath)).rejects.toThrow('must be a regular file')
-    await expect(ensureHomeConfig(configPath)).rejects.toThrow('must be a regular file')
-    await expect(updateHomeConfigAtomic((current) => current, configPath))
-      .rejects.toThrow('must be a regular file')
+      await expect(loadHomeConfig(configPath)).rejects.toThrow('must be a regular file')
+      await expect(ensureHomeConfig(configPath)).rejects.toThrow('must be a regular file')
+      await expect(updateHomeConfigAtomic((current) => current, configPath))
+        .rejects.toThrow('must be a regular file')
 
-    expect((await lstat(configPath)).isSymbolicLink()).toBe(true)
-    expect(await readFile(targetPath, 'utf8')).toBe(targetContents)
-  })
+      expect((await lstat(configPath)).isSymbolicLink()).toBe(true)
+      expect(await readFile(targetPath, 'utf8')).toBe(targetContents)
+    },
+  )
 
   it('rejects a directory target without replacing it', async () => {
     const { configPath } = await fixturePath()
@@ -286,16 +316,19 @@ describe('CordisX home configuration', () => {
     expect((await stat(cordisxHome)).mode & 0o777).toBe(0o755)
   })
 
-  it.skipIf(process.platform === 'win32')('tightens an explicit user-owned CORDISX_HOME without touching its parents', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-home-directory-'))
-    const cordisxHome = path.join(root, 'ui-demos')
-    await chmod(root, 0o755)
-    await mkdir(cordisxHome, { mode: 0o755 })
-    await ensureHomeConfig({ env: { CORDISX_HOME: cordisxHome } })
-    expect((await stat(cordisxHome)).mode & 0o777).toBe(0o700)
-    expect((await stat(root)).mode & 0o777).not.toBe(0o700)
-    expect((await stat(path.join(cordisxHome, 'config.json'))).mode & 0o777).toBe(0o600)
-  })
+  it.skipIf(process.platform === 'win32')(
+    'tightens an explicit user-owned CORDISX_HOME without touching its parents',
+    async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-home-directory-'))
+      const cordisxHome = path.join(root, 'ui-demos')
+      await chmod(root, 0o755)
+      await mkdir(cordisxHome, { mode: 0o755 })
+      await ensureHomeConfig({ env: { CORDISX_HOME: cordisxHome } })
+      expect((await stat(cordisxHome)).mode & 0o777).toBe(0o700)
+      expect((await stat(root)).mode & 0o777).not.toBe(0o700)
+      expect((await stat(path.join(cordisxHome, 'config.json'))).mode & 0o777).toBe(0o600)
+    },
+  )
 
   it('tightens only the canonical default ~/.cordisx directory for legacy migration', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-home-directory-'))
@@ -320,24 +353,25 @@ describe('CordisX home configuration', () => {
   it('serializes concurrent atomic updates without losing named profiles', async () => {
     const { configPath } = await fixturePath()
     await ensureHomeConfig(configPath)
-    const addProfile = (profileId: string, delayMs: number) => updateHomeConfigAtomic(async (current) => {
-      await new Promise((resolve) => setTimeout(resolve, delayMs))
-      const codex = current.apps.codex
-      if (codex === undefined) throw new Error('missing codex app')
-      return {
-        ...current,
-        apps: {
-          ...current.apps,
-          codex: {
-            ...codex,
-            profiles: {
-              ...codex.profiles,
-              [profileId]: { displayName: profileId, dataMode: 'host-isolated' },
+    const addProfile = (profileId: string, delayMs: number) =>
+      updateHomeConfigAtomic(async (current) => {
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
+        const codex = current.apps.codex
+        if (codex === undefined) throw new Error('missing codex app')
+        return {
+          ...current,
+          apps: {
+            ...current.apps,
+            codex: {
+              ...codex,
+              profiles: {
+                ...codex.profiles,
+                [profileId]: { displayName: profileId, dataMode: 'host-isolated' },
+              },
             },
           },
-        },
-      }
-    }, configPath)
+        }
+      }, configPath)
     await Promise.all([
       addProfile('work', 30),
       addProfile('personal', 5),

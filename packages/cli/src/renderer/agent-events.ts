@@ -1,4 +1,4 @@
-import { Context, Service, type Disposable } from '@deepseek-ai/cordis'
+import { Context, type Disposable, Service } from '@deepseek-ai/cordis'
 import {
   CORDISX_AGENT_EVENT_CONTRACT,
   CORDISX_AGENT_EVENT_SCHEMA_VERSION,
@@ -7,10 +7,10 @@ import {
   type CordisXAgentEventPage,
   type CordisXAgentEventQuery,
   type CordisXAgentEventRange,
+  type CordisXAgentEvents,
   type CordisXAgentEventStatus,
   type CordisXAgentEventSubscription,
   type CordisXAgentEventType,
-  type CordisXAgentEvents,
 } from '../agent-contracts.js'
 import type { CordisXPlatformResult, CordisXPluginIdentity } from '../platform-contracts.js'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from './service.js'
@@ -52,7 +52,10 @@ export class CordisXAgentEventLedger {
   private readonly deliveryStates = new Map<string, { stage: string; owner: string; messageId: string }>()
   private readonly contributionRegistrations = new Map<string, string>()
   private readonly contributionReleases = new Set<string>()
-  private readonly contributionEvaluations = new Map<string, { stage: string; contributionId: string; source: string; messageIds: string }>()
+  private readonly contributionEvaluations = new Map<
+    string,
+    { stage: string; contributionId: string; source: string; messageIds: string }
+  >()
   private readonly subscriptions = new Set<LedgerSubscription>()
   private disposed = false
 
@@ -74,7 +77,9 @@ export class CordisXAgentEventLedger {
     const evaluationSnapshot = new Map(this.contributionEvaluations)
     try {
       for (const draft of drafts) {
-        if (!validId(draft.sessionId)) throw new AgentEventLedgerError('invalid', 'sessionId must be a non-empty opaque id')
+        if (!validId(draft.sessionId)) {
+          throw new AgentEventLedgerError('invalid', 'sessionId must be a non-empty opaque id')
+        }
         const seq = this.sessions.get(draft.sessionId)?.length ?? 0
         const event = {
           contract: CORDISX_AGENT_EVENT_CONTRACT,
@@ -87,9 +92,12 @@ export class CordisXAgentEventLedger {
         this.appendInternal(event)
         committed.push(event)
         const range = ranges.get(event.sessionId)
-        ranges.set(event.sessionId, range === undefined
-          ? { fromSeq: event.seq, toSeq: event.seq }
-          : { fromSeq: range.fromSeq, toSeq: event.seq })
+        ranges.set(
+          event.sessionId,
+          range === undefined
+            ? { fromSeq: event.seq, toSeq: event.seq }
+            : { fromSeq: range.fromSeq, toSeq: event.seq },
+        )
       }
     } catch (error) {
       for (const event of [...committed].reverse()) {
@@ -126,8 +134,12 @@ export class CordisXAgentEventLedger {
     if (!validId(input.sessionId)) throw new AgentEventLedgerError('invalid', 'sessionId must be a non-empty opaque id')
     const afterSeq = input.afterSeq ?? -1
     const limit = input.limit ?? 100
-    if (!Number.isInteger(afterSeq) || afterSeq < -1) throw new AgentEventLedgerError('invalid', 'afterSeq must be an integer at least -1')
-    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_SIZE) throw new AgentEventLedgerError('invalid', 'limit must be between 1 and 500')
+    if (!Number.isInteger(afterSeq) || afterSeq < -1) {
+      throw new AgentEventLedgerError('invalid', 'afterSeq must be an integer at least -1')
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_SIZE) {
+      throw new AgentEventLedgerError('invalid', 'limit must be between 1 and 500')
+    }
     const source = this.sessions.get(input.sessionId) ?? []
     const tail = source.length - 1
     const snapshotSeq = input.snapshotSeq ?? tail
@@ -150,15 +162,22 @@ export class CordisXAgentEventLedger {
     })
   }
 
-  subscribe(filter: CordisXAgentEventSubscription, listener: (range: CordisXAgentEventRange) => void): Disposable<void> {
+  subscribe(
+    filter: CordisXAgentEventSubscription,
+    listener: (range: CordisXAgentEventRange) => void,
+  ): Disposable<void> {
     this.assertLive()
-    if (filter.sessionId !== undefined && !validId(filter.sessionId)) throw new AgentEventLedgerError('invalid', 'subscription sessionId is invalid')
+    if (filter.sessionId !== undefined && !validId(filter.sessionId)) {
+      throw new AgentEventLedgerError('invalid', 'subscription sessionId is invalid')
+    }
     if (filter.afterSeq !== undefined && (!Number.isInteger(filter.afterSeq) || filter.afterSeq < -1)) {
       throw new AgentEventLedgerError('invalid', 'subscription afterSeq must be an integer at least -1')
     }
     const subscription = { filter: clone(filter), listener }
     this.subscriptions.add(subscription)
-    return () => { this.subscriptions.delete(subscription) }
+    return () => {
+      this.subscriptions.delete(subscription)
+    }
   }
 
   latestEventId(sessionId: string): string | undefined {
@@ -188,9 +207,15 @@ export class CordisXAgentEventLedger {
     }
     const session = this.sessions.get(event.sessionId) ?? []
     const expectedSeq = session.length
-    if (event.seq > expectedSeq) throw new AgentEventLedgerError('gap', `expected seq ${expectedSeq}, received ${event.seq}`)
-    if (event.seq < expectedSeq) throw new AgentEventLedgerError('out-of-order', `expected seq ${expectedSeq}, received ${event.seq}`)
-    if (this.eventIds.has(event.eventId)) throw new AgentEventLedgerError('duplicate', `duplicate eventId ${event.eventId}`)
+    if (event.seq > expectedSeq) {
+      throw new AgentEventLedgerError('gap', `expected seq ${expectedSeq}, received ${event.seq}`)
+    }
+    if (event.seq < expectedSeq) {
+      throw new AgentEventLedgerError('out-of-order', `expected seq ${expectedSeq}, received ${event.seq}`)
+    }
+    if (this.eventIds.has(event.eventId)) {
+      throw new AgentEventLedgerError('duplicate', `duplicate eventId ${event.eventId}`)
+    }
     const expectedId = this.eventId(event.sessionId, event.seq)
     if (event.eventId !== expectedId) throw new AgentEventLedgerError('invalid', `eventId must be ${expectedId}`)
     if (event.causalParentId !== undefined && !session.some(item => item.eventId === event.causalParentId)) {
@@ -206,10 +231,17 @@ export class CordisXAgentEventLedger {
     if (event.type === 'input.contribution') this.validateContribution(event as CordisXAgentEvent<'input.contribution'>)
     if (event.type === 'content.chunk') {
       const data = event.data as { channel: string; index: number; delta?: string; ref?: string }
-      if ((data.delta === undefined) === (data.ref === undefined)) throw new AgentEventLedgerError('invalid', 'content chunk requires exactly one of delta or ref')
+      if ((data.delta === undefined) === (data.ref === undefined)) {
+        throw new AgentEventLedgerError('invalid', 'content chunk requires exactly one of delta or ref')
+      }
       const key = JSON.stringify([event.sessionId, event.turnId, event.itemId, data.channel])
       const expectedIndex = this.chunkIndices.get(key) ?? 0
-      if (data.index !== expectedIndex) throw new AgentEventLedgerError(data.index < expectedIndex ? 'duplicate' : 'gap', `expected chunk index ${expectedIndex}, received ${data.index}`)
+      if (data.index !== expectedIndex) {
+        throw new AgentEventLedgerError(
+          data.index < expectedIndex ? 'duplicate' : 'gap',
+          `expected chunk index ${expectedIndex}, received ${data.index}`,
+        )
+      }
       this.chunkIndices.set(key, expectedIndex + 1)
     }
     session.push(event)
@@ -219,28 +251,44 @@ export class CordisXAgentEventLedger {
 
   private validateDelivery(event: CordisXAgentEvent<'message.delivery'>): void {
     if (!validId(event.deliveryId) || !validId(event.messageId) || event.data.owner.kind !== 'plugin') {
-      throw new AgentEventLedgerError('invalid', 'message delivery requires stable delivery, message, and owner identity')
+      throw new AgentEventLedgerError(
+        'invalid',
+        'message delivery requires stable delivery, message, and owner identity',
+      )
     }
     const owner = JSON.stringify(event.data.owner)
     const current = this.deliveryStates.get(event.deliveryId)
     const terminal = ['forwarded', 'failed', 'expired', 'cancelled']
     const cancellable = ['requested', 'permission', 'queued']
     const next = new Map([
-      ['requested', 'permission'], ['permission', 'queued'], ['queued', 'claimed'],
-      ['claimed', 'projected'], ['projected', 'forwarded'],
+      ['requested', 'permission'],
+      ['permission', 'queued'],
+      ['queued', 'claimed'],
+      ['claimed', 'projected'],
+      ['projected', 'forwarded'],
     ])
     if (current === undefined) {
-      if (event.data.stage !== 'requested') throw new AgentEventLedgerError('invalid', 'message delivery must begin at requested')
+      if (event.data.stage !== 'requested') {
+        throw new AgentEventLedgerError('invalid', 'message delivery must begin at requested')
+      }
     } else {
       if (current.owner !== owner || current.messageId !== event.messageId) {
         throw new AgentEventLedgerError('invalid', 'message delivery owner or message identity changed')
       }
-      if (terminal.includes(current.stage)) throw new AgentEventLedgerError('invalid', `message delivery has a stage after terminal ${current.stage}`)
+      if (terminal.includes(current.stage)) {
+        throw new AgentEventLedgerError('invalid', `message delivery has a stage after terminal ${current.stage}`)
+      }
       if (event.data.stage === 'cancelled' && !cancellable.includes(current.stage)) {
-        throw new AgentEventLedgerError('invalid', `message delivery cancelled after irreversible stage ${current.stage}`)
+        throw new AgentEventLedgerError(
+          'invalid',
+          `message delivery cancelled after irreversible stage ${current.stage}`,
+        )
       }
       if (!terminal.includes(event.data.stage) && next.get(current.stage) !== event.data.stage) {
-        throw new AgentEventLedgerError('invalid', `invalid message delivery transition ${current.stage} -> ${event.data.stage}`)
+        throw new AgentEventLedgerError(
+          'invalid',
+          `invalid message delivery transition ${current.stage} -> ${event.data.stage}`,
+        )
       }
     }
     this.deliveryStates.set(event.deliveryId, { stage: event.data.stage, owner, messageId: event.messageId })
@@ -248,23 +296,32 @@ export class CordisXAgentEventLedger {
 
   private validateContribution(event: CordisXAgentEvent<'input.contribution'>): void {
     if (!validId(event.contributionId) || event.provenance !== 'cordisx' || event.source.kind !== 'plugin') {
-      throw new AgentEventLedgerError('invalid', 'input contribution requires stable identity and a host-stamped plugin source')
+      throw new AgentEventLedgerError(
+        'invalid',
+        'input contribution requires stable identity and a host-stamped plugin source',
+      )
     }
     const source = JSON.stringify(event.source)
     if (event.data.stage === 'registered') {
-      if (this.contributionRegistrations.has(event.contributionId)) throw new AgentEventLedgerError('duplicate', 'input contribution registered twice')
+      if (this.contributionRegistrations.has(event.contributionId)) {
+        throw new AgentEventLedgerError('duplicate', 'input contribution registered twice')
+      }
       this.contributionRegistrations.set(event.contributionId, source)
     }
     if (event.data.stage === 'released') {
       if (this.contributionRegistrations.get(event.contributionId) !== source) {
         throw new AgentEventLedgerError('invalid', 'input contribution released before matching registration')
       }
-      if (this.contributionReleases.has(event.contributionId)) throw new AgentEventLedgerError('duplicate', 'input contribution released twice')
+      if (this.contributionReleases.has(event.contributionId)) {
+        throw new AgentEventLedgerError('duplicate', 'input contribution released twice')
+      }
       this.contributionReleases.add(event.contributionId)
     }
-    if (event.data.kind !== 'pre-step.append'
+    if (
+      event.data.kind !== 'pre-step.append'
       && ['evaluated', 'projected', 'forwarded'].includes(event.data.stage)
-      && this.contributionRegistrations.get(event.contributionId) !== source) {
+      && this.contributionRegistrations.get(event.contributionId) !== source
+    ) {
       throw new AgentEventLedgerError('invalid', 'prompt contribution evaluated before matching registration')
     }
     if (event.data.evaluationId === undefined) return
@@ -272,14 +329,24 @@ export class CordisXAgentEventLedger {
     const current = this.contributionEvaluations.get(event.data.evaluationId)
     const next = new Map([['evaluated', 'projected'], ['projected', 'forwarded']])
     if (current === undefined) {
-      if (event.data.stage !== 'evaluated') throw new AgentEventLedgerError('invalid', 'input evaluation must begin at evaluated')
+      if (event.data.stage !== 'evaluated') {
+        throw new AgentEventLedgerError('invalid', 'input evaluation must begin at evaluated')
+      }
     } else {
-      if (current.contributionId !== event.contributionId || current.source !== source || current.messageIds !== messageIds) {
+      if (
+        current.contributionId !== event.contributionId || current.source !== source
+        || current.messageIds !== messageIds
+      ) {
         throw new AgentEventLedgerError('invalid', 'input evaluation identity changed')
       }
-      if (['forwarded', 'failed'].includes(current.stage)) throw new AgentEventLedgerError('invalid', 'input evaluation has a stage after terminal')
+      if (['forwarded', 'failed'].includes(current.stage)) {
+        throw new AgentEventLedgerError('invalid', 'input evaluation has a stage after terminal')
+      }
       if (event.data.stage !== 'failed' && next.get(current.stage) !== event.data.stage) {
-        throw new AgentEventLedgerError('invalid', `invalid input contribution transition ${current.stage} -> ${event.data.stage}`)
+        throw new AgentEventLedgerError(
+          'invalid',
+          `invalid input contribution transition ${current.stage} -> ${event.data.stage}`,
+        )
       }
     }
     this.contributionEvaluations.set(event.data.evaluationId, {
@@ -374,15 +441,25 @@ export class CordisXAgentEventService extends Service implements CordisXAgentEve
     const console = serviceOptions(this).console
     const token = console?.tokenFromContext(this.ctx)
     return token === undefined || console === undefined ? await this.queryBound(input) : await console.run(
-      token, 'agentEvents.query', input, invocation => this.queryBound(input, token, invocation), { sessionId: input.sessionId },
+      token,
+      'agentEvents.query',
+      input,
+      invocation => this.queryBound(input, token, invocation),
+      { sessionId: input.sessionId },
     )
   }
 
-  private async queryBound(input: CordisXAgentEventQuery, token?: PluginPrincipalToken, invocation?: { dispatch(message?: string): void }): Promise<CordisXPlatformResult<CordisXAgentEventPage>> {
+  private async queryBound(
+    input: CordisXAgentEventQuery,
+    token?: PluginPrincipalToken,
+    invocation?: { dispatch(message?: string): void },
+  ): Promise<CordisXPlatformResult<CordisXAgentEventPage>> {
     const caller = token === undefined ? identity(this.ctx) : serviceOptions(this).console?.owner(token)
     if (caller === undefined) return denied('permission-denied', 'Agent events require a plugin context')
     if (!validId(input.sessionId)) return denied('invalid-request', 'sessionId must be a non-empty opaque id')
-    const grant = await serviceOptions(this).broker.authorize(caller, 'agent.events.read', { agentSessionId: input.sessionId })
+    const grant = await serviceOptions(this).broker.authorize(caller, 'agent.events.read', {
+      agentSessionId: input.sessionId,
+    })
     if (!grant.ok) return grant
     invocation?.dispatch('Dispatched to Host Agent event ledger')
     try {

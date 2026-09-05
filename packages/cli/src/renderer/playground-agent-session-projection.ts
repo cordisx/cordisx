@@ -15,7 +15,10 @@ const clone = <Value>(value: Value): Value => structuredClone(value)
 function stableIdentity(sessionId: string, sessionGeneration: number): AgentDefinition['identity'] {
   let hash = 2166136261
   for (const character of sessionId) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619) >>> 0
-  return Object.freeze({ agentId: `playground.agent-session.${hash.toString(36)}`, revision: `session-${sessionGeneration}` })
+  return Object.freeze({
+    agentId: `playground.agent-session.${hash.toString(36)}`,
+    revision: `session-${sessionGeneration}`,
+  })
 }
 
 function fallbackDefinition(session: CordisXAgentSessionProjection): AgentDefinition {
@@ -27,10 +30,19 @@ function fallbackDefinition(session: CordisXAgentSessionProjection): AgentDefini
     name: `Agent / Session ${session.sessionId}`,
     description: 'Recovered Playground Agent/Session authority.',
     inherit: {
-      promptSections: 'none', rules: 'none', skills: 'none', tools: 'none',
-      mcpServers: 'none', runtimeDefaults: 'none', avatar: 'none',
+      promptSections: 'none',
+      rules: 'none',
+      skills: 'none',
+      tools: 'none',
+      mcpServers: 'none',
+      runtimeDefaults: 'none',
+      avatar: 'none',
     },
-    promptSections: [], rules: [], skills: [], tools: {}, mcpServers: {},
+    promptSections: [],
+    rules: [],
+    skills: [],
+    tools: {},
+    mcpServers: {},
     runtimeDefaults: { adapterId: 'deterministic-agent-session' },
   }
   return Object.freeze(definition)
@@ -46,8 +58,13 @@ function resolvedDefinition(value: CordisXResolvedAgentDefinition): AgentDefinit
     ...(value.description === undefined ? {} : { description: value.description }),
     ...(value.avatar === undefined ? {} : { avatar: clone(value.avatar) }),
     inherit: {
-      promptSections: 'none', rules: 'none', skills: 'none', tools: 'none',
-      mcpServers: 'none', runtimeDefaults: 'none', avatar: 'none',
+      promptSections: 'none',
+      rules: 'none',
+      skills: 'none',
+      tools: 'none',
+      mcpServers: 'none',
+      runtimeDefaults: 'none',
+      avatar: 'none',
     },
     ...(value.promptSections === undefined ? {} : { promptSections: clone(value.promptSections) }),
     ...(value.rules === undefined ? {} : { rules: clone(value.rules) }),
@@ -72,22 +89,30 @@ function traceLayer(definition: AgentDefinition): PlaygroundMockTraceLayer {
 }
 
 function textContent(content: readonly ContentBlock[]): string {
-  return content.flatMap(block => block.type === 'text' || block.type === 'reasoning'
-    ? [block.text]
-    : block.type === 'tool-call'
+  return content.flatMap(block =>
+    block.type === 'text' || block.type === 'reasoning'
+      ? [block.text]
+      : block.type === 'tool-call'
       ? [`${block.name}(${block.arguments})`]
       : block.type === 'tool-result'
-        ? [textContent(block.content)]
-        : [`[image: ${block.alt ?? block.ref}]`]).filter(Boolean).join('\n')
+      ? [textContent(block.content)]
+      : [`[image: ${block.alt ?? block.ref}]`]
+  ).filter(Boolean).join('\n')
 }
 
 function eventType(event: SessionEvent): PlaygroundMockTaskTrace['events'][number]['type'] {
-  if (event.type === 'user/message' || event.type === 'assistant/message' || event.type === 'approval/decided') return 'semantic.message'
+  if (event.type === 'user/message' || event.type === 'assistant/message' || event.type === 'approval/decided') {
+    return 'semantic.message'
+  }
   if (event.type === 'approval/asked') return 'approval.required'
   if (event.type === 'tool/call') return 'tool.call'
   if (event.type === 'tool/result') return 'tool.result'
   if (event.type === 'turn/start') return 'execution.started'
-  if (event.type === 'turn/end') return event.data.reason.kind === 'completed' ? 'execution.completed' : 'execution.failed'
+  if (event.type === 'turn/end') {
+    return event.data.reason.kind === 'completed'
+      ? 'execution.completed'
+      : 'execution.failed'
+  }
   return 'session.event'
 }
 
@@ -98,33 +123,57 @@ function compact(value: string, limit = 180): string {
 
 function eventDetail(event: SessionEvent, toolNames: ReadonlyMap<string, string>): string {
   switch (event.type) {
-    case 'user/message': return textContent(event.data.content) || `User message ${event.data.id}`
-    case 'assistant/message': return textContent(event.data.message.content) || `Assistant message ${event.data.message.id}`
-    case 'assistant/chunk': return `Assistant stream chunk: ${event.data.chunk.type}`
+    case 'user/message':
+      return textContent(event.data.content) || `User message ${event.data.id}`
+    case 'assistant/message':
+      return textContent(event.data.message.content) || `Assistant message ${event.data.message.id}`
+    case 'assistant/chunk':
+      return `Assistant stream chunk: ${event.data.chunk.type}`
     case 'tool/call': {
       const argumentsPreview = compact(event.data.arguments)
-      return `Tool use · ${event.data.name} · ${event.data.callId}${argumentsPreview === '' ? '' : ` · ${argumentsPreview}`}`
+      return `Tool use · ${event.data.name} · ${event.data.callId}${
+        argumentsPreview === '' ? '' : ` · ${argumentsPreview}`
+      }`
     }
     case 'tool/result': {
       const callId = event.data.message.source.callId
       const toolName = toolNames.get(callId) ?? 'unknown tool'
       const result = compact(textContent(event.data.message.content))
       const error = event.data.error === undefined ? undefined : `${event.data.error.name}/${event.data.error.code}`
-      return `${error === undefined ? 'Tool result' : 'Tool error'} · ${toolName} · ${callId}${error === undefined ? '' : ` · ${error}`}${result === '' ? '' : ` · ${result}`}`
+      return `${error === undefined ? 'Tool result' : 'Tool error'} · ${toolName} · ${callId}${
+        error === undefined ? '' : ` · ${error}`
+      }${result === '' ? '' : ` · ${result}`}`
     }
-    case 'approval/asked': return `Approval requested: ${event.data.toolName}${event.data.reason === undefined ? '' : ` — ${event.data.reason}`}`
-    case 'approval/decided': return `Approval ${event.data.id}: ${event.data.outcome}`
-    case 'turn/start': return `Turn ${event.data.turn} started.`
-    case 'turn/end': return `Turn ${event.data.turn} ended: ${event.data.reason.kind}.`
-    case 'step/start': return `Turn ${event.data.turn}, step ${event.data.step} started.`
-    case 'step/end': return `Turn ${event.data.turn}, step ${event.data.step} ended.`
-    case 'request/header': return `Request header: ${event.data.reason}.`
-    case 'request/context': return `Request context: ${event.data.provider}/${event.data.model}.`
-    case 'agent/inbox/spliced': return `Agent inbox ${event.data.target} changed.`
-    case 'session/end-seed': return 'Session seed ended.'
-    case 'playground/scenario': return event.data.phase === 'failed' || event.data.phase === 'cancelled'
-      ? `Scenario ${event.data.code} · step ${event.data.stepIndex}/${event.data.stepCount} · ${event.data.phase} · ${event.data.error?.message ?? 'no detail'}`
-      : `Scenario ${event.data.code} · step ${event.data.stepIndex}/${event.data.stepCount} · ${event.data.phase}${event.data.stepType === undefined ? '' : ` · ${event.data.stepType}`}`
+    case 'approval/asked':
+      return `Approval requested: ${event.data.toolName}${
+        event.data.reason === undefined ? '' : ` — ${event.data.reason}`
+      }`
+    case 'approval/decided':
+      return `Approval ${event.data.id}: ${event.data.outcome}`
+    case 'turn/start':
+      return `Turn ${event.data.turn} started.`
+    case 'turn/end':
+      return `Turn ${event.data.turn} ended: ${event.data.reason.kind}.`
+    case 'step/start':
+      return `Turn ${event.data.turn}, step ${event.data.step} started.`
+    case 'step/end':
+      return `Turn ${event.data.turn}, step ${event.data.step} ended.`
+    case 'request/header':
+      return `Request header: ${event.data.reason}.`
+    case 'request/context':
+      return `Request context: ${event.data.provider}/${event.data.model}.`
+    case 'agent/inbox/spliced':
+      return `Agent inbox ${event.data.target} changed.`
+    case 'session/end-seed':
+      return 'Session seed ended.'
+    case 'playground/scenario':
+      return event.data.phase === 'failed' || event.data.phase === 'cancelled'
+        ? `Scenario ${event.data.code} · step ${event.data.stepIndex}/${event.data.stepCount} · ${event.data.phase} · ${
+          event.data.error?.message ?? 'no detail'
+        }`
+        : `Scenario ${event.data.code} · step ${event.data.stepIndex}/${event.data.stepCount} · ${event.data.phase}${
+          event.data.stepType === undefined ? '' : ` · ${event.data.stepType}`
+        }`
   }
   return `Session event: ${event.type}`
 }
@@ -146,7 +195,10 @@ function eventOperationId(event: SessionEvent): string | undefined {
   return undefined
 }
 
-function projectEvent(event: SessionEvent, toolNames: ReadonlyMap<string, string>): PlaygroundMockTaskTrace['events'][number] {
+function projectEvent(
+  event: SessionEvent,
+  toolNames: ReadonlyMap<string, string>,
+): PlaygroundMockTaskTrace['events'][number] {
   const operationId = eventOperationId(event)
   const turn = eventTurn(event)
   const messageId = eventMessageId(event)
@@ -174,7 +226,10 @@ function status(session: CordisXAgentSessionProjection): PlaygroundMockTaskTrace
   if (scenario?.type === 'playground/scenario') {
     if (scenario.data.phase === 'failed') return 'error'
     if (scenario.data.phase === 'cancelled') return 'closed'
-    if (scenario.data.phase === 'started' || scenario.data.phase === 'step-started' || scenario.data.phase === 'step-completed') return 'working'
+    if (
+      scenario.data.phase === 'started' || scenario.data.phase === 'step-started'
+      || scenario.data.phase === 'step-completed'
+    ) return 'working'
   }
   const terminal = [...session.events].reverse().find(event => event.type === 'turn/end')
   if (terminal?.type === 'turn/end') {
@@ -190,13 +245,17 @@ function projectTask(session: CordisXAgentSessionProjection): PlaygroundMockTask
   const definitions = (session.agent?.definitions ?? session.setup?.definitions)?.map(resolvedDefinition) ?? []
   const fallback = fallbackDefinition(session)
   const target = session.agent?.definition ?? session.setup?.definition
-  const selected = definitions.find(definition => definition.identity.agentId === target?.agentId
-    && definition.identity.revision === target.revision) ?? definitions.at(-1) ?? fallback
+  const selected = definitions.find(definition =>
+    definition.identity.agentId === target?.agentId
+    && definition.identity.revision === target.revision
+  ) ?? definitions.at(-1) ?? fallback
   const catalog = definitions.length === 0 ? [fallback] : definitions
   const lastInput = [...session.events].reverse().find(event => event.type === 'user/message')
-  const toolNames = new Map(session.events.flatMap(event => event.type === 'tool/call'
-    ? [[event.data.callId, event.data.name] as const]
-    : []))
+  const toolNames = new Map(session.events.flatMap(event =>
+    event.type === 'tool/call'
+      ? [[event.data.callId, event.data.name] as const]
+      : []
+  ))
   const scenario = [...session.events].reverse().find(event => event.type === 'playground/scenario')
   return Object.freeze({
     taskRef: session.sessionId,
@@ -234,5 +293,9 @@ export function projectPlaygroundAgentSessions(
   if (sessions.length === 0) return undefined
   const tasks = new Map<string, PlaygroundMockTaskTrace>()
   for (const session of sessions) tasks.set(session.sessionId, projectTask(session))
-  return Object.freeze({ namespace: PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE, label: 'Mock / Simulator', tasks: Object.freeze([...tasks.values()]) })
+  return Object.freeze({
+    namespace: PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE,
+    label: 'Mock / Simulator',
+    tasks: Object.freeze([...tasks.values()]),
+  })
 }

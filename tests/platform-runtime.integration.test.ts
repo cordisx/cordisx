@@ -21,11 +21,14 @@ describe('Platform runtime activation', () => {
       plugins: [{ id: 'agent-events-required', entry, enabled: true, config: {} }],
     }
     const bundle = await buildRendererBundle(config)
-    const dom = new JSDOM(`
+    const dom = new JSDOM(
+      `
       <html lang="en"><head></head><body>
         <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
       </body></html>
-    `, { runScripts: 'dangerously', url: 'https://codex.local/' })
+    `,
+      { runScripts: 'dangerously', url: 'https://codex.local/' },
+    )
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
 
     const identityKey = JSON.stringify([pathToFileURL(entry).href, 'agent-events-required'])
@@ -35,15 +38,22 @@ describe('Platform runtime activation', () => {
       reason: { key: 'permission.required', fallback: 'Agent events are required for this fixture' },
       scope: {},
     })
-    dom.window.localStorage.setItem('cordisx.platform.permissionPolicies.v1', JSON.stringify([{
-      identityKey,
-      capability: 'agent.events.read',
-      fingerprint,
-      policy: 'deny',
-    }]))
+    dom.window.localStorage.setItem(
+      'cordisx.platform.permissionPolicies.v1',
+      JSON.stringify([{
+        identityKey,
+        capability: 'agent.events.read',
+        fingerprint,
+        policy: 'deny',
+      }]),
+    )
 
     dom.window.eval(bundle)
-    for (let attempt = 0; attempt < 20 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 20 && dom.window.document.documentElement.dataset.cordisxReady !== 'true';
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     const runtime = (dom.window as unknown as {
@@ -132,17 +142,24 @@ describe('Platform runtime activation', () => {
     const config = { ...baseConfig, plugins: [{ id: 'agent-events-required', entry, enabled: true, config: {} }] }
     const identity = { source: pathToFileURL(entry).href, id: 'agent-events-required' }
     const initial = createPermissionPolicyRecord({
-      profileId: 'work', identity, capability: 'agent.events.read', scope: {}, policy: 'allow',
+      profileId: 'work',
+      identity,
+      capability: 'agent.events.read',
+      scope: {},
+      policy: 'allow',
     })
     const token = 'permission-persistence-token'
     const bundle = await buildRendererBundle(config, {
       permission: { profileId: 'work', policies: [initial], bridgeToken: token },
     })
-    const dom = new JSDOM(`
+    const dom = new JSDOM(
+      `
       <html lang="en"><head></head><body>
         <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
       </body></html>
-    `, { runScripts: 'dangerously', url: 'https://codex.local/' })
+    `,
+      { runScripts: 'dangerously', url: 'https://codex.local/' },
+    )
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
     const payloads: Record<string, unknown>[] = []
     Object.defineProperty(dom.window, '__cordisxPermissionPolicyRequestV1', {
@@ -150,15 +167,23 @@ describe('Platform runtime activation', () => {
       value: (text: string) => {
         const payload = JSON.parse(text) as { requestId: string; token: string; records: unknown[] }
         payloads.push(payload as unknown as Record<string, unknown>)
-        queueMicrotask(() => (dom.window as unknown as {
-          __cordisxPermissionPolicyReceiveV1?: (response: string) => void
-        }).__cordisxPermissionPolicyReceiveV1?.(JSON.stringify({
-          requestId: payload.requestId, ok: true, value: payload.records,
-        })))
+        queueMicrotask(() =>
+          (dom.window as unknown as {
+            __cordisxPermissionPolicyReceiveV1?: (response: string) => void
+          }).__cordisxPermissionPolicyReceiveV1?.(JSON.stringify({
+            requestId: payload.requestId,
+            ok: true,
+            value: payload.records,
+          }))
+        )
       },
     })
     dom.window.eval(bundle)
-    for (let attempt = 0; attempt < 30 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 30 && dom.window.document.documentElement.dataset.cordisxReady !== 'true';
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     const runtime = (dom.window as unknown as {
@@ -178,7 +203,10 @@ describe('Platform runtime activation', () => {
       permissions: [{ policy: 'deny' }, { policy: 'ask' }],
     })
     expect(payloads).toHaveLength(1)
-    expect(payloads[0]).toMatchObject({ token, records: [{ key: { profileId: 'work', identity: { pluginId: 'agent-events-required' } }, policy: 'deny' }] })
+    expect(payloads[0]).toMatchObject({
+      token,
+      records: [{ key: { profileId: 'work', identity: { pluginId: 'agent-events-required' } }, policy: 'deny' }],
+    })
     expect(JSON.stringify(payloads[0])).not.toContain('configPath')
     await runtime?.dispose()
     dom.window.close()
@@ -210,11 +238,14 @@ describe('Platform runtime activation', () => {
       providerBridgeToken: 'provider-generation-token',
       generation: 'generation-provider-ready',
     })
-    const dom = new JSDOM(`
+    const dom = new JSDOM(
+      `
       <html lang="en"><head></head><body>
         <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
       </body></html>
-    `, { runScripts: 'dangerously', url: 'https://codex.local/' })
+    `,
+      { runScripts: 'dangerously', url: 'https://codex.local/' },
+    )
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
 
     dom.window.eval(unavailableBundle)
@@ -223,7 +254,10 @@ describe('Platform runtime activation', () => {
       __cordisxRuntime?: {
         snapshot(): {
           plugins: readonly { status: string; blockedReason?: string }[]
-          permissions: readonly { capability: string; availability: { status: string; providers: readonly { providerId: string }[] } }[]
+          permissions: readonly {
+            capability: string
+            availability: { status: string; providers: readonly { providerId: string }[] }
+          }[]
         }
         dispose(): Promise<void>
       }
@@ -245,23 +279,30 @@ describe('Platform runtime activation', () => {
         expect(request.token).toBe('provider-generation-token')
         const value = request.operation === 'status'
           ? {
-              hostId: 'cordisx-provider-fleet',
-              hostName: 'CordisX External Provider Fleet',
-              mode: 'read-write',
-              supportedCapabilities: [
-                'models.read', 'tasks.catalog.read', 'tasks.content.read', 'tasks.create',
-                'tasks.control', 'turns.submit', 'turns.control',
-              ],
-              diagnostics: [],
-              secondConnectionCreated: false,
-              rawBridgeExposed: false,
-            }
+            hostId: 'cordisx-provider-fleet',
+            hostName: 'CordisX External Provider Fleet',
+            mode: 'read-write',
+            supportedCapabilities: [
+              'models.read',
+              'tasks.catalog.read',
+              'tasks.content.read',
+              'tasks.create',
+              'tasks.control',
+              'turns.submit',
+              'turns.control',
+            ],
+            diagnostics: [],
+            secondConnectionCreated: false,
+            rawBridgeExposed: false,
+          }
           : request.operation === 'availability'
-            ? [{ providerId: 'gateway-a', displayName: 'Gateway A', generation: 'provider-a-1', state: 'ready' }]
-            : undefined
-        queueMicrotask(() => (dom.window as unknown as {
-          __cordisxProviderReceiveV1?: (response: string) => void
-        }).__cordisxProviderReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value })))
+          ? [{ providerId: 'gateway-a', displayName: 'Gateway A', generation: 'provider-a-1', state: 'ready' }]
+          : undefined
+        queueMicrotask(() =>
+          (dom.window as unknown as {
+            __cordisxProviderReceiveV1?: (response: string) => void
+          }).__cordisxProviderReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
+        )
       },
     })
     dom.window.eval(providerBundle)
@@ -270,7 +311,10 @@ describe('Platform runtime activation', () => {
       __cordisxRuntime?: {
         snapshot(): {
           plugins: readonly { status: string; blockedReason?: string }[]
-          permissions: readonly { capability: string; availability: { status: string; providers: readonly { providerId: string }[] } }[]
+          permissions: readonly {
+            capability: string
+            availability: { status: string; providers: readonly { providerId: string }[] }
+          }[]
         }
         dispose(): Promise<void>
       }

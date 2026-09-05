@@ -92,10 +92,13 @@ function date(value: string): number | undefined {
 }
 
 function ownerDigest(scope: AgentLoopAuthorityScope): string {
-  return digest('cordisx.agent-loop.owner.v1', JSON.stringify([
-    scope.profileId,
-    scope.ownerKey,
-  ]))
+  return digest(
+    'cordisx.agent-loop.owner.v1',
+    JSON.stringify([
+      scope.profileId,
+      scope.ownerKey,
+    ]),
+  )
 }
 
 function operationKey(scope: AgentLoopAuthorityScope, operationId: string): string {
@@ -110,13 +113,18 @@ function occupiesResource(operation: PersistedOperation): boolean {
 }
 
 function safeDocument(value: unknown): AuthorityDocument {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('AgentLoop authority document is invalid')
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('AgentLoop authority document is invalid')
+  }
   const input = value as Partial<AuthorityDocument>
   if (input.version !== DOCUMENT_VERSION || !Array.isArray(input.operations) || !Array.isArray(input.tasks)) {
     throw new Error('AgentLoop authority document is invalid')
   }
-  if (input.operations.length > MAX_OPERATIONS || input.tasks.length > MAX_TASKS
-    || input.expiredOperations !== undefined && (!Array.isArray(input.expiredOperations) || input.expiredOperations.length > MAX_OPERATIONS)) {
+  if (
+    input.operations.length > MAX_OPERATIONS || input.tasks.length > MAX_TASKS
+    || input.expiredOperations !== undefined
+      && (!Array.isArray(input.expiredOperations) || input.expiredOperations.length > MAX_OPERATIONS)
+  ) {
     throw new Error('AgentLoop authority quota is exceeded')
   }
   return clone(input as AuthorityDocument)
@@ -142,7 +150,9 @@ export class AgentLoopAuthority {
     profileId: string,
     options: { readonly now?: () => Date; readonly crash?: AgentLoopAuthorityCrashHooks } = {},
   ): Promise<AgentLoopAuthority> {
-    if (!path.isAbsolute(homeDir) || !/^[A-Za-z0-9._-]{1,128}$/u.test(profileId)) throw new Error('AgentLoop authority scope is invalid')
+    if (!path.isAbsolute(homeDir) || !/^[A-Za-z0-9._-]{1,128}$/u.test(profileId)) {
+      throw new Error('AgentLoop authority scope is invalid')
+    }
     const directory = path.join(homeDir, 'state', 'profiles', profileId, 'agent-loop')
     await mkdir(directory, { recursive: true, mode: 0o700 })
     await chmod(directory, 0o700)
@@ -153,7 +163,9 @@ export class AgentLoopAuthority {
     )
     try {
       const encoded = await readFile(authority.file, 'utf8')
-      if (Buffer.byteLength(encoded) > MAX_DOCUMENT_BYTES) throw new Error('AgentLoop authority document exceeds its byte quota')
+      if (Buffer.byteLength(encoded) > MAX_DOCUMENT_BYTES) {
+        throw new Error('AgentLoop authority document exceeds its byte quota')
+      }
       const restored = safeDocument(JSON.parse(encoded))
       authority.document = { ...restored, expiredOperations: restored.expiredOperations ?? [] }
       await chmod(authority.file, 0o600)
@@ -178,8 +190,8 @@ export class AgentLoopAuthority {
       const expired = document.expiredOperations.find(item => item.key === key)
       if (expired !== undefined) {
         output = input.provider !== undefined && expired.provider !== undefined
-          && (input.provider.providerId !== expired.provider.providerId
-            || input.provider.providerGeneration !== expired.provider.providerGeneration)
+            && (input.provider.providerId !== expired.provider.providerId
+              || input.provider.providerGeneration !== expired.provider.providerGeneration)
           ? { status: 'reconciliation-required', provider: clone(expired.provider) }
           : expired.commandDigest === input.commandDigest && expired.kind === input.kind
           ? { status: 'operation-expired' }
@@ -188,33 +200,44 @@ export class AgentLoopAuthority {
       }
       const existing = document.operations.find(item => item.key === key)
       if (existing !== undefined) {
-        if (input.provider !== undefined && existing.provider !== undefined
+        if (
+          input.provider !== undefined && existing.provider !== undefined
           && (input.provider.providerId !== existing.provider.providerId
-            || input.provider.providerGeneration !== existing.provider.providerGeneration)) {
+            || input.provider.providerGeneration !== existing.provider.providerGeneration)
+        ) {
           output = { status: 'reconciliation-required', provider: clone(existing.provider) }
-        }
-        else if (existing.commandDigest !== input.commandDigest || existing.kind !== input.kind) output = { status: 'conflict' }
-        else if (existing.state === 'committed') {
+        } else if (existing.commandDigest !== input.commandDigest || existing.kind !== input.kind) {
+          output = { status: 'conflict' }
+        } else if (existing.state === 'committed') {
           output = input.provider !== undefined && existing.provider !== undefined
-            && (existing.provider.providerId !== input.provider.providerId
-              || existing.provider.providerGeneration !== input.provider.providerGeneration)
+              && (existing.provider.providerId !== input.provider.providerId
+                || existing.provider.providerGeneration !== input.provider.providerGeneration)
             ? { status: 'reconciliation-required', provider: clone(existing.provider) }
             : { status: 'replay', result: clone(existing.result) }
-        }
-        else output = { status: 'reconciliation-required', ...(existing.provider === undefined ? {} : { provider: clone(existing.provider) }) }
+        } else {output = {
+            status: 'reconciliation-required',
+            ...(existing.provider === undefined ? {} : { provider: clone(existing.provider) }),
+          }}
         return
       }
       const resourceDigest = input.resourceKey === undefined
         ? undefined
         : digest('cordisx.agent-loop.resource.v1', `${ownerDigest(input.scope)}\0${input.resourceKey}`)
-      if (resourceDigest !== undefined && document.operations.some(item => item.ownerDigest === ownerDigest(input.scope)
-        && item.resourceDigest === resourceDigest
-        && occupiesResource(item))) {
+      if (
+        resourceDigest !== undefined && document.operations.some(item =>
+          item.ownerDigest === ownerDigest(input.scope)
+          && item.resourceDigest === resourceDigest
+          && occupiesResource(item)
+        )
+      ) {
         output = { status: 'resource-conflict' }
         return
       }
       if (document.operations.length >= MAX_OPERATIONS) {
-        output = { status: 'reconciliation-required', ...(input.provider === undefined ? {} : { provider: clone(input.provider) }) }
+        output = {
+          status: 'reconciliation-required',
+          ...(input.provider === undefined ? {} : { provider: clone(input.provider) }),
+        }
         return
       }
       const observedAt = this.now().toISOString()
@@ -244,9 +267,12 @@ export class AgentLoopAuthority {
     await this.mutate(document => {
       const key = operationKey(input.scope, input.operationId)
       const index = document.operations.findIndex(item => item.key === key)
-      if (index < 0 || document.operations[index]!.commandDigest !== input.commandDigest) throw new Error('AgentLoop operation was not planned')
+      if (index < 0 || document.operations[index]!.commandDigest !== input.commandDigest) {
+        throw new Error('AgentLoop operation was not planned')
+      }
       const current = document.operations[index]!
-      const accepted = (input.result as { status?: unknown; locator?: { state?: unknown } } | null)?.status === 'accepted'
+      const accepted =
+        (input.result as { status?: unknown; locator?: { state?: unknown } } | null)?.status === 'accepted'
         && (input.result as { locator?: { state?: unknown } }).locator?.state === 'active'
       document.operations[index] = {
         ...current,
@@ -254,12 +280,19 @@ export class AgentLoopAuthority {
         result: clone(input.result),
         ...(accepted ? {} : { closedAt: this.now().toISOString() }),
       }
-      if (current.kind === 'cancel-member-self-introduction'
+      if (
+        current.kind === 'cancel-member-self-introduction'
         && (input.result as { status?: unknown; requestOperationId?: unknown } | null)?.status === 'accepted'
-        && typeof (input.result as { requestOperationId?: unknown }).requestOperationId === 'string') {
-        const requestKey = operationKey(input.scope, (input.result as { requestOperationId: string }).requestOperationId)
-        const requestIndex = document.operations.findIndex(item => item.key === requestKey && item.state === 'committed'
-          && item.kind === 'request-member-self-introduction')
+        && typeof (input.result as { requestOperationId?: unknown }).requestOperationId === 'string'
+      ) {
+        const requestKey = operationKey(
+          input.scope,
+          (input.result as { requestOperationId: string }).requestOperationId,
+        )
+        const requestIndex = document.operations.findIndex(item =>
+          item.key === requestKey && item.state === 'committed'
+          && item.kind === 'request-member-self-introduction'
+        )
         if (requestIndex >= 0) {
           const request = document.operations[requestIndex]!
           document.operations[requestIndex] = {
@@ -275,7 +308,9 @@ export class AgentLoopAuthority {
     await this.mutate(document => {
       const owner = ownerDigest(scope)
       const existing = document.tasks.findIndex(item => item.task === locator.task)
-      if (existing >= 0 && document.tasks[existing]!.ownerDigest !== owner) throw new Error('AgentLoop task crossed its owner scope')
+      if (existing >= 0 && document.tasks[existing]!.ownerDigest !== owner) {
+        throw new Error('AgentLoop task crossed its owner scope')
+      }
       const observedAt = this.now().toISOString()
       const task: PersistedTask = {
         ...clone(locator),
@@ -305,16 +340,20 @@ export class AgentLoopAuthority {
     },
   ): AgentLoopTaskLocator | undefined {
     const locator = this.resolveTask(scope, input.task)
-    if (locator === undefined || locator.state !== 'active'
+    if (
+      locator === undefined || locator.state !== 'active'
       || locator.binding.bindingId !== input.binding.bindingId
       || locator.binding.generation !== input.binding.generation
       || locator.definition.agentId !== input.definition.agentId
-      || locator.definition.revision !== input.definition.revision) return undefined
+      || locator.definition.revision !== input.definition.revision
+    ) return undefined
     return locator
   }
 
   committedResult(scope: AgentLoopAuthorityScope, operationId: string): unknown | undefined {
-    const value = this.document.operations.find(item => item.key === operationKey(scope, operationId) && item.state === 'committed')
+    const value = this.document.operations.find(item =>
+      item.key === operationKey(scope, operationId) && item.state === 'committed'
+    )
     return value === undefined ? undefined : clone(value.result)
   }
 
@@ -334,12 +373,21 @@ export class AgentLoopAuthority {
     await this.mutate(document => {
       for (let index = 0; index < document.operations.length; index += 1) {
         const operation = document.operations[index]!
-        if (operation.state !== 'committed' || operation.kind !== 'request-member-self-introduction'
+        if (
+          operation.state !== 'committed' || operation.kind !== 'request-member-self-introduction'
           || operation.provider?.providerId !== provider.providerId
-          || operation.provider.providerGeneration !== provider.providerGeneration) continue
-        const result = operation.result as { status?: unknown; turn?: unknown; introductionState?: unknown; locator?: { remoteSessionId?: unknown } } | undefined
-        if (result?.status !== 'accepted' || result.turn !== turn || result.locator?.remoteSessionId !== remoteSessionId
-          || result.introductionState !== undefined && result.introductionState !== 'pending') continue
+          || operation.provider.providerGeneration !== provider.providerGeneration
+        ) continue
+        const result = operation.result as {
+          status?: unknown
+          turn?: unknown
+          introductionState?: unknown
+          locator?: { remoteSessionId?: unknown }
+        } | undefined
+        if (
+          result?.status !== 'accepted' || result.turn !== turn || result.locator?.remoteSessionId !== remoteSessionId
+          || result.introductionState !== undefined && result.introductionState !== 'pending'
+        ) continue
         document.operations[index] = {
           ...operation,
           result: { ...(clone(operation.result) as Record<string, unknown>), introductionState: state },
@@ -351,33 +399,60 @@ export class AgentLoopAuthority {
   async closeProviderGeneration(provider: AgentLoopProviderFence): Promise<void> {
     await this.mutate(document => {
       const closedAt = this.now().toISOString()
-      document.tasks = document.tasks.map(task => task.providerId === provider.providerId
-        && task.providerGeneration === provider.providerGeneration && task.state === 'active'
-        ? { ...task, state: 'closed', updatedAt: closedAt }
-        : task)
-      document.operations = document.operations.map(operation => operation.provider?.providerId === provider.providerId
-        && operation.provider.providerGeneration === provider.providerGeneration && operation.closedAt === undefined
-        ? { ...operation, closedAt }
-        : operation)
+      document.tasks = document.tasks.map(task =>
+        task.providerId === provider.providerId
+          && task.providerGeneration === provider.providerGeneration && task.state === 'active'
+          ? { ...task, state: 'closed', updatedAt: closedAt }
+          : task
+      )
+      document.operations = document.operations.map(operation =>
+        operation.provider?.providerId === provider.providerId
+          && operation.provider.providerGeneration === provider.providerGeneration && operation.closedAt === undefined
+          ? { ...operation, closedAt }
+          : operation
+      )
     })
   }
 
-  snapshotForTests(): AuthorityDocument { return clone(this.document) }
+  snapshotForTests(): AuthorityDocument {
+    return clone(this.document)
+  }
 
-  private async mutate(change: (document: { version: 1; operations: PersistedOperation[]; tasks: PersistedTask[]; expiredOperations: ExpiredOperation[] }) => void): Promise<void> {
+  private async mutate(
+    change: (
+      document: {
+        version: 1
+        operations: PersistedOperation[]
+        tasks: PersistedTask[]
+        expiredOperations: ExpiredOperation[]
+      },
+    ) => void,
+  ): Promise<void> {
     let reject!: (error: unknown) => void
     let resolve!: () => void
-    const result = new Promise<void>((ok, fail) => { resolve = ok; reject = fail })
+    const result = new Promise<void>((ok, fail) => {
+      resolve = ok
+      reject = fail
+    })
     const previous = this.queue
     this.queue = (async () => {
       await previous
       try {
-        const next = clone(this.document) as { version: 1; operations: PersistedOperation[]; tasks: PersistedTask[]; expiredOperations: ExpiredOperation[] }
+        const next = clone(this.document) as {
+          version: 1
+          operations: PersistedOperation[]
+          tasks: PersistedTask[]
+          expiredOperations: ExpiredOperation[]
+        }
         this.gc(next)
         change(next)
-        if (next.operations.length > MAX_OPERATIONS || next.tasks.length > MAX_TASKS) throw new Error('AgentLoop authority quota is exceeded')
+        if (next.operations.length > MAX_OPERATIONS || next.tasks.length > MAX_TASKS) {
+          throw new Error('AgentLoop authority quota is exceeded')
+        }
         const encoded = `${JSON.stringify(next)}\n`
-        if (Buffer.byteLength(encoded) > MAX_DOCUMENT_BYTES) throw new Error('AgentLoop authority document exceeds its byte quota')
+        if (Buffer.byteLength(encoded) > MAX_DOCUMENT_BYTES) {
+          throw new Error('AgentLoop authority document exceeds its byte quota')
+        }
         const temporary = `${this.file}.${randomUUID()}.tmp`
         await writeFile(temporary, encoded, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
         await chmod(temporary, 0o600)
@@ -392,31 +467,36 @@ export class AgentLoopAuthority {
     return await result
   }
 
-  private gc(document: { operations: PersistedOperation[]; tasks: PersistedTask[]; expiredOperations: ExpiredOperation[] }): void {
+  private gc(
+    document: { operations: PersistedOperation[]; tasks: PersistedTask[]; expiredOperations: ExpiredOperation[] },
+  ): void {
     const now = this.now().getTime()
     const cutoff = this.now().getTime() - RECOVERY_DAYS * 24 * 60 * 60 * 1_000
-    const expired = document.operations.filter(item => item.closedAt === undefined
-      ? item.state === 'planned' && (date(item.firstObservedAt) ?? 0) < cutoff
-      : (date(item.closedAt) ?? 0) < cutoff)
+    const expired = document.operations.filter(item =>
+      item.closedAt === undefined
+        ? item.state === 'planned' && (date(item.firstObservedAt) ?? 0) < cutoff
+        : (date(item.closedAt) ?? 0) < cutoff
+    )
     document.expiredOperations = [
       ...document.expiredOperations.filter(item => (date(item.markerExpiresAt) ?? 0) >= now),
       ...expired.flatMap(item => {
         const recoveryStart = date(item.closedAt ?? item.firstObservedAt) ?? 0
         const markerExpiresAt = recoveryStart + EXPIRY_MARKER_DAYS * 24 * 60 * 60 * 1_000
         return markerExpiresAt < now ? [] : [{
-        key: item.key,
-        ownerDigest: item.ownerDigest,
-        commandDigest: item.commandDigest,
-        kind: item.kind,
-        expiredAt: this.now().toISOString(),
-        markerExpiresAt: new Date(markerExpiresAt).toISOString(),
-        ...(item.provider === undefined ? {} : { provider: clone(item.provider) }),
-      }]
+          key: item.key,
+          ownerDigest: item.ownerDigest,
+          commandDigest: item.commandDigest,
+          kind: item.kind,
+          expiredAt: this.now().toISOString(),
+          markerExpiresAt: new Date(markerExpiresAt).toISOString(),
+          ...(item.provider === undefined ? {} : { provider: clone(item.provider) }),
+        }]
       }),
     ].slice(-MAX_OPERATIONS)
     const expiredKeys = new Set(expired.map(item => item.key))
     document.operations = document.operations.filter(item => !expiredKeys.has(item.key)).slice(-MAX_OPERATIONS)
-    document.tasks = document.tasks.filter(item => item.state === 'active' || (date(item.updatedAt) ?? 0) >= cutoff).slice(-MAX_TASKS)
+    document.tasks = document.tasks.filter(item => item.state === 'active' || (date(item.updatedAt) ?? 0) >= cutoff)
+      .slice(-MAX_TASKS)
   }
 }
 
@@ -424,9 +504,11 @@ export function agentLoopCommandDigest(value: unknown): string {
   const canonical = (input: unknown): unknown => {
     if (Array.isArray(input)) return input.map(canonical)
     if (input === null || typeof input !== 'object') return input
-    return Object.fromEntries(Object.entries(input as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, child]) => [key, canonical(child)]))
+    return Object.fromEntries(
+      Object.entries(input as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, canonical(child)]),
+    )
   }
   return digest('cordisx.agent-loop.command.v1', JSON.stringify(canonical(value)))
 }

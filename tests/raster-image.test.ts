@@ -4,9 +4,15 @@ import { cloneRasterImageSnapshot, rasterImageDataUrl } from '../packages/cli/sr
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=='
 const image = (overrides: Partial<RasterImageSnapshotV1> = {}): RasterImageSnapshotV1 => ({
-  $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/raster-image-snapshot.v1.schema.json',
-  contract: 'cordisx.raster-image-snapshot/v1', schemaVersion: 1,
-  mediaType: 'image/png', encoding: 'base64', data: PNG, width: 1, height: 1,
+  $schema:
+    'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/raster-image-snapshot.v1.schema.json',
+  contract: 'cordisx.raster-image-snapshot/v1',
+  schemaVersion: 1,
+  mediaType: 'image/png',
+  encoding: 'base64',
+  data: PNG,
+  width: 1,
+  height: 1,
   ...overrides,
 })
 

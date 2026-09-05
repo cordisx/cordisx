@@ -2,8 +2,8 @@ import { rm } from 'node:fs/promises'
 import path from 'node:path'
 import { PluginPackageSourceSnapshotter } from './integrity.js'
 import { JsonPackageManifestV2Resolver, type JsonPackageManifestV2ResolverOptions } from './manifest.js'
-import { resolvePluginPackageSourceV1, type PluginPackageSourceV1 } from './source.js'
-import { stageResolvedPluginPackage, type StagedPluginPackage } from '../plugin-package.js'
+import { type PluginPackageSourceV1, resolvePluginPackageSourceV1 } from './source.js'
+import { type StagedPluginPackage, stageResolvedPluginPackage } from '../plugin-package.js'
 
 export interface StagePluginPackageSourceOptions extends JsonPackageManifestV2ResolverOptions {
   readonly homeDir: string

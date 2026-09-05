@@ -1,4 +1,4 @@
-import { Service, type Context } from '@deepseek-ai/cordis'
+import { type Context, Service } from '@deepseek-ai/cordis'
 import * as React from 'react'
 import type {
   CordisXVisualData,
@@ -8,8 +8,8 @@ import type {
   CordisXVisualTheme,
 } from '../visual-contracts.js'
 import {
-  generationVisibilityFromContext,
   type GenerationVisibilityCoordinator,
+  generationVisibilityFromContext,
   type PluginGenerationEffectIdentity,
 } from './generation-visibility.js'
 import { HostThemeProjection } from './host-theme.js'
@@ -29,7 +29,12 @@ const registriesByDocument = new WeakMap<Document, VisualRegistry>()
 type MutableVisualContainer = CordisXVisualData[] | Record<string, CordisXVisualData>
 type VisualCloneTask =
   | { readonly kind: 'freeze'; readonly source: object; readonly target: MutableVisualContainer }
-  | { readonly kind: 'value'; readonly source: unknown; readonly target: MutableVisualContainer; readonly key: PropertyKey }
+  | {
+    readonly kind: 'value'
+    readonly source: unknown
+    readonly target: MutableVisualContainer
+    readonly key: PropertyKey
+  }
 
 function invalidVisualData(detail: string): TypeError {
   return new TypeError(`visual data must be JSON-compatible: ${detail}`)
@@ -142,9 +147,13 @@ export class VisualRegistry {
     if (typeof renderer !== 'function') throw new Error('visual renderer must be a component')
     const generation: PluginGenerationEffectIdentity = this.visibility?.effect(ctx)
       ?? Object.freeze({ pluginId: owner })
-    if ([...this.registrations].some(record => record.owner === owner
-      && record.id === id
-      && record.generation.moduleGeneration === generation.moduleGeneration)) {
+    if (
+      [...this.registrations].some(record =>
+        record.owner === owner
+        && record.id === id
+        && record.generation.moduleGeneration === generation.moduleGeneration
+      )
+    ) {
       throw new Error(`visual ${owner}:${id} is already registered for this generation`)
     }
     const registration: VisualRegistration = Object.freeze({
@@ -167,15 +176,19 @@ export class VisualRegistry {
 
   registration(owner: string, id: string): VisualRegistration | undefined {
     if (this.disposed || !LOCAL_ID_PATTERN.test(id)) return undefined
-    return [...this.registrations].find(registration => registration.owner === owner
+    return [...this.registrations].find(registration =>
+      registration.owner === owner
       && registration.id === id
-      && this.visible(registration))
+      && this.visible(registration)
+    )
   }
 
-  subscribe = (listener: () => void): (() => void) => {
+  subscribe = (listener: () => void): () => void => {
     if (this.disposed) return () => undefined
     this.listeners.add(listener)
-    return () => { this.listeners.delete(listener) }
+    return () => {
+      this.listeners.delete(listener)
+    }
   }
 
   snapshot = (): number => this.revision
@@ -203,7 +216,11 @@ export class VisualRegistry {
   private notify(): void {
     this.revision += 1
     for (const listener of [...this.listeners]) {
-      try { listener() } catch (error) { console.error('CordisX visual subscriber failed', error) }
+      try {
+        listener()
+      } catch (error) {
+        console.error('CordisX visual subscriber failed', error)
+      }
     }
   }
 }
@@ -232,15 +249,21 @@ interface VisualFailureBoundaryProps extends React.PropsWithChildren {
 class VisualFailureBoundary extends React.Component<VisualFailureBoundaryProps, { failed: boolean }> {
   state = { failed: false }
 
-  static getDerivedStateFromError(): { failed: boolean } { return { failed: true } }
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true }
+  }
 
-  componentDidCatch(): void { console.error('CordisX visual renderer failed') }
+  componentDidCatch(): void {
+    console.error('CordisX visual renderer failed')
+  }
 
   componentDidUpdate(previous: VisualFailureBoundaryProps): void {
     if (this.state.failed && previous.resetKey !== this.props.resetKey) this.setState({ failed: false })
   }
 
-  render(): React.ReactNode { return this.state.failed ? null : this.props.children }
+  render(): React.ReactNode {
+    return this.state.failed ? null : this.props.children
+  }
 }
 
 function useVisualTheme(element: React.RefObject<HTMLElement | null>): CordisXVisualTheme {
@@ -273,9 +296,11 @@ function RegisteredVisual({ registry, owner, id, data, theme, dataRevision }: {
   const registration = registry.registration(owner, id)
   if (registration === undefined) return null
   const Renderer = registration.renderer
-  return <VisualFailureBoundary resetKey={`${registration.sequence}:${dataRevision}:${theme}`}>
-    <Renderer data={data} theme={theme} />
-  </VisualFailureBoundary>
+  return (
+    <VisualFailureBoundary resetKey={`${registration.sequence}:${dataRevision}:${theme}`}>
+      <Renderer data={data} theme={theme} />
+    </VisualFailureBoundary>
+  )
 }
 
 /** Host-only bounded seat. Providers receive no Context, node, selector, or action authority. */
@@ -289,7 +314,11 @@ export function HostVisual({ owner, id, data }: {
   const theme = useVisualTheme(element)
   const nextDataRevision = React.useRef(0)
   const projection = React.useMemo(() => {
-    try { return { data: cloneVisualData(data), revision: ++nextDataRevision.current } } catch { return undefined }
+    try {
+      return { data: cloneVisualData(data), revision: ++nextDataRevision.current }
+    } catch {
+      return undefined
+    }
   }, [data])
   React.useLayoutEffect(() => {
     const seat = element.current
@@ -300,22 +329,26 @@ export function HostVisual({ owner, id, data }: {
     setRegistry(nextRegistry)
     return detachTheme
   }, [])
-  return <span
-    ref={element}
-    data-cordisx-visual={id}
-    aria-hidden="true"
-    inert={true}
-    style={{ display: 'block', width: '100%', height: '100%', overflow: 'hidden', pointerEvents: 'none' }}
-  >
-    {registry === undefined || projection === undefined
-      ? null
-      : <RegisteredVisual
-          registry={registry}
-          owner={owner}
-          id={id}
-          data={projection.data}
-          dataRevision={projection.revision}
-          theme={theme}
-        />}
-  </span>
+  return (
+    <span
+      ref={element}
+      data-cordisx-visual={id}
+      aria-hidden="true"
+      inert={true}
+      style={{ display: 'block', width: '100%', height: '100%', overflow: 'hidden', pointerEvents: 'none' }}
+    >
+      {registry === undefined || projection === undefined
+        ? null
+        : (
+          <RegisteredVisual
+            registry={registry}
+            owner={owner}
+            id={id}
+            data={projection.data}
+            dataRevision={projection.revision}
+            theme={theme}
+          />
+        )}
+    </span>
+  )
 }

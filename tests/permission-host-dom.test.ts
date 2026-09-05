@@ -23,9 +23,9 @@ import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/ge
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
 import {
   MemoryPermissionPolicyStore,
-  PermissionBroker,
   normalizePluginManifest,
   type PermissionAuthorizationPromptV2,
+  PermissionBroker,
   type PermissionPolicyStore,
 } from '../packages/cli/src/renderer/platform.js'
 import type { PluginConsolePermissionObserver } from '../packages/cli/src/renderer/plugin-console.js'
@@ -61,7 +61,8 @@ async function formalPermissionV4Validators(): Promise<{
   const ajv = new Ajv2020({ allErrors: true, strict: true, allowUnionTypes: true })
   addFormats(ajv)
   for (const schema of schemas) ajv.addSchema(schema)
-  const get = (name: string) => ajv.getSchema(`https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/${name}`)!
+  const get = (name: string) =>
+    ajv.getSchema(`https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/${name}`)!
   return {
     manifest: get('plugin-manifest.v5.schema.json'),
     plan: get('permission-authorization-plan.v4.schema.json'),
@@ -102,7 +103,9 @@ function manifest(capabilities: readonly CordisXCapabilityDeclarationV4[]): Cord
   }, identity.id) as CordisXPluginManifestV5
 }
 
-function certification(overrides: Partial<CordisXCertifiedPermissionProjectionV1> = {}): CordisXCertifiedPermissionProjectionV1 {
+function certification(
+  overrides: Partial<CordisXCertifiedPermissionProjectionV1> = {},
+): CordisXCertifiedPermissionProjectionV1 {
   const payload = {
     source: identity.source,
     pluginId: identity.id,
@@ -111,7 +114,10 @@ function certification(overrides: Partial<CordisXCertifiedPermissionProjectionV1
     reviewPolicy: { id: 'cordisx-marketplace-review' as const, version: '1.0.0' },
     reviewedAt: '2026-08-29T00:00:00.000Z',
     expiresAt: '2026-09-30T00:00:00.000Z',
-    evidence: { kind: 'protected-marketplace-review' as const, reference: 'https://github.com/cordisx/marketplace/pull/123' },
+    evidence: {
+      kind: 'protected-marketplace-review' as const,
+      reference: 'https://github.com/cordisx/marketplace/pull/123',
+    },
     feed: {
       generatedAt: '2026-08-30T00:00:00.000Z',
       root: 'https://marketplace.example/feed.json',
@@ -183,7 +189,10 @@ function setup(input: {
   let hostDomPrompts = 0
   let nonDomPrompts = 0
   const prompt: PermissionAuthorizationPromptV2 = {
-    request: async plan => { nonDomPrompts += 1; return decisionV2(plan) },
+    request: async plan => {
+      nonDomPrompts += 1
+      return decisionV2(plan)
+    },
     requestV4: async (plan, requestIdentity) => {
       hostDomPrompts += 1
       return input.requestV4 === undefined
@@ -212,10 +221,15 @@ function setup(input: {
   }
   const unregister = broker.register(
     identity,
-    manifest(input.capabilities ?? [
-      declaration('ui.host-dom.read', false, { rootIds: ['app.shell'], operations: ['inspect-structure', 'read-text'] }),
-      declaration('ui.host-dom.modify', false, { rootIds: ['app.shell'], operations: ['set-text', 'focus'] }),
-    ]),
+    manifest(
+      input.capabilities ?? [
+        declaration('ui.host-dom.read', false, {
+          rootIds: ['app.shell'],
+          operations: ['inspect-structure', 'read-text'],
+        }),
+        declaration('ui.host-dom.modify', false, { rootIds: ['app.shell'], operations: ['set-text', 'focus'] }),
+      ],
+    ),
     { pluginId: identity.id, moduleGeneration: input.moduleGeneration ?? 'module-1' },
     undefined,
     { version: '1.2.3', integrity: digest },
@@ -228,7 +242,10 @@ describe('manifest-v5 Host DOM permission model', () => {
     const validators = await formalPermissionV4Validators()
     const normalizedManifest = manifest([
       declaration('models.read', false, { providers: ['codex'] }),
-      declaration('ui.host-dom.read', false, { rootIds: ['app.shell'], operations: ['inspect-structure', 'read-text'] }),
+      declaration('ui.host-dom.read', false, {
+        rootIds: ['app.shell'],
+        operations: ['inspect-structure', 'read-text'],
+      }),
     ])
     expectFormal(validators.manifest, normalizedManifest)
     const context = setup({ certified: certification(), capabilities: normalizedManifest.capabilities })
@@ -237,58 +254,73 @@ describe('manifest-v5 Host DOM permission model', () => {
     expectFormal(validators.decision, decisionV4(plan))
   })
 
-  it.each([
-    ['ordinary', false, false, 2, 'explicit-user'],
-    ['certified-only', true, false, 0, 'certified-implicit'],
-    ['official-only', false, true, 2, 'explicit-user'],
-    ['official-and-certified', true, true, 0, 'certified-implicit'],
-  ] as const)('keeps the %s state composable without letting Official authorize', async (_state, certified, _official, promptCount, origin) => {
-    // Official is intentionally absent from the Broker API and cannot affect either capability.
-    const context = setup({ ...(certified ? { certified: certification() } : {}) })
-    await expect(context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text']))
-      .resolves.toMatchObject({ authorized: true, authorizationOrigin: origin })
-    await expect(context.broker.authorizeHostDom(identity, 'ui.host-dom.modify', 'app.shell', ['focus']))
-      .resolves.toMatchObject({ authorized: true, authorizationOrigin: origin })
-    expect(context.hostDomPrompts()).toBe(promptCount)
-    expect(context.broker.snapshots().filter(item => item.authorizationOrigin === origin)).toHaveLength(2)
-  })
+  it.each(
+    [
+      ['ordinary', false, false, 2, 'explicit-user'],
+      ['certified-only', true, false, 0, 'certified-implicit'],
+      ['official-only', false, true, 2, 'explicit-user'],
+      ['official-and-certified', true, true, 0, 'certified-implicit'],
+    ] as const,
+  )(
+    'keeps the %s state composable without letting Official authorize',
+    async (_state, certified, _official, promptCount, origin) => {
+      // Official is intentionally absent from the Broker API and cannot affect either capability.
+      const context = setup({ ...(certified ? { certified: certification() } : {}) })
+      await expect(context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text']))
+        .resolves.toMatchObject({ authorized: true, authorizationOrigin: origin })
+      await expect(context.broker.authorizeHostDom(identity, 'ui.host-dom.modify', 'app.shell', ['focus']))
+        .resolves.toMatchObject({ authorized: true, authorizationOrigin: origin })
+      expect(context.hostDomPrompts()).toBe(promptCount)
+      expect(context.broker.snapshots().filter(item => item.authorizationOrigin === origin)).toHaveLength(2)
+    },
+  )
 
-  it.each([
-    ['ordinary', undefined],
-    ['certified-only', certification()],
-    ['official-only', undefined],
-    ['official-and-certified', certification()],
-  ] as const)('still prompts for non-DOM access in the %s state', async (_state, certified) => {
+  it.each(
+    [
+      ['ordinary', undefined],
+      ['certified-only', certification()],
+      ['official-only', undefined],
+      ['official-and-certified', certification()],
+    ] as const,
+  )('still prompts for non-DOM access in the %s state', async (_state, certified) => {
     const context = setup({
       ...(certified === undefined ? {} : { certified }),
       capabilities: [declaration('models.read', false, { providers: ['codex'] })],
     })
-    await expect(context.broker.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({ ok: true })
+    await expect(context.broker.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({
+      ok: true,
+    })
     expect(context.nonDomPrompts()).toBe(1)
   })
 
   it('binds Certified auto approval to the exact artifact and rejects self-reported trust', async () => {
     const mismatch = setup({})
-    expect(() => mismatch.broker.replaceCertifiedPermissionSnapshot({
-      revision: 1,
-      projections: [certification({ integrity: `sha256:${'b'.repeat(64)}` })],
-    })).toThrow(/invalid projection/)
+    expect(() =>
+      mismatch.broker.replaceCertifiedPermissionSnapshot({
+        revision: 1,
+        projections: [certification({ integrity: `sha256:${'b'.repeat(64)}` })],
+      })
+    ).toThrow(/invalid projection/)
     await mismatch.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text'])
     expect(mismatch.hostDomPrompts()).toBe(1)
 
     const forged = setup({})
-    expect(() => forged.broker.replaceCertifiedPermissionSnapshot({
-      revision: 1,
-      projections: [certification({ fingerprint: `sha256:${'c'.repeat(64)}` })],
-    })).toThrow(/invalid projection/)
+    expect(() =>
+      forged.broker.replaceCertifiedPermissionSnapshot({
+        revision: 1,
+        projections: [certification({ fingerprint: `sha256:${'c'.repeat(64)}` })],
+      })
+    ).toThrow(/invalid projection/)
     await forged.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text'])
     expect(forged.hostDomPrompts()).toBe(1)
 
-    expect(() => normalizePluginManifest({
-      ...manifest([]),
-      certified: true,
-      official: true,
-    }, identity.id)).toThrow(/unsupported/i)
+    expect(() =>
+      normalizePluginManifest({
+        ...manifest([]),
+        certified: true,
+        official: true,
+      }, identity.id)
+    ).toThrow(/unsupported/i)
   })
 
   it('lets exact persistent deny override certification and forbids persistent modify allow', async () => {
@@ -331,29 +363,38 @@ describe('manifest-v5 Host DOM permission model', () => {
     }))
   })
 
-  it.each(['certified', 'explicit'] as const)('fails closed when a reentrant audit observer invalidates a %s grant', async origin => {
-    let invalidated = false
-    const context = setup({
-      ...(origin === 'certified' ? { certified: certification() } : {}),
-      onAudit: broker => {
-        if (invalidated) return
-        invalidated = true
-        if (origin === 'certified') broker.replaceCertifiedPermissionSnapshot({ revision: 2, projections: [] })
-        else broker.clearOnce(identity)
-      },
-    })
-    await expect(context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text']))
-      .resolves.toMatchObject({ authorized: false, state: 'denied', reason: 'permission.grant-invalidated' })
-    expect(context.broker.snapshots().find(item => item.capability === 'ui.host-dom.read')?.authorizationOrigin)
-      .toBeUndefined()
-  })
+  it.each(['certified', 'explicit'] as const)(
+    'fails closed when a reentrant audit observer invalidates a %s grant',
+    async origin => {
+      let invalidated = false
+      const context = setup({
+        ...(origin === 'certified' ? { certified: certification() } : {}),
+        onAudit: broker => {
+          if (invalidated) return
+          invalidated = true
+          if (origin === 'certified') broker.replaceCertifiedPermissionSnapshot({ revision: 2, projections: [] })
+          else broker.clearOnce(identity)
+        },
+      })
+      await expect(context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text']))
+        .resolves.toMatchObject({ authorized: false, state: 'denied', reason: 'permission.grant-invalidated' })
+      expect(context.broker.snapshots().find(item => item.capability === 'ui.host-dom.read')?.authorizationOrigin)
+        .toBeUndefined()
+    },
+  )
 
   it('uses unique plan ids and cancels every pending prompt when the generation unloads', async () => {
     const plans: CordisXPermissionAuthorizationPlanV4[] = []
     const cancelled: string[] = []
     const context = setup({
-      requestV4: async plan => await new Promise(resolve => { plans.push(plan); void resolve }),
-      cancelV4: planId => { cancelled.push(planId) },
+      requestV4: async plan =>
+        await new Promise(resolve => {
+          plans.push(plan)
+          void resolve
+        }),
+      cancelV4: planId => {
+        cancelled.push(planId)
+      },
     })
     const first = context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text'])
     const second = context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text'])
@@ -371,14 +412,22 @@ describe('manifest-v5 Host DOM permission model', () => {
     const pending = context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text'])
     await Promise.resolve()
     await context.broker.setHostDomPolicy(identity, 'ui.host-dom.read', 'deny-persistent')
-    await expect(pending).resolves.toMatchObject({ authorized: false, reason: 'permission.denied-persistent', policy: 'deny' })
+    await expect(pending).resolves.toMatchObject({
+      authorized: false,
+      reason: 'permission.denied-persistent',
+      policy: 'deny',
+    })
   })
 
   it('revokes an already issued concurrent lease when another prompt commits persistent deny', async () => {
     const plans: CordisXPermissionAuthorizationPlanV4[] = []
     const resolvers: Array<(decision: CordisXPermissionAuthorizationDecisionV4) => void> = []
     const context = setup({
-      requestV4: async plan => await new Promise(resolve => { plans.push(plan); resolvers.push(resolve) }),
+      requestV4: async plan =>
+        await new Promise(resolve => {
+          plans.push(plan)
+          resolvers.push(resolve)
+        }),
     })
     const denying = context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text'])
     const allowing = context.broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text'])
@@ -402,7 +451,10 @@ describe('manifest-v5 Host DOM permission model', () => {
       write: records => backing.write(records),
       writeV2: records => backing.writeV2(records),
       writeV3: records => backing.writeV3(records),
-      writeV4: async () => await new Promise<void>((_resolve, reject) => { rejectWrite = reject }),
+      writeV4: async () =>
+        await new Promise<void>((_resolve, reject) => {
+          rejectWrite = reject
+        }),
     }
     const context = setup({ store })
     const persistence = context.broker.setHostDomPolicy(identity, 'ui.host-dom.read', 'allow-persistent')
@@ -441,9 +493,15 @@ describe('manifest-v5 Host DOM permission model', () => {
       { request: async plan => decisionV2(plan), requestV4: async plan => decisionV4(plan) },
     )
     broker.replaceCertifiedPermissionSnapshot({ revision: 1, projections: [certification()] })
-    const unregisterOld = broker.register(identity, manifest([
-      declaration('ui.host-dom.read', false, { rootIds: ['app.shell'], operations: ['read-text'] }),
-    ]), { pluginId: identity.id, moduleGeneration: 'module-1' }, undefined, { version: '1.2.3', integrity: digest })
+    const unregisterOld = broker.register(
+      identity,
+      manifest([
+        declaration('ui.host-dom.read', false, { rootIds: ['app.shell'], operations: ['read-text'] }),
+      ]),
+      { pluginId: identity.id, moduleGeneration: 'module-1' },
+      undefined,
+      { version: '1.2.3', integrity: digest },
+    )
     const handle = visibility.begin('host-dom-update', previous, next)
     const candidateContext = new Context().extend({
       [CORDISX_PLUGIN_ID]: identity.id,
@@ -451,19 +509,26 @@ describe('manifest-v5 Host DOM permission model', () => {
       ...visibility.context(handle, identity.id),
     })
     const candidateView = visibility.view(candidateContext)
-    const unregisterNew = broker.register(identity, manifest([
-      declaration('ui.host-dom.read', false, { rootIds: ['app.shell'], operations: ['read-text'] }),
-    ]), {
-      pluginId: identity.id,
-      moduleGeneration: 'module-2',
-      transactionId: handle.transactionId,
-      transactionEpoch: handle.transactionEpoch,
-    }, candidateView, { version: '1.2.3', integrity: digest })
+    const unregisterNew = broker.register(
+      identity,
+      manifest([
+        declaration('ui.host-dom.read', false, { rootIds: ['app.shell'], operations: ['read-text'] }),
+      ]),
+      {
+        pluginId: identity.id,
+        moduleGeneration: 'module-2',
+        transactionId: handle.transactionId,
+        transactionEpoch: handle.transactionEpoch,
+      },
+      candidateView,
+      { version: '1.2.3', integrity: digest },
+    )
     await expect(broker.authorizeHostDom(identity, 'ui.host-dom.read', 'app.shell', ['read-text'], candidateView))
       .resolves.toMatchObject({ authorized: true, authorizationOrigin: 'certified-implicit' })
     const publication = visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
     expect(broker.snapshots()).toContainEqual(expect.objectContaining({
-      capability: 'ui.host-dom.read', authorizationOrigin: 'certified-implicit',
+      capability: 'ui.host-dom.read',
+      authorizationOrigin: 'certified-implicit',
     }))
     unregisterOld()
     expect(broker.snapshots()).toContainEqual(expect.objectContaining({

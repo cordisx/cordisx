@@ -30,10 +30,14 @@ describe('development checkpoint regressions', () => {
     expect(source).toContain('async function ensureManagerVisible()')
     expect(source).toContain('async function ensureManagerClosed()')
     expect(source).toContain("trigger instanceof HTMLElement ? 'manager-trigger' : 'legacy-fallback'")
-    expect(source).toContain('[data-cordisx-manager-modal] [aria-label="关闭"], [data-cordisx-manager-modal] .cxm-close')
-    expect(source).toContain('const left = switcherRect !== undefined && switcherRect.width > 0 && switcherRect.height > 0 ? switcherRect : right')
+    expect(source).toContain(
+      '[data-cordisx-manager-modal] [aria-label="关闭"], [data-cordisx-manager-modal] .cxm-close',
+    )
+    expect(source).toContain(
+      'const left = switcherRect !== undefined && switcherRect.width > 0 && switcherRect.height > 0 ? switcherRect : right',
+    )
     expect(managerSmoke).toContain('const managerOpenState = await ensureManagerVisible()')
-    expect(managerSmoke).toContain("modal.querySelector('[role=\"dialog\"], .cxr-dialog')")
+    expect(managerSmoke).toContain('modal.querySelector(\'[role="dialog"], .cxr-dialog\')')
     expect(managerSmoke).not.toContain('if (modal?.hidden === true && trigger !== null) trigger.click()')
   })
 })

@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
@@ -48,13 +48,18 @@ describe('shared React plugin runtime', () => {
       generation: 'shared-react-test',
       profileId: 'test',
     })
-    const dom = new JSDOM(`<!doctype html><html lang="en" class="electron-dark"><head></head><body>
+    const dom = new JSDOM(
+      `<!doctype html><html lang="en" class="electron-dark"><head></head><body>
       <div data-cordisx-playground-seat="app"></div>
       <div data-cordisx-playground-seat="main"></div>
       <div data-cordisx-playground-seat="session.content"></div>
-    </body></html>`, { runScripts: 'dangerously', url: 'https://cordisx.local/' })
+    </body></html>`,
+      { runScripts: 'dangerously', url: 'https://cordisx.local/' },
+    )
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
-    Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
+    Object.defineProperty(dom.window, 'fetch', {
+      value: async () => ({ ok: false, status: 503, text: async () => '' }),
+    })
     dom.window.eval(bundle)
     await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true')
     const window = dom.window as unknown as TestWindow
@@ -62,9 +67,13 @@ describe('shared React plugin runtime', () => {
 
     let navigationSettled = false
     const navigation = window.__cordisxRuntime!.navigate('shared-react', { id: 'overview' })
-      .finally(() => { navigationSettled = true })
+      .finally(() => {
+        navigationSettled = true
+      })
     for (let attempt = 0; attempt < 3 && !navigationSettled; attempt += 1) {
-      await waitFor(() => dom.window.document.querySelector('[data-permission-authorization]') !== null || navigationSettled)
+      await waitFor(() =>
+        dom.window.document.querySelector('[data-permission-authorization]') !== null || navigationSettled
+      )
       const dialog = dom.window.document.querySelector<HTMLElement>('[data-permission-authorization]')
       if (dialog !== null) {
         dialog.querySelector<HTMLElement>(
@@ -110,22 +119,50 @@ describe('shared React plugin runtime', () => {
       const library = path.join(directory, 'node_modules', 'test-peer-component')
       await mkdir(library, { recursive: true })
       await writeFile(path.join(directory, 'package.json'), JSON.stringify({ name: 'peer-plugin', type: 'module' }))
-      await writeFile(path.join(library, 'package.json'), JSON.stringify({ name: 'test-peer-component', type: 'module', main: 'index.js' }))
-      await writeFile(path.join(library, 'index.js'), `export { default as React } from 'react'; export { createPortal } from 'react-dom'; export { createRoot } from 'react-dom/client';`)
+      await writeFile(
+        path.join(library, 'package.json'),
+        JSON.stringify({ name: 'test-peer-component', type: 'module', main: 'index.js' }),
+      )
+      await writeFile(
+        path.join(library, 'index.js'),
+        `export { default as React } from 'react'; export { createPortal } from 'react-dom'; export { createRoot } from 'react-dom/client';`,
+      )
       const entry = path.join(directory, 'index.ts')
-      await writeFile(entry, `import { React, createPortal, createRoot } from 'test-peer-component'; export function apply() { globalThis.__peerRuntime = { React, createPortal, createRoot }; }`)
-      const bundle = await buildRendererBundle(config(entry), { playground: true, generation: 'peer-test', profileId: 'test' })
-      const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { runScripts: 'dangerously', url: 'https://cordisx.local/' })
+      await writeFile(
+        entry,
+        `import { React, createPortal, createRoot } from 'test-peer-component'; export function apply() { globalThis.__peerRuntime = { React, createPortal, createRoot }; }`,
+      )
+      const bundle = await buildRendererBundle(config(entry), {
+        playground: true,
+        generation: 'peer-test',
+        profileId: 'test',
+      })
+      const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', {
+        runScripts: 'dangerously',
+        url: 'https://cordisx.local/',
+      })
       try {
         dom.window.eval(bundle)
         await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true')
-        const scope = dom.window as unknown as { __peerRuntime: { React: unknown; createPortal: unknown; createRoot: unknown }; __cordisxSharedReactRuntime: { React: unknown; reactDom: { createPortal: unknown }; reactDomClient: { createRoot: unknown } }; __cordisxRuntime: RuntimeHandle }
+        const scope = dom.window as unknown as {
+          __peerRuntime: { React: unknown; createPortal: unknown; createRoot: unknown }
+          __cordisxSharedReactRuntime: {
+            React: unknown
+            reactDom: { createPortal: unknown }
+            reactDomClient: { createRoot: unknown }
+          }
+          __cordisxRuntime: RuntimeHandle
+        }
         expect(scope.__peerRuntime.React).toBe(scope.__cordisxSharedReactRuntime.React)
         expect(scope.__peerRuntime.createPortal).toBe(scope.__cordisxSharedReactRuntime.reactDom.createPortal)
         expect(scope.__peerRuntime.createRoot).toBe(scope.__cordisxSharedReactRuntime.reactDomClient.createRoot)
         await scope.__cordisxRuntime.dispose()
-      } finally { dom.window.close() }
-    } finally { await rm(directory, { recursive: true, force: true }) }
+      } finally {
+        dom.window.close()
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   }, 20_000)
 
   it('does not publish the shared runtime when activation metadata is invalid', async () => {

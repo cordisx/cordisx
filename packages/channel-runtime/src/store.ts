@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { open, mkdir, readFile, rename, rm } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import type {
   ChannelAdapterDescriptor,
-  ChannelInboxStatus,
   ChannelInboundEnvelope,
-  ChannelOutboxStatus,
+  ChannelInboxStatus,
   ChannelOutboundDelivery,
+  ChannelOutboxStatus,
   ChannelPermissionDecision,
   ChannelPluginIdentity,
 } from './types.js'

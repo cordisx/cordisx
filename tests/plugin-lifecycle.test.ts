@@ -27,10 +27,10 @@ import {
 import type { RollbackPlan } from '../packages/cli/src/launcher/packages/authority.js'
 import type { PackageActivationTuple } from '../packages/cli/src/launcher/packages/types.js'
 import {
+  CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
   CORDISX_PERMISSION_POLICY_SCHEMA_V4,
-  CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
   CORDISX_PLUGIN_PACKAGE_SCHEMA_V3,
@@ -153,7 +153,9 @@ class FormalRuntime implements PluginLifecycleRuntime {
     }
   }
 
-  async recoverRollback(plan: import('../packages/cli/src/launcher/packages/authority.js').RollbackPlan): Promise<RuntimeCleanupObservation> {
+  async recoverRollback(
+    plan: import('../packages/cli/src/launcher/packages/authority.js').RollbackPlan,
+  ): Promise<RuntimeCleanupObservation> {
     this.calls.push('recoverRollback')
     const transactionId = plan.transactionId
     const mutation = this.mutations.get(transactionId)!
@@ -168,8 +170,12 @@ class FormalRuntime implements PluginLifecycleRuntime {
     }
   }
 
-  async commit(): Promise<void> { throw new Error('legacy commit must not run') }
-  async abort(transactionId: string): Promise<void> { this.mutations.delete(transactionId) }
+  async commit(): Promise<void> {
+    throw new Error('legacy commit must not run')
+  }
+  async abort(transactionId: string): Promise<void> {
+    this.mutations.delete(transactionId)
+  }
   async reload(): Promise<void> {}
 }
 
@@ -206,10 +212,18 @@ class BootstrapRecoveryRuntime implements PluginLifecycleRuntime {
     this.adopted = active
   }
 
-  async stage(): Promise<void> { throw new Error('bootstrap recovery must not stage') }
-  async commit(): Promise<void> { throw new Error('bootstrap recovery must not commit a candidate') }
-  async abort(): Promise<void> { throw new Error('bootstrap recovery must not abort outside rollback completion') }
-  async reload(): Promise<void> { throw new Error('bootstrap recovery must not reload') }
+  async stage(): Promise<void> {
+    throw new Error('bootstrap recovery must not stage')
+  }
+  async commit(): Promise<void> {
+    throw new Error('bootstrap recovery must not commit a candidate')
+  }
+  async abort(): Promise<void> {
+    throw new Error('bootstrap recovery must not abort outside rollback completion')
+  }
+  async reload(): Promise<void> {
+    throw new Error('bootstrap recovery must not reload')
+  }
 }
 
 async function workspace(): Promise<{ root: string; home: string }> {
@@ -228,29 +242,40 @@ async function localPackage(input: {
 }): Promise<string> {
   const source = path.join(input.root, `${input.id}-${Math.random().toString(36).slice(2)}`)
   await mkdir(path.join(source, 'src'), { recursive: true })
-  const capabilities = input.requiredCapability === true ? [{
-    name: 'models.read',
-    required: true,
-    reason: { key: 'permission.models', fallback: 'Read models' },
-    scope: {},
-  }] : []
+  const capabilities = input.requiredCapability === true
+    ? [{
+      name: 'models.read',
+      required: true,
+      reason: { key: 'permission.models', fallback: 'Read models' },
+      scope: {},
+    }]
+    : []
   await Promise.all([
-    writeFile(path.join(source, 'cordisx.plugin.json'), `${JSON.stringify({
-      $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
-      schemaVersion: 1,
-      id: input.id,
-      version: input.version ?? '1.0.0',
-      entry: './src/index.ts',
-      compatibility: { runtimeAbi: 1, protocol: 1 },
-      dependencies: input.dependencies ?? [],
-      runtimeManifest: {
-        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
-        schemaVersion: 1,
-        id: input.id,
-        name: input.id.toUpperCase(),
-        capabilities,
-      },
-    }, null, 2)}\n`),
+    writeFile(
+      path.join(source, 'cordisx.plugin.json'),
+      `${
+        JSON.stringify(
+          {
+            $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
+            schemaVersion: 1,
+            id: input.id,
+            version: input.version ?? '1.0.0',
+            entry: './src/index.ts',
+            compatibility: { runtimeAbi: 1, protocol: 1 },
+            dependencies: input.dependencies ?? [],
+            runtimeManifest: {
+              $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+              schemaVersion: 1,
+              id: input.id,
+              name: input.id.toUpperCase(),
+              capabilities,
+            },
+          },
+          null,
+          2,
+        )
+      }\n`,
+    ),
     writeFile(path.join(source, 'src/index.ts'), input.code ?? 'export function apply() {}'),
   ])
   return source
@@ -286,21 +311,30 @@ async function localPackageV4(root: string): Promise<string> {
     writeFile(path.join(source, 'runtime.json'), runtimeText),
     writeFile(path.join(source, 'src/index.ts'), 'export function apply() {}\n'),
   ])
-  await writeFile(path.join(source, 'cordisx-package.json'), `${JSON.stringify({
-    $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V3,
-    schemaVersion: 3,
-    id: runtime.id,
-    version: '1.0.0',
-    entry: './src/index.ts',
-    distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
-    compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V4] },
-    dependencies: [],
-    runtimeManifest: {
-      path: './runtime.json',
-      schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
-      digest: `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`,
-    },
-  }, null, 2)}\n`)
+  await writeFile(
+    path.join(source, 'cordisx-package.json'),
+    `${
+      JSON.stringify(
+        {
+          $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V3,
+          schemaVersion: 3,
+          id: runtime.id,
+          version: '1.0.0',
+          entry: './src/index.ts',
+          distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
+          compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V4] },
+          dependencies: [],
+          runtimeManifest: {
+            path: './runtime.json',
+            schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+            digest: `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`,
+          },
+        },
+        null,
+        2,
+      )
+    }\n`,
+  )
   return source
 }
 
@@ -320,13 +354,15 @@ async function localPackageV5(root: string, hostDomRequired = false, includeHost
     name: 'Permission V5',
     capabilities: [
       { name: 'models.read', required: true, scope: { providers: ['codex'] } },
-      ...(includeHostDom ? [{
-        name: 'ui.host-dom.read',
-        required: hostDomRequired,
-        rationale,
-        security: { dataUse: 'ephemeral', retention: 'runtime', externalTransfer: false },
-        scope: { rootIds: ['app.shell'], operations: ['inspect-structure', 'read-text'] },
-      }] as const : []),
+      ...(includeHostDom
+        ? [{
+          name: 'ui.host-dom.read',
+          required: hostDomRequired,
+          rationale,
+          security: { dataUse: 'ephemeral', retention: 'runtime', externalTransfer: false },
+          scope: { rootIds: ['app.shell'], operations: ['inspect-structure', 'read-text'] },
+        }] as const
+        : []),
     ],
     services: [],
   } as const
@@ -335,21 +371,30 @@ async function localPackageV5(root: string, hostDomRequired = false, includeHost
     writeFile(path.join(source, 'runtime.json'), runtimeText),
     writeFile(path.join(source, 'src/index.ts'), 'export function apply() {}\n'),
   ])
-  await writeFile(path.join(source, 'cordisx-package.json'), `${JSON.stringify({
-    $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V4,
-    schemaVersion: 4,
-    id: runtime.id,
-    version: '1.0.0',
-    entry: './src/index.ts',
-    distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
-    compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V5] },
-    dependencies: [],
-    runtimeManifest: {
-      path: './runtime.json',
-      schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
-      digest: `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`,
-    },
-  }, null, 2)}\n`)
+  await writeFile(
+    path.join(source, 'cordisx-package.json'),
+    `${
+      JSON.stringify(
+        {
+          $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V4,
+          schemaVersion: 4,
+          id: runtime.id,
+          version: '1.0.0',
+          entry: './src/index.ts',
+          distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
+          compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V5] },
+          dependencies: [],
+          runtimeManifest: {
+            path: './runtime.json',
+            schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
+            digest: `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`,
+          },
+        },
+        null,
+        2,
+      )
+    }\n`,
+  )
   return source
 }
 
@@ -369,7 +414,10 @@ function request(
   }
 }
 
-function decision(plan: CordisXPermissionAuthorizationPlanV1, choice: 'allow' | 'allow-once' | 'deny' = 'allow'): CordisXPermissionAuthorizationDecisionV1 {
+function decision(
+  plan: CordisXPermissionAuthorizationPlanV1,
+  choice: 'allow' | 'allow-once' | 'deny' = 'allow',
+): CordisXPermissionAuthorizationDecisionV1 {
   return {
     $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
     schemaVersion: 1,
@@ -381,18 +429,23 @@ function decision(plan: CordisXPermissionAuthorizationPlanV1, choice: 'allow' | 
   }
 }
 
-function exactCertification(artifact: Readonly<{
-  source: string
-  pluginId: string
-  version: string
-  integrity: `sha256:${string}`
-}>): CordisXCertifiedPermissionProjectionV1 {
+function exactCertification(
+  artifact: Readonly<{
+    source: string
+    pluginId: string
+    version: string
+    integrity: `sha256:${string}`
+  }>,
+): CordisXCertifiedPermissionProjectionV1 {
   const payload = {
     ...artifact,
     reviewPolicy: { id: 'cordisx-marketplace-review' as const, version: '1.0.0' },
     reviewedAt: '2026-08-29T00:00:00.000Z',
     expiresAt: '2026-09-30T00:00:00.000Z',
-    evidence: { kind: 'protected-marketplace-review' as const, reference: 'https://github.com/cordisx/marketplace/pull/63' },
+    evidence: {
+      kind: 'protected-marketplace-review' as const,
+      reference: 'https://github.com/cordisx/marketplace/pull/63',
+    },
     feed: {
       generatedAt: '2026-08-30T00:00:00.000Z',
       root: 'https://marketplace.example/feed.json',
@@ -431,12 +484,14 @@ describe('launcher plugin lifecycle coordinator', () => {
     const { root, home } = await workspace()
     const runtime = new FormalRuntime()
     let certified = true
-    const lookupArtifacts: Array<Readonly<{
-      source: string
-      pluginId: string
-      version: string
-      integrity: `sha256:${string}`
-    }>> = []
+    const lookupArtifacts: Array<
+      Readonly<{
+        source: string
+        pluginId: string
+        version: string
+        integrity: `sha256:${string}`
+      }>
+    > = []
     const coordinator = new PluginLifecycleCoordinator({
       homeDir: home,
       profileId: 'work',
@@ -448,13 +503,20 @@ describe('launcher plugin lifecycle coordinator', () => {
       },
       runtime,
     })
-    const planned = await coordinator.handle(request({ kind: 'inspect-local', sourceDirectory: await localPackageV5(root) }))
+    const planned = await coordinator.handle(
+      request({ kind: 'inspect-local', sourceDirectory: await localPackageV5(root) }),
+    )
     expect(planned).toMatchObject({ outcome: 'planned', operation: 'install', package: { id: 'permission-v5' } })
     expect(planned.authorizationPlan).toBeUndefined()
-    expect(await coordinator.permissionReviewPlanV2({
-      requestId: 'v2-probe', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0,
-      target: { kind: 'candidate', candidateId: planned.candidateId! },
-    })).toBeUndefined()
+    expect(
+      await coordinator.permissionReviewPlanV2({
+        requestId: 'v2-probe',
+        profileId: 'work',
+        runtimeGeneration: 'runtime-1',
+        expectedRevision: 0,
+        target: { kind: 'candidate', candidateId: planned.candidateId! },
+      }),
+    ).toBeUndefined()
     const plan = await coordinator.permissionReviewPlanV4({
       requestId: 'v4-plan',
       profileId: 'work',
@@ -464,10 +526,14 @@ describe('launcher plugin lifecycle coordinator', () => {
     })
     expect(plan).toMatchObject({ schemaVersion: 4, operation: 'install' })
     expect(plan?.declarations.find(item => item.capability === 'models.read')).toMatchObject({
-      authorizationMode: 'explicit-user', decisionRequired: true, resourceClass: 'non-dom',
+      authorizationMode: 'explicit-user',
+      decisionRequired: true,
+      resourceClass: 'non-dom',
     })
     expect(plan?.declarations.find(item => item.capability === 'ui.host-dom.read')).toMatchObject({
-      authorizationMode: 'certified-implicit', decisionRequired: false, resourceClass: 'host-dom',
+      authorizationMode: 'certified-implicit',
+      decisionRequired: false,
+      resourceClass: 'host-dom',
       certification: { integrity: expect.stringMatching(/^sha256:/) },
     })
     const decision = {
@@ -488,11 +554,19 @@ describe('launcher plugin lifecycle coordinator', () => {
     }
     certified = false
     await expect(coordinator.applyPermissionReviewV4({
-      requestId: 'v4-apply-revoked', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0, decision,
+      requestId: 'v4-apply-revoked',
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      expectedRevision: 0,
+      decision,
     })).rejects.toThrow('A required plugin capability was not granted')
     certified = true
     const applied = await coordinator.applyPermissionReviewV4({
-      requestId: 'v4-apply', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0, decision,
+      requestId: 'v4-apply',
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      expectedRevision: 0,
+      decision,
     })
     expect(applied).toMatchObject({ outcome: 'applied', operation: 'install', revision: 1 })
     expect(lookupArtifacts).toHaveLength(3)
@@ -509,7 +583,9 @@ describe('launcher plugin lifecycle coordinator', () => {
 
   it('queries certification only for catalog DOM capabilities and falls back to explicit review on lookup failure', async () => {
     const { root, home } = await workspace()
-    const lookup = vi.fn(async () => { throw new Error('trust source offline') })
+    const lookup = vi.fn(async () => {
+      throw new Error('trust source offline')
+    })
     const coordinator = new PluginLifecycleCoordinator({
       homeDir: home,
       profileId: 'work',
@@ -519,27 +595,38 @@ describe('launcher plugin lifecycle coordinator', () => {
       runtime: new FormalRuntime(),
     })
     const nonDom = await coordinator.handle(request({
-      kind: 'inspect-local', sourceDirectory: await localPackageV5(root, false, false),
+      kind: 'inspect-local',
+      sourceDirectory: await localPackageV5(root, false, false),
     }))
     const nonDomPlan = await coordinator.permissionReviewPlanV4({
-      requestId: 'non-dom-v4-plan', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0,
+      requestId: 'non-dom-v4-plan',
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      expectedRevision: 0,
       target: { kind: 'candidate', candidateId: nonDom.candidateId! },
     })
     expect(nonDomPlan?.declarations).toHaveLength(1)
     expect(nonDomPlan?.declarations[0]).toMatchObject({
-      capability: 'models.read', authorizationMode: 'explicit-user', decisionRequired: true,
+      capability: 'models.read',
+      authorizationMode: 'explicit-user',
+      decisionRequired: true,
     })
     expect(lookup).not.toHaveBeenCalled()
 
     const hostDom = await coordinator.handle(request({
-      kind: 'inspect-local', sourceDirectory: await localPackageV5(root),
+      kind: 'inspect-local',
+      sourceDirectory: await localPackageV5(root),
     }))
     const hostDomPlan = await coordinator.permissionReviewPlanV4({
-      requestId: 'host-dom-v4-plan', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0,
+      requestId: 'host-dom-v4-plan',
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      expectedRevision: 0,
       target: { kind: 'candidate', candidateId: hostDom.candidateId! },
     })
     expect(hostDomPlan?.declarations.find(item => item.capability === 'ui.host-dom.read')).toMatchObject({
-      authorizationMode: 'explicit-user', decisionRequired: true,
+      authorizationMode: 'explicit-user',
+      decisionRequired: true,
     })
     expect(lookup).toHaveBeenCalledTimes(1)
   })
@@ -556,10 +643,14 @@ describe('launcher plugin lifecycle coordinator', () => {
       runtime: new FormalRuntime(),
     })
     const staged = await coordinator.handle(request({
-      kind: 'inspect-local', sourceDirectory: await localPackageV5(root, true),
+      kind: 'inspect-local',
+      sourceDirectory: await localPackageV5(root, true),
     }))
     const first = await coordinator.permissionReviewPlanV4({
-      requestId: 'required-v4-first', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0,
+      requestId: 'required-v4-first',
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      expectedRevision: 0,
       target: { kind: 'candidate', candidateId: staged.candidateId! },
     })
     const hostDom = first!.declarations.find(item => item.capability === 'ui.host-dom.read')!
@@ -576,11 +667,17 @@ describe('launcher plugin lifecycle coordinator', () => {
       policy: 'deny-persistent',
     })
     const deniedPlan = await coordinator.permissionReviewPlanV4({
-      requestId: 'required-v4-denied', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0,
+      requestId: 'required-v4-denied',
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      expectedRevision: 0,
       target: { kind: 'candidate', candidateId: staged.candidateId! },
     })
     expect(deniedPlan?.declarations.find(item => item.capability === 'ui.host-dom.read')).toMatchObject({
-      required: true, policy: 'deny-persistent', authorizationMode: 'persistent-policy', decisionRequired: false,
+      required: true,
+      policy: 'deny-persistent',
+      authorizationMode: 'persistent-policy',
+      decisionRequired: false,
     })
     const decision = {
       $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
@@ -599,7 +696,11 @@ describe('launcher plugin lifecycle coordinator', () => {
       })),
     }
     await expect(coordinator.applyPermissionReviewV4({
-      requestId: 'required-v4-apply', profileId: 'work', runtimeGeneration: 'runtime-1', expectedRevision: 0, decision,
+      requestId: 'required-v4-apply',
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      expectedRevision: 0,
+      decision,
     })).rejects.toThrow('A required plugin capability was not granted')
   })
 
@@ -613,7 +714,9 @@ describe('launcher plugin lifecycle coordinator', () => {
       permissionPolicies: [],
       runtime,
     })
-    const planned = await coordinator.handle(request({ kind: 'inspect-local', sourceDirectory: await localPackageV4(root) }))
+    const planned = await coordinator.handle(
+      request({ kind: 'inspect-local', sourceDirectory: await localPackageV4(root) }),
+    )
     expect(planned).toMatchObject({ outcome: 'planned', operation: 'install', package: { id: 'permission-v4' } })
     expect(planned.authorizationPlan).toBeUndefined()
     const plan = await coordinator.permissionReviewPlanV2({
@@ -657,20 +760,28 @@ describe('launcher plugin lifecycle coordinator', () => {
     expect(runtime.calls).toEqual(['prepare', 'stage', 'publish', 'complete', 'finalize'])
     expect(runtime.lastStaged?.authorizationDecision).toEqual(reviewed)
 
-    const disablePlan = await coordinator.handle(request({ kind: 'disable', pluginId: 'permission-v4', impactToken: 'probe' }, 1))
+    const disablePlan = await coordinator.handle(
+      request({ kind: 'disable', pluginId: 'permission-v4', impactToken: 'probe' }, 1),
+    )
     expect(disablePlan).toMatchObject({ outcome: 'planned', operation: 'disable', revision: 1 })
     expect(disablePlan.authorizationPlan).toBeUndefined()
     const disabled = await coordinator.handle(request({
-      kind: 'disable', pluginId: 'permission-v4', impactToken: disablePlan.impactToken!,
+      kind: 'disable',
+      pluginId: 'permission-v4',
+      impactToken: disablePlan.impactToken!,
     }, 1))
     expect(disabled).toMatchObject({ outcome: 'applied', operation: 'disable', revision: 2 })
     expect(runtime.lastStaged?.authorizationDecision).toMatchObject({ schemaVersion: 2, operation: 'enable' })
 
-    const uninstallPlan = await coordinator.handle(request({ kind: 'uninstall', pluginId: 'permission-v4', impactToken: 'probe' }, 2))
+    const uninstallPlan = await coordinator.handle(
+      request({ kind: 'uninstall', pluginId: 'permission-v4', impactToken: 'probe' }, 2),
+    )
     expect(uninstallPlan).toMatchObject({ outcome: 'planned', operation: 'uninstall', revision: 2 })
     expect(uninstallPlan.authorizationPlan).toBeUndefined()
     const uninstalled = await coordinator.handle(request({
-      kind: 'uninstall', pluginId: 'permission-v4', impactToken: uninstallPlan.impactToken!,
+      kind: 'uninstall',
+      pluginId: 'permission-v4',
+      impactToken: uninstallPlan.impactToken!,
     }, 2))
     expect(uninstalled).toMatchObject({ outcome: 'applied', operation: 'uninstall', revision: 3 })
     expect((await coordinator.store.loadActive()).plugins).toEqual([])
@@ -761,23 +872,49 @@ describe('launcher plugin lifecycle coordinator', () => {
     const source = await localPackage({ root, id: 'notes' })
     const { planned, applied } = await install(coordinator, source, 0)
     expect(JSON.stringify(planned)).not.toContain(source)
-    expect(applied).toMatchObject({ outcome: 'applied', operation: 'install', revision: 1, affectedPluginIds: ['notes'] })
+    expect(applied).toMatchObject({
+      outcome: 'applied',
+      operation: 'install',
+      revision: 1,
+      affectedPluginIds: ['notes'],
+    })
     expect(runtime.staged).toHaveLength(1)
     expect(runtime.staged[0]).toMatchObject({ operation: 'install', targetId: 'notes', affectedPluginIds: ['notes'] })
     expect(runtime.committed).toEqual([planned.candidateId])
-    expect(await coordinator.store.loadActive()).toMatchObject({ revision: 1, plugins: [{ id: 'notes', enabled: true }] })
+    expect(await coordinator.store.loadActive()).toMatchObject({
+      revision: 1,
+      plugins: [{ id: 'notes', enabled: true }],
+    })
   })
 
   it('updates only the target dependency closure and preserves an unrelated generation', async () => {
     const { root, home } = await workspace()
     const runtime = new FakeRuntime()
-    const coordinator = new PluginLifecycleCoordinator({ homeDir: home, profileId: 'work', runtimeGeneration: 'runtime-1', permissionPolicies: [], runtime })
-    await install(coordinator, await localPackage({ root, id: 'base', code: 'export const revision = 1; export function apply() {}' }), 0)
-    await install(coordinator, await localPackage({ root, id: 'consumer', dependencies: [{ id: 'base', version: '1.0.0' }] }), 1)
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      runtime,
+    })
+    await install(
+      coordinator,
+      await localPackage({ root, id: 'base', code: 'export const revision = 1; export function apply() {}' }),
+      0,
+    )
+    await install(
+      coordinator,
+      await localPackage({ root, id: 'consumer', dependencies: [{ id: 'base', version: '1.0.0' }] }),
+      1,
+    )
     await install(coordinator, await localPackage({ root, id: 'unrelated' }), 2)
     const before = await coordinator.store.loadActive()
     const original = new Map(before.plugins.map(item => [item.id, item.moduleGeneration]))
-    const updated = await install(coordinator, await localPackage({ root, id: 'base', code: 'export const revision = 2; export function apply() {}' }), 3)
+    const updated = await install(
+      coordinator,
+      await localPackage({ root, id: 'base', code: 'export const revision = 2; export function apply() {}' }),
+      3,
+    )
     expect(updated.applied).toMatchObject({ operation: 'update', affectedPluginIds: ['base', 'consumer'] })
     const after = await coordinator.store.loadActive()
     expect(after.plugins.find(item => item.id === 'base')?.moduleGeneration).not.toBe(original.get('base'))
@@ -788,7 +925,13 @@ describe('launcher plugin lifecycle coordinator', () => {
   it('keeps last-good active after permission denial or readiness failure', async () => {
     const { root, home } = await workspace()
     const runtime = new FakeRuntime()
-    const coordinator = new PluginLifecycleCoordinator({ homeDir: home, profileId: 'work', runtimeGeneration: 'runtime-1', permissionPolicies: [], runtime })
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      runtime,
+    })
     const source = await localPackage({ root, id: 'protected', requiredCapability: true })
     const planned = await coordinator.handle(request({ kind: 'inspect-local', sourceDirectory: source }))
     const denied = await coordinator.handle(request({
@@ -812,26 +955,44 @@ describe('launcher plugin lifecycle coordinator', () => {
   it('requires exact impact confirmation, disables/uninstalls the dependent closure, and reloads one fiber', async () => {
     const { root, home } = await workspace()
     const runtime = new FakeRuntime()
-    const coordinator = new PluginLifecycleCoordinator({ homeDir: home, profileId: 'work', runtimeGeneration: 'runtime-1', permissionPolicies: [], runtime })
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      runtime,
+    })
     await install(coordinator, await localPackage({ root, id: 'base' }), 0)
-    await install(coordinator, await localPackage({ root, id: 'consumer', dependencies: [{ id: 'base', version: '1.0.0' }] }), 1)
+    await install(
+      coordinator,
+      await localPackage({ root, id: 'consumer', dependencies: [{ id: 'base', version: '1.0.0' }] }),
+      1,
+    )
     await install(coordinator, await localPackage({ root, id: 'unrelated' }), 2)
 
     const reload = await coordinator.handle(request({ kind: 'reload', pluginId: 'base' }, 3))
     expect(reload).toMatchObject({ outcome: 'applied', scope: 'plugin-restart', affectedPluginIds: ['base'] })
     expect(runtime.reloaded).toHaveLength(1)
 
-    const disablePlan = await coordinator.handle(request({ kind: 'disable', pluginId: 'base', impactToken: 'probe' }, 3))
+    const disablePlan = await coordinator.handle(
+      request({ kind: 'disable', pluginId: 'base', impactToken: 'probe' }, 3),
+    )
     expect(disablePlan).toMatchObject({ outcome: 'planned', affectedPluginIds: ['base', 'consumer'] })
     const disabled = await coordinator.handle(request({
-      kind: 'disable', pluginId: 'base', impactToken: disablePlan.impactToken!,
+      kind: 'disable',
+      pluginId: 'base',
+      impactToken: disablePlan.impactToken!,
     }, 3))
     expect(disabled).toMatchObject({ outcome: 'applied', revision: 4, affectedPluginIds: ['base', 'consumer'] })
     expect((await coordinator.store.loadActive()).plugins.find(item => item.id === 'unrelated')?.enabled).toBe(true)
 
-    const uninstallPlan = await coordinator.handle(request({ kind: 'uninstall', pluginId: 'base', impactToken: 'probe' }, 4))
+    const uninstallPlan = await coordinator.handle(
+      request({ kind: 'uninstall', pluginId: 'base', impactToken: 'probe' }, 4),
+    )
     const uninstalled = await coordinator.handle(request({
-      kind: 'uninstall', pluginId: 'base', impactToken: uninstallPlan.impactToken!,
+      kind: 'uninstall',
+      pluginId: 'base',
+      impactToken: uninstallPlan.impactToken!,
     }, 4))
     expect(uninstalled).toMatchObject({ outcome: 'applied', affectedPluginIds: ['base', 'consumer'] })
     expect((await coordinator.store.loadActive()).plugins.map(item => item.id)).toEqual(['unrelated'])
@@ -840,17 +1001,28 @@ describe('launcher plugin lifecycle coordinator', () => {
   it('rejects stale activation/runtime generations and restores runtime after durable publication failure', async () => {
     const { root, home } = await workspace()
     const runtime = new FakeRuntime()
-    const coordinator = new PluginLifecycleCoordinator({ homeDir: home, profileId: 'work', runtimeGeneration: 'runtime-1', permissionPolicies: [], runtime })
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      runtime,
+    })
     const source = await localPackage({ root, id: 'notes' })
     expect(await coordinator.handle(request({ kind: 'inspect-local', sourceDirectory: source }, 1))).toMatchObject({
-      outcome: 'conflict', error: { code: 'stale-revision' },
+      outcome: 'conflict',
+      error: { code: 'stale-revision' },
     })
-    expect(await coordinator.handle(request({ kind: 'inspect-local', sourceDirectory: source }, 0, 'runtime-old'))).toMatchObject({
-      outcome: 'conflict', error: { code: 'stale-generation' },
-    })
+    expect(await coordinator.handle(request({ kind: 'inspect-local', sourceDirectory: source }, 0, 'runtime-old')))
+      .toMatchObject({
+        outcome: 'conflict',
+        error: { code: 'stale-generation' },
+      })
 
     const planned = await coordinator.handle(request({ kind: 'inspect-local', sourceDirectory: source }))
-    coordinator.store.commitCandidate = async () => { throw new Error('fixture durable failure') }
+    coordinator.store.commitCandidate = async () => {
+      throw new Error('fixture durable failure')
+    }
     const applied = await coordinator.handle(request({
       kind: 'install',
       candidateId: planned.candidateId!,

@@ -8,9 +8,9 @@ import {
 } from '../packages/cli/src/permission-contracts.js'
 import {
   MemoryPermissionPolicyStore,
-  PermissionBroker,
   normalizePluginManifest,
   type PermissionAuthorizationPromptV2,
+  PermissionBroker,
   type PermissionPrompt,
 } from '../packages/cli/src/renderer/platform.js'
 
@@ -66,7 +66,17 @@ function decision(
 describe('PermissionBroker permission-v2 integration', () => {
   it('binds lifecycle allow-once to one exact profile/identity/scope/fingerprint/generation grant', async () => {
     const store = new MemoryPermissionPolicyStore()
-    const broker = new PermissionBroker(store, legacyPrompt, () => new Date(), 50, 'work', 'runtime-1', undefined, undefined, cancelledV2)
+    const broker = new PermissionBroker(
+      store,
+      legacyPrompt,
+      () => new Date(),
+      50,
+      'work',
+      'runtime-1',
+      undefined,
+      undefined,
+      cancelledV2,
+    )
     broker.register(identity, manifest('tasks.control', { sessions: [session] }), {
       pluginId: identity.id,
       moduleGeneration: 'module-1',
@@ -84,7 +94,17 @@ describe('PermissionBroker permission-v2 integration', () => {
 
   it('persists an exact allowed grant in the same store and restores it in a fresh Broker', async () => {
     const store = new MemoryPermissionPolicyStore()
-    const first = new PermissionBroker(store, legacyPrompt, () => new Date(), 50, 'work', 'runtime-1', undefined, undefined, cancelledV2)
+    const first = new PermissionBroker(
+      store,
+      legacyPrompt,
+      () => new Date(),
+      50,
+      'work',
+      'runtime-1',
+      undefined,
+      undefined,
+      cancelledV2,
+    )
     first.register(identity, manifest('models.read', { providers: ['codex'] }), {
       pluginId: identity.id,
       moduleGeneration: 'module-1',
@@ -94,7 +114,17 @@ describe('PermissionBroker permission-v2 integration', () => {
     expect(store.read()).toEqual([])
     expect(store.readV2()).toHaveLength(1)
 
-    const restored = new PermissionBroker(store, legacyPrompt, () => new Date(), 50, 'work', 'runtime-2', undefined, undefined, cancelledV2)
+    const restored = new PermissionBroker(
+      store,
+      legacyPrompt,
+      () => new Date(),
+      50,
+      'work',
+      'runtime-2',
+      undefined,
+      undefined,
+      cancelledV2,
+    )
     restored.register(identity, manifest('models.read', { providers: ['codex'] }), {
       pluginId: identity.id,
       moduleGeneration: 'module-2',
@@ -108,14 +138,37 @@ describe('PermissionBroker permission-v2 integration', () => {
 
   it('fails an expanded scope back to ask without modifying the narrower persistent record', async () => {
     const store = new MemoryPermissionPolicyStore()
-    const narrow = new PermissionBroker(store, legacyPrompt, () => new Date(), 50, 'work', 'runtime-1', undefined, undefined, cancelledV2)
+    const narrow = new PermissionBroker(
+      store,
+      legacyPrompt,
+      () => new Date(),
+      50,
+      'work',
+      'runtime-1',
+      undefined,
+      undefined,
+      cancelledV2,
+    )
     narrow.register(identity, manifest('models.read', { providers: ['codex'] }))
     const plan = narrow.authorizationPlanV2(identity, 'enable')
     await narrow.authorizeActivationV2(identity, decision(plan, 'allow-persistent'), 'enable')
 
-    const expanded = new PermissionBroker(store, legacyPrompt, () => new Date(), 50, 'work', 'runtime-2', undefined, undefined, cancelledV2)
+    const expanded = new PermissionBroker(
+      store,
+      legacyPrompt,
+      () => new Date(),
+      50,
+      'work',
+      'runtime-2',
+      undefined,
+      undefined,
+      cancelledV2,
+    )
     expanded.register(identity, manifest('models.read', { providers: ['codex', 'external'] }))
-    expect(expanded.authorizationPlanV2(identity).declarations[0]).toMatchObject({ policy: 'ask', decisionRequired: true })
+    expect(expanded.authorizationPlanV2(identity).declarations[0]).toMatchObject({
+      policy: 'ask',
+      decisionRequired: true,
+    })
     expect(store.readV2()[0]?.key.scope).toEqual({ providers: ['codex'] })
   })
 })

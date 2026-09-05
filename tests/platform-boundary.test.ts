@@ -11,13 +11,15 @@ describe('Platform current-connection boundary', () => {
       readFile(path.join(root, 'packages/cli/src/renderer/platform.ts'), 'utf8'),
     ])
     const implementation = sources.join('\n')
-    for (const forbidden of [
-      'electron' + 'Bridge',
-      'mcp-' + 'request',
-      'connect-' + 'app-host',
-      'node:child_' + 'process',
-      'new Web' + 'Socket',
-    ]) {
+    for (
+      const forbidden of [
+        'electron' + 'Bridge',
+        'mcp-' + 'request',
+        'connect-' + 'app-host',
+        'node:child_' + 'process',
+        'new Web' + 'Socket',
+      ]
+    ) {
       expect(implementation).not.toContain(forbidden)
     }
   })

@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -16,10 +16,12 @@ afterEach(async () => {
   await Promise.all([...temporary].map(async directory => {
     const digestRoot = path.join(directory, 'home', 'packages', 'sha256')
     const digests = await readdir(digestRoot).catch(() => [])
-    await Promise.all(digests.map(async digest => await removeStagedPluginPackage(
-      path.join(directory, 'home'),
-      `sha256:${digest}`,
-    )))
+    await Promise.all(digests.map(async digest =>
+      await removeStagedPluginPackage(
+        path.join(directory, 'home'),
+        `sha256:${digest}`,
+      )
+    ))
     await chmod(directory, 0o700).catch(() => undefined)
     await rm(directory, { recursive: true, force: true })
   }))
@@ -64,14 +66,18 @@ async function fixture(entry = 'export function apply() {}'): Promise<{ home: st
 describe('local plugin package store', () => {
   it('normalizes the exact v1 contract and rejects package/runtime identity drift', () => {
     expect(normalizePluginPackageManifest(manifest())).toMatchObject({ id: 'fixture', version: '1.0.0' })
-    expect(() => normalizePluginPackageManifest({
-      ...manifest(),
-      runtimeManifest: { ...manifest().runtimeManifest, id: 'different' },
-    })).toThrow('must equal package.id')
-    expect(() => normalizePluginPackageManifest({
-      ...manifest(),
-      dependencies: [{ id: 'fixture', version: '1.0.0' }],
-    })).toThrow('depend on itself')
+    expect(() =>
+      normalizePluginPackageManifest({
+        ...manifest(),
+        runtimeManifest: { ...manifest().runtimeManifest, id: 'different' },
+      })
+    ).toThrow('must equal package.id')
+    expect(() =>
+      normalizePluginPackageManifest({
+        ...manifest(),
+        dependencies: [{ id: 'fixture', version: '1.0.0' }],
+      })
+    ).toThrow('depend on itself')
   })
 
   it('publishes immutable content-addressed artifacts and preserves the prior digest after a source edit', async () => {
@@ -80,7 +86,9 @@ describe('local plugin package store', () => {
     expect(first.digest).toMatch(/^sha256:[a-f0-9]{64}$/)
     expect(first.identitySource).toBe('https://plugins.example/fixture')
     expect((await loadStagedPluginPackage(home, first.digest)).artifactSource).toBe(first.artifactSource)
-    expect(await readFile(path.join(home, 'packages', 'sha256', first.digest.slice(7), 'README.md'), 'utf8')).toBe('# Fixture\n')
+    expect(await readFile(path.join(home, 'packages', 'sha256', first.digest.slice(7), 'README.md'), 'utf8')).toBe(
+      '# Fixture\n',
+    )
     if (process.platform !== 'win32') {
       expect((await lstat(path.join(home, 'packages', 'sha256', first.digest.slice(7)))).mode & 0o777).toBe(0o555)
     }
@@ -112,10 +120,18 @@ describe('local plugin package store', () => {
     await expect(stageLocalPluginPackage(home, source)).rejects.toThrow('outside the package directory')
 
     await rm(path.join(source, 'src/index.ts'))
-    await writeFile(path.join(source, 'src/index.ts'), "import { Context } from '@deepseek-ai/cordis'; export function apply() { return Context }")
+    await writeFile(
+      path.join(source, 'src/index.ts'),
+      "import { Context } from '@deepseek-ai/cordis'; export function apply() { return Context }",
+    )
     await expect(stageLocalPluginPackage(home, source)).rejects.toThrow('must not bundle a second')
 
-    await writeFile(path.join(source, 'src/index.ts'), "import React from 'react'; export function apply() { return React }")
-    await expect(stageLocalPluginPackage(home, source)).rejects.toThrow('must import React and UI components from cordisx/react and cordisx/ui')
+    await writeFile(
+      path.join(source, 'src/index.ts'),
+      "import React from 'react'; export function apply() { return React }",
+    )
+    await expect(stageLocalPluginPackage(home, source)).rejects.toThrow(
+      'must import React and UI components from cordisx/react and cordisx/ui',
+    )
   })
 })

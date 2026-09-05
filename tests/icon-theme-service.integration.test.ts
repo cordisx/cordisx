@@ -8,9 +8,16 @@ import { CordisXIconThemeService } from '../packages/cli/src/renderer/icon-theme
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
 
 const descriptor: NormalizedVectorDescriptor = {
-  format: 'cordisx.normalized-vector', formatVersion: 1,
+  format: 'cordisx.normalized-vector',
+  formatVersion: 1,
   viewBox: { minX: 0, minY: 0, width: 24, height: 24 },
-  paths: [{ paint: 'stroke', strokeWidth: 3, lineCap: 'square', lineJoin: 'bevel', commands: [{ op: 'move', x: 2, y: 2 }, { op: 'line', x: 22, y: 22 }] }],
+  paths: [{
+    paint: 'stroke',
+    strokeWidth: 3,
+    lineCap: 'square',
+    lineJoin: 'bevel',
+    commands: [{ op: 'move', x: 2, y: 2 }, { op: 'line', x: 22, y: 22 }],
+  }],
 }
 
 describe('Cordis icon theme data service', () => {
@@ -22,12 +29,19 @@ describe('Cordis icon theme data service', () => {
     const plugin = root.extend({ [CORDISX_PLUGIN_ID]: 'aurora', [CORDISX_PLUGIN_GENERATION]: 'aurora-3' })
     const themes = plugin.iconThemes as CordisXIconThemes
     const handle = themes.register({
-      schemaVersion: 1, namespace: 'aurora', providerVersion: '2.1.0',
+      schemaVersion: 1,
+      namespace: 'aurora',
+      providerVersion: '2.1.0',
       descriptors: [{ key: 'action.save', variant: 'regular', state: 'default', descriptor }],
     })
     const registration = registry.registration(handle.providerHandle)!
-    expect(registration).toMatchObject({ providerGeneration: 'aurora-3', identity: { providerId: 'plugin:aurora:aurora' } })
-    expect(registry.select('select-1', 1, 'host-12', handle.providerHandle, handle.providerGeneration).outcome).toBe('applied')
+    expect(registration).toMatchObject({
+      providerGeneration: 'aurora-3',
+      identity: { providerId: 'plugin:aurora:aurora' },
+    })
+    expect(registry.select('select-1', 1, 'host-12', handle.providerHandle, handle.providerGeneration).outcome).toBe(
+      'applied',
+    )
 
     const dom = new JSDOM('<!doctype html>')
     const unbind = bindIconThemeRegistry(dom.window.document, registry)
@@ -37,9 +51,14 @@ describe('Cordis icon theme data service', () => {
       expect(custom.dataset.hostIconFallback).toBe('none')
       expect(custom.querySelector('path')?.getAttribute('d')).toBe('M2 2 L22 22')
       handle.dispose()
-      expect(registry.selection()).toMatchObject({ outcome: 'rolled-back', selectedProvider: { providerId: 'builtin:reicon' } })
+      expect(registry.selection()).toMatchObject({
+        outcome: 'rolled-back',
+        selectedProvider: { providerId: 'builtin:reicon' },
+      })
       expect(registry.registration(handle.providerHandle)?.status).toBe('disposed')
-      expect(createManagerIcon(dom.window.document, 'save-configuration').querySelector('svg')?.dataset.hostIconProvider).toBe('builtin:reicon')
+      expect(
+        createManagerIcon(dom.window.document, 'save-configuration').querySelector('svg')?.dataset.hostIconProvider,
+      ).toBe('builtin:reicon')
     } finally {
       unbind()
       dom.window.close()

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -21,14 +21,20 @@ describe('Codex Desktop Agent Session harness report', () => {
       await expect(writeDesktopAgentSessionHarnessReport(
         reportPath,
         {
-          schemaVersion: 1, kind: 'codex-desktop-agent-session-live-smoke', result: 'failed', error: 'renderer timeout',
+          schemaVersion: 1,
+          kind: 'codex-desktop-agent-session-live-smoke',
+          result: 'failed',
+          error: 'renderer timeout',
           renderer: { url: 'app://-/index.html', ready: false, fixtureReady: false },
-          bridge: { instrumentation: false, observationMode: 'unavailable' }, operations: [], stages: [],
+          bridge: { instrumentation: false, observationMode: 'unavailable' },
+          operations: [],
+          stages: [],
         },
         { stages: [{ stage: 'launch-started', elapsedMs: 0 }], portClosed: true },
       )).resolves.toEqual({ fallbackCreated: true })
       expect(JSON.parse(await readFile(reportPath, 'utf8'))).toMatchObject({
-        result: 'failed', error: 'renderer timeout',
+        result: 'failed',
+        error: 'renderer timeout',
         renderer: { ready: false, fixtureReady: false },
         bridge: { instrumentation: false, observationMode: 'unavailable' },
         harness: { stages: [{ stage: 'launch-started', elapsedMs: 0 }], portClosed: true },
@@ -42,7 +48,8 @@ describe('Codex Desktop Agent Session harness report', () => {
         { stages: [{ stage: 'renderer-ready', elapsedMs: 12 }], portClosed: true },
       )).resolves.toEqual({ fallbackCreated: false })
       expect(JSON.parse(await readFile(reportPath, 'utf8'))).toMatchObject({
-        result: 'partial', harness: { stages: [{ stage: 'renderer-ready', elapsedMs: 12 }] },
+        result: 'partial',
+        harness: { stages: [{ stage: 'renderer-ready', elapsedMs: 12 }] },
       })
     } finally {
       await rm(root, { recursive: true, force: true })

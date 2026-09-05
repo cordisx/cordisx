@@ -5,8 +5,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type { CordisXConfigFieldSnapshot } from '../packages/cli/src/contracts.js'
 import {
   HOST_FORM_STYLES,
-  HostFormAdapter,
   hostConfigApplyMessage,
+  HostFormAdapter,
   hostFormControlLayout,
   hostFormDiagnostic,
   hostPresenterPrimitive,
@@ -14,11 +14,21 @@ import {
   validateHostFormValue,
 } from '../packages/cli/src/renderer/host-form.js'
 import { HOST_ICON_16PX_CSS } from '../packages/cli/src/renderer/icons.js'
-import { setTDesignProps, unwrapTDesignChangeValue, type TDesignElement } from '../packages/cli/src/renderer/tdesign-form.js'
+import {
+  setTDesignProps,
+  type TDesignElement,
+  unwrapTDesignChangeValue,
+} from '../packages/cli/src/renderer/tdesign-form.js'
 
 function field(overrides: Partial<CordisXConfigFieldSnapshot> = {}): CordisXConfigFieldSnapshot {
   return {
-    namespace: 'fixture', path: ['value'], type: 'string', value: '', disabled: false, required: false, ...overrides,
+    namespace: 'fixture',
+    path: ['value'],
+    type: 'string',
+    value: '',
+    disabled: false,
+    required: false,
+    ...overrides,
   }
 }
 
@@ -46,9 +56,30 @@ describe('Host form primitive registry', () => {
     expect(selectHostFormPrimitive(field({ role: 'datetime' }))).toBe('date-picker')
     expect(selectHostFormPrimitive(field({ role: 'time' }))).toBe('time-picker')
     expect(selectHostFormPrimitive(field({ role: 'color' }))).toBe('color-picker')
-    expect(selectHostFormPrimitive(field({ type: 'array', role: 'multi-select', value: ['design'], choices: [{ label: 'Design', value: 'design' }] }))).toBe('multi-select')
-    expect(selectHostFormPrimitive(field({ type: 'array', value: ['design'], arrayItemType: 'string', max: 5 }))).toBe('tag-input')
-    expect(selectHostFormPrimitive(field({ type: 'array', value: [true], arrayItemType: 'boolean', choices: [{ label: 'Enabled', value: true }], presenter: { version: 1, kind: 'array.scalar-rows' } }))).toBe('multi-select')
+    expect(
+      selectHostFormPrimitive(
+        field({
+          type: 'array',
+          role: 'multi-select',
+          value: ['design'],
+          choices: [{ label: 'Design', value: 'design' }],
+        }),
+      ),
+    ).toBe('multi-select')
+    expect(selectHostFormPrimitive(field({ type: 'array', value: ['design'], arrayItemType: 'string', max: 5 }))).toBe(
+      'tag-input',
+    )
+    expect(
+      selectHostFormPrimitive(
+        field({
+          type: 'array',
+          value: [true],
+          arrayItemType: 'boolean',
+          choices: [{ label: 'Enabled', value: true }],
+          presenter: { version: 1, kind: 'array.scalar-rows' },
+        }),
+      ),
+    ).toBe('multi-select')
     expect(selectHostFormPrimitive(field({ role: 'directory' }))).toBe('path-input')
     expect(selectHostFormPrimitive(field({ type: 'object', value: { enabled: true } }))).toBe('json-textarea')
     expect(selectHostFormPrimitive(field({ role: 'secret', disabled: true }))).toBe('sensitive-unavailable')
@@ -57,10 +88,14 @@ describe('Host form primitive registry', () => {
 
   it('records honest diagnostics for unknown roles and unsupported fields', () => {
     expect(hostFormDiagnostic(field({ role: 'future-role' }))).toEqual({
-      code: 'unsupported-schema-role', fieldPath: ['value'], detail: 'unknown role future-role; used input',
+      code: 'unsupported-schema-role',
+      fieldPath: ['value'],
+      detail: 'unknown role future-role; used input',
     })
     expect(hostFormDiagnostic(field({ type: 'lazy', value: undefined }))).toEqual({
-      code: 'unsupported-schema-field', fieldPath: ['value'], detail: 'unsupported Schemastery field type: lazy',
+      code: 'unsupported-schema-field',
+      fieldPath: ['value'],
+      detail: 'unsupported Schemastery field type: lazy',
     })
     expect(hostFormDiagnostic(field({ type: 'array', role: 'multi-select', value: ['design'] }))).toBeUndefined()
   })
@@ -105,22 +140,39 @@ describe('Host form primitive registry', () => {
     expect((control.focusTarget as HTMLElement & { variant?: string }).variant).toBe('primary-filled')
 
     const objectArray = field({
-      type: 'array', value: [{ name: 'Daily summary', enabled: true }], min: 1, max: 3,
+      type: 'array',
+      value: [{ name: 'Daily summary', enabled: true }],
+      min: 1,
+      max: 3,
       presenter: { version: 1, kind: 'array.object-dialog' },
-      arrayItemSchema: { type: 'object', disabled: false, required: false, fields: [
-        { key: 'name', schema: { type: 'string', disabled: false, required: true, label: 'Name' } },
-        { key: 'enabled', schema: { type: 'boolean', disabled: false, required: false, label: 'Enabled' } },
-      ] },
+      arrayItemSchema: {
+        type: 'object',
+        disabled: false,
+        required: false,
+        fields: [
+          { key: 'name', schema: { type: 'string', disabled: false, required: true, label: 'Name' } },
+          { key: 'enabled', schema: { type: 'boolean', disabled: false, required: false, label: 'Enabled' } },
+        ],
+      },
     })
     const drafts = vi.fn()
     const array = adapter.control(objectArray, 'rules', drafts)
     expect(array.primitive).toBe('object-array')
     expect(array.root.querySelectorAll('[data-host-array-item-id]')).toHaveLength(1)
-    expect(array.root.querySelector('[data-host-array-drag-handle="true"]')?.getAttribute('title')).toBe('使用上下移动操作调整顺序')
-    expect([...array.root.querySelectorAll<HTMLElement>('.cxf-array-row-actions t-button')].every(button => button.dataset.density === 'icon')).toBe(true)
+    expect(array.root.querySelector('[data-host-array-drag-handle="true"]')?.getAttribute('title')).toBe(
+      '使用上下移动操作调整顺序',
+    )
+    expect(
+      [...array.root.querySelectorAll<HTMLElement>('.cxf-array-row-actions t-button')].every(button =>
+        button.dataset.density === 'icon'
+      ),
+    ).toBe(true)
     ;(array.root.querySelector('t-button') as HTMLElement).click()
     expect(array.root.querySelectorAll('[data-host-array-item-id]')).toHaveLength(2)
-    expect(drafts).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ name: 'Daily summary' })]), undefined)
+    expect(drafts).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ name: 'Daily summary' })]),
+      undefined,
+    )
   })
 
   it('validates required, finite numeric, natural, range, and choice constraints', () => {
@@ -130,28 +182,49 @@ describe('Host form primitive registry', () => {
     expect(validateHostFormValue(field({ type: 'number', value: 2, min: 2 }), 1)).toBe('不能小于 2')
     expect(validateHostFormValue(field({ type: 'number', value: 2, max: 3 }), 4)).toBe('不能大于 3')
     expect(validateHostFormValue(field({ type: 'number', value: 2, min: 1, step: 2 }), 2)).toBe('请按 2 的步长输入')
-    expect(validateHostFormValue(field({ choices: [{ label: 'Safe', value: 'safe' }] }), 'fast')).toBe('请选择列表中的有效值')
+    expect(validateHostFormValue(field({ choices: [{ label: 'Safe', value: 'safe' }] }), 'fast')).toBe(
+      '请选择列表中的有效值',
+    )
     expect(validateHostFormValue(field({ role: 'datetime' }), 'bad')).toBe('请输入有效日期和时间')
   })
 
   it('keeps object-array identity, reorder, dialog keyboard dismissal, and parent draft ownership in the Host', async () => {
-    const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true, url: 'https://forms.example.test/' })
+    const dom = new JSDOM('<!doctype html><body></body>', {
+      pretendToBeVisual: true,
+      url: 'https://forms.example.test/',
+    })
     const adapter = new HostFormAdapter(dom.window.document, undefined, () => 'en')
     const drafts = vi.fn()
-    const control = adapter.control(field({
-      type: 'array', value: [{ title: 'First' }, { title: 'Second' }], min: 1, max: 4,
-      presenter: { version: 1, kind: 'array.object-dialog', options: { allowReorder: true } },
-      arrayItemSchema: { type: 'object', disabled: false, required: false, fields: [
-        { key: 'title', schema: { type: 'string', disabled: false, required: true, label: 'Title' } },
-      ] },
-    }), 'rules', drafts)
+    const control = adapter.control(
+      field({
+        type: 'array',
+        value: [{ title: 'First' }, { title: 'Second' }],
+        min: 1,
+        max: 4,
+        presenter: { version: 1, kind: 'array.object-dialog', options: { allowReorder: true } },
+        arrayItemSchema: {
+          type: 'object',
+          disabled: false,
+          required: false,
+          fields: [
+            { key: 'title', schema: { type: 'string', disabled: false, required: true, label: 'Title' } },
+          ],
+        },
+      }),
+      'rules',
+      drafts,
+    )
     dom.window.document.body.append(control.root)
     await Promise.resolve()
-    const initialIds = [...control.root.querySelectorAll<HTMLElement>('[data-host-array-item-id]')].map(row => row.dataset.hostArrayItemId)
+    const initialIds = [...control.root.querySelectorAll<HTMLElement>('[data-host-array-item-id]')].map(row =>
+      row.dataset.hostArrayItemId
+    )
     const actions = control.root.querySelectorAll<HTMLElement>('t-button')
     // Add, edit, duplicate, up, down, delete per each row. Move the second row up.
     actions[8]!.click()
-    const reordered = [...control.root.querySelectorAll<HTMLElement>('[data-host-array-item-id]')].map(row => row.dataset.hostArrayItemId)
+    const reordered = [...control.root.querySelectorAll<HTMLElement>('[data-host-array-item-id]')].map(row =>
+      row.dataset.hostArrayItemId
+    )
     expect(reordered[0]).toBe(initialIds[1])
     expect(reordered[1]).toBe(initialIds[0])
     const edit = control.root.querySelectorAll<HTMLElement>('t-button')[1]!
@@ -192,8 +265,12 @@ describe('Host form primitive registry', () => {
     expect(validateHostFormValue(field({ type: 'natural', value: 0 }), -1, 'en')).toBe('Enter a non-negative integer')
     expect(validateHostFormValue(field({ type: 'number', value: 2, min: 2 }), 1, 'en')).toBe('Must be at least 2')
     expect(validateHostFormValue(field({ type: 'number', value: 2, max: 3 }), 4, 'en')).toBe('Must be at most 3')
-    expect(validateHostFormValue(field({ type: 'number', value: 2, min: 1, step: 2 }), 2, 'en')).toBe('Use increments of 2')
-    expect(validateHostFormValue(field({ choices: [{ label: 'Safe', value: 'safe' }] }), 'fast', 'en')).toBe('Choose a value from the list')
+    expect(validateHostFormValue(field({ type: 'number', value: 2, min: 1, step: 2 }), 2, 'en')).toBe(
+      'Use increments of 2',
+    )
+    expect(validateHostFormValue(field({ choices: [{ label: 'Safe', value: 'safe' }] }), 'fast', 'en')).toBe(
+      'Choose a value from the list',
+    )
     expect(validateHostFormValue(field({ role: 'datetime' }), 'bad', 'en')).toBe('Enter a valid date and time')
   })
 })
@@ -242,19 +319,22 @@ describe('Host form DOM and accessibility', () => {
     })
     nativeInput.dispatchEvent(new dom.window.Event('input'))
 
-    const input = adapter.control(field({ value: '' }), 'input', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
+    const input = adapter.control(field({ value: '' }), 'input', onDraft).root as HTMLElement & {
+      onChange?: (value: unknown) => void
+    }
     input.onChange?.(event('Northstar'))
     expect(onDraft).toHaveBeenLastCalledWith('Northstar', undefined)
 
     // The official controlled `t-input` calls the Host callback from its
     // internal input and then re-renders from `props.value`. Keep that exact
     // CustomEvent detail path from restoring the prior value after a fill.
-    const controlledInput = adapter.control(field({ value: 'Northstar workspace' }), 'controlled-input', onDraft).root as HTMLElement & {
-      onChange?: (value: unknown) => void
-      value?: string
-      props?: { value?: string }
-      receiveProps?: (next: { value?: string }, previous: { value?: string }) => void
-    }
+    const controlledInput = adapter.control(field({ value: 'Northstar workspace' }), 'controlled-input', onDraft)
+      .root as HTMLElement & {
+        onChange?: (value: unknown) => void
+        value?: string
+        props?: { value?: string }
+        receiveProps?: (next: { value?: string }, previous: { value?: string }) => void
+      }
     controlledInput.props = { value: 'Northstar workspace' }
     const receiveProps = vi.fn((next: { value?: string }) => {
       // Mirrors the official component's private controlled value update.
@@ -276,37 +356,58 @@ describe('Host form DOM and accessibility', () => {
     expect(controlledInput.props.value).toBe('Northstar updated')
     expect(controlledInput.value).toBe('Northstar updated')
     expect(internalInput.value).toBe('Northstar updated')
-    expect(receiveProps).toHaveBeenNthCalledWith(1,
-      { value: 'Northstar updated' },
-      { value: 'Northstar workspace' },
-    )
+    expect(receiveProps).toHaveBeenNthCalledWith(1, { value: 'Northstar updated' }, { value: 'Northstar workspace' })
     expect(onDraft).toHaveBeenLastCalledWith('Northstar updated', undefined)
 
-    const textarea = adapter.control(field({ role: 'textarea', value: '' }), 'textarea', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
+    const textarea = adapter.control(field({ role: 'textarea', value: '' }), 'textarea', onDraft).root as
+      & HTMLElement
+      & { onChange?: (value: unknown) => void }
     textarea.onChange?.(event('Multiline value'))
     expect(onDraft).toHaveBeenLastCalledWith('Multiline value', undefined)
 
-    const number = adapter.control(field({ type: 'number', value: 1 }), 'number', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
+    const number = adapter.control(field({ type: 'number', value: 1 }), 'number', onDraft).root as HTMLElement & {
+      onChange?: (value: unknown) => void
+    }
     number.onChange?.(event(9))
     expect(onDraft).toHaveBeenLastCalledWith(9, undefined)
 
-    const slider = adapter.control(field({ type: 'number', role: 'slider', value: 2, min: 0, max: 10 }), 'slider', onDraft)
+    const slider = adapter.control(
+      field({ type: 'number', role: 'slider', value: 2, min: 0, max: 10 }),
+      'slider',
+      onDraft,
+    )
     ;(slider.focusTarget as HTMLElement & { onChange?: (value: unknown) => void }).onChange?.(event(7))
     expect(onDraft).toHaveBeenLastCalledWith(7, undefined)
 
-    const checkbox = adapter.control(field({ type: 'boolean', value: false }), 'checkbox', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
+    const checkbox = adapter.control(field({ type: 'boolean', value: false }), 'checkbox', onDraft).root as
+      & HTMLElement
+      & { onChange?: (value: unknown) => void }
     checkbox.onChange?.(event([true]))
     expect(onDraft).toHaveBeenLastCalledWith(true)
 
-    const toggle = adapter.control(field({ type: 'boolean', role: 'switch', value: false }), 'toggle', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
+    const toggle = adapter.control(field({ type: 'boolean', role: 'switch', value: false }), 'toggle', onDraft).root as
+      & HTMLElement
+      & { onChange?: (value: unknown) => void }
     toggle.onChange?.(event('true'))
     expect(onDraft).toHaveBeenLastCalledWith(true)
 
-    const radio = adapter.control(field({ role: 'radio', value: 'safe', choices: [{ label: 'Safe', value: 'safe' }, { label: 'Fast', value: 'fast' }] }), 'radio', onDraft)
+    const radio = adapter.control(
+      field({
+        role: 'radio',
+        value: 'safe',
+        choices: [{ label: 'Safe', value: 'safe' }, { label: 'Fast', value: 'fast' }],
+      }),
+      'radio',
+      onDraft,
+    )
     ;(radio.focusTarget as HTMLElement & { onChange?: (value: unknown) => void }).onChange?.(event('fast'))
     expect(onDraft).toHaveBeenLastCalledWith('fast')
 
-    const select = adapter.control(field({ value: 'safe', choices: [{ label: 'Safe', value: 'safe' }, { label: 'Fast', value: 'fast' }] }), 'select', onDraft).root as HTMLElement & { onChange?: (value: unknown) => void }
+    const select = adapter.control(
+      field({ value: 'safe', choices: [{ label: 'Safe', value: 'safe' }, { label: 'Fast', value: 'fast' }] }),
+      'select',
+      onDraft,
+    ).root as HTMLElement & { onChange?: (value: unknown) => void }
     select.onChange?.(event('fast'))
     expect(onDraft).toHaveBeenLastCalledWith('fast', undefined)
   })
@@ -315,9 +416,20 @@ describe('Host form DOM and accessibility', () => {
     const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true })
     const adapter = new HostFormAdapter(dom.window.document)
     const onDraft = vi.fn()
-    const control = adapter.control({
-      namespace: 'test', path: ['introduction'], type: 'string', role: 'textarea', value: '', disabled: false, required: false,
-    }, 'introduction', onDraft, { placeholder: 'Describe this channel', textareaRows: 5 })
+    const control = adapter.control(
+      {
+        namespace: 'test',
+        path: ['introduction'],
+        type: 'string',
+        role: 'textarea',
+        value: '',
+        disabled: false,
+        required: false,
+      },
+      'introduction',
+      onDraft,
+      { placeholder: 'Describe this channel', textareaRows: 5 },
+    )
     const host = control.root as TDesignElement
     const shadow = host.attachShadow({ mode: 'open' })
     const textarea = dom.window.document.createElement('textarea')
@@ -340,12 +452,18 @@ describe('Host form DOM and accessibility', () => {
   })
 
   it('projects labels, help, errors, required state, TDesign controls, and draft events', () => {
-    const dom = new JSDOM('<!doctype html><html lang="zh-CN" dir="rtl"><body></body></html>', { pretendToBeVisual: true })
+    const dom = new JSDOM('<!doctype html><html lang="zh-CN" dir="rtl"><body></body></html>', {
+      pretendToBeVisual: true,
+    })
     const adapter = new HostFormAdapter(dom.window.document)
     const form = adapter.form('fixture')
     const item = adapter.item({ id: 'duration', label: '时长', help: '1 到 120 秒', required: true })
     const onDraft = vi.fn()
-    const control = adapter.control(field({ path: ['duration'], type: 'number', role: 'slider', value: 30, min: 1, max: 120, required: true }), 'duration', onDraft)
+    const control = adapter.control(
+      field({ path: ['duration'], type: 'number', role: 'slider', value: 30, min: 1, max: 120, required: true }),
+      'duration',
+      onDraft,
+    )
     adapter.connect(item, control)
     item.control.append(control.root)
     form.append(item.root)
@@ -363,7 +481,9 @@ describe('Host form DOM and accessibility', () => {
     expect(numeric?.getAttribute('placeholder')).toBe('请输入')
     expect(range.dataset.tdesignVersion).toBe('1.2.10')
     expect((range as HTMLElement & { label?: boolean; tooltipProps?: { placement?: string } }).label).toBe(true)
-    expect((range as HTMLElement & { tooltipProps?: { placement?: string } }).tooltipProps).toEqual({ placement: 'top' })
+    expect((range as HTMLElement & { tooltipProps?: { placement?: string } }).tooltipProps).toEqual({
+      placement: 'top',
+    })
     expect(range.getAttribute('role')).toBe('slider')
     expect(range.getAttribute('aria-required')).toBe('true')
     expect(range.getAttribute('aria-describedby')).toContain('duration-help')
@@ -377,12 +497,29 @@ describe('Host form DOM and accessibility', () => {
   it('uses TDesign switch/radio semantics and redacts sensitive fields', () => {
     const dom = new JSDOM('<!doctype html><body></body>')
     const adapter = new HostFormAdapter(dom.window.document)
-    const switchControl = adapter.control(field({ type: 'boolean', role: 'switch', value: true }), 'enabled', () => undefined)
+    const switchControl = adapter.control(
+      field({ type: 'boolean', role: 'switch', value: true }),
+      'enabled',
+      () => undefined,
+    )
     const checkbox = adapter.control(field({ type: 'boolean', value: true }), 'avatars', () => undefined)
-    const radio = adapter.control(field({ role: 'radio', value: 'safe', choices: [
-      { label: 'Safe', value: 'safe' }, { label: 'Fast', value: 'fast' },
-    ] }), 'mode', () => undefined)
-    const secret = adapter.control(field({ role: 'credential', value: undefined, disabled: true }), 'credential', () => undefined)
+    const radio = adapter.control(
+      field({
+        role: 'radio',
+        value: 'safe',
+        choices: [
+          { label: 'Safe', value: 'safe' },
+          { label: 'Fast', value: 'fast' },
+        ],
+      }),
+      'mode',
+      () => undefined,
+    )
+    const secret = adapter.control(
+      field({ role: 'credential', value: undefined, disabled: true }),
+      'credential',
+      () => undefined,
+    )
     expect(switchControl.root.tagName).toBe('T-SWITCH')
     expect(switchControl.root.getAttribute('role')).toBe('switch')
     expect(switchControl.root.getAttribute('value')).toBe('true')
@@ -405,17 +542,28 @@ describe('Host form DOM and accessibility', () => {
     const dom = new JSDOM('<!doctype html><html lang="en"><body></body></html>')
     let locale = 'en'
     const adapter = new HostFormAdapter(dom.window.document, undefined, () => locale)
-    const switchControl = adapter.control(field({ type: 'boolean', role: 'switch', value: true }), 'enabled', () => undefined)
+    const switchControl = adapter.control(
+      field({ type: 'boolean', role: 'switch', value: true }),
+      'enabled',
+      () => undefined,
+    )
     expect((switchControl.root as HTMLElement & { label?: string[] }).label).toEqual(['On', 'Off'])
     expect(adapter.control(field({ role: 'secret' }), 'secret', () => undefined).root.textContent)
       .toContain('Managed by Host credentials')
     expect(adapter.control(field({ role: 'date' }), 'date', () => undefined).root.tagName).toBe('T-DATE-PICKER')
     const text = adapter.control(field(), 'text', () => undefined).root as HTMLElement & { placeholder?: string }
-    const textarea = adapter.control(field({ role: 'textarea' }), 'textarea', () => undefined).root as HTMLElement & { placeholder?: string }
+    const textarea = adapter.control(field({ role: 'textarea' }), 'textarea', () => undefined).root as HTMLElement & {
+      placeholder?: string
+    }
     const multiline = adapter.control(field({ role: 'multiline' }), 'multiline', () => undefined).root
-    const number = adapter.control(field({ type: 'number', value: undefined }), 'number', () => undefined).root as HTMLElement & { placeholder?: string }
-    const slider = adapter.control(field({ type: 'number', role: 'slider', value: 4, min: 0, max: 10 }), 'slider', () => undefined).root
-    const select = adapter.control(field({ choices: [{ label: 'Safe', value: 'safe' }] }), 'select', () => undefined).root as HTMLElement & { placeholder?: string }
+    const number = adapter.control(field({ type: 'number', value: undefined }), 'number', () => undefined).root as
+      & HTMLElement
+      & { placeholder?: string }
+    const slider =
+      adapter.control(field({ type: 'number', role: 'slider', value: 4, min: 0, max: 10 }), 'slider', () => undefined)
+        .root
+    const select = adapter.control(field({ choices: [{ label: 'Safe', value: 'safe' }] }), 'select', () => undefined)
+      .root as HTMLElement & { placeholder?: string }
     expect(text.placeholder).toBe('Enter a value')
     expect(text.getAttribute('placeholder')).toBe('Enter a value')
     expect(textarea.placeholder).toBe('Enter a value')
@@ -427,16 +575,26 @@ describe('Host form DOM and accessibility', () => {
     expect(select.placeholder).toBe('Choose')
     expect(select.getAttribute('placeholder')).toBe('Choose')
     const onDraft = vi.fn()
-    const json = adapter.control(field({ type: 'object', value: {} }), 'json', onDraft).root as HTMLElement & { onChange?: (value: string) => void }
+    const json = adapter.control(field({ type: 'object', value: {} }), 'json', onDraft).root as HTMLElement & {
+      onChange?: (value: string) => void
+    }
     json.onChange?.('{')
     expect(onDraft).toHaveBeenLastCalledWith(undefined, 'Enter valid JSON')
     locale = 'zh-CN'
     expect(adapter.control(field({ role: 'secret' }), 'secret-zh', () => undefined).root.textContent)
       .toContain('Host 凭据边界')
     const textZh = adapter.control(field(), 'text-zh', () => undefined).root as HTMLElement & { placeholder?: string }
-    const textareaZh = adapter.control(field({ role: 'textarea' }), 'textarea-zh', () => undefined).root as HTMLElement & { placeholder?: string }
-    const numberZh = adapter.control(field({ type: 'number', value: undefined }), 'number-zh', () => undefined).root as HTMLElement & { placeholder?: string }
-    const selectZh = adapter.control(field({ choices: [{ label: '安全', value: 'safe' }] }), 'select-zh', () => undefined).root as HTMLElement & { placeholder?: string }
+    const textareaZh = adapter.control(field({ role: 'textarea' }), 'textarea-zh', () => undefined).root as
+      & HTMLElement
+      & { placeholder?: string }
+    const numberZh = adapter.control(field({ type: 'number', value: undefined }), 'number-zh', () => undefined).root as
+      & HTMLElement
+      & { placeholder?: string }
+    const selectZh = adapter.control(
+      field({ choices: [{ label: '安全', value: 'safe' }] }),
+      'select-zh',
+      () => undefined,
+    ).root as HTMLElement & { placeholder?: string }
     expect(textZh.placeholder).toBe('请输入')
     expect(textZh.getAttribute('placeholder')).toBe('请输入')
     expect(textareaZh.placeholder).toBe('请输入')
@@ -456,9 +614,18 @@ describe('Host form DOM and accessibility', () => {
     expect(checkbox.focusTarget?.getAttribute('aria-describedby')).toBe('enabled-help enabled-error')
 
     const radioItem = adapter.item({ id: 'mode', label: '模式', help: '选择一种模式' })
-    const radio = adapter.control(field({ role: 'radio', value: 'safe', choices: [
-      { label: 'Safe', value: 'safe' }, { label: 'Fast', value: 'fast' },
-    ] }), 'mode', () => undefined)
+    const radio = adapter.control(
+      field({
+        role: 'radio',
+        value: 'safe',
+        choices: [
+          { label: 'Safe', value: 'safe' },
+          { label: 'Fast', value: 'fast' },
+        ],
+      }),
+      'mode',
+      () => undefined,
+    )
     adapter.connect(radioItem, radio)
     expect(radioItem.label.htmlFor).toBe('')
     expect(radio.root.getAttribute('aria-labelledby')).toBe('mode-label')
@@ -485,8 +652,12 @@ describe('Host form DOM and accessibility', () => {
     expect(HOST_FORM_STYLES).toContain('.cxf-button[data-density="icon"] { inline-size: 2rem; block-size: 2rem; }')
     expect(HOST_FORM_STYLES).toContain('.cxf-form-footer { position: sticky; inset-block-start: 0;')
     expect(HOST_FORM_STYLES).toContain('margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent;')
-    expect(HOST_FORM_STYLES).toContain('t-select.cxf-tdesign-control { border: 0; border-radius: 0; padding: 0; background: transparent; }')
-    expect(HOST_FORM_STYLES).toContain('t-select.cxf-tdesign-control::part(suffix), t-select.cxf-tdesign-control::part(t-select__right-icon) { display: inline-grid; align-self: center; place-items: center; block-size: 100%; }')
+    expect(HOST_FORM_STYLES).toContain(
+      't-select.cxf-tdesign-control { border: 0; border-radius: 0; padding: 0; background: transparent; }',
+    )
+    expect(HOST_FORM_STYLES).toContain(
+      't-select.cxf-tdesign-control::part(suffix), t-select.cxf-tdesign-control::part(t-select__right-icon) { display: inline-grid; align-self: center; place-items: center; block-size: 100%; }',
+    )
     expect(HOST_FORM_STYLES).not.toContain('inset-block-end: -.25rem')
     expect(HOST_FORM_STYLES).not.toContain('.cxf-button {\n    display: inline-flex;')
     expect(HOST_FORM_STYLES).not.toMatch(/(^|[\s,{])(:root|html|body|\*)\s*[{,]/u)
@@ -515,8 +686,16 @@ describe('Host form DOM and accessibility', () => {
     expect(undo.textContent).toBe('')
     expect(save.dataset.hostFormActionIcon).toBe('host:save')
     expect(save.querySelector('[data-host-icon="host:save"]')?.getAttribute('slot')).toBe('icon')
-    expect(save as unknown as { theme?: string; variant?: string; content?: string }).toMatchObject({ theme: 'primary', variant: 'base', content: '' })
-    expect(restore as unknown as { shape?: string; size?: string; content?: string }).toMatchObject({ shape: 'square', size: 'small', content: '' })
+    expect(save as unknown as { theme?: string; variant?: string; content?: string }).toMatchObject({
+      theme: 'primary',
+      variant: 'base',
+      content: '',
+    })
+    expect(restore as unknown as { shape?: string; size?: string; content?: string }).toMatchObject({
+      shape: 'square',
+      size: 'small',
+      content: '',
+    })
   })
 
   it('uses one Host-owned portalled field-action menu for default, field rollback, and path copy', async () => {
@@ -527,8 +706,12 @@ describe('Host form DOM and accessibility', () => {
     const rollback = vi.fn()
     const copyPath = vi.fn(async () => true)
     const menu = adapter.fieldActionMenu({
-      label: 'Workspace name', canUseDefault: () => true, hasFieldDraft: () => hasDraft,
-      useDefault, rollback, copyPath,
+      label: 'Workspace name',
+      canUseDefault: () => true,
+      hasFieldDraft: () => hasDraft,
+      useDefault,
+      rollback,
+      copyPath,
     })
     dom.window.document.body.append(menu.trigger)
     expect(menu.trigger.textContent).toBe('')
@@ -536,8 +719,13 @@ describe('Host form DOM and accessibility', () => {
     expect(menu.trigger.getAttribute('variant')).toBe('text')
     expect(menu.trigger.querySelector('[data-host-icon="host:settings"]')).not.toBeNull()
     const semanticMenu = adapter.fieldActionMenu({
-      label: 'Schedule', icon: 'host:calendar', canUseDefault: () => false, hasFieldDraft: () => false,
-      useDefault: () => undefined, rollback: () => undefined, copyPath: async () => false,
+      label: 'Schedule',
+      icon: 'host:calendar',
+      canUseDefault: () => false,
+      hasFieldDraft: () => false,
+      useDefault: () => undefined,
+      rollback: () => undefined,
+      copyPath: async () => false,
     })
     expect(semanticMenu.trigger.querySelector('[data-host-icon="host:calendar"]')).not.toBeNull()
     expect(semanticMenu.trigger.querySelector('[data-host-icon="host:settings"]')).toBeNull()
@@ -548,8 +736,16 @@ describe('Host form DOM and accessibility', () => {
     const entries = [...popup.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
     expect(popup.hidden).toBe(false)
     expect(menu.trigger.getAttribute('aria-expanded')).toBe('true')
-    expect(entries.map(entry => entry.textContent)).toEqual(['Use default value', 'Revert field change', 'Copy configuration path'])
-    expect(entries.map(entry => entry.querySelector('[data-host-icon]')?.getAttribute('data-host-icon'))).toEqual(['host:reset', 'host:reset', 'host:files'])
+    expect(entries.map(entry => entry.textContent)).toEqual([
+      'Use default value',
+      'Revert field change',
+      'Copy configuration path',
+    ])
+    expect(entries.map(entry => entry.querySelector('[data-host-icon]')?.getAttribute('data-host-icon'))).toEqual([
+      'host:reset',
+      'host:reset',
+      'host:files',
+    ])
     const portalStyles = portal.shadowRoot?.querySelector('style')?.textContent ?? ''
     expect(portalStyles).toContain(HOST_ICON_16PX_CSS)
     expect(HOST_FORM_STYLES).toContain(HOST_ICON_16PX_CSS)
@@ -559,7 +755,9 @@ describe('Host form DOM and accessibility', () => {
     expect(portalStyles).toContain('padding: 8px 9px')
     expect(portalStyles).toContain('gap: 9px')
     expect(portalStyles).toContain('.cxf-field-menu-item:active:not(:disabled)')
-    expect(HOST_FORM_STYLES).toContain('.cxf-field-menu-trigger:hover:not(:disabled), .cxf-field-menu-trigger[aria-expanded="true"] { background: transparent;')
+    expect(HOST_FORM_STYLES).toContain(
+      '.cxf-field-menu-trigger:hover:not(:disabled), .cxf-field-menu-trigger[aria-expanded="true"] { background: transparent;',
+    )
     expect(HOST_FORM_STYLES).toContain('t-select.cxf-tdesign-control::part(t-select__right-icon)')
     expect(HOST_FORM_STYLES).toContain('.cxf-time-select { inline-size: 100%; max-inline-size: none; }')
     entries[0]!.click()
@@ -573,11 +771,15 @@ describe('Host form DOM and accessibility', () => {
     menu.trigger.click()
     expect(entries[1]!.disabled).toBe(true)
     entries[2]!.focus()
-    entries[2]!.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true, cancelable: true }))
+    entries[2]!.dispatchEvent(
+      new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true, cancelable: true }),
+    )
     await Promise.resolve()
     expect(copyPath).toHaveBeenCalledOnce()
     expect(popup.querySelector('[role="status"]')?.textContent).toBe('Path copied')
-    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    dom.window.document.dispatchEvent(
+      new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    )
     expect(popup.hidden).toBe(true)
     expect(dom.window.document.activeElement).toBe(menu.trigger)
     menu.dispose()
@@ -600,9 +802,18 @@ describe('Host form DOM and accessibility', () => {
     const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true })
     const adapter = new HostFormAdapter(dom.window.document)
     const onDraft = vi.fn()
-    const control = adapter.control(field({ value: 'safe', choices: [
-      { label: 'Safe', value: 'safe' }, { label: 'Fast', value: 'fast' }, { label: 'Off', value: 'off', disabled: true },
-    ] }), 'mode', onDraft)
+    const control = adapter.control(
+      field({
+        value: 'safe',
+        choices: [
+          { label: 'Safe', value: 'safe' },
+          { label: 'Fast', value: 'fast' },
+          { label: 'Off', value: 'off', disabled: true },
+        ],
+      }),
+      'mode',
+      onDraft,
+    )
     const select = control.root as HTMLElement & {
       selectedValue: string | undefined
       setSelectedValue(value: string | undefined, notify?: boolean): void
@@ -646,10 +857,26 @@ describe('Host form DOM and accessibility', () => {
     const dateTime = adapter.control(field({ role: 'datetime', value: '2026-09-01 09:30:00' }), 'date-time', onDraft)
     const time = adapter.control(field({ role: 'time', value: '18:30' }), 'time', onDraft)
     const color = adapter.control(field({ role: 'color', value: '#3B82F6' }), 'color', onDraft)
-    const multi = adapter.control(field({ type: 'array', role: 'multi-select', value: ['design'], min: 1, max: 3, choices: [
-      { label: 'Design', value: 'design' }, { label: 'Research', value: 'research' },
-    ] }), 'audiences', onDraft)
-    const tags = adapter.control(field({ type: 'array', value: ['weekly'], arrayItemType: 'string', max: 4 }), 'tags', onDraft)
+    const multi = adapter.control(
+      field({
+        type: 'array',
+        role: 'multi-select',
+        value: ['design'],
+        min: 1,
+        max: 3,
+        choices: [
+          { label: 'Design', value: 'design' },
+          { label: 'Research', value: 'research' },
+        ],
+      }),
+      'audiences',
+      onDraft,
+    )
+    const tags = adapter.control(
+      field({ type: 'array', value: ['weekly'], arrayItemType: 'string', max: 4 }),
+      'tags',
+      onDraft,
+    )
     dom.window.document.body.append(date.root, dateTime.root, time.root, color.root, multi.root, tags.root)
     expect(date.root.tagName).toBe('T-DATE-PICKER')
     expect(dateTime.root.className).toBe('cxf-datetime-control')
@@ -663,9 +890,13 @@ describe('Host form DOM and accessibility', () => {
     expect(multi.root.dataset.hostFormPrimitive).toBe('multi-select')
     expect(tags.root.tagName).toBe('T-TAG-INPUT')
     const multiElement = multi.root as HTMLElement & { selectedValues: readonly string[] }
-    multiElement.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+    multiElement.dispatchEvent(
+      new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }),
+    )
     expect(multiElement.getAttribute('aria-expanded')).toBe('true')
-    multiElement.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    multiElement.dispatchEvent(
+      new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+    )
     expect(multiElement.selectedValues).toEqual(['design', 'research'])
     expect(onDraft).toHaveBeenLastCalledWith(['design', 'research'], undefined)
     const dateTimeTime = dateTime.root.querySelector('t-select') as HTMLElement & { onChange?: (value: string) => void }
@@ -703,7 +934,11 @@ describe('Host form DOM and accessibility', () => {
     remounted.dispose()
     expect(portal.shadowRoot?.querySelectorAll('[role="listbox"]')).toHaveLength(0)
 
-    const multi = adapter.control(field({ type: 'array', role: 'multi-select', choices: [{ label: 'Safe', value: 'safe' }] }), 'multi', () => undefined)
+    const multi = adapter.control(
+      field({ type: 'array', role: 'multi-select', choices: [{ label: 'Safe', value: 'safe' }] }),
+      'multi',
+      () => undefined,
+    )
       .root as HTMLElement & { dispose(): void }
     dom.window.document.body.append(multi)
     expect(portal.shadowRoot?.querySelectorAll('[role="listbox"]')).toHaveLength(1)
@@ -722,7 +957,9 @@ describe('Host form DOM and accessibility', () => {
         /createElement\(\s*['"]select['"]\s*\)/gu,
         /create\([^\n]*['"]select['"]/gu,
         /<select\b/gu,
-      ].flatMap(pattern => [...source.matchAll(pattern)].map(match => `${file}:${source.slice(0, match.index).split('\n').length}`))
+      ].flatMap(pattern =>
+        [...source.matchAll(pattern)].map(match => `${file}:${source.slice(0, match.index).split('\n').length}`)
+      )
     })
     expect(violations).toEqual([])
   })

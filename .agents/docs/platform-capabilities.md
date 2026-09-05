@@ -77,15 +77,15 @@ state, localized reason, and the provider scope it can route.
 adapter. It must never be interpreted as the global Host capability catalog.
 The current implementation has these distinct authorities:
 
-| Provider boundary | Owned route | Availability authority |
-| --- | --- | --- |
-| Desktop current connection | native model/task/turn and Agent delivery routes | the private current-connection Platform/Agent adapter; the product default remains unavailable |
-| External Provider Fleet | model/task/turn routes for configured provider ids | each active or failed Fleet provider generation, scoped by its canonical provider id |
-| Host-local Agent event ledger | `agent.events.read` | the live ledger service; native feed diagnostics do not erase local ledger support |
-| Host Agent history | `agent.history.read` | the launcher history binding and its adapter status |
-| Host configuration | validated configuration descriptors and mutation bridge | the configuration registry/bridge; this is not a Platform-v1 permission name |
-| Host console | plugin DevTools Console contracts | its owning Host service; protocol presence alone does not claim runtime support |
-| Host package lifecycle | inspect/stage/activate/rollback contracts | the launcher generation/lifecycle bridge introduced by the dynamic delivery runtime; protocol presence alone does not claim runtime support |
+| Provider boundary             | Owned route                                             | Availability authority                                                                                                                      |
+| ----------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop current connection    | native model/task/turn and Agent delivery routes        | the private current-connection Platform/Agent adapter; the product default remains unavailable                                              |
+| External Provider Fleet       | model/task/turn routes for configured provider ids      | each active or failed Fleet provider generation, scoped by its canonical provider id                                                        |
+| Host-local Agent event ledger | `agent.events.read`                                     | the live ledger service; native feed diagnostics do not erase local ledger support                                                          |
+| Host Agent history            | `agent.history.read`                                    | the launcher history binding and its adapter status                                                                                         |
+| Host configuration            | validated configuration descriptors and mutation bridge | the configuration registry/bridge; this is not a Platform-v1 permission name                                                                |
+| Host console                  | plugin DevTools Console contracts                       | its owning Host service; protocol presence alone does not claim runtime support                                                             |
+| Host package lifecycle        | inspect/stage/activate/rollback contracts               | the launcher generation/lifecycle bridge introduced by the dynamic delivery runtime; protocol presence alone does not claim runtime support |
 
 The last three remain separate service planes. They are represented as distinct
 provider families for runtime diagnostics, but the Host does not invent

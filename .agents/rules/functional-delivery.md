@@ -57,13 +57,13 @@ that manually injects a token cannot prove that the launcher passes that token.
 
 Choose validation for the behavior and claim:
 
-| Change or claim | Required evidence |
-| --- | --- |
-| Documentation only | Diff and applicable document/link checks |
-| Presentation-only intermediate preview | Correct source/configuration and visible intended change; follow the active pure-style window below |
-| Parser, state, operation, protocol, or other behavior change | Meaningful focused checks plus the normal owning-repository `npm run check`; add or update tests where the behavior or regression risk requires them |
-| Launcher, DOM-adapter, native-surface, or lifecycle change claimed production-usable | Production composition integration plus a real isolated `app://` flow through the affected controls, with scoped cleanup evidence |
-| Formal delivery | Applicable validation above, required PR CI, exact-head merge and remote-main readback, and the authorized compatible-set handoff |
+| Change or claim                                                                      | Required evidence                                                                                                                                    |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Documentation only                                                                   | Diff and applicable document/link checks                                                                                                             |
+| Presentation-only intermediate preview                                               | Correct source/configuration and visible intended change; follow the active pure-style window below                                                  |
+| Parser, state, operation, protocol, or other behavior change                         | Meaningful focused checks plus the normal owning-repository `npm run check`; add or update tests where the behavior or regression risk requires them |
+| Launcher, DOM-adapter, native-surface, or lifecycle change claimed production-usable | Production composition integration plus a real isolated `app://` flow through the affected controls, with scoped cleanup evidence                    |
+| Formal delivery                                                                      | Applicable validation above, required PR CI, exact-head merge and remote-main readback, and the authorized compatible-set handoff                    |
 
 The production smoke asserts positive usability, not mere presence. For
 example, an action must be enabled and produce the intended safe refreshed

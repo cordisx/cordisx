@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { PlaygroundScenarioLabController } from '../packages/cli/src/playground/scenario-lab.js'
 import {
   PLAYGROUND_ROOM_SIMULATION_BINDING_CONTRACT,
-  PlaygroundRoomSimulationBridgeRegistry,
   type PlaygroundRoomSimulationBinding,
+  PlaygroundRoomSimulationBridgeRegistry,
   type PlaygroundRoomSimulationOwner,
 } from '../packages/cli/src/renderer/playground-room-simulation-bridge.js'
 
@@ -18,24 +18,27 @@ const binding: PlaygroundRoomSimulationBinding = Object.freeze({
   generation: 'owner-one',
 })
 
-const available = <Value>(value: Value) => Object.freeze({
-  status: 'available' as const,
-  ownerGeneration: 'owner-one',
-  value,
-})
+const available = <Value>(value: Value) =>
+  Object.freeze({
+    status: 'available' as const,
+    ownerGeneration: 'owner-one',
+    value,
+  })
 
 function owner(): PlaygroundRoomSimulationOwner {
   return {
     ownerGeneration: 'owner-one',
-    resolveSession: async sessionId => sessionId === binding.sessionId
-      ? available(binding)
-      : { status: 'unavailable', code: 'session-unbound', message: 'unbound' },
-    inspect: async input => available({
-      binding: input,
-      lifecycle: 'active',
-      revision: 1,
-      delegationTargets: [{ memberId: 'reviewer', label: 'Reviewer' }],
-    }),
+    resolveSession: async sessionId =>
+      sessionId === binding.sessionId
+        ? available(binding)
+        : { status: 'unavailable', code: 'session-unbound', message: 'unbound' },
+    inspect: async input =>
+      available({
+        binding: input,
+        lifecycle: 'active',
+        revision: 1,
+        delegationTargets: [{ memberId: 'reviewer', label: 'Reviewer' }],
+      }),
     injectMessage: async (_input, operationId) => available({ operationId, phase: 'accepted', binding }),
     emitAgentReply: async (_input, operationId) => available({ operationId, phase: 'accepted', binding }),
     emitAgentApprovalRequest: async (_input, operationId) => available({ operationId, phase: 'accepted', binding }),
@@ -71,12 +74,20 @@ describe('Playground Agent Session Room discovery', () => {
       value: { __cordisxRuntime: { playgroundRoomSimulationBridge: registry.client } },
     })
     const definition = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
       contract: 'cordisx.agent-definition/v1',
       schemaVersion: 1,
       identity: { agentId: 'chatroom.generalist', revision: 'revision-one' },
       name: 'Chatroom Agent',
-      inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
+      inherit: {
+        promptSections: 'none',
+        rules: 'none',
+        skills: 'none',
+        tools: 'none',
+        mcpServers: 'none',
+        runtimeDefaults: 'none',
+      },
       promptSections: [],
     } as const
     const controller = new PlaygroundScenarioLabController({

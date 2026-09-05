@@ -8,19 +8,39 @@ describe('Channel action Host bridge', () => {
       token: 'a'.repeat(64),
       api: {
         connections: {
-          enable: async value => { calls.push(['enable', value]); return { status: 'applied' as const } },
-          disable: async value => { calls.push(['disable', value]); return { status: 'applied' as const } },
-          reconnect: async value => { calls.push(['reconnect', value]); return { status: 'applied' as const } },
+          enable: async value => {
+            calls.push(['enable', value])
+            return { status: 'applied' as const }
+          },
+          disable: async value => {
+            calls.push(['disable', value])
+            return { status: 'applied' as const }
+          },
+          reconnect: async value => {
+            calls.push(['reconnect', value])
+            return { status: 'applied' as const }
+          },
         },
         bindings: {
-          archive: async value => { calls.push(['archive', value]); return { status: 'applied' as const } },
-          restore: async value => { calls.push(['restore', value]); return { status: 'applied' as const } },
-          unbind: async value => { calls.push(['unbind', value]); return { status: 'applied' as const } },
+          archive: async value => {
+            calls.push(['archive', value])
+            return { status: 'applied' as const }
+          },
+          restore: async value => {
+            calls.push(['restore', value])
+            return { status: 'applied' as const }
+          },
+          unbind: async value => {
+            calls.push(['unbind', value])
+            return { status: 'applied' as const }
+          },
         },
       } as never,
     })
     await expect(handler.handle({
-      version: 1, token: handler.token, action: 'reconnect',
+      version: 1,
+      token: handler.token,
+      action: 'reconnect',
       ref: { adapterId: 'simulator', accountId: 'local', tenantId: 'test' },
     })).resolves.toMatchObject({ status: 'applied' })
     await expect(handler.handle({ version: 1, token: handler.token, action: 'archive', bindingId: 'binding-1' }))
@@ -29,6 +49,8 @@ describe('Channel action Host bridge', () => {
       ['reconnect', { ref: { adapterId: 'simulator', accountId: 'local', tenantId: 'test' } }],
       ['archive', { bindingId: 'binding-1' }],
     ])
-    await expect(handler.handle({ version: 1, token: 'wrong', action: 'enable', ref: {} })).rejects.toThrow('unauthorized')
+    await expect(handler.handle({ version: 1, token: 'wrong', action: 'enable', ref: {} })).rejects.toThrow(
+      'unauthorized',
+    )
   })
 })

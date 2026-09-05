@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import {
-  JsonChannelStore,
   type ChannelStoreState,
+  JsonChannelStore,
   type StoredAuditRecord,
   type StoredInboxRecord,
   type StoredOutboxRecord,
@@ -16,6 +16,7 @@ import type {
   ChannelDeliveryHandle,
   ChannelEventRef,
   ChannelInboundEnvelope,
+  ChannelMessageListener,
   ChannelNotification,
   ChannelPermissionDecision,
   ChannelPermissionRequest,
@@ -25,7 +26,6 @@ import type {
   ChannelRuntimeOptions,
   ChannelRuntimeSnapshot,
   ChannelSubscriptionFilter,
-  ChannelMessageListener,
   ChannelTenantRef,
   ChannelThreadRef,
 } from './types.js'
@@ -81,10 +81,12 @@ interface ActiveConnection {
 function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`)
-    .join(',')}}`
+  return `{${
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`)
+      .join(',')
+  }}`
 }
 
 function digest(value: unknown): string {
@@ -141,7 +143,8 @@ function appendAudit(state: ChannelStoreState, record: StoredAuditRecord): void 
 }
 
 function auditRecord(
-  input: Omit<StoredAuditRecord, 'auditId' | 'source' | 'pluginId' | 'pluginGeneration'>
+  input:
+    & Omit<StoredAuditRecord, 'auditId' | 'source' | 'pluginId' | 'pluginGeneration'>
     & { readonly caller: ChannelPluginIdentity },
 ): StoredAuditRecord {
   const { caller, ...record } = input
@@ -193,8 +196,16 @@ function validateActor(value: unknown): void {
 function validateEvent(value: unknown): void {
   const event = objectRecord(value, 'Channel event')
   exactKeys(event, [
-    'adapterId', 'accountId', 'tenantId', 'conversationId', 'kind', 'threadId',
-    'semantics', 'eventId', 'messageId', 'actor',
+    'adapterId',
+    'accountId',
+    'tenantId',
+    'conversationId',
+    'kind',
+    'threadId',
+    'semantics',
+    'eventId',
+    'messageId',
+    'actor',
   ], 'Channel event')
   for (const field of ['adapterId', 'accountId', 'tenantId', 'conversationId', 'threadId', 'eventId']) {
     if (!nonEmptyText(event[field], 512)) throw new ChannelIntegrityError(`Channel event ${field} is invalid`)
@@ -259,9 +270,11 @@ function validateInput(ref: ChannelTenantRef, envelope: ChannelInboundEnvelope):
 }
 
 function sanitizedTenant(ref: ChannelTenantRef): ChannelTenantRef {
-  if (!nonEmptyText(ref.adapterId, 128)
+  if (
+    !nonEmptyText(ref.adapterId, 128)
     || !nonEmptyText(ref.accountId, 512)
-    || !nonEmptyText(ref.tenantId, 512)) {
+    || !nonEmptyText(ref.tenantId, 512)
+  ) {
     throw new ChannelIntegrityError('Channel tenant identity is invalid')
   }
   return { adapterId: ref.adapterId, accountId: ref.accountId, tenantId: ref.tenantId }
@@ -269,10 +282,22 @@ function sanitizedTenant(ref: ChannelTenantRef): ChannelTenantRef {
 
 function sanitizedDescriptor(descriptor: ChannelAdapterDescriptor): ChannelAdapterDescriptor {
   const ref = sanitizedTenant(descriptor.ref)
-  if (!['simulator', 'feishu', 'lark', 'wecom-intelligent-bot', 'wecom-enterprise-app', 'wecom-message-push', 'wechat-service'].includes(descriptor.kind)) {
+  if (
+    ![
+      'simulator',
+      'feishu',
+      'lark',
+      'wecom-intelligent-bot',
+      'wecom-enterprise-app',
+      'wecom-message-push',
+      'wechat-service',
+    ].includes(descriptor.kind)
+  ) {
     throw new ChannelIntegrityError('Channel adapter kind is invalid')
   }
-  if (!['implemented', 'verified', 'experimental', 'unavailable', 'planned'].includes(descriptor.implementationStatus)) {
+  if (
+    !['implemented', 'verified', 'experimental', 'unavailable', 'planned'].includes(descriptor.implementationStatus)
+  ) {
     throw new ChannelIntegrityError('Channel adapter implementation status is invalid')
   }
   if (!Number.isInteger(descriptor.configurationRevision) || descriptor.configurationRevision < 1) {
@@ -291,11 +316,13 @@ function sanitizedDescriptor(descriptor: ChannelAdapterDescriptor): ChannelAdapt
 }
 
 function sanitizedThread(ref: ChannelThreadRef): ChannelThreadRef {
-  if (!nonEmptyText(ref.adapterId, 128)
+  if (
+    !nonEmptyText(ref.adapterId, 128)
     || !nonEmptyText(ref.accountId, 512)
     || !nonEmptyText(ref.tenantId, 512)
     || !nonEmptyText(ref.conversationId, 512)
-    || !nonEmptyText(ref.threadId, 512)) {
+    || !nonEmptyText(ref.threadId, 512)
+  ) {
     throw new ChannelIntegrityError('Channel target identity is invalid')
   }
   if (ref.kind !== 'direct' && ref.kind !== 'group' && ref.kind !== 'broadcast') {
@@ -391,15 +418,18 @@ export class ChannelRuntime {
             lastErrorCode: errorCode(error),
           }
           : { ...current, secretState: secretStateForStartFailure(current, error), lastErrorCode: errorCode(error) }
-        appendAudit(state, auditRecord({
-          caller,
-          recordedAt: now,
-          accountKey: key,
-          generation,
-          operationId,
-          action: 'channel.adapter.activate',
-          outcome: 'failed-last-good-retained',
-        }))
+        appendAudit(
+          state,
+          auditRecord({
+            caller,
+            recordedAt: now,
+            accountKey: key,
+            generation,
+            operationId,
+            action: 'channel.adapter.activate',
+            outcome: 'failed-last-good-retained',
+          }),
+        )
       })
       throw error
     }
@@ -415,15 +445,18 @@ export class ChannelRuntime {
           connectionState: 'ready',
           cursorUpdatedAt: now,
         }
-        appendAudit(state, auditRecord({
-          caller,
-          recordedAt: now,
-          accountKey: key,
-          generation,
-          operationId,
-          action: 'channel.adapter.activate',
-          outcome: 'ready',
-        }))
+        appendAudit(
+          state,
+          auditRecord({
+            caller,
+            recordedAt: now,
+            accountKey: key,
+            generation,
+            operationId,
+            action: 'channel.adapter.activate',
+            outcome: 'ready',
+          }),
+        )
       })
     } catch (error) {
       await connection.stop('failed').catch(() => undefined)
@@ -442,41 +475,46 @@ export class ChannelRuntime {
           if (adapter?.generation === generation) {
             state.adapters[key] = { ...adapter, lastErrorCode: 'PRIOR_GENERATION_STOP_FAILED' }
           }
-          appendAudit(state, auditRecord({
-            caller,
-            recordedAt: failedAt,
-            accountKey: key,
-            generation,
-            operationId,
-            action: 'channel.adapter.replace',
-            outcome: `prior-stop-failed:${errorCode(error)}`,
-          }))
+          appendAudit(
+            state,
+            auditRecord({
+              caller,
+              recordedAt: failedAt,
+              accountKey: key,
+              generation,
+              operationId,
+              action: 'channel.adapter.replace',
+              outcome: `prior-stop-failed:${errorCode(error)}`,
+            }),
+          )
         })
       }
     }
 
     let handleDisposed = false
-    return Object.freeze({
-      ref: descriptor.ref,
-      generation,
-      receive: async (envelope: ChannelInboundEnvelope) => {
-        if (handleDisposed) throw new ChannelGenerationFencedError()
-        return await this.#receiveAt(descriptor.ref, generation, caller, envelope)
-      },
-      drainInbound: async (limit?: number) => {
-        if (handleDisposed) throw new ChannelGenerationFencedError()
-        return await this.#drainInboundAt(descriptor.ref, generation, limit)
-      },
-      drainOutbound: async (limit?: number) => {
-        if (handleDisposed) throw new ChannelGenerationFencedError()
-        return await this.#drainOutboundAt(descriptor.ref, generation, limit)
-      },
-      dispose: async () => {
-        if (handleDisposed) return
-        handleDisposed = true
-        await this.#disposeGeneration(descriptor.ref, generation)
-      },
-    } satisfies ChannelAdapterHandle)
+    return Object.freeze(
+      {
+        ref: descriptor.ref,
+        generation,
+        receive: async (envelope: ChannelInboundEnvelope) => {
+          if (handleDisposed) throw new ChannelGenerationFencedError()
+          return await this.#receiveAt(descriptor.ref, generation, caller, envelope)
+        },
+        drainInbound: async (limit?: number) => {
+          if (handleDisposed) throw new ChannelGenerationFencedError()
+          return await this.#drainInboundAt(descriptor.ref, generation, limit)
+        },
+        drainOutbound: async (limit?: number) => {
+          if (handleDisposed) throw new ChannelGenerationFencedError()
+          return await this.#drainOutboundAt(descriptor.ref, generation, limit)
+        },
+        dispose: async () => {
+          if (handleDisposed) return
+          handleDisposed = true
+          await this.#disposeGeneration(descriptor.ref, generation)
+        },
+      } satisfies ChannelAdapterHandle,
+    )
   }
 
   async notify(
@@ -518,15 +556,18 @@ export class ChannelRuntime {
         status: 'queued',
         attempts: 0,
       }
-      appendAudit(state, auditRecord({
-        caller,
-        recordedAt: now,
-        accountKey: key,
-        generation: adapter.generation,
-        operationId: deliveryId,
-        action: 'channel.delivery.enqueue',
-        outcome: 'queued',
-      }))
+      appendAudit(
+        state,
+        auditRecord({
+          caller,
+          recordedAt: now,
+          accountKey: key,
+          generation: adapter.generation,
+          operationId: deliveryId,
+          action: 'channel.delivery.enqueue',
+          outcome: 'queued',
+        }),
+      )
     })
     return Object.freeze({
       deliveryId,
@@ -629,7 +670,6 @@ export class ChannelRuntime {
     return this.#store.snapshot().audit
   }
 
-
   async dispose(): Promise<void> {
     if (this.#disposed) return
     this.#disposed = true
@@ -695,21 +735,26 @@ export class ChannelRuntime {
       }
       const adapter = state.adapters[key]
       if (adapter !== undefined) state.adapters[key] = { ...adapter, cursorUpdatedAt: now }
-      appendAudit(state, auditRecord({
-        caller,
-        recordedAt: now,
-        accountKey: key,
-        generation,
-        operationId,
-        action: 'channel.inbound.persist',
-        outcome: 'queued',
-        eventKey: eventReplayKey,
-      }))
+      appendAudit(
+        state,
+        auditRecord({
+          caller,
+          recordedAt: now,
+          accountKey: key,
+          generation,
+          operationId,
+          action: 'channel.inbound.persist',
+          outcome: 'queued',
+          eventKey: eventReplayKey,
+        }),
+      )
       return { recordId, duplicate: false, status: 'queued' }
     })
-    if (!receipt.duplicate) queueMicrotask(() => {
-      void this.#publishInput(recordId, generation, envelope).catch(() => undefined)
-    })
+    if (!receipt.duplicate) {
+      queueMicrotask(() => {
+        void this.#publishInput(recordId, generation, envelope).catch(() => undefined)
+      })
+    }
     return receipt
   }
 
@@ -723,7 +768,9 @@ export class ChannelRuntime {
       const nowMs = this.#clock.now().getTime()
       const next = Object.values(this.#store.snapshot().inbox)
         .filter(record => record.accountKey === key && isEligibleInbox(record, nowMs))
-        .sort((left, right) => left.receivedAt.localeCompare(right.receivedAt) || left.recordId.localeCompare(right.recordId))[0]
+        .sort((left, right) =>
+          left.receivedAt.localeCompare(right.receivedAt) || left.recordId.localeCompare(right.recordId)
+        )[0]
       if (next === undefined) break
       await this.#processInbox(next.recordId, ref, generation)
       processed += 1
@@ -751,16 +798,19 @@ export class ChannelRuntime {
         updatedAt: claimedAt,
       }
       state.inbox[recordId] = record
-      appendAudit(state, auditRecord({
-        caller: record.caller,
-        recordedAt: claimedAt,
-        accountKey: key,
-        generation,
-        operationId: record.operationId,
-        action: 'channel.inbound.claim',
-        outcome: 'claimed',
-        eventKey: replayKey(record.envelope.input.source.event),
-      }))
+      appendAudit(
+        state,
+        auditRecord({
+          caller: record.caller,
+          recordedAt: claimedAt,
+          accountKey: key,
+          generation,
+          operationId: record.operationId,
+          action: 'channel.inbound.claim',
+          outcome: 'claimed',
+          eventKey: replayKey(record.envelope.input.source.event),
+        }),
+      )
       return structuredClone(record)
     })
     if (claimed === undefined) return
@@ -775,16 +825,19 @@ export class ChannelRuntime {
       if (current?.leaseGeneration !== generation || current.status !== 'processing') return
       if (state.adapters[current.accountKey]?.generation !== generation) return
       state.inbox[recordId] = { ...current, status: 'applied', updatedAt: now }
-      appendAudit(state, auditRecord({
-        caller: current.caller,
-        recordedAt: now,
-        accountKey: current.accountKey,
-        generation,
-        operationId: current.operationId,
-        action: 'channel.event.accept',
-        outcome: 'applied',
-        eventKey: replayKey(current.envelope.input.source.event),
-      }))
+      appendAudit(
+        state,
+        auditRecord({
+          caller: current.caller,
+          recordedAt: now,
+          accountKey: current.accountKey,
+          generation,
+          operationId: current.operationId,
+          action: 'channel.event.accept',
+          outcome: 'applied',
+          eventKey: replayKey(current.envelope.input.source.event),
+        }),
+      )
     })
   }
 
@@ -800,7 +853,9 @@ export class ChannelRuntime {
       const nowMs = this.#clock.now().getTime()
       const next = Object.values(this.#store.snapshot().outbox)
         .filter(record => record.accountKey === key && isEligibleOutbox(record, nowMs, this.#leaseMs))
-        .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.deliveryId.localeCompare(right.deliveryId))[0]
+        .sort((left, right) =>
+          left.createdAt.localeCompare(right.createdAt) || left.deliveryId.localeCompare(right.deliveryId)
+        )[0]
       if (next === undefined) break
 
       const decision = await this.#permissions.authorize({
@@ -820,16 +875,19 @@ export class ChannelRuntime {
             errorCode: decision === 'ask' ? 'PERMISSION_PENDING' : 'PERMISSION_DENIED',
             updatedAt: this.#now(),
           }
-          appendAudit(state, auditRecord({
-            caller: current.caller,
-            recordedAt: this.#now(),
-            accountKey: current.accountKey,
-            generation,
-            operationId: current.deliveryId,
-            action: 'channel.permission',
-            outcome: decision,
-            capability: 'channel.messages.send',
-          }))
+          appendAudit(
+            state,
+            auditRecord({
+              caller: current.caller,
+              recordedAt: this.#now(),
+              accountKey: current.accountKey,
+              generation,
+              operationId: current.deliveryId,
+              action: 'channel.permission',
+              outcome: decision,
+              capability: 'channel.messages.send',
+            }),
+          )
         })
         processed += 1
         continue
@@ -849,15 +907,18 @@ export class ChannelRuntime {
           updatedAt: claimedAt,
         }
         state.outbox[next.deliveryId] = record
-        appendAudit(state, auditRecord({
-          caller: record.caller,
-          recordedAt: claimedAt,
-          accountKey: key,
-          generation,
-          operationId: record.deliveryId,
-          action: 'channel.delivery.claim',
-          outcome: 'claimed',
-        }))
+        appendAudit(
+          state,
+          auditRecord({
+            caller: record.caller,
+            recordedAt: claimedAt,
+            accountKey: key,
+            generation,
+            operationId: record.deliveryId,
+            action: 'channel.delivery.claim',
+            outcome: 'claimed',
+          }),
+        )
         return structuredClone(record)
       })
       if (claimed === undefined) continue
@@ -882,15 +943,18 @@ export class ChannelRuntime {
             ...(result.recallHandle === undefined ? {} : { recallHandle: result.recallHandle }),
             updatedAt: completedAt,
           }
-          appendAudit(state, auditRecord({
-            caller: current.caller,
-            recordedAt: completedAt,
-            accountKey: key,
-            generation,
-            operationId: current.deliveryId,
-            action: 'channel.delivery.send',
-            outcome: result.recallHandle === undefined ? 'sent-irreversible' : 'sent-recallable',
-          }))
+          appendAudit(
+            state,
+            auditRecord({
+              caller: current.caller,
+              recordedAt: completedAt,
+              accountKey: key,
+              generation,
+              operationId: current.deliveryId,
+              action: 'channel.delivery.send',
+              outcome: result.recallHandle === undefined ? 'sent-irreversible' : 'sent-recallable',
+            }),
+          )
         })
       } catch (error) {
         const failedAt = this.#clock.now()
@@ -903,19 +967,24 @@ export class ChannelRuntime {
           state.outbox[claimed.deliveryId] = {
             ...current,
             status,
-            ...(retry ? { nextAttemptAt: new Date(failedAt.getTime() + this.#retryDelay(current.attempts)).toISOString() } : {}),
+            ...(retry
+              ? { nextAttemptAt: new Date(failedAt.getTime() + this.#retryDelay(current.attempts)).toISOString() }
+              : {}),
             errorCode: errorCode(error),
             updatedAt: failedAt.toISOString(),
           }
-          appendAudit(state, auditRecord({
-            caller: current.caller,
-            recordedAt: failedAt.toISOString(),
-            accountKey: key,
-            generation,
-            operationId: current.deliveryId,
-            action: 'channel.delivery.send',
-            outcome: status,
-          }))
+          appendAudit(
+            state,
+            auditRecord({
+              caller: current.caller,
+              recordedAt: failedAt.toISOString(),
+              accountKey: key,
+              generation,
+              operationId: current.deliveryId,
+              action: 'channel.delivery.send',
+              outcome: status,
+            }),
+          )
         })
       }
       processed += 1
@@ -931,15 +1000,18 @@ export class ChannelRuntime {
       if (current.status === 'processing' || current.status === 'sent') return 'irreversible'
       if (current.status !== 'queued' && current.status !== 'retrying') return 'not-found'
       state.outbox[deliveryId] = { ...current, status: 'cancelled', updatedAt: now }
-      appendAudit(state, auditRecord({
-        caller: current.caller,
-        recordedAt: now,
-        accountKey: current.accountKey,
-        generation: current.generation,
-        operationId: deliveryId,
-        action: 'channel.delivery.cancel',
-        outcome: 'cancelled-before-claim',
-      }))
+      appendAudit(
+        state,
+        auditRecord({
+          caller: current.caller,
+          recordedAt: now,
+          accountKey: current.accountKey,
+          generation: current.generation,
+          operationId: deliveryId,
+          action: 'channel.delivery.cancel',
+          outcome: 'cancelled-before-claim',
+        }),
+      )
       return 'cancelled'
     })
   }

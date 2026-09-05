@@ -15,7 +15,13 @@ import {
 import type { CordisXPluginDependencyV1 } from '../plugin-lifecycle-contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 import type { CordisXPluginManifestV1 } from '../platform-contracts.js'
-import type { CordisXPluginManifestV4, CordisXPluginManifestV5, CordisXPluginManifestV6, CordisXPluginManifestV7, CordisXPluginManifestV8 } from '../permission-contracts.js'
+import type {
+  CordisXPluginManifestV4,
+  CordisXPluginManifestV5,
+  CordisXPluginManifestV6,
+  CordisXPluginManifestV7,
+  CordisXPluginManifestV8,
+} from '../permission-contracts.js'
 
 export interface CordisXConfigPlugin {
   readonly id: string
@@ -24,7 +30,13 @@ export interface CordisXConfigPlugin {
   readonly config: unknown
   readonly revision?: number
   readonly source?: string
-  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8
+  readonly manifest?:
+    | CordisXPluginManifestV1
+    | CordisXPluginManifestV4
+    | CordisXPluginManifestV5
+    | CordisXPluginManifestV6
+    | CordisXPluginManifestV7
+    | CordisXPluginManifestV8
   readonly package?: {
     readonly version: string
     readonly digest: `sha256:${string}`
@@ -185,11 +197,18 @@ function serviceConfiguration(
   const service = object(services[serviceId], `config.plugins.${plugin.id as string}.services.${serviceId}`)
   const profiles = object(service.profiles, `config.plugins.${plugin.id as string}.services.${serviceId}.profiles`)
   if (!Object.hasOwn(profiles, profileId)) return undefined
-  return object(profiles[profileId], `config.plugins.${plugin.id as string}.services.${serviceId}.profiles.${profileId}`).config
+  return object(
+    profiles[profileId],
+    `config.plugins.${plugin.id as string}.services.${serviceId}.profiles.${profileId}`,
+  ).config
 }
 
 /** Validate a version-1 local composition document without changing its storage envelope. */
-export function parseConfigDocument(value: unknown, configPath: string, options: LoadConfigOptions = {}): CordisXConfig {
+export function parseConfigDocument(
+  value: unknown,
+  configPath: string,
+  options: LoadConfigOptions = {},
+): CordisXConfig {
   const location = projectConfigLocation(configPath)
   const absolutePath = location.configPath
   const configRoot = location.configRoot
@@ -204,7 +223,9 @@ export function parseConfigDocument(value: unknown, configPath: string, options:
   const executable = codex.executable === undefined
     ? undefined
     : nonEmptyString(codex.executable, 'config.codex.executable')
-  if (codex.agentLoopBackend !== undefined && codex.agentLoopBackend !== 'local-cli' && codex.agentLoopBackend !== 'mock') {
+  if (
+    codex.agentLoopBackend !== undefined && codex.agentLoopBackend !== 'local-cli' && codex.agentLoopBackend !== 'mock'
+  ) {
     throw new Error('config.codex.agentLoopBackend must be local-cli or mock when provided')
   }
   if (options.profileId !== undefined && !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(options.profileId)) {
@@ -251,13 +272,13 @@ export function parseConfigDocument(value: unknown, configPath: string, options:
   const providers = runtimeValue === undefined
     ? resolveProviderConfigs(raw.providers, { rootDir: configRoot })
     : resolveCliProxyProviderConfigs(
-        parseCliProxyProviderRuntimeConfig(runtimeValue ?? CLI_PROXY_PROVIDER_RUNTIME_CONFIG_INITIAL),
-        parseCliProxyProviderStartupConfig(
-          serviceConfiguration(cliProxyPlugin!, CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID, profileId)
-            ?? CLI_PROXY_PROVIDER_STARTUP_CONFIG_INITIAL,
-        ),
-        { rootDir: configRoot },
-      )
+      parseCliProxyProviderRuntimeConfig(runtimeValue ?? CLI_PROXY_PROVIDER_RUNTIME_CONFIG_INITIAL),
+      parseCliProxyProviderStartupConfig(
+        serviceConfiguration(cliProxyPlugin!, CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID, profileId)
+          ?? CLI_PROXY_PROVIDER_STARTUP_CONFIG_INITIAL,
+      ),
+      { rootDir: configRoot },
+    )
   if (codex.agentLoopBackend === 'local-cli' && providers.some(provider => provider.id === 'codex-local')) {
     throw new Error('config.providers id codex-local is reserved by config.codex.agentLoopBackend')
   }
@@ -274,8 +295,8 @@ export function parseConfigDocument(value: unknown, configPath: string, options:
       ...(codex.agentLoopBackend === 'local-cli'
         ? { agentLoopBackend: 'local-cli' as const }
         : codex.agentLoopBackend === 'mock'
-          ? { agentLoopBackend: 'mock' as const }
-          : {}),
+        ? { agentLoopBackend: 'mock' as const }
+        : {}),
     },
     providers,
     plugins,

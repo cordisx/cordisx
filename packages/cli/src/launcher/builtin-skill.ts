@@ -1,16 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import {
-  copyFile,
-  lstat,
-  mkdir,
-  mkdtemp,
-  open,
-  readFile,
-  readdir,
-  rename,
-  rm,
-  writeFile,
-} from 'node:fs/promises'
+import { copyFile, lstat, mkdir, mkdtemp, open, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
@@ -78,7 +67,7 @@ export class CordisXSkillConflictError extends Error {
   constructor(readonly targetDir: string, detail: string) {
     super(
       `cannot install the built-in CordisX Skill because ${targetDir} ${detail}; `
-      + 'the existing directory was left unchanged',
+        + 'the existing directory was left unchanged',
     )
     this.name = 'CordisXSkillConflictError'
   }
@@ -276,7 +265,9 @@ async function adoptExactUnmanagedTarget(
     await rollbackAdoptionMarker(targetDir, markerPath, markerSource, markerIdentity)
     throw new CordisXSkillConflictError(
       targetDir,
-      `changed while CordisX was adopting its exact content (${error instanceof Error ? error.message : String(error)})`,
+      `changed while CordisX was adopting its exact content (${
+        error instanceof Error ? error.message : String(error)
+      })`,
     )
   }
 }
@@ -313,7 +304,7 @@ async function rollbackAdoptionMarker(
       throw new AggregateError(
         [new CordisXSkillConflictError(targetDir, detail), restoreError],
         `CordisX could not restore the concurrently changed adoption marker for ${targetDir}; `
-        + `the preserved marker remains at ${rollbackPath}`,
+          + `the preserved marker remains at ${rollbackPath}`,
       )
     }
     throw new CordisXSkillConflictError(targetDir, detail)

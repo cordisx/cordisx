@@ -40,21 +40,56 @@ const ABOUT_COPY = {
   },
 } as const satisfies Readonly<Record<'zh-CN' | 'en', AboutCopy>>
 
-export function AboutPage({ snapshot, router }: { readonly model: ManagerModel; readonly snapshot: ManagerSnapshot; readonly router: ManagerRouter }) {
+export function AboutPage(
+  { snapshot, router }: {
+    readonly model: ManagerModel
+    readonly snapshot: ManagerSnapshot
+    readonly router: ManagerRouter
+  },
+) {
   const locale = productLocale(snapshot.localization.locale)
   const copy = ABOUT_COPY[locale]
-  return <section className="cxr-page">
-    <div className="cxr-about-identity">
-      <AnimatedBrandMark />
-      <div className="cxr-about-copy">
-        <strong>CordisX</strong>
-        <span>{copy.version} {snapshot.version}</span>
-        <span className="cxr-about-copyright">{copy.copyright}</span>
+  return (
+    <section className="cxr-page">
+      <div className="cxr-about-identity">
+        <AnimatedBrandMark />
+        <div className="cxr-about-copy">
+          <strong>CordisX</strong>
+          <span>{copy.version} {snapshot.version}</span>
+          <span className="cxr-about-copyright">{copy.copyright}</span>
+        </div>
       </div>
-    </div>
-    <div className="cxr-list cxr-about-links">
-      {copy.links.map(([label, href, icon]) => <a key={href} className="cxr-card" href={href} target="_blank" rel="noopener noreferrer" aria-label={locale === 'zh-CN' ? `${label}（${copy.opensInNewWindow}）` : `${label} (${copy.opensInNewWindow})`}><span className="cxr-card-icon"><HostIcon token={icon} /></span><span className="cxr-card-body"><span className="cxr-card-title">{label}</span></span><HostIcon token="external-link" /></a>)}
-      <button type="button" className="cxr-card" onClick={() => router.navigate({ kind: 'about-acknowledgements' })}><span className="cxr-card-icon"><HostIcon token="acknowledgements" /></span><span className="cxr-card-body"><span className="cxr-card-title">{copy.acknowledgements}</span></span><span className="cxr-card-arrow" aria-hidden="true">›</span></button>
-    </div>
-  </section>
+      <div className="cxr-list cxr-about-links">
+        {copy.links.map(([label, href, icon]) => (
+          <a
+            key={href}
+            className="cxr-card"
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={locale === 'zh-CN'
+              ? `${label}（${copy.opensInNewWindow}）`
+              : `${label} (${copy.opensInNewWindow})`}
+          >
+            <span className="cxr-card-icon">
+              <HostIcon token={icon} />
+            </span>
+            <span className="cxr-card-body">
+              <span className="cxr-card-title">{label}</span>
+            </span>
+            <HostIcon token="external-link" />
+          </a>
+        ))}
+        <button type="button" className="cxr-card" onClick={() => router.navigate({ kind: 'about-acknowledgements' })}>
+          <span className="cxr-card-icon">
+            <HostIcon token="acknowledgements" />
+          </span>
+          <span className="cxr-card-body">
+            <span className="cxr-card-title">{copy.acknowledgements}</span>
+          </span>
+          <span className="cxr-card-arrow" aria-hidden="true">›</span>
+        </button>
+      </div>
+    </section>
+  )
 }

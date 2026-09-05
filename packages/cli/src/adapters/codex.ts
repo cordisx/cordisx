@@ -1,7 +1,7 @@
 import { chmod, mkdir } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import type { HostAdapter, ResolveLaunchPlanInput, ResolvedLaunchPlan } from './contracts.js'
+import type { HostAdapter, ResolvedLaunchPlan, ResolveLaunchPlanInput } from './contracts.js'
 import { resolveCodexExecutable } from '../launcher/process.js'
 
 function profileRoot(homeDir: string, profileId: string): string {

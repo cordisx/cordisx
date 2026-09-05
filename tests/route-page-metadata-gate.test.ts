@@ -115,7 +115,11 @@ function registrationKind(expression: ts.LeftHandSideExpression): RegistrationKi
 }
 
 function registrations(file: string, source: string, lineOffset = 0): Registration[] {
-  const scriptKind = file.endsWith('.mjs') ? ts.ScriptKind.JS : file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+  const scriptKind = file.endsWith('.mjs')
+    ? ts.ScriptKind.JS
+    : file.endsWith('.tsx')
+    ? ts.ScriptKind.TSX
+    : ts.ScriptKind.TS
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, scriptKind)
   const declarations = new Map<string, ts.Expression>()
   const result: Registration[] = []
@@ -128,17 +132,24 @@ function registrations(file: string, source: string, lineOffset = 0): Registrati
   }
   collectObjects(sourceFile)
 
-  const resolveObject = (expression: ts.Expression, seen = new Set<string>()): ts.ObjectLiteralExpression | undefined => {
+  const resolveObject = (
+    expression: ts.Expression,
+    seen = new Set<string>(),
+  ): ts.ObjectLiteralExpression | undefined => {
     if (ts.isObjectLiteralExpression(expression)) return expression
-    if (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) || ts.isSatisfiesExpression(expression)) {
+    if (
+      ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) || ts.isSatisfiesExpression(expression)
+    ) {
       return resolveObject(expression.expression, seen)
     }
-    if (ts.isCallExpression(expression)
+    if (
+      ts.isCallExpression(expression)
       && ts.isPropertyAccessExpression(expression.expression)
       && ts.isIdentifier(expression.expression.expression)
       && expression.expression.expression.text === 'Object'
       && expression.expression.name.text === 'freeze'
-      && expression.arguments[0] !== undefined) {
+      && expression.arguments[0] !== undefined
+    ) {
       return resolveObject(expression.arguments[0], seen)
     }
     if (ts.isIdentifier(expression) && !seen.has(expression.text)) {
@@ -150,7 +161,7 @@ function registrations(file: string, source: string, lineOffset = 0): Registrati
 
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
-        const kind = registrationKind(node.expression)
+      const kind = registrationKind(node.expression)
       if (kind !== undefined) {
         const input = node.arguments[0]
         const metadata = input === undefined ? undefined : resolveObject(input)
@@ -193,7 +204,9 @@ function registrations(file: string, source: string, lineOffset = 0): Registrati
   return result
 }
 
-async function bundledRegistrations(): Promise<{ readonly items: readonly Registration[]; readonly sources: ReadonlyMap<string, string> }> {
+async function bundledRegistrations(): Promise<
+  { readonly items: readonly Registration[]; readonly sources: ReadonlyMap<string, string> }
+> {
   const discovered = (await Promise.all(bundledRoots.map(sourceFiles))).flat()
   const files = [...new Set([...discovered, ...bundledFiles])].sort()
   const sources = new Map<string, string>()
@@ -224,30 +237,59 @@ describe('bundled route/page product metadata gate', () => {
     for (const item of items) {
       const expectedSchema = item.kind === 'page' ? 'CORDISX_PAGE_SCHEMA_V3' : 'CORDISX_ROUTE_SCHEMA_V2'
       const expectedVersion = item.kind === 'page' ? '3' : '2'
-      expect.soft(item.schemaExpression, `${item.file}:${item.line} ${item.kind} ${item.id} uses the wrong protocol schema`).toBe(expectedSchema)
-      expect.soft(item.versionExpression, `${item.file}:${item.line} ${item.kind} ${item.id} uses the wrong schemaVersion`).toBe(expectedVersion)
-      expect.soft(item.fields.has('title'), `${item.file}:${item.line} ${item.kind} ${item.id} is missing title`).toBe(true)
-      expect.soft(item.fields.has('description'), `${item.file}:${item.line} ${item.kind} ${item.id} is missing description`).toBe(true)
+      expect.soft(
+        item.schemaExpression,
+        `${item.file}:${item.line} ${item.kind} ${item.id} uses the wrong protocol schema`,
+      ).toBe(expectedSchema)
+      expect.soft(
+        item.versionExpression,
+        `${item.file}:${item.line} ${item.kind} ${item.id} uses the wrong schemaVersion`,
+      ).toBe(expectedVersion)
+      expect.soft(item.fields.has('title'), `${item.file}:${item.line} ${item.kind} ${item.id} is missing title`).toBe(
+        true,
+      )
+      expect.soft(
+        item.fields.has('description'),
+        `${item.file}:${item.line} ${item.kind} ${item.id} is missing description`,
+      ).toBe(true)
       if (item.kind === 'page') {
-        expect.soft(item.fields.has('localeNamespace'), `${item.file}:${item.line} page.v3 ${item.id} retains legacy localeNamespace`).toBe(false)
+        expect.soft(
+          item.fields.has('localeNamespace'),
+          `${item.file}:${item.line} page.v3 ${item.id} retains legacy localeNamespace`,
+        ).toBe(false)
       }
       const source = sources.get(item.file)!
       expect.soft(/locale:\s*['"]en['"]/.test(source), `${item.file} has no real English catalog`).toBe(true)
-      expect.soft(/locale:\s*['"]zh-CN['"]/.test(source), `${item.file} has no real Simplified Chinese catalog`).toBe(true)
+      expect.soft(/locale:\s*['"]zh-CN['"]/.test(source), `${item.file} has no real Simplified Chinese catalog`).toBe(
+        true,
+      )
     }
   })
 
   it('keeps route and page purpose metadata distinct for the same destination', async () => {
     const { items } = await bundledRegistrations()
     for (const route of items.filter(item => item.kind === 'route')) {
-      const page = items.find(item => item.kind === 'page' && item.file === route.file && item.id === (route.pageId ?? route.id))
-      expect.soft(page, `${route.file}:${route.line} route ${route.id} has no same-file page registration for ${route.pageId ?? route.id}`).toBeDefined()
+      const page = items.find(item =>
+        item.kind === 'page' && item.file === route.file && item.id === (route.pageId ?? route.id)
+      )
+      expect.soft(
+        page,
+        `${route.file}:${route.line} route ${route.id} has no same-file page registration for ${
+          route.pageId ?? route.id
+        }`,
+      ).toBeDefined()
       if (page === undefined) continue
       if (route.titleExpression !== undefined && page.titleExpression !== undefined) {
-        expect.soft(route.titleExpression, `${route.file}:${route.line} route ${route.id} reuses its page title message`).not.toBe(page.titleExpression)
+        expect.soft(
+          route.titleExpression,
+          `${route.file}:${route.line} route ${route.id} reuses its page title message`,
+        ).not.toBe(page.titleExpression)
       }
       if (route.descriptionExpression !== undefined && page.descriptionExpression !== undefined) {
-        expect.soft(route.descriptionExpression, `${route.file}:${route.line} route ${route.id} reuses its page description message`).not.toBe(page.descriptionExpression)
+        expect.soft(
+          route.descriptionExpression,
+          `${route.file}:${route.line} route ${route.id} reuses its page description message`,
+        ).not.toBe(page.descriptionExpression)
       }
     }
   })

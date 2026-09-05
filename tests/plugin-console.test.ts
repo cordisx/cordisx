@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  PluginConsoleAspect,
   formatConsoleMessage,
-  snapshotConsoleValue,
+  PluginConsoleAspect,
   type PluginPrincipalToken,
+  snapshotConsoleValue,
 } from '../packages/cli/src/renderer/plugin-console.js'
 
 const alpha = { source: 'file:///alpha.ts', id: 'alpha' } as const
@@ -14,8 +14,18 @@ describe('plugin DevTools Console aspect', () => {
     const circular: Record<string, unknown> = { value: 1n }
     circular.self = circular
     let getterReads = 0
-    const getter = Object.defineProperty({}, 'secret', { enumerable: true, get: () => { getterReads += 1; return 'no' } })
-    const hostile = new Proxy({}, { ownKeys: () => { throw new Error('proxy trap') } })
+    const getter = Object.defineProperty({}, 'secret', {
+      enumerable: true,
+      get: () => {
+        getterReads += 1
+        return 'no'
+      },
+    })
+    const hostile = new Proxy({}, {
+      ownKeys: () => {
+        throw new Error('proxy trap')
+      },
+    })
     const snapshots = [
       snapshotConsoleValue('x=%d %s %%'),
       snapshotConsoleValue(4),
@@ -103,14 +113,18 @@ describe('plugin DevTools Console aspect', () => {
     expect(aspect.query(alpha)).toMatchObject({ generation: 'alpha-new' })
     expect(aspect.query(alpha).entries.map(entry => entry.message)).toEqual(['candidate readiness'])
     expect(notifications).toEqual(['alpha'])
-    expect(() => aspect.runSync(oldToken, 'stale.command', {}, () => undefined)).toThrow(/principal generation is stale/)
+    expect(() => aspect.runSync(oldToken, 'stale.command', {}, () => undefined)).toThrow(
+      /principal generation is stale/,
+    )
 
     active = 'alpha-old'
     callable.add('alpha-old')
     callable.delete('alpha-new')
     aspect.visibilityChanged(['alpha'])
     expect(aspect.query(alpha).entries.map(entry => entry.message)).toEqual(['old live'])
-    expect(() => aspect.runSync(candidateToken, 'rolled-back.command', {}, () => undefined)).toThrow(/principal generation is stale/)
+    expect(() => aspect.runSync(candidateToken, 'rolled-back.command', {}, () => undefined)).toThrow(
+      /principal generation is stale/,
+    )
   })
 
   it('omits an ambiguous correlation instead of cross-linking concurrent async work', async () => {
@@ -118,9 +132,18 @@ describe('plugin DevTools Console aspect', () => {
     const token = aspect.issue(alpha, 'runtime-1:alpha:1')
     const facade = aspect.consoleFacade(token)
     let release!: () => void
-    const gate = new Promise<void>(resolve => { release = resolve })
-    const first = aspect.run(token, 'platform.tasks.list', {}, async () => { await gate; facade.info('first'); return { ok: true } })
-    const second = aspect.run(token, 'platform.models.list', {}, async () => { facade.info('overlap'); return { ok: true } })
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
+    const first = aspect.run(token, 'platform.tasks.list', {}, async () => {
+      await gate
+      facade.info('first')
+      return { ok: true }
+    })
+    const second = aspect.run(token, 'platform.models.list', {}, async () => {
+      facade.info('overlap')
+      return { ok: true }
+    })
     await second
     release()
     await first

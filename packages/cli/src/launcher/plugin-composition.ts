@@ -24,9 +24,11 @@ export async function loadPluginComposition(
     const item = byId.get(id)!
     const staged = await loadStagedPluginPackage(store.homeDir, item.digest)
     const configuration = await configs.load(item.id)
-    if (staged.manifest.id !== item.id
+    if (
+      staged.manifest.id !== item.id
       || staged.manifest.version !== item.version
-      || JSON.stringify(staged.manifest.dependencies) !== JSON.stringify(item.dependencies)) {
+      || JSON.stringify(staged.manifest.dependencies) !== JSON.stringify(item.dependencies)
+    ) {
       throw new Error(`active plugin package metadata failed readback for ${item.id}`)
     }
     output.push({

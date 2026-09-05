@@ -1,20 +1,20 @@
-import { Context, Service, type Disposable, type Effect } from '@deepseek-ai/cordis'
+import { Context, type Disposable, type Effect, Service } from '@deepseek-ai/cordis'
 import IntlMessageFormat from 'intl-messageformat'
 import type {
   CordisXI18n,
   CordisXLocaleCatalog,
-  CordisXLocalizedProjection,
-  CordisXLocalizedText,
   CordisXLocalizationDiagnostic,
   CordisXLocalizationSeat,
   CordisXLocalizationSnapshot,
-  CordisXMessageParams,
+  CordisXLocalizedProjection,
+  CordisXLocalizedText,
   CordisXMessageDefinition,
+  CordisXMessageParams,
 } from '../contracts.js'
 import { ownerFromContext } from './ownership.js'
 import {
-  generationVisibilityFromContext,
   type GenerationVisibilityCoordinator,
+  generationVisibilityFromContext,
   type PluginGenerationEffectIdentity,
   type PluginGenerationView,
 } from './generation-visibility.js'
@@ -164,22 +164,29 @@ function normalizeMessage(value: unknown): NormalizedMessage {
 
   let params: Record<string, string | number | boolean | null> | undefined
   if (raw.params !== undefined) {
-    const prototype = raw.params === null || typeof raw.params !== 'object' ? undefined : Object.getPrototypeOf(raw.params)
-    const constructor = prototype === null || prototype === undefined || !Object.prototype.hasOwnProperty.call(prototype, 'constructor')
+    const prototype = raw.params === null || typeof raw.params !== 'object'
       ? undefined
-      : (prototype as { constructor?: unknown }).constructor
-    if (raw.params === null || typeof raw.params !== 'object' || Array.isArray(raw.params)
+      : Object.getPrototypeOf(raw.params)
+    const constructor =
+      prototype === null || prototype === undefined || !Object.prototype.hasOwnProperty.call(prototype, 'constructor')
+        ? undefined
+        : (prototype as { constructor?: unknown }).constructor
+    if (
+      raw.params === null || typeof raw.params !== 'object' || Array.isArray(raw.params)
       || Object.prototype.toString.call(raw.params) !== '[object Object]'
-      || (constructor !== undefined && (typeof constructor !== 'function' || constructor.name !== 'Object'))) {
+      || (constructor !== undefined && (typeof constructor !== 'function' || constructor.name !== 'Object'))
+    ) {
       valid = false
     } else {
       const entries = Object.entries(raw.params as Record<string, unknown>)
       if (entries.length > 32) valid = false
       params = {}
       for (const [name, item] of entries.sort(([left], [right]) => left.localeCompare(right))) {
-        if (!/^[a-z][a-zA-Z0-9]*$/.test(name)
+        if (
+          !/^[a-z][a-zA-Z0-9]*$/.test(name)
           || (item !== null && !['string', 'number', 'boolean'].includes(typeof item))
-          || (typeof item === 'number' && !Number.isFinite(item))) {
+          || (typeof item === 'number' && !Number.isFinite(item))
+        ) {
           valid = false
           continue
         }
@@ -260,7 +267,9 @@ export class LocalizationRegistry {
     if (catalog.default === true && defaults !== undefined) {
       for (const [otherLocale, stack] of defaults) {
         if (otherLocale === locale) continue
-        if (stack.some(record => record.default && (this.visibility?.visible(record.generation, candidateView) ?? true))) {
+        if (
+          stack.some(record => record.default && (this.visibility?.visible(record.generation, candidateView) ?? true))
+        ) {
           throw new Error(`locale namespace ${namespace} already has a live default dictionary`)
         }
       }
@@ -309,12 +318,19 @@ export class LocalizationRegistry {
 
   hasNamespace(owner: string, namespace: string, view?: PluginGenerationView): boolean {
     const catalogs = this.records.get(qualifyNamespace(owner, namespace))
-    return catalogs !== undefined && [...catalogs.values()].some(stack => stack.some(record => (
-      this.visibility?.visible(record.generation, view) ?? true
-    )))
+    return catalogs !== undefined && [...catalogs.values()].some(stack =>
+      stack.some(record => (
+        this.visibility?.visible(record.generation, view) ?? true
+      ))
+    )
   }
 
-  resolve(owner: string, message: CordisXLocalizedText, diagnosticSite?: string, view?: PluginGenerationView): CordisXLocalizedProjection {
+  resolve(
+    owner: string,
+    message: CordisXLocalizedText,
+    diagnosticSite?: string,
+    view?: PluginGenerationView,
+  ): CordisXLocalizedProjection {
     if (this.disposed) throw new Error('CordisX localization registry is disposed')
     const normalized = normalizeMessage(message)
     const safeMessage = normalized.message
@@ -353,8 +369,11 @@ export class LocalizationRegistry {
     const active = [...localeMap.values()]
       .map(stack => [...stack].reverse().find(record => this.visibility?.visible(record.generation, view) ?? true))
       .filter((item): item is CatalogRecord => item !== undefined)
-    const defaultRecord = active.filter(record => record.default).sort((left, right) => right.sequence - left.sequence)[0]
-    const candidates = [...new Set([current, language, defaultRecord?.locale].filter((item): item is string => item !== undefined))]
+    const defaultRecord =
+      active.filter(record => record.default).sort((left, right) => right.sequence - left.sequence)[0]
+    const candidates = [
+      ...new Set([current, language, defaultRecord?.locale].filter((item): item is string => item !== undefined)),
+    ]
     let record: CatalogRecord | undefined
     let formatter: IntlMessageFormat | undefined
     for (const locale of candidates) {
@@ -379,7 +398,9 @@ export class LocalizationRegistry {
 
     try {
       const text = String(formatter.format(safeMessage.params ?? {}))
-      if (view?.transactionId === undefined && this.diagnosticRecords.delete(diagnosticKey)) this.scheduleDiagnosticNotification()
+      if (view?.transactionId === undefined && this.diagnosticRecords.delete(diagnosticKey)) {
+        this.scheduleDiagnosticNotification()
+      }
       return { text, namespace, key: safeMessage.key, locale: record.locale }
     } catch {
       return diagnostic({
@@ -421,7 +442,9 @@ export class LocalizationRegistry {
         }
       }
     }
-    return result.sort((left, right) => left.namespace.localeCompare(right.namespace) || left.locale.localeCompare(right.locale))
+    return result.sort((left, right) =>
+      left.namespace.localeCompare(right.namespace) || left.locale.localeCompare(right.locale)
+    )
   }
 
   dispose(): void {
@@ -507,7 +530,10 @@ export class CordisXI18nService extends Service implements CordisXI18n {
   define<Messages extends CordisXMessageDefinition<Messages>>(
     catalog: CordisXLocaleCatalog<Messages>,
   ): ReturnType<CordisXI18n['define']> {
-    return this.ctx.effect(() => this.registry.define(this.ctx, catalog), `i18n.define(${JSON.stringify(catalog.namespace)}, ${JSON.stringify(catalog.locale)})`)
+    return this.ctx.effect(
+      () => this.registry.define(this.ctx, catalog),
+      `i18n.define(${JSON.stringify(catalog.namespace)}, ${JSON.stringify(catalog.locale)})`,
+    )
   }
 
   inject<Messages extends CordisXMessageDefinition<Messages>>(
@@ -525,7 +551,12 @@ export class CordisXI18nService extends Service implements CordisXI18n {
 
   seat<Messages extends CordisXMessageDefinition<Messages>>(namespace?: string): CordisXLocalizationSeat<Messages> {
     const owner = ownerFromContext(this.ctx)
-    return this.createSeat<Messages>(owner, namespace ?? owner, undefined, generationVisibilityFromContext(this.ctx)?.view(this.ctx))
+    return this.createSeat<Messages>(
+      owner,
+      namespace ?? owner,
+      undefined,
+      generationVisibilityFromContext(this.ctx)?.view(this.ctx),
+    )
   }
 
   resolve(message: CordisXLocalizedText): CordisXLocalizedProjection {
@@ -611,42 +642,53 @@ export class CordisXI18nService extends Service implements CordisXI18n {
     }
     const seat: CordisXLocalizationSeat<Messages> = {
       namespace: qualified,
-      t: (key, ...args) => this.registry.resolve(owner, {
-        ...(messageNamespace === undefined ? {} : { namespace: messageNamespace }),
-        key,
-        ...(args[0] === undefined ? {} : { params: args[0] }),
-      }, undefined, view).text,
+      t: (key, ...args) =>
+        this.registry.resolve(
+          owner,
+          {
+            ...(messageNamespace === undefined ? {} : { namespace: messageNamespace }),
+            key,
+            ...(args[0] === undefined ? {} : { params: args[0] }),
+          },
+          undefined,
+          view,
+        ).text,
       message: messageFor,
       getSnapshot: () => this.registry.getSnapshot(),
       subscribe: listener => own(() => this.registry.subscribe(listener)),
-      effect: setup => own(() => {
-        let cleanup: (() => void) | undefined
-        const project = (): void => {
-          cleanup?.()
-          const result = setup(this.registry.getSnapshot())
-          cleanup = typeof result === 'function' ? result : undefined
-        }
-        project()
-        const unsubscribe = this.registry.subscribe(project)
-        return () => {
-          unsubscribe()
-          cleanup?.()
-        }
-      }),
-      bindText: (node, message) => seat.effect(() => {
-        const previous = node.textContent
-        node.textContent = this.registry.resolve(owner, message, undefined, view).text
-        return () => { node.textContent = previous }
-      }),
-      bindAttribute: (element, name, message) => seat.effect(() => {
-        const present = element.hasAttribute(name)
-        const previous = element.getAttribute(name)
-        element.setAttribute(name, this.registry.resolve(owner, message, undefined, view).text)
-        return () => {
-          if (present) element.setAttribute(name, previous ?? '')
-          else element.removeAttribute(name)
-        }
-      }),
+      effect: setup =>
+        own(() => {
+          let cleanup: (() => void) | undefined
+          const project = (): void => {
+            cleanup?.()
+            const result = setup(this.registry.getSnapshot())
+            cleanup = typeof result === 'function' ? result : undefined
+          }
+          project()
+          const unsubscribe = this.registry.subscribe(project)
+          return () => {
+            unsubscribe()
+            cleanup?.()
+          }
+        }),
+      bindText: (node, message) =>
+        seat.effect(() => {
+          const previous = node.textContent
+          node.textContent = this.registry.resolve(owner, message, undefined, view).text
+          return () => {
+            node.textContent = previous
+          }
+        }),
+      bindAttribute: (element, name, message) =>
+        seat.effect(() => {
+          const present = element.hasAttribute(name)
+          const previous = element.getAttribute(name)
+          element.setAttribute(name, this.registry.resolve(owner, message, undefined, view).text)
+          return () => {
+            if (present) element.setAttribute(name, previous ?? '')
+            else element.removeAttribute(name)
+          }
+        }),
     }
     return seat
   }

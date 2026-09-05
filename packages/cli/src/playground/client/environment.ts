@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { HostThemeProjection, resolveHostTheme, type HostAppTheme } from '../../renderer/host-theme.js'
+import { type HostAppTheme, HostThemeProjection, resolveHostTheme } from '../../renderer/host-theme.js'
 import { DocumentLocaleAdapter } from '../../renderer/i18n.js'
 
 export type PlaygroundThemePreference = 'system' | 'light' | 'dark'
@@ -24,7 +24,8 @@ class PlaygroundEnvironmentService {
   constructor() {
     const storedTheme = localStorage.getItem(THEME_KEY)
     const storedLocale = localStorage.getItem(LOCALE_KEY)
-    const preference: PlaygroundThemePreference = storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system' ? storedTheme : 'system'
+    const preference: PlaygroundThemePreference =
+      storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system' ? storedTheme : 'system'
     const locale: PlaygroundLocale = storedLocale === 'en' ? 'en' : 'zh-CN'
     document.documentElement.dataset.pgThemePreference = preference
     document.documentElement.lang = locale
@@ -36,8 +37,13 @@ class PlaygroundEnvironmentService {
   }
 
   getSnapshot = (): PlaygroundEnvironmentSnapshot => this.snapshot
-  subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener) }
-  attachTheme(root: HTMLElement): () => void { return this.theme.attach(root) }
+  subscribe = (listener: () => void): () => void => {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+  attachTheme(root: HTMLElement): () => void {
+    return this.theme.attach(root)
+  }
 
   setTheme(preference: PlaygroundThemePreference): void {
     localStorage.setItem(THEME_KEY, preference)
@@ -73,7 +79,9 @@ class PlaygroundEnvironmentService {
 
   private read(): PlaygroundEnvironmentSnapshot {
     const rawPreference = document.documentElement.dataset.pgThemePreference
-    const themePreference: PlaygroundThemePreference = rawPreference === 'light' || rawPreference === 'dark' ? rawPreference : 'system'
+    const themePreference: PlaygroundThemePreference = rawPreference === 'light' || rawPreference === 'dark'
+      ? rawPreference
+      : 'system'
     return Object.freeze({
       themePreference,
       theme: resolveHostTheme(document).theme,
@@ -83,7 +91,10 @@ class PlaygroundEnvironmentService {
 
   private readonly publish = (): void => {
     const next = this.read()
-    if (next.themePreference === this.snapshot.themePreference && next.theme === this.snapshot.theme && next.locale === this.snapshot.locale) return
+    if (
+      next.themePreference === this.snapshot.themePreference && next.theme === this.snapshot.theme
+      && next.locale === this.snapshot.locale
+    ) return
     this.snapshot = next
     for (const listener of this.listeners) listener()
   }

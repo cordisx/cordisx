@@ -47,12 +47,12 @@ diagnostic instead of a blank surface or simulated editor.
 The formal Protocol v1 catalog is shared by Manager, object-array dialog/page
 editors, and UI Playground:
 
-| Descriptor shape | v1 tokens | fallback |
-| --- | --- | --- |
-| finite scalar choice | `choice.select`, `choice.radio`, `choice.segmented` | Select |
-| bounded number | `number.input`, `number.stepper`, `number.slider` | NumberInput |
-| bounded scalar array | `array.scalar-tags`, `array.scalar-rows` | TagInput / multiple Select |
-| bounded object array | `array.object-auto`, `array.object-dialog`, `array.object-page` | compact Host collection |
+| Descriptor shape     | v1 tokens                                                       | fallback                   |
+| -------------------- | --------------------------------------------------------------- | -------------------------- |
+| finite scalar choice | `choice.select`, `choice.radio`, `choice.segmented`             | Select                     |
+| bounded number       | `number.input`, `number.stepper`, `number.slider`               | NumberInput                |
+| bounded scalar array | `array.scalar-tags`, `array.scalar-rows`                        | TagInput / multiple Select |
+| bounded object array | `array.object-auto`, `array.object-dialog`, `array.object-page` | compact Host collection    |
 
 Layout is also a catalog decision. Inputs, textareas, paths, date/time/color
 and Select fill the control column. Number steppers, slider/value pairs,
@@ -71,12 +71,12 @@ dependency license records is needed.
 
 ## Requirement ledger
 
-| Capability | State | Evidence / next gate |
-| --- | --- | --- |
-| Protocol `formPresentation` v1 | formally merged | `cordisx-protocol#43`, `17dda260` |
-| Core package normalize/resolve/draft API | implemented | package build, tarball allowlist, and package-level tests required before Host PR |
-| CLI/Manager/Playground consume one resolver | implemented | CLI adapter imports package; real isolated smoke still required |
-| TDesign recursive object-array dialog | implemented | shared parent draft callback; focused lifecycle/keyboard tests still required |
-| Object-array page chrome and dynamic unions | unimplemented | requires Manager navigation adapter and formal schema projection; cannot be represented as dialog success |
-| Generic map/set/dict/tuple editors | unimplemented | current Host has an explicit bounded fallback/diagnostic, not a false structured editor |
-| Full gallery and formal Host merge | unimplemented | requires current-main rebase, full gates, isolated `app://`, PR/CI/head-fenced merge |
+| Capability                                  | State           | Evidence / next gate                                                                                      |
+| ------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------- |
+| Protocol `formPresentation` v1              | formally merged | `cordisx-protocol#43`, `17dda260`                                                                         |
+| Core package normalize/resolve/draft API    | implemented     | package build, tarball allowlist, and package-level tests required before Host PR                         |
+| CLI/Manager/Playground consume one resolver | implemented     | CLI adapter imports package; real isolated smoke still required                                           |
+| TDesign recursive object-array dialog       | implemented     | shared parent draft callback; focused lifecycle/keyboard tests still required                             |
+| Object-array page chrome and dynamic unions | unimplemented   | requires Manager navigation adapter and formal schema projection; cannot be represented as dialog success |
+| Generic map/set/dict/tuple editors          | unimplemented   | current Host has an explicit bounded fallback/diagnostic, not a false structured editor                   |
+| Full gallery and formal Host merge          | unimplemented   | requires current-main rebase, full gates, isolated `app://`, PR/CI/head-fenced merge                      |

@@ -1,4 +1,4 @@
-import { Context, Service, type Effect } from '@deepseek-ai/cordis'
+import { Context, type Effect, Service } from '@deepseek-ai/cordis'
 import {
   CORDISX_IMPLEMENTED_SURFACE_NAMES,
   CORDISX_SURFACE_NAMES,
@@ -6,20 +6,23 @@ import {
   type CordisXContributionHandle,
   type CordisXContributionOptions,
   type CordisXContributionPresentationOptions,
-  type CordisXExtensionPointControlCandidateSnapshotV1,
-  type CordisXExtensionPointControlAuthorizationV1,
-  type CordisXExtensionPointControlClaimOptions,
-  type CordisXExtensionPointControlDeclarationV1,
-  type CordisXExtensionPointControlLease,
   type CordisXDisabledState,
-  type CordisXExtensionPointCurrentContextState,
   type CordisXEnvironmentRow,
   type CordisXEnvironmentRowAction,
   type CordisXEnvironmentSection,
   type CordisXEnvironmentSectionAction,
+  type CordisXExtensionPointControlAuthorizationV1,
+  type CordisXExtensionPointControlCandidateSnapshotV1,
+  type CordisXExtensionPointControlClaimOptions,
+  type CordisXExtensionPointControlDeclarationV1,
+  type CordisXExtensionPointControlLease,
+  type CordisXExtensionPointCurrentContextState,
   type CordisXIconToken,
+  type CordisXLocalizedText,
+  type CordisXManagerSettingsContentTabItem,
+  type CordisXManagerSettingsNavigationItem,
   type CordisXNavigationAction,
-  type CordisXNavigationItem,
+  type CordisXNavigationCollectionAction,
   type CordisXNavigationCollectionItem,
   type CordisXNavigationCollectionItemV2,
   type CordisXNavigationCollectionItemV3,
@@ -34,52 +37,49 @@ import {
   type CordisXNavigationCollectionSource,
   type CordisXNavigationCollectionSourceV2,
   type CordisXNavigationCollectionSourceV3,
-  type CordisXNavigationCollectionAction,
-  type CordisXManagerSettingsContentTabItem,
-  type CordisXManagerSettingsNavigationItem,
-  type CordisXLocalizedText,
+  type CordisXNavigationItem,
+  type CordisXPresenterItem,
+  type CordisXReasoningIntensityPresentation,
+  type CordisXSessionBackdropPresentation,
   type CordisXSlots,
   type CordisXStructuredAction,
   type CordisXSurfaceMap,
   type CordisXSurfaceName,
-  type CordisXTransientCanvasPresentation,
   type CordisXTabItem,
-  type CordisXPresenterItem,
-  type CordisXReasoningIntensityPresentation,
-  type CordisXSessionBackdropPresentation,
   type CordisXToolbarItem,
+  type CordisXTransientCanvasPresentation,
   type CordisXWhen,
 } from '../contracts.js'
 import { cloneRasterImageSnapshot } from './raster-image.js'
 import { generationFromContext, ownerFromContext, qualifyOwnedId, sourceFromContext } from './ownership.js'
 import {
   ControlledSurfaceCoordinator,
-  normalizeControlledSurfaceDeclaration,
-  type ControlledSurfaceGroupChoice,
   type ControlledSurfaceGeneration,
+  type ControlledSurfaceGroupChoice,
   type ControlledSurfaceManagerSnapshot,
   type ControlledSurfaceRegistrationHandle,
+  normalizeControlledSurfaceDeclaration,
 } from './controlled-surfaces.js'
 import {
-  generationVisibilityFromContext,
   type GenerationVisibilityCoordinator,
-  type PluginGenerationParticipantTransition,
+  generationVisibilityFromContext,
   type PluginGenerationEffectIdentity,
+  type PluginGenerationParticipantTransition,
   type PluginGenerationView,
 } from './generation-visibility.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
 import type { PluginConsoleAspect } from './plugin-console.js'
 import {
-  HostContextStore,
-  ICON_TOKEN_PATTERN,
-  assertWhenExpression,
   assertLocalId,
   assertLocalizedText,
   assertReference,
+  assertWhenExpression,
+  type CordisXContextValues,
   evaluateWhen,
+  HostContextStore,
+  ICON_TOKEN_PATTERN,
   immutableSnapshot,
   whenContextKeys,
-  type CordisXContextValues,
 } from './validation.js'
 
 export const CORDISX_HOST_ICON_TOKENS = [
@@ -202,7 +202,9 @@ function assertKeys(value: object, allowed: readonly string[], label: string): v
 function assertIcon(icon: CordisXIconToken | undefined, label: string): void {
   if (icon === undefined) return
   if (!ICON_TOKEN_PATTERN.test(icon)) throw new Error(`${label} has an invalid host icon token`)
-  if (!(CORDISX_HOST_ICON_TOKENS as readonly string[]).includes(icon)) throw new Error(`${label} uses unknown host icon token ${icon}`)
+  if (!(CORDISX_HOST_ICON_TOKENS as readonly string[]).includes(icon)) {
+    throw new Error(`${label} uses unknown host icon token ${icon}`)
+  }
 }
 
 function assertCommand(reference: CordisXCommandReference, label: string): void {
@@ -211,7 +213,10 @@ function assertCommand(reference: CordisXCommandReference, label: string): void 
   assertKeys(reference, ['id', 'arguments'], `${label} command`)
 }
 
-function assertRoute(reference: { readonly id: string; readonly params?: Readonly<Record<string, unknown>> }, label: string): void {
+function assertRoute(
+  reference: { readonly id: string; readonly params?: Readonly<Record<string, unknown>> },
+  label: string,
+): void {
   if (reference === null || typeof reference !== 'object') throw new Error(`${label} requires a route reference`)
   assertReference(reference.id, `${label} route id`)
   assertKeys(reference, ['id', 'params'], `${label} route`)
@@ -234,7 +239,9 @@ function assertAction(action: CordisXStructuredAction, label: string): void {
   assertLocalizedText(action.label, `${label} label`)
   if (action.ariaLabel !== undefined) assertLocalizedText(action.ariaLabel, `${label} ariaLabel`)
   assertIcon(action.icon, label)
-  if (action.command === undefined && action.route === undefined) throw new Error(`${label} requires a command or route reference`)
+  if (action.command === undefined && action.route === undefined) {
+    throw new Error(`${label} requires a command or route reference`)
+  }
   if (action.command !== undefined) assertCommand(action.command, label)
   if (action.route !== undefined) assertRoute(action.route, label)
   if (action.routeBehavior !== undefined && !['navigate', 'toggle'].includes(action.routeBehavior)) {
@@ -268,15 +275,21 @@ function cloneNavigationCollectionActions(
       throw new Error(`${actionLabel} must be an object`)
     }
     const common = ['kind', 'id', 'label', 'ariaLabel', 'icon', 'placement', 'tone', 'pressed', 'disabled', 'feedback']
-    assertKeys(action, action.kind === 'command'
-      ? [...common, 'command', 'confirmation']
-      : action.kind === 'copy-text'
+    assertKeys(
+      action,
+      action.kind === 'command'
+        ? [...common, 'command', 'confirmation']
+        : action.kind === 'copy-text'
         ? [...common, 'text']
-        : common, actionLabel)
+        : common,
+      actionLabel,
+    )
     assertLocalId(action.id, `${actionLabel} id`)
     if (ids.has(action.id)) throw new Error(`${label} has duplicate action ${action.id}`)
     ids.add(action.id)
-    if (!['command', 'copy-route-link', 'copy-text'].includes(action.kind)) throw new Error(`${actionLabel}.kind is invalid`)
+    if (!['command', 'copy-route-link', 'copy-text'].includes(action.kind)) {
+      throw new Error(`${actionLabel}.kind is invalid`)
+    }
     assertLocalizedText(action.label, `${actionLabel} label`)
     if (action.ariaLabel !== undefined) assertLocalizedText(action.ariaLabel, `${actionLabel} ariaLabel`)
     assertIcon(action.icon as CordisXIconToken | undefined, actionLabel)
@@ -296,7 +309,9 @@ function cloneNavigationCollectionActions(
     if (action.kind === 'command') {
       assertCommand(action.command as CordisXCommandReference, actionLabel)
       if (action.confirmation !== undefined) {
-        if (action.confirmation === null || typeof action.confirmation !== 'object' || Array.isArray(action.confirmation)) {
+        if (
+          action.confirmation === null || typeof action.confirmation !== 'object' || Array.isArray(action.confirmation)
+        ) {
           throw new Error(`${actionLabel}.confirmation must be an object`)
         }
         assertKeys(action.confirmation, ['title', 'description', 'confirmLabel'], `${actionLabel}.confirmation`)
@@ -323,16 +338,24 @@ function assertPresentationOptions(
   options: CordisXContributionPresentationOptions,
 ): void {
   assertKeys(options, ['group', 'order', 'when', 'disabled'], 'surface contribution presentation options')
-  if ((surface === 'manager.settings.tabs' || surface === 'composer.reasoning-intensity' || surface === 'session.backdrop' || surface === 'composer.submit.effects') && options.group !== undefined) {
+  if (
+    (surface === 'manager.settings.tabs' || surface === 'composer.reasoning-intensity' || surface === 'session.backdrop'
+      || surface === 'composer.submit.effects') && options.group !== undefined
+  ) {
     throw new Error(`${surface} does not accept a contribution group`)
   }
-  if (surface === 'manager.settings.navigation-items'
+  if (
+    surface === 'manager.settings.navigation-items'
     && options.group !== 'before-settings'
-    && options.group !== 'after-settings') {
+    && options.group !== 'after-settings'
+  ) {
     throw new Error('manager.settings.navigation-items requires group before-settings or after-settings')
   }
   if (options.group !== undefined) assertLocalId(options.group, 'surface contribution group')
-  if (options.order !== undefined && (!Number.isInteger(options.order) || options.order < -100000 || options.order > 100000)) {
+  if (
+    options.order !== undefined
+    && (!Number.isInteger(options.order) || options.order < -100000 || options.order > 100000)
+  ) {
     throw new Error('surface contribution order is invalid')
   }
   assertWhenExpression(options.when)
@@ -343,12 +366,20 @@ function assertControlOptions(control: CordisXExtensionPointControlClaimOptions 
   if (control === undefined) return
   assertKeys(control, ['claimId', 'mode', 'priority', 'requestedBindings'], 'surface control claim')
   assertLocalId(control.claimId, 'surface control claim id')
-  if (!['compose', 'replace', 'overlay', 'proxy', 'hide-native'].includes(control.mode)) throw new Error('surface control mode is invalid')
-  if (control.priority !== undefined && (!Number.isInteger(control.priority) || control.priority < -100000 || control.priority > 100000)) throw new Error('surface control priority is invalid')
+  if (!['compose', 'replace', 'overlay', 'proxy', 'hide-native'].includes(control.mode)) {
+    throw new Error('surface control mode is invalid')
+  }
+  if (
+    control.priority !== undefined
+    && (!Number.isInteger(control.priority) || control.priority < -100000 || control.priority > 100000)
+  ) throw new Error('surface control priority is invalid')
   if (control.requestedBindings !== undefined) {
     assertKeys(control.requestedBindings, ['properties', 'commands', 'events'], 'surface control requested bindings')
     for (const [kind, values] of Object.entries(control.requestedBindings)) {
-      if (!Array.isArray(values) || values.some(value => typeof value !== 'string') || new Set(values).size !== values.length) {
+      if (
+        !Array.isArray(values) || values.some(value => typeof value !== 'string')
+        || new Set(values).size !== values.length
+      ) {
         throw new Error(`surface control ${kind} bindings are invalid`)
       }
     }
@@ -360,7 +391,8 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
   if (snapshot === null || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
     throw new Error(`surface ${surface} requires a structured object item`)
   }
-  if (surface === 'sidebar.footer.before-control'
+  if (
+    surface === 'sidebar.footer.before-control'
     || surface === 'sidebar.footer.after-control'
     || surface === 'sidebar.footer.menu'
     || surface === 'sidebar.account.menu'
@@ -373,7 +405,8 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
     || surface === 'session.tool.actions'
     || surface === 'composer.command-menu.items'
     || surface === 'panel.right.header-actions'
-    || surface === 'panel.bottom.header-actions') {
+    || surface === 'panel.bottom.header-actions'
+  ) {
     assertKeys(snapshot, ['label', 'ariaLabel', 'icon', 'command', 'route', 'routeBehavior'], surface)
     assertAction(snapshot as CordisXStructuredAction, surface)
   } else if (surface === 'sidebar.navigation.items') {
@@ -381,7 +414,11 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
       readonly collectionContract?: 'cordisx.navigation-collection/v2' | 'cordisx.navigation-collection/v3'
       readonly actions?: readonly (CordisXNavigationCollectionAction | CordisXNavigationAction)[]
     }
-    assertKeys(snapshot, ['label', 'description', 'icon', 'command', 'route', 'actions', 'collectionContract'], 'navigation item')
+    assertKeys(
+      snapshot,
+      ['label', 'description', 'icon', 'command', 'route', 'actions', 'collectionContract'],
+      'navigation item',
+    )
     assertLocalizedText(navigation.label, 'navigation label')
     if (navigation.description !== undefined) assertLocalizedText(navigation.description, 'navigation description')
     assertIcon(navigation.icon, 'navigation item')
@@ -393,13 +430,22 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
       assertKeys(navigation.route, ['id', 'params'], 'navigation route')
       assertReference(navigation.route.id, 'navigation route id')
     }
-    if (navigation.collectionContract === 'cordisx.navigation-collection/v2'
-      || navigation.collectionContract === 'cordisx.navigation-collection/v3') {
-      cloneNavigationCollectionActions(navigation.actions as readonly CordisXNavigationCollectionAction[] | undefined, 'navigation collection actions')
+    if (
+      navigation.collectionContract === 'cordisx.navigation-collection/v2'
+      || navigation.collectionContract === 'cordisx.navigation-collection/v3'
+    ) {
+      cloneNavigationCollectionActions(
+        navigation.actions as readonly CordisXNavigationCollectionAction[] | undefined,
+        'navigation collection actions',
+      )
     } else {
       for (const action of navigation.actions ?? []) {
         const legacyAction = action as CordisXNavigationAction
-        assertKeys(legacyAction, ['id', 'label', 'ariaLabel', 'icon', 'command', 'when', 'disabled'], 'navigation action')
+        assertKeys(
+          legacyAction,
+          ['id', 'label', 'ariaLabel', 'icon', 'command', 'when', 'disabled'],
+          'navigation action',
+        )
         assertLocalId(legacyAction.id, 'navigation action id')
         assertAction(legacyAction, 'navigation action')
         assertWhenExpression(legacyAction.when)
@@ -408,10 +454,16 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
     }
   } else if (surface === 'workspace.toolbar.items' || surface === 'composer.toolbar.items') {
     const toolbar = snapshot as CordisXToolbarItem
-    assertKeys(snapshot, ['label', 'ariaLabel', 'icon', 'command', 'route', 'routeBehavior', 'anchor', 'placement'], 'toolbar item')
+    assertKeys(
+      snapshot,
+      ['label', 'ariaLabel', 'icon', 'command', 'route', 'routeBehavior', 'anchor', 'placement'],
+      'toolbar item',
+    )
     assertAction(toolbar, 'toolbar item')
     if (surface === 'composer.toolbar.items') {
-      if (!['leading', 'model', 'submit'].includes(toolbar.anchor)) throw new Error('composer toolbar anchor is invalid')
+      if (!['leading', 'model', 'submit'].includes(toolbar.anchor)) {
+        throw new Error('composer toolbar anchor is invalid')
+      }
     } else assertLocalId(toolbar.anchor, 'toolbar anchor')
     if (!['before', 'after', 'menu'].includes(toolbar.placement)) throw new Error('toolbar placement is invalid')
   } else if (surface === 'session.tabs' || surface === 'panel.right.tabs' || surface === 'panel.bottom.tabs') {
@@ -422,7 +474,9 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
     assertIcon(tab.icon, 'tab item')
     assertRoute(tab.route, 'tab item')
     if (tab.badge !== undefined && typeof tab.badge === 'object') assertLocalizedText(tab.badge, 'tab badge')
-    if (tab.order !== undefined && (!Number.isInteger(tab.order) || tab.order < -100000 || tab.order > 100000)) throw new Error('tab order is invalid')
+    if (tab.order !== undefined && (!Number.isInteger(tab.order) || tab.order < -100000 || tab.order > 100000)) {
+      throw new Error('tab order is invalid')
+    }
     assertWhenExpression(tab.when)
   } else if (surface === 'composer.reasoning-intensity') {
     const presentation = snapshot as CordisXReasoningIntensityPresentation
@@ -436,7 +490,9 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
       throw new Error('reasoning intensity requires between two and eight stages')
     }
     for (const [index, stage] of presentation.stages.entries()) {
-      if (stage === null || typeof stage !== 'object' || Array.isArray(stage)) throw new Error(`reasoning intensity stage ${index} must be an object`)
+      if (stage === null || typeof stage !== 'object' || Array.isArray(stage)) {
+        throw new Error(`reasoning intensity stage ${index} must be an object`)
+      }
       assertKeys(stage, ['label', 'material'], `reasoning intensity stage ${index}`)
       assertLocalizedText(stage.label, `reasoning intensity stage ${index} label`)
       if (!['plastic', 'bronze', 'steel', 'silver', 'gold'].includes(stage.material)) {
@@ -452,7 +508,9 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
       throw new Error('session backdrop motion is invalid')
     }
     if (presentation.layers !== undefined) {
-      if (presentation.layers === null || typeof presentation.layers !== 'object' || Array.isArray(presentation.layers)) {
+      if (
+        presentation.layers === null || typeof presentation.layers !== 'object' || Array.isArray(presentation.layers)
+      ) {
         throw new Error('session backdrop layers must be an object')
       }
       assertKeys(presentation.layers, ['portrait', 'effects'], 'session backdrop layers')
@@ -467,7 +525,9 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
       throw new Error('session backdrop requires between two and eight stages')
     }
     for (const [index, stage] of presentation.stages.entries()) {
-      if (stage === null || typeof stage !== 'object' || Array.isArray(stage)) throw new Error(`session backdrop stage ${index} must be an object`)
+      if (stage === null || typeof stage !== 'object' || Array.isArray(stage)) {
+        throw new Error(`session backdrop stage ${index} must be an object`)
+      }
       assertKeys(stage, ['material', 'ambience', 'portrait'], `session backdrop stage ${index}`)
       if (!['plastic', 'bronze', 'steel', 'silver', 'gold'].includes(stage.material)) {
         throw new Error(`session backdrop stage ${index} material is invalid`)
@@ -476,11 +536,17 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
         throw new Error(`session backdrop stage ${index} ambience is invalid`)
       }
       const portrait = stage.portrait
-      if (portrait === null || typeof portrait !== 'object' || Array.isArray(portrait)) throw new Error(`session backdrop stage ${index} portrait must be an object`)
+      if (portrait === null || typeof portrait !== 'object' || Array.isArray(portrait)) {
+        throw new Error(`session backdrop stage ${index} portrait must be an object`)
+      }
       assertKeys(portrait, ['mediaType', 'data', 'alt'], `session backdrop stage ${index} portrait`)
-      if (portrait.mediaType !== 'image/png') throw new Error(`session backdrop stage ${index} portrait mediaType is invalid`)
-      if (typeof portrait.data !== 'string' || portrait.data.length < 32 || portrait.data.length > 1_200_000
-        || !/^[A-Za-z0-9+/]+={0,2}$/u.test(portrait.data)) throw new Error(`session backdrop stage ${index} portrait data is invalid`)
+      if (portrait.mediaType !== 'image/png') {
+        throw new Error(`session backdrop stage ${index} portrait mediaType is invalid`)
+      }
+      if (
+        typeof portrait.data !== 'string' || portrait.data.length < 32 || portrait.data.length > 1_200_000
+        || !/^[A-Za-z0-9+/]+={0,2}$/u.test(portrait.data)
+      ) throw new Error(`session backdrop stage ${index} portrait data is invalid`)
       assertLocalizedText(portrait.alt, `session backdrop stage ${index} portrait alt`)
     }
   } else if (surface === 'composer.submit.effects') {
@@ -493,22 +559,29 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
     if (canvas.reducedMotion !== 'skip' && canvas.reducedMotion !== 'static') {
       throw new Error('transient canvas presentation reducedMotion is invalid')
     }
-  } else if (surface === 'session.banner.items'
+  } else if (
+    surface === 'session.banner.items'
     || surface === 'session.turn.footer'
     || surface === 'composer.dock.above'
-    || surface === 'composer.dock.below') {
+    || surface === 'composer.dock.below'
+  ) {
     const presenter = snapshot as CordisXPresenterItem
     assertKeys(snapshot, ['kind', 'text', 'detail', 'icon', 'tone', 'command', 'route', 'progress'], 'presenter item')
     if (!['banner', 'status', 'chip', 'progress'].includes(presenter.kind)) throw new Error('presenter kind is invalid')
     assertLocalizedText(presenter.text, 'presenter text')
     if (presenter.detail !== undefined) assertLocalizedText(presenter.detail, 'presenter detail')
     assertIcon(presenter.icon, 'presenter item')
-    if (presenter.tone !== undefined && !['neutral', 'info', 'success', 'warning', 'error'].includes(presenter.tone)) throw new Error('presenter tone is invalid')
+    if (presenter.tone !== undefined && !['neutral', 'info', 'success', 'warning', 'error'].includes(presenter.tone)) {
+      throw new Error('presenter tone is invalid')
+    }
     if (presenter.command !== undefined) assertCommand(presenter.command, 'presenter item')
     if (presenter.route !== undefined) assertRoute(presenter.route, 'presenter item')
     if (presenter.kind === 'progress') {
-      if (presenter.progress === undefined || !Number.isFinite(presenter.progress.current) || !Number.isFinite(presenter.progress.total)
-        || presenter.progress.current < 0 || presenter.progress.total <= 0) throw new Error('progress presenter requires finite current/total values')
+      if (
+        presenter.progress === undefined || !Number.isFinite(presenter.progress.current)
+        || !Number.isFinite(presenter.progress.total)
+        || presenter.progress.current < 0 || presenter.progress.total <= 0
+      ) throw new Error('progress presenter requires finite current/total values')
     } else if (presenter.progress !== undefined) throw new Error('progress values require a progress presenter')
   } else if (surface === 'manager.settings.tabs') {
     const tab = snapshot as CordisXManagerSettingsContentTabItem
@@ -516,7 +589,9 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
     assertLocalizedText(tab.title, 'manager settings content tab title')
     if (tab.icon === undefined) throw new Error('manager settings content tab requires a host icon token')
     assertIcon(tab.icon, 'manager settings content tab')
-    if (tab.route === null || typeof tab.route !== 'object') throw new Error('manager settings content tab requires a route reference')
+    if (tab.route === null || typeof tab.route !== 'object') {
+      throw new Error('manager settings content tab requires a route reference')
+    }
     assertKeys(tab.route, ['id', 'params'], 'manager settings content tab route')
     assertLocalId(tab.route.id, 'manager settings content tab route id')
   } else if (surface === 'manager.settings.navigation-items') {
@@ -546,7 +621,9 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
     assertLocalId(row.rowId, 'environment row id')
     assertLocalizedText(row.label, 'environment row label')
     if (row.description !== undefined) assertLocalizedText(row.description, 'environment row description')
-    if (row.value !== undefined && typeof row.value === 'object') assertLocalizedText(row.value, 'environment row value')
+    if (row.value !== undefined && typeof row.value === 'object') {
+      assertLocalizedText(row.value, 'environment row value')
+    }
     assertIcon(row.status, 'environment row status')
   } else {
     const action = snapshot as CordisXEnvironmentRowAction
@@ -572,15 +649,23 @@ export class SurfaceRegistry {
   private access: ExtensionPointAccessResolver | undefined
   private controls: ControlledSurfaceCoordinator | undefined
   private disconnectControls: (() => void) | undefined
-  private readonly committedControlTransactions = new Map<string, Readonly<{ moduleGeneration: string; transactionId: string; transactionEpoch: string }>>()
-  private preparedControlTransition: Readonly<{
-    transactionId: string
-    transactionEpoch: string
-    affectedPluginIds: readonly string[]
-    after: PluginGenerationParticipantTransition['after']
-    previous: ReadonlyMap<string, Readonly<{ moduleGeneration: string; transactionId: string; transactionEpoch: string }>>
-    published: boolean
-  }> | undefined
+  private readonly committedControlTransactions = new Map<
+    string,
+    Readonly<{ moduleGeneration: string; transactionId: string; transactionEpoch: string }>
+  >()
+  private preparedControlTransition:
+    | Readonly<{
+      transactionId: string
+      transactionEpoch: string
+      affectedPluginIds: readonly string[]
+      after: PluginGenerationParticipantTransition['after']
+      previous: ReadonlyMap<
+        string,
+        Readonly<{ moduleGeneration: string; transactionId: string; transactionEpoch: string }>
+      >
+      published: boolean
+    }>
+    | undefined
 
   constructor(
     private readonly contexts: HostContextStore,
@@ -604,16 +689,21 @@ export class SurfaceRegistry {
           for (const pluginId of prepared.affectedPluginIds) {
             const plugin = prepared.after.plugins.find(item => item.id === pluginId)
             if (plugin === undefined) this.committedControlTransactions.delete(pluginId)
-            else this.committedControlTransactions.set(pluginId, Object.freeze({
-              moduleGeneration: plugin.moduleGeneration,
-              transactionId: prepared.transactionId,
-              transactionEpoch: prepared.transactionEpoch,
-            }))
+            else {this.committedControlTransactions.set(
+                pluginId,
+                Object.freeze({
+                  moduleGeneration: plugin.moduleGeneration,
+                  transactionId: prepared.transactionId,
+                  transactionEpoch: prepared.transactionEpoch,
+                }),
+              )}
           }
           this.preparedControlTransition = Object.freeze({ ...prepared, published: true })
         } else if (prepared?.published === true) {
           this.committedControlTransactions.clear()
-          for (const [pluginId, transaction] of prepared.previous) this.committedControlTransactions.set(pluginId, transaction)
+          for (const [pluginId, transaction] of prepared.previous) {
+            this.committedControlTransactions.set(pluginId, transaction)
+          }
           this.preparedControlTransition = undefined
         }
         this.controls?.invalidate()
@@ -635,13 +725,17 @@ export class SurfaceRegistry {
 
   setControlCoordinator(controls: ControlledSurfaceCoordinator): void {
     if (this.controls !== undefined) throw new Error('controlled surface coordinator is already installed')
-    if (this.records.size > 0) throw new Error('controlled surface coordinator must be installed before plugin registration')
+    if (this.records.size > 0) {
+      throw new Error('controlled surface coordinator must be installed before plugin registration')
+    }
     this.controls = controls
     this.disconnectControls = controls.subscribe(() => this.notify())
     this.notify()
   }
 
-  controlCoordinator(): ControlledSurfaceCoordinator | undefined { return this.controls }
+  controlCoordinator(): ControlledSurfaceCoordinator | undefined {
+    return this.controls
+  }
 
   invalidatePointPolicies(): void {
     if (this.controls === undefined) this.notify()
@@ -659,16 +753,24 @@ export class SurfaceRegistry {
   }
 
   setToolbarAnchors(anchors: readonly string[]): void {
-    this.setSurfaceAnchors('workspace.toolbar.items', anchors.map(id => ({ id, placements: ['before', 'after', 'menu'] as const })))
+    this.setSurfaceAnchors(
+      'workspace.toolbar.items',
+      anchors.map(id => ({ id, placements: ['before', 'after', 'menu'] as const })),
+    )
   }
 
-  setSurfaceAnchors(surface: string, anchors: readonly { id: string; placements: readonly ('before' | 'after' | 'menu')[] }[]): void {
+  setSurfaceAnchors(
+    surface: string,
+    anchors: readonly { id: string; placements: readonly ('before' | 'after' | 'menu')[] }[],
+  ): void {
     const next = new Map(anchors.map(anchor => [anchor.id, new Set(anchor.placements) as ReadonlySet<string>]))
     const previous = this.surfaceAnchors.get(surface)
-    if (previous?.size === next.size && [...next].every(([id, placements]) => {
-      const existing = previous.get(id)
-      return existing?.size === placements.size && [...placements].every(placement => existing.has(placement))
-    })) return
+    if (
+      previous?.size === next.size && [...next].every(([id, placements]) => {
+        const existing = previous.get(id)
+        return existing?.size === placements.size && [...placements].every(placement => existing.has(placement))
+      })
+    ) return
     this.surfaceAnchors.set(surface, next)
     this.notify()
   }
@@ -682,14 +784,20 @@ export class SurfaceRegistry {
   }
 
   /** @deprecated Use setCurrentContext. */
-  setAvailability(items: readonly SurfaceCurrentContextSnapshot[]): void { this.setCurrentContext(items) }
+  setAvailability(items: readonly SurfaceCurrentContextSnapshot[]): void {
+    this.setCurrentContext(items)
+  }
 
   currentContextSnapshot(): readonly SurfaceCurrentContextSnapshot[] {
-    return [...this.currentContext.values()].sort((left, right) => left.surface < right.surface ? -1 : left.surface > right.surface ? 1 : 0)
+    return [...this.currentContext.values()].sort((left, right) =>
+      left.surface < right.surface ? -1 : left.surface > right.surface ? 1 : 0
+    )
   }
 
   /** @deprecated Use currentContextSnapshot. */
-  availabilitySnapshot(): readonly SurfaceCurrentContextSnapshot[] { return this.currentContextSnapshot() }
+  availabilitySnapshot(): readonly SurfaceCurrentContextSnapshot[] {
+    return this.currentContextSnapshot()
+  }
 
   isDeclared(name: string): boolean {
     return this.declared.has(name)
@@ -708,12 +816,14 @@ export class SurfaceRegistry {
   ): CordisXContributionHandle<CordisXSurfaceMap[Name]> {
     if (this.disposed) throw new Error('CordisX surface registry is disposed')
     const owner = typeof ownerOrContext === 'string' ? ownerOrContext : ownerFromContext(ownerOrContext)
-    const generation: PluginGenerationEffectIdentity = isolatedBinding?.generation ?? (typeof ownerOrContext === 'string'
-      ? Object.freeze({ pluginId: owner })
-      : this.visibility?.effect(ownerOrContext) ?? Object.freeze({ pluginId: owner }))
-    const candidateView = isolatedBinding?.candidateView ?? (typeof ownerOrContext === 'string' || generation.transactionId === undefined
-      ? undefined
-      : this.visibility?.view(ownerOrContext))
+    const generation: PluginGenerationEffectIdentity = isolatedBinding?.generation
+      ?? (typeof ownerOrContext === 'string'
+        ? Object.freeze({ pluginId: owner })
+        : this.visibility?.effect(ownerOrContext) ?? Object.freeze({ pluginId: owner }))
+    const candidateView = isolatedBinding?.candidateView
+      ?? (typeof ownerOrContext === 'string' || generation.transactionId === undefined
+        ? undefined
+        : this.visibility?.view(ownerOrContext))
     assertLocalId(owner, 'surface owner')
     assertKeys(options, ['name', 'id', 'group', 'order', 'when', 'disabled', 'control'], 'surface contribution options')
     assertLocalId(options.id, 'surface contribution id')
@@ -728,8 +838,12 @@ export class SurfaceRegistry {
       throw new Error(`controlled surface runtime is unavailable for ${options.name}`)
     }
     const qualifiedId = qualifyOwnedId(owner, options.id)
-    const key = `${options.name}\u0000${qualifiedId}\u0000${generation.moduleGeneration ?? 'host'}\u0000${generation.transactionId ?? ''}\u0000${generation.transactionEpoch ?? ''}`
-    if (this.records.has(key)) throw new Error(`surface contribution ${options.name}/${qualifiedId} is already registered for this generation`)
+    const key = `${options.name}\u0000${qualifiedId}\u0000${generation.moduleGeneration ?? 'host'}\u0000${
+      generation.transactionId ?? ''
+    }\u0000${generation.transactionEpoch ?? ''}`
+    if (this.records.has(key)) {
+      throw new Error(`surface contribution ${options.name}/${qualifiedId} is already registered for this generation`)
+    }
     let snapshot: unknown
     let validationError: string | undefined
     try {
@@ -738,27 +852,37 @@ export class SurfaceRegistry {
       snapshot = undefined
       validationError = error instanceof Error ? error.message : String(error)
     }
-    const source = isolatedBinding?.source ?? (typeof ownerOrContext === 'string' ? undefined : sourceFromContext(ownerOrContext))
+    const source = isolatedBinding?.source
+      ?? (typeof ownerOrContext === 'string' ? undefined : sourceFromContext(ownerOrContext))
     const controlOrigin = options.control === undefined ? 'legacy-structured' as const : 'explicit' as const
     const controlledPoint = this.controls?.hasPoint(options.name) === true
-    const principalHandle = source === undefined || !controlledPoint ? undefined : this.controlPrincipal(source, owner, controlOrigin)
-    const controlDeclaration = this.controls === undefined || source === undefined || !controlledPoint ? undefined : normalizeControlledSurfaceDeclaration({
-      principalHandle: principalHandle!,
-      source,
-      pluginId: owner,
-      pointId: options.name,
-      contributionId: options.id,
-      ...(options.order === undefined ? {} : { order: options.order }),
-      ...(options.control === undefined ? {} : { control: options.control }),
-    })
-    const moduleGeneration = isolatedBinding?.moduleGeneration ?? (typeof ownerOrContext === 'string' ? undefined : generationFromContext(ownerOrContext))
-    const controlGeneration: ControlledSurfaceGeneration | undefined = controlDeclaration === undefined ? undefined : Object.freeze({
+    const principalHandle = source === undefined || !controlledPoint
+      ? undefined
+      : this.controlPrincipal(source, owner, controlOrigin)
+    const controlDeclaration = this.controls === undefined || source === undefined || !controlledPoint
+      ? undefined
+      : normalizeControlledSurfaceDeclaration({
+        principalHandle: principalHandle!,
+        source,
+        pluginId: owner,
+        pointId: options.name,
+        contributionId: options.id,
+        ...(options.order === undefined ? {} : { order: options.order }),
+        ...(options.control === undefined ? {} : { control: options.control }),
+      })
+    const moduleGeneration = isolatedBinding?.moduleGeneration
+      ?? (typeof ownerOrContext === 'string' ? undefined : generationFromContext(ownerOrContext))
+    const controlGeneration: ControlledSurfaceGeneration | undefined = controlDeclaration === undefined
+      ? undefined
+      : Object.freeze({
         principalHandle: principalHandle!,
         principalOrigin: controlOrigin,
         source: source!,
         pluginId: owner,
         ...(moduleGeneration === undefined ? {} : { moduleGeneration }),
-        ...(generation.transactionId === undefined ? {} : { transactionId: generation.transactionId, transactionEpoch: generation.transactionEpoch }),
+        ...(generation.transactionId === undefined
+          ? {}
+          : { transactionId: generation.transactionId, transactionEpoch: generation.transactionEpoch }),
         ...(candidateView === undefined ? {} : { visibilityView: candidateView }),
       })
     const controlHandle = controlDeclaration === undefined ? undefined : this.controls!.register({
@@ -770,13 +894,15 @@ export class SurfaceRegistry {
         return decision === undefined
           ? Object.freeze({ authorized: true })
           : Object.freeze({
-              authorized: decision.authorized,
-              policy: decision.policy,
-              ...(decision.reason === undefined ? {} : { reason: decision.reason }),
-            })
+            authorized: decision.authorized,
+            policy: decision.policy,
+            ...(decision.reason === undefined ? {} : { reason: decision.reason }),
+          })
       },
     })
-    const controlLease = controlDeclaration === undefined || options.control === undefined ? undefined : this.controls!.createLease(controlDeclaration, controlGeneration!)
+    const controlLease = controlDeclaration === undefined || options.control === undefined
+      ? undefined
+      : this.controls!.createLease(controlDeclaration, controlGeneration!)
     const record: SurfaceRecord = {
       sequence: this.nextSequence++,
       owner,
@@ -823,7 +949,12 @@ export class SurfaceRegistry {
       if (!active) throw new Error(`surface contribution ${qualifiedId} is disposed`)
       this.visibility?.assertCallable(generation, candidateView)
       assertPresentationOptions(options.name, next)
-      record.options = immutableSnapshot({ name: options.name, id: options.id, ...(options.control === undefined ? {} : { control: options.control }), ...next })
+      record.options = immutableSnapshot({
+        name: options.name,
+        id: options.id,
+        ...(options.control === undefined ? {} : { control: options.control }),
+        ...next,
+      })
       if (this.visibility?.visible(generation) !== false) this.notify()
     }
     if (controlLease !== undefined) Object.defineProperty(handle, 'control', { value: controlLease, enumerable: true })
@@ -831,16 +962,20 @@ export class SurfaceRegistry {
   }
 
   renderToken(surface: string, qualifiedId: string): object | undefined {
-    return [...this.records.values()].find(record => record.options.name === surface
+    return [...this.records.values()].find(record =>
+      record.options.name === surface
       && record.qualifiedId === qualifiedId
-      && this.recordVisible(record))?.renderToken
+      && this.recordVisible(record)
+    )?.renderToken
   }
 
   markRendered(surface: string, qualifiedId: string, renderToken: object, rendered: boolean): void {
-    const record = [...this.records.values()].find(item => item.options.name === surface
+    const record = [...this.records.values()].find(item =>
+      item.options.name === surface
       && item.qualifiedId === qualifiedId
       && item.renderToken === renderToken
-      && this.recordVisible(item))
+      && this.recordVisible(item)
+    )
     if (record === undefined || record.rendered === rendered) return
     record.rendered = rendered
     this.notify()
@@ -861,9 +996,11 @@ export class SurfaceRegistry {
       if (record.options.name === 'environment.section.rows' && record.item !== undefined) {
         rows.add(qualifyOwnedId(record.owner, (record.item as CordisXEnvironmentRow).rowId))
       }
-      if (record.options.name === 'manager.settings.navigation-items'
+      if (
+        record.options.name === 'manager.settings.navigation-items'
         && record.validationError === undefined
-        && record.item !== undefined) {
+        && record.item !== undefined
+      ) {
         const routeId = (record.item as CordisXManagerSettingsNavigationItem).route.id
         const key = `${record.owner}\u0000${routeId}`
         const contributions = managerNavigationRoutes.get(key) ?? []
@@ -887,37 +1024,52 @@ export class SurfaceRegistry {
           const conflicts = managerNavigationRoutes.get(`${record.owner}\u0000${routeId}`)
           if (conflicts !== undefined && conflicts.length > 1) {
             const ids = [...conflicts].sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
-            error = `manager settings navigation route ${qualifyOwnedId(record.owner, routeId)} is referenced by multiple contributions: ${ids.join(', ')}`
+            error = `manager settings navigation route ${
+              qualifyOwnedId(record.owner, routeId)
+            } is referenced by multiple contributions: ${ids.join(', ')}`
           }
         }
-        const pointAccess = this.access?.decision(record.owner, record.options.name, 'surface', view ?? record.candidateView)
-          ?? { policy: 'inherit' as const, effectivePolicy: 'allow' as const, authorized: true }
+        const pointAccess =
+          this.access?.decision(record.owner, record.options.name, 'surface', view ?? record.candidateView)
+            ?? { policy: 'inherit' as const, effectivePolicy: 'allow' as const, authorized: true }
         const control = record.controlDeclaration === undefined ? undefined : controlSnapshot?.points
           .find(point => point.id === record.controlDeclaration!.identity.pointId)?.candidates
-          .find(candidate => candidate.identity.source === record.controlDeclaration!.identity.source
+          .find(candidate =>
+            candidate.identity.source === record.controlDeclaration!.identity.source
             && candidate.identity.pluginId === record.controlDeclaration!.identity.pluginId
             && candidate.claimId === record.controlDeclaration!.claimId
-            && candidate.mode === record.controlDeclaration!.mode)
+            && candidate.mode === record.controlDeclaration!.mode
+          )
         const toolbarItem = item as unknown as CordisXToolbarItem | undefined
-        const anchorSupport = toolbarItem !== undefined && (record.options.name === 'workspace.toolbar.items' || record.options.name === 'composer.toolbar.items')
+        const anchorSupport = toolbarItem !== undefined
+            && (record.options.name === 'workspace.toolbar.items' || record.options.name === 'composer.toolbar.items')
           ? this.access?.surfaceAnchorSupport(record.options.name, toolbarItem.anchor)
           : undefined
-        if (error === undefined && !this.declared.has(record.options.name)) error = `surface ${record.options.name} is not declared by the host`
+        if (error === undefined && !this.declared.has(record.options.name)) {
+          error = `surface ${record.options.name} is not declared by the host`
+        }
         const unknownWhen = whenContextKeys(record.options.when).find(key => !knownKeys.has(key))
-        if (error === undefined && unknownWhen !== undefined) error = `when context key ${unknownWhen} is not declared by the host`
+        if (error === undefined && unknownWhen !== undefined) {
+          error = `when context key ${unknownWhen} is not declared by the host`
+        }
         if (error === undefined && item !== undefined) {
           const command = item.command as CordisXCommandReference | undefined
           const route = item.route as { id: string } | undefined
           const resolutionView = view ?? record.candidateView
-          if (command !== undefined && !this.resolvers.command(record.owner, command, resolutionView)) error = `command ${command.id} is not available`
-          else if (command === undefined && route !== undefined && record.options.name === 'manager.settings.tabs') {
+          if (command !== undefined && !this.resolvers.command(record.owner, command, resolutionView)) {
+            error = `command ${command.id} is not available`
+          } else if (command === undefined && route !== undefined && record.options.name === 'manager.settings.tabs') {
             const resolution = this.resolvers.managerSettingsRoute?.(record.owner, route.id, resolutionView)
               ?? (this.resolvers.route(record.owner, route.id, resolutionView)
                 ? { state: 'available' as const }
                 : { state: 'pending' as const, detail: `route ${route.id} is not available` })
             if (resolution.state === 'pending') pending = true
-            if (resolution.state === 'invalid') error = resolution.detail ?? `route ${route.id} is incompatible with manager settings`
-          } else if (command === undefined && route !== undefined && record.options.name === 'manager.settings.navigation-items') {
+            if (resolution.state === 'invalid') {
+              error = resolution.detail ?? `route ${route.id} is incompatible with manager settings`
+            }
+          } else if (
+            command === undefined && route !== undefined && record.options.name === 'manager.settings.navigation-items'
+          ) {
             const resolution = this.resolvers.managerSettingsNavigationRoute?.(record.owner, route.id, resolutionView)
               ?? (this.resolvers.route(record.owner, route.id, resolutionView)
                 ? { state: 'available' as const }
@@ -926,22 +1078,35 @@ export class SurfaceRegistry {
             if (resolution.state === 'invalid') {
               error = resolution.detail ?? `route ${route.id} is incompatible with manager settings navigation`
             }
-          } else if (command === undefined && route !== undefined && !this.resolvers.route(record.owner, route.id, resolutionView)) error = `route ${route.id} is not available`
+          } else if (
+            command === undefined && route !== undefined
+            && !this.resolvers.route(record.owner, route.id, resolutionView)
+          ) error = `route ${route.id} is not available`
           const actions = item.actions as readonly { command?: CordisXCommandReference }[] | undefined
-          const missingAction = actions?.find(action => action.command !== undefined
-            && !this.resolvers.command(record.owner, action.command, resolutionView))
-          if (error === undefined && missingAction?.command !== undefined) error = `command ${missingAction.command.id} is not available`
+          const missingAction = actions?.find(action =>
+            action.command !== undefined
+            && !this.resolvers.command(record.owner, action.command, resolutionView)
+          )
+          if (error === undefined && missingAction?.command !== undefined) {
+            error = `command ${missingAction.command.id} is not available`
+          }
           const actionWithUnknownWhen = (item.actions as readonly { when?: CordisXWhen }[] | undefined)
             ?.find(action => whenContextKeys(action.when).some(key => !knownKeys.has(key)))
           const unknownActionKey = actionWithUnknownWhen === undefined
             ? undefined
             : whenContextKeys(actionWithUnknownWhen.when).find(key => !knownKeys.has(key))
-          if (error === undefined && unknownActionKey !== undefined) error = `when context key ${unknownActionKey} is not declared by the host`
+          if (error === undefined && unknownActionKey !== undefined) {
+            error = `when context key ${unknownActionKey} is not declared by the host`
+          }
           if (record.options.name === 'workspace.toolbar.items' || record.options.name === 'composer.toolbar.items') {
             const anchored = item as unknown as CordisXToolbarItem
-            if (!this.surfaceAnchors.get(record.options.name)?.get(anchored.anchor)?.has(anchored.placement)) pending = true
+            if (!this.surfaceAnchors.get(record.options.name)?.get(anchored.anchor)?.has(anchored.placement)) {
+              pending = true
+            }
           }
-          if (record.options.name === 'environment.section.actions' || record.options.name === 'environment.section.rows') {
+          if (
+            record.options.name === 'environment.section.actions' || record.options.name === 'environment.section.rows'
+          ) {
             const target = qualifyOwnedId(record.owner, String(item.sectionId))
             if (!sections.has(target)) pending = true
           }
@@ -951,10 +1116,15 @@ export class SurfaceRegistry {
           }
         }
         const currentContext = this.currentContext.get(record.options.name)
-        const currentAnchor = toolbarItem === undefined ? undefined : currentContext?.anchors?.find(anchor => anchor.id === toolbarItem.anchor)
-        if (this.access !== undefined && currentContext !== undefined && currentContext.state !== 'active') pending = true
+        const currentAnchor = toolbarItem === undefined
+          ? undefined
+          : currentContext?.anchors?.find(anchor => anchor.id === toolbarItem.anchor)
+        if (this.access !== undefined && currentContext !== undefined && currentContext.state !== 'active') {
+          pending = true
+        }
         if (currentAnchor !== undefined && currentAnchor.state !== 'active') pending = true
-        const authorized = pointAccess.authorized && anchorSupport?.supported !== false && (control === undefined || control.state === 'selected')
+        const authorized = pointAccess.authorized && anchorSupport?.supported !== false
+          && (control === undefined || control.state === 'selected')
         if (control?.state === 'pending' || control?.state === 'suppressed') pending = true
         const contextDetail = currentAnchor?.detail ?? currentContext?.detail
         const contextCode = currentAnchor?.code ?? currentContext?.code
@@ -1086,7 +1256,10 @@ export class CordisXSlotService extends Service implements CordisXSlots {
   private readonly navigationCollectionLeadingVisuals = new Map<string, CordisXNavigationCollectionLeadingVisual>()
   private nextNavigationCollection = 1
 
-  constructor(ctx: Context, input?: SurfaceRegistry | { readonly registry?: SurfaceRegistry; readonly console: PluginConsoleAspect }) {
+  constructor(
+    ctx: Context,
+    input?: SurfaceRegistry | { readonly registry?: SurfaceRegistry; readonly console: PluginConsoleAspect },
+  ) {
     super(ctx, 'slots')
     const registry = input instanceof SurfaceRegistry ? input : input?.registry
     this.console = input instanceof SurfaceRegistry ? undefined : input?.console
@@ -1100,18 +1273,24 @@ export class CordisXSlotService extends Service implements CordisXSlots {
 
   inject<Name extends CordisXSurfaceName>(name: Name, setup: () => Effect): ReturnType<CordisXSlots['inject']> {
     if (!this.registry.isDeclared(name)) {
-      throw new Error(`surface ${JSON.stringify(name)} is not declared; direct-DOM slots were removed in structured UI v1`)
+      throw new Error(
+        `surface ${JSON.stringify(name)} is not declared; direct-DOM slots were removed in structured UI v1`,
+      )
     }
     const token = this.console?.tokenFromContext(this.ctx)
     const scoped = token === undefined || this.console === undefined
       ? setup
-      : () => this.console!.runInPluginContext(
+      : () =>
+        this.console!.runInPluginContext(
           token,
           { trigger: { kind: 'registration', registrationId: `surface:${name}` } },
           setup,
         ) as Effect
-    const register = (): ReturnType<CordisXSlots['inject']> => this.ctx.effect(scoped, `slots.inject(${JSON.stringify(name)})`)
-    return token === undefined || this.console === undefined ? register() : this.console.runSync(token, 'slots.inject', { name }, register)
+    const register = (): ReturnType<CordisXSlots['inject']> =>
+      this.ctx.effect(scoped, `slots.inject(${JSON.stringify(name)})`)
+    return token === undefined || this.console === undefined
+      ? register()
+      : this.console.runSync(token, 'slots.inject', { name }, register)
   }
 
   register<Name extends CordisXSurfaceName>(
@@ -1119,7 +1298,8 @@ export class CordisXSlotService extends Service implements CordisXSlots {
     item: CordisXSurfaceMap[Name],
   ): CordisXContributionHandle<CordisXSurfaceMap[Name]> {
     const token = this.console?.tokenFromContext(this.ctx)
-    const register = (): CordisXContributionHandle<CordisXSurfaceMap[Name]> => this.registry.register(this.ctx, options, item)
+    const register = (): CordisXContributionHandle<CordisXSurfaceMap[Name]> =>
+      this.registry.register(this.ctx, options, item)
     const handle = token === undefined || this.console === undefined
       ? register()
       : this.console.runSync(token, 'slots.register', { options, item }, register)
@@ -1128,11 +1308,31 @@ export class CordisXSlotService extends Service implements CordisXSlots {
       return handle
     }
     const console = this.console
-    const dispose = (() => console.runCleanupSync(token, 'slots.dispose', { name: options.name, id: options.id }, handle.dispose)) as CordisXContributionHandle<CordisXSurfaceMap[Name]>
+    const dispose = (() =>
+      console.runCleanupSync(
+        token,
+        'slots.dispose',
+        { name: options.name, id: options.id },
+        handle.dispose,
+      )) as CordisXContributionHandle<CordisXSurfaceMap[Name]>
     dispose.dispose = dispose
-    dispose.update = next => console.runSync(token, 'slots.update', { name: options.name, id: options.id, item: next }, () => handle.update(next))
-    dispose.updateOptions = next => console.runSync(token, 'slots.updateOptions', { name: options.name, id: options.id, options: next }, () => handle.updateOptions(next))
-    if (handle.control !== undefined) Object.defineProperty(dispose, 'control', { value: handle.control, enumerable: true })
+    dispose.update = next =>
+      console.runSync(
+        token,
+        'slots.update',
+        { name: options.name, id: options.id, item: next },
+        () => handle.update(next),
+      )
+    dispose.updateOptions = next =>
+      console.runSync(
+        token,
+        'slots.updateOptions',
+        { name: options.name, id: options.id, options: next },
+        () => handle.updateOptions(next),
+      )
+    if (handle.control !== undefined) {
+      Object.defineProperty(dispose, 'control', { value: handle.control, enumerable: true })
+    }
     this.ctx.effect(() => dispose, `slots.register(${JSON.stringify(options.name)}, ${JSON.stringify(options.id)})`)
     return dispose
   }
@@ -1150,14 +1350,27 @@ export class CordisXSlotService extends Service implements CordisXSlots {
     source: CordisXNavigationCollectionSource,
   ): CordisXNavigationCollectionRegistration
   registerCollection(
-    options: CordisXNavigationCollectionOptions | CordisXNavigationCollectionOptionsV2 | CordisXNavigationCollectionOptionsV3,
-    source: CordisXNavigationCollectionSource | CordisXNavigationCollectionSourceV2 | CordisXNavigationCollectionSourceV3,
+    options:
+      | CordisXNavigationCollectionOptions
+      | CordisXNavigationCollectionOptionsV2
+      | CordisXNavigationCollectionOptionsV3,
+    source:
+      | CordisXNavigationCollectionSource
+      | CordisXNavigationCollectionSourceV2
+      | CordisXNavigationCollectionSourceV3,
   ): CordisXNavigationCollectionRegistration {
     const contract = 'contract' in options ? options.contract : undefined
-    const actionCapable = contract === 'cordisx.navigation-collection/v2' || contract === 'cordisx.navigation-collection/v3'
+    const actionCapable = contract === 'cordisx.navigation-collection/v2'
+      || contract === 'cordisx.navigation-collection/v3'
     const imageCapable = contract === 'cordisx.navigation-collection/v3'
-    assertKeys(options, actionCapable ? ['contract', 'name', 'id', 'group'] : ['name', 'id', 'group'], 'navigation collection options')
-    if (options.name !== 'sidebar.navigation.items') throw new Error('navigation collection requires sidebar.navigation.items')
+    assertKeys(
+      options,
+      actionCapable ? ['contract', 'name', 'id', 'group'] : ['name', 'id', 'group'],
+      'navigation collection options',
+    )
+    if (options.name !== 'sidebar.navigation.items') {
+      throw new Error('navigation collection requires sidebar.navigation.items')
+    }
     assertLocalId(options.id, 'navigation collection id')
     if (options.group === null || typeof options.group !== 'object' || Array.isArray(options.group)) {
       throw new Error('navigation collection group must be an object')
@@ -1165,8 +1378,10 @@ export class CordisXSlotService extends Service implements CordisXSlots {
     assertKeys(options.group, ['id', 'label', 'order'], 'navigation collection group')
     assertLocalId(options.group.id, 'navigation collection group id')
     assertLocalizedText(options.group.label, 'navigation collection group label')
-    if (options.group.order !== undefined
-      && (!Number.isInteger(options.group.order) || options.group.order < -100_000 || options.group.order > 100_000)) {
+    if (
+      options.group.order !== undefined
+      && (!Number.isInteger(options.group.order) || options.group.order < -100_000 || options.group.order > 100_000)
+    ) {
       throw new Error('navigation collection group order is invalid')
     }
     if (source === null || typeof source !== 'object') throw new Error('navigation collection source must be an object')
@@ -1187,14 +1402,22 @@ export class CordisXSlotService extends Service implements CordisXSlots {
       surfaceGroup,
     })
     let active = true
-    let current: CordisXNavigationCollectionSnapshot | CordisXNavigationCollectionSnapshotV2 | CordisXNavigationCollectionSnapshotV3 | undefined
+    let current:
+      | CordisXNavigationCollectionSnapshot
+      | CordisXNavigationCollectionSnapshotV2
+      | CordisXNavigationCollectionSnapshotV3
+      | undefined
     let unsubscribe: (() => void) | undefined
     let nextItemSequence = 1
     const stableIds = new Map<string, string>()
     let handles: CordisXContributionHandle<CordisXNavigationItem>[] = []
     let leadingVisualIds = new Set<string>()
 
-    const read = (): CordisXNavigationCollectionSnapshot | CordisXNavigationCollectionSnapshotV2 | CordisXNavigationCollectionSnapshotV3 => {
+    const read = ():
+      | CordisXNavigationCollectionSnapshot
+      | CordisXNavigationCollectionSnapshotV2
+      | CordisXNavigationCollectionSnapshotV3 =>
+    {
       const input = source.snapshot()
       if (input === null || typeof input !== 'object' || Array.isArray(input)) {
         throw new Error('navigation collection snapshot must be an object')
@@ -1207,47 +1430,68 @@ export class CordisXSlotService extends Service implements CordisXSlots {
         throw new Error('navigation collection snapshot items are invalid')
       }
       const ids = new Set<string>()
-      const items = input.items.map((candidate, index): CordisXNavigationCollectionItem | CordisXNavigationCollectionItemV2 | CordisXNavigationCollectionItemV3 => {
-        if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
-          throw new Error(`navigation collection item ${index} must be an object`)
-        }
-        assertKeys(candidate, imageCapable
-          ? ['id', 'label', 'description', 'icon', 'leadingVisual', 'route', 'order', 'disabled', 'actions']
-          : actionCapable
-            ? ['id', 'label', 'description', 'icon', 'route', 'order', 'disabled', 'actions']
-            : ['id', 'label', 'description', 'icon', 'route', 'order', 'disabled'], `navigation collection item ${index}`)
-        assertLocalId(candidate.id, `navigation collection item ${index} id`)
-        if (ids.has(candidate.id)) throw new Error(`navigation collection has duplicate item ${candidate.id}`)
-        ids.add(candidate.id)
-        assertLocalizedText(candidate.label, `navigation collection item ${index} label`)
-        if (candidate.description !== undefined) assertLocalizedText(candidate.description, `navigation collection item ${index} description`)
-        assertIcon(candidate.icon, `navigation collection item ${index}`)
-        const candidateVisual = imageCapable ? (candidate as CordisXNavigationCollectionItemV3).leadingVisual : undefined
-        if (candidate.icon !== undefined && candidateVisual !== undefined) {
-          throw new Error(`navigation collection item ${index} cannot combine icon and leadingVisual`)
-        }
-        const leadingVisual = cloneNavigationCollectionLeadingVisual(
-          candidateVisual,
-          `navigation collection item ${index} leadingVisual`,
-        )
-        assertRoute(candidate.route, `navigation collection item ${index}`)
-        if (!Number.isInteger(candidate.order) || candidate.order < -100_000 || candidate.order > 100_000) {
-          throw new Error(`navigation collection item ${index} order is invalid`)
-        }
-        assertDisabled(candidate.disabled)
-        const actions = actionCapable
-          ? cloneNavigationCollectionActions((candidate as CordisXNavigationCollectionItemV2).actions, `navigation collection item ${index} actions`)
-          : undefined
-        return immutableSnapshot({
-          ...candidate,
-          ...(leadingVisual === undefined ? {} : { leadingVisual }),
-          ...(actions === undefined ? {} : { actions }),
-        })
-      })
+      const items = input.items.map(
+        (
+          candidate,
+          index,
+        ): CordisXNavigationCollectionItem | CordisXNavigationCollectionItemV2 | CordisXNavigationCollectionItemV3 => {
+          if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
+            throw new Error(`navigation collection item ${index} must be an object`)
+          }
+          assertKeys(
+            candidate,
+            imageCapable
+              ? ['id', 'label', 'description', 'icon', 'leadingVisual', 'route', 'order', 'disabled', 'actions']
+              : actionCapable
+              ? ['id', 'label', 'description', 'icon', 'route', 'order', 'disabled', 'actions']
+              : ['id', 'label', 'description', 'icon', 'route', 'order', 'disabled'],
+            `navigation collection item ${index}`,
+          )
+          assertLocalId(candidate.id, `navigation collection item ${index} id`)
+          if (ids.has(candidate.id)) throw new Error(`navigation collection has duplicate item ${candidate.id}`)
+          ids.add(candidate.id)
+          assertLocalizedText(candidate.label, `navigation collection item ${index} label`)
+          if (candidate.description !== undefined) {
+            assertLocalizedText(candidate.description, `navigation collection item ${index} description`)
+          }
+          assertIcon(candidate.icon, `navigation collection item ${index}`)
+          const candidateVisual = imageCapable
+            ? (candidate as CordisXNavigationCollectionItemV3).leadingVisual
+            : undefined
+          if (candidate.icon !== undefined && candidateVisual !== undefined) {
+            throw new Error(`navigation collection item ${index} cannot combine icon and leadingVisual`)
+          }
+          const leadingVisual = cloneNavigationCollectionLeadingVisual(
+            candidateVisual,
+            `navigation collection item ${index} leadingVisual`,
+          )
+          assertRoute(candidate.route, `navigation collection item ${index}`)
+          if (!Number.isInteger(candidate.order) || candidate.order < -100_000 || candidate.order > 100_000) {
+            throw new Error(`navigation collection item ${index} order is invalid`)
+          }
+          assertDisabled(candidate.disabled)
+          const actions = actionCapable
+            ? cloneNavigationCollectionActions(
+              (candidate as CordisXNavigationCollectionItemV2).actions,
+              `navigation collection item ${index} actions`,
+            )
+            : undefined
+          return immutableSnapshot({
+            ...candidate,
+            ...(leadingVisual === undefined ? {} : { leadingVisual }),
+            ...(actions === undefined ? {} : { actions }),
+          })
+        },
+      )
       return immutableSnapshot({ revision: input.revision, items })
     }
 
-    const replace = (next: CordisXNavigationCollectionSnapshot | CordisXNavigationCollectionSnapshotV2 | CordisXNavigationCollectionSnapshotV3): void => {
+    const replace = (
+      next:
+        | CordisXNavigationCollectionSnapshot
+        | CordisXNavigationCollectionSnapshotV2
+        | CordisXNavigationCollectionSnapshotV3,
+    ): void => {
       if (!active) return
       if (current !== undefined && next.revision < current.revision) {
         throw new Error('navigation collection snapshot revision moved backwards')
@@ -1327,8 +1571,13 @@ export class CordisXSlotService extends Service implements CordisXSlots {
           console.error('[cordisx] navigation collection update failed', error)
         }
       })
-      if (typeof unsubscribe !== 'function') throw new Error('navigation collection subscribe must return an unsubscribe function')
-      effectDispose = this.ctx.effect(() => disposeRegistration, `slots.registerCollection(${JSON.stringify(options.id)})`)
+      if (typeof unsubscribe !== 'function') {
+        throw new Error('navigation collection subscribe must return an unsubscribe function')
+      }
+      effectDispose = this.ctx.effect(
+        () => disposeRegistration,
+        `slots.registerCollection(${JSON.stringify(options.id)})`,
+      )
     } catch (error) {
       disposeRegistration()
       throw error
@@ -1383,7 +1632,10 @@ export class CordisXSlotService extends Service implements CordisXSlots {
     return this.registry.controlCoordinator()?.legacyAuthorizations() ?? []
   }
 
-  setControlAuthorization(expectedRevision: number, authorization: CordisXExtensionPointControlAuthorizationV1): number {
+  setControlAuthorization(
+    expectedRevision: number,
+    authorization: CordisXExtensionPointControlAuthorizationV1,
+  ): number {
     const controls = this.registry.controlCoordinator()
     if (controls === undefined) throw new Error('controlled surface runtime is unavailable')
     return controls.setAuthorization(expectedRevision, authorization)

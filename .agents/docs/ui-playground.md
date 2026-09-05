@@ -101,7 +101,10 @@ flow. These values are fixture-owned catalog keys, not Runtime commands.
           "entryAgentId": "chatroom.generalist",
           "label": "Full local smoke",
           "steps": [
-            { "type": "assistant-reply", "text": "Starting the declared flow." },
+            {
+              "type": "assistant-reply",
+              "text": "Starting the declared flow."
+            },
             {
               "type": "room-delegation",
               "as": "reviewer",
@@ -110,9 +113,24 @@ flow. These values are fixture-owned catalog keys, not Runtime commands.
               "task": "Review the declared flow."
             },
             { "type": "activate-session-scope", "actor": "reviewer" },
-            { "type": "tool-call", "actor": "reviewer", "call": "inspect", "name": "workspace.inspect", "arguments": { "scope": "current" } },
-            { "type": "tool-result", "actor": "reviewer", "call": "inspect", "content": "Inspection complete." },
-            { "type": "assistant-reply", "actor": "reviewer", "text": "Review complete." },
+            {
+              "type": "tool-call",
+              "actor": "reviewer",
+              "call": "inspect",
+              "name": "workspace.inspect",
+              "arguments": { "scope": "current" }
+            },
+            {
+              "type": "tool-result",
+              "actor": "reviewer",
+              "call": "inspect",
+              "content": "Inspection complete."
+            },
+            {
+              "type": "assistant-reply",
+              "actor": "reviewer",
+              "text": "Review complete."
+            },
             { "type": "final-summary", "text": "The declared flow completed." }
           ]
         }

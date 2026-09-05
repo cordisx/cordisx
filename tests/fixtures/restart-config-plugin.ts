@@ -29,5 +29,7 @@ export function apply(ctx: Context, config: { label: string }): void {
   }
   if (fixture.rollbackShouldFail) throw new Error('last-good rollback rejected by plugin')
   if (config.label === 'fail') throw new Error('candidate rejected by plugin')
-  ctx.effect(() => () => { fixture.restartDispose += 1 }, 'restart config fixture cleanup')
+  ctx.effect(() => () => {
+    fixture.restartDispose += 1
+  }, 'restart config fixture cleanup')
 }

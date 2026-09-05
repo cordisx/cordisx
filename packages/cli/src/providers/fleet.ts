@@ -24,23 +24,37 @@ import type {
 import type { CordisXPlatformAdapter } from '../renderer/platform.js'
 import type { CordisXExternalProviderAvailabilityStatus } from '../capability-availability-contracts.js'
 import { ProviderAdapterRegistry, ProviderRegistryError } from '../renderer/provider-registry.js'
-import { startCodexAppServer, startLocalCodexAppServer, type CodexAppServerOptions, type CodexAppServerRpc } from './codex-app-server.js'
+import {
+  type CodexAppServerOptions,
+  type CodexAppServerRpc,
+  startCodexAppServer,
+  startLocalCodexAppServer,
+} from './codex-app-server.js'
 import { CliProxyProviderAdapter } from './cli-proxy-adapter.js'
 import type { CodexProviderConfig, ProviderConnection, ProviderLifecycleSignal } from './contracts.js'
 import {
   AgentLoopAuthority,
-  agentLoopCommandDigest,
   type AgentLoopAuthorityScope,
+  agentLoopCommandDigest,
   type AgentLoopProviderFence,
   type AgentLoopTaskLocator,
 } from '../launcher/agent-loop-authority.js'
 
 const FLEET_CAPABILITIES: readonly CordisXPlatformCapability[] = Object.freeze([
-  'models.read', 'tasks.catalog.read', 'tasks.content.read', 'tasks.create', 'tasks.control', 'turns.submit', 'turns.control', 'turns.introduce', 'approvals.decide',
+  'models.read',
+  'tasks.catalog.read',
+  'tasks.content.read',
+  'tasks.create',
+  'tasks.control',
+  'turns.submit',
+  'turns.control',
+  'turns.introduce',
+  'approvals.decide',
 ])
 const CURRENT_CONNECTION_UNAVAILABLE: CordisXPlatformDiagnostic = Object.freeze({
   code: 'current-connection-client-unavailable',
-  message: 'The native Codex Desktop current connection remains unavailable; Provider Fleet connections are routed independently',
+  message:
+    'The native Codex Desktop current connection remains unavailable; Provider Fleet connections are routed independently',
 })
 
 interface ProviderPageState {
@@ -75,7 +89,11 @@ export interface ProviderFleetOptions {
   readonly agentLoopAuthority?: AgentLoopAuthority
 }
 
-function failure(code: CordisXPlatformDiagnostic['code'], message: string, retryable = false): CordisXPlatformResult<never> {
+function failure(
+  code: CordisXPlatformDiagnostic['code'],
+  message: string,
+  retryable = false,
+): CordisXPlatformResult<never> {
   return { ok: false, error: { code, message, ...(retryable ? { retryable: true } : {}) } }
 }
 
@@ -83,7 +101,10 @@ function copy<Value>(value: Value): Value {
   return JSON.parse(JSON.stringify(value)) as Value
 }
 
-function normalizedQuery(input: CordisXTasksListInput, providerIds: readonly string[]): Omit<CordisXTasksListInput, 'cursor'> {
+function normalizedQuery(
+  input: CordisXTasksListInput,
+  providerIds: readonly string[],
+): Omit<CordisXTasksListInput, 'cursor'> {
   return Object.freeze({
     providerIds: Object.freeze([...providerIds].sort()),
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
@@ -99,12 +120,18 @@ function queryFingerprint(query: Omit<CordisXTasksListInput, 'cursor'>): string 
 function sessionCompare(left: CordisXSessionSummary, right: CordisXSessionSummary): number {
   const updated = (right.updatedAt ?? '').localeCompare(left.updatedAt ?? '')
   if (updated !== 0) return updated
-  return `${left.ref.providerId}\0${left.ref.remoteSessionId}`.localeCompare(`${right.ref.providerId}\0${right.ref.remoteSessionId}`)
+  return `${left.ref.providerId}\0${left.ref.remoteSessionId}`.localeCompare(
+    `${right.ref.providerId}\0${right.ref.remoteSessionId}`,
+  )
 }
 
 function registryFailure(error: unknown): CordisXPlatformResult<never> {
   if (error instanceof ProviderRegistryError) {
-    return failure(error.code === 'invalid-provider' ? 'invalid-provider' : 'adapter-unavailable', error.message, error.code !== 'invalid-provider')
+    return failure(
+      error.code === 'invalid-provider' ? 'invalid-provider' : 'adapter-unavailable',
+      error.message,
+      error.code !== 'invalid-provider',
+    )
   }
   return failure('adapter-failure', 'External provider routing failed', true)
 }
@@ -129,38 +156,48 @@ export class ProviderFleet implements CordisXPlatformAdapter {
 
   private constructor(options: ProviderFleetOptions) {
     this.now = options.now ?? Date.now
-    this.startServer = options.startServer ?? (async (config, serverOptions) => config.kind === 'local-codex'
-      ? await startLocalCodexAppServer(config, serverOptions)
-      : await startCodexAppServer(config, serverOptions))
+    this.startServer = options.startServer ?? (async (config, serverOptions) =>
+      config.kind === 'local-codex'
+        ? await startLocalCodexAppServer(config, serverOptions)
+        : await startCodexAppServer(config, serverOptions))
     this.appServer = options.appServer
     this.agentLoopAuthority = options.agentLoopAuthority
   }
 
-  static async create(configs: readonly CodexProviderConfig[], options: ProviderFleetOptions = {}): Promise<ProviderFleet> {
+  static async create(
+    configs: readonly CodexProviderConfig[],
+    options: ProviderFleetOptions = {},
+  ): Promise<ProviderFleet> {
     const fleet = new ProviderFleet(options)
     const start = fleet.startServer
     const sourceRegistry = fleet.registry
-    await Promise.all(configs.filter(config => config.enabled).map(async config => {
-      fleet.names.set(config.id, config.displayName)
-      try {
-        const server = await start(config, options.appServer)
-        const adapter = new CliProxyProviderAdapter(config, server)
-        fleet.registry.register({
-          providerId: config.id,
-          generation: adapter.generation,
-          adapter,
-          dispose: async () => await adapter.close(),
-        })
-        const disposeLifecycle = adapter.subscribeLifecycle?.(event => fleet.observeLifecycle(sourceRegistry, adapter.generation, event))
-        if (disposeLifecycle !== undefined) fleet.lifecycleDisposers.set(config.id, disposeLifecycle)
-      } catch {
-        fleet.failures.set(config.id, {
-          code: 'adapter-unavailable',
-          message: `${config.kind === 'local-codex' ? 'Local Codex' : 'External provider'} ${config.id} is unavailable`,
-          retryable: true,
-        })
-      }
-    }))
+    await Promise.all(
+      configs.filter(config => config.enabled).map(async config => {
+        fleet.names.set(config.id, config.displayName)
+        try {
+          const server = await start(config, options.appServer)
+          const adapter = new CliProxyProviderAdapter(config, server)
+          fleet.registry.register({
+            providerId: config.id,
+            generation: adapter.generation,
+            adapter,
+            dispose: async () => await adapter.close(),
+          })
+          const disposeLifecycle = adapter.subscribeLifecycle?.(event =>
+            fleet.observeLifecycle(sourceRegistry, adapter.generation, event)
+          )
+          if (disposeLifecycle !== undefined) fleet.lifecycleDisposers.set(config.id, disposeLifecycle)
+        } catch {
+          fleet.failures.set(config.id, {
+            code: 'adapter-unavailable',
+            message: `${
+              config.kind === 'local-codex' ? 'Local Codex' : 'External provider'
+            } ${config.id} is unavailable`,
+            retryable: true,
+          })
+        }
+      }),
+    )
     return fleet
   }
 
@@ -178,7 +215,9 @@ export class ProviderFleet implements CordisXPlatformAdapter {
   }
 
   providerStatuses(): readonly CordisXExternalProviderAvailabilityStatus[] {
-    const generations = new Map(this.registry.snapshots().filter(item => item.state === 'active').map(item => [item.providerId, item.generation]))
+    const generations = new Map(
+      this.registry.snapshots().filter(item => item.state === 'active').map(item => [item.providerId, item.generation]),
+    )
     return [...this.names].map(([providerId, displayName]) => {
       const generation = generations.get(providerId)
       return {
@@ -193,13 +232,22 @@ export class ProviderFleet implements CordisXPlatformAdapter {
   async listModels(input: CordisXModelsListInput): Promise<CordisXPlatformResult<CordisXModelPage>> {
     const providers = this.providers(input.providerIds)
     if (!providers.ok) return providers
-    const pages = await Promise.all(providers.value.map(async providerId => await this.withProvider(providerId, async adapter => await adapter.listModels())))
+    const pages = await Promise.all(
+      providers.value.map(async providerId =>
+        await this.withProvider(providerId, async adapter => await adapter.listModels())
+      ),
+    )
     const failed = pages.find(page => !page.ok)
     if (failed !== undefined && !failed.ok) return failed
     const models = pages.flatMap(page => page.ok ? page.value : []).sort((left, right) => {
-      return `${left.label}\0${left.ref.providerId}\0${left.ref.modelId}`.localeCompare(`${right.label}\0${right.ref.providerId}\0${right.ref.modelId}`)
+      return `${left.label}\0${left.ref.providerId}\0${left.ref.modelId}`.localeCompare(
+        `${right.label}\0${right.ref.providerId}\0${right.ref.modelId}`,
+      )
     })
-    return { ok: true, value: { contract: 'cordisx.platform-model-page/v1', schemaVersion: 1, providerIds: providers.value, models } }
+    return {
+      ok: true,
+      value: { contract: 'cordisx.platform-model-page/v1', schemaVersion: 1, providerIds: providers.value, models },
+    }
   }
 
   async listTasks(input: CordisXTasksListInput): Promise<CordisXPlatformResult<CordisXSessionPage>> {
@@ -222,8 +270,12 @@ export class ProviderFleet implements CordisXPlatformAdapter {
         snapshotId: randomUUID(),
         query,
         providers: providers.value.map(providerId => {
-          const generation = this.registry.snapshots().find(item => item.providerId === providerId && item.state === 'active')?.generation
-          if (generation === undefined) throw new ProviderRegistryError('adapter-unavailable', `Provider ${providerId} is unavailable`)
+          const generation = this.registry.snapshots().find(item =>
+            item.providerId === providerId && item.state === 'active'
+          )?.generation
+          if (generation === undefined) {
+            throw new ProviderRegistryError('adapter-unavailable', `Provider ${providerId} is unavailable`)
+          }
           return { providerId, generation, cursor: undefined, buffer: [], done: false }
         }),
         expiresAt: this.now() + 10 * 60_000,
@@ -264,7 +316,9 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     return await this.withSession(input.session, async adapter => await adapter.readSession(input.session))
   }
 
-  async createTask(input: Omit<CordisXTaskCreateInput, 'initialMessage'>): Promise<CordisXPlatformResult<CordisXSessionSummary>> {
+  async createTask(
+    input: Omit<CordisXTaskCreateInput, 'initialMessage'>,
+  ): Promise<CordisXPlatformResult<CordisXSessionSummary>> {
     return await this.withProvider(input.model.providerId, async adapter => await adapter.createSession(input))
   }
 
@@ -293,13 +347,14 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     if (generation === 'retired') return { status: 'unavailable', code: 'host-unavailable' }
     const provider = { providerId: input.model.providerId, providerGeneration: generation }
     return await this.durableAgentLoop(input, provider, async commandDigest => {
-      const created = await this.withProvider(input.model.providerId, async adapter => await adapter.createSession({
-        model: input.model,
-        cwd: input.cwd,
-        ...(input.developerInstructions === undefined ? {} : { developerInstructions: input.developerInstructions }),
-        ...(input.effort === undefined ? {} : { effort: input.effort }),
-        approvalPolicy: 'on-request',
-      }), generation)
+      const created = await this.withProvider(input.model.providerId, async adapter =>
+        await adapter.createSession({
+          model: input.model,
+          cwd: input.cwd,
+          ...(input.developerInstructions === undefined ? {} : { developerInstructions: input.developerInstructions }),
+          ...(input.effort === undefined ? {} : { effort: input.effort }),
+          approvalPolicy: 'on-request',
+        }), generation)
       if (!created.ok) return { status: 'unavailable', code: 'host-unavailable' }
       const locator: AgentLoopTaskLocator = {
         task: `cxloop-task:${randomUUID()}`,
@@ -329,19 +384,33 @@ export class ProviderFleet implements CordisXPlatformAdapter {
   }): Promise<unknown> {
     const locator = this.agentLoopAuthority?.resolveTask(input.scope, input.task)
     if (locator === undefined || locator.state !== 'active') return { status: 'unavailable', code: 'task-unavailable' }
-    if (locator.definition.agentId !== input.definition.agentId || locator.definition.revision !== input.definition.revision) {
+    if (
+      locator.definition.agentId !== input.definition.agentId
+      || locator.definition.revision !== input.definition.revision
+    ) {
       return { status: 'conflict', code: 'binding-conflict' }
     }
-    if (this.generationFor(locator.providerId) !== locator.providerGeneration) return { status: 'unavailable', code: 'provider-replaced' }
+    if (this.generationFor(locator.providerId) !== locator.providerGeneration) {
+      return { status: 'unavailable', code: 'provider-replaced' }
+    }
     return await this.durableAgentLoop(input, locator, async () => {
-      const read = await this.withProvider(locator.providerId, async adapter => await adapter.readSession({ providerId: locator.providerId, remoteSessionId: locator.remoteSessionId }), locator.providerGeneration)
+      const read = await this.withProvider(
+        locator.providerId,
+        async adapter =>
+          await adapter.readSession({ providerId: locator.providerId, remoteSessionId: locator.remoteSessionId }),
+        locator.providerGeneration,
+      )
       if (!read.ok) return { status: 'unavailable', code: 'task-unavailable' }
       const rebound: AgentLoopTaskLocator = {
         ...locator,
         binding: { bindingId: locator.binding.bindingId, generation: locator.binding.generation + 1 },
       }
       await this.agentLoopAuthority!.rememberTask(input.scope, rebound)
-      return { status: 'accepted', locator: rebound, detailsUrl: { url: `codex:task/${encodeURIComponent(locator.remoteSessionId)}`, target: 'external' } }
+      return {
+        status: 'accepted',
+        locator: rebound,
+        detailsUrl: { url: `codex:task/${encodeURIComponent(locator.remoteSessionId)}`, target: 'external' },
+      }
     })
   }
 
@@ -365,14 +434,17 @@ export class ProviderFleet implements CordisXPlatformAdapter {
   }): Promise<unknown> {
     const locator = this.resolveAgentLoopBinding(input)
     if (locator === undefined || locator.state !== 'active') return { status: 'unavailable', code: 'binding-closed' }
-    if (this.generationFor(locator.providerId) !== locator.providerGeneration) return { status: 'unavailable', code: 'provider-replaced' }
+    if (this.generationFor(locator.providerId) !== locator.providerGeneration) {
+      return { status: 'unavailable', code: 'provider-replaced' }
+    }
     return await this.durableAgentLoop(input, locator, async commandDigest => {
-      const sent = await this.withProvider(locator.providerId, async adapter => await adapter.submitTurn({
-        session: { providerId: locator.providerId, remoteSessionId: locator.remoteSessionId },
-        message: input.message,
-        operationId: input.operationId,
-        operationDigest: commandDigest,
-      }), locator.providerGeneration)
+      const sent = await this.withProvider(locator.providerId, async adapter =>
+        await adapter.submitTurn({
+          session: { providerId: locator.providerId, remoteSessionId: locator.remoteSessionId },
+          message: input.message,
+          operationId: input.operationId,
+          operationDigest: commandDigest,
+        }), locator.providerGeneration)
       return !sent.ok
         ? { status: 'unavailable', code: 'host-unavailable' }
         : { status: 'accepted', locator, turn: sent.value.turnId, messageId: `cxloop-message:${input.operationId}` }
@@ -392,20 +464,33 @@ export class ProviderFleet implements CordisXPlatformAdapter {
   }): Promise<unknown> {
     const locator = this.resolveAgentLoopBinding(input)
     if (locator === undefined || locator.state !== 'active') return { status: 'unavailable', code: 'binding-closed' }
-    if (this.generationFor(locator.providerId) !== locator.providerGeneration) return { status: 'unavailable', code: 'provider-replaced' }
+    if (this.generationFor(locator.providerId) !== locator.providerGeneration) {
+      return { status: 'unavailable', code: 'provider-replaced' }
+    }
     return await this.durableAgentLoop(input, locator, async commandDigest => {
-      const resolved = await this.withProvider(locator.providerId, async adapter => await adapter.decideApproval({
-        session: { providerId: locator.providerId, remoteSessionId: locator.remoteSessionId },
-        turnId: input.turn,
-        approvalId: input.approvalId,
-        decision: input.decision,
-        operationId: input.operationId,
-        operationDigest: commandDigest,
-      }), locator.providerGeneration)
+      const resolved = await this.withProvider(locator.providerId, async adapter =>
+        await adapter.decideApproval({
+          session: { providerId: locator.providerId, remoteSessionId: locator.remoteSessionId },
+          turnId: input.turn,
+          approvalId: input.approvalId,
+          decision: input.decision,
+          operationId: input.operationId,
+          operationDigest: commandDigest,
+        }), locator.providerGeneration)
       return !resolved.ok
         ? { status: 'unavailable', code: 'approval-unavailable' }
-        : { status: 'accepted', locator, operationId: input.operationId, turn: input.turn, approvalId: input.approvalId, decision: input.decision }
-    }, { resourceKey: `approval\0${input.task}\0${input.turn}\0${input.approvalId}`, conflictCode: 'approval-conflict' })
+        : {
+          status: 'accepted',
+          locator,
+          operationId: input.operationId,
+          turn: input.turn,
+          approvalId: input.approvalId,
+          decision: input.decision,
+        }
+    }, {
+      resourceKey: `approval\0${input.task}\0${input.turn}\0${input.approvalId}`,
+      conflictCode: 'approval-conflict',
+    })
   }
 
   async requestAgentLoopIntroductionV4(input: {
@@ -421,25 +506,40 @@ export class ProviderFleet implements CordisXPlatformAdapter {
   }): Promise<unknown> {
     const locator = this.resolveAgentLoopBinding(input)
     if (locator === undefined || locator.state !== 'active') return { status: 'unavailable', code: 'binding-closed' }
-    if (this.generationFor(locator.providerId) !== locator.providerGeneration) return { status: 'unavailable', code: 'provider-replaced' }
+    if (this.generationFor(locator.providerId) !== locator.providerGeneration) {
+      return { status: 'unavailable', code: 'provider-replaced' }
+    }
     return await this.durableAgentLoop(input, locator, async commandDigest => {
-      const requested = await this.withProvider(locator.providerId, async adapter => await adapter.requestMemberSelfIntroduction({
-        session: { providerId: locator.providerId, remoteSessionId: locator.remoteSessionId },
-        operationId: input.operationId,
-        operationDigest: commandDigest,
-        participantId: input.participantId,
-        memberId: input.memberId,
-        runId: input.runId,
-      }), locator.providerGeneration)
+      const requested = await this.withProvider(
+        locator.providerId,
+        async adapter =>
+          await adapter.requestMemberSelfIntroduction({
+            session: { providerId: locator.providerId, remoteSessionId: locator.remoteSessionId },
+            operationId: input.operationId,
+            operationDigest: commandDigest,
+            participantId: input.participantId,
+            memberId: input.memberId,
+            runId: input.runId,
+          }),
+        locator.providerGeneration,
+      )
       return !requested.ok
         ? { status: 'unavailable', code: 'introduction-unavailable' }
         : {
-            status: 'accepted', locator, operationId: input.operationId,
-            participantId: input.participantId, memberId: input.memberId, runId: input.runId,
-            turn: requested.value.turnId, messageId: requested.value.messageId,
-            introductionState: this.introductionTerminal(locator, requested.value.turnId) ?? 'pending',
-          }
-    }, { resourceKey: `introduction\0${input.task}\0${input.participantId}\0${input.memberId}\0${input.runId}`, conflictCode: 'introduction-conflict' })
+          status: 'accepted',
+          locator,
+          operationId: input.operationId,
+          participantId: input.participantId,
+          memberId: input.memberId,
+          runId: input.runId,
+          turn: requested.value.turnId,
+          messageId: requested.value.messageId,
+          introductionState: this.introductionTerminal(locator, requested.value.turnId) ?? 'pending',
+        }
+    }, {
+      resourceKey: `introduction\0${input.task}\0${input.participantId}\0${input.memberId}\0${input.runId}`,
+      conflictCode: 'introduction-conflict',
+    })
   }
 
   async cancelAgentLoopIntroductionV4(input: {
@@ -456,37 +556,62 @@ export class ProviderFleet implements CordisXPlatformAdapter {
   }): Promise<unknown> {
     const locator = this.resolveAgentLoopBinding(input)
     if (locator === undefined || locator.state !== 'active') return { status: 'unavailable', code: 'binding-closed' }
-    if (this.generationFor(locator.providerId) !== locator.providerGeneration) return { status: 'unavailable', code: 'provider-replaced' }
-    try { await this.lifecycleAuthorityQueue } catch { return { status: 'unavailable', code: 'reconciliation-required' } }
+    if (this.generationFor(locator.providerId) !== locator.providerGeneration) {
+      return { status: 'unavailable', code: 'provider-replaced' }
+    }
+    try {
+      await this.lifecycleAuthorityQueue
+    } catch {
+      return { status: 'unavailable', code: 'reconciliation-required' }
+    }
     const request = this.agentLoopAuthority?.committedResult(input.scope, input.requestOperationId) as {
-      status?: unknown; turn?: unknown; messageId?: unknown
-      participantId?: unknown; memberId?: unknown; runId?: unknown
+      status?: unknown
+      turn?: unknown
+      messageId?: unknown
+      participantId?: unknown
+      memberId?: unknown
+      runId?: unknown
       introductionState?: unknown
-      locator?: { task?: unknown; providerId?: unknown; providerGeneration?: unknown; remoteSessionId?: unknown; binding?: { bindingId?: unknown; generation?: unknown } }
+      locator?: {
+        task?: unknown
+        providerId?: unknown
+        providerGeneration?: unknown
+        remoteSessionId?: unknown
+        binding?: { bindingId?: unknown; generation?: unknown }
+      }
     } | undefined
     if (request?.status !== 'accepted' || typeof request.turn !== 'string' || typeof request.messageId !== 'string') {
       return { status: 'unavailable', code: 'introduction-not-found' }
     }
-    if (request.locator?.task !== locator.task
+    if (
+      request.locator?.task !== locator.task
       || request.locator.providerId !== locator.providerId
       || request.locator.providerGeneration !== locator.providerGeneration
       || request.locator.remoteSessionId !== locator.remoteSessionId
       || request.locator.binding?.bindingId !== locator.binding.bindingId
-      || request.locator.binding.generation !== locator.binding.generation) {
+      || request.locator.binding.generation !== locator.binding.generation
+    ) {
       return { status: 'conflict', code: 'introduction-conflict' }
     }
-    if (request.participantId !== input.participantId || request.memberId !== input.memberId) return { status: 'conflict', code: 'member-conflict' }
+    if (request.participantId !== input.participantId || request.memberId !== input.memberId) {
+      return { status: 'conflict', code: 'member-conflict' }
+    }
     if (request.runId !== input.runId) return { status: 'conflict', code: 'run-conflict' }
     if (request.introductionState === 'completed') return { status: 'conflict', code: 'introduction-completed' }
     if (request.introductionState === 'cancelled') return { status: 'conflict', code: 'introduction-cancelled' }
     if (request.introductionState !== 'pending') return { status: 'conflict', code: 'introduction-conflict' }
     return await this.durableAgentLoop(input, locator, async commandDigest => {
-      const cancelled = await this.withProvider(locator.providerId, async adapter => await adapter.cancelMemberSelfIntroduction({
-        session: { providerId: locator.providerId, remoteSessionId: locator.remoteSessionId },
-        turnId: request.turn as string,
-        operationId: input.operationId,
-        operationDigest: commandDigest,
-      }), locator.providerGeneration)
+      const cancelled = await this.withProvider(
+        locator.providerId,
+        async adapter =>
+          await adapter.cancelMemberSelfIntroduction({
+            session: { providerId: locator.providerId, remoteSessionId: locator.remoteSessionId },
+            turnId: request.turn as string,
+            operationId: input.operationId,
+            operationDigest: commandDigest,
+          }),
+        locator.providerGeneration,
+      )
       if (!cancelled.ok) return { status: 'unavailable', code: 'introduction-unavailable' }
       this.appendLifecycle({
         providerGeneration: locator.providerGeneration,
@@ -498,36 +623,65 @@ export class ProviderFleet implements CordisXPlatformAdapter {
         cancellation: { operationId: input.operationId },
       })
       return {
-            status: 'accepted', locator, operationId: input.operationId, requestOperationId: input.requestOperationId,
-            participantId: request.participantId, memberId: request.memberId, runId: request.runId,
-            turn: cancelled.value.turnId, messageId: request.messageId,
-          }
-    }, { resourceKey: `introduction-cancel\0${input.task}\0${input.requestOperationId}`, conflictCode: 'introduction-conflict' })
+        status: 'accepted',
+        locator,
+        operationId: input.operationId,
+        requestOperationId: input.requestOperationId,
+        participantId: request.participantId,
+        memberId: request.memberId,
+        runId: request.runId,
+        turn: cancelled.value.turnId,
+        messageId: request.messageId,
+      }
+    }, {
+      resourceKey: `introduction-cancel\0${input.task}\0${input.requestOperationId}`,
+      conflictCode: 'introduction-conflict',
+    })
   }
 
-  async readAgentLoopV4Lifecycle(input: { readonly scope: AgentLoopAuthorityScope; readonly task: string; readonly binding: { readonly bindingId: string; readonly generation: number }; readonly definition: { readonly agentId: string; readonly revision: string }; readonly afterSequence: number }): Promise<unknown> {
-    try { await this.lifecycleAuthorityQueue } catch { return { status: 'unavailable', code: 'reconciliation-required' } }
+  async readAgentLoopV4Lifecycle(
+    input: {
+      readonly scope: AgentLoopAuthorityScope
+      readonly task: string
+      readonly binding: { readonly bindingId: string; readonly generation: number }
+      readonly definition: { readonly agentId: string; readonly revision: string }
+      readonly afterSequence: number
+    },
+  ): Promise<unknown> {
+    try {
+      await this.lifecycleAuthorityQueue
+    } catch {
+      return { status: 'unavailable', code: 'reconciliation-required' }
+    }
     const locator = this.resolveAgentLoopBinding(input)
     if (locator === undefined || locator.state !== 'active') return { status: 'unavailable', code: 'binding-closed' }
-    if (this.generationFor(locator.providerId) !== locator.providerGeneration) return { status: 'unavailable', code: 'provider-replaced' }
+    if (this.generationFor(locator.providerId) !== locator.providerGeneration) {
+      return { status: 'unavailable', code: 'provider-replaced' }
+    }
     const session = { providerId: locator.providerId, remoteSessionId: locator.remoteSessionId }
     const inFlightFence = [...this.agentLoopInFlight.values()]
-      .filter(operation => operation.task === input.task
+      .filter(operation =>
+        operation.task === input.task
         && operation.provider.providerId === locator.providerId
         && operation.provider.providerGeneration === locator.providerGeneration
-        && operation.lifecycleFence !== undefined)
-      .reduce<number | undefined>((minimum, operation) => minimum === undefined
-        ? operation.lifecycleFence
-        : Math.min(minimum, operation.lifecycleFence!), undefined)
+        && operation.lifecycleFence !== undefined
+      )
+      .reduce<number | undefined>((minimum, operation) =>
+        minimum === undefined
+          ? operation.lifecycleFence
+          : Math.min(minimum, operation.lifecycleFence!), undefined)
     const range = this.readLifecycle(session, input.afterSequence)
-    const stableEvents = inFlightFence === undefined ? range.events : range.events.filter(event => event.sequence <= inFlightFence)
+    const stableEvents = inFlightFence === undefined
+      ? range.events
+      : range.events.filter(event => event.sequence <= inFlightFence)
     const committed = this.agentLoopAuthority?.committedResults(input.scope) ?? []
-    const accepted = (kind: string) => committed.flatMap(entry => {
-      if (entry.kind !== kind || entry.result === null || typeof entry.result !== 'object') return []
-      const value = entry.result as Record<string, unknown>
-      const locator = value.locator as { task?: unknown } | undefined
-      return value.status === 'accepted' && locator?.task === input.task ? [value] : []
-    })
+    const accepted = (kind: string) =>
+      committed.flatMap(entry => {
+        if (entry.kind !== kind || entry.result === null || typeof entry.result !== 'object') return []
+        const value = entry.result as Record<string, unknown>
+        const locator = value.locator as { task?: unknown } | undefined
+        return value.status === 'accepted' && locator?.task === input.task ? [value] : []
+      })
     const approvals = accepted('approval-decision')
     const introductions = accepted('request-member-self-introduction')
     const cancellations = accepted('cancel-member-self-introduction')
@@ -539,32 +693,46 @@ export class ProviderFleet implements CordisXPlatformAdapter {
         const approval = event.type === 'approval.resolved' && approvalId !== undefined
           ? approvals.find(result => result.turn === event.turnId && result.approvalId === approvalId)
           : undefined
-        const introduction = event.type === 'turn.started' || event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.cancelled'
-          ? introductions.find(result => result.turn === event.turnId)
-          : undefined
-        const cancellation = event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.cancelled'
-          ? cancellations.find(result => result.turn === event.turnId)
-          : undefined
+        const introduction =
+          event.type === 'turn.started' || event.type === 'turn.completed' || event.type === 'turn.failed'
+            || event.type === 'turn.cancelled'
+            ? introductions.find(result => result.turn === event.turnId)
+            : undefined
+        const cancellation =
+          event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.cancelled'
+            ? cancellations.find(result => result.turn === event.turnId)
+            : undefined
         return {
           ...event,
           ...(typeof approval?.operationId === 'string' ? { causation: { operationId: approval.operationId } } : {}),
-          ...(introduction === undefined ? {} : { introduction: {
-            operationId: introduction.operationId,
-            messageId: introduction.messageId,
-            participantId: introduction.participantId,
-            memberId: introduction.memberId,
-            runId: introduction.runId,
-          } }),
+          ...(introduction === undefined ? {} : {
+            introduction: {
+              operationId: introduction.operationId,
+              messageId: introduction.messageId,
+              participantId: introduction.participantId,
+              memberId: introduction.memberId,
+              runId: introduction.runId,
+            },
+          }),
           ...(cancellation === undefined ? {} : { cancellation: { operationId: cancellation.operationId } }),
         }
       }),
     }
   }
 
-  resolveAgentLoopV4Session(input: { readonly scope: AgentLoopAuthorityScope; readonly task: string; readonly binding: { readonly bindingId: string; readonly generation: number }; readonly definition: { readonly agentId: string; readonly revision: string } }): unknown {
+  resolveAgentLoopV4Session(
+    input: {
+      readonly scope: AgentLoopAuthorityScope
+      readonly task: string
+      readonly binding: { readonly bindingId: string; readonly generation: number }
+      readonly definition: { readonly agentId: string; readonly revision: string }
+    },
+  ): unknown {
     const locator = this.resolveAgentLoopBinding(input)
     if (locator === undefined || locator.state !== 'active') return { status: 'unavailable', code: 'binding-closed' }
-    if (this.generationFor(locator.providerId) !== locator.providerGeneration) return { status: 'unavailable', code: 'provider-replaced' }
+    if (this.generationFor(locator.providerId) !== locator.providerGeneration) {
+      return { status: 'unavailable', code: 'provider-replaced' }
+    }
     return { status: 'resolved', sessionId: locator.remoteSessionId }
   }
 
@@ -587,30 +755,111 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     if (prior !== undefined) return structuredClone(prior)
     const observedAt = new Date(this.now()).toISOString()
     const created = await this.createTask({ model: input.model, cwd: input.cwd })
-    if (!created.ok) return this.remember({ contract: 'cordisx.platform-task-dispatch-result/v1', schemaVersion: 1, operationId: input.operationId, operation: 'create', status: 'rejected', failure: { code: 'TASK_CREATE_REJECTED', retryable: created.error.retryable === true }, observedAt })
+    if (!created.ok) {
+      return this.remember({
+        contract: 'cordisx.platform-task-dispatch-result/v1',
+        schemaVersion: 1,
+        operationId: input.operationId,
+        operation: 'create',
+        status: 'rejected',
+        failure: { code: 'TASK_CREATE_REJECTED', retryable: created.error.retryable === true },
+        observedAt,
+      })
+    }
     const session = created.value.ref
     const cursor = this.cursor(session)
     const turn = await this.submitTurn({ session, message: input.message })
-    if (!turn.ok) return this.remember({ contract: 'cordisx.platform-task-dispatch-result/v1', schemaVersion: 1, operationId: input.operationId, operation: 'create', status: 'created-initial-turn-failed', session, lifecycle: { session, afterSequence: cursor }, failure: { code: 'TURN_START_FAILED', retryable: turn.error.retryable === true }, observedAt: new Date(this.now()).toISOString() })
-    this.appendLifecycle({ providerGeneration: this.generationFor(session.providerId), session, turnId: turn.value.turnId, operationId: input.operationId, type: 'turn.started', provenance: 'observed', observedAt: new Date(this.now()).toISOString() })
-    return this.remember({ contract: 'cordisx.platform-task-dispatch-result/v1', schemaVersion: 1, operationId: input.operationId, operation: 'create', status: 'accepted', session, turn: { session, turnId: turn.value.turnId }, lifecycle: { session, afterSequence: cursor }, observedAt: new Date(this.now()).toISOString() })
+    if (!turn.ok) {
+      return this.remember({
+        contract: 'cordisx.platform-task-dispatch-result/v1',
+        schemaVersion: 1,
+        operationId: input.operationId,
+        operation: 'create',
+        status: 'created-initial-turn-failed',
+        session,
+        lifecycle: { session, afterSequence: cursor },
+        failure: { code: 'TURN_START_FAILED', retryable: turn.error.retryable === true },
+        observedAt: new Date(this.now()).toISOString(),
+      })
+    }
+    this.appendLifecycle({
+      providerGeneration: this.generationFor(session.providerId),
+      session,
+      turnId: turn.value.turnId,
+      operationId: input.operationId,
+      type: 'turn.started',
+      provenance: 'observed',
+      observedAt: new Date(this.now()).toISOString(),
+    })
+    return this.remember({
+      contract: 'cordisx.platform-task-dispatch-result/v1',
+      schemaVersion: 1,
+      operationId: input.operationId,
+      operation: 'create',
+      status: 'accepted',
+      session,
+      turn: { session, turnId: turn.value.turnId },
+      lifecycle: { session, afterSequence: cursor },
+      observedAt: new Date(this.now()).toISOString(),
+    })
   }
 
   /** Launcher-private Channel follow-up primitive against a complete bound session. */
-  async dispatchFollowup(input: { readonly operationId: string; readonly session: CordisXTaskReadInput['session']; readonly message: string }): Promise<ChannelTaskDispatchResult> {
+  async dispatchFollowup(
+    input: {
+      readonly operationId: string
+      readonly session: CordisXTaskReadInput['session']
+      readonly message: string
+    },
+  ): Promise<ChannelTaskDispatchResult> {
     const prior = this.operationResults.get(input.operationId)
     if (prior !== undefined) return structuredClone(prior)
     const observedAt = new Date(this.now()).toISOString()
     const cursor = this.cursor(input.session)
     const turn = await this.submitTurn({ session: input.session, message: input.message })
-    if (!turn.ok) return this.remember({ contract: 'cordisx.platform-task-dispatch-result/v1', schemaVersion: 1, operationId: input.operationId, operation: 'followup', status: 'rejected', failure: { code: 'TURN_START_REJECTED', retryable: turn.error.retryable === true }, observedAt })
-    this.appendLifecycle({ providerGeneration: this.generationFor(input.session.providerId), session: input.session, turnId: turn.value.turnId, operationId: input.operationId, type: 'turn.started', provenance: 'observed', observedAt: new Date(this.now()).toISOString() })
-    return this.remember({ contract: 'cordisx.platform-task-dispatch-result/v1', schemaVersion: 1, operationId: input.operationId, operation: 'followup', status: 'accepted', session: input.session, turn: { session: input.session, turnId: turn.value.turnId }, lifecycle: { session: input.session, afterSequence: cursor }, observedAt: new Date(this.now()).toISOString() })
+    if (!turn.ok) {
+      return this.remember({
+        contract: 'cordisx.platform-task-dispatch-result/v1',
+        schemaVersion: 1,
+        operationId: input.operationId,
+        operation: 'followup',
+        status: 'rejected',
+        failure: { code: 'TURN_START_REJECTED', retryable: turn.error.retryable === true },
+        observedAt,
+      })
+    }
+    this.appendLifecycle({
+      providerGeneration: this.generationFor(input.session.providerId),
+      session: input.session,
+      turnId: turn.value.turnId,
+      operationId: input.operationId,
+      type: 'turn.started',
+      provenance: 'observed',
+      observedAt: new Date(this.now()).toISOString(),
+    })
+    return this.remember({
+      contract: 'cordisx.platform-task-dispatch-result/v1',
+      schemaVersion: 1,
+      operationId: input.operationId,
+      operation: 'followup',
+      status: 'accepted',
+      session: input.session,
+      turn: { session: input.session, turnId: turn.value.turnId },
+      lifecycle: { session: input.session, afterSequence: cursor },
+      observedAt: new Date(this.now()).toISOString(),
+    })
   }
 
   readLifecycle(session: CordisXTaskReadInput['session'], afterSequence = 0): ChannelTaskLifecycleRange {
     const events = (this.lifecycle.get(lifecycleKey(session)) ?? []).filter(event => event.sequence > afterSequence)
-    return { contract: 'cordisx.platform-task-lifecycle-range/v1', schemaVersion: 1, session, afterSequence, nextAfterSequence: events.at(-1)?.sequence ?? afterSequence, events: structuredClone(events) }
+    return {
+      contract: 'cordisx.platform-task-lifecycle-range/v1',
+      schemaVersion: 1,
+      session,
+      afterSequence,
+      nextAfterSequence: events.at(-1)?.sequence ?? afterSequence,
+      events: structuredClone(events),
+    }
   }
 
   subscribeLifecycle(listener: (event: ChannelTaskLifecycleEvent) => void): () => void {
@@ -664,7 +913,8 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     this.names = replacement.names
     this.lifecycleDisposers = this.subscribeRegistryLifecycle(this.registry)
     replacement.closed = true
-    const generation = this.registry.snapshots().map(item => item.generation).sort().join(',') || `unavailable:${randomUUID()}`
+    const generation = this.registry.snapshots().map(item => item.generation).sort().join(',')
+      || `unavailable:${randomUUID()}`
     let settled = false
     return {
       generation,
@@ -686,8 +936,10 @@ export class ProviderFleet implements CordisXPlatformAdapter {
       finalize: async () => {
         if (settled) return
         settled = true
-        const current = new Set(this.registry.snapshots().filter(item => item.state === 'active')
-          .map(item => `${item.providerId}\0${item.generation}`))
+        const current = new Set(
+          this.registry.snapshots().filter(item => item.state === 'active')
+            .map(item => `${item.providerId}\0${item.generation}`),
+        )
         await previous.registry.dispose()
         for (const dispose of previous.lifecycleDisposers.values()) dispose()
         for (const provider of previous.providers) {
@@ -700,7 +952,9 @@ export class ProviderFleet implements CordisXPlatformAdapter {
   }
 
   private providers(requested?: readonly string[]): CordisXPlatformResult<readonly string[]> {
-    const active = new Set(this.registry.snapshots().filter(item => item.state === 'active').map(item => item.providerId))
+    const active = new Set(
+      this.registry.snapshots().filter(item => item.state === 'active').map(item => item.providerId),
+    )
     const selected = requested === undefined || requested.length === 0 ? [...active].sort() : [...requested].sort()
     const unavailable = selected.find(providerId => !active.has(providerId))
     if (unavailable !== undefined) {
@@ -711,14 +965,18 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     return { ok: true, value: selected }
   }
 
-  private async ensureBuffer(provider: ProviderPageState, query: Omit<CordisXTasksListInput, 'cursor'>): Promise<CordisXPlatformResult<true>> {
+  private async ensureBuffer(
+    provider: ProviderPageState,
+    query: Omit<CordisXTasksListInput, 'cursor'>,
+  ): Promise<CordisXPlatformResult<true>> {
     if (provider.done || provider.buffer.length > 0) return { ok: true, value: true }
-    const page = await this.withProvider(provider.providerId, async adapter => await adapter.listSessions({
-      ...(query.cwd === undefined ? {} : { cwd: query.cwd }),
-      ...(query.searchTerm === undefined ? {} : { searchTerm: query.searchTerm }),
-      ...(provider.cursor === undefined ? {} : { cursor: provider.cursor }),
-      ...(query.limit === undefined ? {} : { limit: query.limit }),
-    }), provider.generation)
+    const page = await this.withProvider(provider.providerId, async adapter =>
+      await adapter.listSessions({
+        ...(query.cwd === undefined ? {} : { cwd: query.cwd }),
+        ...(query.searchTerm === undefined ? {} : { searchTerm: query.searchTerm }),
+        ...(provider.cursor === undefined ? {} : { cursor: provider.cursor }),
+        ...(query.limit === undefined ? {} : { limit: query.limit }),
+      }), provider.generation)
     if (!page.ok) return page
     provider.buffer.push(...[...page.value.sessions].sort(sessionCompare))
     provider.cursor = page.value.nextCursor
@@ -771,20 +1029,29 @@ export class ProviderFleet implements CordisXPlatformAdapter {
       ? String((input.command as { type: string }).type)
       : 'unknown'
     const inFlightKey = JSON.stringify([input.scope.profileId, input.scope.ownerKey, input.operationId])
-    const replay = (value: unknown): unknown => (value as { status?: unknown } | null)?.status === 'accepted'
-      ? { ...(copy(value) as Record<string, unknown>), delivery: 'replayed' }
-      : copy(value)
+    const replay = (value: unknown): unknown =>
+      (value as { status?: unknown } | null)?.status === 'accepted'
+        ? { ...(copy(value) as Record<string, unknown>), delivery: 'replayed' }
+        : copy(value)
     const prior = this.agentLoopInFlight.get(inFlightKey)
     if (prior !== undefined) {
-      if (prior.provider.providerId !== provider.providerId || prior.provider.providerGeneration !== provider.providerGeneration) {
+      if (
+        prior.provider.providerId !== provider.providerId
+        || prior.provider.providerGeneration !== provider.providerGeneration
+      ) {
         return { status: 'unavailable', code: 'provider-replaced' }
       }
-      if (prior.commandDigest !== commandDigest || prior.kind !== kind) return { status: 'conflict', code: 'operation-conflict' }
+      if (prior.commandDigest !== commandDigest || prior.kind !== kind) {
+        return { status: 'conflict', code: 'operation-conflict' }
+      }
       return replay(await prior.promise)
     }
     let resolve!: (value: unknown) => void
     let reject!: (error: unknown) => void
-    const pending = new Promise<unknown>((accepted, failed) => { resolve = accepted; reject = failed })
+    const pending = new Promise<unknown>((accepted, failed) => {
+      resolve = accepted
+      reject = failed
+    })
     void pending.catch(() => undefined)
     const locator = 'task' in provider && 'remoteSessionId' in provider ? provider as AgentLoopTaskLocator : undefined
     const operation: AgentLoopInFlight = {
@@ -814,15 +1081,23 @@ export class ProviderFleet implements CordisXPlatformAdapter {
       let output: unknown
       if (plan.status === 'replay') output = replay(plan.result)
       else if (plan.status === 'conflict') output = { status: 'conflict', code: 'operation-conflict' }
-      else if (plan.status === 'resource-conflict') output = { status: 'conflict', code: resource?.conflictCode ?? 'operation-conflict' }
-      else if (plan.status === 'operation-expired') output = { status: 'unavailable', code: 'operation-expired' }
+      else if (plan.status === 'resource-conflict') {
+        output = { status: 'conflict', code: resource?.conflictCode ?? 'operation-conflict' }
+      } else if (plan.status === 'operation-expired') output = { status: 'unavailable', code: 'operation-expired' }
       else if (plan.status === 'reconciliation-required') {
-        output = plan.provider !== undefined && (plan.provider.providerId !== provider.providerId || plan.provider.providerGeneration !== provider.providerGeneration)
+        output = plan.provider !== undefined
+            && (plan.provider.providerId !== provider.providerId
+              || plan.provider.providerGeneration !== provider.providerGeneration)
           ? { status: 'unavailable', code: 'provider-replaced' }
           : { status: 'unavailable', code: 'reconciliation-required' }
       } else {
         const result = await execute(commandDigest)
-        await this.agentLoopAuthority.commit({ scope: input.scope, operationId: input.operationId, commandDigest, result })
+        await this.agentLoopAuthority.commit({
+          scope: input.scope,
+          operationId: input.operationId,
+          commandDigest,
+          result,
+        })
         output = { ...(copy(result) as Record<string, unknown>), delivery: 'executed' }
       }
       resolve(output)
@@ -846,7 +1121,8 @@ export class ProviderFleet implements CordisXPlatformAdapter {
   }
 
   private generationFor(providerId: string): string {
-    return this.registry.snapshots().find(item => item.providerId === providerId && item.state === 'active')?.generation ?? 'retired'
+    return this.registry.snapshots().find(item => item.providerId === providerId && item.state === 'active')?.generation
+      ?? 'retired'
   }
 
   private subscribeRegistryLifecycle(registry: ProviderAdapterRegistry<ProviderConnection>): Map<string, () => void> {
@@ -854,7 +1130,9 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     for (const snapshot of registry.snapshots().filter(item => item.state === 'active')) {
       const lease = registry.acquire(snapshot.providerId, snapshot.generation)
       try {
-        const dispose = lease.adapter.subscribeLifecycle?.(event => this.observeLifecycle(registry, snapshot.generation, event))
+        const dispose = lease.adapter.subscribeLifecycle?.(event =>
+          this.observeLifecycle(registry, snapshot.generation, event)
+        )
         if (dispose !== undefined) disposers.set(snapshot.providerId, dispose)
       } finally {
         lease.release()
@@ -868,38 +1146,79 @@ export class ProviderFleet implements CordisXPlatformAdapter {
   }
 
   private introductionTerminal(locator: AgentLoopTaskLocator, turn: string): 'completed' | 'failed' | undefined {
-    const terminal = (this.lifecycle.get(lifecycleKey({ providerId: locator.providerId, remoteSessionId: locator.remoteSessionId })) ?? [])
-      .find(event => event.providerGeneration === locator.providerGeneration && event.turnId === turn
-        && (event.type === 'turn.completed' || event.type === 'turn.failed'))
+    const terminal =
+      (this.lifecycle.get(lifecycleKey({ providerId: locator.providerId, remoteSessionId: locator.remoteSessionId }))
+        ?? [])
+        .find(event =>
+          event.providerGeneration === locator.providerGeneration && event.turnId === turn
+          && (event.type === 'turn.completed' || event.type === 'turn.failed')
+        )
     return terminal?.type === 'turn.completed' ? 'completed' : terminal?.type === 'turn.failed' ? 'failed' : undefined
   }
 
-  private observeLifecycle(source: ProviderAdapterRegistry<ProviderConnection>, generation: string, event: ProviderLifecycleSignal): void {
-    const provider = source.snapshots().find(snapshot => snapshot.providerId === event.session.providerId
-      && snapshot.generation === generation)
-    if (provider === undefined || provider.inFlight === 0
-      && (provider.state === 'draining' || source !== this.registry)) return
-    const appended = this.appendLifecycle({ providerGeneration: generation, session: event.session, turnId: event.turnId, type: event.type, provenance: 'observed', observedAt: new Date(this.now()).toISOString(), ...(event.output === undefined ? {} : { output: event.output }), ...(event.failure === undefined ? {} : { failure: event.failure }), ...(event.approval === undefined ? {} : { approval: event.approval }) })
+  private observeLifecycle(
+    source: ProviderAdapterRegistry<ProviderConnection>,
+    generation: string,
+    event: ProviderLifecycleSignal,
+  ): void {
+    const provider = source.snapshots().find(snapshot =>
+      snapshot.providerId === event.session.providerId
+      && snapshot.generation === generation
+    )
+    if (
+      provider === undefined || provider.inFlight === 0
+        && (provider.state === 'draining' || source !== this.registry)
+    ) return
+    const appended = this.appendLifecycle({
+      providerGeneration: generation,
+      session: event.session,
+      turnId: event.turnId,
+      type: event.type,
+      provenance: 'observed',
+      observedAt: new Date(this.now()).toISOString(),
+      ...(event.output === undefined ? {} : { output: event.output }),
+      ...(event.failure === undefined ? {} : { failure: event.failure }),
+      ...(event.approval === undefined ? {} : { approval: event.approval }),
+    })
     if (appended && (event.type === 'turn.completed' || event.type === 'turn.failed')) {
-      this.lifecycleAuthorityQueue = this.lifecycleAuthorityQueue.then(async () => await this.agentLoopAuthority?.observeIntroductionTerminal(
-        { providerId: event.session.providerId, providerGeneration: generation },
-        event.session.remoteSessionId,
-        event.turnId,
-        event.type === 'turn.completed' ? 'completed' : 'failed',
-      ))
+      this.lifecycleAuthorityQueue = this.lifecycleAuthorityQueue.then(async () =>
+        await this.agentLoopAuthority?.observeIntroductionTerminal(
+          { providerId: event.session.providerId, providerGeneration: generation },
+          event.session.remoteSessionId,
+          event.turnId,
+          event.type === 'turn.completed' ? 'completed' : 'failed',
+        )
+      )
     }
   }
 
-  private appendLifecycle(input: Omit<ChannelTaskLifecycleEvent, 'contract' | 'schemaVersion' | 'eventId' | 'sequence'>): boolean {
+  private appendLifecycle(
+    input: Omit<ChannelTaskLifecycleEvent, 'contract' | 'schemaVersion' | 'eventId' | 'sequence'>,
+  ): boolean {
     const key = lifecycleKey(input.session)
     const current = this.lifecycle.get(key) ?? []
     if (input.type === 'turn.completed' || input.type === 'turn.failed' || input.type === 'turn.cancelled') {
-      if (current.some(event => event.turnId === input.turnId
-        && (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.cancelled'))) return false
+      if (
+        current.some(event =>
+          event.turnId === input.turnId
+          && (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.cancelled')
+        )
+      ) return false
     } else if (input.type === 'approval.required' || input.type === 'approval.resolved') {
-      if (current.some(event => event.turnId === input.turnId && event.type === input.type && event.approval?.approvalId === input.approval?.approvalId)) return false
+      if (
+        current.some(event =>
+          event.turnId === input.turnId && event.type === input.type
+          && event.approval?.approvalId === input.approval?.approvalId
+        )
+      ) return false
     } else if (current.some(event => event.turnId === input.turnId && event.type === input.type)) return false
-    const event: ChannelTaskLifecycleEvent = { contract: 'cordisx.platform-task-lifecycle-event/v1', schemaVersion: 1, eventId: `lifecycle:${randomUUID()}`, sequence: current.length + 1, ...input }
+    const event: ChannelTaskLifecycleEvent = {
+      contract: 'cordisx.platform-task-lifecycle-event/v1',
+      schemaVersion: 1,
+      eventId: `lifecycle:${randomUUID()}`,
+      sequence: current.length + 1,
+      ...input,
+    }
     this.lifecycle.set(key, [...current, event])
     for (const listener of this.lifecycleListeners) listener(structuredClone(event))
     return true

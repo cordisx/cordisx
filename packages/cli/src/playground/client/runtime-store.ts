@@ -5,21 +5,21 @@ import {
 } from '../../renderer/playground-mock-agent-loop.js'
 import {
   mergePlaygroundSimulatorTaskSnapshots,
+  type PlaygroundHostSessionTaskContext,
   projectPlaygroundHostSessionTask,
   readPlaygroundSimulatorTaskSnapshots,
-  type PlaygroundHostSessionTaskContext,
 } from './task-details-navigation.js'
 import {
   clearPlaygroundDisposableSessionData,
   isPlaygroundPreviewResetEpoch,
-  playgroundPreviewResetEpochMatches,
   PLAYGROUND_PREVIEW_RESET_RESULT_KEY,
-  reconcilePlaygroundPreviewBootstrapEpoch,
+  type PlaygroundPreviewResetEpoch,
+  playgroundPreviewResetEpochMatches,
   readPlaygroundPreviewResetApplied,
   readPlaygroundPreviewResetMarker,
+  reconcilePlaygroundPreviewBootstrapEpoch,
   writePlaygroundPreviewResetApplied,
   writePlaygroundPreviewResetMarker,
-  type PlaygroundPreviewResetEpoch,
 } from './preview-reset.js'
 
 export const PLAYGROUND_PREVIEW_RESET_APPLY_EVENT = 'cordisx:playground-preview-reset-apply-local' as const
@@ -53,7 +53,11 @@ export type PlaygroundSimulatorTaskSource =
   | 'legacy-alias-registry'
 
 function browserSessionStorage(): Storage | undefined {
-  try { return window.sessionStorage } catch { return undefined }
+  try {
+    return window.sessionStorage
+  } catch {
+    return undefined
+  }
 }
 
 const initialResetMarker = readPlaygroundPreviewResetMarker(browserSessionStorage())
@@ -96,7 +100,12 @@ function refresh(): void {
     runtime.playgroundMockAgentLoop?.(),
     runtime.playgroundAgentSessions?.(),
   )
-  publish({ status: 'active', plugins: runtime.snapshot().plugins, ...(simulator === undefined ? {} : { simulator }), ...resetStateProjection() })
+  publish({
+    status: 'active',
+    plugins: runtime.snapshot().plugins,
+    ...(simulator === undefined ? {} : { simulator }),
+    ...resetStateProjection(),
+  })
 }
 
 export async function bootRuntime(): Promise<void> {
@@ -108,7 +117,9 @@ export async function bootRuntime(): Promise<void> {
     if (!await synchronizePlaygroundPreviewResetEpoch()) return
     if (!previewResetBlocked) {
       const cached = readPlaygroundSimulatorTaskSnapshots(browserSessionStorage())
-      if (cached !== undefined) publish({ status: 'starting', plugins: [], simulator: cached, ...resetStateProjection() })
+      if (cached !== undefined) {
+        publish({ status: 'starting', plugins: [], simulator: cached, ...resetStateProjection() })
+      }
     }
     await import('virtual:cordisx-composition')
     if (pendingRuntimeGeneration !== generation) return
@@ -117,7 +128,12 @@ export async function bootRuntime(): Promise<void> {
   } catch (error) {
     if (pendingRuntimeGeneration !== generation) return
     pendingRuntimeGeneration = undefined
-    publish({ status: 'failed', plugins: [], error: error instanceof Error ? error.message : String(error), ...resetStateProjection() })
+    publish({
+      status: 'failed',
+      plugins: [],
+      error: error instanceof Error ? error.message : String(error),
+      ...resetStateProjection(),
+    })
   }
 }
 
@@ -209,10 +225,14 @@ export async function requestPlaygroundPreviewInstanceReset(requestId: string): 
   resetPlaygroundLiveSimulator()
   const storage = browserSessionStorage()
   if (storage !== undefined) clearPlaygroundDisposableSessionData(storage)
-  const response = await fetch(`/api/reset?client=playground-reset-v1&request=${encodeURIComponent(requestId)}`, { method: 'POST' })
+  const response = await fetch(`/api/reset?client=playground-reset-v1&request=${encodeURIComponent(requestId)}`, {
+    method: 'POST',
+  })
   if (!response.ok) throw new Error(`Preview reset failed with HTTP ${response.status}`)
   const value = await response.json() as { readonly reset?: unknown }
-  if (!isPlaygroundPreviewResetEpoch(value.reset)) throw new Error('Preview reset response did not include a valid epoch')
+  if (!isPlaygroundPreviewResetEpoch(value.reset)) {
+    throw new Error('Preview reset response did not include a valid epoch')
+  }
   applyPlaygroundPreviewResetEpoch(value.reset, true)
   return value.reset
 }
@@ -326,9 +346,24 @@ function installBridge(
 
 function installHostBridges(): void {
   window.__cordisxConfigRequestV1 = installBridge('/api/config', value => window.__cordisxConfigReceiveV1?.(value))
-  window.__cordisxPlaygroundAgentSessionRequestV1 = installBridge('/api/agent-sessions', value => window.__cordisxPlaygroundAgentSessionReceiveV1?.(value))
-  window.__cordisxOwnerDocumentRequestV1 = installBridge('/api/documents', value => window.__cordisxOwnerDocumentReceiveV1?.(value))
-  window.__cordisxServiceConfigRequestV1 = installBridge('/api/service-config', value => window.__cordisxServiceConfigReceiveV1?.(value))
-  window.__cordisxChannelCredentialRequestV1 = installBridge('/api/channel-credential', value => window.__cordisxChannelCredentialReceiveV1?.(value))
-  window.__cordisxProviderRequestV1 = installBridge('/api/provider', value => window.__cordisxProviderReceiveV1?.(value))
+  window.__cordisxPlaygroundAgentSessionRequestV1 = installBridge(
+    '/api/agent-sessions',
+    value => window.__cordisxPlaygroundAgentSessionReceiveV1?.(value),
+  )
+  window.__cordisxOwnerDocumentRequestV1 = installBridge(
+    '/api/documents',
+    value => window.__cordisxOwnerDocumentReceiveV1?.(value),
+  )
+  window.__cordisxServiceConfigRequestV1 = installBridge(
+    '/api/service-config',
+    value => window.__cordisxServiceConfigReceiveV1?.(value),
+  )
+  window.__cordisxChannelCredentialRequestV1 = installBridge(
+    '/api/channel-credential',
+    value => window.__cordisxChannelCredentialReceiveV1?.(value),
+  )
+  window.__cordisxProviderRequestV1 = installBridge(
+    '/api/provider',
+    value => window.__cordisxProviderReceiveV1?.(value),
+  )
 }

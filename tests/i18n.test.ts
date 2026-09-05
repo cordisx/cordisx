@@ -1,17 +1,24 @@
 import { Context } from '@deepseek-ai/cordis'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
-import type { CordisXLocaleCatalog, CordisXLocalizationSeat, CordisXLocalizationSnapshot } from '../packages/cli/src/contracts.js'
+import type {
+  CordisXLocaleCatalog,
+  CordisXLocalizationSeat,
+  CordisXLocalizationSnapshot,
+} from '../packages/cli/src/contracts.js'
 import {
   canonicalLocale,
   CordisXI18nService,
+  type CordisXLocaleSource,
   DocumentLocaleAdapter,
   LocalizationRegistry,
-  type CordisXLocaleSource,
 } from '../packages/cli/src/renderer/i18n.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
-import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
+import {
+  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+  type CordisXPluginActivationRecordV1,
+} from '../packages/cli/src/plugin-lifecycle-contracts.js'
 
 class MutableLocaleSource implements CordisXLocaleSource {
   private readonly listeners = new Set<() => void>()
@@ -39,11 +46,22 @@ class MutableLocaleSource implements CordisXLocaleSource {
 describe('LocalizationRegistry', () => {
   it('keeps candidate dictionaries private while resolving the candidate self-view', () => {
     const activation = (revision: number, generation: string): CordisXPluginActivationRecordV1 => ({
-      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, schemaVersion: 1,
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1,
       recordKind: revision === 1 ? 'active' : 'candidate',
       ...(revision === 1 ? {} : { transactionId: 'update-demo' }),
-      profileId: 'default', revision, lastGoodRevision: 1, runtimeGeneration: 'runtime-1',
-      plugins: [{ id: 'demo', version: '1.0.0', digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`, moduleGeneration: generation, enabled: true, dependencies: [] }],
+      profileId: 'default',
+      revision,
+      lastGoodRevision: 1,
+      runtimeGeneration: 'runtime-1',
+      plugins: [{
+        id: 'demo',
+        version: '1.0.0',
+        digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`,
+        moduleGeneration: generation,
+        enabled: true,
+        dependencies: [],
+      }],
     })
     const previous = activation(1, 'demo-1')
     const candidate = activation(2, 'demo-2')
@@ -55,13 +73,17 @@ describe('LocalizationRegistry', () => {
 
     const handle = visibility.begin('update-demo', previous, candidate)
     const candidateContext = new Context().extend({
-      [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_GENERATION]: 'demo-2', ...visibility.context(handle, 'demo'),
+      [CORDISX_PLUGIN_ID]: 'demo',
+      [CORDISX_PLUGIN_GENERATION]: 'demo-2',
+      ...visibility.context(handle, 'demo'),
     })
     registry.define(candidateContext, { namespace: 'demo', locale: 'en', default: true, messages: { label: 'New' } })
     expect(registry.getSnapshot().version).toBe(version)
     expect(registry.resolve('demo', { key: 'label' }).text).toBe('Old')
     expect(registry.resolve('demo', { key: 'label' }, undefined, visibility.view(candidateContext)).text).toBe('New')
-    expect(registry.resolve('demo', { key: 'candidate-missing' }, undefined, visibility.view(candidateContext)).diagnostic).toBe('missing-key')
+    expect(
+      registry.resolve('demo', { key: 'candidate-missing' }, undefined, visibility.view(candidateContext)).diagnostic,
+    ).toBe('missing-key')
     expect(registry.diagnostics()).toEqual([])
 
     visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
@@ -143,12 +165,14 @@ describe('LocalizationRegistry', () => {
       messages: { label: 'Replacement' },
     })
     expect(registry.resolve('demo', { key: 'label' }).text).toBe('Replacement')
-    expect(() => registry.define('demo', {
-      namespace: 'demo',
-      locale: 'zh-CN',
-      default: true,
-      messages: { label: '冲突' },
-    })).toThrow(/already has a live default/)
+    expect(() =>
+      registry.define('demo', {
+        namespace: 'demo',
+        locale: 'zh-CN',
+        default: true,
+        messages: { label: '冲突' },
+      })
+    ).toThrow(/already has a live default/)
 
     removeReplacement()
     expect(registry.resolve('demo', { key: 'label' }).text).toBe('Original')
@@ -158,11 +182,13 @@ describe('LocalizationRegistry', () => {
       diagnostic: 'missing-namespace',
     })
     registry.dispose()
-    expect(() => registry.define('demo', {
-      namespace: 'demo',
-      locale: 'en',
-      messages: { label: 'Late' },
-    })).toThrow(/disposed/)
+    expect(() =>
+      registry.define('demo', {
+        namespace: 'demo',
+        locale: 'en',
+        messages: { label: 'Late' },
+      })
+    ).toThrow(/disposed/)
   })
 
   it('records deterministic missing namespace, key, and param diagnostics', () => {
@@ -192,7 +218,9 @@ describe('LocalizationRegistry', () => {
   it('tracks distinct missing-message projections without notification oscillation', async () => {
     const registry = new LocalizationRegistry(new MutableLocaleSource())
     let notifications = 0
-    registry.subscribeDiagnostics(() => { notifications += 1 })
+    registry.subscribeDiagnostics(() => {
+      notifications += 1
+    })
 
     registry.resolve('demo', { key: 'missing', params: { value: 1 }, fallback: 'First' })
     registry.resolve('demo', { key: 'missing', params: { value: 2 }, fallback: 'Second' })
@@ -238,7 +266,9 @@ describe('LocalizationRegistry', () => {
       locale: 'en',
       messages: { label: 'Use <code>{name}</code>' },
     })
-    expect(registry.resolve('demo', { key: 'label', params: { name: 'CordisX' } }).text).toBe('Use <code>CordisX</code>')
+    expect(registry.resolve('demo', { key: 'label', params: { name: 'CordisX' } }).text).toBe(
+      'Use <code>CordisX</code>',
+    )
     registry.dispose()
   })
 
@@ -247,8 +277,12 @@ describe('LocalizationRegistry', () => {
     const registry = new LocalizationRegistry(source)
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     let healthyRuns = 0
-    registry.subscribe(() => { throw new Error('projection failed') })
-    registry.subscribe(() => { healthyRuns += 1 })
+    registry.subscribe(() => {
+      throw new Error('projection failed')
+    })
+    registry.subscribe(() => {
+      healthyRuns += 1
+    })
 
     const remove = registry.define('demo', {
       namespace: 'demo',
@@ -268,16 +302,20 @@ describe('LocalizationRegistry', () => {
   it('requires canonical locale serialization and owned namespaces', () => {
     expect(canonicalLocale('EN-us')).toBe('en-US')
     const registry = new LocalizationRegistry(new MutableLocaleSource())
-    expect(() => registry.define('demo', {
-      namespace: 'demo',
-      locale: 'EN-us',
-      messages: { label: 'Label' },
-    })).toThrow(/canonical serialization/)
-    expect(() => registry.define('demo', {
-      namespace: 'other:foreign',
-      locale: 'en',
-      messages: { label: 'Label' },
-    })).toThrow(/invalid locale namespace/)
+    expect(() =>
+      registry.define('demo', {
+        namespace: 'demo',
+        locale: 'EN-us',
+        messages: { label: 'Label' },
+      })
+    ).toThrow(/canonical serialization/)
+    expect(() =>
+      registry.define('demo', {
+        namespace: 'other:foreign',
+        locale: 'en',
+        messages: { label: 'Label' },
+      })
+    ).toThrow(/invalid locale namespace/)
     registry.dispose()
     expect(() => registry.resolve('demo', { key: 'late' })).toThrow(/disposed/)
   })
@@ -291,7 +329,9 @@ describe('DocumentLocaleAdapter', () => {
     expect(adapter.getSnapshot()).toBe(initial)
     expect(Object.isFrozen(initial)).toBe(true)
     let changes = 0
-    adapter.subscribe(() => { changes += 1 })
+    adapter.subscribe(() => {
+      changes += 1
+    })
 
     dom.window.document.documentElement.lang = 'zh-cn'
     dom.window.document.documentElement.dir = 'rtl'
@@ -351,7 +391,9 @@ describe('CordisXI18nService', () => {
             injected.bindAttribute(attributeTarget, 'title', injected.message('status'))
             injected.effect(() => {
               effectRuns += 1
-              return () => { effectCleanups += 1 }
+              return () => {
+                effectCleanups += 1
+              }
             })
             return () => {}
           })

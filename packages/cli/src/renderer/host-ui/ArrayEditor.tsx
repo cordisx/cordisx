@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { Fragment, type ReactElement, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Dialog } from 'tdesign-react'
 import type { CordisXConfigFieldSnapshot, CordisXConfigFormSchemaNode, CordisXJsonValue } from '../../contracts.js'
 import { formSchemaDefaultValue } from '../form-schema-defaults.js'
@@ -61,15 +61,27 @@ function schemaContainsSensitiveField(schema: CordisXConfigFormSchemaNode): bool
     || schema.item !== undefined && schemaContainsSensitiveField(schema.item)
 }
 
-function summary(value: Record<string, unknown>, schema: CordisXConfigFormSchemaNode | undefined, locale: string): string {
+function summary(
+  value: Record<string, unknown>,
+  schema: CordisXConfigFormSchemaNode | undefined,
+  locale: string,
+): string {
   return schema?.fields
     ?.filter(field => !schemaContainsSensitiveField(field.schema))
-    .map(field => `${field.schema.label ?? field.key}: ${String(value[field.key] ?? '')}`).join(' · ') || managerCopy(locale, 'form.array-item')
+    .map(field => `${field.schema.label ?? field.key}: ${String(value[field.key] ?? '')}`).join(' · ')
+    || managerCopy(locale, 'form.array-item')
 }
 
-function childField(parent: CordisXConfigFieldSnapshot, rowId: string, child: NonNullable<CordisXConfigFormSchemaNode['fields']>[number], value: unknown): CordisXConfigFieldSnapshot {
+function childField(
+  parent: CordisXConfigFieldSnapshot,
+  rowId: string,
+  child: NonNullable<CordisXConfigFormSchemaNode['fields']>[number],
+  value: unknown,
+): CordisXConfigFieldSnapshot {
   const schema = child.schema
-  const nestedItemDefault = schema.type === 'array' && schema.item?.type === 'object' ? formSchemaDefaultValue(schema.item) : undefined
+  const nestedItemDefault = schema.type === 'array' && schema.item?.type === 'object'
+    ? formSchemaDefaultValue(schema.item)
+    : undefined
   return {
     namespace: parent.namespace,
     path: [...parent.path, rowId, child.key],
@@ -86,7 +98,12 @@ function childField(parent: CordisXConfigFieldSnapshot, rowId: string, child: No
     ...(schema.choices === undefined ? {} : { choices: schema.choices }),
     ...(schema.arrayItemType === undefined ? {} : { arrayItemType: schema.arrayItemType }),
     ...(schema.presenter === undefined ? {} : { presenter: schema.presenter }),
-    ...(schema.type === 'array' && schema.item?.type === 'object' ? { arrayItemSchema: schema.item, ...(nestedItemDefault === undefined ? {} : { arrayItemDefault: nestedItemDefault }) } : {}),
+    ...(schema.type === 'array' && schema.item?.type === 'object'
+      ? {
+        arrayItemSchema: schema.item,
+        ...(nestedItemDefault === undefined ? {} : { arrayItemDefault: nestedItemDefault }),
+      }
+      : {}),
   }
 }
 
@@ -96,11 +113,17 @@ interface ArrayItemProjectedField {
   readonly controlId: string
 }
 
-function projectItemFields(field: CordisXConfigFieldSnapshot, rowId: string, draft: Readonly<Record<string, unknown>>): readonly ArrayItemProjectedField[] {
+function projectItemFields(
+  field: CordisXConfigFieldSnapshot,
+  rowId: string,
+  draft: Readonly<Record<string, unknown>>,
+): readonly ArrayItemProjectedField[] {
   return field.arrayItemSchema?.fields?.map(child => ({
     key: child.key,
     field: childField(field, rowId, child, draft[child.key]),
-    controlId: `cxf-array-${encodeURIComponent(field.path.join('.'))}-${encodeURIComponent(rowId)}-${encodeURIComponent(child.key)}`,
+    controlId: `cxf-array-${encodeURIComponent(field.path.join('.'))}-${encodeURIComponent(rowId)}-${
+      encodeURIComponent(child.key)
+    }`,
   })) ?? []
 }
 
@@ -110,54 +133,94 @@ function ArrayItemFields({ fields, setDraft, validateField, renderFieldRow }: {
   readonly validateField: ArrayEditorProps['validateField']
   readonly renderFieldRow: ArrayEditorProps['renderFieldRow']
 }) {
-  return <div className="cxf-form-grid cxf-array-item-fields">
-    {fields.map(item => {
-      const issueText = validateField(item.field)
-      return <Fragment key={item.controlId}>
-        {renderFieldRow({
-          field: item.field,
-          controlId: item.controlId,
-          ...(issueText === undefined ? {} : { issueText }),
-          onChange: next => setDraft(current => ({ ...current, [item.key]: next })),
-        })}
-      </Fragment>
-    })}
-  </div>
+  return (
+    <div className="cxf-form-grid cxf-array-item-fields">
+      {fields.map(item => {
+        const issueText = validateField(item.field)
+        return (
+          <Fragment key={item.controlId}>
+            {renderFieldRow({
+              field: item.field,
+              controlId: item.controlId,
+              ...(issueText === undefined ? {} : { issueText }),
+              onChange: next => setDraft(current => ({ ...current, [item.key]: next })),
+            })}
+          </Fragment>
+        )
+      })}
+    </div>
+  )
 }
 
-function ArrayItemSubpage({ pageId, field, rowId, mode, initialValue, locale, validateField, renderFieldRow, onConfirm }: {
-  readonly pageId: string
-  readonly field: CordisXConfigFieldSnapshot
-  readonly rowId: string
-  readonly mode: ArrayEditorTarget['kind']
-  readonly initialValue: Readonly<Record<string, unknown>>
-  readonly locale: string
-  readonly validateField: ArrayEditorProps['validateField']
-  readonly renderFieldRow: ArrayEditorProps['renderFieldRow']
-  readonly onConfirm: (draft: Record<string, unknown>) => void
-}) {
+function ArrayItemSubpage(
+  { pageId, field, rowId, mode, initialValue, locale, validateField, renderFieldRow, onConfirm }: {
+    readonly pageId: string
+    readonly field: CordisXConfigFieldSnapshot
+    readonly rowId: string
+    readonly mode: ArrayEditorTarget['kind']
+    readonly initialValue: Readonly<Record<string, unknown>>
+    readonly locale: string
+    readonly validateField: ArrayEditorProps['validateField']
+    readonly renderFieldRow: ArrayEditorProps['renderFieldRow']
+    readonly onConfirm: (draft: Record<string, unknown>) => void
+  },
+) {
   const [draft, setDraft] = useState<Record<string, unknown>>(() => structuredClone(initialValue))
   const content = useRef<HTMLDivElement>(null)
   const navigation = useHostFormPageNavigation()
   useEffect(() => {
-    const fieldControl = content.current?.querySelector<HTMLElement>('input:not(:disabled),textarea:not(:disabled),select:not(:disabled),button:not(:disabled),[tabindex]:not([tabindex="-1"])')
-    const back = content.current?.closest('.cxf-form-subpage')?.querySelector<HTMLElement>('.cxf-form-subpage-header button:not(:disabled)')
+    const fieldControl = content.current?.querySelector<HTMLElement>(
+      'input:not(:disabled),textarea:not(:disabled),select:not(:disabled),button:not(:disabled),[tabindex]:not([tabindex="-1"])',
+    )
+    const back = content.current?.closest('.cxf-form-subpage')?.querySelector<HTMLElement>(
+      '.cxf-form-subpage-header button:not(:disabled)',
+    )
     ;(fieldControl ?? back)?.focus()
   }, [])
   if (navigation === undefined) throw new Error('ArrayItemSubpage must be rendered inside HostFormPageStack')
   const fields = projectItemFields(field, rowId, draft)
   const invalid = fields.some(item => validateField(item.field) !== undefined)
-  return <HostFormSubpage pageId={pageId} breadcrumbLabel={managerCopy(locale, 'form.breadcrumbs')} backLabel={managerCopy(locale, 'form.back')} actions={<>
-    <div className="cxf-status" data-state={invalid ? 'invalid' : 'draft'}>{managerCopy(locale, invalid ? 'form.fix-invalid-fields' : 'form.item-draft-hint')}</div>
-    <div className="cxf-form-action-buttons">
-      <Button type="button" variant="outline" onClick={navigation.back}>{managerCopy(locale, 'form.cancel')}</Button>
-      <Button tag="button" type="button" theme="primary" disabled={invalid} onClick={() => { if (invalid) return; onConfirm(structuredClone(draft)); navigation.back() }}>{managerCopy(locale, mode === 'create' ? 'form.create-item' : 'form.save-item')}</Button>
-    </div>
-  </>}>
-    <div ref={content}>
-      <ArrayItemFields fields={fields} setDraft={setDraft} validateField={validateField} renderFieldRow={renderFieldRow} />
-    </div>
-  </HostFormSubpage>
+  return (
+    <HostFormSubpage
+      pageId={pageId}
+      breadcrumbLabel={managerCopy(locale, 'form.breadcrumbs')}
+      backLabel={managerCopy(locale, 'form.back')}
+      actions={
+        <>
+          <div className="cxf-status" data-state={invalid ? 'invalid' : 'draft'}>
+            {managerCopy(locale, invalid ? 'form.fix-invalid-fields' : 'form.item-draft-hint')}
+          </div>
+          <div className="cxf-form-action-buttons">
+            <Button type="button" variant="outline" onClick={navigation.back}>
+              {managerCopy(locale, 'form.cancel')}
+            </Button>
+            <Button
+              tag="button"
+              type="button"
+              theme="primary"
+              disabled={invalid}
+              onClick={() => {
+                if (invalid) return
+                onConfirm(structuredClone(draft))
+                navigation.back()
+              }}
+            >
+              {managerCopy(locale, mode === 'create' ? 'form.create-item' : 'form.save-item')}
+            </Button>
+          </div>
+        </>
+      }
+    >
+      <div ref={content}>
+        <ArrayItemFields
+          fields={fields}
+          setDraft={setDraft}
+          validateField={validateField}
+          renderFieldRow={renderFieldRow}
+        />
+      </div>
+    </HostFormSubpage>
+  )
 }
 
 export function ArrayEditor({ field, value, onChange, locale, validateField, renderFieldRow }: ArrayEditorProps) {
@@ -171,7 +234,11 @@ export function ArrayEditor({ field, value, onChange, locale, validateField, ren
   const resolvedIds = useMemo(() => reconcileIds(identity.current.value, identity.current.ids, value), [ids, value])
   useEffect(() => {
     identity.current = { value, ids: resolvedIds }
-    setIds(current => current.length === resolvedIds.length && current.every((id, index) => id === resolvedIds[index]) ? current : [...resolvedIds])
+    setIds(current =>
+      current.length === resolvedIds.length && current.every((id, index) => id === resolvedIds[index])
+        ? current
+        : [...resolvedIds]
+    )
   }, [resolvedIds, value])
   const rows = useMemo(() => value.map((item, index) => ({ id: resolvedIds[index]!, item })), [resolvedIds, value])
   const dialogFields = target === undefined ? [] : projectItemFields(field, target.rowId, draft)
@@ -181,7 +248,11 @@ export function ArrayEditor({ field, value, onChange, locale, validateField, ren
     setIds([...nextIds])
     onChange(next as CordisXJsonValue)
   }
-  const openPage = (nextTarget: ArrayEditorTarget, initialValue: Readonly<Record<string, unknown>>, returnFocus: HTMLElement) => {
+  const openPage = (
+    nextTarget: ArrayEditorTarget,
+    initialValue: Readonly<Record<string, unknown>>,
+    returnFocus: HTMLElement,
+  ) => {
     if (navigation === undefined) return false
     const pageId = `array-item:${field.path.join('.')}:${nextTarget.rowId}:${nextTarget.kind}`
     const title = targetTitle(locale, nextTarget)
@@ -190,16 +261,28 @@ export function ArrayEditor({ field, value, onChange, locale, validateField, ren
       breadcrumbLabel: field.label ?? field.path.at(-1) ?? managerCopy(locale, 'form.array-item'),
       title,
       returnFocus,
-      content: <ArrayItemSubpage pageId={pageId} field={field} rowId={nextTarget.rowId} mode={nextTarget.kind} initialValue={initialValue} locale={locale} validateField={validateField} renderFieldRow={renderFieldRow} onConfirm={next => {
-        if (nextTarget.kind === 'create') {
-          if (value.length >= limit) return
-          commit([...value, next], [...resolvedIds, nextTarget.rowId])
-          return
-        }
-        const nextValue = [...value]
-        nextValue[nextTarget.index] = next
-        commit(nextValue)
-      }} />,
+      content: (
+        <ArrayItemSubpage
+          pageId={pageId}
+          field={field}
+          rowId={nextTarget.rowId}
+          mode={nextTarget.kind}
+          initialValue={initialValue}
+          locale={locale}
+          validateField={validateField}
+          renderFieldRow={renderFieldRow}
+          onConfirm={next => {
+            if (nextTarget.kind === 'create') {
+              if (value.length >= limit) return
+              commit([...value, next], [...resolvedIds, nextTarget.rowId])
+              return
+            }
+            const nextValue = [...value]
+            nextValue[nextTarget.index] = next
+            commit(nextValue)
+          }}
+        />
+      ),
     })
     return true
   }
@@ -230,25 +313,109 @@ export function ArrayEditor({ field, value, onChange, locale, validateField, ren
   }
   return (
     <div className="cxf-array-editor" data-host-form-primitive="object-array">
-      <div className="cxf-array-editor-toolbar"><Button tag="button" size="small" shape="square" variant="text" aria-label={managerCopy(locale, 'form.add-item')} title={managerCopy(locale, 'form.add-item')} data-array-action="add" icon={<HostIcon token="add" />} disabled={field.disabled || value.length >= limit} onClick={event => openCreate(event.currentTarget)} /></div>
+      <div className="cxf-array-editor-toolbar">
+        <Button
+          tag="button"
+          size="small"
+          shape="square"
+          variant="text"
+          aria-label={managerCopy(locale, 'form.add-item')}
+          title={managerCopy(locale, 'form.add-item')}
+          data-array-action="add"
+          icon={<HostIcon token="add" />}
+          disabled={field.disabled || value.length >= limit}
+          onClick={event => openCreate(event.currentTarget)}
+        />
+      </div>
       {rows.map(({ id, item }, index) => (
-        <div key={id} className="cxf-array-row" data-host-array-item-id={id}
+        <div
+          key={id}
+          className="cxf-array-row"
+          data-host-array-item-id={id}
           draggable={canReorder && !field.disabled}
           onDragStart={event => event.dataTransfer.setData('text/x-cordisx-array-index', String(index))}
-          onDragOver={event => { if (canReorder) event.preventDefault() }}
-          onDrop={event => { event.preventDefault(); move(Number(event.dataTransfer.getData('text/x-cordisx-array-index')), index) }}>
-          <button type="button" className="cxf-array-row-drag-handle" aria-label={managerCopy(locale, 'form.reorder-handle')} disabled={!canReorder || field.disabled}
-            onKeyDown={event => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); move(index, index + (event.key === 'ArrowUp' ? -1 : 1)) } }}><HostIcon token="move" /></button>
+          onDragOver={event => {
+            if (canReorder) event.preventDefault()
+          }}
+          onDrop={event => {
+            event.preventDefault()
+            move(Number(event.dataTransfer.getData('text/x-cordisx-array-index')), index)
+          }}
+        >
+          <button
+            type="button"
+            className="cxf-array-row-drag-handle"
+            aria-label={managerCopy(locale, 'form.reorder-handle')}
+            disabled={!canReorder || field.disabled}
+            onKeyDown={event => {
+              if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                event.preventDefault()
+                move(index, index + (event.key === 'ArrowUp' ? -1 : 1))
+              }
+            }}
+          >
+            <HostIcon token="move" />
+          </button>
           <span className="cxf-array-row-summary">{summary(item, field.arrayItemSchema, locale)}</span>
           <span className="cxf-array-row-actions">
-            <Button tag="button" shape="square" variant="text" aria-label={managerCopy(locale, 'form.edit-item')} title={managerCopy(locale, 'form.edit-item')} icon={<HostIcon token="edit" />} disabled={field.disabled} onClick={event => openEdit(index, event.currentTarget)} />
-            <Button tag="button" shape="square" variant="text" aria-label={managerCopy(locale, 'form.duplicate-item')} title={managerCopy(locale, 'form.duplicate-item')} icon={<HostIcon token="copy" />} disabled={field.disabled || value.length >= limit} onClick={() => { const next = [...value]; next.splice(index + 1, 0, structuredClone(item)); const nextIds = [...resolvedIds]; nextIds.splice(index + 1, 0, stableId()); commit(next, nextIds) }} />
-            <Button tag="button" className="cxf-array-delete" shape="square" variant="text" theme="danger" aria-label={managerCopy(locale, 'form.delete-item')} title={managerCopy(locale, 'form.delete-item')} icon={<HostIcon token="delete" />} disabled={field.disabled || value.length <= (field.min ?? 0)} onClick={() => commit(value.filter((_, itemIndex) => itemIndex !== index), resolvedIds.filter((_, itemIndex) => itemIndex !== index))} />
+            <Button
+              tag="button"
+              shape="square"
+              variant="text"
+              aria-label={managerCopy(locale, 'form.edit-item')}
+              title={managerCopy(locale, 'form.edit-item')}
+              icon={<HostIcon token="edit" />}
+              disabled={field.disabled}
+              onClick={event => openEdit(index, event.currentTarget)}
+            />
+            <Button
+              tag="button"
+              shape="square"
+              variant="text"
+              aria-label={managerCopy(locale, 'form.duplicate-item')}
+              title={managerCopy(locale, 'form.duplicate-item')}
+              icon={<HostIcon token="copy" />}
+              disabled={field.disabled || value.length >= limit}
+              onClick={() => {
+                const next = [...value]
+                next.splice(index + 1, 0, structuredClone(item))
+                const nextIds = [...resolvedIds]
+                nextIds.splice(index + 1, 0, stableId())
+                commit(next, nextIds)
+              }}
+            />
+            <Button
+              tag="button"
+              className="cxf-array-delete"
+              shape="square"
+              variant="text"
+              theme="danger"
+              aria-label={managerCopy(locale, 'form.delete-item')}
+              title={managerCopy(locale, 'form.delete-item')}
+              icon={<HostIcon token="delete" />}
+              disabled={field.disabled || value.length <= (field.min ?? 0)}
+              onClick={() =>
+                commit(
+                  value.filter((_, itemIndex) => itemIndex !== index),
+                  resolvedIds.filter((_, itemIndex) => itemIndex !== index),
+                )}
+            />
           </span>
         </div>
       ))}
-      <Dialog visible={target !== undefined} dialogClassName="cxf-array-item-dialog" header={targetTitle(locale, target)} onClose={() => setTarget(undefined)}
-        confirmBtn={{ tag: 'button', content: managerCopy(locale, target?.kind === 'create' ? 'form.create-item' : 'form.save-item'), theme: 'primary', disabled: dialogInvalid }} cancelBtn={managerCopy(locale, 'form.cancel')} onConfirm={() => {
+      <Dialog
+        visible={target !== undefined}
+        dialogClassName="cxf-array-item-dialog"
+        header={targetTitle(locale, target)}
+        onClose={() => setTarget(undefined)}
+        confirmBtn={{
+          tag: 'button',
+          content: managerCopy(locale, target?.kind === 'create' ? 'form.create-item' : 'form.save-item'),
+          theme: 'primary',
+          disabled: dialogInvalid,
+        }}
+        cancelBtn={managerCopy(locale, 'form.cancel')}
+        onConfirm={() => {
           if (target === undefined || dialogInvalid) return
           if (target.kind === 'create') {
             if (value.length >= limit) return
@@ -259,8 +426,14 @@ export function ArrayEditor({ field, value, onChange, locale, validateField, ren
             commit(next)
           }
           setTarget(undefined)
-        }}>
-        <ArrayItemFields fields={dialogFields} setDraft={setDraft} validateField={validateField} renderFieldRow={renderFieldRow} />
+        }}
+      >
+        <ArrayItemFields
+          fields={dialogFields}
+          setDraft={setDraft}
+          validateField={validateField}
+          renderFieldRow={renderFieldRow}
+        />
       </Dialog>
     </div>
   )

@@ -26,11 +26,16 @@ describe('built-in local Channel service', () => {
     })
     await service.start(SIMULATOR_CHANNEL_SERVICE_CONFIG)
     expect(service.snapshot()?.accounts).toEqual([expect.objectContaining({
-      adapterKind: 'simulator', connectionState: 'ready',
+      adapterKind: 'simulator',
+      connectionState: 'ready',
     })])
-    const restarted = await service.restart({ ...SIMULATOR_CHANNEL_SERVICE_CONFIG, connections: [{
-      ...SIMULATOR_CHANNEL_SERVICE_CONFIG.connections[0]!, enabled: false,
-    }] })
+    const restarted = await service.restart({
+      ...SIMULATOR_CHANNEL_SERVICE_CONFIG,
+      connections: [{
+        ...SIMULATOR_CHANNEL_SERVICE_CONFIG.connections[0]!,
+        enabled: false,
+      }],
+    })
     expect(restarted.generation).toMatch(/^channel-local-/)
     await restarted.finalize()
     expect(service.snapshot()?.accounts).toEqual([])
@@ -57,7 +62,8 @@ describe('built-in local Channel service', () => {
     const enabled = await service.manager.connections.enable({ ref, generation: disabled.generation })
     expect(enabled.status).toBe('applied')
     expect(enabled.projection?.accounts).toEqual([expect.objectContaining({
-      ref, connectionState: 'ready',
+      ref,
+      connectionState: 'ready',
     })])
 
     const reconnected = await service.manager.connections.reconnect({ ref, generation: enabled.generation })
@@ -83,13 +89,18 @@ describe('built-in local Channel service', () => {
       source: pathToFileURL(path.join(artifactDirectory, 'index.ts')).href,
     })
     await service.start(SIMULATOR_CHANNEL_SERVICE_CONFIG)
-    const restarted = await service.restart({ ...SIMULATOR_CHANNEL_SERVICE_CONFIG, connections: [{
-      ...SIMULATOR_CHANNEL_SERVICE_CONFIG.connections[0]!, enabled: false,
-    }] })
+    const restarted = await service.restart({
+      ...SIMULATOR_CHANNEL_SERVICE_CONFIG,
+      connections: [{
+        ...SIMULATOR_CHANNEL_SERVICE_CONFIG.connections[0]!,
+        enabled: false,
+      }],
+    })
     expect(service.snapshot()?.accounts).toEqual([])
     await restarted.rollback()
     expect(service.snapshot()?.accounts).toEqual([expect.objectContaining({
-      adapterKind: 'simulator', connectionState: 'ready',
+      adapterKind: 'simulator',
+      connectionState: 'ready',
     })])
     await service.dispose()
   })
@@ -102,17 +113,22 @@ describe('built-in local Channel service', () => {
     const configuration = structuredClone(SIMULATOR_CHANNEL_SERVICE_CONFIG)
     configuration.connections.push({
       ref: { adapterId: 'feishu', accountId: 'cli_test', tenantId: 'tenant-test' },
-      adapterKind: 'feishu', enabled: true, transport: { mode: 'websocket' },
+      adapterKind: 'feishu',
+      enabled: true,
+      transport: { mode: 'websocket' },
       secretRef: 'host-secret:env/CORDISX_MISSING_TEST_SECRET',
     })
     const service = createLocalChannelService({
-      artifactDirectory, dataDir: path.join(root, 'runtime'),
+      artifactDirectory,
+      dataDir: path.join(root, 'runtime'),
       source: pathToFileURL(path.join(artifactDirectory, 'index.ts')).href,
       environment: {},
     })
     await service.start(configuration)
     expect(service.snapshot()?.accounts).toContainEqual(expect.objectContaining({
-      adapterKind: 'feishu', connectionState: 'unavailable', secretState: 'missing',
+      adapterKind: 'feishu',
+      connectionState: 'unavailable',
+      secretState: 'missing',
     }))
     await service.dispose()
   })

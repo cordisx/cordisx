@@ -280,7 +280,12 @@ export interface CordisXTurnSubmitInput {
 }
 
 export type CordisXTurnControlInput =
-  | { readonly action: 'steer'; readonly session: CordisXPlatformSessionRef; readonly turnId?: string; readonly message: string }
+  | {
+    readonly action: 'steer'
+    readonly session: CordisXPlatformSessionRef
+    readonly turnId?: string
+    readonly message: string
+  }
   | { readonly action: 'interrupt'; readonly session: CordisXPlatformSessionRef; readonly turnId?: string }
 
 export interface CordisXTurnControlOutcome {

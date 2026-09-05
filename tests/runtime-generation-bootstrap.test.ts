@@ -27,26 +27,28 @@ function installBrowserGlobals(): JSDOM {
     configurable: true,
     value: () => ({ length: 1 }),
   })
-  for (const [name, value] of [
-    ['window', browser],
-    ['document', browser.document],
-    ['history', browser.history],
-    ['location', browser.location],
-    ['navigator', browser.navigator],
-    ['localStorage', browser.localStorage],
-    ['HTMLElement', browser.HTMLElement],
-    ['Element', browser.Element],
-    ['Node', browser.Node],
-    ['Text', browser.Text],
-    ['Event', browser.Event],
-    ['CustomEvent', browser.CustomEvent],
-    ['KeyboardEvent', browser.KeyboardEvent],
-    ['MouseEvent', browser.MouseEvent],
-    ['MutationObserver', browser.MutationObserver],
-    ['getComputedStyle', browser.getComputedStyle.bind(browser)],
-    ['requestAnimationFrame', browser.requestAnimationFrame.bind(browser)],
-    ['cancelAnimationFrame', browser.cancelAnimationFrame.bind(browser)],
-  ] as const) vi.stubGlobal(name, value)
+  for (
+    const [name, value] of [
+      ['window', browser],
+      ['document', browser.document],
+      ['history', browser.history],
+      ['location', browser.location],
+      ['navigator', browser.navigator],
+      ['localStorage', browser.localStorage],
+      ['HTMLElement', browser.HTMLElement],
+      ['Element', browser.Element],
+      ['Node', browser.Node],
+      ['Text', browser.Text],
+      ['Event', browser.Event],
+      ['CustomEvent', browser.CustomEvent],
+      ['KeyboardEvent', browser.KeyboardEvent],
+      ['MouseEvent', browser.MouseEvent],
+      ['MutationObserver', browser.MutationObserver],
+      ['getComputedStyle', browser.getComputedStyle.bind(browser)],
+      ['requestAnimationFrame', browser.requestAnimationFrame.bind(browser)],
+      ['cancelAnimationFrame', browser.cancelAnimationFrame.bind(browser)],
+    ] as const
+  ) vi.stubGlobal(name, value)
   return dom
 }
 
@@ -59,18 +61,28 @@ function metadata(generation: string, hostKind?: 'codex' | 'playground', include
     generation,
     ...(hostKind === undefined ? {} : { hostKind }),
     ...(hostKind === 'playground' ? { permissionPolicies: [] } : {}),
-    ...(includeFixture ? {
-      pluginActivation: {
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-activation.v1.schema.json' as const,
-        schemaVersion: 1 as const, recordKind: 'active' as const, profileId: 'work',
-        revision: 1, lastGoodRevision: 1, runtimeGeneration: generation,
-        plugins: [{
-          id: 'org.cordisx.permission-fixture', version: '1.0.0',
-          digest: `sha256:${'a'.repeat(64)}` as const,
-          moduleGeneration: 'local-dev-generation-1', enabled: true, dependencies: [],
-        }],
-      },
-    } : {}),
+    ...(includeFixture
+      ? {
+        pluginActivation: {
+          $schema:
+            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-activation.v1.schema.json' as const,
+          schemaVersion: 1 as const,
+          recordKind: 'active' as const,
+          profileId: 'work',
+          revision: 1,
+          lastGoodRevision: 1,
+          runtimeGeneration: generation,
+          plugins: [{
+            id: 'org.cordisx.permission-fixture',
+            version: '1.0.0',
+            digest: `sha256:${'a'.repeat(64)}` as const,
+            moduleGeneration: 'local-dev-generation-1',
+            enabled: true,
+            dependencies: [],
+          }],
+        },
+      }
+      : {}),
   } as const
 }
 
@@ -88,17 +100,28 @@ const localDevelopmentPlugin = (
     capabilities: [{ name: 'sessions.get' as const, required: true, scope: {} }],
   }
   return {
-    id, source, enabled: true, config: {}, revision: 0, manifest,
+    id,
+    source,
+    enabled: true,
+    config: {},
+    revision: 0,
+    manifest,
     package: {
-      version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` as const,
-      moduleGeneration: 'local-dev-generation-1', dependencies: [],
+      version: '1.0.0',
+      digest: `sha256:${'a'.repeat(64)}` as const,
+      moduleGeneration: 'local-dev-generation-1',
+      dependencies: [],
     },
-    ...(development ? {
-      development: {
-        origin: 'local-dev' as const, pluginId: id,
-        sourcePath: '/private/tmp/chatroom/src/index.ts', state: 'ready' as const,
-      },
-    } : {}),
+    ...(development
+      ? {
+        development: {
+          origin: 'local-dev' as const,
+          pluginId: id,
+          sourcePath: '/private/tmp/chatroom/src/index.ts',
+          state: 'ready' as const,
+        },
+      }
+      : {}),
     module: {
       manifest,
       inject: ['sessions'],
@@ -154,7 +177,11 @@ describe('production renderer generation bootstrap', () => {
       [localDevelopmentPlugin(false, applied, 'https://plugins.example/org.cordisx.permission-fixture.js')],
       metadata('playground-ordinary-plugin', 'playground', true),
     )
-    for (let attempt = 0; attempt < 50 && dom.window.document.querySelector('[data-permission-prompt]') === null; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 50 && dom.window.document.querySelector('[data-permission-prompt]') === null;
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     const prompt = dom.window.document.querySelector<HTMLElement>('[data-permission-prompt]')
@@ -175,7 +202,11 @@ describe('production renderer generation bootstrap', () => {
       [localDevelopmentPlugin(true, applied)],
       metadata('codex-local-development-metadata', 'codex', true),
     )
-    for (let attempt = 0; attempt < 50 && dom.window.document.querySelector('[data-permission-prompt]') === null; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 50 && dom.window.document.querySelector('[data-permission-prompt]') === null;
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     const prompt = dom.window.document.querySelector<HTMLElement>('[data-permission-prompt]')
@@ -225,7 +256,9 @@ describe('production renderer generation bootstrap', () => {
   it('clears failed boot globals so the same generation can retry cleanly', async () => {
     const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
     const dom = installBrowserGlobals()
-    const failingBootstrap = vi.fn(async () => { throw new Error('fixture generation boot failed') })
+    const failingBootstrap = vi.fn(async () => {
+      throw new Error('fixture generation boot failed')
+    })
     const retryBootstrap = vi.fn(async () => undefined)
 
     const failed = installCordisX([], metadata('retry-generation'), failingBootstrap)

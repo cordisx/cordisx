@@ -3,17 +3,21 @@ import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
-  CHANNEL_SERVICE_CONFIG_SCHEMA_V1,
-  CHANNEL_SERVICE_CONFIG_INITIAL,
-  ChannelRuntime,
-  LauncherChannelServiceHost,
-  createChannelHostServiceConfigContract,
-  parseChannelServiceConfig,
   type ActiveLauncherChannelService,
+  CHANNEL_SERVICE_CONFIG_INITIAL,
+  CHANNEL_SERVICE_CONFIG_SCHEMA_V1,
+  ChannelRuntime,
   type ChannelRuntimeSnapshot,
+  createChannelHostServiceConfigContract,
+  LauncherChannelServiceHost,
+  parseChannelServiceConfig,
 } from '@cordisx/channel-runtime'
 import type { ChannelManagerProjectionV1 } from '../renderer/channel-manager.js'
-import { createChannelManagerApi, type ChannelManagerApi, type ChannelManagerActionStatus } from './channel-manager-api.js'
+import {
+  type ChannelManagerActionStatus,
+  type ChannelManagerApi,
+  createChannelManagerApi,
+} from './channel-manager-api.js'
 import { feishuDefinitionsForConfig } from './feishu-adapter.js'
 
 export { CHANNEL_SERVICE_CONFIG_INITIAL, createChannelHostServiceConfigContract }
@@ -51,30 +55,38 @@ export function projectLocalChannelManager(input: {
 }): ChannelManagerProjectionV1 {
   const configuration = parseChannelServiceConfig(input.configuration)
   const runtimeAccounts = new Map((input.runtime?.accounts ?? []).map(account => [
-    JSON.stringify([account.ref.adapterId, account.ref.accountId, account.ref.tenantId]), account,
+    JSON.stringify([account.ref.adapterId, account.ref.accountId, account.ref.tenantId]),
+    account,
   ]))
   const refForAccountKey = new Map(configuration.connections.map(connection => [
-    JSON.stringify([connection.ref.adapterId, connection.ref.accountId, connection.ref.tenantId]), connection.ref,
+    JSON.stringify([connection.ref.adapterId, connection.ref.accountId, connection.ref.tenantId]),
+    connection.ref,
   ]))
   const connections = configuration.connections.map(connection => {
     const runtime = runtimeAccounts.get(JSON.stringify([
-      connection.ref.adapterId, connection.ref.accountId, connection.ref.tenantId,
+      connection.ref.adapterId,
+      connection.ref.accountId,
+      connection.ref.tenantId,
     ]))
     return {
       ref: connection.ref,
       adapterKind: connection.adapterKind,
       enabled: connection.enabled,
       transportMode: connection.transport.mode,
-      secretState: runtime?.secretState ?? (connection.adapterKind === 'simulator' ? 'unavailable' as const : 'missing' as const),
+      secretState: runtime?.secretState
+        ?? (connection.adapterKind === 'simulator' ? 'unavailable' as const : 'missing' as const),
     }
   })
   const accounts = connections.map(connection => {
     const runtime = runtimeAccounts.get(JSON.stringify([
-      connection.ref.adapterId, connection.ref.accountId, connection.ref.tenantId,
+      connection.ref.adapterId,
+      connection.ref.accountId,
+      connection.ref.tenantId,
     ]))
     return {
       ...connection,
-      implementationStatus: runtime?.implementationStatus ?? (connection.adapterKind === 'simulator' ? 'verified' as const : 'implemented' as const),
+      implementationStatus: runtime?.implementationStatus
+        ?? (connection.adapterKind === 'simulator' ? 'verified' as const : 'implemented' as const),
       connectionState: runtime?.connectionState ?? (connection.enabled ? 'starting' as const : 'disabled' as const),
       generation: runtime?.generation ?? 0,
       inbound: runtime?.inbound ?? { pending: 0, retrying: 0, deadLetter: 0 },
@@ -86,8 +98,11 @@ export function projectLocalChannelManager(input: {
     schemaVersion: 1,
     status: 'experimental',
     service: {
-      configurationKind: 'host', configApplies: 'service-restart',
-      revision: input.revision, lastGoodRevision: input.lastGoodRevision, writable: input.writable,
+      configurationKind: 'host',
+      configApplies: 'service-restart',
+      revision: input.revision,
+      lastGoodRevision: input.lastGoodRevision,
+      writable: input.writable,
     },
     connections,
     routes: [],
@@ -95,7 +110,9 @@ export function projectLocalChannelManager(input: {
     bindings: [],
     logs: (input.audit ?? []).flatMap(entry => {
       const account = refForAccountKey.get(entry.accountKey)
-      return account === undefined ? [] : [{ id: entry.auditId, account, recordedAt: entry.recordedAt, action: entry.action, outcome: entry.outcome }]
+      return account === undefined
+        ? []
+        : [{ id: entry.auditId, account, recordedAt: entry.recordedAt, action: entry.action, outcome: entry.outcome }]
     }),
     diagnostics: configuration.connections
       .filter(connection => connection.adapterKind === 'simulator')
@@ -156,19 +173,25 @@ export function createLocalChannelService(input: {
       // only the redacted runtime snapshot. A bad/missing credential leaves
       // that account unavailable without preventing the rest of CordisX from
       // starting.
-      for (const definition of feishuDefinitionsForConfig(configuration, {
-        source: input.source,
-        configurationRevision: sequence,
-        ...(input.environment === undefined ? {} : { secretResolver: { environment: input.environment } }),
-      })) {
-        await runtime.activate(definition, { source: input.source, pluginId: 'channel', generation }).catch(() => undefined)
+      for (
+        const definition of feishuDefinitionsForConfig(configuration, {
+          source: input.source,
+          configurationRevision: sequence,
+          ...(input.environment === undefined ? {} : { secretResolver: { environment: input.environment } }),
+        })
+      ) {
+        await runtime.activate(definition, { source: input.source, pluginId: 'channel', generation }).catch(() =>
+          undefined
+        )
       }
       return {
         generation,
         runtime,
         host,
         service,
-        dispose: async () => { await host.dispose() },
+        dispose: async () => {
+          await host.dispose()
+        },
       }
     } catch (error) {
       await host.dispose().catch(() => undefined)
@@ -239,7 +262,9 @@ export function createLocalChannelService(input: {
           activeConfiguration = priorConfiguration
           await next.dispose()
         },
-        finalize: async () => { await prior?.dispose() },
+        finalize: async () => {
+          await prior?.dispose()
+        },
       }
     },
     snapshot: () => active?.runtime.snapshot(),

@@ -33,14 +33,17 @@ export const manifest = {
 
 export function apply(ctx: Context): void {
   ctx.i18n.define<Messages>({
-    namespace: 'console-showcase', locale: 'en', default: true,
+    namespace: 'console-showcase',
+    locale: 'en',
+    default: true,
     messages: {
       'plugin.name': 'Plugin Console Showcase',
       'plugin.description': 'Validates the log and diagnostics console in plugin runtime status.',
     },
   })
   ctx.i18n.define<Messages>({
-    namespace: 'console-showcase', locale: 'zh-CN',
+    namespace: 'console-showcase',
+    locale: 'zh-CN',
     messages: {
       'plugin.name': '插件控制台展示',
       'plugin.description': '用于验证插件运行状态中的日志与诊断控制台。',
@@ -50,7 +53,13 @@ export function apply(ctx: Context): void {
   console.debug('debug=%d', 1)
   console.log('object and array', { nested: { ok: true } }, [1, 2, 3])
   console.info('bigint=%s', 42n, new Error('inspectable error'))
-  console.warn('warning', { circular: (() => { const value: Record<string, unknown> = {}; value.self = value; return value })() })
+  console.warn('warning', {
+    circular: (() => {
+      const value: Record<string, unknown> = {}
+      value.self = value
+      return value
+    })(),
+  })
   console.error('showcase failure payload', new Error('expected demo error'))
 
   // Host instrumentation records both calls independently of the messages above.

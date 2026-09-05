@@ -52,9 +52,11 @@ function snapshotKey(projection: CordisXCertifiedPermissionProjectionV1): string
 
 function parseProjection(value: unknown, now: Date): CordisXCertifiedPermissionProjectionV1 | undefined {
   const candidate = object(value)
-  if (candidate === undefined || typeof candidate.source !== 'string' || typeof candidate.pluginId !== 'string'
+  if (
+    candidate === undefined || typeof candidate.source !== 'string' || typeof candidate.pluginId !== 'string'
     || typeof candidate.version !== 'string' || typeof candidate.integrity !== 'string'
-    || !/^sha256:[a-f0-9]{64}$/u.test(candidate.integrity)) return undefined
+    || !/^sha256:[a-f0-9]{64}$/u.test(candidate.integrity)
+  ) return undefined
   return normalizeCertifiedPermissionProjectionV1(
     value,
     { source: candidate.source, pluginId: candidate.pluginId },
@@ -69,19 +71,28 @@ function parseEnvelope(
   now: Date,
 ): CertifiedPermissionDeliveryEnvelopeV1 | undefined {
   const envelope = object(value)
-  if (envelope === undefined || !exact(envelope, [
-    'contract', 'profileId', 'runtimeGeneration', 'documentEpoch', 'deliverySequence',
-    'authorityRevision', 'snapshot',
-  ]) || envelope.contract !== CERTIFIED_PERMISSION_CHANNEL_CONTRACT
+  if (
+    envelope === undefined || !exact(envelope, [
+      'contract',
+      'profileId',
+      'runtimeGeneration',
+      'documentEpoch',
+      'deliverySequence',
+      'authorityRevision',
+      'snapshot',
+    ]) || envelope.contract !== CERTIFIED_PERMISSION_CHANNEL_CONTRACT
     || envelope.profileId !== expected.profileId
     || envelope.runtimeGeneration !== expected.runtimeGeneration
     || envelope.documentEpoch !== expected.documentEpoch
     || !Number.isSafeInteger(envelope.deliverySequence) || (envelope.deliverySequence as number) < 1
-    || !Number.isSafeInteger(envelope.authorityRevision) || (envelope.authorityRevision as number) < 0) return undefined
+    || !Number.isSafeInteger(envelope.authorityRevision) || (envelope.authorityRevision as number) < 0
+  ) return undefined
   const snapshot = object(envelope.snapshot)
-  if (snapshot === undefined || !exact(snapshot, ['revision', 'projections'])
+  if (
+    snapshot === undefined || !exact(snapshot, ['revision', 'projections'])
     || snapshot.revision !== envelope.authorityRevision
-    || !Array.isArray(snapshot.projections) || snapshot.projections.length > MAX_PROJECTIONS) return undefined
+    || !Array.isArray(snapshot.projections) || snapshot.projections.length > MAX_PROJECTIONS
+  ) return undefined
   const projections: CordisXCertifiedPermissionProjectionV1[] = []
   for (const candidate of snapshot.projections) {
     const projection = parseProjection(candidate, now)
@@ -116,24 +127,30 @@ export function certifiedPermissionEndpointTakeKey(token: string): string {
  * one-shot take function is removed atomically when CDP acquires the endpoint;
  * later deliveries use only the debugger-held RemoteObject objectId.
  */
-export function createCertifiedPermissionDocumentChannel(options: Readonly<{
-  token: string
-  profileId: string
-  runtimeGeneration: string
-  sink: CertifiedPermissionSnapshotSink
-  now?: () => Date
-  initialHandshakeTimeoutMs?: number
-  heartbeatTimeoutMs?: number
-}>): CertifiedPermissionDocumentChannel {
-  if (!TOKEN.test(options.token) || options.profileId.length < 1 || options.profileId.length > 64
-    || options.runtimeGeneration.length < 1 || options.runtimeGeneration.length > 200) {
+export function createCertifiedPermissionDocumentChannel(
+  options: Readonly<{
+    token: string
+    profileId: string
+    runtimeGeneration: string
+    sink: CertifiedPermissionSnapshotSink
+    now?: () => Date
+    initialHandshakeTimeoutMs?: number
+    heartbeatTimeoutMs?: number
+  }>,
+): CertifiedPermissionDocumentChannel {
+  if (
+    !TOKEN.test(options.token) || options.profileId.length < 1 || options.profileId.length > 64
+    || options.runtimeGeneration.length < 1 || options.runtimeGeneration.length > 200
+  ) {
     throw new Error('Certified permission document channel scope is invalid')
   }
   const now = options.now ?? (() => new Date())
   const initialTimeout = options.initialHandshakeTimeoutMs ?? INITIAL_HANDSHAKE_TIMEOUT_MS
   const heartbeatTimeout = options.heartbeatTimeoutMs ?? HEARTBEAT_TIMEOUT_MS
-  if (!Number.isSafeInteger(initialTimeout) || initialTimeout < 1 || initialTimeout > 60_000
-    || !Number.isSafeInteger(heartbeatTimeout) || heartbeatTimeout < 1 || heartbeatTimeout > 120_000) {
+  if (
+    !Number.isSafeInteger(initialTimeout) || initialTimeout < 1 || initialTimeout > 60_000
+    || !Number.isSafeInteger(heartbeatTimeout) || heartbeatTimeout < 1 || heartbeatTimeout > 120_000
+  ) {
     throw new Error('Certified permission document channel timeout is invalid')
   }
   const documentEpoch = typeof globalThis.crypto?.randomUUID === 'function'
@@ -151,7 +168,9 @@ export function createCertifiedPermissionDocumentChannel(options: Readonly<{
   let heartbeatTimer: ReturnType<typeof setTimeout> | undefined
   let initialTimer: ReturnType<typeof setTimeout> | undefined
   let resolveReady!: () => void
-  const ready = new Promise<void>(resolve => { resolveReady = resolve })
+  const ready = new Promise<void>(resolve => {
+    resolveReady = resolve
+  })
   const clear = (): void => options.sink.clearCertifiedPermissionSnapshot()
   const clearHeartbeat = (): void => {
     if (heartbeatTimer !== undefined) clearTimeout(heartbeatTimer)
@@ -176,20 +195,23 @@ export function createCertifiedPermissionDocumentChannel(options: Readonly<{
       profileId: string
       runtimeGeneration: string
       documentEpoch: string
-    }> => Object.freeze({
-      contract: CERTIFIED_PERMISSION_CHANNEL_CONTRACT,
-      profileId: options.profileId,
-      runtimeGeneration: options.runtimeGeneration,
-      documentEpoch,
-    }),
+    }> =>
+      Object.freeze({
+        contract: CERTIFIED_PERMISSION_CHANNEL_CONTRACT,
+        profileId: options.profileId,
+        runtimeGeneration: options.runtimeGeneration,
+        documentEpoch,
+      }),
     deliver: (payload: unknown): Readonly<{
       documentEpoch: string
       deliverySequence: number
       authorityRevision: number
     }> => {
       try {
-        if (disposed || typeof payload !== 'string'
-          || new TextEncoder().encode(payload).byteLength > MAX_ENVELOPE_BYTES) {
+        if (
+          disposed || typeof payload !== 'string'
+          || new TextEncoder().encode(payload).byteLength > MAX_ENVELOPE_BYTES
+        ) {
           throw new Error('Certified permission delivery was rejected')
         }
         const parsed = parseEnvelope(JSON.parse(payload) as unknown, {
@@ -197,12 +219,17 @@ export function createCertifiedPermissionDocumentChannel(options: Readonly<{
           runtimeGeneration: options.runtimeGeneration,
           documentEpoch,
         }, now())
-        if (parsed === undefined || parsed.deliverySequence <= lastSequence
-          || parsed.authorityRevision < lastAuthorityRevision) {
+        if (
+          parsed === undefined || parsed.deliverySequence <= lastSequence
+          || parsed.authorityRevision < lastAuthorityRevision
+        ) {
           throw new Error('Certified permission delivery is stale or invalid')
         }
         const digest = JSON.stringify(parsed.snapshot.projections)
-        if (parsed.authorityRevision === lastAuthorityRevision && lastSnapshotDigest !== '' && digest !== lastSnapshotDigest) {
+        if (
+          parsed.authorityRevision === lastAuthorityRevision && lastSnapshotDigest !== ''
+          && digest !== lastSnapshotDigest
+        ) {
           throw new Error('Certified permission delivery equivocated at one authority revision')
         }
         options.sink.replaceCertifiedPermissionSnapshot(parsed.snapshot)
@@ -213,7 +240,11 @@ export function createCertifiedPermissionDocumentChannel(options: Readonly<{
         heartbeatTimer = setTimeout(failClosed, heartbeatTimeout)
         ;(heartbeatTimer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.()
         settleReady()
-        return Object.freeze({ documentEpoch, deliverySequence: lastSequence, authorityRevision: lastAuthorityRevision })
+        return Object.freeze({
+          documentEpoch,
+          deliverySequence: lastSequence,
+          authorityRevision: lastAuthorityRevision,
+        })
       } catch (error) {
         failClosed()
         throw error
@@ -253,6 +284,8 @@ export function createCertifiedPermissionDocumentChannel(options: Readonly<{
   return Object.freeze({
     documentEpoch,
     ready,
-    dispose: () => { endpoint.close() },
+    dispose: () => {
+      endpoint.close()
+    },
   })
 }

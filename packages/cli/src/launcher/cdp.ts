@@ -43,31 +43,31 @@ import {
 import {
   CONFIG_BINDING,
   CONFIG_RECEIVER,
-  MAX_CONFIG_REQUEST_BYTES,
   configBridgeError,
-  parseConfigBindingRequest,
   type ConfigBridgeHandler,
+  MAX_CONFIG_REQUEST_BYTES,
+  parseConfigBindingRequest,
 } from './config-rpc.js'
 import {
   MAX_PUBLISHER_GRANT_REQUEST_BYTES,
+  parsePublisherGrantBindingRequest,
   PUBLISHER_GRANT_BINDING,
   PUBLISHER_GRANT_RECEIVER,
-  parsePublisherGrantBindingRequest,
   type PublisherGrantBridgeHandler,
 } from './publisher-grant-rpc.js'
 import {
   MAX_SERVICE_CONFIG_REQUEST_BYTES,
+  parseServiceConfigBindingRequest,
   SERVICE_CONFIG_BINDING,
   SERVICE_CONFIG_RECEIVER,
-  parseServiceConfigBindingRequest,
   serviceConfigBridgeError,
   type ServiceConfigBridgeHandler,
 } from './service-config-rpc.js'
 import {
   CHANNEL_CREDENTIAL_BINDING,
   CHANNEL_CREDENTIAL_RECEIVER,
-  MAX_CHANNEL_CREDENTIAL_REQUEST_BYTES,
   type ChannelCredentialBridgeHandler,
+  MAX_CHANNEL_CREDENTIAL_REQUEST_BYTES,
 } from './channel-credential-rpc.js'
 import {
   CHANNEL_ACTIONS_BINDING,
@@ -77,38 +77,38 @@ import {
 import {
   MAX_PERMISSION_REQUEST_BYTES,
   MAX_PERMISSION_REQUESTS,
+  parsePermissionBindingRequest,
   PERMISSION_BINDING,
   PERMISSION_RECEIVER,
-  parsePermissionBindingRequest,
-  persistPermissionPolicies,
   type PermissionPersistenceContext,
+  persistPermissionPolicies,
   type PluginPermissionIdentityRegistry,
 } from './permission-rpc.js'
 import {
   ICON_THEME_PREFERENCE_BINDING,
   ICON_THEME_PREFERENCE_RECEIVER,
-  IconThemePreferenceBroadcastHub,
-  MAX_ICON_THEME_PREFERENCE_REQUEST_BYTES,
   iconThemePreferenceBridgeError,
+  IconThemePreferenceBroadcastHub,
+  type IconThemePreferencePersistenceContext,
+  type IconThemePreferenceReadyResponseAck,
+  MAX_ICON_THEME_PREFERENCE_REQUEST_BYTES,
   parseIconThemePreferenceBindingRequest,
   parseIconThemePreferenceDocumentReadyRequest,
   persistIconThemePreference,
-  type IconThemePreferencePersistenceContext,
-  type IconThemePreferenceReadyResponseAck,
 } from './icon-theme-rpc.js'
 import { CdpCertifiedPermissionChannel } from './certified-permission-cdp.js'
 import type { LauncherMarketplaceCertifiedAuthority } from './marketplace-certified-authority.js'
 import {
+  entityInstallationId,
   MAX_OWNER_DOCUMENT_REQUEST_BYTES,
   MAX_OWNER_DOCUMENT_REQUESTS,
   OWNER_DOCUMENT_BINDING,
   OWNER_DOCUMENT_RECEIVER,
-  entityInstallationId,
   ownerDocumentBridgeError,
-  parseOwnerDocumentBindingRequest,
+  type OwnerDocumentBridgeHandler,
   type OwnerDocumentLeaseRegistry,
   type OwnerDocumentPrincipalBinding,
-  type OwnerDocumentBridgeHandler,
+  parseOwnerDocumentBindingRequest,
 } from './owner-document-rpc.js'
 import { isEntityBindingRequest } from './entity-rpc.js'
 import type { EntityDirectoryAuthority } from './entity-directory.js'
@@ -123,10 +123,17 @@ const MAX_CDP_INJECTION_TIMEOUT_MS = 600_000
 
 export function resolveCdpInjectionTimeoutMs(value: string | undefined): number {
   if (value === undefined || value === '') return DEFAULT_CDP_INJECTION_TIMEOUT_MS
-  if (!/^\d+$/u.test(value)) throw new Error('CORDISX_CDP_INJECTION_TIMEOUT_MS must be an integer number of milliseconds')
+  if (!/^\d+$/u.test(value)) {
+    throw new Error('CORDISX_CDP_INJECTION_TIMEOUT_MS must be an integer number of milliseconds')
+  }
   const timeoutMs = Number(value)
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < MIN_CDP_INJECTION_TIMEOUT_MS || timeoutMs > MAX_CDP_INJECTION_TIMEOUT_MS) {
-    throw new Error(`CORDISX_CDP_INJECTION_TIMEOUT_MS must be between ${MIN_CDP_INJECTION_TIMEOUT_MS} and ${MAX_CDP_INJECTION_TIMEOUT_MS}`)
+  if (
+    !Number.isSafeInteger(timeoutMs) || timeoutMs < MIN_CDP_INJECTION_TIMEOUT_MS
+    || timeoutMs > MAX_CDP_INJECTION_TIMEOUT_MS
+  ) {
+    throw new Error(
+      `CORDISX_CDP_INJECTION_TIMEOUT_MS must be between ${MIN_CDP_INJECTION_TIMEOUT_MS} and ${MAX_CDP_INJECTION_TIMEOUT_MS}`,
+    )
   }
   return timeoutMs
 }
@@ -283,8 +290,14 @@ async function evaluateRuntimeOperation<Value = void>(
     returnByValue: true,
     allowUnsafeEvalBlockedByCSP: true,
   }, timeoutMs)
-  const value = (response.result as { value?: unknown } | undefined)?.value as { ok?: unknown; error?: unknown; result?: Value } | undefined
-  if (value?.ok !== true) throw new Error(typeof value?.error === 'string' ? value.error : 'renderer lifecycle operation failed')
+  const value = (response.result as { value?: unknown } | undefined)?.value as {
+    ok?: unknown
+    error?: unknown
+    result?: Value
+  } | undefined
+  if (value?.ok !== true) {
+    throw new Error(typeof value?.error === 'string' ? value.error : 'renderer lifecycle operation failed')
+  }
   return value.result as Value
 }
 
@@ -312,7 +325,10 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private permissionIdentities: PluginPermissionIdentityRegistry | undefined
   private ownerDocumentAuthority: {
     readonly leases: OwnerDocumentLeaseRegistry
-    readonly issue: (identity: { readonly source: string; readonly pluginId: string }, moduleGeneration: string) => OwnerDocumentPrincipalBinding
+    readonly issue: (
+      identity: { readonly source: string; readonly pluginId: string },
+      moduleGeneration: string,
+    ) => OwnerDocumentPrincipalBinding
   } | undefined
   private entityAuthority: { readonly profileId: string; readonly authority: EntityDirectoryAuthority } | undefined
   private recoveredActivation: CordisXPluginActivationRecordV1 | undefined
@@ -325,21 +341,27 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   }
 
   setPermissionIdentities(permissionIdentities: PluginPermissionIdentityRegistry): void {
-    if (this.joining.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0 || this.fences.size !== 0) {
+    if (
+      this.joining.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0 || this.fences.size !== 0
+    ) {
       throw new Error('cannot replace permission identities during a generation transaction')
     }
     this.permissionIdentities = permissionIdentities
   }
 
   setOwnerDocumentAuthority(authority: NonNullable<CdpPluginLifecycleRuntime['ownerDocumentAuthority']>): void {
-    if (this.joining.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0 || this.fences.size !== 0) {
+    if (
+      this.joining.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0 || this.fences.size !== 0
+    ) {
       throw new Error('cannot replace owner document authority during a generation transaction')
     }
     this.ownerDocumentAuthority = authority
   }
 
   setEntityAuthority(profileId: string, authority: EntityDirectoryAuthority): void {
-    if (this.joining.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0 || this.fences.size !== 0) {
+    if (
+      this.joining.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0 || this.fences.size !== 0
+    ) {
       throw new Error('cannot replace entity authority during a generation transaction')
     }
     this.entityAuthority = { profileId, authority }
@@ -358,7 +380,9 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 
   prepare(transactionId: string): RuntimeGenerationFence {
     if (this.fences.has(transactionId)) throw new Error('plugin generation fence already exists')
-    if (this.joining.size !== 0 || this.fences.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
+    if (
+      this.joining.size !== 0 || this.fences.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0
+    ) {
       throw new Error('another plugin generation transaction is unresolved')
     }
     if (this.sessions.size === 0) throw new Error('no ready CordisX renderer is available')
@@ -371,7 +395,9 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   }
 
   register(session: CdpSession): () => void {
-    if (this.joining.size !== 0 || this.fences.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
+    if (
+      this.joining.size !== 0 || this.fences.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0
+    ) {
       throw new Error('cannot register a CordisX renderer during a plugin generation transaction')
     }
     this.sessions.add(session)
@@ -389,8 +415,10 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     readonly commit: (developmentVersion: number) => (() => void) | undefined
     readonly abort: () => void
   } {
-    if (this.joining.size !== 0 || this.fences.size !== 0
-      || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
+    if (
+      this.joining.size !== 0 || this.fences.size !== 0
+      || this.staged.size !== 0 || this.stagedMutations.size !== 0
+    ) {
       throw new Error('cannot join a CordisX renderer during a plugin generation transaction')
     }
     this.joining.add(session)
@@ -432,12 +460,15 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     session: CdpSession,
     state: CordisXLocalDevelopmentSnapshot,
   ): Promise<void> {
-    await evaluateRuntimeOperation(session, `(async () => { try {
+    await evaluateRuntimeOperation(
+      session,
+      `(async () => { try {
       await globalThis.__cordisxBoot
       const runtime = globalThis.__cordisxRuntime
       if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
       return { ok: true, result: runtime.updateLocalDevelopmentStatus(${JSON.stringify(state)}) }
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+    )
   }
 
   async updateDevelopmentStatus(state: CordisXLocalDevelopmentSnapshot): Promise<void> {
@@ -459,10 +490,12 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     const sessions = [...this.sessions]
     if (sessions.length === 0) throw new Error('no ready CordisX renderer is available')
     const fence = this.fences.get(mutation.transactionId)
-    if (fence === undefined
+    if (
+      fence === undefined
       || mutation.transactionEpoch !== fence.transactionEpoch
       || mutation.expectedRegistryEpoch !== fence.expectedRegistryEpoch
-      || mutation.afterRegistryEpoch !== fence.expectedRegistryEpoch + 1) {
+      || mutation.afterRegistryEpoch !== fence.expectedRegistryEpoch + 1
+    ) {
       throw new Error('plugin generation mutation does not match its Host registry fence')
     }
     this.stagedMutations.set(mutation.transactionId, mutation)
@@ -471,26 +504,37 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     this.staged.set(mutation.transactionId, sessions)
     const { runtimeArtifactSource, ...projectedMutation } = mutation
     const runtimePackage = mutation.package
-    if (runtimePackage !== undefined && mutation.candidate.plugins.find(item => item.id === mutation.targetId)?.enabled === true
-      && this.entityAuthority !== undefined) {
+    if (
+      runtimePackage !== undefined
+      && mutation.candidate.plugins.find(item => item.id === mutation.targetId)?.enabled === true
+      && this.entityAuthority !== undefined
+    ) {
       const binding = {
         profileId: this.entityAuthority.profileId,
         installationId: entityInstallationId(this.entityAuthority.profileId, mutation.targetId),
-        pluginId: mutation.targetId, pluginGeneration: 1,
+        pluginId: mutation.targetId,
+        pluginGeneration: 1,
       }
-      this.entityAuthority.authority.register(binding, runtimePackage.entityTemplates.map(template => template.declaration))
+      this.entityAuthority.authority.register(
+        binding,
+        runtimePackage.entityTemplates.map(template => template.declaration),
+      )
       const materialized = await this.entityAuthority.authority.materialize(
-        binding, runtimePackage.manifest.version, runtimePackage.digest, runtimePackage.entityTemplates,
+        binding,
+        runtimePackage.manifest.version,
+        runtimePackage.digest,
+        runtimePackage.entityTemplates,
       )
       const rejected = materialized.find(result => result.status === 'rejected')
       if (rejected !== undefined) throw new Error(`entity template ${rejected.agentId} was rejected: ${rejected.code}`)
     }
     const runtimeManifest = runtimePackage?.manifest?.runtimeManifest ?? mutation.developmentPackage?.manifest
     const isolatedArtifactSource = runtimeManifest !== undefined
-      && (runtimeManifest.schemaVersion === 7 || ((runtimeManifest.schemaVersion === 5 || runtimeManifest.schemaVersion === 6)
-        && runtimeManifest.capabilities.some(capability => (
-          capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
-        ))))
+        && (runtimeManifest.schemaVersion === 7
+          || ((runtimeManifest.schemaVersion === 5 || runtimeManifest.schemaVersion === 6)
+            && runtimeManifest.capabilities.some(capability => (
+              capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
+            ))))
       ? runtimeArtifactSource ?? runtimePackage?.artifactSource
       : undefined
     const candidateLeases = mutation.candidate.plugins.flatMap(item => {
@@ -532,7 +576,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         if (mutation.package !== undefined || runtimeArtifactSource !== undefined) {
           try {
             await session.send('Runtime.evaluate', {
-              expression: 'delete globalThis.__cordisxPendingPluginModuleV1; delete globalThis.__cordisxPendingPluginModuleFactoryV1',
+              expression:
+                'delete globalThis.__cordisxPendingPluginModuleV1; delete globalThis.__cordisxPendingPluginModuleFactoryV1',
               allowUnsafeEvalBlockedByCSP: true,
             })
             if (isolatedArtifactSource === undefined) {
@@ -540,14 +585,18 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
                 expression: runtimeArtifactSource ?? mutation.package!.artifactSource,
                 allowUnsafeEvalBlockedByCSP: true,
               })
-              if (artifact.exceptionDetails !== undefined) artifactFailure = new Error('plugin artifact evaluation failed')
+              if (artifact.exceptionDetails !== undefined) {
+                artifactFailure = new Error('plugin artifact evaluation failed')
+              }
             }
           } catch (error) {
             artifactFailure = error
           }
         }
         const serialized = JSON.stringify(rendererMutation)
-        const receipt = await evaluateRuntimeOperation<Omit<RuntimeReadinessObservation, 'observation'>>(session, `(async () => { try {
+        const receipt = await evaluateRuntimeOperation<Omit<RuntimeReadinessObservation, 'observation'>>(
+          session,
+          `(async () => { try {
           const module = globalThis.__cordisxPendingPluginModuleV1
           const moduleFactory = globalThis.__cordisxPendingPluginModuleFactoryV1
           delete globalThis.__cordisxPendingPluginModuleV1
@@ -560,7 +609,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
           delete globalThis.__cordisxPendingPluginModuleV1
           delete globalThis.__cordisxPendingPluginModuleFactoryV1
           return { ok: false, error: error instanceof Error ? error.message : String(error) }
-        } })()`)
+        } })()`,
+        )
         if (artifactFailure !== undefined) throw artifactFailure
         return { ...receipt, observation: mutation.candidate }
       }))
@@ -568,9 +618,13 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       for (const result of results) if (result.status === 'fulfilled') receipts.push(result.value)
       if (failed !== undefined) throw failed.reason
       const first = receipts[0]!
-      if (receipts.some(item => item.transactionEpoch !== first.transactionEpoch
-        || item.expectedRegistryEpoch !== first.expectedRegistryEpoch
-        || item.afterRegistryEpoch !== first.afterRegistryEpoch)) {
+      if (
+        receipts.some(item =>
+          item.transactionEpoch !== first.transactionEpoch
+          || item.expectedRegistryEpoch !== first.expectedRegistryEpoch
+          || item.afterRegistryEpoch !== first.afterRegistryEpoch
+        )
+      ) {
         throw new Error('CordisX renderer readiness receipts disagree')
       }
       return first
@@ -581,41 +635,68 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 
   async publish(transactionId: string): Promise<RuntimePublicationObservation> {
     const sessions = this.staged.get(transactionId) ?? []
-    const results = await Promise.all(sessions.map(async session => await evaluateRuntimeOperation<RuntimePublicationObservation>(session, `(async () => { try {
+    const results = await Promise.all(
+      sessions.map(async session =>
+        await evaluateRuntimeOperation<RuntimePublicationObservation>(
+          session,
+          `(async () => { try {
       const runtime = globalThis.__cordisxRuntime
       if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
       const result = await runtime.publishPluginMutation(${JSON.stringify(transactionId)})
       return { ok: true, result }
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+        )
+      ),
+    )
     const first = results[0]
-    if (first === undefined || results.some(item => item.transactionEpoch !== first.transactionEpoch
-      || item.registryEpoch !== first.registryEpoch)) throw new Error('CordisX renderer publications disagree')
+    if (
+      first === undefined || results.some(item =>
+        item.transactionEpoch !== first.transactionEpoch
+        || item.registryEpoch !== first.registryEpoch
+      )
+    ) throw new Error('CordisX renderer publications disagree')
     this.registryEpoch = first.registryEpoch
     return first
   }
 
   async complete(transactionId: string): Promise<RuntimeCleanupObservation> {
     const sessions = this.staged.get(transactionId) ?? []
-    const results = await Promise.all(sessions.map(async session => await evaluateRuntimeOperation<RuntimeCleanupObservation>(session, `(async () => { try {
+    const results = await Promise.all(
+      sessions.map(async session =>
+        await evaluateRuntimeOperation<RuntimeCleanupObservation>(
+          session,
+          `(async () => { try {
       const runtime = globalThis.__cordisxRuntime
       if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
       const result = await runtime.completePluginMutation(${JSON.stringify(transactionId)})
       return { ok: true, result }
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+        )
+      ),
+    )
     const first = results[0]
-    if (first === undefined || results.some(item => item.transactionEpoch !== first.transactionEpoch
-      || item.registryEpoch !== first.registryEpoch)) throw new Error('CordisX renderer cleanup observations disagree')
+    if (
+      first === undefined || results.some(item =>
+        item.transactionEpoch !== first.transactionEpoch
+        || item.registryEpoch !== first.registryEpoch
+      )
+    ) throw new Error('CordisX renderer cleanup observations disagree')
     return first
   }
 
   async finalize(transactionId: string): Promise<void> {
     const sessions = this.staged.get(transactionId) ?? []
-    await Promise.all(sessions.map(async session => await evaluateRuntimeOperation(session, `(async () => { try {
+    await Promise.all(sessions.map(async session =>
+      await evaluateRuntimeOperation(
+        session,
+        `(async () => { try {
       const runtime = globalThis.__cordisxRuntime
       if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
       await runtime.finalizePluginMutation(${JSON.stringify(transactionId)})
       return { ok: true }
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+      )
+    ))
     this.releaseTransaction(transactionId, 'commit')
   }
 
@@ -639,19 +720,30 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       this.releaseTransaction(transactionId, 'abort')
       return restored
     }
-    const results = await Promise.all(sessions.map(async session => await evaluateRuntimeOperation<RuntimeCleanupObservation>(session, `(async () => { try {
+    const results = await Promise.all(
+      sessions.map(async session =>
+        await evaluateRuntimeOperation<RuntimeCleanupObservation>(
+          session,
+          `(async () => { try {
       const runtime = globalThis.__cordisxRuntime
       if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
       const result = await runtime.rollbackPluginMutation(${JSON.stringify(transactionId)})
       return { ok: true, result }
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+        )
+      ),
+    )
     const first = results[0]
-    if (first === undefined || first.transactionId !== transactionId
-      || results.some(item => item.transactionId !== first.transactionId
-      || item.transactionEpoch !== first.transactionEpoch
-      || item.registryEpoch !== first.registryEpoch
-      || JSON.stringify(item.active) !== JSON.stringify(first.active)
-      || JSON.stringify(item.disposedAfter) !== JSON.stringify(first.disposedAfter))) {
+    if (
+      first === undefined || first.transactionId !== transactionId
+      || results.some(item =>
+        item.transactionId !== first.transactionId
+        || item.transactionEpoch !== first.transactionEpoch
+        || item.registryEpoch !== first.registryEpoch
+        || JSON.stringify(item.active) !== JSON.stringify(first.active)
+        || JSON.stringify(item.disposedAfter) !== JSON.stringify(first.disposedAfter)
+      )
+    ) {
       throw new Error('CordisX renderer rollback observations disagree')
     }
     this.registryEpoch = first.registryEpoch
@@ -668,7 +760,11 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       active: activationRecord(plan.rollbackTarget),
       disposedAfter: activationRecord(plan.expectedPublished),
     }
-    const results = await Promise.all(sessions.map(async session => await evaluateRuntimeOperation<RuntimeCleanupObservation>(session, `(async () => { try {
+    const results = await Promise.all(
+      sessions.map(async session =>
+        await evaluateRuntimeOperation<RuntimeCleanupObservation>(
+          session,
+          `(async () => { try {
       const runtime = globalThis.__cordisxRuntime
       if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
       let result
@@ -679,16 +775,23 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         result = await runtime.recoverPluginMutation(${JSON.stringify(recovery)})
       }
       return { ok: true, result }
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+        )
+      ),
+    )
     const first = results[0]
-    if (first === undefined || first.transactionId !== plan.transactionId
+    if (
+      first === undefined || first.transactionId !== plan.transactionId
       || first.transactionEpoch !== plan.transactionEpoch
       || first.registryEpoch !== plan.rollbackRegistryEpoch
-      || results.some(item => item.transactionId !== first.transactionId
-      || item.transactionEpoch !== first.transactionEpoch
-      || item.registryEpoch !== first.registryEpoch
-      || JSON.stringify(item.active) !== JSON.stringify(first.active)
-      || JSON.stringify(item.disposedAfter) !== JSON.stringify(first.disposedAfter))) {
+      || results.some(item =>
+        item.transactionId !== first.transactionId
+        || item.transactionEpoch !== first.transactionEpoch
+        || item.registryEpoch !== first.registryEpoch
+        || JSON.stringify(item.active) !== JSON.stringify(first.active)
+        || JSON.stringify(item.disposedAfter) !== JSON.stringify(first.disposedAfter)
+      )
+    ) {
       throw new Error('CordisX renderer recovery observations disagree')
     }
     this.registryEpoch = first.registryEpoch
@@ -698,7 +801,9 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 
   async adoptRecoveredActivation(active: CordisXPluginActivationRecordV1, registryEpoch: number): Promise<void> {
     const sessions = [...this.sessions, ...this.joining]
-    await Promise.all(sessions.map(async session => await this.adoptRecoveredActivationFor(session, active, registryEpoch)))
+    await Promise.all(
+      sessions.map(async session => await this.adoptRecoveredActivationFor(session, active, registryEpoch)),
+    )
     this.registryEpoch = registryEpoch
     this.recoveredActivation = active
   }
@@ -713,46 +818,68 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     active: CordisXPluginActivationRecordV1,
     registryEpoch: number,
   ): Promise<void> {
-    await evaluateRuntimeOperation(session, `(async () => { try {
+    await evaluateRuntimeOperation(
+      session,
+      `(async () => { try {
       const runtime = globalThis.__cordisxRuntime
       if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
       await runtime.adoptRecoveredActivation(${JSON.stringify(active)}, ${JSON.stringify(registryEpoch)})
       return { ok: true }
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+    )
     this.recoveredSessions.add(session)
   }
 
   async commit(transactionId: string): Promise<void> {
     const sessions = this.staged.get(transactionId) ?? []
-    await Promise.all(sessions.map(async session => await evaluateRuntimeOperation(session, `(async () => { try {
+    await Promise.all(sessions.map(async session =>
+      await evaluateRuntimeOperation(
+        session,
+        `(async () => { try {
       const runtime = globalThis.__cordisxRuntime
       if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
       await runtime.commitPluginMutation(${JSON.stringify(transactionId)})
       return { ok: true }
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+      )
+    ))
     this.releaseTransaction(transactionId, 'commit')
   }
 
   async abort(transactionId: string): Promise<void> {
     const sessions = this.staged.get(transactionId) ?? []
-    await Promise.all(sessions.map(async session => await evaluateRuntimeOperation(session, `(async () => { try {
+    await Promise.all(sessions.map(async session =>
+      await evaluateRuntimeOperation(
+        session,
+        `(async () => { try {
       const runtime = globalThis.__cordisxRuntime
       if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
       await runtime.abortPluginMutation(${JSON.stringify(transactionId)})
       return { ok: true }
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+      )
+    ))
     this.releaseTransaction(transactionId, 'abort')
   }
 
-  async reload(input: { readonly pluginId: string; readonly moduleGeneration: string; readonly runtimeGeneration: string }): Promise<void> {
+  async reload(
+    input: { readonly pluginId: string; readonly moduleGeneration: string; readonly runtimeGeneration: string },
+  ): Promise<void> {
     const sessions = [...this.sessions]
     if (sessions.length === 0) throw new Error('no ready CordisX renderer is available')
-    await Promise.all(sessions.map(async session => await evaluateRuntimeOperation(session, `(async () => { try {
+    await Promise.all(sessions.map(async session =>
+      await evaluateRuntimeOperation(
+        session,
+        `(async () => { try {
       const runtime = globalThis.__cordisxRuntime
       if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
-      await runtime.reloadPluginGeneration(${JSON.stringify(input.pluginId)}, ${JSON.stringify(input.moduleGeneration)}, ${JSON.stringify(input.runtimeGeneration)})
+      await runtime.reloadPluginGeneration(${JSON.stringify(input.pluginId)}, ${
+          JSON.stringify(input.moduleGeneration)
+        }, ${JSON.stringify(input.runtimeGeneration)})
       return { ok: true }
-    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`)))
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+      )
+    ))
   }
 }
 
@@ -953,7 +1080,10 @@ class ViteLoopbackPermissionCoordinator {
         await restoreViteLoopbackPermission(browser, current.permission)
       } catch (browserError) {
         // Retain the zero-reference grant so a later live target can restore it.
-        throw new AggregateError([targetError, browserError], `CordisX could not restore Vite loopback permission for ${permission.origin}`)
+        throw new AggregateError(
+          [targetError, browserError],
+          `CordisX could not restore Vite loopback permission for ${permission.origin}`,
+        )
       } finally {
         browser?.close()
       }
@@ -972,17 +1102,27 @@ async function waitForViteBootstrap(
   while (Date.now() < deadline) {
     if (signal?.aborted === true) throw cdpInstallationAborted()
     try {
-      await abortable(evaluateRuntimeOperation(session, `(async () => { try {
-        if (globalThis.__cordisxViteInstallId !== ${JSON.stringify(installId)}) return { ok: false, error: 'cordisx:vite-boot-pending' }
+      await abortable(
+        evaluateRuntimeOperation(
+          session,
+          `(async () => { try {
+        if (globalThis.__cordisxViteInstallId !== ${
+            JSON.stringify(installId)
+          }) return { ok: false, error: 'cordisx:vite-boot-pending' }
         if (!globalThis.__cordisxViteBoot) return { ok: false, error: 'cordisx:vite-boot-pending' }
         await globalThis.__cordisxViteBoot
         return { ok: globalThis.__cordisxRuntime !== undefined }
-      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`, Math.max(1, deadline - Date.now())), signal)
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+          Math.max(1, deadline - Date.now()),
+        ),
+        signal,
+      )
       return
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error))
       const transient = lastError.message === 'cordisx:vite-boot-pending'
-        || /Execution context was destroyed|Cannot find context|Inspected target navigated|CDP request timed out: Runtime\.evaluate/i.test(lastError.message)
+        || /Execution context was destroyed|Cannot find context|Inspected target navigated|CDP request timed out: Runtime\.evaluate/i
+          .test(lastError.message)
       if (!transient || session.isClosed()) throw lastError
       await delay(100, signal)
     }
@@ -1016,8 +1156,12 @@ function parseMarketplaceBindingRequest(value: unknown): MarketplaceBindingReque
   if (value === null || typeof value !== 'object') throw new Error('invalid marketplace bridge request')
   const requestId = (value as { requestId?: unknown }).requestId
   const url = (value as { url?: unknown }).url
-  if (typeof requestId !== 'string' || !/^[a-z0-9-]{1,96}$/i.test(requestId)) throw new Error('invalid marketplace bridge request id')
-  if (typeof url !== 'string' || url.length === 0 || url.length > 2048) throw new Error('invalid marketplace bridge URL')
+  if (typeof requestId !== 'string' || !/^[a-z0-9-]{1,96}$/i.test(requestId)) {
+    throw new Error('invalid marketplace bridge request id')
+  }
+  if (typeof url !== 'string' || url.length === 0 || url.length > 2048) {
+    throw new Error('invalid marketplace bridge URL')
+  }
   return { requestId, url }
 }
 
@@ -1119,18 +1263,23 @@ async function deliverIconThemePreferenceToDocument(
   readonly readyLeaseToken?: string
   readonly readyLeaseRevision?: number
 }> {
-  const evaluation = session.send('Runtime.evaluate', iconThemePreferenceDeliveryEvaluation(
-    payload,
-    documentEpoch,
-    minimumRevision,
-    executionContextId,
-  ))
+  const evaluation = session.send(
+    'Runtime.evaluate',
+    iconThemePreferenceDeliveryEvaluation(
+      payload,
+      documentEpoch,
+      minimumRevision,
+      executionContextId,
+    ),
+  )
   let response
   if (signal === undefined) {
     response = await evaluation
   } else {
     let rejectCancelled!: (error: Error) => void
-    const cancelled = new Promise<never>((_resolve, reject) => { rejectCancelled = reject })
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      rejectCancelled = reject
+    })
     const onAbort = (): void => rejectCancelled(new Error('icon theme preference document delivery was cancelled'))
     signal.addEventListener('abort', onAbort, { once: true })
     if (signal.aborted) onAbort()
@@ -1151,8 +1300,10 @@ async function deliverIconThemePreferenceToDocument(
     readyLeaseToken?: unknown
     readyLeaseRevision?: unknown
   }
-  if (ack.documentEpoch !== documentEpoch || !Number.isSafeInteger(ack.currentRevision)
-    || (ack.currentRevision as number) < minimumRevision) {
+  if (
+    ack.documentEpoch !== documentEpoch || !Number.isSafeInteger(ack.currentRevision)
+    || (ack.currentRevision as number) < minimumRevision
+  ) {
     throw new Error('icon theme preference delivery acknowledgement is invalid')
   }
   return {
@@ -1174,7 +1325,10 @@ export function serviceConfigResponseEvaluation(
   executionContextId?: number,
 ): Record<string, unknown> {
   return {
-    expression: `(() => { const receiver = globalThis.${SERVICE_CONFIG_RECEIVER}; if (typeof receiver !== 'function') return false; receiver(${JSON.stringify(JSON.stringify(payload))}); return true })()`,
+    expression:
+      `(() => { const receiver = globalThis.${SERVICE_CONFIG_RECEIVER}; if (typeof receiver !== 'function') return false; receiver(${
+        JSON.stringify(JSON.stringify(payload))
+      }); return true })()`,
     allowUnsafeEvalBlockedByCSP: true,
     returnByValue: true,
     ...(executionContextId === undefined ? {} : { contextId: executionContextId }),
@@ -1196,12 +1350,21 @@ async function sendServiceConfigBindingResponse(
   await session.send('Runtime.evaluate', serviceConfigResponseEvaluation(payload))
 }
 
-async function sendChannelCredentialBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
-  await session.send('Runtime.evaluate', { expression: `void globalThis.${CHANNEL_CREDENTIAL_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`, allowUnsafeEvalBlockedByCSP: true })
+async function sendChannelCredentialBindingResponse(
+  session: CdpSession,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  await session.send('Runtime.evaluate', {
+    expression: `void globalThis.${CHANNEL_CREDENTIAL_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    allowUnsafeEvalBlockedByCSP: true,
+  })
 }
 
 async function sendChannelActionsBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
-  await session.send('Runtime.evaluate', { expression: `void globalThis.${CHANNEL_ACTIONS_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`, allowUnsafeEvalBlockedByCSP: true })
+  await session.send('Runtime.evaluate', {
+    expression: `void globalThis.${CHANNEL_ACTIONS_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    allowUnsafeEvalBlockedByCSP: true,
+  })
 }
 
 async function sendPermissionBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
@@ -1211,7 +1374,10 @@ async function sendPermissionBindingResponse(session: CdpSession, payload: Recor
   })
 }
 
-async function sendPluginLifecycleBindingResponse(session: CdpSession, payload: Record<string, unknown>): Promise<void> {
+async function sendPluginLifecycleBindingResponse(
+  session: CdpSession,
+  payload: Record<string, unknown>,
+): Promise<void> {
   await session.send('Runtime.evaluate', {
     expression: `void globalThis.${PLUGIN_LIFECYCLE_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
     allowUnsafeEvalBlockedByCSP: true,
@@ -1264,7 +1430,9 @@ async function install(
   signal?: AbortSignal,
 ): Promise<InstalledScript> {
   if (iconThemePreferenceBroadcast !== undefined) {
-    if (iconThemePreference === undefined) throw new Error('icon theme preference broadcast requires persistence context')
+    if (iconThemePreference === undefined) {
+      throw new Error('icon theme preference broadcast requires persistence context')
+    }
     iconThemePreferenceBroadcast.assertScope(iconThemePreference)
   }
   const url = target.webSocketDebuggerUrl
@@ -1301,12 +1469,12 @@ async function install(
   const unregisterIconThemePreferenceBroadcast = iconThemePreferenceBroadcast === undefined
     ? undefined
     : (): void => {
-        iconThemeDocumentFence += 1
-        activeIconThemeDocumentController?.abort()
-        activeIconThemeDocumentController = undefined
-        unregisterCurrentIconThemeDocument?.()
-        unregisterCurrentIconThemeDocument = undefined
-      }
+      iconThemeDocumentFence += 1
+      activeIconThemeDocumentController?.abort()
+      activeIconThemeDocumentController = undefined
+      unregisterCurrentIconThemeDocument?.()
+      unregisterCurrentIconThemeDocument = undefined
+    }
   let removeLifecycleBindingListener = (): void => {}
   let unregisterLifecycleSession = (): void => {}
   let generationJoin: ReturnType<CdpPluginLifecycleRuntime['beginJoin']> | undefined
@@ -1333,9 +1501,11 @@ async function install(
       await session.send('Page.removeScriptToEvaluateOnNewDocument', {
         identifier: stale.identifier,
       }).catch(() => undefined)
-      await Promise.allSettled(installedBindingNames(stale).map(async name => {
-        await session.send('Runtime.removeBinding', { name })
-      }))
+      await Promise.allSettled(
+        installedBindingNames(stale).map(async name => {
+          await session.send('Runtime.removeBinding', { name })
+        }),
+      )
     }
     await session.send('Runtime.addBinding', { name: MARKETPLACE_BINDING })
     if (provider !== undefined) await session.send('Runtime.addBinding', { name: PROVIDER_BINDING })
@@ -1346,7 +1516,9 @@ async function install(
     if (credential !== undefined) await session.send('Runtime.addBinding', { name: CHANNEL_CREDENTIAL_BINDING })
     if (actions !== undefined) await session.send('Runtime.addBinding', { name: CHANNEL_ACTIONS_BINDING })
     if (permission !== undefined) await session.send('Runtime.addBinding', { name: PERMISSION_BINDING })
-    if (iconThemePreference !== undefined) await session.send('Runtime.addBinding', { name: ICON_THEME_PREFERENCE_BINDING })
+    if (iconThemePreference !== undefined) {
+      await session.send('Runtime.addBinding', { name: ICON_THEME_PREFERENCE_BINDING })
+    }
     if (lifecycle !== undefined) await session.send('Runtime.addBinding', { name: PLUGIN_LIFECYCLE_BINDING })
     if (publisherGrant !== undefined) await session.send('Runtime.addBinding', { name: PUBLISHER_GRANT_BINDING })
     let activeMarketplaceRequests = 0
@@ -1358,7 +1530,9 @@ async function install(
         try {
           const requestValue = parseMarketplaceBindingRequest(JSON.parse(payload) as unknown)
           requestId = requestValue.requestId
-          if (activeMarketplaceRequests >= MAX_MARKETPLACE_REQUESTS) throw new Error('too many concurrent marketplace feed requests')
+          if (activeMarketplaceRequests >= MAX_MARKETPLACE_REQUESTS) {
+            throw new Error('too many concurrent marketplace feed requests')
+          }
           activeMarketplaceRequests += 1
           try {
             const response = await fetchMarketplaceFeed(requestValue.url, marketplaceController.signal)
@@ -1389,11 +1563,15 @@ async function install(
         void (async () => {
           let requestId = 'invalid'
           try {
-            if (Buffer.byteLength(payload) > MAX_PROVIDER_REQUEST_BYTES) throw new Error('provider request exceeds maximum size')
+            if (Buffer.byteLength(payload) > MAX_PROVIDER_REQUEST_BYTES) {
+              throw new Error('provider request exceeds maximum size')
+            }
             const request = parseProviderBindingRequest(JSON.parse(payload) as unknown, provider.token)
             requestId = request.requestId
             if (providerController?.signal.aborted === true) throw new Error('provider request bridge is closed')
-            if (activeProviderRequests >= MAX_PROVIDER_REQUESTS) throw new Error('too many concurrent provider requests')
+            if (activeProviderRequests >= MAX_PROVIDER_REQUESTS) {
+              throw new Error('too many concurrent provider requests')
+            }
             activeProviderRequests += 1
             try {
               const value = await handleProviderBindingRequest(provider.fleet, request)
@@ -1419,11 +1597,15 @@ async function install(
         void (async () => {
           let requestId = 'invalid'
           try {
-            if (Buffer.byteLength(payload) > MAX_AGENT_HISTORY_REQUEST_BYTES) throw new Error('Agent history request exceeds maximum size')
+            if (Buffer.byteLength(payload) > MAX_AGENT_HISTORY_REQUEST_BYTES) {
+              throw new Error('Agent history request exceeds maximum size')
+            }
             const request = parseAgentHistoryBindingRequest(JSON.parse(payload) as unknown, history.token)
             requestId = request.requestId
             if (historyController?.signal.aborted === true) throw new Error('Agent history bridge is closed')
-            if (activeHistoryRequests >= MAX_AGENT_HISTORY_REQUESTS) throw new Error('too many concurrent Agent history requests')
+            if (activeHistoryRequests >= MAX_AGENT_HISTORY_REQUESTS) {
+              throw new Error('too many concurrent Agent history requests')
+            }
             activeHistoryRequests += 1
             try {
               const value = await handleAgentHistoryBindingRequest(history.host, request)
@@ -1449,8 +1631,15 @@ async function install(
         void (async () => {
           let requestId = 'invalid'
           try {
-            if (Buffer.byteLength(payload) > MAX_CONFIG_REQUEST_BYTES) throw new Error('config request exceeds maximum size')
-            const request = parseConfigBindingRequest(JSON.parse(payload) as unknown, config.token, config.profileId, config.generation)
+            if (Buffer.byteLength(payload) > MAX_CONFIG_REQUEST_BYTES) {
+              throw new Error('config request exceeds maximum size')
+            }
+            const request = parseConfigBindingRequest(
+              JSON.parse(payload) as unknown,
+              config.token,
+              config.profileId,
+              config.generation,
+            )
             requestId = request.requestId
             if (configController?.signal.aborted === true) throw new Error('config request bridge is closed')
             if (activeConfigRequests >= 1) throw new Error('another config request is already active')
@@ -1481,21 +1670,27 @@ async function install(
           let requestId = 'invalid'
           let entityRequest = false
           try {
-            if (Buffer.byteLength(payload) > MAX_OWNER_DOCUMENT_REQUEST_BYTES) throw new Error('owner document request exceeds maximum size')
+            if (Buffer.byteLength(payload) > MAX_OWNER_DOCUMENT_REQUEST_BYTES) {
+              throw new Error('owner document request exceeds maximum size')
+            }
             const parsed = JSON.parse(payload) as unknown
             const generic = parsed as { readonly requestId?: unknown }
             requestId = typeof generic.requestId === 'string' ? generic.requestId : 'invalid'
             entityRequest = isEntityBindingRequest(parsed)
             if (ownerDocumentController?.signal.aborted === true) throw new Error('owner document bridge is closed')
-            if (activeOwnerDocumentRequests >= MAX_OWNER_DOCUMENT_REQUESTS) throw new Error('too many owner document requests')
+            if (activeOwnerDocumentRequests >= MAX_OWNER_DOCUMENT_REQUESTS) {
+              throw new Error('too many owner document requests')
+            }
             activeOwnerDocumentRequests += 1
             try {
               const value = entityRequest && ownerDocuments.entities !== undefined
                 ? await ownerDocuments.entities.handle(parsed)
                 : await (async () => {
-                    const request = parseOwnerDocumentBindingRequest(parsed)
-                    return request.operation === 'load' ? await ownerDocuments.load(request) : await ownerDocuments.replace(request)
-                  })()
+                  const request = parseOwnerDocumentBindingRequest(parsed)
+                  return request.operation === 'load'
+                    ? await ownerDocuments.load(request)
+                    : await ownerDocuments.replace(request)
+                })()
               await sendOwnerDocumentBindingResponse(session, { requestId, ok: true, value })
             } finally {
               activeOwnerDocumentRequests -= 1
@@ -1503,7 +1698,9 @@ async function install(
           } catch (error) {
             if (entityRequest) {
               await sendOwnerDocumentBindingResponse(session, {
-                requestId, ok: false, error: error instanceof Error ? error.message : 'entity request rejected',
+                requestId,
+                ok: false,
+                error: error instanceof Error ? error.message : 'entity request rejected',
               }).catch(() => undefined)
               return
             }
@@ -1525,11 +1722,22 @@ async function install(
         void (async () => {
           let requestId = 'invalid'
           try {
-            if (Buffer.byteLength(payload) > MAX_SERVICE_CONFIG_REQUEST_BYTES) throw new Error('service configuration request exceeds maximum size')
-            const request = parseServiceConfigBindingRequest(JSON.parse(payload) as unknown, serviceConfig.token, serviceConfig.profileId, serviceConfig.generation)
+            if (Buffer.byteLength(payload) > MAX_SERVICE_CONFIG_REQUEST_BYTES) {
+              throw new Error('service configuration request exceeds maximum size')
+            }
+            const request = parseServiceConfigBindingRequest(
+              JSON.parse(payload) as unknown,
+              serviceConfig.token,
+              serviceConfig.profileId,
+              serviceConfig.generation,
+            )
             requestId = request.requestId
-            if (serviceConfigController?.signal.aborted === true) throw new Error('service configuration bridge is closed')
-            if (activeServiceConfigRequests >= 1) throw new Error('another service configuration request is already active')
+            if (serviceConfigController?.signal.aborted === true) {
+              throw new Error('service configuration bridge is closed')
+            }
+            if (activeServiceConfigRequests >= 1) {
+              throw new Error('another service configuration request is already active')
+            }
             activeServiceConfigRequests += 1
             let value: unknown
             try {
@@ -1559,14 +1767,20 @@ async function install(
           const payload = params.payload as string
           let requestId = 'invalid'
           try {
-            if (Buffer.byteLength(payload) > MAX_CHANNEL_CREDENTIAL_REQUEST_BYTES) throw new Error('channel credential request exceeds maximum size')
+            if (Buffer.byteLength(payload) > MAX_CHANNEL_CREDENTIAL_REQUEST_BYTES) {
+              throw new Error('channel credential request exceeds maximum size')
+            }
             const raw = JSON.parse(payload) as { requestId?: unknown }
             requestId = typeof raw.requestId === 'string' ? raw.requestId : requestId
             if (credentialController?.signal.aborted === true) throw new Error('channel credential bridge is closed')
             const value = await credential.handle(raw)
             await sendChannelCredentialBindingResponse(session, { requestId, ok: true, value })
           } catch {
-            await sendChannelCredentialBindingResponse(session, { requestId, ok: false, code: 'channel-credential-unavailable' }).catch(() => undefined)
+            await sendChannelCredentialBindingResponse(session, {
+              requestId,
+              ok: false,
+              code: 'channel-credential-unavailable',
+            }).catch(() => undefined)
           }
         })()
       })
@@ -1584,7 +1798,11 @@ async function install(
             const value = await actions.handle(raw)
             await sendChannelActionsBindingResponse(session, { requestId, ok: true, value })
           } catch {
-            await sendChannelActionsBindingResponse(session, { requestId, ok: false, code: 'channel-action-unavailable' }).catch(() => undefined)
+            await sendChannelActionsBindingResponse(session, {
+              requestId,
+              ok: false,
+              code: 'channel-action-unavailable',
+            }).catch(() => undefined)
           }
         })()
       })
@@ -1597,11 +1815,17 @@ async function install(
         void (async () => {
           let requestId = 'invalid'
           try {
-            if (Buffer.byteLength(payload) > MAX_PERMISSION_REQUEST_BYTES) throw new Error('permission request exceeds maximum size')
+            if (Buffer.byteLength(payload) > MAX_PERMISSION_REQUEST_BYTES) {
+              throw new Error('permission request exceeds maximum size')
+            }
             const request = parsePermissionBindingRequest(JSON.parse(payload) as unknown, permission)
             requestId = request.requestId
-            if (permissionController?.signal.aborted === true) throw new Error('permission persistence bridge is closed')
-            if (activePermissionRequests >= MAX_PERMISSION_REQUESTS) throw new Error('too many concurrent permission requests')
+            if (permissionController?.signal.aborted === true) {
+              throw new Error('permission persistence bridge is closed')
+            }
+            if (activePermissionRequests >= MAX_PERMISSION_REQUESTS) {
+              throw new Error('too many concurrent permission requests')
+            }
             activePermissionRequests += 1
             try {
               const value = await persistPermissionPolicies(permission, request.records)
@@ -1627,16 +1851,24 @@ async function install(
         void (async () => {
           let requestId = 'invalid'
           let documentEpoch: string | undefined
-          const executionContextId = typeof params.executionContextId === 'number' ? params.executionContextId : undefined
+          const executionContextId = typeof params.executionContextId === 'number'
+            ? params.executionContextId
+            : undefined
           try {
-            if (Buffer.byteLength(payload) > MAX_ICON_THEME_PREFERENCE_REQUEST_BYTES) throw new Error('icon theme preference request exceeds maximum size')
+            if (Buffer.byteLength(payload) > MAX_ICON_THEME_PREFERENCE_REQUEST_BYTES) {
+              throw new Error('icon theme preference request exceeds maximum size')
+            }
             const raw = JSON.parse(payload) as unknown
             if (raw !== null && typeof raw === 'object' && (raw as { kind?: unknown }).kind === 'document-ready') {
               const ready = parseIconThemePreferenceDocumentReadyRequest(raw, iconThemePreference)
               requestId = ready.requestId
               documentEpoch = ready.documentEpoch
-              if (executionContextId === undefined) throw new Error('icon theme preference document execution context is unavailable')
-              if (iconThemePreferenceBroadcast === undefined) throw new Error('icon theme preference broadcast is unavailable')
+              if (executionContextId === undefined) {
+                throw new Error('icon theme preference document execution context is unavailable')
+              }
+              if (iconThemePreferenceBroadcast === undefined) {
+                throw new Error('icon theme preference broadcast is unavailable')
+              }
               const previousController = activeIconThemeDocumentController
               const previousUnregister = unregisterCurrentIconThemeDocument
               const documentController = new AbortController()
@@ -1654,20 +1886,25 @@ async function install(
               previousController?.abort()
               previousUnregister?.()
               iconThemeDocumentQueue = iconThemeDocumentQueue.catch(() => undefined).then(async () => {
-                if (iconThemePreferenceClosed() || documentController.signal.aborted || fence !== iconThemeDocumentFence) {
+                if (
+                  iconThemePreferenceClosed() || documentController.signal.aborted || fence !== iconThemeDocumentFence
+                ) {
                   throw new Error('icon theme preference document ready request is stale')
                 }
                 const registration = await reservation.register({
-                  receive: async preference => await deliverIconThemePreferenceToDocument(
-                    session,
-                    { kind: 'sync', value: preference },
-                    ready.documentEpoch,
-                    preference.revision,
-                    executionContextId,
-                    documentController.signal,
-                  ),
+                  receive: async preference =>
+                    await deliverIconThemePreferenceToDocument(
+                      session,
+                      { kind: 'sync', value: preference },
+                      ready.documentEpoch,
+                      preference.revision,
+                      executionContextId,
+                      documentController.signal,
+                    ),
                 })
-                if (iconThemePreferenceClosed() || documentController.signal.aborted || fence !== iconThemeDocumentFence) {
+                if (
+                  iconThemePreferenceClosed() || documentController.signal.aborted || fence !== iconThemeDocumentFence
+                ) {
                   registration.unregister()
                   throw new Error('icon theme preference document ready request is stale')
                 }
@@ -1679,41 +1916,48 @@ async function install(
                   executionContextId,
                   documentController.signal,
                 )
-                await registration.respondReady(probeAck, async (status, lease): Promise<IconThemePreferenceReadyResponseAck> => {
-                  const ack = await deliverIconThemePreferenceToDocument(
-                    session,
-                    {
-                      kind: 'document-ready',
-                      requestId: ready.requestId,
-                      ok: true,
-                      documentEpoch: ready.documentEpoch,
-                      readyLeaseToken: lease.token,
-                      readyLeaseRevision: lease.revision,
-                      ...status,
-                    },
-                    ready.documentEpoch,
-                    status.currentRevision,
-                    executionContextId,
-                    lease.signal,
-                  )
-                  if (ack.readyLeaseToken !== lease.token || ack.readyLeaseRevision !== lease.revision) {
-                    throw new Error('icon theme preference ready response lease acknowledgement is invalid')
-                  }
-                  return {
-                    documentEpoch: ack.documentEpoch,
-                    currentRevision: ack.currentRevision,
-                    readyLeaseToken: ack.readyLeaseToken,
-                    readyLeaseRevision: ack.readyLeaseRevision,
-                  }
-                })
+                await registration.respondReady(
+                  probeAck,
+                  async (status, lease): Promise<IconThemePreferenceReadyResponseAck> => {
+                    const ack = await deliverIconThemePreferenceToDocument(
+                      session,
+                      {
+                        kind: 'document-ready',
+                        requestId: ready.requestId,
+                        ok: true,
+                        documentEpoch: ready.documentEpoch,
+                        readyLeaseToken: lease.token,
+                        readyLeaseRevision: lease.revision,
+                        ...status,
+                      },
+                      ready.documentEpoch,
+                      status.currentRevision,
+                      executionContextId,
+                      lease.signal,
+                    )
+                    if (ack.readyLeaseToken !== lease.token || ack.readyLeaseRevision !== lease.revision) {
+                      throw new Error('icon theme preference ready response lease acknowledgement is invalid')
+                    }
+                    return {
+                      documentEpoch: ack.documentEpoch,
+                      currentRevision: ack.currentRevision,
+                      readyLeaseToken: ack.readyLeaseToken,
+                      readyLeaseRevision: ack.readyLeaseRevision,
+                    }
+                  },
+                )
               })
               await iconThemeDocumentQueue
               return
             }
             const request = parseIconThemePreferenceBindingRequest(raw, iconThemePreference)
             requestId = request.requestId
-            if (iconThemePreferenceController?.signal.aborted === true) throw new Error('icon theme preference bridge is closed')
-            if (activeIconThemePreferenceRequests >= 1) throw new Error('another icon theme preference request is active')
+            if (iconThemePreferenceController?.signal.aborted === true) {
+              throw new Error('icon theme preference bridge is closed')
+            }
+            if (activeIconThemePreferenceRequests >= 1) {
+              throw new Error('another icon theme preference request is active')
+            }
             activeIconThemePreferenceRequests += 1
             let value
             try {
@@ -1723,9 +1967,14 @@ async function install(
             }
             const synchronization = iconThemePreferenceBroadcast === undefined
               ? 'pending'
-              : (await iconThemePreferenceBroadcast.broadcast(value)).pending === 0 ? 'complete' : 'pending'
+              : (await iconThemePreferenceBroadcast.broadcast(value)).pending === 0
+              ? 'complete'
+              : 'pending'
             await sendIconThemePreferenceBindingResponse(session, {
-              requestId, ok: true, value, synchronization,
+              requestId,
+              ok: true,
+              value,
+              synchronization,
             }, executionContextId)
           } catch (error) {
             const bridgeError = iconThemePreferenceBridgeError(error)
@@ -1733,17 +1982,25 @@ async function install(
             if (bridgeError.currentPreference !== undefined) {
               synchronization = iconThemePreferenceBroadcast === undefined
                 ? 'pending'
-                : (await iconThemePreferenceBroadcast.broadcast(bridgeError.currentPreference)).pending === 0 ? 'complete' : 'pending'
+                : (await iconThemePreferenceBroadcast.broadcast(bridgeError.currentPreference)).pending === 0
+                ? 'complete'
+                : 'pending'
             }
             if (documentEpoch !== undefined && executionContextId !== undefined) {
-              await deliverIconThemePreferenceToDocument(session, {
-                kind: 'document-ready',
-                requestId,
-                ok: false,
+              await deliverIconThemePreferenceToDocument(
+                session,
+                {
+                  kind: 'document-ready',
+                  requestId,
+                  ok: false,
+                  documentEpoch,
+                  currentRevision: 0,
+                  ...bridgeError,
+                },
                 documentEpoch,
-                currentRevision: 0,
-                ...bridgeError,
-              }, documentEpoch, 0, executionContextId).catch(() => undefined)
+                0,
+                executionContextId,
+              ).catch(() => undefined)
             } else {
               await sendIconThemePreferenceBindingResponse(session, {
                 requestId,
@@ -1764,7 +2021,9 @@ async function install(
         void (async () => {
           let requestId = 'invalid'
           try {
-            if (Buffer.byteLength(payload) > MAX_PLUGIN_LIFECYCLE_REQUEST_BYTES) throw new Error('plugin lifecycle request exceeds maximum size')
+            if (Buffer.byteLength(payload) > MAX_PLUGIN_LIFECYCLE_REQUEST_BYTES) {
+              throw new Error('plugin lifecycle request exceeds maximum size')
+            }
             const request = parsePluginLifecycleBindingRequest(JSON.parse(payload) as unknown, lifecycle.handler)
             requestId = request.requestId
             if (lifecycleController?.signal.aborted === true) throw new Error('plugin lifecycle bridge is closed')
@@ -1773,7 +2032,11 @@ async function install(
               async value => await sendPluginLifecycleBindingResponse(session, { requestId, ok: true, value }),
             )
           } catch {
-            await sendPluginLifecycleBindingResponse(session, { requestId, ok: false, error: 'Plugin lifecycle request was rejected' }).catch(() => undefined)
+            await sendPluginLifecycleBindingResponse(session, {
+              requestId,
+              ok: false,
+              error: 'Plugin lifecycle request was rejected',
+            }).catch(() => undefined)
           }
         })()
       })
@@ -1785,14 +2048,20 @@ async function install(
         void (async () => {
           let requestId = 'invalid'
           try {
-            if (Buffer.byteLength(payload) > MAX_PUBLISHER_GRANT_REQUEST_BYTES) throw new Error('PublisherGrant request exceeds maximum size')
+            if (Buffer.byteLength(payload) > MAX_PUBLISHER_GRANT_REQUEST_BYTES) {
+              throw new Error('PublisherGrant request exceeds maximum size')
+            }
             const request = parsePublisherGrantBindingRequest(JSON.parse(payload) as unknown)
             requestId = request.requestId
             if (publisherGrantController?.signal.aborted === true) throw new Error('PublisherGrant bridge is closed')
             const value = await publisherGrant.handle(request)
             await sendPublisherGrantBindingResponse(session, { requestId, ok: true, value })
           } catch {
-            await sendPublisherGrantBindingResponse(session, { requestId, ok: false, error: 'PublisherGrant request was rejected' }).catch(() => undefined)
+            await sendPublisherGrantBindingResponse(session, {
+              requestId,
+              ok: false,
+              error: 'PublisherGrant request was rejected',
+            }).catch(() => undefined)
           }
         })()
       })
@@ -1802,9 +2071,11 @@ async function install(
     const documentSource = newDocumentSource ?? source
     const added = await session.send(
       'Page.addScriptToEvaluateOnNewDocument',
-      { source: viteInstallId === undefined
-        ? documentSource
-        : `globalThis.__cordisxViteInstallId = ${JSON.stringify(viteInstallId)};\n${documentSource}` },
+      {
+        source: viteInstallId === undefined
+          ? documentSource
+          : `globalThis.__cordisxViteInstallId = ${JSON.stringify(viteInstallId)};\n${documentSource}`,
+      },
       CDP_REQUEST_TIMEOUT_MS,
     )
     identifier = added.identifier as string | undefined
@@ -1824,10 +2095,14 @@ async function install(
       )
     }
     if (generationRuntime !== undefined || iconThemePreferenceBroadcast !== undefined) {
-      await evaluateRuntimeOperation(session, `(async () => { try {
+      await evaluateRuntimeOperation(
+        session,
+        `(async () => { try {
         await globalThis.__cordisxBoot
         return { ok: globalThis.__cordisxRuntime !== undefined }
-      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`, CDP_INJECTION_TIMEOUT_MS)
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+        CDP_INJECTION_TIMEOUT_MS,
+      )
     }
     if (generationRuntime !== undefined) {
       // Reserve this boot-ready renderer before durable recovery. The
@@ -1874,13 +2149,17 @@ async function install(
       actionsBindingInstalled: actions !== undefined,
       ...(permissionController === undefined ? {} : { permissionController, removePermissionBindingListener }),
       permissionBindingInstalled: permission !== undefined,
-      ...(iconThemePreferenceController === undefined ? {} : { iconThemePreferenceController, removeIconThemePreferenceBindingListener }),
+      ...(iconThemePreferenceController === undefined
+        ? {}
+        : { iconThemePreferenceController, removeIconThemePreferenceBindingListener }),
       iconThemePreferenceBindingInstalled: iconThemePreference !== undefined,
       ...(unregisterIconThemePreferenceBroadcast === undefined ? {} : { unregisterIconThemePreferenceBroadcast }),
       ...(lifecycleController === undefined ? {} : { lifecycleController, removeLifecycleBindingListener }),
       lifecycleBindingInstalled: lifecycle !== undefined,
       unregisterLifecycleSession,
-      ...(publisherGrantController === undefined ? {} : { publisherGrantController, removePublisherGrantBindingListener }),
+      ...(publisherGrantController === undefined
+        ? {}
+        : { publisherGrantController, removePublisherGrantBindingListener }),
       publisherGrantBindingInstalled: publisherGrant !== undefined,
       ...(certifiedPermissionChannel === undefined ? {} : { certifiedPermissionChannel }),
     }
@@ -1924,8 +2203,9 @@ async function install(
       }).catch(() => undefined)
     }
     if (viteDevelopment) await session.send('Page.setBypassCSP', { enabled: false }).catch(() => undefined)
-    if (viteLoopbackPermissions === undefined) await restoreViteLoopbackPermission(session, viteLoopbackPermission).catch(() => undefined)
-    else await viteLoopbackPermissions.release(session, viteLoopbackPermission).catch(() => undefined)
+    if (viteLoopbackPermissions === undefined) {
+      await restoreViteLoopbackPermission(session, viteLoopbackPermission).catch(() => undefined)
+    } else await viteLoopbackPermissions.release(session, viteLoopbackPermission).catch(() => undefined)
     session.close()
     throw error
   }
@@ -1973,7 +2253,9 @@ async function uninstall(
       if (viteLoopbackPermissions === undefined) {
         await restoreViteLoopbackPermission(installed.session, installed.viteLoopbackPermission).catch(() => undefined)
       } else {
-        await viteLoopbackPermissions.release(installed.session, installed.viteLoopbackPermission).catch(() => undefined)
+        await viteLoopbackPermissions.release(installed.session, installed.viteLoopbackPermission).catch(() =>
+          undefined
+        )
       }
     }
     await Promise.allSettled([
@@ -2047,7 +2329,10 @@ export interface WatchInjectionOptions {
   readonly iconThemePreferencePersistence?: IconThemePreferencePersistenceContext
   /** Host-private injection seam for profile-wide launcher integration tests. */
   readonly iconThemePreferenceBroadcastHub?: IconThemePreferenceBroadcastHub
-  readonly pluginLifecycle?: { readonly handler: PluginLifecycleBridgeHandler; readonly runtime: CdpPluginLifecycleRuntime }
+  readonly pluginLifecycle?: {
+    readonly handler: PluginLifecycleBridgeHandler
+    readonly runtime: CdpPluginLifecycleRuntime
+  }
   /** Host-private generation plane used by `cordisx dev`; it installs no public lifecycle binding. */
   readonly developmentRuntime?: CdpPluginLifecycleRuntime
   readonly publisherGrant?: PublisherGrantBridgeHandler
@@ -2088,9 +2373,11 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
         }
         for (const target of targets) {
           const current = installed.get(target.id)
-          if (current !== undefined
+          if (
+            current !== undefined
             && current.target.webSocketDebuggerUrl === target.webSocketDebuggerUrl
-            && !current.session.isClosed()) continue
+            && !current.session.isClosed()
+          ) continue
           let stale: InstalledScript | undefined
           if (current !== undefined) {
             await uninstall(current, viteLoopbackPermissions).catch(() => undefined)
@@ -2124,8 +2411,8 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
             options.newDocumentSource === undefined
               ? undefined
               : typeof options.newDocumentSource === 'string'
-                ? options.newDocumentSource
-                : options.newDocumentSource(),
+              ? options.newDocumentSource
+              : options.newDocumentSource(),
             stale,
             options.viteDevelopment,
             viteLoopbackPermissions,
@@ -2138,7 +2425,9 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
       } catch (error) {
         if (options.signal.aborted) break
         if (attemptedViteTarget) {
-          throw new Error(`CordisX Vite renderer installation failed: ${error instanceof Error ? error.message : String(error)}`)
+          throw new Error(
+            `CordisX Vite renderer installation failed: ${error instanceof Error ? error.message : String(error)}`,
+          )
         }
         options.onStatus?.(`waiting for Codex CDP on 127.0.0.1:${options.port}: ${String(error)}`)
       }

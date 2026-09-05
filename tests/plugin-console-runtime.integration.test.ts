@@ -45,9 +45,13 @@ describe('plugin DevTools Console runtime', () => {
     const denial = createPermissionPolicyRecord({
       profileId: 'console-smoke',
       identity: { source: pathToFileURL(showcaseEntry).href, id: 'console-showcase' },
-      capability: 'models.read', scope: {}, policy: 'deny',
+      capability: 'models.read',
+      scope: {},
+      policy: 'deny',
     })
-    bundle = await buildRendererBundle(config, { permission: { profileId: 'console-smoke', policies: [denial], bridgeToken: 'console-smoke-token' } })
+    bundle = await buildRendererBundle(config, {
+      permission: { profileId: 'console-smoke', policies: [denial], bridgeToken: 'console-smoke-token' },
+    })
     expect(bundle).not.toContain('https://cdn')
   }, BUNDLE_SETUP_TIMEOUT_MS)
 
@@ -64,32 +68,56 @@ describe('plugin DevTools Console runtime', () => {
   })
 
   it('captures silent Host API calls and owner-scoped native Console without cross-plugin leakage', async () => {
-    const dom = new JSDOM('<html class="electron-dark"><head></head><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>', {
-      runScripts: 'dangerously', url: 'https://codex.local/', pretendToBeVisual: true,
-    })
+    const dom = new JSDOM(
+      '<html class="electron-dark"><head></head><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>',
+      {
+        runScripts: 'dangerously',
+        url: 'https://codex.local/',
+        pretendToBeVisual: true,
+      },
+    )
     activeDom = dom
-    Object.defineProperty(dom.window, 'matchMedia', { configurable: true, value: () => ({
-      matches: false, media: '', onchange: null,
-      addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
-    }) })
+    Object.defineProperty(dom.window, 'matchMedia', {
+      configurable: true,
+      value: () => ({
+        matches: false,
+        media: '',
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }),
+    })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
-    Object.defineProperty(dom.window.HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: function () {
-      const height = (this as HTMLElement).classList.contains('luna-console') ? 240 : 24
-      return { x: 0, y: 0, top: 0, left: 0, right: 800, bottom: height, width: 800, height, toJSON: () => ({}) }
-    } })
-    Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetHeight', { configurable: true, get: function () {
-      return (this as HTMLElement).classList.contains('luna-console') ? 240 : 24
-    } })
-    Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetParent', { configurable: true, get: () => dom.window.document.body })
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      value: function() {
+        const height = (this as HTMLElement).classList.contains('luna-console') ? 240 : 24
+        return { x: 0, y: 0, top: 0, left: 0, right: 800, bottom: height, width: 800, height, toJSON: () => ({}) }
+      },
+    })
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetHeight', {
+      configurable: true,
+      get: function() {
+        return (this as HTMLElement).classList.contains('luna-console') ? 240 : 24
+      },
+    })
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetParent', {
+      configurable: true,
+      get: () => dom.window.document.body,
+    })
     Object.defineProperty(dom.window, '__cordisxPermissionPolicyRequestV1', { configurable: true, value: () => {} })
     dom.window.eval(bundle)
     await waitForState(() => dom.window.document.documentElement.dataset.cordisxReady === 'true', 'renderer readiness')
     const runtime = (dom.window as unknown as { __cordisxRuntime?: TestRuntime }).__cordisxRuntime
     expect(runtime).toBeDefined()
     activeRuntime = runtime
-    await waitForState(() => runtime!.pluginConsole('console-showcase').entries.some(entry => (
-      entry.source === 'platform.models.list' && (entry.phase === 'failure' || entry.phase === 'success')
-    )), 'terminal Host invocation')
+    await waitForState(() =>
+      runtime!.pluginConsole('console-showcase').entries.some(entry => (
+        entry.source === 'platform.models.list' && (entry.phase === 'failure' || entry.phase === 'success')
+      )), 'terminal Host invocation')
 
     const silent = runtime!.pluginConsole('silent-api')
     expect(silent.entries.some(entry => entry.source === 'settings.get' && entry.phase === 'success')).toBe(true)
@@ -97,38 +125,71 @@ describe('plugin DevTools Console runtime', () => {
 
     const showcase = runtime!.pluginConsole('console-showcase')
     expect(showcase.entries.filter(entry => entry.kind === 'console').map(entry => entry.method)).toEqual([
-      'debug', 'log', 'info', 'warn', 'error',
+      'debug',
+      'log',
+      'info',
+      'warn',
+      'error',
     ])
     expect(showcase.entries.some(entry => entry.source === 'settings.get' && entry.phase === 'success')).toBe(true)
-    expect(showcase.entries.some(entry => entry.source === 'platform.models.list' && entry.phase === 'failure')).toBe(true)
+    expect(showcase.entries.some(entry => entry.source === 'platform.models.list' && entry.phase === 'failure')).toBe(
+      true,
+    )
     expect(showcase.entries.some(entry => entry.kind === 'permission' && entry.phase === 'deny')).toBe(true)
     expect(showcase.entries.every(entry => entry.plugin.pluginId === 'console-showcase')).toBe(true)
     expect(silent.entries.every(entry => entry.plugin.pluginId === 'silent-api')).toBe(true)
-    expect(showcase.entries.find(entry => entry.method === 'info' && entry.kind === 'console')?.args.some(arg => arg.type === 'error')).toBe(true)
+    expect(
+      showcase.entries.find(entry => entry.method === 'info' && entry.kind === 'console')?.args.some(arg =>
+        arg.type === 'error'
+      ),
+    ).toBe(true)
 
-    dom.window.dispatchEvent(new dom.window.ErrorEvent('error', { filename: 'codex-native.js', error: new Error('native') }))
+    dom.window.dispatchEvent(
+      new dom.window.ErrorEvent('error', { filename: 'codex-native.js', error: new Error('native') }),
+    )
     expect(runtime!.pluginConsole('console-showcase').unattributedEntries).toBeUndefined()
-    dom.window.dispatchEvent(new dom.window.ErrorEvent('error', { filename: pathToFileURL(showcaseEntry).href, error: new Error('plugin boundary') }))
-    expect(runtime!.pluginConsole('console-showcase').entries.some(entry => entry.coverage === 'best-effort')).toBe(true)
-    dom.window.dispatchEvent(new dom.window.ErrorEvent('error', {
-      filename: `${pathToFileURL(showcaseEntry).href}\n${pathToFileURL(silentEntry).href}`,
-      error: new Error('shared plugin boundary'),
-    }))
+    dom.window.dispatchEvent(
+      new dom.window.ErrorEvent('error', {
+        filename: pathToFileURL(showcaseEntry).href,
+        error: new Error('plugin boundary'),
+      }),
+    )
+    expect(runtime!.pluginConsole('console-showcase').entries.some(entry => entry.coverage === 'best-effort')).toBe(
+      true,
+    )
+    dom.window.dispatchEvent(
+      new dom.window.ErrorEvent('error', {
+        filename: `${pathToFileURL(showcaseEntry).href}\n${pathToFileURL(silentEntry).href}`,
+        error: new Error('shared plugin boundary'),
+      }),
+    )
     expect(runtime!.pluginConsole('console-showcase').unattributedEntries).toBe(1)
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger="true"]')?.click()
-    await waitForState(() => dom.window.document.querySelector('[data-plugin-id="console-showcase"]') !== null, 'React plugin list')
+    await waitForState(
+      () => dom.window.document.querySelector('[data-plugin-id="console-showcase"]') !== null,
+      'React plugin list',
+    )
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="console-showcase"]')?.click()
-    await waitForState(() => dom.window.document.querySelector('[data-plugin-detail-tab="runtime"]') !== null, 'React plugin details')
+    await waitForState(
+      () => dom.window.document.querySelector('[data-plugin-detail-tab="runtime"]') !== null,
+      'React plugin details',
+    )
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="runtime"]')?.click()
-    await waitForState(() => dom.window.document.querySelector('[data-plugin-runtime-status="console-showcase"]') !== null, 'React runtime panel')
+    await waitForState(
+      () => dom.window.document.querySelector('[data-plugin-runtime-status="console-showcase"]') !== null,
+      'React runtime panel',
+    )
     expect(dom.window.document.querySelector('[data-plugin-runtime-status="console-showcase"]')).not.toBeNull()
     const runtimeOverview = dom.window.document.querySelector<HTMLElement>('.cxm-runtime-overview')!
     expect(runtimeOverview.querySelector('[data-runtime-console-summary="console-showcase"]')).not.toBeNull()
     expect(runtimeOverview.querySelectorAll('.cxm-runtime-console-metric')).toHaveLength(4)
     expect(runtimeOverview.querySelector('[data-runtime-lifecycle="console-showcase"]')).toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="logs"]')?.click()
-    await waitForState(() => dom.window.document.querySelector('[role="tabpanel"][aria-label="Logs & diagnostics"]') !== null, 'React logs panel')
+    await waitForState(
+      () => dom.window.document.querySelector('[role="tabpanel"][aria-label="Logs & diagnostics"]') !== null,
+      'React logs panel',
+    )
     let consoleFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
     await waitForState(() => {
       consoleFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
@@ -149,7 +210,10 @@ describe('plugin DevTools Console runtime', () => {
     expect(logsPanel.querySelector('[data-runtime-lifecycle="console-showcase"]')).toBeNull()
     const reactEntriesBeforeLiveUpdate = runtime!.pluginConsole('console-showcase').entries.length
     await runtime!.setPluginBlocked('console-showcase', true)
-    await waitForState(() => runtime!.pluginConsole('console-showcase').entries.length > reactEntriesBeforeLiveUpdate, 'live Console append')
+    await waitForState(
+      () => runtime!.pluginConsole('console-showcase').entries.length > reactEntriesBeforeLiveUpdate,
+      'live Console append',
+    )
     await runtime!.dispose()
     return
     const mixed = lunaEntries.find(item => item.textContent?.includes('object and array'))
@@ -171,50 +235,91 @@ describe('plugin DevTools Console runtime', () => {
     // refreshed Luna projection still exposes structured objects.
     const stopFollowing = dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="follow"]')!
     stopFollowing.click()
-    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe('false')
+    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe(
+      'false',
+    )
     const entriesBeforeLiveUpdate = runtime!.pluginConsole('console-showcase').entries.length
     await runtime!.setPluginBlocked('console-showcase', true)
-    await waitForState(() => runtime!.pluginConsole('console-showcase').entries.length > entriesBeforeLiveUpdate, 'live Console append')
+    await waitForState(
+      () => runtime!.pluginConsole('console-showcase').entries.length > entriesBeforeLiveUpdate,
+      'live Console append',
+    )
     await waitForState(() => (
       dom.window.document.querySelectorAll('[data-plugin-console="console-showcase"] [data-console-entry]').length
         === runtime!.pluginConsole('console-showcase').entries.length
     ), 'mounted Luna Console live refresh')
-    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe('false')
-    const refreshedMixed = [...dom.window.document.querySelectorAll<HTMLElement>('[data-plugin-console="console-showcase"] [data-console-entry]')]
+    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe(
+      'false',
+    )
+    const refreshedMixed = [
+      ...dom.window.document.querySelectorAll<HTMLElement>(
+        '[data-plugin-console="console-showcase"] [data-console-entry]',
+      ),
+    ]
       .find(item => item.textContent?.includes('object and array'))
     refreshedMixed?.querySelector<HTMLElement>('.luna-console-preview')?.click()
     expect(refreshedMixed?.querySelector('.luna-object-viewer')).not.toBeNull()
     dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="follow"]')?.click()
-    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe(
+      'true',
+    )
 
     const controls = dom.window.document.querySelector('.cxm-console-controls')
     expect(controls?.textContent).not.toContain('采集范围')
     expect(controls?.parentElement?.textContent).not.toContain('Host API 自动切面')
     const toolbar = controls?.querySelector('[role="toolbar"][aria-label="Console display controls"]')
     const actionButtons = [...(toolbar?.querySelectorAll<HTMLButtonElement>('[data-console-action]') ?? [])]
-    expect(actionButtons.map(button => button.dataset.consoleAction)).toEqual(['pause', 'follow', 'clear', 'copy', 'export'])
+    expect(actionButtons.map(button => button.dataset.consoleAction)).toEqual([
+      'pause',
+      'follow',
+      'clear',
+      'copy',
+      'export',
+    ])
     expect(actionButtons.every(button => button.textContent === '')).toBe(true)
-    expect(actionButtons.map(button => button.getAttribute('aria-label'))).toEqual(['Pause capture', 'Stop following', 'Clear logs', 'Copy selected', 'Export plugin logs'])
-    expect(actionButtons.find(button => button.dataset.consoleAction === 'clear')?.getAttribute('aria-description')).toBe('Cannot be undone')
+    expect(actionButtons.map(button => button.getAttribute('aria-label'))).toEqual([
+      'Pause capture',
+      'Stop following',
+      'Clear logs',
+      'Copy selected',
+      'Export plugin logs',
+    ])
+    expect(actionButtons.find(button => button.dataset.consoleAction === 'clear')?.getAttribute('aria-description'))
+      .toBe('Cannot be undone')
     expect(actionButtons.find(button => button.dataset.consoleAction === 'copy')?.disabled).toBe(true)
     actionButtons[0]?.focus()
-    await waitForState(() => dom.window.document.querySelector('[role="tooltip"]')?.textContent === 'Pause capture', 'toolbar tooltip')
+    await waitForState(
+      () => dom.window.document.querySelector('[role="tooltip"]')?.textContent === 'Pause capture',
+      'toolbar tooltip',
+    )
     expect(dom.window.document.querySelector('[role="tooltip"]')?.textContent).toBe('Pause capture')
     actionButtons[0]?.blur()
     actionButtons[0]?.click()
-    expect(dom.window.document.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed')).toBe('true')
-    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(dom.window.document.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed')).toBe(
+      'true',
+    )
+    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe(
+      'true',
+    )
     dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="pause"]')?.dispatchEvent(
       new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
     )
-    expect(dom.window.document.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed')).toBe('false')
+    expect(dom.window.document.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed')).toBe(
+      'false',
+    )
     dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="pause"]')?.dispatchEvent(
       new dom.window.KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }),
     )
-    expect(dom.window.document.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(dom.window.document.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed')).toBe(
+      'true',
+    )
     dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="follow"]')?.click()
-    expect(dom.window.document.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed')).toBe('true')
-    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe('false')
+    expect(dom.window.document.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed')).toBe(
+      'true',
+    )
+    expect(dom.window.document.querySelector('[data-console-action="follow"]')?.getAttribute('aria-pressed')).toBe(
+      'false',
+    )
     dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="pause"]')?.click()
     dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="follow"]')?.click()
     const keyboardFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
@@ -234,7 +339,9 @@ describe('plugin DevTools Console runtime', () => {
     search!.value = 'inspectable error'
     search!.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
     await waitForState(() => dom.window.document.querySelector('[data-console-entry]') !== null, 'search projection')
-    expect(dom.window.document.querySelector('[data-console-entry]')?.getAttribute('data-console-source')).toBe('console.info')
+    expect(dom.window.document.querySelector('[data-console-entry]')?.getAttribute('data-console-source')).toBe(
+      'console.info',
+    )
     expect(dom.window.document.querySelector('[data-console-source="console.warn"]')).toBeNull()
     const resetSearch = dom.window.document.querySelector<HTMLInputElement>('[data-console-search="console-showcase"]')
     resetSearch!.value = ''
@@ -242,14 +349,19 @@ describe('plugin DevTools Console runtime', () => {
     const source = dom.window.document.querySelector<TestTDesignSelect>('t-select[aria-label="Log source"]')
     source!.setSelectedValue('console.warn', true)
     await waitForState(() => dom.window.document.querySelector('[data-console-entry]') !== null, 'source projection')
-    expect(dom.window.document.querySelector('[data-console-entry]')?.getAttribute('data-console-source')).toBe('console.warn')
+    expect(dom.window.document.querySelector('[data-console-entry]')?.getAttribute('data-console-source')).toBe(
+      'console.warn',
+    )
     expect(dom.window.document.querySelector('[data-console-source="console.log"]')).toBeNull()
     const resetSource = dom.window.document.querySelector<TestTDesignSelect>('t-select[aria-label="Log source"]')
     resetSource!.setSelectedValue('all', true)
     const kind = dom.window.document.querySelector<TestTDesignSelect>('t-select[aria-label="API / type"]')
     kind!.setSelectedValue('console', true)
     const scopedFrame = dom.window.document.querySelector<HTMLElement>('[data-plugin-console="console-showcase"]')
-    await waitForState(() => scopedFrame?.querySelector('[data-console-source="console.log"]') !== null, 'Console-only projection')
+    await waitForState(
+      () => scopedFrame?.querySelector('[data-console-source="console.log"]') !== null,
+      'Console-only projection',
+    )
     expect(scopedFrame?.querySelector('[data-console-source="console.log"]')).not.toBeNull()
     expect(scopedFrame?.querySelector('[data-console-source="settings.get"]')).toBeNull()
 
@@ -277,11 +389,20 @@ describe('plugin DevTools Console runtime', () => {
     const clear = dom.window.document.querySelector<HTMLButtonElement>('[data-console-action="clear"]')
     clear?.click()
     expect(runtime!.pluginConsole('console-showcase').entries).toEqual([])
-    expect(dom.window.document.querySelector('[data-plugin-console="console-showcase"] .cxm-console-empty')?.textContent).toContain('Waiting for plugin logs')
+    expect(
+      dom.window.document.querySelector('[data-plugin-console="console-showcase"] .cxm-console-empty')?.textContent,
+    ).toContain('Waiting for plugin logs')
     dom.window.document.documentElement.lang = 'zh-CN'
-    await waitForState(() => dom.window.document.querySelector('[data-tab="about"]')?.textContent === '关于 CordisX', 'zh primary navigation')
+    await waitForState(
+      () => dom.window.document.querySelector('[data-tab="about"]')?.textContent === '关于 CordisX',
+      'zh primary navigation',
+    )
     const zhToolbar = dom.window.document.querySelector('[role="toolbar"][aria-label="Console 显示控制"]')
-    expect([...zhToolbar?.querySelectorAll<HTMLButtonElement>('[data-console-action]') ?? []].map(button => button.getAttribute('aria-label')))
+    expect(
+      [...zhToolbar?.querySelectorAll<HTMLButtonElement>('[data-console-action]') ?? []].map(button =>
+        button.getAttribute('aria-label')
+      ),
+    )
       .toEqual(['暂停采集', '停止跟随', '清空日志', '复制所选', '导出插件日志'])
     await runtime!.setPluginBlocked('console-showcase', true)
     await runtime!.setPluginBlocked('console-showcase', false)

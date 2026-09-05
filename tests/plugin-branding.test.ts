@@ -11,6 +11,7 @@ describe('local plugin brand icon projection', () => {
   it('falls back instead of accepting arbitrary URLs, SVG, or malformed metadata', () => {
     expect(pluginBrandIconDataUrl('https://example.com/icon.png')).toBeUndefined()
     expect(pluginBrandIconDataUrl({ mediaType: 'image/svg+xml', data: 'a'.repeat(32) })).toBeUndefined()
-    expect(pluginBrandIconDataUrl({ mediaType: 'image/png', data: 'not base64', href: 'https://example.com' })).toBeUndefined()
+    expect(pluginBrandIconDataUrl({ mediaType: 'image/png', data: 'not base64', href: 'https://example.com' }))
+      .toBeUndefined()
   })
 })

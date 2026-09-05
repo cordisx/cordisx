@@ -37,8 +37,12 @@ try {
 
   await exec('npm', ['run', 'prepare:dev'], { cwd: root, maxBuffer: 16 * 1024 * 1024 })
 
-  const bundleModule = await import(`${pathToFileURL(path.join(root, 'packages/cli/dist/src/launcher/bundle.js')).href}?clean-dev=${Date.now()}`)
-  const configModule = await import(`${pathToFileURL(path.join(root, 'packages/cli/dist/src/launcher/config.js')).href}?clean-dev=${Date.now()}`)
+  const bundleModule = await import(
+    `${pathToFileURL(path.join(root, 'packages/cli/dist/src/launcher/bundle.js')).href}?clean-dev=${Date.now()}`
+  )
+  const configModule = await import(
+    `${pathToFileURL(path.join(root, 'packages/cli/dist/src/launcher/config.js')).href}?clean-dev=${Date.now()}`
+  )
   const config = await configModule.loadConfig(path.join(root, 'cordisx.config.example.json'))
   const bundle = await bundleModule.buildRendererBundle(config)
   if (typeof bundle !== 'string' || bundle.length === 0) throw new Error('clean development renderer bundle is empty')

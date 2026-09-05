@@ -76,9 +76,11 @@ export class CdpCertifiedPermissionChannel {
       targetId: string
     }>,
   ) {
-    if (!TOKEN.test(options.token) || options.profileId.length < 1 || options.profileId.length > 64
+    if (
+      !TOKEN.test(options.token) || options.profileId.length < 1 || options.profileId.length > 64
       || options.runtimeGeneration.length < 1 || options.runtimeGeneration.length > 200
-      || options.targetId.length < 1 || options.targetId.length > 512) {
+      || options.targetId.length < 1 || options.targetId.length > 512
+    ) {
       throw new Error('Certified permission CDP channel scope is invalid')
     }
     this.objectGroup = `cordisx-certified-permission-${options.targetId}`
@@ -104,8 +106,10 @@ export class CdpCertifiedPermissionChannel {
   private contextCreated(params: Record<string, unknown>): void {
     const context = object(params.context)
     const auxData = object(context?.auxData)
-    if (context === undefined || !Number.isSafeInteger(context.id) || (context.id as number) < 1
-      || auxData?.isDefault !== true) return
+    if (
+      context === undefined || !Number.isSafeInteger(context.id) || (context.id as number) < 1
+      || auxData?.isDefault !== true
+    ) return
     const executionContextId = context.id as number
     const executionContextEpoch: ExecutionContextEpoch = Object.freeze({
       token: Object.freeze({}),
@@ -122,16 +126,22 @@ export class CdpCertifiedPermissionChannel {
     const executionContextId = params.executionContextId as number
     const executionContextEpoch = this.liveContexts.get(executionContextId)
     const destroyedUniqueId = params.executionContextUniqueId
-    if (executionContextEpoch?.uniqueId !== undefined && typeof destroyedUniqueId === 'string'
-      && destroyedUniqueId !== executionContextEpoch.uniqueId) return
+    if (
+      executionContextEpoch?.uniqueId !== undefined && typeof destroyedUniqueId === 'string'
+      && destroyedUniqueId !== executionContextEpoch.uniqueId
+    ) return
     this.liveContexts.delete(executionContextId)
-    if (this.current === undefined || executionContextId !== this.current.executionContextId
+    if (
+      this.current === undefined || executionContextId !== this.current.executionContextId
       || (executionContextEpoch !== undefined
-        && this.current.executionContextEpoch.token !== executionContextEpoch.token)) return
+        && this.current.executionContextEpoch.token !== executionContextEpoch.token)
+    ) return
     const stale = this.current
     this.current = undefined
     this.fence += 1
-    this.enqueue(async () => { await this.release(stale) })
+    this.enqueue(async () => {
+      await this.release(stale)
+    })
   }
 
   private contextsCleared(): void {
@@ -139,7 +149,11 @@ export class CdpCertifiedPermissionChannel {
     const stale = this.current
     this.current = undefined
     this.fence += 1
-    if (stale !== undefined) this.enqueue(async () => { await this.release(stale) })
+    if (stale !== undefined) {
+      this.enqueue(async () => {
+        await this.release(stale)
+      })
+    }
   }
 
   private liveContext(executionContextId: number, executionContextEpoch: ExecutionContextEpoch): boolean {
@@ -199,11 +213,13 @@ export class CdpCertifiedPermissionChannel {
       })
       if (!this.liveContext(executionContextId, executionContextEpoch)) return
       const description = object(remoteResult(descriptionResponse, 'endpoint description').value)
-      if (description === undefined || Object.keys(description).length !== 4
+      if (
+        description === undefined || Object.keys(description).length !== 4
         || description.contract !== CERTIFIED_PERMISSION_CHANNEL_CONTRACT
         || description.profileId !== this.options.profileId
         || description.runtimeGeneration !== this.options.runtimeGeneration
-        || typeof description.documentEpoch !== 'string' || !EPOCH.test(description.documentEpoch)) return
+        || typeof description.documentEpoch !== 'string' || !EPOCH.test(description.documentEpoch)
+      ) return
       const next: CertifiedPermissionDocumentEndpoint = {
         objectId,
         executionContextId,
@@ -263,8 +279,10 @@ export class CdpCertifiedPermissionChannel {
     })
     const ack = object(remoteResult(response, 'snapshot delivery').value)
     if (this.disposed || (requireCurrent && (this.current !== endpoint || endpoint.fence !== this.fence))) return
-    if (ack === undefined || ack.documentEpoch !== endpoint.documentEpoch
-      || ack.deliverySequence !== sequence || ack.authorityRevision !== snapshot.revision) {
+    if (
+      ack === undefined || ack.documentEpoch !== endpoint.documentEpoch
+      || ack.deliverySequence !== sequence || ack.authorityRevision !== snapshot.revision
+    ) {
       throw new Error('Certified permission CDP delivery acknowledgement is invalid')
     }
     endpoint.sequence = sequence
@@ -276,7 +294,9 @@ export class CdpCertifiedPermissionChannel {
       functionDeclaration: 'function() { return this.close() }',
       awaitPromise: true,
       returnByValue: true,
-    }).then(response => { remoteResult(response, 'endpoint close') }).catch(() => undefined)
+    }).then(response => {
+      remoteResult(response, 'endpoint close')
+    }).catch(() => undefined)
     await this.release(endpoint)
   }
 

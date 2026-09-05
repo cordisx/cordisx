@@ -50,7 +50,7 @@ describe('Manager acknowledgements', () => {
       readFile(path.join(projectRoot, 'packages/cli/third_party/reicon-icon-credits.txt'), 'utf8'),
       readFile(path.join(projectRoot, 'packages/cli/third_party/reicon-MIT.txt'), 'utf8'),
     ])
-    expect(notices).toContain('| `reicon` | `1.2.1` | MIT |')
+    expect(notices).toMatch(/^\|[ \t]+`reicon`[ \t]+\|[ \t]+`1\.2\.1`[ \t]+\|[ \t]+MIT[ \t]+\|/m)
     expect(notices).toContain('Zappicon under the Zappicon License')
     expect(notices).toMatch(/does\s+not represent them as CordisX-owned MIT icon assets/u)
     expect(credits).toContain('https://zappicon.com/license')

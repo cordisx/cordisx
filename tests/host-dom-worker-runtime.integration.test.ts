@@ -1,8 +1,8 @@
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
   CORDISX_PAGE_SCHEMA_V3,
+  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
@@ -18,7 +18,11 @@ const worker = vi.hoisted(() => ({
 }))
 
 vi.mock('../packages/cli/src/renderer/host-dom-worker.js', () => ({
-  createBrowserHostDomWorkerEnvironment: () => ({ start: () => { throw new Error('unused mocked worker environment') } }),
+  createBrowserHostDomWorkerEnvironment: () => ({
+    start: () => {
+      throw new Error('unused mocked worker environment')
+    },
+  }),
   createHostDomWorkerBoundary: (options: HostDomWorkerBoundaryOptions) => {
     worker.options.push(options)
     const status: HostDomWorkerStatus = Object.freeze({ status: 'ready' })
@@ -36,8 +40,12 @@ vi.mock('../packages/cli/src/renderer/host-dom-worker.js', () => ({
         options.hostDom?.dispose()
         options.transientCanvas?.dispose()
       },
-      startTransientCanvas: (input: unknown) => { worker.canvasStarts.push(input) },
-      stopTransientCanvas: (sessionId: string) => { worker.canvasStops.push(sessionId) },
+      startTransientCanvas: (input: unknown) => {
+        worker.canvasStarts.push(input)
+      },
+      stopTransientCanvas: (sessionId: string) => {
+        worker.canvasStops.push(sessionId)
+      },
     }
   },
 }))
@@ -63,8 +71,16 @@ interface RuntimeHandle {
       }
     }[]
   }
-  setExtensionPointPolicy(source: string, pluginId: string, pointId: string, policy: 'allow' | 'deny' | 'inherit'): Promise<void>
-  activePluginGeneration(): Record<string, unknown> & { readonly plugins: readonly unknown[]; readonly revision: number }
+  setExtensionPointPolicy(
+    source: string,
+    pluginId: string,
+    pointId: string,
+    policy: 'allow' | 'deny' | 'inherit',
+  ): Promise<void>
+  activePluginGeneration(): Record<string, unknown> & {
+    readonly plugins: readonly unknown[]
+    readonly revision: number
+  }
   stagePluginMutation(mutation: unknown): Promise<unknown>
   abortPluginMutation(transactionId: string): Promise<void>
   publishPluginMutation(transactionId: string): Promise<unknown>
@@ -83,26 +99,28 @@ function installBrowserGlobals(): JSDOM {
     configurable: true,
     value: () => ({ length: 1 }),
   })
-  for (const [name, value] of [
-    ['window', browser],
-    ['document', browser.document],
-    ['history', browser.history],
-    ['location', browser.location],
-    ['navigator', browser.navigator],
-    ['localStorage', browser.localStorage],
-    ['HTMLElement', browser.HTMLElement],
-    ['Element', browser.Element],
-    ['Node', browser.Node],
-    ['Text', browser.Text],
-    ['Event', browser.Event],
-    ['CustomEvent', browser.CustomEvent],
-    ['KeyboardEvent', browser.KeyboardEvent],
-    ['MouseEvent', browser.MouseEvent],
-    ['MutationObserver', browser.MutationObserver],
-    ['getComputedStyle', browser.getComputedStyle.bind(browser)],
-    ['requestAnimationFrame', browser.requestAnimationFrame.bind(browser)],
-    ['cancelAnimationFrame', browser.cancelAnimationFrame.bind(browser)],
-  ] as const) vi.stubGlobal(name, value)
+  for (
+    const [name, value] of [
+      ['window', browser],
+      ['document', browser.document],
+      ['history', browser.history],
+      ['location', browser.location],
+      ['navigator', browser.navigator],
+      ['localStorage', browser.localStorage],
+      ['HTMLElement', browser.HTMLElement],
+      ['Element', browser.Element],
+      ['Node', browser.Node],
+      ['Text', browser.Text],
+      ['Event', browser.Event],
+      ['CustomEvent', browser.CustomEvent],
+      ['KeyboardEvent', browser.KeyboardEvent],
+      ['MouseEvent', browser.MouseEvent],
+      ['MutationObserver', browser.MutationObserver],
+      ['getComputedStyle', browser.getComputedStyle.bind(browser)],
+      ['requestAnimationFrame', browser.requestAnimationFrame.bind(browser)],
+      ['cancelAnimationFrame', browser.cancelAnimationFrame.bind(browser)],
+    ] as const
+  ) vi.stubGlobal(name, value)
   return dom
 }
 
@@ -132,7 +150,8 @@ describe('Host DOM worker production runtime composition', () => {
   it('keeps the artifact as data, binds the Host client, reports availability, and disposes the boundary', async () => {
     const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
     const dom = installBrowserGlobals()
-    const artifactSource = 'globalThis.__hostDomRendererExecutionWouldBeABug = true; globalThis.__cordisxPendingPluginModuleV1 = { apply() {} }'
+    const artifactSource =
+      'globalThis.__hostDomRendererExecutionWouldBeABug = true; globalThis.__cordisxPendingPluginModuleV1 = { apply() {} }'
     const plugin = {
       id: 'isolated-host-dom',
       source: 'https://marketplace.example/isolated-host-dom',
@@ -197,7 +216,8 @@ describe('Host DOM worker production runtime composition', () => {
       artifactSource,
       config: { label: 'safe configuration' },
     })
-    expect((globalThis as typeof globalThis & Record<string, unknown>).__hostDomRendererExecutionWouldBeABug).toBeUndefined()
+    expect((globalThis as typeof globalThis & Record<string, unknown>).__hostDomRendererExecutionWouldBeABug)
+      .toBeUndefined()
     await expect(worker.options[0]!.hostDom.catalog()).resolves.toMatchObject({
       schemaVersion: 1,
       roots: expect.arrayContaining([expect.objectContaining({ rootId: 'app.shell' })]),
@@ -296,7 +316,8 @@ describe('Host DOM worker production runtime composition', () => {
       profileId: 'work',
       generation: 'runtime-generation',
     })
-    const artifactSource = 'globalThis.__dynamicHostDomRendererExecutionWouldBeABug = true; globalThis.__cordisxPendingPluginModuleV1 = { apply() {} }'
+    const artifactSource =
+      'globalThis.__dynamicHostDomRendererExecutionWouldBeABug = true; globalThis.__cordisxPendingPluginModuleV1 = { apply() {} }'
     const runtimeManifest = {
       $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
       schemaVersion: 5,
@@ -349,15 +370,21 @@ describe('Host DOM worker production runtime composition', () => {
 
     expect(worker.options).toHaveLength(1)
     expect(worker.options[0]?.artifactSource).toBe(artifactSource)
-    expect((globalThis as typeof globalThis & Record<string, unknown>).__dynamicHostDomRendererExecutionWouldBeABug).toBeUndefined()
+    expect((globalThis as typeof globalThis & Record<string, unknown>).__dynamicHostDomRendererExecutionWouldBeABug)
+      .toBeUndefined()
     await runtime.publishPluginMutation('dynamic-host-dom-install')
     await runtime.completePluginMutation('dynamic-host-dom-install')
     await runtime.finalizePluginMutation('dynamic-host-dom-install')
-    expect(runtime.snapshot().plugins).toContainEqual(expect.objectContaining({ id: 'dynamic-host-dom', status: 'active' }))
+    expect(runtime.snapshot().plugins).toContainEqual(
+      expect.objectContaining({ id: 'dynamic-host-dom', status: 'active' }),
+    )
 
     await runtime.dispose()
     expect(worker.dispose).toHaveBeenCalledOnce()
-    Reflect.deleteProperty(globalThis as typeof globalThis & Record<string, unknown>, '__dynamicHostDomRendererExecutionWouldBeABug')
+    Reflect.deleteProperty(
+      globalThis as typeof globalThis & Record<string, unknown>,
+      '__dynamicHostDomRendererExecutionWouldBeABug',
+    )
     dom.window.close()
   }, 60_000)
 
@@ -382,10 +409,15 @@ describe('Host DOM worker production runtime composition', () => {
       configurable: true,
       value: () => ({ matches: false, addEventListener: () => undefined, removeEventListener: () => undefined }),
     })
-    const artifactSource = 'globalThis.__canvasRendererExecutionWouldBeABug = true; globalThis.__cordisxPendingPluginModuleV1 = { apply() {} }'
+    const artifactSource =
+      'globalThis.__canvasRendererExecutionWouldBeABug = true; globalThis.__cordisxPendingPluginModuleV1 = { apply() {} }'
     const plugin = {
-      id: 'isolated-canvas', source: 'https://marketplace.example/isolated-canvas', enabled: true,
-      config: {}, revision: 1, isolatedArtifactSource: artifactSource,
+      id: 'isolated-canvas',
+      source: 'https://marketplace.example/isolated-canvas',
+      enabled: true,
+      config: {},
+      revision: 1,
+      isolatedArtifactSource: artifactSource,
       manifest: {
         $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
         schemaVersion: 7,
@@ -395,28 +427,42 @@ describe('Host DOM worker production runtime composition', () => {
         execution: { realm: 'isolated-worker', interfaces: ['ui.transient-canvas/v1'] },
       },
       package: {
-        version: '1.0.0', digest: `sha256:${'c'.repeat(64)}`,
-        moduleGeneration: 'isolated-canvas-generation', dependencies: [],
+        version: '1.0.0',
+        digest: `sha256:${'c'.repeat(64)}`,
+        moduleGeneration: 'isolated-canvas-generation',
+        dependencies: [],
       },
     } as const
     const runtime = await installCordisX([plugin], {
-      version: 'test', workspaceCwd: '/workspace', providers: [], profileId: 'work',
-      hostKind: 'playground', generation: 'runtime-generation',
+      version: 'test',
+      workspaceCwd: '/workspace',
+      providers: [],
+      profileId: 'work',
+      hostKind: 'playground',
+      generation: 'runtime-generation',
       pluginActivation: {
         $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
         schemaVersion: 1,
         recordKind: 'active',
-        profileId: 'work', revision: 1, lastGoodRevision: 1, runtimeGeneration: 'runtime-generation',
+        profileId: 'work',
+        revision: 1,
+        lastGoodRevision: 1,
+        runtimeGeneration: 'runtime-generation',
         plugins: [{
-          id: 'isolated-canvas', version: '1.0.0', digest: `sha256:${'c'.repeat(64)}`,
-          moduleGeneration: 'isolated-canvas-generation', enabled: true, dependencies: [],
+          id: 'isolated-canvas',
+          version: '1.0.0',
+          digest: `sha256:${'c'.repeat(64)}`,
+          moduleGeneration: 'isolated-canvas-generation',
+          enabled: true,
+          dependencies: [],
         }],
       },
     })
     expect(worker.options).toHaveLength(1)
     expect(worker.options[0]?.hostDom).toBeUndefined()
     expect(worker.options[0]?.transientCanvas).toBeDefined()
-    expect((globalThis as typeof globalThis & Record<string, unknown>).__canvasRendererExecutionWouldBeABug).toBeUndefined()
+    expect((globalThis as typeof globalThis & Record<string, unknown>).__canvasRendererExecutionWouldBeABug)
+      .toBeUndefined()
     await runtime.setExtensionPointPolicy(
       'https://marketplace.example/isolated-canvas',
       'isolated-canvas',
@@ -424,7 +470,8 @@ describe('Host DOM worker production runtime composition', () => {
       'allow',
     )
     await worker.options[0]!.transientCanvas!.register({
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
       schemaVersion: 1,
       id: 'sparkles',
       pointId: 'composer.submit.effects',
@@ -437,59 +484,107 @@ describe('Host DOM worker production runtime composition', () => {
     await Promise.resolve()
     expect(worker.canvasStarts).toHaveLength(1)
     expect(worker.canvasStarts[0]).toMatchObject({ registrationId: 'sparkles', canvas: offscreen })
-    expect(dom.window.document.querySelector<HTMLCanvasElement>('[data-cordisx-transient-canvas="sparkles"]')?.style.pointerEvents).toBe('none')
+    expect(
+      dom.window.document.querySelector<HTMLCanvasElement>('[data-cordisx-transient-canvas="sparkles"]')?.style
+        .pointerEvents,
+    ).toBe('none')
 
     await runtime.dispose()
     expect(dom.window.document.querySelector('[data-cordisx-transient-canvas]')).toBeNull()
     dom.window.close()
   }, 60_000)
 
-  it('boots the production local-development runtime after its V8 authority requester route registers during plugin apply', async () => {
-    const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
-    const dom = installBrowserGlobals()
-    const plugin = {
-      id: 'chatroom', source: 'file:///cordisx-local-dev/chatroom/chatroom.js', enabled: true,
-      config: {}, revision: 1,
-      manifest: {
-        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
-        schemaVersion: 8,
+  it(
+    'boots the production local-development runtime after its V8 authority requester route registers during plugin apply',
+    async () => {
+      const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
+      const dom = installBrowserGlobals()
+      const plugin = {
         id: 'chatroom',
-        capabilities: [{
-          name: 'approvals.answer', required: false,
-          scope: { authorityRequester: { kind: 'approval-authority-requester-route', requester: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
-        }],
-        services: [],
-      },
-      module: {
-        inject: ['i18n', 'pages', 'routes'],
-        apply(ctx: any) {
-          ctx.i18n.define({ namespace: 'chatroom', locale: 'en', default: true, messages: { page: 'Room', route: 'Session' } })
-          ctx.pages.register({
-            $schema: CORDISX_PAGE_SCHEMA_V3, schemaVersion: 3, id: 'room',
-            title: { key: 'page', fallback: 'Room' }, description: { key: 'route', fallback: 'Session' },
-          }, () => () => undefined)
-          ctx.routes.register({
-            $schema: CORDISX_ROUTE_SCHEMA_V2, schemaVersion: 2,
-            id: 'room-session-detail', path: '/main/chatroom/:roomId/session/:sessionId', outlet: 'main', page: 'room',
-            title: { key: 'route', fallback: 'Session' }, description: { key: 'route', fallback: 'Session' },
-          })
+        source: 'file:///cordisx-local-dev/chatroom/chatroom.js',
+        enabled: true,
+        config: {},
+        revision: 1,
+        manifest: {
+          $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
+          schemaVersion: 8,
+          id: 'chatroom',
+          capabilities: [{
+            name: 'approvals.answer',
+            required: false,
+            scope: {
+              authorityRequester: {
+                kind: 'approval-authority-requester-route',
+                requester: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' },
+              },
+            },
+          }],
+          services: [],
         },
-      },
-      package: {
-        version: '0.1.0', digest: `sha256:${'d'.repeat(64)}`,
-        moduleGeneration: 'chatroom-v8-local-development', dependencies: [],
-      },
-    } as const
-    const runtime = await installCordisX([plugin], {
-      version: 'test', workspaceCwd: '/workspace', providers: [], profileId: 'work', hostKind: 'playground', generation: 'runtime-v8-local-development',
-      pluginActivation: {
-        $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, schemaVersion: 1, recordKind: 'active',
-        profileId: 'work', revision: 1, lastGoodRevision: 1, runtimeGeneration: 'runtime-v8-local-development',
-        plugins: [{ id: 'chatroom', version: '0.1.0', digest: `sha256:${'d'.repeat(64)}`, moduleGeneration: 'chatroom-v8-local-development', enabled: true, dependencies: [] }],
-      },
-    })
-    expect(runtime.snapshot().plugins).toContainEqual(expect.objectContaining({ id: 'chatroom', status: 'active' }))
-    await runtime.dispose()
-    dom.window.close()
-  }, 60_000)
+        module: {
+          inject: ['i18n', 'pages', 'routes'],
+          apply(ctx: any) {
+            ctx.i18n.define({
+              namespace: 'chatroom',
+              locale: 'en',
+              default: true,
+              messages: { page: 'Room', route: 'Session' },
+            })
+            ctx.pages.register({
+              $schema: CORDISX_PAGE_SCHEMA_V3,
+              schemaVersion: 3,
+              id: 'room',
+              title: { key: 'page', fallback: 'Room' },
+              description: { key: 'route', fallback: 'Session' },
+            }, () => () => undefined)
+            ctx.routes.register({
+              $schema: CORDISX_ROUTE_SCHEMA_V2,
+              schemaVersion: 2,
+              id: 'room-session-detail',
+              path: '/main/chatroom/:roomId/session/:sessionId',
+              outlet: 'main',
+              page: 'room',
+              title: { key: 'route', fallback: 'Session' },
+              description: { key: 'route', fallback: 'Session' },
+            })
+          },
+        },
+        package: {
+          version: '0.1.0',
+          digest: `sha256:${'d'.repeat(64)}`,
+          moduleGeneration: 'chatroom-v8-local-development',
+          dependencies: [],
+        },
+      } as const
+      const runtime = await installCordisX([plugin], {
+        version: 'test',
+        workspaceCwd: '/workspace',
+        providers: [],
+        profileId: 'work',
+        hostKind: 'playground',
+        generation: 'runtime-v8-local-development',
+        pluginActivation: {
+          $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+          schemaVersion: 1,
+          recordKind: 'active',
+          profileId: 'work',
+          revision: 1,
+          lastGoodRevision: 1,
+          runtimeGeneration: 'runtime-v8-local-development',
+          plugins: [{
+            id: 'chatroom',
+            version: '0.1.0',
+            digest: `sha256:${'d'.repeat(64)}`,
+            moduleGeneration: 'chatroom-v8-local-development',
+            enabled: true,
+            dependencies: [],
+          }],
+        },
+      })
+      expect(runtime.snapshot().plugins).toContainEqual(expect.objectContaining({ id: 'chatroom', status: 'active' }))
+      await runtime.dispose()
+      dom.window.close()
+    },
+    60_000,
+  )
 })

@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
+  buildPermissionAuthorizationPlanResultV2,
+  buildPermissionAuthorizationPlanV2,
   CapabilityRiskCatalog,
   HOST_CAPABILITY_RISK_ENTRIES,
-  PermissionDecisionEngine,
-  buildPermissionAuthorizationPlanV2,
-  buildPermissionAuthorizationPlanResultV2,
   partitionPermissionReviewPlan,
+  PermissionDecisionEngine,
 } from '../packages/cli/src/capability-risk-catalog.js'
 import {
   CORDISX_PERMISSION_CAPABILITIES_V2,
@@ -17,12 +17,12 @@ import {
   type CordisXPermissionPolicyRecordV2,
 } from '../packages/cli/src/permission-contracts.js'
 import {
-  PermissionOnceGrantLedger,
   comparePermissionScopeV2,
   migratePermissionPolicyV1,
   normalizeCapabilityDeclarationV2,
   normalizePermissionPolicyRecordV2,
   normalizePermissionRationaleV2,
+  PermissionOnceGrantLedger,
   permissionSecurityFingerprint,
   sha256Hex,
 } from '../packages/cli/src/permission-model-v2.js'
@@ -77,22 +77,33 @@ describe('permission capability risk catalog', () => {
   it('is exhaustive and fails closed when any accepted capability lacks metadata', () => {
     const catalog = new CapabilityRiskCatalog()
     expect(catalog.snapshot().map(item => item.capability)).toEqual(CORDISX_PERMISSION_CAPABILITIES_V4)
-    expect(catalog.snapshot().filter(item => item.resourceClass === 'non-dom')).toHaveLength(CORDISX_PERMISSION_CAPABILITIES_V2.length)
+    expect(catalog.snapshot().filter(item => item.resourceClass === 'non-dom')).toHaveLength(
+      CORDISX_PERMISSION_CAPABILITIES_V2.length,
+    )
     expect(catalog.get('ui.extension-points.render')).toMatchObject({
       resourceClass: 'dom-rendering',
       certifiedImplicitApproval: true,
     })
     expect(catalog.get('ui.host-dom.read')).toMatchObject({
-      resourceClass: 'host-dom', sensitivity: 'sensitive', certifiedImplicitApproval: true,
+      resourceClass: 'host-dom',
+      sensitivity: 'sensitive',
+      certifiedImplicitApproval: true,
     })
     expect(catalog.get('ui.host-dom.modify')).toMatchObject({
-      resourceClass: 'host-dom', sensitivity: 'high-risk', certifiedImplicitApproval: true, persistentAllow: false,
+      resourceClass: 'host-dom',
+      sensitivity: 'high-risk',
+      certifiedImplicitApproval: true,
+      persistentAllow: false,
     })
-    expect(() => new CapabilityRiskCatalog(HOST_CAPABILITY_RISK_ENTRIES.slice(1))).toThrow(/metadata missing: models\.read/)
-    expect(() => new CapabilityRiskCatalog([
-      ...HOST_CAPABILITY_RISK_ENTRIES,
-      { ...HOST_CAPABILITY_RISK_ENTRIES[0]!, capability: 'unknown.read' as 'models.read' },
-    ])).toThrow(/unsupported entry: unknown\.read/)
+    expect(() => new CapabilityRiskCatalog(HOST_CAPABILITY_RISK_ENTRIES.slice(1))).toThrow(
+      /metadata missing: models\.read/,
+    )
+    expect(() =>
+      new CapabilityRiskCatalog([
+        ...HOST_CAPABILITY_RISK_ENTRIES,
+        { ...HOST_CAPABILITY_RISK_ENTRIES[0]!, capability: 'unknown.read' as 'models.read' },
+      ])
+    ).toThrow(/unsupported entry: unknown\.read/)
   })
 
   it('keeps required orthogonal to sensitivity and computes Host-owned defaults', () => {
@@ -106,16 +117,20 @@ describe('permission capability risk catalog', () => {
     }
     expect(engine.recommend('models.read', { ...context, required: false, scope: {} }).defaultDecision)
       .toBe('allow-persistent')
-    expect(engine.recommend('agent.events.read', {
-      ...context,
-      required: false,
-      scope: { sessionIds: ['session-1'] },
-    }).defaultDecision).toBe('allow-once')
-    expect(engine.recommend('agent.events.read', {
-      ...context,
-      required: true,
-      scope: { sessionIds: ['session-1'] },
-    }).defaultDecision).toBe('allow-once')
+    expect(
+      engine.recommend('agent.events.read', {
+        ...context,
+        required: false,
+        scope: { sessionIds: ['session-1'] },
+      }).defaultDecision,
+    ).toBe('allow-once')
+    expect(
+      engine.recommend('agent.events.read', {
+        ...context,
+        required: true,
+        scope: { sessionIds: ['session-1'] },
+      }).defaultDecision,
+    ).toBe('allow-once')
     const highRisk = engine.recommend('tasks.control', {
       ...context,
       operation: 'install',
@@ -163,34 +178,48 @@ describe('permission declarations and fingerprints', () => {
 
   it('rejects markup, links, script schemes, interpolated deception, and Host impersonation', () => {
     const rationale = declaration('models.read', false, {}).rationale!
-    expect(() => normalizePermissionRationaleV2({
-      ...rationale,
-      description: { key: 'bad', fallback: '<b>Trusted</b>' },
-    })).toThrow(/markup/)
-    expect(() => normalizePermissionRationaleV2({
-      ...rationale,
-      feature: { key: 'bad', fallback: 'See https:\/\/example.com' },
-    })).toThrow(/link\/script/)
-    expect(() => normalizePermissionRationaleV2({
-      ...rationale,
-      deniedBehavior: { key: 'bad', params: { claim: 'CordisX verified safe' } },
-    })).toThrow(/security claim/)
-    expect(() => normalizePermissionRationaleV2({
-      ...rationale,
-      title: { key: 'bad', fallback: '宿主已验证安全' },
-    })).toThrow(/security claim/)
+    expect(() =>
+      normalizePermissionRationaleV2({
+        ...rationale,
+        description: { key: 'bad', fallback: '<b>Trusted</b>' },
+      })
+    ).toThrow(/markup/)
+    expect(() =>
+      normalizePermissionRationaleV2({
+        ...rationale,
+        feature: { key: 'bad', fallback: 'See https:\/\/example.com' },
+      })
+    ).toThrow(/link\/script/)
+    expect(() =>
+      normalizePermissionRationaleV2({
+        ...rationale,
+        deniedBehavior: { key: 'bad', params: { claim: 'CordisX verified safe' } },
+      })
+    ).toThrow(/security claim/)
+    expect(() =>
+      normalizePermissionRationaleV2({
+        ...rationale,
+        title: { key: 'bad', fallback: '宿主已验证安全' },
+      })
+    ).toThrow(/security claim/)
   })
 
   it('rejects capability-family scope spoofing and classifies scope expansion', () => {
-    expect(() => normalizeCapabilityDeclarationV2({
-      name: 'agent.events.read', required: true, scope: {
-        sessions: [{ providerId: 'codex', remoteSessionId: 'thread-1' }],
-      },
-    })).toThrow(/cannot use Platform sessions/)
+    expect(() =>
+      normalizeCapabilityDeclarationV2({
+        name: 'agent.events.read',
+        required: true,
+        scope: {
+          sessions: [{ providerId: 'codex', remoteSessionId: 'thread-1' }],
+        },
+      })
+    ).toThrow(/cannot use Platform sessions/)
     expect(comparePermissionScopeV2({ cwdRoots: ['/work'] }, { cwdRoots: ['/work/project'] })).toBe('narrowed')
     expect(comparePermissionScopeV2({ cwdRoots: ['/work/project'] }, { cwdRoots: ['/work'] })).toBe('expanded')
     expect(comparePermissionScopeV2({ providers: ['codex'] }, { providers: ['claude'] })).toBe('changed')
-    expect(comparePermissionScopeV2({ providers: ['codex', 'claude'] }, { providers: ['claude', 'codex'] })).toBe('equal')
+    expect(comparePermissionScopeV2({ providers: ['codex', 'claude'] }, { providers: ['claude', 'codex'] })).toBe(
+      'equal',
+    )
   })
 })
 
@@ -238,15 +267,24 @@ describe('shared permission authorization planning', () => {
         availability: 'supported' as const,
       }),
     }
-    expect(buildPermissionAuthorizationPlanV2({ ...input, policies: [policy(item, 'allow-persistent')] })
-      .declarations[0]?.decisionRequired).toBe(false)
-    expect(buildPermissionAuthorizationPlanV2({ ...input, policies: [policy(item, 'allow-persistent', 'file:///plugins/other.js')] })
-      .declarations[0]).toMatchObject({ policy: 'ask', decisionRequired: true })
-    expect(buildPermissionAuthorizationPlanV2({
-      ...input,
-      declarations: [{ ...item, scope: { providers: ['claude'] } }],
-      policies: [policy(item, 'allow-persistent')],
-    }).declarations[0]).toMatchObject({ policy: 'ask', decisionRequired: true })
+    expect(
+      buildPermissionAuthorizationPlanV2({ ...input, policies: [policy(item, 'allow-persistent')] })
+        .declarations[0]?.decisionRequired,
+    ).toBe(false)
+    expect(
+      buildPermissionAuthorizationPlanV2({
+        ...input,
+        policies: [policy(item, 'allow-persistent', 'file:///plugins/other.js')],
+      })
+        .declarations[0],
+    ).toMatchObject({ policy: 'ask', decisionRequired: true })
+    expect(
+      buildPermissionAuthorizationPlanV2({
+        ...input,
+        declarations: [{ ...item, scope: { providers: ['claude'] } }],
+        policies: [policy(item, 'allow-persistent')],
+      }).declarations[0],
+    ).toMatchObject({ policy: 'ask', decisionRequired: true })
   })
 
   it('carries policy only across provable scope narrowing and returns one durable migration', () => {
@@ -325,20 +363,26 @@ describe('permission lifetime', () => {
   })
 
   it('migrates v1 only to catalog-permitted persistent states', () => {
-    expect(migratePermissionPolicyV1('allow', {
-      key,
-      persistentAllow: true,
-      persistentDeny: true,
-    }).policy).toBe('allow-persistent')
-    expect(migratePermissionPolicyV1('allow', {
-      key,
-      persistentAllow: false,
-      persistentDeny: true,
-    }).policy).toBe('ask')
-    expect(migratePermissionPolicyV1('deny', {
-      key,
-      persistentAllow: false,
-      persistentDeny: true,
-    }).policy).toBe('deny-persistent')
+    expect(
+      migratePermissionPolicyV1('allow', {
+        key,
+        persistentAllow: true,
+        persistentDeny: true,
+      }).policy,
+    ).toBe('allow-persistent')
+    expect(
+      migratePermissionPolicyV1('allow', {
+        key,
+        persistentAllow: false,
+        persistentDeny: true,
+      }).policy,
+    ).toBe('ask')
+    expect(
+      migratePermissionPolicyV1('deny', {
+        key,
+        persistentAllow: false,
+        persistentDeny: true,
+      }).policy,
+    ).toBe('deny-persistent')
   })
 })

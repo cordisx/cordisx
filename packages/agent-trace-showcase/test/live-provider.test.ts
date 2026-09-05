@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  CORDISX_AGENT_EVENT_CONTRACT,
-  CORDISX_AGENT_EVENT_SCHEMA_VERSION,
   CORDISX_AGENT_DELIVERY_CONTRACT,
   CORDISX_AGENT_DELIVERY_SCHEMA_VERSION,
+  CORDISX_AGENT_EVENT_CONTRACT,
+  CORDISX_AGENT_EVENT_SCHEMA_VERSION,
   type CordisXAgent,
   type CordisXAgentDeliveryHandle,
   type CordisXAgentEvent,
@@ -35,7 +35,10 @@ const queued = Object.freeze({
   provenance: 'cordisx',
   source: owner,
   data: {
-    stage: 'queued', target: 'next-step', wakeup: false, owner,
+    stage: 'queued',
+    target: 'next-step',
+    wakeup: false,
+    owner,
   },
 }) satisfies CordisXAgentEvent<'message.delivery'>
 
@@ -44,14 +47,20 @@ function service(options: { deny?: boolean } = {}): CordisXAgentEvents & { emit(
   let disposed = false
   return {
     status: () => ({
-      hostId: 'codex-desktop', hostName: 'Codex Desktop', mode: 'unavailable',
-      adapterId: 'codex', adapterVersion: '0.145.0', experimental: [],
+      hostId: 'codex-desktop',
+      hostName: 'Codex Desktop',
+      mode: 'unavailable',
+      adapterId: 'codex',
+      adapterVersion: '0.145.0',
+      experimental: [],
       diagnostics: [{ code: 'current-connection-client-unavailable', message: 'Current connection is unavailable.' }],
-      secondConnectionCreated: false, rawBridgeExposed: false,
+      secondConnectionCreated: false,
+      rawBridgeExposed: false,
     }),
-    query: vi.fn(async input => options.deny === true
-      ? { ok: false as const, error: { code: 'permission-denied' as const, message: 'Denied by fixture broker.' } }
-      : {
+    query: vi.fn(async input =>
+      options.deny === true
+        ? { ok: false as const, error: { code: 'permission-denied' as const, message: 'Denied by fixture broker.' } }
+        : {
           ok: true as const,
           value: {
             contract: CORDISX_AGENT_EVENT_CONTRACT,
@@ -64,10 +73,14 @@ function service(options: { deny?: boolean } = {}): CordisXAgentEvents & { emit(
               ? { fromSeq: 0, toSeq: 0, events: [queued] }
               : { events: [] }),
           },
-        }),
+        }
+    ),
     subscribe: (_input, next) => {
       listener = next
-      return () => { disposed = true; listener = undefined }
+      return () => {
+        disposed = true
+        listener = undefined
+      }
     },
     emit: () => listener?.({ sessionId: 'session-a', fromSeq: 0, toSeq: 0 }),
     disposed: () => disposed,
@@ -87,14 +100,21 @@ function controls(): {
   const snapshot = () => ({
     contract: CORDISX_AGENT_DELIVERY_CONTRACT,
     schemaVersion: CORDISX_AGENT_DELIVERY_SCHEMA_VERSION,
-    deliveryId: 'delivery-live-1', messageId: 'message-live-1', sessionId: 'session-a',
-    target: 'next-step' as const, wakeup: false, owner,
+    deliveryId: 'delivery-live-1',
+    messageId: 'message-live-1',
+    sessionId: 'session-a',
+    target: 'next-step' as const,
+    wakeup: false,
+    owner,
     stage: cancelled ? 'cancelled' as const : 'queued' as const,
-    terminal: cancelled, cancellable: !cancelled, valid: true,
+    terminal: cancelled,
+    cancellable: !cancelled,
+    valid: true,
     stageEventId: cancelled ? 'cxevt:session-a:cancelled' : 'cxevt:session-a:queued',
   })
   const handle: CordisXAgentDeliveryHandle = {
-    deliveryId: 'delivery-live-1', snapshot,
+    deliveryId: 'delivery-live-1',
+    snapshot,
     cancel: () => {
       cancelled = true
       return { ok: true, snapshot: snapshot() }
@@ -104,14 +124,20 @@ function controls(): {
   const releaseContext = vi.fn()
   const releasePreStep = vi.fn()
   const agent: CordisXAgent = {
-    send: vi.fn(() => handle), followup: vi.fn(() => handle), steer: vi.fn(() => handle), inject: vi.fn(() => handle),
+    send: vi.fn(() => handle),
+    followup: vi.fn(() => handle),
+    steer: vi.fn(() => handle),
+    inject: vi.fn(() => handle),
     clearPending: vi.fn(() => ({ cancelled: [snapshot()], retained: [] })),
   }
   return {
-    agent, handle,
+    agent,
+    handle,
     agents: { get: vi.fn(() => agent), preStep: vi.fn(() => releasePreStep) },
     systemPrompt: { section: vi.fn(() => releaseSection), context: vi.fn(() => releaseContext) },
-    releaseSection, releaseContext, releasePreStep,
+    releaseSection,
+    releaseContext,
+    releasePreStep,
   }
 }
 
@@ -125,8 +151,17 @@ describe('Agent Trace live v2 provider', () => {
     expect(store.getSnapshot()).toMatchObject({
       sessionId: 'session-a',
       status: {
-        mode: 'partial', completeness: 'partial', contractVersion: 'cordisx.agent-events/v2',
-        supportedOperations: ['followup', 'steer', 'inject', 'pre-step', 'system-prompt-section', 'system-prompt-context'],
+        mode: 'partial',
+        completeness: 'partial',
+        contractVersion: 'cordisx.agent-events/v2',
+        supportedOperations: [
+          'followup',
+          'steer',
+          'inject',
+          'pre-step',
+          'system-prompt-section',
+          'system-prompt-context',
+        ],
       },
       range: { firstSeq: 0, lastSeq: 0, loaded: 1, totalAvailable: 1, renderedLimit: 500 },
     })
@@ -203,14 +238,25 @@ describe('Agent Trace live v2 provider', () => {
     const contribution = projectAgentEvent({
       contract: CORDISX_AGENT_EVENT_CONTRACT,
       schemaVersion: CORDISX_AGENT_EVENT_SCHEMA_VERSION,
-      eventId: 'cxevt:session-a:2', sessionId: 'session-a', contributionId: 'contribution-1',
-      turnId: 'turn-1', stepId: 'step-1', seq: 2, time: 1002,
-      type: 'input.contribution', provenance: 'cordisx', source: owner,
+      eventId: 'cxevt:session-a:2',
+      sessionId: 'session-a',
+      contributionId: 'contribution-1',
+      turnId: 'turn-1',
+      stepId: 'step-1',
+      seq: 2,
+      time: 1002,
+      type: 'input.contribution',
+      provenance: 'cordisx',
+      source: owner,
       data: { kind: 'system-prompt.section', stage: 'forwarded', evaluationId: 'evaluation-1' },
     })
     expect(contribution).toMatchObject({
-      id: 'cxevt:session-a:2', requestId: 'contribution-1', type: 'input.contribution',
-      semanticType: 'system-prompt.section', phase: 'forwarded', modelConsumption: 'unproved',
+      id: 'cxevt:session-a:2',
+      requestId: 'contribution-1',
+      type: 'input.contribution',
+      semanticType: 'system-prompt.section',
+      phase: 'forwarded',
+      modelConsumption: 'unproved',
     })
   })
 })

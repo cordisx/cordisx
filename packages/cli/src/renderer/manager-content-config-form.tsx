@@ -10,7 +10,8 @@ import type { ManagerContentConfigBindingHandle } from './manager-content-config
 import type { ManagerModel, ManagerPluginSnapshot, ManagerSnapshot } from './manager.js'
 import { HostForm } from './host-ui/HostForm.js'
 
-const COMMAND_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-command.v1.schema.json' as const
+const COMMAND_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-content-config-command.v1.schema.json' as const
 
 function commandId(operation: string): string {
   return `cx-manager-config-${operation}:${crypto.randomUUID()}`
@@ -39,41 +40,50 @@ function ManagerContentConfigForm({ handle, locale, subscribeLocale }: {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
   }, [handle])
-  const model = useMemo(() => ({
-    snapshot: () => ({ localization: { locale: locale() } }) as ManagerSnapshot,
-    subscribe: () => () => {},
-    updatePluginConfig: async (_pluginId: string, expectedRevision: number, operations: readonly ConfigMutationOperation[]) => {
-      const validate: ManagerContentConfigCommandV1 = {
-        $schema: COMMAND_SCHEMA,
-        contract: 'cordisx.manager-content-config-command/v1',
-        schemaVersion: 1,
-        commandId: commandId('validate'),
-        binding,
-        expectedRevision,
-        operation: 'draft.validate',
-        operations: operations as Extract<ManagerContentConfigCommandV1, { operation: 'draft.validate' }>['operations'],
-      }
-      const validated = await handle.source.execute(validate)
-      if (validated.status !== 'validated') throw resultError(validated)
-      const saved = await handle.source.execute({
-        ...validate,
-        commandId: commandId('save'),
-        operation: 'draft.save',
-        mutationId: commandId('mutation'),
-      })
-      if (saved.status !== 'applied' && saved.status !== 'staged') throw resultError(saved)
-      refresh()
-    },
-  }) as unknown as ManagerModel, [binding, handle, locale])
-  const plugin = useMemo(() => ({
-    id: handle.owner,
-    source: binding.identity.source,
-    name: handle.owner,
-    inject: [],
-    config: configuration.value,
-    configuration,
-    status: 'active',
-  }) as ManagerPluginSnapshot, [binding.identity.source, configuration, handle.owner])
+  const model = useMemo(() =>
+    ({
+      snapshot: () => ({ localization: { locale: locale() } }) as ManagerSnapshot,
+      subscribe: () => () => {},
+      updatePluginConfig: async (
+        _pluginId: string,
+        expectedRevision: number,
+        operations: readonly ConfigMutationOperation[],
+      ) => {
+        const validate: ManagerContentConfigCommandV1 = {
+          $schema: COMMAND_SCHEMA,
+          contract: 'cordisx.manager-content-config-command/v1',
+          schemaVersion: 1,
+          commandId: commandId('validate'),
+          binding,
+          expectedRevision,
+          operation: 'draft.validate',
+          operations: operations as Extract<
+            ManagerContentConfigCommandV1,
+            { operation: 'draft.validate' }
+          >['operations'],
+        }
+        const validated = await handle.source.execute(validate)
+        if (validated.status !== 'validated') throw resultError(validated)
+        const saved = await handle.source.execute({
+          ...validate,
+          commandId: commandId('save'),
+          operation: 'draft.save',
+          mutationId: commandId('mutation'),
+        })
+        if (saved.status !== 'applied' && saved.status !== 'staged') throw resultError(saved)
+        refresh()
+      },
+    }) as unknown as ManagerModel, [binding, handle, locale])
+  const plugin = useMemo(() =>
+    ({
+      id: handle.owner,
+      source: binding.identity.source,
+      name: handle.owner,
+      inject: [],
+      config: configuration.value,
+      configuration,
+      status: 'active',
+    }) as ManagerPluginSnapshot, [binding.identity.source, configuration, handle.owner])
 
   useEffect(() => {
     let disposed = false
@@ -81,7 +91,9 @@ function ManagerContentConfigForm({ handle, locale, subscribeLocale }: {
     void (async () => {
       const initial = await handle.source.snapshot()
       if (disposed || initial.status !== 'available') {
-        if (!disposed) setError(initial.status === 'unavailable' ? initial.code : 'manager content config is unavailable')
+        if (!disposed) {
+          setError(initial.status === 'unavailable' ? initial.code : 'manager content config is unavailable')
+        }
         return
       }
       if (handle.body.defaultMaterialization !== undefined) {
@@ -95,7 +107,9 @@ function ManagerContentConfigForm({ handle, locale, subscribeLocale }: {
           operation: 'defaults.materialize',
           materializationId: `cx-manager-default:${binding.bindingId}`,
         })
-        if (!disposed && !['applied', 'staged', 'preserved'].includes(result.status)) setError(resultError(result).message)
+        if (!disposed && !['applied', 'staged', 'preserved'].includes(result.status)) {
+          setError(resultError(result).message)
+        }
         if (!disposed) refresh()
       }
       const snapshot = await handle.source.snapshot()
@@ -115,7 +129,9 @@ function ManagerContentConfigForm({ handle, locale, subscribeLocale }: {
         }
         refresh()
       }
-    })().catch(cause => { if (!disposed) setError(cause instanceof Error ? cause.message : String(cause)) })
+    })().catch(cause => {
+      if (!disposed) setError(cause instanceof Error ? cause.message : String(cause))
+    })
     return () => {
       disposed = true
       void unsubscribe?.()
@@ -124,10 +140,12 @@ function ManagerContentConfigForm({ handle, locale, subscribeLocale }: {
 
   useEffect(() => subscribeLocale(refresh), [refresh, subscribeLocale])
 
-  return <div data-manager-content-config-host="true">
-    {error === undefined ? null : <div className="cxr-notice cxf-alert" data-tone="error" role="alert">{error}</div>}
-    <HostForm model={model} plugin={plugin} />
-  </div>
+  return (
+    <div data-manager-content-config-host="true">
+      {error === undefined ? null : <div className="cxr-notice cxf-alert" data-tone="error" role="alert">{error}</div>}
+      <HostForm model={model} plugin={plugin} />
+    </div>
+  )
 }
 
 export function mountManagerContentConfigForm(
@@ -137,7 +155,9 @@ export function mountManagerContentConfigForm(
   subscribeLocale: (listener: () => void) => () => void = () => () => {},
 ): () => void {
   let root: Root | undefined = createRoot(container)
-  flushSync(() => root?.render(<ManagerContentConfigForm handle={handle} locale={locale} subscribeLocale={subscribeLocale} />))
+  flushSync(() =>
+    root?.render(<ManagerContentConfigForm handle={handle} locale={locale} subscribeLocale={subscribeLocale} />)
+  )
   return () => {
     root?.unmount()
     root = undefined

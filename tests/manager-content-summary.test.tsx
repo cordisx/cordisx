@@ -5,7 +5,7 @@ import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ManagerModel } from '../packages/cli/src/renderer/manager.js'
-import type { ManagerContentPresentation, ManagedManagerPageMount } from '../packages/cli/src/renderer/navigation.js'
+import type { ManagedManagerPageMount, ManagerContentPresentation } from '../packages/cli/src/renderer/navigation.js'
 import { ManagerContentPage } from '../packages/cli/src/renderer/manager/pages/ManagerContentPage.js'
 import type { ManagerRouter } from '../packages/cli/src/renderer/manager/model/routes.js'
 import { REACT_MANAGER_STYLES } from '../packages/cli/src/renderer/manager/styles.js'
@@ -24,20 +24,29 @@ afterEach(() => Object.assign(globalThis, previous))
 
 describe('Host Manager entity record summary', () => {
   it('renders a semantic summary icon before tabs and keeps plugin body in the scroll panel', async () => {
-    const dom = new JSDOM('<!doctype html><html data-cordisx-app-theme="dark"><body><div id="root"></div></body></html>')
+    const dom = new JSDOM(
+      '<!doctype html><html data-cordisx-app-theme="dark"><body><div id="root"></div></body></html>',
+    )
     Object.assign(globalThis, {
-      window: dom.window, document: dom.window.document,
-      HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, Node: dom.window.Node,
-      MutationObserver: dom.window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true,
+      window: dom.window,
+      document: dom.window.document,
+      HTMLElement: dom.window.HTMLElement,
+      Element: dom.window.Element,
+      Node: dom.window.Node,
+      MutationObserver: dom.window.MutationObserver,
+      IS_REACT_ACT_ENVIRONMENT: true,
     })
     const overview = { id: 'entity-overview', params: { entityId: 'lead' } } as const
     const prompts = { id: 'entity-prompts', params: { entityId: 'lead' } } as const
     const avatar = createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'lead' })
     const presentation: ManagerContentPresentation = {
-      title: 'Lead detail', description: 'Entity detail', parent: { id: 'team' },
+      title: 'Lead detail',
+      description: 'Entity detail',
+      parent: { id: 'team' },
       recordSummary: {
         leadingVisual: { kind: 'agent-avatar', avatar },
-        title: 'Lead', description: 'Coordinates the team.',
+        title: 'Lead',
+        description: 'Coordinates the team.',
         source: {
           leadingVisual: { kind: 'agent-avatar', avatar },
           title: { key: 'lead.title', fallback: 'Lead' },
@@ -52,17 +61,32 @@ describe('Host Manager entity record summary', () => {
     const replace = vi.fn()
     const router: ManagerRouter = {
       route: { kind: 'manager-content', id: 'chatroom:team', reference: overview },
-      navigate: vi.fn(), replace, openDetail: vi.fn(), back: vi.fn(),
+      navigate: vi.fn(),
+      replace,
+      openDetail: vi.fn(),
+      back: vi.fn(),
     }
     const model = {
       managerContentPresentation: () => presentation,
-      mountManagerContent: async (_id: string, _reference: unknown, container: HTMLElement): Promise<ManagedManagerPageMount> => {
+      mountManagerContent: async (
+        _id: string,
+        _reference: unknown,
+        container: HTMLElement,
+      ): Promise<ManagedManagerPageMount> => {
         const body = container.ownerDocument.createElement('article')
         body.dataset.entityBusinessBody = 'true'
         body.textContent = 'Plugin prompt content'
         container.append(body)
         const abort = new AbortController()
-        return { owner: 'chatroom', contributionId: 'chatroom:team', routeId: 'chatroom:entity-overview', pageId: 'chatroom:entity-overview', signal: abort.signal, abort: () => abort.abort(), dispose: async () => body.remove() }
+        return {
+          owner: 'chatroom',
+          contributionId: 'chatroom:team',
+          routeId: 'chatroom:entity-overview',
+          pageId: 'chatroom:entity-overview',
+          signal: abort.signal,
+          abort: () => abort.abort(),
+          dispose: async () => body.remove(),
+        }
       },
       closeManagerContent: async () => {},
     } as unknown as ManagerModel
@@ -85,11 +109,15 @@ describe('Host Manager entity record summary', () => {
       expect(panel.querySelector('[data-entity-business-body]')?.textContent).toBe('Plugin prompt content')
 
       const first = tabs.querySelector<HTMLButtonElement>('[data-manager-content-tab="overview"]')!
-      first.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+      first.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }),
+      )
       expect(replace).toHaveBeenCalledWith({ kind: 'manager-content', id: 'chatroom:team', reference: prompts })
       expect(REACT_MANAGER_STYLES).toContain('.cxr-manager-record-summary { display: grid; min-width: 0;')
       expect(REACT_MANAGER_STYLES).toContain('background: var(--cx-hover')
-      expect(REACT_MANAGER_STYLES).toContain('.cxr-manager-content-panel { min-width: 0; min-height: 0; flex: 1; overflow: auto;')
+      expect(REACT_MANAGER_STYLES).toContain(
+        '.cxr-manager-content-panel { min-width: 0; min-height: 0; flex: 1; overflow: auto;',
+      )
     } finally {
       await act(async () => root.unmount())
       dom.window.close()

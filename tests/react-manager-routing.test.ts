@@ -25,15 +25,17 @@ describe('React Manager plugin route breadcrumbs', () => {
   })
 
   it('stops safely when a plugin declares a cyclic parent route', () => {
-    expect(projectManagerContentBreadcrumbs({
-      current: { id: 'child' },
-      rootLabel: 'Plugin',
-      presentation: reference => ({
-        title: reference.id,
-        description: '',
-        parent: { id: reference.id === 'child' ? 'parent' : 'child' },
-        tabs: [],
-      }),
-    }).map(segment => segment.label)).toEqual(['parent', 'child'])
+    expect(
+      projectManagerContentBreadcrumbs({
+        current: { id: 'child' },
+        rootLabel: 'Plugin',
+        presentation: reference => ({
+          title: reference.id,
+          description: '',
+          parent: { id: reference.id === 'child' ? 'parent' : 'child' },
+          tabs: [],
+        }),
+      }).map(segment => segment.label),
+    ).toEqual(['parent', 'child'])
   })
 })

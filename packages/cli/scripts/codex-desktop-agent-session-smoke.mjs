@@ -4,19 +4,23 @@ import path from 'node:path'
 import { parseArgs } from 'node:util'
 import WebSocket from 'ws'
 
-const parsed = parseArgs({ options: {
-  port: { type: 'string' },
-  report: { type: 'string' },
-  marker: { type: 'string' },
-  'session-id': { type: 'string' },
-} })
+const parsed = parseArgs({
+  options: {
+    port: { type: 'string' },
+    report: { type: 'string' },
+    marker: { type: 'string' },
+    'session-id': { type: 'string' },
+  },
+})
 const port = Number(parsed.values.port)
 const reportPath = parsed.values.report
 const marker = parsed.values.marker
 const sessionId = parsed.values['session-id']
-if (!Number.isInteger(port) || port < 1024 || port > 65535 || typeof reportPath !== 'string'
+if (
+  !Number.isInteger(port) || port < 1024 || port > 65535 || typeof reportPath !== 'string'
   || !path.isAbsolute(reportPath) || typeof marker !== 'string' || marker === ''
-  || typeof sessionId !== 'string' || !sessionId.startsWith('cx-session.')) {
+  || typeof sessionId !== 'string' || !sessionId.startsWith('cx-session.')
+) {
   throw new Error('usage: --port <port> --report <absolute-json> --marker <marker> --session-id <cx-session.*>')
 }
 
@@ -41,14 +45,17 @@ socket.on('message', data => {
   if (message.error !== undefined) waiter.reject(new Error(message.error.message ?? 'CDP request failed'))
   else waiter.resolve(message.result)
 })
-const send = (method, params = {}) => new Promise((resolve, reject) => {
-  const id = ++nextId
-  pending.set(id, { resolve, reject })
-  socket.send(JSON.stringify({ id, method, params }))
-})
+const send = (method, params = {}) =>
+  new Promise((resolve, reject) => {
+    const id = ++nextId
+    pending.set(id, { resolve, reject })
+    socket.send(JSON.stringify({ id, method, params }))
+  })
 const evaluate = async expression => {
   const result = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
-  if (result.exceptionDetails !== undefined) throw new Error(result.exceptionDetails.text ?? 'renderer evaluation failed')
+  if (result.exceptionDetails !== undefined) {
+    throw new Error(result.exceptionDetails.text ?? 'renderer evaluation failed')
+  }
   return result.result?.value
 }
 
@@ -62,7 +69,9 @@ const report = {
   sessionId,
   renderer: {
     url: target.url,
-    ready: await evaluate("document.documentElement.dataset.cordisxReady === 'true' && globalThis.__cordisxRuntime !== undefined"),
+    ready: await evaluate(
+      "document.documentElement.dataset.cordisxReady === 'true' && globalThis.__cordisxRuntime !== undefined",
+    ),
     fixtureReady: await evaluate('globalThis.__cordisxDesktopAgentSessionSmoke !== undefined'),
   },
   bridge: {
@@ -116,8 +125,13 @@ const installBridgeTrace = await evaluate(`(() => {
 })()`)
 const bridgeObserverInstalled = installBridgeTrace?.installed === true
 report.bridge.observationMode = bridgeObserverInstalled ? 'method-wrapper-installed' : 'unavailable'
-if (!bridgeObserverInstalled) report.limitations.push(`bridge method-only trace unavailable: ${installBridgeTrace?.reason ?? 'unknown'}`)
-report.stages.push({ stage: bridgeObserverInstalled ? 'bridge-observer-installed' : 'bridge-unavailable', elapsedMs: 0 })
+if (!bridgeObserverInstalled) {
+  report.limitations.push(`bridge method-only trace unavailable: ${installBridgeTrace?.reason ?? 'unknown'}`)
+}
+report.stages.push({
+  stage: bridgeObserverInstalled ? 'bridge-observer-installed' : 'bridge-unavailable',
+  elapsedMs: 0,
+})
 
 let permissionPromptOrdinal = 0
 const answerPermissionPrompt = async () => {
@@ -141,7 +155,9 @@ const invoke = async (name, input, timeoutMs = 90_000) => {
   const startedAt = Date.now()
   report.stages.push({ stage: `api:${name}:start`, elapsedMs: 0 })
   const before = await controllerSnapshot()
-  const accepted = await evaluate(`globalThis.__cordisxDesktopAgentSessionSmoke?.invoke(${JSON.stringify(name)}, ${JSON.stringify(input)}) === true`)
+  const accepted = await evaluate(
+    `globalThis.__cordisxDesktopAgentSessionSmoke?.invoke(${JSON.stringify(name)}, ${JSON.stringify(input)}) === true`,
+  )
   if (!accepted) throw new Error(`fixture rejected operation ${name}`)
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -149,7 +165,11 @@ const invoke = async (name, input, timeoutMs = 90_000) => {
     const snapshot = await controllerSnapshot()
     if (snapshot !== undefined && snapshot.busy === false && snapshot.operationOrdinal > before.operationOrdinal) {
       report.operations.push(snapshot.last)
-      report.stages.push({ stage: `api:${name}:complete`, elapsedMs: Date.now() - startedAt, ok: snapshot.last?.ok === true })
+      report.stages.push({
+        stage: `api:${name}:complete`,
+        elapsedMs: Date.now() - startedAt,
+        ok: snapshot.last?.ok === true,
+      })
       return snapshot.last
     }
     await sleep(100)
@@ -172,42 +192,62 @@ try {
     toolName: 'cordisx.smoke.local-approval',
     reason: `Local isolated approval round-trip ${marker}; no external side effect`,
   })
-  if (approval?.value?.outcome !== 'allowed-once') throw new Error(`manual approval did not round-trip: ${JSON.stringify(approval)}`)
+  if (approval?.value?.outcome !== 'allowed-once') {
+    throw new Error(`manual approval did not round-trip: ${JSON.stringify(approval)}`)
+  }
 
   const primary = await invoke('send', {
-    mode: 'send', messageId: `${marker}.message.primary`,
-    text: `CordisX isolated local smoke ${marker}. Use the shell tool exactly once to run printf '%s' '${marker}' without changing files or using the network, then reply with ${marker}.`,
+    mode: 'send',
+    messageId: `${marker}.message.primary`,
+    text:
+      `CordisX isolated local smoke ${marker}. Use the shell tool exactly once to run printf '%s' '${marker}' without changing files or using the network, then reply with ${marker}.`,
   })
   assertAccepted('send', primary)
   const queued = await invoke('send', {
-    mode: 'followup', messageId: `${marker}.message.queued`, text: `Queued smoke message ${marker}; do not execute after it is discarded.`,
+    mode: 'followup',
+    messageId: `${marker}.message.queued`,
+    text: `Queued smoke message ${marker}; do not execute after it is discarded.`,
   })
   assertAccepted('followup', queued)
   const discarded = await invoke('discard', { messageId: `${marker}.message.queued` })
   assertAccepted('discard', discarded)
   const steered = await invoke('send', {
-    mode: 'steer', messageId: `${marker}.message.steer`, text: `Continue the same local smoke and include ${marker}.`,
+    mode: 'steer',
+    messageId: `${marker}.message.steer`,
+    text: `Continue the same local smoke and include ${marker}.`,
   })
   assertAccepted('steer', steered)
   const injected = await invoke('send', {
-    mode: 'inject', messageId: `${marker}.message.inject`, text: `Injected local-only smoke context ${marker}.`,
+    mode: 'inject',
+    messageId: `${marker}.message.inject`,
+    text: `Injected local-only smoke context ${marker}.`,
   })
   assertAccepted('inject', injected)
   await invoke('idle', undefined, 180_000)
   const firstRead = await invoke('read')
-  if (firstRead?.ok !== true || firstRead.value?.snapshot?.status !== 'available' || firstRead.value?.page?.status !== 'available') {
+  if (
+    firstRead?.ok !== true || firstRead.value?.snapshot?.status !== 'available'
+    || firstRead.value?.page?.status !== 'available'
+  ) {
     throw new Error(`Session readback unavailable: ${JSON.stringify(firstRead)}`)
   }
   await invoke('closeObservers')
   assertAccepted('disposeAgent', await invoke('disposeAgent', { mutationId: `${marker}.dispose` }))
   const sessionReadback = await invoke('sessionGet', { sessionId })
-  if (sessionReadback?.value?.status !== 'found') throw new Error(`Session registry lost the same-process Session: ${JSON.stringify(sessionReadback)}`)
+  if (sessionReadback?.value?.status !== 'found') {
+    throw new Error(`Session registry lost the same-process Session: ${JSON.stringify(sessionReadback)}`)
+  }
   const resumed = await invoke('resume', { sessionId, mutationId: `${marker}.resume` })
   assertAccepted('resume', resumed)
   await invoke('observe')
-  assertAccepted('cancel-send', await invoke('send', {
-    mode: 'send', messageId: `${marker}.message.cancel`, text: `Begin a response for cancellation smoke ${marker}. Do not use tools.`,
-  }))
+  assertAccepted(
+    'cancel-send',
+    await invoke('send', {
+      mode: 'send',
+      messageId: `${marker}.message.cancel`,
+      text: `Begin a response for cancellation smoke ${marker}. Do not use tools.`,
+    }),
+  )
   const cancelled = await invoke('cancel', { mutationId: `${marker}.cancel`, keepInbox: false })
   assertAccepted('cancel', cancelled)
   await invoke('idle', undefined, 90_000)
@@ -233,7 +273,14 @@ if (report.bridge.outboundMethods.length > 0 || report.bridge.inboundMethods.len
 
 const sessionEvents = report.fixture?.entries?.filter(entry => entry.kind === 'session').map(entry => entry.name) ?? []
 const outboundMethods = report.bridge.outboundMethods
-const requiredOutbound = ['thread/start', 'turn/start', 'turn/steer', 'thread/inject_items', 'thread/resume', 'turn/interrupt']
+const requiredOutbound = [
+  'thread/start',
+  'turn/start',
+  'turn/steer',
+  'thread/inject_items',
+  'thread/resume',
+  'turn/interrupt',
+]
 report.assertions = {
   publicCreateResumeMapping: report.operations.some(item => item?.name === 'create' && item.ok)
     && report.operations.some(item => item?.name === 'resume' && item.ok),
@@ -243,7 +290,9 @@ report.assertions = {
   toolResultObserved: sessionEvents.includes('tool/result'),
   approvalRoundTripObserved: sessionEvents.includes('approval/asked') && sessionEvents.includes('approval/decided'),
   turnLifecycleObserved: sessionEvents.includes('turn/start') && sessionEvents.includes('turn/end'),
-  sameProcessSessionReadback: report.operations.some(item => item?.name === 'sessionGet' && item.value?.status === 'found'),
+  sameProcessSessionReadback: report.operations.some(item =>
+    item?.name === 'sessionGet' && item.value?.status === 'found'
+  ),
   detailMapsSessionToNativeThread: typeof report.fixture?.detailRef === 'string'
     && report.fixture.detailRef.startsWith('codex-thread:'),
 }

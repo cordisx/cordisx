@@ -9,18 +9,18 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   ICON_STATES,
   ICON_VARIANTS,
-  SEMANTIC_ICON_KEYS,
   isNormalizedVectorDescriptor,
+  SEMANTIC_ICON_KEYS,
 } from '../packages/cli/src/icon-theme-contracts.js'
 import { HostIcon } from '../packages/cli/src/renderer/host-ui/HostIcon.js'
 import { HostSurfaceIcon } from '../packages/cli/src/renderer/host-ui/HostSurfaceIcon.js'
 import { IconThemeRegistry } from '../packages/cli/src/renderer/icon-theme-registry.js'
 import {
-  HOST_ICON_16PX_CSS,
-  MANAGER_ICON_SEMANTICS,
   bindIconThemeRegistry,
   createManagerIcon,
+  HOST_ICON_16PX_CSS,
   hostSurfaceIconKey,
+  MANAGER_ICON_SEMANTICS,
   renderHostIconSvg,
 } from '../packages/cli/src/renderer/icons.js'
 import { resolveBuiltinReiconDescriptor } from '../packages/cli/src/renderer/reicon-icon-backend.js'
@@ -44,7 +44,9 @@ function importedModules(source: string): string[] {
   }
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) add(node.moduleSpecifier)
-    if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) add(node.moduleReference.expression)
+    if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
+      add(node.moduleReference.expression)
+    }
     if (ts.isCallExpression(node)) {
       const dynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword
       const commonJsRequire = ts.isIdentifier(node.expression) && node.expression.text === 'require'
@@ -64,13 +66,19 @@ function isIconLibrary(moduleName: string): boolean {
 describe('Host Reicon normalized backend', () => {
   it('privately compiles and validates all 1,536 formal Protocol tuples', () => {
     let tuples = 0
-    for (const key of SEMANTIC_ICON_KEYS) for (const variant of ICON_VARIANTS) for (const state of ICON_STATES) {
-      let descriptor
-      try { descriptor = resolveBuiltinReiconDescriptor(key, variant, state) } catch (error) {
-        throw new Error(`failed tuple ${key}/${variant}/${state}`, { cause: error })
+    for (const key of SEMANTIC_ICON_KEYS) {
+      for (const variant of ICON_VARIANTS) {
+        for (const state of ICON_STATES) {
+          let descriptor
+          try {
+            descriptor = resolveBuiltinReiconDescriptor(key, variant, state)
+          } catch (error) {
+            throw new Error(`failed tuple ${key}/${variant}/${state}`, { cause: error })
+          }
+          expect(isNormalizedVectorDescriptor(descriptor), `${key}/${variant}/${state}`).toBe(true)
+          tuples += 1
+        }
       }
-      expect(isNormalizedVectorDescriptor(descriptor), `${key}/${variant}/${state}`).toBe(true)
-      tuples += 1
     }
     expect(tuples).toBe(1536)
   })
@@ -78,30 +86,44 @@ describe('Host Reicon normalized backend', () => {
   it('renders the complete regular/filled light/dark 16/18/24 visual DOM matrix', () => {
     const dom = new JSDOM('<!doctype html>')
     let rendered = 0
-    for (const theme of ['light', 'dark'] as const) for (const size of [16, 18, 24]) {
-      for (const key of SEMANTIC_ICON_KEYS) for (const [variant, state] of [['regular', 'default'], ['filled', 'active']] as const) {
-        const icon = renderHostIconSvg(dom.window.document, key, { theme, size, variant, state }).svg
-        expect(icon.dataset, `${theme}/${size}/${key}/${variant}`).toMatchObject({
-          hostIconKey: key,
-          hostIconProvider: 'builtin:reicon',
-          hostIconFallback: 'none',
-          hostIconTheme: theme,
-          hostIconState: state,
-          hostIconVariant: variant,
-        })
-        expect(icon.getAttribute('width')).toBe(String(size))
-        expect(icon.getAttribute('height')).toBe(String(size))
-        expect(icon.getAttribute('aria-hidden')).toBe('true')
-        expect(icon.getAttribute('focusable')).toBe('false')
-        expect(icon.querySelectorAll('path').length, key).toBeGreaterThan(0)
-        rendered += 1
+    for (const theme of ['light', 'dark'] as const) {
+      for (const size of [16, 18, 24]) {
+        for (const key of SEMANTIC_ICON_KEYS) {
+          for (const [variant, state] of [['regular', 'default'], ['filled', 'active']] as const) {
+            const icon = renderHostIconSvg(dom.window.document, key, { theme, size, variant, state }).svg
+            expect(icon.dataset, `${theme}/${size}/${key}/${variant}`).toMatchObject({
+              hostIconKey: key,
+              hostIconProvider: 'builtin:reicon',
+              hostIconFallback: 'none',
+              hostIconTheme: theme,
+              hostIconState: state,
+              hostIconVariant: variant,
+            })
+            expect(icon.getAttribute('width')).toBe(String(size))
+            expect(icon.getAttribute('height')).toBe(String(size))
+            expect(icon.getAttribute('aria-hidden')).toBe('true')
+            expect(icon.getAttribute('focusable')).toBe('false')
+            expect(icon.querySelectorAll('path').length, key).toBeGreaterThan(0)
+            rendered += 1
+          }
+        }
       }
     }
     expect(rendered).toBe(64 * 2 * 3 * 2)
     const newlyFormalKeys = [
-      'action.disable', 'action.enable', 'action.export', 'action.favorite', 'action.follow',
-      'action.import', 'action.move', 'action.pause', 'action.resume', 'action.submit',
-      'agent.turn-control', 'content.acknowledgements', 'content.contributions',
+      'action.disable',
+      'action.enable',
+      'action.export',
+      'action.favorite',
+      'action.follow',
+      'action.import',
+      'action.move',
+      'action.pause',
+      'action.resume',
+      'action.submit',
+      'agent.turn-control',
+      'content.acknowledgements',
+      'content.contributions',
     ] as const
     for (const key of newlyFormalKeys) {
       expect(resolveBuiltinReiconDescriptor(key, 'regular', 'default'), key)
@@ -114,7 +136,9 @@ describe('Host Reicon normalized backend', () => {
     const dom = new JSDOM('<!doctype html>')
     const normal = createManagerIcon(dom.window.document, 'favorite').querySelector('svg')!
     const favorite = createManagerIcon(dom.window.document, 'favorite-active').querySelector('svg')!
-    const active = createManagerIcon(dom.window.document, 'plugins', undefined, { state: 'active' }).querySelector('svg')!
+    const active = createManagerIcon(dom.window.document, 'plugins', undefined, { state: 'active' }).querySelector(
+      'svg',
+    )!
     expect(normal.dataset.hostIconVariant).toBe('regular')
     expect(favorite.dataset.hostIconVariant).toBe('filled')
     expect(active.dataset.hostIconVariant).toBe('filled')
@@ -124,15 +148,24 @@ describe('Host Reicon normalized backend', () => {
 
   it('preserves Reicon compound outline holes instead of filling every contour', () => {
     const compoundOutlineKeys = [
-      'action.copy', 'action.search', 'action.settings', 'content.files', 'content.layers',
-      'navigation.marketplace', 'navigation.plugins', 'navigation.routes', 'status.info',
+      'action.copy',
+      'action.search',
+      'action.settings',
+      'content.files',
+      'content.layers',
+      'navigation.marketplace',
+      'navigation.plugins',
+      'navigation.routes',
+      'status.info',
     ] as const
     const dom = new JSDOM('<!doctype html>')
     for (const key of compoundOutlineKeys) {
       const descriptor = resolveBuiltinReiconDescriptor(key, 'regular', 'default')
-      const compound = descriptor.paths.find(path => path.paint === 'fill'
+      const compound = descriptor.paths.find(path =>
+        path.paint === 'fill'
         && path.fillRule === 'evenodd'
-        && path.commands.filter(command => command.op === 'move').length > 1)
+        && path.commands.filter(command => command.op === 'move').length > 1
+      )
       expect(compound, key).toBeDefined()
       expect(compound?.commands.filter(command => command.op === 'close'), key).toHaveLength(1)
       expect(compound?.commands.at(-1)?.op, key).toBe('close')
@@ -165,13 +198,43 @@ describe('Host Reicon normalized backend', () => {
   it('uses a Host neutral descriptor for an unknown key', () => {
     const dom = new JSDOM('<!doctype html>')
     const unknown = renderHostIconSvg(dom.window.document, 'provider.private-key')
-    expect(unknown.resolution).toMatchObject({ key: 'provider.private-key', provider: 'host:neutral', fallback: 'neutral' })
+    expect(unknown.resolution).toMatchObject({
+      key: 'provider.private-key',
+      provider: 'host:neutral',
+      fallback: 'neutral',
+    })
     expect(unknown.svg.querySelector('path')).not.toBeNull()
     dom.window.close()
   })
 
   it('maps every legacy Host surface token to a formal semantic key', () => {
-    const tokens = ['analytics', 'back', 'calendar', 'close', 'error', 'files', 'folder', 'history', 'info', 'layers', 'key', 'more', 'new', 'open', 'palette', 'playground', 'refresh', 'reset', 'review', 'settings', 'save', 'clock', 'success', 'warning', 'tags']
+    const tokens = [
+      'analytics',
+      'back',
+      'calendar',
+      'close',
+      'error',
+      'files',
+      'folder',
+      'history',
+      'info',
+      'layers',
+      'key',
+      'more',
+      'new',
+      'open',
+      'palette',
+      'playground',
+      'refresh',
+      'reset',
+      'review',
+      'settings',
+      'save',
+      'clock',
+      'success',
+      'warning',
+      'tags',
+    ]
     expect(tokens.map(name => hostSurfaceIconKey(`host:${name}`))).not.toContain(undefined)
     expect(hostSurfaceIconKey('host:new')).toBe('action.add')
     expect(hostSurfaceIconKey('host:playground')).toBe('navigation.overview')
@@ -208,13 +271,18 @@ describe('Host Reicon normalized backend', () => {
       ['import-plugin', 'action.import', 'regular', 'default'],
     ] as const
     const registration = registry.registerPlugin('register', 0, 'host-formal64', {
-      principalHandle: 'ipp_formal6400000001', pluginId: 'formal64', providerGeneration: 'formal64-1',
+      principalHandle: 'ipp_formal6400000001',
+      pluginId: 'formal64',
+      providerGeneration: 'formal64-1',
     }, {
       schemaVersion: 1,
       namespace: 'formal64',
       providerVersion: '1.0.0',
       descriptors: rows.map(([, key, variant, state]) => ({
-        key, variant, state, descriptor: resolveBuiltinReiconDescriptor(key, variant, state),
+        key,
+        variant,
+        state,
+        descriptor: resolveBuiltinReiconDescriptor(key, variant, state),
       })),
     }).registration!
     registry.select('select', 1, 'host-formal64', registration.providerHandle, registration.providerGeneration)
@@ -225,8 +293,11 @@ describe('Host Reicon normalized backend', () => {
         expect(MANAGER_ICON_SEMANTICS[token], token).toBe(key)
         const svg = createManagerIcon(dom.window.document, token).querySelector('svg')!
         expect(svg.dataset, token).toMatchObject({
-          hostIconProvider: 'plugin:formal64:formal64', hostIconFallback: 'none', hostIconKey: key,
-          hostIconVariant: variant, hostIconState: state,
+          hostIconProvider: 'plugin:formal64:formal64',
+          hostIconFallback: 'none',
+          hostIconKey: key,
+          hostIconVariant: variant,
+          hostIconState: state,
         })
       }
       expect(resolve).toHaveBeenCalledTimes(rows.length)
@@ -264,14 +335,26 @@ describe('Host Reicon normalized backend', () => {
 
   it('uses the same normalized geometry for React and imperative DOM', async () => {
     const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
-    const previous = { document: globalThis.document, window: globalThis.window, MutationObserver: globalThis.MutationObserver, IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT }
-    Object.assign(globalThis, { document: dom.window.document, window: dom.window, MutationObserver: dom.window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true })
+    const previous = {
+      document: globalThis.document,
+      window: globalThis.window,
+      MutationObserver: globalThis.MutationObserver,
+      IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT,
+    }
+    Object.assign(globalThis, {
+      document: dom.window.document,
+      window: dom.window,
+      MutationObserver: dom.window.MutationObserver,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    })
     const root = createRoot(dom.window.document.getElementById('root')!)
     try {
       await act(async () => root.render(<HostIcon token="routes" />))
       const reactSvg = dom.window.document.querySelector('#root svg')!
       const imperativeSvg = createManagerIcon(dom.window.document, 'routes').querySelector('svg')!
-      expect(reactSvg.querySelector('path')?.getAttribute('d')).toBe(imperativeSvg.querySelector('path')?.getAttribute('d'))
+      expect(reactSvg.querySelector('path')?.getAttribute('d')).toBe(
+        imperativeSvg.querySelector('path')?.getAttribute('d'),
+      )
       expect(reactSvg.dataset.hostIconKey).toBe(imperativeSvg.dataset.hostIconKey)
     } finally {
       await act(async () => root.unmount())
@@ -282,8 +365,18 @@ describe('Host Reicon normalized backend', () => {
 
   it('keeps an unknown React surface token neutral and outside provider routing', async () => {
     const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>')
-    const previous = { document: globalThis.document, window: globalThis.window, MutationObserver: globalThis.MutationObserver, IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT }
-    Object.assign(globalThis, { document: dom.window.document, window: dom.window, MutationObserver: dom.window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true })
+    const previous = {
+      document: globalThis.document,
+      window: globalThis.window,
+      MutationObserver: globalThis.MutationObserver,
+      IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT,
+    }
+    Object.assign(globalThis, {
+      document: dom.window.document,
+      window: dom.window,
+      MutationObserver: dom.window.MutationObserver,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    })
     const registry = new IconThemeRegistry('host-react-unknown', 'profile-main')
     const resolve = vi.spyOn(registry, 'resolve')
     const unbind = bindIconThemeRegistry(dom.window.document, registry)
@@ -317,7 +410,9 @@ describe('Host Reicon normalized backend', () => {
       const relative = path.relative(repositoryRoot, file)
       const imports = importedModules(source).filter(isIconLibrary)
       if (file === path.join(rendererRoot, 'reicon-icon-backend.ts')) {
-        if (imports.some(moduleName => moduleName !== 'reicon' && !moduleName.startsWith('reicon/'))) violations.push(relative)
+        if (imports.some(moduleName => moduleName !== 'reicon' && !moduleName.startsWith('reicon/'))) {
+          violations.push(relative)
+        }
         continue
       }
       if (imports.length > 0) violations.push(relative)

@@ -15,7 +15,10 @@ describe('named CLI profile resolution', () => {
       dataMode: 'host-isolated',
     })
     expect(selection).toMatchObject({
-      appId: 'codex', profileId: 'default', dataMode: 'host-isolated', created: false,
+      appId: 'codex',
+      profileId: 'default',
+      dataMode: 'host-isolated',
+      created: false,
     })
   })
 
@@ -23,13 +26,19 @@ describe('named CLI profile resolution', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-profile-selection-'))
     const configPath = path.join(root, 'config.json')
     const first = await resolveProfileSelection({
-      config: createDefaultHomeConfig(), configPath, appId: 'codex', profileId: 'work',
+      config: createDefaultHomeConfig(),
+      configPath,
+      appId: 'codex',
+      profileId: 'work',
     })
     expect(first).toMatchObject({ profileId: 'work', dataMode: 'shared', created: true })
     const persisted = await loadHomeConfig(configPath)
     expect(persisted.apps.codex?.profiles.work).toEqual({ displayName: 'Work', dataMode: 'shared' })
     const second = await resolveProfileSelection({
-      config: persisted, configPath, appId: 'codex', profileId: 'work',
+      config: persisted,
+      configPath,
+      appId: 'codex',
+      profileId: 'work',
     })
     expect(second).toMatchObject({ profileId: 'work', dataMode: 'shared', created: false })
   })

@@ -13,11 +13,11 @@ npx create-cordisx-plugin@beta <target> [options]
 
 Use one of these shapes:
 
-| Mode | Use it when | Creator options |
-| --- | --- | --- |
-| Standalone single plugin | One repository publishes or develops one plugin | default, or `--mode single`; the target directory determines the package and plugin id |
-| Dedicated plugin workspace | One repository owns several related plugins | `--mode workspace --plugin <id> --plugin <id>` |
-| Embedded business project | CordisX plugins are tooling or product integration inside an existing application repository | `--mode embedded --plugin <id>`; the target may already contain the business project |
+| Mode                       | Use it when                                                                                  | Creator options                                                                        |
+| -------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Standalone single plugin   | One repository publishes or develops one plugin                                              | default, or `--mode single`; the target directory determines the package and plugin id |
+| Dedicated plugin workspace | One repository owns several related plugins                                                  | `--mode workspace --plugin <id> --plugin <id>`                                         |
+| Embedded business project  | CordisX plugins are tooling or product integration inside an existing application repository | `--mode embedded --plugin <id>`; the target may already contain the business project   |
 
 For embedded mode, choose dependency integration with
 `--integration auto|workspace|isolated` and detect or specify the package
@@ -74,8 +74,16 @@ to the config file:
 {
   "version": 1,
   "plugins": [
-    { "id": "chatroom", "entry": "./plugins/chatroom/src/chatroom.tsx", "enabled": true },
-    { "id": "calendar", "entry": "./plugins/calendar/src/calendar.tsx", "enabled": true }
+    {
+      "id": "chatroom",
+      "entry": "./plugins/chatroom/src/chatroom.tsx",
+      "enabled": true
+    },
+    {
+      "id": "calendar",
+      "entry": "./plugins/calendar/src/calendar.tsx",
+      "enabled": true
+    }
   ]
 }
 ```

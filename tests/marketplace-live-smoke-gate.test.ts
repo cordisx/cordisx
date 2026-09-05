@@ -17,6 +17,8 @@ describe('Marketplace real app smoke gate', () => {
     expect(source).toContain("'trust.official,trust.certified'")
     expect(source).toContain('Marketplace trust detail assertions failed')
     expect(source).toContain('/interface capabilities|界面能力/iu')
-    expect(source).toContain("const requestedView = managerPlugin === undefined ? (managerMarketplaceView ?? 'discovery') : 'detail'")
+    expect(source).toContain(
+      "const requestedView = managerPlugin === undefined ? (managerMarketplaceView ?? 'discovery') : 'detail'",
+    )
   })
 })

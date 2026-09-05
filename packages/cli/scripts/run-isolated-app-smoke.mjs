@@ -32,16 +32,33 @@ const pluginBundleHarness = process.argv.includes('--plugin-bundle-harness')
 const connectorHarnessPolicy = optionalValue('--connector-harness-policy') ?? 'allow'
 const connectorHarnessScenario = optionalValue('--connector-harness-scenario') ?? 'flow'
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('--port must be an unprivileged TCP port')
-if (devConfig !== undefined && homeConfig !== undefined) throw new Error('--dev-config and --home-config are mutually exclusive')
-if (homeConfig !== undefined && !path.isAbsolute(homeConfig)) throw new Error('--home-config must be an absolute config path')
-if (connectorHarness && (devConfig !== undefined || homeConfig !== undefined)) throw new Error('--connector-harness owns its fixed temporary Home composition')
-if (connectorHarness && pluginBundleHarness) throw new Error('--connector-harness and --plugin-bundle-harness are mutually exclusive')
-if (pluginBundleHarness && homeConfig === undefined) throw new Error('--plugin-bundle-harness requires --home-config')
-if (desktopAgentSessionHarness && (connectorHarness || pluginBundleHarness || devConfig === undefined || homeConfig !== undefined)) {
-  throw new Error('--desktop-agent-session-harness requires --dev-config and cannot be combined with another harness or --home-config')
+if (devConfig !== undefined && homeConfig !== undefined) {
+  throw new Error('--dev-config and --home-config are mutually exclusive')
 }
-if (!['allow', 'deny', 'default'].includes(connectorHarnessPolicy)) throw new Error('--connector-harness-policy must be allow, deny, or default')
-if (!['flow', 'unsubscribe', 'owner-replay', 'owner-live'].includes(connectorHarnessScenario)) throw new Error('--connector-harness-scenario is invalid')
+if (homeConfig !== undefined && !path.isAbsolute(homeConfig)) {
+  throw new Error('--home-config must be an absolute config path')
+}
+if (connectorHarness && (devConfig !== undefined || homeConfig !== undefined)) {
+  throw new Error('--connector-harness owns its fixed temporary Home composition')
+}
+if (connectorHarness && pluginBundleHarness) {
+  throw new Error('--connector-harness and --plugin-bundle-harness are mutually exclusive')
+}
+if (pluginBundleHarness && homeConfig === undefined) throw new Error('--plugin-bundle-harness requires --home-config')
+if (
+  desktopAgentSessionHarness
+  && (connectorHarness || pluginBundleHarness || devConfig === undefined || homeConfig !== undefined)
+) {
+  throw new Error(
+    '--desktop-agent-session-harness requires --dev-config and cannot be combined with another harness or --home-config',
+  )
+}
+if (!['allow', 'deny', 'default'].includes(connectorHarnessPolicy)) {
+  throw new Error('--connector-harness-policy must be allow, deny, or default')
+}
+if (!['flow', 'unsubscribe', 'owner-replay', 'owner-live'].includes(connectorHarnessScenario)) {
+  throw new Error('--connector-harness-scenario is invalid')
+}
 const smokeArgs = process.argv.slice(separator + 1)
 const reportIndex = smokeArgs.indexOf('--report')
 const reportPath = reportIndex >= 0 ? smokeArgs[reportIndex + 1] : undefined
@@ -53,8 +70,14 @@ function exited(child) {
 async function waitForExit(child, milliseconds) {
   if (exited(child)) return true
   return await new Promise(resolve => {
-    const timer = setTimeout(() => { child.off('exit', onExit); resolve(false) }, milliseconds)
-    const onExit = () => { clearTimeout(timer); resolve(true) }
+    const timer = setTimeout(() => {
+      child.off('exit', onExit)
+      resolve(false)
+    }, milliseconds)
+    const onExit = () => {
+      clearTimeout(timer)
+      resolve(true)
+    }
     child.once('exit', onExit)
   })
 }
@@ -114,10 +137,15 @@ async function cordisxReady(target) {
         clearTimeout(timer)
         resolve(message.result?.result?.value === true)
       })
-      socket.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: {
-        expression: "document.documentElement.dataset.cordisxReady === 'true' && globalThis.__cordisxRuntime !== undefined",
-        returnByValue: true,
-      } }))
+      socket.send(JSON.stringify({
+        id: 1,
+        method: 'Runtime.evaluate',
+        params: {
+          expression:
+            "document.documentElement.dataset.cordisxReady === 'true' && globalThis.__cordisxRuntime !== undefined",
+          returnByValue: true,
+        },
+      }))
     })
     return result
   } finally {
@@ -130,7 +158,9 @@ async function waitForRenderer() {
   const timeoutMs = pluginBundleHarness ? 300_000 : desktopAgentSessionRendererTimeoutMs(desktopAgentSessionHarness)
   let targetObserved = false
   while (Date.now() - startedAt < timeoutMs) {
-    if (exited(launcher)) throw new Error(`isolated launcher exited before renderer readiness (status ${String(launcher.exitCode)})`)
+    if (exited(launcher)) {
+      throw new Error(`isolated launcher exited before renderer readiness (status ${String(launcher.exitCode)})`)
+    }
     try {
       const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
         signal: AbortSignal.timeout(Math.min(500, Math.max(1, timeoutMs - (Date.now() - startedAt)))),
@@ -173,31 +203,57 @@ if (connectorHarness) {
   const plugins = fixtureEntries
     .filter(([id]) => id === `connector-harness-${connectorHarnessScenario}`)
     .map(([id, entry]) => ({ id, entry: path.join(fixtures, entry), enabled: true, config: {} }))
-  const permissions = connectorHarnessPolicy === 'default' ? [] : plugins.flatMap(plugin => ['agent.events.read', 'agent.messages.append'].map(capability => ({
-    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v1.schema.json',
-    schemaVersion: 1,
-    key: {
-      profileId: 'smoke',
-      identity: { source: pathToFileURL(plugin.entry).href, pluginId: plugin.id },
-      capability,
-      scope: {},
-    },
-    policy: connectorHarnessPolicy,
-  })))
+  const permissions = connectorHarnessPolicy === 'default'
+    ? []
+    : plugins.flatMap(plugin =>
+      ['agent.events.read', 'agent.messages.append'].map(capability => ({
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v1.schema.json',
+        schemaVersion: 1,
+        key: {
+          profileId: 'smoke',
+          identity: { source: pathToFileURL(plugin.entry).href, pluginId: plugin.id },
+          capability,
+          scope: {},
+        },
+        policy: connectorHarnessPolicy,
+      }))
+    )
   effectiveHomeConfig = path.join(connectorHarnessRoot, 'config.json')
-  await writeFile(effectiveHomeConfig, `${JSON.stringify({
-    version: 1,
-    defaultApp: 'codex',
-    providers: [], plugins, permissions, publisherGrantIssuers: [],
-    apps: { codex: { defaultProfile: 'smoke', profiles: { smoke: { displayName: 'Connector smoke', dataMode: 'shared' } } } },
-  }, null, 2)}\n`, { mode: 0o600 })
+  await writeFile(
+    effectiveHomeConfig,
+    `${
+      JSON.stringify(
+        {
+          version: 1,
+          defaultApp: 'codex',
+          providers: [],
+          plugins,
+          permissions,
+          publisherGrantIssuers: [],
+          apps: {
+            codex: {
+              defaultProfile: 'smoke',
+              profiles: { smoke: { displayName: 'Connector smoke', dataMode: 'shared' } },
+            },
+          },
+        },
+        null,
+        2,
+      )
+    }\n`,
+    { mode: 0o600 },
+  )
 }
 const homeRoot = connectorHarness
   ? await prepareIsolatedSmokeHome(effectiveHomeConfig)
-  : homeConfig === undefined ? undefined : await prepareIsolatedSmokeHome(homeConfig)
+  : homeConfig === undefined
+  ? undefined
+  : await prepareIsolatedSmokeHome(homeConfig)
 const invocation = connectorHarness
   ? ['codex', 'smoke', '--data', 'shared']
-  : pluginBundleHarness ? ['codex', 'smoke', '--data', 'shared']
+  : pluginBundleHarness
+  ? ['codex', 'smoke', '--data', 'shared']
   : devConfig === undefined
   ? ['codex', 'smoke', '--data', 'host-isolated']
   : ['dev', '--config', devConfig]
@@ -205,18 +261,28 @@ const cliEntry = connectorHarness ? 'tests/fixtures/connector-production-smoke-c
 const smokeEntry = connectorHarness
   ? 'tests/fixtures/connector-production-smoke.mjs'
   : pluginBundleHarness
-    ? 'tests/fixtures/plugin-bundle-production-smoke.mjs'
-    : desktopAgentSessionHarness
-      ? 'packages/cli/scripts/codex-desktop-agent-session-smoke.mjs'
-      : 'packages/cli/scripts/live-smoke.mjs'
+  ? 'tests/fixtures/plugin-bundle-production-smoke.mjs'
+  : desktopAgentSessionHarness
+  ? 'packages/cli/scripts/codex-desktop-agent-session-smoke.mjs'
+  : 'packages/cli/scripts/live-smoke.mjs'
 const launcherEnvironment = connectorHarness
   ? { ...process.env, CORDISX_HOME: path.join(homeRoot, '.cordisx') }
   : pluginBundleHarness
-    ? { ...process.env, CORDISX_HOME: path.join(homeRoot, '.cordisx') }
-  : homeRoot === undefined ? process.env : { ...process.env, HOME: homeRoot }
+  ? { ...process.env, CORDISX_HOME: path.join(homeRoot, '.cordisx') }
+  : homeRoot === undefined
+  ? process.env
+  : { ...process.env, HOME: homeRoot }
 const launcher = spawn(process.execPath, [
-  '--import', 'tsx', cliEntry, ...invocation,
-  '--debug-port', String(port), '--profile-dir', profileDir, '--', '--start-minimized',
+  '--import',
+  'tsx',
+  cliEntry,
+  ...invocation,
+  '--debug-port',
+  String(port),
+  '--profile-dir',
+  profileDir,
+  '--',
+  '--start-minimized',
 ], {
   stdio: ['ignore', 'pipe', 'pipe'],
   env: launcherEnvironment,
@@ -237,7 +303,20 @@ let result = 1
 try {
   await waitForRenderer()
   result = await new Promise((resolve, reject) => {
-    smoke = spawn(process.execPath, [smokeEntry, '--port', String(port), ...(connectorHarness ? ['--connector-harness-policy', connectorHarnessPolicy, '--connector-harness-scenario', connectorHarnessScenario] : []), ...smokeArgs], {
+    smoke = spawn(process.execPath, [
+      smokeEntry,
+      '--port',
+      String(port),
+      ...(connectorHarness
+        ? [
+          '--connector-harness-policy',
+          connectorHarnessPolicy,
+          '--connector-harness-scenario',
+          connectorHarnessScenario,
+        ]
+        : []),
+      ...smokeArgs,
+    ], {
       stdio: 'inherit',
       env: process.env,
     })
@@ -263,13 +342,21 @@ try {
     }
     if (active.length > 0) {
       for (const processRecord of active) {
-        try { process.kill(processRecord.pid, 'SIGKILL') } catch (error) { if (error?.code !== 'ESRCH') throw error }
+        try {
+          process.kill(processRecord.pid, 'SIGKILL')
+        } catch (error) {
+          if (error?.code !== 'ESRCH') throw error
+        }
       }
       await new Promise(resolve => setTimeout(resolve, 100))
       active = profileProcesses()
     }
     if (active.length > 0) {
-      throw new Error(`profile ${profileDir} still has active Electron processes after smoke cleanup: ${active.map(item => item.pid).join(',')}`)
+      throw new Error(
+        `profile ${profileDir} still has active Electron processes after smoke cleanup: ${
+          active.map(item => item.pid).join(',')
+        }`,
+      )
     }
   }
   const crashpadAfter = await crashpadCount()

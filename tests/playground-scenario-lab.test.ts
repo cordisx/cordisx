@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  createPlaygroundScenarioLabRuntime,
   PLAYGROUND_SCENARIO_CATALOG,
   PlaygroundScenarioLabController,
-  createPlaygroundScenarioLabRuntime,
   type PlaygroundScenarioLabRuntime,
 } from '../packages/cli/src/playground/scenario-lab.js'
 import type { BoundAgentLoopClientV4 } from '../packages/cli/src/agent-loop-contracts.js'
@@ -11,7 +11,9 @@ const immediate = async () => {}
 
 function deferred() {
   let resolve!: () => void
-  const promise = new Promise<void>(done => { resolve = done })
+  const promise = new Promise<void>(done => {
+    resolve = done
+  })
   return { promise, resolve }
 }
 
@@ -31,12 +33,14 @@ function delayedRuntime(
   }
   const client: BoundAgentLoopClientV4 = Object.freeze({
     ...runtime.client,
-    createOrBind: command => operation === 'create'
-      ? delayed(() => runtime.client.createOrBind(command))
-      : runtime.client.createOrBind(command),
-    send: command => operation === 'send'
-      ? delayed(() => runtime.client.send(command))
-      : runtime.client.send(command),
+    createOrBind: command =>
+      operation === 'create'
+        ? delayed(() => runtime.client.createOrBind(command))
+        : runtime.client.createOrBind(command),
+    send: command =>
+      operation === 'send'
+        ? delayed(() => runtime.client.send(command))
+        : runtime.client.send(command),
   })
   return Object.freeze({ ...runtime, client })
 }
@@ -47,31 +51,53 @@ describe('Playground Scenario Lab Phase 1', () => {
     await controller.run()
     const completed = controller.getSnapshot()
     expect(completed).toMatchObject({
-      owner: 'host-playground-scenario-lab', phase: 'completed', cursor: 2, stepCount: 2,
+      owner: 'host-playground-scenario-lab',
+      phase: 'completed',
+      cursor: 2,
+      stepCount: 2,
     })
     expect(completed.tasks).toHaveLength(1)
     expect(completed.conversation.selection).toMatchObject({ kind: 'room', roomId: 'scenario-continuous-sends' })
     expect(completed.conversation.entries).toHaveLength(8)
-    expect(completed.conversation.entries.slice(0, 4).map(entry => entry.kind === 'message' ? entry.authorId : '')).toEqual([
-      'scenario-human', 'scenario-human', 'scenario-human', 'scenario-human',
-    ])
-    expect(completed.conversation.entries.slice(4).map(entry => entry.kind === 'message' ? entry.authorId : '')).toEqual([
-      'scenario-agent-a', 'scenario-agent-a', 'scenario-agent-a', 'scenario-agent-a',
-    ])
-    expect(completed.conversation.entries.filter(entry => entry.kind === 'message' && entry.authorId === 'scenario-human')
-      .every(entry => entry.kind === 'message' && entry.reactions?.[0]?.state === 'completed')).toBe(true)
+    expect(completed.conversation.entries.slice(0, 4).map(entry => entry.kind === 'message' ? entry.authorId : ''))
+      .toEqual([
+        'scenario-human',
+        'scenario-human',
+        'scenario-human',
+        'scenario-human',
+      ])
+    expect(completed.conversation.entries.slice(4).map(entry => entry.kind === 'message' ? entry.authorId : ''))
+      .toEqual([
+        'scenario-agent-a',
+        'scenario-agent-a',
+        'scenario-agent-a',
+        'scenario-agent-a',
+      ])
+    expect(
+      completed.conversation.entries.filter(entry => entry.kind === 'message' && entry.authorId === 'scenario-human')
+        .every(entry => entry.kind === 'message' && entry.reactions?.[0]?.state === 'completed'),
+    ).toBe(true)
     expect(completed.tasks[0]?.events.filter(event => event.type === 'input.accepted')).toHaveLength(4)
-    expect(completed.activities.filter(activity => activity.message.startsWith('send a/')).map(activity => activity.message)).toEqual([
-      'send a/1: executed', 'send a/2: executed', 'send a/3: executed', 'send a/4: executed',
+    expect(
+      completed.activities.filter(activity => activity.message.startsWith('send a/')).map(activity => activity.message),
+    ).toEqual([
+      'send a/1: executed',
+      'send a/2: executed',
+      'send a/3: executed',
+      'send a/4: executed',
     ])
 
     controller.reset()
     expect(controller.getSnapshot()).toMatchObject({
-      phase: 'idle', cursor: 0, activities: [], tasks: [],
+      phase: 'idle',
+      cursor: 0,
+      activities: [],
+      tasks: [],
       conversation: { entries: [], selection: { kind: 'room' } },
     })
     await controller.run()
-    expect(controller.getSnapshot().activities.filter(activity => activity.message === 'create a: executed')).toHaveLength(1)
+    expect(controller.getSnapshot().activities.filter(activity => activity.message === 'create a: executed'))
+      .toHaveLength(1)
     controller.dispose()
   })
 
@@ -82,10 +108,14 @@ describe('Playground Scenario Lab Phase 1', () => {
     const snapshot = controller.getSnapshot()
     expect(snapshot.phase).toBe('completed')
     expect(snapshot.tasks.map(task => task.identity.agentId)).toEqual([
-      'playground.scenario.a', 'playground.scenario.b', 'playground.scenario.c',
+      'playground.scenario.a',
+      'playground.scenario.b',
+      'playground.scenario.c',
     ])
     expect(snapshot.tasks.map(task => task.input)).toEqual([
-      'Independent input for Agent A.', 'Independent input for Agent B.', 'Independent input for Agent C.',
+      'Independent input for Agent A.',
+      'Independent input for Agent B.',
+      'Independent input for Agent C.',
     ])
     expect(snapshot.conversation.selection).toMatchObject({
       kind: 'room',
@@ -95,9 +125,17 @@ describe('Playground Scenario Lab Phase 1', () => {
         { participantId: 'scenario-agent-c', memberId: 'scenario-member-c', runId: 'scenario-run-c' },
       ],
     })
-    expect(snapshot.conversation.entries.filter(entry => entry.kind === 'message').map(entry => entry.kind === 'message' ? entry.authorId : '')).toEqual([
-      'scenario-human', 'scenario-human', 'scenario-human',
-      'scenario-agent-a', 'scenario-agent-b', 'scenario-agent-c',
+    expect(
+      snapshot.conversation.entries.filter(entry => entry.kind === 'message').map(entry =>
+        entry.kind === 'message' ? entry.authorId : ''
+      ),
+    ).toEqual([
+      'scenario-human',
+      'scenario-human',
+      'scenario-human',
+      'scenario-agent-a',
+      'scenario-agent-b',
+      'scenario-agent-c',
     ])
     expect(snapshot.activities.filter(activity => activity.message.startsWith('send '))).toHaveLength(3)
     controller.dispose()
@@ -107,15 +145,26 @@ describe('Playground Scenario Lab Phase 1', () => {
     const controller = new PlaygroundScenarioLabController(immediate)
     controller.select('human-interruption')
     await controller.run()
-    expect(controller.getSnapshot().conversation.entries.map(entry => entry.kind === 'message' ? entry.authorId : entry.kind)).toEqual([
-      'scenario-human', 'scenario-agent-a', 'scenario-human', 'scenario-agent-a',
+    expect(
+      controller.getSnapshot().conversation.entries.map(entry =>
+        entry.kind === 'message' ? entry.authorId : entry.kind
+      ),
+    ).toEqual([
+      'scenario-human',
+      'scenario-agent-a',
+      'scenario-human',
+      'scenario-agent-a',
     ])
     controller.dispose()
   })
 
   it('pauses between deterministic steps and resumes one exact step with Next', async () => {
     let releaseDelay: (() => void) | undefined
-    const controller = new PlaygroundScenarioLabController(() => new Promise(resolve => { releaseDelay = resolve }))
+    const controller = new PlaygroundScenarioLabController(() =>
+      new Promise(resolve => {
+        releaseDelay = resolve
+      })
+    )
     const running = controller.run()
     await vi.waitFor(() => expect(controller.getSnapshot().cursor).toBe(1))
     controller.pause()
@@ -136,29 +185,51 @@ describe('Playground Scenario Lab Phase 1', () => {
     await controller.next()
     expect(controller.getSnapshot().tasks[0]?.status).toBe('error')
     expect(controller.getSnapshot().conversation.entries.at(-1)).toMatchObject({
-      kind: 'message', authorId: 'scenario-agent-a', deliveryState: 'delivered', runState: 'failed',
+      kind: 'message',
+      authorId: 'scenario-agent-a',
+      deliveryState: 'delivered',
+      runState: 'failed',
     })
     await controller.next()
-    expect(controller.getSnapshot().tasks[0]).toMatchObject({ status: 'completed', input: 'Retry with a fresh logical operation.' })
+    expect(controller.getSnapshot().tasks[0]).toMatchObject({
+      status: 'completed',
+      input: 'Retry with a fresh logical operation.',
+    })
     expect(controller.getSnapshot().conversation.entries.at(-1)).toMatchObject({
-      kind: 'message', authorId: 'scenario-agent-a', runState: 'idle',
+      kind: 'message',
+      authorId: 'scenario-agent-a',
+      runState: 'idle',
     })
 
     controller.select('approval-decision')
     await controller.run()
     expect(controller.getSnapshot()).toMatchObject({ phase: 'completed', cursor: 3, stepCount: 3 })
-    expect(controller.getSnapshot().activities.filter(activity => activity.message.startsWith('approval a/')).map(activity => activity.message)).toEqual([
+    expect(
+      controller.getSnapshot().activities.filter(activity => activity.message.startsWith('approval a/')).map(activity =>
+        activity.message
+      ),
+    ).toEqual([
       'approval a/1: approved/executed',
       'approval a/2: denied/executed',
       'approval a/3: cancelled/executed',
     ])
-    expect(controller.getSnapshot().conversation.entries.filter(entry => entry.kind === 'approval').map(entry => entry.kind === 'approval' ? entry.state : '')).toEqual([
-      'approved', 'denied', 'cancelled',
+    expect(
+      controller.getSnapshot().conversation.entries.filter(entry => entry.kind === 'approval').map(entry =>
+        entry.kind === 'approval' ? entry.state : ''
+      ),
+    ).toEqual([
+      'approved',
+      'denied',
+      'cancelled',
     ])
     expect(PLAYGROUND_SCENARIO_CATALOG.find(item => item.id === 'approval-decision')?.availability).toMatchObject({
       state: 'available',
     })
-    expect(controller.getSnapshot().activities.every(activity => activity.kind === 'operation' || activity.kind === 'result')).toBe(true)
+    expect(
+      controller.getSnapshot().activities.every(activity =>
+        activity.kind === 'operation' || activity.kind === 'result'
+      ),
+    ).toBe(true)
     controller.dispose()
   })
 
@@ -170,9 +241,13 @@ describe('Playground Scenario Lab Phase 1', () => {
     expect(input.length).toBeGreaterThan(500)
     expect(input).toContain('```ts')
     expect(input).toContain('https://example.com/scenario?mode=deterministic')
-    expect(controller.getSnapshot().conversation.entries.some(entry => entry.kind === 'message'
-      && entry.authorId === 'scenario-human'
-      && entry.body.join('\n').includes('```ts'))).toBe(true)
+    expect(
+      controller.getSnapshot().conversation.entries.some(entry =>
+        entry.kind === 'message'
+        && entry.authorId === 'scenario-human'
+        && entry.body.join('\n').includes('```ts')
+      ),
+    ).toBe(true)
     controller.dispose()
   })
 
@@ -230,16 +305,27 @@ describe('Playground Scenario Lab Phase 1', () => {
     controller.select('multi-binding')
     gate.resolve()
     await running
-    expect(controller.getSnapshot()).toMatchObject({ selectedScenarioId: 'multi-binding', phase: 'idle', cursor: 0, activities: [], tasks: [] })
+    expect(controller.getSnapshot()).toMatchObject({
+      selectedScenarioId: 'multi-binding',
+      phase: 'idle',
+      cursor: 0,
+      activities: [],
+      tasks: [],
+    })
     controller.dispose()
   })
 
   it('does not publish a late completion after disposal', async () => {
     const gate = deferred()
     const entered = deferred()
-    const controller = new PlaygroundScenarioLabController(immediate, () => delayedRuntime('create', entered.resolve, gate.promise, 'before'))
+    const controller = new PlaygroundScenarioLabController(
+      immediate,
+      () => delayedRuntime('create', entered.resolve, gate.promise, 'before'),
+    )
     let publications = 0
-    controller.subscribe(() => { publications += 1 })
+    controller.subscribe(() => {
+      publications += 1
+    })
     const running = controller.run()
     await entered.promise
     const beforeDispose = publications

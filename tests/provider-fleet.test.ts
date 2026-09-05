@@ -9,15 +9,28 @@ import { ProviderFleet } from '../packages/cli/src/providers/fleet.js'
 
 function config(root: string, id: string): CliProxyProviderConfig {
   return {
-    id, kind: 'cli-proxy-api', displayName: id.toUpperCase(), baseUrl: `https://${id}.test/v1`, apiKeyEnv: `${id.toUpperCase()}_KEY`,
-    codexExecutable: 'codex', codexHome: path.join(root, id), enabled: true, timeoutMs: 1_000,
+    id,
+    kind: 'cli-proxy-api',
+    displayName: id.toUpperCase(),
+    baseUrl: `https://${id}.test/v1`,
+    apiKeyEnv: `${id.toUpperCase()}_KEY`,
+    codexExecutable: 'codex',
+    codexHome: path.join(root, id),
+    enabled: true,
+    timeoutMs: 1_000,
   }
 }
 
 function localConfig(root: string): LocalCodexProviderConfig {
   return {
-    id: 'codex-local', kind: 'local-codex', displayName: 'Local Codex', sourceProviderId: 'openai',
-    codexExecutable: 'codex', codexHome: path.join(root, 'codex-local'), enabled: true, timeoutMs: 1_000,
+    id: 'codex-local',
+    kind: 'local-codex',
+    displayName: 'Local Codex',
+    sourceProviderId: 'openai',
+    codexExecutable: 'codex',
+    codexHome: path.join(root, 'codex-local'),
+    enabled: true,
+    timeoutMs: 1_000,
   }
 }
 
@@ -26,16 +39,40 @@ function server(id: string, calls: { provider: string; method: string; params: u
     generation: `generation-${id}`,
     async request<Result>(method: string, params: unknown): Promise<Result> {
       calls.push({ provider: id, method, params })
-      if (method === 'model/list') return { data: [{ id: 'shared-model', model: 'shared-model', displayName: 'Shared', hidden: false, isDefault: true }], nextCursor: null } as Result
+      if (method === 'model/list') {
+        return {
+          data: [{ id: 'shared-model', model: 'shared-model', displayName: 'Shared', hidden: false, isDefault: true }],
+          nextCursor: null,
+        } as Result
+      }
       if (method === 'thread/list') {
         const cursor = (params as { cursor?: string }).cursor
         return {
-          data: [{ id: cursor === undefined ? 'shared-session' : `${id}-later`, preview: `${id} session`, modelProvider: id, createdAt: 1, updatedAt: cursor === undefined ? (id === 'alpha' ? 20 : 10) : 1, cwd: '/workspace', turns: [] }],
+          data: [{
+            id: cursor === undefined ? 'shared-session' : `${id}-later`,
+            preview: `${id} session`,
+            modelProvider: id,
+            createdAt: 1,
+            updatedAt: cursor === undefined ? (id === 'alpha' ? 20 : 10) : 1,
+            cwd: '/workspace',
+            turns: [],
+          }],
           nextCursor: cursor === undefined ? `${id}-cursor` : null,
         } as Result
       }
       if (method === 'thread/start') {
-        return { thread: { id: `${id}-created`, preview: '', modelProvider: id, createdAt: 1, updatedAt: 1, cwd: '/workspace', turns: [] }, model: 'shared-model' } as Result
+        return {
+          thread: {
+            id: `${id}-created`,
+            preview: '',
+            modelProvider: id,
+            createdAt: 1,
+            updatedAt: 1,
+            cwd: '/workspace',
+            turns: [],
+          },
+          model: 'shared-model',
+        } as Result
       }
       throw new Error(`unexpected ${method}`)
     },
@@ -60,15 +97,24 @@ describe('Provider Fleet', () => {
       { providerId: 'alpha', remoteSessionId: 'shared-session' },
       { providerId: 'beta', remoteSessionId: 'shared-session' },
     ])
-    const created = await fleet.createTask({ model: { providerId: 'beta', modelId: 'shared-model' }, cwd: '/workspace' })
+    const created = await fleet.createTask({
+      model: { providerId: 'beta', modelId: 'shared-model' },
+      cwd: '/workspace',
+    })
     expect(created.ok && created.value.ref).toEqual({ providerId: 'beta', remoteSessionId: 'beta-created' })
     expect(calls.filter(call => call.method === 'thread/start').map(call => call.provider)).toEqual(['beta'])
-    expect(fleet.status()).toMatchObject({ mode: 'read-write', secondConnectionCreated: false, rawBridgeExposed: false })
+    expect(fleet.status()).toMatchObject({
+      mode: 'read-write',
+      secondConnectionCreated: false,
+      rawBridgeExposed: false,
+    })
     expect(fleet.providerStatuses()).toEqual([
       { providerId: 'alpha', displayName: 'ALPHA', generation: 'generation-alpha', state: 'ready' },
       { providerId: 'beta', displayName: 'BETA', generation: 'generation-beta', state: 'ready' },
     ])
-    expect(fleet.status().diagnostics).toContainEqual(expect.objectContaining({ code: 'current-connection-client-unavailable' }))
+    expect(fleet.status().diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'current-connection-client-unavailable' }),
+    )
     await fleet.close()
   })
 
@@ -97,7 +143,9 @@ describe('Provider Fleet', () => {
     expect(first.ok && first.value.nextCursor).toEqual(expect.any(String))
     if (!first.ok || first.value.nextCursor === undefined) throw new Error('missing cursor')
     const mismatch = await fleet.listTasks({ providerIds: ['alpha'], limit: 1, cursor: first.value.nextCursor })
-    expect(mismatch).toEqual(expect.objectContaining({ ok: false, error: expect.objectContaining({ code: 'invalid-request' }) }))
+    expect(mismatch).toEqual(
+      expect.objectContaining({ ok: false, error: expect.objectContaining({ code: 'invalid-request' }) }),
+    )
     await fleet.close()
   })
 
@@ -108,25 +156,43 @@ describe('Provider Fleet', () => {
       startServer: async provider => {
         const base = server(provider.id, [])
         return {
-        ...base,
-        async request<Result>(method: string, params: unknown): Promise<Result> {
-          if (method === 'turn/start') return { turn: { id: 'turn-1' } } as Result
-          return await base.request<Result>(method, params)
-        },
-        subscribeNotifications(listener) { notify = listener; return () => { notify = undefined } },
+          ...base,
+          async request<Result>(method: string, params: unknown): Promise<Result> {
+            if (method === 'turn/start') return { turn: { id: 'turn-1' } } as Result
+            return await base.request<Result>(method, params)
+          },
+          subscribeNotifications(listener) {
+            notify = listener
+            return () => {
+              notify = undefined
+            }
+          },
         }
       },
     })
     const dispatched = await fleet.dispatchCreate({
-      operationId: 'channel-op-1', model: { providerId: 'alpha', modelId: 'shared-model' }, cwd: '/workspace', message: 'hello',
+      operationId: 'channel-op-1',
+      model: { providerId: 'alpha', modelId: 'shared-model' },
+      cwd: '/workspace',
+      message: 'hello',
     })
-    if (dispatched.session === undefined || dispatched.turn === undefined || notify === undefined) throw new Error('dispatch did not create a lifecycle target')
-    notify('turn/completed', { threadId: dispatched.session.remoteSessionId, turnId: dispatched.turn.turnId, text: 'Done.', rawEvent: { secret: 'never retained' } })
+    if (dispatched.session === undefined || dispatched.turn === undefined || notify === undefined) {
+      throw new Error('dispatch did not create a lifecycle target')
+    }
+    notify('turn/completed', {
+      threadId: dispatched.session.remoteSessionId,
+      turnId: dispatched.turn.turnId,
+      text: 'Done.',
+      rawEvent: { secret: 'never retained' },
+    })
     const events = fleet.readLifecycle(dispatched.session, 0)
-    expect(events).toMatchObject({ nextAfterSequence: 2, events: [
-      { type: 'turn.started', operationId: 'channel-op-1' },
-      { type: 'turn.completed', output: [{ type: 'text', text: 'Done.' }] },
-    ] })
+    expect(events).toMatchObject({
+      nextAfterSequence: 2,
+      events: [
+        { type: 'turn.started', operationId: 'channel-op-1' },
+        { type: 'turn.completed', output: [{ type: 'text', text: 'Done.' }] },
+      ],
+    })
     expect(JSON.stringify(events)).not.toContain('rawEvent')
     await fleet.close()
   })
@@ -139,7 +205,12 @@ describe('Provider Fleet', () => {
         const base = server(provider.id, [])
         return {
           ...base,
-          subscribeNotifications(listener) { notify = listener; return () => { notify = undefined } },
+          subscribeNotifications(listener) {
+            notify = listener
+            return () => {
+              notify = undefined
+            }
+          },
         }
       },
     })
@@ -157,8 +228,14 @@ describe('Provider Fleet', () => {
     }
     notify('approval/requested', approval('approval/requested', 'approval-2'))
     notify('approval/resolved', approval('approval/resolved', 'approval-2'))
-    notify('turn/completed', { threadId: session.remoteSessionId, turn: { id: 'turn-with-two-approvals', status: 'completed' } })
-    notify('turn/completed', { threadId: session.remoteSessionId, turn: { id: 'turn-with-two-approvals', status: 'failed' } })
+    notify('turn/completed', {
+      threadId: session.remoteSessionId,
+      turn: { id: 'turn-with-two-approvals', status: 'completed' },
+    })
+    notify('turn/completed', {
+      threadId: session.remoteSessionId,
+      turn: { id: 'turn-with-two-approvals', status: 'failed' },
+    })
 
     expect(fleet.readLifecycle(session).events.map(event => [event.type, event.approval?.approvalId])).toEqual([
       ['approval.required', 'approval-1'],
@@ -181,43 +258,115 @@ describe('Provider Fleet', () => {
         generation: 'local-generation-1',
         async request<Result>(method: string, params: unknown): Promise<Result> {
           calls.push({ method, params })
-          if (method === 'thread/start') return { thread: { id: 'local-session', preview: '', modelProvider: 'openai', createdAt: 1, updatedAt: 1, cwd: '/workspace', turns: [] } } as Result
-          if (method === 'thread/read') return { thread: { id: 'local-session', preview: '', modelProvider: 'openai', createdAt: 1, updatedAt: 1, cwd: '/workspace', turns: [] } } as Result
-          if (method === 'turn/start') return { turn: { id: `turn-${calls.filter(call => call.method === 'turn/start').length}` } } as Result
+          if (method === 'thread/start') {
+            return {
+              thread: {
+                id: 'local-session',
+                preview: '',
+                modelProvider: 'openai',
+                createdAt: 1,
+                updatedAt: 1,
+                cwd: '/workspace',
+                turns: [],
+              },
+            } as Result
+          }
+          if (method === 'thread/read') {
+            return {
+              thread: {
+                id: 'local-session',
+                preview: '',
+                modelProvider: 'openai',
+                createdAt: 1,
+                updatedAt: 1,
+                cwd: '/workspace',
+                turns: [],
+              },
+            } as Result
+          }
+          if (method === 'turn/start') {
+            return { turn: { id: `turn-${calls.filter(call => call.method === 'turn/start').length}` } } as Result
+          }
           if (method === 'turn/interrupt') return {} as Result
           throw new Error(`unexpected ${method}`)
         },
-        subscribeNotifications(listener) { notify = listener; return () => { notify = undefined } },
+        subscribeNotifications(listener) {
+          notify = listener
+          return () => {
+            notify = undefined
+          }
+        },
         async close() {},
       }),
     })
     const scope = { profileId: 'work', compositionGeneration: 'composition-1', ownerKey: 'plugin-owner' }
     const definition = { agentId: 'agent-1', revision: 'revision-1' }
     const createInput = {
-      scope, command: { type: 'create-or-bind', commandId: 'create-1' }, operationId: 'create-1', definition,
-      model: { providerId: 'codex-local', modelId: 'gpt-5' }, cwd: '/workspace', developerInstructions: 'private definition body',
+      scope,
+      command: { type: 'create-or-bind', commandId: 'create-1' },
+      operationId: 'create-1',
+      definition,
+      model: { providerId: 'codex-local', modelId: 'gpt-5' },
+      cwd: '/workspace',
+      developerInstructions: 'private definition body',
     }
-    const created = await fleet.createAgentLoopV4(createInput) as { status: string; locator?: { task: string; binding: { bindingId: string; generation: number }; definition: typeof definition }; delivery?: string }
-    expect(created).toMatchObject({ status: 'accepted', delivery: 'executed', locator: { providerGeneration: 'local-generation-1' } })
+    const created = await fleet.createAgentLoopV4(createInput) as {
+      status: string
+      locator?: { task: string; binding: { bindingId: string; generation: number }; definition: typeof definition }
+      delivery?: string
+    }
+    expect(created).toMatchObject({
+      status: 'accepted',
+      delivery: 'executed',
+      locator: { providerGeneration: 'local-generation-1' },
+    })
     const replayedCreate = await fleet.createAgentLoopV4(createInput)
     expect(replayedCreate).toMatchObject({ status: 'accepted', delivery: 'replayed' })
     expect(calls.filter(call => call.method === 'thread/start')).toHaveLength(1)
-    expect(calls.find(call => call.method === 'thread/start')?.params).toMatchObject({ approvalPolicy: 'on-request', sandbox: 'read-only' })
+    expect(calls.find(call => call.method === 'thread/start')?.params).toMatchObject({
+      approvalPolicy: 'on-request',
+      sandbox: 'read-only',
+    })
     const task = created.locator?.task
     if (task === undefined) throw new Error('missing durable task')
 
     const binding = created.locator?.binding
     if (binding === undefined) throw new Error('missing durable binding')
-    const sendInput = { scope, command: { type: 'send', commandId: 'send-1', content: [{ kind: 'text', text: 'private message' }] }, operationId: 'send-1', task, binding, definition, message: 'private message' }
+    const sendInput = {
+      scope,
+      command: { type: 'send', commandId: 'send-1', content: [{ kind: 'text', text: 'private message' }] },
+      operationId: 'send-1',
+      task,
+      binding,
+      definition,
+      message: 'private message',
+    }
     expect(await fleet.sendAgentLoopV4(sendInput)).toMatchObject({ status: 'accepted', delivery: 'executed' })
     expect(await fleet.sendAgentLoopV4(sendInput)).toMatchObject({ status: 'accepted', delivery: 'replayed' })
     const introductionInput = {
-      scope, command: { type: 'request-member-self-introduction', commandId: 'intro-1' }, operationId: 'intro-1', task,
-      binding, definition, participantId: 'participant-1', memberId: 'member-1', runId: 'run-1',
+      scope,
+      command: { type: 'request-member-self-introduction', commandId: 'intro-1' },
+      operationId: 'intro-1',
+      task,
+      binding,
+      definition,
+      participantId: 'participant-1',
+      memberId: 'member-1',
+      runId: 'run-1',
     }
-    expect(await fleet.requestAgentLoopIntroductionV4(introductionInput)).toMatchObject({ status: 'accepted', delivery: 'executed' })
-    expect(await fleet.requestAgentLoopIntroductionV4(introductionInput)).toMatchObject({ status: 'accepted', delivery: 'replayed' })
-    notify?.('turn/completed', { threadId: 'local-session', turn: { id: 'turn-2', status: 'completed' }, text: 'Hello from the Agent.' })
+    expect(await fleet.requestAgentLoopIntroductionV4(introductionInput)).toMatchObject({
+      status: 'accepted',
+      delivery: 'executed',
+    })
+    expect(await fleet.requestAgentLoopIntroductionV4(introductionInput)).toMatchObject({
+      status: 'accepted',
+      delivery: 'replayed',
+    })
+    notify?.('turn/completed', {
+      threadId: 'local-session',
+      turn: { id: 'turn-2', status: 'completed' },
+      text: 'Hello from the Agent.',
+    })
     const turns = calls.filter(call => call.method === 'turn/start')
     expect(turns).toHaveLength(2)
     expect(turns[0]?.params).toMatchObject({ clientUserMessageId: 'send-1' })
@@ -226,40 +375,101 @@ describe('Provider Fleet', () => {
     expect(turns[1]?.params).not.toHaveProperty('responsesapiClientMetadata')
     expect(await fleet.readAgentLoopV4Lifecycle({ scope, task, binding, definition, afterSequence: 0 })).toMatchObject({
       status: 'accepted',
-      events: [{ turnId: 'turn-2', type: 'turn.completed', introduction: {
-        operationId: 'intro-1', participantId: 'participant-1', memberId: 'member-1', runId: 'run-1',
-      } }],
+      events: [{
+        turnId: 'turn-2',
+        type: 'turn.completed',
+        introduction: {
+          operationId: 'intro-1',
+          participantId: 'participant-1',
+          memberId: 'member-1',
+          runId: 'run-1',
+        },
+      }],
     })
-    expect(await fleet.cancelAgentLoopIntroductionV4({
-      scope, command: { type: 'cancel-member-self-introduction', commandId: 'cancel-completed' }, operationId: 'cancel-completed', requestOperationId: 'intro-1',
-      task, binding, definition, participantId: 'participant-1', memberId: 'member-1', runId: 'run-1',
-    })).toMatchObject({ status: 'conflict', code: 'introduction-completed' })
+    expect(
+      await fleet.cancelAgentLoopIntroductionV4({
+        scope,
+        command: { type: 'cancel-member-self-introduction', commandId: 'cancel-completed' },
+        operationId: 'cancel-completed',
+        requestOperationId: 'intro-1',
+        task,
+        binding,
+        definition,
+        participantId: 'participant-1',
+        memberId: 'member-1',
+        runId: 'run-1',
+      }),
+    ).toMatchObject({ status: 'conflict', code: 'introduction-completed' })
     expect(calls.filter(call => call.method === 'turn/interrupt')).toHaveLength(0)
     const failedIntroduction = {
-      scope, command: { type: 'request-member-self-introduction', commandId: 'intro-failed' }, operationId: 'intro-failed', task,
-      binding, definition, participantId: 'participant-2', memberId: 'member-2', runId: 'run-2',
+      scope,
+      command: { type: 'request-member-self-introduction', commandId: 'intro-failed' },
+      operationId: 'intro-failed',
+      task,
+      binding,
+      definition,
+      participantId: 'participant-2',
+      memberId: 'member-2',
+      runId: 'run-2',
     }
-    expect(await fleet.requestAgentLoopIntroductionV4(failedIntroduction)).toMatchObject({ status: 'accepted', delivery: 'executed', turn: 'turn-3' })
+    expect(await fleet.requestAgentLoopIntroductionV4(failedIntroduction)).toMatchObject({
+      status: 'accepted',
+      delivery: 'executed',
+      turn: 'turn-3',
+    })
     notify?.('turn/completed', { threadId: 'local-session', turn: { id: 'turn-3', status: 'failed' } })
-    expect(await fleet.requestAgentLoopIntroductionV4(failedIntroduction)).toMatchObject({ status: 'accepted', delivery: 'replayed', introductionState: 'failed' })
-    notify?.('turn/completed', { threadId: 'local-session', turn: { id: 'turn-3', status: 'completed' }, text: 'Late contradictory completion.' })
-    expect(await fleet.requestAgentLoopIntroductionV4({
-      ...failedIntroduction,
-      command: { type: 'request-member-self-introduction', commandId: 'intro-retry' }, operationId: 'intro-retry',
-    })).toMatchObject({ status: 'accepted', delivery: 'executed', turn: 'turn-4' })
-    notify?.('turn/completed', { threadId: 'local-session', turn: { id: 'turn-4', status: 'completed' }, text: 'Retry succeeded.' })
+    expect(await fleet.requestAgentLoopIntroductionV4(failedIntroduction)).toMatchObject({
+      status: 'accepted',
+      delivery: 'replayed',
+      introductionState: 'failed',
+    })
+    notify?.('turn/completed', {
+      threadId: 'local-session',
+      turn: { id: 'turn-3', status: 'completed' },
+      text: 'Late contradictory completion.',
+    })
+    expect(
+      await fleet.requestAgentLoopIntroductionV4({
+        ...failedIntroduction,
+        command: { type: 'request-member-self-introduction', commandId: 'intro-retry' },
+        operationId: 'intro-retry',
+      }),
+    ).toMatchObject({ status: 'accepted', delivery: 'executed', turn: 'turn-4' })
+    notify?.('turn/completed', {
+      threadId: 'local-session',
+      turn: { id: 'turn-4', status: 'completed' },
+      text: 'Retry succeeded.',
+    })
     notify?.('turn/completed', { threadId: 'local-session', turn: { id: 'turn-4', status: 'failed' } })
-    expect(await fleet.requestAgentLoopIntroductionV4({
-      ...failedIntroduction,
-      command: { type: 'request-member-self-introduction', commandId: 'intro-after-completed' }, operationId: 'intro-after-completed',
-    })).toMatchObject({ status: 'conflict', code: 'introduction-conflict' })
+    expect(
+      await fleet.requestAgentLoopIntroductionV4({
+        ...failedIntroduction,
+        command: { type: 'request-member-self-introduction', commandId: 'intro-after-completed' },
+        operationId: 'intro-after-completed',
+      }),
+    ).toMatchObject({ status: 'conflict', code: 'introduction-conflict' })
     const rebound = await fleet.bindAgentLoopV4({
-      scope, command: { type: 'create-or-bind', commandId: 'bind-1', target: { mode: 'bind', task } },
-      operationId: 'bind-1', task, definition,
+      scope,
+      command: { type: 'create-or-bind', commandId: 'bind-1', target: { mode: 'bind', task } },
+      operationId: 'bind-1',
+      task,
+      definition,
     }) as { status: string; locator?: { binding: { bindingId: string; generation: number } } }
-    expect(rebound).toMatchObject({ status: 'accepted', locator: { binding: { bindingId: binding.bindingId, generation: binding.generation + 1 } } })
-    expect(await fleet.sendAgentLoopV4({ ...sendInput, operationId: 'send-stale', command: { type: 'send', commandId: 'send-stale' } })).toMatchObject({ status: 'unavailable', code: 'binding-closed' })
-    expect(await fleet.readAgentLoopV4Lifecycle({ scope, task, binding, definition, afterSequence: 0 })).toMatchObject({ status: 'unavailable', code: 'binding-closed' })
+    expect(rebound).toMatchObject({
+      status: 'accepted',
+      locator: { binding: { bindingId: binding.bindingId, generation: binding.generation + 1 } },
+    })
+    expect(
+      await fleet.sendAgentLoopV4({
+        ...sendInput,
+        operationId: 'send-stale',
+        command: { type: 'send', commandId: 'send-stale' },
+      }),
+    ).toMatchObject({ status: 'unavailable', code: 'binding-closed' })
+    expect(await fleet.readAgentLoopV4Lifecycle({ scope, task, binding, definition, afterSequence: 0 })).toMatchObject({
+      status: 'unavailable',
+      code: 'binding-closed',
+    })
     expect(JSON.stringify(authority.snapshotForTests())).not.toContain('private definition body')
     expect(JSON.stringify(authority.snapshotForTests())).not.toContain('private message')
     await fleet.close()
@@ -276,7 +486,19 @@ describe('Provider Fleet', () => {
         generation: 'local-generation-1',
         async request<Result>(method: string, params: unknown): Promise<Result> {
           calls.push({ method, params })
-          if (method === 'thread/start') return { thread: { id: `session-${nextSession++}`, preview: '', modelProvider: 'openai', createdAt: 1, updatedAt: 1, cwd: '/workspace', turns: [] } } as Result
+          if (method === 'thread/start') {
+            return {
+              thread: {
+                id: `session-${nextSession++}`,
+                preview: '',
+                modelProvider: 'openai',
+                createdAt: 1,
+                updatedAt: 1,
+                cwd: '/workspace',
+                turns: [],
+              },
+            } as Result
+          }
           if (method === 'turn/start') return { turn: { id: 'introduction-turn-task-one' } } as Result
           if (method === 'turn/interrupt') return {} as Result
           throw new Error(`unexpected ${method}`)
@@ -286,40 +508,88 @@ describe('Provider Fleet', () => {
     })
     const scope = { profileId: 'work', compositionGeneration: 'composition', ownerKey: 'owner' }
     const definition = { agentId: 'agent-1', revision: 'revision-1' }
-    const create = async (operationId: string) => await fleet.createAgentLoopV4({
-      scope, command: { type: 'create-or-bind', commandId: operationId }, operationId, definition,
-      model: { providerId: 'codex-local', modelId: 'gpt-5' }, cwd: '/workspace',
-    }) as { status: string; locator: { task: string; binding: { bindingId: string; generation: number } } }
+    const create = async (operationId: string) =>
+      await fleet.createAgentLoopV4({
+        scope,
+        command: { type: 'create-or-bind', commandId: operationId },
+        operationId,
+        definition,
+        model: { providerId: 'codex-local', modelId: 'gpt-5' },
+        cwd: '/workspace',
+      }) as { status: string; locator: { task: string; binding: { bindingId: string; generation: number } } }
     const first = await create('create-one')
     const second = await create('create-two')
-    expect(await fleet.requestAgentLoopIntroductionV4({
-      scope, command: { type: 'request-member-self-introduction', commandId: 'intro-one' }, operationId: 'intro-one',
-      task: first.locator.task, binding: first.locator.binding, definition,
-      participantId: 'participant', memberId: 'member', runId: 'run',
-    })).toMatchObject({ status: 'accepted' })
-    expect(await fleet.cancelAgentLoopIntroductionV4({
-      scope, command: { type: 'cancel-member-self-introduction', commandId: 'cancel-cross-task' }, operationId: 'cancel-cross-task', requestOperationId: 'intro-one',
-      task: second.locator.task, binding: second.locator.binding, definition,
-      participantId: 'participant', memberId: 'member', runId: 'run',
-    })).toMatchObject({ status: 'conflict', code: 'introduction-conflict' })
+    expect(
+      await fleet.requestAgentLoopIntroductionV4({
+        scope,
+        command: { type: 'request-member-self-introduction', commandId: 'intro-one' },
+        operationId: 'intro-one',
+        task: first.locator.task,
+        binding: first.locator.binding,
+        definition,
+        participantId: 'participant',
+        memberId: 'member',
+        runId: 'run',
+      }),
+    ).toMatchObject({ status: 'accepted' })
+    expect(
+      await fleet.cancelAgentLoopIntroductionV4({
+        scope,
+        command: { type: 'cancel-member-self-introduction', commandId: 'cancel-cross-task' },
+        operationId: 'cancel-cross-task',
+        requestOperationId: 'intro-one',
+        task: second.locator.task,
+        binding: second.locator.binding,
+        definition,
+        participantId: 'participant',
+        memberId: 'member',
+        runId: 'run',
+      }),
+    ).toMatchObject({ status: 'conflict', code: 'introduction-conflict' })
     expect(calls.filter(call => call.method === 'turn/interrupt')).toHaveLength(0)
-    expect(await fleet.cancelAgentLoopIntroductionV4({
-      scope, command: { type: 'cancel-member-self-introduction', commandId: 'cancel-exact-task' }, operationId: 'cancel-exact-task', requestOperationId: 'intro-one',
-      task: first.locator.task, binding: first.locator.binding, definition,
-      participantId: 'participant', memberId: 'member', runId: 'run',
-    })).toMatchObject({ status: 'accepted', delivery: 'executed' })
-    expect(await fleet.cancelAgentLoopIntroductionV4({
-      scope, command: { type: 'cancel-member-self-introduction', commandId: 'cancel-after-cancelled' }, operationId: 'cancel-after-cancelled', requestOperationId: 'intro-one',
-      task: first.locator.task, binding: first.locator.binding, definition,
-      participantId: 'participant', memberId: 'member', runId: 'run',
-    })).toMatchObject({ status: 'conflict', code: 'introduction-cancelled' })
+    expect(
+      await fleet.cancelAgentLoopIntroductionV4({
+        scope,
+        command: { type: 'cancel-member-self-introduction', commandId: 'cancel-exact-task' },
+        operationId: 'cancel-exact-task',
+        requestOperationId: 'intro-one',
+        task: first.locator.task,
+        binding: first.locator.binding,
+        definition,
+        participantId: 'participant',
+        memberId: 'member',
+        runId: 'run',
+      }),
+    ).toMatchObject({ status: 'accepted', delivery: 'executed' })
+    expect(
+      await fleet.cancelAgentLoopIntroductionV4({
+        scope,
+        command: { type: 'cancel-member-self-introduction', commandId: 'cancel-after-cancelled' },
+        operationId: 'cancel-after-cancelled',
+        requestOperationId: 'intro-one',
+        task: first.locator.task,
+        binding: first.locator.binding,
+        definition,
+        participantId: 'participant',
+        memberId: 'member',
+        runId: 'run',
+      }),
+    ).toMatchObject({ status: 'conflict', code: 'introduction-cancelled' })
     expect(calls.filter(call => call.method === 'turn/interrupt')).toHaveLength(1)
-    expect(await fleet.readAgentLoopV4Lifecycle({
-      scope, task: first.locator.task, binding: first.locator.binding, definition, afterSequence: 0,
-    })).toMatchObject({
+    expect(
+      await fleet.readAgentLoopV4Lifecycle({
+        scope,
+        task: first.locator.task,
+        binding: first.locator.binding,
+        definition,
+        afterSequence: 0,
+      }),
+    ).toMatchObject({
       status: 'accepted',
       events: [expect.objectContaining({
-        turnId: 'introduction-turn-task-one', type: 'turn.cancelled', cancellation: { operationId: 'cancel-exact-task' },
+        turnId: 'introduction-turn-task-one',
+        type: 'turn.cancelled',
+        cancellation: { operationId: 'cancel-exact-task' },
       })],
     })
     await fleet.close()
@@ -330,15 +600,31 @@ describe('Provider Fleet', () => {
     const authority = await AgentLoopAuthority.open(root, 'work')
     let releaseTurn!: () => void
     let observeTurn!: () => void
-    let turnStarted = new Promise<void>(resolve => { observeTurn = resolve })
-    let turnGate = new Promise<void>(resolve => { releaseTurn = resolve })
+    let turnStarted = new Promise<void>(resolve => {
+      observeTurn = resolve
+    })
+    let turnGate = new Promise<void>(resolve => {
+      releaseTurn = resolve
+    })
     let turnExecutions = 0
     const fleet = await ProviderFleet.create([localConfig(root)], {
       agentLoopAuthority: authority,
       startServer: async () => ({
         generation: 'local-generation-1',
         async request<Result>(method: string): Promise<Result> {
-          if (method === 'thread/start') return { thread: { id: 'session-one', preview: '', modelProvider: 'openai', createdAt: 1, updatedAt: 1, cwd: '/workspace', turns: [] } } as Result
+          if (method === 'thread/start') {
+            return {
+              thread: {
+                id: 'session-one',
+                preview: '',
+                modelProvider: 'openai',
+                createdAt: 1,
+                updatedAt: 1,
+                cwd: '/workspace',
+                turns: [],
+              },
+            } as Result
+          }
           if (method === 'turn/start') {
             turnExecutions += 1
             observeTurn()
@@ -353,13 +639,23 @@ describe('Provider Fleet', () => {
     const scope = { profileId: 'work', compositionGeneration: 'composition', ownerKey: 'owner' }
     const definition = { agentId: 'agent-1', revision: 'revision-1' }
     const created = await fleet.createAgentLoopV4({
-      scope, command: { type: 'create-or-bind', commandId: 'create' }, operationId: 'create', definition,
-      model: { providerId: 'codex-local', modelId: 'gpt-5' }, cwd: '/workspace',
+      scope,
+      command: { type: 'create-or-bind', commandId: 'create' },
+      operationId: 'create',
+      definition,
+      model: { providerId: 'codex-local', modelId: 'gpt-5' },
+      cwd: '/workspace',
     }) as { locator: { task: string; binding: { bindingId: string; generation: number } } }
-    const send = (message: string) => fleet.sendAgentLoopV4({
-      scope, command: { type: 'send', commandId: 'shared-send', content: [{ kind: 'text', text: message }] }, operationId: 'shared-send',
-      task: created.locator.task, binding: created.locator.binding, definition, message,
-    })
+    const send = (message: string) =>
+      fleet.sendAgentLoopV4({
+        scope,
+        command: { type: 'send', commandId: 'shared-send', content: [{ kind: 'text', text: message }] },
+        operationId: 'shared-send',
+        task: created.locator.task,
+        binding: created.locator.binding,
+        definition,
+        message,
+      })
     const first = send('same payload')
     await turnStarted
     const replay = send('same payload')
@@ -372,11 +668,20 @@ describe('Provider Fleet', () => {
     expect(conflict).toMatchObject({ status: 'conflict', code: 'operation-conflict' })
     expect(turnExecutions).toBe(1)
 
-    turnStarted = new Promise<void>(resolve => { observeTurn = resolve })
-    turnGate = new Promise<void>(resolve => { releaseTurn = resolve })
+    turnStarted = new Promise<void>(resolve => {
+      observeTurn = resolve
+    })
+    turnGate = new Promise<void>(resolve => {
+      releaseTurn = resolve
+    })
     const pending = fleet.sendAgentLoopV4({
-      scope, command: { type: 'send', commandId: 'second-send', content: [{ kind: 'text', text: 'next' }] }, operationId: 'second-send',
-      task: created.locator.task, binding: created.locator.binding, definition, message: 'next',
+      scope,
+      command: { type: 'send', commandId: 'second-send', content: [{ kind: 'text', text: 'next' }] },
+      operationId: 'second-send',
+      task: created.locator.task,
+      binding: created.locator.binding,
+      definition,
+      message: 'next',
     })
     await turnStarted
     releaseTurn()
@@ -390,18 +695,38 @@ describe('Provider Fleet', () => {
     let notify: ((method: string, params: unknown) => void) | undefined
     let releaseIntroduction!: () => void
     let observedIntroduction!: () => void
-    const introductionGate = new Promise<void>(resolve => { releaseIntroduction = resolve })
-    const introductionObserved = new Promise<void>(resolve => { observedIntroduction = resolve })
+    const introductionGate = new Promise<void>(resolve => {
+      releaseIntroduction = resolve
+    })
+    const introductionObserved = new Promise<void>(resolve => {
+      observedIntroduction = resolve
+    })
     const fleet = await ProviderFleet.create([localConfig(root)], {
       agentLoopAuthority: authority,
       startServer: async () => ({
         generation: 'local-generation-1',
         async request<Result>(method: string, params: unknown): Promise<Result> {
-          if (method === 'thread/start') return { thread: { id: 'session-causation', preview: '', modelProvider: 'openai', createdAt: 1, updatedAt: 1, cwd: '/workspace', turns: [] } } as Result
+          if (method === 'thread/start') {
+            return {
+              thread: {
+                id: 'session-causation',
+                preview: '',
+                modelProvider: 'openai',
+                createdAt: 1,
+                updatedAt: 1,
+                cwd: '/workspace',
+                turns: [],
+              },
+            } as Result
+          }
           if (method === 'turn/start') {
             const input = (params as { input?: unknown[] }).input
             if (input?.length === 0) {
-              notify?.('turn/completed', { threadId: 'session-causation', turn: { id: 'turn-introduction', status: 'completed' }, text: 'I help the team review changes.' })
+              notify?.('turn/completed', {
+                threadId: 'session-causation',
+                turn: { id: 'turn-introduction', status: 'completed' },
+                text: 'I help the team review changes.',
+              })
               observedIntroduction()
               await introductionGate
               return { turn: { id: 'turn-introduction' } } as Result
@@ -409,36 +734,67 @@ describe('Provider Fleet', () => {
           }
           throw new Error(`unexpected ${method}`)
         },
-        subscribeNotifications(listener) { notify = listener; return () => { notify = undefined } },
+        subscribeNotifications(listener) {
+          notify = listener
+          return () => {
+            notify = undefined
+          }
+        },
         async close() {},
       }),
     })
     const scope = { profileId: 'work', compositionGeneration: 'composition', ownerKey: 'owner' }
     const definition = { agentId: 'agent-1', revision: 'revision-1' }
     const created = await fleet.createAgentLoopV4({
-      scope, command: { type: 'create-or-bind', commandId: 'create' }, operationId: 'create', definition,
-      model: { providerId: 'codex-local', modelId: 'gpt-5' }, cwd: '/workspace',
+      scope,
+      command: { type: 'create-or-bind', commandId: 'create' },
+      operationId: 'create',
+      definition,
+      model: { providerId: 'codex-local', modelId: 'gpt-5' },
+      cwd: '/workspace',
     }) as { locator: { task: string; binding: { bindingId: string; generation: number } } }
     const request = fleet.requestAgentLoopIntroductionV4({
-      scope, command: { type: 'request-member-self-introduction', commandId: 'intro' }, operationId: 'intro',
-      task: created.locator.task, binding: created.locator.binding, definition,
-      participantId: 'participant', memberId: 'member', runId: 'run',
+      scope,
+      command: { type: 'request-member-self-introduction', commandId: 'intro' },
+      operationId: 'intro',
+      task: created.locator.task,
+      binding: created.locator.binding,
+      definition,
+      participantId: 'participant',
+      memberId: 'member',
+      runId: 'run',
     })
     await introductionObserved
-    expect(await fleet.readAgentLoopV4Lifecycle({
-      scope, task: created.locator.task, binding: created.locator.binding, definition, afterSequence: 0,
-    })).toMatchObject({ status: 'accepted', nextAfterSequence: 0, events: [] })
+    expect(
+      await fleet.readAgentLoopV4Lifecycle({
+        scope,
+        task: created.locator.task,
+        binding: created.locator.binding,
+        definition,
+        afterSequence: 0,
+      }),
+    ).toMatchObject({ status: 'accepted', nextAfterSequence: 0, events: [] })
     releaseIntroduction()
     expect(await request).toMatchObject({ status: 'accepted', delivery: 'executed' })
-    expect(await fleet.readAgentLoopV4Lifecycle({
-      scope, task: created.locator.task, binding: created.locator.binding, definition, afterSequence: 0,
-    })).toMatchObject({
+    expect(
+      await fleet.readAgentLoopV4Lifecycle({
+        scope,
+        task: created.locator.task,
+        binding: created.locator.binding,
+        definition,
+        afterSequence: 0,
+      }),
+    ).toMatchObject({
       status: 'accepted',
       events: [expect.objectContaining({
-        turnId: 'turn-introduction', type: 'turn.completed',
+        turnId: 'turn-introduction',
+        type: 'turn.completed',
         introduction: {
-          operationId: 'intro', messageId: 'cxloop-introduction:intro',
-          participantId: 'participant', memberId: 'member', runId: 'run',
+          operationId: 'intro',
+          messageId: 'cxloop-introduction:intro',
+          participantId: 'participant',
+          memberId: 'member',
+          runId: 'run',
         },
       })],
     })
@@ -450,8 +806,18 @@ describe('Provider Fleet', () => {
     const authority = await AgentLoopAuthority.open(root, 'work')
     const gates: Array<{ entered: Promise<void>; enter(): void; release: Promise<void>; resolve(): void }> = []
     const gate = () => {
-      let enter!: () => void; let resolve!: () => void
-      const value = { entered: new Promise<void>(done => { enter = done }), enter: () => enter(), release: new Promise<void>(done => { resolve = done }), resolve: () => resolve() }
+      let enter!: () => void
+      let resolve!: () => void
+      const value = {
+        entered: new Promise<void>(done => {
+          enter = done
+        }),
+        enter: () => enter(),
+        release: new Promise<void>(done => {
+          resolve = done
+        }),
+        resolve: () => resolve(),
+      }
       gates.push(value)
       return value
     }
@@ -466,8 +832,21 @@ describe('Provider Fleet', () => {
           async request<Result>(method: string): Promise<Result> {
             if (method === 'thread/start') {
               const pending = gates.shift()
-              if (pending !== undefined) { pending.enter(); await pending.release }
-              return { thread: { id: `session-${currentGeneration}`, preview: '', modelProvider: 'openai', createdAt: 1, updatedAt: 1, cwd: '/workspace', turns: [] } } as Result
+              if (pending !== undefined) {
+                pending.enter()
+                await pending.release
+              }
+              return {
+                thread: {
+                  id: `session-${currentGeneration}`,
+                  preview: '',
+                  modelProvider: 'openai',
+                  createdAt: 1,
+                  updatedAt: 1,
+                  cwd: '/workspace',
+                  turns: [],
+                },
+              } as Result
             }
             throw new Error(`unexpected ${method}`)
           },
@@ -479,8 +858,12 @@ describe('Provider Fleet', () => {
     const definition = { agentId: 'agent-1', revision: 'revision-1' }
     const firstGate = gate()
     const oldCreate = fleet.createAgentLoopV4({
-      scope, command: { type: 'create-or-bind', commandId: 'create-old' }, operationId: 'create-old', definition,
-      model: { providerId: 'codex-local', modelId: 'gpt-5' }, cwd: '/workspace',
+      scope,
+      command: { type: 'create-or-bind', commandId: 'create-old' },
+      operationId: 'create-old',
+      definition,
+      model: { providerId: 'codex-local', modelId: 'gpt-5' },
+      cwd: '/workspace',
     }) as Promise<{ status: string; locator: { task: string } }>
     await firstGate.entered
     const replacement = await fleet.reconfigure([localConfig(root)])
@@ -494,8 +877,12 @@ describe('Provider Fleet', () => {
     const nextReplacement = await fleet.reconfigure([localConfig(root)])
     const rollbackGate = gate()
     const replacementCreate = fleet.createAgentLoopV4({
-      scope, command: { type: 'create-or-bind', commandId: 'create-rollback' }, operationId: 'create-rollback', definition,
-      model: { providerId: 'codex-local', modelId: 'gpt-5' }, cwd: '/workspace',
+      scope,
+      command: { type: 'create-or-bind', commandId: 'create-rollback' },
+      operationId: 'create-rollback',
+      definition,
+      model: { providerId: 'codex-local', modelId: 'gpt-5' },
+      cwd: '/workspace',
     }) as Promise<{ status: string; locator: { task: string } }>
     await rollbackGate.entered
     const rollingBack = nextReplacement.rollback()
@@ -519,7 +906,12 @@ describe('Provider Fleet', () => {
         return {
           ...base,
           generation: `generation-alpha-${ordinal}`,
-          subscribeNotifications(listener) { notifications[index] = listener; return () => { notifications[index] = undefined } },
+          subscribeNotifications(listener) {
+            notifications[index] = listener
+            return () => {
+              notifications[index] = undefined
+            }
+          },
         }
       },
     })
@@ -530,9 +922,17 @@ describe('Provider Fleet', () => {
     if (currentNotify === undefined) throw new Error('replacement lifecycle source is unavailable')
     const session = { providerId: 'alpha', remoteSessionId: 'shared-session' }
     previousNotify('turn/completed', { threadId: session.remoteSessionId, turnId: 'old-turn', text: 'must be fenced' })
-    currentNotify('turn/completed', { threadId: session.remoteSessionId, turnId: 'new-turn', text: 'replacement reply' })
+    currentNotify('turn/completed', {
+      threadId: session.remoteSessionId,
+      turnId: 'new-turn',
+      text: 'replacement reply',
+    })
     expect(fleet.readLifecycle(session).events).toEqual([
-      expect.objectContaining({ providerGeneration: 'generation-alpha-2', turnId: 'new-turn', output: [{ type: 'text', text: 'replacement reply' }] }),
+      expect.objectContaining({
+        providerGeneration: 'generation-alpha-2',
+        turnId: 'new-turn',
+        output: [{ type: 'text', text: 'replacement reply' }],
+      }),
     ])
     await replacement.finalize()
     await fleet.close()

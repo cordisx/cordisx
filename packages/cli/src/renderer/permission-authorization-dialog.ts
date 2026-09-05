@@ -51,7 +51,10 @@ interface MountedItem {
     readonly deniedBehavior: HTMLElement
   }
   readonly authorizationLabel: HTMLElement
-  readonly options: ReadonlyMap<CordisXPermissionDecisionV2, { readonly input: TDesignElement; readonly label: HTMLElement }>
+  readonly options: ReadonlyMap<
+    CordisXPermissionDecisionV2,
+    { readonly input: TDesignElement; readonly label: HTMLElement }
+  >
   readonly denialImpact: HTMLElement
   readonly technicalSummary: HTMLElement
   readonly capabilityLabel: HTMLElement
@@ -166,7 +169,11 @@ function text(node: Node, value: string): void {
 }
 
 function focusable(root: HTMLElement): readonly HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), summary, [tabindex]:not([tabindex="-1"])')]
+  return [
+    ...root.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), input:not(:disabled), summary, [tabindex]:not([tabindex="-1"])',
+    ),
+  ]
     .filter(node => !node.hidden)
 }
 
@@ -240,9 +247,10 @@ export class BrowserPermissionAuthorizationDialog {
     if (this.disposed) return Promise.resolve(Object.freeze({ status: 'cancelled' }))
     return new Promise(resolve => {
       const HTMLElementConstructor = this.document.defaultView?.HTMLElement
-      const previousFocus = HTMLElementConstructor !== undefined && this.document.activeElement instanceof HTMLElementConstructor
-        ? this.document.activeElement as HTMLElement
-        : undefined
+      const previousFocus =
+        HTMLElementConstructor !== undefined && this.document.activeElement instanceof HTMLElementConstructor
+          ? this.document.activeElement as HTMLElement
+          : undefined
       const initial = viewModel.project(request.project())
       const overlay = element(this.document, 'div', 'cxp-overlay cxf-scope')
       const forms = new HostFormAdapter(this.document, overlay, () => this.document.documentElement.lang || 'zh-CN')
@@ -337,8 +345,16 @@ export class BrowserPermissionAuthorizationDialog {
         if (finished) return
         const projection = viewModel.project(request.project())
         this.patch(initial, projection, {
-          heading, pluginName, sourceLabel, sourceValue, trustLabel, trustValue,
-          mounted, manage, cancel, confirm,
+          heading,
+          pluginName,
+          sourceLabel,
+          sourceValue,
+          trustLabel,
+          trustValue,
+          mounted,
+          manage,
+          cancel,
+          confirm,
         })
       })
       this.document.body.append(overlay)
@@ -358,7 +374,8 @@ export class BrowserPermissionAuthorizationDialog {
     const name = element(this.document, 'h3', undefined, projected.name)
     const requirement = element(this.document, 'span', 'cxp-badge', projected.requirement)
     const sensitivity = element(this.document, 'span', 'cxp-badge', projected.sensitivity)
-    sensitivity.dataset.risk = viewModel.plan.declarations.find(item => item.capability === projected.capability)!.sensitivity
+    sensitivity.dataset.risk =
+      viewModel.plan.declarations.find(item => item.capability === projected.capability)!.sensitivity
     const reviewMode = element(this.document, 'span', 'cxp-badge', projected.reviewModeLabel)
     reviewMode.dataset.permissionReviewMode = projected.reviewMode
     heading.append(name, requirement, sensitivity, reviewMode)
@@ -406,7 +423,9 @@ export class BrowserPermissionAuthorizationDialog {
         name: `cxp-${viewModel.plan.planId}-${projected.capability}`,
         value: option.value,
         checked: option.selected,
-        onChange: (checked: boolean) => { if (checked) choose() },
+        onChange: (checked: boolean) => {
+          if (checked) choose()
+        },
       })
       input.addEventListener('click', choose)
       optionLabel.addEventListener('click', event => {
@@ -432,7 +451,17 @@ export class BrowserPermissionAuthorizationDialog {
       root,
       mounted: {
         capability: projected.capability,
-        name, requirement, sensitivity, reviewMode, descriptionLabel, description, risk, limitationLabel, limitation, scopeLabel, scope,
+        name,
+        requirement,
+        sensitivity,
+        reviewMode,
+        descriptionLabel,
+        description,
+        risk,
+        limitationLabel,
+        limitation,
+        scopeLabel,
+        scope,
         ...(availability === undefined ? {} : { availability }),
         ...(rationale === undefined ? {} : { rationale: rationale.mounted }),
         authorizationLabel,
@@ -464,9 +493,20 @@ export class BrowserPermissionAuthorizationDialog {
 
   private mountTechnical(projected: PermissionAuthorizationItemProjection): {
     readonly root: HTMLDetailsElement
-    readonly mounted: Pick<MountedItem,
-      'technicalSummary' | 'capabilityLabel' | 'capabilityValue' | 'providersLabel' | 'providersValue'
-      | 'runtimeLabel' | 'runtimeValue' | 'moduleLabel' | 'moduleValue' | 'requestLabel' | 'requestValue'>
+    readonly mounted: Pick<
+      MountedItem,
+      | 'technicalSummary'
+      | 'capabilityLabel'
+      | 'capabilityValue'
+      | 'providersLabel'
+      | 'providersValue'
+      | 'runtimeLabel'
+      | 'runtimeValue'
+      | 'moduleLabel'
+      | 'moduleValue'
+      | 'requestLabel'
+      | 'requestValue'
+    >
   } {
     const value = projected.technical
     const root = element(this.document, 'details', 'cxp-technical')
@@ -483,15 +523,32 @@ export class BrowserPermissionAuthorizationDialog {
     const requestLabel = element(this.document, 'dt', undefined, value.requestSourceLabel)
     const requestValue = element(this.document, 'dd', undefined, value.requestSource ?? '—')
     facts.append(
-      capabilityLabel, capabilityValue, providersLabel, providersValue, runtimeLabel, runtimeValue,
-      moduleLabel, moduleValue, requestLabel, requestValue,
+      capabilityLabel,
+      capabilityValue,
+      providersLabel,
+      providersValue,
+      runtimeLabel,
+      runtimeValue,
+      moduleLabel,
+      moduleValue,
+      requestLabel,
+      requestValue,
     )
     root.append(technicalSummary, facts)
     return {
       root,
       mounted: {
-        technicalSummary, capabilityLabel, capabilityValue, providersLabel, providersValue,
-        runtimeLabel, runtimeValue, moduleLabel, moduleValue, requestLabel, requestValue,
+        technicalSummary,
+        capabilityLabel,
+        capabilityValue,
+        providersLabel,
+        providersValue,
+        runtimeLabel,
+        runtimeValue,
+        moduleLabel,
+        moduleValue,
+        requestLabel,
+        requestValue,
       },
     }
   }
@@ -512,7 +569,9 @@ export class BrowserPermissionAuthorizationDialog {
       readonly confirm: TDesignButtonElement
     },
   ): void {
-    if (previous.items.length !== next.items.length) throw new Error('locale projection changed the permission plan shape')
+    if (previous.items.length !== next.items.length) {
+      throw new Error('locale projection changed the permission plan shape')
+    }
     text(mounted.heading, next.heading)
     text(mounted.pluginName, next.plugin.name)
     text(mounted.sourceLabel, next.plugin.sourceLabel)
@@ -559,7 +618,9 @@ export class BrowserPermissionAuthorizationDialog {
         mountedOption.input.update?.()
       }
       text(item.denialImpact, projected.denialImpact)
-      item.denialImpact.hidden = !projected.authorizationOptions.find(option => option.selected)?.value.startsWith('deny')
+      item.denialImpact.hidden = !projected.authorizationOptions.find(option => option.selected)?.value.startsWith(
+        'deny',
+      )
       text(item.technicalSummary, projected.technical.label)
       text(item.capabilityLabel, projected.technical.capabilityIdLabel)
       text(item.capabilityValue, projected.technical.capabilityId)

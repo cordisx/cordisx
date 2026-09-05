@@ -1,13 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { chmod, lstat, mkdir, open, readFile, readdir, rename, unlink } from 'node:fs/promises'
+import { chmod, lstat, mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import type { CordisXPluginActivationRecordV1 } from '../../plugin-lifecycle-contracts.js'
-import {
-  PluginActivationStore,
-  pluginDependentClosure,
-  topologicalPluginOrder,
-} from '../plugin-activation.js'
+import { PluginActivationStore, pluginDependentClosure, topologicalPluginOrder } from '../plugin-activation.js'
 import {
   loadStagedPluginPackage,
   removeStagedPluginPackage,
@@ -30,7 +26,16 @@ import type {
 import { PackageLifecycleError } from './types.js'
 
 type Operation = 'install' | 'update' | 'enable' | 'disable' | 'uninstall'
-type Status = 'permission-review' | 'ready' | 'activation-requested' | 'readiness-confirmed' | 'committed' | 'completed' | 'rollback-pending' | 'aborted' | 'recovered-aborted'
+type Status =
+  | 'permission-review'
+  | 'ready'
+  | 'activation-requested'
+  | 'readiness-confirmed'
+  | 'committed'
+  | 'completed'
+  | 'rollback-pending'
+  | 'aborted'
+  | 'recovered-aborted'
 
 export interface CandidateAccess {
   readonly ownerId: string
@@ -288,7 +293,10 @@ function observation(record: CordisXPluginActivationRecordV1, registryEpoch: num
   }
 }
 
-function changedIds(expected: CordisXPluginActivationRecordV1, after: CordisXPluginActivationRecordV1): readonly string[] {
+function changedIds(
+  expected: CordisXPluginActivationRecordV1,
+  after: CordisXPluginActivationRecordV1,
+): readonly string[] {
   const prior = new Map(expected.plugins.map(plugin => [plugin.id, plugin]))
   const next = new Map(after.plugins.map(plugin => [plugin.id, plugin]))
   return [...new Set([...prior.keys(), ...next.keys()])].filter((id) => {
@@ -304,10 +312,12 @@ function computeImpact(expected: CordisXPluginActivationRecordV1, after: CordisX
   readonly drainOrder: readonly string[]
 } {
   const changed = changedIds(expected, after)
-  const affected = [...new Set(changed.flatMap(id => [
-    ...pluginDependentClosure(expected.plugins, id),
-    ...pluginDependentClosure(after.plugins, id),
-  ]))].sort()
+  const affected = [
+    ...new Set(changed.flatMap(id => [
+      ...pluginDependentClosure(expected.plugins, id),
+      ...pluginDependentClosure(after.plugins, id),
+    ])),
+  ].sort()
   return {
     affected,
     activationOrder: topologicalPluginOrder(after.plugins).filter(id => affected.includes(id)),
@@ -315,10 +325,15 @@ function computeImpact(expected: CordisXPluginActivationRecordV1, after: CordisX
   }
 }
 
-function targetIdentity(expected: CordisXPluginActivationRecordV1, after: CordisXPluginActivationRecordV1): PackageIdentity {
+function targetIdentity(
+  expected: CordisXPluginActivationRecordV1,
+  after: CordisXPluginActivationRecordV1,
+): PackageIdentity {
   const id = changedIds(expected, after)[0]
   const item = after.plugins.find(plugin => plugin.id === id) ?? expected.plugins.find(plugin => plugin.id === id)
-  if (id === undefined || item === undefined) throw new PackageLifecycleError('empty-candidate', 'candidate changes no plugin package')
+  if (id === undefined || item === undefined) {
+    throw new PackageLifecycleError('empty-candidate', 'candidate changes no plugin package')
+  }
   return { pluginId: item.id, version: item.version, integrity: item.digest }
 }
 
@@ -347,7 +362,9 @@ class AuthorityJournal {
 
   async read(): Promise<JournalState> {
     const metadata = await lstat(this.#file)
-    if (!metadata.isFile() || metadata.isSymbolicLink()) throw new PackageLifecycleError('invalid-journal', 'authority journal must be a regular file')
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      throw new PackageLifecycleError('invalid-journal', 'authority journal must be a regular file')
+    }
     const state = JSON.parse(await readFile(this.#file, 'utf8')) as JournalState
     if (state.contract !== 'cordisx.launcher-package-authority/v1' || !Number.isInteger(state.revision)) {
       throw new PackageLifecycleError('invalid-journal', 'authority journal contract is invalid')
@@ -355,12 +372,17 @@ class AuthorityJournal {
     return state
   }
 
-  async update(mutate: (draft: { revision: number; transactions: Record<string, JournalTransaction> }) => void): Promise<JournalState> {
+  async update(
+    mutate: (draft: { revision: number; transactions: Record<string, JournalTransaction> }) => void,
+  ): Promise<JournalState> {
     let result!: JournalState
     const previous = this.#tail.catch(() => undefined)
     const operation = previous.then(async () => {
       const current = await this.read()
-      const draft = structuredClone(current) as unknown as { revision: number; transactions: Record<string, JournalTransaction> }
+      const draft = structuredClone(current) as unknown as {
+        revision: number
+        transactions: Record<string, JournalTransaction>
+      }
       mutate(draft)
       draft.revision = current.revision + 1
       result = { contract: current.contract, revision: draft.revision, transactions: draft.transactions }
@@ -404,7 +426,9 @@ export class PackageLifecycleAuthority {
   }
 
   static async open(options: PackageLifecycleAuthorityOptions): Promise<PackageLifecycleAuthority> {
-    const journal = new AuthorityJournal(path.join(options.homeDir, 'state', 'profiles', options.profileId, 'package-authority'))
+    const journal = new AuthorityJournal(
+      path.join(options.homeDir, 'state', 'profiles', options.profileId, 'package-authority'),
+    )
     await journal.open()
     return new PackageLifecycleAuthority(options, journal)
   }
@@ -420,7 +444,10 @@ export class PackageLifecycleAuthority {
   }): Promise<PreparedCandidate> {
     const state = await this.#journal.read()
     if (Object.values(state.transactions).some(item => item.status === 'rollback-pending')) {
-      throw new PackageLifecycleError('rollback-pending', 'a rollback must complete before starting another package transaction')
+      throw new PackageLifecycleError(
+        'rollback-pending',
+        'a rollback must complete before starting another package transaction',
+      )
     }
     const [expected, after] = await Promise.all([
       this.activation.loadActive(),
@@ -447,9 +474,14 @@ export class PackageLifecycleAuthority {
       permissionPlanFingerprint: input.permissionPlanFingerprint,
     }
     const receipt = await this.options.permissionAuthority.review(reviewInput)
-    if (!permissionReceipts.has(receipt) || receipt.inputFingerprint !== fingerprint(reviewInput)
-      || receipt.planRevision !== input.permissionPlanRevision) {
-      throw new PackageLifecycleError('untrusted-permission-review', 'permission review was not issued for this candidate fence')
+    if (
+      !permissionReceipts.has(receipt) || receipt.inputFingerprint !== fingerprint(reviewInput)
+      || receipt.planRevision !== input.permissionPlanRevision
+    ) {
+      throw new PackageLifecycleError(
+        'untrusted-permission-review',
+        'permission review was not issued for this candidate fence',
+      )
     }
     const transaction: JournalTransaction = {
       transactionId: input.candidateId,
@@ -481,7 +513,9 @@ export class PackageLifecycleAuthority {
         oneShotGrantIds: receipt.oneShotGrantIds,
       },
     }
-    await this.#journal.update(draft => { draft.transactions[input.candidateId] = transaction })
+    await this.#journal.update(draft => {
+      draft.transactions[input.candidateId] = transaction
+    })
     return {
       transactionId: input.candidateId,
       candidateFingerprint,
@@ -500,10 +534,16 @@ export class PackageLifecycleAuthority {
     return this.#plan(transaction, current, boundary)
   }
 
-  async resolveImpact(access: ImpactAccess, boundary: PackageResolutionBoundary): Promise<Pick<PackageCandidatePlan,
-  'transactionId' | 'boundary' | 'affectedPluginIds' | 'activationOrder' | 'drainOrder'>> {
+  async resolveImpact(
+    access: ImpactAccess,
+    boundary: PackageResolutionBoundary,
+  ): Promise<
+    Pick<PackageCandidatePlan, 'transactionId' | 'boundary' | 'affectedPluginIds' | 'activationOrder' | 'drainOrder'>
+  > {
     const state = await this.#journal.read()
-    const transaction = Object.values(state.transactions).find(item => item.impactTokenHash === tokenHash(access.impactToken))
+    const transaction = Object.values(state.transactions).find(item =>
+      item.impactTokenHash === tokenHash(access.impactToken)
+    )
     if (transaction === undefined) throw new PackageLifecycleError('impact-token-invalid', 'impact token is invalid')
     this.#access(transaction, access.ownerId, access.profileId)
     const current = await this.activation.loadActive()
@@ -517,9 +557,15 @@ export class PackageLifecycleAuthority {
     }
   }
 
-  async resolveRuntimeModule(access: CandidateAccess, boundary: PackageResolutionBoundary, pluginId: string): Promise<RuntimeModuleAccess> {
+  async resolveRuntimeModule(
+    access: CandidateAccess,
+    boundary: PackageResolutionBoundary,
+    pluginId: string,
+  ): Promise<RuntimeModuleAccess> {
     const plan = await this.resolveCandidate(access, boundary)
-    if (!plan.affectedPluginIds.includes(pluginId)) throw new PackageLifecycleError('plugin-outside-closure', `${pluginId} is outside the Host closure`)
+    if (!plan.affectedPluginIds.includes(pluginId)) {
+      throw new PackageLifecycleError('plugin-outside-closure', `${pluginId} is outside the Host closure`)
+    }
     const item = plan.after.plugins.find(plugin => plugin.id === pluginId)
     if (item === undefined) throw new PackageLifecycleError('package-removed', `${pluginId} has no candidate artifact`)
     await loadStagedPluginPackage(this.options.homeDir, item.digest)
@@ -545,7 +591,9 @@ export class PackageLifecycleAuthority {
     if (item === undefined) throw new PackageLifecycleError('package-removed', `${pluginId} has no candidate artifact`)
     const staged = await loadStagedPluginPackage(this.options.homeDir, item.digest)
     const service = staged.serviceModules.find(module => module.declaration.id === serviceId)
-    if (service === undefined) throw new PackageLifecycleError('service-not-found', `${pluginId}:${serviceId} is not a staged service`)
+    if (service === undefined) {
+      throw new PackageLifecycleError('service-not-found', `${pluginId}:${serviceId} is not a staged service`)
+    }
     const servicePath = stagedPluginServiceModulePath(this.options.homeDir, item.digest, serviceId)
     return {
       packageIdentity: { pluginId: item.id, version: item.version, integrity: item.digest },
@@ -566,7 +614,9 @@ export class PackageLifecycleAuthority {
     const transaction = await this.#candidate(access)
     const current = await this.activation.loadActive()
     this.#validate(transaction, current, 'stage')
-    if (transaction.status !== 'ready') throw new PackageLifecycleError('permission-review-required', 'required permissions are unresolved or denied')
+    if (transaction.status !== 'ready') {
+      throw new PackageLifecycleError('permission-review-required', 'required permissions are unresolved or denied')
+    }
     await this.#setStatus(transaction.transactionId, 'activation-requested')
     return this.#plan({ ...transaction, status: 'activation-requested' }, current, 'stage')
   }
@@ -575,21 +625,24 @@ export class PackageLifecycleAuthority {
     const transaction = await this.#candidate(access)
     const current = await this.activation.loadActive()
     this.#validate(transaction, current, 'publish')
-    if (transaction.status !== 'activation-requested' || !readinessReceipts.has(receipt)
+    if (
+      transaction.status !== 'activation-requested' || !readinessReceipts.has(receipt)
       || receipt.receiptFingerprint !== fingerprint({
-        transactionId: receipt.transactionId,
-        transactionEpoch: receipt.transactionEpoch,
-        candidateFingerprint: receipt.candidateFingerprint,
-        expectedRegistryEpoch: receipt.expectedRegistryEpoch,
-        afterRegistryEpoch: receipt.afterRegistryEpoch,
-        observation: receipt.observation,
-      })
+          transactionId: receipt.transactionId,
+          transactionEpoch: receipt.transactionEpoch,
+          candidateFingerprint: receipt.candidateFingerprint,
+          expectedRegistryEpoch: receipt.expectedRegistryEpoch,
+          afterRegistryEpoch: receipt.afterRegistryEpoch,
+          observation: receipt.observation,
+        })
       || receipt.transactionId !== transaction.transactionId
       || receipt.transactionEpoch !== transaction.transactionEpoch
       || receipt.candidateFingerprint !== transaction.candidateFingerprint
       || receipt.expectedRegistryEpoch !== transaction.expectedRegistryEpoch
       || receipt.afterRegistryEpoch !== transaction.afterRegistryEpoch
-      || fingerprint(receipt.observation) !== fingerprint(observation(transaction.after, transaction.afterRegistryEpoch))) {
+      || fingerprint(receipt.observation)
+        !== fingerprint(observation(transaction.after, transaction.afterRegistryEpoch))
+    ) {
       throw new PackageLifecycleError('stale-readiness-receipt', 'shared registry readiness receipt is forged or stale')
     }
     await this.#setStatus(transaction.transactionId, 'readiness-confirmed')
@@ -599,7 +652,9 @@ export class PackageLifecycleAuthority {
     const transaction = await this.#candidate(access)
     const current = await this.activation.loadActive()
     this.#validate(transaction, current, 'publish')
-    if (transaction.status !== 'readiness-confirmed') throw new PackageLifecycleError('readiness-required', 'closure readiness is not confirmed')
+    if (transaction.status !== 'readiness-confirmed') {
+      throw new PackageLifecycleError('readiness-required', 'closure readiness is not confirmed')
+    }
     const committed = await this.activation.commitCandidate(transaction.transactionId)
     await this.#setStatus(transaction.transactionId, 'committed')
     return committed
@@ -607,7 +662,9 @@ export class PackageLifecycleAuthority {
 
   async completeCommit(access: CandidateAccess, receipt: SharedRegistryCommitReceipt): Promise<void> {
     const transaction = await this.#candidate(access)
-    if (transaction.status !== 'committed') throw new PackageLifecycleError('commit-not-pending', `transaction is ${transaction.status}`)
+    if (transaction.status !== 'committed') {
+      throw new PackageLifecycleError('commit-not-pending', `transaction is ${transaction.status}`)
+    }
     const expectedInput = {
       transactionId: receipt.transactionId,
       transactionEpoch: receipt.transactionEpoch,
@@ -616,23 +673,31 @@ export class PackageLifecycleAuthority {
       active: receipt.active,
       disposedAfter: receipt.disposedAfter,
     }
-    if (!commitReceipts.has(receipt) || receipt.receiptFingerprint !== fingerprint(expectedInput)
+    if (
+      !commitReceipts.has(receipt) || receipt.receiptFingerprint !== fingerprint(expectedInput)
       || receipt.transactionId !== transaction.transactionId
       || receipt.transactionEpoch !== transaction.transactionEpoch
       || receipt.candidateFingerprint !== transaction.candidateFingerprint
       || receipt.registryEpoch !== transaction.afterRegistryEpoch
       || fingerprint(receipt.active) !== fingerprint(observation(transaction.after, transaction.afterRegistryEpoch))
-      || fingerprint(receipt.disposedAfter) !== fingerprint(observation(transaction.expected, transaction.expectedRegistryEpoch))) {
+      || fingerprint(receipt.disposedAfter)
+        !== fingerprint(observation(transaction.expected, transaction.expectedRegistryEpoch))
+    ) {
       throw new PackageLifecycleError('stale-commit-receipt', 'commit-last-good receipt is forged or stale')
     }
     const active = await this.activation.loadActive()
     if (fingerprint(active.plugins) !== fingerprint(transaction.after.plugins)) {
-      throw new PackageLifecycleError('commit-active-mismatch', 'durable active closure differs from committed registry closure')
+      throw new PackageLifecycleError(
+        'commit-active-mismatch',
+        'durable active closure differs from committed registry closure',
+      )
     }
     const journal = await this.#journal.read()
     const retiredGrantIds = Object.values(journal.transactions)
-      .filter(item => item.transactionId !== transaction.transactionId && item.status === 'completed'
-        && item.after.plugins.some(plugin => transaction.affectedPluginIds.includes(plugin.id)))
+      .filter(item =>
+        item.transactionId !== transaction.transactionId && item.status === 'completed'
+        && item.after.plugins.some(plugin => transaction.affectedPluginIds.includes(plugin.id))
+      )
       .flatMap(item => item.permission.oneShotGrantIds)
     await this.#setStatus(transaction.transactionId, 'completed')
     await this.activation.releaseLastGood(transaction.expected.revision)
@@ -641,9 +706,14 @@ export class PackageLifecycleAuthority {
 
   async abort(access: CandidateAccess, failureCode: string): Promise<void> {
     const transaction = await this.#candidate(access)
-    if (transaction.status === 'activation-requested' || transaction.status === 'readiness-confirmed'
-      || transaction.status === 'committed' || transaction.status === 'rollback-pending') {
-      throw new PackageLifecycleError('rollback-required', 'published or potentially published closure requires rollback')
+    if (
+      transaction.status === 'activation-requested' || transaction.status === 'readiness-confirmed'
+      || transaction.status === 'committed' || transaction.status === 'rollback-pending'
+    ) {
+      throw new PackageLifecycleError(
+        'rollback-required',
+        'published or potentially published closure requires rollback',
+      )
     }
     await this.activation.abortCandidate(transaction.transactionId)
     await this.#setStatus(transaction.transactionId, 'aborted', failureCode)
@@ -652,7 +722,10 @@ export class PackageLifecycleAuthority {
 
   async beginRollback(access: CandidateAccess, failureCode: string): Promise<RollbackPlan> {
     const transaction = await this.#candidate(access)
-    if (transaction.status !== 'activation-requested' && transaction.status !== 'readiness-confirmed' && transaction.status !== 'committed') {
+    if (
+      transaction.status !== 'activation-requested' && transaction.status !== 'readiness-confirmed'
+      && transaction.status !== 'committed'
+    ) {
       throw new PackageLifecycleError('rollback-not-required', `transaction is ${transaction.status}`)
     }
     const rollbackToken = `rollback:${randomUUID()}` as PackageRollbackToken
@@ -668,7 +741,10 @@ export class PackageLifecycleAuthority {
     return this.#rollbackPlan(transaction, rollbackToken)
   }
 
-  async completeRollback(access: RollbackAccess, receipt: SharedRegistryRollbackReceipt): Promise<CordisXPluginActivationRecordV1> {
+  async completeRollback(
+    access: RollbackAccess,
+    receipt: SharedRegistryRollbackReceipt,
+  ): Promise<CordisXPluginActivationRecordV1> {
     const transaction = await this.#rollbackTransaction(access)
     const expectedInput = {
       transactionId: receipt.transactionId,
@@ -678,13 +754,16 @@ export class PackageLifecycleAuthority {
       active: receipt.active,
       disposedAfter: receipt.disposedAfter,
     }
-    if (!rollbackReceipts.has(receipt) || receipt.receiptFingerprint !== fingerprint(expectedInput)
+    if (
+      !rollbackReceipts.has(receipt) || receipt.receiptFingerprint !== fingerprint(expectedInput)
       || receipt.transactionId !== transaction.transactionId
       || receipt.transactionEpoch !== transaction.transactionEpoch
       || receipt.candidateFingerprint !== transaction.candidateFingerprint
       || receipt.registryEpoch !== transaction.afterRegistryEpoch + 1
       || fingerprint(receipt.active) !== fingerprint(observation(transaction.expected, receipt.registryEpoch))
-      || fingerprint(receipt.disposedAfter) !== fingerprint(observation(transaction.after, transaction.afterRegistryEpoch))) {
+      || fingerprint(receipt.disposedAfter)
+        !== fingerprint(observation(transaction.after, transaction.afterRegistryEpoch))
+    ) {
       throw new PackageLifecycleError('stale-rollback-receipt', 'rollback completion receipt is forged or stale')
     }
     const current = await this.activation.loadActive()
@@ -711,8 +790,10 @@ export class PackageLifecycleAuthority {
     const directives: RecoveryDirective[] = []
     for (const transaction of Object.values(state.transactions)) {
       if (terminal(transaction.status)) continue
-      if (transaction.status === 'activation-requested' || transaction.status === 'readiness-confirmed'
-        || transaction.status === 'committed' || transaction.status === 'rollback-pending') {
+      if (
+        transaction.status === 'activation-requested' || transaction.status === 'readiness-confirmed'
+        || transaction.status === 'committed' || transaction.status === 'rollback-pending'
+      ) {
         const rollbackToken = `rollback:${randomUUID()}` as PackageRollbackToken
         directives.push({ transactionId: transaction.transactionId, action: 'rollback-published', rollbackToken })
         await this.#journal.update(draft => {
@@ -735,7 +816,11 @@ export class PackageLifecycleAuthority {
 
   async releaseLastGood(revision: number): Promise<void> {
     const state = await this.#journal.read()
-    if (Object.values(state.transactions).some(item => item.status === 'rollback-pending' && item.expected.revision === revision)) {
+    if (
+      Object.values(state.transactions).some(item =>
+        item.status === 'rollback-pending' && item.expected.revision === revision
+      )
+    ) {
       throw new PackageLifecycleError('rollback-lease-active', 'last-good is pinned by rollback-pending')
     }
     await this.activation.releaseLastGood(revision)
@@ -750,9 +835,15 @@ export class PackageLifecycleAuthority {
       this.activation.listCandidates(),
       this.activation.listLastGood(),
     ])
-    const referenced = new Set([...active.plugins, ...candidates.flatMap(item => item.plugins), ...histories.flatMap(item => item.plugins)].map(item => item.digest))
+    const referenced = new Set(
+      [...active.plugins, ...candidates.flatMap(item => item.plugins), ...histories.flatMap(item => item.plugins)].map(
+        item => item.digest,
+      ),
+    )
     for (const item of Object.values(journal.transactions)) {
-      if (!terminal(item.status)) for (const plugin of [...item.expected.plugins, ...item.after.plugins]) referenced.add(plugin.digest)
+      if (!terminal(item.status)) {
+        for (const plugin of [...item.expected.plugins, ...item.after.plugins]) referenced.add(plugin.digest)
+      }
     }
     const root = path.join(this.options.homeDir, 'packages', 'sha256')
     const entries = await readdir(root, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
@@ -772,7 +863,11 @@ export class PackageLifecycleAuthority {
     return removed.sort()
   }
 
-  #plan(transaction: JournalTransaction, current: CordisXPluginActivationRecordV1, boundary: PackageResolutionBoundary): PackageCandidatePlan {
+  #plan(
+    transaction: JournalTransaction,
+    current: CordisXPluginActivationRecordV1,
+    boundary: PackageResolutionBoundary,
+  ): PackageCandidatePlan {
     return deepFreeze({
       transactionId: transaction.transactionId,
       transactionEpoch: transaction.transactionEpoch,
@@ -806,8 +901,12 @@ export class PackageLifecycleAuthority {
 
   async #candidate(access: CandidateAccess): Promise<JournalTransaction> {
     const state = await this.#journal.read()
-    const transaction = Object.values(state.transactions).find(item => item.candidateTokenHash === tokenHash(access.candidateToken))
-    if (transaction === undefined) throw new PackageLifecycleError('candidate-token-invalid', 'candidate token is invalid')
+    const transaction = Object.values(state.transactions).find(item =>
+      item.candidateTokenHash === tokenHash(access.candidateToken)
+    )
+    if (transaction === undefined) {
+      throw new PackageLifecycleError('candidate-token-invalid', 'candidate token is invalid')
+    }
     this.#access(transaction, access.ownerId, access.profileId)
     if (transaction.permission.reviewTokenHash !== tokenHash(access.permissionReviewToken ?? '')) {
       throw new PackageLifecycleError('permission-review-token-invalid', 'permission review token is missing or stale')
@@ -832,33 +931,56 @@ export class PackageLifecycleAuthority {
     }
   }
 
-  #validate(transaction: JournalTransaction, current: CordisXPluginActivationRecordV1, boundary: PackageResolutionBoundary): void {
-    if (!transaction.permission.requiredSatisfied) throw new PackageLifecycleError('permission-review-required', 'required permissions are unresolved or denied')
+  #validate(
+    transaction: JournalTransaction,
+    current: CordisXPluginActivationRecordV1,
+    boundary: PackageResolutionBoundary,
+  ): void {
+    if (!transaction.permission.requiredSatisfied) {
+      throw new PackageLifecycleError('permission-review-required', 'required permissions are unresolved or denied')
+    }
     const allowed: Record<PackageResolutionBoundary, readonly Status[]> = {
       plan: ['ready', 'permission-review'],
       stage: ['ready', 'activation-requested'],
       publish: ['activation-requested', 'readiness-confirmed'],
       rollback: ['activation-requested', 'readiness-confirmed', 'committed', 'rollback-pending'],
     }
-    if (!allowed[boundary].includes(transaction.status)) throw new PackageLifecycleError('invalid-boundary', `${boundary} cannot resolve ${transaction.status}`)
+    if (!allowed[boundary].includes(transaction.status)) {
+      throw new PackageLifecycleError('invalid-boundary', `${boundary} cannot resolve ${transaction.status}`)
+    }
     const currentMatchesExpected = fingerprint(current) === fingerprint(transaction.expected)
     const currentMatchesAfter = fingerprint(current.plugins) === fingerprint(transaction.after.plugins)
       && current.runtimeGeneration === transaction.after.runtimeGeneration
-    if (boundary !== 'rollback' && !currentMatchesExpected) throw new PackageLifecycleError('stale-generation-fence', 'activation revision/runtime/module/package tuple changed')
-    if (boundary === 'rollback' && !currentMatchesExpected && !currentMatchesAfter) throw new PackageLifecycleError('stale-generation-fence', 'rollback active tuple is stale')
+    if (boundary !== 'rollback' && !currentMatchesExpected) {
+      throw new PackageLifecycleError(
+        'stale-generation-fence',
+        'activation revision/runtime/module/package tuple changed',
+      )
+    }
+    if (boundary === 'rollback' && !currentMatchesExpected && !currentMatchesAfter) {
+      throw new PackageLifecycleError('stale-generation-fence', 'rollback active tuple is stale')
+    }
     const impact = computeImpact(transaction.expected, transaction.after)
-    if (fingerprint(impact) !== fingerprint({
-      affected: transaction.affectedPluginIds,
-      activationOrder: transaction.activationOrder,
-      drainOrder: transaction.drainOrder,
-    })) throw new PackageLifecycleError('stale-impact', 'Host-computed dependency closure changed')
+    if (
+      fingerprint(impact) !== fingerprint({
+        affected: transaction.affectedPluginIds,
+        activationOrder: transaction.activationOrder,
+        drainOrder: transaction.drainOrder,
+      })
+    ) throw new PackageLifecycleError('stale-impact', 'Host-computed dependency closure changed')
   }
 
   async #setStatus(transactionId: string, status: Status, failureCode?: string): Promise<void> {
     await this.#journal.update(draft => {
       const transaction = draft.transactions[transactionId]
-      if (transaction === undefined) throw new PackageLifecycleError('transaction-missing', 'package transaction is missing')
-      draft.transactions[transactionId] = { ...transaction, status, ...(failureCode === undefined ? {} : { failureCode }) }
+      if (transaction === undefined) {
+        throw new PackageLifecycleError('transaction-missing', 'package transaction is missing')
+      }
+      draft.transactions[transactionId] = {
+        ...transaction,
+        status,
+        ...(failureCode === undefined ? {} : { failureCode }),
+      }
     })
   }
 }

@@ -33,14 +33,30 @@ export interface TraceOverviewSpan {
 }
 
 export const EMPTY_FILTERS: TraceFilters = Object.freeze({
-  search: '', lane: 'all', truth: 'all', origin: 'all', source: 'all', type: 'all', phase: 'all',
+  search: '',
+  lane: 'all',
+  truth: 'all',
+  origin: 'all',
+  source: 'all',
+  type: 'all',
+  phase: 'all',
 })
 
 function searchable(event: TraceEvent): string {
   return [
-    event.id, event.type, event.semanticType, event.summary, event.truth, event.origin, event.phase,
-    event.source.id, event.source.label, event.plugin?.id, event.plugin?.source,
-    event.permission?.capability, JSON.stringify(event.payload ?? {}),
+    event.id,
+    event.type,
+    event.semanticType,
+    event.summary,
+    event.truth,
+    event.origin,
+    event.phase,
+    event.source.id,
+    event.source.label,
+    event.plugin?.id,
+    event.plugin?.source,
+    event.permission?.capability,
+    JSON.stringify(event.payload ?? {}),
   ].filter(Boolean).join('\n').toLocaleLowerCase()
 }
 
@@ -58,9 +74,11 @@ export function filterTraceEvents(events: readonly TraceEvent[], filters: TraceF
 }
 
 export function orderTraceEvents(events: readonly TraceEvent[], order: TraceOrder): readonly TraceEvent[] {
-  return [...events].sort(order === 'sequence'
-    ? (left, right) => left.seq - right.seq
-    : (left, right) => Date.parse(left.recordedAt) - Date.parse(right.recordedAt) || left.seq - right.seq)
+  return [...events].sort(
+    order === 'sequence'
+      ? (left, right) => left.seq - right.seq
+      : (left, right) => Date.parse(left.recordedAt) - Date.parse(right.recordedAt) || left.seq - right.seq,
+  )
 }
 
 export function groupTraceEvents(events: readonly TraceEvent[]): readonly TraceTurnGroup[] {

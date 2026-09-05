@@ -24,9 +24,11 @@ export function resolveHostManagerAgentDefinitionOpenRequest(
 ): HostManagerContentOpenRequest | undefined {
   if (target?.parent === undefined) return undefined
   const parent = target.parent
-  const candidates = items.filter(item => item.owner === target.owner
+  const candidates = items.filter(item =>
+    item.owner === target.owner
     && !item.disabled
-    && sameRouteReference(item.route, parent))
+    && sameRouteReference(item.route, parent)
+  )
   if (candidates.length !== 1) return undefined
   const candidate = candidates[0]
   if (candidate === undefined) return undefined
@@ -44,7 +46,9 @@ export class HostManagerNavigationController {
   bind(listener: (request: HostManagerContentOpenRequest) => void): () => void {
     if (this.listener !== undefined) throw new Error('CordisX Manager navigation controller is already bound')
     this.listener = listener
-    return () => { if (this.listener === listener) this.listener = undefined }
+    return () => {
+      if (this.listener === listener) this.listener = undefined
+    }
   }
 
   openManagerContent(request: HostManagerContentOpenRequest): void {

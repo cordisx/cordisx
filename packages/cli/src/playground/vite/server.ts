@@ -61,11 +61,12 @@ export async function startVitePlayground(options: VitePlaygroundOptions): Promi
   const runtimeImport = `/@fs/${runtimePath}`
   const previewResetInstanceId = randomUUID()
   let previewResetGeneration = 0
-  const previewResetState = () => Object.freeze({
-    version: 1 as const,
-    instanceId: previewResetInstanceId,
-    generation: previewResetGeneration,
-  })
+  const previewResetState = () =>
+    Object.freeze({
+      version: 1 as const,
+      instanceId: previewResetInstanceId,
+      generation: previewResetGeneration,
+    })
 
   const compositionPlugin: Plugin = {
     name: 'cordisx-playground-composition',

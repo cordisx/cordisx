@@ -7,10 +7,7 @@ import {
   CORDISX_PLUGIN_PACKAGE_SCHEMA_V7,
   CORDISX_PLUGIN_PACKAGE_SCHEMA_V8,
 } from '../packages/cli/src/permission-contracts.js'
-import {
-  normalizePluginManifestV7,
-  normalizePluginManifestV8,
-} from '../packages/cli/src/permission-model-v4.js'
+import { normalizePluginManifestV7, normalizePluginManifestV8 } from '../packages/cli/src/permission-model-v4.js'
 import {
   PLUGIN_PACKAGE_SCHEMA_V7,
   PLUGIN_PACKAGE_SCHEMA_V8,
@@ -55,7 +52,12 @@ describe('plugin package v7/v8 predecessor and successor parity', () => {
       capabilities: [{
         name: 'approvals.answer',
         required: false,
-        scope: { authorityRequester: { kind: 'approval-authority-requester-route', requester: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
+        scope: {
+          authorityRequester: {
+            kind: 'approval-authority-requester-route',
+            requester: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' },
+          },
+        },
       }],
       services: [],
     }
@@ -69,13 +71,15 @@ describe('plugin package v7/v8 predecessor and successor parity', () => {
     const config = parseConfigDocument({ version: 1, plugins: [] }, location.configPath)
     expect(cordisXProjectRoot(config)).toBe(location.projectRoot)
     expect(cordisXConfigRoot(config)).toBe(location.configRoot)
-    for (const relative of [
-      'packages/cli/src/launcher/development.ts',
-      'packages/cli/src/launcher/plugin-package.ts',
-      'packages/cli/src/launcher/plugin-lifecycle.ts',
-      'packages/cli/src/launcher/vite-development.ts',
-      'packages/cli/src/renderer/runtime.ts',
-    ]) {
+    for (
+      const relative of [
+        'packages/cli/src/launcher/development.ts',
+        'packages/cli/src/launcher/plugin-package.ts',
+        'packages/cli/src/launcher/plugin-lifecycle.ts',
+        'packages/cli/src/launcher/vite-development.ts',
+        'packages/cli/src/renderer/runtime.ts',
+      ]
+    ) {
       const source = await readFile(path.join(root, relative), 'utf8')
       expect(source).toContain('V7')
       expect(source).toContain('V8')

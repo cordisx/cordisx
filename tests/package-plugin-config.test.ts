@@ -11,7 +11,9 @@ describe('package plugin configuration store', () => {
       const first = new PackagePluginConfigStore(root, 'work', 'runtime-a')
       expect(await first.load('fixture')).toEqual({ revision: 0, config: {} })
       expect(await first.stage('fixture', 0, { timeout: 30 }, 'a'.repeat(64))).toEqual({ candidateRevision: 1 })
-      await expect(first.stage('fixture', 0, { timeout: 45 }, 'a'.repeat(64))).rejects.toMatchObject({ actualRevision: 0 })
+      await expect(first.stage('fixture', 0, { timeout: 45 }, 'a'.repeat(64))).rejects.toMatchObject({
+        actualRevision: 0,
+      })
       await first.abort('fixture', 1, 'a'.repeat(64))
       expect(await first.load('fixture')).toEqual({ revision: 0, config: {} })
 
@@ -20,7 +22,9 @@ describe('package plugin configuration store', () => {
       await first.stage('fixture', 1, { timeout: 60 }, 'a'.repeat(64))
       const second = new PackagePluginConfigStore(root, 'work', 'runtime-b')
       expect(await second.load('fixture')).toEqual({ revision: 1, config: { timeout: 45 } })
-      const stored = JSON.parse(await readFile(path.join(root, 'state/profiles/work/plugins/config/fixture.json'), 'utf8')) as { candidate?: unknown }
+      const stored = JSON.parse(
+        await readFile(path.join(root, 'state/profiles/work/plugins/config/fixture.json'), 'utf8'),
+      ) as { candidate?: unknown }
       expect(stored.candidate).toBeUndefined()
     } finally {
       await rm(root, { recursive: true, force: true })

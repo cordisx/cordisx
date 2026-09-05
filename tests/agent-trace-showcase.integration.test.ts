@@ -102,8 +102,15 @@ async function settle(rounds = 1): Promise<void> {
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
   return {
-    x: left, y: top, left, top, right: left + width, bottom: top + height,
-    width, height, toJSON: () => ({}),
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON: () => ({}),
   } as DOMRect
 }
 
@@ -133,32 +140,40 @@ async function fixture(sessionId: string, options: {
         enabled: true,
         config: { mode: options.mode ?? 'fixture' },
       },
-      ...(options.sibling === true ? [{
-        id: 'session-header-sibling-fixture',
-        entry: path.join(projectRoot, 'tests/fixtures/session-header-sibling-plugin.ts'),
-        enabled: true,
-        config: {},
-      }] : []),
-      ...(options.overflow === true ? [{
-        id: 'session-header-overflow-fixture',
-        entry: path.join(projectRoot, 'tests/fixtures/session-header-overflow-plugin.ts'),
-        enabled: true,
-        config: {},
-      }] : []),
+      ...(options.sibling === true
+        ? [{
+          id: 'session-header-sibling-fixture',
+          entry: path.join(projectRoot, 'tests/fixtures/session-header-sibling-plugin.ts'),
+          enabled: true,
+          config: {},
+        }]
+        : []),
+      ...(options.overflow === true
+        ? [{
+          id: 'session-header-overflow-fixture',
+          entry: path.join(projectRoot, 'tests/fixtures/session-header-overflow-plugin.ts'),
+          enabled: true,
+          config: {},
+        }]
+        : []),
     ],
   }
   const bundle = await buildRendererBundle(config, {
     permission: {
       profileId: 'development',
       bridgeToken: '4'.repeat(64),
-      policies: exactDomPermissionPolicies('development', config.plugins.map(plugin => ({
-        id: plugin.id,
-        entry: plugin.entry,
-        pointIds: ['session.header.actions', 'session.content'],
-      }))),
+      policies: exactDomPermissionPolicies(
+        'development',
+        config.plugins.map(plugin => ({
+          id: plugin.id,
+          entry: plugin.entry,
+          pointIds: ['session.header.actions', 'session.content'],
+        })),
+      ),
     },
   })
-  const dom = new JSDOM(`
+  const dom = new JSDOM(
+    `
     <html lang="zh-CN" class="electron-dark"><head><style>
       .codex-toolbar-button { width: 28px; height: 28px; border-radius: 6px; }
       .native-summary-pressed { color: rgb(26, 28, 31); background-color: rgba(26, 28, 31, .05); }
@@ -182,7 +197,9 @@ async function fixture(sessionId: string, options: {
           <div id="native-session-title">Current session</div>
           <div id="native-session-actions" style="display:flex">
             <span id="native-session-tooltip-trigger" data-state="closed" style="display:contents">
-              <button id="native-session-menu" class="codex-toolbar-button${options.nativePressed === true ? ' native-summary-pressed' : ''}" aria-pressed="${options.nativePressed === true ? 'true' : 'false'}" title="切换置顶摘要">Session menu</button>
+              <button id="native-session-menu" class="codex-toolbar-button${
+      options.nativePressed === true ? ' native-summary-pressed' : ''
+    }" aria-pressed="${options.nativePressed === true ? 'true' : 'false'}" title="切换置顶摘要">Session menu</button>
             </span>
           </div>
         </header>
@@ -195,7 +212,9 @@ async function fixture(sessionId: string, options: {
       </main>
       <aside id="native-right-panel" data-pip-home-surface="thread-summary-panel"></aside>
     </body></html>
-  `, { runScripts: 'dangerously', url: 'https://codex.local/native' })
+  `,
+    { runScripts: 'dangerously', url: 'https://codex.local/native' },
+  )
   Object.defineProperty(dom.window, 'structuredClone', { configurable: true, value: structuredClone })
   installPermissionPolicyBridge(dom.window)
   Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', {
@@ -219,7 +238,11 @@ async function fixture(sessionId: string, options: {
 
   dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
   dom.window.eval(bundle)
-  for (let attempt = 0; attempt < 50 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
+  for (
+    let attempt = 0;
+    attempt < 50 && dom.window.document.documentElement.dataset.cordisxReady !== 'true';
+    attempt += 1
+  ) {
     await new Promise(resolve => setTimeout(resolve, 10))
   }
   const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime
@@ -271,30 +294,51 @@ describe('Agent Trace Showcase renderer integration', () => {
     const { dom, runtime } = await fixture('session-config-form', { mode: 'historical' })
     const descriptor = runtime.snapshot().plugins.find(plugin => plugin.id === 'agent-trace-showcase')?.configuration
     expect(descriptor).toMatchObject({
-      schemaKind: 'schemastery', applies: 'plugin-restart', revision: 0,
+      schemaKind: 'schemastery',
+      applies: 'plugin-restart',
+      revision: 0,
       value: { mode: 'historical' },
     })
     expect(descriptor?.fields.map(field => field.path.join('.'))).toEqual([
-      'mode', 'historyPageSize', 'timelineWindowSize',
+      'mode',
+      'historyPageSize',
+      'timelineWindowSize',
     ])
     expect(descriptor?.fields.map(field => field.label)).toEqual([
-      '数据模式', '历史分页大小', '时间线窗口大小',
+      '数据模式',
+      '历史分页大小',
+      '时间线窗口大小',
     ])
 
     dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
-    for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-plugin-id="agent-trace-showcase"]') === null; attempt += 1) await settle(1)
+    for (
+      let attempt = 0;
+      attempt < 20 && dom.window.document.querySelector('[data-plugin-id="agent-trace-showcase"]') === null;
+      attempt += 1
+    ) await settle(1)
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="agent-trace-showcase"]')!.click()
-    for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-plugin-detail-tab="config"]') === null; attempt += 1) await settle(1)
+    for (
+      let attempt = 0;
+      attempt < 20 && dom.window.document.querySelector('[data-plugin-detail-tab="config"]') === null;
+      attempt += 1
+    ) await settle(1)
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')!.click()
-    for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-plugin-config-form="agent-trace-showcase"]') === null; attempt += 1) await settle(1)
+    for (
+      let attempt = 0;
+      attempt < 20 && dom.window.document.querySelector('[data-plugin-config-form="agent-trace-showcase"]') === null;
+      attempt += 1
+    ) await settle(1)
 
     const form = dom.window.document.querySelector<HTMLFormElement>(
       '[data-plugin-config-form="agent-trace-showcase"]',
     )!
     expect(form.closest('[role="tabpanel"]')?.getAttribute('aria-label')).toBe('配置管理')
-    expect([...form.querySelectorAll<HTMLElement>('[data-config-path]')].map(field => field.dataset.configPath)).toEqual([
-      'mode', 'historyPageSize', 'timelineWindowSize',
-    ])
+    expect([...form.querySelectorAll<HTMLElement>('[data-config-path]')].map(field => field.dataset.configPath))
+      .toEqual([
+        'mode',
+        'historyPageSize',
+        'timelineWindowSize',
+      ])
     expect(form.querySelectorAll('.cxf-section-heading')).toHaveLength(0)
     expect(form.textContent).not.toContain('常规')
     expect(form.querySelector('[data-config-path="mode"] .t-select')).not.toBeNull()
@@ -398,14 +442,24 @@ describe('Agent Trace Showcase renderer integration', () => {
     await runtime.setPluginBlocked('session-header-sibling-fixture', false)
     await settle(4)
     expect(seat.querySelectorAll(':scope > button')).toHaveLength(2)
-    expect(seat.querySelector<HTMLButtonElement>('[data-cordisx-contribution-id="agent-trace-showcase:open-timeline"]')?.getAttribute('aria-pressed')).toBe('true')
-    expect(seat.querySelector<HTMLButtonElement>('[data-cordisx-contribution-id="session-header-sibling-fixture:sibling"]')?.getAttribute('aria-pressed')).toBe('false')
+    expect(
+      seat.querySelector<HTMLButtonElement>('[data-cordisx-contribution-id="agent-trace-showcase:open-timeline"]')
+        ?.getAttribute('aria-pressed'),
+    ).toBe('true')
+    expect(
+      seat.querySelector<HTMLButtonElement>('[data-cordisx-contribution-id="session-header-sibling-fixture:sibling"]')
+        ?.getAttribute('aria-pressed'),
+    ).toBe('false')
 
     const styles = dom.window.document.getElementById('cordisx-structured-styles')?.textContent ?? ''
     expect(styles).toContain('--cordisx-toolbar-outer-group-gap: 6px')
     expect(styles).toContain('--cordisx-toolbar-action-gap: 6px')
-    expect(styles).toContain('--cordisx-toolbar-action-pressed-background: color-mix(in oklab,var(--color-text,currentColor) 5%,transparent)')
-    expect(styles).toContain('--cordisx-toolbar-action-pressed-hover-background: color-mix(in oklab,var(--color-text,currentColor) 10%,transparent)')
+    expect(styles).toContain(
+      '--cordisx-toolbar-action-pressed-background: color-mix(in oklab,var(--color-text,currentColor) 5%,transparent)',
+    )
+    expect(styles).toContain(
+      '--cordisx-toolbar-action-pressed-hover-background: color-mix(in oklab,var(--color-text,currentColor) 10%,transparent)',
+    )
     expect(styles).toContain('[aria-pressed="true"][data-cordisx-route-state="presented"]')
     expect(styles).not.toContain('[data-cordisx-route-state="presented"] ~')
     expect(styles).not.toContain('--color-background-elevated-secondary,rgba(127,127,127,.08)')
@@ -443,10 +497,13 @@ describe('Agent Trace Showcase renderer integration', () => {
           outlet: 'session.content',
           page: 'session.timeline',
           title: {
-            namespace: 'agent-trace-showcase', key: 'route.timeline.title', fallback: 'Open Agent Trace',
+            namespace: 'agent-trace-showcase',
+            key: 'route.timeline.title',
+            fallback: 'Open Agent Trace',
           },
           description: {
-            namespace: 'agent-trace-showcase', key: 'route.timeline.description',
+            namespace: 'agent-trace-showcase',
+            key: 'route.timeline.description',
             fallback: 'Use the conversation header action to open the Agent Trace Timeline for the active session.',
           },
         },
@@ -460,11 +517,15 @@ describe('Agent Trace Showcase renderer integration', () => {
           schemaVersion: 3,
           id: 'session.timeline',
           title: {
-            namespace: 'agent-trace-showcase', key: 'page.timeline.title', fallback: 'Agent Trace Timeline',
+            namespace: 'agent-trace-showcase',
+            key: 'page.timeline.title',
+            fallback: 'Agent Trace Timeline',
           },
           description: {
-            namespace: 'agent-trace-showcase', key: 'page.timeline.description',
-            fallback: 'Inspect input, model, tool, delivery, and prompt-contribution events for the active Agent session.',
+            namespace: 'agent-trace-showcase',
+            key: 'page.timeline.description',
+            fallback:
+              'Inspect input, model, tool, delivery, and prompt-contribution events for the active Agent session.',
           },
           icon: 'host:history',
           chrome: 'body-only',
@@ -473,7 +534,10 @@ describe('Agent Trace Showcase renderer integration', () => {
     ])
     expect(runtime.snapshot().registrations.filter(item => item.owner === 'agent-trace-showcase')).toEqual([
       expect.objectContaining({
-        surface: 'session.header.actions', valid: true, authorized: true, rendered: true,
+        surface: 'session.header.actions',
+        valid: true,
+        authorized: true,
+        rendered: true,
       }),
     ])
     const entrySeat = dom.window.document.querySelector<HTMLElement>(
@@ -482,9 +546,17 @@ describe('Agent Trace Showcase renderer integration', () => {
     const entryButton = entrySeat.querySelector<HTMLButtonElement>('button')!
     expect(entrySeat.parentElement?.id).toBe('native-session-actions')
     expect(entrySeat.nextElementSibling?.id).toBe('native-session-tooltip-trigger')
-    expect(dom.window.document.getElementById('native-session-tooltip-trigger')?.parentElement?.id).toBe('native-session-actions')
-    expect(dom.window.document.getElementById('native-session-tooltip-trigger')?.querySelector('[data-cordisx-surface-host]')).toBeNull()
-    expect(dom.window.document.getElementById('native-session-menu')?.parentElement?.id).toBe('native-session-tooltip-trigger')
+    expect(dom.window.document.getElementById('native-session-tooltip-trigger')?.parentElement?.id).toBe(
+      'native-session-actions',
+    )
+    expect(
+      dom.window.document.getElementById('native-session-tooltip-trigger')?.querySelector(
+        '[data-cordisx-surface-host]',
+      ),
+    ).toBeNull()
+    expect(dom.window.document.getElementById('native-session-menu')?.parentElement?.id).toBe(
+      'native-session-tooltip-trigger',
+    )
     expect(entrySeat.dataset.cordisxNoDrag).toBe('true')
     expect(entryButton.className).not.toContain('codex-toolbar-button')
     expect(entryButton.className).toContain('cordisx-toolbar-action')
@@ -518,7 +590,9 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(dom.window.document.querySelector('.cordisx-host-tooltip')).toBeNull()
 
     let nativeActivations = 0
-    dom.window.document.getElementById('native-session-menu')?.addEventListener('click', () => { nativeActivations += 1 })
+    dom.window.document.getElementById('native-session-menu')?.addEventListener('click', () => {
+      nativeActivations += 1
+    })
     entryButton.click()
     await settle(4)
     expect(nativeActivations).toBe(0)
@@ -543,7 +617,9 @@ describe('Agent Trace Showcase renderer integration', () => {
     })
     expect(entrySeat.querySelector('button')).toBe(entryButton)
     expect(entryButton.getAttribute('aria-pressed')).toBe('true')
-    const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="agent-trace-showcase:session.timeline"]')!
+    const page = dom.window.document.querySelector<HTMLElement>(
+      '[data-cordisx-page="agent-trace-showcase:session.timeline"]',
+    )!
     expect(page.dataset.cordisxPageChromePolicy).toBe('body-only')
     expect(page.getAttribute('aria-label')).toBe('Agent Trace 时间线')
     expect(page.querySelector('[data-cordisx-page-chrome]')).toBeNull()
@@ -574,18 +650,26 @@ describe('Agent Trace Showcase renderer integration', () => {
     entryButton.click()
     await settle(4)
     expect(entryButton.getAttribute('aria-pressed')).toBe('true')
-    const reopenedPage = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="agent-trace-showcase:session.timeline"]')!
+    const reopenedPage = dom.window.document.querySelector<HTMLElement>(
+      '[data-cordisx-page="agent-trace-showcase:session.timeline"]',
+    )!
     reopenedPage.querySelector<HTMLButtonElement>('.cxt-clear')!.focus()
-    reopenedPage.querySelector<HTMLButtonElement>('.cxt-clear')!.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
-      key: 'Escape', bubbles: true, cancelable: true,
-    }))
+    reopenedPage.querySelector<HTMLButtonElement>('.cxt-clear')!.dispatchEvent(
+      new dom.window.KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
     await settle(4)
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
     expect(entryButton.getAttribute('aria-pressed')).toBe('false')
     expect(dom.window.document.activeElement).toBe(entryButton)
     entryButton.click()
     await settle(4)
-    const remountedPage = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="agent-trace-showcase:session.timeline"]')!
+    const remountedPage = dom.window.document.querySelector<HTMLElement>(
+      '[data-cordisx-page="agent-trace-showcase:session.timeline"]',
+    )!
 
     const outletContainer = remountedPage.parentElement!
     const replacementSessionContent = sessionContent.cloneNode(true) as HTMLElement
@@ -612,7 +696,8 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(remountedPage.querySelector('.cxt-detail-scroll')?.textContent).toContain('fixture-generation-7')
 
     await expect(runtime.navigate('agent-trace-showcase', {
-      id: 'session.timeline', params: { sessionId: 'session-b' },
+      id: 'session.timeline',
+      params: { sessionId: 'session-b' },
     })).rejects.toThrow(/does not match native session session-a/)
     expect(dom.window.location.href).toBe(nativeUrl)
 
@@ -649,7 +734,9 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(runtime.snapshot().commands).toEqual([])
     expect(runtime.snapshot().registrations).toEqual([
       expect.objectContaining({
-        surface: 'session.header.actions', visible: false, rendered: false,
+        surface: 'session.header.actions',
+        visible: false,
+        rendered: false,
         error: 'owning plugin is inactive',
       }),
     ])
@@ -674,7 +761,9 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(restoredEntry).not.toBe(firstGenerationEntry)
     expect(restoredEntry.getAttribute('aria-pressed')).toBe('false')
     expect(runtime.snapshot().platform).toMatchObject({
-      mode: 'unavailable', secondConnectionCreated: false, rawBridgeExposed: false,
+      mode: 'unavailable',
+      secondConnectionCreated: false,
+      rawBridgeExposed: false,
     })
     expect(runtime.snapshot().permissions.find(item => item.capability === 'agent.events.read')).toMatchObject({
       availability: { status: 'supported', providers: [{ providerId: 'host-agent-events' }] },
@@ -687,7 +776,8 @@ describe('Agent Trace Showcase renderer integration', () => {
     selected.removeAttribute('data-app-action-sidebar-thread-selected')
     await settle(4)
     expect(runtime.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({
-      available: false, mounted: false,
+      available: false,
+      mounted: false,
     })
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"]')).toBeNull()
     restoredEntry.click()
@@ -707,14 +797,18 @@ describe('Agent Trace Showcase renderer integration', () => {
     conversation.setAttribute('data-response-annotation-conversation', 'session-b')
     composer.setAttribute('data-above-composer-conversation-id', 'session-b')
     await settle(4)
-    expect(runtime.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({ mounted: false })
+    expect(runtime.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({
+      mounted: false,
+    })
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
     expect(reselectedEntry.getAttribute('aria-pressed')).toBe('false')
     await expect(runtime.navigate('agent-trace-showcase', {
-      id: 'session.timeline', params: { sessionId: 'session-a' },
+      id: 'session.timeline',
+      params: { sessionId: 'session-a' },
     })).rejects.toThrow(/does not match native session session-b/)
     await runtime.navigate('agent-trace-showcase', {
-      id: 'session.timeline', params: { sessionId: 'session-b' },
+      id: 'session.timeline',
+      params: { sessionId: 'session-b' },
     })
     await settle(2)
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).not.toBeNull()
@@ -732,8 +826,12 @@ describe('Agent Trace Showcase renderer integration', () => {
     const { dom, runtime } = await fixture('session-a', { headerAvailable: false })
     expect(runtime.snapshot().registrations).toEqual([
       expect.objectContaining({
-        surface: 'session.header.actions', pending: true, rendered: false,
-        authorized: true, currentContext: 'inactive', availabilityCode: 'anchor.unresolved',
+        surface: 'session.header.actions',
+        pending: true,
+        rendered: false,
+        authorized: true,
+        currentContext: 'inactive',
+        availabilityCode: 'anchor.unresolved',
       }),
     ])
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"]')).toBeNull()
@@ -742,8 +840,11 @@ describe('Agent Trace Showcase renderer integration', () => {
     await settle(3)
     expect(runtime.snapshot().registrations).toEqual([
       expect.objectContaining({
-        surface: 'session.header.actions', authorized: true, pending: true,
-        currentContext: 'not-mounted', availabilityCode: 'session.not-mounted',
+        surface: 'session.header.actions',
+        authorized: true,
+        pending: true,
+        currentContext: 'not-mounted',
+        availabilityCode: 'session.not-mounted',
       }),
     ])
     await runtime.dispose()
@@ -785,11 +886,29 @@ describe('Agent Trace Showcase renderer integration', () => {
   it('keeps an unavailable v2 compatibility page scoped to each host-issued session', async () => {
     const { dom, runtime } = await fixture('session-a', { mode: 'live' })
     expect(runtime.snapshot().permissions).toEqual(expect.arrayContaining([
-      ...['agent.events.read', 'agent.history.read', 'agent.messages.append', 'agent.prompt.section', 'agent.prompt.context'].map(capability => expect.objectContaining({
-        identity: expect.objectContaining({ id: 'agent-trace-showcase' }), capability, policy: 'ask',
-      })),
+      ...[
+        'agent.events.read',
+        'agent.history.read',
+        'agent.messages.append',
+        'agent.prompt.section',
+        'agent.prompt.context',
+      ].map(capability =>
+        expect.objectContaining({
+          identity: expect.objectContaining({ id: 'agent-trace-showcase' }),
+          capability,
+          policy: 'ask',
+        })
+      ),
     ]))
-    for (const capability of ['agent.events.read', 'agent.history.read', 'agent.messages.append', 'agent.prompt.section', 'agent.prompt.context']) {
+    for (
+      const capability of [
+        'agent.events.read',
+        'agent.history.read',
+        'agent.messages.append',
+        'agent.prompt.section',
+        'agent.prompt.context',
+      ]
+    ) {
       await runtime.setPermissionPolicy('agent-trace-showcase', capability, 'allow')
     }
 
@@ -801,7 +920,9 @@ describe('Agent Trace Showcase renderer integration', () => {
     expect(page).not.toBeNull()
     expect(page.querySelector('.cxt-badge')?.textContent).toBe('unavailable')
     expect(page.querySelector('.cxt-integrity')?.textContent).toContain('cordisx.agent-events/v2')
-    expect([...page.querySelectorAll<HTMLButtonElement>('[data-demo-kind]')].every(button => button.disabled)).toBe(true)
+    expect([...page.querySelectorAll<HTMLButtonElement>('[data-demo-kind]')].every(button => button.disabled)).toBe(
+      true,
+    )
     expect(page.querySelector<HTMLButtonElement>('.cxt-clear')?.disabled).toBe(true)
     expect(runtime.snapshot().permissions.find(item => item.capability === 'agent.messages.append')?.lastRequested)
       .toBeUndefined()
@@ -824,16 +945,20 @@ describe('Agent Trace Showcase renderer integration', () => {
     page = dom.window.document.querySelector<HTMLElement>('[data-agent-trace-showcase="true"]')!
     expect(page).not.toBeNull()
     expect(runtime.snapshot().navigation.outlets.find(item => item.id === 'session.content')).toMatchObject({
-      contextKey: 'session:session-b', mounted: true,
+      contextKey: 'session:session-b',
+      mounted: true,
     })
     expect(sessionBEntry.getAttribute('aria-pressed')).toBe('true')
-    expect(runtime.snapshot().permissions.find(item => item.capability === 'agent.events.read')).toMatchObject({ policy: 'allow' })
+    expect(runtime.snapshot().permissions.find(item => item.capability === 'agent.events.read')).toMatchObject({
+      policy: 'allow',
+    })
 
     await runtime.setPluginBlocked('agent-trace-showcase', true)
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
     expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"]')).toBeNull()
     await runtime.setPluginBlocked('agent-trace-showcase', false)
-    expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"] button')).not.toBeNull()
+    expect(dom.window.document.querySelector('[data-cordisx-surface-host="session.header.actions"] button')).not
+      .toBeNull()
     await runtime.dispose()
     expect(dom.window.document.querySelector('[data-agent-trace-showcase]')).toBeNull()
   }, 20_000)

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,15 +10,34 @@ import { build } from 'esbuild'
 const execFileAsync = promisify(execFile)
 const version = '1.2.10'
 const tarballSha256 = 'e1929f06eda5c3d2ee194da0d6bc9f81e187184fe1054627afeabad2ae71db0e'
-const components = ['input', 'textarea', 'input-number', 'select', 'date-picker', 'tag-input', 'checkbox', 'switch', 'radio', 'slider', 'button', 'alert', 'loading']
+const components = [
+  'input',
+  'textarea',
+  'input-number',
+  'select',
+  'date-picker',
+  'tag-input',
+  'checkbox',
+  'switch',
+  'radio',
+  'slider',
+  'button',
+  'alert',
+  'loading',
+]
 const root = fileURLToPath(new URL('..', import.meta.url))
 const output = path.join(root, 'src/renderer/vendor/tdesign-web-components-1.2.10.ts')
 const work = await mkdtemp(path.join(tmpdir(), 'cordisx-tdesign-vendor-'))
 
 try {
   const { stdout } = await execFileAsync('npm', [
-    'pack', `tdesign-web-components@${version}`, '--silent', '--json',
-    '--registry=https://registry.npmjs.org', '--pack-destination', work,
+    'pack',
+    `tdesign-web-components@${version}`,
+    '--silent',
+    '--json',
+    '--registry=https://registry.npmjs.org',
+    '--pack-destination',
+    work,
   ], { maxBuffer: 1024 * 1024 * 4 })
   const [{ filename }] = JSON.parse(stdout)
   const tarball = path.join(work, filename)
@@ -26,14 +45,29 @@ try {
   if (actualHash !== tarballSha256) throw new Error(`TDesign tarball hash mismatch: ${actualHash}`)
   await writeFile(path.join(work, 'package.json'), JSON.stringify({ private: true, type: 'module' }))
   await execFileAsync('npm', [
-    'install', '--silent', '--ignore-scripts', '--no-audit', '--no-fund',
-    '--registry=https://registry.npmjs.org', tarball,
+    'install',
+    '--silent',
+    '--ignore-scripts',
+    '--no-audit',
+    '--no-fund',
+    '--registry=https://registry.npmjs.org',
+    tarball,
   ], { cwd: work, maxBuffer: 1024 * 1024 * 8 })
   const entry = path.join(work, 'entry.js')
-  await writeFile(entry, components.map(component => `import 'tdesign-web-components/lib/${component}/index.js'`).join('\n'))
+  await writeFile(
+    entry,
+    components.map(component => `import 'tdesign-web-components/lib/${component}/index.js'`).join('\n'),
+  )
   const bundled = await build({
-    entryPoints: [entry], bundle: true, format: 'iife', platform: 'browser', target: ['chrome120'],
-    minify: true, sourcemap: false, write: false, logLevel: 'silent',
+    entryPoints: [entry],
+    bundle: true,
+    format: 'iife',
+    platform: 'browser',
+    target: ['chrome120'],
+    minify: true,
+    sourcemap: false,
+    write: false,
+    logLevel: 'silent',
   })
   const bundledScript = bundled.outputFiles[0]?.text
   if (bundledScript === undefined) throw new Error('TDesign vendor bundle was not produced')
@@ -45,7 +79,9 @@ try {
   if (mutationMarkerIndex < 0 || mutationStart < 0 || mutationEnd < 0) {
     throw new Error('Pinned Omi HTMLElement compatibility patch no longer matches upstream')
   }
-  let script = `${upstreamScript.slice(0, mutationStart)}(()=>{})();/* CordisX: preserve the native HTMLElement constructor. */${upstreamScript.slice(mutationEnd + 5)}`
+  let script = `${
+    upstreamScript.slice(0, mutationStart)
+  }(()=>{})();/* CordisX: preserve the native HTMLElement constructor. */${upstreamScript.slice(mutationEnd + 5)}`
     .replace(/[ \t]+$/gmu, '')
   // A few code paths in the official 1.2.10 ESM subset retain `Component.h`
   // after bundling although the imported Omi binding has been elided. Bind only
@@ -56,34 +92,46 @@ try {
   const unboundComponentReferences = [...script.matchAll(/\bComponent\.h\(/gu)].length
   if (unboundComponentReferences > 0) {
     script = script.replaceAll('Component.h(', 'globalThis.__cordisxTDesignOmiComponent.h(')
-    script += ';globalThis.__cordisxTDesignOmiComponent=customElements.get("t-input");if(typeof globalThis.__cordisxTDesignOmiComponent?.h!=="function")throw new Error("TDesign Omi component bridge was not installed")'
+    script +=
+      ';globalThis.__cordisxTDesignOmiComponent=customElements.get("t-input");if(typeof globalThis.__cordisxTDesignOmiComponent?.h!=="function")throw new Error("TDesign Omi component bridge was not installed")'
   }
   const css = await readFile(path.join(work, 'node_modules/tdesign-web-components/lib/style/index.css'), 'utf8')
-  const tokenBlocks = [...css.matchAll(/:root(?:\[theme-mode="(?:light|dark)"\])?(?:\s*,\s*:root(?:\[theme-mode="(?:light|dark)"\])?)?\s*\{[^}]*\}/g)]
-    .map(match => match[0]
-      .replaceAll(':root[theme-mode="dark"]', '.cxf-scope[data-cordisx-app-theme="dark"], .cxf-tdesign-portal-host[data-cordisx-app-theme="dark"]')
-      .replaceAll(':root[theme-mode="light"]', '.cxf-scope, .cxf-tdesign-portal-host')
-      .replaceAll(':root', '.cxf-scope, .cxf-tdesign-portal-host'))
+  const tokenBlocks = [
+    ...css.matchAll(
+      /:root(?:\[theme-mode="(?:light|dark)"\])?(?:\s*,\s*:root(?:\[theme-mode="(?:light|dark)"\])?)?\s*\{[^}]*\}/g,
+    ),
+  ]
+    .map(match =>
+      match[0]
+        .replaceAll(
+          ':root[theme-mode="dark"]',
+          '.cxf-scope[data-cordisx-app-theme="dark"], .cxf-tdesign-portal-host[data-cordisx-app-theme="dark"]',
+        )
+        .replaceAll(':root[theme-mode="light"]', '.cxf-scope, .cxf-tdesign-portal-host')
+        .replaceAll(':root', '.cxf-scope, .cxf-tdesign-portal-host')
+    )
     .join('\n')
   const portalCss = css
     .replaceAll(':root[theme-mode="dark"]', ':host-context([data-cordisx-app-theme="dark"])')
     .replaceAll(':root[theme-mode="light"]', ':host')
     .replaceAll(':root', ':host')
-  const generated = `// Generated by scripts/build-tdesign-vendor.mjs from the official MIT-licensed TDesign release.\n` +
-    `// Upstream: tdesign-web-components@${version}; npm tarball sha256: ${tarballSha256}.\n` +
-    `// @ts-nocheck -- mechanically bundled upstream JavaScript is intentionally not retyped here.\n` +
-    `export const TDESIGN_WEB_COMPONENTS_VERSION = ${JSON.stringify(version)} as const\n` +
-    `export const TDESIGN_WEB_COMPONENTS_TARBALL_SHA256 = ${JSON.stringify(tarballSha256)} as const\n` +
-    `export const TDESIGN_SCOPED_TOKEN_CSS = ${JSON.stringify(tokenBlocks)}\n` +
-    `export const TDESIGN_PORTAL_CSS = ${JSON.stringify(portalCss)}\n` +
-    `export function installTDesignWebComponents(): void {\n` +
-    `  if ((globalThis as any).__cordisxTDesignWebComponents1210 === true) return\n` +
-    `  ;${script}\n` +
-    `  ;(globalThis as any).__cordisxTDesignWebComponents1210 = true\n` +
-    `}\n`
+  const generated = `// Generated by scripts/build-tdesign-vendor.mjs from the official MIT-licensed TDesign release.\n`
+    + `// Upstream: tdesign-web-components@${version}; npm tarball sha256: ${tarballSha256}.\n`
+    + `// @ts-nocheck -- mechanically bundled upstream JavaScript is intentionally not retyped here.\n`
+    + `export const TDESIGN_WEB_COMPONENTS_VERSION = ${JSON.stringify(version)} as const\n`
+    + `export const TDESIGN_WEB_COMPONENTS_TARBALL_SHA256 = ${JSON.stringify(tarballSha256)} as const\n`
+    + `export const TDESIGN_SCOPED_TOKEN_CSS = ${JSON.stringify(tokenBlocks)}\n`
+    + `export const TDESIGN_PORTAL_CSS = ${JSON.stringify(portalCss)}\n`
+    + `export function installTDesignWebComponents(): void {\n`
+    + `  if ((globalThis as any).__cordisxTDesignWebComponents1210 === true) return\n`
+    + `  ;${script}\n`
+    + `  ;(globalThis as any).__cordisxTDesignWebComponents1210 = true\n`
+    + `}\n`
   await mkdir(path.dirname(output), { recursive: true })
   await writeFile(output, generated)
-  process.stdout.write(`${output}\n${Buffer.byteLength(script)} bundled JS bytes\n${Buffer.byteLength(css)} base CSS bytes\n`)
+  process.stdout.write(
+    `${output}\n${Buffer.byteLength(script)} bundled JS bytes\n${Buffer.byteLength(css)} base CSS bytes\n`,
+  )
 } finally {
   await rm(work, { recursive: true, force: true })
 }

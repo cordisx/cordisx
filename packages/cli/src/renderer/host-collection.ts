@@ -289,7 +289,10 @@ function enabledMenuItems(popup: HTMLElement): HTMLButtonElement[] {
 }
 
 export function createHostCollection(document: Document, options: HostCollectionOptions): HostCollectionView {
-  if (options.search !== undefined && 'enabled' in options.search && options.search.enabled === false && options.search.reason.trim() === '') {
+  if (
+    options.search !== undefined && 'enabled' in options.search && options.search.enabled === false
+    && options.search.reason.trim() === ''
+  ) {
     throw new Error('A non-searchable Host collection requires a product reason.')
   }
 
@@ -307,7 +310,9 @@ export function createHostCollection(document: Document, options: HostCollection
   list.setAttribute('aria-label', options.label)
 
   const rendered: RenderedItem[] = []
-  let activeMenu: { popup: HTMLElement, trigger: HTMLButtonElement, card: HTMLElement, detachTheme?: () => void } | undefined
+  let activeMenu:
+    | { popup: HTMLElement; trigger: HTMLButtonElement; card: HTMLElement; detachTheme?: () => void }
+    | undefined
 
   const restoreTriggerFocus = (trigger: HTMLButtonElement): void => {
     if (!trigger.isConnected) return
@@ -378,7 +383,10 @@ export function createHostCollection(document: Document, options: HostCollection
       button.dataset.tone = action.tone ?? 'neutral'
       button.setAttribute('role', 'menuitem')
       button.disabled = action.disabled === true
-      button.setAttribute('aria-label', action.unavailableReason === undefined ? action.label : `${action.label}：${action.unavailableReason}`)
+      button.setAttribute(
+        'aria-label',
+        action.unavailableReason === undefined ? action.label : `${action.label}：${action.unavailableReason}`,
+      )
       if (button.disabled) {
         button.setAttribute('aria-disabled', 'true')
         if (action.unavailableReason !== undefined) {
@@ -409,7 +417,10 @@ export function createHostCollection(document: Document, options: HostCollection
   const onDocumentPointerDown = (event: Event): void => {
     if (activeMenu === undefined) return
     const target = event.target
-    if (target instanceof document.defaultView!.Node && (activeMenu.popup.contains(target) || activeMenu.trigger.contains(target))) return
+    if (
+      target instanceof document.defaultView!.Node
+      && (activeMenu.popup.contains(target) || activeMenu.trigger.contains(target))
+    ) return
     closeMenu(false)
   }
   function onMenuKeyDown(event: KeyboardEvent): void {
@@ -428,12 +439,12 @@ export function createHostCollection(document: Document, options: HostCollection
     const next = event.key === 'ArrowDown'
       ? items[(current + 1 + items.length) % items.length]
       : event.key === 'ArrowUp'
-        ? items[(current - 1 + items.length) % items.length]
-        : event.key === 'Home'
-          ? items[0]
-          : event.key === 'End'
-            ? items.at(-1)
-            : undefined
+      ? items[(current - 1 + items.length) % items.length]
+      : event.key === 'Home'
+      ? items[0]
+      : event.key === 'End'
+      ? items.at(-1)
+      : undefined
     if (next !== undefined) {
       event.preventDefault()
       event.stopPropagation()
@@ -524,8 +535,12 @@ export function createHostCollection(document: Document, options: HostCollection
       cleanups.push(options.tooltips.attach(primary, () => item.status?.detail ?? item.status?.label ?? '', 'top'))
     }
 
-    const direct = [...(item.actions ?? [])].filter(action => action.placement === 'direct').sort((left, right) => (left.priority ?? 0) - (right.priority ?? 0))
-    const overflow = [...(item.actions ?? [])].filter(action => action.placement === 'overflow').sort((left, right) => (left.priority ?? 0) - (right.priority ?? 0))
+    const direct = [...(item.actions ?? [])].filter(action => action.placement === 'direct').sort((left, right) =>
+      (left.priority ?? 0) - (right.priority ?? 0)
+    )
+    const overflow = [...(item.actions ?? [])].filter(action => action.placement === 'overflow').sort((left, right) =>
+      (left.priority ?? 0) - (right.priority ?? 0)
+    )
     if (direct.length > 0 || overflow.length > 0) {
       const actions = document.createElement('div')
       actions.className = 'cxc-actions'
@@ -538,10 +553,19 @@ export function createHostCollection(document: Document, options: HostCollection
         button.dataset.collectionAction = action.id
         button.dataset.tone = action.tone ?? 'neutral'
         button.disabled = action.disabled === true
-        button.setAttribute('aria-label', action.unavailableReason === undefined ? action.label : `${action.label}：${action.unavailableReason}`)
+        button.setAttribute(
+          'aria-label',
+          action.unavailableReason === undefined ? action.label : `${action.label}：${action.unavailableReason}`,
+        )
         appendIcon(button, action.icon)
-        if (!button.disabled && action.onInvoke !== undefined) button.addEventListener('click', () => { void action.onInvoke?.() })
-        if (options.tooltips !== undefined) cleanups.push(options.tooltips.attach(button, () => action.unavailableReason ?? action.label, 'top'))
+        if (!button.disabled && action.onInvoke !== undefined) {
+          button.addEventListener('click', () => {
+            void action.onInvoke?.()
+          })
+        }
+        if (options.tooltips !== undefined) {
+          cleanups.push(options.tooltips.attach(button, () => action.unavailableReason ?? action.label, 'top'))
+        }
         actions.append(button)
       }
       if (overflow.length > 0) {
@@ -554,7 +578,9 @@ export function createHostCollection(document: Document, options: HostCollection
         trigger.setAttribute('aria-controls', `cxc-menu-${options.id}-${item.id}`.replace(/[^a-zA-Z0-9_-]/g, '-'))
         if (options.moreIcon !== undefined) appendIcon(trigger, options.moreIcon)
         trigger.addEventListener('click', () => openMenu(trigger, card, overflow))
-        if (options.tooltips !== undefined) cleanups.push(options.tooltips.attach(trigger, () => options.moreLabel ?? '更多操作', 'top'))
+        if (options.tooltips !== undefined) {
+          cleanups.push(options.tooltips.attach(trigger, () => options.moreLabel ?? '更多操作', 'top'))
+        }
         actions.append(trigger)
       }
       card.append(actions)
@@ -565,7 +591,11 @@ export function createHostCollection(document: Document, options: HostCollection
     rendered.push({
       item,
       root: listitem,
-      searchable: normalizeSearch([item.title, item.description, item.machineId, ...(item.searchText ?? [])].filter((value): value is string => value !== undefined).join(' ')),
+      searchable: normalizeSearch(
+        [item.title, item.description, item.machineId, ...(item.searchText ?? [])].filter((value): value is string =>
+          value !== undefined
+        ).join(' '),
+      ),
       highlightedFields,
     })
   }
@@ -587,7 +617,9 @@ export function createHostCollection(document: Document, options: HostCollection
       for (const field of entry.highlightedFields) renderHighlight(field, rawQuery)
     }
     empty.hidden = visible > 0
-    empty.textContent = options.items.length === 0 || query === '' ? options.emptyLabel ?? '暂无数据' : options.noMatchesLabel ?? '没有匹配结果'
+    empty.textContent = options.items.length === 0 || query === ''
+      ? options.emptyLabel ?? '暂无数据'
+      : options.noMatchesLabel ?? '没有匹配结果'
   }
 
   const search = options.search

@@ -3,17 +3,19 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  ChannelRuntime,
   type ChannelAdapterDefinition,
   type ChannelInboundEnvelope,
   type ChannelPluginIdentity,
+  ChannelRuntime,
   type ChannelTenantRef,
 } from '@cordisx/channel-runtime'
 import { createChannelManagerApi } from '../packages/cli/src/launcher/channel-manager-api.js'
 
 const temporary = new Set<string>()
 const identity: ChannelPluginIdentity = Object.freeze({
-  source: 'file:///launcher-private-source', pluginId: 'channel', generation: 'plugin-generation',
+  source: 'file:///launcher-private-source',
+  pluginId: 'channel',
+  generation: 'plugin-generation',
 })
 const ref: ChannelTenantRef = Object.freeze({ adapterId: 'simulator', accountId: 'local', tenantId: 'test' })
 
@@ -25,8 +27,11 @@ afterEach(async () => {
 function adapter(account: ChannelTenantRef, revision: number): ChannelAdapterDefinition {
   return {
     descriptor: {
-      ref: account, kind: 'simulator', implementationStatus: 'verified',
-      configurationRevision: revision, secretState: 'unavailable',
+      ref: account,
+      kind: 'simulator',
+      implementationStatus: 'verified',
+      configurationRevision: revision,
+      secretState: 'unavailable',
     },
     start: async () => ({
       send: async () => ({ externalMessageId: 'unused' }),
@@ -38,12 +43,22 @@ function adapter(account: ChannelTenantRef, revision: number): ChannelAdapterDef
 function createEnvelope(eventId: string): ChannelInboundEnvelope {
   return {
     input: {
-      contract: 'cordisx.channel-user-input/v1', schemaVersion: 1, role: 'user',
+      contract: 'cordisx.channel-user-input/v1',
+      schemaVersion: 1,
+      role: 'user',
       content: [{ type: 'text', text: 'Create this task.' }],
-      source: { kind: 'channel', event: {
-        ...ref, conversationId: 'conversation', kind: 'direct', threadId: 'thread', semantics: 'conversation',
-        eventId, actor: { ...ref, userId: 'user' },
-      } },
+      source: {
+        kind: 'channel',
+        event: {
+          ...ref,
+          conversationId: 'conversation',
+          kind: 'direct',
+          threadId: 'thread',
+          semantics: 'conversation',
+          eventId,
+          actor: { ...ref, userId: 'user' },
+        },
+      },
       receivedAt: '2026-08-25T00:00:00.000Z',
     },
   }
@@ -80,7 +95,9 @@ describe('launcher-private Channel manager API', () => {
     expect(exported.filename).toMatch(/^cordisx-channel-logs-.*\.json$/)
     const payload = JSON.parse(exported.payload)
     expect(payload).toMatchObject({ contract: 'cordisx.channel-manager-logs-export/v1', schemaVersion: 1 })
-    expect(payload.records).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'channel.adapter.activate' })]))
+    expect(payload.records).toEqual(
+      expect.arrayContaining([expect.objectContaining({ action: 'channel.adapter.activate' })]),
+    )
     expect(exported.payload).not.toContain('launcher-private-source')
     await runtime.dispose()
   })

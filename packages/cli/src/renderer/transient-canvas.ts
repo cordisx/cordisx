@@ -39,7 +39,9 @@ interface ActivePresentation {
 }
 
 function assertRegistration(value: unknown): asserts value is TransientCanvasRegistrationV1 {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('transient canvas registration must be an object')
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('transient canvas registration must be an object')
+  }
   const item = value as Record<string, unknown>
   const allowed = ['$schema', 'schemaVersion', 'id', 'pointId', 'durationMs', 'reducedMotion']
   if (Object.keys(item).some(key => !allowed.includes(key)) || Object.keys(item).length !== allowed.length) {
@@ -76,20 +78,24 @@ export class TransientCanvasCoordinator {
   }
 
   available(): boolean {
-    const prototype = this.document.defaultView?.HTMLCanvasElement.prototype as (HTMLCanvasElement & {
-      transferControlToOffscreen?: () => OffscreenCanvas
-    }) | undefined
+    const prototype = this.document.defaultView?.HTMLCanvasElement.prototype as
+      | (HTMLCanvasElement & {
+        transferControlToOffscreen?: () => OffscreenCanvas
+      })
+      | undefined
     return typeof prototype?.transferControlToOffscreen === 'function'
   }
 
-  bind(input: Readonly<{
-    owner: string
-    source: string
-    moduleGeneration: string
-    generation: PluginGenerationEffectIdentity
-    candidateView?: PluginGenerationView
-    sink: TransientCanvasWorkerSink
-  }>): Readonly<{
+  bind(
+    input: Readonly<{
+      owner: string
+      source: string
+      moduleGeneration: string
+      generation: PluginGenerationEffectIdentity
+      candidateView?: PluginGenerationView
+      sink: TransientCanvasWorkerSink
+    }>,
+  ): Readonly<{
     register(declaration: TransientCanvasRegistrationV1): Promise<void>
     unregister(id: string): Promise<void>
     dispose(): void
@@ -100,7 +106,9 @@ export class TransientCanvasCoordinator {
         if (this.disposed) throw new Error('transient canvas coordinator is disposed')
         assertRegistration(declaration)
         const key = `${input.owner}\u0000${input.moduleGeneration}\u0000${declaration.id}`
-        if (this.registrations.has(key)) throw new Error(`transient canvas registration ${declaration.id} already exists`)
+        if (this.registrations.has(key)) {
+          throw new Error(`transient canvas registration ${declaration.id} already exists`)
+        }
         const surface = this.surfaces.register(input.owner, {
           name: 'composer.submit.effects',
           id: declaration.id,
@@ -114,7 +122,13 @@ export class TransientCanvasCoordinator {
           source: input.source,
           moduleGeneration: input.moduleGeneration,
         })
-        this.registrations.set(key, { key, owner: input.owner, declaration: structuredClone(declaration), sink: input.sink, surface })
+        this.registrations.set(key, {
+          key,
+          owner: input.owner,
+          declaration: structuredClone(declaration),
+          sink: input.sink,
+          surface,
+        })
         owned.add(key)
         this.reconcile()
       },
@@ -156,29 +170,48 @@ export class TransientCanvasCoordinator {
   private readonly onFormSubmit = (event: SubmitEvent): void => {
     const submitter = event.submitter
     if (submitter !== null && submitter !== this.submitButton) return
-    queueMicrotask(() => { if (!event.defaultPrevented) this.present() })
+    queueMicrotask(() => {
+      if (!event.defaultPrevented) this.present()
+    })
   }
 
   private readonly onButtonClick = (event: MouseEvent): void => {
     const button = this.submitButton
     if (button === undefined || button.disabled || button.getAttribute('aria-disabled') === 'true') return
-    queueMicrotask(() => { if (!event.defaultPrevented) this.present() })
+    queueMicrotask(() => {
+      if (!event.defaultPrevented) this.present()
+    })
   }
 
   private readonly onResize = (): void => this.dismiss()
 
   private winner(): Registration | undefined {
-    const snapshot = this.surfaces.snapshot().find(item => item.surface === 'composer.submit.effects'
-      && item.visible && item.authorized && item.valid && !item.pending && !item.disabled && item.currentContext === 'active')
+    const snapshot = this.surfaces.snapshot().find(item =>
+      item.surface === 'composer.submit.effects'
+      && item.visible && item.authorized && item.valid && !item.pending && !item.disabled
+      && item.currentContext === 'active'
+    )
     if (snapshot === undefined) return undefined
-    return [...this.registrations.values()].find(item => item.owner === snapshot.owner && item.declaration.id === snapshot.id)
+    return [...this.registrations.values()].find(item =>
+      item.owner === snapshot.owner && item.declaration.id === snapshot.id
+    )
   }
 
   private reconcile(): void {
     const winner = this.winner()
     for (const registration of this.registrations.values()) {
-      const token = this.surfaces.renderToken('composer.submit.effects', `${registration.owner}:${registration.declaration.id}`)
-      if (token !== undefined) this.surfaces.markRendered('composer.submit.effects', `${registration.owner}:${registration.declaration.id}`, token, registration === winner)
+      const token = this.surfaces.renderToken(
+        'composer.submit.effects',
+        `${registration.owner}:${registration.declaration.id}`,
+      )
+      if (token !== undefined) {
+        this.surfaces.markRendered(
+          'composer.submit.effects',
+          `${registration.owner}:${registration.declaration.id}`,
+          token,
+          registration === winner,
+        )
+      }
     }
     if (this.active !== undefined && this.active.key !== winner?.key) this.dismiss()
   }
@@ -190,7 +223,8 @@ export class TransientCanvasCoordinator {
     const reducedMotion = view.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
     if (reducedMotion && winner.declaration.reducedMotion === 'skip') return
     const canvas = this.document.createElement('canvas')
-    const transfer = (canvas as HTMLCanvasElement & { transferControlToOffscreen?: () => OffscreenCanvas }).transferControlToOffscreen
+    const transfer =
+      (canvas as HTMLCanvasElement & { transferControlToOffscreen?: () => OffscreenCanvas }).transferControlToOffscreen
     if (typeof transfer !== 'function') return
     this.dismiss()
     const pixelRatio = Math.min(2, Math.max(1, view.devicePixelRatio || 1))
@@ -235,7 +269,9 @@ export class TransientCanvasCoordinator {
     this.active = undefined
     this.document.defaultView?.clearTimeout(active.timer)
     active.canvas.remove()
-    try { active.sink.stop(active.sessionId) } catch {}
+    try {
+      active.sink.stop(active.sessionId)
+    } catch {}
   }
 
   private removeRegistration(key: string): void {

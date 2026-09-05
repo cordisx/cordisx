@@ -16,8 +16,10 @@ import {
 } from '../packages/cli/src/renderer/host-dom-worker.js'
 
 const WORKER_MESSAGE = 'cordisx.host-dom-worker/v1'
-const REQUEST_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-dom-bridge-request.v1.schema.json'
-const RESULT_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-dom-bridge-result.v1.schema.json'
+const REQUEST_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-dom-bridge-request.v1.schema.json'
+const RESULT_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-dom-bridge-result.v1.schema.json'
 
 class FakeTransport implements HostDomWorkerTransport {
   readonly posted: unknown[] = []
@@ -30,13 +32,20 @@ class FakeTransport implements HostDomWorkerTransport {
     this.posted.push(message)
     this.transfers.push([...transfer])
   }
-  subscribe = (listener: (message: unknown) => void): (() => void) => {
+  subscribe = (listener: (message: unknown) => void): () => void => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
-  terminate = (): void => { this.terminated = true }
-  destroy = (): void => { this.destroyed = true; this.listeners.clear() }
-  emit(message: unknown): void { for (const listener of this.listeners) listener(message) }
+  terminate = (): void => {
+    this.terminated = true
+  }
+  destroy = (): void => {
+    this.destroyed = true
+    this.listeners.clear()
+  }
+  emit(message: unknown): void {
+    for (const listener of this.listeners) listener(message)
+  }
 }
 
 class FakeEnvironment implements HostDomWorkerEnvironment {
@@ -50,7 +59,8 @@ class FakeEnvironment implements HostDomWorkerEnvironment {
 
 function catalog(): HostDomRootCatalog {
   return {
-    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-dom-root-catalog.v1.schema.json',
+    $schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-dom-root-catalog.v1.schema.json',
     schemaVersion: 1,
     authority: 'host',
     catalogVersion: '2026-08-31',
@@ -121,7 +131,7 @@ describe('Host DOM worker boundary', () => {
     expect(input?.iframeSrcdoc).toContain(`Content-Security-Policy" content="${HOST_DOM_WORKER_IFRAME_CSP}`)
     expect(input?.iframeSrcdoc).toContain("default-src 'none'")
     expect(input?.iframeSrcdoc).toContain("connect-src 'none'")
-    expect(input?.iframeSrcdoc).toContain("worker-src blob:")
+    expect(input?.iframeSrcdoc).toContain('worker-src blob:')
     expect(input?.iframeSrcdoc).toContain("script-src 'unsafe-inline' blob:")
     expect(input?.iframeSrcdoc).not.toContain('allow-same-origin')
     expect(input?.artifactSource).toBe(artifact)
@@ -139,7 +149,7 @@ describe('Host DOM worker boundary', () => {
     expect(bootstrap).toContain('const portPost = port.postMessage.bind(port)')
     expect(bootstrap).toContain('message.token !== boundaryToken')
     expect(bootstrap).toContain('applyFunction(pluginModule.apply, pluginModule, [context, config])')
-    expect(bootstrap).toContain("plugin apply must return void or Promise<void>")
+    expect(bootstrap).toContain('plugin apply must return void or Promise<void>')
 
     environment.transport.emit(status(environment, 'ready'))
     await boundary.ready
@@ -264,7 +274,8 @@ describe('Host DOM worker boundary', () => {
     await boundary.ready
 
     const declaration = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/transient-canvas-registration.v1.schema.json',
       schemaVersion: 1,
       id: 'sparkles',
       pointId: 'composer.submit.effects',
@@ -272,18 +283,30 @@ describe('Host DOM worker boundary', () => {
       reducedMotion: 'static',
     } as const
     environment.transport.emit(fromWorker(environment, {
-      type: 'rpc', sequence: 1, requestId: 'rpc-canvas-register-1', method: 'canvas-register', payload: declaration,
+      type: 'rpc',
+      sequence: 1,
+      requestId: 'rpc-canvas-register-1',
+      method: 'canvas-register',
+      payload: declaration,
     }))
     await waitForPosted(environment.transport, 1)
     expect(transientCanvas.register).toHaveBeenCalledWith(declaration)
 
     const offscreen = { kind: 'offscreen' } as unknown as OffscreenCanvas
     boundary.startTransientCanvas({
-      sessionId: 'canvas:1', registrationId: 'sparkles', canvas: offscreen,
-      width: 1200, height: 800, pixelRatio: 2, reducedMotion: false, startedAt: 42,
+      sessionId: 'canvas:1',
+      registrationId: 'sparkles',
+      canvas: offscreen,
+      width: 1200,
+      height: 800,
+      pixelRatio: 2,
+      reducedMotion: false,
+      startedAt: 42,
     })
     expect(environment.transport.posted[1]).toMatchObject({
-      type: 'canvas-start', registrationId: 'sparkles', canvas: offscreen,
+      type: 'canvas-start',
+      registrationId: 'sparkles',
+      canvas: offscreen,
     })
     expect(environment.transport.posted[1]).not.toHaveProperty('document')
     expect(environment.transport.transfers[1]).toEqual([offscreen])
@@ -412,9 +435,14 @@ describe('Host DOM worker boundary', () => {
       throw new Error('tampered Element.setAttribute')
     })
     const OriginalChannel = globalThis.MessageChannel
-    vi.stubGlobal('MessageChannel', class {
-      constructor() { throw new Error('tampered MessageChannel') }
-    })
+    vi.stubGlobal(
+      'MessageChannel',
+      class {
+        constructor() {
+          throw new Error('tampered MessageChannel')
+        }
+      },
+    )
     try {
       const transport = environment.start({
         document: dom.window.document,
@@ -440,21 +468,25 @@ describe('Host DOM worker boundary', () => {
     const dom = new JSDOM('<body></body>')
     const environment = new FakeEnvironment()
     const hostDom = client()
-    expect(() => createHostDomWorkerBoundary({
-      document: dom.window.document,
-      artifactSource: 'globalThis.__cordisxHostDomPluginModuleV1 = { apply() {} }',
-      config: { callback: () => {} },
-      hostDom,
-      environment,
-    })).toThrow('JSON values only')
+    expect(() =>
+      createHostDomWorkerBoundary({
+        document: dom.window.document,
+        artifactSource: 'globalThis.__cordisxHostDomPluginModuleV1 = { apply() {} }',
+        config: { callback: () => {} },
+        hostDom,
+        environment,
+      })
+    ).toThrow('JSON values only')
     expect(environment.input).toBeUndefined()
 
-    expect(() => createHostDomWorkerBoundary({
-      document: dom.window.document,
-      artifactSource: 'x'.repeat(8 * 1024 * 1024 + 1),
-      hostDom,
-      environment,
-    })).toThrow('8 MiB')
+    expect(() =>
+      createHostDomWorkerBoundary({
+        document: dom.window.document,
+        artifactSource: 'x'.repeat(8 * 1024 * 1024 + 1),
+        hostDom,
+        environment,
+      })
+    ).toThrow('8 MiB')
     expect(environment.input).toBeUndefined()
     dom.window.close()
   })

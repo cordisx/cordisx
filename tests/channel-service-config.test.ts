@@ -7,14 +7,11 @@ import {
   createChannelHostServiceConfigContract,
   parseChannelServiceConfig,
 } from '../packages/channel-runtime/src/index.js'
+import { ensureHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
 import {
-  ensureHomeConfig,
-  updateHomeConfigAtomic,
-} from '../packages/cli/src/config/home-config.js'
-import {
-  HostServiceConfigNarrowApi,
   type HostServiceConfigContract,
   type HostServiceConfigMutation,
+  HostServiceConfigNarrowApi,
 } from '../packages/cli/src/launcher/service-config.js'
 
 describe('Channel Host service configuration contract', () => {
@@ -63,7 +60,8 @@ describe('Channel Host service configuration contract', () => {
     expect(descriptor).toMatchObject({
       identity: { pluginId: 'channel', serviceId: 'runtime' },
       schema: {
-        id: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json',
+        id:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json',
         projection: { kind: 'schemastery' },
       },
       configApplies: 'service-restart',

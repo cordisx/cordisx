@@ -1,8 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import {
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
-  type CordisXPluginManifestV1,
-} from '../../packages/cli/src/contracts.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1, type CordisXPluginManifestV1 } from '../../packages/cli/src/contracts.js'
 
 export const manifest = {
   $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,

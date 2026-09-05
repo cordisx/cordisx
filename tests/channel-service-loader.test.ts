@@ -4,14 +4,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+import { ChannelRuntime, LauncherChannelServiceHost } from '../packages/channel-runtime/src/index.js'
 import {
-  ChannelRuntime,
-  LauncherChannelServiceHost,
-} from '../packages/channel-runtime/src/index.js'
-import {
-  SIMULATOR_CHANNEL_SERVICE_CONFIG,
   SimulatedPermissionBroker,
   SimulatedTaskGateway,
+  SIMULATOR_CHANNEL_SERVICE_CONFIG,
 } from '../packages/channel-runtime/src/simulator.js'
 import { CapabilityRiskCatalog } from '../packages/cli/src/capability-risk-catalog.js'
 import {
@@ -20,10 +17,10 @@ import {
 } from '../packages/cli/src/permission-contracts.js'
 import { normalizePluginManifestV4 } from '../packages/cli/src/permission-model-v2.js'
 import {
-  PackageLifecycleAuthority,
-  createHostPermissionReviewAuthority,
-  stagePluginPackageSourceV1,
   type CandidateAccess,
+  createHostPermissionReviewAuthority,
+  PackageLifecycleAuthority,
+  stagePluginPackageSourceV1,
 } from '../packages/cli/src/launcher/packages/index.js'
 import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
 import {
@@ -50,7 +47,9 @@ async function packageFixture() {
   const source = path.join(root, 'source')
   await mkdir(path.join(source, 'src'), { recursive: true })
   await writeFile(path.join(source, 'src/index.js'), 'export function apply() {}\n')
-  await writeFile(path.join(source, 'src/service.js'), `
+  await writeFile(
+    path.join(source, 'src/service.js'),
+    `
 export const inject = ['channel']
 export async function apply(ctx, config) {
   const connection = config.connections.find(item => item.enabled && item.adapterKind === 'simulator')
@@ -71,7 +70,8 @@ export async function apply(ctx, config) {
     },
   })
 }
-`)
+`,
+  )
   const runtime = {
     $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
     schemaVersion: 4,
@@ -89,28 +89,38 @@ export async function apply(ctx, config) {
       entry: './src/service.js',
       configuration: {
         kind: 'host',
-        schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json',
+        schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json',
         configApplies: 'restart',
       },
     }],
   } as const
   const runtimeText = `${JSON.stringify(runtime, null, 2)}\n`
   await writeFile(path.join(source, 'runtime.json'), runtimeText)
-  await writeFile(path.join(source, 'cordisx-package.json'), `${JSON.stringify({
-    $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V3,
-    schemaVersion: 3,
-    id: runtime.id,
-    version: '1.0.0',
-    entry: './src/index.js',
-    distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
-    compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V4] },
-    dependencies: [],
-    runtimeManifest: {
-      path: './runtime.json',
-      schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
-      digest: `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`,
-    },
-  }, null, 2)}\n`)
+  await writeFile(
+    path.join(source, 'cordisx-package.json'),
+    `${
+      JSON.stringify(
+        {
+          $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V3,
+          schemaVersion: 3,
+          id: runtime.id,
+          version: '1.0.0',
+          entry: './src/index.js',
+          distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
+          compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V4] },
+          dependencies: [],
+          runtimeManifest: {
+            path: './runtime.json',
+            schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+            digest: `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`,
+          },
+        },
+        null,
+        2,
+      )
+    }\n`,
+  )
   return { root, homeDir, source, runtime }
 }
 
@@ -123,11 +133,12 @@ describe('launcher Channel service module loading', () => {
     }, {
       homeDir: fixture.homeDir,
       runtimeValidators: {
-        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V4]: value => normalizePluginManifestV4(
-          value,
-          fixture.runtime.id,
-          new CapabilityRiskCatalog(),
-        ),
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V4]: value =>
+          normalizePluginManifestV4(
+            value,
+            fixture.runtime.id,
+            new CapabilityRiskCatalog(),
+          ),
       },
     })
     expect(staged.serviceModules).toEqual([
@@ -233,11 +244,12 @@ describe('launcher Channel service module loading', () => {
     }, {
       homeDir: fixture.homeDir,
       runtimeValidators: {
-        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V4]: value => normalizePluginManifestV4(
-          value,
-          fixture.runtime.id,
-          new CapabilityRiskCatalog(),
-        ),
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V4]: value =>
+          normalizePluginManifestV4(
+            value,
+            fixture.runtime.id,
+            new CapabilityRiskCatalog(),
+          ),
       },
     })).rejects.toMatchObject({ code: 'invalid-package-manifest' })
   })

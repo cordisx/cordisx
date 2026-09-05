@@ -34,7 +34,10 @@ async function createLocalDevelopmentFixture(root: string): Promise<{
 async function createBuiltinSkillFixture(root: string): Promise<string> {
   const source = path.join(root, 'builtin-skill')
   await mkdir(path.join(source, 'agents'), { recursive: true })
-  await writeFile(path.join(source, 'SKILL.md'), '---\nname: cordisx-plugin-development\ndescription: test Skill\n---\n')
+  await writeFile(
+    path.join(source, 'SKILL.md'),
+    '---\nname: cordisx-plugin-development\ndescription: test Skill\n---\n',
+  )
   await writeFile(path.join(source, 'agents', 'openai.yaml'), 'interface:\n  display_name: "CordisX"\n')
   return source
 }
@@ -81,24 +84,36 @@ describe('functional CordisX CLI', () => {
       internalObserveOwnerDocuments: async ({ source, handler }) => {
         const token = source.match(/"token":\s*"([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)"/)?.[1]
         if (token === undefined) throw new Error('configured plugin binding is missing')
-        const moduleGeneration = (JSON.parse(Buffer.from(token.split('.')[0]!, 'base64url').toString('utf8')) as { moduleGeneration: string }).moduleGeneration
+        const moduleGeneration =
+          (JSON.parse(Buffer.from(token.split('.')[0]!, 'base64url').toString('utf8')) as { moduleGeneration: string })
+            .moduleGeneration
         globalThis.__cordisxOwnerDocumentRequestV1 = (payload: string) => {
           void (async () => {
             const request = parseOwnerDocumentBindingRequest(JSON.parse(payload))
             const value = request.operation === 'load' ? await handler.load(request) : await handler.replace(request)
-            globalThis.__cordisxOwnerDocumentReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
+            globalThis.__cordisxOwnerDocumentReceiveV1?.(
+              JSON.stringify({ requestId: request.requestId, ok: true, value }),
+            )
           })()
         }
         const identity = { source: pathToFileURL(entry).href, id: 'owner-documents-runtime' }
         const broker = new CordisXOwnerDocumentBroker(new BrowserOwnerDocumentBridge(), [{
-          source: identity.source, pluginId: identity.id, moduleGeneration, token,
+          source: identity.source,
+          pluginId: identity.id,
+          moduleGeneration,
+          token,
         }])
         const client = broker.bind({ identity, moduleGeneration, active: () => true })
         result = await client.replace({
-          contract: 'cordisx.owner-documents/v1', documentId: 'room-registry', expectedRevision: 0, schemaVersion: 1,
+          contract: 'cordisx.owner-documents/v1',
+          documentId: 'room-registry',
+          expectedRevision: 0,
+          schemaVersion: 1,
           value: { operationId: 'configured-plugin-operation', state: 'planned' },
         })
-        broker.dispose(); delete globalThis.__cordisxOwnerDocumentRequestV1; delete globalThis.__cordisxOwnerDocumentReceiveV1
+        broker.dispose()
+        delete globalThis.__cordisxOwnerDocumentRequestV1
+        delete globalThis.__cordisxOwnerDocumentReceiveV1
       },
     })
     expect(result).toMatchObject({ status: 'accepted', snapshot: { revision: 1 } })
@@ -109,15 +124,20 @@ describe('functional CordisX CLI', () => {
     const project = path.join(root, 'project')
     const home = path.join(root, 'home')
     await import('node:fs/promises').then(async fs => await fs.mkdir(project))
-    await writeFile(path.join(project, 'cordisx.config.json'), JSON.stringify({
-      version: 1,
-      plugins: [{ id: 'must-not-load', entry: './missing.ts' }],
-    }))
+    await writeFile(
+      path.join(project, 'cordisx.config.json'),
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: 'must-not-load', entry: './missing.ts' }],
+      }),
+    )
     const output: string[] = []
     const runtime = {
       cwd: project,
       env: { CORDISX_HOME: home },
-      stdout: (line: string): void => { output.push(line) },
+      stdout: (line: string): void => {
+        output.push(line)
+      },
     }
 
     await runCordisXCli(['setup'], runtime)
@@ -132,7 +152,9 @@ describe('functional CordisX CLI', () => {
     expect(persisted.apps.codex.profiles.work.dataMode).toBe('shared')
     expect(output.filter(line => line.includes('created codex/work'))).toHaveLength(1)
     expect(output.some(line => line.includes('plugins: (none)'))).toBe(true)
-    await expect(access(path.join(home, 'apps', 'codex', 'profiles', 'work', 'chromium'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(path.join(home, 'apps', 'codex', 'profiles', 'work', 'chromium'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
   it('fails an unavailable adapter explicitly without falling back to Codex', async () => {
@@ -161,10 +183,14 @@ describe('functional CordisX CLI', () => {
     const output: string[] = []
     await runCordisXCli(['codex', '--system', '--dry-run', '--executable', process.execPath], {
       env: { CORDISX_HOME: home },
-      stdout: line => { output.push(line) },
+      stdout: line => {
+        output.push(line)
+      },
     })
     expect(output.join('\n')).toContain('"chromiumProfile": {\n      "mode": "system"')
-    await expect(access(path.join(home, 'apps', 'codex', 'profiles', 'default'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(path.join(home, 'apps', 'codex', 'profiles', 'default'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
   it('keeps a shared UI-demo launch in its own persistent Chromium profile', async () => {
@@ -173,18 +199,34 @@ describe('functional CordisX CLI', () => {
     const output: string[] = []
     await runCordisXCli(['codex', 'ui-demo', '--data', 'shared', '--dry-run', '--executable', process.execPath], {
       env: { CORDISX_HOME: home },
-      stdout: line => { output.push(line) },
+      stdout: line => {
+        output.push(line)
+      },
     })
     expect(output.join('\n')).toContain('"chromiumProfile": {\n      "mode": "independent"')
-    await expect(access(path.join(home, 'apps', 'codex', 'profiles', 'ui-demo', 'chromium'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(path.join(home, 'apps', 'codex', 'profiles', 'ui-demo', 'chromium'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
   it('accepts a shared profile Chromium override without changing Host roots', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-run-'))
     const output: string[] = []
     await runCordisXCli([
-      'codex', '--data', 'shared', '--profile-dir', path.join(root, 'private-profile'), '--dry-run', '--executable', process.execPath,
-    ], { env: { CORDISX_HOME: path.join(root, 'home') }, stdout: line => { output.push(line) } })
+      'codex',
+      '--data',
+      'shared',
+      '--profile-dir',
+      path.join(root, 'private-profile'),
+      '--dry-run',
+      '--executable',
+      process.execPath,
+    ], {
+      env: { CORDISX_HOME: path.join(root, 'home') },
+      stdout: line => {
+        output.push(line)
+      },
+    })
     expect(output.join('\n')).toContain(path.join(root, 'private-profile'))
   })
 
@@ -204,13 +246,19 @@ describe('functional CordisX CLI', () => {
     const output: string[] = []
     const processCwd = process.cwd()
     await expect(runCordisXCli([
-      'codex', '--data', 'shared', '--executable', executable,
+      'codex',
+      '--data',
+      'shared',
+      '--executable',
+      executable,
     ], {
       cwd: project,
       env: { CORDISX_HOME: path.join(root, 'home') },
       internalBuiltinSkillSourceDir: builtinSkillSource,
       internalSharedHomeDir: sharedHome,
-      stdout: line => { output.push(line) },
+      stdout: line => {
+        output.push(line)
+      },
     })).rejects.toThrow('Host exited before CordisX CDP became ready')
     expect(output.join('\n')).toContain('"status": "launching"')
     expect(output.join('\n')).toContain('[cordisx] built-in Skill installed:')
@@ -236,7 +284,12 @@ describe('functional CordisX CLI', () => {
     await chmod(executable, 0o755)
 
     await expect(runCordisXCli([
-      'codex', 'private', '--data', 'host-isolated', '--executable', executable,
+      'codex',
+      'private',
+      '--data',
+      'host-isolated',
+      '--executable',
+      executable,
     ], {
       env: { CORDISX_HOME: cordisxHome },
       internalSharedHomeDir: sharedHome,
@@ -261,17 +314,29 @@ describe('functional CordisX CLI', () => {
     })
     const address = server.address()
     if (address === null || typeof address === 'string') throw new Error('missing occupied port')
-    await writeFile(configPath, JSON.stringify({
-      version: 1, codex: { debugPort: address.port }, plugins: [],
-    }))
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        codex: { debugPort: address.port },
+        plugins: [],
+      }),
+    )
     try {
       await expect(runCordisXCli([
-        'dev', '--config', configPath, '--system', '--executable', process.execPath,
+        'dev',
+        '--config',
+        configPath,
+        '--system',
+        '--executable',
+        process.execPath,
       ], { cwd: root, stdout: () => undefined })).rejects.toThrow(
         `loopback CDP port is unavailable: ${address.port}`,
       )
     } finally {
-      await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
+      await new Promise<void>((resolve, reject) =>
+        server.close(error => error === undefined ? resolve() : reject(error))
+      )
     }
   })
 
@@ -298,10 +363,16 @@ describe('functional CordisX CLI', () => {
     await launch(firstHome)
     const firstStatePath = path.join(firstHome, directGrantStatePath)
     const firstState = JSON.parse(await readFile(firstStatePath, 'utf8')) as Record<string, unknown>
-    await writeFile(firstStatePath, `${JSON.stringify({ ...firstState, revision: 7, lastTrustedAt: '2026-08-28T00:00:00.000Z' }, null, 2)}\n`)
+    await writeFile(
+      firstStatePath,
+      `${JSON.stringify({ ...firstState, revision: 7, lastTrustedAt: '2026-08-28T00:00:00.000Z' }, null, 2)}\n`,
+    )
     await launch(secondHome)
 
-    expect(JSON.parse(await readFile(firstStatePath, 'utf8'))).toMatchObject({ revision: 7, lastTrustedAt: '2026-08-28T00:00:00.000Z' })
+    expect(JSON.parse(await readFile(firstStatePath, 'utf8'))).toMatchObject({
+      revision: 7,
+      lastTrustedAt: '2026-08-28T00:00:00.000Z',
+    })
     expect(JSON.parse(await readFile(path.join(secondHome, directGrantStatePath), 'utf8'))).toMatchObject({
       contract: 'cordisx.publisher-grants/direct-device-bound/v1',
       revision: 0,
@@ -344,30 +415,33 @@ describe('functional CordisX CLI', () => {
     }
   })
 
-  it.skipIf(process.platform === 'win32')('rejects a symlinked CORDISX_HOME before either development path can write', async () => {
-    for (const mode of ['direct', 'config'] as const) {
-      const root = await mkdtemp(path.join(os.tmpdir(), `cordisx-cli-dev-${mode}-symlink-home-`))
-      const { project, entry, configPath, executable } = await createLocalDevelopmentFixture(root)
-      const target = path.join(root, 'target-home')
-      const link = path.join(root, 'linked-home')
-      await mkdir(target, { mode: 0o755 })
-      await symlink(target, link)
-      const args = mode === 'direct'
-        ? ['dev', entry, '--executable', executable]
-        : ['dev', '--config', configPath, '--executable', executable]
+  it.skipIf(process.platform === 'win32')(
+    'rejects a symlinked CORDISX_HOME before either development path can write',
+    async () => {
+      for (const mode of ['direct', 'config'] as const) {
+        const root = await mkdtemp(path.join(os.tmpdir(), `cordisx-cli-dev-${mode}-symlink-home-`))
+        const { project, entry, configPath, executable } = await createLocalDevelopmentFixture(root)
+        const target = path.join(root, 'target-home')
+        const link = path.join(root, 'linked-home')
+        await mkdir(target, { mode: 0o755 })
+        await symlink(target, link)
+        const args = mode === 'direct'
+          ? ['dev', entry, '--executable', executable]
+          : ['dev', '--config', configPath, '--executable', executable]
 
-      await expect(runCordisXCli(args, {
-        cwd: project,
-        env: { CORDISX_HOME: link },
-        stdout: () => undefined,
-      })).rejects.toThrow('CordisX home must be a real directory')
+        await expect(runCordisXCli(args, {
+          cwd: project,
+          env: { CORDISX_HOME: link },
+          stdout: () => undefined,
+        })).rejects.toThrow('CordisX home must be a real directory')
 
-      expect((await stat(target)).mode & 0o777).toBe(0o755)
-      await expect(access(path.join(target, 'state'))).rejects.toMatchObject({ code: 'ENOENT' })
-      await expect(access(path.join(target, 'projects'))).rejects.toMatchObject({ code: 'ENOENT' })
-      await expect(access(path.join(target, 'cache'))).rejects.toMatchObject({ code: 'ENOENT' })
-    }
-  })
+        expect((await stat(target)).mode & 0o777).toBe(0o755)
+        await expect(access(path.join(target, 'state'))).rejects.toMatchObject({ code: 'ENOENT' })
+        await expect(access(path.join(target, 'projects'))).rejects.toMatchObject({ code: 'ENOENT' })
+        await expect(access(path.join(target, 'cache'))).rejects.toMatchObject({ code: 'ENOENT' })
+      }
+    },
+  )
 
   it('rejects a non-directory CORDISX_HOME before either development path can write', async () => {
     for (const mode of ['direct', 'config'] as const) {
@@ -388,27 +462,30 @@ describe('functional CordisX CLI', () => {
     }
   })
 
-  it.skipIf(process.platform === 'win32')('rejects a non-owned broad CORDISX_HOME before development state writes', async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-dev-owner-home-'))
-    const { project, entry, executable } = await createLocalDevelopmentFixture(root)
-    const home = path.join(root, 'foreign-home')
-    await mkdir(home, { mode: 0o755 })
-    const metadata = await stat(home)
-    const getuid = vi.spyOn(process, 'getuid').mockReturnValue(metadata.uid + 1)
-    try {
-      await expect(runCordisXCli(['dev', entry, '--executable', executable], {
-        cwd: project,
-        env: { CORDISX_HOME: home },
-        stdout: () => undefined,
-      })).rejects.toThrow('CordisX home must be owned by the current user')
-    } finally {
-      getuid.mockRestore()
-    }
-    expect((await stat(home)).mode & 0o777).toBe(0o755)
-    await expect(access(path.join(home, 'state'))).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(access(path.join(home, 'projects'))).rejects.toMatchObject({ code: 'ENOENT' })
-    await expect(access(path.join(home, 'cache'))).rejects.toMatchObject({ code: 'ENOENT' })
-  })
+  it.skipIf(process.platform === 'win32')(
+    'rejects a non-owned broad CORDISX_HOME before development state writes',
+    async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-dev-owner-home-'))
+      const { project, entry, executable } = await createLocalDevelopmentFixture(root)
+      const home = path.join(root, 'foreign-home')
+      await mkdir(home, { mode: 0o755 })
+      const metadata = await stat(home)
+      const getuid = vi.spyOn(process, 'getuid').mockReturnValue(metadata.uid + 1)
+      try {
+        await expect(runCordisXCli(['dev', entry, '--executable', executable], {
+          cwd: project,
+          env: { CORDISX_HOME: home },
+          stdout: () => undefined,
+        })).rejects.toThrow('CordisX home must be owned by the current user')
+      } finally {
+        getuid.mockRestore()
+      }
+      expect((await stat(home)).mode & 0o777).toBe(0o755)
+      await expect(access(path.join(home, 'state'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(access(path.join(home, 'projects'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(access(path.join(home, 'cache'))).rejects.toMatchObject({ code: 'ENOENT' })
+    },
+  )
 
   it('uses an isolated homedir for a fresh default ~/.cordisx development Home', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-dev-default-home-'))
@@ -446,7 +523,9 @@ describe('functional CordisX CLI', () => {
       env: { CORDISX_HOME: cordisxHome },
       internalBuiltinSkillSourceDir: source,
       internalSharedHomeDir: hostHome,
-      stdout: line => { output.push(line) },
+      stdout: line => {
+        output.push(line)
+      },
     })).rejects.toThrow('Host exited before CordisX CDP became ready')
     await expect(readFile(targetSkill, 'utf8')).resolves.toContain('description: test Skill')
     expect(output.join('\n')).toContain('[cordisx] built-in Skill installed:')
@@ -458,7 +537,9 @@ describe('functional CordisX CLI', () => {
       env: { CORDISX_HOME: cordisxHome },
       internalBuiltinSkillSourceDir: source,
       internalSharedHomeDir: hostHome,
-      stdout: line => { output.push(line) },
+      stdout: line => {
+        output.push(line)
+      },
     })).rejects.toThrow('Host exited before CordisX CDP became ready')
     await expect(readFile(targetSkill, 'utf8')).resolves.toBe('local user edit\n')
     expect(output.join('\n')).toContain('[cordisx] built-in Skill preserved:')
@@ -503,24 +584,35 @@ describe('functional CordisX CLI', () => {
     await mkdir(path.dirname(chatroomEntry), { recursive: true })
     await mkdir(path.dirname(calendarEntry), { recursive: true })
     await mkdir(nestedCwd, { recursive: true })
-    await writeFile(path.join(configRoot, 'package.json'), JSON.stringify({
-      name: 'business-project-cordisx', private: true, version: '1.0.0', type: 'module',
-    }))
+    await writeFile(
+      path.join(configRoot, 'package.json'),
+      JSON.stringify({
+        name: 'business-project-cordisx',
+        private: true,
+        version: '1.0.0',
+        type: 'module',
+      }),
+    )
     await writeFile(chatroomEntry, "export const name = 'chatroom'; export function apply() {}\n")
     await writeFile(calendarEntry, "export const name = 'calendar'; export function apply() {}\n")
-    await writeFile(configPath, JSON.stringify({
-      version: 1,
-      plugins: [
-        { id: 'chatroom', entry: './plugins/chatroom/src/chatroom.tsx' },
-        { id: 'calendar', entry: './plugins/calendar/src/calendar.tsx' },
-      ],
-    }))
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: 'chatroom', entry: './plugins/chatroom/src/chatroom.tsx' },
+          { id: 'calendar', entry: './plugins/calendar/src/calendar.tsx' },
+        ],
+      }),
+    )
     const output: string[] = []
 
     await runCordisXCli(['dev', '--dry-run'], {
       cwd: nestedCwd,
       env: { CORDISX_HOME: home },
-      stdout: line => { output.push(line) },
+      stdout: line => {
+        output.push(line)
+      },
     })
 
     expect(JSON.parse(output.at(-1)!) as unknown).toEqual(expect.objectContaining({
@@ -547,7 +639,9 @@ describe('functional CordisX CLI', () => {
     await runCordisXCli(['dev', '--config', path.relative(nestedCwd, configPath), '--dry-run'], {
       cwd: nestedCwd,
       env: { CORDISX_HOME: home },
-      stdout: line => { output.push(line) },
+      stdout: line => {
+        output.push(line)
+      },
     })
 
     expect(JSON.parse(output.at(-1)!) as unknown).toEqual(expect.objectContaining({
@@ -611,7 +705,12 @@ describe('functional CordisX CLI', () => {
     await writeFile(entry, "import { value } from './value.js'\nexport default { name: value, apply() {} }\n")
     await writeFile(dependency, "export const value = 'demo'\n")
     const output: string[] = []
-    await runCordisXCli(['dev', entry, '--dry-run'], { cwd: root, stdout: line => { output.push(line) } })
+    await runCordisXCli(['dev', entry, '--dry-run'], {
+      cwd: root,
+      stdout: line => {
+        output.push(line)
+      },
+    })
     expect(JSON.parse(output.at(-1)!) as unknown).toMatchObject({
       status: 'ready',
       mode: 'development',
@@ -620,7 +719,9 @@ describe('functional CordisX CLI', () => {
       sourcePath: entry,
     })
     await writeFile(dependency, 'export const value =\n')
-    await expect(runCordisXCli(['dev', entry, '--dry-run'], { cwd: root, stdout: () => undefined })).rejects.toThrow(/Build failed/u)
+    await expect(runCordisXCli(['dev', entry, '--dry-run'], { cwd: root, stdout: () => undefined })).rejects.toThrow(
+      /Build failed/u,
+    )
   })
 
   it('deploys the Skill and exposes one scaffolded plugin entry to the Host without creating a managed source', async () => {
@@ -632,17 +733,32 @@ describe('functional CordisX CLI', () => {
     const observedEnvironment = path.join(root, 'observed-environment.json')
     const executable = path.join(root, 'capture-development-entry')
     await mkdir(path.dirname(entry), { recursive: true })
-    await writeFile(path.join(project, 'send-confetti', 'package.json'), JSON.stringify({ name: 'send-confetti', version: '0.1.0' }))
+    await writeFile(
+      path.join(project, 'send-confetti', 'package.json'),
+      JSON.stringify({ name: 'send-confetti', version: '0.1.0' }),
+    )
     await writeFile(entry, "export const name = 'send-confetti'\nexport function apply() {}\n")
-    await writeFile(executable, `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(observedEnvironment)}, JSON.stringify({ entry: process.env.CORDISX_DEV_ENTRY, mode: process.env.CORDISX_DEV_MODE }))\n`)
+    await writeFile(
+      executable,
+      `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${
+        JSON.stringify(observedEnvironment)
+      }, JSON.stringify({ entry: process.env.CORDISX_DEV_ENTRY, mode: process.env.CORDISX_DEV_MODE }))\n`,
+    )
     await chmod(executable, 0o755)
 
     const dryOutput: string[] = []
     await runCordisXCli(['dev', entry, '--dry-run'], {
-      cwd: project, env: { CORDISX_HOME: home }, stdout: line => { dryOutput.push(line) },
+      cwd: project,
+      env: { CORDISX_HOME: home },
+      stdout: line => {
+        dryOutput.push(line)
+      },
     })
     expect(JSON.parse(dryOutput.at(-1)!) as unknown).toMatchObject({
-      status: 'ready', origin: 'local-dev', pluginId: 'send-confetti', sourcePath: entry,
+      status: 'ready',
+      origin: 'local-dev',
+      pluginId: 'send-confetti',
+      sourcePath: entry,
     })
 
     const output: string[] = []
@@ -650,7 +766,9 @@ describe('functional CordisX CLI', () => {
       cwd: project,
       env: { CORDISX_HOME: home },
       internalSharedHomeDir: hostHome,
-      stdout: line => { output.push(line) },
+      stdout: line => {
+        output.push(line)
+      },
     })).rejects.toThrow('Host exited before CordisX CDP became ready')
 
     expect(JSON.parse(await readFile(observedEnvironment, 'utf8'))).toEqual({ entry, mode: 'explicit-entry' })

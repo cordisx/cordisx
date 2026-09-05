@@ -1,4 +1,4 @@
-import { normalizeMarketplaceSource, type MarketplaceStorage } from './marketplace-source.js'
+import { type MarketplaceStorage, normalizeMarketplaceSource } from './marketplace-source.js'
 
 export const MARKETPLACE_FEED_CACHE_KEY = 'cordisx.manager.marketplaceFeedCache.v1'
 
@@ -29,10 +29,17 @@ function parseEntries(value: unknown): MarketplaceFeedCacheEntry[] {
   for (const item of cache.entries) {
     if (item === null || typeof item !== 'object' || Array.isArray(item)) continue
     const raw = item as { url?: unknown; text?: unknown; storedAt?: unknown }
-    if (typeof raw.url !== 'string' || typeof raw.text !== 'string' || typeof raw.storedAt !== 'number' || !Number.isFinite(raw.storedAt)) continue
+    if (
+      typeof raw.url !== 'string' || typeof raw.text !== 'string' || typeof raw.storedAt !== 'number'
+      || !Number.isFinite(raw.storedAt)
+    ) continue
     if (byteLength(raw.text) > MAX_FEED_CACHE_BYTES) continue
     let url: string
-    try { url = normalizeMarketplaceSource(raw.url) } catch { continue }
+    try {
+      url = normalizeMarketplaceSource(raw.url)
+    } catch {
+      continue
+    }
     if (url !== raw.url || seen.has(url)) continue
     seen.add(url)
     entries.push(Object.freeze({ url, text: raw.text, storedAt: raw.storedAt }))
@@ -89,13 +96,17 @@ export class BrowserMarketplaceFeedCache {
       const value: PersistedMarketplaceFeedCacheV1 = { schemaVersion: 1, entries }
       const serialized = JSON.stringify(value)
       if (byteLength(serialized) <= MAX_PERSISTED_CACHE_BYTES) {
-        try { this.storage.setItem(MARKETPLACE_FEED_CACHE_KEY, serialized) } catch { /* cache persistence is best-effort */ }
+        try {
+          this.storage.setItem(MARKETPLACE_FEED_CACHE_KEY, serialized)
+        } catch { /* cache persistence is best-effort */ }
         return
       }
       const removed = entries.pop()
       if (removed !== undefined) this.entries.delete(removed.url)
     }
-    try { this.storage.setItem(MARKETPLACE_FEED_CACHE_KEY, JSON.stringify({ schemaVersion: 1, entries: [] })) } catch { /* best-effort */ }
+    try {
+      this.storage.setItem(MARKETPLACE_FEED_CACHE_KEY, JSON.stringify({ schemaVersion: 1, entries: [] }))
+    } catch { /* best-effort */ }
   }
 }
 

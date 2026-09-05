@@ -19,8 +19,9 @@ export interface CordisXVisualProps<Data extends CordisXVisualData = CordisXVisu
   readonly theme: CordisXVisualTheme
 }
 
-export type CordisXVisualRenderer<Data extends CordisXVisualData = CordisXVisualData> =
-  ComponentType<CordisXVisualProps<Data>>
+export type CordisXVisualRenderer<Data extends CordisXVisualData = CordisXVisualData> = ComponentType<
+  CordisXVisualProps<Data>
+>
 
 /** Fiber-owned visual-provider registration for trusted renderer plugins. */
 export interface CordisXVisuals {

@@ -21,7 +21,11 @@ export class BrowserChannelActionsBridge {
   private constructor(private readonly token: string) {
     globalThis[RECEIVER] = payload => {
       let value: { requestId?: unknown; ok?: unknown; value?: unknown }
-      try { value = JSON.parse(payload) as typeof value } catch { return }
+      try {
+        value = JSON.parse(payload) as typeof value
+      } catch {
+        return
+      }
       if (typeof value.requestId !== 'string') return
       const pending = this.pending.get(value.requestId)
       if (pending === undefined) return
@@ -32,7 +36,9 @@ export class BrowserChannelActionsBridge {
     }
   }
 
-  static connect(token: string): BrowserChannelActionsBridge { return new BrowserChannelActionsBridge(token) }
+  static connect(token: string): BrowserChannelActionsBridge {
+    return new BrowserChannelActionsBridge(token)
+  }
 
   async run(action: string, input: Record<string, unknown>): Promise<ChannelManagerActionResult> {
     const binding = globalThis[BINDING]

@@ -59,6 +59,8 @@ export function projectPublicRuntimeSnapshot(snapshot: ManagerSnapshot): Manager
       return publicPlugin
     }),
     ...(projected.iconThemes === undefined ? {} : { iconThemes: publicIconThemes(projected.iconThemes) }),
-    ...(projected.extensionPoints === undefined ? {} : { extensionPoints: publicExtensionPoints(projected.extensionPoints) }),
+    ...(projected.extensionPoints === undefined
+      ? {}
+      : { extensionPoints: publicExtensionPoints(projected.extensionPoints) }),
   }
 }

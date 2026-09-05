@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import {
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   type BoundAgentLoopClient,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   type CordisXPluginManifestV1,
 } from '../../packages/cli/src/contracts.js'
 
@@ -11,9 +11,24 @@ export const manifest = {
   id: 'agent-loop-runtime',
   name: 'AgentLoop Runtime Fixture',
   capabilities: [
-    { name: 'tasks.create', required: true, reason: { key: 'agent-loop.create', fallback: 'Create the AgentLoop task' }, scope: { providers: ['gateway-a'] } },
-    { name: 'tasks.content.read', required: true, reason: { key: 'agent-loop.read', fallback: 'Read AgentLoop events' }, scope: { providers: ['gateway-a'] } },
-    { name: 'turns.submit', required: true, reason: { key: 'agent-loop.send', fallback: 'Send AgentLoop turns' }, scope: { providers: ['gateway-a'] } },
+    {
+      name: 'tasks.create',
+      required: true,
+      reason: { key: 'agent-loop.create', fallback: 'Create the AgentLoop task' },
+      scope: { providers: ['gateway-a'] },
+    },
+    {
+      name: 'tasks.content.read',
+      required: true,
+      reason: { key: 'agent-loop.read', fallback: 'Read AgentLoop events' },
+      scope: { providers: ['gateway-a'] },
+    },
+    {
+      name: 'turns.submit',
+      required: true,
+      reason: { key: 'agent-loop.send', fallback: 'Send AgentLoop turns' },
+      scope: { providers: ['gateway-a'] },
+    },
   ],
 } as const satisfies CordisXPluginManifestV1
 

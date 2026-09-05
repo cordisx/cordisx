@@ -134,7 +134,9 @@ function schemaEnvelope(schema: { readonly toJSON: () => unknown }): Readonly<Re
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`${label} must be an object`)
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object`)
+  }
   return value as Record<string, unknown>
 }
 
@@ -182,7 +184,9 @@ function modelMapping(value: unknown, label: string): CliProxyProviderModelMappi
   return {
     sourceModelId: text(mapping.sourceModelId, `${label}.sourceModelId`, 256),
     modelId: text(mapping.modelId, `${label}.modelId`, 256),
-    ...(mapping.displayName === undefined ? {} : { displayName: text(mapping.displayName, `${label}.displayName`, 200) }),
+    ...(mapping.displayName === undefined
+      ? {}
+      : { displayName: text(mapping.displayName, `${label}.displayName`, 200) }),
     enabled: boolean(mapping.enabled, `${label}.enabled`, true),
     isDefault: boolean(mapping.isDefault, `${label}.isDefault`, false),
   }
@@ -204,14 +208,20 @@ function runtimeProvider(
   const models = provider.models === undefined ? {} : object(provider.models, `${label}.models`)
   exactKeys(models, ['mappings'], `${label}.models`)
   const rawMappings = models.mappings ?? []
-  if (!Array.isArray(rawMappings) || rawMappings.length > 256) throw new TypeError(`${label}.models.mappings must contain at most 256 items`)
+  if (!Array.isArray(rawMappings) || rawMappings.length > 256) {
+    throw new TypeError(`${label}.models.mappings must contain at most 256 items`)
+  }
   const mappings = rawMappings.map((item, index) => modelMapping(item, `${label}.models.mappings[${index}]`))
   const sourceIds = new Set<string>()
   const modelIds = new Set<string>()
   let defaultCount = 0
   for (const mapping of mappings) {
-    if (sourceIds.has(mapping.sourceModelId)) throw new TypeError(`${label}.models.mappings contains duplicate sourceModelId ${mapping.sourceModelId}`)
-    if (modelIds.has(mapping.modelId)) throw new TypeError(`${label}.models.mappings contains duplicate modelId ${mapping.modelId}`)
+    if (sourceIds.has(mapping.sourceModelId)) {
+      throw new TypeError(`${label}.models.mappings contains duplicate sourceModelId ${mapping.sourceModelId}`)
+    }
+    if (modelIds.has(mapping.modelId)) {
+      throw new TypeError(`${label}.models.mappings contains duplicate modelId ${mapping.modelId}`)
+    }
     sourceIds.add(mapping.sourceModelId)
     modelIds.add(mapping.modelId)
     if (mapping.enabled && mapping.isDefault) defaultCount += 1
@@ -271,7 +281,11 @@ function parseRuntime(
   const providers = config.providers.map((item, index) => {
     const candidate = object(item, `CLIProxy provider runtime configuration.providers[${index}]`)
     const id = typeof candidate.id === 'string' ? candidate.id.trim() : ''
-    return runtimeProvider(item, `CLIProxy provider runtime configuration.providers[${index}]`, currentProviders.get(id))
+    return runtimeProvider(
+      item,
+      `CLIProxy provider runtime configuration.providers[${index}]`,
+      currentProviders.get(id),
+    )
   })
   const ids = new Set<string>()
   for (const provider of providers) {
@@ -294,7 +308,9 @@ function parseStartup(value: unknown): CliProxyProviderStartupConfigV1 {
   if (!Array.isArray(config.providers) || config.providers.length > 64) {
     throw new TypeError('CLIProxy provider startup configuration.providers must contain at most 64 items')
   }
-  const providers = config.providers.map((item, index) => startupProvider(item, `CLIProxy provider startup configuration.providers[${index}]`))
+  const providers = config.providers.map((item, index) =>
+    startupProvider(item, `CLIProxy provider startup configuration.providers[${index}]`)
+  )
   const ids = new Set<string>()
   const dataDirs = new Set<string>()
   for (const provider of providers) {
@@ -332,7 +348,9 @@ export function validateCliProxyProviderPlanes(
 ): void {
   const runtimeIds = new Set(runtime.providers.map(provider => provider.id))
   const orphan = startup.providers.find(provider => !runtimeIds.has(provider.id))
-  if (orphan !== undefined) throw new TypeError(`CLIProxy startup provider ${orphan.id} has no matching runtime provider`)
+  if (orphan !== undefined) {
+    throw new TypeError(`CLIProxy startup provider ${orphan.id} has no matching runtime provider`)
+  }
 }
 
 export function resolveCliProxyProviderConfigs(
@@ -441,19 +459,24 @@ export const CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT: HostServiceConfigContra
   }),
   schema: Object.freeze({
     id: CLI_PROXY_PROVIDER_RUNTIME_CONFIG_SCHEMA_V1,
-    projection: Object.freeze({ kind: 'schemastery' as const, envelope: schemaEnvelope(CliProxyProviderRuntimeConfigSchema) }),
+    projection: Object.freeze({
+      kind: 'schemastery' as const,
+      envelope: schemaEnvelope(CliProxyProviderRuntimeConfigSchema),
+    }),
   }),
   configApplies: 'service-restart' as const,
   initialConfiguration: CLI_PROXY_PROVIDER_RUNTIME_CONFIG_INITIAL as unknown as JsonValue,
   parseStored: (value: unknown) => parseCliProxyProviderRuntimeConfig(value) as unknown as JsonValue,
-  normalizeMutation: (value: unknown, current: JsonValue) => normalizeCliProxyProviderRuntimeMutation(
-    value,
-    current as unknown as CliProxyProviderRuntimeConfigV1,
-  ) as unknown as JsonValue,
-  project: (value: JsonValue, secretState: (secretRef: string | undefined) => HostSecretState) => projectCliProxyProviderRuntimeConfig(
-    value as unknown as CliProxyProviderRuntimeConfigV1,
-    secretState,
-  ),
+  normalizeMutation: (value: unknown, current: JsonValue) =>
+    normalizeCliProxyProviderRuntimeMutation(
+      value,
+      current as unknown as CliProxyProviderRuntimeConfigV1,
+    ) as unknown as JsonValue,
+  project: (value: JsonValue, secretState: (secretRef: string | undefined) => HostSecretState) =>
+    projectCliProxyProviderRuntimeConfig(
+      value as unknown as CliProxyProviderRuntimeConfigV1,
+      secretState,
+    ),
 })
 
 export const CLI_PROXY_PROVIDER_STARTUP_CONFIG_CONTRACT: HostServiceConfigContract = Object.freeze({
@@ -464,13 +487,17 @@ export const CLI_PROXY_PROVIDER_STARTUP_CONFIG_CONTRACT: HostServiceConfigContra
   }),
   schema: Object.freeze({
     id: CLI_PROXY_PROVIDER_STARTUP_CONFIG_SCHEMA_V1,
-    projection: Object.freeze({ kind: 'schemastery' as const, envelope: schemaEnvelope(CliProxyProviderStartupConfigSchema) }),
+    projection: Object.freeze({
+      kind: 'schemastery' as const,
+      envelope: schemaEnvelope(CliProxyProviderStartupConfigSchema),
+    }),
   }),
   configApplies: 'app-restart' as const,
   initialConfiguration: CLI_PROXY_PROVIDER_STARTUP_CONFIG_INITIAL as unknown as JsonValue,
   parseStored: (value: unknown) => parseCliProxyProviderStartupConfig(value) as unknown as JsonValue,
   normalizeMutation: (value: unknown) => parseCliProxyProviderStartupConfig(value) as unknown as JsonValue,
-  project: (value: JsonValue) => projectCliProxyProviderStartupConfig(
-    value as unknown as CliProxyProviderStartupConfigV1,
-  ),
+  project: (value: JsonValue) =>
+    projectCliProxyProviderStartupConfig(
+      value as unknown as CliProxyProviderStartupConfigV1,
+    ),
 })
