@@ -1,96 +1,101 @@
-# CordisX Documentation
+# CordisX documentation
 
-This directory is the public, aggregatable source for CordisX product and architecture documentation.
+This is the public, aggregatable source for Host product explanations, guides,
+and implementation references. Choose an entry by the task below. A reference
+may describe compatibility, experimental, or unavailable paths; its stated
+scope and evidence do not imply that every path is released or user-accepted.
+Historical plans and delivery records are grouped separately and retain their
+original evidence states.
 
-- `product-overview.md` and `product-overview.zh-CN.md` preserve the English
-  and Simplified Chinese product story, project background, ecosystem links,
-  and licensing overview that stay outside the task-focused product README.
-- `getting-started.md` records local development, launcher, smoke-test, and
-  example-plugin instructions that should not live in the product README.
-- `startup-qa.md` and `startup-qa.zh-CN.md` provide a short English and
-  Simplified Chinese self-service path for common startup questions.
-- `architecture.md` defines the current runtime, lifecycle, slot, and security boundaries.
-- `manager-content-design.md` is the reusable design guideline for manager
-  hierarchy, title de-duplication, tabs, flat lists, cards, states, and
-  accessibility/screenshot regression evidence.
-- `ui-copy-principles.md` defines the product UI copy hierarchy: concise
-  current state first, clear document actions for context, and diagnostics for
-  implementation detail.
-- `manager-settings-tabs.md` preserves the host-neutral Settings content-tab
-  compatibility contract. The current Manager IA has no top-level Settings
-  page, so its surface/outlet remain diagnosable as `not-mounted` rather than
-  manufacturing an empty shell.
-- `manager-settings-navigation.md` defines real plugin-owned first-level
-  Manager destinations across the stable virtual settings seam, the v5/
-  catalog-v4 route-v2/page-v3 projection, standard `manager.content` shell,
-  fallback, configuration planes, overlap boundary, and renderer matrix.
-- `plugin-configuration.md` defines Schemastery-first forms, the Standard
-  Schema validation boundary, revision-fenced persistence, live/restart
-  application, last-good recovery, secrets, and lifecycle-owned field
-  renderers.
-- `host-form-system.md` defines the Host-owned TDesign-aligned primitive
-  adapter, official Web Components audit, scoped theme/layout/a11y contract,
-  schema selection, draft/validation states, and current Manager integration.
-- `plugin-react-runtime.md` defines the direct shared-React authoring API,
-  Host component surface, private-React rejection, page-body ownership, and
-  root lifecycle/verification contract.
-- `plugin-visuals.md` defines owner-scoped bounded visual providers, opaque
-  immutable data, theme projection, generation visibility, and failure
-  containment.
-- `service-configuration.md` defines plugin-owned launcher service schemas,
-  Host CAS/permission/secret boundaries, and explicit service/app restart
-  planes used by CLIProxy Providers.
-- `plugin-devtools-console.md` defines the plugin-scoped DevTools Console,
-  issuance-bound Host instrumentation, native variadic arguments, coverage
-  guarantees, Luna rendering, privacy and bounded lifetime.
-- `manager-feedback-ledger-2026-08-26.md` is the bounded follow-up ledger for
-  the accepted Manager Console and Host Form feedback from 2026-08-26. It
-  records exact user-visible outcomes, file ownership, validation, and the
-  rule that previously accepted UI work is not reopened without a regression.
-- `dynamic-plugin-lifecycle.md` defines local package staging, dependency and
-  permission planning, minimum-scope plugin generations, atomic activation,
-  last-good rollback, uninstall cleanup, and Host-owned manager operations.
-- `data-contribution-routing.md` defines the approved structured shell-contribution and
-  page/outlet architecture that replaces direct plugin DOM rendering in native shell areas.
-- `extension-point-management.md` defines surfaces and outlets as the two
-  extension-point families, their localized host catalog, manager search and
-  detail experience, point-policy enforcement, and delivery/validation order.
-- `marketplace-trust-and-ranking.md` defines the independent Official and
-  Certified dimensions, protected Marketplace trust root, exact-artifact
-  revocation behavior, bounded stable search order, and Manager projection.
-- `ui-extension-catalog-codex-adapter.md` defines the complete host-neutral UI
-  catalog, Codex adapter availability, structured payload families, DeepSeek
-  Harness mapping/refusals, contextual identity boundary, and validation matrix.
-- `distribution-and-cli.md` defines the product monorepo, home configuration,
-  app/profile command model, package ownership, and release gates.
-- `showcase-capture-integration.md` defines which real-showcase support belongs
-  in CordisX, which behavior is opt-in, which capture artifacts stay in the
-  homepage repository, which module guides an Agent must read first, and how
-  changes to the root README AI-first plugin demo route to the website-owned
-  [capture workflow](https://github.com/cordisx/cordisx.github.io/blob/main/.agents/docs/ai-plugin-demo-capture.md).
-- `dynamic-package-store.md` maps source-v1/package-v2 intake and Host-private
-  transaction hardening onto the single launcher package/activation stores.
-- `plugin-bundles.md` defines Host-owned bundle manifests, member claims,
-  atomic lifecycle coordination, permission merging and safety floors,
-  Manager information architecture, Playground fixtures, and app-smoke proof.
-- `platform-capabilities.md` defines the Platform service, permission broker,
-  current-connection adapter boundary, manager projection, PR order, and validation scope.
-- `multi-provider-sessions.md` defines provider-aware model/session identity,
-  Provider Fleet routing, the launcher-private connection plane, CLIProxyAPI
-  integration, PR order, and validation scope.
-- `agent-events.md` defines the UI-neutral Session/Agent event ledger,
-  DSH-aligned messaging facade, permission chain, private adapter boundary,
-  honest degradation, and validation matrix.
-- `agent-loop.md` defines the experimental principal-bound `ctx.agentLoop`
-  text path, AgentDefinition resolution, opaque create-or-bind identity,
-  proactive events, existing-permission reuse, and Chatroom/Host ownership.
-- `agent-trace-showcase.md` defines the independent development-only Agent
-  Trace Showcase plugin, its stacked core-contract dependency, session Timeline
-  product boundary, fixture seam, lifecycle, and validation matrix.
-- `channel-runtime.md` defines the Channel product operations, composite
-  account/tenant/conversation/thread/task binding, Node-side service boundary,
-  official Feishu/WeCom/WeChat feasibility, security and reliability contracts,
-  DSH/OneWorks facade, PR order, and simulator-first validation matrix.
-- `development-plan.md` records staged implementation and validation boundaries.
+Normative plugin contracts belong in `cordisx/cordisx-protocol`; private or
+provisional planning belongs in `cordisx/roadmap`. Host references describe the
+implementation of those contracts, not a second public specification.
 
-Normative plugin contracts belong in `cordisx/cordisx-protocol`; private or provisional planning belongs in `cordisx/roadmap`.
+## Use CordisX
+
+| Document | Type | Use it for |
+| --- | --- | --- |
+| [product-overview](product-overview.md) | Overview | Product scope, background, ecosystem, and licensing |
+| [product-overview.zh-CN](product-overview.zh-CN.md) | Overview | Simplified Chinese product overview |
+| [getting-started](getting-started.md) | Guide | Installation, local setup, launch modes, examples, and smoke commands |
+| [startup-qa](startup-qa.md) | Guide | Startup troubleshooting |
+| [startup-qa.zh-CN](startup-qa.zh-CN.md) | Guide | Simplified Chinese startup troubleshooting |
+
+## Develop and inspect plugins
+
+| Document | Type | Use it for |
+| --- | --- | --- |
+| [vite-native-development](vite-native-development.md) | Guide / reference | Vite graph, update boundaries, and native development evidence |
+| [ui-playground](ui-playground.md) | Guide | Local UI and scenarios, configuration, and evidence limits |
+| [plugin-react-runtime](plugin-react-runtime.md) | Reference | Shared React authoring, controlled body seats, and lifecycle |
+| [plugin-visuals](plugin-visuals.md) | Reference (unreleased) | Owner-scoped decorative renderers, opaque data, theme, generation visibility, and failure containment |
+| [plugin-configuration](plugin-configuration.md) | Reference | Schema forms, persistence, apply scopes, secrets, and recovery |
+| [service-configuration](service-configuration.md) | Reference | Launcher service schemas, credentials, and restart planes |
+| [plugin-devtools-console](plugin-devtools-console.md) | Reference | Plugin-scoped Console attribution, coverage, privacy, and lifetime |
+| [agent-trace-showcase](agent-trace-showcase.md) | Reference | Development-only Trace plugin, Timeline, fixtures, and validation scope |
+
+## Understand runtime composition and delivery
+
+| Document | Type | Use it for |
+| --- | --- | --- |
+| [architecture](architecture.md) | Overview | Runtime planes, ownership, trust, and detailed-reference navigation |
+| [launcher-runtime](launcher-runtime.md) | Reference | Node/CDP composition, exact authority, durable state, and services |
+| [renderer-runtime](renderer-runtime.md) | Reference | Renderer, conversation, adapter, routing, Manager, and trust integration |
+| [distribution-and-cli](distribution-and-cli.md) | Reference | CLI grammar, launch profiles, package ownership, and release contract |
+| [dynamic-plugin-lifecycle](dynamic-plugin-lifecycle.md) | Reference | Dynamic package generations, activation, rollback, and cleanup |
+| [dynamic-package-store](dynamic-package-store.md) | Reference | Source intake, private transactions, permissions, and leases |
+| [plugin-bundles](plugin-bundles.md) | Reference | Bundle claims, lifecycle coordination, permission merging, and Manager projection |
+| [showcase-capture-integration](showcase-capture-integration.md) | Guide | Host support for website-owned capture workflows and artifacts |
+
+## Design Host UI and extension points
+
+| Document | Type | Use it for |
+| --- | --- | --- |
+| [data-contribution-routing](data-contribution-routing.md) | Reference | Structured shell records, pages, outlets, localization, and routing |
+| [extension-point-management](extension-point-management.md) | Reference | Surface/outlet catalogs, diagnostics, and point policy |
+| [ui-extension-catalog-codex-adapter](ui-extension-catalog-codex-adapter.md) | Reference | Host-neutral catalog, Codex adapter availability, and verification matrix |
+| [manager-content-design](manager-content-design.md) | Reference | Host UI hierarchy, navigation, controls, layout, and accessibility |
+| [manager-settings-tabs](manager-settings-tabs.md) | Compatibility reference | Stable Settings content-tab seam and honest not-mounted behavior |
+| [manager-settings-navigation](manager-settings-navigation.md) | Reference | Contributed first-level Manager destinations and standard page composition |
+| [host-collections](host-collections.md) | Reference | Host-owned list/detail collections, actions, search, and lifecycle |
+| [host-form-system](host-form-system.md) | Reference | Host form primitives, TDesign adapter, theme, layout, and validation |
+| [schemastery-ui](schemastery-ui.md) | Reference | Form-engine package boundary, presenters, and layout semantics |
+| [host-icon-theme](host-icon-theme.md) | Reference | Icon provider handles, preference persistence, and renderer synchronization |
+| [icon-theme-manager-token-map](icon-theme-manager-token-map.md) | Reference / recorded decisions | Manager semantic icon seats and retained acceptance-map entries |
+| [ui-copy-principles](ui-copy-principles.md) | Reference | Concise product copy, localization, diagnostics, and review principles |
+| [ui-copy-catalog](ui-copy-catalog.md) | Reference / historical scan | Copy inventory and explicitly dated integration observations |
+
+## Understand authority, Agent, Channel, and Marketplace features
+
+| Document | Type | Use it for |
+| --- | --- | --- |
+| [platform-capabilities](platform-capabilities.md) | Reference | Platform service, Permission Broker, adapter availability, and transport |
+| [publisher-grants](publisher-grants.md) | Reference | Device-bound PublisherGrant authority, persistence, and optional registry |
+| [multi-provider-sessions](multi-provider-sessions.md) | Reference | Provider Fleet, structured identities, independent connections, and CLIProxyAPI |
+| [agent-events](agent-events.md) | Reference | Session/Agent events, messaging, permissions, and private adapter boundary |
+| [agent-history](agent-history.md) | Reference | Read-only durable history, paging, deduplication, redaction, and ownership |
+| [agent-loop](agent-loop.md) | Experimental reference | Principal-bound AgentLoop path, catalog resolution, and unsupported boundaries |
+| [channel-runtime](channel-runtime.md) | Reference | Node Channel services, bindings, adapters, reliability, and evidence scope |
+| [marketplace-source-management](marketplace-source-management.md) | Reference | Source management, cache behavior, and Manager information architecture |
+| [marketplace-trust-and-ranking](marketplace-trust-and-ranking.md) | Reference | Official/Certified dimensions, revocation, search, and projection |
+
+## Read historical plans and delivery evidence
+
+| Document | Type | Use it for |
+| --- | --- | --- |
+| [development-plan](development-plan.md) | Historical plan | Recorded stages and feasibility observations; not the current roadmap |
+| [manager-feedback-ledger-2026-08-26](manager-feedback-ledger-2026-08-26.md) | Historical delivery record | 2026-08-26 requirement batch and its retained evidence states |
+| [certified-dom-permission-ledger-2026-08-30](certified-dom-permission-ledger-2026-08-30.md) | Historical candidate record | 2026-08-30 candidate SHAs, local checks, and pending gates |
+
+## Maintainer and artifact entry points
+
+[AGENTS.md](https://github.com/cordisx/cordisx/blob/main/AGENTS.md) routes maintainers to repository rules;
+[CONTRIBUTING.md](https://github.com/cordisx/cordisx/blob/main/CONTRIBUTING.md) records contribution terms. Those
+instructions are not public product reference material.
+
+Package READMEs, including [the CLI](https://github.com/cordisx/cordisx/blob/main/packages/cli/README.md), stay beside
+their published artifacts. [Example READMEs](https://github.com/cordisx/cordisx/blob/main/examples/plugins/hello-toolbar/README.md)
+explain individual demos. The [plugin-development Skill](https://github.com/cordisx/cordisx/blob/main/skills/cordisx-plugin-development/SKILL.md)
+is shipped with the CLI and keeps its task references together for installed
+use. These local entry points may summarize a feature and link to the detailed
+reference without duplicating its authority.

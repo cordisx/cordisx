@@ -412,3 +412,40 @@ bounded RPC identity/scope rejection; atomic configuration readback; manager
 `ask`/`allow`/`deny` editing; non-duplicated visible headings; keyboard/focus;
 and both renderer color schemes. Agent event contracts and Agent Trace special
 cases are an explicit negative diff boundary.
+
+## Renderer transport composition
+
+The following Host integration constraints complement the capability-specific
+contracts above and the [architecture overview](architecture.md). Permission
+versions retain their own scope; availability is checked separately.
+
+The Platform permission seam uses versioned capability declarations, an
+identity-bound Permission Broker, and Manager permission projections. These
+controls govern cooperative `ctx.platform` calls; they do not by themselves
+provide package installation authority, publisher verification, or general
+untrusted execution isolation. Package and execution boundaries are specified
+separately in [dynamic plugin lifecycle](dynamic-plugin-lifecycle.md) and
+[renderer trust composition](renderer-runtime.md#marketplace-trust-and-host-dom-isolation).
+
+The same Broker also owns controlled extension-point rendering authorization.
+Its permission-v3 catalog adds one DOM/rendering capability and keeps every
+existing Platform, Agent, and Channel capability non-DOM. A configured
+Marketplace trust root may provide an exact Certified artifact projection; only
+that projection and only the catalog-designated DOM capability may skip the
+visible confirmation. The Host still issues and audits a profile/scope/security-
+fingerprint/generation-bound lease. Official provenance never enters this
+decision. Extension-point availability probes stay independent, and legacy
+point/control policy stores are migration inputs rather than a second runtime
+authorization authority.
+
+The multi-provider Platform slice routes every model and session operation by
+structured provider-aware identity. Its launcher-private RPC exposes normalized
+operations only; credentials, child processes, app-server messages, and raw
+transport stay outside the renderer. An external provider becoming available
+does not change the honest status of the native current-connection adapter.
+The renderer adapter authenticates the narrow CDP binding with a per-launch
+closure-bound token before any Platform operation is dispatched. Plugins use
+only `ctx.platform`, so the Permission Broker retains canonical source identity,
+composite requested session/model targets, policy outcome, and user-visible
+audit state. This reduces accidental binding bypass inside the current trusted
+renderer model; it is not a substitute for a future isolated plugin realm.

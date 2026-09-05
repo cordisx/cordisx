@@ -1,20 +1,20 @@
 # Functional product delivery
 
 Use this rule for user-visible Manager pages, launcher flows, renderer bridges,
-and interactive previews. It complements the architecture and visual rules;
-it prevents a technically present feature from being reported as usable before
-its production composition and real interaction path work.
+and interactive previews. It complements the architecture and visual rules.
+An intermediate preview, a verified production path, and formal delivery have
+different evidence requirements; name the stage before reporting readiness.
 
 ## Start from a requirement ledger
 
 Translate the request and every later correction into one ledger before
 editing. Keep user-visible behavior separate from implementation dependencies.
-Each item has exactly one state:
-
-- `unimplemented`: no conforming product path exists;
-- `implemented`: code exists on the current candidate;
-- `verified`: the intended production path passed named evidence; or
-- `formally merged`: the verified candidate is present on owning-repo main.
+Record implementation state and the evidence for validation, merge, and user
+acceptance separately. `implemented` means code exists on the named candidate;
+`verified` requires named evidence for the claimed path and scope. Record a
+formal owning-repository merge by its exact SHA. Only explicit user acceptance
+establishes `accepted`. A merged item may still lack real-App verification or
+user acceptance; keep those gaps visible instead of promoting a single state.
 
 Do not close the ledger because a partial PR merged, CI passed, a simulator
 worked, or a screenshot looked better. Re-read the complete ledger after every
@@ -55,43 +55,91 @@ that the production bundle metadata publishes it, the CDP installer binds it,
 the renderer receives it, and the user control becomes operable. A unit test
 that manually injects a token cannot prove that the launcher passes that token.
 
-Use this evidence ladder for an interactive path:
+Choose validation for the behavior and claim:
 
-1. focused unit tests for parser, state, or operation semantics;
-2. an integration test through the production composition entry point;
-3. one real isolated `app://` flow that clicks or reads the intended controls;
-4. cleanup evidence for the temporary port, profile processes, and runner Home;
-5. normal PR CI and exact-head merge readback.
+| Change or claim | Required evidence |
+| --- | --- |
+| Documentation only | Diff and applicable document/link checks |
+| Presentation-only intermediate preview | Correct source/configuration and visible intended change; follow the active pure-style window below |
+| Parser, state, operation, protocol, or other behavior change | Meaningful focused checks plus the normal owning-repository `npm run check`; add or update tests where the behavior or regression risk requires them |
+| Launcher, DOM-adapter, native-surface, or lifecycle change claimed production-usable | Production composition integration plus a real isolated `app://` flow through the affected controls, with scoped cleanup evidence |
+| Formal delivery | Applicable validation above, required PR CI, exact-head merge and remote-main readback, and the authorized compatible-set handoff |
 
-The real smoke asserts positive usability, not mere presence. For example, an
-action button must be enabled and produce a safe refreshed projection; three
-disabled buttons do not prove three implemented actions. Empty-state smoke
-also verifies that persistent task controls remain present.
+The production smoke asserts positive usability, not mere presence. For
+example, an action must be enabled and produce the intended safe refreshed
+projection. Empty-state smoke also verifies persistent task controls. JSDOM,
+Playground fixtures, or a manually injected token cannot establish native
+integration. Record unavailable evidence as a remaining gate; do not fabricate
+a fallback or claim formal readiness to bypass it.
 
 ## Keep preview launches honest
 
-`CORDISX_HOME` isolates CordisX configuration and state. It must not be
-described as a new Host login profile. A shared Host launch reuses the stored
-system Host profile, but Electron cannot add a CDP port to a process that was
-already started without one. In that case, fail clearly and require a normal
-cold restart; do not report `ready` when a singleton hand-off exits before the
-first renderer injection.
+### Intermediate preview
 
-Before announcing `可体验`:
+A feature-branch or dirty worktree may provide a useful intermediate preview.
+Playground, a development site, and a real App are valid preview surfaces with
+different evidence limits. A preview does not require formal main, CI, or a
+real-App gate before the user can inspect the work.
 
-1. verify the checkout is at the intended formal Host main;
-2. verify the selected CordisX config and profile;
-3. verify no stale CordisX Host instance or private profile process remains;
-4. require the first renderer-injection acknowledgement;
-5. state whether one Host instance means an Electron process tree rather than
-   literally one operating-system process; and
-6. leave the launcher alive because it owns RPC, service, and cleanup lifetime.
+Before reporting `可预览` or `PREVIEW_READY`, identify the owning repository,
+source SHA and dirty state, exact configuration, URL or App renderer, relevant
+process/lifetime, data source, unavailable capabilities, and checks deferred.
+Verify that the surface reflects the intended source. Label feature-head
+upstream inputs experimental; they are not formal consumer dependencies.
+A successful page load proves availability only, not functional verification
+or acceptance. Use the same preview during feedback when practical.
 
-Never copy, symlink, or concurrently open the system Chromium profile to avoid
-a login prompt. If the current Host was not launched with CDP, an external
-terminal or helper may wait for the user to exit it normally and then perform
-the cold shared launch. Do not kill the Host from the task that depends on its
-app-server.
+### User-led pure-style iteration
+
+When the user is actively reviewing an existing preview and the change is
+limited to presentation (spacing, typography, color, geometry, or non-semantic
+motion), make the narrow edit, restore compile/HMR visibility if needed, and
+report `FEEDBACK_READY`. Automated tests and independent review are deferred
+during that feedback window; they do not block the user's next inspection.
+The user remains the only acceptance authority.
+
+The window ends when the user ends active styling review or feedback changes
+behavior, accessibility semantics, security, permissions, public contracts,
+persistent data, lifecycle, release, or another high-risk surface. On exit,
+perform the applicable checks once for the final change. Add or update tests
+only when behavior or regression risk requires them. Preserve explicit
+acceptance separately from validation; silence or a visible preview is neither.
+This matches the pure-style workflow owned by CordisXMono and does not activate
+responsible-manager mode for a single-owner task.
+
+### Native launch and production proof
+
+`CORDISX_HOME` scopes CordisX configuration and state, not Host login identity.
+The normal `shared` mode starts an independent Host process and CordisX-scoped
+Chromium profile while sharing the existing Host account/configuration roots.
+`--system` explicitly selects the normal system Chromium profile; advanced
+`host-isolated` mode uses separate Host roots. See the
+[launch-mode reference](../docs/distribution-and-cli.md#independent-cordisx-launches-and-explicit-host-root-isolation).
+
+For a native preview, verify its selected config/profile, source provenance,
+and first renderer-injection acknowledgement. Identify an Electron process
+tree as one Host instance rather than claiming it is one operating-system
+process. Leave the owning launcher alive while the preview is in use; it owns
+RPC, service, and cleanup lifetime. Clean up only temporary resources owned by
+the completed validation run. Existing shared previews and unrelated Host
+processes are not cleanup targets.
+
+Electron cannot add CDP to an already-running process that lacks it. If an
+explicit system-profile launch encounters singleton hand-off without injection,
+report the launch as unavailable and require a normal cold restart. Never copy,
+symlink, or concurrently open the system Chromium profile to avoid a login
+prompt. A helper may wait for the user to exit normally before a cold launch;
+do not kill the Host from the task that depends on its app-server.
+
+### Formal experience or delivery
+
+Before reporting a production path as verified, name the candidate and the
+production/native evidence above. Before reporting a formal experience build,
+verify the intended formal Host main and compatible formal dependencies,
+selected config/profile, runtime provenance, and applicable delivery gates.
+Use `可预览`, `生产路径已验证`, or `正式交付` rather than an unqualified `可体验`
+that leaves the evidence level unclear. None of these labels supplies missing
+authorization to publish, merge, deploy, or start additional user-owned tasks.
 
 ## Prefer function before hardening without fabricating safety
 
@@ -108,7 +156,9 @@ consumer baseline.
 ## Merge and handoff discipline
 
 - Observable protocol changes land before Host consumers.
-- Consumers rebase only on formal merge commits, never feature heads.
+- Final consumers update their branch from their own repository's formal main
+  and consume provider changes through exact formal dependency commits. An
+  explicitly experimental preview is not a final dependency or mono baseline.
 - Shared Manager DOM, launcher assembly, and live-smoke scripts each have one
   active owner at a time.
 - A CI success is fenced to its exact source head and base; re-run after a

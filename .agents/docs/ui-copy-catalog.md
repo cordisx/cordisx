@@ -24,14 +24,18 @@ two languages merely because its locale contains a region subtag.
 | Apply-required configuration | `Restart required` / `需要重启` | restart | Configuration owner |
 | Permission confirmation | concise required-risk statement | allow or deny | TDesign/dialog owner |
 
-## Current scan boundary
+## Historical scan — 2026-08-25
 
-The 2026-08-25 source scan found these user-facing groups:
+The following table preserves the source scan from 2026-08-25. Its file names
+and integration states are historical observations, not current ownership or
+editing restrictions. Confirm the current implementation before changing a
+surface; use the [copy principles](ui-copy-principles.md) for stable product
+constraints.
 
-| Source family | Current localization mechanism | Follow-up boundary |
+| Source family at the scan | Observed localization mechanism | Recorded integration concern |
 | --- | --- | --- |
-| `renderer/manager.ts` | hard-coded Host text plus plugin projections | Do not edit here while the Configuration, Marketplace source, and TDesign owners are changing it. Integrate this catalog only after their formal main merges. |
-| `renderer/permission-authorization-dialog.ts` and `permission-locales.ts` | `CordisXLocaleCatalog` with en/zh-CN | TDesign owner retains the dialog; preserve short risk plus explicit decision. |
+| `renderer/manager.ts` | hard-coded Host text plus plugin projections | At the scan, integration waited for the Configuration, Marketplace source, and TDesign owners. This temporary file lock has no authority over a new task; coordinate any current overlap with its current owner. |
+| `renderer/permission-authorization-dialog.ts` and `permission-locales.ts` | `CordisXLocaleCatalog` with en/zh-CN | The dialog was assigned to the TDesign owner; its stable requirement is short risk text plus an explicit decision. |
 | `renderer/capability-availability.ts` | en/zh-CN keyed catalog | Keep provider/route explanations out of primary state labels; show them in detail or diagnostics. |
 | `renderer/extension-points.ts` | localized catalog projections | Keep semantic point IDs secondary; unavailable anchors remain `pending` plus diagnostic. |
 | `plugins/cli-proxy-api` and `agent-trace-showcase` | plugin catalogs with en/zh-CN | Their empty/error states already have a dedicated plugin localization boundary. |
