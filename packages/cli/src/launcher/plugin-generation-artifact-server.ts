@@ -6,13 +6,15 @@ import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import type { RuntimeModuleAccess } from './packages/authority.js'
 
-const ARTIFACT_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-generation-artifact.v1.schema.json'
+const ARTIFACT_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-generation-artifact.v1.schema.json'
 const ARTIFACT_CONTRACT = 'cordisx.plugin-generation-artifact/v1'
 const ARTIFACT_FORMAT = 'browser-esm-graph'
 const DIGEST = /^sha256:[a-f0-9]{64}$/u
 const MODULE_PATH = /^\.\/[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}\.(?:js|mjs)$/u
 const STYLESHEET_PATH = /^\.\/[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}\.css$/u
-const ASSET_PATH = /^\.\/[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}\.(?:avif|gif|jpeg|jpg|png|svg|webp|woff|woff2|wasm)$/u
+const ASSET_PATH =
+  /^\.\/[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*){0,7}\.(?:avif|gif|jpeg|jpg|png|svg|webp|woff|woff2|wasm)$/u
 const GENERATION = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u
 const MAX_MANIFEST_BYTES = 1024 * 1024
 const MAX_REQUEST_TRACE_ENTRIES = 4096
@@ -151,15 +153,21 @@ function sorted(values: readonly string[]): boolean {
 }
 
 function freezeArtifact(value: PluginGenerationArtifactV1): PluginGenerationArtifactV1 {
-  const files = value.files.map(file => Object.freeze(file.kind === 'asset' ? { ...file } : {
-    ...file,
-    ...(file.kind === 'module' ? {
-      imports: Object.freeze([...file.imports]),
-      dynamicImports: Object.freeze([...file.dynamicImports]),
-      styles: Object.freeze([...file.styles]),
-    } : {}),
-    assets: Object.freeze([...file.assets]),
-  }))
+  const files = value.files.map(file =>
+    Object.freeze(
+      file.kind === 'asset' ? { ...file } : {
+        ...file,
+        ...(file.kind === 'module'
+          ? {
+            imports: Object.freeze([...file.imports]),
+            dynamicImports: Object.freeze([...file.dynamicImports]),
+            styles: Object.freeze([...file.styles]),
+          }
+          : {}),
+        assets: Object.freeze([...file.assets]),
+      },
+    )
+  )
   return Object.freeze({
     ...value,
     initialStyles: Object.freeze([...value.initialStyles]),
@@ -210,7 +218,11 @@ function closedPaths(
 
 function assertClosedGraph(artifact: PluginGenerationArtifactV1): void {
   const files = new Map(artifact.files.map(file => [file.path, file]))
-  const expectedKind = (edges: readonly `./${string}`[], kind: PluginGenerationArtifactFileKind, label: string): void => {
+  const expectedKind = (
+    edges: readonly `./${string}`[],
+    kind: PluginGenerationArtifactFileKind,
+    label: string,
+  ): void => {
     for (const edge of edges) {
       if (files.get(edge)?.kind !== kind) throw new Error(`${label} references a missing or incompatible file: ${edge}`)
     }
@@ -252,7 +264,7 @@ function assertClosedGraph(artifact: PluginGenerationArtifactV1): void {
     const file = files.get(filePath)
     if (file?.kind === 'module') {
       for (const edge of [...file.imports, ...file.dynamicImports, ...file.styles, ...file.assets]) visit(edge)
-    } else if (file?.kind === 'stylesheet') for (const edge of file.assets) visit(edge)
+    } else if (file?.kind === 'stylesheet') { for (const edge of file.assets) visit(edge) }
   }
   visit(artifact.entry)
   if (reachable.size !== files.size) throw new Error('plugin generation artifact contains an unreachable file')
@@ -261,19 +273,36 @@ function assertClosedGraph(artifact: PluginGenerationArtifactV1): void {
 /** Parse the closed browser graph object written beside an immutable module entry. */
 export function parsePluginGenerationArtifactV1(value: unknown): PluginGenerationArtifactV1 {
   const manifest = record(value, 'plugin generation artifact')
-  exactKeys(manifest, ['$schema', 'contract', 'schemaVersion', 'format', 'entry', 'initialStyles', 'sharedImports', 'files'], 'plugin generation artifact')
-  if (manifest.$schema !== ARTIFACT_SCHEMA || manifest.contract !== ARTIFACT_CONTRACT
-    || manifest.schemaVersion !== 1 || manifest.format !== ARTIFACT_FORMAT) {
+  exactKeys(manifest, [
+    '$schema',
+    'contract',
+    'schemaVersion',
+    'format',
+    'entry',
+    'initialStyles',
+    'sharedImports',
+    'files',
+  ], 'plugin generation artifact')
+  if (
+    manifest.$schema !== ARTIFACT_SCHEMA || manifest.contract !== ARTIFACT_CONTRACT
+    || manifest.schemaVersion !== 1 || manifest.format !== ARTIFACT_FORMAT
+  ) {
     throw new Error('plugin generation artifact contract is unsupported')
   }
   const declaredEntry = logicalPath(manifest.entry, MODULE_PATH, 'plugin generation artifact entry')
-  if (!Array.isArray(manifest.initialStyles) || !Array.isArray(manifest.files)
-    || manifest.files.length < 1 || manifest.files.length > MAX_PLUGIN_GENERATION_GRAPH_FILES) {
+  if (
+    !Array.isArray(manifest.initialStyles) || !Array.isArray(manifest.files)
+    || manifest.files.length < 1 || manifest.files.length > MAX_PLUGIN_GENERATION_GRAPH_FILES
+  ) {
     throw new Error('plugin generation artifact file lists are invalid')
   }
-  if (!Array.isArray(manifest.sharedImports) || manifest.sharedImports.length > SHARED_IMPORTS.size
-    || manifest.sharedImports.some(item => typeof item !== 'string' || !SHARED_IMPORTS.has(item as PluginGenerationSharedImportV1))
-    || !sorted(manifest.sharedImports as string[])) {
+  if (
+    !Array.isArray(manifest.sharedImports) || manifest.sharedImports.length > SHARED_IMPORTS.size
+    || manifest.sharedImports.some(item =>
+      typeof item !== 'string' || !SHARED_IMPORTS.has(item as PluginGenerationSharedImportV1)
+    )
+    || !sorted(manifest.sharedImports as string[])
+  ) {
     throw new Error('plugin generation artifact sharedImports must be closed, unique, and sorted')
   }
   const seen = new Set<string>()
@@ -282,22 +311,34 @@ export function parsePluginGenerationArtifactV1(value: unknown): PluginGeneratio
   const files = manifest.files.map((raw, index): PluginGenerationArtifactFileV1 => {
     const file = record(raw, `plugin generation artifact files[${index}]`)
     const kind = file.kind
-    exactKeys(file, kind === 'module'
-      ? ['path', 'kind', 'mediaType', 'digest', 'byteLength', 'imports', 'dynamicImports', 'styles', 'assets']
-      : kind === 'stylesheet'
+    exactKeys(
+      file,
+      kind === 'module'
+        ? ['path', 'kind', 'mediaType', 'digest', 'byteLength', 'imports', 'dynamicImports', 'styles', 'assets']
+        : kind === 'stylesheet'
         ? ['path', 'kind', 'mediaType', 'digest', 'byteLength', 'assets']
-        : ['path', 'kind', 'mediaType', 'digest', 'byteLength'], `plugin generation artifact files[${index}]`)
+        : ['path', 'kind', 'mediaType', 'digest', 'byteLength'],
+      `plugin generation artifact files[${index}]`,
+    )
     if (kind !== 'module' && kind !== 'stylesheet' && kind !== 'asset') {
       throw new Error(`plugin generation artifact files[${index}].kind is unsupported`)
     }
-    const filePath = logicalPath(file.path, kind === 'module' ? MODULE_PATH : kind === 'stylesheet' ? STYLESHEET_PATH : ASSET_PATH, `plugin generation artifact files[${index}].path`)
+    const filePath = logicalPath(
+      file.path,
+      kind === 'module' ? MODULE_PATH : kind === 'stylesheet' ? STYLESHEET_PATH : ASSET_PATH,
+      `plugin generation artifact files[${index}].path`,
+    )
     const foldedPath = filePath.toLocaleLowerCase('en-US')
-    if (seen.has(filePath) || folded.has(foldedPath)) throw new Error(`plugin generation artifact file is duplicated: ${filePath}`)
+    if (seen.has(filePath) || folded.has(foldedPath)) {
+      throw new Error(`plugin generation artifact file is duplicated: ${filePath}`)
+    }
     seen.add(filePath)
     folded.add(foldedPath)
-    const expectedMediaType = kind === 'module' ? 'text/javascript'
-      : kind === 'stylesheet' ? 'text/css'
-        : ASSET_MEDIA_TYPES[path.extname(filePath).toLocaleLowerCase('en-US')]
+    const expectedMediaType = kind === 'module'
+      ? 'text/javascript'
+      : kind === 'stylesheet'
+      ? 'text/css'
+      : ASSET_MEDIA_TYPES[path.extname(filePath).toLocaleLowerCase('en-US')]
     if (file.mediaType !== expectedMediaType) {
       throw new Error(`plugin generation artifact files[${index}].mediaType is invalid`)
     }
@@ -310,35 +351,68 @@ export function parsePluginGenerationArtifactV1(value: unknown): PluginGeneratio
       MAX_PLUGIN_GENERATION_GRAPH_FILE_BYTES,
     )
     totalBytes += byteLength
-    if (totalBytes > MAX_PLUGIN_GENERATION_GRAPH_BYTES) throw new Error('plugin generation artifact exceeds the total byte limit')
+    if (totalBytes > MAX_PLUGIN_GENERATION_GRAPH_BYTES) {
+      throw new Error('plugin generation artifact exceeds the total byte limit')
+    }
     const common = {
       path: filePath,
       digest: file.digest as `sha256:${string}`,
       byteLength,
     }
-    if (kind === 'module') return Object.freeze({
-      ...common,
-      kind,
-      mediaType: 'text/javascript',
-      imports: closedPaths(file.imports, MODULE_PATH, `plugin generation artifact files[${index}].imports`, MAX_PLUGIN_GENERATION_GRAPH_FILES),
-      dynamicImports: closedPaths(file.dynamicImports, MODULE_PATH, `plugin generation artifact files[${index}].dynamicImports`, MAX_PLUGIN_GENERATION_GRAPH_FILES),
-      styles: closedPaths(file.styles, STYLESHEET_PATH, `plugin generation artifact files[${index}].styles`, 256),
-      assets: closedPaths(file.assets, ASSET_PATH, `plugin generation artifact files[${index}].assets`, MAX_PLUGIN_GENERATION_GRAPH_FILES),
-    })
-    if (kind === 'stylesheet') return Object.freeze({
-      ...common,
-      kind,
-      mediaType: 'text/css',
-      assets: closedPaths(file.assets, ASSET_PATH, `plugin generation artifact files[${index}].assets`, MAX_PLUGIN_GENERATION_GRAPH_FILES),
-    })
+    if (kind === 'module') {
+      return Object.freeze({
+        ...common,
+        kind,
+        mediaType: 'text/javascript',
+        imports: closedPaths(
+          file.imports,
+          MODULE_PATH,
+          `plugin generation artifact files[${index}].imports`,
+          MAX_PLUGIN_GENERATION_GRAPH_FILES,
+        ),
+        dynamicImports: closedPaths(
+          file.dynamicImports,
+          MODULE_PATH,
+          `plugin generation artifact files[${index}].dynamicImports`,
+          MAX_PLUGIN_GENERATION_GRAPH_FILES,
+        ),
+        styles: closedPaths(file.styles, STYLESHEET_PATH, `plugin generation artifact files[${index}].styles`, 256),
+        assets: closedPaths(
+          file.assets,
+          ASSET_PATH,
+          `plugin generation artifact files[${index}].assets`,
+          MAX_PLUGIN_GENERATION_GRAPH_FILES,
+        ),
+      })
+    }
+    if (kind === 'stylesheet') {
+      return Object.freeze({
+        ...common,
+        kind,
+        mediaType: 'text/css',
+        assets: closedPaths(
+          file.assets,
+          ASSET_PATH,
+          `plugin generation artifact files[${index}].assets`,
+          MAX_PLUGIN_GENERATION_GRAPH_FILES,
+        ),
+      })
+    }
     return Object.freeze({ ...common, kind, mediaType: expectedMediaType as PluginGenerationAssetMediaTypeV1 })
   })
   if (!sorted(files.map(file => file.path))) {
     throw new Error('plugin generation artifact files must be path-sorted')
   }
   const entry = files.find(file => file.path === declaredEntry)
-  if (entry?.kind !== 'module') throw new Error('plugin generation artifact entry must name a declared JavaScript module')
-  const initialStyles = closedPaths(manifest.initialStyles, STYLESHEET_PATH, 'plugin generation artifact initialStyles', 256)
+  if (entry?.kind !== 'module') {
+    throw new Error('plugin generation artifact entry must name a declared JavaScript module')
+  }
+  const initialStyles = closedPaths(
+    manifest.initialStyles,
+    STYLESHEET_PATH,
+    'plugin generation artifact initialStyles',
+    256,
+  )
   const artifact = freezeArtifact({
     $schema: ARTIFACT_SCHEMA,
     contract: ARTIFACT_CONTRACT,
@@ -360,16 +434,22 @@ export async function readPluginGenerationArtifactV1(
   if (!path.isAbsolute(artifactDirectory)) throw new Error('plugin artifact directory must be absolute')
   const root = await realpath(artifactDirectory)
   const manifestPath = path.join(root, 'artifact.json')
-  const handle = await open(manifestPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT') return undefined
-    throw error
-  })
+  const handle = await open(manifestPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    },
+  )
   if (handle === undefined) return undefined
   try {
     const metadata = await handle.stat()
-    if (!metadata.isFile() || metadata.size > MAX_MANIFEST_BYTES) throw new Error('plugin generation artifact manifest is not a bounded regular file')
+    if (!metadata.isFile() || metadata.size > MAX_MANIFEST_BYTES) {
+      throw new Error('plugin generation artifact manifest is not a bounded regular file')
+    }
     const bytes = await handle.readFile()
-    if (bytes.byteLength !== metadata.size) throw new Error('plugin generation artifact manifest changed during readback')
+    if (bytes.byteLength !== metadata.size) {
+      throw new Error('plugin generation artifact manifest changed during readback')
+    }
     return parsePluginGenerationArtifactV1(JSON.parse(bytes.toString('utf8')) as unknown)
   } finally {
     await handle.close()
@@ -392,7 +472,9 @@ async function readVerifiedFile(
   const handle = await open(resolved, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
   try {
     const metadata = await handle.stat()
-    if (!metadata.isFile() || metadata.size !== file.byteLength || metadata.size > MAX_PLUGIN_GENERATION_GRAPH_FILE_BYTES) {
+    if (
+      !metadata.isFile() || metadata.size !== file.byteLength || metadata.size > MAX_PLUGIN_GENERATION_GRAPH_FILE_BYTES
+    ) {
       throw new Error('plugin generation artifact file metadata failed integrity readback')
     }
     const bytes = await handle.readFile()
@@ -532,27 +614,60 @@ export async function startPluginGenerationArtifactServer(): Promise<PluginGener
       let leaseId: string | undefined
       let artifactPath: `./${string}` | undefined
       const finish = (value: number): void => {
-        rememberTrace({ method, ...(leaseId === undefined ? {} : { leaseId }), ...(artifactPath === undefined ? {} : { artifactPath }), status: value })
+        rememberTrace({
+          method,
+          ...(leaseId === undefined ? {} : { leaseId }),
+          ...(artifactPath === undefined ? {} : { artifactPath }),
+          status: value,
+        })
         status(response, value)
       }
-      if (method !== 'GET' && method !== 'HEAD') { finish(405); return }
+      if (method !== 'GET' && method !== 'HEAD') {
+        finish(405)
+        return
+      }
       let url: URL
-      try { url = new URL(request.url ?? '/', origin) } catch { finish(400); return }
-      if (url.search !== '' || url.hash !== '') { finish(404); return }
+      try {
+        url = new URL(request.url ?? '/', origin)
+      } catch {
+        finish(400)
+        return
+      }
+      if (url.search !== '' || url.hash !== '') {
+        finish(404)
+        return
+      }
       let decoded: string
-      try { decoded = decodeURIComponent(url.pathname) } catch { finish(400); return }
+      try {
+        decoded = decodeURIComponent(url.pathname)
+      } catch {
+        finish(400)
+        return
+      }
       const prefix = `/cordisx-plugin-artifacts/${secret}/`
-      if (!decoded.startsWith(prefix)) { finish(404); return }
+      if (!decoded.startsWith(prefix)) {
+        finish(404)
+        return
+      }
       const remainder = decoded.slice(prefix.length)
       const separator = remainder.indexOf('/')
-      if (separator < 1) { finish(404); return }
+      if (separator < 1) {
+        finish(404)
+        return
+      }
       leaseId = remainder.slice(0, separator)
       const relative = `./${remainder.slice(separator + 1)}`
-      if (!MODULE_PATH.test(relative) && !STYLESHEET_PATH.test(relative) && !ASSET_PATH.test(relative)) { finish(404); return }
+      if (!MODULE_PATH.test(relative) && !STYLESHEET_PATH.test(relative) && !ASSET_PATH.test(relative)) {
+        finish(404)
+        return
+      }
       artifactPath = relative as `./${string}`
       const route = routes.get(leaseId)
       const file = route?.files.get(artifactPath)
-      if (route === undefined || file === undefined) { finish(404); return }
+      if (route === undefined || file === undefined) {
+        finish(404)
+        return
+      }
       try {
         const bytes = await readVerifiedFile(route.root, file)
         headers(response)
@@ -574,7 +689,10 @@ export async function startPluginGenerationArtifactServer(): Promise<PluginGener
   })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve() })
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject)
+      resolve()
+    })
   })
   const address = server.address() as AddressInfo
   origin = `http://127.0.0.1:${address.port}`
@@ -613,7 +731,11 @@ export async function startPluginGenerationArtifactServer(): Promise<PluginGener
       const registry = '__cordisxPluginGenerationResourcesV1'
       const install = resourceRegistryInstallSource()
       let retired = false
-      const importSource = `(async () => { ${install}; const resources = globalThis.${registry}.stage(${JSON.stringify({ id: leaseId, baseUrl, initialStyles: initialStyleUrls })}); try { await resources.ready; return await import(${JSON.stringify(entryUrl)}); } catch (error) { globalThis.${registry}.retire(${JSON.stringify(leaseId)}); throw error; } })()`
+      const importSource = `(async () => { ${install}; const resources = globalThis.${registry}.stage(${
+        JSON.stringify({ id: leaseId, baseUrl, initialStyles: initialStyleUrls })
+      }); try { await resources.ready; return await import(${
+        JSON.stringify(entryUrl)
+      }); } catch (error) { globalThis.${registry}.retire(${JSON.stringify(leaseId)}); throw error; } })()`
       return Object.freeze({
         leaseId,
         pluginId: module.packageIdentity.pluginId,
@@ -638,7 +760,9 @@ export async function startPluginGenerationArtifactServer(): Promise<PluginGener
       if (closed) return
       closed = true
       routes.clear()
-      await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
+      await new Promise<void>((resolve, reject) =>
+        server.close(error => error === undefined ? resolve() : reject(error))
+      )
     },
   }
 }

@@ -3,9 +3,9 @@ import path from 'node:path'
 import { transform } from 'esbuild'
 import type { RuntimeModuleAccess } from './packages/authority.js'
 import {
-  readPluginGenerationArtifactV1,
   type PluginGenerationArtifactServer,
   type PluginGenerationGraphLease,
+  readPluginGenerationArtifactV1,
 } from './plugin-generation-artifact-server.js'
 
 /** Maximum immutable browser runtime entry accepted from any plugin generation. */
@@ -13,15 +13,15 @@ export const MAX_PLUGIN_RUNTIME_MODULE_BYTES = 24 * 1024 * 1024
 
 export type LoadedPluginGenerationArtifact =
   | {
-      readonly kind: 'legacy-factory'
-      readonly runtimeArtifactSource: string
-    }
+    readonly kind: 'legacy-factory'
+    readonly runtimeArtifactSource: string
+  }
   | {
-      readonly kind: 'browser-esm-graph'
-      /** Awaitable browser expression returning the plugin module namespace. */
-      readonly runtimeArtifactSource: string
-      readonly lease: PluginGenerationGraphLease
-    }
+    readonly kind: 'browser-esm-graph'
+    /** Awaitable browser expression returning the plugin module namespace. */
+    readonly runtimeArtifactSource: string
+    readonly lease: PluginGenerationGraphLease
+  }
 
 function inside(root: string, target: string): boolean {
   const relative = path.relative(root, target)
@@ -79,8 +79,6 @@ export async function loadPluginGenerationArtifactForRuntime(
 
 export {
   parsePluginGenerationArtifactV1,
-  readPluginGenerationArtifactV1,
-  startPluginGenerationArtifactServer,
   type PluginGenerationArtifactAssetV1,
   type PluginGenerationArtifactFileKind,
   type PluginGenerationArtifactFileV1,
@@ -92,4 +90,6 @@ export {
   type PluginGenerationAssetMediaTypeV1,
   type PluginGenerationGraphLease,
   type PluginGenerationSharedImportV1,
+  readPluginGenerationArtifactV1,
+  startPluginGenerationArtifactServer,
 } from './plugin-generation-artifact-server.js'

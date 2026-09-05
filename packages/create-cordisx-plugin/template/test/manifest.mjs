@@ -4,7 +4,9 @@ import test from 'node:test'
 const component = () => null
 const noop = () => undefined
 const React = new Proxy({ Fragment: Symbol('Fragment'), Suspense: component, lazy: () => component }, {
-  get(target, property) { return Reflect.get(target, property) ?? noop },
+  get(target, property) {
+    return Reflect.get(target, property) ?? noop
+  },
 })
 globalThis.__cordisxSharedReactRuntime = {
   React,

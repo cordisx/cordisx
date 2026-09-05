@@ -20,21 +20,23 @@ if (leaked.length > 0) {
   throw new Error(`create-cordisx-plugin package leaked non-allowlisted files: ${leaked.join(', ')}`)
 }
 
-for (const required of [
-  'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md',
-  'LICENSE',
-  'README.md',
-  'dist/cli.js',
-  'template/README.md',
-  'template/README.zh-Hans.md',
-  'template/_gitignore',
-  'template/package.json',
-  'template/src/overview-page.tsx',
-  'template/src/{{packageName}}.tsx',
-  'template/test/manifest.mjs',
-  'template/tsconfig.json',
-  'template/vite.config.ts',
-]) {
+for (
+  const required of [
+    'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md',
+    'LICENSE',
+    'README.md',
+    'dist/cli.js',
+    'template/README.md',
+    'template/README.zh-Hans.md',
+    'template/_gitignore',
+    'template/package.json',
+    'template/src/overview-page.tsx',
+    'template/src/{{packageName}}.tsx',
+    'template/test/manifest.mjs',
+    'template/tsconfig.json',
+    'template/vite.config.ts',
+  ]
+) {
   if (!files.includes(required)) throw new Error(`create-cordisx-plugin package is missing ${required}`)
 }
 

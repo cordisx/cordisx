@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { build as viteBuild, normalizePath, type Plugin, type Rollup, type UserConfig } from 'vite'
 import {
+  assertNoPrivateReactModules,
   CONTRACTS_MODULE_PATH,
   CORDISX_REACT_JSX_DEV_RUNTIME_MODULE,
   CORDISX_REACT_JSX_RUNTIME_MODULE,
   CORDISX_REACT_MODULE,
   CORDISX_UI_MODULE,
-  assertNoPrivateReactModules,
   cordisXSharedModuleSource,
 } from './react-virtual-modules.js'
 
@@ -51,7 +51,11 @@ export interface PluginGenerationArtifactStylesheetV1 extends PluginGenerationAr
 
 export interface PluginGenerationArtifactAssetV1 extends PluginGenerationArtifactFileBaseV1 {
   readonly kind: 'asset'
-  readonly mediaType: 'application/wasm' | 'font/woff' | 'font/woff2' | `image/${'avif' | 'gif' | 'jpeg' | 'png' | 'svg+xml' | 'webp'}`
+  readonly mediaType:
+    | 'application/wasm'
+    | 'font/woff'
+    | 'font/woff2'
+    | `image/${'avif' | 'gif' | 'jpeg' | 'png' | 'svg+xml' | 'webp'}`
 }
 
 export type PluginGenerationArtifactFileV1 =
@@ -129,8 +133,10 @@ function cordisXProductionSharedModules(
       if (!PEER_MODULES.has(source as PluginGenerationSharedImportV1) || importer === undefined) return
       const normalized = normalizePath(importer)
       const relative = path.relative(pluginRoot, normalized)
-      if (!normalized.includes('/node_modules/')
-        && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) return
+      if (
+        !normalized.includes('/node_modules/')
+        && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+      ) return
       sharedImports.add(source as PluginGenerationSharedImportV1)
       return `${SHARED_PREFIX}${sharedModuleId(source as PluginGenerationSharedImportV1)}`
     },
@@ -145,14 +151,26 @@ function bytes(source: string | Uint8Array): Uint8Array {
   return typeof source === 'string' ? Buffer.from(source) : source
 }
 
-function mediaType(fileName: string): { readonly kind: PluginGenerationArtifactFileKind; readonly mediaType: PluginGenerationArtifactFileV1['mediaType'] } {
+function mediaType(
+  fileName: string,
+): {
+  readonly kind: PluginGenerationArtifactFileKind
+  readonly mediaType: PluginGenerationArtifactFileV1['mediaType']
+} {
   const extension = path.extname(fileName).toLowerCase()
   if (extension === '.js' || extension === '.mjs') return { kind: 'module', mediaType: 'text/javascript' }
   if (extension === '.css') return { kind: 'stylesheet', mediaType: 'text/css' }
   const media = new Map<string, PluginGenerationArtifactAssetV1['mediaType']>([
-    ['.avif', 'image/avif'], ['.gif', 'image/gif'], ['.jpeg', 'image/jpeg'], ['.jpg', 'image/jpeg'],
-    ['.png', 'image/png'], ['.svg', 'image/svg+xml'], ['.webp', 'image/webp'],
-    ['.woff', 'font/woff'], ['.woff2', 'font/woff2'], ['.wasm', 'application/wasm'],
+    ['.avif', 'image/avif'],
+    ['.gif', 'image/gif'],
+    ['.jpeg', 'image/jpeg'],
+    ['.jpg', 'image/jpeg'],
+    ['.png', 'image/png'],
+    ['.svg', 'image/svg+xml'],
+    ['.webp', 'image/webp'],
+    ['.woff', 'font/woff'],
+    ['.woff2', 'font/woff2'],
+    ['.wasm', 'application/wasm'],
   ]).get(extension)
   if (media === undefined) throw new Error(`plugin production graph emitted unsupported asset type: ${fileName}`)
   return { kind: 'asset', mediaType: media }
@@ -160,7 +178,10 @@ function mediaType(fileName: string): { readonly kind: PluginGenerationArtifactF
 
 function artifactPath(fileName: string): `./${string}` {
   const normalized = normalizePath(fileName)
-  if (!/^(?:[A-Za-z0-9][A-Za-z0-9._-]*\.(?:js|mjs)|chunks\/[A-Za-z0-9][A-Za-z0-9._-]*\.(?:js|mjs)|assets\/[A-Za-z0-9][A-Za-z0-9._-]*)$/u.test(normalized)) {
+  if (
+    !/^(?:[A-Za-z0-9][A-Za-z0-9._-]*\.(?:js|mjs)|chunks\/[A-Za-z0-9][A-Za-z0-9._-]*\.(?:js|mjs)|assets\/[A-Za-z0-9][A-Za-z0-9._-]*)$/u
+      .test(normalized)
+  ) {
     throw new Error(`plugin production graph emitted an unsafe path: ${fileName}`)
   }
   return `./${normalized}`
@@ -207,11 +228,14 @@ function artifactProjection(
     throw new Error('plugin production graph must not bundle a second @deepseek-ai/cordis runtime')
   }
   const stylesFor = (chunk: Rollup.OutputChunk): readonly `./${string}`[] => {
-    const metadata = (chunk as typeof chunk & { readonly viteMetadata?: { readonly importedCss?: ReadonlySet<string> } }).viteMetadata
+    const metadata =
+      (chunk as typeof chunk & { readonly viteMetadata?: { readonly importedCss?: ReadonlySet<string> } }).viteMetadata
     return [...metadata?.importedCss ?? []].map(artifactPath).sort()
   }
   const assetsFor = (chunk: Rollup.OutputChunk): readonly `./${string}`[] => {
-    const metadata = (chunk as typeof chunk & { readonly viteMetadata?: { readonly importedAssets?: ReadonlySet<string> } }).viteMetadata
+    const metadata =
+      (chunk as typeof chunk & { readonly viteMetadata?: { readonly importedAssets?: ReadonlySet<string> } })
+        .viteMetadata
     return [...metadata?.importedAssets ?? []].map(artifactPath).sort()
   }
   const stylesheetAssets = (filePath: `./${string}`, value: Uint8Array): readonly `./${string}`[] => {
@@ -233,10 +257,15 @@ function artifactProjection(
     if (identity.kind === 'module') {
       const chunk = chunkByPath.get(filePath)
       if (chunk === undefined) throw new Error(`plugin production module metadata is missing: ${filePath}`)
-      return { ...common, kind: 'module', mediaType: 'text/javascript',
+      return {
+        ...common,
+        kind: 'module',
+        mediaType: 'text/javascript',
         imports: chunk.imports.map(artifactPath).sort(),
         dynamicImports: chunk.dynamicImports.map(artifactPath).sort(),
-        styles: stylesFor(chunk), assets: assetsFor(chunk) }
+        styles: stylesFor(chunk),
+        assets: assetsFor(chunk),
+      }
     }
     if (identity.kind === 'stylesheet') {
       return { ...common, kind: 'stylesheet', mediaType: 'text/css', assets: stylesheetAssets(filePath, value) }
@@ -264,7 +293,8 @@ function artifactProjection(
       $schema: CORDISX_PLUGIN_GENERATION_ARTIFACT_SCHEMA,
       contract: CORDISX_PLUGIN_GENERATION_ARTIFACT_CONTRACT,
       schemaVersion: 1,
-      format: 'browser-esm-graph', entry,
+      format: 'browser-esm-graph',
+      entry,
       initialStyles: Object.freeze([...initialStyles].sort()),
       sharedImports: Object.freeze([...sharedImports].sort()),
       files: Object.freeze(files.map(file => Object.freeze(file))),
@@ -283,7 +313,11 @@ function artifactManifestPlugin(sharedImports: Set<PluginGenerationSharedImportV
       order: 'post',
       handler(_options, bundle) {
         const projected = artifactProjection(Object.values(bundle), sharedImports)
-        this.emitFile({ type: 'asset', fileName: 'artifact.json', source: `${JSON.stringify(projected.manifest, null, 2)}\n` })
+        this.emitFile({
+          type: 'asset',
+          fileName: 'artifact.json',
+          source: `${JSON.stringify(projected.manifest, null, 2)}\n`,
+        })
       },
     },
   }
@@ -311,14 +345,19 @@ function pluginViteBuild(options: CordisXPluginViteConfigOptions): {
         write: options.write ?? true,
         outDir: path.resolve(options.root, options.outDir ?? 'dist'),
         emptyOutDir: true,
-        target: 'chrome120', cssCodeSplit: true, assetsInlineLimit: 0,
-        sourcemap: false, minify: 'esbuild', manifest: false,
+        target: 'chrome120',
+        cssCodeSplit: true,
+        assetsInlineLimit: 0,
+        sourcemap: false,
+        minify: 'esbuild',
+        manifest: false,
         modulePreload: { polyfill: false },
         rollupOptions: {
           input: path.resolve(options.root, options.entry),
           preserveEntrySignatures: 'strict',
           output: {
-            format: 'es', entryFileNames: entryFileName,
+            format: 'es',
+            entryFileNames: entryFileName,
             chunkFileNames: 'chunks/[name]-[hash].js',
             assetFileNames: 'assets/[name]-[hash][extname]',
           },

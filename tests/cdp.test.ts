@@ -1413,11 +1413,16 @@ describe('CdpPluginLifecycleRuntime', () => {
       const retire = vi.fn()
       return {
         lease: {
-          leaseId: name, pluginId: 'demo', moduleGeneration: generation,
-          baseUrl: `http://127.0.0.1/${name}/`, entryUrl: `http://127.0.0.1/${name}/module.js`,
-          initialStyleUrls: [], importSource: `Promise.resolve(globalThis.__${name}Module)`,
+          leaseId: name,
+          pluginId: 'demo',
+          moduleGeneration: generation,
+          baseUrl: `http://127.0.0.1/${name}/`,
+          entryUrl: `http://127.0.0.1/${name}/module.js`,
+          initialStyleUrls: [],
+          importSource: `Promise.resolve(globalThis.__${name}Module)`,
           publishSource: `globalThis.__${name}Published = true`,
-          retireSource: `globalThis.__${name}Retired = true`, retire,
+          retireSource: `globalThis.__${name}Retired = true`,
+          retire,
         } satisfies PluginGenerationGraphLease,
         retire,
       }
@@ -1432,26 +1437,73 @@ describe('CdpPluginLifecycleRuntime', () => {
       async send(_method: string, params: Record<string, unknown>) {
         const expression = String(params.expression ?? '')
         expressions.push(expression)
-        if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
-        } } } }
-        if (expression.includes('publishPluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch, registryEpoch: 1, active: candidate,
-        } } } }
-        if (expression.includes('completePluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'tx', transactionEpoch, registryEpoch: 1, active: candidate, disposedAfter: previous,
-        } } } }
+        if (expression.includes('stagePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('publishPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  registryEpoch: 1,
+                  active: candidate,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('completePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  registryEpoch: 1,
+                  active: candidate,
+                  disposedAfter: previous,
+                },
+              },
+            },
+          }
+        }
         return { result: { value: { ok: true, result: true } } }
       },
     } as never)
-    const fence = runtime.prepare('tx'); transactionEpoch = fence.transactionEpoch
+    const fence = runtime.prepare('tx')
+    transactionEpoch = fence.transactionEpoch
     await runtime.stage({
-      transactionId: 'tx', ...fence, afterRegistryEpoch: 1, operation: 'update', previous, candidate,
-      targetId: 'demo', affectedPluginIds: ['demo'],
+      transactionId: 'tx',
+      ...fence,
+      afterRegistryEpoch: 1,
+      operation: 'update',
+      previous,
+      candidate,
+      targetId: 'demo',
+      affectedPluginIds: ['demo'],
       package: {
         manifest: { id: 'demo', runtimeManifest: { schemaVersion: 1, capabilities: [] } },
-        digest: `sha256:${'b'.repeat(64)}`, moduleSource: '', artifactSource: 'void 0',
-        serviceModules: [], identitySource: 'file:///demo-next.js',
+        digest: `sha256:${'b'.repeat(64)}`,
+        moduleSource: '',
+        artifactSource: 'void 0',
+        serviceModules: [],
+        identitySource: 'file:///demo-next.js',
       } as never,
       runtimeArtifactSource: next.lease.importSource,
       runtimeArtifactLease: next.lease,
@@ -1477,25 +1529,60 @@ describe('CdpPluginLifecycleRuntime', () => {
       async send(_method: string, params: Record<string, unknown>) {
         const expression = String(params.expression ?? '')
         rollbackExpressions.push(expression)
-        if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'rollback', transactionEpoch: rollbackEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
-        } } } }
-        if (expression.includes('rollbackPluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'rollback', transactionEpoch: rollbackEpoch, registryEpoch: 2,
-          active: previous, disposedAfter: candidate,
-        } } } }
+        if (expression.includes('stagePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'rollback',
+                  transactionEpoch: rollbackEpoch,
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('rollbackPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'rollback',
+                  transactionEpoch: rollbackEpoch,
+                  registryEpoch: 2,
+                  active: previous,
+                  disposedAfter: candidate,
+                },
+              },
+            },
+          }
+        }
         return { result: { value: { ok: true, result: true } } }
       },
     } as never)
-    const rollbackFence = rollbackRuntime.prepare('rollback'); rollbackEpoch = rollbackFence.transactionEpoch
+    const rollbackFence = rollbackRuntime.prepare('rollback')
+    rollbackEpoch = rollbackFence.transactionEpoch
     await rollbackRuntime.stage({
-      transactionId: 'rollback', ...rollbackFence, afterRegistryEpoch: 1, operation: 'update', previous, candidate,
-      targetId: 'demo', affectedPluginIds: ['demo'], runtimeArtifactSource: rollbackNext.lease.importSource,
+      transactionId: 'rollback',
+      ...rollbackFence,
+      afterRegistryEpoch: 1,
+      operation: 'update',
+      previous,
+      candidate,
+      targetId: 'demo',
+      affectedPluginIds: ['demo'],
+      runtimeArtifactSource: rollbackNext.lease.importSource,
       runtimeArtifactLease: rollbackNext.lease,
       package: {
         manifest: { id: 'demo', runtimeManifest: { schemaVersion: 1, capabilities: [] } },
-        digest: `sha256:${'c'.repeat(64)}`, moduleSource: '', artifactSource: 'void 0',
-        serviceModules: [], identitySource: 'file:///demo-rollback.js',
+        digest: `sha256:${'c'.repeat(64)}`,
+        moduleSource: '',
+        artifactSource: 'void 0',
+        serviceModules: [],
+        identitySource: 'file:///demo-rollback.js',
       } as never,
     })
     await rollbackRuntime.rollback('rollback')

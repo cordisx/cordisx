@@ -119,14 +119,20 @@ describe('local plugin package store', () => {
       export async function showAvatar() { return await import('./avatar') }
     `)
     await Promise.all([
-      writeFile(path.join(source, 'src/avatar.ts'), `
+      writeFile(
+        path.join(source, 'src/avatar.ts'),
+        `
         import './avatar.css'
         import avatarUrl from './avatar.svg'
         globalThis.__fixtureLazyExecuted = true
         export { avatarUrl }
-      `),
+      `,
+      ),
       writeFile(path.join(source, 'src/avatar.css'), '.fixture-avatar { background-image: url(./avatar.svg) }\n'),
-      writeFile(path.join(source, 'src/avatar.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><circle cx="4" cy="4" r="4"/></svg>\n'),
+      writeFile(
+        path.join(source, 'src/avatar.svg'),
+        '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><circle cx="4" cy="4" r="4"/></svg>\n',
+      ),
     ])
 
     const staged = await stageLocalPluginPackage(home, source)
@@ -135,12 +141,19 @@ describe('local plugin package store', () => {
     expect(graph?.manifest.entry).toBe('./module.js')
     expect(graph?.manifest.initialStyles).toEqual([])
     expect(graph?.manifest.files.some(file => file.path.startsWith('./chunks/') && file.kind === 'module')).toBe(true)
-    expect(graph?.manifest.files.some(file => file.path.startsWith('./assets/') && file.kind === 'stylesheet')).toBe(true)
-    expect(graph?.manifest.files.some(file => file.path.startsWith('./assets/') && file.mediaType === 'image/svg+xml')).toBe(true)
-    expect(Buffer.from(graph?.files.get(graph.manifest.entry) ?? []).toString('utf8')).not.toContain('__fixtureLazyExecuted')
+    expect(graph?.manifest.files.some(file => file.path.startsWith('./assets/') && file.kind === 'stylesheet')).toBe(
+      true,
+    )
+    expect(graph?.manifest.files.some(file => file.path.startsWith('./assets/') && file.mediaType === 'image/svg+xml'))
+      .toBe(true)
+    expect(Buffer.from(graph?.files.get(graph.manifest.entry) ?? []).toString('utf8')).not.toContain(
+      '__fixtureLazyExecuted',
+    )
 
     const storedRoot = path.join(home, 'packages', 'sha256', staged.digest.slice(7))
-    expect(JSON.parse(await readFile(path.join(storedRoot, 'browser', 'artifact.json'), 'utf8'))).toEqual(graph?.manifest)
+    expect(JSON.parse(await readFile(path.join(storedRoot, 'browser', 'artifact.json'), 'utf8'))).toEqual(
+      graph?.manifest,
+    )
     const loaded = await loadStagedPluginPackage(home, staged.digest)
     expect(loaded.browserArtifact?.manifest).toEqual(graph?.manifest)
   })
@@ -153,14 +166,20 @@ describe('local plugin package store', () => {
     const packageManifest = { ...manifest(), entry: './dist/runtime/chatroom.js' }
     await Promise.all([
       writeFile(path.join(source, 'cordisx.plugin.json'), `${JSON.stringify(packageManifest, null, 2)}\n`),
-      writeFile(path.join(source, 'src/panel.ts'), `
+      writeFile(
+        path.join(source, 'src/panel.ts'),
+        `
         import './panel.css'
         import iconUrl from './panel.svg'
         globalThis.__fixturePanelExecuted = true
         export { iconUrl }
-      `),
+      `,
+      ),
       writeFile(path.join(source, 'src/panel.css'), '.fixture-panel { background-image: url(./panel.svg) }\n'),
-      writeFile(path.join(source, 'src/panel.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><path d="M0 0h8v8H0z"/></svg>\n'),
+      writeFile(
+        path.join(source, 'src/panel.svg'),
+        '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><path d="M0 0h8v8H0z"/></svg>\n',
+      ),
     ])
     await viteBuild({
       ...cordisXPluginViteConfig({

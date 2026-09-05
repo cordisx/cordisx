@@ -187,7 +187,10 @@ describe('plugin README composition', () => {
       codex: { debugPort: 9229 },
       providers: [],
       plugins: [{
-        id: 'graph-plugin', entry, enabled: true, config: {},
+        id: 'graph-plugin',
+        entry,
+        enabled: true,
+        config: {},
         runtimeGraph: {
           moduleGeneration: 'graph-generation-a',
           loadSource: 'Promise.resolve(globalThis.__graphModuleFixture)',

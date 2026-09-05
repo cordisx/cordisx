@@ -45,7 +45,11 @@ const OverviewPage = lazy(async () => {
 })
 
 function OverviewPageBoundary(props: CordisXReactPageProps<Messages>) {
-  return <Suspense fallback={null}><OverviewPage {...props} /></Suspense>
+  return (
+    <Suspense fallback={null}>
+      <OverviewPage {...props} />
+    </Suspense>
+  )
 }
 
 const mountOverview = defineReactPage<Messages>(OverviewPageBoundary)
