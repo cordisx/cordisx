@@ -8,13 +8,22 @@ import type {
   CordisXPrivateAgentDriver,
 } from './agent-session-runtime.js'
 
-/** Exact observed Desktop build; this closed Host-only pin must be re-audited on upgrades. */
-export const CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN = Object.freeze({
-  appVersion: '26.818.61809',
-  buildNumber: '7019',
-  buildFlavor: 'prod',
-  hostId: 'local',
-})
+/**
+ * Exact audited Desktop bridge revisions. New builds are additive entries only;
+ * unknown version/build/flavor triples remain unavailable rather than guessing
+ * that a private Electron bridge is compatible.
+ */
+export const CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS = Object.freeze([
+  Object.freeze({
+    appVersion: '26.818.61809', buildNumber: '7019', buildFlavor: 'prod', hostId: 'local',
+  }),
+  Object.freeze({
+    appVersion: '26.901.41600', buildNumber: '7982', buildFlavor: 'prod', hostId: 'local',
+  }),
+] as const)
+/** Historical first audited pin, retained for existing callers and fixtures. */
+export const CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN = CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[0]
+type CodexDesktopAgentSessionTransportPin = typeof CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[number]
 
 interface ElectronBridge {
   readonly sendMessageFromView?: (value: unknown) => Promise<unknown> | unknown
@@ -92,7 +101,10 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
   private disposed = false
   private connectionReplaced = false
 
-  private constructor(private readonly bridge: Required<ElectronBridge>) {
+  private constructor(
+    private readonly bridge: Required<ElectronBridge>,
+    private readonly pin: CodexDesktopAgentSessionTransportPin,
+  ) {
     window.addEventListener('message', this.receive, true)
   }
 
@@ -109,12 +121,13 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     ) return undefined
     try {
       const options = object(await bridge.getSentryInitOptions())
-      if (
-        options?.appVersion !== CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN.appVersion
-        || options.buildNumber !== CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN.buildNumber
-        || options.buildFlavor !== CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN.buildFlavor
-      ) return undefined
-      return new CodexDesktopAgentSessionTransport(bridge as Required<ElectronBridge>)
+      const pin = CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS.find(candidate => (
+        options?.appVersion === candidate.appVersion
+        && options.buildNumber === candidate.buildNumber
+        && options.buildFlavor === candidate.buildFlavor
+      ))
+      if (pin === undefined) return undefined
+      return new CodexDesktopAgentSessionTransport(bridge as Required<ElectronBridge>, pin)
     } catch {
       return undefined
     }
@@ -343,7 +356,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     try {
       await this.bridge.sendMessageFromView({
         type: 'mcp-request',
-        hostId: CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN.hostId,
+        hostId: this.pin.hostId,
         request: { id: requestId, method, params: clone(params) },
       })
     } catch (error) {
@@ -360,7 +373,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
   private readonly receive = (event: MessageEvent<unknown>): void => {
     if (this.disposed || (event.source !== null && event.source !== window)) return
     const envelope = object(event.data)
-    if (text(envelope?.hostId) !== CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN.hostId) return
+    if (text(envelope?.hostId) !== this.pin.hostId) return
     const type = text(envelope?.type)
     if (type === 'codex-app-server-connection-changed' || type === 'codex-app-server-initialized') {
       if (this.sessions.size > 0 || this.pending.size > 0) {
@@ -640,7 +653,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     try {
       await this.bridge.sendMessageFromView({
         type: 'mcp-response',
-        hostId: CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN.hostId,
+        hostId: this.pin.hostId,
         requestMethod: method,
         response: { id: requestId, result: { decision } },
       })

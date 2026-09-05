@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { UserMessage } from '@cordisx/protocol/sessions/v1'
 import {
   CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN,
+  CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS,
   CodexDesktopAgentSessionTransport,
 } from '../packages/cli/src/renderer/codex-desktop-agent-session-transport.js'
 
@@ -280,5 +281,17 @@ describe('Codex Desktop Agent/Session transport', () => {
       sendMessageFromView: async () => {},
     })
     expect(await CodexDesktopAgentSessionTransport.connect()).toBeUndefined()
+  })
+
+  it('accepts the separately audited 7982 bridge revision without widening the pin fence', async () => {
+    const view = new TestWindow()
+    install('window', view)
+    install('location', view.location)
+    install('codexWindowType', 'electron')
+    install('electronBridge', {
+      getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[1] }),
+      sendMessageFromView: async () => {},
+    })
+    expect(await CodexDesktopAgentSessionTransport.connect()).toBeDefined()
   })
 })
