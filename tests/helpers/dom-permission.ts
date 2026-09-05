@@ -15,20 +15,22 @@ export function exactDomPermissionPolicies(
   profileId: string,
   plugins: readonly ExactDomPermissionFixture[],
 ): readonly CordisXPersistedPermissionPolicyRecordV3[] {
-  return plugins.flatMap(plugin => plugin.pointIds.map(pointId => ({
-    $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V3,
-    schemaVersion: 3 as const,
-    key: domPermissionAuthorizationKeyV3({
-      profileId,
-      identity: {
-        source: pathToFileURL(plugin.entry).href,
-        pluginId: plugin.id,
-      },
-      pointId,
-      catalogVersion: CORDISX_CAPABILITY_CATALOG_VERSION,
-    }),
-    policy: 'allow-persistent' as const,
-  })))
+  return plugins.flatMap(plugin =>
+    plugin.pointIds.map(pointId => ({
+      $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V3,
+      schemaVersion: 3 as const,
+      key: domPermissionAuthorizationKeyV3({
+        profileId,
+        identity: {
+          source: pathToFileURL(plugin.entry).href,
+          pluginId: plugin.id,
+        },
+        pointId,
+        catalogVersion: CORDISX_CAPABILITY_CATALOG_VERSION,
+      }),
+      policy: 'allow-persistent' as const,
+    }))
+  )
 }
 
 export function installPermissionPolicyBridge(window: JSDOM['window']): void {

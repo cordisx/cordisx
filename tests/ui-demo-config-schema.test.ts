@@ -53,14 +53,23 @@ describe('UI demo Config Schemas', () => {
     expect(home.apps.codex.defaultProfile).toBe('ui-demo')
     expect(home.apps.codex.profiles['ui-demo']?.dataMode).toBe('shared')
     expect(home.plugins.map(plugin => plugin.id)).toEqual([
-      'slot-showcase', 'hello-toolbar', 'settings-tab-demo', 'form-schema-gallery', 'channel', 'cli-proxy-api',
+      'slot-showcase',
+      'hello-toolbar',
+      'settings-tab-demo',
+      'form-schema-gallery',
+      'channel',
+      'cli-proxy-api',
     ])
     expect(home.plugins.every(plugin => plugin.profiles?.['ui-demo']?.revision === 0)).toBe(true)
     const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const loaded = await loadConfig(path.join(projectRoot, 'config/ui-demos/config.json'), { profileId: 'ui-demo' })
     expect(loaded.plugins.map(plugin => [plugin.id, plugin.revision])).toEqual([
-      ['slot-showcase', 0], ['hello-toolbar', 0], ['settings-tab-demo', 0],
-      ['form-schema-gallery', 0], ['channel', 0], ['cli-proxy-api', 0],
+      ['slot-showcase', 0],
+      ['hello-toolbar', 0],
+      ['settings-tab-demo', 0],
+      ['form-schema-gallery', 0],
+      ['channel', 0],
+      ['cli-proxy-api', 0],
     ])
   })
 
@@ -89,7 +98,8 @@ describe('UI demo Config Schemas', () => {
       expect.objectContaining({
         path: ['sessionId'],
         label: 'Native session ID',
-        description: 'Selected native session ID used by the optional navigation shortcut. Leave empty to hide that shortcut.',
+        description:
+          'Selected native session ID used by the optional navigation shortcut. Leave empty to hide that shortcut.',
         value: '',
         max: 128,
       }),
@@ -161,8 +171,18 @@ describe('UI demo Config Schemas', () => {
     expect(() => FormSchemaGalleryConfig({ ...defaults, reviewThreshold: 0.45 })).toThrow()
     expect(() => FormSchemaGalleryConfig({ ...defaults, audienceTags: [] })).toThrow()
 
-    const en = descriptor('form-schema-gallery', FormSchemaGalleryConfig, { workspaceName: 'Northstar workspace' }, 'en')
-    const zh = descriptor('form-schema-gallery', FormSchemaGalleryConfig, { workspaceName: 'Northstar workspace' }, 'zh-CN')
+    const en = descriptor(
+      'form-schema-gallery',
+      FormSchemaGalleryConfig,
+      { workspaceName: 'Northstar workspace' },
+      'en',
+    )
+    const zh = descriptor(
+      'form-schema-gallery',
+      FormSchemaGalleryConfig,
+      { workspaceName: 'Northstar workspace' },
+      'zh-CN',
+    )
     expect(en).toMatchObject({ schemaKind: 'schemastery', applies: 'plugin-restart', writable: true })
     const enField = (path: string) => en.fields.find(field => field.path.join('.') === path)
     expect(enField('workspaceName')).toMatchObject({ label: 'Workspace name', required: true, min: 3, max: 48 })
@@ -170,37 +190,81 @@ describe('UI demo Config Schemas', () => {
     expect(enField('handoffNote')).toMatchObject({ label: 'Handoff note', role: 'multiline', value: undefined })
     expect(enField('documentationUrl')).toMatchObject({ label: 'Documentation URL', role: 'url' })
     expect(enField('exportDirectory')).toMatchObject({ label: 'Export folder', role: 'directory' })
-    expect(enField('maxParallelJobs')).toMatchObject({ label: 'Parallel tasks', type: 'number', min: 1, max: 16, step: 1 })
+    expect(enField('maxParallelJobs')).toMatchObject({
+      label: 'Parallel tasks',
+      type: 'number',
+      min: 1,
+      max: 16,
+      step: 1,
+    })
     expect(enField('reviewThreshold')).toMatchObject({ label: 'Review threshold', min: 0.5, max: 1, step: 0.05 })
     expect(enField('showMemberAvatars')).toMatchObject({ label: 'Show member avatars', type: 'boolean' })
     expect(enField('backgroundSync')).toMatchObject({ label: 'Background sync', role: 'switch' })
-    expect(enField('releaseTrack')).toMatchObject({ label: 'Release track', choices: [{ label: 'stable', value: 'stable' }, { label: 'preview', value: 'preview' }, { label: 'early-access', value: 'early-access' }] })
+    expect(enField('releaseTrack')).toMatchObject({
+      label: 'Release track',
+      choices: [{ label: 'stable', value: 'stable' }, { label: 'preview', value: 'preview' }, {
+        label: 'early-access',
+        value: 'early-access',
+      }],
+    })
     expect(enField('approvalMode')).toMatchObject({ label: 'Approval mode', role: 'radio' })
     expect(enField('approvalMode')).toMatchObject({ presenter: { version: 1, kind: 'choice.radio' } })
-    expect(enField('reviewMode')).toMatchObject({ label: 'Review mode', role: 'radio', presenter: { version: 1, kind: 'choice.segmented' } })
+    expect(enField('reviewMode')).toMatchObject({
+      label: 'Review mode',
+      role: 'radio',
+      presenter: { version: 1, kind: 'choice.segmented' },
+    })
     expect(enField('maxParallelJobs')).toMatchObject({ presenter: { version: 1, kind: 'number.stepper' } })
     expect(enField('reviewThreshold')).toMatchObject({ presenter: { version: 1, kind: 'number.slider' } })
-    expect(enField('preferredReviewDate')).toMatchObject({ label: 'Preferred review date', role: 'date', icon: 'host:calendar', group: { id: 'schedule', title: 'Schedule' } })
+    expect(enField('preferredReviewDate')).toMatchObject({
+      label: 'Preferred review date',
+      role: 'date',
+      icon: 'host:calendar',
+      group: { id: 'schedule', title: 'Schedule' },
+    })
     expect(enField('nextSyncAt')).toMatchObject({ label: 'Next sync time', role: 'datetime', icon: 'host:calendar' })
     expect(enField('dailyQuietTime')).toMatchObject({ label: 'Daily quiet time', role: 'time', icon: 'host:clock' })
     expect(enField('accentColor')).toMatchObject({ label: 'Accent color', role: 'color', icon: 'host:palette' })
     expect(enField('audienceTags')).toMatchObject({
-      label: 'Audience tags', type: 'array', role: 'multi-select', min: 1, max: 5,
+      label: 'Audience tags',
+      type: 'array',
+      role: 'multi-select',
+      min: 1,
+      max: 5,
       choices: [
-        { label: 'design', value: 'design' }, { label: 'research', value: 'research' },
-        { label: 'operations', value: 'operations' }, { label: 'community', value: 'community' },
+        { label: 'design', value: 'design' },
+        { label: 'research', value: 'research' },
+        { label: 'operations', value: 'operations' },
+        { label: 'community', value: 'community' },
       ],
     })
     // The gallery deliberately contains an inline scalar/set-like collection
     // alongside object-array pages; it is not an object-array-only sample.
     expect(enField('quickLabels')).toMatchObject({
-      label: 'Quick labels', type: 'array', arrayItemType: 'string', max: 6,
-      presenter: { version: 1, kind: 'array.scalar-tags' }, value: ['weekly', 'planning'],
+      label: 'Quick labels',
+      type: 'array',
+      arrayItemType: 'string',
+      max: 6,
+      presenter: { version: 1, kind: 'array.scalar-tags' },
+      value: ['weekly', 'planning'],
     })
-    expect(enField('reminderChannels')).toMatchObject({ label: 'Reminder channels', type: 'array', arrayItemType: 'boolean', presenter: { version: 1, kind: 'array.scalar-rows' } })
+    expect(enField('reminderChannels')).toMatchObject({
+      label: 'Reminder channels',
+      type: 'array',
+      arrayItemType: 'boolean',
+      presenter: { version: 1, kind: 'array.scalar-rows' },
+    })
     expect(enField('notificationRules')).toMatchObject({ label: 'Notification rules', type: 'array', min: 1, max: 4 })
-    expect(enField('notificationRules')).toMatchObject({ presenter: { version: 1, kind: 'array.object-page' }, arrayItemSchema: { type: 'object' }, arrayItemDefault: { enabled: true } })
-    expect(enField('escalationRules')).toMatchObject({ presenter: { version: 1, kind: 'array.object-page' }, arrayItemSchema: { type: 'object' }, arrayItemDefault: { enabled: true } })
+    expect(enField('notificationRules')).toMatchObject({
+      presenter: { version: 1, kind: 'array.object-page' },
+      arrayItemSchema: { type: 'object' },
+      arrayItemDefault: { enabled: true },
+    })
+    expect(enField('escalationRules')).toMatchObject({
+      presenter: { version: 1, kind: 'array.object-page' },
+      arrayItemSchema: { type: 'object' },
+      arrayItemDefault: { enabled: true },
+    })
     expect(enField('appearance.density')).toMatchObject({ label: 'Display density' })
     expect(enField('appearance.showActivity')).toMatchObject({ label: 'Show recent activity' })
     expect(enField('referenceCode')).toMatchObject({ label: 'Reference code', disabled: true })
@@ -214,7 +278,8 @@ describe('UI demo Config Schemas', () => {
     }
     const gallery = config.plugins.filter(plugin => plugin.id === 'form-schema-gallery')
     expect(gallery).toEqual([expect.objectContaining({
-      entry: './examples/plugins/form-schema-gallery/index.ts', enabled: true,
+      entry: './examples/plugins/form-schema-gallery/index.ts',
+      enabled: true,
     })])
   })
 })

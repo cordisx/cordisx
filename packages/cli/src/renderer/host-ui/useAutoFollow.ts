@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type RefObject, type UIEventHandler } from 'react'
+import { type RefObject, type UIEventHandler, useLayoutEffect, useRef } from 'react'
 
 const BOTTOM_THRESHOLD = 8
 

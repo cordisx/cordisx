@@ -20,7 +20,9 @@ if (args.includes('--help') || args.includes('-h')) {
 }
 const rawPort = value(args, '--port')
 const port = rawPort === undefined ? undefined : Number(rawPort)
-if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) throw new Error('--port must be an integer from 0 to 65535')
+if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) {
+  throw new Error('--port must be an integer from 0 to 65535')
+}
 const configPath = path.resolve(value(args, '--config') ?? defaultUiPlaygroundConfig)
 const externalHome = process.env.CORDISX_PLAYGROUND_HOME
 const playground = await startVitePlayground({
@@ -30,6 +32,13 @@ const playground = await startVitePlayground({
 })
 console.log(`[cordisx] UI Playground: ${playground.url}`)
 console.log(`[cordisx] isolated CORDISX_HOME: ${playground.homeDir}`)
-const stop = async () => { await playground.close(); process.exit(0) }
-process.once('SIGINT', () => { void stop() })
-process.once('SIGTERM', () => { void stop() })
+const stop = async () => {
+  await playground.close()
+  process.exit(0)
+}
+process.once('SIGINT', () => {
+  void stop()
+})
+process.once('SIGTERM', () => {
+  void stop()
+})

@@ -30,27 +30,40 @@ class PageSelect<Value extends CordisXJsonScalar> implements CordisXPageSelectCo
     this.set(choices, value)
   }
 
-  get value(): Value | undefined { return this.selected }
+  get value(): Value | undefined {
+    return this.selected
+  }
 
-  set(choices: readonly { readonly label: string; readonly value: Value; readonly disabled?: boolean }[], value?: Value): void {
+  set(
+    choices: readonly { readonly label: string; readonly value: Value; readonly disabled?: boolean }[],
+    value?: Value,
+  ): void {
     if (this.closed) return
     this.selected = value
     const indexed = choices.map((choice, index) => ({ ...choice, key: String(index) }))
     const selectedKey = indexed.find(choice => Object.is(choice.value, value))?.key
     const attach = () => this.root
-    this.reactRoot.render(<ConfigProvider globalConfig={{ attach }}><Select
-      {...(this.options.id === undefined ? {} : { id: this.options.id })}
-      aria-label={this.options.label}
-      {...(selectedKey === undefined ? {} : { value: selectedKey })}
-      options={indexed.map(choice => ({ label: choice.label, value: choice.key, ...(choice.disabled === undefined ? {} : { disabled: choice.disabled }) }))}
-      {...(this.options.disabled === undefined ? {} : { disabled: this.options.disabled })}
-      {...(this.options.clearable === undefined ? {} : { clearable: this.options.clearable })}
-      onChange={key => {
-        const next = indexed.find(choice => choice.key === String(key))?.value
-        this.selected = next
-        this.options.onChange(next)
-      }}
-    /></ConfigProvider>)
+    this.reactRoot.render(
+      <ConfigProvider globalConfig={{ attach }}>
+        <Select
+          {...(this.options.id === undefined ? {} : { id: this.options.id })}
+          aria-label={this.options.label}
+          {...(selectedKey === undefined ? {} : { value: selectedKey })}
+          options={indexed.map(choice => ({
+            label: choice.label,
+            value: choice.key,
+            ...(choice.disabled === undefined ? {} : { disabled: choice.disabled }),
+          }))}
+          {...(this.options.disabled === undefined ? {} : { disabled: this.options.disabled })}
+          {...(this.options.clearable === undefined ? {} : { clearable: this.options.clearable })}
+          onChange={key => {
+            const next = indexed.find(choice => choice.key === String(key))?.value
+            this.selected = next
+            this.options.onChange(next)
+          }}
+        />
+      </ConfigProvider>,
+    )
   }
 
   dispose(): void {

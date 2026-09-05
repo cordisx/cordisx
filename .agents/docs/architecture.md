@@ -43,14 +43,14 @@ explicit-entry bundle / dynamic package generations / Vite development graph
              Host-owned adapter/UI       launcher/private transports
 ```
 
-| Plane | Owner and boundary | Detailed reference |
-| --- | --- | --- |
-| Launcher | Process, configuration, package and service composition, CDP, cleanup | [Launcher runtime](launcher-runtime.md) |
-| Renderer | One shared runtime, plugin fibers, validated snapshots, conversation commands | [Renderer runtime](renderer-runtime.md#renderer-plane) |
-| UI adapter | Semantic surfaces, route/outlet reconciliation, native history | [Slot plane](renderer-runtime.md#slot-plane) |
-| Manager and forms | Host chrome, controls, state projection, configuration UI | [Manager](renderer-runtime.md#built-in-manager-plane), [forms](host-form-system.md) |
-| Authority | Brokered capabilities, principal-bound grants, private transport | [Platform capabilities](platform-capabilities.md), [Publisher Grants](publisher-grants.md) |
-| Icon themes | Provider handles, semantic seats, profile preference synchronization | [Host icon themes](host-icon-theme.md) |
+| Plane             | Owner and boundary                                                            | Detailed reference                                                                         |
+| ----------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Launcher          | Process, configuration, package and service composition, CDP, cleanup         | [Launcher runtime](launcher-runtime.md)                                                    |
+| Renderer          | One shared runtime, plugin fibers, validated snapshots, conversation commands | [Renderer runtime](renderer-runtime.md#renderer-plane)                                     |
+| UI adapter        | Semantic surfaces, route/outlet reconciliation, native history                | [Slot plane](renderer-runtime.md#slot-plane)                                               |
+| Manager and forms | Host chrome, controls, state projection, configuration UI                     | [Manager](renderer-runtime.md#built-in-manager-plane), [forms](host-form-system.md)        |
+| Authority         | Brokered capabilities, principal-bound grants, private transport              | [Platform capabilities](platform-capabilities.md), [Publisher Grants](publisher-grants.md) |
+| Icon themes       | Provider handles, semantic seats, profile preference synchronization          | [Host icon themes](host-icon-theme.md)                                                     |
 
 The headings below preserve existing architecture links. Detailed constraints
 have moved to their linked reference once; update those topics rather than

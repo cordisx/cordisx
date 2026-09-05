@@ -71,16 +71,20 @@ validatePackage(creator, {
 })
 assert(JSON.stringify(creator.exports) === '{}', 'creator must not expose its executable as an import API')
 
-for (const [label, readme] of [
-  ['cordisx README', cliReadme],
-  ['creator README', creatorReadme],
-]) {
+for (
+  const [label, readme] of [
+    ['cordisx README', cliReadme],
+    ['creator README', creatorReadme],
+  ]
+) {
   assert(readme.includes('@beta'), `${label} must use the beta channel`)
 }
-for (const [label, readme] of [
-  ['root README', rootReadme],
-  ['Chinese root README', rootReadmeZh],
-]) {
+for (
+  const [label, readme] of [
+    ['root README', rootReadme],
+    ['Chinese root README', rootReadmeZh],
+  ]
+) {
   assert(readme.includes('npx cordisx@beta'), `${label} must document the beta launcher`)
   assert(readme.includes('startup-qa'), `${label} must link startup self-service`)
   assert(readme.includes('.agents/docs/README.md'), `${label} must link the documentation index`)
@@ -112,19 +116,35 @@ if (!allowPendingLicense) {
     readFile(path.join(repositoryRoot, 'packages/create-cordisx-plugin/LICENSE'), 'utf8'),
     readFile(path.join(repositoryRoot, 'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'), 'utf8'),
     readFile(path.join(repositoryRoot, 'packages/cli/CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'), 'utf8'),
-    readFile(path.join(repositoryRoot, 'packages/create-cordisx-plugin/CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'), 'utf8'),
+    readFile(
+      path.join(repositoryRoot, 'packages/create-cordisx-plugin/CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'),
+      'utf8',
+    ),
   ])
   assert(rootLicense === cliLicense && cliLicense === creatorLicense, 'repository and tarball licenses must match')
-  assert(rootException === cliException && cliException === creatorException, 'repository and tarball plugin exceptions must match')
+  assert(
+    rootException === cliException && cliException === creatorException,
+    'repository and tarball plugin exceptions must match',
+  )
   assert(cli.files.includes('LICENSE'), 'cordisx tarball allowlist must include LICENSE')
   assert(creator.files.includes('LICENSE'), 'creator tarball allowlist must include LICENSE')
-  assert(cli.files.includes('CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'), 'cordisx tarball must include the plugin exception')
-  assert(creator.files.includes('CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'), 'creator tarball must include the plugin exception')
+  assert(
+    cli.files.includes('CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'),
+    'cordisx tarball must include the plugin exception',
+  )
+  assert(
+    creator.files.includes('CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'),
+    'creator tarball must include the plugin exception',
+  )
 } else {
   for (const relative of ['LICENSE', 'packages/cli/LICENSE', 'packages/create-cordisx-plugin/LICENSE']) {
     await access(path.join(repositoryRoot, relative)).then(
-      () => { throw new Error(`pending-license mode must not commit ${relative}`) },
-      error => { if (error.code !== 'ENOENT') throw error },
+      () => {
+        throw new Error(`pending-license mode must not commit ${relative}`)
+      },
+      error => {
+        if (error.code !== 'ENOENT') throw error
+      },
     )
   }
 }

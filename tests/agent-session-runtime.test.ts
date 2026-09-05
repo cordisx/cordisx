@@ -5,19 +5,19 @@ import type { UserMessage } from '@cordisx/protocol/sessions/v1'
 import type { ApprovalRequestRoutingQuestion, ApprovalRequestRoutingResult } from '@cordisx/protocol/approval/v3'
 import { Context } from '@deepseek-ai/cordis'
 import {
-  CordisXAgentRegistryServiceV1,
-  CordisXAgentAdmissionTargetOriginService,
-  CordisXAgentAdmissionTargetReservationService,
-  CordisXAgentAdmissionBootstrapTargetService,
   CordisXAgentAdmissionBootstrapReservationService,
-  CordisXAgentAdmissionBootstrapRoomTargetService,
   CordisXAgentAdmissionBootstrapRoomReservationService,
+  CordisXAgentAdmissionBootstrapRoomTargetService,
   CordisXAgentAdmissionBootstrapRouteDeclarationService,
   CordisXAgentAdmissionBootstrapRouteReservationService,
+  CordisXAgentAdmissionBootstrapTargetService,
+  CordisXAgentAdmissionTargetOriginService,
+  CordisXAgentAdmissionTargetReservationService,
+  CordisXAgentRegistryServiceV1,
   CordisXAgentSessionRuntime,
   CordisXApprovalServiceV1,
-  CordisXSessionRegistryServiceV1,
   type CordisXPrivateAgentDriver,
+  CordisXSessionRegistryServiceV1,
 } from '../packages/cli/src/renderer/agent-session-runtime.js'
 import {
   CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_CONTRACT_V1,
@@ -28,31 +28,83 @@ import {
   CORDISX_PLUGIN_ID,
   CORDISX_PLUGIN_SOURCE,
 } from '../packages/cli/src/renderer/ownership.js'
-import { AgentRouteSessionScopeAuthority, type AgentActiveRoute } from '../packages/cli/src/renderer/agent-route-session-scope.js'
+import {
+  type AgentActiveRoute,
+  AgentRouteSessionScopeAuthority,
+} from '../packages/cli/src/renderer/agent-route-session-scope.js'
 import { PlaygroundScenarioSessionScopeAuthority } from '../packages/cli/src/renderer/playground-scenario-session-scope.js'
 
 class Driver implements CordisXPrivateAgentDriver {
   private readonly replacement = new Set<() => void>()
-  private readonly approvals = new Set<(request: { readonly sessionId: string; readonly toolName: string; readonly callId?: string; readonly reason?: string }) => Promise<'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'>>()
+  private readonly approvals = new Set<
+    (
+      request: {
+        readonly sessionId: string
+        readonly toolName: string
+        readonly callId?: string
+        readonly reason?: string
+      },
+    ) => Promise<'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'>
+  >()
   readonly submitted: string[] = []
-  async create(): Promise<{ readonly status: 'accepted' }> { return { status: 'accepted' } }
-  async resume(): Promise<{ readonly status: 'accepted' }> { return { status: 'accepted' } }
-  async submit(input: { readonly message: UserMessage }): Promise<'accepted'> { this.submitted.push(input.message.id); return 'accepted' }
-  async discard(): Promise<'accepted'> { return 'accepted' }
-  async cancel(_input: { readonly cause: AgentCancelCause; readonly keepInbox: boolean }): Promise<'accepted'> { return 'accepted' }
-  onApprovalRequest(listener: (request: { readonly sessionId: string; readonly toolName: string; readonly callId?: string; readonly reason?: string }) => Promise<'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'>): () => void { this.approvals.add(listener); return () => this.approvals.delete(listener) }
-  async ask(request: { readonly sessionId: string; readonly toolName: string; readonly callId?: string; readonly reason?: string }): Promise<'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'> {
+  async create(): Promise<{ readonly status: 'accepted' }> {
+    return { status: 'accepted' }
+  }
+  async resume(): Promise<{ readonly status: 'accepted' }> {
+    return { status: 'accepted' }
+  }
+  async submit(input: { readonly message: UserMessage }): Promise<'accepted'> {
+    this.submitted.push(input.message.id)
+    return 'accepted'
+  }
+  async discard(): Promise<'accepted'> {
+    return 'accepted'
+  }
+  async cancel(_input: { readonly cause: AgentCancelCause; readonly keepInbox: boolean }): Promise<'accepted'> {
+    return 'accepted'
+  }
+  onApprovalRequest(
+    listener: (
+      request: {
+        readonly sessionId: string
+        readonly toolName: string
+        readonly callId?: string
+        readonly reason?: string
+      },
+    ) => Promise<'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'>,
+  ): () => void {
+    this.approvals.add(listener)
+    return () => this.approvals.delete(listener)
+  }
+  async ask(
+    request: {
+      readonly sessionId: string
+      readonly toolName: string
+      readonly callId?: string
+      readonly reason?: string
+    },
+  ): Promise<'allowed-once' | 'rejected' | 'cancelled' | 'unavailable'> {
     const listener = [...this.approvals][0]
     return listener === undefined ? 'unavailable' : await listener(request)
   }
-  onReplacement(listener: () => void): () => void { this.replacement.add(listener); return () => this.replacement.delete(listener) }
-  replace(): void { for (const listener of this.replacement) listener() }
-  dispose(): void { this.replacement.clear(); this.approvals.clear() }
+  onReplacement(listener: () => void): () => void {
+    this.replacement.add(listener)
+    return () => this.replacement.delete(listener)
+  }
+  replace(): void {
+    for (const listener of this.replacement) listener()
+  }
+  dispose(): void {
+    this.replacement.clear()
+    this.approvals.clear()
+  }
 }
 
 const owner = { pluginId: 'registry:test', generation: 1 } as const
 const message = (id: string): UserMessage => ({
-  id, role: 'user', content: [{ type: 'text', text: 'hello' }],
+  id,
+  role: 'user',
+  content: [{ type: 'text', text: 'hello' }],
   source: { kind: 'plugin', pluginId: owner.pluginId, generation: owner.generation },
 })
 
@@ -60,18 +112,40 @@ const setup: AgentSetup = {
   definition: { agentId: 'lead', revision: 'revision-session-1' },
   definitions: [{
     $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
-    contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
+    contract: 'cordisx.agent-definition/v1',
+    schemaVersion: 1,
     identity: { agentId: 'base', revision: 'revision-base-1' },
     name: 'Base',
     promptSections: [{ sectionId: 'base-introduction', kind: 'introduction', text: 'Base operating context.' }],
-    inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
+    inherit: {
+      promptSections: 'none',
+      rules: 'none',
+      skills: 'none',
+      tools: 'none',
+      mcpServers: 'none',
+      runtimeDefaults: 'none',
+    },
   }, {
     $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
-    contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
+    contract: 'cordisx.agent-definition/v1',
+    schemaVersion: 1,
     identity: { agentId: 'lead', revision: 'revision-session-1' },
-    name: 'Lead exact', extends: [{ agentId: 'base', revision: 'revision-base-1' }],
-    promptSections: [{ sectionId: 'lead-introduction', kind: 'introduction', text: 'Coordinates the exact Session room.' }],
-    inherit: { promptSections: 'append', rules: 'merge', skills: 'merge', tools: 'merge', mcpServers: 'merge', runtimeDefaults: 'merge', avatar: 'inherit' },
+    name: 'Lead exact',
+    extends: [{ agentId: 'base', revision: 'revision-base-1' }],
+    promptSections: [{
+      sectionId: 'lead-introduction',
+      kind: 'introduction',
+      text: 'Coordinates the exact Session room.',
+    }],
+    inherit: {
+      promptSections: 'append',
+      rules: 'merge',
+      skills: 'merge',
+      tools: 'merge',
+      mcpServers: 'merge',
+      runtimeDefaults: 'merge',
+      avatar: 'inherit',
+    },
   }],
 }
 
@@ -88,7 +162,8 @@ describe('Agent/Session Host authority v1', () => {
     })
     expect(runtime.definitionPresentation({ agentId: 'base', revision: 'revision-base-1' })).toEqual({
       identity: { agentId: 'base', revision: 'revision-base-1' },
-      name: 'Base', introduction: 'Base operating context.',
+      name: 'Base',
+      introduction: 'Base operating context.',
     })
     driver.replace()
     expect(runtime.definitionPresentation(setup.definition)).toBeUndefined()
@@ -98,7 +173,8 @@ describe('Agent/Session Host authority v1', () => {
 
   it('keeps every Cordis service method bound to the Host runtime through the service proxy', async () => {
     const runtime = new CordisXAgentSessionRuntime({
-      driver: new Driver(), authorize: async () => true,
+      driver: new Driver(),
+      authorize: async () => true,
       admissionTargetActive: () => true,
       captureAdmissionTarget: () => ({ active: () => true, commit: () => {}, close: () => {} }),
       bootstrapAdmissionTargetActive: () => true,
@@ -149,84 +225,140 @@ describe('Agent/Session Host authority v1', () => {
     expect(created.sessionId).toMatch(/^cx-session\.[A-Za-z0-9-]+$/u)
     const v3Origin = await issue({
       origin: {
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json',
-        contract: 'cordisx.agent-command-origin/v1', schemaVersion: 1,
-        originId: 'proxy-target-origin', binding: { bindingId: 'proxy-binding', ownerGeneration: 'proxy-generation' },
-        generation: 'proxy-generation', executionId: 'proxy-execution', commandId: 'proxy-send', scope: 'composer-submit',
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json',
+        contract: 'cordisx.agent-command-origin/v1',
+        schemaVersion: 1,
+        originId: 'proxy-target-origin',
+        binding: { bindingId: 'proxy-binding', ownerGeneration: 'proxy-generation' },
+        generation: 'proxy-generation',
+        executionId: 'proxy-execution',
+        commandId: 'proxy-send',
+        scope: 'composer-submit',
         room: { roomId: 'proxy-room', participantId: 'leader', memberId: 'member-leader', runId: 'run-leader' },
       },
       target: { participantId: 'leader', memberId: 'member-leader', runId: 'run-leader' },
     })
     expect(v3Origin.status).toBe('issued')
     if (v3Origin.status !== 'issued') throw new Error('target origin denied')
-    const v3Reservation = await reserve({ handle: created.handle, origin: v3Origin.origin, message: { text: 'proxy delivery' } })
+    const v3Reservation = await reserve({
+      handle: created.handle,
+      origin: v3Origin.origin,
+      message: { text: 'proxy delivery' },
+    })
     expect(v3Reservation.status).toBe('reserved')
     if (v3Reservation.status !== 'reserved') throw new Error('target reservation denied')
     await expect(v3Reservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
     const v4Origin = await issueBootstrapTarget({
       origin: {
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json',
-        contract: 'cordisx.agent-bootstrap-command-origin/v1', schemaVersion: 1,
-        originId: 'proxy-bootstrap-origin', binding: { bindingId: 'proxy-binding', ownerGeneration: 'proxy-generation' },
-        generation: 'proxy-generation', executionId: 'proxy-bootstrap-execution', commandId: 'proxy-send', scope: 'composer-submit',
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json',
+        contract: 'cordisx.agent-bootstrap-command-origin/v1',
+        schemaVersion: 1,
+        originId: 'proxy-bootstrap-origin',
+        binding: { bindingId: 'proxy-binding', ownerGeneration: 'proxy-generation' },
+        generation: 'proxy-generation',
+        executionId: 'proxy-bootstrap-execution',
+        commandId: 'proxy-send',
+        scope: 'composer-submit',
       },
       target: { participantId: 'reviewer', memberId: 'member-reviewer', runId: 'run-reviewer' },
     })
     expect(v4Origin.status).toBe('issued')
     if (v4Origin.status !== 'issued') throw new Error('bootstrap target origin denied')
-    const v4Reservation = await reserveBootstrapTarget({ handle: created.handle, origin: v4Origin.origin, message: { text: 'bootstrap delivery' } })
+    const v4Reservation = await reserveBootstrapTarget({
+      handle: created.handle,
+      origin: v4Origin.origin,
+      message: { text: 'bootstrap delivery' },
+    })
     expect(v4Reservation.status).toBe('reserved')
     if (v4Reservation.status !== 'reserved') throw new Error('bootstrap target reservation denied')
     await expect(v4Reservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
     const v5Origin = await issueBootstrapRoomTarget({
       origin: {
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json',
-        contract: 'cordisx.agent-bootstrap-command-origin/v1', schemaVersion: 1,
-        originId: 'proxy-bootstrap-room-origin', binding: { bindingId: 'proxy-binding', ownerGeneration: 'proxy-generation' },
-        generation: 'proxy-generation', executionId: 'proxy-bootstrap-room-execution', commandId: 'proxy-send', scope: 'composer-submit',
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json',
+        contract: 'cordisx.agent-bootstrap-command-origin/v1',
+        schemaVersion: 1,
+        originId: 'proxy-bootstrap-room-origin',
+        binding: { bindingId: 'proxy-binding', ownerGeneration: 'proxy-generation' },
+        generation: 'proxy-generation',
+        executionId: 'proxy-bootstrap-room-execution',
+        commandId: 'proxy-send',
+        scope: 'composer-submit',
       },
       target: { roomId: 'proxy-room', participantId: 'reviewer', memberId: 'member-reviewer', runId: 'run-reviewer' },
     })
-    expect(v5Origin).toMatchObject({ status: 'issued', receipt: { target: { roomId: 'proxy-room', runId: 'run-reviewer' } } })
+    expect(v5Origin).toMatchObject({
+      status: 'issued',
+      receipt: { target: { roomId: 'proxy-room', runId: 'run-reviewer' } },
+    })
     if (v5Origin.status !== 'issued') throw new Error('bootstrap Room target origin denied')
-    const v5Reservation = await reserveBootstrapRoomTarget({ handle: created.handle, origin: v5Origin.origin, message: { text: 'bootstrap Room delivery' } })
+    const v5Reservation = await reserveBootstrapRoomTarget({
+      handle: created.handle,
+      origin: v5Origin.origin,
+      message: { text: 'bootstrap Room delivery' },
+    })
     expect(v5Reservation.status).toBe('reserved')
     if (v5Reservation.status !== 'reserved') throw new Error('bootstrap Room target reservation denied')
     await expect(v5Reservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
-    expect(await get(created.sessionId)).toMatchObject({ id: created.sessionId, generation: created.handle.agent.generation })
+    expect(await get(created.sessionId)).toMatchObject({
+      id: created.sessionId,
+      generation: created.handle.agent.generation,
+    })
     expect(await getSession(created.sessionId)).toMatchObject({ id: created.sessionId })
     await registerAnswerer(created.handle.agent, async () => 'allowed-once')
     const decision = await request({ agent: created.handle.agent, toolName: 'shell' })
     expect(decision).toMatchObject({ outcome: 'allowed-once' })
     expect(decision.id).toMatch(/^cx-approval\.[A-Za-z0-9-]+$/u)
-    await registerAuthorityAnswerer({ agent: created.handle.agent, definition: setup.definition }, async () => 'rejected')
+    await registerAuthorityAnswerer(
+      { agent: created.handle.agent, definition: setup.definition },
+      async () => 'rejected',
+    )
     const decisionV2 = await request({
       requester: { agent: created.handle.agent, definition: setup.definition },
       authority: { agent: created.handle.agent, definition: setup.definition },
-      toolName: 'shell-v2', reason: { kind: 'plain-text', text: 'Exact authority proxy request.' },
+      toolName: 'shell-v2',
+      reason: { kind: 'plain-text', text: 'Exact authority proxy request.' },
     })
     expect(decisionV2).toMatchObject({ contract: 'cordisx.approval-decision/v2', outcome: 'rejected' })
-    const routed = await registerRequestResolver({ agent: created.handle.agent, definition: setup.definition }, question => ({
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-result.v1.schema.json',
-      contract: 'cordisx.approval-request-routing-result/v1', schemaVersion: 1,
-      routingId: question.routingId, registration: question.registration,
-      status: 'unavailable', code: 'mapping-unavailable',
-    }))
+    const routed = await registerRequestResolver(
+      { agent: created.handle.agent, definition: setup.definition },
+      question => ({
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-result.v1.schema.json',
+        contract: 'cordisx.approval-request-routing-result/v1',
+        schemaVersion: 1,
+        routingId: question.routingId,
+        registration: question.registration,
+        status: 'unavailable',
+        code: 'mapping-unavailable',
+      }),
+    )
     expect(routed.status).toBe('registered')
-    if (routed.status === 'registered') await expect(routed.handle.dispose()).resolves.toMatchObject({ status: 'closed', code: 'disposed' })
+    if (routed.status === 'registered') {
+      await expect(routed.handle.dispose()).resolves.toMatchObject({ status: 'closed', code: 'disposed' })
+    }
     expect(await created.handle.dispose()).toMatchObject({ status: 'accepted' })
     expect(await resume({ sessionId: created.sessionId })).toMatchObject({ status: 'accepted', disposition: 'resumed' })
-    expect(await acquireLegacyTaskBinding({
-      $schema: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1,
-      contract: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_CONTRACT_V1,
-      schemaVersion: 1, mutationId: 'proxy-legacy-closed',
-      binding: {
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v4.schema.json',
-        contract: 'cordisx.agent-loop-task-binding/v4', schemaVersion: 4,
-        task: 'proxy-legacy-task', binding: { bindingId: 'proxy-legacy-binding', generation: 1 },
-        definition: { agentId: 'lead', revision: 'revision-one' }, state: 'closed',
-      },
-    })).toMatchObject({ status: 'unavailable', code: 'binding-closed' })
+    expect(
+      await acquireLegacyTaskBinding({
+        $schema: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1,
+        contract: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_CONTRACT_V1,
+        schemaVersion: 1,
+        mutationId: 'proxy-legacy-closed',
+        binding: {
+          $schema:
+            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v4.schema.json',
+          contract: 'cordisx.agent-loop-task-binding/v4',
+          schemaVersion: 4,
+          task: 'proxy-legacy-task',
+          binding: { bindingId: 'proxy-legacy-binding', generation: 1 },
+          definition: { agentId: 'lead', revision: 'revision-one' },
+          state: 'closed',
+        },
+      }),
+    ).toMatchObject({ status: 'unavailable', code: 'binding-closed' })
 
     await bootstrapRoomReservations.dispose()
     await bootstrapRoomTargets.dispose()
@@ -243,28 +375,46 @@ describe('Agent/Session Host authority v1', () => {
   it('creates an owner handle, admits a MessageId once, and replays one Session truth', async () => {
     const driver = new Driver()
     const runtime = new CordisXAgentSessionRuntime({ driver, authorize: async () => true, now: () => 10 })
-    const created = await runtime.create(owner, { sessionId: 'session-1', mutationId: 'create-1', options: {} satisfies AgentOptions })
+    const created = await runtime.create(owner, {
+      sessionId: 'session-1',
+      mutationId: 'create-1',
+      options: {} satisfies AgentOptions,
+    })
     expect(created).toMatchObject({ status: 'accepted', disposition: 'created', sessionId: 'session-1' })
     if (created.status !== 'accepted') throw new Error('agent unavailable')
-    expect(await created.handle.agent.followup(message('message-1'))).toMatchObject({ status: 'accepted', messageId: 'message-1' })
-    expect(await created.handle.agent.followup(message('message-1'))).toMatchObject({ status: 'accepted', messageId: 'message-1' })
+    expect(await created.handle.agent.followup(message('message-1'))).toMatchObject({
+      status: 'accepted',
+      messageId: 'message-1',
+    })
+    expect(await created.handle.agent.followup(message('message-1'))).toMatchObject({
+      status: 'accepted',
+      messageId: 'message-1',
+    })
     expect(driver.submitted).toEqual(['message-1'])
 
     const snapshot = await created.handle.agent.session.snapshot()
     expect(snapshot).toMatchObject({ status: 'available', snapshot: { snapshotSeq: 1 } })
     const read = await created.handle.agent.session.read({ afterSeq: -1, snapshotSeq: 1, limit: 10 })
-    expect(read).toMatchObject({ status: 'available', page: { events: [{ type: 'agent/inbox/spliced' }, { type: 'user/message' }] } })
+    expect(read).toMatchObject({
+      status: 'available',
+      page: { events: [{ type: 'agent/inbox/spliced' }, { type: 'user/message' }] },
+    })
   })
 
   it('commits the originating Shell capture only after the driver accepts a submission', async () => {
     const lifecycle: string[] = []
     const runtime = new CordisXAgentSessionRuntime({
-      driver: new Driver(), authorize: async () => true,
+      driver: new Driver(),
+      authorize: async () => true,
       captureSubmission: (_owner, sessionId, messageId) => {
         lifecycle.push(`capture:${sessionId}:${messageId}`)
         return {
-          commit: () => { lifecycle.push('commit') },
-          close: () => { lifecycle.push('close') },
+          commit: () => {
+            lifecycle.push('commit')
+          },
+          close: () => {
+            lifecycle.push('close')
+          },
         }
       },
     })
@@ -286,7 +436,9 @@ describe('Agent/Session Host authority v1', () => {
     if (created.status !== 'accepted') throw new Error('agent unavailable')
     await created.handle.agent.followup(message('message-2'))
     const pages: string[] = []
-    const subscribed = await created.handle.agent.session.subscribe({ afterSeq: -1 }, page => { pages.push(`${page.phase}:${page.events.map(event => event.seq).join(',')}`) })
+    const subscribed = await created.handle.agent.session.subscribe({ afterSeq: -1 }, page => {
+      pages.push(`${page.phase}:${page.events.map(event => event.seq).join(',')}`)
+    })
     expect(subscribed.status).toBe('subscribed')
     if (subscribed.status !== 'subscribed') throw new Error('subscription unavailable')
     expect(pages).toEqual(['replay:0,1'])
@@ -301,7 +453,8 @@ describe('Agent/Session Host authority v1', () => {
     const created = await runtime.create(owner, { sessionId: 'session-watermark' })
     if (created.status !== 'accepted') throw new Error('agent unavailable')
     await created.handle.agent.followup(message('message-before-replay'))
-    const pages: Array<{ readonly phase: string; readonly replayThrough: number; readonly events: readonly number[] }> = []
+    const pages: Array<{ readonly phase: string; readonly replayThrough: number; readonly events: readonly number[] }> =
+      []
     let appendedDuringReplay = false
     const subscribed = await created.handle.agent.session.subscribe({ afterSeq: -1 }, async page => {
       pages.push({ phase: page.phase, replayThrough: page.replayThrough, events: page.events.map(event => event.seq) })
@@ -325,7 +478,9 @@ describe('Agent/Session Host authority v1', () => {
     const created = await runtime.create(owner, { sessionId: 'session-closed' })
     if (created.status !== 'accepted') throw new Error('agent unavailable')
     const pages: string[] = []
-    const subscribed = await created.handle.agent.session.subscribe({ afterSeq: -1 }, page => { pages.push(page.phase) })
+    const subscribed = await created.handle.agent.session.subscribe({ afterSeq: -1 }, page => {
+      pages.push(page.phase)
+    })
     if (subscribed.status !== 'subscribed') throw new Error('subscription unavailable')
     runtime.fenceSession('session-closed', 'route-replaced')
     expect(await subscribed.subscription.closed).toMatchObject({ status: 'closed', code: 'route-replaced' })
@@ -337,7 +492,9 @@ describe('Agent/Session Host authority v1', () => {
     const runtime = new CordisXAgentSessionRuntime({ driver: new Driver(), authorize: async () => true })
     const created = await runtime.create(owner, { sessionId: 'session-observer-failure' })
     if (created.status !== 'accepted') throw new Error('agent unavailable')
-    const subscribed = await created.handle.agent.session.subscribe({ afterSeq: -1 }, () => { throw new Error('observer failed') })
+    const subscribed = await created.handle.agent.session.subscribe({ afterSeq: -1 }, () => {
+      throw new Error('observer failed')
+    })
     if (subscribed.status !== 'subscribed') throw new Error('subscription unavailable')
     await created.handle.agent.followup(message('message-observer-failure'))
     expect(await subscribed.subscription.closed).toMatchObject({ status: 'closed', code: 'observer-failed' })
@@ -351,7 +508,10 @@ describe('Agent/Session Host authority v1', () => {
     if (subscribed.status !== 'subscribed') throw new Error('subscription unavailable')
     runtime.fenceOwner(owner.pluginId, 'permission-revoked')
     expect(await subscribed.subscription.closed).toMatchObject({ status: 'closed', code: 'permission-revoked' })
-    expect(await created.handle.agent.followup(message('after-revoke'))).toMatchObject({ status: 'unavailable', code: 'agent-replaced' })
+    expect(await created.handle.agent.followup(message('after-revoke'))).toMatchObject({
+      status: 'unavailable',
+      code: 'agent-replaced',
+    })
     expect(await created.handle.dispose()).toMatchObject({ status: 'unavailable', code: 'agent-replaced' })
   })
 
@@ -363,7 +523,10 @@ describe('Agent/Session Host authority v1', () => {
     const decision = await runtime.requestApproval(owner, { agent: created.handle.agent, toolName: 'shell' })
     expect(decision.outcome).toBe('allowed-once')
     const page = await created.handle.agent.session.read({ afterSeq: -1, limit: 10 })
-    expect(page).toMatchObject({ status: 'available', page: { events: [{ type: 'approval/asked' }, { type: 'approval/decided' }] } })
+    expect(page).toMatchObject({
+      status: 'available',
+      page: { events: [{ type: 'approval/asked' }, { type: 'approval/decided' }] },
+    })
   })
 
   it('binds approval v2 to exact requester and authority Agents in one requester Session ledger', async () => {
@@ -383,67 +546,117 @@ describe('Agent/Session Host authority v1', () => {
     const definition = (identity: typeof reviewerIdentity, name: string): AgentSetup => ({
       definition: identity,
       definitions: [{
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
-        contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
-        identity, name,
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
+        contract: 'cordisx.agent-definition/v1',
+        schemaVersion: 1,
+        identity,
+        name,
         promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: `${name} prompt` }],
-        inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
+        inherit: {
+          promptSections: 'none',
+          rules: 'none',
+          skills: 'none',
+          tools: 'none',
+          mcpServers: 'none',
+          runtimeDefaults: 'none',
+        },
       }],
     })
-    const reviewer = await runtime.create(owner, { sessionId: 'cx-session.reviewer-v2', setup: definition(reviewerIdentity, 'Reviewer') })
-    const lead = await runtime.create(owner, { sessionId: 'cx-session.lead-v2', setup: definition(leadIdentity, 'Lead') })
+    const reviewer = await runtime.create(owner, {
+      sessionId: 'cx-session.reviewer-v2',
+      setup: definition(reviewerIdentity, 'Reviewer'),
+    })
+    const lead = await runtime.create(owner, {
+      sessionId: 'cx-session.lead-v2',
+      setup: definition(leadIdentity, 'Lead'),
+    })
     if (reviewer.status !== 'accepted' || lead.status !== 'accepted') throw new Error('agents unavailable')
     const answer = vi.fn(async question => {
       expect(question).toMatchObject({
-        contract: 'cordisx.approval-question/v2', schemaVersion: 2,
+        contract: 'cordisx.approval-question/v2',
+        schemaVersion: 2,
         requester: { agentId: reviewer.sessionId, sessionId: reviewer.sessionId, definition: reviewerIdentity },
         authority: { agentId: lead.sessionId, sessionId: lead.sessionId, definition: leadIdentity },
         reason: { kind: 'plain-text', text: 'Reviewer needs Lead to approve publishing.' },
       })
       return 'rejected' as const
     })
-    const handle = await runtime.registerAuthorityAnswerer(owner, { agent: lead.handle.agent, definition: leadIdentity }, answer)
+    const handle = await runtime.registerAuthorityAnswerer(owner, {
+      agent: lead.handle.agent,
+      definition: leadIdentity,
+    }, answer)
     const decision = await runtime.requestApprovalV2(owner, {
       requester: { agent: reviewer.handle.agent, definition: reviewerIdentity },
       authority: { agent: lead.handle.agent, definition: leadIdentity },
-      toolName: 'workspace.publish', callId: 'tool-call-v2',
+      toolName: 'workspace.publish',
+      callId: 'tool-call-v2',
       reason: { kind: 'plain-text', text: 'Reviewer needs Lead to approve publishing.' },
     })
     expect(decision).toMatchObject({
-      contract: 'cordisx.approval-decision/v2', schemaVersion: 2, outcome: 'rejected',
-      requester: { definition: reviewerIdentity }, authority: { definition: leadIdentity },
+      contract: 'cordisx.approval-decision/v2',
+      schemaVersion: 2,
+      outcome: 'rejected',
+      requester: { definition: reviewerIdentity },
+      authority: { definition: leadIdentity },
     })
     expect(answer).toHaveBeenCalledTimes(1)
     expect(authorization).toContain('approvals.request:cx-session.reviewer-v2')
     expect(authorization).toContain('approvals.answer:cx-session.lead-v2')
     const read = await reviewer.handle.agent.session.read({ afterSeq: -1, snapshotSeq: 2, limit: 10 })
-    expect(read).toMatchObject({ status: 'available', page: { events: [
-      { seq: 0, type: 'approval/authority-bound', ignorable: true, data: { requester: reviewerIdentity, authority: leadIdentity, reason: { kind: 'plain-text' } } },
-      { seq: 1, type: 'approval/asked', data: { reason: 'Reviewer needs Lead to approve publishing.' } },
-      { seq: 2, type: 'approval/decided', data: { outcome: 'rejected' } },
-    ] } })
-    expect((read.status === 'available' ? read.page.events : []).map(event => event.data && 'id' in event.data ? event.data.id : 'approvalId' in event.data ? event.data.approvalId : undefined))
+    expect(read).toMatchObject({
+      status: 'available',
+      page: {
+        events: [
+          {
+            seq: 0,
+            type: 'approval/authority-bound',
+            ignorable: true,
+            data: { requester: reviewerIdentity, authority: leadIdentity, reason: { kind: 'plain-text' } },
+          },
+          { seq: 1, type: 'approval/asked', data: { reason: 'Reviewer needs Lead to approve publishing.' } },
+          { seq: 2, type: 'approval/decided', data: { outcome: 'rejected' } },
+        ],
+      },
+    })
+    expect(
+      (read.status === 'available' ? read.page.events : []).map(event =>
+        event.data && 'id' in event.data
+          ? event.data.id
+          : 'approvalId' in event.data
+          ? event.data.approvalId
+          : undefined
+      ),
+    )
       .toEqual([decision.id, decision.id, decision.id])
     driver.replace()
     await expect(handle.dispose()).resolves.toEqual({ status: 'closed', code: 'connection-replaced' })
     await expect(runtime.requestApprovalV2(owner, {
-      requester: { agent: reviewer.handle.agent, definition: reviewerIdentity }, authority: { agent: lead.handle.agent, definition: leadIdentity },
-      toolName: 'workspace.publish', reason: { kind: 'plain-text', text: 'stale' },
+      requester: { agent: reviewer.handle.agent, definition: reviewerIdentity },
+      authority: { agent: lead.handle.agent, definition: leadIdentity },
+      toolName: 'workspace.publish',
+      reason: { kind: 'plain-text', text: 'stale' },
     })).rejects.toThrow('unavailable')
     await runtime.dispose()
   })
 
   it('rejects approval v2 identity substitution before writing durable facts', async () => {
-    const runtime = new CordisXAgentSessionRuntime({ driver: new Driver(), authorize: async () => true, declares: () => true })
+    const runtime = new CordisXAgentSessionRuntime({
+      driver: new Driver(),
+      authorize: async () => true,
+      declares: () => true,
+    })
     const created = await runtime.create(owner, { sessionId: 'cx-session.approval-v2-identity', setup })
     if (created.status !== 'accepted') throw new Error('agent unavailable')
     await expect(runtime.registerAuthorityAnswerer(owner, {
-      agent: created.handle.agent, definition: { ...setup.definition, revision: 'wrong-revision' },
+      agent: created.handle.agent,
+      definition: { ...setup.definition, revision: 'wrong-revision' },
     }, async () => 'allowed-once')).rejects.toThrow('unavailable')
     await expect(runtime.requestApprovalV2(owner, {
       requester: { agent: created.handle.agent, definition: setup.definition },
       authority: { agent: created.handle.agent, definition: { ...setup.definition, agentId: 'other-agent' } },
-      toolName: 'workspace.publish', reason: { kind: 'plain-text', text: 'No inferred authority.' },
+      toolName: 'workspace.publish',
+      reason: { kind: 'plain-text', text: 'No inferred authority.' },
     })).rejects.toThrow('unavailable')
     const snapshot = await created.handle.agent.session.snapshot()
     expect(snapshot).toMatchObject({ status: 'available', snapshot: { snapshotSeq: -1 } })
@@ -455,18 +668,29 @@ describe('Agent/Session Host authority v1', () => {
     let routeAuthorized = false
     const runtime = new CordisXAgentSessionRuntime({
       driver,
-      authorize: async (_owner, capability) => capability === 'agents.create' || capability === 'agents.resume' || routeAuthorized,
+      authorize: async (_owner, capability) =>
+        capability === 'agents.create' || capability === 'agents.resume' || routeAuthorized,
       declares: () => true,
       now: () => 31,
     })
     const makeSetup = (agentId: string, revision: string, name: string): AgentSetup => ({
       definition: { agentId, revision },
       definitions: [{
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
-        contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
-        identity: { agentId, revision }, name,
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
+        contract: 'cordisx.agent-definition/v1',
+        schemaVersion: 1,
+        identity: { agentId, revision },
+        name,
         promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: `${name} prompt` }],
-        inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
+        inherit: {
+          promptSections: 'none',
+          rules: 'none',
+          skills: 'none',
+          tools: 'none',
+          mcpServers: 'none',
+          runtimeDefaults: 'none',
+        },
       }],
     })
     const reviewerSetup = makeSetup('reviewer', 'reviewer-driver-v3', 'Reviewer')
@@ -475,40 +699,87 @@ describe('Agent/Session Host authority v1', () => {
     const lead = await runtime.create(owner, { sessionId: 'cx-session.driver-lead', setup: leadSetup })
     if (reviewer.status !== 'accepted' || lead.status !== 'accepted') throw new Error('agents unavailable')
     let answer!: (outcome: 'allowed-once') => void
-    const decision = new Promise<'allowed-once'>(resolve => { answer = resolve })
+    const decision = new Promise<'allowed-once'>(resolve => {
+      answer = resolve
+    })
     let liveQuestion: ApprovalQuestionV2 | undefined
-    const answerer = vi.fn(async (question: ApprovalQuestionV2) => { liveQuestion = question; return await decision })
-    await runtime.registerAuthorityAnswerer(owner, { agent: lead.handle.agent, definition: leadSetup.definition }, answerer)
+    const answerer = vi.fn(async (question: ApprovalQuestionV2) => {
+      liveQuestion = question
+      return await decision
+    })
+    await runtime.registerAuthorityAnswerer(
+      owner,
+      { agent: lead.handle.agent, definition: leadSetup.definition },
+      answerer,
+    )
     const resolver = vi.fn((question: ApprovalRequestRoutingQuestion): ApprovalRequestRoutingResult => ({
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-result.v1.schema.json',
-      contract: 'cordisx.approval-request-routing-result/v1', schemaVersion: 1,
-      routingId: question.routingId, registration: question.registration,
-      status: 'accepted', code: 'routed', requester: question.requester,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-result.v1.schema.json',
+      contract: 'cordisx.approval-request-routing-result/v1',
+      schemaVersion: 1,
+      routingId: question.routingId,
+      registration: question.registration,
+      status: 'accepted',
+      code: 'routed',
+      requester: question.requester,
       authority: {
-        agentId: lead.sessionId, sessionId: lead.sessionId, agentGeneration: lead.agentGeneration,
+        agentId: lead.sessionId,
+        sessionId: lead.sessionId,
+        agentGeneration: lead.agentGeneration,
         definition: leadSetup.definition,
       },
     }))
-    const registered = await runtime.registerRequestResolver(owner, { agent: reviewer.handle.agent, definition: reviewerSetup.definition }, resolver)
-    expect(registered).toMatchObject({ status: 'registered', handle: { registration: { owner, requester: { agentId: reviewer.sessionId, definition: reviewerSetup.definition } } } })
+    const registered = await runtime.registerRequestResolver(owner, {
+      agent: reviewer.handle.agent,
+      definition: reviewerSetup.definition,
+    }, resolver)
+    expect(registered).toMatchObject({
+      status: 'registered',
+      handle: {
+        registration: { owner, requester: { agentId: reviewer.sessionId, definition: reviewerSetup.definition } },
+      },
+    })
 
     // Dynamic host-route permission is intentionally unavailable until the
     // later exact Session route is activated; registration itself must not
     // require that route or create a lease.
-    await expect(driver.ask({ sessionId: reviewer.sessionId, toolName: 'workspace.publish', reason: 'before route activation' })).resolves.toBe('unavailable')
+    await expect(
+      driver.ask({ sessionId: reviewer.sessionId, toolName: 'workspace.publish', reason: 'before route activation' }),
+    ).resolves.toBe('unavailable')
     routeAuthorized = true
 
-    const pending = driver.ask({ sessionId: reviewer.sessionId, toolName: 'workspace.publish', callId: 'driver-call-v3', reason: 'Reviewer requests exact Lead approval.' })
+    const pending = driver.ask({
+      sessionId: reviewer.sessionId,
+      toolName: 'workspace.publish',
+      callId: 'driver-call-v3',
+      reason: 'Reviewer requests exact Lead approval.',
+    })
     await vi.waitFor(() => expect(answerer).toHaveBeenCalledTimes(1))
-    expect(resolver).toHaveBeenCalledWith(expect.objectContaining({
-      contract: 'cordisx.approval-request-routing-question/v1', requester: expect.objectContaining({ agentId: reviewer.sessionId }),
-      toolName: 'workspace.publish', callId: 'driver-call-v3', reason: { kind: 'plain-text', text: 'Reviewer requests exact Lead approval.' },
-    }), expect.any(AbortSignal))
+    expect(resolver).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contract: 'cordisx.approval-request-routing-question/v1',
+        requester: expect.objectContaining({ agentId: reviewer.sessionId }),
+        toolName: 'workspace.publish',
+        callId: 'driver-call-v3',
+        reason: { kind: 'plain-text', text: 'Reviewer requests exact Lead approval.' },
+      }),
+      expect.any(AbortSignal),
+    )
     const inFlight = await reviewer.handle.agent.session.read({ afterSeq: -1, snapshotSeq: 1, limit: 10 })
-    expect(inFlight).toMatchObject({ status: 'available', page: { events: [
-      { seq: 0, type: 'approval/authority-bound', ignorable: true, data: { requester: reviewerSetup.definition, authority: leadSetup.definition } },
-      { seq: 1, type: 'approval/asked', data: { reason: 'Reviewer requests exact Lead approval.' } },
-    ] } })
+    expect(inFlight).toMatchObject({
+      status: 'available',
+      page: {
+        events: [
+          {
+            seq: 0,
+            type: 'approval/authority-bound',
+            ignorable: true,
+            data: { requester: reviewerSetup.definition, authority: leadSetup.definition },
+          },
+          { seq: 1, type: 'approval/asked', data: { reason: 'Reviewer requests exact Lead approval.' } },
+        ],
+      },
+    })
     if (inFlight.status !== 'available' || liveQuestion === undefined) throw new Error('pending approval unavailable')
     const asked = inFlight.page.events.find(event => event.type === 'approval/asked')
     if (asked?.type !== 'approval/asked') throw new Error('asked fact unavailable')
@@ -520,9 +791,16 @@ describe('Agent/Session Host authority v1', () => {
     answer('allowed-once')
     await expect(pending).resolves.toBe('allowed-once')
     const completed = await reviewer.handle.agent.session.read({ afterSeq: -1, snapshotSeq: 2, limit: 10 })
-    expect(completed).toMatchObject({ status: 'available', page: { events: [
-      { type: 'approval/authority-bound' }, { type: 'approval/asked' }, { type: 'approval/decided', data: { outcome: 'allowed-once' } },
-    ] } })
+    expect(completed).toMatchObject({
+      status: 'available',
+      page: {
+        events: [
+          { type: 'approval/authority-bound' },
+          { type: 'approval/asked' },
+          { type: 'approval/decided', data: { outcome: 'allowed-once' } },
+        ],
+      },
+    })
     await runtime.dispose()
   })
 
@@ -532,29 +810,55 @@ describe('Agent/Session Host authority v1', () => {
     const routed = await runtime.create(owner, { sessionId: 'cx-session.driver-routed', setup })
     const legacy = await runtime.create(owner, { sessionId: 'cx-session.driver-legacy', setup })
     if (routed.status !== 'accepted' || legacy.status !== 'accepted') throw new Error('agents unavailable')
-    const malformed = await runtime.registerRequestResolver(owner, { agent: routed.handle.agent, definition: setup.definition }, question => ({
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-result.v1.schema.json',
-      contract: 'cordisx.approval-request-routing-result/v1', schemaVersion: 1,
-      routingId: `${question.routingId}-wrong`, registration: question.registration,
-      status: 'unavailable', code: 'mapping-unavailable',
+    const malformed = await runtime.registerRequestResolver(owner, {
+      agent: routed.handle.agent,
+      definition: setup.definition,
+    }, question => ({
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-result.v1.schema.json',
+      contract: 'cordisx.approval-request-routing-result/v1',
+      schemaVersion: 1,
+      routingId: `${question.routingId}-wrong`,
+      registration: question.registration,
+      status: 'unavailable',
+      code: 'mapping-unavailable',
     }))
     if (malformed.status !== 'registered') throw new Error('resolver unavailable')
-    await expect(driver.ask({ sessionId: routed.sessionId, toolName: 'shell', reason: 'route me' })).resolves.toBe('unavailable')
+    await expect(driver.ask({ sessionId: routed.sessionId, toolName: 'shell', reason: 'route me' })).resolves.toBe(
+      'unavailable',
+    )
     await expect(malformed.handle.dispose()).resolves.toMatchObject({ code: 'disposed' })
-    await expect(driver.ask({ sessionId: routed.sessionId, toolName: 'shell', reason: 'still route required' })).resolves.toBe('unavailable')
-    expect(await routed.handle.agent.session.snapshot()).toMatchObject({ status: 'available', snapshot: { snapshotSeq: -1 } })
+    await expect(driver.ask({ sessionId: routed.sessionId, toolName: 'shell', reason: 'still route required' }))
+      .resolves.toBe('unavailable')
+    expect(await routed.handle.agent.session.snapshot()).toMatchObject({
+      status: 'available',
+      snapshot: { snapshotSeq: -1 },
+    })
 
     await expect(driver.ask({ sessionId: legacy.sessionId, toolName: 'shell' })).resolves.toBe('unavailable')
     expect(await legacy.handle.agent.session.read({ afterSeq: -1, snapshotSeq: 1, limit: 10 })).toMatchObject({
-      status: 'available', page: { events: [{ type: 'approval/asked' }, { type: 'approval/decided' }] },
+      status: 'available',
+      page: { events: [{ type: 'approval/asked' }, { type: 'approval/decided' }] },
     })
 
-    const first = await runtime.registerRequestResolver(owner, { agent: routed.handle.agent, definition: setup.definition }, () => { throw new Error('stale') })
-    const second = await runtime.registerRequestResolver(owner, { agent: routed.handle.agent, definition: setup.definition }, question => ({
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-result.v1.schema.json',
-      contract: 'cordisx.approval-request-routing-result/v1', schemaVersion: 1,
-      routingId: question.routingId, registration: question.registration,
-      status: 'unavailable', code: 'authority-unavailable',
+    const first = await runtime.registerRequestResolver(owner, {
+      agent: routed.handle.agent,
+      definition: setup.definition,
+    }, () => {
+      throw new Error('stale')
+    })
+    const second = await runtime.registerRequestResolver(owner, {
+      agent: routed.handle.agent,
+      definition: setup.definition,
+    }, question => ({
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/approval-request-routing-result.v1.schema.json',
+      contract: 'cordisx.approval-request-routing-result/v1',
+      schemaVersion: 1,
+      routingId: question.routingId,
+      registration: question.registration,
+      status: 'unavailable',
+      code: 'authority-unavailable',
     }))
     if (first.status !== 'registered' || second.status !== 'registered') throw new Error('replacement unavailable')
     await expect(first.handle.closed).resolves.toMatchObject({ code: 'requester-replaced' })
@@ -570,20 +874,35 @@ describe('Agent/Session Host authority v1', () => {
     const decisions: string[] = []
     const routes = new AgentRouteSessionScopeAuthority({
       activeRoute: () => active,
-      routes: candidate => candidate.pluginId === owner.pluginId && candidate.generation === owner.generation
-        ? [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/session/:sessionId', schemaVersion: 2 }]
-        : [],
-      decide: async plan => { decisions.push(`${plan.capability}:${plan.scope.sessionIds[0]}`); return { authorized: true } },
+      routes: candidate =>
+        candidate.pluginId === owner.pluginId && candidate.generation === owner.generation
+          ? [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/session/:sessionId', schemaVersion: 2 }]
+          : [],
+      decide: async plan => {
+        decisions.push(`${plan.capability}:${plan.scope.sessionIds[0]}`)
+        return { authorized: true }
+      },
       connectionGeneration: () => 1,
     })
     routes.install(owner, [
-      { manifestVersion: 6, name: 'approvals.request', required: false, scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
-      { manifestVersion: 6, name: 'approvals.answer', required: false, scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
+      {
+        manifestVersion: 6,
+        name: 'approvals.request',
+        required: false,
+        scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } },
+      },
+      {
+        manifestVersion: 6,
+        name: 'approvals.answer',
+        required: false,
+        scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } },
+      },
     ])
     routes.validateInstalledRoutes(owner)
     const runtime = new CordisXAgentSessionRuntime({
       driver,
-      authorize: async (candidate, capability, sessionId) => capability === 'agents.create'
+      authorize: async (candidate, capability, sessionId) =>
+        capability === 'agents.create'
         || await routes.authorize(candidate, capability, sessionId),
       declares: (candidate, capability) => routes.declares(candidate, capability),
     })
@@ -598,12 +917,22 @@ describe('Agent/Session Host authority v1', () => {
 
     await expect(runtime.requestApproval(owner, { agent: created.handle.agent, toolName: 'workspace.publish' }))
       .resolves.toMatchObject({ outcome: 'unavailable' })
-    active = { owner, routeId: 'room-session-detail', instanceId: 'route-lead', params: { sessionId: 'cx-session.lead' } }
+    active = {
+      owner,
+      routeId: 'room-session-detail',
+      instanceId: 'route-lead',
+      params: { sessionId: 'cx-session.lead' },
+    }
     await expect(runtime.requestApproval(owner, { agent: created.handle.agent, toolName: 'workspace.publish' }))
       .resolves.toMatchObject({ outcome: 'unavailable' })
     expect(answerer).not.toHaveBeenCalled()
 
-    active = { owner, routeId: 'room-session-detail', instanceId: 'route-reviewer', params: { sessionId: 'cx-session.reviewer' } }
+    active = {
+      owner,
+      routeId: 'room-session-detail',
+      instanceId: 'route-reviewer',
+      params: { sessionId: 'cx-session.reviewer' },
+    }
     await expect(runtime.requestApproval(owner, { agent: created.handle.agent, toolName: 'workspace.publish' }))
       .resolves.toMatchObject({ outcome: 'allowed-once' })
     expect(answerer).toHaveBeenCalledTimes(1)
@@ -631,12 +960,23 @@ describe('Agent/Session Host authority v1', () => {
       connectionGeneration: () => 1,
     })
     routeScopes.install(owner, [
-      { manifestVersion: 5, name: 'approvals.request', required: false, scope: { sessionIds: ['cx-session.static-answer'] } },
-      { manifestVersion: 5, name: 'approvals.answer', required: false, scope: { sessionIds: ['cx-session.static-answer'] } },
+      {
+        manifestVersion: 5,
+        name: 'approvals.request',
+        required: false,
+        scope: { sessionIds: ['cx-session.static-answer'] },
+      },
+      {
+        manifestVersion: 5,
+        name: 'approvals.answer',
+        required: false,
+        scope: { sessionIds: ['cx-session.static-answer'] },
+      },
     ])
     const runtime = new CordisXAgentSessionRuntime({
       driver: new Driver(),
-      authorize: async (candidate, capability, sessionId) => capability === 'agents.create'
+      authorize: async (candidate, capability, sessionId) =>
+        capability === 'agents.create'
         || await routeScopes.authorize(candidate, capability, sessionId),
       declares: (candidate, capability) => routeScopes.declares(candidate, capability),
     })
@@ -654,8 +994,12 @@ describe('Agent/Session Host authority v1', () => {
     const driver = new Driver()
     let releaseAnswer!: (value: boolean) => void
     let answerAuthorizationStarted!: () => void
-    const started = new Promise<void>(resolve => { answerAuthorizationStarted = resolve })
-    const answerAuthorization = new Promise<boolean>(resolve => { releaseAnswer = resolve })
+    const started = new Promise<void>(resolve => {
+      answerAuthorizationStarted = resolve
+    })
+    const answerAuthorization = new Promise<boolean>(resolve => {
+      releaseAnswer = resolve
+    })
     const answerer = vi.fn(async () => 'allowed-once' as const)
     const runtime = new CordisXAgentSessionRuntime({
       driver,
@@ -698,69 +1042,109 @@ describe('Agent/Session Host authority v1', () => {
     const driver = new Driver()
     const runtime = new CordisXAgentSessionRuntime({ driver, authorize: async () => true })
     const binding = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v4.schema.json' as const,
-      contract: 'cordisx.agent-loop-task-binding/v4' as const, schemaVersion: 4 as const,
-      task: 'legacy-task-not-a-session-id', binding: { bindingId: 'legacy-binding', generation: 7 },
-      definition: { agentId: 'lead', revision: 'rev-1' }, state: 'active' as const,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v4.schema.json' as const,
+      contract: 'cordisx.agent-loop-task-binding/v4' as const,
+      schemaVersion: 4 as const,
+      task: 'legacy-task-not-a-session-id',
+      binding: { bindingId: 'legacy-binding', generation: 7 },
+      definition: { agentId: 'lead', revision: 'rev-1' },
+      state: 'active' as const,
     }
     let resolutions = 0
     runtime.installLegacyBindingResolver(owner.pluginId, async candidate => {
       resolutions += 1
       return candidate.binding.generation === 7
-      ? { status: 'resolved', sessionId: 'native-session-exact' }
-      : { status: 'unavailable', code: 'binding-unresolved' }
+        ? { status: 'resolved', sessionId: 'native-session-exact' }
+        : { status: 'unavailable', code: 'binding-unresolved' }
     })
     const request = {
       $schema: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1,
       contract: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_CONTRACT_V1,
-      schemaVersion: 1 as const, mutationId: 'room-run:migrate:1', binding,
+      schemaVersion: 1 as const,
+      mutationId: 'room-run:migrate:1',
+      binding,
     }
     const acquired = await runtime.acquireLegacyTaskBinding(owner, request)
     expect(acquired).toMatchObject({
-      status: 'accepted', sessionId: 'native-session-exact', identitySource: 'agent-loop-authority',
+      status: 'accepted',
+      sessionId: 'native-session-exact',
+      identitySource: 'agent-loop-authority',
       acquire: { status: 'accepted', disposition: 'resumed', sessionId: 'native-session-exact' },
     })
     const replayed = await runtime.acquireLegacyTaskBinding(owner, request)
-    expect(replayed).toMatchObject({ status: 'accepted', acquire: { disposition: 'replayed', sessionId: 'native-session-exact' } })
-    expect(replayed.status === 'accepted' && replayed.acquire.handle).toBe(acquired.status === 'accepted' && acquired.acquire.handle)
+    expect(replayed).toMatchObject({
+      status: 'accepted',
+      acquire: { disposition: 'replayed', sessionId: 'native-session-exact' },
+    })
+    expect(replayed.status === 'accepted' && replayed.acquire.handle).toBe(
+      acquired.status === 'accepted' && acquired.acquire.handle,
+    )
     expect(resolutions).toBe(1)
     expect(await runtime.acquireLegacyTaskBinding(owner, { ...request, binding: { ...binding, task: 'other-task' } }))
       .toMatchObject({ status: 'conflict', code: 'mutation-conflict' })
     driver.replace()
-    expect(await runtime.acquireLegacyTaskBinding(owner, request)).toMatchObject({ status: 'unavailable', code: 'connection-replaced' })
+    expect(await runtime.acquireLegacyTaskBinding(owner, request)).toMatchObject({
+      status: 'unavailable',
+      code: 'connection-replaced',
+    })
     expect(resolutions).toBe(1)
   })
 
   it('fails closed for stale, closed, or no-longer-owned legacy bindings', async () => {
     const runtime = new CordisXAgentSessionRuntime({ driver: new Driver(), authorize: async () => true })
     const closed = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v4.schema.json' as const,
-      contract: 'cordisx.agent-loop-task-binding/v4' as const, schemaVersion: 4 as const,
-      task: 'legacy-task', binding: { bindingId: 'legacy-binding', generation: 1 },
-      definition: { agentId: 'lead', revision: 'rev-1' }, state: 'closed' as const,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-loop-task-binding.v4.schema.json' as const,
+      contract: 'cordisx.agent-loop-task-binding/v4' as const,
+      schemaVersion: 4 as const,
+      task: 'legacy-task',
+      binding: { bindingId: 'legacy-binding', generation: 1 },
+      definition: { agentId: 'lead', revision: 'rev-1' },
+      state: 'closed' as const,
     }
-    expect(await runtime.acquireLegacyTaskBinding(owner, {
-      $schema: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1,
-      contract: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_CONTRACT_V1,
-      schemaVersion: 1, mutationId: 'closed', binding: closed,
-    })).toMatchObject({ status: 'unavailable', code: 'binding-closed' })
+    expect(
+      await runtime.acquireLegacyTaskBinding(owner, {
+        $schema: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1,
+        contract: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_CONTRACT_V1,
+        schemaVersion: 1,
+        mutationId: 'closed',
+        binding: closed,
+      }),
+    ).toMatchObject({ status: 'unavailable', code: 'binding-closed' })
     const active = { ...closed, state: 'active' as const }
-    expect(await runtime.acquireLegacyTaskBinding(owner, {
-      $schema: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1,
-      contract: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_CONTRACT_V1,
-      schemaVersion: 1, mutationId: 'missing-owner', binding: active,
-    })).toMatchObject({ status: 'unavailable', code: 'plugin-generation-replaced' })
+    expect(
+      await runtime.acquireLegacyTaskBinding(owner, {
+        $schema: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1,
+        contract: CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_CONTRACT_V1,
+        schemaVersion: 1,
+        mutationId: 'missing-owner',
+        binding: active,
+      }),
+    ).toMatchObject({ status: 'unavailable', code: 'plugin-generation-replaced' })
   })
 
   it('captures a v2 reservation before submitting its newly admitted Session message', async () => {
     const driver = new Driver()
     const order: string[] = []
-    driver.submit = async input => { order.push(`driver:${input.message.id}`); return 'accepted' }
+    driver.submit = async input => {
+      order.push(`driver:${input.message.id}`)
+      return 'accepted'
+    }
     const runtime = new CordisXAgentSessionRuntime({
-      driver, authorize: async () => true,
+      driver,
+      authorize: async () => true,
       captureAdmission: (_owner, _origin, sessionId, generation, messageId) => {
         order.push(`capture:${sessionId}:${generation}:${messageId}`)
-        return { active: () => true, commit: () => { order.push('commit') }, close: () => { order.push('close') } }
+        return {
+          active: () => true,
+          commit: () => {
+            order.push('commit')
+          },
+          close: () => {
+            order.push('close')
+          },
+        }
       },
     })
     const created = await runtime.create(owner, { sessionId: 'cx-session.created-during-command', setup })
@@ -769,10 +1153,16 @@ describe('Agent/Session Host authority v1', () => {
       handle: created.handle,
       message: { text: 'scenario input' },
       origin: {
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json',
-        contract: 'cordisx.agent-command-origin/v1', schemaVersion: 1,
-        originId: 'origin-1', binding: { bindingId: 'binding-1', ownerGeneration: 'generation-1' },
-        generation: 'generation-1', executionId: 'execution-1', commandId: 'composer.submit', scope: 'composer-submit',
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json',
+        contract: 'cordisx.agent-command-origin/v1',
+        schemaVersion: 1,
+        originId: 'origin-1',
+        binding: { bindingId: 'binding-1', ownerGeneration: 'generation-1' },
+        generation: 'generation-1',
+        executionId: 'execution-1',
+        commandId: 'composer.submit',
+        scope: 'composer-submit',
         room: { roomId: 'room-1', participantId: 'lead', memberId: 'lead', runId: 'run-1' },
       },
     })
@@ -790,25 +1180,43 @@ describe('Agent/Session Host authority v1', () => {
     const driver = new Driver()
     let captures = 0
     const runtime = new CordisXAgentSessionRuntime({
-      driver, authorize: async () => true,
-      captureAdmission: () => { captures += 1; return { active: () => true, commit: () => {}, close: () => {} } },
+      driver,
+      authorize: async () => true,
+      captureAdmission: () => {
+        captures += 1
+        return { active: () => true, commit: () => {}, close: () => {} }
+      },
     })
     const created = await runtime.create(owner, { sessionId: 'cx-session.reservation-fence', setup })
     if (created.status !== 'accepted') throw new Error('agent unavailable')
     const origin = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json',
-      contract: 'cordisx.agent-command-origin/v1', schemaVersion: 1 as const,
-      originId: 'origin-fence', binding: { bindingId: 'binding-fence', ownerGeneration: 'generation-fence' },
-      generation: 'generation-fence', executionId: 'execution-fence', commandId: 'composer.submit', scope: 'composer-submit' as const,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json',
+      contract: 'cordisx.agent-command-origin/v1',
+      schemaVersion: 1 as const,
+      originId: 'origin-fence',
+      binding: { bindingId: 'binding-fence', ownerGeneration: 'generation-fence' },
+      generation: 'generation-fence',
+      executionId: 'execution-fence',
+      commandId: 'composer.submit',
+      scope: 'composer-submit' as const,
       room: { roomId: 'room-fence', participantId: 'lead', memberId: 'lead', runId: 'run-fence' },
     }
-    const reserved = await runtime.reserveAdmission(owner, { handle: created.handle, origin, message: { text: 'fenced' } })
+    const reserved = await runtime.reserveAdmission(owner, {
+      handle: created.handle,
+      origin,
+      message: { text: 'fenced' },
+    })
     if (reserved.status !== 'reserved') throw new Error('reservation unavailable')
     await reserved.reservation.revoke()
     await expect(reserved.reservation.submit()).rejects.toThrow('unavailable')
     expect(driver.submitted).toEqual([])
     expect(captures).toBe(1)
-    const replacement = await runtime.reserveAdmission(owner, { handle: created.handle, origin: { ...origin, originId: 'origin-replacement' }, message: { text: 'replacement' } })
+    const replacement = await runtime.reserveAdmission(owner, {
+      handle: created.handle,
+      origin: { ...origin, originId: 'origin-replacement' },
+      message: { text: 'replacement' },
+    })
     if (replacement.status !== 'reserved') throw new Error('reservation unavailable')
     driver.replace()
     await expect(replacement.reservation.submit()).rejects.toThrow('unavailable')
@@ -819,19 +1227,30 @@ describe('Agent/Session Host authority v1', () => {
     const driver = new Driver()
     let commandActive = true
     const runtime = new CordisXAgentSessionRuntime({
-      driver, authorize: async () => true,
+      driver,
+      authorize: async () => true,
       captureAdmission: () => ({ active: () => commandActive, commit: () => {}, close: () => {} }),
     })
     const created = await runtime.create(owner, { sessionId: 'cx-session.command-complete', setup })
     if (created.status !== 'accepted') throw new Error('agent unavailable')
     const origin = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json',
-      contract: 'cordisx.agent-command-origin/v1', schemaVersion: 1 as const,
-      originId: 'origin-command-complete', binding: { bindingId: 'binding-command-complete', ownerGeneration: 'generation-command-complete' },
-      generation: 'generation-command-complete', executionId: 'execution-command-complete', commandId: 'composer.submit', scope: 'composer-submit' as const,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json',
+      contract: 'cordisx.agent-command-origin/v1',
+      schemaVersion: 1 as const,
+      originId: 'origin-command-complete',
+      binding: { bindingId: 'binding-command-complete', ownerGeneration: 'generation-command-complete' },
+      generation: 'generation-command-complete',
+      executionId: 'execution-command-complete',
+      commandId: 'composer.submit',
+      scope: 'composer-submit' as const,
       room: { roomId: 'room-command-complete', participantId: 'lead', memberId: 'lead', runId: 'run-lead' },
     }
-    const reserved = await runtime.reserveAdmission(owner, { handle: created.handle, origin, message: { text: 'single target' } })
+    const reserved = await runtime.reserveAdmission(owner, {
+      handle: created.handle,
+      origin,
+      message: { text: 'single target' },
+    })
     if (reserved.status !== 'reserved') throw new Error('reservation unavailable')
     commandActive = false
     await expect(reserved.reservation.submit()).rejects.toThrow('unavailable')
@@ -839,7 +1258,9 @@ describe('Agent/Session Host authority v1', () => {
     await expect(runtime.reserveAdmission(owner, { handle: created.handle, origin, message: { text: 'reused' } }))
       .resolves.toMatchObject({ status: 'denied', code: 'reused' })
     await expect(runtime.reserveAdmission({ pluginId: owner.pluginId, generation: owner.generation + 1 }, {
-      handle: created.handle, origin: { ...origin, originId: 'origin-owner-substitution' }, message: { text: 'cross owner' },
+      handle: created.handle,
+      origin: { ...origin, originId: 'origin-owner-substitution' },
+      message: { text: 'cross owner' },
     })).resolves.toMatchObject({ status: 'denied', code: 'not-owner' })
     await runtime.dispose()
   })
@@ -849,22 +1270,37 @@ describe('Agent/Session Host authority v1', () => {
     const captures: string[] = []
     let commandActive = true
     const origin = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json' as const,
-      contract: 'cordisx.agent-command-origin/v1' as const, schemaVersion: 1 as const,
-      originId: `origin-targets-${count}`, binding: { bindingId: 'binding-targets', ownerGeneration: 'generation-targets' },
-      generation: 'generation-targets', executionId: `execution-targets-${count}`, commandId: 'composer.submit', scope: 'composer-submit' as const,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-command-origin/v1' as const,
+      schemaVersion: 1 as const,
+      originId: `origin-targets-${count}`,
+      binding: { bindingId: 'binding-targets', ownerGeneration: 'generation-targets' },
+      generation: 'generation-targets',
+      executionId: `execution-targets-${count}`,
+      commandId: 'composer.submit',
+      scope: 'composer-submit' as const,
       room: { roomId: 'room-targets', participantId: 'leader', memberId: 'member-leader', runId: 'run-leader' },
     }
     const targets = Array.from({ length: count }, (_, index) => ({
-      participantId: ['leader', 'reviewer', 'integrator'][index]!, memberId: `member-${index + 1}`, runId: `run-${index + 1}`,
+      participantId: ['leader', 'reviewer', 'integrator'][index]!,
+      memberId: `member-${index + 1}`,
+      runId: `run-${index + 1}`,
     }))
     const runtime = new CordisXAgentSessionRuntime({
-      driver, authorize: async () => true,
-      admissionTargetActive: (_owner, candidate, target) => commandActive && candidate.originId === origin.originId
-        && targets.some(value => value.participantId === target.participantId && value.memberId === target.memberId && value.runId === target.runId),
+      driver,
+      authorize: async () => true,
+      admissionTargetActive: (_owner, candidate, target) =>
+        commandActive && candidate.originId === origin.originId
+        && targets.some(value =>
+          value.participantId === target.participantId && value.memberId === target.memberId
+          && value.runId === target.runId
+        ),
       captureAdmissionTarget: (_owner, candidate, target, sessionId, generation, messageId) => {
         if (!commandActive || candidate.originId !== origin.originId) return undefined
-        captures.push(`${target.participantId}:${target.memberId}:${target.runId}:${sessionId}:${generation}:${messageId}`)
+        captures.push(
+          `${target.participantId}:${target.memberId}:${target.runId}:${sessionId}:${generation}:${messageId}`,
+        )
         return { active: () => commandActive, commit: () => {}, close: () => {} }
       },
     })
@@ -873,11 +1309,17 @@ describe('Agent/Session Host authority v1', () => {
       if (created.status !== 'accepted') throw new Error('agent unavailable')
       return created.handle
     }))
-    const capabilities = await Promise.all(targets.map(target => runtime.issueAdmissionTargetOrigin(owner, { origin, target })))
+    const capabilities = await Promise.all(
+      targets.map(target => runtime.issueAdmissionTargetOrigin(owner, { origin, target })),
+    )
     expect(capabilities.every(value => value.status === 'issued')).toBe(true)
     const reservations = await Promise.all(capabilities.map(async (capability, index) => {
       if (capability.status !== 'issued') throw new Error('target origin denied')
-      return await runtime.reserveAdmissionTarget(owner, { handle: handles[index]!, origin: capability.origin, message: { text: `delivery-${index + 1}` } })
+      return await runtime.reserveAdmissionTarget(owner, {
+        handle: handles[index]!,
+        origin: capability.origin,
+        message: { text: `delivery-${index + 1}` },
+      })
     }))
     expect(reservations.every(value => value.status === 'reserved')).toBe(true)
     await Promise.all(reservations.map(async reservation => {
@@ -888,13 +1330,20 @@ describe('Agent/Session Host authority v1', () => {
     expect(driver.submitted).toHaveLength(count)
     const first = capabilities[0]
     if (first.status !== 'issued') throw new Error('target origin denied')
-    await expect(runtime.reserveAdmissionTarget(owner, { handle: handles[1] ?? handles[0]!, origin: first.origin, message: { text: 'reused' } }))
+    await expect(
+      runtime.reserveAdmissionTarget(owner, {
+        handle: handles[1] ?? handles[0]!,
+        origin: first.origin,
+        message: { text: 'reused' },
+      }),
+    )
       .resolves.toMatchObject({ status: 'denied', code: 'reused' })
     await expect(runtime.issueAdmissionTargetOrigin(owner, { origin, target: targets[0]! }))
       .resolves.toMatchObject({ status: 'denied', code: 'reused' })
     commandActive = false
     const afterComplete = await runtime.issueAdmissionTargetOrigin(owner, {
-      origin: { ...origin, originId: `${origin.originId}-completed` }, target: targets[0]!,
+      origin: { ...origin, originId: `${origin.originId}-completed` },
+      target: targets[0]!,
     })
     expect(afterComplete).toMatchObject({ status: 'denied', code: 'target-denied' })
     await runtime.dispose()
@@ -904,103 +1353,172 @@ describe('Agent/Session Host authority v1', () => {
     const driver = new Driver()
     let commandActive = true
     const origin = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json' as const,
-      contract: 'cordisx.agent-command-origin/v1' as const, schemaVersion: 1 as const,
-      originId: 'origin-cross-target', binding: { bindingId: 'binding-cross-target', ownerGeneration: 'generation-cross-target' },
-      generation: 'generation-cross-target', executionId: 'execution-cross-target', commandId: 'composer.submit', scope: 'composer-submit' as const,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-command-origin/v1' as const,
+      schemaVersion: 1 as const,
+      originId: 'origin-cross-target',
+      binding: { bindingId: 'binding-cross-target', ownerGeneration: 'generation-cross-target' },
+      generation: 'generation-cross-target',
+      executionId: 'execution-cross-target',
+      commandId: 'composer.submit',
+      scope: 'composer-submit' as const,
       room: { roomId: 'room-cross-target', participantId: 'leader', memberId: 'member-leader', runId: 'run-leader' },
     }
     const leader = { participantId: 'leader', memberId: 'member-leader', runId: 'run-leader' }
     const reviewer = { participantId: 'reviewer', memberId: 'member-reviewer', runId: 'run-reviewer' }
     const runtime = new CordisXAgentSessionRuntime({
-      driver, authorize: async () => true,
-      admissionTargetActive: (_owner, candidate, target) => commandActive && candidate.originId === origin.originId
-        && [leader, reviewer].some(value => value.participantId === target.participantId && value.memberId === target.memberId && value.runId === target.runId),
-      captureAdmissionTarget: (_owner, _candidate, target) => target.participantId === 'leader'
-        ? { active: () => commandActive, commit: () => {}, close: () => {} } : undefined,
+      driver,
+      authorize: async () => true,
+      admissionTargetActive: (_owner, candidate, target) =>
+        commandActive && candidate.originId === origin.originId
+        && [leader, reviewer].some(value =>
+          value.participantId === target.participantId && value.memberId === target.memberId
+          && value.runId === target.runId
+        ),
+      captureAdmissionTarget: (_owner, _candidate, target) =>
+        target.participantId === 'leader'
+          ? { active: () => commandActive, commit: () => {}, close: () => {} }
+          : undefined,
     })
     const created = await runtime.create(owner, { sessionId: 'cx-session.cross-target', setup })
     if (created.status !== 'accepted') throw new Error('agent unavailable')
     const issued = await runtime.issueAdmissionTargetOrigin(owner, { origin, target: reviewer })
     if (issued.status !== 'issued') throw new Error('target origin denied')
-    await expect(runtime.reserveAdmissionTarget(owner, { handle: created.handle, origin: issued.origin, message: { text: 'reviewer' } }))
+    await expect(
+      runtime.reserveAdmissionTarget(owner, {
+        handle: created.handle,
+        origin: issued.origin,
+        message: { text: 'reviewer' },
+      }),
+    )
       .resolves.toMatchObject({ status: 'denied', code: 'target-mismatch' })
     await expect(runtime.reserveAdmissionTarget({ pluginId: owner.pluginId, generation: owner.generation + 1 }, {
-      handle: created.handle, origin: issued.origin, message: { text: 'owner substitution' },
+      handle: created.handle,
+      origin: issued.origin,
+      message: { text: 'owner substitution' },
     })).resolves.toMatchObject({ status: 'denied', code: 'not-owner' })
     commandActive = false
-    await expect(runtime.reserveAdmissionTarget(owner, { handle: created.handle, origin: issued.origin, message: { text: 'after complete' } }))
+    await expect(
+      runtime.reserveAdmissionTarget(owner, {
+        handle: created.handle,
+        origin: issued.origin,
+        message: { text: 'after complete' },
+      }),
+    )
       .resolves.toMatchObject({ status: 'denied', code: 'command-complete' })
     expect(driver.submitted).toEqual([])
     await runtime.dispose()
   })
 
-  it.each([1, 2, 3])('issues, captures, and submits one Shell v9/v4 bootstrap capability per new target for N=%i', async count => {
-    const driver = new Driver()
-    let commandActive = true
-    const captured: string[] = []
-    const origin = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
-      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
-      originId: `bootstrap-origin-${count}`, binding: { bindingId: 'bootstrap-binding', ownerGeneration: 'bootstrap-owner-generation' },
-      generation: 'bootstrap-plugin-generation', executionId: `bootstrap-execution-${count}`, commandId: 'composer.submit', scope: 'composer-submit' as const,
-    }
-    const targets = Array.from({ length: count }, (_, index) => ({
-      participantId: ['leader', 'reviewer', 'integrator'][index]!, memberId: `member-${index + 1}`, runId: `run-${index + 1}`,
-    }))
-    const targetSessions = new Map(targets.map((target, index) => [target.runId, `cx-session.bootstrap-${count}-${index}`]))
-    const runtime = new CordisXAgentSessionRuntime({
-      driver, authorize: async () => true,
-      bootstrapAdmissionTargetActive: (_owner, candidate, target) => commandActive && candidate.originId === origin.originId
-        && targets.some(value => value.participantId === target.participantId && value.memberId === target.memberId && value.runId === target.runId),
-      captureBootstrapAdmissionTarget: (_owner, candidate, target, sessionId, generation, messageId) => {
-        if (!commandActive || candidate.originId !== origin.originId || targetSessions.get(target.runId) !== sessionId) return undefined
-        captured.push(`${target.participantId}:${target.memberId}:${target.runId}:${sessionId}:${generation}:${messageId}`)
-        return { active: () => commandActive, commit: () => {}, close: () => {} }
-      },
-    })
-    const issued = await Promise.all(targets.map(target => runtime.issueAdmissionBootstrapTarget(owner, { origin, target })))
-    expect(issued.every(value => value.status === 'issued')).toBe(true)
-    const handles = await Promise.all(targets.map(async (target, index) => {
-      const created = await runtime.create(owner, { sessionId: targetSessions.get(target.runId)!, setup })
-      if (created.status !== 'accepted') throw new Error(`bootstrap target ${index} was not acquired`)
-      return created.handle
-    }))
-    const reservations = await Promise.all(issued.map(async (capability, index) => {
-      if (capability.status !== 'issued') throw new Error('bootstrap target origin denied')
-      return await runtime.reserveAdmissionBootstrapTarget(owner, {
-        handle: handles[index]!, origin: capability.origin, message: { text: `bootstrap delivery ${index + 1}` },
+  it.each([1, 2, 3])(
+    'issues, captures, and submits one Shell v9/v4 bootstrap capability per new target for N=%i',
+    async count => {
+      const driver = new Driver()
+      let commandActive = true
+      const captured: string[] = []
+      const origin = {
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+        contract: 'cordisx.agent-bootstrap-command-origin/v1' as const,
+        schemaVersion: 1 as const,
+        originId: `bootstrap-origin-${count}`,
+        binding: { bindingId: 'bootstrap-binding', ownerGeneration: 'bootstrap-owner-generation' },
+        generation: 'bootstrap-plugin-generation',
+        executionId: `bootstrap-execution-${count}`,
+        commandId: 'composer.submit',
+        scope: 'composer-submit' as const,
+      }
+      const targets = Array.from({ length: count }, (_, index) => ({
+        participantId: ['leader', 'reviewer', 'integrator'][index]!,
+        memberId: `member-${index + 1}`,
+        runId: `run-${index + 1}`,
+      }))
+      const targetSessions = new Map(
+        targets.map((target, index) => [target.runId, `cx-session.bootstrap-${count}-${index}`]),
+      )
+      const runtime = new CordisXAgentSessionRuntime({
+        driver,
+        authorize: async () => true,
+        bootstrapAdmissionTargetActive: (_owner, candidate, target) =>
+          commandActive && candidate.originId === origin.originId
+          && targets.some(value =>
+            value.participantId === target.participantId && value.memberId === target.memberId
+            && value.runId === target.runId
+          ),
+        captureBootstrapAdmissionTarget: (_owner, candidate, target, sessionId, generation, messageId) => {
+          if (
+            !commandActive || candidate.originId !== origin.originId || targetSessions.get(target.runId) !== sessionId
+          ) return undefined
+          captured.push(
+            `${target.participantId}:${target.memberId}:${target.runId}:${sessionId}:${generation}:${messageId}`,
+          )
+          return { active: () => commandActive, commit: () => {}, close: () => {} }
+        },
       })
-    }))
-    expect(reservations.every(value => value.status === 'reserved')).toBe(true)
-    expect(captured).toHaveLength(count)
-    expect(driver.submitted).toEqual([])
-    await Promise.all(reservations.map(async reservation => {
-      if (reservation.status !== 'reserved') throw new Error('bootstrap reservation denied')
-      await expect(reservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
-    }))
-    expect(driver.submitted).toHaveLength(count)
-    await runtime.dispose()
-  })
+      const issued = await Promise.all(
+        targets.map(target => runtime.issueAdmissionBootstrapTarget(owner, { origin, target })),
+      )
+      expect(issued.every(value => value.status === 'issued')).toBe(true)
+      const handles = await Promise.all(targets.map(async (target, index) => {
+        const created = await runtime.create(owner, { sessionId: targetSessions.get(target.runId)!, setup })
+        if (created.status !== 'accepted') throw new Error(`bootstrap target ${index} was not acquired`)
+        return created.handle
+      }))
+      const reservations = await Promise.all(issued.map(async (capability, index) => {
+        if (capability.status !== 'issued') throw new Error('bootstrap target origin denied')
+        return await runtime.reserveAdmissionBootstrapTarget(owner, {
+          handle: handles[index]!,
+          origin: capability.origin,
+          message: { text: `bootstrap delivery ${index + 1}` },
+        })
+      }))
+      expect(reservations.every(value => value.status === 'reserved')).toBe(true)
+      expect(captured).toHaveLength(count)
+      expect(driver.submitted).toEqual([])
+      await Promise.all(reservations.map(async reservation => {
+        if (reservation.status !== 'reserved') throw new Error('bootstrap reservation denied')
+        await expect(reservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
+      }))
+      expect(driver.submitted).toHaveLength(count)
+      await runtime.dispose()
+    },
+  )
 
   it('fails closed for v4 cross-target, reuse, command completion, owner replacement, and connection replacement', async () => {
     const driver = new Driver()
     let commandActive = true
     const origin = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
-      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
-      originId: 'bootstrap-fences', binding: { bindingId: 'bootstrap-fence-binding', ownerGeneration: 'bootstrap-fence-owner' },
-      generation: 'bootstrap-fence-generation', executionId: 'bootstrap-fence-execution', commandId: 'composer.submit', scope: 'composer-submit' as const,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const,
+      schemaVersion: 1 as const,
+      originId: 'bootstrap-fences',
+      binding: { bindingId: 'bootstrap-fence-binding', ownerGeneration: 'bootstrap-fence-owner' },
+      generation: 'bootstrap-fence-generation',
+      executionId: 'bootstrap-fence-execution',
+      commandId: 'composer.submit',
+      scope: 'composer-submit' as const,
     }
     const leader = { participantId: 'leader', memberId: 'member-leader', runId: 'run-leader' }
     const reviewer = { participantId: 'reviewer', memberId: 'member-reviewer', runId: 'run-reviewer' }
-    const targetSessions = new Map([[leader.runId, 'cx-session.bootstrap-leader'], [reviewer.runId, 'cx-session.bootstrap-reviewer']])
+    const targetSessions = new Map([[leader.runId, 'cx-session.bootstrap-leader'], [
+      reviewer.runId,
+      'cx-session.bootstrap-reviewer',
+    ]])
     const runtime = new CordisXAgentSessionRuntime({
-      driver, authorize: async () => true,
-      bootstrapAdmissionTargetActive: (_owner, candidate, target) => commandActive && candidate.originId.startsWith('bootstrap-fences')
-        && [leader, reviewer].some(value => value.participantId === target.participantId && value.memberId === target.memberId && value.runId === target.runId),
-      captureBootstrapAdmissionTarget: (_owner, _candidate, target, sessionId) => targetSessions.get(target.runId) === sessionId
-        ? { active: () => commandActive, commit: () => {}, close: () => {} } : undefined,
+      driver,
+      authorize: async () => true,
+      bootstrapAdmissionTargetActive: (_owner, candidate, target) =>
+        commandActive && candidate.originId.startsWith('bootstrap-fences')
+        && [leader, reviewer].some(value =>
+          value.participantId === target.participantId && value.memberId === target.memberId
+          && value.runId === target.runId
+        ),
+      captureBootstrapAdmissionTarget: (_owner, _candidate, target, sessionId) =>
+        targetSessions.get(target.runId) === sessionId
+          ? { active: () => commandActive, commit: () => {}, close: () => {} }
+          : undefined,
     })
     const lead = await runtime.create(owner, { sessionId: targetSessions.get(leader.runId)!, setup })
     const review = await runtime.create(owner, { sessionId: targetSessions.get(reviewer.runId)!, setup })
@@ -1008,16 +1526,24 @@ describe('Agent/Session Host authority v1', () => {
     const reviewerIssued = await runtime.issueAdmissionBootstrapTarget(owner, { origin, target: reviewer })
     if (reviewerIssued.status !== 'issued') throw new Error('reviewer target origin denied')
     await expect(runtime.reserveAdmissionBootstrapTarget(owner, {
-      handle: lead.handle, origin: reviewerIssued.origin, message: { text: 'cross target' },
+      handle: lead.handle,
+      origin: reviewerIssued.origin,
+      message: { text: 'cross target' },
     })).resolves.toMatchObject({ status: 'denied', code: 'target-mismatch' })
-    await expect(runtime.reserveAdmissionBootstrapTarget({ pluginId: owner.pluginId, generation: owner.generation + 1 }, {
-      handle: review.handle, origin: reviewerIssued.origin, message: { text: 'cross owner' },
-    })).resolves.toMatchObject({ status: 'denied', code: 'not-owner' })
+    await expect(
+      runtime.reserveAdmissionBootstrapTarget({ pluginId: owner.pluginId, generation: owner.generation + 1 }, {
+        handle: review.handle,
+        origin: reviewerIssued.origin,
+        message: { text: 'cross owner' },
+      }),
+    ).resolves.toMatchObject({ status: 'denied', code: 'not-owner' })
 
     const leaderIssued = await runtime.issueAdmissionBootstrapTarget(owner, { origin, target: leader })
     if (leaderIssued.status !== 'issued') throw new Error('leader target origin denied')
     const reserved = await runtime.reserveAdmissionBootstrapTarget(owner, {
-      handle: lead.handle, origin: leaderIssued.origin, message: { text: 'command completion' },
+      handle: lead.handle,
+      origin: leaderIssued.origin,
+      message: { text: 'command completion' },
     })
     if (reserved.status !== 'reserved') throw new Error('bootstrap reservation unavailable')
     await expect(runtime.issueAdmissionBootstrapTarget(owner, { origin, target: leader }))
@@ -1025,16 +1551,21 @@ describe('Agent/Session Host authority v1', () => {
     commandActive = false
     await expect(reserved.reservation.submit()).rejects.toThrow('unavailable')
     await expect(runtime.reserveAdmissionBootstrapTarget(owner, {
-      handle: review.handle, origin: reviewerIssued.origin, message: { text: 'after command complete' },
+      handle: review.handle,
+      origin: reviewerIssued.origin,
+      message: { text: 'after command complete' },
     })).resolves.toMatchObject({ status: 'denied', code: 'command-complete' })
 
     commandActive = true
     const replacementIssued = await runtime.issueAdmissionBootstrapTarget(owner, {
-      origin: { ...origin, originId: 'bootstrap-fences-replacement' }, target: leader,
+      origin: { ...origin, originId: 'bootstrap-fences-replacement' },
+      target: leader,
     })
     if (replacementIssued.status !== 'issued') throw new Error('replacement target origin denied')
     const replacement = await runtime.reserveAdmissionBootstrapTarget(owner, {
-      handle: lead.handle, origin: replacementIssued.origin, message: { text: 'connection replacement' },
+      handle: lead.handle,
+      origin: replacementIssued.origin,
+      message: { text: 'connection replacement' },
     })
     if (replacement.status !== 'reserved') throw new Error('replacement reservation unavailable')
     driver.replace()
@@ -1044,20 +1575,31 @@ describe('Agent/Session Host authority v1', () => {
 
     const ownerDriver = new Driver()
     const ownerRuntime = new CordisXAgentSessionRuntime({
-      driver: ownerDriver, authorize: async () => true,
-      bootstrapAdmissionTargetActive: (_owner, candidate, target) => candidate.originId === 'bootstrap-fences-owner-replacement'
-        && target.participantId === leader.participantId && target.memberId === leader.memberId && target.runId === leader.runId,
-      captureBootstrapAdmissionTarget: (_owner, _candidate, target, sessionId) => target.runId === leader.runId && sessionId === 'cx-session.bootstrap-owner-replacement'
-        ? { active: () => true, commit: () => {}, close: () => {} } : undefined,
+      driver: ownerDriver,
+      authorize: async () => true,
+      bootstrapAdmissionTargetActive: (_owner, candidate, target) =>
+        candidate.originId === 'bootstrap-fences-owner-replacement'
+        && target.participantId === leader.participantId && target.memberId === leader.memberId
+        && target.runId === leader.runId,
+      captureBootstrapAdmissionTarget: (_owner, _candidate, target, sessionId) =>
+        target.runId === leader.runId && sessionId === 'cx-session.bootstrap-owner-replacement'
+          ? { active: () => true, commit: () => {}, close: () => {} }
+          : undefined,
     })
-    const ownerCreated = await ownerRuntime.create(owner, { sessionId: 'cx-session.bootstrap-owner-replacement', setup })
+    const ownerCreated = await ownerRuntime.create(owner, {
+      sessionId: 'cx-session.bootstrap-owner-replacement',
+      setup,
+    })
     if (ownerCreated.status !== 'accepted') throw new Error('owner replacement target unavailable')
     const ownerIssued = await ownerRuntime.issueAdmissionBootstrapTarget(owner, {
-      origin: { ...origin, originId: 'bootstrap-fences-owner-replacement' }, target: leader,
+      origin: { ...origin, originId: 'bootstrap-fences-owner-replacement' },
+      target: leader,
     })
     if (ownerIssued.status !== 'issued') throw new Error('owner replacement origin denied')
     const ownerReservation = await ownerRuntime.reserveAdmissionBootstrapTarget(owner, {
-      handle: ownerCreated.handle, origin: ownerIssued.origin, message: { text: 'owner replacement' },
+      handle: ownerCreated.handle,
+      origin: ownerIssued.origin,
+      message: { text: 'owner replacement' },
     })
     if (ownerReservation.status !== 'reserved') throw new Error('owner replacement reservation unavailable')
     ownerRuntime.fenceOwner(owner.pluginId, 'plugin-generation-replaced')
@@ -1070,30 +1612,51 @@ describe('Agent/Session Host authority v1', () => {
     const driver = new Driver()
     let commandActive = true
     const origin = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
-      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
-      originId: `bootstrap-room-origin-${count}`, binding: { bindingId: 'bootstrap-room-binding', ownerGeneration: 'bootstrap-room-owner-generation' },
-      generation: 'bootstrap-room-plugin-generation', executionId: `bootstrap-room-execution-${count}`, commandId: 'composer.submit', scope: 'composer-submit' as const,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const,
+      schemaVersion: 1 as const,
+      originId: `bootstrap-room-origin-${count}`,
+      binding: { bindingId: 'bootstrap-room-binding', ownerGeneration: 'bootstrap-room-owner-generation' },
+      generation: 'bootstrap-room-plugin-generation',
+      executionId: `bootstrap-room-execution-${count}`,
+      commandId: 'composer.submit',
+      scope: 'composer-submit' as const,
     }
     const targets = Array.from({ length: count }, (_, index) => ({
-      roomId: 'room-existing', participantId: ['leader', 'reviewer', 'integrator'][index]!, memberId: `member-${index + 1}`, runId: `run-${index + 1}`,
+      roomId: 'room-existing',
+      participantId: ['leader', 'reviewer', 'integrator'][index]!,
+      memberId: `member-${index + 1}`,
+      runId: `run-${index + 1}`,
     }))
-    const targetSessions = new Map(targets.map((target, index) => [target.runId, `cx-session.bootstrap-room-${count}-${index}`]))
+    const targetSessions = new Map(
+      targets.map((target, index) => [target.runId, `cx-session.bootstrap-room-${count}-${index}`]),
+    )
     const captures: string[] = []
     const runtime = new CordisXAgentSessionRuntime({
-      driver, authorize: async () => true,
-      bootstrapAdmissionRoomTargetActive: (_owner, candidate, target) => commandActive && candidate.originId === origin.originId
-        && (target.roomId === 'room-existing' || target.roomId === 'room-foreign') && targets.some(value => value.participantId === target.participantId
-          && value.memberId === target.memberId && value.runId === target.runId),
+      driver,
+      authorize: async () => true,
+      bootstrapAdmissionRoomTargetActive: (_owner, candidate, target) =>
+        commandActive && candidate.originId === origin.originId
+        && (target.roomId === 'room-existing' || target.roomId === 'room-foreign') && targets.some(value =>
+          value.participantId === target.participantId
+          && value.memberId === target.memberId && value.runId === target.runId
+        ),
       captureBootstrapAdmissionRoomTarget: (_owner, candidate, target, receipt, sessionId, generation, messageId) => {
-        if (!commandActive || candidate.originId !== origin.originId || targetSessions.get(target.runId) !== sessionId
+        if (
+          !commandActive || candidate.originId !== origin.originId || targetSessions.get(target.runId) !== sessionId
           || receipt.target.roomId !== target.roomId || receipt.target.participantId !== target.participantId
-          || receipt.target.memberId !== target.memberId || receipt.target.runId !== target.runId) return undefined
-        captures.push(`${target.roomId}:${target.participantId}:${target.memberId}:${target.runId}:${sessionId}:${generation}:${messageId}`)
+          || receipt.target.memberId !== target.memberId || receipt.target.runId !== target.runId
+        ) return undefined
+        captures.push(
+          `${target.roomId}:${target.participantId}:${target.memberId}:${target.runId}:${sessionId}:${generation}:${messageId}`,
+        )
         return { active: () => commandActive, commit: () => {}, close: () => {} }
       },
     })
-    const issued = await Promise.all(targets.map(target => runtime.issueAdmissionBootstrapRoomTarget(owner, { origin, target })))
+    const issued = await Promise.all(
+      targets.map(target => runtime.issueAdmissionBootstrapRoomTarget(owner, { origin, target })),
+    )
     expect(issued.every(value => value.status === 'issued')).toBe(true)
     const handles = await Promise.all(targets.map(async target => {
       const created = await runtime.create(owner, { sessionId: targetSessions.get(target.runId)!, setup })
@@ -1103,7 +1666,9 @@ describe('Agent/Session Host authority v1', () => {
     const reservations = await Promise.all(issued.map(async (capability, index) => {
       if (capability.status !== 'issued') throw new Error('bootstrap Room target origin denied')
       return await runtime.reserveAdmissionBootstrapRoomTarget(owner, {
-        handle: handles[index]!, origin: capability.origin, message: { text: `bootstrap Room delivery ${index + 1}` },
+        handle: handles[index]!,
+        origin: capability.origin,
+        message: { text: `bootstrap Room delivery ${index + 1}` },
       })
     }))
     expect(reservations.every(value => value.status === 'reserved')).toBe(true)
@@ -1117,16 +1682,20 @@ describe('Agent/Session Host authority v1', () => {
     const first = issued[0]!
     if (first.status !== 'issued') throw new Error('bootstrap Room target origin denied')
     await expect(runtime.reserveAdmissionBootstrapRoomTarget(owner, {
-      handle: handles[0]!, origin: first.origin, message: { text: 'reused bootstrap Room target' },
+      handle: handles[0]!,
+      origin: first.origin,
+      message: { text: 'reused bootstrap Room target' },
     })).resolves.toMatchObject({ status: 'denied', code: 'reused' })
     await expect(runtime.issueAdmissionBootstrapRoomTarget(owner, { origin, target: targets[0]! }))
       .resolves.toMatchObject({ status: 'denied', code: 'duplicate-target' })
     await expect(runtime.issueAdmissionBootstrapRoomTarget(owner, {
-      origin, target: { ...targets[0]!, roomId: 'room-foreign' },
+      origin,
+      target: { ...targets[0]!, roomId: 'room-foreign' },
     })).resolves.toMatchObject({ status: 'denied', code: 'cross-room' })
     commandActive = false
     await expect(runtime.issueAdmissionBootstrapRoomTarget(owner, {
-      origin: { ...origin, originId: `${origin.originId}-complete` }, target: targets[0]!,
+      origin: { ...origin, originId: `${origin.originId}-complete` },
+      target: targets[0]!,
     })).resolves.toMatchObject({ status: 'denied', code: 'target-denied' })
     await runtime.dispose()
   })
@@ -1135,49 +1704,82 @@ describe('Agent/Session Host authority v1', () => {
     const driver = new Driver()
     let commandActive = true
     const origin = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
-      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
-      originId: 'bootstrap-room-fences', binding: { bindingId: 'bootstrap-room-fence-binding', ownerGeneration: 'bootstrap-room-fence-owner' },
-      generation: 'bootstrap-room-fence-generation', executionId: 'bootstrap-room-fence-execution', commandId: 'composer.submit', scope: 'composer-submit' as const,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const,
+      schemaVersion: 1 as const,
+      originId: 'bootstrap-room-fences',
+      binding: { bindingId: 'bootstrap-room-fence-binding', ownerGeneration: 'bootstrap-room-fence-owner' },
+      generation: 'bootstrap-room-fence-generation',
+      executionId: 'bootstrap-room-fence-execution',
+      commandId: 'composer.submit',
+      scope: 'composer-submit' as const,
     }
     const leader = { roomId: 'room-fences', participantId: 'leader', memberId: 'member-leader', runId: 'run-leader' }
-    const reviewer = { roomId: 'room-fences', participantId: 'reviewer', memberId: 'member-reviewer', runId: 'run-reviewer' }
-    const sessions = new Map([[leader.runId, 'cx-session.bootstrap-room-leader'], [reviewer.runId, 'cx-session.bootstrap-room-reviewer']])
+    const reviewer = {
+      roomId: 'room-fences',
+      participantId: 'reviewer',
+      memberId: 'member-reviewer',
+      runId: 'run-reviewer',
+    }
+    const sessions = new Map([[leader.runId, 'cx-session.bootstrap-room-leader'], [
+      reviewer.runId,
+      'cx-session.bootstrap-room-reviewer',
+    ]])
     const runtime = new CordisXAgentSessionRuntime({
-      driver, authorize: async () => true,
-      bootstrapAdmissionRoomTargetActive: (_owner, candidate, target) => commandActive && candidate.originId.startsWith('bootstrap-room-fences')
-        && [leader, reviewer].some(value => value.roomId === target.roomId && value.participantId === target.participantId
-          && value.memberId === target.memberId && value.runId === target.runId),
-      captureBootstrapAdmissionRoomTarget: (_owner, _candidate, target, _receipt, sessionId) => sessions.get(target.runId) === sessionId
-        ? { active: () => commandActive, commit: () => {}, close: () => {} } : undefined,
+      driver,
+      authorize: async () => true,
+      bootstrapAdmissionRoomTargetActive: (_owner, candidate, target) =>
+        commandActive && candidate.originId.startsWith('bootstrap-room-fences')
+        && [leader, reviewer].some(value =>
+          value.roomId === target.roomId && value.participantId === target.participantId
+          && value.memberId === target.memberId && value.runId === target.runId
+        ),
+      captureBootstrapAdmissionRoomTarget: (_owner, _candidate, target, _receipt, sessionId) =>
+        sessions.get(target.runId) === sessionId
+          ? { active: () => commandActive, commit: () => {}, close: () => {} }
+          : undefined,
     })
     const lead = await runtime.create(owner, { sessionId: sessions.get(leader.runId)!, setup })
     const review = await runtime.create(owner, { sessionId: sessions.get(reviewer.runId)!, setup })
-    if (lead.status !== 'accepted' || review.status !== 'accepted') throw new Error('bootstrap Room targets unavailable')
+    if (lead.status !== 'accepted' || review.status !== 'accepted') {
+      throw new Error('bootstrap Room targets unavailable')
+    }
     const reviewerIssued = await runtime.issueAdmissionBootstrapRoomTarget(owner, { origin, target: reviewer })
     if (reviewerIssued.status !== 'issued') throw new Error('reviewer bootstrap Room target denied')
     await expect(runtime.reserveAdmissionBootstrapRoomTarget(owner, {
-      handle: lead.handle, origin: reviewerIssued.origin, message: { text: 'cross target' },
+      handle: lead.handle,
+      origin: reviewerIssued.origin,
+      message: { text: 'cross target' },
     })).resolves.toMatchObject({ status: 'denied', code: 'target-mismatch' })
-    await expect(runtime.reserveAdmissionBootstrapRoomTarget({ pluginId: owner.pluginId, generation: owner.generation + 1 }, {
-      handle: review.handle, origin: reviewerIssued.origin, message: { text: 'owner replacement' },
-    })).resolves.toMatchObject({ status: 'denied', code: 'not-owner' })
+    await expect(
+      runtime.reserveAdmissionBootstrapRoomTarget({ pluginId: owner.pluginId, generation: owner.generation + 1 }, {
+        handle: review.handle,
+        origin: reviewerIssued.origin,
+        message: { text: 'owner replacement' },
+      }),
+    ).resolves.toMatchObject({ status: 'denied', code: 'not-owner' })
 
     const leaderIssued = await runtime.issueAdmissionBootstrapRoomTarget(owner, { origin, target: leader })
     if (leaderIssued.status !== 'issued') throw new Error('leader bootstrap Room target denied')
     const revoked = await runtime.reserveAdmissionBootstrapRoomTarget(owner, {
-      handle: lead.handle, origin: leaderIssued.origin, message: { text: 'revoke' },
+      handle: lead.handle,
+      origin: leaderIssued.origin,
+      message: { text: 'revoke' },
     })
     if (revoked.status !== 'reserved') throw new Error('bootstrap Room revoke reservation unavailable')
     await revoked.reservation.revoke()
     await expect(revoked.reservation.submit()).rejects.toThrow('unavailable')
 
     const completionIssued = await runtime.issueAdmissionBootstrapRoomTarget(owner, {
-      origin: { ...origin, originId: 'bootstrap-room-fences-complete' }, target: leader,
+      origin: { ...origin, originId: 'bootstrap-room-fences-complete' },
+      target: leader,
     })
     if (completionIssued.status !== 'issued') throw new Error('completion bootstrap Room target denied')
     const completion = await runtime.reserveAdmissionBootstrapRoomTarget(owner, {
-      handle: lead.handle, origin: completionIssued.origin, message: { text: 'command completion' },
+      handle: lead.handle,
+      origin: completionIssued.origin,
+      message: { text: 'command completion' },
     })
     if (completion.status !== 'reserved') throw new Error('bootstrap Room completion reservation unavailable')
     commandActive = false
@@ -1185,11 +1787,14 @@ describe('Agent/Session Host authority v1', () => {
 
     commandActive = true
     const connectionIssued = await runtime.issueAdmissionBootstrapRoomTarget(owner, {
-      origin: { ...origin, originId: 'bootstrap-room-fences-connection' }, target: leader,
+      origin: { ...origin, originId: 'bootstrap-room-fences-connection' },
+      target: leader,
     })
     if (connectionIssued.status !== 'issued') throw new Error('connection bootstrap Room target denied')
     const connection = await runtime.reserveAdmissionBootstrapRoomTarget(owner, {
-      handle: lead.handle, origin: connectionIssued.origin, message: { text: 'connection replacement' },
+      handle: lead.handle,
+      origin: connectionIssued.origin,
+      message: { text: 'connection replacement' },
     })
     if (connection.status !== 'reserved') throw new Error('bootstrap Room connection reservation unavailable')
     driver.replace()
@@ -1199,20 +1804,28 @@ describe('Agent/Session Host authority v1', () => {
 
     const ownerDriver = new Driver()
     const ownerRuntime = new CordisXAgentSessionRuntime({
-      driver: ownerDriver, authorize: async () => true,
-      bootstrapAdmissionRoomTargetActive: (_owner, candidate, target) => candidate.originId === 'bootstrap-room-fences-owner'
+      driver: ownerDriver,
+      authorize: async () => true,
+      bootstrapAdmissionRoomTargetActive: (_owner, candidate, target) =>
+        candidate.originId === 'bootstrap-room-fences-owner'
         && target.roomId === leader.roomId && target.runId === leader.runId,
-      captureBootstrapAdmissionRoomTarget: (_owner, _candidate, target, _receipt, sessionId) => target.runId === leader.runId
-        && sessionId === 'cx-session.bootstrap-room-owner' ? { active: () => true, commit: () => {}, close: () => {} } : undefined,
+      captureBootstrapAdmissionRoomTarget: (_owner, _candidate, target, _receipt, sessionId) =>
+        target.runId === leader.runId
+          && sessionId === 'cx-session.bootstrap-room-owner'
+          ? { active: () => true, commit: () => {}, close: () => {} }
+          : undefined,
     })
     const ownerCreated = await ownerRuntime.create(owner, { sessionId: 'cx-session.bootstrap-room-owner', setup })
     if (ownerCreated.status !== 'accepted') throw new Error('owner bootstrap Room target unavailable')
     const ownerIssued = await ownerRuntime.issueAdmissionBootstrapRoomTarget(owner, {
-      origin: { ...origin, originId: 'bootstrap-room-fences-owner' }, target: leader,
+      origin: { ...origin, originId: 'bootstrap-room-fences-owner' },
+      target: leader,
     })
     if (ownerIssued.status !== 'issued') throw new Error('owner bootstrap Room target denied')
     const ownerReservation = await ownerRuntime.reserveAdmissionBootstrapRoomTarget(owner, {
-      handle: ownerCreated.handle, origin: ownerIssued.origin, message: { text: 'owner replacement' },
+      handle: ownerCreated.handle,
+      origin: ownerIssued.origin,
+      message: { text: 'owner replacement' },
     })
     if (ownerReservation.status !== 'reserved') throw new Error('owner bootstrap Room reservation unavailable')
     ownerRuntime.fenceOwner(owner.pluginId, 'plugin-generation-replaced')
@@ -1221,68 +1834,109 @@ describe('Agent/Session Host authority v1', () => {
     await ownerRuntime.dispose()
   })
 
-  it.each([1, 2, 3])('declares, reserves, submits, and Host-claims one v6 Room route continuation per fresh target for N=%i', async count => {
-    const driver = new Driver()
-    let commandActive = true
-    const origin = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
-      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
-      originId: `bootstrap-route-origin-${count}`, binding: { bindingId: 'bootstrap-route-old-binding', ownerGeneration: 'bootstrap-route-owner-generation' },
-      generation: 'bootstrap-route-plugin-generation', executionId: `bootstrap-route-execution-${count}`, commandId: 'composer.submit', scope: 'composer-submit' as const,
-    }
-    const targets = Array.from({ length: count }, (_, index) => ({
-      roomId: 'room-bootstrap-route', participantId: ['leader', 'reviewer', 'integrator'][index]!,
-      memberId: `member-${index + 1}`, runId: `run-${index + 1}`,
-      route: { routeId: 'room', param: 'roomId' as const, roomId: 'room-bootstrap-route' },
-    }))
-    const sessions = new Map(targets.map((target, index) => [target.runId, `cx-session.bootstrap-route-${count}-${index}`]))
-    const messages = new Map<string, string>()
-    const runtime = new CordisXAgentSessionRuntime({
-      driver, authorize: async () => true,
-      bootstrapAdmissionRouteTargetActive: (_owner, candidate, target) => commandActive && candidate.originId === origin.originId
-        && targets.some(value => value.roomId === target.roomId && value.participantId === target.participantId
-          && value.memberId === target.memberId && value.runId === target.runId && value.route.routeId === target.route.routeId),
-      bootstrapAdmissionRouteClaimActive: (_owner, candidate) => commandActive && candidate.originId === origin.originId,
-      captureBootstrapAdmissionRouteTarget: (_owner, candidate, target, _continuation, sessionId, _generation, messageId) => {
-        if (!commandActive || candidate.originId !== origin.originId || sessions.get(target.runId) !== sessionId) return undefined
-        messages.set(target.runId, messageId)
-        return { active: () => commandActive, commit: () => {}, close: () => {} }
-      },
-    })
-    const declarations = await Promise.all(targets.map(target => runtime.declareAdmissionBootstrapRoute(owner, { origin, target })))
-    expect(declarations.every(value => value.status === 'declared')).toBe(true)
-    const handles = await Promise.all(targets.map(async target => {
-      const created = await runtime.create(owner, { sessionId: sessions.get(target.runId)!, setup })
-      if (created.status !== 'accepted') throw new Error('fresh v6 target was not acquired')
-      return created.handle
-    }))
-    const reservations = await Promise.all(declarations.map(async (declaration, index) => {
-      if (declaration.status !== 'declared') throw new Error('v6 declaration denied')
-      return await runtime.reserveAdmissionBootstrapRoute(owner, {
-        handle: handles[index]!, continuation: declaration.continuation, message: { text: `fresh v6 delivery ${index + 1}` },
-      })
-    }))
-    expect(reservations.every(value => value.status === 'reserved')).toBe(true)
-    await Promise.all(reservations.map(async reservation => {
-      if (reservation.status !== 'reserved') throw new Error('v6 reservation denied')
-      await expect(reservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
-    }))
-    expect(driver.submitted).toHaveLength(count)
-    for (const [index, declaration] of declarations.entries()) {
-      if (declaration.status !== 'declared') throw new Error('v6 declaration denied')
-      const target = targets[index]!
-      const result = runtime.claimAdmissionBootstrapRoute(owner, {
-        continuation: declaration.continuation,
-        binding: {
-          binding: { bindingId: `bootstrap-route-new-binding-${index}`, ownerGeneration: origin.binding.ownerGeneration },
-          generation: origin.generation, route: target.route,
+  it.each([1, 2, 3])(
+    'declares, reserves, submits, and Host-claims one v6 Room route continuation per fresh target for N=%i',
+    async count => {
+      const driver = new Driver()
+      let commandActive = true
+      const origin = {
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+        contract: 'cordisx.agent-bootstrap-command-origin/v1' as const,
+        schemaVersion: 1 as const,
+        originId: `bootstrap-route-origin-${count}`,
+        binding: { bindingId: 'bootstrap-route-old-binding', ownerGeneration: 'bootstrap-route-owner-generation' },
+        generation: 'bootstrap-route-plugin-generation',
+        executionId: `bootstrap-route-execution-${count}`,
+        commandId: 'composer.submit',
+        scope: 'composer-submit' as const,
+      }
+      const targets = Array.from({ length: count }, (_, index) => ({
+        roomId: 'room-bootstrap-route',
+        participantId: ['leader', 'reviewer', 'integrator'][index]!,
+        memberId: `member-${index + 1}`,
+        runId: `run-${index + 1}`,
+        route: { routeId: 'room', param: 'roomId' as const, roomId: 'room-bootstrap-route' },
+      }))
+      const sessions = new Map(
+        targets.map((target, index) => [target.runId, `cx-session.bootstrap-route-${count}-${index}`]),
+      )
+      const messages = new Map<string, string>()
+      const runtime = new CordisXAgentSessionRuntime({
+        driver,
+        authorize: async () => true,
+        bootstrapAdmissionRouteTargetActive: (_owner, candidate, target) =>
+          commandActive && candidate.originId === origin.originId
+          && targets.some(value =>
+            value.roomId === target.roomId && value.participantId === target.participantId
+            && value.memberId === target.memberId && value.runId === target.runId
+            && value.route.routeId === target.route.routeId
+          ),
+        bootstrapAdmissionRouteClaimActive: (_owner, candidate) =>
+          commandActive && candidate.originId === origin.originId,
+        captureBootstrapAdmissionRouteTarget: (
+          _owner,
+          candidate,
+          target,
+          _continuation,
+          sessionId,
+          _generation,
+          messageId,
+        ) => {
+          if (!commandActive || candidate.originId !== origin.originId || sessions.get(target.runId) !== sessionId) {
+            return undefined
+          }
+          messages.set(target.runId, messageId)
+          return { active: () => commandActive, commit: () => {}, close: () => {} }
         },
-        source: { sessionId: sessions.get(target.runId)!, messageId: messages.get(target.runId)! },
       })
-      expect(result).toMatchObject({ status: 'claimed', code: 'claimed', receipt: { target, source: { sessionId: sessions.get(target.runId)! } } })
-    }
-    await runtime.dispose()
-  })
+      const declarations = await Promise.all(
+        targets.map(target => runtime.declareAdmissionBootstrapRoute(owner, { origin, target })),
+      )
+      expect(declarations.every(value => value.status === 'declared')).toBe(true)
+      const handles = await Promise.all(targets.map(async target => {
+        const created = await runtime.create(owner, { sessionId: sessions.get(target.runId)!, setup })
+        if (created.status !== 'accepted') throw new Error('fresh v6 target was not acquired')
+        return created.handle
+      }))
+      const reservations = await Promise.all(declarations.map(async (declaration, index) => {
+        if (declaration.status !== 'declared') throw new Error('v6 declaration denied')
+        return await runtime.reserveAdmissionBootstrapRoute(owner, {
+          handle: handles[index]!,
+          continuation: declaration.continuation,
+          message: { text: `fresh v6 delivery ${index + 1}` },
+        })
+      }))
+      expect(reservations.every(value => value.status === 'reserved')).toBe(true)
+      await Promise.all(reservations.map(async reservation => {
+        if (reservation.status !== 'reserved') throw new Error('v6 reservation denied')
+        await expect(reservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
+      }))
+      expect(driver.submitted).toHaveLength(count)
+      for (const [index, declaration] of declarations.entries()) {
+        if (declaration.status !== 'declared') throw new Error('v6 declaration denied')
+        const target = targets[index]!
+        const result = runtime.claimAdmissionBootstrapRoute(owner, {
+          continuation: declaration.continuation,
+          binding: {
+            binding: {
+              bindingId: `bootstrap-route-new-binding-${index}`,
+              ownerGeneration: origin.binding.ownerGeneration,
+            },
+            generation: origin.generation,
+            route: target.route,
+          },
+          source: { sessionId: sessions.get(target.runId)!, messageId: messages.get(target.runId)! },
+        })
+        expect(result).toMatchObject({
+          status: 'claimed',
+          code: 'claimed',
+          receipt: { target, source: { sessionId: sessions.get(target.runId)! } },
+        })
+      }
+      await runtime.dispose()
+    },
+  )
 
   it('composes v6 claim liveness through the retained live command, before command completion or scenario activation', async () => {
     const driver = new Driver()
@@ -1291,27 +1945,46 @@ describe('Agent/Session Host authority v1', () => {
     let runtime!: CordisXAgentSessionRuntime
     const lifecycle: string[] = []
     const origin = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
-      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const,
+      schemaVersion: 1 as const,
       originId: 'bootstrap-route-composed-origin',
-      binding: { bindingId: 'bootstrap-route-composed-old-binding', ownerGeneration: 'bootstrap-route-composed-owner-generation' },
-      generation: 'bootstrap-route-composed-plugin-generation', executionId: 'bootstrap-route-composed-execution',
-      commandId: 'composer.submit', scope: 'composer-submit' as const,
+      binding: {
+        bindingId: 'bootstrap-route-composed-old-binding',
+        ownerGeneration: 'bootstrap-route-composed-owner-generation',
+      },
+      generation: 'bootstrap-route-composed-plugin-generation',
+      executionId: 'bootstrap-route-composed-execution',
+      commandId: 'composer.submit',
+      scope: 'composer-submit' as const,
     }
     const target = {
-      roomId: 'room-bootstrap-route-composed', participantId: 'leader', memberId: 'member-leader', runId: 'run-leader',
+      roomId: 'room-bootstrap-route-composed',
+      participantId: 'leader',
+      memberId: 'member-leader',
+      runId: 'run-leader',
       route: { routeId: 'room', param: 'roomId' as const, roomId: 'room-bootstrap-route-composed' },
     }
     const sourceSessionId = 'cx-session.bootstrap-route-composed-lead'
     const authority = new PlaygroundScenarioSessionScopeAuthority({
-      hostGeneration: 'playground-bootstrap-route-composed', connectionGeneration: () => 1,
+      hostGeneration: 'playground-bootstrap-route-composed',
+      connectionGeneration: () => 1,
       currentRoute: () => undefined,
-      ownerForSession: sessionId => sessionId === sourceSessionId || sessionId === 'cx-session.bootstrap-route-composed-reviewer'
-        ? owner : undefined,
-      routeOwner: agentOwner => agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation
-        ? { source: 'file:///fixtures/registry.ts', pluginId: 'registry' } : undefined,
-      permissionRoute: () => ({ routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }),
-      bootstrapRouteRegistered: (_owner, candidate) => candidate.roomId === target.roomId && candidate.route.routeId === target.route.routeId
+      ownerForSession: sessionId =>
+        sessionId === sourceSessionId || sessionId === 'cx-session.bootstrap-route-composed-reviewer'
+          ? owner
+          : undefined,
+      routeOwner: agentOwner =>
+        agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation
+          ? { source: 'file:///fixtures/registry.ts', pluginId: 'registry' }
+          : undefined,
+      permissionRoute: () => ({
+        routeId: 'room-session-detail',
+        path: '/main/chatroom/:roomId/run/:runId/session/:sessionId',
+      }),
+      bootstrapRouteRegistered: (_owner, candidate) =>
+        candidate.roomId === target.roomId && candidate.route.routeId === target.route.routeId
         && candidate.route.param === target.route.param && candidate.route.roomId === target.route.roomId,
       claimBootstrapRoute: (claimOwner, request) => {
         lifecycle.push('claim')
@@ -1322,19 +1995,41 @@ describe('Agent/Session Host authority v1', () => {
       changed: () => {},
     })
     runtime = new CordisXAgentSessionRuntime({
-      driver, authorize: async () => true,
+      driver,
+      authorize: async () => true,
       bootstrapAdmissionRouteTargetActive: (claimOwner, candidate, declaredTarget) =>
         authority.bootstrapAdmissionRouteTargetActive(claimOwner, candidate, declaredTarget),
       bootstrapAdmissionRouteClaimActive: (claimOwner, candidate, declaredTarget) =>
         authority.bootstrapAdmissionRouteClaimActive(claimOwner, candidate, declaredTarget),
-      captureBootstrapAdmissionRouteTarget: (claimOwner, candidate, declaredTarget, continuation, sessionId, generation, messageId) =>
-        authority.captureBootstrapAdmissionRouteTarget(claimOwner, candidate, declaredTarget, continuation, sessionId, generation, messageId),
+      captureBootstrapAdmissionRouteTarget: (
+        claimOwner,
+        candidate,
+        declaredTarget,
+        continuation,
+        sessionId,
+        generation,
+        messageId,
+      ) =>
+        authority.captureBootstrapAdmissionRouteTarget(
+          claimOwner,
+          candidate,
+          declaredTarget,
+          continuation,
+          sessionId,
+          generation,
+          messageId,
+        ),
     })
 
     await authority.conversationSource.execute({
-      owner, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
-      snapshotGeneration: 'bootstrap-route-composed-snapshot', routeId: 'chatroom:new-room', runs: [],
-      active: () => oldBindingActive, bootstrapOrigin: origin,
+      owner,
+      bindingId: origin.binding.bindingId,
+      ownerGeneration: origin.binding.ownerGeneration,
+      snapshotGeneration: 'bootstrap-route-composed-snapshot',
+      routeId: 'chatroom:new-room',
+      runs: [],
+      active: () => oldBindingActive,
+      bootstrapOrigin: origin,
     }, async () => {
       const declaration = await runtime.declareAdmissionBootstrapRoute(owner, { origin, target })
       expect(declaration.status).toBe('declared')
@@ -1343,7 +2038,9 @@ describe('Agent/Session Host authority v1', () => {
       expect(created.status).toBe('accepted')
       if (created.status !== 'accepted') throw new Error('bootstrap route Session was not created')
       const reservation = await runtime.reserveAdmissionBootstrapRoute(owner, {
-        handle: created.handle, continuation: declaration.continuation, message: { text: 'fresh room source' },
+        handle: created.handle,
+        continuation: declaration.continuation,
+        message: { text: 'fresh room source' },
       })
       expect(reservation.status).toBe('reserved')
       if (reservation.status !== 'reserved') throw new Error('bootstrap route reservation was not created')
@@ -1355,8 +2052,12 @@ describe('Agent/Session Host authority v1', () => {
       authority.conversationSource.claimBootstrapRoute({
         owner,
         binding: {
-          binding: { bindingId: 'bootstrap-route-composed-new-binding', ownerGeneration: origin.binding.ownerGeneration },
-          generation: origin.generation, route: target.route,
+          binding: {
+            bindingId: 'bootstrap-route-composed-new-binding',
+            ownerGeneration: origin.binding.ownerGeneration,
+          },
+          generation: origin.generation,
+          route: target.route,
         },
         active: () => newBindingActive,
       })
@@ -1364,8 +2065,10 @@ describe('Agent/Session Host authority v1', () => {
     lifecycle.push('command-completed')
 
     const activated = await authority.client.activate({
-      runId: 'scenario-bootstrap-route-composed', sourceMessageId: driver.submitted[0]!,
-      sourceSessionId, targetSessionId: 'cx-session.bootstrap-route-composed-reviewer',
+      runId: 'scenario-bootstrap-route-composed',
+      sourceMessageId: driver.submitted[0]!,
+      sourceSessionId,
+      targetSessionId: 'cx-session.bootstrap-route-composed-reviewer',
     })
     lifecycle.push('scenario-tick')
     expect(activated.status).toBe('available')
@@ -1381,22 +2084,42 @@ describe('Agent/Session Host authority v1', () => {
     let commandActive = true
     let capturedMessage: string | undefined
     const origin = {
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
-      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
-      originId: 'bootstrap-route-fences', binding: { bindingId: 'bootstrap-route-old', ownerGeneration: 'bootstrap-route-owner' },
-      generation: 'bootstrap-route-generation', executionId: 'bootstrap-route-execution', commandId: 'composer.submit', scope: 'composer-submit' as const,
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const,
+      schemaVersion: 1 as const,
+      originId: 'bootstrap-route-fences',
+      binding: { bindingId: 'bootstrap-route-old', ownerGeneration: 'bootstrap-route-owner' },
+      generation: 'bootstrap-route-generation',
+      executionId: 'bootstrap-route-execution',
+      commandId: 'composer.submit',
+      scope: 'composer-submit' as const,
     }
     const target = {
-      roomId: 'room-fences', participantId: 'leader', memberId: 'member-leader', runId: 'run-leader',
+      roomId: 'room-fences',
+      participantId: 'leader',
+      memberId: 'member-leader',
+      runId: 'run-leader',
       route: { routeId: 'room', param: 'roomId' as const, roomId: 'room-fences' },
     }
     const runtime = new CordisXAgentSessionRuntime({
-      driver, authorize: async () => true,
-      bootstrapAdmissionRouteTargetActive: (_owner, candidate) => commandActive
+      driver,
+      authorize: async () => true,
+      bootstrapAdmissionRouteTargetActive: (_owner, candidate) =>
+        commandActive
         && [origin.originId, 'bootstrap-route-complete'].includes(candidate.originId),
-      bootstrapAdmissionRouteClaimActive: (_owner, candidate) => commandActive
+      bootstrapAdmissionRouteClaimActive: (_owner, candidate) =>
+        commandActive
         && [origin.originId, 'bootstrap-route-complete'].includes(candidate.originId),
-      captureBootstrapAdmissionRouteTarget: (_owner, _candidate, current, _continuation, sessionId, _generation, messageId) => {
+      captureBootstrapAdmissionRouteTarget: (
+        _owner,
+        _candidate,
+        current,
+        _continuation,
+        sessionId,
+        _generation,
+        messageId,
+      ) => {
         if (current.runId !== target.runId || sessionId !== 'cx-session.bootstrap-route-fences') return undefined
         capturedMessage = messageId
         return { active: () => commandActive, commit: () => {}, close: () => {} }
@@ -1406,50 +2129,78 @@ describe('Agent/Session Host authority v1', () => {
     if (created.status !== 'accepted') throw new Error('v6 fence target unavailable')
     const declaration = await runtime.declareAdmissionBootstrapRoute(owner, { origin, target })
     if (declaration.status !== 'declared') throw new Error('v6 declaration denied')
-    await expect(runtime.declareAdmissionBootstrapRoute(owner, { origin, target })).resolves.toMatchObject({ status: 'denied', code: 'duplicate-target' })
+    await expect(runtime.declareAdmissionBootstrapRoute(owner, { origin, target })).resolves.toMatchObject({
+      status: 'denied',
+      code: 'duplicate-target',
+    })
     await expect(runtime.declareAdmissionBootstrapRoute(owner, {
       origin,
       target: { ...target, roomId: 'room-foreign', route: { ...target.route, roomId: 'room-foreign' } },
     })).resolves.toMatchObject({ status: 'denied', code: 'cross-room' })
     expect(runtime.claimAdmissionBootstrapRoute(owner, {
       continuation: declaration.continuation,
-      binding: { binding: { bindingId: 'new-binding', ownerGeneration: origin.binding.ownerGeneration }, generation: origin.generation, route: target.route },
+      binding: {
+        binding: { bindingId: 'new-binding', ownerGeneration: origin.binding.ownerGeneration },
+        generation: origin.generation,
+        route: target.route,
+      },
       source: { sessionId: 'cx-session.bootstrap-route-fences', messageId: 'cx-message.premature' },
     })).toMatchObject({ status: 'denied', code: 'not-submitted' })
     const reservation = await runtime.reserveAdmissionBootstrapRoute(owner, {
-      handle: created.handle, continuation: declaration.continuation, message: { text: 'fenced route submission' },
+      handle: created.handle,
+      continuation: declaration.continuation,
+      message: { text: 'fenced route submission' },
     })
     if (reservation.status !== 'reserved') throw new Error('v6 reservation denied')
     await expect(reservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
     expect(runtime.claimAdmissionBootstrapRoute(owner, {
       continuation: declaration.continuation,
-      binding: { binding: { bindingId: 'new-binding', ownerGeneration: origin.binding.ownerGeneration }, generation: origin.generation, route: target.route },
+      binding: {
+        binding: { bindingId: 'new-binding', ownerGeneration: origin.binding.ownerGeneration },
+        generation: origin.generation,
+        route: target.route,
+      },
       source: { sessionId: 'cx-session.bootstrap-route-fences', messageId: 'cx-message.cross-target' },
     })).toMatchObject({ status: 'denied', code: 'source-mismatch' })
     expect(runtime.claimAdmissionBootstrapRoute(owner, {
       continuation: declaration.continuation,
-      binding: { binding: { bindingId: 'new-binding', ownerGeneration: origin.binding.ownerGeneration }, generation: origin.generation, route: target.route },
+      binding: {
+        binding: { bindingId: 'new-binding', ownerGeneration: origin.binding.ownerGeneration },
+        generation: origin.generation,
+        route: target.route,
+      },
       source: { sessionId: 'cx-session.bootstrap-route-fences', messageId: capturedMessage! },
     })).toMatchObject({ status: 'claimed' })
     expect(runtime.claimAdmissionBootstrapRoute(owner, {
       continuation: declaration.continuation,
-      binding: { binding: { bindingId: 'new-binding-again', ownerGeneration: origin.binding.ownerGeneration }, generation: origin.generation, route: target.route },
+      binding: {
+        binding: { bindingId: 'new-binding-again', ownerGeneration: origin.binding.ownerGeneration },
+        generation: origin.generation,
+        route: target.route,
+      },
       source: { sessionId: 'cx-session.bootstrap-route-fences', messageId: capturedMessage! },
     })).toMatchObject({ status: 'denied', code: 'reused' })
 
     const completed = await runtime.declareAdmissionBootstrapRoute(owner, {
-      origin: { ...origin, originId: 'bootstrap-route-complete' }, target,
+      origin: { ...origin, originId: 'bootstrap-route-complete' },
+      target,
     })
     if (completed.status !== 'declared') throw new Error('v6 completion declaration denied')
     const completedReservation = await runtime.reserveAdmissionBootstrapRoute(owner, {
-      handle: created.handle, continuation: completed.continuation, message: { text: 'before command completes' },
+      handle: created.handle,
+      continuation: completed.continuation,
+      message: { text: 'before command completes' },
     })
     if (completedReservation.status !== 'reserved') throw new Error('v6 completion reservation denied')
     await expect(completedReservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
     commandActive = false
     expect(runtime.claimAdmissionBootstrapRoute(owner, {
       continuation: completed.continuation,
-      binding: { binding: { bindingId: 'new-binding-after-complete', ownerGeneration: origin.binding.ownerGeneration }, generation: origin.generation, route: target.route },
+      binding: {
+        binding: { bindingId: 'new-binding-after-complete', ownerGeneration: origin.binding.ownerGeneration },
+        generation: origin.generation,
+        route: target.route,
+      },
       source: { sessionId: 'cx-session.bootstrap-route-fences', messageId: capturedMessage! },
     })).toMatchObject({ status: 'denied', code: 'command-complete' })
     await runtime.dispose()

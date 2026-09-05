@@ -10,23 +10,30 @@ import { CommandRegistry } from '../packages/cli/src/renderer/commands.js'
 import { BrowserRouteHistoryAdapter } from '../packages/cli/src/renderer/codex-router-history.js'
 import type { CordisXI18nService, LocalizationEffectOwner } from '../packages/cli/src/renderer/i18n.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
-import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from '../packages/cli/src/renderer/ownership.js'
-import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
+import {
+  CORDISX_PLUGIN_GENERATION,
+  CORDISX_PLUGIN_ID,
+  CORDISX_PLUGIN_SOURCE,
+} from '../packages/cli/src/renderer/ownership.js'
+import {
+  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+  type CordisXPluginActivationRecordV1,
+} from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import {
   NavigationRegistry,
-  OutletRegistry,
-  PageRegistry,
   type OutletController,
   type OutletHostSnapshot,
+  OutletRegistry,
+  PageRegistry,
 } from '../packages/cli/src/renderer/navigation.js'
 import {
   CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
   CORDISX_EXTENSION_POINT_LOCALE_CATALOGS,
   CORDISX_MANAGER_EXTENSION_POINT_CATALOG,
+  type ExtensionPointAccessResolver,
   ExtensionPointDescriptorRegistry,
   ExtensionPointPolicyBroker,
   MemoryExtensionPointPolicyStore,
-  type ExtensionPointAccessResolver,
 } from '../packages/cli/src/renderer/extension-points.js'
 import { TestCodexRouteHistory } from './helpers/codex-route-history.js'
 import { activatePlaygroundReviewNavigation } from '../packages/cli/src/playground/client/review-navigation.js'
@@ -44,7 +51,13 @@ class FakeOutlet implements OutletController {
   hides = 0
 
   constructor(container: HTMLElement, contextKey = 'context:one', nativeSessionId?: string) {
-    this.snapshot = { available: true, container, contextKey, placement: 'absolute', ...(nativeSessionId === undefined ? {} : { nativeSessionId }) }
+    this.snapshot = {
+      available: true,
+      container,
+      contextKey,
+      placement: 'absolute',
+      ...(nativeSessionId === undefined ? {} : { nativeSessionId }),
+    }
   }
 
   getSnapshot(): OutletHostSnapshot {
@@ -56,11 +69,21 @@ class FakeOutlet implements OutletController {
     return () => this.listeners.delete(listener)
   }
 
-  show(): void { this.shows += 1 }
-  hide(): void { this.hides += 1 }
+  show(): void {
+    this.shows += 1
+  }
+  hide(): void {
+    this.hides += 1
+  }
 
   set(container: HTMLElement, contextKey: string, nativeSessionId = this.snapshot.nativeSessionId): void {
-    this.snapshot = { available: true, container, contextKey, placement: 'absolute', ...(nativeSessionId === undefined ? {} : { nativeSessionId }) }
+    this.snapshot = {
+      available: true,
+      container,
+      contextKey,
+      placement: 'absolute',
+      ...(nativeSessionId === undefined ? {} : { nativeSessionId }),
+    }
     for (const listener of [...this.listeners]) listener()
   }
 }
@@ -77,21 +100,26 @@ function fakeI18n(): CordisXI18nService {
         t: key => String(key),
         message: (key, params) => ({ key, ...(params === undefined ? {} : { params }) }),
         getSnapshot: () => ({ locale: 'en', direction: 'ltr', version: 0 }),
-        subscribe: listener => own(() => {
-          void listener
-          return () => {}
-        }),
+        subscribe: listener =>
+          own(() => {
+            void listener
+            return () => {}
+          }),
         effect: setup => own(() => setup({ locale: 'en', direction: 'ltr', version: 0 })),
-        bindText: (node, message) => own(() => {
-          const previous = node.textContent
-          node.textContent = message.fallback ?? message.key
-          return () => { node.textContent = previous }
-        }),
-        bindAttribute: (element, name, message) => own(() => {
-          const previous = element.getAttribute(name)
-          element.setAttribute(name, message.fallback ?? message.key)
-          return () => previous === null ? element.removeAttribute(name) : element.setAttribute(name, previous)
-        }),
+        bindText: (node, message) =>
+          own(() => {
+            const previous = node.textContent
+            node.textContent = message.fallback ?? message.key
+            return () => {
+              node.textContent = previous
+            }
+          }),
+        bindAttribute: (element, name, message) =>
+          own(() => {
+            const previous = element.getAttribute(name)
+            element.setAttribute(name, message.fallback ?? message.key)
+            return () => previous === null ? element.removeAttribute(name) : element.setAttribute(name, previous)
+          }),
       }
       return seat
     },
@@ -157,9 +185,12 @@ describe('NavigationRegistry', () => {
       schemaVersion: 2,
     }])
     expect(navigation.agentRuntimeRoutesForOwner({
-      source: 'file:///plugins/chatroom-b/index.mjs', pluginId, moduleGeneration,
+      source: 'file:///plugins/chatroom-b/index.mjs',
+      pluginId,
+      moduleGeneration,
     })).toEqual([])
-    expect(navigation.agentRuntimeRoutesForOwner({ source, pluginId, moduleGeneration: 'chatroom-generation-two' })).toEqual([])
+    expect(navigation.agentRuntimeRoutesForOwner({ source, pluginId, moduleGeneration: 'chatroom-generation-two' }))
+      .toEqual([])
     expect(navigation.agentRuntimeRouteFromHistory({
       schemaVersion: 1,
       owner: pluginId,
@@ -182,12 +213,32 @@ describe('NavigationRegistry', () => {
     const dom = new JSDOM('<body><main id="main"></main><main id="app"></main></body>')
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
-    outlets.declare({
-      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'portal', contextPolicy: 'semantic', presentationGroup: 'primary',
-    }, new FakeOutlet(dom.window.document.getElementById('main')!, 'main:one'), path => path.startsWith('/main/'))
-    outlets.declare({
-      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation', presentationGroup: 'primary',
-    }, new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer'), path => !path.startsWith('/main/'))
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'main',
+        authority: 'host-adapter',
+        scope: 'main',
+        preferredPlacement: 'portal',
+        contextPolicy: 'semantic',
+        presentationGroup: 'primary',
+      },
+      new FakeOutlet(dom.window.document.getElementById('main')!, 'main:one'),
+      path => path.startsWith('/main/'),
+    )
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'app',
+        authority: 'host-adapter',
+        scope: 'renderer',
+        preferredPlacement: 'fixed',
+        contextPolicy: 'generation',
+        presentationGroup: 'primary',
+      },
+      new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer'),
+      path => !path.startsWith('/main/'),
+    )
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     const mount = ({ container }: { container: HTMLElement }) => {
       const chrome = container.ownerDocument.createElement('header')
@@ -208,23 +259,32 @@ describe('NavigationRegistry', () => {
     navigation.register('chatroom', {
       $schema: CORDISX_ROUTE_SCHEMA_V2,
       schemaVersion: 2,
-      id: 'room', path: '/main/chatroom', outlet: 'main', page: 'room',
+      id: 'room',
+      path: '/main/chatroom',
+      outlet: 'main',
+      page: 'room',
       title: { key: 'route.room.title', fallback: 'New room' },
       description: { key: 'route.room.description', fallback: 'Open the Host-rendered conversation.' },
     })
     navigation.register('chatroom', {
-      id: 'room-app', path: '/chatroom', outlet: 'app', page: 'room',
+      id: 'room-app',
+      path: '/chatroom',
+      outlet: 'app',
+      page: 'room',
     })
 
-    expect(() => pages.register('chatroom', {
-      id: 'room-with-plugin-chrome',
-      title: { key: 'page.room-with-plugin-chrome.title', fallback: 'Room' },
-      chrome: 'body-only',
-      headerActions: [{
-        id: 'duplicate', label: { key: 'action.duplicate', fallback: 'Duplicate action' },
-        command: { id: 'duplicate' },
-      }],
-    }, () => undefined)).toThrow(/body-only page room-with-plugin-chrome cannot declare/)
+    expect(() =>
+      pages.register('chatroom', {
+        id: 'room-with-plugin-chrome',
+        title: { key: 'page.room-with-plugin-chrome.title', fallback: 'Room' },
+        chrome: 'body-only',
+        headerActions: [{
+          id: 'duplicate',
+          label: { key: 'action.duplicate', fallback: 'Duplicate action' },
+          command: { id: 'duplicate' },
+        }],
+      }, () => undefined)
+    ).toThrow(/body-only page room-with-plugin-chrome cannot declare/)
     await expect(navigation.navigate('chatroom', { id: 'room-app' })).rejects.toThrow(/persistent external chrome/)
 
     await navigation.navigate('chatroom', { id: 'room' })
@@ -264,23 +324,32 @@ describe('NavigationRegistry', () => {
     })
     pages.register('legacy', { id: 'page', title: { key: 'legacy.page', fallback: 'Legacy page' } }, () => undefined)
     navigation.register('legacy', { id: 'route', path: '/legacy', outlet: 'app', page: 'page' })
-    expect(() => pages.register('invalid', {
-      id: 'description-without-version',
-      title: { key: 'invalid.page.title' },
-      description: { key: 'invalid.page.description' },
-    }, () => undefined)).toThrow('legacy page metadata cannot declare description; use page.v3')
-    expect(() => pages.register('invalid', {
-      $schema: CORDISX_PAGE_SCHEMA_V3,
-      schemaVersion: 3,
-      id: 'missing-description',
-      title: { key: 'invalid.page.title' },
-    }, () => undefined)).toThrow('page.v3 requires localized description metadata')
-    expect(() => navigation.register('invalid', {
-      $schema: CORDISX_ROUTE_SCHEMA_V2,
-      schemaVersion: 2,
-      id: 'missing-description', path: '/invalid', outlet: 'app', page: 'missing-description',
-      title: { key: 'invalid.route.title' },
-    })).toThrow('route.v2 requires localized title and description metadata')
+    expect(() =>
+      pages.register('invalid', {
+        id: 'description-without-version',
+        title: { key: 'invalid.page.title' },
+        description: { key: 'invalid.page.description' },
+      }, () => undefined)
+    ).toThrow('legacy page metadata cannot declare description; use page.v3')
+    expect(() =>
+      pages.register('invalid', {
+        $schema: CORDISX_PAGE_SCHEMA_V3,
+        schemaVersion: 3,
+        id: 'missing-description',
+        title: { key: 'invalid.page.title' },
+      }, () => undefined)
+    ).toThrow('page.v3 requires localized description metadata')
+    expect(() =>
+      navigation.register('invalid', {
+        $schema: CORDISX_ROUTE_SCHEMA_V2,
+        schemaVersion: 2,
+        id: 'missing-description',
+        path: '/invalid',
+        outlet: 'app',
+        page: 'missing-description',
+        title: { key: 'invalid.route.title' },
+      })
+    ).toThrow('route.v2 requires localized title and description metadata')
 
     const snapshot = navigation.snapshot()
     expect(snapshot.routes.find(item => item.qualifiedId === 'demo:documented')?.productMetadata).toEqual({
@@ -314,11 +383,22 @@ describe('NavigationRegistry', () => {
 
   it('rebinds the current Codex history entry across a same-route generation replacement', async () => {
     const activation = (revision: number, generation: string): CordisXPluginActivationRecordV1 => ({
-      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, schemaVersion: 1,
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1,
       recordKind: revision === 1 ? 'active' : 'candidate',
       ...(revision === 1 ? {} : { transactionId: 'update-demo' }),
-      profileId: 'default', revision, lastGoodRevision: 1, runtimeGeneration: 'runtime-1',
-      plugins: [{ id: 'demo', version: '1.0.0', digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`, moduleGeneration: generation, enabled: true, dependencies: [] }],
+      profileId: 'default',
+      revision,
+      lastGoodRevision: 1,
+      runtimeGeneration: 'runtime-1',
+      plugins: [{
+        id: 'demo',
+        version: '1.0.0',
+        digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`,
+        moduleGeneration: generation,
+        enabled: true,
+        dependencies: [],
+      }],
     })
     const previous = activation(1, 'demo-1')
     const candidate = activation(2, 'demo-2')
@@ -326,32 +406,51 @@ describe('NavigationRegistry', () => {
     const pages = new PageRegistry(visibility)
     const outlets = new OutletRegistry()
     const dom = new JSDOM('<body><main id="app"></main></body>')
-    outlets.declare({
-      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
-    }, new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer'), path => path === '/settings')
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'app',
+        authority: 'host-adapter',
+        scope: 'renderer',
+        preferredPlacement: 'fixed',
+        contextPolicy: 'generation',
+      },
+      new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer'),
+      path => path === '/settings',
+    )
     const history = new TestCodexRouteHistory()
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), history)
     const source = 'file:///plugins/demo/index.mjs'
     const oldContext = new Context().extend({
-      [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_SOURCE]: source, [CORDISX_PLUGIN_GENERATION]: 'demo-1',
+      [CORDISX_PLUGIN_ID]: 'demo',
+      [CORDISX_PLUGIN_SOURCE]: source,
+      [CORDISX_PLUGIN_GENERATION]: 'demo-1',
     })
-    pages.register(oldContext, { id: 'settings', title: { key: 'old' } }, ({ container }) => { container.textContent = 'old' })
+    pages.register(oldContext, { id: 'settings', title: { key: 'old' } }, ({ container }) => {
+      container.textContent = 'old'
+    })
     navigation.register(oldContext, { id: 'settings', path: '/settings', outlet: 'app', page: 'settings' })
     await navigation.navigate('demo', { id: 'settings' })
     const currentHistory = history.snapshot()
 
     const handle = visibility.begin('update-demo', previous, candidate)
     const candidateContext = new Context().extend({
-      [CORDISX_PLUGIN_ID]: 'demo', [CORDISX_PLUGIN_SOURCE]: source,
-      [CORDISX_PLUGIN_GENERATION]: 'demo-2', ...visibility.context(handle, 'demo'),
+      [CORDISX_PLUGIN_ID]: 'demo',
+      [CORDISX_PLUGIN_SOURCE]: source,
+      [CORDISX_PLUGIN_GENERATION]: 'demo-2',
+      ...visibility.context(handle, 'demo'),
     })
-    pages.register(candidateContext, { id: 'settings', title: { key: 'new' } }, ({ container }) => { container.textContent = 'new' })
+    pages.register(candidateContext, { id: 'settings', title: { key: 'new' } }, ({ container }) => {
+      container.textContent = 'new'
+    })
     navigation.register(candidateContext, { id: 'settings', path: '/settings', outlet: 'app', page: 'settings' })
     expect(navigation.snapshot().pages[0]?.metadata.title).toEqual({ key: 'old' })
     expect(navigation.snapshot(visibility.view(candidateContext)).pages[0]?.metadata.title).toEqual({ key: 'new' })
     expect(navigation.snapshot(visibility.view(candidateContext)).routes).toHaveLength(1)
     expect(navigation.agentRuntimeRoutesForOwner({
-      source, pluginId: 'demo', moduleGeneration: 'demo-2',
+      source,
+      pluginId: 'demo',
+      moduleGeneration: 'demo-2',
     }, visibility.view(candidateContext))).toEqual([{ id: 'settings', path: '/settings' }])
     expect(navigation.agentRuntimeRoutesForOwner({ source, pluginId: 'demo', moduleGeneration: 'demo-2' })).toEqual([])
 
@@ -359,7 +458,11 @@ describe('NavigationRegistry', () => {
     await navigation.settled()
     expect(navigation.snapshot().pages[0]?.metadata.title).toEqual({ key: 'new' })
     expect(navigation.snapshot().routes).toHaveLength(1)
-    expect(history.snapshot()).toMatchObject({ key: currentHistory.key, index: currentHistory.index, entry: currentHistory.entry })
+    expect(history.snapshot()).toMatchObject({
+      key: currentHistory.key,
+      index: currentHistory.index,
+      entry: currentHistory.entry,
+    })
     expect(dom.window.document.querySelector('[data-cordisx-page="demo:settings"]')?.textContent).toContain('new')
     await navigation.dispose()
     pages.dispose()
@@ -371,13 +474,26 @@ describe('NavigationRegistry', () => {
     const dom = new JSDOM('<body><main id="main"></main></body>')
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
-    outlets.declare({
-      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'portal', contextPolicy: 'semantic',
-    }, new FakeOutlet(dom.window.document.getElementById('main')!, 'main:one'), path => path.startsWith('/main/'))
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'main',
+        authority: 'host-adapter',
+        scope: 'main',
+        preferredPlacement: 'portal',
+        contextPolicy: 'semantic',
+      },
+      new FakeOutlet(dom.window.document.getElementById('main')!, 'main:one'),
+      path => path.startsWith('/main/'),
+    )
     const history = new TestCodexRouteHistory()
     history.push(Object.freeze({
-      schemaVersion: 1, owner: 'chatroom', routeId: 'chatroom:room', outlet: 'main',
-      path: '/main/rooms/one', params: Object.freeze({ roomId: 'one' }),
+      schemaVersion: 1,
+      owner: 'chatroom',
+      routeId: 'chatroom:room',
+      outlet: 'main',
+      path: '/main/rooms/one',
+      params: Object.freeze({ roomId: 'one' }),
     }))
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), history)
     const mounted: string[] = []
@@ -385,14 +501,22 @@ describe('NavigationRegistry', () => {
       mounted.push(String(params.roomId))
       container.textContent = String(params.roomId)
     })
-    const unregisterRoute = navigation.register('chatroom', { id: 'room', path: '/main/rooms/:roomId', outlet: 'main', page: 'room' })
+    const unregisterRoute = navigation.register('chatroom', {
+      id: 'room',
+      path: '/main/rooms/:roomId',
+      outlet: 'main',
+      page: 'room',
+    })
 
     await navigation.startHistoryProjection()
     expect(navigation.snapshot().outlets[0]).toMatchObject({ activeRoute: 'chatroom:room', mounted: true })
     expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')?.textContent).toContain('one')
 
     await navigation.navigate('chatroom', { id: 'room', params: { roomId: 'two' } })
-    expect(history.snapshot()).toMatchObject({ index: 2, entry: { routeId: 'chatroom:room', params: { roomId: 'two' } } })
+    expect(history.snapshot()).toMatchObject({
+      index: 2,
+      entry: { routeId: 'chatroom:room', params: { roomId: 'two' } },
+    })
     await navigation.back('chatroom', 'main')
     expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')?.textContent).toContain('one')
     await history.nativeForward()
@@ -417,14 +541,21 @@ describe('NavigationRegistry', () => {
     const original = new JSDOM('', { url: 'http://127.0.0.1/' })
     const originalHistory = new BrowserRouteHistoryAdapter(original.window as unknown as Window, true)
     originalHistory.push(Object.freeze({
-      schemaVersion: 1, owner: 'chatroom', routeId: 'chatroom:room', outlet: 'main',
-      path: '/main/chatroom/room-1', params: Object.freeze({ roomId: 'room-1' }),
+      schemaVersion: 1,
+      owner: 'chatroom',
+      routeId: 'chatroom:room',
+      outlet: 'main',
+      path: '/main/chatroom/room-1',
+      params: Object.freeze({ roomId: 'room-1' }),
     }))
     const originalState = original.window.history.state as { readonly key: string; readonly idx: number }
 
-    const dom = new JSDOM('<body><main id="main"></main><nav><div data-sidebar-item="chatroom:chatroom"><button class="cxsi-primary">New room</button></div></nav></body>', {
-      url: 'http://127.0.0.1/',
-    })
+    const dom = new JSDOM(
+      '<body><main id="main"></main><nav><div data-sidebar-item="chatroom:chatroom"><button class="cxsi-primary">New room</button></div></nav></body>',
+      {
+        url: 'http://127.0.0.1/',
+      },
+    )
     copySessionStorage(original.window.sessionStorage, dom.window.sessionStorage)
     // The new Browser document has retained React's key/index but not the
     // Host route payload; BrowserRouteHistoryAdapter must recover only its
@@ -433,9 +564,18 @@ describe('NavigationRegistry', () => {
     const history = new BrowserRouteHistoryAdapter(dom.window as unknown as Window, true)
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
-    outlets.declare({
-      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'portal', contextPolicy: 'semantic',
-    }, new FakeOutlet(dom.window.document.getElementById('main')!, 'main:one'), path => path.startsWith('/main/'))
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'main',
+        authority: 'host-adapter',
+        scope: 'main',
+        preferredPlacement: 'portal',
+        contextPolicy: 'semantic',
+      },
+      new FakeOutlet(dom.window.document.getElementById('main')!, 'main:one'),
+      path => path.startsWith('/main/'),
+    )
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), history)
     pages.register('chatroom', { id: 'room', title: { key: 'room' } }, ({ container, params }) => {
       container.textContent = `room:${String(params.roomId)}`
@@ -444,11 +584,15 @@ describe('NavigationRegistry', () => {
 
     await navigation.startHistoryProjection()
     let newRoomActivations = 0
-    dom.window.document.querySelector('button')?.addEventListener('click', () => { newRoomActivations += 1 })
+    dom.window.document.querySelector('button')?.addEventListener('click', () => {
+      newRoomActivations += 1
+    })
     activatePlaygroundReviewNavigation(dom.window.document, 'chatroom:chatroom')
 
     expect(history.snapshot()).toMatchObject({ entry: { routeId: 'chatroom:room', params: { roomId: 'room-1' } } })
-    expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')?.textContent).toContain('room:room-1')
+    expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')?.textContent).toContain(
+      'room:room-1',
+    )
     expect(newRoomActivations).toBe(0)
 
     await navigation.dispose()
@@ -464,30 +608,62 @@ describe('NavigationRegistry', () => {
     const original = new JSDOM('', { url: 'http://127.0.0.1/' })
     const originalHistory = new BrowserRouteHistoryAdapter(original.window as unknown as Window, true)
     originalHistory.push(Object.freeze({
-      schemaVersion: 1, owner: 'chatroom', routeId: 'chatroom:room', outlet: 'main',
-      path: '/main/chatroom/room-1', params: Object.freeze({ roomId: 'room-1' }),
+      schemaVersion: 1,
+      owner: 'chatroom',
+      routeId: 'chatroom:room',
+      outlet: 'main',
+      path: '/main/chatroom/room-1',
+      params: Object.freeze({ roomId: 'room-1' }),
     }))
     const originalState = original.window.history.state as { readonly key: string; readonly idx: number }
 
-    const dom = new JSDOM('<body><main id="main"></main><nav><div data-sidebar-item="chatroom:chatroom"><button class="cxsi-primary">New room</button></div></nav></body>', {
-      url: 'http://127.0.0.1/',
-    })
+    const dom = new JSDOM(
+      '<body><main id="main"></main><nav><div data-sidebar-item="chatroom:chatroom"><button class="cxsi-primary">New room</button></div></nav></body>',
+      {
+        url: 'http://127.0.0.1/',
+      },
+    )
     copySessionStorage(original.window.sessionStorage, dom.window.sessionStorage)
     dom.window.history.replaceState({ key: originalState.key, idx: originalState.idx }, '', '/')
     const history = new BrowserRouteHistoryAdapter(dom.window as unknown as Window, true)
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
-    outlets.declare({
-      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'portal', contextPolicy: 'semantic',
-    }, new FakeOutlet(dom.window.document.getElementById('main')!, 'main:one'), path => path.startsWith('/main/'))
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'main',
+        authority: 'host-adapter',
+        scope: 'main',
+        preferredPlacement: 'portal',
+        contextPolicy: 'semantic',
+      },
+      new FakeOutlet(dom.window.document.getElementById('main')!, 'main:one'),
+      path => path.startsWith('/main/'),
+    )
     let accessState: 'pending' | 'allowed' | 'denied' | 'stale' = 'pending'
-    const accessDecision = () => accessState === 'allowed'
-      ? { policy: 'allow' as const, effectivePolicy: 'allow' as const, authorized: true }
-      : accessState === 'pending'
-        ? { policy: 'inherit' as const, effectivePolicy: 'deny' as const, authorized: false, reason: 'permission.review-pending' }
+    const accessDecision = () =>
+      accessState === 'allowed'
+        ? { policy: 'allow' as const, effectivePolicy: 'allow' as const, authorized: true }
+        : accessState === 'pending'
+        ? {
+          policy: 'inherit' as const,
+          effectivePolicy: 'deny' as const,
+          authorized: false,
+          reason: 'permission.review-pending',
+        }
         : accessState === 'denied'
-          ? { policy: 'deny' as const, effectivePolicy: 'deny' as const, authorized: false, reason: 'permission.denied-persistent' }
-          : { policy: 'inherit' as const, effectivePolicy: 'deny' as const, authorized: false, reason: 'permission.identity-unavailable' }
+        ? {
+          policy: 'deny' as const,
+          effectivePolicy: 'deny' as const,
+          authorized: false,
+          reason: 'permission.denied-persistent',
+        }
+        : {
+          policy: 'inherit' as const,
+          effectivePolicy: 'deny' as const,
+          authorized: false,
+          reason: 'permission.identity-unavailable',
+        }
     const access: ExtensionPointAccessResolver = {
       decision: () => accessDecision(),
       surfaceAnchorSupport: () => ({ supported: true }),
@@ -505,38 +681,60 @@ describe('NavigationRegistry', () => {
 
     await navigation.startHistoryProjection()
     let newRoomActivations = 0
-    dom.window.document.querySelector('button')?.addEventListener('click', () => { newRoomActivations += 1 })
+    dom.window.document.querySelector('button')?.addEventListener('click', () => {
+      newRoomActivations += 1
+    })
     activatePlaygroundReviewNavigation(dom.window.document, 'chatroom:chatroom')
-    expect(history.snapshot()).toMatchObject({ entry: { owner: 'chatroom', routeId: 'chatroom:room', params: { roomId: 'room-1' } } })
+    expect(history.snapshot()).toMatchObject({
+      entry: { owner: 'chatroom', routeId: 'chatroom:room', params: { roomId: 'room-1' } },
+    })
     expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')).toBeNull()
     expect(newRoomActivations).toBe(0)
 
     accessState = 'allowed'
     await navigation.invalidatePointPolicies()
-    expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')?.textContent).toContain('room:room-1')
+    expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')?.textContent).toContain(
+      'room:room-1',
+    )
 
     accessState = 'denied'
     await navigation.invalidatePointPolicies()
     expect(history.snapshot().entry).toBeUndefined()
     expect(dom.window.document.querySelector('[data-cordisx-page="chatroom:room"]')).toBeNull()
 
-    dom.window.history.pushState({
-      __cordisxRouteV1: {
-        schemaVersion: 1, owner: 'foreign', routeId: 'foreign:room', outlet: 'main',
-        path: '/main/chatroom/room-1', params: { roomId: 'room-1' },
+    dom.window.history.pushState(
+      {
+        __cordisxRouteV1: {
+          schemaVersion: 1,
+          owner: 'foreign',
+          routeId: 'foreign:room',
+          outlet: 'main',
+          path: '/main/chatroom/room-1',
+          params: { roomId: 'room-1' },
+        },
       },
-    }, '', '/')
+      '',
+      '/',
+    )
     await settle()
     await navigation.settled()
     expect(history.snapshot().entry).toBeUndefined()
 
     accessState = 'stale'
-    dom.window.history.pushState({
-      __cordisxRouteV1: {
-        schemaVersion: 1, owner: 'chatroom', routeId: 'chatroom:room', outlet: 'main',
-        path: '/main/chatroom/room-1', params: { roomId: 'room-1' },
+    dom.window.history.pushState(
+      {
+        __cordisxRouteV1: {
+          schemaVersion: 1,
+          owner: 'chatroom',
+          routeId: 'chatroom:room',
+          outlet: 'main',
+          path: '/main/chatroom/room-1',
+          params: { roomId: 'room-1' },
+        },
       },
-    }, '', '/')
+      '',
+      '/',
+    )
     await settle()
     await navigation.settled()
     expect(history.snapshot().entry).toBeUndefined()
@@ -555,17 +753,30 @@ describe('NavigationRegistry', () => {
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
     const controller = new FakeOutlet(dom.window.document.getElementById('one')!)
-    outlets.declare({
-      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'absolute', contextPolicy: 'semantic',
-    }, controller, path => path.startsWith('/main/'))
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'main',
+        authority: 'host-adapter',
+        scope: 'main',
+        preferredPlacement: 'absolute',
+        contextPolicy: 'semantic',
+      },
+      controller,
+      path => path.startsWith('/main/'),
+    )
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     let mounts = 0
     let cleanups = 0
     let aborted = false
     pages.register('demo', { id: 'analytics', title: { key: 'title' } }, (context) => {
       mounts += 1
-      context.signal.addEventListener('abort', () => { aborted = true })
-      context.localization.effect(() => () => { cleanups += 1 })
+      context.signal.addEventListener('abort', () => {
+        aborted = true
+      })
+      context.localization.effect(() => () => {
+        cleanups += 1
+      })
       const state = context.document.createElement('input')
       state.value = 'preserved'
       context.container.append(state)
@@ -598,41 +809,74 @@ describe('NavigationRegistry', () => {
   })
 
   it('uses Codex session history for back/close without changing the native URL and rejects stale session routes', async () => {
-    const dom = new JSDOM('<body><main id="app"></main><main id="session"></main></body>', { url: 'https://example.test/native' })
+    const dom = new JSDOM('<body><main id="app"></main><main id="session"></main></body>', {
+      url: 'https://example.test/native',
+    })
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
     const app = new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer')
     const session = new FakeOutlet(dom.window.document.getElementById('session')!, 'session:one', 'one')
-    outlets.declare({
-      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
-    }, app, path => !path.startsWith('/main/') && !path.startsWith('/sessions/'))
-    outlets.declare({
-      schemaVersion: 1, id: 'session.content', authority: 'host-adapter', scope: 'session', preferredPlacement: 'absolute', contextPolicy: 'semantic',
-    }, session, path => path.startsWith('/sessions/:sessionId/'))
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'app',
+        authority: 'host-adapter',
+        scope: 'renderer',
+        preferredPlacement: 'fixed',
+        contextPolicy: 'generation',
+      },
+      app,
+      path => !path.startsWith('/main/') && !path.startsWith('/sessions/'),
+    )
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'session.content',
+        authority: 'host-adapter',
+        scope: 'session',
+        preferredPlacement: 'absolute',
+        contextPolicy: 'semantic',
+      },
+      session,
+      path => path.startsWith('/sessions/:sessionId/'),
+    )
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     pages.register('demo', { id: 'first', title: { key: 'first' }, icon: 'host:info' }, () => undefined)
     pages.register('demo', { id: 'second', title: { key: 'second' }, icon: 'host:analytics' }, () => undefined)
     pages.register('demo', { id: 'session', title: { key: 'session' } }, () => undefined)
     navigation.register('demo', { id: 'first', path: '/first', outlet: 'app', page: 'first' })
     navigation.register('demo', { id: 'second', path: '/second', outlet: 'app', page: 'second' })
-    navigation.register('demo', { id: 'session', path: '/sessions/:sessionId/files', outlet: 'session.content', page: 'session' })
+    navigation.register('demo', {
+      id: 'session',
+      path: '/sessions/:sessionId/files',
+      outlet: 'session.content',
+      page: 'session',
+    })
 
     await navigation.navigate('demo', { id: 'first' })
     expect(dom.window.document.querySelector('[data-cordisx-page-leading] [data-host-icon="host:info"]')).toBeNull()
     expect(dom.window.document.querySelector('[data-cordisx-page-chrome] button[aria-label="Back"]')).not.toBeNull()
     await navigation.navigate('demo', { id: 'second' })
-    const back = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-page-leading] button[aria-label="Back"]')!
+    const back = dom.window.document.querySelector<HTMLButtonElement>(
+      '[data-cordisx-page-leading] button[aria-label="Back"]',
+    )!
     expect(back).not.toBeNull()
-    expect(dom.window.document.querySelector('[data-cordisx-page-leading] [data-host-icon="host:analytics"]')).toBeNull()
+    expect(dom.window.document.querySelector('[data-cordisx-page-leading] [data-host-icon="host:analytics"]'))
+      .toBeNull()
     expect(dom.window.location.href).toBe('https://example.test/native')
     back.click()
     await settle()
     expect(navigation.snapshot().outlets.find(item => item.id === 'app')?.activeRoute).toBe('demo:first')
     await navigation.close('demo', 'app')
     expect(app.hides).toBe(1)
-    await expect(navigation.navigate('demo', { id: 'session', params: { sessionId: 'stale' } })).rejects.toThrow(/does not match native session one/)
+    await expect(navigation.navigate('demo', { id: 'session', params: { sessionId: 'stale' } })).rejects.toThrow(
+      /does not match native session one/,
+    )
     await navigation.navigate('demo', { id: 'session', params: { sessionId: 'one' } })
-    expect(navigation.match('session.content', '/sessions/one/files')).toEqual({ routeId: 'demo:session', params: { sessionId: 'one' } })
+    expect(navigation.match('session.content', '/sessions/one/files')).toEqual({
+      routeId: 'demo:session',
+      params: { sessionId: 'one' },
+    })
     await navigation.dispose()
     pages.dispose()
     outlets.dispose()
@@ -649,19 +893,34 @@ describe('NavigationRegistry', () => {
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
     const controller = new FakeOutlet(dom.window.document.getElementById('session')!, 'session:one', 'one')
-    outlets.declare({
-      schemaVersion: 1, id: 'session.content', authority: 'host-adapter', scope: 'session', preferredPlacement: 'absolute', contextPolicy: 'semantic',
-    }, controller, path => path.startsWith('/sessions/:sessionId/'))
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'session.content',
+        authority: 'host-adapter',
+        scope: 'session',
+        preferredPlacement: 'absolute',
+        contextPolicy: 'semantic',
+      },
+      controller,
+      path => path.startsWith('/sessions/:sessionId/'),
+    )
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     pages.register('demo', {
-      id: 'trace', title: { key: 'trace', fallback: 'Agent Trace' }, icon: 'host:history', chrome: 'body-only',
+      id: 'trace',
+      title: { key: 'trace', fallback: 'Agent Trace' },
+      icon: 'host:history',
+      chrome: 'body-only',
     }, ({ container }) => {
       const bodyButton = container.ownerDocument.createElement('button')
       bodyButton.textContent = 'Timeline body'
       container.append(bodyButton)
     })
     navigation.register('demo', {
-      id: 'trace', path: '/sessions/:sessionId/trace', outlet: 'session.content', page: 'trace',
+      id: 'trace',
+      path: '/sessions/:sessionId/trace',
+      outlet: 'session.content',
+      page: 'trace',
     })
     const trigger = dom.window.document.getElementById('trigger') as HTMLButtonElement
     const reference = { id: 'trace', params: { sessionId: 'one' } } as const
@@ -669,10 +928,13 @@ describe('NavigationRegistry', () => {
     expect(navigation.routeProjection('demo', reference)).toMatchObject({ active: false, presented: false })
     await navigation.toggleFromSurface('demo', reference, 'session.header.actions', 'demo:trace', trigger)
     expect(navigation.routeProjection('demo', reference)).toMatchObject({
-      active: true, presented: true, outlet: 'session.content',
+      active: true,
+      presented: true,
+      outlet: 'session.content',
     })
     expect(navigation.routeProjection('demo', { id: 'trace', params: { sessionId: 'two' } })).toMatchObject({
-      active: false, presented: false,
+      active: false,
+      presented: false,
     })
     const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="demo:trace"]')!
     expect(page.dataset.cordisxPageChromePolicy).toBe('body-only')
@@ -685,9 +947,13 @@ describe('NavigationRegistry', () => {
     expect(dom.window.document.getElementById('native-thread')?.textContent).toBe('native')
 
     page.querySelector('button')!.focus()
-    page.querySelector('button')!.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
-      key: 'Escape', bubbles: true, cancelable: true,
-    }))
+    page.querySelector('button')!.dispatchEvent(
+      new dom.window.KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
     await navigation.settled()
     expect(navigation.routeProjection('demo', reference)).toMatchObject({ active: false, presented: false })
     expect(dom.window.document.activeElement).toBe(trigger)
@@ -698,7 +964,11 @@ describe('NavigationRegistry', () => {
     expect(navigation.routeProjection('demo', reference)).toMatchObject({ active: false, presented: false })
     expect(dom.window.document.activeElement).toBe(trigger)
     await expect(navigation.toggleFromSurface(
-      'demo', { id: 'trace', params: { sessionId: 'two' } }, 'session.header.actions', 'demo:trace', trigger,
+      'demo',
+      { id: 'trace', params: { sessionId: 'two' } },
+      'session.header.actions',
+      'demo:trace',
+      trigger,
     )).rejects.toThrow(/does not match native session one/)
 
     await navigation.dispose()
@@ -708,21 +978,28 @@ describe('NavigationRegistry', () => {
   })
 
   it('mounts a body-only manager settings page through attributed access checks and aborts before dispose', async () => {
-    const dom = new JSDOM('<body><main id="logical"></main><section id="panel" role="tabpanel"><div id="body"></div></section></body>', {
-      url: 'https://codex.local/native',
-    })
+    const dom = new JSDOM(
+      '<body><main id="logical"></main><section id="panel" role="tabpanel"><div id="body"></div></section></body>',
+      {
+        url: 'https://codex.local/native',
+      },
+    )
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
     const controller = new FakeOutlet(dom.window.document.getElementById('logical')!, 'manager:generation')
-    outlets.declare({
-      schemaVersion: 1,
-      id: 'manager.settings.content',
-      authority: 'host-adapter',
-      scope: 'manager-settings',
-      preferredPlacement: 'portal',
-      contextPolicy: 'generation',
-      presentationGroup: 'manager-settings',
-    }, controller, path => path.startsWith('/manager/settings/'))
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'manager.settings.content',
+        authority: 'host-adapter',
+        scope: 'manager-settings',
+        preferredPlacement: 'portal',
+        contextPolicy: 'generation',
+        presentationGroup: 'manager-settings',
+      },
+      controller,
+      path => path.startsWith('/manager/settings/'),
+    )
     const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     descriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
@@ -733,38 +1010,62 @@ describe('NavigationRegistry', () => {
     navigation.setAccessResolver(broker)
     const events: string[] = []
     pages.register('demo', {
-      id: 'settings', title: { key: 'settings' }, chrome: 'body-only', localeNamespace: 'demo',
+      id: 'settings',
+      title: { key: 'settings' },
+      chrome: 'body-only',
+      localeNamespace: 'demo',
     }, (context) => {
       events.push('mount')
       context.signal.addEventListener('abort', () => events.push('abort'), { once: true })
-      context.localization.effect(() => () => { events.push('effect-dispose') })
+      context.localization.effect(() => () => {
+        events.push('effect-dispose')
+      })
       const input = context.document.createElement('input')
       input.dataset.pluginSettingsInput = 'true'
       context.container.append(input)
-      return () => { events.push('page-dispose') }
+      return () => {
+        events.push('page-dispose')
+      }
     })
     navigation.register('demo', {
-      id: 'settings', path: '/manager/settings/demo', outlet: 'manager.settings.content', page: 'settings',
+      id: 'settings',
+      path: '/manager/settings/demo',
+      outlet: 'manager.settings.content',
+      page: 'settings',
     })
 
     const body = dom.window.document.getElementById('body')!
     const mount = await navigation.mountManagerSettings('demo', { id: 'settings' }, 'demo:settings', body)
-    expect(mount).toMatchObject({ owner: 'demo', contributionId: 'demo:settings', routeId: 'demo:settings', pageId: 'demo:settings' })
-    expect(body.querySelector('[data-cordisx-settings-page="demo:settings"] [data-plugin-settings-input]')).not.toBeNull()
+    expect(mount).toMatchObject({
+      owner: 'demo',
+      contributionId: 'demo:settings',
+      routeId: 'demo:settings',
+      pageId: 'demo:settings',
+    })
+    expect(body.querySelector('[data-cordisx-settings-page="demo:settings"] [data-plugin-settings-input]')).not
+      .toBeNull()
     expect(body.querySelector('[data-cordisx-page-chrome]')).toBeNull()
     expect(body.closest('[role="tabpanel"]')?.getAttribute('role')).toBe('tabpanel')
     expect(dom.window.location.href).toBe('https://codex.local/native')
     expect(broker.accessDiagnostics().map(item => item.request.operation)).toEqual([
-      'surface.route.navigate', 'outlet.route.navigate', 'outlet.page.mount',
+      'surface.route.navigate',
+      'outlet.route.navigate',
+      'outlet.page.mount',
     ])
-    expect(broker.accessDiagnostics().every(item => item.request.identity.pluginId === 'demo'
-      && item.request.identity.source === identity.source
-      && item.request.generation === 'generation-one')).toBe(true)
+    expect(
+      broker.accessDiagnostics().every(item =>
+        item.request.identity.pluginId === 'demo'
+        && item.request.identity.source === identity.source
+        && item.request.generation === 'generation-one'
+      ),
+    ).toBe(true)
 
     await navigation.closeManagerSettings()
     expect(events).toEqual(['mount', 'abort', 'page-dispose', 'effect-dispose'])
     expect(body.children).toHaveLength(0)
-    expect(navigation.snapshot().outlets.find(item => item.id === 'manager.settings.content')).toMatchObject({ mounted: false })
+    expect(navigation.snapshot().outlets.find(item => item.id === 'manager.settings.content')).toMatchObject({
+      mounted: false,
+    })
 
     await navigation.dispose()
     broker.dispose()
@@ -780,25 +1081,67 @@ describe('NavigationRegistry', () => {
     const outlets = new OutletRegistry()
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     navigation.register('demo', {
-      id: 'pending', path: '/manager/settings/pending', outlet: 'manager.settings.content', page: 'pending',
+      id: 'pending',
+      path: '/manager/settings/pending',
+      outlet: 'manager.settings.content',
+      page: 'pending',
     })
-    expect(navigation.managerSettingsRoute('demo', 'pending')).toMatchObject({ state: 'pending', detail: expect.stringContaining('outlet') })
+    expect(navigation.managerSettingsRoute('demo', 'pending')).toMatchObject({
+      state: 'pending',
+      detail: expect.stringContaining('outlet'),
+    })
 
     const controller = new FakeOutlet(dom.window.document.getElementById('logical')!, 'manager:generation')
-    outlets.declare({
-      schemaVersion: 1, id: 'manager.settings.content', authority: 'host-adapter', scope: 'manager-settings',
-      preferredPlacement: 'portal', contextPolicy: 'generation', presentationGroup: 'manager-settings',
-    }, controller, path => path.startsWith('/manager/settings/'))
-    expect(navigation.managerSettingsRoute('demo', 'pending')).toMatchObject({ state: 'pending', detail: expect.stringContaining('page') })
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'manager.settings.content',
+        authority: 'host-adapter',
+        scope: 'manager-settings',
+        preferredPlacement: 'portal',
+        contextPolicy: 'generation',
+        presentationGroup: 'manager-settings',
+      },
+      controller,
+      path => path.startsWith('/manager/settings/'),
+    )
+    expect(navigation.managerSettingsRoute('demo', 'pending')).toMatchObject({
+      state: 'pending',
+      detail: expect.stringContaining('page'),
+    })
     pages.register('demo', { id: 'pending', title: { key: 'pending' } }, () => undefined)
-    expect(navigation.managerSettingsRoute('demo', 'pending')).toMatchObject({ state: 'invalid', detail: expect.stringContaining('body-only') })
+    expect(navigation.managerSettingsRoute('demo', 'pending')).toMatchObject({
+      state: 'invalid',
+      detail: expect.stringContaining('body-only'),
+    })
 
     pages.register('demo', { id: 'ready', title: { key: 'ready' }, chrome: 'body-only' }, () => undefined)
-    navigation.register('demo', { id: 'root', path: '/manager/settings', outlet: 'manager.settings.content', page: 'ready' })
-    expect(navigation.managerSettingsRoute('demo', 'root')).toMatchObject({ state: 'invalid', detail: expect.stringContaining('strictly below') })
-    navigation.register('demo', { id: 'first', path: '/manager/settings/shared', outlet: 'manager.settings.content', page: 'ready' })
-    navigation.register('other', { id: 'second', path: '/manager/settings/shared', outlet: 'manager.settings.content', page: 'ready' })
-    expect(navigation.managerSettingsRoute('demo', 'first')).toMatchObject({ state: 'invalid', detail: expect.stringContaining('conflicts') })
+    navigation.register('demo', {
+      id: 'root',
+      path: '/manager/settings',
+      outlet: 'manager.settings.content',
+      page: 'ready',
+    })
+    expect(navigation.managerSettingsRoute('demo', 'root')).toMatchObject({
+      state: 'invalid',
+      detail: expect.stringContaining('strictly below'),
+    })
+    navigation.register('demo', {
+      id: 'first',
+      path: '/manager/settings/shared',
+      outlet: 'manager.settings.content',
+      page: 'ready',
+    })
+    navigation.register('other', {
+      id: 'second',
+      path: '/manager/settings/shared',
+      outlet: 'manager.settings.content',
+      page: 'ready',
+    })
+    expect(navigation.managerSettingsRoute('demo', 'first')).toMatchObject({
+      state: 'invalid',
+      detail: expect.stringContaining('conflicts'),
+    })
 
     const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
@@ -810,10 +1153,23 @@ describe('NavigationRegistry', () => {
     navigation.setAccessResolver(broker)
     pages.register('denied', { id: 'settings', title: { key: 'settings' }, chrome: 'body-only' }, () => undefined)
     navigation.register('denied', {
-      id: 'settings', path: '/manager/settings/denied', outlet: 'manager.settings.content', page: 'settings',
+      id: 'settings',
+      path: '/manager/settings/denied',
+      outlet: 'manager.settings.content',
+      page: 'settings',
     })
-    expect(navigation.managerSettingsRoute('denied', 'settings')).toMatchObject({ state: 'invalid', detail: expect.stringContaining('denied') })
-    await expect(navigation.mountManagerSettings('denied', { id: 'settings' }, 'denied:settings', dom.window.document.getElementById('panel')!))
+    expect(navigation.managerSettingsRoute('denied', 'settings')).toMatchObject({
+      state: 'invalid',
+      detail: expect.stringContaining('denied'),
+    })
+    await expect(
+      navigation.mountManagerSettings(
+        'denied',
+        { id: 'settings' },
+        'denied:settings',
+        dom.window.document.getElementById('panel')!,
+      ),
+    )
       .rejects.toThrow(/denied/)
 
     await navigation.dispose()
@@ -830,12 +1186,32 @@ describe('NavigationRegistry', () => {
     const outlets = new OutletRegistry()
     const main = new FakeOutlet(dom.window.document.getElementById('main')!, 'main:one')
     const app = new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer')
-    outlets.declare({
-      schemaVersion: 1, id: 'main', authority: 'host-adapter', scope: 'main', preferredPlacement: 'portal', contextPolicy: 'semantic', presentationGroup: 'primary',
-    }, main, path => path.startsWith('/main/'))
-    outlets.declare({
-      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation', presentationGroup: 'primary',
-    }, app, path => !path.startsWith('/main/'))
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'main',
+        authority: 'host-adapter',
+        scope: 'main',
+        preferredPlacement: 'portal',
+        contextPolicy: 'semantic',
+        presentationGroup: 'primary',
+      },
+      main,
+      path => path.startsWith('/main/'),
+    )
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'app',
+        authority: 'host-adapter',
+        scope: 'renderer',
+        preferredPlacement: 'fixed',
+        contextPolicy: 'generation',
+        presentationGroup: 'primary',
+      },
+      app,
+      path => !path.startsWith('/main/'),
+    )
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     pages.register('demo', { id: 'main', title: { key: 'main' } }, ({ container }) => {
       const input = container.ownerDocument.createElement('input')
@@ -850,7 +1226,8 @@ describe('NavigationRegistry', () => {
     const mainPage = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="demo:main"]')!
     await navigation.navigate('demo', { id: 'app' })
     expect(navigation.snapshot().outlets.find(item => item.id === 'main')).toMatchObject({
-      mounted: false, presentation: 'inactive',
+      mounted: false,
+      presentation: 'inactive',
     })
     expect(navigation.snapshot().outlets.find(item => item.id === 'app')).toMatchObject({ presentation: 'presented' })
     expect(mainPage.isConnected).toBe(false)
@@ -886,16 +1263,36 @@ describe('NavigationRegistry', () => {
     const commandRegistry = new CommandRegistry(broker)
     const commands = {
       hasFor: (owner: string, reference: { id: string }) => commandRegistry.has(owner, reference),
-      executeFor: (owner: string, reference: { id: string }, invocationKey?: string) => commandRegistry.execute(owner, reference, invocationKey),
+      executeFor: (owner: string, reference: { id: string }, invocationKey?: string) =>
+        commandRegistry.execute(owner, reference, invocationKey),
       subscribeInternal: (listener: () => void) => commandRegistry.subscribe(listener),
     }
     const controller = new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer')
-    outlets.declare({
-      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
-    }, controller, path => !path.startsWith('/main/') && !path.startsWith('/sessions/'))
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory(), undefined, broker, commands)
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'app',
+        authority: 'host-adapter',
+        scope: 'renderer',
+        preferredPlacement: 'fixed',
+        contextPolicy: 'generation',
+      },
+      controller,
+      path => !path.startsWith('/main/') && !path.startsWith('/sessions/'),
+    )
+    const navigation = new NavigationRegistry(
+      pages,
+      outlets,
+      fakeI18n(),
+      new TestCodexRouteHistory(),
+      undefined,
+      broker,
+      commands,
+    )
     let executions = 0
-    commandRegistry.register('demo', { id: 'refresh', title: { key: 'refresh', fallback: 'Refresh' } }, () => { executions += 1 })
+    commandRegistry.register('demo', { id: 'refresh', title: { key: 'refresh', fallback: 'Refresh' } }, () => {
+      executions += 1
+    })
     let bodyContainer: HTMLElement | undefined
     pages.register('demo', {
       id: 'overview',
@@ -909,7 +1306,9 @@ describe('NavigationRegistry', () => {
         icon: 'host:refresh',
         command: { id: 'refresh' },
       }],
-    }, ({ container }) => { bodyContainer = container })
+    }, ({ container }) => {
+      bodyContainer = container
+    })
     navigation.register('demo', { id: 'overview', path: '/overview', outlet: 'app', page: 'overview' })
 
     await navigation.navigate('demo', { id: 'overview' })
@@ -962,28 +1361,34 @@ describe('NavigationRegistry', () => {
 
   it('rejects arbitrary page-header render fields instead of exposing a DOM seat', () => {
     const pages = new PageRegistry()
-    expect(() => pages.register('demo', {
-      id: 'unsafe',
-      title: { key: 'unsafe' },
-      headerMount: () => undefined,
-    } as never, () => undefined)).toThrow(/unknown field headerMount/)
-    expect(() => pages.register('demo', {
-      id: 'unsafe-action',
-      title: { key: 'unsafe-action' },
-      headerActions: [{
+    expect(() =>
+      pages.register('demo', {
         id: 'unsafe',
-        label: { key: 'unsafe' },
-        icon: 'host:info',
-        command: { id: 'unsafe' },
-        children: [],
-      }],
-    } as never, () => undefined)).toThrow(/unknown field children/)
-    expect(() => pages.register('demo', {
-      id: 'body-only-header',
-      title: { key: 'body-only-header' },
-      chrome: 'body-only',
-      breadcrumbs: [],
-    }, () => undefined)).toThrow(/body-only page body-only-header cannot declare/)
+        title: { key: 'unsafe' },
+        headerMount: () => undefined,
+      } as never, () => undefined)
+    ).toThrow(/unknown field headerMount/)
+    expect(() =>
+      pages.register('demo', {
+        id: 'unsafe-action',
+        title: { key: 'unsafe-action' },
+        headerActions: [{
+          id: 'unsafe',
+          label: { key: 'unsafe' },
+          icon: 'host:info',
+          command: { id: 'unsafe' },
+          children: [],
+        }],
+      } as never, () => undefined)
+    ).toThrow(/unknown field children/)
+    expect(() =>
+      pages.register('demo', {
+        id: 'body-only-header',
+        title: { key: 'body-only-header' },
+        chrome: 'body-only',
+        breadcrumbs: [],
+      }, () => undefined)
+    ).toThrow(/body-only page body-only-header cannot declare/)
     pages.dispose()
   })
 
@@ -991,9 +1396,18 @@ describe('NavigationRegistry', () => {
     const dom = new JSDOM('<body><main id="app"></main></body>')
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
-    outlets.declare({
-      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
-    }, new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer'), path => path === '/trace')
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'app',
+        authority: 'host-adapter',
+        scope: 'renderer',
+        preferredPlacement: 'fixed',
+        contextPolicy: 'generation',
+      },
+      new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer'),
+      path => path === '/trace',
+    )
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     pages.register('demo', { id: 'trace', title: { key: 'trace' }, chrome: 'body-only' }, () => undefined)
     navigation.register('demo', { id: 'trace', path: '/trace', outlet: 'app', page: 'trace' })
@@ -1011,9 +1425,18 @@ describe('NavigationRegistry', () => {
     const dom = new JSDOM('<body><main></main></body>')
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
-    outlets.declare({
-      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
-    }, new FakeOutlet(dom.window.document.querySelector('main')!), () => true)
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'app',
+        authority: 'host-adapter',
+        scope: 'renderer',
+        preferredPlacement: 'fixed',
+        contextPolicy: 'generation',
+      },
+      new FakeOutlet(dom.window.document.querySelector('main')!),
+      () => true,
+    )
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     pages.register('one', { id: 'page', title: { key: 'page' } }, () => undefined)
     pages.register('two', { id: 'page', title: { key: 'page' } }, () => undefined)
@@ -1022,19 +1445,27 @@ describe('NavigationRegistry', () => {
     expect(navigation.snapshot().routes.every(route => !route.valid && route.error?.includes('conflicts'))).toBe(true)
     expect(navigation.match('app', '/conflict')).toBeUndefined()
     const panel = new FakeOutlet(dom.window.document.querySelector('main')!, 'panel:right')
-    outlets.declare({
-      schemaVersion: 1,
-      id: 'panel.right',
-      authority: 'host-adapter',
-      scope: 'panel',
-      preferredPlacement: 'portal',
-      contextPolicy: 'semantic',
-    }, panel, path => path.startsWith('/panels/right/'))
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'panel.right',
+        authority: 'host-adapter',
+        scope: 'panel',
+        preferredPlacement: 'portal',
+        contextPolicy: 'semantic',
+      },
+      panel,
+      path => path.startsWith('/panels/right/'),
+    )
     pages.register('panel-demo', { id: 'page', title: { key: 'page' } }, () => undefined)
     navigation.register('panel-demo', { id: 'route', path: '/panels/right/demo', outlet: 'panel.right', page: 'page' })
-    expect(navigation.snapshot().routes.find(route => route.qualifiedId === 'panel-demo:route')).toMatchObject({ valid: true })
+    expect(navigation.snapshot().routes.find(route => route.qualifiedId === 'panel-demo:route')).toMatchObject({
+      valid: true,
+    })
     navigation.register('panel-demo', { id: 'wrong-path', path: '/main/wrong', outlet: 'panel.right', page: 'page' })
-    expect(navigation.snapshot().routes.find(route => route.qualifiedId === 'panel-demo:wrong-path')?.error).toMatch(/incompatible/)
+    expect(navigation.snapshot().routes.find(route => route.qualifiedId === 'panel-demo:wrong-path')?.error).toMatch(
+      /incompatible/,
+    )
     void navigation.dispose()
     pages.dispose()
     outlets.dispose()
@@ -1049,20 +1480,40 @@ describe('NavigationRegistry', () => {
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
     const controller = new FakeOutlet(container, 'renderer')
-    outlets.declare({
-      schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation',
-    }, controller, path => !path.startsWith('/main/') && !path.startsWith('/sessions/'))
+    outlets.declare(
+      {
+        schemaVersion: 1,
+        id: 'app',
+        authority: 'host-adapter',
+        scope: 'renderer',
+        preferredPlacement: 'fixed',
+        contextPolicy: 'generation',
+      },
+      controller,
+      path => !path.startsWith('/main/') && !path.startsWith('/sessions/'),
+    )
     const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
     const broker = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore())
     const identity = { source: 'https://plugins.example/demo', id: 'demo' }
     broker.register(identity)
-    const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory(), undefined, broker)
+    const navigation = new NavigationRegistry(
+      pages,
+      outlets,
+      fakeI18n(),
+      new TestCodexRouteHistory(),
+      undefined,
+      broker,
+    )
     let aborted = false
     let disposed = 0
     pages.register('demo', { id: 'page', title: { key: 'page' } }, ({ signal }) => {
-      signal.addEventListener('abort', () => { aborted = true })
-      return () => { disposed += 1 }
+      signal.addEventListener('abort', () => {
+        aborted = true
+      })
+      return () => {
+        disposed += 1
+      }
     })
     navigation.register('demo', { id: 'route', path: '/demo', outlet: 'app', page: 'page' })
 
@@ -1074,7 +1525,8 @@ describe('NavigationRegistry', () => {
       authorized: true,
     })
     broker.setPolicy(identity, 'sidebar.navigation.items', 'deny')
-    await expect(navigation.navigateFromSurface('demo', { id: 'route' }, 'sidebar.navigation.items', 'demo:navigation')).rejects.toThrow(/denied/)
+    await expect(navigation.navigateFromSurface('demo', { id: 'route' }, 'sidebar.navigation.items', 'demo:navigation'))
+      .rejects.toThrow(/denied/)
     broker.setPolicy(identity, 'sidebar.navigation.items', 'inherit')
     const disposedBeforeOutletDeny = disposed
     const hidesBeforeOutletDeny = controller.hides
@@ -1085,14 +1537,18 @@ describe('NavigationRegistry', () => {
     expect(controller.hides).toBe(hidesBeforeOutletDeny + 1)
     expect(navigation.snapshot().routes[0]).toMatchObject({ valid: true, authorized: false, pointPolicy: 'deny' })
     expect(broker.accessDiagnostics()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ request: expect.objectContaining({ operation: 'outlet.route.navigate' }), authorized: false }),
+      expect.objectContaining({
+        request: expect.objectContaining({ operation: 'outlet.route.navigate' }),
+        authorized: false,
+      }),
     ]))
     expect(navigation.match('app', '/demo')).toBeUndefined()
     const shows = controller.shows
     await expect(navigation.navigate('demo', { id: 'route' })).rejects.toThrow(/denied/)
     expect(controller.shows).toBe(shows)
     expect(broker.accessDiagnostics().at(-1)).toMatchObject({
-      request: { operation: 'outlet.route.navigate' }, authorized: false,
+      request: { operation: 'outlet.route.navigate' },
+      authorized: false,
     })
     expect(native.parentElement).toBe(nativeParent)
     expect(native.isConnected).toBe(true)

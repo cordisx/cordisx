@@ -2,9 +2,11 @@ export const name = 'channel-runtime'
 export const inject = ['channel']
 
 function validateConfig(value) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)
+  if (
+    value === null || typeof value !== 'object' || Array.isArray(value)
     || value.contract !== 'cordisx.channel-service-config/v1' || value.schemaVersion !== 1
-    || !Array.isArray(value.connections)) {
+    || !Array.isArray(value.connections)
+  ) {
     throw new TypeError('Channel service configuration is invalid')
   }
   return value

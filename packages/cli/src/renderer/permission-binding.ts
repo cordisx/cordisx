@@ -1,16 +1,17 @@
+import { CORDISX_PLATFORM_CAPABILITIES, type CordisXPermissionPolicyRecordV1 } from '../platform-contracts.js'
+import type {
+  CordisXPermissionPolicyRecordV2,
+  CordisXPermissionPolicyRecordV3,
+  CordisXPermissionPolicyRecordV4,
+} from '../permission-contracts.js'
 import {
-  CORDISX_PLATFORM_CAPABILITIES,
-  type CordisXPermissionPolicyRecordV1,
-} from '../platform-contracts.js'
-import type { CordisXPermissionPolicyRecordV2, CordisXPermissionPolicyRecordV3, CordisXPermissionPolicyRecordV4 } from '../permission-contracts.js'
-import {
+  type CordisXPersistedPermissionPolicyRecord,
   isPermissionPolicyRecordV2,
   isPermissionPolicyRecordV3,
   isPermissionPolicyRecordV4,
   normalizePersistedPermissionPolicyRecord,
   persistedPermissionMigrationKey,
   persistedPermissionRecordKey,
-  type CordisXPersistedPermissionPolicyRecord,
 } from '../permission-persistence.js'
 import type { LegacyStoredPolicy, PermissionPolicyStore } from './platform.js'
 
@@ -72,7 +73,12 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
   }
 
   read(): readonly CordisXPermissionPolicyRecordV1[] {
-    return clone([...this.records.values()].filter(record => !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record) && !isPermissionPolicyRecordV4(record)))
+    return clone(
+      [...this.records.values()].filter(record =>
+        !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record)
+        && !isPermissionPolicyRecordV4(record)
+      ),
+    )
   }
 
   readV2(): readonly CordisXPermissionPolicyRecordV2[] {
@@ -110,10 +116,12 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
   private async writeRecords(records: readonly CordisXPersistedPermissionPolicyRecord[]): Promise<void> {
     const normalized = records.map(item => normalizePersistedPermissionPolicyRecord(item))
     const persisted = await this.request(normalized)
-    if (persisted.length !== normalized.length || persisted.some((record, index) => (
-      persistedPermissionRecordKey(record) !== persistedPermissionRecordKey(normalized[index]!)
-      || record.policy !== normalized[index]!.policy
-    ))) {
+    if (
+      persisted.length !== normalized.length || persisted.some((record, index) => (
+        persistedPermissionRecordKey(record) !== persistedPermissionRecordKey(normalized[index]!)
+        || record.policy !== normalized[index]!.policy
+      ))
+    ) {
       throw new Error('Permission policy persistence returned mismatched records')
     }
     const migrations = new Set(persisted.filter(isPermissionPolicyRecordV2).map(persistedPermissionMigrationKey))
@@ -191,7 +199,11 @@ export class BindingPermissionPolicyStore implements PermissionPolicyStore {
 
   private readonly receive = (payload: string): void => {
     let response: PermissionResponse
-    try { response = JSON.parse(payload) as PermissionResponse } catch { return }
+    try {
+      response = JSON.parse(payload) as PermissionResponse
+    } catch {
+      return
+    }
     if (typeof response.requestId !== 'string') return
     const pending = this.pending.get(response.requestId)
     if (pending === undefined) return

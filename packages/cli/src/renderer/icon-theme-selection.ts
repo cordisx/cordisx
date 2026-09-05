@@ -1,8 +1,5 @@
 import type { HomeConfigIconThemePreference } from '../config/home-config.js'
-import {
-  IconThemeRegistry,
-  type RedactedIconThemeProvider,
-} from './icon-theme-registry.js'
+import { IconThemeRegistry, type RedactedIconThemeProvider } from './icon-theme-registry.js'
 
 export interface IconThemePreferenceWriter {
   persist(
@@ -25,17 +22,21 @@ export function reconcileIconThemePreference(
   preference: IconThemeSelectionCandidate,
 ): void {
   const snapshot = registry.redactedSnapshot()
-  const target = snapshot.providers.find(provider => provider.providerId === preference.providerId
+  const target = snapshot.providers.find(provider =>
+    provider.providerId === preference.providerId
     && provider.namespace === preference.namespace
     && provider.providerVersion === preference.providerVersion
     && provider.providerGeneration === preference.providerGeneration
-    && (provider.status === 'ready' || provider.status === 'active'))
+    && (provider.status === 'ready' || provider.status === 'active')
+  )
     ?? snapshot.providers.find(provider => provider.providerId === 'builtin:reicon')
   if (target === undefined) return
   const selected = snapshot.selected
-  if (selected.providerId === target.providerId && selected.namespace === target.namespace
+  if (
+    selected.providerId === target.providerId && selected.namespace === target.namespace
     && selected.providerVersion === target.providerVersion
-    && selected.providerGeneration === target.providerGeneration) return
+    && selected.providerGeneration === target.providerGeneration
+  ) return
   const result = registry.selectProvider(
     `iconresync_${String(Date.now()).padStart(16, '0')}`,
     registry.selection().profileRevision,
@@ -44,12 +45,14 @@ export function reconcileIconThemePreference(
   )
   if (result.outcome === 'applied' || target.providerId === 'builtin:reicon') return
   const builtin = registry.redactedSnapshot().providers.find(provider => provider.providerId === 'builtin:reicon')
-  if (builtin !== undefined) registry.selectProvider(
-    `iconresync_default_${String(Date.now()).padStart(16, '0')}`,
-    registry.selection().profileRevision,
-    hostGeneration,
-    builtin,
-  )
+  if (builtin !== undefined) {
+    registry.selectProvider(
+      `iconresync_default_${String(Date.now()).padStart(16, '0')}`,
+      registry.selection().profileRevision,
+      hostGeneration,
+      builtin,
+    )
+  }
 }
 
 /** Host-private selection transaction; public providers never receive persistence authority. */
@@ -67,7 +70,9 @@ export async function selectAndPersistIconTheme(
     hostGeneration,
     candidate,
   )
-  if (result.outcome !== 'applied') throw new Error(`icon theme selection failed: ${result.error?.code ?? result.outcome}`)
+  if (result.outcome !== 'applied') {
+    throw new Error(`icon theme selection failed: ${result.error?.code ?? result.outcome}`)
+  }
   if (writer === undefined) return
   try {
     await writer.persist(expectedProfileRevision, result.profileRevision, {
@@ -91,12 +96,14 @@ export async function selectAndPersistIconTheme(
       )
       if (restored.outcome !== 'applied') {
         const builtin = registry.redactedSnapshot().providers.find(provider => provider.providerId === 'builtin:reicon')
-        if (builtin !== undefined) registry.selectProvider(
-          `icondefault_${String(Date.now()).padStart(16, '0')}`,
-          registry.selection().profileRevision,
-          hostGeneration,
-          builtin,
-        )
+        if (builtin !== undefined) {
+          registry.selectProvider(
+            `icondefault_${String(Date.now()).padStart(16, '0')}`,
+            registry.selection().profileRevision,
+            hostGeneration,
+            builtin,
+          )
+        }
       }
     }
     throw error

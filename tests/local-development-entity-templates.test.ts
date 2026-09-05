@@ -7,10 +7,14 @@ import { buildLocalDevelopmentPlugin } from '../packages/cli/src/launcher/develo
 import { entityTreeDigest } from '../packages/cli/src/launcher/entity-directory.js'
 import { createPlaygroundSession } from '../packages/cli/src/playground/session.js'
 
-const PACKAGE_SCHEMA_V5 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v5.schema.json'
-const PACKAGE_SCHEMA_V6 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v6.schema.json'
-const ENTITY_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-file.v1.schema.json'
-const RUNTIME_SCHEMA_V5 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v5.schema.json'
+const PACKAGE_SCHEMA_V5 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v5.schema.json'
+const PACKAGE_SCHEMA_V6 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v6.schema.json'
+const ENTITY_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-file.v1.schema.json'
+const RUNTIME_SCHEMA_V5 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v5.schema.json'
 const roots = new Set<string>()
 
 afterEach(async () => {
@@ -35,33 +39,79 @@ async function fixture(): Promise<{
   await mkdir(path.dirname(entry), { recursive: true })
   await mkdir(path.dirname(promptPath), { recursive: true })
   await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'chatroom-fixture', version: '1.0.0' }))
-  await writeFile(entry, `
+  await writeFile(
+    entry,
+    `
 export const manifest = {
   $schema: '${RUNTIME_SCHEMA_V5}', schemaVersion: 5, id: 'chatroom', capabilities: [], services: [],
 }
 export function apply() {}
-`)
-  await writeFile(entityPath, `${JSON.stringify({
-    $schema: ENTITY_SCHEMA_V1,
-    contract: 'cordisx.entity-file/v1', schemaVersion: 1, agentId: 'lead', name: 'Lead',
-    inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
-    promptSections: [{ sectionId: 'role', kind: 'role', source: { kind: 'markdown', path: './prompts/role.md' } }],
-  }, null, 2)}\n`)
+`,
+  )
+  await writeFile(
+    entityPath,
+    `${
+      JSON.stringify(
+        {
+          $schema: ENTITY_SCHEMA_V1,
+          contract: 'cordisx.entity-file/v1',
+          schemaVersion: 1,
+          agentId: 'lead',
+          name: 'Lead',
+          inherit: {
+            promptSections: 'none',
+            rules: 'none',
+            skills: 'none',
+            tools: 'none',
+            mcpServers: 'none',
+            runtimeDefaults: 'none',
+          },
+          promptSections: [{
+            sectionId: 'role',
+            kind: 'role',
+            source: { kind: 'markdown', path: './prompts/role.md' },
+          }],
+        },
+        null,
+        2,
+      )
+    }\n`,
+  )
   await writeFile(promptPath, 'Lead role from package.\n')
-  await writeFile(configPath, JSON.stringify({
-    version: 1, providers: [], plugins: [{ id: 'chatroom', entry: './src/chatroom.ts', enabled: true, config: {} }],
-  }))
+  await writeFile(
+    configPath,
+    JSON.stringify({
+      version: 1,
+      providers: [],
+      plugins: [{ id: 'chatroom', entry: './src/chatroom.ts', enabled: true, config: {} }],
+    }),
+  )
   const writeManifest = async (digest: `sha256:${string}`, version: 4 | 5 | 6 = 5): Promise<void> => {
-    await writeFile(path.join(root, 'cordisx-package.json'), `${JSON.stringify({
-      $schema: version === 6 ? PACKAGE_SCHEMA_V6 : version === 5 ? PACKAGE_SCHEMA_V5 : 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v4.schema.json',
-      schemaVersion: version,
-      id: 'chatroom', version: '1.0.0', entry: './src/chatroom.ts',
-      distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
-      compatibility: { runtimeAbi: 1, protocolSchemas: [RUNTIME_SCHEMA_V5, ENTITY_SCHEMA_V1] },
-      dependencies: [],
-      runtimeManifest: { path: './runtime.json', schema: RUNTIME_SCHEMA_V5, digest: `sha256:${'0'.repeat(64)}` },
-      entityTemplates: [{ agentId: 'lead', entityPath: './entities/lead/entity.json', digest }],
-    }, null, 2)}\n`)
+    await writeFile(
+      path.join(root, 'cordisx-package.json'),
+      `${
+        JSON.stringify(
+          {
+            $schema: version === 6
+              ? PACKAGE_SCHEMA_V6
+              : version === 5
+              ? PACKAGE_SCHEMA_V5
+              : 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v4.schema.json',
+            schemaVersion: version,
+            id: 'chatroom',
+            version: '1.0.0',
+            entry: './src/chatroom.ts',
+            distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
+            compatibility: { runtimeAbi: 1, protocolSchemas: [RUNTIME_SCHEMA_V5, ENTITY_SCHEMA_V1] },
+            dependencies: [],
+            runtimeManifest: { path: './runtime.json', schema: RUNTIME_SCHEMA_V5, digest: `sha256:${'0'.repeat(64)}` },
+            entityTemplates: [{ agentId: 'lead', entityPath: './entities/lead/entity.json', digest }],
+          },
+          null,
+          2,
+        )
+      }\n`,
+    )
   }
   return { root, entry, configPath, entityPath, promptPath, writeManifest }
 }
@@ -76,7 +126,9 @@ describe('local development package-v5 entity templates', () => {
 
     const first = await buildLocalDevelopmentPlugin(value.entry)
     expect(first.entityTemplates).toMatchObject([{ declaration: { agentId: 'lead', digest: firstEntityDigest } }])
-    expect(first.watchFiles).toEqual(expect.arrayContaining([value.entityPath, value.promptPath, path.join(value.root, 'cordisx-package.json')]))
+    expect(first.watchFiles).toEqual(
+      expect.arrayContaining([value.entityPath, value.promptPath, path.join(value.root, 'cordisx-package.json')]),
+    )
 
     const secondEntityText = entityText.replace('"name": "Lead"', '"name": "Lead Revised"')
     await writeFile(value.entityPath, secondEntityText)
@@ -95,7 +147,9 @@ describe('local development package-v5 entity templates', () => {
     expect(third.entityTemplates[0]?.declaration.digest).toBe(thirdEntityDigest)
 
     await value.writeManifest(thirdEntityDigest, 4)
-    await expect(buildLocalDevelopmentPlugin(value.entry)).rejects.toThrow(/require plugin-package\.v5, plugin-package\.v6, or plugin-package\.v7/)
+    await expect(buildLocalDevelopmentPlugin(value.entry)).rejects.toThrow(
+      /require plugin-package\.v5, plugin-package\.v6, or plugin-package\.v7/,
+    )
   })
 
   it('accepts package-v6 entity templates on the local development path', async () => {
@@ -115,7 +169,9 @@ describe('local development package-v5 entity templates', () => {
     await expect(buildLocalDevelopmentPlugin(value.entry)).rejects.toThrow(/digest mismatch/)
 
     const manifestPath = path.join(value.root, 'cordisx-package.json')
-    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as { entityTemplates: Array<Record<string, unknown>> }
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+      entityTemplates: Array<Record<string, unknown>>
+    }
     manifest.entityTemplates[0]!.entityPath = './entities/other/entity.json'
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
     await expect(buildLocalDevelopmentPlugin(value.entry)).rejects.toThrow(/invalid or duplicated/)

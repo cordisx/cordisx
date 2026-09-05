@@ -8,7 +8,12 @@ import {
 import type { CordisXInternalRendererBootstrap } from '../../packages/cli/src/renderer/runtime.js'
 
 const connectorIds = ['smoke.flow', 'smoke.unsubscribe', 'smoke.owner-replay', 'smoke.owner-live'] as const
-const pluginIds = ['connector-harness-flow', 'connector-harness-unsubscribe', 'connector-harness-owner-replay', 'connector-harness-owner-live'] as const
+const pluginIds = [
+  'connector-harness-flow',
+  'connector-harness-unsubscribe',
+  'connector-harness-owner-replay',
+  'connector-harness-owner-live',
+] as const
 
 function open(registration: CordisXConnectorRegistrationIdentity, commandId: string): CordisXConnectorCommand {
   return {
@@ -90,14 +95,19 @@ export const installConnectorProductionFixture: CordisXInternalRendererBootstrap
     }
     const values = pluginIds.map(id => status(id))
     const active = values.filter((value): value is string => value !== undefined)
-    const complete = active.length === 1 && active.every(value => value === 'passed' || value === 'denied' || value.startsWith('failed'))
+    const complete = active.length === 1
+      && active.every(value => value === 'passed' || value === 'denied' || value.startsWith('failed'))
     if (!complete && Date.now() < deadline) return
     stopped = true
     clearInterval(timer)
     const snapshot = connectors.snapshot()
     const passed = complete && active.every(value => value === 'passed' || value === 'denied')
     const flowPassed = status('connector-harness-flow') === 'passed'
-    const cancellationPassed = ['connector-harness-unsubscribe', 'connector-harness-owner-replay', 'connector-harness-owner-live']
+    const cancellationPassed = [
+      'connector-harness-unsubscribe',
+      'connector-harness-owner-replay',
+      'connector-harness-owner-live',
+    ]
       .some(id => status(id) === 'passed')
     publish({
       status: passed ? 'passed' : 'failed',

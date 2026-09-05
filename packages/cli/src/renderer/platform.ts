@@ -1,18 +1,18 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { AgentRuntimeCapability } from '@cordisx/protocol/agents/v1'
 import {
-  CORDISX_PLATFORM_CAPABILITIES,
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1,
   CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V1,
+  CORDISX_PLATFORM_CAPABILITIES,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   type CordisXCapabilityDeclaration,
   type CordisXCapabilityScope,
   type CordisXLocalizedText,
   type CordisXModelDescriptor,
   type CordisXModelPage,
   type CordisXModelsListInput,
-  type CordisXPermissionAuthorizationPlanV1,
   type CordisXPermissionAuthorizationDecisionV1,
+  type CordisXPermissionAuthorizationPlanV1,
   type CordisXPermissionDecision,
   type CordisXPermissionPolicy,
   type CordisXPermissionPolicyRecordV1,
@@ -21,19 +21,19 @@ import {
   type CordisXPlatformCapability,
   type CordisXPlatformDiagnostic,
   type CordisXPlatformModelRef,
-  type CordisXPlatformSessionRef,
   type CordisXPlatformResult,
+  type CordisXPlatformSessionRef,
   type CordisXPluginIdentity,
   type CordisXPluginManifestV1,
+  type CordisXSessionCreateOutcome,
+  type CordisXSessionPage,
+  type CordisXSessionProjection,
+  type CordisXSessionSummary,
   type CordisXTaskControlInput,
   type CordisXTaskControlOutcome,
   type CordisXTaskCreateInput,
   type CordisXTaskReadInput,
   type CordisXTasksListInput,
-  type CordisXSessionCreateOutcome,
-  type CordisXSessionPage,
-  type CordisXSessionProjection,
-  type CordisXSessionSummary,
   type CordisXTurnControlInput,
   type CordisXTurnControlOutcome,
   type CordisXTurnStart,
@@ -47,8 +47,8 @@ import {
   permissionScopeFingerprint,
 } from '../permissions.js'
 import {
-  generationVisibilityFromContext,
   type GenerationVisibilityCoordinator,
+  generationVisibilityFromContext,
   type PluginGenerationEffectIdentity,
   type PluginGenerationView,
 } from './generation-visibility.js'
@@ -66,21 +66,21 @@ import {
 } from '../permission-authorization-view-model.js'
 import { BrowserPermissionAuthorizationDialog } from './permission-authorization-dialog.js'
 import {
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V3,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
   CORDISX_PERMISSION_POLICY_SCHEMA_V2,
   CORDISX_PERMISSION_POLICY_SCHEMA_V3,
   CORDISX_PERMISSION_POLICY_SCHEMA_V4,
-  type CordisXCertifiedPermissionProjectionV1,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
+  type CordisXCapabilityDeclarationV2,
   type CordisXCapabilityDeclarationV3,
   type CordisXCapabilityDeclarationV4,
-  type CordisXCapabilityDeclarationV2,
+  type CordisXCertifiedPermissionProjectionV1,
   type CordisXPermissionAuthorizationBindingV2,
   type CordisXPermissionAuthorizationDecisionV2,
   type CordisXPermissionAuthorizationDecisionV3,
@@ -109,20 +109,20 @@ import {
   type CordisXPluginManifestV8,
 } from '../permission-contracts.js'
 import {
-  CapabilityRiskCatalog,
   buildDomPermissionAuthorizationPlanV3,
   buildHostDomPermissionAuthorizationPlanV4,
-  buildPermissionAuthorizationPlanV4,
   buildPermissionAuthorizationPlanResultV2,
+  buildPermissionAuthorizationPlanV4,
+  CapabilityRiskCatalog,
 } from '../capability-risk-catalog.js'
 import {
-  PermissionOnceGrantLedger,
   assertPermissionAuthorizationDecisionV2,
   migratePermissionPolicyV1,
-  normalizePluginManifestV4,
   normalizePermissionAuthorizationBindingV2,
   normalizePermissionPolicyRecordV2,
   normalizePermissionScopeV2,
+  normalizePluginManifestV4,
+  PermissionOnceGrantLedger,
   permissionRecordKeyV2,
   permissionSecurityFingerprint,
   sha256Hex,
@@ -145,20 +145,24 @@ import {
   permissionRecordKeyV4,
 } from '../permission-model-v4.js'
 import {
+  type CordisXPersistedPermissionPolicyRecord,
   isPermissionPolicyRecordV2,
   isPermissionPolicyRecordV3,
   isPermissionPolicyRecordV4,
   normalizePersistedPermissionPolicyRecord,
   persistedPermissionMigrationKey,
   persistedPermissionRecordKey,
-  type CordisXPersistedPermissionPolicyRecord,
 } from '../permission-persistence.js'
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const LEGACY_POLICY_STORAGE_KEY = 'cordisx.platform.permissionPolicies.v1'
 const POLICY_STORAGE_KEY = 'cordisx.platform.permissionPolicies.v2'
 
-function failure(code: CordisXPlatformDiagnostic['code'], message: string, retryable = false): CordisXPlatformResult<never> {
+function failure(
+  code: CordisXPlatformDiagnostic['code'],
+  message: string,
+  retryable = false,
+): CordisXPlatformResult<never> {
   return { ok: false, error: { code, message, ...(retryable ? { retryable: true } : {}) } }
 }
 
@@ -180,21 +184,30 @@ function normalizedReason(value: unknown, label: string): CordisXLocalizedText {
   const unknown = Object.keys(reason).filter(key => !['namespace', 'key', 'params', 'fallback'].includes(key))
   if (unknown.length > 0) throw new Error(`${label} contains unknown field ${unknown[0]}`)
   if (typeof reason.key !== 'string' || !ID_PATTERN.test(reason.key)) throw new Error(`${label}.key is invalid`)
-  if (reason.namespace !== undefined && (typeof reason.namespace !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,95}(?::[a-z0-9][a-z0-9._-]{0,95})?$/.test(reason.namespace))) {
+  if (
+    reason.namespace !== undefined
+    && (typeof reason.namespace !== 'string'
+      || !/^[a-z0-9][a-z0-9._-]{0,95}(?::[a-z0-9][a-z0-9._-]{0,95})?$/.test(reason.namespace))
+  ) {
     throw new Error(`${label}.namespace is invalid`)
   }
   if (reason.fallback !== undefined && (typeof reason.fallback !== 'string' || reason.fallback.trim() === '')) {
     throw new Error(`${label}.fallback is invalid`)
   }
   const params = reason.params === undefined ? undefined : object(reason.params, `${label}.params`)
-  if (params !== undefined && (Object.keys(params).length > 32 || Object.entries(params).some(([key, item]) => {
-    return !/^[a-z][a-zA-Z0-9]*$/.test(key) || !(item === null || ['string', 'number', 'boolean'].includes(typeof item))
-  }))) throw new Error(`${label}.params is invalid`)
+  if (
+    params !== undefined && (Object.keys(params).length > 32 || Object.entries(params).some(([key, item]) => {
+      return !/^[a-z][a-zA-Z0-9]*$/.test(key)
+        || !(item === null || ['string', 'number', 'boolean'].includes(typeof item))
+    }))
+  ) throw new Error(`${label}.params is invalid`)
   return Object.freeze({
     ...(typeof reason.namespace === 'string' ? { namespace: reason.namespace } : {}),
     key: reason.key,
     ...(params === undefined ? {} : {
-      params: Object.fromEntries(Object.entries(params).sort(([left], [right]) => left.localeCompare(right))) as NonNullable<CordisXLocalizedText['params']>,
+      params: Object.fromEntries(
+        Object.entries(params).sort(([left], [right]) => left.localeCompare(right)),
+      ) as NonNullable<CordisXLocalizedText['params']>,
     }),
     ...(typeof reason.fallback === 'string' ? { fallback: reason.fallback } : {}),
   })
@@ -204,7 +217,14 @@ function normalizedReason(value: unknown, label: string): CordisXLocalizedText {
 export function normalizePluginManifest(
   value: unknown,
   expectedId: string,
-): CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8 {
+):
+  | CordisXPluginManifestV1
+  | CordisXPluginManifestV4
+  | CordisXPluginManifestV5
+  | CordisXPluginManifestV6
+  | CordisXPluginManifestV7
+  | CordisXPluginManifestV8
+{
   if (!ID_PATTERN.test(expectedId)) throw new Error(`launcher plugin id ${expectedId} is invalid`)
   if (value === undefined) {
     return Object.freeze({
@@ -230,26 +250,41 @@ export function normalizePluginManifest(
   if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 || manifest.schemaVersion === 4) {
     return normalizePluginManifestV4(manifest, expectedId, new CapabilityRiskCatalog())
   }
-  const unknown = Object.keys(manifest).filter(key => !['$schema', 'schemaVersion', 'id', 'name', 'capabilities'].includes(key))
+  const unknown = Object.keys(manifest).filter(key =>
+    !['$schema', 'schemaVersion', 'id', 'name', 'capabilities'].includes(key)
+  )
   if (unknown.length > 0) throw new Error(`plugin ${expectedId} manifest contains unknown field ${unknown[0]}`)
-  if (manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V1) throw new Error(`plugin ${expectedId} manifest schema is unsupported`)
+  if (manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V1) {
+    throw new Error(`plugin ${expectedId} manifest schema is unsupported`)
+  }
   if (manifest.schemaVersion !== 1) throw new Error(`plugin ${expectedId} manifest version is unsupported`)
-  if (manifest.id !== expectedId) throw new Error(`plugin manifest id ${String(manifest.id)} does not match launcher id ${expectedId}`)
+  if (manifest.id !== expectedId) {
+    throw new Error(`plugin manifest id ${String(manifest.id)} does not match launcher id ${expectedId}`)
+  }
   if (manifest.name !== undefined && (typeof manifest.name !== 'string' || manifest.name.trim() === '')) {
     throw new Error(`plugin ${expectedId} manifest name is invalid`)
   }
-  if (!Array.isArray(manifest.capabilities)) throw new Error(`plugin ${expectedId} manifest capabilities must be an array`)
+  if (!Array.isArray(manifest.capabilities)) {
+    throw new Error(`plugin ${expectedId} manifest capabilities must be an array`)
+  }
   const seen = new Set<string>()
   const capabilities = manifest.capabilities.map((item, index): CordisXCapabilityDeclaration => {
     const declaration = object(item, `plugin ${expectedId} capability[${index}]`)
     const unknownFields = Object.keys(declaration).filter(key => !['name', 'required', 'reason', 'scope'].includes(key))
-    if (unknownFields.length > 0) throw new Error(`plugin ${expectedId} capability[${index}] contains unknown field ${unknownFields[0]}`)
-    if (typeof declaration.name !== 'string' || !(CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(declaration.name)) {
+    if (unknownFields.length > 0) {
+      throw new Error(`plugin ${expectedId} capability[${index}] contains unknown field ${unknownFields[0]}`)
+    }
+    if (
+      typeof declaration.name !== 'string'
+      || !(CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(declaration.name)
+    ) {
       throw new Error(`plugin ${expectedId} capability[${index}] name is unsupported`)
     }
     if (seen.has(declaration.name)) throw new Error(`plugin ${expectedId} declares ${declaration.name} more than once`)
     seen.add(declaration.name)
-    if (typeof declaration.required !== 'boolean') throw new Error(`plugin ${expectedId} capability[${index}].required must be boolean`)
+    if (typeof declaration.required !== 'boolean') {
+      throw new Error(`plugin ${expectedId} capability[${index}].required must be boolean`)
+    }
     const name = declaration.name as CordisXPlatformCapability
     const scope = normalizePermissionScope(declaration.scope, `plugin ${expectedId} capability[${index}].scope`)
     if (name.startsWith('agent.') && scope.sessions !== undefined) {
@@ -324,7 +359,12 @@ export class MemoryPermissionPolicyStore implements PermissionPolicyStore {
   }
 
   read(): readonly CordisXPermissionPolicyRecordV1[] {
-    return copy(this.records.filter(record => !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record) && !isPermissionPolicyRecordV4(record))) as readonly CordisXPermissionPolicyRecordV1[]
+    return copy(
+      this.records.filter(record =>
+        !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record)
+        && !isPermissionPolicyRecordV4(record)
+      ),
+    ) as readonly CordisXPermissionPolicyRecordV1[]
   }
 
   readV2(): readonly CordisXPermissionPolicyRecordV2[] {
@@ -364,8 +404,10 @@ export class MemoryPermissionPolicyStore implements PermissionPolicyStore {
     const keys = new Set(normalized.map(persistedPermissionRecordKey))
     const migrations = new Set(normalized.filter(isPermissionPolicyRecordV2).map(persistedPermissionMigrationKey))
     this.records = copy([
-      ...this.records.filter(item => !keys.has(persistedPermissionRecordKey(item))
-        && !(migrations.has(persistedPermissionMigrationKey(item)) && !isPermissionPolicyRecordV2(item))),
+      ...this.records.filter(item =>
+        !keys.has(persistedPermissionRecordKey(item))
+        && !(migrations.has(persistedPermissionMigrationKey(item)) && !isPermissionPolicyRecordV2(item))
+      ),
       ...normalized,
     ])
   }
@@ -376,7 +418,8 @@ export class BrowserPermissionPolicyStore implements PermissionPolicyStore {
 
   read(): readonly CordisXPermissionPolicyRecordV1[] {
     return this.readAll().filter((record): record is CordisXPermissionPolicyRecordV1 => (
-      !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record) && !isPermissionPolicyRecordV4(record) && record.key.profileId === this.profileId
+      !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record) && !isPermissionPolicyRecordV4(record)
+      && record.key.profileId === this.profileId
     ))
   }
 
@@ -424,7 +467,11 @@ export class BrowserPermissionPolicyStore implements PermissionPolicyStore {
       const parsed = value === null ? [] : JSON.parse(value) as unknown
       if (!Array.isArray(parsed)) return []
       return parsed.flatMap((item) => {
-        try { return [normalizePersistedPermissionPolicyRecord(item)] } catch { return [] }
+        try {
+          return [normalizePersistedPermissionPolicyRecord(item)]
+        } catch {
+          return []
+        }
       })
     } catch {
       return []
@@ -436,11 +483,16 @@ export class BrowserPermissionPolicyStore implements PermissionPolicyStore {
     const records = this.readAll()
     const keys = new Set(normalized.map(persistedPermissionRecordKey))
     const migrations = new Set(normalized.filter(isPermissionPolicyRecordV2).map(persistedPermissionMigrationKey))
-    localStorage.setItem(POLICY_STORAGE_KEY, JSON.stringify([
-      ...records.filter(item => !keys.has(persistedPermissionRecordKey(item))
-        && !(migrations.has(persistedPermissionMigrationKey(item)) && !isPermissionPolicyRecordV2(item))),
-      ...normalized,
-    ]))
+    localStorage.setItem(
+      POLICY_STORAGE_KEY,
+      JSON.stringify([
+        ...records.filter(item =>
+          !keys.has(persistedPermissionRecordKey(item))
+          && !(migrations.has(persistedPermissionMigrationKey(item)) && !isPermissionPolicyRecordV2(item))
+        ),
+        ...normalized,
+      ]),
+    )
   }
 
   legacy(): readonly LegacyStoredPolicy[] {
@@ -532,7 +584,8 @@ export class BrowserPermissionPrompt implements PermissionPrompt {
   private async show(input: PermissionPromptRequest): Promise<Exclude<CordisXPermissionDecision, 'ask'>> {
     const document = this.document
     if (document?.body === undefined || input.signal?.aborted === true) return 'deny'
-    const reason = input.declaration.reason.fallback ?? `${input.declaration.reason.namespace ?? input.identity.id}:${input.declaration.reason.key}`
+    const reason = input.declaration.reason.fallback
+      ?? `${input.declaration.reason.namespace ?? input.identity.id}:${input.declaration.reason.key}`
     return await new Promise((resolve) => {
       const overlay = document.createElement('div')
       const detachTheme = this.theme.attach(overlay)
@@ -727,7 +780,13 @@ export interface DomPermissionPolicyEntry {
 interface Registration {
   readonly token: object
   readonly identity: CordisXPluginIdentity
-  readonly manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8
+  readonly manifest:
+    | CordisXPluginManifestV1
+    | CordisXPluginManifestV4
+    | CordisXPluginManifestV5
+    | CordisXPluginManifestV6
+    | CordisXPluginManifestV7
+    | CordisXPluginManifestV8
   readonly declarations: ReadonlyMap<CordisXPlatformCapability, CordisXCapabilityDeclaration>
   readonly declarationsV2: ReadonlyMap<CordisXPermissionCapabilityV2, CordisXCapabilityDeclarationV2>
   readonly declarationsV4: ReadonlyMap<'ui.host-dom.read' | 'ui.host-dom.modify', CordisXCapabilityDeclarationV4>
@@ -760,24 +819,46 @@ export interface HostDomPermissionAccessDecision extends DomPermissionAccessDeci
 }
 
 function manifestDeclarationsV2(
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8,
+  manifest:
+    | CordisXPluginManifestV1
+    | CordisXPluginManifestV4
+    | CordisXPluginManifestV5
+    | CordisXPluginManifestV6
+    | CordisXPluginManifestV7
+    | CordisXPluginManifestV8,
 ): readonly CordisXCapabilityDeclarationV2[] {
   if (manifest.schemaVersion === 4) return manifest.capabilities
-  if (manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7 || manifest.schemaVersion === 8) return manifest.capabilities.filter(item => (
-    !isHostDomPermissionCapability(item.name) && !isAgentRuntimePermission(item.name)
-  )) as readonly CordisXCapabilityDeclarationV2[]
-  return Object.freeze(manifest.capabilities.map(declaration => Object.freeze({
-    name: declaration.name as CordisXPermissionCapabilityV2,
-    required: declaration.required,
-    scope: declaration.scope as CordisXPermissionScopeV2,
-  })))
+  if (
+    manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7
+    || manifest.schemaVersion === 8
+  ) {
+    return manifest.capabilities.filter(item => (
+      !isHostDomPermissionCapability(item.name) && !isAgentRuntimePermission(item.name)
+    )) as readonly CordisXCapabilityDeclarationV2[]
+  }
+  return Object.freeze(manifest.capabilities.map(declaration =>
+    Object.freeze({
+      name: declaration.name as CordisXPermissionCapabilityV2,
+      required: declaration.required,
+      scope: declaration.scope as CordisXPermissionScopeV2,
+    })
+  ))
 }
 
 function manifestHostDomDeclarationsV4(
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8,
+  manifest:
+    | CordisXPluginManifestV1
+    | CordisXPluginManifestV4
+    | CordisXPluginManifestV5
+    | CordisXPluginManifestV6
+    | CordisXPluginManifestV7
+    | CordisXPluginManifestV8,
 ): readonly CordisXCapabilityDeclarationV4[] {
-  return manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7 || manifest.schemaVersion === 8
-    ? manifest.capabilities.filter(item => isHostDomPermissionCapability(item.name)) as readonly CordisXCapabilityDeclarationV4[]
+  return manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7
+      || manifest.schemaVersion === 8
+    ? manifest.capabilities.filter(item =>
+      isHostDomPermissionCapability(item.name)
+    ) as readonly CordisXCapabilityDeclarationV4[]
     : Object.freeze([])
 }
 
@@ -788,9 +869,16 @@ function isAgentRuntimePermission(value: string): value is AgentRuntimeCapabilit
 /** The legacy v4 review UI has no Agent/Session vocabulary; those declarations
  * are evaluated by the Host-private exact Session lease authority instead. */
 function permissionPlanDeclarations(
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8,
+  manifest:
+    | CordisXPluginManifestV1
+    | CordisXPluginManifestV4
+    | CordisXPluginManifestV5
+    | CordisXPluginManifestV6
+    | CordisXPluginManifestV7
+    | CordisXPluginManifestV8,
 ): readonly CordisXCapabilityDeclarationV4[] {
-  return (manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7 || manifest.schemaVersion === 8
+  return (manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7
+      || manifest.schemaVersion === 8
     ? manifest.capabilities.filter(item => !isAgentRuntimePermission(item.name))
     : manifest.capabilities) as readonly CordisXCapabilityDeclarationV4[]
 }
@@ -819,14 +907,32 @@ function pathInside(value: string, root: string): boolean {
 }
 
 function scopeAllows(scope: CordisXCapabilityScope, requested: RequestedScope): boolean {
-  if (requested.providerId !== undefined && scope.providers !== undefined && !scope.providers.includes(requested.providerId)) return false
-  if (requested.providerIds !== undefined && scope.providers !== undefined && requested.providerIds.some(id => !scope.providers?.includes(id))) return false
-  if (requested.model !== undefined && scope.providers !== undefined && !scope.providers.includes(requested.model.providerId)) return false
-  if (requested.session !== undefined && scope.sessions !== undefined && !scope.sessions.some(ref => {
-    return ref.providerId === requested.session?.providerId && ref.remoteSessionId === requested.session.remoteSessionId
-  })) return false
-  if (requested.cwd !== undefined && scope.cwdRoots !== undefined && !scope.cwdRoots.some(root => pathInside(requested.cwd as string, root))) return false
-  if (requested.agentSessionId !== undefined && scope.sessionIds !== undefined && !scope.sessionIds.includes(requested.agentSessionId)) return false
+  if (
+    requested.providerId !== undefined && scope.providers !== undefined
+    && !scope.providers.includes(requested.providerId)
+  ) return false
+  if (
+    requested.providerIds !== undefined && scope.providers !== undefined
+    && requested.providerIds.some(id => !scope.providers?.includes(id))
+  ) return false
+  if (
+    requested.model !== undefined && scope.providers !== undefined
+    && !scope.providers.includes(requested.model.providerId)
+  ) return false
+  if (
+    requested.session !== undefined && scope.sessions !== undefined && !scope.sessions.some(ref => {
+      return ref.providerId === requested.session?.providerId
+        && ref.remoteSessionId === requested.session.remoteSessionId
+    })
+  ) return false
+  if (
+    requested.cwd !== undefined && scope.cwdRoots !== undefined
+    && !scope.cwdRoots.some(root => pathInside(requested.cwd as string, root))
+  ) return false
+  if (
+    requested.agentSessionId !== undefined && scope.sessionIds !== undefined
+    && !scope.sessionIds.includes(requested.agentSessionId)
+  ) return false
   if (requested.allAgentSessions === true && scope.sessionIds !== undefined) return false
   return true
 }
@@ -851,15 +957,29 @@ function isoNow(now: () => Date): string {
 /** Host-only Agent/Session authorization inputs. They are never projected to plugins. */
 export type AgentRuntimeConnection = Readonly<{ connectionId: string; generation: number }>
 export type AgentRuntimeRouteScope = Readonly<{
-  kind: 'host-route'; active: true; owner: { source: string; pluginId: string }; routeId: string
-  routeInstanceId: string; path: string; params: Readonly<{ sessionId: string }>
+  kind: 'host-route'
+  active: true
+  owner: { source: string; pluginId: string }
+  routeId: string
+  routeInstanceId: string
+  path: string
+  params: Readonly<{ sessionId: string }>
 }>
 export type AgentRuntimeScopeSource =
-  | Readonly<{ kind: 'host-route'; routeInstanceId: string; routeId: string; path: string; params: Readonly<{ sessionId: string }> }>
+  | Readonly<
+    {
+      kind: 'host-route'
+      routeInstanceId: string
+      routeId: string
+      path: string
+      params: Readonly<{ sessionId: string }>
+    }
+  >
   | Readonly<{ kind: 'host-create'; reservedSessionId: string }>
   | Readonly<{ kind: 'host-exact'; exactSessionId: string }>
 export type AgentRuntimePermissionFence = Readonly<{
-  identity: CordisXPluginIdentity; sessionId: string
+  identity: CordisXPluginIdentity
+  sessionId: string
   code: 'route-replaced' | 'plugin-generation-replaced' | 'permission-revoked' | 'connection-replaced'
 }>
 export type AgentRuntimeLease = Readonly<{ leaseId: string; sessionId: string }>
@@ -890,7 +1010,8 @@ function validAgentRuntimeSessionId(value: unknown): value is string {
   return validAgentRuntimeOpaqueId(value) && !value.includes('*')
 }
 function validAgentRuntimeConnection(value: AgentRuntimeConnection): boolean {
-  return validAgentRuntimeOpaqueId(value.connectionId) && Number.isSafeInteger(value.generation) && value.generation >= 0
+  return validAgentRuntimeOpaqueId(value.connectionId) && Number.isSafeInteger(value.generation)
+    && value.generation >= 0
 }
 function validAgentRuntimeRoute(value: AgentRuntimeRouteScope): boolean {
   return value.kind === 'host-route' && value.active === true
@@ -901,7 +1022,10 @@ function validAgentRuntimeRoute(value: AgentRuntimeRouteScope): boolean {
 function agentRuntimeIdentityKey(value: Readonly<{ source: string; pluginId: string }>): string {
   return `${value.source}\u0000${value.pluginId}`
 }
-function sameAgentRuntimeConnection(left: AgentRuntimeConnection | undefined, right: AgentRuntimeConnection | undefined): boolean {
+function sameAgentRuntimeConnection(
+  left: AgentRuntimeConnection | undefined,
+  right: AgentRuntimeConnection | undefined,
+): boolean {
   return left?.connectionId === right?.connectionId && left?.generation === right?.generation
 }
 function sameAgentRuntimeRoute(left: AgentRuntimeRouteScope, right: AgentRuntimeRouteScope): boolean {
@@ -909,7 +1033,9 @@ function sameAgentRuntimeRoute(left: AgentRuntimeRouteScope, right: AgentRuntime
     && left.routeId === right.routeId && left.routeInstanceId === right.routeInstanceId
     && left.path === right.path && left.params.sessionId === right.params.sessionId
 }
-function isHostRouteSessionScopeBinding(value: unknown): value is Readonly<{ kind: 'host-route-param'; routeId: string; param: 'sessionId' }> {
+function isHostRouteSessionScopeBinding(
+  value: unknown,
+): value is Readonly<{ kind: 'host-route-param'; routeId: string; param: 'sessionId' }> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     && Object.keys(value).every(key => key === 'kind' || key === 'routeId' || key === 'param')
     && (value as { kind?: unknown }).kind === 'host-route-param'
@@ -922,9 +1048,11 @@ function isApprovalAuthorityRequesterRouteScope(value: unknown): value is Readon
   kind: 'approval-authority-requester-route'
   requester: Readonly<{ kind: 'host-route-param'; routeId: string; param: 'sessionId' }>
 }> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)
+  if (
+    value === null || typeof value !== 'object' || Array.isArray(value)
     || !Object.keys(value).every(key => key === 'kind' || key === 'requester')
-    || (value as { kind?: unknown }).kind !== 'approval-authority-requester-route') return false
+    || (value as { kind?: unknown }).kind !== 'approval-authority-requester-route'
+  ) return false
   const requester = (value as { requester?: unknown }).requester
   return isHostRouteSessionScopeBinding(requester)
 }
@@ -943,34 +1071,48 @@ export class PermissionBroker {
   private readonly domLeases = new Map<string, DomPermissionLease>()
   private readonly domRequests = new Map<string, Promise<DomPermissionAccessDecision>>()
   private readonly domPromptPlans = new Map<string, CordisXPermissionAuthorizationPlanV3>()
-  private readonly domPoints = new Map<string, Readonly<{ identity: CordisXPluginIdentity; pointId: string; moduleGeneration?: string }>>()
+  private readonly domPoints = new Map<
+    string,
+    Readonly<{ identity: CordisXPluginIdentity; pointId: string; moduleGeneration?: string }>
+  >()
   private readonly domCertificationTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly hostDomLeases = new Map<string, HostDomPermissionLease>()
-  private readonly hostDomPromptPlans = new Map<string, Readonly<{
-    plan: CordisXPermissionAuthorizationPlanV4
-    cancel: () => void
-  }>>()
+  private readonly hostDomPromptPlans = new Map<
+    string,
+    Readonly<{
+      plan: CordisXPermissionAuthorizationPlanV4
+      cancel: () => void
+    }>
+  >()
   private readonly hostDomPolicyRevisions = new Map<string, number>()
   private hostDomOperationSequence = 0
-  private readonly pendingDomReviews = new Map<string, Readonly<{
-    identity: CordisXPluginIdentity
-    pointId: string
-    moduleGeneration?: string
-    view?: PluginGenerationView
-  }>>()
+  private readonly pendingDomReviews = new Map<
+    string,
+    Readonly<{
+      identity: CordisXPluginIdentity
+      pointId: string
+      moduleGeneration?: string
+      view?: PluginGenerationView
+    }>
+  >()
   private readonly catalog = new CapabilityRiskCatalog()
   private readonly listeners = new Set<() => void>()
   private readonly agentRuntimeRoutes = new Map<string, AgentRuntimeRouteScope>()
-  private readonly playgroundScenarioAgentRuntimeRoutes = new Map<string, Readonly<{
-    route: AgentRuntimeRouteScope
-    baseRouteInstanceId: string
-  }>>()
+  private readonly playgroundScenarioAgentRuntimeRoutes = new Map<
+    string,
+    Readonly<{
+      route: AgentRuntimeRouteScope
+      baseRouteInstanceId: string
+    }>
+  >()
   private readonly agentRuntimeLeases = new Map<string, AgentRuntimeLeaseRecord>()
-  private readonly pendingAgentRuntimePrompts = new Set<Readonly<{
-    identity: CordisXPluginIdentity
-    registrationToken: object
-    abort: AbortController
-  }>>()
+  private readonly pendingAgentRuntimePrompts = new Set<
+    Readonly<{
+      identity: CordisXPluginIdentity
+      registrationToken: object
+      abort: AbortController
+    }>
+  >()
   private readonly agentRuntimeFenceListeners = new Set<(fence: AgentRuntimePermissionFence) => void>()
   private readonly developmentAgentRuntimeSeeds = new WeakSet<object>()
   private readonly developmentAgentRuntimeAuthorizations = new WeakSet<object>()
@@ -1009,36 +1151,54 @@ export class PermissionBroker {
 
   register(
     identity: CordisXPluginIdentity,
-    manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8,
+    manifest:
+      | CordisXPluginManifestV1
+      | CordisXPluginManifestV4
+      | CordisXPluginManifestV5
+      | CordisXPluginManifestV6
+      | CordisXPluginManifestV7
+      | CordisXPluginManifestV8,
     generation: PluginGenerationEffectIdentity = Object.freeze({ pluginId: identity.id }),
     candidateView?: PluginGenerationView,
     artifact?: PermissionArtifactBindingV3,
   ): () => void {
     const key = `${platformIdentityKey(identity)}\u0000${generation.moduleGeneration ?? 'host'}`
     const declarations = new Map<CordisXPlatformCapability, CordisXCapabilityDeclaration>(
-      manifest.schemaVersion === 4 || manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7 || manifest.schemaVersion === 8
+      manifest.schemaVersion === 4 || manifest.schemaVersion === 5 || manifest.schemaVersion === 6
+        || manifest.schemaVersion === 7 || manifest.schemaVersion === 8
         ? manifest.capabilities.flatMap(item => (
-            (CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
-              ? [[item.name as CordisXPlatformCapability, {
-                  name: item.name as CordisXPlatformCapability,
-                  required: item.required,
-                  reason: ('rationale' in item ? item.rationale?.description : undefined) ?? {
-                    namespace: 'permission',
-                    key: `permission.${item.name}.legacy-reason`,
-                    fallback: this.catalog.get(item.name as CordisXPermissionCapabilityV4).presentation.description.fallback,
-                  },
-                  scope: item.scope as CordisXCapabilityScope,
-                } as CordisXCapabilityDeclaration] as const]
-              : []
-          ))
+          (CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
+            ? [
+              [item.name as CordisXPlatformCapability, {
+                name: item.name as CordisXPlatformCapability,
+                required: item.required,
+                reason: ('rationale' in item ? item.rationale?.description : undefined) ?? {
+                  namespace: 'permission',
+                  key: `permission.${item.name}.legacy-reason`,
+                  fallback:
+                    this.catalog.get(item.name as CordisXPermissionCapabilityV4).presentation.description.fallback,
+                },
+                scope: item.scope as CordisXCapabilityScope,
+              } as CordisXCapabilityDeclaration] as const,
+            ]
+            : []
+        ))
         : manifest.capabilities.map(item => [item.name, item] as const),
     )
     const declarationsV2 = new Map(manifestDeclarationsV2(manifest).map(item => [item.name, item]))
-    const declarationsV4 = new Map(manifestHostDomDeclarationsV4(manifest).map(item => [
-      item.name as 'ui.host-dom.read' | 'ui.host-dom.modify', item,
-    ]))
-    if (artifact !== undefined && (!/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(artifact.version)
-      || !/^sha256:[a-f0-9]{64}$/u.test(artifact.integrity))) throw new Error(`plugin ${identity.id} permission artifact identity is invalid`)
+    const declarationsV4 = new Map(
+      manifestHostDomDeclarationsV4(manifest).map(item => [
+        item.name as 'ui.host-dom.read' | 'ui.host-dom.modify',
+        item,
+      ]),
+    )
+    if (
+      artifact !== undefined
+      && (!/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(
+        artifact.version,
+      )
+        || !/^sha256:[a-f0-9]{64}$/u.test(artifact.integrity))
+    ) throw new Error(`plugin ${identity.id} permission artifact identity is invalid`)
     const projectedCertification = artifact === undefined
       ? undefined
       : this.certifiedProjections.get(certifiedArtifactKey(
@@ -1053,14 +1213,21 @@ export class PermissionBroker {
         artifact,
         this.now(),
       )
-    const normalizedArtifact: RegistrationArtifactBinding | undefined = artifact === undefined ? undefined : Object.freeze({
-      version: artifact.version,
-      integrity: artifact.integrity,
-      ...(certification === undefined ? {} : { certification }),
-    })
+    const normalizedArtifact: RegistrationArtifactBinding | undefined = artifact === undefined
+      ? undefined
+      : Object.freeze({
+        version: artifact.version,
+        integrity: artifact.integrity,
+        ...(certification === undefined ? {} : { certification }),
+      })
     const registration: Registration = {
       token: Object.freeze({}),
-      identity: Object.freeze({ ...identity }), manifest, declarations, declarationsV2, declarationsV4, generation,
+      identity: Object.freeze({ ...identity }),
+      manifest,
+      declarations,
+      declarationsV2,
+      declarationsV4,
+      generation,
       ...(candidateView === undefined ? {} : { candidateView }),
       ...(normalizedArtifact === undefined ? {} : { artifact: normalizedArtifact }),
     }
@@ -1082,7 +1249,9 @@ export class PermissionBroker {
       this.clearDomGeneration(generation.moduleGeneration, identity)
       this.clearHostDomGeneration(generation.moduleGeneration, identity)
       if (![...this.registrations.values()].some(item => platformIdentityKey(item.identity) === identityKey)) {
-        for (const auditKey of [...this.audit.keys()]) if (auditKey.startsWith(`${identityKey}\u0000`)) this.audit.delete(auditKey)
+        for (const auditKey of [...this.audit.keys()]) {
+          if (auditKey.startsWith(`${identityKey}\u0000`)) this.audit.delete(auditKey)
+        }
       }
       if (this.visibility?.visible(generation) !== false) this.changed()
     }
@@ -1134,14 +1303,16 @@ export class PermissionBroker {
   }
 
   /** Returns an exact revocable lease only after a registered v5/v6 declaration and exact policy match. */
-  async authorizeAgentRuntime(input: Readonly<{
-    identity: CordisXPluginIdentity
-    capability: AgentRuntimeCapability
-    sessionId: string
-    scopeSource: AgentRuntimeScopeSource
-    connection: AgentRuntimeConnection
-    view?: PluginGenerationView
-  }>): Promise<AgentRuntimeAuthorization> {
+  async authorizeAgentRuntime(
+    input: Readonly<{
+      identity: CordisXPluginIdentity
+      capability: AgentRuntimeCapability
+      sessionId: string
+      scopeSource: AgentRuntimeScopeSource
+      connection: AgentRuntimeConnection
+      view?: PluginGenerationView
+    }>,
+  ): Promise<AgentRuntimeAuthorization> {
     return await this.authorizeAgentRuntimeInternal(input, false)
   }
 
@@ -1163,27 +1334,38 @@ export class PermissionBroker {
     return await this.authorizeAgentRuntimeInternal(input, true)
   }
 
-  private async authorizeAgentRuntimeInternal(input: Readonly<{
-    identity: CordisXPluginIdentity
-    capability: AgentRuntimeCapability
-    sessionId: string
-    scopeSource: AgentRuntimeScopeSource
-    connection: AgentRuntimeConnection
-    view?: PluginGenerationView
-  }>, developmentAutoApprove: boolean): Promise<AgentRuntimeAuthorization> {
+  private async authorizeAgentRuntimeInternal(
+    input: Readonly<{
+      identity: CordisXPluginIdentity
+      capability: AgentRuntimeCapability
+      sessionId: string
+      scopeSource: AgentRuntimeScopeSource
+      connection: AgentRuntimeConnection
+      view?: PluginGenerationView
+    }>,
+    developmentAutoApprove: boolean,
+  ): Promise<AgentRuntimeAuthorization> {
     const registration = this.registration(input.identity, input.view)
-    if (registration === undefined || !validAgentRuntimeSessionId(input.sessionId)
+    if (
+      registration === undefined || !validAgentRuntimeSessionId(input.sessionId)
       || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
       || (registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6
-        && registration.manifest.schemaVersion !== 7 && registration.manifest.schemaVersion !== 8)) return Object.freeze({ authorized: false })
-    const declaration = registration.manifest.capabilities.find((item): item is Extract<typeof item, { readonly name: AgentRuntimeCapability }> => (
+        && registration.manifest.schemaVersion !== 7 && registration.manifest.schemaVersion !== 8)
+    ) return Object.freeze({ authorized: false })
+    const declaration = registration.manifest.capabilities.find((
+      item,
+    ): item is Extract<typeof item, { readonly name: AgentRuntimeCapability }> => (
       item.name === input.capability && isAgentRuntimePermission(item.name)
     ))
     if (declaration === undefined) return Object.freeze({ authorized: false })
     const declaredSessionIds = 'sessionIds' in declaration.scope ? declaration.scope.sessionIds : undefined
-    const authorityRequester = 'authorityRequester' in declaration.scope ? declaration.scope.authorityRequester : undefined
+    const authorityRequester = 'authorityRequester' in declaration.scope
+      ? declaration.scope.authorityRequester
+      : undefined
     const rationale = 'rationale' in declaration ? declaration.rationale : undefined
-    if (!this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)) return Object.freeze({ authorized: false })
+    if (!this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)) {
+      return Object.freeze({ authorized: false })
+    }
     const policyKey = this.agentRuntimePolicyKey(registration, input.capability, input.sessionId)
     const policy = this.policyRecords.get(policyKey)
     if (!developmentAutoApprove && isPermissionPolicyRecordV4(policy) && policy.policy === 'deny-persistent') {
@@ -1191,9 +1373,15 @@ export class PermissionBroker {
     }
     if (developmentAutoApprove && (!isPermissionPolicyRecordV4(policy) || policy.policy !== 'allow-persistent')) {
       const record = this.agentRuntimePolicyRecord(registration, input.capability, input.sessionId, 'allow-persistent')
-      try { await this.persistV4([record]) } catch { return Object.freeze({ authorized: false }) }
-      if (!this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-        || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)) {
+      try {
+        await this.persistV4([record])
+      } catch {
+        return Object.freeze({ authorized: false })
+      }
+      if (
+        !this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
+        || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)
+      ) {
         return Object.freeze({ authorized: false })
       }
       this.policyRecords.set(permissionRecordKeyV4(record), record)
@@ -1203,7 +1391,8 @@ export class PermissionBroker {
         name: input.capability as CordisXPlatformCapability,
         required: declaration.required,
         reason: rationale?.description ?? Object.freeze({
-          namespace: 'permission', key: `agent-runtime.${input.capability}`,
+          namespace: 'permission',
+          key: `agent-runtime.${input.capability}`,
           fallback: `${input.capability} for one exact Agent Session`,
         }),
         scope: Object.freeze({ sessionIds: Object.freeze([input.sessionId]) }),
@@ -1221,25 +1410,43 @@ export class PermissionBroker {
             requested: Object.freeze({ agentSessionId: input.sessionId }),
             signal: abort.signal,
           }),
-          new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), this.promptTimeoutMs) }),
-          new Promise<'cancelled'>(resolve => abort.signal.addEventListener('abort', () => resolve('cancelled'), { once: true })),
+          new Promise<'timeout'>(resolve => {
+            timer = setTimeout(() => resolve('timeout'), this.promptTimeoutMs)
+          }),
+          new Promise<'cancelled'>(resolve =>
+            abort.signal.addEventListener('abort', () => resolve('cancelled'), { once: true })
+          ),
         ])
-      } catch { decision = 'deny' }
-      finally {
+      } catch {
+        decision = 'deny'
+      } finally {
         if (timer !== undefined) clearTimeout(timer)
         this.pendingAgentRuntimePrompts.delete(pending)
         abort.abort()
       }
       if (decision !== 'allow' && decision !== 'allow-once') return Object.freeze({ authorized: false })
-      if (!this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-        || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)) {
+      if (
+        !this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
+        || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)
+      ) {
         return Object.freeze({ authorized: false })
       }
       if (decision === 'allow') {
-        const record = this.agentRuntimePolicyRecord(registration, input.capability, input.sessionId, 'allow-persistent')
-        try { await this.persistV4([record]) } catch { return Object.freeze({ authorized: false }) }
-        if (!this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-          || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)) {
+        const record = this.agentRuntimePolicyRecord(
+          registration,
+          input.capability,
+          input.sessionId,
+          'allow-persistent',
+        )
+        try {
+          await this.persistV4([record])
+        } catch {
+          return Object.freeze({ authorized: false })
+        }
+        if (
+          !this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
+          || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)
+        ) {
           return Object.freeze({ authorized: false })
         }
         this.policyRecords.set(permissionRecordKeyV4(record), record)
@@ -1250,19 +1457,27 @@ export class PermissionBroker {
       item.identity.source === input.identity.source && item.identity.id === input.identity.id
       && item.capability === input.capability && item.lease.sessionId === input.sessionId
       && sameAgentRuntimeConnection(item.connection, input.connection)
-      && item.routeInstanceId === (input.scopeSource.kind === 'host-route' ? input.scopeSource.routeInstanceId : undefined)
+      && item.routeInstanceId
+        === (input.scopeSource.kind === 'host-route' ? input.scopeSource.routeInstanceId : undefined)
       && item.moduleGeneration === registration.generation.moduleGeneration
     ))
     if (existing !== undefined) return Object.freeze({ authorized: true, lease: existing.lease })
     const lease = Object.freeze({ leaseId: crypto.randomUUID(), sessionId: input.sessionId })
-    this.agentRuntimeLeases.set(lease.leaseId, Object.freeze({
-      lease, identity: Object.freeze({ ...input.identity }), capability: input.capability,
-      connection: Object.freeze({ ...input.connection }),
-      ...(input.scopeSource.kind === 'host-route'
-        ? { routeInstanceId: input.scopeSource.routeInstanceId, routeSessionId: input.scopeSource.params.sessionId }
-        : {}),
-      ...(registration.generation.moduleGeneration === undefined ? {} : { moduleGeneration: registration.generation.moduleGeneration }),
-    }))
+    this.agentRuntimeLeases.set(
+      lease.leaseId,
+      Object.freeze({
+        lease,
+        identity: Object.freeze({ ...input.identity }),
+        capability: input.capability,
+        connection: Object.freeze({ ...input.connection }),
+        ...(input.scopeSource.kind === 'host-route'
+          ? { routeInstanceId: input.scopeSource.routeInstanceId, routeSessionId: input.scopeSource.params.sessionId }
+          : {}),
+        ...(registration.generation.moduleGeneration === undefined
+          ? {}
+          : { moduleGeneration: registration.generation.moduleGeneration }),
+      }),
+    )
     return Object.freeze({ authorized: true, lease })
   }
 
@@ -1274,7 +1489,8 @@ export class PermissionBroker {
       && lease.moduleGeneration === registration.generation.moduleGeneration
       && sameAgentRuntimeConnection(lease.connection, this.agentRuntimeConnection)
       && (lease.routeInstanceId === undefined || this.agentRuntimeRouteValues().some(route => (
-        route.routeInstanceId === lease.routeInstanceId && route.params.sessionId === (lease.routeSessionId ?? lease.lease.sessionId)
+        route.routeInstanceId === lease.routeInstanceId
+        && route.params.sessionId === (lease.routeSessionId ?? lease.lease.sessionId)
         && route.owner.source === identity.source && route.owner.pluginId === identity.id
       )))
   }
@@ -1321,17 +1537,23 @@ export class PermissionBroker {
       throw new Error('Playground scenario Agent Session route scope is invalid')
     }
     const primary = this.agentRuntimeRoutes.get(agentRuntimeIdentityKey(scope.owner))
-    if (primary === undefined || primary.routeInstanceId !== baseRouteInstanceId
+    if (
+      primary === undefined || primary.routeInstanceId !== baseRouteInstanceId
       || primary.owner.source !== scope.owner.source || primary.owner.pluginId !== scope.owner.pluginId
       || primary.routeId !== scope.routeId || primary.path !== scope.path
-      || scope.routeInstanceId === baseRouteInstanceId) {
+      || scope.routeInstanceId === baseRouteInstanceId
+    ) {
       throw new Error('Playground scenario Agent Session route does not match the active Room route')
     }
     if (this.playgroundScenarioAgentRuntimeRoutes.has(scope.routeInstanceId)) {
       throw new Error('Playground scenario Agent Session route instance is already active')
     }
     const record = Object.freeze({
-      route: Object.freeze({ ...scope, owner: Object.freeze({ ...scope.owner }), params: Object.freeze({ ...scope.params }) }),
+      route: Object.freeze({
+        ...scope,
+        owner: Object.freeze({ ...scope.owner }),
+        params: Object.freeze({ ...scope.params }),
+      }),
       baseRouteInstanceId,
     })
     this.playgroundScenarioAgentRuntimeRoutes.set(scope.routeInstanceId, record)
@@ -1357,7 +1579,11 @@ export class PermissionBroker {
       throw new Error('Playground scenario captured Agent Session route scope is invalid')
     }
     const record = Object.freeze({
-      route: Object.freeze({ ...scope, owner: Object.freeze({ ...scope.owner }), params: Object.freeze({ ...scope.params }) }),
+      route: Object.freeze({
+        ...scope,
+        owner: Object.freeze({ ...scope.owner }),
+        params: Object.freeze({ ...scope.params }),
+      }),
       baseRouteInstanceId: scope.routeInstanceId,
     })
     this.playgroundScenarioAgentRuntimeRoutes.set(scope.routeInstanceId, record)
@@ -1374,11 +1600,21 @@ export class PermissionBroker {
   async seedAgentRuntimePolicies(
     authority: DevelopmentAgentRuntimePolicySeedAuthority,
     identity: CordisXPluginIdentity,
-    entries: readonly Readonly<{ capability: AgentRuntimeCapability; sessionIds: readonly [string, ...string[]]; policy: CordisXPermissionPolicyV2 }>[],
+    entries: readonly Readonly<
+      {
+        capability: AgentRuntimeCapability
+        sessionIds: readonly [string, ...string[]]
+        policy: CordisXPermissionPolicyV2
+      }
+    >[],
   ): Promise<void> {
-    if (!this.developmentAgentRuntimeSeeds.has(authority)) throw new Error('Agent Session policy seed authority is invalid')
+    if (!this.developmentAgentRuntimeSeeds.has(authority)) {
+      throw new Error('Agent Session policy seed authority is invalid')
+    }
     const records = entries.map(entry => {
-      if (entry.sessionIds.length !== 1 || !validAgentRuntimeSessionId(entry.sessionIds[0])) throw new Error('Agent Session seed requires one exact SessionId')
+      if (entry.sessionIds.length !== 1 || !validAgentRuntimeSessionId(entry.sessionIds[0])) {
+        throw new Error('Agent Session seed requires one exact SessionId')
+      }
       if (!isAgentRuntimePermission(entry.capability)) throw new Error('Agent Session seed capability is unsupported')
       return this.agentRuntimePolicyRecordForIdentity(identity, entry.capability, entry.sessionIds[0]!, entry.policy)
     })
@@ -1389,8 +1625,10 @@ export class PermissionBroker {
   }
 
   private registration(identity: CordisXPluginIdentity, view?: PluginGenerationView): Registration | undefined {
-    return [...this.registrations.values()].find(item => platformIdentityKey(item.identity) === platformIdentityKey(identity)
-      && (this.visibility?.visible(item.generation, view) ?? true))
+    return [...this.registrations.values()].find(item =>
+      platformIdentityKey(item.identity) === platformIdentityKey(identity)
+      && (this.visibility?.visible(item.generation, view) ?? true)
+    )
   }
 
   private validAgentRuntimeScopeSource(
@@ -1409,19 +1647,23 @@ export class PermissionBroker {
         && authorityRequester === undefined
         && (declaredScope === undefined || (Array.isArray(declaredScope) && declaredScope.includes(input.sessionId)))
     }
-    if (Array.isArray(declaredScope)) return authorityRequester === undefined
-      && declaredScope.length === 1 && declaredScope[0] === input.sessionId
+    if (Array.isArray(declaredScope)) {
+      return authorityRequester === undefined
+        && declaredScope.length === 1 && declaredScope[0] === input.sessionId
+    }
     const source = input.scopeSource
     const route = this.agentRuntimeRouteValues().find(candidate => (
       candidate.owner.source === registration.identity.source
       && candidate.owner.pluginId === registration.identity.id
       && candidate.routeInstanceId === source.routeInstanceId
     ))
-    if (route === undefined
+    if (
+      route === undefined
       || route.routeInstanceId !== source.routeInstanceId
       || route.routeId !== source.routeId
       || route.path !== source.path
-      || route.params.sessionId !== source.params.sessionId) return false
+      || route.params.sessionId !== source.params.sessionId
+    ) return false
     if (isHostRouteSessionScopeBinding(declaredScope)) {
       return authorityRequester === undefined
         && route.params.sessionId === input.sessionId
@@ -1466,7 +1708,11 @@ export class PermissionBroker {
     })
   }
 
-  private agentRuntimePolicyKey(registration: Registration, capability: AgentRuntimeCapability, sessionId: string): string {
+  private agentRuntimePolicyKey(
+    registration: Registration,
+    capability: AgentRuntimeCapability,
+    sessionId: string,
+  ): string {
     return permissionRecordKeyV4(this.agentRuntimePolicyRecord(registration, capability, sessionId, 'ask'))
   }
 
@@ -1483,17 +1729,23 @@ export class PermissionBroker {
       }
     }
     for (const pending of this.pendingAgentRuntimePrompts) {
-      if (identity !== undefined && (pending.identity.source !== identity.source || pending.identity.id !== identity.id)) continue
+      if (
+        identity !== undefined && (pending.identity.source !== identity.source || pending.identity.id !== identity.id)
+      ) continue
       if (registrationToken !== undefined && pending.registrationToken !== registrationToken) continue
       pending.abort.abort()
       this.pendingAgentRuntimePrompts.delete(pending)
     }
     for (const [leaseId, lease] of this.agentRuntimeLeases) {
-      if (identity !== undefined && (lease.identity.source !== identity.source || lease.identity.id !== identity.id)) continue
+      if (identity !== undefined && (lease.identity.source !== identity.source || lease.identity.id !== identity.id)) {
+        continue
+      }
       this.agentRuntimeLeases.delete(leaseId)
       const fence = Object.freeze({ identity: lease.identity, sessionId: lease.lease.sessionId, code })
       for (const listener of this.agentRuntimeFenceListeners) {
-        try { listener(fence) } catch { /* fences are authoritative; observers are isolated */ }
+        try {
+          listener(fence)
+        } catch { /* fences are authoritative; observers are isolated */ }
       }
     }
   }
@@ -1511,7 +1763,9 @@ export class PermissionBroker {
       this.agentRuntimeLeases.delete(leaseId)
       const fence = Object.freeze({ identity: lease.identity, sessionId: lease.lease.sessionId, code })
       for (const listener of this.agentRuntimeFenceListeners) {
-        try { listener(fence) } catch { /* fences are authoritative; observers are isolated */ }
+        try {
+          listener(fence)
+        } catch { /* fences are authoritative; observers are isolated */ }
       }
     }
   }
@@ -1536,10 +1790,15 @@ export class PermissionBroker {
   ): void {
     const artifact = registration.artifact
     if (artifact === undefined || this.registrations.get(key)?.token !== registration.token) return
-    const normalized = normalizeCertifiedPermissionProjectionV1(certification, {
-      source: registration.identity.source,
-      pluginId: registration.identity.id,
-    }, artifact, this.now())
+    const normalized = normalizeCertifiedPermissionProjectionV1(
+      certification,
+      {
+        source: registration.identity.source,
+        pluginId: registration.identity.id,
+      },
+      artifact,
+      this.now(),
+    )
     const previous = artifact.certification
     if (previous?.fingerprint === normalized?.fingerprint && previous?.revision === normalized?.revision) {
       this.scheduleDomCertificationExpiry(key, registration)
@@ -1605,12 +1864,16 @@ export class PermissionBroker {
     if (snapshot.revision < this.certifiedProjectionRevision) {
       throw new Error('Certified permission snapshot revision regressed')
     }
-    if (snapshot.revision === this.certifiedProjectionRevision
-      && this.certifiedProjectionDigest !== '' && digest !== this.certifiedProjectionDigest) {
+    if (
+      snapshot.revision === this.certifiedProjectionRevision
+      && this.certifiedProjectionDigest !== '' && digest !== this.certifiedProjectionDigest
+    ) {
       throw new Error('Certified permission snapshot equivocated at one revision')
     }
-    if (snapshot.revision === this.certifiedProjectionRevision
-      && digest === this.certifiedProjectionDigest && this.certifiedProjectionAvailable) return
+    if (
+      snapshot.revision === this.certifiedProjectionRevision
+      && digest === this.certifiedProjectionDigest && this.certifiedProjectionAvailable
+    ) return
     this.certifiedProjectionRevision = snapshot.revision
     this.certifiedProjectionDigest = digest
     this.certifiedProjectionAvailable = true
@@ -1673,7 +1936,10 @@ export class PermissionBroker {
     const registration = this.registrations.get(key)
     const artifact = registration?.artifact
     const certification = artifact?.certification
-    if (registration === undefined || registration.token !== token || artifact === undefined || certification === undefined) return
+    if (
+      registration === undefined || registration.token !== token || artifact === undefined
+      || certification === undefined
+    ) return
     if (this.now().getTime() < Date.parse(certification.expiresAt)) {
       this.scheduleDomCertificationExpiry(key, registration)
       return
@@ -1769,13 +2035,22 @@ export class PermissionBroker {
     const artifact = registration.artifact
     return artifact === undefined
       ? undefined
-      : normalizeCertifiedPermissionProjectionV1(artifact.certification, {
+      : normalizeCertifiedPermissionProjectionV1(
+        artifact.certification,
+        {
           source: registration.identity.source,
           pluginId: registration.identity.id,
-        }, artifact, this.now())
+        },
+        artifact,
+        this.now(),
+      )
   }
 
-  private domPlan(registration: Registration, pointId: string, operationId: string): CordisXPermissionAuthorizationPlanV3 {
+  private domPlan(
+    registration: Registration,
+    pointId: string,
+    operationId: string,
+  ): CordisXPermissionAuthorizationPlanV3 {
     const certification = this.activeCertification(registration)
     return buildDomPermissionAuthorizationPlanV3({
       planId: operationId,
@@ -1843,45 +2118,78 @@ export class PermissionBroker {
   }
 
   domPolicies(): readonly DomPermissionPolicyEntry[] {
-    return Object.freeze([...this.policyRecords.values()].flatMap(record => {
-      if (!isPermissionPolicyRecordV3(record) || record.key.profileId !== this.profileId) return []
-      const pointId = record.key.scope.extensionPoints?.[0]
-      if (pointId === undefined || record.key.scope.extensionPoints?.length !== 1) return []
-      return [Object.freeze({
-        identity: Object.freeze({ source: record.key.identity.source, id: record.key.identity.pluginId }),
-        pointId,
-        policy: record.policy === 'allow-persistent' ? 'allow' as const : record.policy === 'deny-persistent' ? 'deny' as const : 'inherit' as const,
-      })]
-    }).sort((left, right) => `${left.identity.source}\u0000${left.identity.id}\u0000${left.pointId}`.localeCompare(
-      `${right.identity.source}\u0000${right.identity.id}\u0000${right.pointId}`,
-    )))
+    return Object.freeze(
+      [...this.policyRecords.values()].flatMap(record => {
+        if (!isPermissionPolicyRecordV3(record) || record.key.profileId !== this.profileId) return []
+        const pointId = record.key.scope.extensionPoints?.[0]
+        if (pointId === undefined || record.key.scope.extensionPoints?.length !== 1) return []
+        return [Object.freeze({
+          identity: Object.freeze({ source: record.key.identity.source, id: record.key.identity.pluginId }),
+          pointId,
+          policy: record.policy === 'allow-persistent'
+            ? 'allow' as const
+            : record.policy === 'deny-persistent'
+            ? 'deny' as const
+            : 'inherit' as const,
+        })]
+      }).sort((left, right) =>
+        `${left.identity.source}\u0000${left.identity.id}\u0000${left.pointId}`.localeCompare(
+          `${right.identity.source}\u0000${right.identity.id}\u0000${right.pointId}`,
+        )
+      ),
+    )
   }
 
-  domAccess(identity: CordisXPluginIdentity, pointId: string, view?: PluginGenerationView): DomPermissionAccessDecision {
+  domAccess(
+    identity: CordisXPluginIdentity,
+    pointId: string,
+    view?: PluginGenerationView,
+  ): DomPermissionAccessDecision {
     const registration = this.registration(identity, view)
     const policy = this.domPolicy(identity, pointId)
-    if (registration === undefined) return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.identity-unavailable', policy })
+    if (registration === undefined) {
+      return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.identity-unavailable', policy })
+    }
     const pointKey = this.domPointKey(identity, pointId, registration.generation.moduleGeneration)
-    this.domPoints.set(pointKey, Object.freeze({ identity: registration.identity, pointId, ...(registration.generation.moduleGeneration === undefined ? {} : { moduleGeneration: registration.generation.moduleGeneration }) }))
-    const lease = this.validDomLease(registration, pointId)
-    if (lease !== undefined) return Object.freeze({
-      authorized: true,
-      state: 'allowed',
-      reason: lease.authorizationOrigin === 'certified-implicit' ? 'permission.certified-implicit' : 'permission.explicit-user',
-      policy,
-      authorizationOrigin: lease.authorizationOrigin,
-    })
-    const request = this.domRequests.get(pointKey)
-    if (request !== undefined) return Object.freeze({ authorized: false, state: 'pending', reason: 'permission.review-pending', policy })
-    if (policy === 'deny') return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.denied-persistent', policy })
-    if (policy === 'allow' || this.activeCertification(registration) !== undefined) {
-      const operationId = `dom:auto:${sha256Hex([
-        this.generation,
-        registration.generation.moduleGeneration ?? 'host',
-        identity.source,
-        identity.id,
+    this.domPoints.set(
+      pointKey,
+      Object.freeze({
+        identity: registration.identity,
         pointId,
-      ].join('\u0000')).slice(0, 48)}`
+        ...(registration.generation.moduleGeneration === undefined
+          ? {}
+          : { moduleGeneration: registration.generation.moduleGeneration }),
+      }),
+    )
+    const lease = this.validDomLease(registration, pointId)
+    if (lease !== undefined) {
+      return Object.freeze({
+        authorized: true,
+        state: 'allowed',
+        reason: lease.authorizationOrigin === 'certified-implicit'
+          ? 'permission.certified-implicit'
+          : 'permission.explicit-user',
+        policy,
+        authorizationOrigin: lease.authorizationOrigin,
+      })
+    }
+    const request = this.domRequests.get(pointKey)
+    if (request !== undefined) {
+      return Object.freeze({ authorized: false, state: 'pending', reason: 'permission.review-pending', policy })
+    }
+    if (policy === 'deny') {
+      return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.denied-persistent', policy })
+    }
+    if (policy === 'allow' || this.activeCertification(registration) !== undefined) {
+      const operationId = `dom:auto:${
+        sha256Hex([
+          this.generation,
+          registration.generation.moduleGeneration ?? 'host',
+          identity.source,
+          identity.id,
+          pointId,
+        ].join('\u0000')).slice(0, 48)
+      }`
       const plan = this.domPlan(registration, pointId, operationId)
       const item = plan.declarations[0]!
       if (item.authorizationMode === 'certified-implicit') {
@@ -1891,33 +2199,47 @@ export class PermissionBroker {
         return this.grantDomAccess(registration, pointId, plan, item, 'explicit-user', true)
       }
     }
-    this.pendingDomReviews.set(this.domPendingReviewKey(identity, registration.generation.moduleGeneration), Object.freeze({
-      identity: registration.identity,
-      pointId,
-      ...(registration.generation.moduleGeneration === undefined ? {} : {
-        moduleGeneration: registration.generation.moduleGeneration,
+    this.pendingDomReviews.set(
+      this.domPendingReviewKey(identity, registration.generation.moduleGeneration),
+      Object.freeze({
+        identity: registration.identity,
+        pointId,
+        ...(registration.generation.moduleGeneration === undefined ? {} : {
+          moduleGeneration: registration.generation.moduleGeneration,
+        }),
+        ...(view === undefined ? {} : { view }),
       }),
-      ...(view === undefined ? {} : { view }),
-    }))
+    )
     return Object.freeze({ authorized: false, state: 'pending', reason: 'permission.review-pending', policy })
   }
 
-  requestDomAccess(identity: CordisXPluginIdentity, pointId: string, view?: PluginGenerationView): Promise<DomPermissionAccessDecision> {
+  requestDomAccess(
+    identity: CordisXPluginIdentity,
+    pointId: string,
+    view?: PluginGenerationView,
+  ): Promise<DomPermissionAccessDecision> {
     const registration = this.registration(identity, view)
-    if (registration === undefined) return Promise.resolve(Object.freeze({
-      authorized: false,
-      state: 'denied',
-      reason: 'permission.identity-unavailable',
-      policy: this.domPolicy(identity, pointId),
-    }))
+    if (registration === undefined) {
+      return Promise.resolve(Object.freeze({
+        authorized: false,
+        state: 'denied',
+        reason: 'permission.identity-unavailable',
+        policy: this.domPolicy(identity, pointId),
+      }))
+    }
     const pointKey = this.domPointKey(identity, pointId, registration.generation.moduleGeneration)
     const pendingKey = this.domPendingReviewKey(identity, registration.generation.moduleGeneration)
     if (this.pendingDomReviews.get(pendingKey)?.pointId === pointId) this.pendingDomReviews.delete(pendingKey)
-    this.domPoints.set(pointKey, Object.freeze({
-      identity: registration.identity,
-      pointId,
-      ...(registration.generation.moduleGeneration === undefined ? {} : { moduleGeneration: registration.generation.moduleGeneration }),
-    }))
+    this.domPoints.set(
+      pointKey,
+      Object.freeze({
+        identity: registration.identity,
+        pointId,
+        ...(registration.generation.moduleGeneration === undefined
+          ? {}
+          : { moduleGeneration: registration.generation.moduleGeneration }),
+      }),
+    )
     const existing = this.domRequests.get(pointKey)
     if (existing !== undefined) return existing
     const task = this.resolveDomAccess(registration, pointId).finally(() => {
@@ -1936,7 +2258,9 @@ export class PermissionBroker {
     view?: PluginGenerationView,
   ): Promise<readonly DomPermissionAccessDecision[]> {
     const registration = this.registration(identity, view)
-    if (registration === undefined || registration.generation.moduleGeneration !== moduleGeneration) return Object.freeze([])
+    if (registration === undefined || registration.generation.moduleGeneration !== moduleGeneration) {
+      return Object.freeze([])
+    }
     const prefix = this.domGenerationPrefix(identity, moduleGeneration)
     const requests = [...this.domRequests.entries()]
       .filter(([key]) => key.startsWith(prefix))
@@ -1951,7 +2275,9 @@ export class PermissionBroker {
 
   private async resolveDomAccess(registration: Registration, pointId: string): Promise<DomPermissionAccessDecision> {
     const identity = registration.identity
-    const operationId = `dom:${this.generation}:${registration.generation.moduleGeneration ?? 'host'}:${identity.id}:${pointId}`
+    const operationId = `dom:${this.generation}:${
+      registration.generation.moduleGeneration ?? 'host'
+    }:${identity.id}:${pointId}`
     const plan = this.domPlan(registration, pointId, operationId)
     const item = plan.declarations[0]!
     const key: CordisXPermissionAuthorizationKeyV3 = Object.freeze({
@@ -1963,7 +2289,12 @@ export class PermissionBroker {
     })
     if (item.authorizationMode === 'persistent-policy' && item.policy === 'deny-persistent') {
       this.recordDomAudit(registration, pointId, false, 'explicit-user', 'Persistent user denial')
-      return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.denied-persistent', policy: 'deny' })
+      return Object.freeze({
+        authorized: false,
+        state: 'denied',
+        reason: 'permission.denied-persistent',
+        policy: 'deny',
+      })
     }
     let origin: 'explicit-user' | 'certified-implicit'
     if (item.authorizationMode === 'certified-implicit') {
@@ -1978,7 +2309,9 @@ export class PermissionBroker {
       try {
         decision = await Promise.race([
           this.promptV2?.requestV3?.(plan, identity) ?? Promise.resolve(undefined),
-          new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), this.promptTimeoutMs) }),
+          new Promise<undefined>(resolve => {
+            timer = setTimeout(() => resolve(undefined), this.promptTimeoutMs)
+          }),
         ])
       } catch {
         decision = undefined
@@ -1988,15 +2321,30 @@ export class PermissionBroker {
         this.promptV2?.cancelV3?.(plan.planId, plan.binding)
       }
       if (!this.isRegistered(registration)) {
-        return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.generation-invalidated', policy: 'inherit' })
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.generation-invalidated',
+          policy: 'inherit',
+        })
       }
       if (decision === undefined) {
         this.recordDomAudit(registration, pointId, false, 'explicit-user', 'Explicit review cancelled or timed out')
-        return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.review-cancelled', policy: 'inherit' })
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.review-cancelled',
+          policy: 'inherit',
+        })
       }
       const selected = await this.commitDomDecision(plan, decision)
       if (!this.isRegistered(registration)) {
-        return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.generation-invalidated', policy: 'inherit' })
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.generation-invalidated',
+          policy: 'inherit',
+        })
       }
       if (selected === 'deny-once' || selected === 'deny-persistent') {
         this.recordDomAudit(registration, pointId, false, 'explicit-user', 'Explicit user denial')
@@ -2010,8 +2358,19 @@ export class PermissionBroker {
       if (selected === 'allow-once') {
         this.onceV2.issue(key, plan.binding)
         if (!this.onceV2.consume(key, plan.binding)) {
-          this.recordDomAudit(registration, pointId, false, 'explicit-user', 'Exact one-time grant could not be consumed')
-          return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.once-invalid', policy: 'inherit' })
+          this.recordDomAudit(
+            registration,
+            pointId,
+            false,
+            'explicit-user',
+            'Exact one-time grant could not be consumed',
+          )
+          return Object.freeze({
+            authorized: false,
+            state: 'denied',
+            reason: 'permission.once-invalid',
+            policy: 'inherit',
+          })
         }
       }
       origin = 'explicit-user'
@@ -2020,11 +2379,11 @@ export class PermissionBroker {
     return this.isRegistered(registration)
       ? granted
       : Object.freeze({
-          authorized: false,
-          state: 'denied',
-          reason: 'permission.generation-invalidated',
-          policy: 'inherit',
-        })
+        authorized: false,
+        state: 'denied',
+        reason: 'permission.generation-invalidated',
+        policy: 'inherit',
+      })
   }
 
   private grantDomAccess(
@@ -2043,22 +2402,29 @@ export class PermissionBroker {
       securityFingerprint: item.securityFingerprint,
     })
     const certification = origin === 'certified-implicit' ? item.certification : undefined
-    this.domLeases.set(this.domLeaseKey(key), Object.freeze({
-      key,
-      runtimeGeneration: this.generation,
-      ...(registration.generation.moduleGeneration === undefined ? {} : { moduleGeneration: registration.generation.moduleGeneration }),
-      authorizationOrigin: origin,
-      ...(certification === undefined ? {} : {
-        certificationFingerprint: certification.fingerprint,
-        certificationRevision: certification.revision,
+    this.domLeases.set(
+      this.domLeaseKey(key),
+      Object.freeze({
+        key,
+        runtimeGeneration: this.generation,
+        ...(registration.generation.moduleGeneration === undefined
+          ? {}
+          : { moduleGeneration: registration.generation.moduleGeneration }),
+        authorizationOrigin: origin,
+        ...(certification === undefined ? {} : {
+          certificationFingerprint: certification.fingerprint,
+          certificationRevision: certification.revision,
+        }),
       }),
-    }))
+    )
     this.recordDomAudit(
       registration,
       pointId,
       true,
       origin,
-      origin === 'certified-implicit' ? 'Exact Certified artifact auto-approved by the Host catalog' : 'Explicit user approval',
+      origin === 'certified-implicit'
+        ? 'Exact Certified artifact auto-approved by the Host catalog'
+        : 'Explicit user approval',
       certification,
       deferAuditNotification,
     )
@@ -2075,18 +2441,22 @@ export class PermissionBroker {
     plan: CordisXPermissionAuthorizationPlanV3,
     decision: CordisXPermissionAuthorizationDecisionV3,
   ): Promise<CordisXPermissionDecisionV2> {
-    if (decision.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V3
+    if (
+      decision.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V3
       || decision.schemaVersion !== 3 || decision.origin !== 'explicit-user'
       || decision.planId !== plan.planId || decision.operation !== plan.operation
       || decision.profileId !== plan.profileId || JSON.stringify(decision.identity) !== JSON.stringify(plan.identity)
       || JSON.stringify(decision.binding) !== JSON.stringify(plan.binding)
-      || decision.decisions.length !== 1) throw new Error('DOM permission decision does not match the Host plan')
+      || decision.decisions.length !== 1
+    ) throw new Error('DOM permission decision does not match the Host plan')
     const item = plan.declarations[0]!
     const selected = decision.decisions[0]!
-    if (selected.capability !== item.capability
+    if (
+      selected.capability !== item.capability
       || JSON.stringify(selected.scope) !== JSON.stringify(item.scope)
       || selected.securityFingerprint !== item.securityFingerprint
-      || !item.allowedDecisions.includes(selected.decision)) throw new Error('DOM permission decision is invalid')
+      || !item.allowedDecisions.includes(selected.decision)
+    ) throw new Error('DOM permission decision is invalid')
     if (selected.decision === 'allow-persistent' || selected.decision === 'deny-persistent') {
       const record = normalizePermissionPolicyRecordV3({
         $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V3,
@@ -2124,7 +2494,10 @@ export class PermissionBroker {
     )
     const audit = this.audit.get(key) ?? { denialCount: 0 }
     if (allowed) audit.lastUsedAt = isoNow(this.now)
-    else { audit.lastDeniedAt = isoNow(this.now); audit.denialCount += 1 }
+    else {
+      audit.lastDeniedAt = isoNow(this.now)
+      audit.denialCount += 1
+    }
     audit.authorizationOrigin = authorizationOrigin
     audit.authorizationReason = authorizationReason
     if (certification === undefined) delete audit.certification
@@ -2147,26 +2520,35 @@ export class PermissionBroker {
     this.clearDomLeases(moduleGeneration, identity)
     const identityKey = identity === undefined ? undefined : platformIdentityKey(identity)
     for (const [key, plan] of this.domPromptPlans) {
-      if ((moduleGeneration === undefined || plan.binding.moduleGeneration === moduleGeneration)
+      if (
+        (moduleGeneration === undefined || plan.binding.moduleGeneration === moduleGeneration)
         && (identity === undefined || (
           plan.identity.source === identity.source && plan.identity.pluginId === identity.id
-        ))) {
+        ))
+      ) {
         this.domPromptPlans.delete(key)
         this.promptV2?.cancelV3?.(plan.planId, plan.binding)
       }
     }
     for (const [key, point] of this.domPoints) {
-      if ((moduleGeneration === undefined || point.moduleGeneration === moduleGeneration)
-        && (identityKey === undefined || platformIdentityKey(point.identity) === identityKey)) this.domPoints.delete(key)
+      if (
+        (moduleGeneration === undefined || point.moduleGeneration === moduleGeneration)
+        && (identityKey === undefined || platformIdentityKey(point.identity) === identityKey)
+      ) this.domPoints.delete(key)
     }
     for (const [key, pending] of this.pendingDomReviews) {
-      if ((moduleGeneration === undefined || pending.moduleGeneration === moduleGeneration)
-        && (identityKey === undefined || platformIdentityKey(pending.identity) === identityKey)) this.pendingDomReviews.delete(key)
+      if (
+        (moduleGeneration === undefined || pending.moduleGeneration === moduleGeneration)
+        && (identityKey === undefined || platformIdentityKey(pending.identity) === identityKey)
+      ) this.pendingDomReviews.delete(key)
     }
     const requestPrefix = identity === undefined ? undefined : this.domGenerationPrefix(identity, moduleGeneration)
     for (const key of [...this.domRequests.keys()]) {
-      if (requestPrefix !== undefined ? key.startsWith(requestPrefix)
-        : moduleGeneration === undefined || key.includes(`\u0000${moduleGeneration}\u0000`)) this.domRequests.delete(key)
+      if (
+        requestPrefix !== undefined
+          ? key.startsWith(requestPrefix)
+          : moduleGeneration === undefined || key.includes(`\u0000${moduleGeneration}\u0000`)
+      ) this.domRequests.delete(key)
     }
     if (identityKey !== undefined) {
       const auditPrefix = moduleGeneration === undefined
@@ -2178,33 +2560,39 @@ export class PermissionBroker {
 
   private clearDomLeases(moduleGeneration?: string, identity?: CordisXPluginIdentity): void {
     for (const [key, lease] of this.domLeases) {
-      if (lease.runtimeGeneration === this.generation
+      if (
+        lease.runtimeGeneration === this.generation
         && (moduleGeneration === undefined || lease.moduleGeneration === moduleGeneration)
         && (identity === undefined || (
           lease.key.identity.source === identity.source && lease.key.identity.pluginId === identity.id
-        ))) this.domLeases.delete(key)
+        ))
+      ) this.domLeases.delete(key)
     }
   }
 
   private clearCertifiedDomLeases(registration: Registration): void {
     for (const [key, lease] of this.domLeases) {
-      if (lease.runtimeGeneration !== this.generation
+      if (
+        lease.runtimeGeneration !== this.generation
         || lease.moduleGeneration !== registration.generation.moduleGeneration
         || lease.authorizationOrigin !== 'certified-implicit'
         || lease.key.identity.source !== registration.identity.source
-        || lease.key.identity.pluginId !== registration.identity.id) continue
+        || lease.key.identity.pluginId !== registration.identity.id
+      ) continue
       this.domLeases.delete(key)
     }
   }
 
   private clearExactDomLease(registration: Registration, pointId: string): void {
     for (const [key, lease] of this.domLeases) {
-      if (lease.runtimeGeneration !== this.generation
+      if (
+        lease.runtimeGeneration !== this.generation
         || lease.moduleGeneration !== registration.generation.moduleGeneration
         || lease.key.identity.source !== registration.identity.source
         || lease.key.identity.pluginId !== registration.identity.id
         || lease.key.scope.extensionPoints?.length !== 1
-        || lease.key.scope.extensionPoints[0] !== pointId) continue
+        || lease.key.scope.extensionPoints[0] !== pointId
+      ) continue
       this.domLeases.delete(key)
     }
   }
@@ -2271,23 +2659,34 @@ export class PermissionBroker {
     return record.policy === 'allow-persistent' ? 'allow' : record.policy === 'deny-persistent' ? 'deny' : 'inherit'
   }
 
-  private hostDomPolicyRevision(registration: Registration, capability: 'ui.host-dom.read' | 'ui.host-dom.modify'): number {
+  private hostDomPolicyRevision(
+    registration: Registration,
+    capability: 'ui.host-dom.read' | 'ui.host-dom.modify',
+  ): number {
     return this.hostDomPolicyRevisions.get(this.hostDomLeaseKey(this.hostDomKey(registration, capability))) ?? 0
   }
 
-  private bumpHostDomPolicyRevision(registration: Registration, capability: 'ui.host-dom.read' | 'ui.host-dom.modify'): number {
+  private bumpHostDomPolicyRevision(
+    registration: Registration,
+    capability: 'ui.host-dom.read' | 'ui.host-dom.modify',
+  ): number {
     const key = this.hostDomLeaseKey(this.hostDomKey(registration, capability))
     const revision = (this.hostDomPolicyRevisions.get(key) ?? 0) + 1
     this.hostDomPolicyRevisions.set(key, revision)
     return revision
   }
 
-  private cancelHostDomPrompts(registration: Registration, capability: 'ui.host-dom.read' | 'ui.host-dom.modify'): void {
+  private cancelHostDomPrompts(
+    registration: Registration,
+    capability: 'ui.host-dom.read' | 'ui.host-dom.modify',
+  ): void {
     for (const [key, pending] of this.hostDomPromptPlans) {
       const plan = pending.plan
-      if (plan.identity.source !== registration.identity.source || plan.identity.pluginId !== registration.identity.id
+      if (
+        plan.identity.source !== registration.identity.source || plan.identity.pluginId !== registration.identity.id
         || plan.binding.moduleGeneration !== registration.generation.moduleGeneration
-        || plan.declarations[0]?.capability !== capability) continue
+        || plan.declarations[0]?.capability !== capability
+      ) continue
       this.hostDomPromptPlans.delete(key)
       pending.cancel()
       this.promptV2?.cancelV4?.(plan.planId, plan.binding)
@@ -2350,67 +2749,106 @@ export class PermissionBroker {
     view?: PluginGenerationView,
   ): Promise<HostDomPermissionAccessDecision> {
     const registration = this.registration(identity, view)
-    if (registration === undefined) return Object.freeze({
-      authorized: false, state: 'denied', reason: 'permission.identity-unavailable', policy: 'inherit',
-    })
+    if (registration === undefined) {
+      return Object.freeze({
+        authorized: false,
+        state: 'denied',
+        reason: 'permission.identity-unavailable',
+        policy: 'inherit',
+      })
+    }
     const declaration = registration.declarationsV4.get(capability)
-    if (declaration === undefined) return Object.freeze({
-      authorized: false, state: 'denied', reason: 'permission.undeclared', policy: 'inherit',
-    })
+    if (declaration === undefined) {
+      return Object.freeze({
+        authorized: false,
+        state: 'denied',
+        reason: 'permission.undeclared',
+        policy: 'inherit',
+      })
+    }
     const roots = declaration.scope.rootIds ?? []
     const declaredOperations = declaration.scope.operations ?? []
-    if (!roots.includes(rootId) || operations.length < 1 || new Set(operations).size !== operations.length
-      || operations.some(operation => !declaredOperations.includes(operation as never))) {
-      this.recordHostDomAudit(registration, capability, false, 'explicit-user', 'Requested root or operation exceeds manifest scope')
+    if (
+      !roots.includes(rootId) || operations.length < 1 || new Set(operations).size !== operations.length
+      || operations.some(operation => !declaredOperations.includes(operation as never))
+    ) {
+      this.recordHostDomAudit(
+        registration,
+        capability,
+        false,
+        'explicit-user',
+        'Requested root or operation exceeds manifest scope',
+      )
       return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.scope-denied', policy: 'inherit' })
     }
     const policy = this.hostDomPolicy(identity, capability, view)
     if (policy === 'deny') {
       this.clearExactHostDomLease(registration, capability)
       this.recordHostDomAudit(registration, capability, false, 'explicit-user', 'Persistent user denial')
-      return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.denied-persistent', policy: 'deny' })
+      return Object.freeze({
+        authorized: false,
+        state: 'denied',
+        reason: 'permission.denied-persistent',
+        policy: 'deny',
+      })
     }
     const lease = this.validHostDomLease(registration, capability)
-    if (lease !== undefined) return Object.freeze({
-      authorized: true,
-      state: 'allowed',
-      reason: lease.authorizationOrigin === 'certified-implicit' ? 'permission.certified-implicit' : 'permission.explicit-user',
-      policy,
-      authorizationOrigin: lease.authorizationOrigin,
-      lease,
-    })
-    const operationId = `host-dom:${sha256Hex([
-      this.generation,
-      registration.generation.moduleGeneration ?? 'host',
-      identity.source,
-      identity.id,
-      capability,
-      rootId,
-      [...operations].sort().join(','),
-      String(this.now().getTime()),
-      String(++this.hostDomOperationSequence),
-    ].join('\u0000')).slice(0, 48)}`
+    if (lease !== undefined) {
+      return Object.freeze({
+        authorized: true,
+        state: 'allowed',
+        reason: lease.authorizationOrigin === 'certified-implicit'
+          ? 'permission.certified-implicit'
+          : 'permission.explicit-user',
+        policy,
+        authorizationOrigin: lease.authorizationOrigin,
+        lease,
+      })
+    }
+    const operationId = `host-dom:${
+      sha256Hex([
+        this.generation,
+        registration.generation.moduleGeneration ?? 'host',
+        identity.source,
+        identity.id,
+        capability,
+        rootId,
+        [...operations].sort().join(','),
+        String(this.now().getTime()),
+        String(++this.hostDomOperationSequence),
+      ].join('\u0000')).slice(0, 48)
+    }`
     const plan = this.hostDomPlan(registration, capability, operationId)
     const item = plan.declarations[0]!
     if (item.authorizationMode === 'persistent-policy' && item.policy === 'deny-persistent') {
       this.recordHostDomAudit(registration, capability, false, 'explicit-user', 'Persistent user denial')
-      return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.denied-persistent', policy: 'deny' })
+      return Object.freeze({
+        authorized: false,
+        state: 'denied',
+        reason: 'permission.denied-persistent',
+        policy: 'deny',
+      })
     }
     let origin: 'explicit-user' | 'certified-implicit'
     if (item.authorizationMode === 'certified-implicit') origin = 'certified-implicit'
-    else if (item.authorizationMode === 'persistent-policy' && item.policy === 'allow-persistent') origin = 'explicit-user'
-    else {
+    else if (item.authorizationMode === 'persistent-policy' && item.policy === 'allow-persistent') {
+      origin = 'explicit-user'
+    } else {
       let decision: CordisXPermissionAuthorizationDecisionV4 | undefined
       let timer: ReturnType<typeof setTimeout> | undefined
       const policyRevision = this.hostDomPolicyRevision(registration, capability)
       let cancelPrompt!: () => void
-      const cancelled = new Promise<undefined>(resolve => { cancelPrompt = () => resolve(undefined) })
+      const cancelled = new Promise<undefined>(resolve => {
+        cancelPrompt = () => resolve(undefined)
+      })
       this.hostDomPromptPlans.set(plan.planId, { plan, cancel: cancelPrompt })
       try {
         decision = await Promise.race([
           this.promptV2?.requestV4?.(plan, identity) ?? Promise.resolve(undefined),
           cancelled,
-          new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), this.promptTimeoutMs) }),
+          new Promise<undefined>(resolve => {
+            timer = setTimeout(() => resolve(undefined), this.promptTimeoutMs)
+          }),
         ])
       } catch {
         decision = undefined
@@ -2419,30 +2857,69 @@ export class PermissionBroker {
         this.hostDomPromptPlans.delete(plan.planId)
         this.promptV2?.cancelV4?.(plan.planId, plan.binding)
       }
-      if (!this.isRegistered(registration)) return Object.freeze({
-        authorized: false, state: 'denied', reason: 'permission.generation-invalidated', policy: 'inherit',
-      })
+      if (!this.isRegistered(registration)) {
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.generation-invalidated',
+          policy: 'inherit',
+        })
+      }
       const currentPolicy = this.hostDomPolicy(identity, capability, view)
       if (currentPolicy === 'deny') {
         this.recordHostDomAudit(registration, capability, false, 'explicit-user', 'Persistent user denial')
-        return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.denied-persistent', policy: 'deny' })
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.denied-persistent',
+          policy: 'deny',
+        })
       }
-      if (this.hostDomPolicyRevision(registration, capability) !== policyRevision) return Object.freeze({
-        authorized: false, state: 'denied', reason: 'permission.policy-invalidated', policy: currentPolicy,
-      })
+      if (this.hostDomPolicyRevision(registration, capability) !== policyRevision) {
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.policy-invalidated',
+          policy: currentPolicy,
+        })
+      }
       if (decision === undefined) {
-        this.recordHostDomAudit(registration, capability, false, 'explicit-user', 'Explicit review cancelled or timed out')
-        return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.review-cancelled', policy: 'inherit' })
+        this.recordHostDomAudit(
+          registration,
+          capability,
+          false,
+          'explicit-user',
+          'Explicit review cancelled or timed out',
+        )
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.review-cancelled',
+          policy: 'inherit',
+        })
       }
       const committed = await this.commitHostDomDecision(registration, plan, decision)
       const selected = committed.decision
-      if (!this.isRegistered(registration)) return Object.freeze({
-        authorized: false, state: 'denied', reason: 'permission.generation-invalidated', policy: 'inherit',
-      })
+      if (!this.isRegistered(registration)) {
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.generation-invalidated',
+          policy: 'inherit',
+        })
+      }
       const committedPolicy = this.hostDomPolicy(identity, capability, view)
-      if (this.hostDomPolicyRevision(registration, capability) !== committed.policyRevision || committedPolicy === 'deny' && selected !== 'deny-persistent') {
+      if (
+        this.hostDomPolicyRevision(registration, capability) !== committed.policyRevision
+        || committedPolicy === 'deny' && selected !== 'deny-persistent'
+      ) {
         this.clearExactHostDomLease(registration, capability)
-        return Object.freeze({ authorized: false, state: 'denied', reason: 'permission.policy-invalidated', policy: committedPolicy })
+        return Object.freeze({
+          authorized: false,
+          state: 'denied',
+          reason: 'permission.policy-invalidated',
+          policy: committedPolicy,
+        })
       }
       if (selected === 'deny-once' || selected === 'deny-persistent') {
         this.recordHostDomAudit(registration, capability, false, 'explicit-user', 'Explicit user denial')
@@ -2462,9 +2939,14 @@ export class PermissionBroker {
       })
       if (selected === 'allow-once') {
         this.onceV2.issue(key, plan.binding)
-        if (!this.onceV2.consume(key, plan.binding)) return Object.freeze({
-          authorized: false, state: 'denied', reason: 'permission.once-invalid', policy: 'inherit',
-        })
+        if (!this.onceV2.consume(key, plan.binding)) {
+          return Object.freeze({
+            authorized: false,
+            state: 'denied',
+            reason: 'permission.once-invalid',
+            policy: 'inherit',
+          })
+        }
       }
       origin = 'explicit-user'
     }
@@ -2475,8 +2957,11 @@ export class PermissionBroker {
     return activeLease !== undefined && activeLease.leaseId === granted.lease?.leaseId
       ? granted
       : Object.freeze({
-          authorized: false, state: 'denied', reason: 'permission.grant-invalidated', policy: 'inherit',
-        })
+        authorized: false,
+        state: 'denied',
+        reason: 'permission.grant-invalidated',
+        policy: 'inherit',
+      })
   }
 
   isHostDomLeaseActive(
@@ -2487,7 +2972,9 @@ export class PermissionBroker {
     const registration = this.registration(identity, view)
     if (registration === undefined) return false
     const lease = [...this.hostDomLeases.values()].find(candidate => candidate.leaseId === leaseId)
-    return lease !== undefined && this.validHostDomLease(registration, lease.key.capability as 'ui.host-dom.read' | 'ui.host-dom.modify')?.leaseId === leaseId
+    return lease !== undefined
+      && this.validHostDomLease(registration, lease.key.capability as 'ui.host-dom.read' | 'ui.host-dom.modify')
+          ?.leaseId === leaseId
   }
 
   private validHostDomLease(
@@ -2533,10 +3020,15 @@ export class PermissionBroker {
     })
     const certification = origin === 'certified-implicit' ? item.certification : undefined
     const lease: HostDomPermissionLease = Object.freeze({
-      leaseId: `hdl_${sha256Hex([plan.planId, item.capability, item.securityFingerprint, this.now().toISOString()].join('\u0000')).slice(0, 48)}`,
+      leaseId: `hdl_${
+        sha256Hex([plan.planId, item.capability, item.securityFingerprint, this.now().toISOString()].join('\u0000'))
+          .slice(0, 48)
+      }`,
       key,
       runtimeGeneration: this.generation,
-      ...(registration.generation.moduleGeneration === undefined ? {} : { moduleGeneration: registration.generation.moduleGeneration }),
+      ...(registration.generation.moduleGeneration === undefined
+        ? {}
+        : { moduleGeneration: registration.generation.moduleGeneration }),
       authorizationOrigin: origin,
       ...(certification === undefined ? {} : {
         certificationFingerprint: certification.fingerprint,
@@ -2549,7 +3041,9 @@ export class PermissionBroker {
       item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify',
       true,
       origin,
-      origin === 'certified-implicit' ? 'Exact Certified artifact auto-approved by the Host catalog' : 'Explicit user approval',
+      origin === 'certified-implicit'
+        ? 'Exact Certified artifact auto-approved by the Host catalog'
+        : 'Explicit user approval',
       certification,
     )
     return Object.freeze({
@@ -2569,17 +3063,22 @@ export class PermissionBroker {
   ): Promise<Readonly<{ decision: CordisXPermissionDecisionV2; policyRevision: number }>> {
     const item = plan.declarations[0]!
     const selected = decision.decisions[0]
-    if (decision.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4
+    if (
+      decision.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4
       || decision.schemaVersion !== 4 || decision.origin !== 'explicit-user'
       || decision.planId !== plan.planId || decision.operation !== plan.operation
       || decision.profileId !== plan.profileId || JSON.stringify(decision.identity) !== JSON.stringify(plan.identity)
       || JSON.stringify(decision.binding) !== JSON.stringify(plan.binding)
       || decision.decisions.length !== 1 || selected === undefined
       || selected.capability !== item.capability || JSON.stringify(selected.scope) !== JSON.stringify(item.scope)
-      || selected.securityFingerprint !== item.securityFingerprint || !item.allowedDecisions.includes(selected.decision)) {
+      || selected.securityFingerprint !== item.securityFingerprint || !item.allowedDecisions.includes(selected.decision)
+    ) {
       throw new Error('Host DOM permission decision does not match the exact Host plan')
     }
-    let policyRevision = this.hostDomPolicyRevision(registration, item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify')
+    let policyRevision = this.hostDomPolicyRevision(
+      registration,
+      item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify',
+    )
     if (selected.decision === 'allow-persistent' || selected.decision === 'deny-persistent') {
       const record = normalizePermissionPolicyRecordV4({
         $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V4,
@@ -2597,7 +3096,10 @@ export class PermissionBroker {
       const previous = this.policyRecords.get(key)
       this.policyRecords.set(key, record)
       this.clearExactHostDomLease(registration, item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify')
-      policyRevision = this.bumpHostDomPolicyRevision(registration, item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify')
+      policyRevision = this.bumpHostDomPolicyRevision(
+        registration,
+        item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify',
+      )
       this.cancelHostDomPrompts(registration, item.capability as 'ui.host-dom.read' | 'ui.host-dom.modify')
       this.changed()
       try {
@@ -2616,7 +3118,9 @@ export class PermissionBroker {
   }
 
   private hostDomAuditKey(registration: Registration, capability: 'ui.host-dom.read' | 'ui.host-dom.modify'): string {
-    return `${platformIdentityKey(registration.identity)}\u0000${capability}\u0000${registration.generation.moduleGeneration ?? 'host'}`
+    return `${platformIdentityKey(registration.identity)}\u0000${capability}\u0000${
+      registration.generation.moduleGeneration ?? 'host'
+    }`
   }
 
   private recordHostDomAudit(
@@ -2630,7 +3134,10 @@ export class PermissionBroker {
     const key = this.hostDomAuditKey(registration, capability)
     const audit = this.audit.get(key) ?? { denialCount: 0 }
     if (allowed) audit.lastUsedAt = isoNow(this.now)
-    else { audit.lastDeniedAt = isoNow(this.now); audit.denialCount += 1 }
+    else {
+      audit.lastDeniedAt = isoNow(this.now)
+      audit.denialCount += 1
+    }
     audit.authorizationOrigin = authorizationOrigin
     audit.authorizationReason = authorizationReason
     if (certification === undefined) delete audit.certification
@@ -2650,11 +3157,13 @@ export class PermissionBroker {
 
   private clearCertifiedHostDomLeases(registration: Registration): void {
     for (const [key, lease] of this.hostDomLeases) {
-      if (lease.runtimeGeneration === this.generation
+      if (
+        lease.runtimeGeneration === this.generation
         && lease.moduleGeneration === registration.generation.moduleGeneration
         && lease.authorizationOrigin === 'certified-implicit'
         && lease.key.identity.source === registration.identity.source
-        && lease.key.identity.pluginId === registration.identity.id) this.hostDomLeases.delete(key)
+        && lease.key.identity.pluginId === registration.identity.id
+      ) this.hostDomLeases.delete(key)
     }
     for (const capability of registration.declarationsV4.keys()) {
       const audit = this.audit.get(this.hostDomAuditKey(registration, capability))
@@ -2667,16 +3176,21 @@ export class PermissionBroker {
 
   private clearHostDomGeneration(moduleGeneration?: string, identity?: CordisXPluginIdentity): void {
     for (const [key, lease] of this.hostDomLeases) {
-      if (lease.runtimeGeneration === this.generation
+      if (
+        lease.runtimeGeneration === this.generation
         && (moduleGeneration === undefined || lease.moduleGeneration === moduleGeneration)
         && (identity === undefined || (
           lease.key.identity.source === identity.source && lease.key.identity.pluginId === identity.id
-        ))) this.hostDomLeases.delete(key)
+        ))
+      ) this.hostDomLeases.delete(key)
     }
     for (const [key, pending] of this.hostDomPromptPlans) {
       const plan = pending.plan
-      if ((moduleGeneration === undefined || plan.binding.moduleGeneration === moduleGeneration)
-        && (identity === undefined || (plan.identity.source === identity.source && plan.identity.pluginId === identity.id))) {
+      if (
+        (moduleGeneration === undefined || plan.binding.moduleGeneration === moduleGeneration)
+        && (identity === undefined
+          || (plan.identity.source === identity.source && plan.identity.pluginId === identity.id))
+      ) {
         this.hostDomPromptPlans.delete(key)
         pending.cancel()
         this.promptV2?.cancelV4?.(plan.planId, plan.binding)
@@ -2686,7 +3200,9 @@ export class PermissionBroker {
       const prefix = `${platformIdentityKey(identity)}\u0000ui.host-dom.`
       const generationSuffix = moduleGeneration === undefined ? undefined : `\u0000${moduleGeneration}`
       for (const key of [...this.audit.keys()]) {
-        if (key.startsWith(prefix) && (generationSuffix === undefined || key.endsWith(generationSuffix))) this.audit.delete(key)
+        if (key.startsWith(prefix) && (generationSuffix === undefined || key.endsWith(generationSuffix))) {
+          this.audit.delete(key)
+        }
       }
     }
   }
@@ -2881,17 +3397,26 @@ export class PermissionBroker {
     view?: PluginGenerationView,
   ): Promise<void> {
     const registration = this.registration(identity, view)
-    if (registration === undefined || (registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6)) {
+    if (
+      registration === undefined
+      || (registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6)
+    ) {
       throw new Error(`plugin ${identity.id} does not use permission v4`)
     }
     const plan = this.authorizationPlanV4(identity, operation, view, authorization.binding)!
     assertPermissionAuthorizationDecisionV4(plan, authorization)
-    if (plan.declarations.some(item => item.required
-      && item.authorizationMode === 'persistent-policy'
-      && item.policy === 'deny-persistent')
-      || authorization.decisions.some(selected => plan.declarations.some(item => (
-        item.capability === selected.capability && item.required && selected.decision.startsWith('deny')
-      )))) {
+    if (
+      plan.declarations.some(item =>
+        item.required
+        && item.authorizationMode === 'persistent-policy'
+        && item.policy === 'deny-persistent'
+      )
+      || authorization.decisions.some(selected =>
+        plan.declarations.some(item => (
+          item.capability === selected.capability && item.required && selected.decision.startsWith('deny')
+        ))
+      )
+    ) {
       throw new Error(`plugin ${identity.id} denies a required permission v4 capability`)
     }
     const oneShotBinding = this.binding(registration, `${this.generation}:${identity.id}`)
@@ -3038,7 +3563,10 @@ export class PermissionBroker {
   }
 
   private migratePolicyRecordsV1(registration: Registration): void {
-    if (registration.manifest.schemaVersion !== 4 && registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6) return
+    if (
+      registration.manifest.schemaVersion !== 4 && registration.manifest.schemaVersion !== 5
+      && registration.manifest.schemaVersion !== 6
+    ) return
     const legacy = [...this.policyRecords.values()].filter((record): record is CordisXPermissionPolicyRecordV1 => (
       !isPermissionPolicyRecordV2(record)
       && !isPermissionPolicyRecordV3(record)
@@ -3048,8 +3576,10 @@ export class PermissionBroker {
     ))
     for (const record of legacy) {
       const declaration = registration.declarationsV2.get(record.key.capability as CordisXPermissionCapabilityV2)
-      if (declaration === undefined
-        || JSON.stringify(normalizePermissionScopeV2(record.key.scope)) !== JSON.stringify(declaration.scope)) continue
+      if (
+        declaration === undefined
+        || JSON.stringify(normalizePermissionScopeV2(record.key.scope)) !== JSON.stringify(declaration.scope)
+      ) continue
       const plan = this.planV2(registration, 'runtime', {
         operationId: `migration:${registration.identity.id}:${record.key.capability}`,
         runtimeGeneration: this.generation,
@@ -3078,7 +3608,11 @@ export class PermissionBroker {
     }
   }
 
-  policy(identity: CordisXPluginIdentity, capability: CordisXPlatformCapability, view?: PluginGenerationView): CordisXPermissionPolicy {
+  policy(
+    identity: CordisXPluginIdentity,
+    capability: CordisXPlatformCapability,
+    view?: PluginGenerationView,
+  ): CordisXPermissionPolicy {
     const registration = this.registration(identity, view)
     const declaration = registration?.declarations.get(capability)
     if (registration === undefined || declaration === undefined) return 'ask'
@@ -3090,7 +3624,8 @@ export class PermissionBroker {
         scope: declaration.scope,
         policy: 'ask',
       })))
-      return record !== undefined && !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record) && !isPermissionPolicyRecordV4(record)
+      return record !== undefined && !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record)
+          && !isPermissionPolicyRecordV4(record)
         ? record.policy
         : 'ask'
     }
@@ -3105,7 +3640,9 @@ export class PermissionBroker {
   ): Promise<void> {
     const registration = this.registration(identity)
     const declaration = registration?.declarations.get(capability)
-    if (registration === undefined || declaration === undefined) throw new Error(`plugin ${identity.id} does not declare ${capability}`)
+    if (registration === undefined || declaration === undefined) {
+      throw new Error(`plugin ${identity.id} does not declare ${capability}`)
+    }
     if (registration.manifest.schemaVersion === 1) {
       const record = createPermissionPolicyRecord({
         profileId: this.profileId,
@@ -3183,13 +3720,14 @@ export class PermissionBroker {
       declarations: Object.freeze([...registration.declarations.values()].map(declaration => {
         const item = v2.declarations.find(candidate => candidate.capability === declaration.name)!
         return Object.freeze({
-        capability: declaration.name,
-        required: declaration.required,
-        reason: declaration.reason,
-        scope: declaration.scope,
-        policy: item.policy === 'allow-persistent' ? 'allow' : item.policy === 'deny-persistent' ? 'deny' : 'ask',
-        decisionRequired: item.decisionRequired,
-      }) })),
+          capability: declaration.name,
+          required: declaration.required,
+          reason: declaration.reason,
+          scope: declaration.scope,
+          policy: item.policy === 'allow-persistent' ? 'allow' : item.policy === 'deny-persistent' ? 'deny' : 'ask',
+          decisionRequired: item.decisionRequired,
+        })
+      })),
     })
   }
 
@@ -3206,7 +3744,8 @@ export class PermissionBroker {
       return
     }
     const plan = this.authorizationPlanV2(identity, operation, view)
-    if (authorization === null || typeof authorization !== 'object'
+    if (
+      authorization === null || typeof authorization !== 'object'
       || authorization.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1
       || authorization.schemaVersion !== 1
       || authorization.planId !== `${this.generation}:${identity.id}`
@@ -3214,17 +3753,21 @@ export class PermissionBroker {
       || authorization.profileId !== this.profileId
       || authorization.identity?.source !== identity.source
       || authorization.identity.pluginId !== identity.id
-      || !Array.isArray(authorization.decisions)) {
+      || !Array.isArray(authorization.decisions)
+    ) {
       throw new Error('authorization decision does not match the current plan')
     }
     const expected = new Set(plan.declarations.map(item => item.capability))
     const seen = new Set<CordisXPlatformCapability>()
     for (const item of authorization.decisions) {
-      if (item === null || typeof item !== 'object'
-        || (item.decision !== 'ask' && item.decision !== 'allow' && item.decision !== 'allow-once' && item.decision !== 'deny')
+      if (
+        item === null || typeof item !== 'object'
+        || (item.decision !== 'ask' && item.decision !== 'allow' && item.decision !== 'allow-once'
+          && item.decision !== 'deny')
         || !expected.has(item.capability) || seen.has(item.capability)
         || JSON.stringify(normalizePermissionScopeV2(item.scope))
-          !== JSON.stringify(plan.declarations.find(candidate => candidate.capability === item.capability)?.scope)) {
+          !== JSON.stringify(plan.declarations.find(candidate => candidate.capability === item.capability)?.scope)
+      ) {
         throw new Error('authorization decision does not match the current manifest')
       }
       seen.add(item.capability)
@@ -3243,10 +3786,10 @@ export class PermissionBroker {
         let decision: CordisXPermissionDecisionV2 = item.decision === 'allow-once'
           ? 'allow-once'
           : item.decision === 'allow'
-            ? 'allow-persistent'
-            : item.decision === 'deny'
-              ? 'deny-persistent'
-              : 'deny-once'
+          ? 'allow-persistent'
+          : item.decision === 'deny'
+          ? 'deny-persistent'
+          : 'deny-once'
         if (!declaration.allowedDecisions.includes(decision)) {
           decision = item.decision === 'allow' ? 'allow-once' : 'deny-once'
         }
@@ -3268,7 +3811,8 @@ export class PermissionBroker {
     operation: 'install' | 'update' | 'enable',
   ): Promise<void> {
     const identity = registration.identity
-    if (authorization === null || typeof authorization !== 'object'
+    if (
+      authorization === null || typeof authorization !== 'object'
       || authorization.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V1
       || authorization.schemaVersion !== 1
       || authorization.planId !== `${this.generation}:${identity.id}`
@@ -3276,17 +3820,21 @@ export class PermissionBroker {
       || authorization.profileId !== this.profileId
       || authorization.identity?.source !== identity.source
       || authorization.identity.pluginId !== identity.id
-      || !Array.isArray(authorization.decisions)) {
+      || !Array.isArray(authorization.decisions)
+    ) {
       throw new Error('authorization decision does not match the current plan')
     }
     const expected = new Set(registration.declarations.keys())
     const seen = new Set<CordisXPlatformCapability>()
     for (const item of authorization.decisions) {
-      if (item === null || typeof item !== 'object'
-        || (item.decision !== 'ask' && item.decision !== 'allow' && item.decision !== 'allow-once' && item.decision !== 'deny')
+      if (
+        item === null || typeof item !== 'object'
+        || (item.decision !== 'ask' && item.decision !== 'allow' && item.decision !== 'allow-once'
+          && item.decision !== 'deny')
         || !expected.has(item.capability) || seen.has(item.capability)
         || permissionScopeFingerprint(item.capability, normalizePermissionScope(item.scope))
-          !== declarationFingerprint(registration.declarations.get(item.capability)!)) {
+          !== declarationFingerprint(registration.declarations.get(item.capability)!)
+      ) {
         throw new Error('authorization decision does not match the current manifest')
       }
       seen.add(item.capability)
@@ -3324,7 +3872,11 @@ export class PermissionBroker {
     this.changed()
   }
 
-  async setDomPolicy(identity: CordisXPluginIdentity, pointId: string, policy: CordisXPermissionPolicyV2): Promise<void> {
+  async setDomPolicy(
+    identity: CordisXPluginIdentity,
+    pointId: string,
+    policy: CordisXPermissionPolicyV2,
+  ): Promise<void> {
     await this.setDomPolicies(identity, [{ pointId, policy }])
   }
 
@@ -3415,7 +3967,9 @@ export class PermissionBroker {
       try {
         decision = await Promise.race([
           this.prompt.request({ identity, declaration, requested }),
-          new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), this.promptTimeoutMs) }),
+          new Promise<'timeout'>(resolve => {
+            timer = setTimeout(() => resolve('timeout'), this.promptTimeoutMs)
+          }),
         ])
       } catch {
         decision = 'deny'
@@ -3436,7 +3990,12 @@ export class PermissionBroker {
         try {
           await this.setPolicy(identity, capability, 'allow')
         } catch {
-          this.consoleObserver?.permission(identity, capability, 'deny', `${capability} allow decision could not be persisted`)
+          this.consoleObserver?.permission(
+            identity,
+            capability,
+            'deny',
+            `${capability} allow decision could not be persisted`,
+          )
           this.denied(identityKey, capability, requested)
           return failure('adapter-failure', `${capability} permission policy could not be persisted`)
         }
@@ -3509,7 +4068,9 @@ export class PermissionBroker {
       try {
         decision = await Promise.race([
           this.promptV2?.request(plan, identity) ?? Promise.resolve(undefined),
-          new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), this.promptTimeoutMs) }),
+          new Promise<undefined>(resolve => {
+            timer = setTimeout(() => resolve(undefined), this.promptTimeoutMs)
+          }),
         ])
       } catch {
         decision = undefined
@@ -3518,7 +4079,12 @@ export class PermissionBroker {
       }
       if (decision === undefined) {
         this.onceV2.clearOperation(binding.operationId)
-        this.consoleObserver?.permission(identity, capability, 'deny', `${capability} permission request was cancelled or timed out`)
+        this.consoleObserver?.permission(
+          identity,
+          capability,
+          'deny',
+          `${capability} permission request was cancelled or timed out`,
+        )
         this.denied(identityKey, capability, requested)
         return failure('permission-denied', `${capability} was not authorized for this call`)
       }
@@ -3566,35 +4132,48 @@ export class PermissionBroker {
     return { ok: true, value: { declaration: legacyDeclaration } }
   }
 
-  requiredDenied(identity: CordisXPluginIdentity, view?: PluginGenerationView): readonly CordisXPermissionCapabilityV4[] {
+  requiredDenied(
+    identity: CordisXPluginIdentity,
+    view?: PluginGenerationView,
+  ): readonly CordisXPermissionCapabilityV4[] {
     const registration = this.registration(identity, view)
     if (registration === undefined) return []
     if (registration.manifest.schemaVersion === 1) {
       const binding = this.binding(registration, `${this.generation}:${identity.id}`)
       return [...registration.declarations.values()]
-        .filter(item => item.required && this.policy(identity, item.name, view) === 'deny'
-          && !this.onceV2.has(this.legacyAuthorizationKey(registration, item), binding))
+        .filter(item =>
+          item.required && this.policy(identity, item.name, view) === 'deny'
+          && !this.onceV2.has(this.legacyAuthorizationKey(registration, item), binding)
+        )
         .map(item => item.name)
     }
     const plan = this.authorizationPlanV2(identity, 'enable', view)
-    const denied: CordisXPermissionCapabilityV4[] = plan.declarations.filter(item => item.required
+    const denied: CordisXPermissionCapabilityV4[] = plan.declarations.filter(item =>
+      item.required
       && item.policy !== 'allow-persistent'
-      && !this.onceV2.has(this.authorizationKey(plan, item.capability), plan.binding))
+      && !this.onceV2.has(this.authorizationKey(plan, item.capability), plan.binding)
+    )
       .map(item => item.capability)
     if (registration.manifest.schemaVersion === 5 || registration.manifest.schemaVersion === 6) {
       for (const declaration of registration.declarationsV4.values()) {
         if (!declaration.required) continue
         const capability = declaration.name as 'ui.host-dom.read' | 'ui.host-dom.modify'
         const policy = this.hostDomPolicy(identity, capability, view)
-        if (policy === 'deny' || (policy !== 'allow'
-          && this.validHostDomLease(registration, capability) === undefined
-          && this.activeCertification(registration) === undefined)) denied.push(capability)
+        if (
+          policy === 'deny' || (policy !== 'allow'
+            && this.validHostDomLease(registration, capability) === undefined
+            && this.activeCertification(registration) === undefined)
+        ) denied.push(capability)
       }
     }
     return Object.freeze(denied)
   }
 
-  recordScopeDenial(identity: CordisXPluginIdentity, capability: CordisXPlatformCapability, requested: RequestedScope): void {
+  recordScopeDenial(
+    identity: CordisXPluginIdentity,
+    capability: CordisXPlatformCapability,
+    requested: RequestedScope,
+  ): void {
     this.denied(platformIdentityKey(identity), capability, requested)
   }
 
@@ -3624,12 +4203,15 @@ export class PermissionBroker {
             }
           })
         }
-        const operationId = `snapshot:${this.generation}:${registration.generation.moduleGeneration ?? 'host'}:${registration.identity.id}`
+        const operationId = `snapshot:${this.generation}:${
+          registration.generation.moduleGeneration ?? 'host'
+        }:${registration.identity.id}`
         const plan = this.planV2(registration, 'enable', this.binding(registration, operationId))
         const denied = new Set(this.requiredDenied(registration.identity))
         return plan.declarations.map(item => {
           const declaration = registration.declarationsV2.get(item.capability)!
-          const audit = this.audit.get(this.auditKey(identityKey, item.capability as CordisXPlatformCapability)) ?? { denialCount: 0 }
+          const audit = this.audit.get(this.auditKey(identityKey, item.capability as CordisXPlatformCapability))
+            ?? { denialCount: 0 }
           return {
             identity: registration.identity,
             capability: item.capability,
@@ -3637,12 +4219,18 @@ export class PermissionBroker {
             reason: declaration.rationale?.description ?? item.presentation.description,
             scope: item.scope,
             fingerprint: item.securityFingerprint,
-            policy: item.policy === 'allow-persistent' ? 'allow' as const : item.policy === 'deny-persistent' ? 'deny' as const : 'ask' as const,
+            policy: item.policy === 'allow-persistent'
+              ? 'allow' as const
+              : item.policy === 'deny-persistent'
+              ? 'deny' as const
+              : 'ask' as const,
             ...(audit.lastRequested === undefined ? {} : { lastRequested: audit.lastRequested }),
             ...(audit.lastUsedAt === undefined ? {} : { lastUsedAt: audit.lastUsedAt }),
             ...(audit.lastDeniedAt === undefined ? {} : { lastDeniedAt: audit.lastDeniedAt }),
             denialCount: audit.denialCount,
-            ...(denied.has(item.capability) ? { blockedReason: `Required capability ${item.capability} is not authorized` } : {}),
+            ...(denied.has(item.capability)
+              ? { blockedReason: `Required capability ${item.capability} is not authorized` }
+              : {}),
           }
         })
       })
@@ -3661,7 +4249,11 @@ export class PermissionBroker {
       })
       const record = this.policyRecords.get(this.domLeaseKey(key))
       const policy = record !== undefined && isPermissionPolicyRecordV3(record)
-        ? record.policy === 'allow-persistent' ? 'allow' as const : record.policy === 'deny-persistent' ? 'deny' as const : 'ask' as const
+        ? record.policy === 'allow-persistent'
+          ? 'allow' as const
+          : record.policy === 'deny-persistent'
+          ? 'deny' as const
+          : 'ask' as const
         : 'ask' as const
       const audit = this.audit.get(this.domAuditKey(
         platformIdentityKey(point.identity),
@@ -3694,7 +4286,11 @@ export class PermissionBroker {
         const key = this.hostDomKey(registration, capability)
         const record = this.policyRecords.get(this.hostDomLeaseKey(key))
         const policy = isPermissionPolicyRecordV4(record)
-          ? record.policy === 'allow-persistent' ? 'allow' as const : record.policy === 'deny-persistent' ? 'deny' as const : 'ask' as const
+          ? record.policy === 'allow-persistent'
+            ? 'allow' as const
+            : record.policy === 'deny-persistent'
+            ? 'deny' as const
+            : 'ask' as const
           : 'ask' as const
         const audit = this.audit.get(this.hostDomAuditKey(registration, capability)) ?? { denialCount: 0 }
         return Object.freeze({
@@ -3810,7 +4406,11 @@ export class PermissionBroker {
       const declaration = registration.declarations.get(legacy.capability)
       if (declaration === undefined) continue
       let parsed: unknown
-      try { parsed = JSON.parse(legacy.fingerprint) as unknown } catch { continue }
+      try {
+        parsed = JSON.parse(legacy.fingerprint) as unknown
+      } catch {
+        continue
+      }
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) continue
       const fingerprint = parsed as { name?: unknown; scope?: unknown }
       if (fingerprint.name !== declaration.name) continue
@@ -3875,7 +4475,9 @@ export interface CordisXPlatformAdapter {
   listModels(input: CordisXModelsListInput): Promise<CordisXPlatformResult<CordisXModelPage>>
   listTasks(input: CordisXTasksListInput): Promise<CordisXPlatformResult<CordisXSessionPage>>
   readTask(input: CordisXTaskReadInput): Promise<CordisXPlatformResult<CordisXSessionProjection>>
-  createTask(input: Omit<CordisXTaskCreateInput, 'initialMessage'>): Promise<CordisXPlatformResult<CordisXSessionSummary>>
+  createTask(
+    input: Omit<CordisXTaskCreateInput, 'initialMessage'>,
+  ): Promise<CordisXPlatformResult<CordisXSessionSummary>>
   controlTask(input: CordisXTaskControlInput): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>>
   submitTurn(input: CordisXTurnSubmitInput): Promise<CordisXPlatformResult<CordisXTurnStart>>
   controlTurn(input: CordisXTurnControlInput): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>>
@@ -3899,13 +4501,27 @@ export class UnavailablePlatformAdapter implements CordisXPlatformAdapter {
     }
   }
 
-  async listModels(): Promise<CordisXPlatformResult<never>> { return { ok: false, error: CURRENT_CONNECTION_UNAVAILABLE } }
-  async listTasks(): Promise<CordisXPlatformResult<never>> { return { ok: false, error: CURRENT_CONNECTION_UNAVAILABLE } }
-  async readTask(): Promise<CordisXPlatformResult<never>> { return { ok: false, error: CURRENT_CONNECTION_UNAVAILABLE } }
-  async createTask(): Promise<CordisXPlatformResult<never>> { return { ok: false, error: CURRENT_CONNECTION_UNAVAILABLE } }
-  async controlTask(): Promise<CordisXPlatformResult<never>> { return { ok: false, error: CURRENT_CONNECTION_UNAVAILABLE } }
-  async submitTurn(): Promise<CordisXPlatformResult<never>> { return { ok: false, error: CURRENT_CONNECTION_UNAVAILABLE } }
-  async controlTurn(): Promise<CordisXPlatformResult<never>> { return { ok: false, error: CURRENT_CONNECTION_UNAVAILABLE } }
+  async listModels(): Promise<CordisXPlatformResult<never>> {
+    return { ok: false, error: CURRENT_CONNECTION_UNAVAILABLE }
+  }
+  async listTasks(): Promise<CordisXPlatformResult<never>> {
+    return { ok: false, error: CURRENT_CONNECTION_UNAVAILABLE }
+  }
+  async readTask(): Promise<CordisXPlatformResult<never>> {
+    return { ok: false, error: CURRENT_CONNECTION_UNAVAILABLE }
+  }
+  async createTask(): Promise<CordisXPlatformResult<never>> {
+    return { ok: false, error: CURRENT_CONNECTION_UNAVAILABLE }
+  }
+  async controlTask(): Promise<CordisXPlatformResult<never>> {
+    return { ok: false, error: CURRENT_CONNECTION_UNAVAILABLE }
+  }
+  async submitTurn(): Promise<CordisXPlatformResult<never>> {
+    return { ok: false, error: CURRENT_CONNECTION_UNAVAILABLE }
+  }
+  async controlTurn(): Promise<CordisXPlatformResult<never>> {
+    return { ok: false, error: CURRENT_CONNECTION_UNAVAILABLE }
+  }
 }
 
 export interface CordisXPlatformProjection {
@@ -3959,14 +4575,19 @@ export class ProjectionPlatformAdapter implements CordisXPlatformAdapter {
   async listTasks(input: CordisXTasksListInput): Promise<CordisXPlatformResult<CordisXSessionPage>> {
     const snapshot = this.source.getSnapshot()
     const sessions = snapshot.sessions
-    if (sessions === undefined) return failure('adapter-unavailable', 'The complete session catalog projection is unavailable')
-    if (input.cursor !== undefined) return failure('invalid-request', 'The projection adapter does not support continuation cursors')
+    if (sessions === undefined) {
+      return failure('adapter-unavailable', 'The complete session catalog projection is unavailable')
+    }
+    if (input.cursor !== undefined) {
+      return failure('invalid-request', 'The projection adapter does not support continuation cursors')
+    }
     const providerIds = input.providerIds ?? []
     const limit = input.limit ?? 100
     const filtered = sessions.filter(item => {
       return (providerIds.length === 0 || providerIds.includes(item.ref.providerId))
         && (input.cwd === undefined || normalizedPath(item.cwd) === normalizedPath(input.cwd))
-        && (input.searchTerm === undefined || `${item.title ?? ''}\n${item.cwd}`.toLocaleLowerCase().includes(input.searchTerm.toLocaleLowerCase()))
+        && (input.searchTerm === undefined
+          || `${item.title ?? ''}\n${item.cwd}`.toLocaleLowerCase().includes(input.searchTerm.toLocaleLowerCase()))
     }).slice(0, limit)
     return {
       ok: true,
@@ -3987,20 +4608,33 @@ export class ProjectionPlatformAdapter implements CordisXPlatformAdapter {
 
   async readTask(input: CordisXTaskReadInput): Promise<CordisXPlatformResult<CordisXSessionProjection>> {
     const contents = this.source.getSnapshot().sessionContents
-    if (contents === undefined) return failure('adapter-unavailable', 'The complete session content projection is unavailable')
+    if (contents === undefined) {
+      return failure('adapter-unavailable', 'The complete session content projection is unavailable')
+    }
     const session = contents.find(item => {
       return item.ref.providerId === input.session.providerId
         && item.ref.remoteSessionId === input.session.remoteSessionId
     })
     return session === undefined
-      ? failure('task-not-found', `Session ${input.session.remoteSessionId} was not found for provider ${input.session.providerId}`)
+      ? failure(
+        'task-not-found',
+        `Session ${input.session.remoteSessionId} was not found for provider ${input.session.providerId}`,
+      )
       : { ok: true, value: copy(session) }
   }
 
-  async createTask(): Promise<CordisXPlatformResult<never>> { return failure('adapter-read-only', 'The current Platform adapter is read-only') }
-  async controlTask(): Promise<CordisXPlatformResult<never>> { return failure('adapter-read-only', 'The current Platform adapter is read-only') }
-  async submitTurn(): Promise<CordisXPlatformResult<never>> { return failure('adapter-read-only', 'The current Platform adapter is read-only') }
-  async controlTurn(): Promise<CordisXPlatformResult<never>> { return failure('adapter-read-only', 'The current Platform adapter is read-only') }
+  async createTask(): Promise<CordisXPlatformResult<never>> {
+    return failure('adapter-read-only', 'The current Platform adapter is read-only')
+  }
+  async controlTask(): Promise<CordisXPlatformResult<never>> {
+    return failure('adapter-read-only', 'The current Platform adapter is read-only')
+  }
+  async submitTurn(): Promise<CordisXPlatformResult<never>> {
+    return failure('adapter-read-only', 'The current Platform adapter is read-only')
+  }
+  async controlTurn(): Promise<CordisXPlatformResult<never>> {
+    return failure('adapter-read-only', 'The current Platform adapter is read-only')
+  }
 }
 
 export interface CordisXPlatformServiceOptions {
@@ -4080,37 +4714,55 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     const options = optionsFor(this)
     const token = options.console?.tokenFromContext(this.ctx)
     return Object.freeze({
-      list: async (input = {}) => token === undefined || options.console === undefined
-        ? await this.listModels(input)
-        : await options.console.run(token, 'platform.models.list', input, invocation => this.listModels(input, token, invocation)),
+      list: async (input = {}) =>
+        token === undefined || options.console === undefined
+          ? await this.listModels(input)
+          : await options.console.run(token, 'platform.models.list', input, invocation =>
+            this.listModels(input, token, invocation)),
     })
   }
 
   get tasks(): CordisXPlatform['tasks'] {
     const options = optionsFor(this)
     const token = options.console?.tokenFromContext(this.ctx)
-    const instrument = <Value>(source: string, input: unknown, operation: (invocation?: PluginConsoleInvocation) => Promise<Value>): Promise<Value> => (
+    const instrument = <Value>(
+      source: string,
+      input: unknown,
+      operation: (invocation?: PluginConsoleInvocation) => Promise<Value>,
+    ): Promise<Value> => (
       token === undefined || options.console === undefined
         ? operation()
         : options.console.run(token, source, input, operation)
     )
     return Object.freeze({
-      list: async (input = {}) => await instrument('platform.tasks.list', input, invocation => this.listTasks(input, token, invocation)),
-      read: async input => await instrument('platform.tasks.read', input, invocation => this.readTask(input, token, invocation)),
-      create: async input => await instrument('platform.tasks.create', input, invocation => this.createTask(input, token, invocation)),
-      control: async input => await instrument('platform.tasks.control', input, invocation => this.controlTask(input, token, invocation)),
+      list: async (input = {}) =>
+        await instrument('platform.tasks.list', input, invocation => this.listTasks(input, token, invocation)),
+      read: async input =>
+        await instrument('platform.tasks.read', input, invocation => this.readTask(input, token, invocation)),
+      create: async input =>
+        await instrument('platform.tasks.create', input, invocation => this.createTask(input, token, invocation)),
+      control: async input =>
+        await instrument('platform.tasks.control', input, invocation => this.controlTask(input, token, invocation)),
     })
   }
 
   get turns(): CordisXPlatform['turns'] {
     const options = optionsFor(this)
     const token = options.console?.tokenFromContext(this.ctx)
-    const instrument = <Value>(source: string, input: unknown, operation: (invocation?: PluginConsoleInvocation) => Promise<Value>): Promise<Value> => (
-      token === undefined || options.console === undefined ? operation() : options.console.run(token, source, input, operation)
+    const instrument = <Value>(
+      source: string,
+      input: unknown,
+      operation: (invocation?: PluginConsoleInvocation) => Promise<Value>,
+    ): Promise<Value> => (
+      token === undefined || options.console === undefined
+        ? operation()
+        : options.console.run(token, source, input, operation)
     )
     return Object.freeze({
-      submit: async input => await instrument('platform.turns.submit', input, invocation => this.submitTurn(input, token, invocation)),
-      control: async input => await instrument('platform.turns.control', input, invocation => this.controlTurn(input, token, invocation)),
+      submit: async input =>
+        await instrument('platform.turns.submit', input, invocation => this.submitTurn(input, token, invocation)),
+      control: async input =>
+        await instrument('platform.turns.control', input, invocation => this.controlTurn(input, token, invocation)),
     })
   }
 
@@ -4124,7 +4776,9 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     token?: PluginPrincipalToken,
   ): Promise<CordisXPlatformResult<AuthorizationGrant>> {
     const identity = token === undefined ? pluginIdentity(this.ctx) : optionsFor(this).console?.owner(token)
-    if (identity === undefined) return failure('permission-undeclared', 'Platform calls require a runtime-bound plugin identity')
+    if (identity === undefined) {
+      return failure('permission-undeclared', 'Platform calls require a runtime-bound plugin identity')
+    }
     return await optionsFor(this).broker.authorize(
       identity,
       capability,
@@ -4133,7 +4787,9 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     )
   }
 
-  private async guarded<Value>(operation: () => Promise<CordisXPlatformResult<Value>>): Promise<CordisXPlatformResult<Value>> {
+  private async guarded<Value>(
+    operation: () => Promise<CordisXPlatformResult<Value>>,
+  ): Promise<CordisXPlatformResult<Value>> {
     try {
       return await operation()
     } catch {
@@ -4153,11 +4809,20 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     if (scopeAllows(scope, requested)) return { ok: true, value: true }
     const identity = pluginIdentity(this.ctx)
     if (identity !== undefined) optionsFor(this).broker.recordScopeDenial(identity, grant.declaration.name, requested)
-    return failure('permission-scope-denied', `Session ${session.remoteSessionId} is outside the declared ${grant.declaration.name} scope`)
+    return failure(
+      'permission-scope-denied',
+      `Session ${session.remoteSessionId} is outside the declared ${grant.declaration.name} scope`,
+    )
   }
 
-  private async listModels(input: CordisXModelsListInput, token?: PluginPrincipalToken, invocation?: PluginConsoleInvocation): Promise<CordisXPlatformResult<CordisXModelPage>> {
-    if (input.providerIds !== undefined && !validProviderIds(input.providerIds)) return failure('invalid-request', 'providerIds must be a unique string array')
+  private async listModels(
+    input: CordisXModelsListInput,
+    token?: PluginPrincipalToken,
+    invocation?: PluginConsoleInvocation,
+  ): Promise<CordisXPlatformResult<CordisXModelPage>> {
+    if (input.providerIds !== undefined && !validProviderIds(input.providerIds)) {
+      return failure('invalid-request', 'providerIds must be a unique string array')
+    }
     const grant = await this.authorize('models.read', {
       ...(input.providerIds === undefined ? {} : { providerIds: input.providerIds }),
     }, token)
@@ -4174,11 +4839,23 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     }
   }
 
-  private async listTasks(input: CordisXTasksListInput, token?: PluginPrincipalToken, invocation?: PluginConsoleInvocation): Promise<CordisXPlatformResult<CordisXSessionPage>> {
-    if (input.providerIds !== undefined && !validProviderIds(input.providerIds)) return failure('invalid-request', 'providerIds must be a unique string array')
-    if (input.cwd !== undefined && (!validText(input.cwd) || !absolutePath(input.cwd))) return failure('invalid-request', 'cwd must be an absolute path')
-    if (input.searchTerm !== undefined && !validText(input.searchTerm)) return failure('invalid-request', 'searchTerm must be a non-empty string')
-    if (input.cursor !== undefined && !validText(input.cursor)) return failure('invalid-request', 'cursor must be a non-empty string')
+  private async listTasks(
+    input: CordisXTasksListInput,
+    token?: PluginPrincipalToken,
+    invocation?: PluginConsoleInvocation,
+  ): Promise<CordisXPlatformResult<CordisXSessionPage>> {
+    if (input.providerIds !== undefined && !validProviderIds(input.providerIds)) {
+      return failure('invalid-request', 'providerIds must be a unique string array')
+    }
+    if (input.cwd !== undefined && (!validText(input.cwd) || !absolutePath(input.cwd))) {
+      return failure('invalid-request', 'cwd must be an absolute path')
+    }
+    if (input.searchTerm !== undefined && !validText(input.searchTerm)) {
+      return failure('invalid-request', 'searchTerm must be a non-empty string')
+    }
+    if (input.cursor !== undefined && !validText(input.cursor)) {
+      return failure('invalid-request', 'cursor must be a non-empty string')
+    }
     if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 500)) {
       return failure('invalid-request', 'limit must be an integer between 1 and 500')
     }
@@ -4194,52 +4871,95 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
       ok: true,
       value: {
         ...result.value,
-        sessions: result.value.sessions.filter(item => scopeAllows(grant.value.declaration.scope, {
-          providerId: item.ref.providerId,
-          cwd: item.cwd,
-          session: item.ref,
-        })),
+        sessions: result.value.sessions.filter(item =>
+          scopeAllows(grant.value.declaration.scope, {
+            providerId: item.ref.providerId,
+            cwd: item.cwd,
+            session: item.ref,
+          })
+        ),
       },
     }
   }
 
-  private async readTask(input: CordisXTaskReadInput, token?: PluginPrincipalToken, invocation?: PluginConsoleInvocation): Promise<CordisXPlatformResult<CordisXSessionProjection>> {
-    if (!validSessionRef(input.session)) return failure('invalid-request', 'session must be a complete Platform session reference')
+  private async readTask(
+    input: CordisXTaskReadInput,
+    token?: PluginPrincipalToken,
+    invocation?: PluginConsoleInvocation,
+  ): Promise<CordisXPlatformResult<CordisXSessionProjection>> {
+    if (!validSessionRef(input.session)) {
+      return failure('invalid-request', 'session must be a complete Platform session reference')
+    }
     const requested = { providerId: input.session.providerId, session: input.session }
     const grant = await this.authorize('tasks.content.read', requested, token)
     if (!grant.ok) return grant
     invocation?.dispatch()
     const result = await this.guarded(async () => await optionsFor(this).adapter.readTask(input))
     if (!result.ok) return result
-    if (!sameSession(result.value.ref, input.session) || result.value.model.providerId !== input.session.providerId) return safeAdapterFailure()
+    if (!sameSession(result.value.ref, input.session) || result.value.model.providerId !== input.session.providerId) {
+      return safeAdapterFailure()
+    }
     if (scopeAllows(grant.value.declaration.scope, { ...requested, cwd: result.value.cwd })) return result
     const identity = pluginIdentity(this.ctx)
-    if (identity !== undefined) optionsFor(this).broker.recordScopeDenial(identity, grant.value.declaration.name, { ...requested, cwd: result.value.cwd })
+    if (identity !== undefined) {
+      optionsFor(this).broker.recordScopeDenial(identity, grant.value.declaration.name, {
+        ...requested,
+        cwd: result.value.cwd,
+      })
+    }
     return failure('permission-scope-denied', 'Session content is outside the declared scope')
   }
 
-  private async createTask(input: CordisXTaskCreateInput, token?: PluginPrincipalToken, invocation?: PluginConsoleInvocation): Promise<CordisXPlatformResult<CordisXSessionCreateOutcome>> {
-    if (!validModelRef(input.model)) return failure('invalid-request', 'model must be a complete Platform model reference')
-    if (!validText(input.cwd) || !absolutePath(input.cwd)) return failure('invalid-request', 'cwd must be an absolute path')
-    if (input.initialMessage !== undefined && !validText(input.initialMessage)) return failure('invalid-request', 'initialMessage must be a non-empty string')
-    const grant = await this.authorize('tasks.create', { providerId: input.model.providerId, model: input.model, cwd: input.cwd }, token)
-    if (!grant.ok) return grant
-    invocation?.dispatch()
-    const models = await this.guarded(async () => await optionsFor(this).adapter.listModels({ providerIds: [input.model.providerId] }))
-    if (!models.ok) return models
-    const providerModels = models.value.models.filter(model => model.ref.providerId === input.model.providerId)
-    if (providerModels.length === 0) return failure('invalid-provider', `Provider ${input.model.providerId} is not currently available`)
-    if (!providerModels.some(model => model.ref.modelId === input.model.modelId)) {
-      return failure('invalid-model', `Model ${input.model.modelId} is not currently available from provider ${input.model.providerId}`)
+  private async createTask(
+    input: CordisXTaskCreateInput,
+    token?: PluginPrincipalToken,
+    invocation?: PluginConsoleInvocation,
+  ): Promise<CordisXPlatformResult<CordisXSessionCreateOutcome>> {
+    if (!validModelRef(input.model)) {
+      return failure('invalid-request', 'model must be a complete Platform model reference')
     }
-    const created = await this.guarded(async () => await optionsFor(this).adapter.createTask({
+    if (!validText(input.cwd) || !absolutePath(input.cwd)) {
+      return failure('invalid-request', 'cwd must be an absolute path')
+    }
+    if (input.initialMessage !== undefined && !validText(input.initialMessage)) {
+      return failure('invalid-request', 'initialMessage must be a non-empty string')
+    }
+    const grant = await this.authorize('tasks.create', {
+      providerId: input.model.providerId,
       model: input.model,
       cwd: input.cwd,
-    }))
+    }, token)
+    if (!grant.ok) return grant
+    invocation?.dispatch()
+    const models = await this.guarded(async () =>
+      await optionsFor(this).adapter.listModels({ providerIds: [input.model.providerId] })
+    )
+    if (!models.ok) return models
+    const providerModels = models.value.models.filter(model => model.ref.providerId === input.model.providerId)
+    if (providerModels.length === 0) {
+      return failure('invalid-provider', `Provider ${input.model.providerId} is not currently available`)
+    }
+    if (!providerModels.some(model => model.ref.modelId === input.model.modelId)) {
+      return failure(
+        'invalid-model',
+        `Model ${input.model.modelId} is not currently available from provider ${input.model.providerId}`,
+      )
+    }
+    const created = await this.guarded(async () =>
+      await optionsFor(this).adapter.createTask({
+        model: input.model,
+        cwd: input.cwd,
+      })
+    )
     if (!created.ok) return created
-    if (created.value.ref.providerId !== input.model.providerId || created.value.model.providerId !== input.model.providerId) return safeAdapterFailure()
+    if (
+      created.value.ref.providerId !== input.model.providerId
+      || created.value.model.providerId !== input.model.providerId
+    ) return safeAdapterFailure()
     if (input.initialMessage === undefined) return { ok: true, value: { status: 'created', session: created.value } }
-    const turn = await this.guarded(async () => await optionsFor(this).adapter.submitTurn({ session: created.value.ref, message: input.initialMessage as string }))
+    const turn = await this.guarded(async () =>
+      await optionsFor(this).adapter.submitTurn({ session: created.value.ref, message: input.initialMessage as string })
+    )
     if (turn.ok) return { ok: true, value: { status: 'created', session: created.value, initialTurn: turn.value } }
     return {
       ok: true,
@@ -4248,18 +4968,28 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
         session: created.value,
         error: {
           code: 'initial-turn-failed',
-          message: `Session ${created.value.ref.remoteSessionId} was created, but its initial turn did not start: ${turn.error.message}`,
+          message:
+            `Session ${created.value.ref.remoteSessionId} was created, but its initial turn did not start: ${turn.error.message}`,
           ...(turn.error.retryable === undefined ? {} : { retryable: turn.error.retryable }),
         },
       },
     }
   }
 
-  private async controlTask(input: CordisXTaskControlInput, token?: PluginPrincipalToken, invocation?: PluginConsoleInvocation): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>> {
-    if (!validSessionRef(input.session) || !['continue', 'fork', 'archive', 'restore', 'delete'].includes(input.action)) {
+  private async controlTask(
+    input: CordisXTaskControlInput,
+    token?: PluginPrincipalToken,
+    invocation?: PluginConsoleInvocation,
+  ): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>> {
+    if (
+      !validSessionRef(input.session) || !['continue', 'fork', 'archive', 'restore', 'delete'].includes(input.action)
+    ) {
       return failure('invalid-request', 'task control input is invalid')
     }
-    const grant = await this.authorize('tasks.control', { providerId: input.session.providerId, session: input.session }, token)
+    const grant = await this.authorize('tasks.control', {
+      providerId: input.session.providerId,
+      session: input.session,
+    }, token)
     if (!grant.ok) return grant
     invocation?.dispatch()
     const scope = await this.ensureSessionScope(grant.value, input.session)
@@ -4267,9 +4997,19 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     return await this.guarded(async () => await optionsFor(this).adapter.controlTask(input))
   }
 
-  private async submitTurn(input: CordisXTurnSubmitInput, token?: PluginPrincipalToken, invocation?: PluginConsoleInvocation): Promise<CordisXPlatformResult<CordisXTurnStart>> {
-    if (!validSessionRef(input.session) || !validText(input.message)) return failure('invalid-request', 'session and message must be valid')
-    const grant = await this.authorize('turns.submit', { providerId: input.session.providerId, session: input.session }, token)
+  private async submitTurn(
+    input: CordisXTurnSubmitInput,
+    token?: PluginPrincipalToken,
+    invocation?: PluginConsoleInvocation,
+  ): Promise<CordisXPlatformResult<CordisXTurnStart>> {
+    if (!validSessionRef(input.session) || !validText(input.message)) {
+      return failure('invalid-request', 'session and message must be valid')
+    }
+    const grant = await this.authorize(
+      'turns.submit',
+      { providerId: input.session.providerId, session: input.session },
+      token,
+    )
     if (!grant.ok) return grant
     invocation?.dispatch()
     const scope = await this.ensureSessionScope(grant.value, input.session)
@@ -4277,10 +5017,21 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     return await this.guarded(async () => await optionsFor(this).adapter.submitTurn(input))
   }
 
-  private async controlTurn(input: CordisXTurnControlInput, token?: PluginPrincipalToken, invocation?: PluginConsoleInvocation): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>> {
-    if (!validSessionRef(input.session) || !['steer', 'interrupt'].includes(input.action)) return failure('invalid-request', 'turn control input is invalid')
-    if (input.action === 'steer' && !validText(input.message)) return failure('invalid-request', 'steer message must be a non-empty string')
-    const grant = await this.authorize('turns.control', { providerId: input.session.providerId, session: input.session }, token)
+  private async controlTurn(
+    input: CordisXTurnControlInput,
+    token?: PluginPrincipalToken,
+    invocation?: PluginConsoleInvocation,
+  ): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>> {
+    if (!validSessionRef(input.session) || !['steer', 'interrupt'].includes(input.action)) {
+      return failure('invalid-request', 'turn control input is invalid')
+    }
+    if (input.action === 'steer' && !validText(input.message)) {
+      return failure('invalid-request', 'steer message must be a non-empty string')
+    }
+    const grant = await this.authorize('turns.control', {
+      providerId: input.session.providerId,
+      session: input.session,
+    }, token)
     if (!grant.ok) return grant
     invocation?.dispatch()
     const scope = await this.ensureSessionScope(grant.value, input.session)

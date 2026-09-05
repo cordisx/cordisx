@@ -1,15 +1,6 @@
-import type {
-  CordisXAgentHistory,
-  CordisXAgentHistoryPage,
-} from 'cordisx/contracts'
+import type { CordisXAgentHistory, CordisXAgentHistoryPage } from 'cordisx/contracts'
 import { projectAgentEvent } from './live-provider.js'
-import type {
-  TraceAdapterStatus,
-  TraceDemoRequest,
-  TraceEvent,
-  TraceShowcaseStore,
-  TraceSnapshot,
-} from './types.js'
+import type { TraceAdapterStatus, TraceDemoRequest, TraceEvent, TraceShowcaseStore, TraceSnapshot } from './types.js'
 
 const WINDOW_LIMIT = 500
 const HISTORY_PROTOCOL_HEAD = 'e4c1fea227cb53e3a0833a0c84c5f9f487f107c5'
@@ -44,11 +35,13 @@ export function mergeTraceEvents(
   for (const event of live) facts.set(factualKey(event), event)
   const ordered = [...facts.values()].sort(eventOrder)
   const bounded = ordered.length <= windowLimit ? ordered : ordered.slice(-windowLimit)
-  return Object.freeze(bounded.map((event, index) => Object.freeze({
-    ...event,
-    sourceSeq: event.sourceSeq ?? event.seq,
-    seq: index,
-  })))
+  return Object.freeze(bounded.map((event, index) =>
+    Object.freeze({
+      ...event,
+      sourceSeq: event.sourceSeq ?? event.seq,
+      seq: index,
+    })
+  ))
 }
 
 function historyDiagnostics(page: CordisXAgentHistoryPage): readonly string[] {
@@ -99,9 +92,11 @@ function statusFor(
 }
 
 function importedEvents(page: CordisXAgentHistoryPage): readonly TraceEvent[] {
-  return Object.freeze(page.events
-    .filter(event => event.type !== 'message.delivery' && event.type !== 'input.contribution')
-    .map(event => projectAgentEvent(event, 'historical')))
+  return Object.freeze(
+    page.events
+      .filter(event => event.type !== 'message.delivery' && event.type !== 'input.contribution')
+      .map(event => projectAgentEvent(event, 'historical')),
+  )
 }
 
 /**
@@ -167,7 +162,10 @@ export class HistoricalTraceShowcaseStore implements TraceShowcaseStore {
     const cursor = this.nextCursor
     this.operation = this.operation.then(async () => {
       const result = await this.history.query({
-        sessionId: this.sessionId, cursor, limit: this.options.pageSize, payloadPolicy: 'summarized',
+        sessionId: this.sessionId,
+        cursor,
+        limit: this.options.pageSize,
+        payloadPolicy: 'summarized',
       })
       if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
       if (this.disposed) return
@@ -183,9 +181,15 @@ export class HistoricalTraceShowcaseStore implements TraceShowcaseStore {
     await this.operation
   }
 
-  async requestDemo(request: TraceDemoRequest): Promise<string> { return await this.live.requestDemo(request) }
-  async cancelQueued(requestId: string): Promise<boolean> { return await this.live.cancelQueued(requestId) }
-  async clearQueued(): Promise<number> { return await this.live.clearQueued() }
+  async requestDemo(request: TraceDemoRequest): Promise<string> {
+    return await this.live.requestDemo(request)
+  }
+  async cancelQueued(requestId: string): Promise<boolean> {
+    return await this.live.cancelQueued(requestId)
+  }
+  async clearQueued(): Promise<number> {
+    return await this.live.clearQueued()
+  }
 
   async settled(): Promise<void> {
     const child = this.live as TraceShowcaseStore & { settled?: () => Promise<void> }
@@ -199,7 +203,10 @@ export class HistoricalTraceShowcaseStore implements TraceShowcaseStore {
     const tailCursor = this.tailCursor
     this.operation = this.operation.then(async () => {
       const result = await this.history.tail({
-        sessionId: this.sessionId, tailCursor, limit: this.options.pageSize, payloadPolicy: 'summarized',
+        sessionId: this.sessionId,
+        tailCursor,
+        limit: this.options.pageSize,
+        payloadPolicy: 'summarized',
       })
       if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
       if (this.disposed) return
@@ -231,7 +238,9 @@ export class HistoricalTraceShowcaseStore implements TraceShowcaseStore {
 
   private async initialQuery(): Promise<void> {
     const result = await this.history.query({
-      sessionId: this.sessionId, limit: this.options.pageSize, payloadPolicy: 'summarized',
+      sessionId: this.sessionId,
+      limit: this.options.pageSize,
+      payloadPolicy: 'summarized',
     })
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
     if (this.disposed) return

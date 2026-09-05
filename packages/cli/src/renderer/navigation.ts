@@ -1,21 +1,21 @@
-import { Context, Service, type Disposable } from '@deepseek-ai/cordis'
-import { cloneAgentAvatarRef, type AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
+import { Context, type Disposable, Service } from '@deepseek-ai/cordis'
+import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity } from '@cordisx/protocol/agents/v1'
 import {
-  CORDISX_PAGE_SCHEMA_V1,
-  CORDISX_PAGE_SCHEMA_V2,
-  CORDISX_PAGE_SCHEMA_V3,
-  CORDISX_ROUTE_SCHEMA_V1,
-  CORDISX_ROUTE_SCHEMA_V2,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V2,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V4,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V5,
+  CORDISX_PAGE_SCHEMA_V1,
+  CORDISX_PAGE_SCHEMA_V2,
+  CORDISX_PAGE_SCHEMA_V3,
+  CORDISX_ROUTE_SCHEMA_V1,
+  CORDISX_ROUTE_SCHEMA_V2,
 } from '../contracts.js'
 import type {
-  CordisXJsonScalar,
   CordisXIconToken,
+  CordisXJsonScalar,
   CordisXLocalizedText,
   CordisXManagerContentNavigation,
   CordisXManagerContentNavigationDeclarationV1,
@@ -38,9 +38,7 @@ import type {
   ManagerContentNavigationTabV2,
   ManagerContentRecordSummaryProjectionV2,
 } from '../contracts.js'
-import type {
-  ManagerContentConfigBindingHandle,
-} from './manager-content-config.js'
+import type { ManagerContentConfigBindingHandle } from './manager-content-config.js'
 import { mountManagerContentConfigForm } from './manager-content-config-form.js'
 import type { CordisXCommandService } from './commands.js'
 import { CordisXI18nService, type LocalizationEffectOwner } from './i18n.js'
@@ -48,8 +46,8 @@ import type { ExtensionPointAccessResolver } from './extension-points.js'
 import { createHostSurfaceIcon } from './icons.js'
 import { ownerFromContext, qualifyOwnedId, sourceFromContext } from './ownership.js'
 import {
-  generationVisibilityFromContext,
   type GenerationVisibilityCoordinator,
+  generationVisibilityFromContext,
   type PluginGenerationEffectIdentity,
   type PluginGenerationView,
 } from './generation-visibility.js'
@@ -65,13 +63,13 @@ import type {
   CodexRouteHistorySnapshot,
 } from './codex-router-history.js'
 import {
-  ICON_TOKEN_PATTERN,
-  HostContextStore,
   assertLocalId,
   assertLocalizedText,
   assertReference,
   assertWhenExpression,
   evaluateWhen,
+  HostContextStore,
+  ICON_TOKEN_PATTERN,
   immutableSnapshot,
   whenContextKeys,
 } from './validation.js'
@@ -114,12 +112,16 @@ function assertPageMetadataVersion(metadata: CordisXPageMetadata): void {
   const hasSchema = metadata.$schema !== undefined
   const hasVersion = metadata.schemaVersion !== undefined
   if (!hasSchema && !hasVersion) {
-    if (metadata.description !== undefined) throw new Error('legacy page metadata cannot declare description; use page.v3')
+    if (metadata.description !== undefined) {
+      throw new Error('legacy page metadata cannot declare description; use page.v3')
+    }
     return
   }
   if (!hasSchema || !hasVersion) throw new Error('page metadata requires a complete $schema/schemaVersion tuple')
   if (metadata.schemaVersion === 1 && metadata.$schema === CORDISX_PAGE_SCHEMA_V1) {
-    if (metadata.description !== undefined || metadata.chrome !== undefined) throw new Error('page.v1 cannot declare description or chrome')
+    if (metadata.description !== undefined || metadata.chrome !== undefined) {
+      throw new Error('page.v1 cannot declare description or chrome')
+    }
     return
   }
   if (metadata.schemaVersion === 2 && metadata.$schema === CORDISX_PAGE_SCHEMA_V2) {
@@ -128,7 +130,9 @@ function assertPageMetadataVersion(metadata: CordisXPageMetadata): void {
   }
   if (metadata.schemaVersion === 3 && metadata.$schema === CORDISX_PAGE_SCHEMA_V3) {
     if (metadata.description === undefined) throw new Error('page.v3 requires localized description metadata')
-    if (metadata.localeNamespace !== undefined) throw new Error('page.v3 uses owner-default i18n and cannot declare localeNamespace')
+    if (metadata.localeNamespace !== undefined) {
+      throw new Error('page.v3 uses owner-default i18n and cannot declare localeNamespace')
+    }
     return
   }
   throw new Error('page metadata has an unsupported $schema/schemaVersion tuple')
@@ -138,7 +142,9 @@ function assertRouteDefinitionVersion(definition: CordisXRouteDefinition): void 
   const hasSchema = definition.$schema !== undefined
   const hasVersion = definition.schemaVersion !== undefined
   if (!hasSchema && !hasVersion) {
-    if (definition.description !== undefined) throw new Error('legacy route definition cannot declare description; use route.v2')
+    if (definition.description !== undefined) {
+      throw new Error('legacy route definition cannot declare description; use route.v2')
+    }
     return
   }
   if (!hasSchema || !hasVersion) throw new Error('route definition requires a complete $schema/schemaVersion tuple')
@@ -205,16 +211,34 @@ export class OutletRegistry {
   private readonly listeners = new Set<() => void>()
   private disposed = false
 
-  declare(descriptor: OutletDescriptor, controller: OutletController, validatePath: (path: string) => boolean): () => void {
+  declare(
+    descriptor: OutletDescriptor,
+    controller: OutletController,
+    validatePath: (path: string) => boolean,
+  ): () => void {
     if (this.disposed) throw new Error('CordisX outlet registry is disposed')
-    assertKeys(descriptor, ['schemaVersion', 'id', 'authority', 'scope', 'preferredPlacement', 'contextPolicy', 'presentationGroup'], 'outlet descriptor')
-    if (descriptor.schemaVersion !== 1) throw new Error(`unsupported outlet schema version: ${descriptor.schemaVersion}`)
+    assertKeys(descriptor, [
+      'schemaVersion',
+      'id',
+      'authority',
+      'scope',
+      'preferredPlacement',
+      'contextPolicy',
+      'presentationGroup',
+    ], 'outlet descriptor')
+    if (descriptor.schemaVersion !== 1) {
+      throw new Error(`unsupported outlet schema version: ${descriptor.schemaVersion}`)
+    }
     assertReference(descriptor.id, 'outlet id')
     if (descriptor.authority !== 'host-adapter') throw new Error('outlet authority must be host-adapter')
     assertLocalId(descriptor.scope, 'outlet scope')
-    if (!['fixed', 'absolute', 'portal'].includes(descriptor.preferredPlacement)) throw new Error('invalid outlet placement')
+    if (!['fixed', 'absolute', 'portal'].includes(descriptor.preferredPlacement)) {
+      throw new Error('invalid outlet placement')
+    }
     if (!['generation', 'semantic'].includes(descriptor.contextPolicy)) throw new Error('invalid outlet context policy')
-    if (descriptor.presentationGroup !== undefined) assertLocalId(descriptor.presentationGroup, 'outlet presentation group')
+    if (descriptor.presentationGroup !== undefined) {
+      assertLocalId(descriptor.presentationGroup, 'outlet presentation group')
+    }
     if (typeof validatePath !== 'function') throw new Error('outlet requires a host path validator')
     if (this.records.has(descriptor.id)) throw new Error(`outlet ${descriptor.id} is already declared`)
     const frozen = immutableSnapshot(descriptor)
@@ -349,7 +373,9 @@ function assertPageHeaderAction(action: CordisXPageHeaderAction, label: string):
   assertLocalizedText(action.label, `${label} label`)
   if (action.ariaLabel !== undefined) assertLocalizedText(action.ariaLabel, `${label} ariaLabel`)
   assertHostIcon(action.icon, label)
-  if (action.command === null || typeof action.command !== 'object') throw new Error(`${label} requires a command reference`)
+  if (action.command === null || typeof action.command !== 'object') {
+    throw new Error(`${label} requires a command reference`)
+  }
   assertKeys(action.command, ['id', 'arguments'], `${label} command`)
   assertReference(action.command.id, `${label} command id`)
   assertWhenExpression(action.when)
@@ -368,15 +394,23 @@ function pageChromeButton(document: Document, ariaLabel: string, icon: string): 
   button.style.setProperty('-webkit-app-region', 'no-drag')
   const Button = document.defaultView?.HTMLButtonElement
   const template = [...document.querySelectorAll('header[data-app-shell-application-menu-bar] button')]
-    .find((candidate): candidate is HTMLButtonElement => Button !== undefined
+    .find((candidate): candidate is HTMLButtonElement =>
+      Button !== undefined
       && candidate instanceof Button
-      && candidate.closest('[data-cordisx-page-outlet]') === null)
+      && candidate.closest('[data-cordisx-page-outlet]') === null
+    )
   if (template !== undefined) {
     button.className = template.className
   } else {
     Object.assign(button.style, {
-      width: '30px', height: '30px', border: '1px solid transparent', borderRadius: '8px',
-      background: 'transparent', color: 'inherit', cursor: 'pointer', padding: '5px',
+      width: '30px',
+      height: '30px',
+      border: '1px solid transparent',
+      borderRadius: '8px',
+      background: 'transparent',
+      color: 'inherit',
+      cursor: 'pointer',
+      padding: '5px',
     })
   }
   button.classList.add('cordisx-page-chrome-action')
@@ -408,7 +442,19 @@ export class PageRegistry {
       ? undefined
       : this.visibility?.view(ownerOrContext)
     assertLocalId(owner, 'page owner')
-    assertKeys(metadata, ['$schema', 'schemaVersion', 'id', 'title', 'description', 'icon', 'chrome', 'breadcrumbs', 'tabs', 'headerActions', 'localeNamespace'], 'page metadata')
+    assertKeys(metadata, [
+      '$schema',
+      'schemaVersion',
+      'id',
+      'title',
+      'description',
+      'icon',
+      'chrome',
+      'breadcrumbs',
+      'tabs',
+      'headerActions',
+      'localeNamespace',
+    ], 'page metadata')
     assertPageMetadataVersion(metadata)
     assertLocalId(metadata.id, 'page id')
     assertLocalizedText(metadata.title, 'page title')
@@ -417,8 +463,10 @@ export class PageRegistry {
     if (metadata.chrome !== undefined && !['standard', 'body-only'].includes(metadata.chrome)) {
       throw new Error(`page ${metadata.id} chrome policy is invalid`)
     }
-    if (metadata.chrome === 'body-only'
-      && (metadata.breadcrumbs !== undefined || metadata.tabs !== undefined || metadata.headerActions !== undefined)) {
+    if (
+      metadata.chrome === 'body-only'
+      && (metadata.breadcrumbs !== undefined || metadata.tabs !== undefined || metadata.headerActions !== undefined)
+    ) {
       throw new Error(`body-only page ${metadata.id} cannot declare breadcrumbs, tabs, or header actions`)
     }
     if (metadata.localeNamespace !== undefined) assertReference(metadata.localeNamespace, 'page locale namespace')
@@ -462,8 +510,10 @@ export class PageRegistry {
 
   get(requestingOwner: string, id: string, view?: PluginGenerationView): PageRecord | undefined {
     const qualifiedId = qualifyOwnedId(requestingOwner, id)
-    const record = [...this.records.values()].find(item => item.qualifiedId === qualifiedId
-      && (this.visibility?.visible(item.generation, view) ?? true))
+    const record = [...this.records.values()].find(item =>
+      item.qualifiedId === qualifiedId
+      && (this.visibility?.visible(item.generation, view) ?? true)
+    )
     if (record?.owner !== requestingOwner) return undefined
     return record
   }
@@ -472,11 +522,11 @@ export class PageRegistry {
     return [...this.records.values()]
       .filter(record => this.visibility?.visible(record.generation, view) ?? true)
       .map(record => ({
-      owner: record.owner,
-      id: record.metadata.id,
-      qualifiedId: record.qualifiedId,
-      metadata: record.metadata,
-    })).sort((left, right) => left.qualifiedId.localeCompare(right.qualifiedId))
+        owner: record.owner,
+        id: record.metadata.id,
+        qualifiedId: record.qualifiedId,
+        metadata: record.metadata,
+      })).sort((left, right) => left.qualifiedId.localeCompare(right.qualifiedId))
   }
 
   subscribe(listener: () => void): () => void {
@@ -694,7 +744,9 @@ function sameStructuredValue(left: unknown, right: unknown): boolean {
   const leftKeys = Object.keys(leftRecord).sort()
   const rightKeys = Object.keys(rightRecord).sort()
   return leftKeys.length === rightKeys.length
-    && leftKeys.every((key, index) => key === rightKeys[index] && sameStructuredValue(leftRecord[key], rightRecord[key]))
+    && leftKeys.every((key, index) =>
+      key === rightKeys[index] && sameStructuredValue(leftRecord[key], rightRecord[key])
+    )
 }
 
 export interface ManagerContentPresentation {
@@ -741,14 +793,16 @@ export class ManagerContentNavigationRegistry {
   private readonly disconnectVisibility: (() => void) | undefined
   private notificationDepth = 0
   private notificationPending = false
-  private configFactory: ((input: {
-    readonly owner: string
-    readonly declarationId: string
-    readonly moduleGeneration: string
-    readonly view?: PluginGenerationView
-    readonly body: NonNullable<CordisXManagerContentNavigationDeclarationV4['body']>
-    readonly contractVersion: 1 | 2
-  }) => ManagerContentConfigBindingHandle) | undefined
+  private configFactory:
+    | ((input: {
+      readonly owner: string
+      readonly declarationId: string
+      readonly moduleGeneration: string
+      readonly view?: PluginGenerationView
+      readonly body: NonNullable<CordisXManagerContentNavigationDeclarationV4['body']>
+      readonly contractVersion: 1 | 2
+    }) => ManagerContentConfigBindingHandle)
+    | undefined
 
   constructor(private readonly visibility?: GenerationVisibilityCoordinator) {
     this.disconnectVisibility = visibility?.connect({ notify: () => this.notify() })
@@ -775,26 +829,44 @@ export class ManagerContentNavigationRegistry {
     const candidateView = typeof ownerOrContext === 'string' || generation.transactionId === undefined
       ? undefined
       : this.visibility?.view(ownerOrContext)
-    assertKeys(declaration, declaration.schemaVersion >= 3
-      ? ['$schema', 'schemaVersion', 'id', 'route', 'parentRoute', 'header', 'subject', 'recordSummary', 'tabs', ...(declaration.schemaVersion >= 4 ? ['body'] : [])]
-      : ['$schema', 'schemaVersion', 'id', 'route', 'parentRoute', 'header', 'tabs'], 'manager content navigation declaration')
-    const version = declaration.$schema === CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1 && declaration.schemaVersion === 1
-      ? 1
-      : declaration.$schema === CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V2 && declaration.schemaVersion === 2
+    assertKeys(
+      declaration,
+      declaration.schemaVersion >= 3
+        ? [
+          '$schema',
+          'schemaVersion',
+          'id',
+          'route',
+          'parentRoute',
+          'header',
+          'subject',
+          'recordSummary',
+          'tabs',
+          ...(declaration.schemaVersion >= 4 ? ['body'] : []),
+        ]
+        : ['$schema', 'schemaVersion', 'id', 'route', 'parentRoute', 'header', 'tabs'],
+      'manager content navigation declaration',
+    )
+    const version =
+      declaration.$schema === CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1 && declaration.schemaVersion === 1
+        ? 1
+        : declaration.$schema === CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V2 && declaration.schemaVersion === 2
         ? 2
         : declaration.$schema === CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3 && declaration.schemaVersion === 3
-          ? 3
-          : declaration.$schema === CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V4 && declaration.schemaVersion === 4
-            ? 4
-            : declaration.$schema === CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V5 && declaration.schemaVersion === 5
-              ? 5
+        ? 3
+        : declaration.$schema === CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V4 && declaration.schemaVersion === 4
+        ? 4
+        : declaration.$schema === CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V5 && declaration.schemaVersion === 5
+        ? 5
         : undefined
     if (version === undefined) {
       throw new Error('manager content navigation declaration has an unsupported schema tuple')
     }
     assertLocalId(declaration.id, 'manager content navigation declaration id')
     this.assertRouteReference(declaration.route, 'manager content navigation declaration route')
-    if (declaration.parentRoute !== undefined) this.assertRouteReference(declaration.parentRoute, 'manager content navigation declaration parent route')
+    if (declaration.parentRoute !== undefined) {
+      this.assertRouteReference(declaration.parentRoute, 'manager content navigation declaration parent route')
+    }
     assertKeys(declaration.header, ['title'], 'manager content navigation declaration header')
     const title = declaration.header.title
     if (title === null || typeof title !== 'object' || Array.isArray(title)) {
@@ -825,18 +897,38 @@ export class ManagerContentNavigationRegistry {
         assertLocalizedText((tab as ManagerContentNavigationTabV2).label, 'manager content navigation tab label')
       }
     }
-    if (version >= 3) this.assertV3(declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5, candidateView)
+    if (version >= 3) {
+      this.assertV3(
+        declaration as
+          | CordisXManagerContentNavigationDeclarationV3
+          | CordisXManagerContentNavigationDeclarationV4
+          | CordisXManagerContentNavigationDeclarationV5,
+        candidateView,
+      )
+    }
     const key = `${owner}\u0000${declaration.id}\u0000${generation.moduleGeneration ?? 'host'}`
-    if (this.declarations.has(key)) throw new Error(`manager content navigation declaration ${declaration.id} is already registered`)
+    if (this.declarations.has(key)) {
+      throw new Error(`manager content navigation declaration ${declaration.id} is already registered`)
+    }
     let config: ManagerContentConfigBindingHandle | undefined
-    if (version >= 4 && (declaration as CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5).body !== undefined) {
-      const body = (declaration as CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5).body!
+    if (
+      version >= 4
+      && (declaration as CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5)
+          .body !== undefined
+    ) {
+      const body =
+        (declaration as CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5)
+          .body!
       this.assertConfigBody(body)
       if (this.configFactory === undefined) throw new Error('manager content config authority is unavailable')
       const moduleGeneration = generation.moduleGeneration
       if (moduleGeneration === undefined) throw new Error('manager content config requires an exact plugin generation')
       config = this.configFactory({
-        owner, declarationId: declaration.id, moduleGeneration, body, contractVersion: version === 5 ? 2 : 1,
+        owner,
+        declarationId: declaration.id,
+        moduleGeneration,
+        body,
+        contractVersion: version === 5 ? 2 : 1,
         ...(candidateView === undefined ? {} : { view: candidateView }),
       })
     }
@@ -851,13 +943,22 @@ export class ManagerContentNavigationRegistry {
     return () => {
       const record = this.declarations.get(key)
       if (record === undefined || !this.declarations.delete(key)) return
-      record.config?.close(this.visibleDeclarations().some(candidate => candidate.owner === owner
-        && candidate.declaration.id === declaration.id) ? 'generation-replaced' : 'declaration-replaced')
+      record.config?.close(
+        this.visibleDeclarations().some(candidate =>
+            candidate.owner === owner
+            && candidate.declaration.id === declaration.id
+          )
+          ? 'generation-replaced'
+          : 'declaration-replaced',
+      )
       if (this.visibility?.visible(generation) !== false) this.notify()
     }
   }
 
-  registerRecordTitles(ownerOrContext: string | Context, records: readonly CordisXManagerContentRecordTitleV1[]): () => void {
+  registerRecordTitles(
+    ownerOrContext: string | Context,
+    records: readonly CordisXManagerContentRecordTitleV1[],
+  ): () => void {
     const owner = typeof ownerOrContext === 'string' ? ownerOrContext : ownerFromContext(ownerOrContext)
     const generation: PluginGenerationEffectIdentity = typeof ownerOrContext === 'string'
       ? Object.freeze({ pluginId: owner })
@@ -868,7 +969,9 @@ export class ManagerContentNavigationRegistry {
     const entries: string[] = []
     for (const record of records) {
       assertKeys(record, ['id', 'title'], 'manager content record title')
-      if (typeof record.id !== 'string' || record.id.length < 1 || record.id.length > 512) throw new Error('manager content record title id is invalid')
+      if (typeof record.id !== 'string' || record.id.length < 1 || record.id.length > 512) {
+        throw new Error('manager content record title id is invalid')
+      }
       assertLocalizedText(record.title, 'manager content record title')
       const key = `${owner}\u0000${record.id}\u0000${generation.moduleGeneration ?? 'host'}`
       if (this.titles.has(key)) throw new Error(`manager content record title ${record.id} is already registered`)
@@ -894,7 +997,7 @@ export class ManagerContentNavigationRegistry {
     ownerOrContext: string | Context,
     projection: Readonly<{
       readonly declarations: readonly (
-        CordisXManagerContentNavigationDeclarationV1
+        | CordisXManagerContentNavigationDeclarationV1
         | CordisXManagerContentNavigationDeclarationV2
         | CordisXManagerContentNavigationDeclarationV3
         | CordisXManagerContentNavigationDeclarationV4
@@ -921,10 +1024,11 @@ export class ManagerContentNavigationRegistry {
         for (const unregister of declarations.reverse()) unregister()
         throw error
       }
-      dispose = () => this.transaction(() => {
-        titles?.()
-        for (const unregister of declarations.reverse()) unregister()
-      })
+      dispose = () =>
+        this.transaction(() => {
+          titles?.()
+          for (const unregister of declarations.reverse()) unregister()
+        })
       this.projections.set(projectionKey, dispose)
     })
     return () => {
@@ -934,8 +1038,14 @@ export class ManagerContentNavigationRegistry {
     }
   }
 
-  resolve(owner: string, reference: CordisXRouteReference, view?: PluginGenerationView): ManagerContentDeclarationRecord | undefined {
-    const matches = this.visibleDeclarations(view).filter(record => record.owner === owner && sameReference(record.declaration.route, reference))
+  resolve(
+    owner: string,
+    reference: CordisXRouteReference,
+    view?: PluginGenerationView,
+  ): ManagerContentDeclarationRecord | undefined {
+    const matches = this.visibleDeclarations(view).filter(record =>
+      record.owner === owner && sameReference(record.declaration.route, reference)
+    )
     return matches.length === 1 ? matches[0] : undefined
   }
 
@@ -944,15 +1054,20 @@ export class ManagerContentNavigationRegistry {
   }
 
   title(owner: string, id: string, view?: PluginGenerationView): CordisXLocalizedText | undefined {
-    const matches = [...this.titles.values()].filter(record => record.owner === owner && record.id === id
-      && (this.visibility?.visible(record.generation, view) ?? true))
+    const matches = [...this.titles.values()].filter(record =>
+      record.owner === owner && record.id === id
+      && (this.visibility?.visible(record.generation, view) ?? true)
+    )
     return matches.length === 1 ? matches[0]?.title : undefined
   }
 
   resolveAgentDefinitionSubject(identity: AgentDefinitionIdentity): ManagerContentAgentDefinitionTarget | undefined {
     const matches = this.visibleDeclarations().filter(record => {
       const subject = record.declaration.schemaVersion >= 3
-        ? (record.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5).subject
+        ? (record.declaration as
+          | CordisXManagerContentNavigationDeclarationV3
+          | CordisXManagerContentNavigationDeclarationV4
+          | CordisXManagerContentNavigationDeclarationV5).subject
         : undefined
       return subject?.kind === 'agent-definition'
         && subject.identity.agentId === identity.agentId
@@ -960,13 +1075,18 @@ export class ManagerContentNavigationRegistry {
     })
     if (matches.length !== 1) return undefined
     const match = matches[0]!
-    const subject = (match.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5).subject!
+    const subject = (match.declaration as
+      | CordisXManagerContentNavigationDeclarationV3
+      | CordisXManagerContentNavigationDeclarationV4
+      | CordisXManagerContentNavigationDeclarationV5).subject!
     return Object.freeze({
       owner: match.owner,
       generation: match.generation,
       identity: immutableSnapshot(subject.identity),
       route: immutableSnapshot(match.declaration.route),
-      ...(match.declaration.parentRoute === undefined ? {} : { parent: immutableSnapshot(match.declaration.parentRoute) }),
+      ...(match.declaration.parentRoute === undefined
+        ? {}
+        : { parent: immutableSnapshot(match.declaration.parentRoute) }),
     })
   }
 
@@ -988,39 +1108,68 @@ export class ManagerContentNavigationRegistry {
     return [...this.declarations.values()].filter(record => this.visibility?.visible(record.generation, view) ?? true)
   }
 
-  private assertV3(declaration: CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5, view?: PluginGenerationView): void {
+  private assertV3(
+    declaration:
+      | CordisXManagerContentNavigationDeclarationV3
+      | CordisXManagerContentNavigationDeclarationV4
+      | CordisXManagerContentNavigationDeclarationV5,
+    view?: PluginGenerationView,
+  ): void {
     if (declaration.subject !== undefined) {
       assertKeys(declaration.subject, ['kind', 'identity'], 'manager content navigation subject')
-      if (declaration.subject.kind !== 'agent-definition') throw new Error('manager content navigation subject kind is invalid')
+      if (declaration.subject.kind !== 'agent-definition') {
+        throw new Error('manager content navigation subject kind is invalid')
+      }
       assertKeys(declaration.subject.identity, ['agentId', 'revision'], 'manager content navigation subject identity')
-      if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/u.test(declaration.subject.identity.agentId)
+      if (
+        !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/u.test(declaration.subject.identity.agentId)
         || typeof declaration.subject.identity.revision !== 'string'
         || declaration.subject.identity.revision.length < 1
-        || declaration.subject.identity.revision.length > 512) {
+        || declaration.subject.identity.revision.length > 512
+      ) {
         throw new Error('manager content navigation subject identity is invalid')
       }
       const duplicate = this.visibleDeclarations(view).find(record => {
         const subject = record.declaration.schemaVersion >= 3
-          ? (record.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5).subject
+          ? (record.declaration as
+            | CordisXManagerContentNavigationDeclarationV3
+            | CordisXManagerContentNavigationDeclarationV4
+            | CordisXManagerContentNavigationDeclarationV5).subject
           : undefined
         return subject?.kind === 'agent-definition'
           && subject.identity.agentId === declaration.subject!.identity.agentId
           && subject.identity.revision === declaration.subject!.identity.revision
       })
-      if (duplicate !== undefined) throw new Error(`manager content navigation subject ${declaration.subject.identity.agentId}@${declaration.subject.identity.revision} is already claimed`)
+      if (duplicate !== undefined) {
+        throw new Error(
+          `manager content navigation subject ${declaration.subject.identity.agentId}@${declaration.subject.identity.revision} is already claimed`,
+        )
+      }
     }
     if (declaration.recordSummary !== undefined) {
       assertKeys(declaration.recordSummary, ['leadingVisual', 'title', 'description'], 'manager content record summary')
-      assertKeys(declaration.recordSummary.leadingVisual, ['kind', 'avatar'], 'manager content record summary leading visual')
-      if (declaration.recordSummary.leadingVisual.kind !== 'agent-avatar') throw new Error('manager content record summary leading visual kind is invalid')
+      assertKeys(
+        declaration.recordSummary.leadingVisual,
+        ['kind', 'avatar'],
+        'manager content record summary leading visual',
+      )
+      if (declaration.recordSummary.leadingVisual.kind !== 'agent-avatar') {
+        throw new Error('manager content record summary leading visual kind is invalid')
+      }
       cloneAgentAvatarRef(declaration.recordSummary.leadingVisual.avatar)
       assertLocalizedText(declaration.recordSummary.title, 'manager content record summary title')
-      if (typeof declaration.recordSummary.title.fallback !== 'string' || declaration.recordSummary.title.fallback.trim() === '') {
+      if (
+        typeof declaration.recordSummary.title.fallback !== 'string'
+        || declaration.recordSummary.title.fallback.trim() === ''
+      ) {
         throw new Error('manager content record summary title fallback is invalid')
       }
       if (declaration.recordSummary.description !== undefined) {
         assertLocalizedText(declaration.recordSummary.description, 'manager content record summary description')
-        if (typeof declaration.recordSummary.description.fallback !== 'string' || declaration.recordSummary.description.fallback.trim() === '') {
+        if (
+          typeof declaration.recordSummary.description.fallback !== 'string'
+          || declaration.recordSummary.description.fallback.trim() === ''
+        ) {
           throw new Error('manager content record summary description fallback is invalid')
         }
       }
@@ -1034,13 +1183,20 @@ export class ManagerContentNavigationRegistry {
     const defaults = body.defaultMaterialization
     if (defaults === undefined) return
     assertKeys(defaults, ['mode', 'fields'], 'manager content config default materialization')
-    if (defaults.mode !== 'missing-only' || !Array.isArray(defaults.fields) || defaults.fields.length < 1 || defaults.fields.length > 16) {
+    if (
+      defaults.mode !== 'missing-only' || !Array.isArray(defaults.fields) || defaults.fields.length < 1
+      || defaults.fields.length > 16
+    ) {
       throw new Error('manager content config default materialization is invalid')
     }
     for (const field of defaults.fields) {
       assertKeys(field, ['path', 'value'], 'manager content config missing default')
-      if (!Array.isArray(field.path) || field.path.length < 1 || field.path.length > 32
-        || field.path.some((segment: unknown) => typeof segment !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/u.test(segment))) {
+      if (
+        !Array.isArray(field.path) || field.path.length < 1 || field.path.length > 32
+        || field.path.some((segment: unknown) =>
+          typeof segment !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/u.test(segment)
+        )
+      ) {
         throw new Error('manager content config default path is invalid')
       }
       if (!['string', 'number', 'boolean'].includes(typeof field.value) && field.value !== null) {
@@ -1054,7 +1210,9 @@ export class ManagerContentNavigationRegistry {
     assertLocalId(reference.id, `${label} id`)
     for (const [key, value] of Object.entries(reference.params ?? {})) {
       if (!/^[a-z][a-zA-Z0-9]*$/u.test(key)) throw new Error(`${label} param ${key} is invalid`)
-      if (!['string', 'number', 'boolean'].includes(typeof value) && value !== null) throw new Error(`${label} param ${key} is not scalar`)
+      if (!['string', 'number', 'boolean'].includes(typeof value) && value !== null) {
+        throw new Error(`${label} param ${key} is not scalar`)
+      }
     }
   }
 
@@ -1108,15 +1266,21 @@ export class NavigationRegistry {
     private readonly commands?: Pick<CordisXCommandService, 'hasFor' | 'executeFor' | 'subscribeInternal'>,
   ) {
     this.managerContent = new ManagerContentNavigationRegistry(pages.visibility)
-    this.unsubscribePages = pages.subscribe(() => { void this.enqueue(() => this.reconcileDependencies()) })
-    this.unsubscribeOutlets = outlets.subscribe(() => { void this.enqueue(() => this.reconcileDependencies()) })
+    this.unsubscribePages = pages.subscribe(() => {
+      void this.enqueue(() => this.reconcileDependencies())
+    })
+    this.unsubscribeOutlets = outlets.subscribe(() => {
+      void this.enqueue(() => this.reconcileDependencies())
+    })
     this.unsubscribeManagerContent = this.managerContent.subscribe(() => this.notify())
     this.unsubscribeHistory = history.subscribe(() => {
       if (this.historyProjectionStarted) void this.enqueue(() => this.applyHistorySnapshot(history.snapshot()))
     })
-    this.disconnectVisibility = pages.visibility?.connect({ notify: () => {
-      void this.enqueue(() => this.reconcileGeneration())
-    } })
+    this.disconnectVisibility = pages.visibility?.connect({
+      notify: () => {
+        void this.enqueue(() => this.reconcileGeneration())
+      },
+    })
   }
 
   /** Begin reverse projection only after Host outlets and plugin routes are registered. */
@@ -1133,7 +1297,11 @@ export class NavigationRegistry {
     if (declaration === undefined) return undefined
     const record = this.findRecord(owner, reference.id)
     if (record === undefined || record.definition.outlet !== 'manager.content') return undefined
-    try { buildPath(record, reference.params ?? {}) } catch { return undefined }
+    try {
+      buildPath(record, reference.params ?? {})
+    } catch {
+      return undefined
+    }
     const page = this.pages.get(owner, record.definition.page, record.candidateView)
     if (page === undefined) return undefined
     const text = (value: CordisXLocalizedText, site: string): string => (
@@ -1141,21 +1309,40 @@ export class NavigationRegistry {
     )
     const header = declaration.declaration.header.title
     const title = header.kind === 'record'
-      ? text(this.managerContent.title(owner, String(reference.params?.[header.recordIdParam]), declaration.candidateView) ?? header.fallback, `manager-content:${owner}:${declaration.declaration.id}:record`)
+      ? text(
+        this.managerContent.title(owner, String(reference.params?.[header.recordIdParam]), declaration.candidateView)
+          ?? header.fallback,
+        `manager-content:${owner}:${declaration.declaration.id}:record`,
+      )
       : text(page.metadata.title, `manager-content:${owner}:${declaration.declaration.id}:title`)
-    const description = text(page.metadata.description ?? record.definition.description ?? record.definition.title ?? page.metadata.title, `manager-content:${owner}:${declaration.declaration.id}:description`)
-    const relatedDeclarations = this.managerContent.declarationsFor(owner, declaration.candidateView).filter(candidate => (
-      sameReference(candidate.declaration.route, reference)
-      || (declaration.declaration.tabs ?? []).some(tab => sameReference(tab.route, candidate.declaration.route))
-      || (candidate.declaration.tabs ?? []).some(tab => sameReference(tab.route, reference))
-    ))
+    const description = text(
+      page.metadata.description ?? record.definition.description ?? record.definition.title ?? page.metadata.title,
+      `manager-content:${owner}:${declaration.declaration.id}:description`,
+    )
+    const relatedDeclarations = this.managerContent.declarationsFor(owner, declaration.candidateView).filter(
+      candidate => (
+        sameReference(candidate.declaration.route, reference)
+        || (declaration.declaration.tabs ?? []).some(tab => sameReference(tab.route, candidate.declaration.route))
+        || (candidate.declaration.tabs ?? []).some(tab => sameReference(tab.route, reference))
+      ),
+    )
     const summarySources = relatedDeclarations.flatMap(candidate => (
       candidate.declaration.schemaVersion >= 3
-        && (candidate.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5).recordSummary !== undefined
-        ? [(candidate.declaration as CordisXManagerContentNavigationDeclarationV3 | CordisXManagerContentNavigationDeclarationV4 | CordisXManagerContentNavigationDeclarationV5).recordSummary!]
+        && (candidate.declaration as
+            | CordisXManagerContentNavigationDeclarationV3
+            | CordisXManagerContentNavigationDeclarationV4
+            | CordisXManagerContentNavigationDeclarationV5).recordSummary !== undefined
+        ? [
+          (candidate.declaration as
+            | CordisXManagerContentNavigationDeclarationV3
+            | CordisXManagerContentNavigationDeclarationV4
+            | CordisXManagerContentNavigationDeclarationV5).recordSummary!,
+        ]
         : []
     ))
-    if (summarySources.length > 1 && summarySources.some(summary => !sameStructuredValue(summarySources[0], summary))) return undefined
+    if (summarySources.length > 1 && summarySources.some(summary => !sameStructuredValue(summarySources[0], summary))) {
+      return undefined
+    }
     const summarySource = summarySources[0] === undefined
       ? undefined
       : immutableSnapshot(summarySources[0]) as ManagerContentRecordSummaryProjectionV2
@@ -1163,7 +1350,10 @@ export class NavigationRegistry {
       leadingVisual: summarySource.leadingVisual,
       title: text(summarySource.title, `manager-content:${owner}:${declaration.declaration.id}:summary:title`),
       ...(summarySource.description === undefined ? {} : {
-        description: text(summarySource.description, `manager-content:${owner}:${declaration.declaration.id}:summary:description`),
+        description: text(
+          summarySource.description,
+          `manager-content:${owner}:${declaration.declaration.id}:summary:description`,
+        ),
       }),
       source: summarySource,
     })
@@ -1174,22 +1364,27 @@ export class NavigationRegistry {
       const targetDeclaration = this.managerContent.resolve(owner, tab.route, declaration.candidateView)
       if (targetDeclaration === undefined) return []
       const targetTabs = targetDeclaration.declaration.tabs ?? []
-      if (targetTabs.length > 0 && targetTabs.filter(candidate => sameReference(candidate.route, tab.route)).length !== 1) return []
+      if (
+        targetTabs.length > 0 && targetTabs.filter(candidate => sameReference(candidate.route, tab.route)).length !== 1
+      ) return []
       const resolution = this.managerContentRoute(owner, tab.route, record.candidateView)
       if (resolution.state !== 'available' || resolution.resolved === undefined) return []
       const icon = resolution.resolved.page.metadata.icon
       if (icon === undefined) return []
       const tabText = declaration.declaration.schemaVersion >= 2
         ? (Object.hasOwn(tab, 'label')
-            ? (tab as ManagerContentNavigationTabV2).label
-            : resolution.resolved.definition.title)
+          ? (tab as ManagerContentNavigationTabV2).label
+          : resolution.resolved.definition.title)
         : resolution.resolved.page.metadata.title
       if (tabText === undefined) return []
       return [Object.freeze({
         id: tab.id,
         label: text(tabText, `manager-content:${owner}:${declaration.declaration.id}:tab:${tab.id}`),
         icon,
-        route: Object.freeze({ id: tab.route.id, ...(tab.route.params === undefined ? {} : { params: immutableSnapshot(tab.route.params) }) }),
+        route: Object.freeze({
+          id: tab.route.id,
+          ...(tab.route.params === undefined ? {} : { params: immutableSnapshot(tab.route.params) }),
+        }),
         active: sameReference(tab.route, reference),
       })]
     })
@@ -1208,11 +1403,15 @@ export class NavigationRegistry {
     })
   }
 
-  managerContentAgentDefinitionTarget(identity: AgentDefinitionIdentity): ManagerContentAgentDefinitionTarget | undefined {
+  managerContentAgentDefinitionTarget(
+    identity: AgentDefinitionIdentity,
+  ): ManagerContentAgentDefinitionTarget | undefined {
     const target = this.managerContent.resolveAgentDefinitionSubject(identity)
     if (target === undefined) return undefined
     if (this.managerContentRoute(target.owner, target.route).state !== 'available') return undefined
-    if (target.parent !== undefined && this.managerContentRoute(target.owner, target.parent).state !== 'available') return undefined
+    if (target.parent !== undefined && this.managerContentRoute(target.owner, target.parent).state !== 'available') {
+      return undefined
+    }
     return target
   }
 
@@ -1240,10 +1439,16 @@ export class NavigationRegistry {
       ? undefined
       : this.pages.visibility?.view(ownerOrContext)
     assertLocalId(owner, 'route owner')
-    assertKeys(definition, ['$schema', 'schemaVersion', 'id', 'path', 'outlet', 'page', 'title', 'description', 'when'], 'route definition')
+    assertKeys(
+      definition,
+      ['$schema', 'schemaVersion', 'id', 'path', 'outlet', 'page', 'title', 'description', 'when'],
+      'route definition',
+    )
     assertRouteDefinitionVersion(definition)
     assertLocalId(definition.id, 'route id')
-    if (definition.path.length > 512 || !ROUTE_PATH_PATTERN.test(definition.path)) throw new Error(`invalid route path: ${definition.path}`)
+    if (definition.path.length > 512 || !ROUTE_PATH_PATTERN.test(definition.path)) {
+      throw new Error(`invalid route path: ${definition.path}`)
+    }
     assertReference(definition.outlet, 'route outlet')
     assertReference(definition.page, 'route page')
     if (definition.title !== undefined) assertLocalizedText(definition.title, 'route title')
@@ -1284,15 +1489,23 @@ export class NavigationRegistry {
     owner: AgentRuntimeNavigationOwner,
     view?: PluginGenerationView,
   ): readonly AgentRuntimeNavigationRoute[] {
-    return Object.freeze(this.visibleRecords(view)
-      .filter(record => record.owner === owner.pluginId
-        && record.source === owner.source
-        && record.generation.moduleGeneration === owner.moduleGeneration)
-      .map(record => Object.freeze({
-        id: record.definition.id,
-        path: record.definition.path,
-        ...(record.definition.schemaVersion === undefined ? {} : { schemaVersion: record.definition.schemaVersion }),
-      })))
+    return Object.freeze(
+      this.visibleRecords(view)
+        .filter(record =>
+          record.owner === owner.pluginId
+          && record.source === owner.source
+          && record.generation.moduleGeneration === owner.moduleGeneration
+        )
+        .map(record =>
+          Object.freeze({
+            id: record.definition.id,
+            path: record.definition.path,
+            ...(record.definition.schemaVersion === undefined
+              ? {}
+              : { schemaVersion: record.definition.schemaVersion }),
+          })
+        ),
+    )
   }
 
   /** Resolves a persisted Host history entry back to its exact source owner. */
@@ -1301,9 +1514,15 @@ export class NavigationRegistry {
     view?: PluginGenerationView,
   ): ResolvedAgentRuntimeNavigationRoute | undefined {
     const matches = this.visibleRecords(view).filter(record => {
-      if (record.owner !== entry.owner || record.qualifiedId !== entry.routeId
-        || record.source === undefined || record.generation.moduleGeneration === undefined) return false
-      try { return buildPath(record, entry.params) === entry.path } catch { return false }
+      if (
+        record.owner !== entry.owner || record.qualifiedId !== entry.routeId
+        || record.source === undefined || record.generation.moduleGeneration === undefined
+      ) return false
+      try {
+        return buildPath(record, entry.params) === entry.path
+      } catch {
+        return false
+      }
     })
     if (matches.length !== 1) return undefined
     const record = matches[0]!
@@ -1324,7 +1543,11 @@ export class NavigationRegistry {
     return record?.owner === requestingOwner && this.routeError(record) === undefined
   }
 
-  managerSettingsRoute(requestingOwner: string, id: string, view?: PluginGenerationView): ManagerSettingsRouteResolution {
+  managerSettingsRoute(
+    requestingOwner: string,
+    id: string,
+    view?: PluginGenerationView,
+  ): ManagerSettingsRouteResolution {
     const record = this.findRecord(requestingOwner, id, view)
     if (record === undefined || record.owner !== requestingOwner) {
       return { state: 'pending', detail: `route ${id} is not registered by plugin ${requestingOwner}` }
@@ -1342,7 +1565,10 @@ export class NavigationRegistry {
       return { state: 'pending', detail: 'outlet manager.settings.content is not declared by the host' }
     }
     if (!this.outlets.get('manager.settings.content')!.validatePath(record.definition.path)) {
-      return { state: 'invalid', detail: `route path ${record.definition.path} is incompatible with manager.settings.content` }
+      return {
+        state: 'invalid',
+        detail: `route path ${record.definition.path} is incompatible with manager.settings.content`,
+      }
     }
     const pathConflict = this.visibleRecords(view).find(candidate => (
       candidate.qualifiedId !== record.qualifiedId
@@ -1356,17 +1582,31 @@ export class NavigationRegistry {
       }
     }
     const page = this.pages.get(record.owner, record.definition.page, view ?? record.candidateView)
-    if (page === undefined) return { state: 'pending', detail: `page ${record.definition.page} is not registered by plugin ${record.owner}` }
+    if (page === undefined) {
+      return { state: 'pending', detail: `page ${record.definition.page} is not registered by plugin ${record.owner}` }
+    }
     if (page.metadata.chrome !== 'body-only') {
       return { state: 'invalid', detail: `page ${page.qualifiedId} must use body-only chrome` }
     }
     const values = this.contexts.getSnapshot()
     const unknownKey = whenContextKeys(record.definition.when).find(key => !Object.hasOwn(values, key))
-    if (unknownKey !== undefined) return { state: 'invalid', detail: `when context key ${unknownKey} is not declared by the host adapter` }
-    if (!evaluateWhen(record.definition.when, values)) return { state: 'pending', detail: 'route when condition is not satisfied' }
-    const outletAccess = this.access?.decision(record.owner, 'manager.settings.content', 'outlet', view ?? record.candidateView)
+    if (unknownKey !== undefined) {
+      return { state: 'invalid', detail: `when context key ${unknownKey} is not declared by the host adapter` }
+    }
+    if (!evaluateWhen(record.definition.when, values)) {
+      return { state: 'pending', detail: 'route when condition is not satisfied' }
+    }
+    const outletAccess = this.access?.decision(
+      record.owner,
+      'manager.settings.content',
+      'outlet',
+      view ?? record.candidateView,
+    )
     if (outletAccess !== undefined && !outletAccess.authorized) {
-      return { state: 'invalid', detail: outletAccess.reason ?? `extension point manager.settings.content is denied for plugin ${record.owner}` }
+      return {
+        state: 'invalid',
+        detail: outletAccess.reason ?? `extension point manager.settings.content is denied for plugin ${record.owner}`,
+      }
     }
     return { state: 'available' }
   }
@@ -1383,16 +1623,20 @@ export class NavigationRegistry {
     if (record.definition.outlet !== 'manager.content') {
       return { state: 'invalid', detail: `route ${record.qualifiedId} must target manager.content` }
     }
-    if (record.definition.path === '/manager/extensions' || record.definition.path === '/manager/extensions/'
-      || !record.definition.path.startsWith('/manager/extensions/')) {
+    if (
+      record.definition.path === '/manager/extensions' || record.definition.path === '/manager/extensions/'
+      || !record.definition.path.startsWith('/manager/extensions/')
+    ) {
       return { state: 'invalid', detail: `route ${record.qualifiedId} must be strictly below /manager/extensions/` }
     }
     if (record.definition.page.includes(':')) {
       return { state: 'invalid', detail: `route ${record.qualifiedId} must reference a same-owner local page` }
     }
-    if (record.definition.schemaVersion !== 2
+    if (
+      record.definition.schemaVersion !== 2
       || record.definition.title === undefined
-      || record.definition.description === undefined) {
+      || record.definition.description === undefined
+    ) {
       return { state: 'invalid', detail: `route ${record.qualifiedId} requires route-v2 title and description` }
     }
     const outlet = this.outlets.get('manager.content')
@@ -1434,7 +1678,10 @@ export class NavigationRegistry {
     }
     const outletAccess = this.access?.decision(record.owner, 'manager.content', 'outlet', view ?? record.candidateView)
     if (outletAccess !== undefined && !outletAccess.authorized) {
-      return { state: 'invalid', detail: outletAccess.reason ?? `extension point manager.content is denied for plugin ${record.owner}` }
+      return {
+        state: 'invalid',
+        detail: outletAccess.reason ?? `extension point manager.content is denied for plugin ${record.owner}`,
+      }
     }
     return {
       state: 'available',
@@ -1480,16 +1727,41 @@ export class NavigationRegistry {
       assertKeys(reference, ['id', 'params'], 'manager settings route reference')
       assertLocalId(reference.id, 'manager settings route reference')
       const record = this.findRecord(requestingOwner, reference.id)
-      if (record === undefined || record.owner !== requestingOwner) throw new Error(`route ${reference.id} is not available to plugin ${requestingOwner}`)
+      if (record === undefined || record.owner !== requestingOwner) {
+        throw new Error(`route ${reference.id} is not available to plugin ${requestingOwner}`)
+      }
       const resolution = this.managerSettingsRoute(requestingOwner, reference.id)
-      if (resolution.state !== 'available') throw new Error(resolution.detail ?? `route ${record.qualifiedId} is not available`)
+      if (resolution.state !== 'available') {
+        throw new Error(resolution.detail ?? `route ${record.qualifiedId} is not available`)
+      }
       const page = this.pages.get(record.owner, record.definition.page, record.candidateView)!
-      const surfaceAccess = this.access?.authorizeSurfaceRoute(requestingOwner, 'manager.settings.tabs', contributionId, record.qualifiedId)
-      if (surfaceAccess !== undefined && !surfaceAccess.authorized) throw new Error(surfaceAccess.reason ?? 'manager.settings.tabs is denied')
-      const routeAccess = this.access?.authorizeOutletRoute(requestingOwner, 'manager.settings.content', record.qualifiedId, page.qualifiedId)
-      if (routeAccess !== undefined && !routeAccess.authorized) throw new Error(routeAccess.reason ?? 'manager.settings.content is denied')
-      const pageAccess = this.access?.authorizeOutletPage(requestingOwner, 'manager.settings.content', record.qualifiedId, page.qualifiedId)
-      if (pageAccess !== undefined && !pageAccess.authorized) throw new Error(pageAccess.reason ?? 'manager.settings.content is denied')
+      const surfaceAccess = this.access?.authorizeSurfaceRoute(
+        requestingOwner,
+        'manager.settings.tabs',
+        contributionId,
+        record.qualifiedId,
+      )
+      if (surfaceAccess !== undefined && !surfaceAccess.authorized) {
+        throw new Error(surfaceAccess.reason ?? 'manager.settings.tabs is denied')
+      }
+      const routeAccess = this.access?.authorizeOutletRoute(
+        requestingOwner,
+        'manager.settings.content',
+        record.qualifiedId,
+        page.qualifiedId,
+      )
+      if (routeAccess !== undefined && !routeAccess.authorized) {
+        throw new Error(routeAccess.reason ?? 'manager.settings.content is denied')
+      }
+      const pageAccess = this.access?.authorizeOutletPage(
+        requestingOwner,
+        'manager.settings.content',
+        record.qualifiedId,
+        page.qualifiedId,
+      )
+      if (pageAccess !== undefined && !pageAccess.authorized) {
+        throw new Error(pageAccess.reason ?? 'manager.settings.content is denied')
+      }
       const params = immutableSnapshot(reference.params ?? {})
       buildPath(record, params)
       await this.unmountManagerSettings()
@@ -1576,17 +1848,42 @@ export class NavigationRegistry {
       assertKeys(reference, ['id', 'params'], 'manager content route reference')
       assertLocalId(reference.id, 'manager content route reference')
       const record = this.findRecord(requestingOwner, reference.id)
-      if (record === undefined || record.owner !== requestingOwner) throw new Error(`route ${reference.id} is not available to plugin ${requestingOwner}`)
+      if (record === undefined || record.owner !== requestingOwner) {
+        throw new Error(`route ${reference.id} is not available to plugin ${requestingOwner}`)
+      }
       const resolution = this.managerContentRoute(requestingOwner, reference)
-      if (resolution.state !== 'available') throw new Error(resolution.detail ?? `route ${record.qualifiedId} is not available`)
+      if (resolution.state !== 'available') {
+        throw new Error(resolution.detail ?? `route ${record.qualifiedId} is not available`)
+      }
       const managerDeclaration = this.managerContent.resolve(requestingOwner, reference, record.candidateView)
       const page = this.pages.get(record.owner, record.definition.page, record.candidateView)!
-      const surfaceAccess = this.access?.authorizeSurfaceRoute(requestingOwner, 'manager.settings.navigation-items', contributionId, record.qualifiedId)
-      if (surfaceAccess !== undefined && !surfaceAccess.authorized) throw new Error(surfaceAccess.reason ?? 'manager.settings.navigation-items is denied')
-      const routeAccess = this.access?.authorizeOutletRoute(requestingOwner, 'manager.content', record.qualifiedId, page.qualifiedId)
-      if (routeAccess !== undefined && !routeAccess.authorized) throw new Error(routeAccess.reason ?? 'manager.content is denied')
-      const pageAccess = this.access?.authorizeOutletPage(requestingOwner, 'manager.content', record.qualifiedId, page.qualifiedId)
-      if (pageAccess !== undefined && !pageAccess.authorized) throw new Error(pageAccess.reason ?? 'manager.content is denied')
+      const surfaceAccess = this.access?.authorizeSurfaceRoute(
+        requestingOwner,
+        'manager.settings.navigation-items',
+        contributionId,
+        record.qualifiedId,
+      )
+      if (surfaceAccess !== undefined && !surfaceAccess.authorized) {
+        throw new Error(surfaceAccess.reason ?? 'manager.settings.navigation-items is denied')
+      }
+      const routeAccess = this.access?.authorizeOutletRoute(
+        requestingOwner,
+        'manager.content',
+        record.qualifiedId,
+        page.qualifiedId,
+      )
+      if (routeAccess !== undefined && !routeAccess.authorized) {
+        throw new Error(routeAccess.reason ?? 'manager.content is denied')
+      }
+      const pageAccess = this.access?.authorizeOutletPage(
+        requestingOwner,
+        'manager.content',
+        record.qualifiedId,
+        page.qualifiedId,
+      )
+      if (pageAccess !== undefined && !pageAccess.authorized) {
+        throw new Error(pageAccess.reason ?? 'manager.content is denied')
+      }
       const params = immutableSnapshot(reference.params ?? {})
       buildPath(record, params)
       await this.unmountManagerContent()
@@ -1633,13 +1930,31 @@ export class NavigationRegistry {
           assertKeys(next, ['id', 'params'], 'manager collection route reference')
           assertLocalId(next.id, 'manager collection route reference')
           const target = this.findRecord(page.owner, next.id)
-          if (target === undefined || target.owner !== page.owner) throw new Error(`route ${next.id} is not available to plugin ${page.owner}`)
+          if (target === undefined || target.owner !== page.owner) {
+            throw new Error(`route ${next.id} is not available to plugin ${page.owner}`)
+          }
           const targetResolution = this.managerContentRoute(page.owner, next)
-          if (targetResolution.state !== 'available' || targetResolution.resolved === undefined) throw new Error(targetResolution.detail ?? `route ${target.qualifiedId} is not available`)
-          const routeDecision = this.access?.authorizeOutletRoute(page.owner, 'manager.content', target.qualifiedId, targetResolution.resolved.page.qualifiedId)
-          const pageDecision = this.access?.authorizeOutletPage(page.owner, 'manager.content', target.qualifiedId, targetResolution.resolved.page.qualifiedId)
-          if (routeDecision !== undefined && !routeDecision.authorized) throw new Error(routeDecision.reason ?? `route ${target.qualifiedId} is denied`)
-          if (pageDecision !== undefined && !pageDecision.authorized) throw new Error(pageDecision.reason ?? `page ${targetResolution.resolved.page.qualifiedId} is denied`)
+          if (targetResolution.state !== 'available' || targetResolution.resolved === undefined) {
+            throw new Error(targetResolution.detail ?? `route ${target.qualifiedId} is not available`)
+          }
+          const routeDecision = this.access?.authorizeOutletRoute(
+            page.owner,
+            'manager.content',
+            target.qualifiedId,
+            targetResolution.resolved.page.qualifiedId,
+          )
+          const pageDecision = this.access?.authorizeOutletPage(
+            page.owner,
+            'manager.content',
+            target.qualifiedId,
+            targetResolution.resolved.page.qualifiedId,
+          )
+          if (routeDecision !== undefined && !routeDecision.authorized) {
+            throw new Error(routeDecision.reason ?? `route ${target.qualifiedId} is denied`)
+          }
+          if (pageDecision !== undefined && !pageDecision.authorized) {
+            throw new Error(pageDecision.reason ?? `page ${targetResolution.resolved.page.qualifiedId} is denied`)
+          }
           await (managerNavigation ?? {
             navigate: candidate => this.navigate(page.owner, candidate),
             back: outlet => this.back(page.owner, outlet),
@@ -1650,13 +1965,31 @@ export class NavigationRegistry {
           assertKeys(next, ['id', 'params'], 'manager collection route reference')
           assertLocalId(next.id, 'manager collection route reference')
           const target = this.findRecord(page.owner, next.id)
-          if (target === undefined || target.owner !== page.owner) throw new Error(`route ${next.id} is not available to plugin ${page.owner}`)
+          if (target === undefined || target.owner !== page.owner) {
+            throw new Error(`route ${next.id} is not available to plugin ${page.owner}`)
+          }
           const targetResolution = this.managerContentRoute(page.owner, next)
-          if (targetResolution.state !== 'available' || targetResolution.resolved === undefined) throw new Error(targetResolution.detail ?? `route ${target.qualifiedId} is not available`)
-          const routeDecision = this.access?.authorizeOutletRoute(page.owner, 'manager.content', target.qualifiedId, targetResolution.resolved.page.qualifiedId)
-          const pageDecision = this.access?.authorizeOutletPage(page.owner, 'manager.content', target.qualifiedId, targetResolution.resolved.page.qualifiedId)
-          if (routeDecision !== undefined && !routeDecision.authorized) throw new Error(routeDecision.reason ?? `route ${target.qualifiedId} is denied`)
-          if (pageDecision !== undefined && !pageDecision.authorized) throw new Error(pageDecision.reason ?? `page ${targetResolution.resolved.page.qualifiedId} is denied`)
+          if (targetResolution.state !== 'available' || targetResolution.resolved === undefined) {
+            throw new Error(targetResolution.detail ?? `route ${target.qualifiedId} is not available`)
+          }
+          const routeDecision = this.access?.authorizeOutletRoute(
+            page.owner,
+            'manager.content',
+            target.qualifiedId,
+            targetResolution.resolved.page.qualifiedId,
+          )
+          const pageDecision = this.access?.authorizeOutletPage(
+            page.owner,
+            'manager.content',
+            target.qualifiedId,
+            targetResolution.resolved.page.qualifiedId,
+          )
+          if (routeDecision !== undefined && !routeDecision.authorized) {
+            throw new Error(routeDecision.reason ?? `route ${target.qualifiedId} is denied`)
+          }
+          if (pageDecision !== undefined && !pageDecision.authorized) {
+            throw new Error(pageDecision.reason ?? `page ${targetResolution.resolved.page.qualifiedId} is denied`)
+          }
           const path = buildPath(target, next.params ?? {})
           return new URL(path, content.ownerDocument.location.href).href
         },
@@ -1672,7 +2005,9 @@ export class NavigationRegistry {
             actionId,
             qualifyOwnedId(page.owner, command.id),
           )
-          if (decision !== undefined && !decision.authorized) throw new Error(decision.reason ?? `manager collection command ${command.id} is denied`)
+          if (decision !== undefined && !decision.authorized) {
+            throw new Error(decision.reason ?? `manager collection command ${command.id} is denied`)
+          }
           return this.commands.executeFor(page.owner, command, invocationKey)
         },
         writeClipboard: async value => {
@@ -1707,29 +2042,29 @@ export class NavigationRegistry {
       try {
         const pageDispose = managerDeclaration?.config === undefined
           ? page.mount({
-              container: pageBody,
-              document: content.ownerDocument,
-              signal: abortController.signal,
-              routeId: record.qualifiedId,
-              outlet: 'manager.content',
-              params,
-              navigation: managerNavigation ?? {
-                navigate: next => this.navigate(page.owner, next),
-                back: outlet => this.back(page.owner, outlet),
-                close: outlet => this.close(page.owner, outlet),
-              },
-              controls,
-              managerCollection: collection.registry,
-              localeNamespace: localization.namespace,
-              t: localization.t,
-              localization,
-            })
+            container: pageBody,
+            document: content.ownerDocument,
+            signal: abortController.signal,
+            routeId: record.qualifiedId,
+            outlet: 'manager.content',
+            params,
+            navigation: managerNavigation ?? {
+              navigate: next => this.navigate(page.owner, next),
+              back: outlet => this.back(page.owner, outlet),
+              close: outlet => this.close(page.owner, outlet),
+            },
+            controls,
+            managerCollection: collection.registry,
+            localeNamespace: localization.namespace,
+            t: localization.t,
+            localization,
+          })
           : mountManagerContentConfigForm(
-              pageBody,
-              managerDeclaration.config,
-              () => this.i18n.getSnapshot().locale,
-              listener => this.i18n.subscribeInternal(listener),
-            )
+            pageBody,
+            managerDeclaration.config,
+            () => this.i18n.getSnapshot().locale,
+            listener => this.i18n.subscribeInternal(listener),
+          )
         if (typeof pageDispose === 'function') mount.pageDispose = pageDispose
         result = mount
         this.notify()
@@ -1775,7 +2110,9 @@ export class NavigationRegistry {
       record.candidateView,
     )
     if (routeAccess !== undefined && !routeAccess.authorized) {
-      throw new Error(routeAccess.reason ?? `extension point ${record.definition.outlet} is denied for plugin ${requestingOwner}`)
+      throw new Error(
+        routeAccess.reason ?? `extension point ${record.definition.outlet} is denied for plugin ${requestingOwner}`,
+      )
     }
     const params = immutableSnapshot(reference.params ?? {})
     const path = buildPath(record, params)
@@ -1799,14 +2136,18 @@ export class NavigationRegistry {
     const routeId = qualifyOwnedId(requestingOwner, reference.id)
     const decision = this.access?.authorizeSurfaceRoute(requestingOwner, pointId, contributionId, routeId)
     if (decision !== undefined && !decision.authorized) {
-      return Promise.reject(new Error(decision.reason ?? `extension point ${pointId} is denied for plugin ${requestingOwner}`))
+      return Promise.reject(
+        new Error(decision.reason ?? `extension point ${pointId} is denied for plugin ${requestingOwner}`),
+      )
     }
     return this.enqueue(() => this.navigateNow(requestingOwner, reference, returnFocus))
   }
 
   routeProjection(requestingOwner: string, reference: CordisXRouteReference): RouteProjection {
     const record = this.findRecord(requestingOwner, reference.id)
-    if (record === undefined || record.owner !== requestingOwner || this.routeError(record) !== undefined) return { active: false, presented: false }
+    if (record === undefined || record.owner !== requestingOwner || this.routeError(record) !== undefined) {
+      return { active: false, presented: false }
+    }
     const params = reference.params ?? {}
     try {
       buildPath(record, params)
@@ -1851,7 +2192,9 @@ export class NavigationRegistry {
       const name = outlet ?? this.currentOutletFor(requestingOwner)
       if (name === undefined) throw new Error(`plugin ${requestingOwner} has no open route`)
       const state = this.states.get(name)
-      if (state?.current?.record.owner !== requestingOwner) throw new Error(`plugin ${requestingOwner} has no open route`)
+      if (state?.current?.record.owner !== requestingOwner) {
+        throw new Error(`plugin ${requestingOwner} has no open route`)
+      }
       await this.goBackOrClear(name, true)
       this.notify()
     })
@@ -1868,13 +2211,20 @@ export class NavigationRegistry {
     })
   }
 
-  match(outlet: string, path: string): { readonly routeId: string; readonly params: Readonly<Record<string, string>> } | undefined {
+  match(
+    outlet: string,
+    path: string,
+  ): { readonly routeId: string; readonly params: Readonly<Record<string, string>> } | undefined {
     const matches = this.visibleRecords()
-      .filter(record => record.definition.outlet === outlet
+      .filter(record =>
+        record.definition.outlet === outlet
         && this.routeError(record) === undefined
-        && (this.access?.decision(record.owner, outlet, 'outlet').authorized ?? true))
+        && (this.access?.decision(record.owner, outlet, 'outlet').authorized ?? true)
+      )
       .map(record => ({ record, params: matchPath(record, path) }))
-      .filter((item): item is { record: RouteRecord; params: Readonly<Record<string, string>> } => item.params !== undefined)
+      .filter((item): item is { record: RouteRecord; params: Readonly<Record<string, string>> } =>
+        item.params !== undefined
+      )
     if (matches.length !== 1) return undefined
     return { routeId: matches[0]!.record.qualifiedId, params: matches[0]!.params }
   }
@@ -1883,8 +2233,9 @@ export class NavigationRegistry {
     const nextMetadataProjectionSites = new Map<string, string>()
     const routes = this.visibleRecords(view).map((record): RouteSnapshot => {
       const error = this.routeError(record)
-      const pointAccess = this.access?.decision(record.owner, record.definition.outlet, 'outlet', view ?? record.candidateView)
-        ?? { policy: 'inherit' as const, effectivePolicy: 'allow' as const, authorized: true }
+      const pointAccess =
+        this.access?.decision(record.owner, record.definition.outlet, 'outlet', view ?? record.candidateView)
+          ?? { policy: 'inherit' as const, effectivePolicy: 'allow' as const, authorized: true }
       return {
         owner: record.owner,
         id: record.definition.id,
@@ -1926,17 +2277,23 @@ export class NavigationRegistry {
       const state = this.states.get(descriptor.id)
       const managerMount = descriptor.id === 'manager.settings.content'
         ? this.managerSettingsMount
-        : descriptor.id === 'manager.content' ? this.managerContentMount : undefined
+        : descriptor.id === 'manager.content'
+        ? this.managerContentMount
+        : undefined
       return {
         ...descriptor,
         ...host,
         ...(managerMount === undefined ? {} : { available: true }),
         mounted: state?.mount !== undefined || managerMount !== undefined,
-        presentation: state?.mount === undefined && managerMount === undefined ? 'inactive' : state?.presentation ?? 'presented',
+        presentation: state?.mount === undefined && managerMount === undefined
+          ? 'inactive'
+          : state?.presentation ?? 'presented',
         ...(state?.suspendedBy === undefined ? {} : { suspendedBy: state.suspendedBy }),
         ...(managerMount !== undefined
           ? { activeRoute: managerMount.routeId }
-          : state?.current === undefined ? {} : { activeRoute: state.current.record.qualifiedId }),
+          : state?.current === undefined
+          ? {}
+          : { activeRoute: state.current.record.qualifiedId }),
         ...(state?.error === undefined ? {} : { error: state.error }),
       }
     })
@@ -2036,26 +2393,34 @@ export class NavigationRegistry {
     const history = this.history.snapshot()
     if (!history.available) return history.reason ?? 'Codex session history is unavailable'
     const view = record.candidateView
-    const conflict = this.visibleRecords(view).find(other => other !== record
+    const conflict = this.visibleRecords(view).find(other =>
+      other !== record
       && other.definition.outlet === record.definition.outlet
-      && other.definition.path === record.definition.path)
+      && other.definition.path === record.definition.path
+    )
     if (conflict !== undefined) return `route path conflicts with ${conflict.qualifiedId}`
-    if (this.outlets.get(record.definition.outlet) === undefined) return `outlet ${record.definition.outlet} is not declared by the host adapter`
+    if (this.outlets.get(record.definition.outlet) === undefined) {
+      return `outlet ${record.definition.outlet} is not declared by the host adapter`
+    }
     if (!this.outlets.get(record.definition.outlet)!.validatePath(record.definition.path)) {
       return `route path ${record.definition.path} is incompatible with outlet ${record.definition.outlet}`
     }
     const page = this.pages.get(record.owner, record.definition.page, view)
     if (page === undefined) return `page ${record.definition.page} is not registered by plugin ${record.owner}`
     if (record.definition.outlet === 'manager.content') {
-      if (record.definition.path === '/manager/extensions'
+      if (
+        record.definition.path === '/manager/extensions'
         || record.definition.path === '/manager/extensions/'
-        || !record.definition.path.startsWith('/manager/extensions/')) {
+        || !record.definition.path.startsWith('/manager/extensions/')
+      ) {
         return `route path ${record.definition.path} must be strictly below /manager/extensions/`
       }
       if (record.definition.page.includes(':')) return `page ${record.definition.page} must be a same-owner local page`
-      if (record.definition.schemaVersion !== 2
+      if (
+        record.definition.schemaVersion !== 2
         || record.definition.title === undefined
-        || record.definition.description === undefined) {
+        || record.definition.description === undefined
+      ) {
         return 'manager.content routes require route-v2 title and description'
       }
       if (page.metadata.schemaVersion !== 3 || page.metadata.description === undefined) {
@@ -2092,8 +2457,10 @@ export class NavigationRegistry {
       this.notify()
       return
     }
-    const record = this.visibleRecords().find(candidate => candidate.owner === projected.owner
-      && candidate.qualifiedId === projected.routeId)
+    const record = this.visibleRecords().find(candidate =>
+      candidate.owner === projected.owner
+      && candidate.qualifiedId === projected.routeId
+    )
     if (record === undefined) {
       this.history.replace()
       await this.applyHistorySnapshot(this.history.snapshot())
@@ -2125,16 +2492,20 @@ export class NavigationRegistry {
       this.notify()
       return
     }
-    if (this.routeError(record) !== undefined
+    if (
+      this.routeError(record) !== undefined
       || routeAccess?.authorized === false
       || projected.outlet !== record.definition.outlet
-      || projected.path !== path) {
+      || projected.path !== path
+    ) {
       this.history.replace()
       await this.applyHistorySnapshot(this.history.snapshot())
       return
     }
     for (const [name, state] of this.states) {
-      if (name !== record.definition.outlet && (state.current !== undefined || state.mount !== undefined)) await this.closeNow(name)
+      if (name !== record.definition.outlet && (state.current !== undefined || state.mount !== undefined)) {
+        await this.closeNow(name)
+      }
     }
     const outlet = this.outlets.get(record.definition.outlet)!
     await outlet.controller.show()
@@ -2195,12 +2566,18 @@ export class NavigationRegistry {
     if (focus?.isConnected === true && !focus.matches(':disabled')) focus.focus()
   }
 
-  private async navigateNow(requestingOwner: string, reference: CordisXRouteReference, returnFocus?: HTMLElement): Promise<void> {
+  private async navigateNow(
+    requestingOwner: string,
+    reference: CordisXRouteReference,
+    returnFocus?: HTMLElement,
+  ): Promise<void> {
     this.historyProjectionStarted = true
     assertKeys(reference, ['id', 'params'], 'route reference')
     assertReference(reference.id, 'route reference')
     const record = this.findRecord(requestingOwner, reference.id)
-    if (record === undefined || record.owner !== requestingOwner) throw new Error(`route ${reference.id} is not available to plugin ${requestingOwner}`)
+    if (record === undefined || record.owner !== requestingOwner) {
+      throw new Error(`route ${reference.id} is not available to plugin ${requestingOwner}`)
+    }
     const error = this.routeError(record)
     if (error !== undefined) throw new Error(`route ${record.qualifiedId} is invalid: ${error}`)
     const routeAccess = this.access?.authorizeOutletRoute(
@@ -2211,7 +2588,9 @@ export class NavigationRegistry {
       record.candidateView,
     )
     if (routeAccess !== undefined && !routeAccess.authorized) {
-      throw new Error(routeAccess.reason ?? `extension point ${record.definition.outlet} is denied for plugin ${requestingOwner}`)
+      throw new Error(
+        routeAccess.reason ?? `extension point ${record.definition.outlet} is denied for plugin ${requestingOwner}`,
+      )
     }
     const params = immutableSnapshot(reference.params ?? {})
     const path = buildPath(record, params)
@@ -2221,10 +2600,14 @@ export class NavigationRegistry {
     await outletRecord.controller.show()
     const host = outletRecord.controller.getSnapshot()
     if (!host.available || host.container === undefined || host.contextKey === undefined) {
-      throw new Error(`outlet ${record.definition.outlet} is unavailable${host.error === undefined ? '' : `: ${host.error}`}`)
+      throw new Error(
+        `outlet ${record.definition.outlet} is unavailable${host.error === undefined ? '' : `: ${host.error}`}`,
+      )
     }
     if (record.definition.outlet === 'session.content' && String(params.sessionId) !== host.nativeSessionId) {
-      throw new Error(`session route ${record.qualifiedId} does not match native session ${host.nativeSessionId ?? '<none>'}`)
+      throw new Error(
+        `session route ${record.qualifiedId} does not match native session ${host.nativeSessionId ?? '<none>'}`,
+      )
     }
     const next = this.history.push(Object.freeze({
       schemaVersion: 1,
@@ -2253,7 +2636,8 @@ export class NavigationRegistry {
       entry.record.candidateView,
     )
     if (pageAccess !== undefined && !pageAccess.authorized) {
-      state.error = pageAccess.reason ?? `extension point ${entry.record.definition.outlet} is denied for plugin ${entry.record.owner}`
+      state.error = pageAccess.reason
+        ?? `extension point ${entry.record.definition.outlet} is denied for plugin ${entry.record.owner}`
       await this.closeNow(name)
       return
     }
@@ -2261,9 +2645,14 @@ export class NavigationRegistry {
     content.dataset.cordisxPage = page.qualifiedId
     content.dataset.cordisxRoute = entry.record.qualifiedId
     Object.assign(content.style, {
-      position: 'absolute', inset: '0', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      position: 'absolute',
+      inset: '0',
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
       background: 'var(--color-background-surface-under, #141414)',
-      color: 'var(--color-text, #dfdfdf)', font: '13px/1.45 ui-sans-serif, system-ui, sans-serif',
+      color: 'var(--color-text, #dfdfdf)',
+      font: '13px/1.45 ui-sans-serif, system-ui, sans-serif',
     })
     content.dataset.cordisxNoDrag = 'true'
     content.style.setProperty('-webkit-app-region', 'no-drag')
@@ -2294,140 +2683,154 @@ export class NavigationRegistry {
       const bodyOnly = page.metadata.chrome === 'body-only'
       content.dataset.cordisxPageChromePolicy = bodyOnly ? 'body-only' : 'standard'
       if (!bodyOnly) {
-      const chrome = content.ownerDocument.createElement('header')
-      chrome.dataset.cordisxPageChrome = 'true'
-      chrome.dataset.cordisxDrag = 'true'
-      Object.assign(chrome.style, {
-        display: 'flex', alignItems: 'center', gap: '8px', minHeight: '46px', padding: '0 12px',
-        borderBottom: '1px solid var(--color-border, rgba(255,255,255,.084))',
-        background: 'var(--color-background-surface, #181818)', flex: '0 0 auto',
-      })
-      chrome.style.paddingLeft = 'max(12px, var(--cordisx-page-chrome-safe-left, 0px))'
-      chrome.style.setProperty('-webkit-app-region', 'drag')
-      const leading = content.ownerDocument.createElement('div')
-      leading.dataset.cordisxPageLeading = 'true'
-      leading.style.cssText = 'display:flex;width:28px;height:28px;flex:0 0 28px;align-items:center;justify-content:center'
-      if ((this.history.snapshot().index ?? 0) > 0) {
-        const back = pageChromeButton(content.ownerDocument, 'Back', 'host:back')
-        back.addEventListener('click', () => { void this.back(page.owner, name as CordisXOutletName) })
-        leading.append(back)
-      } else if (page.metadata.icon !== undefined) {
-        leading.append(createHostSurfaceIcon(content.ownerDocument, page.metadata.icon))
-      }
-      const titleGroup = content.ownerDocument.createElement('div')
-      titleGroup.dataset.cordisxPageTitle = 'true'
-      titleGroup.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;flex:1'
-      const title = content.ownerDocument.createElement('strong')
-      title.style.cssText = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
-      const titleMessage = entry.record.definition.title ?? page.metadata.title
-      const titleSite = `page:${page.qualifiedId}:chrome.title`
-      localization.effect(() => {
-        title.textContent = this.i18n.resolveFor(page.owner, titleMessage, titleSite).text
-        return () => this.i18n.clearDiagnosticSite(page.owner, titleSite)
-      })
-      titleGroup.append(title)
-      chrome.append(leading, titleGroup)
-      for (const action of page.metadata.headerActions ?? []) {
-        const button = pageChromeButton(content.ownerDocument, action.id, action.icon ?? 'host:more')
-        button.dataset.cordisxPageHeaderAction = action.id
-        const labelSite = `page:${page.qualifiedId}:chrome.actions.${action.id}.label`
-        const disabledSite = `page:${page.qualifiedId}:chrome.actions.${action.id}.disabled`
+        const chrome = content.ownerDocument.createElement('header')
+        chrome.dataset.cordisxPageChrome = 'true'
+        chrome.dataset.cordisxDrag = 'true'
+        Object.assign(chrome.style, {
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          minHeight: '46px',
+          padding: '0 12px',
+          borderBottom: '1px solid var(--color-border, rgba(255,255,255,.084))',
+          background: 'var(--color-background-surface, #181818)',
+          flex: '0 0 auto',
+        })
+        chrome.style.paddingLeft = 'max(12px, var(--cordisx-page-chrome-safe-left, 0px))'
+        chrome.style.setProperty('-webkit-app-region', 'drag')
+        const leading = content.ownerDocument.createElement('div')
+        leading.dataset.cordisxPageLeading = 'true'
+        leading.style.cssText =
+          'display:flex;width:28px;height:28px;flex:0 0 28px;align-items:center;justify-content:center'
+        if ((this.history.snapshot().index ?? 0) > 0) {
+          const back = pageChromeButton(content.ownerDocument, 'Back', 'host:back')
+          back.addEventListener('click', () => {
+            void this.back(page.owner, name as CordisXOutletName)
+          })
+          leading.append(back)
+        } else if (page.metadata.icon !== undefined) {
+          leading.append(createHostSurfaceIcon(content.ownerDocument, page.metadata.icon))
+        }
+        const titleGroup = content.ownerDocument.createElement('div')
+        titleGroup.dataset.cordisxPageTitle = 'true'
+        titleGroup.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;flex:1'
+        const title = content.ownerDocument.createElement('strong')
+        title.style.cssText = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
+        const titleMessage = entry.record.definition.title ?? page.metadata.title
+        const titleSite = `page:${page.qualifiedId}:chrome.title`
         localization.effect(() => {
-          const accessible = this.i18n.resolveFor(page.owner, action.ariaLabel ?? action.label, labelSite).text
-          button.setAttribute('aria-label', accessible)
-          const disabledReason = action.disabled?.reason === undefined
-            ? undefined
-            : this.i18n.resolveFor(page.owner, action.disabled.reason, disabledSite).text
-          button.dataset.cordisxTooltip = action.disabled?.value === true && disabledReason !== undefined ? disabledReason : accessible
-          return () => {
-            this.i18n.clearDiagnosticSite(page.owner, labelSite)
-            this.i18n.clearDiagnosticSite(page.owner, disabledSite)
-          }
+          title.textContent = this.i18n.resolveFor(page.owner, titleMessage, titleSite).text
+          return () => this.i18n.clearDiagnosticSite(page.owner, titleSite)
         })
-        const refresh = (): void => {
-          button.hidden = !evaluateWhen(action.when, this.contexts.getSnapshot())
-          button.disabled = action.disabled?.value === true || !(this.commands?.hasFor(page.owner, action.command) ?? false)
-        }
-        refresh()
-        effects.push(tooltips.attach(button, () => button.dataset.cordisxTooltip, 'bottom'))
-        effects.push(this.contexts.subscribe(refresh))
-        if (this.commands !== undefined) effects.push(this.commands.subscribeInternal(refresh))
-        button.addEventListener('click', () => {
-          if (button.disabled || button.hidden || this.commands === undefined) return
-          const commandId = qualifyOwnedId(page.owner, action.command.id)
-          const decision = this.access?.authorizeOutletPageCommand(
-            page.owner,
-            name,
-            entry.record.qualifiedId,
-            page.qualifiedId,
-            action.id,
-            commandId,
-          )
-          if (decision !== undefined && !decision.authorized) {
-            state.error = decision.reason ?? `extension point ${name} is denied for plugin ${page.owner}`
-            this.notify()
-            return
+        titleGroup.append(title)
+        chrome.append(leading, titleGroup)
+        for (const action of page.metadata.headerActions ?? []) {
+          const button = pageChromeButton(content.ownerDocument, action.id, action.icon ?? 'host:more')
+          button.dataset.cordisxPageHeaderAction = action.id
+          const labelSite = `page:${page.qualifiedId}:chrome.actions.${action.id}.label`
+          const disabledSite = `page:${page.qualifiedId}:chrome.actions.${action.id}.disabled`
+          localization.effect(() => {
+            const accessible = this.i18n.resolveFor(page.owner, action.ariaLabel ?? action.label, labelSite).text
+            button.setAttribute('aria-label', accessible)
+            const disabledReason = action.disabled?.reason === undefined
+              ? undefined
+              : this.i18n.resolveFor(page.owner, action.disabled.reason, disabledSite).text
+            button.dataset.cordisxTooltip = action.disabled?.value === true && disabledReason !== undefined
+              ? disabledReason
+              : accessible
+            return () => {
+              this.i18n.clearDiagnosticSite(page.owner, labelSite)
+              this.i18n.clearDiagnosticSite(page.owner, disabledSite)
+            }
+          })
+          const refresh = (): void => {
+            button.hidden = !evaluateWhen(action.when, this.contexts.getSnapshot())
+            button.disabled = action.disabled?.value === true
+              || !(this.commands?.hasFor(page.owner, action.command) ?? false)
           }
-          void this.commands.executeFor(
-            page.owner,
-            action.command,
-            `page:${page.qualifiedId}:header:${action.id}`,
-          ).catch((error: unknown) => {
-            state.error = error instanceof Error ? error.message : String(error)
-            this.notify()
+          refresh()
+          effects.push(tooltips.attach(button, () => button.dataset.cordisxTooltip, 'bottom'))
+          effects.push(this.contexts.subscribe(refresh))
+          if (this.commands !== undefined) effects.push(this.commands.subscribeInternal(refresh))
+          button.addEventListener('click', () => {
+            if (button.disabled || button.hidden || this.commands === undefined) return
+            const commandId = qualifyOwnedId(page.owner, action.command.id)
+            const decision = this.access?.authorizeOutletPageCommand(
+              page.owner,
+              name,
+              entry.record.qualifiedId,
+              page.qualifiedId,
+              action.id,
+              commandId,
+            )
+            if (decision !== undefined && !decision.authorized) {
+              state.error = decision.reason ?? `extension point ${name} is denied for plugin ${page.owner}`
+              this.notify()
+              return
+            }
+            void this.commands.executeFor(
+              page.owner,
+              action.command,
+              `page:${page.qualifiedId}:header:${action.id}`,
+            ).catch((error: unknown) => {
+              state.error = error instanceof Error ? error.message : String(error)
+              this.notify()
+            })
           })
-        })
-        chrome.append(button)
-      }
-      // Manager owns the modal close affordance. A manager.content page may expose
-      // Back in its Host shell, but must not create a second adjacent close button.
-      if (name !== 'manager.content') {
-        const close = pageChromeButton(content.ownerDocument, 'Close', 'host:close')
-        close.addEventListener('click', () => { void this.close(page.owner, name as CordisXOutletName) })
-        chrome.append(close)
-      }
-      content.append(chrome)
-      if ((page.metadata.breadcrumbs?.length ?? 0) > 0) {
-        const breadcrumbs = content.ownerDocument.createElement('nav')
-        breadcrumbs.setAttribute('aria-label', 'Breadcrumb')
-        breadcrumbs.style.cssText = 'display:flex;gap:5px;padding:7px 14px;color:#9aa3b5;flex:0 0 auto'
-        for (const [index, item] of page.metadata.breadcrumbs!.entries()) {
-          const label = content.ownerDocument.createElement('span')
-          const site = `page:${page.qualifiedId}:chrome.breadcrumbs.${index}`
-          localization.effect(() => {
-            label.textContent = this.i18n.resolveFor(page.owner, item, site).text
-            return () => this.i18n.clearDiagnosticSite(page.owner, site)
-          })
-          breadcrumbs.append(label)
+          chrome.append(button)
         }
-        content.append(breadcrumbs)
-      }
-      if ((page.metadata.tabs?.length ?? 0) > 0) {
-        const tabs = content.ownerDocument.createElement('div')
-        tabs.setAttribute('role', 'tablist')
-        tabs.dataset.cordisxNoDrag = 'true'
-        tabs.style.cssText = 'display:flex;gap:4px;padding:7px 12px;border-bottom:1px solid rgba(255,255,255,.08);flex:0 0 auto'
-        tabs.style.setProperty('-webkit-app-region', 'no-drag')
-        for (const [index, tab] of page.metadata.tabs!.entries()) {
-          const button = content.ownerDocument.createElement('button')
-          button.type = 'button'
-          button.setAttribute('role', 'tab')
-          button.setAttribute('aria-selected', String(index === 0))
-          button.dataset.tabId = tab.id
-          button.dataset.cordisxNoDrag = 'true'
-          button.style.setProperty('-webkit-app-region', 'no-drag')
-          if (tab.icon !== undefined) button.append(createHostSurfaceIcon(content.ownerDocument, tab.icon))
-          const label = content.ownerDocument.createElement('span')
-          button.append(label)
-          const site = `page:${page.qualifiedId}:chrome.tabs.${tab.id}`
-          localization.effect(() => {
-            label.textContent = this.i18n.resolveFor(page.owner, tab.label, site).text
-            return () => this.i18n.clearDiagnosticSite(page.owner, site)
+        // Manager owns the modal close affordance. A manager.content page may expose
+        // Back in its Host shell, but must not create a second adjacent close button.
+        if (name !== 'manager.content') {
+          const close = pageChromeButton(content.ownerDocument, 'Close', 'host:close')
+          close.addEventListener('click', () => {
+            void this.close(page.owner, name as CordisXOutletName)
           })
-          tabs.append(button)
+          chrome.append(close)
         }
-        content.append(tabs)
-      }
+        content.append(chrome)
+        if ((page.metadata.breadcrumbs?.length ?? 0) > 0) {
+          const breadcrumbs = content.ownerDocument.createElement('nav')
+          breadcrumbs.setAttribute('aria-label', 'Breadcrumb')
+          breadcrumbs.style.cssText = 'display:flex;gap:5px;padding:7px 14px;color:#9aa3b5;flex:0 0 auto'
+          for (const [index, item] of page.metadata.breadcrumbs!.entries()) {
+            const label = content.ownerDocument.createElement('span')
+            const site = `page:${page.qualifiedId}:chrome.breadcrumbs.${index}`
+            localization.effect(() => {
+              label.textContent = this.i18n.resolveFor(page.owner, item, site).text
+              return () => this.i18n.clearDiagnosticSite(page.owner, site)
+            })
+            breadcrumbs.append(label)
+          }
+          content.append(breadcrumbs)
+        }
+        if ((page.metadata.tabs?.length ?? 0) > 0) {
+          const tabs = content.ownerDocument.createElement('div')
+          tabs.setAttribute('role', 'tablist')
+          tabs.dataset.cordisxNoDrag = 'true'
+          tabs.style.cssText =
+            'display:flex;gap:4px;padding:7px 12px;border-bottom:1px solid rgba(255,255,255,.08);flex:0 0 auto'
+          tabs.style.setProperty('-webkit-app-region', 'no-drag')
+          for (const [index, tab] of page.metadata.tabs!.entries()) {
+            const button = content.ownerDocument.createElement('button')
+            button.type = 'button'
+            button.setAttribute('role', 'tab')
+            button.setAttribute('aria-selected', String(index === 0))
+            button.dataset.tabId = tab.id
+            button.dataset.cordisxNoDrag = 'true'
+            button.style.setProperty('-webkit-app-region', 'no-drag')
+            if (tab.icon !== undefined) button.append(createHostSurfaceIcon(content.ownerDocument, tab.icon))
+            const label = content.ownerDocument.createElement('span')
+            button.append(label)
+            const site = `page:${page.qualifiedId}:chrome.tabs.${tab.id}`
+            localization.effect(() => {
+              label.textContent = this.i18n.resolveFor(page.owner, tab.label, site).text
+              return () => this.i18n.clearDiagnosticSite(page.owner, site)
+            })
+            tabs.append(button)
+          }
+          content.append(tabs)
+        }
       } else if (bodyOnly) {
         const titleSite = `page:${page.qualifiedId}:body.accessible-title`
         localization.effect(() => {
@@ -2532,9 +2935,11 @@ export class NavigationRegistry {
         managed.routeId,
         managed.pageId,
       )
-      if (current === undefined || resolution.state !== 'available'
+      if (
+        current === undefined || resolution.state !== 'available'
         || this.pages.get(managed.owner, managed.page.metadata.id) === undefined
-        || (retentionAccess !== undefined && !retentionAccess.authorized)) {
+        || (retentionAccess !== undefined && !retentionAccess.authorized)
+      ) {
         await this.unmountManagerSettings()
       }
     }
@@ -2550,9 +2955,11 @@ export class NavigationRegistry {
         managerContent.routeId,
         managerContent.pageId,
       )
-      if (current === undefined || resolution.state !== 'available'
+      if (
+        current === undefined || resolution.state !== 'available'
         || this.pages.get(managerContent.owner, managerContent.page.metadata.id) === undefined
-        || (retentionAccess !== undefined && !retentionAccess.authorized)) {
+        || (retentionAccess !== undefined && !retentionAccess.authorized)
+      ) {
         await this.unmountManagerContent()
       }
     }
@@ -2562,9 +2969,11 @@ export class NavigationRegistry {
   }
 
   private async reconcilePresentation(): Promise<void> {
-    const active = new Set([...this.states.entries()]
-      .filter(([, state]) => state.mount !== undefined && state.current !== undefined)
-      .map(([name]) => name))
+    const active = new Set(
+      [...this.states.entries()]
+        .filter(([, state]) => state.mount !== undefined && state.current !== undefined)
+        .map(([name]) => name),
+    )
     this.presentationOrder = this.presentationOrder.filter(name => active.has(name))
     for (const name of active) if (!this.presentationOrder.includes(name)) this.presentationOrder.push(name)
     const winners = new Map<string, string>()
@@ -2590,8 +2999,10 @@ export class NavigationRegistry {
       }
       dismissHostTooltips(state.mount.content.ownerDocument)
       const focused = state.mount.content.ownerDocument.activeElement
-      if (focused instanceof state.mount.content.ownerDocument.defaultView!.HTMLElement
-        && state.mount.content.contains(focused)) focused.blur()
+      if (
+        focused instanceof state.mount.content.ownerDocument.defaultView!.HTMLElement
+        && state.mount.content.contains(focused)
+      ) focused.blur()
       state.mount.content.inert = true
       state.mount.content.setAttribute('aria-hidden', 'true')
       state.mount.content.dataset.cordisxPresentation = 'suspended'
@@ -2687,16 +3098,20 @@ export class CordisXPageService extends Service implements CordisXPages {
     const token = this.console?.tokenFromContext(this.ctx)
     const scopedMount: CordisXPageMount<Messages> = token === undefined || this.console === undefined
       ? mount
-      : context => this.console!.runInPluginContext(
+      : context =>
+        this.console!.runInPluginContext(
           token,
           { trigger: { kind: 'registration', registrationId: `page:${owner}:${metadata.id}` } },
           () => mount(context),
         ) as ReturnType<CordisXPageMount<Messages>>
-    const register = (): ReturnType<CordisXPages['register']> => this.ctx.effect(
-      () => this.registry.register(this.ctx, metadata, scopedMount),
-      `pages.register(${JSON.stringify(metadata.id)})`,
-    )
-    return token === undefined || this.console === undefined ? register() : this.console.runSync(token, 'pages.register', metadata, register)
+    const register = (): ReturnType<CordisXPages['register']> =>
+      this.ctx.effect(
+        () => this.registry.register(this.ctx, metadata, scopedMount),
+        `pages.register(${JSON.stringify(metadata.id)})`,
+      )
+    return token === undefined || this.console === undefined
+      ? register()
+      : this.console.runSync(token, 'pages.register', metadata, register)
   }
 
   snapshot(): readonly PageSnapshot[] {
@@ -2712,7 +3127,10 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
   readonly contexts = new HostContextStore()
   private readonly console: PluginConsoleAspect | undefined
 
-  constructor(ctx: Context, options: { readonly history: CodexRouteHistoryAdapter; readonly console?: PluginConsoleAspect }) {
+  constructor(
+    ctx: Context,
+    options: { readonly history: CodexRouteHistoryAdapter; readonly console?: PluginConsoleAspect },
+  ) {
     super(ctx, 'routes')
     this.console = options.console
     const pages = ctx.pages as CordisXPageService
@@ -2721,7 +3139,15 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
     if (pages?.registry === undefined || i18n === undefined || commands === undefined) {
       throw new Error('CordisX routes require pages, i18n, and commands services')
     }
-    this.registry = new NavigationRegistry(pages.registry, this.outlets, i18n, options.history, this.contexts, undefined, commands)
+    this.registry = new NavigationRegistry(
+      pages.registry,
+      this.outlets,
+      i18n,
+      options.history,
+      this.contexts,
+      undefined,
+      commands,
+    )
     ctx.effect(() => async () => {
       await this.registry.dispose()
       this.outlets.dispose()
@@ -2731,16 +3157,21 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
 
   register(definition: CordisXRouteDefinition): ReturnType<CordisXRoutes['register']> {
     const token = this.console?.tokenFromContext(this.ctx)
-    const register = (): ReturnType<CordisXRoutes['register']> => this.ctx.effect(
-      () => this.registry.register(this.ctx, definition),
-      `routes.register(${JSON.stringify(definition.id)})`,
-    )
-    return token === undefined || this.console === undefined ? register() : this.console.runSync(token, 'routes.register', definition, register)
+    const register = (): ReturnType<CordisXRoutes['register']> =>
+      this.ctx.effect(
+        () => this.registry.register(this.ctx, definition),
+        `routes.register(${JSON.stringify(definition.id)})`,
+      )
+    return token === undefined || this.console === undefined
+      ? register()
+      : this.console.runSync(token, 'routes.register', definition, register)
   }
 
   navigate(reference: CordisXRouteReference): Promise<void> {
     const token = this.console?.tokenFromContext(this.ctx)
-    if (token === undefined || this.console === undefined) return this.registry.navigate(ownerFromContext(this.ctx), reference)
+    if (token === undefined || this.console === undefined) {
+      return this.registry.navigate(ownerFromContext(this.ctx), reference)
+    }
     const owner = this.console.owner(token)
     return this.console.run(token, 'routes.navigate', reference, async invocation => {
       invocation.dispatch('Dispatched to Host navigation registry')
@@ -2777,11 +3208,16 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
     return this.registry.managerSettingsNavigationRoute(owner, id, view)
   }
 
-  managerContentPresentationFor(owner: string, reference: CordisXRouteReference): ManagerContentPresentation | undefined {
+  managerContentPresentationFor(
+    owner: string,
+    reference: CordisXRouteReference,
+  ): ManagerContentPresentation | undefined {
     return this.registry.managerContentPresentation(owner, reference)
   }
 
-  managerContentAgentDefinitionTarget(identity: AgentDefinitionIdentity): ManagerContentAgentDefinitionTarget | undefined {
+  managerContentAgentDefinitionTarget(
+    identity: AgentDefinitionIdentity,
+  ): ManagerContentAgentDefinitionTarget | undefined {
     return this.registry.managerContentAgentDefinitionTarget(identity)
   }
 
@@ -2909,7 +3345,9 @@ export class CordisXManagerContentNavigationService extends Service implements C
     )
   }
 
-  registerRecordTitles(records: readonly CordisXManagerContentRecordTitleV1[]): ReturnType<CordisXManagerContentNavigation['registerRecordTitles']> {
+  registerRecordTitles(
+    records: readonly CordisXManagerContentRecordTitleV1[],
+  ): ReturnType<CordisXManagerContentNavigation['registerRecordTitles']> {
     const routes = this.ctx.routes as CordisXRouteService
     return this.ctx.effect(
       () => routes.registry.managerContent.registerRecordTitles(this.ctx, records),
@@ -2917,15 +3355,24 @@ export class CordisXManagerContentNavigationService extends Service implements C
     )
   }
 
-  replaceProjection(projection: import('../contracts.js').CordisXManagerContentNavigationProjectionV1): ReturnType<CordisXManagerContentNavigation['replaceProjection']>
-  replaceProjection(projection: import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV2): ReturnType<CordisXManagerContentNavigation['replaceProjection']>
-  replaceProjection(projection: import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV3): ReturnType<CordisXManagerContentNavigation['replaceProjection']>
-  replaceProjection(projection: import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV4): ReturnType<CordisXManagerContentNavigation['replaceProjection']>
-  replaceProjection(projection:
-    | import('../contracts.js').CordisXManagerContentNavigationProjectionV1
-    | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV2
-    | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV3
-    | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV4,
+  replaceProjection(
+    projection: import('../contracts.js').CordisXManagerContentNavigationProjectionV1,
+  ): ReturnType<CordisXManagerContentNavigation['replaceProjection']>
+  replaceProjection(
+    projection: import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV2,
+  ): ReturnType<CordisXManagerContentNavigation['replaceProjection']>
+  replaceProjection(
+    projection: import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV3,
+  ): ReturnType<CordisXManagerContentNavigation['replaceProjection']>
+  replaceProjection(
+    projection: import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV4,
+  ): ReturnType<CordisXManagerContentNavigation['replaceProjection']>
+  replaceProjection(
+    projection:
+      | import('../contracts.js').CordisXManagerContentNavigationProjectionV1
+      | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV2
+      | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV3
+      | import('../contracts.js').CordisXManagerContentNavigationCatalogProjectionV4,
   ): ReturnType<CordisXManagerContentNavigation['replaceProjection']> {
     const routes = this.ctx.routes as CordisXRouteService
     return this.ctx.effect(

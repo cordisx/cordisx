@@ -1,6 +1,4 @@
 import {
-  loadHomeConfig,
-  updateHomeConfigAtomic,
   type HomeConfig,
   type HomeConfigPlugin,
   type HomeConfigPluginService,
@@ -8,6 +6,8 @@ import {
   type HomeConfigServiceApplies,
   type HomeConfigWriteOptions,
   type JsonValue,
+  loadHomeConfig,
+  updateHomeConfigAtomic,
 } from './home-config.js'
 
 const LOCAL_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
@@ -153,29 +153,34 @@ export async function commitServiceConfigCandidate(
     const plugin = config.plugins[index]!
     const state = serviceState(plugin, input.serviceId, input.profileId, input.initialConfig)
     const candidate = state.candidate
-    if (candidate === undefined
+    if (
+      candidate === undefined
       || candidate.revision !== input.candidateRevision
       || candidate.applies !== input.applies
       || candidate.ownerToken !== input.ownerToken
-      || candidate.generation !== input.generation) {
-      throw new ServiceConfigConflictError(state.revision, 'service configuration candidate is not owned by this generation')
+      || candidate.generation !== input.generation
+    ) {
+      throw new ServiceConfigConflictError(
+        state.revision,
+        'service configuration candidate is not owned by this generation',
+      )
     }
     if (input.applies === 'service-restart' && state.restartRequired === true) {
       throw new ServiceConfigConflictError(state.revision, 'service configuration already requires an app restart')
     }
     committed = input.applies === 'service-restart'
       ? {
-          revision: candidate.revision,
-          lastGoodRevision: candidate.revision,
-          config: candidate.config,
-        }
+        revision: candidate.revision,
+        lastGoodRevision: candidate.revision,
+        config: candidate.config,
+      }
       : {
-          revision: candidate.revision,
-          lastGoodRevision: state.lastGoodRevision,
-          config: candidate.config,
-          lastGoodConfig: state.lastGoodConfig ?? state.config,
-          restartRequired: true,
-        }
+        revision: candidate.revision,
+        lastGoodRevision: state.lastGoodRevision,
+        config: candidate.config,
+        lastGoodConfig: state.lastGoodConfig ?? state.config,
+        restartRequired: true,
+      }
     return replaceServiceState(config, index, plugin, input.serviceId, input.profileId, committed)
   }, options)
   return structuredClone(committed!)
@@ -192,10 +197,15 @@ export async function abortServiceConfigCandidate(
     const state = serviceState(plugin, input.serviceId, input.profileId, input.initialConfig)
     const candidate = state.candidate
     if (candidate === undefined) return config
-    if (candidate.revision !== input.candidateRevision
+    if (
+      candidate.revision !== input.candidateRevision
       || candidate.ownerToken !== input.ownerToken
-      || candidate.generation !== input.generation) {
-      throw new ServiceConfigConflictError(state.revision, 'service configuration candidate is not owned by this generation')
+      || candidate.generation !== input.generation
+    ) {
+      throw new ServiceConfigConflictError(
+        state.revision,
+        'service configuration candidate is not owned by this generation',
+      )
     }
     const { candidate: _candidate, ...active } = state
     return replaceServiceState(config, index, plugin, input.serviceId, input.profileId, active)

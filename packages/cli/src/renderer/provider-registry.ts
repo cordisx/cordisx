@@ -44,7 +44,9 @@ function recordFor<Adapter>(registration: ProviderAdapterRegistration<Adapter>):
   if (!PROVIDER_ID.test(registration.providerId)) throw new Error(`invalid provider id: ${registration.providerId}`)
   if (registration.generation.trim() === '') throw new Error('provider generation must be a non-empty string')
   let resolveDrained = (): void => {}
-  const drained = new Promise<void>(resolve => { resolveDrained = resolve })
+  const drained = new Promise<void>(resolve => {
+    resolveDrained = resolve
+  })
   return { ...registration, state: 'active', inFlight: 0, settled: false, resolveDrained, drained }
 }
 
@@ -70,7 +72,9 @@ export class ProviderAdapterRegistry<Adapter> {
       this.active.set(replacement.providerId, replacement)
       return Promise.resolve()
     }
-    if (current.generation === replacement.generation) throw new Error(`provider ${replacement.providerId} generation did not change`)
+    if (current.generation === replacement.generation) {
+      throw new Error(`provider ${replacement.providerId} generation did not change`)
+    }
     current.state = 'draining'
     this.draining.add(current)
     this.active.set(replacement.providerId, replacement)
@@ -79,7 +83,9 @@ export class ProviderAdapterRegistry<Adapter> {
   }
 
   acquire(providerId: string, expectedGeneration?: string): ProviderAdapterLease<Adapter> {
-    if (!PROVIDER_ID.test(providerId)) throw new ProviderRegistryError('invalid-provider', 'Provider identity is invalid')
+    if (!PROVIDER_ID.test(providerId)) {
+      throw new ProviderRegistryError('invalid-provider', 'Provider identity is invalid')
+    }
     const record = this.active.get(providerId)
     if (record === undefined || record.state !== 'active') {
       throw new ProviderRegistryError('adapter-unavailable', `Provider ${providerId} is unavailable`)
@@ -103,11 +109,13 @@ export class ProviderAdapterRegistry<Adapter> {
   }
 
   acquireSession(ref: CordisXPlatformSessionRef, expectedGeneration?: string): ProviderAdapterLease<Adapter> {
-    if (ref === null || typeof ref !== 'object' || Array.isArray(ref)
+    if (
+      ref === null || typeof ref !== 'object' || Array.isArray(ref)
       || !PROVIDER_ID.test(ref.providerId)
       || typeof ref.remoteSessionId !== 'string'
       || ref.remoteSessionId.length === 0
-      || ref.remoteSessionId.length > 512) {
+      || ref.remoteSessionId.length > 512
+    ) {
       throw new ProviderRegistryError('invalid-provider', 'A complete Platform session reference is required')
     }
     return this.acquire(ref.providerId, expectedGeneration)
@@ -115,8 +123,15 @@ export class ProviderAdapterRegistry<Adapter> {
 
   snapshots(): readonly ProviderAdapterSnapshot[] {
     return [...this.active.values(), ...this.draining]
-      .map(record => ({ providerId: record.providerId, generation: record.generation, state: record.state, inFlight: record.inFlight }))
-      .sort((left, right) => `${left.providerId}\0${left.generation}`.localeCompare(`${right.providerId}\0${right.generation}`))
+      .map(record => ({
+        providerId: record.providerId,
+        generation: record.generation,
+        state: record.state,
+        inFlight: record.inFlight,
+      }))
+      .sort((left, right) =>
+        `${left.providerId}\0${left.generation}`.localeCompare(`${right.providerId}\0${right.generation}`)
+      )
   }
 
   async dispose(): Promise<void> {

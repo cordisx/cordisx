@@ -62,11 +62,13 @@ function item<T>(items: readonly T[], index: number, label: string): T {
 function splitRings(lines: readonly LineData[]): readonly number[][] {
   const endpoints = lines.map(line => [point(line, 0), point(line, 2)] as const)
   const touching = new Map<string, number[]>()
-  endpoints.forEach((pair, index) => pair.forEach((key) => {
-    const list = touching.get(key) ?? []
-    list.push(index)
-    touching.set(key, list)
-  }))
+  endpoints.forEach((pair, index) =>
+    pair.forEach((key) => {
+      const list = touching.get(key) ?? []
+      list.push(index)
+      touching.set(key, list)
+    })
+  )
 
   const seen = new Set<number>()
   const components: number[][] = []
@@ -228,25 +230,44 @@ function AnimatedMarkSvg({ asset, className }: { readonly asset: AnimatedAsset; 
     return () => window.cancelAnimationFrame(animationFrame)
   }, [asset])
 
-  return <svg className={className} viewBox="0 0 1024 1024" role="presentation" data-cordisx-animation="one-shot">
-    <g ref={groupRef} fill="none" strokeLinecap="round">
-      {initial.map((line, index) => <line key={index} x1={line[0]} y1={line[1]} x2={line[2]} y2={line[3]} strokeWidth={line[4]} stroke={line[5]} />)}
-    </g>
-  </svg>
+  return (
+    <svg className={className} viewBox="0 0 1024 1024" role="presentation" data-cordisx-animation="one-shot">
+      <g ref={groupRef} fill="none" strokeLinecap="round">
+        {initial.map((line, index) => (
+          <line
+            key={index}
+            x1={line[0]}
+            y1={line[1]}
+            x2={line[2]}
+            y2={line[3]}
+            strokeWidth={line[4]}
+            stroke={line[5]}
+          />
+        ))}
+      </g>
+    </svg>
+  )
 }
 
 /** Host-owned adaptive CordisX mark using the repository's approved artwork. */
 export function BrandMark({ className }: { readonly className?: string }) {
-  return <span className={['cxr-brand-mark', className].filter(Boolean).join(' ')} aria-hidden="true">
-    <img className="cxr-brand-mark-dark" src={darkUri} alt="" draggable={false} />
-    <img className="cxr-brand-mark-light" src={lightUri} alt="" draggable={false} />
-  </span>
+  return (
+    <span className={['cxr-brand-mark', className].filter(Boolean).join(' ')} aria-hidden="true">
+      <img className="cxr-brand-mark-dark" src={darkUri} alt="" draggable={false} />
+      <img className="cxr-brand-mark-light" src={lightUri} alt="" draggable={false} />
+    </span>
+  )
 }
 
 /** About-page mark that unfolds once whenever the page is mounted. */
 export function AnimatedBrandMark({ className }: { readonly className?: string }) {
-  return <span className={['cxr-brand-mark', 'cxr-brand-mark-animated', className].filter(Boolean).join(' ')} aria-hidden="true">
-    <AnimatedMarkSvg className="cxr-brand-mark-dark" asset={animatedAssets.dark} />
-    <AnimatedMarkSvg className="cxr-brand-mark-light" asset={animatedAssets.light} />
-  </span>
+  return (
+    <span
+      className={['cxr-brand-mark', 'cxr-brand-mark-animated', className].filter(Boolean).join(' ')}
+      aria-hidden="true"
+    >
+      <AnimatedMarkSvg className="cxr-brand-mark-dark" asset={animatedAssets.dark} />
+      <AnimatedMarkSvg className="cxr-brand-mark-light" asset={animatedAssets.light} />
+    </span>
+  )
 }

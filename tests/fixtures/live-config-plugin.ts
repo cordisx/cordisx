@@ -44,11 +44,15 @@ export function apply(ctx: Context, config: { timeout: number }): void {
     input.value = String(field.value)
     input.addEventListener('input', () => field.setDraft(Number(input.value)))
     container.append(input)
-    field.signal.addEventListener('abort', () => { fixture.rendererAbort += 1 }, { once: true })
+    field.signal.addEventListener('abort', () => {
+      fixture.rendererAbort += 1
+    }, { once: true })
     return () => {
       fixture.rendererDispose += 1
       input.remove()
     }
   })
-  ctx.effect(() => () => { fixture.liveDispose += 1 }, 'live config fixture cleanup')
+  ctx.effect(() => () => {
+    fixture.liveDispose += 1
+  }, 'live config fixture cleanup')
 }

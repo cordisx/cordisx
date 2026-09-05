@@ -26,12 +26,12 @@ terms in the source list or form.
 
 ## Copy layers
 
-| Layer | Include | Do not include |
-| --- | --- | --- |
-| Primary screen | Current state and the immediate next action | Causal chains, architecture, or security implementation detail |
-| Expandable diagnostic | Error code, failed request detail, support data | A substitute for the primary state |
-| Documentation | Architecture boundaries, protocol terms, setup, and full remediation | A hidden requirement needed to understand the current state |
-| Confirmation | Material impact, irreversibility, and affected plugins | Avoidable implementation jargon |
+| Layer                 | Include                                                              | Do not include                                                 |
+| --------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Primary screen        | Current state and the immediate next action                          | Causal chains, architecture, or security implementation detail |
+| Expandable diagnostic | Error code, failed request detail, support data                      | A substitute for the primary state                             |
+| Documentation         | Architecture boundaries, protocol terms, setup, and full remediation | A hidden requirement needed to understand the current state    |
+| Confirmation          | Material impact, irreversibility, and affected plugins               | Avoidable implementation jargon                                |
 
 Safety-critical confirmations keep the impact: uninstall, disabling dependent
 plugins, permission grants, and destructive data operations must state what

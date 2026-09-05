@@ -12,12 +12,15 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 describe('Codex Desktop Agent Session live harness', () => {
   it('uses one isolated app profile and the existing authenticated Desktop connection', async () => {
-    const wrapper = await readFile(path.join(root, 'packages/cli/scripts/run-codex-desktop-agent-session-harness.mjs'), 'utf8')
+    const wrapper = await readFile(
+      path.join(root, 'packages/cli/scripts/run-codex-desktop-agent-session-harness.mjs'),
+      'utf8',
+    )
     const runner = await readFile(path.join(root, 'packages/cli/scripts/run-isolated-app-smoke.mjs'), 'utf8')
     expect(wrapper).toContain("bundleId: 'com.openai.codex'")
     expect(wrapper).toContain("appVersion: '26.818.61809'")
     expect(wrapper).toContain("buildNumber: '7019'")
-    expect(wrapper).toContain("CORDISX_HOME: cordisxHome")
+    expect(wrapper).toContain('CORDISX_HOME: cordisxHome')
     expect(wrapper).toContain('writeDesktopAgentSessionHarnessReport')
     expect(wrapper).toContain('waitForOwnedProfileQuiescence')
     expect(wrapper).toContain('sharedHome: process.env.HOME')
@@ -32,10 +35,18 @@ describe('Codex Desktop Agent Session live harness', () => {
 
   it('declares every public Agent Session capability exercised by the fixture', () => {
     expect(manifest.capabilities.map(capability => capability.name)).toEqual([
-      'agents.create', 'agents.resume', 'agents.get',
-      'agents.message.submit', 'agents.message.cancel', 'agents.cancel', 'agents.live.subscribe',
-      'sessions.get', 'sessions.read', 'sessions.subscribe',
-      'approvals.request', 'approvals.answer',
+      'agents.create',
+      'agents.resume',
+      'agents.get',
+      'agents.message.submit',
+      'agents.message.cancel',
+      'agents.cancel',
+      'agents.live.subscribe',
+      'sessions.get',
+      'sessions.read',
+      'sessions.subscribe',
+      'approvals.request',
+      'approvals.answer',
     ])
     expect(manifest.capabilities.every(capability => capability.required)).toBe(true)
   })
@@ -44,10 +55,14 @@ describe('Codex Desktop Agent Session live harness', () => {
     const adapterSend = vi.fn(async (message: unknown) => ({ status: 'accepted', message }))
     const owner = { pluginId: 'file:///fixture.ts:fixture', generation: 7 }
     const agent = {
-      id: 'cx-session.fixture', generation: 1, options: {}, inbox: { nextTurn: [], nextStep: [] },
+      id: 'cx-session.fixture',
+      generation: 1,
+      options: {},
+      inbox: { nextTurn: [], nextStep: [] },
       status: { status: 'available', value: 'idle' },
       session: {
-        id: 'cx-session.fixture', generation: 1,
+        id: 'cx-session.fixture',
+        generation: 1,
         header: { id: 'cx-session.fixture', formatVersion: 1, createdAt: 1, isSeeded: false },
       },
       send: adapterSend,
@@ -64,9 +79,13 @@ describe('Codex Desktop Agent Session live harness', () => {
     await wait()
     expect(controller.invoke('send', { mode: 'send', messageId: 'message-1', text: 'hello' })).toBe(true)
     await wait()
-    expect(adapterSend).toHaveBeenCalledWith(expect.objectContaining({
-      source: { kind: 'plugin', pluginId: owner.pluginId, generation: owner.generation },
-    }), 'next-turn', true)
+    expect(adapterSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: { kind: 'plugin', pluginId: owner.pluginId, generation: owner.generation },
+      }),
+      'next-turn',
+      true,
+    )
     expect(controller.snapshot().last).toMatchObject({ name: 'send', ok: true })
   })
 })

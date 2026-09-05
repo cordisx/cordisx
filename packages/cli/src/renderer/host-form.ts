@@ -1,8 +1,8 @@
 import type { CordisXConfigFieldSnapshot, CordisXConfigFormIcon, CordisXJsonScalar } from '../contracts.js'
-import { resolveFormPresenter, type FormDescriptor } from '@cordisx/schemastery-ui'
+import { type FormDescriptor, resolveFormPresenter } from '@cordisx/schemastery-ui'
 import {
-  bindTDesignTextInput,
   bindTDesignTextareaRows,
+  bindTDesignTextInput,
   createTDesignButton,
   createTDesignElement,
   createTDesignMultiSelect,
@@ -10,11 +10,11 @@ import {
   createTDesignSelect,
   createTDesignTagInput,
   setTDesignProps,
-  tdesignPortalContainer,
   TDESIGN_SCOPED_TOKEN_CSS,
   type TDesignButtonElement,
   type TDesignElement,
   type TDesignMultiSelectElement,
+  tdesignPortalContainer,
   type TDesignSelectElement,
   type TDesignSelectOption,
 } from './tdesign-form.js'
@@ -22,10 +22,24 @@ import { createHostSurfaceIcon, HOST_ICON_16PX_CSS } from './icons.js'
 import { managerCopy, productLocale } from './ui-copy.js'
 
 export type HostFormPrimitive =
-  | 'input' | 'textarea' | 'number-input' | 'select' | 'checkbox' | 'switch'
-  | 'radio' | 'slider' | 'path-input' | 'json-textarea'
-  | 'date-picker' | 'time-picker' | 'color-picker' | 'multi-select' | 'tag-input'
-  | 'object-array' | 'sensitive-unavailable' | 'unsupported'
+  | 'input'
+  | 'textarea'
+  | 'number-input'
+  | 'select'
+  | 'checkbox'
+  | 'switch'
+  | 'radio'
+  | 'slider'
+  | 'path-input'
+  | 'json-textarea'
+  | 'date-picker'
+  | 'time-picker'
+  | 'color-picker'
+  | 'multi-select'
+  | 'tag-input'
+  | 'object-array'
+  | 'sensitive-unavailable'
+  | 'unsupported'
 
 /**
  * Host layout policy is deliberately derived from the resolved primitive, not
@@ -77,19 +91,42 @@ export type HostConfigApplyPhase = 'dirty' | 'saving' | 'saved'
  * behavior. The v2 values remain generic Host projections and introduce no
  * product-specific service fields.
  */
-export function hostConfigApplyMessage(mode: HostConfigApplyMode, phase: HostConfigApplyPhase, locale = 'zh-CN'): string {
+export function hostConfigApplyMessage(
+  mode: HostConfigApplyMode,
+  phase: HostConfigApplyPhase,
+  locale = 'zh-CN',
+): string {
   if (phase === 'saving') return managerCopy(locale, 'form.saving')
-  const action = mode === 'live' ? managerCopy(locale, 'form.apply-live')
-    : mode === 'service-restart' ? managerCopy(locale, 'form.apply-service-restart')
-      : mode === 'app-restart' ? managerCopy(locale, 'form.apply-app-restart')
-        : managerCopy(locale, 'form.apply-plugin-restart')
+  const action = mode === 'live'
+    ? managerCopy(locale, 'form.apply-live')
+    : mode === 'service-restart'
+    ? managerCopy(locale, 'form.apply-service-restart')
+    : mode === 'app-restart'
+    ? managerCopy(locale, 'form.apply-app-restart')
+    : managerCopy(locale, 'form.apply-plugin-restart')
   return phase === 'saved' ? action : `${managerCopy(locale, 'form.dirty-prefix')} · ${action}`
 }
 
 const SENSITIVE_ROLES = new Set(['secret', 'credential', 'credential-ref', 'permission', 'capability'])
 const KNOWN_ROLES = new Set([
-  'checkbox', 'switch', 'radio', 'slider', 'textarea', 'multiline', 'path', 'file', 'directory',
-  'duration', 'url', 'date', 'datetime', 'time', 'color', 'multi-select', 'code', 'json',
+  'checkbox',
+  'switch',
+  'radio',
+  'slider',
+  'textarea',
+  'multiline',
+  'path',
+  'file',
+  'directory',
+  'duration',
+  'url',
+  'date',
+  'datetime',
+  'time',
+  'color',
+  'multi-select',
+  'code',
+  'json',
 ])
 
 export const HOST_FORM_STYLES = `${TDESIGN_SCOPED_TOKEN_CSS}\n${HOST_ICON_16PX_CSS}\n${String.raw`
@@ -268,7 +305,9 @@ export function selectHostFormPrimitive(field: CordisXConfigFieldSnapshot): Host
     if (field.role === 'date' || field.role === 'datetime') return 'date-picker'
     if (field.role === 'time') return 'time-picker'
     if (field.role === 'color') return 'color-picker'
-    if (field.role === 'textarea' || field.role === 'multiline' || field.role === 'code' || field.role === 'json') return 'textarea'
+    if (field.role === 'textarea' || field.role === 'multiline' || field.role === 'code' || field.role === 'json') {
+      return 'textarea'
+    }
     if (field.role === 'path' || field.role === 'file' || field.role === 'directory') return 'path-input'
     return 'input'
   }
@@ -323,42 +362,96 @@ export function hostFormControlLayout(field: CordisXConfigFieldSnapshot): HostFo
 
 export function hostFormDiagnostic(field: CordisXConfigFieldSnapshot): HostFormDiagnostic | undefined {
   const primitive = selectHostFormPrimitive(field)
-  if (field.presenter !== undefined && hostPresenterPrimitive(field) === undefined) return {
-    code: 'unsupported-presenter', fieldPath: field.path, detail: `incompatible Host form presenter: ${field.presenter.kind}`,
+  if (field.presenter !== undefined && hostPresenterPrimitive(field) === undefined) {
+    return {
+      code: 'unsupported-presenter',
+      fieldPath: field.path,
+      detail: `incompatible Host form presenter: ${field.presenter.kind}`,
+    }
   }
-  if (primitive === 'unsupported') return {
-    code: 'unsupported-schema-field', fieldPath: field.path, detail: `unsupported Schemastery field type: ${field.type}`,
+  if (primitive === 'unsupported') {
+    return {
+      code: 'unsupported-schema-field',
+      fieldPath: field.path,
+      detail: `unsupported Schemastery field type: ${field.type}`,
+    }
   }
-  if (field.role !== undefined && !SENSITIVE_ROLES.has(field.role) && !KNOWN_ROLES.has(field.role)) return {
-    code: 'unsupported-schema-role', fieldPath: field.path, detail: `unknown role ${field.role}; used ${primitive}`,
+  if (field.role !== undefined && !SENSITIVE_ROLES.has(field.role) && !KNOWN_ROLES.has(field.role)) {
+    return {
+      code: 'unsupported-schema-role',
+      fieldPath: field.path,
+      detail: `unknown role ${field.role}; used ${primitive}`,
+    }
   }
   return undefined
 }
 
-export function validateHostFormValue(field: CordisXConfigFieldSnapshot, value: unknown, locale = 'zh-CN'): string | undefined {
-  if (field.required && (value === undefined || value === null || value === '' || Array.isArray(value) && value.length === 0)) return managerCopy(locale, 'form.required')
+export function validateHostFormValue(
+  field: CordisXConfigFieldSnapshot,
+  value: unknown,
+  locale = 'zh-CN',
+): string | undefined {
+  if (
+    field.required
+    && (value === undefined || value === null || value === '' || Array.isArray(value) && value.length === 0)
+  ) return managerCopy(locale, 'form.required')
   if (value === undefined || value === null || value === '') return undefined
-  if (field.choices !== undefined && !Array.isArray(value) && !field.choices.some(choice => Object.is(choice.value, value))) return managerCopy(locale, 'form.choice-invalid')
+  if (
+    field.choices !== undefined && !Array.isArray(value)
+    && !field.choices.some(choice => Object.is(choice.value, value))
+  ) return managerCopy(locale, 'form.choice-invalid')
   if (field.type === 'array') {
     if (!Array.isArray(value)) return managerCopy(locale, 'form.choice-invalid')
-    if (field.min !== undefined && value.length < field.min) return productLocale(locale) === 'zh-CN' ? `至少选择 ${field.min} 项` : `Choose at least ${field.min}`
-    if (field.max !== undefined && value.length > field.max) return productLocale(locale) === 'zh-CN' ? `最多选择 ${field.max} 项` : `Choose at most ${field.max}`
-    if (field.choices !== undefined && value.some(item => !field.choices!.some(choice => Object.is(choice.value, item)))) return managerCopy(locale, 'form.choice-invalid')
+    if (field.min !== undefined && value.length < field.min) {
+      return productLocale(locale) === 'zh-CN'
+        ? `至少选择 ${field.min} 项`
+        : `Choose at least ${field.min}`
+    }
+    if (field.max !== undefined && value.length > field.max) {
+      return productLocale(locale) === 'zh-CN'
+        ? `最多选择 ${field.max} 项`
+        : `Choose at most ${field.max}`
+    }
+    if (
+      field.choices !== undefined && value.some(item => !field.choices!.some(choice => Object.is(choice.value, item)))
+    ) return managerCopy(locale, 'form.choice-invalid')
   }
-  if (field.role === 'date' && (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/u.test(value))) return productLocale(locale) === 'zh-CN' ? '请输入有效日期' : 'Enter a valid date'
-  if (field.role === 'datetime' && (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2} [0-2]\d:[0-5]\d:[0-5]\d$/u.test(value))) return productLocale(locale) === 'zh-CN' ? '请输入有效日期和时间' : 'Enter a valid date and time'
-  if (field.role === 'time' && (typeof value !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(value))) return productLocale(locale) === 'zh-CN' ? '请输入有效时间' : 'Enter a valid time'
-  if (field.role === 'color' && (typeof value !== 'string' || !/^#[\da-fA-F]{6}$/u.test(value))) return productLocale(locale) === 'zh-CN' ? '请输入有效 HEX 颜色' : 'Enter a valid HEX color'
+  if (field.role === 'date' && (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/u.test(value))) {
+    return productLocale(locale) === 'zh-CN' ? '请输入有效日期' : 'Enter a valid date'
+  }
+  if (
+    field.role === 'datetime'
+    && (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2} [0-2]\d:[0-5]\d:[0-5]\d$/u.test(value))
+  ) return productLocale(locale) === 'zh-CN' ? '请输入有效日期和时间' : 'Enter a valid date and time'
+  if (field.role === 'time' && (typeof value !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(value))) {
+    return productLocale(locale) === 'zh-CN' ? '请输入有效时间' : 'Enter a valid time'
+  }
+  if (field.role === 'color' && (typeof value !== 'string' || !/^#[\da-fA-F]{6}$/u.test(value))) {
+    return productLocale(locale) === 'zh-CN' ? '请输入有效 HEX 颜色' : 'Enter a valid HEX color'
+  }
   if (field.type === 'number' || field.type === 'natural') {
     if (typeof value !== 'number' || !Number.isFinite(value)) return managerCopy(locale, 'form.number-invalid')
-    if (field.type === 'natural' && (!Number.isInteger(value) || value < 0)) return managerCopy(locale, 'form.natural-invalid')
-    if (field.min !== undefined && value < field.min) return productLocale(locale) === 'zh-CN' ? `不能小于 ${field.min}` : `Must be at least ${field.min}`
-    if (field.max !== undefined && value > field.max) return productLocale(locale) === 'zh-CN' ? `不能大于 ${field.max}` : `Must be at most ${field.max}`
+    if (field.type === 'natural' && (!Number.isInteger(value) || value < 0)) {
+      return managerCopy(locale, 'form.natural-invalid')
+    }
+    if (field.min !== undefined && value < field.min) {
+      return productLocale(locale) === 'zh-CN'
+        ? `不能小于 ${field.min}`
+        : `Must be at least ${field.min}`
+    }
+    if (field.max !== undefined && value > field.max) {
+      return productLocale(locale) === 'zh-CN'
+        ? `不能大于 ${field.max}`
+        : `Must be at most ${field.max}`
+    }
     if (field.step !== undefined && field.step > 0) {
       const origin = field.min ?? 0
       const quotient = (value - origin) / field.step
-      if (Math.abs(quotient - Math.round(quotient)) > 1e-9) return productLocale(locale) === 'zh-CN'
-        ? `请按 ${field.step} 的步长输入` : `Use increments of ${field.step}`
+      if (Math.abs(quotient - Math.round(quotient)) > 1e-9) {
+        return productLocale(locale) === 'zh-CN'
+          ? `请按 ${field.step} 的步长输入`
+          : `Use increments of ${field.step}`
+      }
     }
   }
   return undefined
@@ -421,7 +514,11 @@ export class HostFormAdapter {
     return { root: input, focusTarget: input, primitive: 'input', clear: () => apply(''), dispose }
   }
 
-  section(title?: string, description?: string, icon?: CordisXConfigFormIcon): { readonly root: HTMLElement; readonly content: HTMLElement } {
+  section(
+    title?: string,
+    description?: string,
+    icon?: CordisXConfigFormIcon,
+  ): { readonly root: HTMLElement; readonly content: HTMLElement } {
     const root = this.document.createElement('section')
     root.className = 'cxf-section'
     if (title !== undefined) {
@@ -455,7 +552,13 @@ export class HostFormAdapter {
     options: readonly TDesignSelectOption<Value>[],
     value: Value | undefined,
     onChange: (value: Value | undefined) => void,
-    config: { readonly id?: string; readonly disabled?: boolean; readonly readonly?: boolean; readonly clearable?: boolean; readonly placeholder?: string } = {},
+    config: {
+      readonly id?: string
+      readonly disabled?: boolean
+      readonly readonly?: boolean
+      readonly clearable?: boolean
+      readonly placeholder?: string
+    } = {},
   ): TDesignSelectElement<Value> {
     return createTDesignSelect(this.document, this.portalHost, options, {
       label,
@@ -466,7 +569,16 @@ export class HostFormAdapter {
     })
   }
 
-  item(options: { readonly id: string; readonly label: string; readonly help?: string; readonly required?: boolean; readonly fullWidth?: boolean; readonly icon?: CordisXConfigFormIcon }): HostFormItem {
+  item(
+    options: {
+      readonly id: string
+      readonly label: string
+      readonly help?: string
+      readonly required?: boolean
+      readonly fullWidth?: boolean
+      readonly icon?: CordisXConfigFormIcon
+    },
+  ): HostFormItem {
     const root = this.document.createElement('div')
     root.className = 'cxf-item'
     root.dataset.fullWidth = String(options.fullWidth === true)
@@ -507,7 +619,12 @@ export class HostFormAdapter {
     if (help !== undefined) root.append(help)
     root.append(error)
     return {
-      root, control, labelRow, label, ...(help === undefined ? {} : { help }), error,
+      root,
+      control,
+      labelRow,
+      label,
+      ...(help === undefined ? {} : { help }),
+      error,
       setError: (message?: string): void => {
         error.textContent = message ?? ''
         error.hidden = message === undefined || message === ''
@@ -535,7 +652,11 @@ export class HostFormAdapter {
     readonly copyPath: () => Promise<boolean>
   }): HostFormFieldActionMenu {
     const locale = this.locale()
-    const trigger = this.button(managerCopy(locale, 'form.field-actions'), { icon: options.icon ?? 'host:settings', density: 'icon', variant: 'text' })
+    const trigger = this.button(managerCopy(locale, 'form.field-actions'), {
+      icon: options.icon ?? 'host:settings',
+      density: 'icon',
+      variant: 'text',
+    })
     trigger.classList.add('cxf-field-menu-trigger')
     trigger.dataset.hostFormAction = 'field-actions'
     trigger.setAttribute('aria-haspopup', 'menu')
@@ -552,7 +673,12 @@ export class HostFormAdapter {
     status.className = 'cxf-field-menu-status'
     status.hidden = true
     status.setAttribute('role', 'status')
-    const item = (label: string, icon: CordisXConfigFormIcon, disabled: boolean, handler: () => void | Promise<void>): HTMLButtonElement => {
+    const item = (
+      label: string,
+      icon: CordisXConfigFormIcon,
+      disabled: boolean,
+      handler: () => void | Promise<void>,
+    ): HTMLButtonElement => {
       const button = this.document.createElement('button')
       button.className = 'cxf-field-menu-item'
       button.type = 'button'
@@ -562,7 +688,9 @@ export class HostFormAdapter {
       glyph.classList.add('cxf-form-icon')
       glyph.setAttribute('aria-hidden', 'true')
       button.append(glyph, this.document.createTextNode(label))
-      button.addEventListener('click', () => { void handler() })
+      button.addEventListener('click', () => {
+        void handler()
+      })
       return button
     }
     let visible = false
@@ -590,7 +718,11 @@ export class HostFormAdapter {
       const above = rect.top > view.innerHeight - rect.bottom && rect.top > (menu.offsetHeight || 120)
       menu.style.inlineSize = `${width}px`
       menu.style.insetInlineStart = `${Math.max(gutter, Math.min(rect.left, view.innerWidth - width - gutter))}px`
-      menu.style.insetBlockStart = `${above ? Math.max(gutter, rect.top - (menu.offsetHeight || 120) - 4) : Math.min(view.innerHeight - gutter, rect.bottom + 4)}px`
+      menu.style.insetBlockStart = `${
+        above
+          ? Math.max(gutter, rect.top - (menu.offsetHeight || 120) - 4)
+          : Math.min(view.innerHeight - gutter, rect.bottom + 4)
+      }px`
     }
     const open = (): void => {
       if (disposed) return
@@ -612,7 +744,9 @@ export class HostFormAdapter {
       const copied = await options.copyPath()
       status.hidden = false
       status.textContent = managerCopy(this.locale(), copied ? 'form.path-copied' : 'form.path-copy-unavailable')
-      this.document.defaultView?.setTimeout(() => { status.hidden = true }, 1800)
+      this.document.defaultView?.setTimeout(() => {
+        status.hidden = true
+      }, 1800)
     })
     menu.append(useDefault, rollback, copyPath, status)
     tdesignPortalContainer(this.portalHost).append(menu)
@@ -628,7 +762,9 @@ export class HostFormAdapter {
       // A menu lives in the Host portal Shadow root, so document.activeElement
       // is the portal host rather than the focused menu button. The composed
       // path is the stable cross-root focus identity for navigation/Enter.
-      const focusedItem = event.composedPath().find(node => node === useDefault || node === rollback || node === copyPath) as HTMLButtonElement | undefined
+      const focusedItem = event.composedPath().find(node =>
+        node === useDefault || node === rollback || node === copyPath
+      ) as HTMLButtonElement | undefined
       const current = focusedItem === undefined ? -1 : enabled.indexOf(focusedItem)
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -641,12 +777,15 @@ export class HostFormAdapter {
         focusedItem.click()
       } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Home' || event.key === 'End') {
         event.preventDefault()
-        const next = event.key === 'Home' ? 0 : event.key === 'End' ? enabled.length - 1
+        const next = event.key === 'Home' ? 0 : event.key === 'End'
+          ? enabled.length - 1
           : (current + (event.key === 'ArrowDown' ? 1 : -1) + enabled.length) % enabled.length
         enabled[next]?.focus()
       }
     }
-    const onTrigger = (): void => { visible ? close(false) : open() }
+    const onTrigger = (): void => {
+      visible ? close(false) : open()
+    }
     trigger.addEventListener('click', onTrigger)
     this.document.addEventListener('pointerdown', onPointerDown, true)
     this.document.addEventListener('keydown', onKeyDown, true)
@@ -679,25 +818,44 @@ export class HostFormAdapter {
     }
   }
 
-  private objectArrayControl(field: CordisXConfigFieldSnapshot, id: string, onDraft: (value: unknown, issue?: string) => void): HostFormControl {
+  private objectArrayControl(
+    field: CordisXConfigFieldSnapshot,
+    id: string,
+    onDraft: (value: unknown, issue?: string) => void,
+  ): HostFormControl {
     const root = this.document.createElement('div')
     root.className = 'cxf-array-editor'
     root.dataset.hostFormPrimitive = 'object-array'
     root.dataset.presenter = field.presenter?.kind ?? 'array.object-auto'
-    const values = Array.isArray(field.value) ? field.value.filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object' && !Array.isArray(item)) : []
+    const values = Array.isArray(field.value)
+      ? field.value.filter((item): item is Record<string, unknown> =>
+        item !== null && typeof item === 'object' && !Array.isArray(item)
+      )
+      : []
     const ids = values.map(() => `cxf-array-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`)
     const limit = field.max ?? 64
     const schema = field.arrayItemSchema
     const canReorder = field.presenter?.options?.allowReorder !== false
     let connectedOnce = root.isConnected
     let dismissActiveDialog: (() => void) | undefined
-    const observer = this.document.defaultView === null ? undefined : new this.document.defaultView.MutationObserver(() => {
-      if (root.isConnected) { connectedOnce = true; return }
-      if (connectedOnce) { dismissActiveDialog?.(); observer?.disconnect() }
-    })
+    const observer = this.document.defaultView === null
+      ? undefined
+      : new this.document.defaultView.MutationObserver(() => {
+        if (root.isConnected) {
+          connectedOnce = true
+          return
+        }
+        if (connectedOnce) {
+          dismissActiveDialog?.()
+          observer?.disconnect()
+        }
+      })
     observer?.observe(this.document.documentElement, { childList: true, subtree: true })
-    const emit = (next: readonly Record<string, unknown>[]): void => onDraft(next, validateHostFormValue(field, next, this.locale()))
-    const summary = (value: Record<string, unknown>): string => schema?.fields?.map(({ key, schema }) => `${schema.label ?? key}: ${String(value[key] ?? '')}`).join(' · ') || managerCopy(this.locale(), 'form.array-item')
+    const emit = (next: readonly Record<string, unknown>[]): void =>
+      onDraft(next, validateHostFormValue(field, next, this.locale()))
+    const summary = (value: Record<string, unknown>): string =>
+      schema?.fields?.map(({ key, schema }) => `${schema.label ?? key}: ${String(value[key] ?? '')}`).join(' · ')
+      || managerCopy(this.locale(), 'form.array-item')
     const render = (): void => {
       root.replaceChildren()
       const toolbar = this.document.createElement('div')
@@ -705,22 +863,99 @@ export class HostFormAdapter {
       const add = this.button(managerCopy(this.locale(), 'form.add-item'), { icon: 'host:save' })
       add.disabled = field.disabled || values.length >= limit
       add.addEventListener('click', () => {
-        const item = Object.fromEntries((schema?.fields ?? []).map(({ key, schema }) => [key, schema.type === 'boolean' ? false : schema.type === 'number' || schema.type === 'natural' ? schema.min ?? 0 : '']))
-        values.push(item); ids.push(`cxf-array-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`); emit(values); render(); open(values.length - 1)
+        const item = Object.fromEntries(
+          (schema?.fields ?? []).map(({ key, schema }) => [
+            key,
+            schema.type === 'boolean'
+              ? false
+              : schema.type === 'number' || schema.type === 'natural'
+              ? schema.min ?? 0
+              : '',
+          ]),
+        )
+        values.push(item)
+        ids.push(`cxf-array-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`)
+        emit(values)
+        render()
+        open(values.length - 1)
       })
-      toolbar.append(add); root.append(toolbar)
+      toolbar.append(add)
+      root.append(toolbar)
       values.forEach((value, index) => {
-        const row = this.document.createElement('div'); row.className = 'cxf-array-row'; row.dataset.hostArrayItemId = ids[index]!
-        const handle = this.document.createElement('span'); handle.className = 'cxf-array-row-drag-handle'; handle.dataset.hostArrayDragHandle = 'true'; handle.setAttribute('role', 'img'); handle.setAttribute('aria-label', managerCopy(this.locale(), 'form.reorder-handle')); handle.setAttribute('title', managerCopy(this.locale(), 'form.reorder-handle'))
-        const handleIcon = createHostSurfaceIcon(this.document, 'host:more'); handleIcon.classList.add('cxf-form-icon'); handleIcon.setAttribute('aria-hidden', 'true'); handle.append(handleIcon)
-        const text = this.document.createElement('span'); text.className = 'cxf-array-row-summary'; text.textContent = summary(value)
-        const actions = this.document.createElement('div'); actions.className = 'cxf-array-row-actions'
-        const edit = this.button(managerCopy(this.locale(), 'form.edit-item'), { density: 'icon', icon: 'host:settings' }); edit.disabled = field.disabled; edit.addEventListener('click', () => open(index))
-        const duplicate = this.button(managerCopy(this.locale(), 'form.duplicate-item'), { density: 'icon', icon: 'host:files' }); duplicate.disabled = field.disabled || values.length >= limit; duplicate.addEventListener('click', () => { values.splice(index + 1, 0, structuredClone(value)); ids.splice(index + 1, 0, `cxf-array-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`); emit(values); render() })
-        const moveUp = this.button(managerCopy(this.locale(), 'form.move-item-up'), { density: 'icon', icon: 'host:back' }); moveUp.classList.add('cxf-array-row-action-up'); moveUp.disabled = field.disabled || !canReorder || index === 0; moveUp.addEventListener('click', () => { [values[index - 1], values[index]] = [values[index]!, values[index - 1]!]; [ids[index - 1], ids[index]] = [ids[index]!, ids[index - 1]!]; emit(values); render() })
-        const moveDown = this.button(managerCopy(this.locale(), 'form.move-item-down'), { density: 'icon', icon: 'host:back' }); moveDown.classList.add('cxf-array-row-action-down'); moveDown.disabled = field.disabled || !canReorder || index === values.length - 1; moveDown.addEventListener('click', () => { [values[index + 1], values[index]] = [values[index]!, values[index + 1]!]; [ids[index + 1], ids[index]] = [ids[index]!, ids[index + 1]!]; emit(values); render() })
-        const remove = this.button(managerCopy(this.locale(), 'form.delete-item'), { density: 'icon', tone: 'danger', icon: 'host:reset' }); remove.disabled = field.disabled || values.length <= (field.min ?? 0); remove.addEventListener('click', () => { values.splice(index, 1); ids.splice(index, 1); emit(values); render() })
-        actions.append(edit, duplicate, moveUp, moveDown, remove); row.append(handle, text, actions); root.append(row)
+        const row = this.document.createElement('div')
+        row.className = 'cxf-array-row'
+        row.dataset.hostArrayItemId = ids[index]!
+        const handle = this.document.createElement('span')
+        handle.className = 'cxf-array-row-drag-handle'
+        handle.dataset.hostArrayDragHandle = 'true'
+        handle.setAttribute('role', 'img')
+        handle.setAttribute('aria-label', managerCopy(this.locale(), 'form.reorder-handle'))
+        handle.setAttribute('title', managerCopy(this.locale(), 'form.reorder-handle'))
+        const handleIcon = createHostSurfaceIcon(this.document, 'host:more')
+        handleIcon.classList.add('cxf-form-icon')
+        handleIcon.setAttribute('aria-hidden', 'true')
+        handle.append(handleIcon)
+        const text = this.document.createElement('span')
+        text.className = 'cxf-array-row-summary'
+        text.textContent = summary(value)
+        const actions = this.document.createElement('div')
+        actions.className = 'cxf-array-row-actions'
+        const edit = this.button(managerCopy(this.locale(), 'form.edit-item'), {
+          density: 'icon',
+          icon: 'host:settings',
+        })
+        edit.disabled = field.disabled
+        edit.addEventListener('click', () => open(index))
+        const duplicate = this.button(managerCopy(this.locale(), 'form.duplicate-item'), {
+          density: 'icon',
+          icon: 'host:files',
+        })
+        duplicate.disabled = field.disabled || values.length >= limit
+        duplicate.addEventListener('click', () => {
+          values.splice(index + 1, 0, structuredClone(value))
+          ids.splice(index + 1, 0, `cxf-array-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`)
+          emit(values)
+          render()
+        })
+        const moveUp = this.button(managerCopy(this.locale(), 'form.move-item-up'), {
+          density: 'icon',
+          icon: 'host:back',
+        })
+        moveUp.classList.add('cxf-array-row-action-up')
+        moveUp.disabled = field.disabled || !canReorder || index === 0
+        moveUp.addEventListener('click', () => {
+          ;[values[index - 1], values[index]] = [values[index]!, values[index - 1]!]
+          ;[ids[index - 1], ids[index]] = [ids[index]!, ids[index - 1]!]
+          emit(values)
+          render()
+        })
+        const moveDown = this.button(managerCopy(this.locale(), 'form.move-item-down'), {
+          density: 'icon',
+          icon: 'host:back',
+        })
+        moveDown.classList.add('cxf-array-row-action-down')
+        moveDown.disabled = field.disabled || !canReorder || index === values.length - 1
+        moveDown.addEventListener('click', () => {
+          ;[values[index + 1], values[index]] = [values[index]!, values[index + 1]!]
+          ;[ids[index + 1], ids[index]] = [ids[index]!, ids[index + 1]!]
+          emit(values)
+          render()
+        })
+        const remove = this.button(managerCopy(this.locale(), 'form.delete-item'), {
+          density: 'icon',
+          tone: 'danger',
+          icon: 'host:reset',
+        })
+        remove.disabled = field.disabled || values.length <= (field.min ?? 0)
+        remove.addEventListener('click', () => {
+          values.splice(index, 1)
+          ids.splice(index, 1)
+          emit(values)
+          render()
+        })
+        actions.append(edit, duplicate, moveUp, moveDown, remove)
+        row.append(handle, text, actions)
+        root.append(row)
       })
     }
     const open = (index: number): void => {
@@ -728,10 +963,19 @@ export class HostFormAdapter {
       const host = tdesignPortalContainer(this.portalHost)
       const rowId = ids[index]!
       const restore = root.querySelector<HTMLElement>(`[data-host-array-item-id="${rowId}"] button`)
-      const dialog = this.document.createElement('section'); dialog.className = 'cxf-array-editor-dialog'; dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.tabIndex = -1
-      const head = this.document.createElement('div'); head.className = 'cxf-array-editor-dialog-head'
-      const title = this.document.createElement('strong'); title.id = `${id}-${rowId}-title`; title.textContent = field.label ?? managerCopy(this.locale(), 'form.edit-item'); dialog.setAttribute('aria-labelledby', title.id)
-      const close = this.button(managerCopy(this.locale(), 'form.close'), { density: 'icon', icon: 'host:reset' }); close.setAttribute('aria-label', managerCopy(this.locale(), 'form.close'))
+      const dialog = this.document.createElement('section')
+      dialog.className = 'cxf-array-editor-dialog'
+      dialog.setAttribute('role', 'dialog')
+      dialog.setAttribute('aria-modal', 'true')
+      dialog.tabIndex = -1
+      const head = this.document.createElement('div')
+      head.className = 'cxf-array-editor-dialog-head'
+      const title = this.document.createElement('strong')
+      title.id = `${id}-${rowId}-title`
+      title.textContent = field.label ?? managerCopy(this.locale(), 'form.edit-item')
+      dialog.setAttribute('aria-labelledby', title.id)
+      const close = this.button(managerCopy(this.locale(), 'form.close'), { density: 'icon', icon: 'host:reset' })
+      close.setAttribute('aria-label', managerCopy(this.locale(), 'form.close'))
       let dismissed = false
       const dismiss = () => {
         if (dismissed) return
@@ -742,32 +986,83 @@ export class HostFormAdapter {
         if (dismissActiveDialog === dismiss) dismissActiveDialog = undefined
         restore?.focus()
       }
-      close.addEventListener('click', dismiss); head.append(title, close); dialog.append(head)
-      const fields = this.document.createElement('div'); fields.className = 'cxf-array-editor-dialog-fields'; dialog.append(fields)
+      close.addEventListener('click', dismiss)
+      head.append(title, close)
+      dialog.append(head)
+      const fields = this.document.createElement('div')
+      fields.className = 'cxf-array-editor-dialog-fields'
+      dialog.append(fields)
       for (const child of schema?.fields ?? []) {
-        const slot = this.document.createElement('div'); slot.className = 'cxf-array-editor-dialog-field'
-        const label = this.document.createElement('label'); label.textContent = child.schema.label ?? child.key
-        const childField: CordisXConfigFieldSnapshot = { namespace: field.namespace, path: [...field.path, rowId, child.key], type: child.schema.type, ...(child.schema.role === undefined ? {} : { role: child.schema.role }), ...(child.schema.choices === undefined ? {} : { choices: child.schema.choices }), ...(child.schema.presenter === undefined ? {} : { presenter: child.schema.presenter }), ...(child.schema.item === undefined ? {} : { arrayItemSchema: child.schema.item }), value: values[index]![child.key], disabled: field.disabled || child.schema.disabled, required: child.schema.required, ...(child.schema.min === undefined ? {} : { min: child.schema.min }), ...(child.schema.max === undefined ? {} : { max: child.schema.max }), ...(child.schema.step === undefined ? {} : { step: child.schema.step }), ...(child.schema.arrayItemType === undefined ? {} : { arrayItemType: child.schema.arrayItemType }) }
-        const control = this.control(childField, `${id}-${rowId}-${child.key}`, next => { values[index] = { ...values[index], [child.key]: next }; emit(values); render() })
-        label.htmlFor = `${id}-${rowId}-${child.key}`; slot.append(label, control.root); fields.append(slot)
+        const slot = this.document.createElement('div')
+        slot.className = 'cxf-array-editor-dialog-field'
+        const label = this.document.createElement('label')
+        label.textContent = child.schema.label ?? child.key
+        const childField: CordisXConfigFieldSnapshot = {
+          namespace: field.namespace,
+          path: [...field.path, rowId, child.key],
+          type: child.schema.type,
+          ...(child.schema.role === undefined ? {} : { role: child.schema.role }),
+          ...(child.schema.choices === undefined ? {} : { choices: child.schema.choices }),
+          ...(child.schema.presenter === undefined ? {} : { presenter: child.schema.presenter }),
+          ...(child.schema.item === undefined ? {} : { arrayItemSchema: child.schema.item }),
+          value: values[index]![child.key],
+          disabled: field.disabled || child.schema.disabled,
+          required: child.schema.required,
+          ...(child.schema.min === undefined ? {} : { min: child.schema.min }),
+          ...(child.schema.max === undefined ? {} : { max: child.schema.max }),
+          ...(child.schema.step === undefined ? {} : { step: child.schema.step }),
+          ...(child.schema.arrayItemType === undefined ? {} : { arrayItemType: child.schema.arrayItemType }),
+        }
+        const control = this.control(childField, `${id}-${rowId}-${child.key}`, next => {
+          values[index] = { ...values[index], [child.key]: next }
+          emit(values)
+          render()
+        })
+        label.htmlFor = `${id}-${rowId}-${child.key}`
+        slot.append(label, control.root)
+        fields.append(slot)
       }
-      const focusable = (): HTMLElement[] => [...dialog.querySelectorAll<HTMLElement>('button, [tabindex]:not([tabindex="-1"])')].filter(element => !element.hasAttribute('disabled') && element.getAttribute('aria-disabled') !== 'true')
+      const focusable = (): HTMLElement[] =>
+        [...dialog.querySelectorAll<HTMLElement>('button, [tabindex]:not([tabindex="-1"])')].filter(element =>
+          !element.hasAttribute('disabled') && element.getAttribute('aria-disabled') !== 'true'
+        )
       const onKey = (event: KeyboardEvent) => {
-        if (event.key === 'Escape') { event.preventDefault(); dismiss(); return }
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          dismiss()
+          return
+        }
         if (event.key !== 'Tab') return
-        const items = focusable(); if (items.length === 0) return
+        const items = focusable()
+        if (items.length === 0) return
         const active = this.document.activeElement
         const current = items.indexOf(active as HTMLElement)
-        if (event.shiftKey && (current <= 0 || active === dialog)) { event.preventDefault(); items.at(-1)?.focus() }
-        else if (!event.shiftKey && current === items.length - 1) { event.preventDefault(); items[0]?.focus() }
+        if (event.shiftKey && (current <= 0 || active === dialog)) {
+          event.preventDefault()
+          items.at(-1)?.focus()
+        } else if (!event.shiftKey && current === items.length - 1) {
+          event.preventDefault()
+          items[0]?.focus()
+        }
       }
-      const onPointerDown = (event: Event) => { if (!event.composedPath().includes(dialog)) dismiss() }
-      dialog.addEventListener('keydown', onKey); this.document.addEventListener('pointerdown', onPointerDown, true); host.append(dialog); dismissActiveDialog = dismiss; close.focus()
+      const onPointerDown = (event: Event) => {
+        if (!event.composedPath().includes(dialog)) dismiss()
+      }
+      dialog.addEventListener('keydown', onKey)
+      this.document.addEventListener('pointerdown', onPointerDown, true)
+      host.append(dialog)
+      dismissActiveDialog = dismiss
+      close.focus()
     }
     render()
     return {
-      root, focusTarget: root, primitive: 'object-array',
-      dispose: () => { dismissActiveDialog?.(); observer?.disconnect() },
+      root,
+      focusTarget: root,
+      primitive: 'object-array',
+      dispose: () => {
+        dismissActiveDialog?.()
+        observer?.disconnect()
+      },
     }
   }
 
@@ -779,12 +1074,18 @@ export class HostFormAdapter {
   ): HostFormControl {
     const primitive = selectHostFormPrimitive(field)
     const diagnostic = hostFormDiagnostic(field)
-    if (primitive === 'sensitive-unavailable') return {
-      root: this.alert(managerCopy(this.locale(), 'form.sensitive-unavailable'), 'warning'),
-      primitive,
+    if (primitive === 'sensitive-unavailable') {
+      return {
+        root: this.alert(managerCopy(this.locale(), 'form.sensitive-unavailable'), 'warning'),
+        primitive,
+      }
     }
-    if (primitive === 'unsupported') return {
-      root: this.alert(managerCopy(this.locale(), 'form.unsupported'), 'warning'), primitive, ...(diagnostic === undefined ? {} : { diagnostic }),
+    if (primitive === 'unsupported') {
+      return {
+        root: this.alert(managerCopy(this.locale(), 'form.unsupported'), 'warning'),
+        primitive,
+        ...(diagnostic === undefined ? {} : { diagnostic }),
+      }
     }
     if (primitive === 'multi-select') {
       const select = createTDesignMultiSelect<CordisXJsonScalar>(this.document, this.portalHost, field.choices!, {
@@ -800,7 +1101,9 @@ export class HostFormAdapter {
       return { root: select, focusTarget: select, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
     }
     if (primitive === 'tag-input') {
-      const value = Array.isArray(field.value) ? field.value.filter((item): item is string | number => typeof item === 'string' || typeof item === 'number') : []
+      const value = Array.isArray(field.value)
+        ? field.value.filter((item): item is string | number => typeof item === 'string' || typeof item === 'number')
+        : []
       const tags = createTDesignTagInput(this.document, {
         id,
         label: field.label ?? field.path.at(-1) ?? managerCopy(this.locale(), 'form.text-placeholder'),
@@ -809,7 +1112,8 @@ export class HostFormAdapter {
         ...(field.max === undefined ? {} : { max: field.max }),
         disabled: field.disabled,
         onChange: next => {
-          const normalized = field.arrayItemType === 'string' ? next.map(String)
+          const normalized = field.arrayItemType === 'string'
+            ? next.map(String)
             : next.map(Number).filter(Number.isFinite)
           onDraft(normalized, validateHostFormValue(field, normalized, this.locale()))
         },
@@ -830,25 +1134,46 @@ export class HostFormAdapter {
         const dateValue = initial?.slice(0, 10)
         const initialTime = /^\d{4}-\d{2}-\d{2} ([0-2]\d:[0-5]\d)(?::[0-5]\d)?$/u.exec(initial ?? '')?.[1] ?? '00:00'
         const options: TDesignSelectOption<string>[] = []
-        for (let hour = 0; hour < 24; hour += 1) for (let minute = 0; minute < 60; minute += 15) {
-          const value = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
-          options.push({ label: value, value })
+        for (let hour = 0; hour < 24; hour += 1) {
+          for (let minute = 0; minute < 60; minute += 15) {
+            const value = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+            options.push({ label: value, value })
+          }
         }
         let selectedDate = dateValue ?? ''
         let selectedTime = initialTime
-        const emit = () => onDraft(selectedDate === '' ? '' : `${selectedDate} ${selectedTime}:00`, validateHostFormValue(field, selectedDate === '' ? '' : `${selectedDate} ${selectedTime}:00`, this.locale()))
+        const emit = () =>
+          onDraft(
+            selectedDate === '' ? '' : `${selectedDate} ${selectedTime}:00`,
+            validateHostFormValue(
+              field,
+              selectedDate === '' ? '' : `${selectedDate} ${selectedTime}:00`,
+              this.locale(),
+            ),
+          )
         setTDesignProps(date, {
-          value: dateValue, defaultValue: dateValue,
+          value: dateValue,
+          defaultValue: dateValue,
           placeholder: productLocale(this.locale()) === 'zh-CN' ? '选择日期' : 'Select date',
-          format: 'YYYY-MM-DD', disabled: field.disabled,
+          format: 'YYYY-MM-DD',
+          disabled: field.disabled,
           popupProps: { attach: () => this.portalHost },
-          onChange: (value: string | undefined) => { selectedDate = value ?? ''; emit() },
+          onChange: (value: string | undefined) => {
+            selectedDate = value ?? ''
+            emit()
+          },
         })
         const time = createTDesignSelect(this.document, this.portalHost, options, {
-          id: `${id}-time`, label: field.label ?? field.path.at(-1) ?? 'Time',
-          placeholder: productLocale(this.locale()) === 'zh-CN' ? '选择时间' : 'Select time', value: selectedTime,
-          disabled: field.disabled, clearable: false,
-          onChange: value => { selectedTime = value ?? selectedTime; emit() },
+          id: `${id}-time`,
+          label: field.label ?? field.path.at(-1) ?? 'Time',
+          placeholder: productLocale(this.locale()) === 'zh-CN' ? '选择时间' : 'Select time',
+          value: selectedTime,
+          disabled: field.disabled,
+          clearable: false,
+          onChange: value => {
+            selectedTime = value ?? selectedTime
+            emit()
+          },
         })
         time.classList.add('cxf-time-select')
         root.append(date, time)
@@ -867,12 +1192,15 @@ export class HostFormAdapter {
     }
     if (primitive === 'time-picker') {
       const options: TDesignSelectOption<string>[] = []
-      for (let hour = 0; hour < 24; hour += 1) for (let minute = 0; minute < 60; minute += 15) {
-        const value = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
-        options.push({ label: value, value })
+      for (let hour = 0; hour < 24; hour += 1) {
+        for (let minute = 0; minute < 60; minute += 15) {
+          const value = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+          options.push({ label: value, value })
+        }
       }
       const time = createTDesignSelect(this.document, this.portalHost, options, {
-        id, label: field.label ?? field.path.at(-1) ?? 'Time',
+        id,
+        label: field.label ?? field.path.at(-1) ?? 'Time',
         placeholder: productLocale(this.locale()) === 'zh-CN' ? '选择时间' : 'Select time',
         value: typeof field.value === 'string' ? field.value : undefined,
         disabled: field.disabled,
@@ -909,7 +1237,10 @@ export class HostFormAdapter {
         onDraft(next, validateHostFormValue(field, next, this.locale()))
       })
       setTDesignProps(hex, {
-        value: current, defaultValue: current, disabled: field.disabled, placeholder: '#RRGGBB',
+        value: current,
+        defaultValue: current,
+        disabled: field.disabled,
+        placeholder: '#RRGGBB',
         onChange: (next: string) => {
           const normalized = next.trim().toUpperCase()
           if (/^#[\dA-F]{6}$/u.test(normalized)) picker.value = normalized
@@ -1023,12 +1354,23 @@ export class HostFormAdapter {
         onDraft(resolved, validateHostFormValue(field, resolved, this.locale()))
       }
       setTDesignProps(slider, {
-        value, defaultValue: value, min: field.min ?? 0, max: field.max ?? 100, step: field.step ?? 1, disabled: field.disabled,
-        label: true, tooltipProps: { placement: 'top' },
+        value,
+        defaultValue: value,
+        min: field.min ?? 0,
+        max: field.max ?? 100,
+        step: field.step ?? 1,
+        disabled: field.disabled,
+        label: true,
+        tooltipProps: { placement: 'top' },
         onChange: (next: number) => apply(next),
       })
       setTDesignProps(numeric, {
-        value, defaultValue: value, min: field.min, max: field.max, step: field.step, disabled: field.disabled,
+        value,
+        defaultValue: value,
+        min: field.min,
+        max: field.max,
+        step: field.step,
+        disabled: field.disabled,
         placeholder: managerCopy(this.locale(), 'form.text-placeholder'),
         onChange: (next: number | undefined) => apply(next),
       })
@@ -1036,9 +1378,11 @@ export class HostFormAdapter {
       return { root, focusTarget: slider, primitive, ...(diagnostic === undefined ? {} : { diagnostic }) }
     }
     if (primitive === 'object-array') return this.objectArrayControl(field, id, onDraft)
-    const tag = primitive === 'textarea' || primitive === 'json-textarea' ? 't-textarea'
-      : primitive === 'number-input' ? 't-input-number'
-        : 't-input'
+    const tag = primitive === 'textarea' || primitive === 'json-textarea'
+      ? 't-textarea'
+      : primitive === 'number-input'
+      ? 't-input-number'
+      : 't-input'
     const input = createTDesignElement(this.document, tag, primitive)
     input.classList.toggle('cxf-textarea', primitive === 'textarea' || primitive === 'json-textarea')
     input.classList.toggle('cxf-json', primitive === 'json-textarea')
@@ -1073,7 +1417,8 @@ export class HostFormAdapter {
         value: initial,
         defaultValue: initial,
         disabled: field.disabled,
-        placeholder: options.placeholder ?? (primitive === 'path-input' ? '/absolute/path' : managerCopy(this.locale(), 'form.text-placeholder')),
+        placeholder: options.placeholder
+          ?? (primitive === 'path-input' ? '/absolute/path' : managerCopy(this.locale(), 'form.text-placeholder')),
         autosize: primitive === 'textarea' || primitive === 'json-textarea'
           ? { minRows: options.textareaRows ?? 4, maxRows: 12 }
           : undefined,
@@ -1087,7 +1432,10 @@ export class HostFormAdapter {
         root: input,
         focusTarget: input,
         primitive,
-        dispose: () => { disposeText(); disposeRows?.() },
+        dispose: () => {
+          disposeText()
+          disposeRows?.()
+        },
         ...(diagnostic === undefined ? {} : { diagnostic }),
       }
     }
@@ -1109,7 +1457,8 @@ export class HostFormAdapter {
     button.dataset.tone = options.tone ?? 'default'
     button.dataset.density = options.density ?? 'icon-label'
     if (options.action !== undefined) button.dataset.hostFormAction = options.action
-    const icon = options.icon ?? (options.action === 'save' ? 'host:save' : options.action === undefined ? undefined : 'host:reset')
+    const icon = options.icon
+      ?? (options.action === 'save' ? 'host:save' : options.action === undefined ? undefined : 'host:reset')
     if (icon !== undefined) {
       button.dataset.hostFormActionIcon = icon
       // The icon remains Host-owned and decorative. TDesign keeps the button

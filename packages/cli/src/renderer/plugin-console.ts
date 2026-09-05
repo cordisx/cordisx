@@ -19,7 +19,8 @@ const MAX_PREVIEW = 2048
 const MAX_STACK = 16384
 const MAX_DEPTH = 4
 const MAX_ITEMS = 64
-const SENSITIVE_KEY = /(?:^|[_-])(prompt|message|content|secret|credential|password|token|authorization|url|path|cwd)(?:$|[_-])/i
+const SENSITIVE_KEY =
+  /(?:^|[_-])(prompt|message|content|secret|credential|password|token|authorization|url|path|cwd)(?:$|[_-])/i
 
 declare const PRINCIPAL_TOKEN_BRAND: unique symbol
 /** Private launcher-issued capability. Object identity, not renderer fields, is authoritative. */
@@ -32,7 +33,9 @@ export interface PluginPrincipalRecord {
   readonly runtimeGeneration: string
 }
 
-interface MutablePrincipalRecord extends PluginPrincipalRecord { live: boolean }
+interface MutablePrincipalRecord extends PluginPrincipalRecord {
+  live: boolean
+}
 
 function identityKey(identity: CordisXPluginIdentity): string {
   return `${identity.source}\u0000${identity.id}`
@@ -55,24 +58,42 @@ function byteCount(value: string): number {
 }
 
 function safeTag(value: object): string {
-  try { return Object.prototype.toString.call(value) } catch { return '[unavailable]' }
+  try {
+    return Object.prototype.toString.call(value)
+  } catch {
+    return '[unavailable]'
+  }
 }
 
 function errorText(error: unknown): string {
-  try { return error instanceof Error ? error.message : String(error) } catch { return 'unavailable error' }
+  try {
+    return error instanceof Error ? error.message : String(error)
+  } catch {
+    return 'unavailable error'
+  }
 }
 
-function primitiveSnapshot(value: undefined | null | boolean | number | string | bigint | symbol): CordisXPluginConsoleValueSummaryV1 {
+function primitiveSnapshot(
+  value: undefined | null | boolean | number | string | bigint | symbol,
+): CordisXPluginConsoleValueSummaryV1 {
   if (value === undefined) return { type: 'undefined', preview: 'undefined' }
   if (value === null) return { type: 'null', preview: 'null', value: null }
   if (typeof value === 'string') {
     const preview = clamp(value, MAX_PREVIEW)
-    return { type: 'string', preview: preview.value, value: preview.value, byteCount: byteCount(value), ...(preview.truncated ? { truncated: true } : {}) }
+    return {
+      type: 'string',
+      preview: preview.value,
+      value: preview.value,
+      byteCount: byteCount(value),
+      ...(preview.truncated ? { truncated: true } : {}),
+    }
   }
   if (typeof value === 'bigint') return { type: 'bigint', preview: `${value}n`, value: value.toString() }
   if (typeof value === 'symbol') {
     let preview = 'Symbol()'
-    try { preview = String(value) } catch { /* safe fallback */ }
+    try {
+      preview = String(value)
+    } catch { /* safe fallback */ }
     return { type: 'symbol', preview }
   }
   const preview = String(value)
@@ -80,14 +101,20 @@ function primitiveSnapshot(value: undefined | null | boolean | number | string |
 }
 
 /** Snapshot hostile values without invoking getters. Capture must never affect plugin execution. */
-export function snapshotConsoleValue(value: unknown, seen: WeakSet<object> = new WeakSet(), depth = 0): CordisXPluginConsoleValueSummaryV1 {
+export function snapshotConsoleValue(
+  value: unknown,
+  seen: WeakSet<object> = new WeakSet(),
+  depth = 0,
+): CordisXPluginConsoleValueSummaryV1 {
   try {
     if (value === null || ['undefined', 'boolean', 'number', 'string', 'bigint', 'symbol'].includes(typeof value)) {
       return primitiveSnapshot(value as undefined | null | boolean | number | string | bigint | symbol)
     }
     if (typeof value === 'function') {
       let name = 'anonymous'
-      try { name = value.name || name } catch { /* safe fallback */ }
+      try {
+        name = value.name || name
+      } catch { /* safe fallback */ }
       return { type: 'function', preview: `[Function ${name}]`, name }
     }
     if (typeof value !== 'object') return { type: 'unavailable', preview: '[unavailable]' }
@@ -98,7 +125,9 @@ export function snapshotConsoleValue(value: unknown, seen: WeakSet<object> = new
       const message = clamp(value.message || '', MAX_PREVIEW).value
       const stack = typeof value.stack === 'string' ? clamp(value.stack, MAX_STACK) : undefined
       return {
-        type: 'error', name, preview: message === '' ? name : `${name}: ${message}`,
+        type: 'error',
+        name,
+        preview: message === '' ? name : `${name}: ${message}`,
         ...(stack === undefined ? {} : { stack: stack.value, ...(stack.truncated ? { truncated: true } : {}) }),
       }
     }
@@ -111,32 +140,55 @@ export function snapshotConsoleValue(value: unknown, seen: WeakSet<object> = new
       } catch { /* safe fallback */ }
       return { type: 'element', preview }
     }
-    if (depth >= MAX_DEPTH) return { type: Array.isArray(value) ? 'array' : 'object', preview: safeTag(value), truncated: true }
+    if (depth >= MAX_DEPTH) {
+      return { type: Array.isArray(value) ? 'array' : 'object', preview: safeTag(value), truncated: true }
+    }
     if (Array.isArray(value)) {
       const count = value.length
       const items: CordisXPluginConsoleValueSummaryV1[] = []
       for (let index = 0; index < Math.min(count, MAX_ITEMS); index += 1) {
         let descriptor: PropertyDescriptor | undefined
-        try { descriptor = Object.getOwnPropertyDescriptor(value, String(index)) } catch { /* unavailable proxy */ }
-        items.push(descriptor !== undefined && 'value' in descriptor
-          ? snapshotConsoleValue(descriptor.value, seen, depth + 1)
-          : { type: 'unavailable', preview: '[empty or accessor]' })
+        try {
+          descriptor = Object.getOwnPropertyDescriptor(value, String(index))
+        } catch { /* unavailable proxy */ }
+        items.push(
+          descriptor !== undefined && 'value' in descriptor
+            ? snapshotConsoleValue(descriptor.value, seen, depth + 1)
+            : { type: 'unavailable', preview: '[empty or accessor]' },
+        )
       }
-      return { type: 'array', preview: `Array(${count})`, items, itemCount: count, ...(count > MAX_ITEMS ? { truncated: true } : {}) }
+      return {
+        type: 'array',
+        preview: `Array(${count})`,
+        items,
+        itemCount: count,
+        ...(count > MAX_ITEMS ? { truncated: true } : {}),
+      }
     }
     let descriptors: PropertyDescriptorMap
-    try { descriptors = Object.getOwnPropertyDescriptors(value) } catch {
+    try {
+      descriptors = Object.getOwnPropertyDescriptors(value)
+    } catch {
       return { type: 'unavailable', preview: '[unavailable proxy]' }
     }
     const keys = Object.keys(descriptors)
     const entries = keys.slice(0, MAX_ITEMS).map(key => {
       const descriptor = descriptors[key]
       if (descriptor === undefined || !('value' in descriptor)) {
-        return { key: clamp(key, 512).value, value: { type: 'unavailable', preview: '[Getter/Setter]' } as CordisXPluginConsoleValueSummaryV1 }
+        return {
+          key: clamp(key, 512).value,
+          value: { type: 'unavailable', preview: '[Getter/Setter]' } as CordisXPluginConsoleValueSummaryV1,
+        }
       }
       return { key: clamp(key, 512).value, value: snapshotConsoleValue(descriptor.value, seen, depth + 1) }
     })
-    return { type: 'object', preview: safeTag(value), entries, itemCount: keys.length, ...(keys.length > MAX_ITEMS ? { truncated: true } : {}) }
+    return {
+      type: 'object',
+      preview: safeTag(value),
+      entries,
+      itemCount: keys.length,
+      ...(keys.length > MAX_ITEMS ? { truncated: true } : {}),
+    }
   } catch {
     return { type: 'unavailable', preview: '[unavailable]' }
   }
@@ -164,7 +216,9 @@ export function formatConsoleMessage(args: readonly CordisXPluginConsoleValueSum
       return formatToken(value, token)
     })
   }
-  if (used < args.length) message += `${message === '' ? '' : ' '}${args.slice(used).map(item => item.preview).join(' ')}`
+  if (used < args.length) {
+    message += `${message === '' ? '' : ' '}${args.slice(used).map(item => item.preview).join(' ')}`
+  }
   return clamp(message, MAX_MESSAGE).value
 }
 
@@ -177,28 +231,49 @@ function consumptionSummary(value: unknown): CordisXPluginConsoleConsumptionSumm
     if (typeof value !== 'object') return { type: typeof value }
     const descriptors = Object.getOwnPropertyDescriptors(value)
     const ok = descriptors.ok !== undefined && 'value' in descriptors.ok ? descriptors.ok.value : undefined
-    const projected = ok === true && descriptors.value !== undefined && 'value' in descriptors.value ? descriptors.value.value : value
+    const projected = ok === true && descriptors.value !== undefined && 'value' in descriptors.value
+      ? descriptors.value.value
+      : value
     if (projected === null || typeof projected !== 'object') return { type: typeof projected }
     const projectedDescriptors = Object.getOwnPropertyDescriptors(projected)
     const collection = ['models', 'sessions', 'events', 'items', 'turns', 'cancelled', 'retained']
-      .map(key => projectedDescriptors[key]).find(item => item !== undefined && 'value' in item && Array.isArray(item.value))
+      .map(key => projectedDescriptors[key]).find(item =>
+        item !== undefined && 'value' in item && Array.isArray(item.value)
+      )
     const keys = Object.keys(projectedDescriptors).filter(key => !SENSITIVE_KEY.test(key))
     return {
       type: 'object',
-      ...(collection === undefined || !('value' in collection) ? {} : { itemCount: (collection.value as unknown[]).length }),
+      ...(collection === undefined || !('value' in collection)
+        ? {}
+        : { itemCount: (collection.value as unknown[]).length }),
       ...(keys.length === 0 ? {} : { preview: clamp(keys.slice(0, 12).join(', '), 512).value }),
     }
-  } catch { return { type: 'unavailable' } }
+  } catch {
+    return { type: 'unavailable' }
+  }
 }
 
-function terminalFor(value: unknown): { readonly phase: 'success' | 'failure' | 'cancel'; readonly status: 'success' | 'failure' | 'cancelled'; readonly method: CordisXPluginConsoleMethod; readonly message: string } {
+function terminalFor(
+  value: unknown,
+): {
+  readonly phase: 'success' | 'failure' | 'cancel'
+  readonly status: 'success' | 'failure' | 'cancelled'
+  readonly method: CordisXPluginConsoleMethod
+  readonly message: string
+} {
   if (value !== null && typeof value === 'object') {
     try {
       const descriptors = Object.getOwnPropertyDescriptors(value)
       if (descriptors.ok !== undefined && 'value' in descriptors.ok && descriptors.ok.value === false) {
-        const error = descriptors.error !== undefined && 'value' in descriptors.error ? descriptors.error.value : undefined
-        const code = error !== null && typeof error === 'object' ? Object.getOwnPropertyDescriptor(error, 'code')?.value : undefined
-        if (code === 'interrupted') return { phase: 'cancel', status: 'cancelled', method: 'warn', message: 'Call cancelled' }
+        const error = descriptors.error !== undefined && 'value' in descriptors.error
+          ? descriptors.error.value
+          : undefined
+        const code = error !== null && typeof error === 'object'
+          ? Object.getOwnPropertyDescriptor(error, 'code')?.value
+          : undefined
+        if (code === 'interrupted') {
+          return { phase: 'cancel', status: 'cancelled', method: 'warn', message: 'Call cancelled' }
+        }
         return { phase: 'failure', status: 'failure', method: 'error', message: 'Call failed' }
       }
     } catch { /* success is based only on a real Host result */ }
@@ -211,7 +286,12 @@ export class PluginPrincipalRegistry {
 
   issue(identity: CordisXPluginIdentity, pluginGeneration: string, runtimeGeneration: string): PluginPrincipalToken {
     const token = Object.freeze(Object.create(null)) as PluginPrincipalToken
-    this.records.set(token, { identity: Object.freeze({ source: identity.source, id: identity.id }), pluginGeneration, runtimeGeneration, live: true })
+    this.records.set(token, {
+      identity: Object.freeze({ source: identity.source, id: identity.id }),
+      pluginGeneration,
+      runtimeGeneration,
+      live: true,
+    })
     return token
   }
 
@@ -222,7 +302,10 @@ export class PluginPrincipalRegistry {
   require(token: PluginPrincipalToken | undefined, runtimeGeneration?: string): PluginPrincipalRecord {
     if (token === undefined) throw new Error('CordisX capability requires a Host-issued plugin principal')
     const record = this.records.get(token)
-    if (record === undefined || !record.live || runtimeGeneration !== undefined && record.runtimeGeneration !== runtimeGeneration) {
+    if (
+      record === undefined || !record.live
+      || runtimeGeneration !== undefined && record.runtimeGeneration !== runtimeGeneration
+    ) {
       throw new Error('CordisX plugin principal is stale or invalid')
     }
     return record
@@ -234,7 +317,10 @@ export class PluginPrincipalRegistry {
   }
 }
 
-export interface PluginConsoleInvocation { dispatch(message?: string): void; readonly correlationId: string }
+export interface PluginConsoleInvocation {
+  dispatch(message?: string): void
+  readonly correlationId: string
+}
 export interface PluginConsolePendingInvocation {
   readonly correlationId: string
   permission(source: string, phase: 'ask' | 'allow' | 'deny', message: string): void
@@ -244,7 +330,12 @@ export interface PluginConsolePendingInvocation {
   cancel(reason?: unknown): void
 }
 export interface PluginConsolePermissionObserver {
-  permission(identity: CordisXPluginIdentity, capability: CordisXPermissionCapabilityV4, phase: 'ask' | 'allow' | 'deny', message: string): void
+  permission(
+    identity: CordisXPluginIdentity,
+    capability: CordisXPermissionCapabilityV4,
+    phase: 'ask' | 'allow' | 'deny',
+    message: string,
+  ): void
 }
 
 interface EntryDraft {
@@ -308,7 +399,8 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
     this.assertLive()
     const token = this.principals.issue(identity, pluginGeneration, this.generation)
     const key = identityKey(identity)
-    const owner = this.owners.get(key) ?? { identity: Object.freeze({ ...identity }), entries: [], generation: pluginGeneration, dropped: 0 }
+    const owner = this.owners.get(key)
+      ?? { identity: Object.freeze({ ...identity }), entries: [], generation: pluginGeneration, dropped: 0 }
     owner.generation = pluginGeneration
     this.owners.set(key, owner)
     return token
@@ -325,16 +417,33 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
     })
   }
 
-  lifecycle(token: PluginPrincipalToken, phase: 'activate' | 'dispose' | 'reload', message: string, method: CordisXPluginConsoleMethod = 'info'): void {
+  lifecycle(
+    token: PluginPrincipalToken,
+    phase: 'activate' | 'dispose' | 'reload',
+    message: string,
+    method: CordisXPluginConsoleMethod = 'info',
+  ): void {
     const record = this.principals.require(token, this.generation)
-    this.append(record, { coverage: 'host-mediated', kind: 'lifecycle', method, source: `plugin.${phase}`, message, phase, trigger: { kind: 'lifecycle' } })
+    this.append(record, {
+      coverage: 'host-mediated',
+      kind: 'lifecycle',
+      method,
+      source: `plugin.${phase}`,
+      message,
+      phase,
+      trigger: { kind: 'lifecycle' },
+    })
   }
 
   diagnostic(token: PluginPrincipalToken, source: string, message: string, error?: unknown): void {
     const record = this.principals.require(token, this.generation)
     const snapshot = snapshotConsoleValue(error)
     this.append(record, {
-      coverage: 'host-mediated', kind: 'diagnostic', method: 'error', source, message,
+      coverage: 'host-mediated',
+      kind: 'diagnostic',
+      method: 'error',
+      source,
+      message,
       ...(error === undefined ? {} : { args: [snapshot] }),
       ...(snapshot.stack === undefined ? {} : { stack: snapshot.stack }),
     })
@@ -347,8 +456,12 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
     this.principals.revoke(token)
   }
 
-  owner(token: PluginPrincipalToken): CordisXPluginIdentity { return this.principal(token).identity }
-  tokenFromContext(ctx: Context): PluginPrincipalToken | undefined { return this.principals.fromContext(ctx) }
+  owner(token: PluginPrincipalToken): CordisXPluginIdentity {
+    return this.principal(token).identity
+  }
+  tokenFromContext(ctx: Context): PluginPrincipalToken | undefined {
+    return this.principals.fromContext(ctx)
+  }
 
   async run<Value>(
     token: PluginPrincipalToken,
@@ -367,10 +480,19 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
     const started = this.now()
     let dispatched = false
     this.append(record, {
-      coverage: 'host-mediated', kind: 'invocation', method: 'info', source, message: 'Call requested',
-      phase: 'requested', status: 'pending', correlationId, request: consumptionSummary(request),
+      coverage: 'host-mediated',
+      kind: 'invocation',
+      method: 'info',
+      source,
+      message: 'Call requested',
+      phase: 'requested',
+      status: 'pending',
+      correlationId,
+      request: consumptionSummary(request),
       trigger: context.trigger ?? { kind: 'capability' },
-      ...(context.effectiveOwner === undefined ? {} : { effectiveOwner: { source: context.effectiveOwner.source, pluginId: context.effectiveOwner.id } }),
+      ...(context.effectiveOwner === undefined
+        ? {}
+        : { effectiveOwner: { source: context.effectiveOwner.source, pluginId: context.effectiveOwner.id } }),
       ...(context.sessionId === undefined ? {} : { sessionId: context.sessionId }),
       ...(context.invocationKey === undefined ? {} : { context: { invocationKey: context.invocationKey } }),
     })
@@ -378,39 +500,72 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
       if (dispatched) return
       dispatched = true
       this.append(record, {
-        coverage: 'host-mediated', kind: 'invocation', method: 'debug', source, message,
-        phase: 'dispatch', status: 'pending', correlationId, trigger: context.trigger ?? { kind: 'capability' },
-        ...(context.effectiveOwner === undefined ? {} : { effectiveOwner: { source: context.effectiveOwner.source, pluginId: context.effectiveOwner.id } }),
+        coverage: 'host-mediated',
+        kind: 'invocation',
+        method: 'debug',
+        source,
+        message,
+        phase: 'dispatch',
+        status: 'pending',
+        correlationId,
+        trigger: context.trigger ?? { kind: 'capability' },
+        ...(context.effectiveOwner === undefined
+          ? {}
+          : { effectiveOwner: { source: context.effectiveOwner.source, pluginId: context.effectiveOwner.id } }),
       })
     }
-    return await this.runInPluginContext(token, { correlationId, trigger: context.trigger ?? { kind: 'capability' } }, async () => {
-      try {
-        const value = await operation({ correlationId, dispatch })
-        if (!dispatched) dispatch('Dispatched to local Host service')
-        const terminal = terminalFor(value)
-        this.append(record, {
-          coverage: 'host-mediated', kind: 'invocation', method: terminal.method, source, message: terminal.message,
-          phase: terminal.phase, status: terminal.status, correlationId, durationMs: Math.max(0, this.now() - started),
-          result: consumptionSummary(value), trigger: context.trigger ?? { kind: 'capability' },
-          ...(context.effectiveOwner === undefined ? {} : { effectiveOwner: { source: context.effectiveOwner.source, pluginId: context.effectiveOwner.id } }),
-        })
-        return value
-      } catch (error) {
-        if (!dispatched) dispatch('Dispatched to local Host service')
-        const cancelled = typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError'
-        const snapshot = snapshotConsoleValue(error)
-        this.append(record, {
-          coverage: 'host-mediated', kind: 'invocation', method: cancelled ? 'warn' : 'error', source,
-          message: cancelled ? 'Call cancelled' : `Call failed: ${errorText(error)}`,
-          phase: cancelled ? 'cancel' : 'failure', status: cancelled ? 'cancelled' : 'failure', correlationId,
-          durationMs: Math.max(0, this.now() - started), result: { type: cancelled ? 'cancelled' : 'error' },
-          args: [snapshot], trigger: context.trigger ?? { kind: 'capability' },
-          ...(snapshot.stack === undefined ? {} : { stack: snapshot.stack }),
-          ...(context.effectiveOwner === undefined ? {} : { effectiveOwner: { source: context.effectiveOwner.source, pluginId: context.effectiveOwner.id } }),
-        })
-        throw error
-      }
-    })
+    return await this.runInPluginContext(
+      token,
+      { correlationId, trigger: context.trigger ?? { kind: 'capability' } },
+      async () => {
+        try {
+          const value = await operation({ correlationId, dispatch })
+          if (!dispatched) dispatch('Dispatched to local Host service')
+          const terminal = terminalFor(value)
+          this.append(record, {
+            coverage: 'host-mediated',
+            kind: 'invocation',
+            method: terminal.method,
+            source,
+            message: terminal.message,
+            phase: terminal.phase,
+            status: terminal.status,
+            correlationId,
+            durationMs: Math.max(0, this.now() - started),
+            result: consumptionSummary(value),
+            trigger: context.trigger ?? { kind: 'capability' },
+            ...(context.effectiveOwner === undefined
+              ? {}
+              : { effectiveOwner: { source: context.effectiveOwner.source, pluginId: context.effectiveOwner.id } }),
+          })
+          return value
+        } catch (error) {
+          if (!dispatched) dispatch('Dispatched to local Host service')
+          const cancelled = typeof DOMException !== 'undefined' && error instanceof DOMException
+            && error.name === 'AbortError'
+          const snapshot = snapshotConsoleValue(error)
+          this.append(record, {
+            coverage: 'host-mediated',
+            kind: 'invocation',
+            method: cancelled ? 'warn' : 'error',
+            source,
+            message: cancelled ? 'Call cancelled' : `Call failed: ${errorText(error)}`,
+            phase: cancelled ? 'cancel' : 'failure',
+            status: cancelled ? 'cancelled' : 'failure',
+            correlationId,
+            durationMs: Math.max(0, this.now() - started),
+            result: { type: cancelled ? 'cancelled' : 'error' },
+            args: [snapshot],
+            trigger: context.trigger ?? { kind: 'capability' },
+            ...(snapshot.stack === undefined ? {} : { stack: snapshot.stack }),
+            ...(context.effectiveOwner === undefined
+              ? {}
+              : { effectiveOwner: { source: context.effectiveOwner.source, pluginId: context.effectiveOwner.id } }),
+          })
+          throw error
+        }
+      },
+    )
   }
 
   runSync<Value>(token: PluginPrincipalToken, source: string, request: unknown, operation: () => Value): Value {
@@ -435,12 +590,27 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
     const correlationId = `cxcall:${encodeURIComponent(this.generation)}:${this.nextCall++}`
     const started = this.now()
     this.append(record, {
-      coverage: 'host-mediated', kind: 'invocation', method: 'info', source, message: 'Call requested',
-      phase: 'requested', status: 'pending', correlationId, request: consumptionSummary(request), trigger: { kind: 'capability' },
+      coverage: 'host-mediated',
+      kind: 'invocation',
+      method: 'info',
+      source,
+      message: 'Call requested',
+      phase: 'requested',
+      status: 'pending',
+      correlationId,
+      request: consumptionSummary(request),
+      trigger: { kind: 'capability' },
     })
     this.append(record, {
-      coverage: 'host-mediated', kind: 'invocation', method: 'debug', source, message: 'Dispatched to local Host service',
-      phase: 'dispatch', status: 'pending', correlationId, trigger: { kind: 'capability' },
+      coverage: 'host-mediated',
+      kind: 'invocation',
+      method: 'debug',
+      source,
+      message: 'Dispatched to local Host service',
+      phase: 'dispatch',
+      status: 'pending',
+      correlationId,
+      trigger: { kind: 'capability' },
     })
     try {
       const value = retiring
@@ -450,17 +620,34 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
         throw new Error('CordisX synchronous capability returned a Promise')
       }
       this.append(record, {
-        coverage: 'host-mediated', kind: 'invocation', method: 'info', source, message: 'Call succeeded',
-        phase: 'success', status: 'success', correlationId, durationMs: Math.max(0, this.now() - started),
-        result: consumptionSummary(value), trigger: { kind: 'capability' },
+        coverage: 'host-mediated',
+        kind: 'invocation',
+        method: 'info',
+        source,
+        message: 'Call succeeded',
+        phase: 'success',
+        status: 'success',
+        correlationId,
+        durationMs: Math.max(0, this.now() - started),
+        result: consumptionSummary(value),
+        trigger: { kind: 'capability' },
       })
       return value as Value
     } catch (error) {
       const snapshot = snapshotConsoleValue(error)
       this.append(record, {
-        coverage: 'host-mediated', kind: 'invocation', method: 'error', source, message: `Call failed: ${errorText(error)}`,
-        phase: 'failure', status: 'failure', correlationId, durationMs: Math.max(0, this.now() - started),
-        result: { type: 'error' }, args: [snapshot], trigger: { kind: 'capability' },
+        coverage: 'host-mediated',
+        kind: 'invocation',
+        method: 'error',
+        source,
+        message: `Call failed: ${errorText(error)}`,
+        phase: 'failure',
+        status: 'failure',
+        correlationId,
+        durationMs: Math.max(0, this.now() - started),
+        result: { type: 'error' },
+        args: [snapshot],
+        trigger: { kind: 'capability' },
         ...(snapshot.stack === undefined ? {} : { stack: snapshot.stack }),
       })
       throw error
@@ -480,8 +667,16 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
     let terminal = false
     const trigger = context.trigger ?? { kind: 'capability' as const }
     this.append(record, {
-      coverage: 'host-mediated', kind: 'invocation', method: 'info', source, message: 'Call requested',
-      phase: 'requested', status: 'pending', correlationId, request: consumptionSummary(request), trigger,
+      coverage: 'host-mediated',
+      kind: 'invocation',
+      method: 'info',
+      source,
+      message: 'Call requested',
+      phase: 'requested',
+      status: 'pending',
+      correlationId,
+      request: consumptionSummary(request),
+      trigger,
       ...(context.sessionId === undefined ? {} : { sessionId: context.sessionId }),
     })
     const finish = (phase: 'success' | 'failure' | 'cancel', value?: unknown): void => {
@@ -489,11 +684,20 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
       terminal = true
       const snapshot = phase === 'success' ? undefined : snapshotConsoleValue(value)
       this.append(record, {
-        coverage: 'host-mediated', kind: 'invocation', method: phase === 'success' ? 'info' : phase === 'cancel' ? 'warn' : 'error',
-        source, message: phase === 'success' ? 'Call succeeded' : phase === 'cancel' ? 'Call cancelled' : 'Call failed',
-        phase, status: phase === 'success' ? 'success' : phase === 'cancel' ? 'cancelled' : 'failure', correlationId,
-        durationMs: Math.max(0, this.now() - started), result: consumptionSummary(value), trigger,
-        ...(snapshot === undefined ? {} : { args: [snapshot], ...(snapshot.stack === undefined ? {} : { stack: snapshot.stack }) }),
+        coverage: 'host-mediated',
+        kind: 'invocation',
+        method: phase === 'success' ? 'info' : phase === 'cancel' ? 'warn' : 'error',
+        source,
+        message: phase === 'success' ? 'Call succeeded' : phase === 'cancel' ? 'Call cancelled' : 'Call failed',
+        phase,
+        status: phase === 'success' ? 'success' : phase === 'cancel' ? 'cancelled' : 'failure',
+        correlationId,
+        durationMs: Math.max(0, this.now() - started),
+        result: consumptionSummary(value),
+        trigger,
+        ...(snapshot === undefined
+          ? {}
+          : { args: [snapshot], ...(snapshot.stack === undefined ? {} : { stack: snapshot.stack }) }),
       })
     }
     return Object.freeze({
@@ -501,16 +705,30 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
       permission: (permissionSource: string, phase: 'ask' | 'allow' | 'deny', message: string) => {
         if (terminal) return
         this.append(record, {
-          coverage: 'host-mediated', kind: 'permission', method: phase === 'deny' ? 'warn' : 'info', source: permissionSource,
-          message, phase, status: phase === 'deny' ? 'denied' : 'pending', correlationId, trigger,
+          coverage: 'host-mediated',
+          kind: 'permission',
+          method: phase === 'deny' ? 'warn' : 'info',
+          source: permissionSource,
+          message,
+          phase,
+          status: phase === 'deny' ? 'denied' : 'pending',
+          correlationId,
+          trigger,
         })
       },
       dispatch: (message = 'Dispatched to Host boundary') => {
         if (terminal || dispatched) return
         dispatched = true
         this.append(record, {
-          coverage: 'host-mediated', kind: 'invocation', method: 'debug', source, message,
-          phase: 'dispatch', status: 'pending', correlationId, trigger,
+          coverage: 'host-mediated',
+          kind: 'invocation',
+          method: 'debug',
+          source,
+          message,
+          phase: 'dispatch',
+          status: 'pending',
+          correlationId,
+          trigger,
         })
       },
       success: (value?: unknown) => finish('success', value),
@@ -542,21 +760,44 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
       }
       release()
       return value
-    } catch (error) { release(); throw error }
+    } catch (error) {
+      release()
+      throw error
+    }
   }
 
-  wrapCallback<Args extends readonly unknown[], Value>(token: PluginPrincipalToken, registrationId: string, callback: (...args: Args) => Value | Promise<Value>): (...args: Args) => Value | Promise<Value> {
-    return (...args) => this.runInPluginContext(token, { trigger: { kind: 'registration', registrationId } }, () => callback(...args))
+  wrapCallback<Args extends readonly unknown[], Value>(
+    token: PluginPrincipalToken,
+    registrationId: string,
+    callback: (...args: Args) => Value | Promise<Value>,
+  ): (...args: Args) => Value | Promise<Value> {
+    return (...args) =>
+      this.runInPluginContext(token, { trigger: { kind: 'registration', registrationId } }, () => callback(...args))
   }
 
-  permission(identity: CordisXPluginIdentity, capability: CordisXPermissionCapabilityV4, phase: 'ask' | 'allow' | 'deny', message: string): void {
+  permission(
+    identity: CordisXPluginIdentity,
+    capability: CordisXPermissionCapabilityV4,
+    phase: 'ask' | 'allow' | 'deny',
+    message: string,
+  ): void {
     const frame = this.current(identity)
     if (frame?.correlationId === undefined) return
     let record: PluginPrincipalRecord
-    try { record = this.principal(frame.token) } catch { return }
+    try {
+      record = this.principal(frame.token)
+    } catch {
+      return
+    }
     this.append(record, {
-      coverage: 'host-mediated', kind: 'permission', method: phase === 'deny' ? 'warn' : 'info', source: capability,
-      message, phase, status: phase === 'deny' ? 'denied' : 'pending', correlationId: frame.correlationId,
+      coverage: 'host-mediated',
+      kind: 'permission',
+      method: phase === 'deny' ? 'warn' : 'info',
+      source: capability,
+      message,
+      phase,
+      status: phase === 'deny' ? 'denied' : 'pending',
+      correlationId: frame.correlationId,
       trigger: frame.trigger ?? { kind: 'capability' },
     })
   }
@@ -564,11 +805,15 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
   query(identity: CordisXPluginIdentity): CordisXPluginConsolePageV1 {
     const owner = this.owners.get(identityKey(identity))
     const activeGeneration = this.generationAuthority?.activeModuleGeneration(identity.id)
-    const entries = owner?.entries.filter(entry => activeGeneration === undefined || entry.generation === activeGeneration) ?? []
+    const entries =
+      owner?.entries.filter(entry => activeGeneration === undefined || entry.generation === activeGeneration) ?? []
     return Object.freeze({
-      contract: 'cordisx.plugin-console-page/v1', schemaVersion: 1,
+      contract: 'cordisx.plugin-console-page/v1',
+      schemaVersion: 1,
       plugin: Object.freeze({ source: identity.source, pluginId: identity.id }),
-      generation: activeGeneration ?? owner?.generation ?? this.generation, generatedAt: this.now(), partialObservability: true,
+      generation: activeGeneration ?? owner?.generation ?? this.generation,
+      generatedAt: this.now(),
+      partialObservability: true,
       ...(owner === undefined || owner.dropped === 0 ? {} : { droppedEntries: owner.dropped }),
       ...(this.unattributed === 0 ? {} : { unattributedEntries: this.unattributed }),
       entries: Object.freeze([...entries]),
@@ -580,7 +825,11 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
     if (owner === undefined) return
     const activeGeneration = this.generationAuthority?.activeModuleGeneration(identity.id)
     if (activeGeneration === undefined) owner.entries.length = 0
-    else owner.entries.splice(0, owner.entries.length, ...owner.entries.filter(entry => entry.generation !== activeGeneration))
+    else {owner.entries.splice(
+        0,
+        owner.entries.length,
+        ...owner.entries.filter(entry => entry.generation !== activeGeneration),
+      )}
     owner.dropped = 0
     this.notify(identity.id)
   }
@@ -606,11 +855,20 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
   recordBestEffortError(token: PluginPrincipalToken, source: string, error: unknown): void {
     if (this.disposed) return
     let record: PluginPrincipalRecord
-    try { record = this.principal(token) } catch { return }
+    try {
+      record = this.principal(token)
+    } catch {
+      return
+    }
     const snapshot = snapshotConsoleValue(error)
     this.append(record, {
-      coverage: 'best-effort', kind: 'diagnostic', method: 'error', source,
-      message: errorText(error), args: [snapshot], trigger: { kind: 'error-boundary' },
+      coverage: 'best-effort',
+      kind: 'diagnostic',
+      method: 'error',
+      source,
+      message: errorText(error),
+      args: [snapshot],
+      trigger: { kind: 'error-boundary' },
       ...(snapshot.stack === undefined ? {} : { stack: snapshot.stack }),
     })
   }
@@ -625,13 +883,21 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
 
   private console(token: PluginPrincipalToken, method: CordisXPluginConsoleMethod, rawArgs: readonly unknown[]): void {
     let record: PluginPrincipalRecord
-    try { record = this.principal(token) } catch { return }
+    try {
+      record = this.principal(token)
+    } catch {
+      return
+    }
     const args = rawArgs.map(item => snapshotConsoleValue(item))
     const frame = this.current(record.identity)
     const error = args.find(item => item.type === 'error')
     this.append(record, {
-      coverage: 'scoped-console', kind: 'console', method, source: `console.${method}`,
-      message: formatConsoleMessage(args), args,
+      coverage: 'scoped-console',
+      kind: 'console',
+      method,
+      source: `console.${method}`,
+      message: formatConsoleMessage(args),
+      args,
       ...(frame?.correlationId === undefined ? {} : { correlationId: frame.correlationId }),
       ...(frame?.trigger === undefined ? {} : { trigger: frame.trigger }),
       ...(error?.stack === undefined ? {} : { stack: error.stack }),
@@ -644,14 +910,24 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
     if (owner === undefined) return
     const seq = this.nextEntry++
     owner.entries.push(Object.freeze({
-      contract: 'cordisx.plugin-console-entry/v1', schemaVersion: 1,
-      entryId: `cxconsole:${encodeURIComponent(this.generation)}:${seq}`, seq, time: this.now(),
+      contract: 'cordisx.plugin-console-entry/v1',
+      schemaVersion: 1,
+      entryId: `cxconsole:${encodeURIComponent(this.generation)}:${seq}`,
+      seq,
+      time: this.now(),
       plugin: Object.freeze({ source: record.identity.source, pluginId: record.identity.id }),
-      generation: record.pluginGeneration, args: Object.freeze([...(draft.args ?? [])]), ...draft,
+      generation: record.pluginGeneration,
+      args: Object.freeze([...(draft.args ?? [])]),
+      ...draft,
     }) as CordisXPluginConsoleEntryV1)
-    while (owner.entries.length > this.maxEntriesPerPlugin) { owner.entries.shift(); owner.dropped += 1 }
-    if (this.generationAuthority?.activeModuleGeneration(record.identity.id) === record.pluginGeneration
-      || this.generationAuthority === undefined) this.notify(record.identity.id)
+    while (owner.entries.length > this.maxEntriesPerPlugin) {
+      owner.entries.shift()
+      owner.dropped += 1
+    }
+    if (
+      this.generationAuthority?.activeModuleGeneration(record.identity.id) === record.pluginGeneration
+      || this.generationAuthority === undefined
+    ) this.notify(record.identity.id)
   }
 
   private current(identity: CordisXPluginIdentity): ExecutionFrame | undefined {
@@ -661,13 +937,19 @@ export class PluginConsoleAspect implements PluginConsolePermissionObserver {
 
   private principal(token: PluginPrincipalToken | undefined): PluginPrincipalRecord {
     const record = this.principals.require(token, this.generation)
-    if (this.generationAuthority !== undefined
-      && !this.generationAuthority.callableGeneration(record.identity.id, record.pluginGeneration)) {
+    if (
+      this.generationAuthority !== undefined
+      && !this.generationAuthority.callableGeneration(record.identity.id, record.pluginGeneration)
+    ) {
       throw new Error('CordisX plugin principal generation is stale')
     }
     return record
   }
 
-  private notify(pluginId: string): void { for (const listener of this.listeners) listener(pluginId) }
-  private assertLive(): void { if (this.disposed) throw new Error('Plugin Console aspect is disposed') }
+  private notify(pluginId: string): void {
+    for (const listener of this.listeners) listener(pluginId)
+  }
+  private assertLive(): void {
+    if (this.disposed) throw new Error('Plugin Console aspect is disposed')
+  }
 }

@@ -143,14 +143,14 @@ second app-server, or renderer filesystem fallback is created.
 
 ## Validation matrix
 
-| Layer | Required evidence |
-| --- | --- |
-| Contract | valid/invalid page, max 500, scope, policy clamp, provenance, no path/provider/delivery leakage |
-| Resolver | active/archive, exact identity, profile separation, symlink/traversal refusal, movement |
-| Parser | old/current fixtures, session/turn/message/tool/timing/compaction, native-id preference |
-| Robustness | corrupt middle/tail, partial/oversized line, truncation/replacement, multi-GB sparse paging |
-| Privacy | secret fixtures, all payload policies, diagnostic/cache/binding no-content assertions |
-| Paging/tail | restart stability, duplicate import, 500 boundary, append, invalid/stale/cross-scope cursor |
-| Lifecycle | A/B switch, allow/ask/deny/timeout, block/restore, generation/fiber dispose |
-| Consumer | one store seam, historical/live/fixture origin, overlap dedupe, stable ordering, coverage UI |
+| Layer         | Required evidence                                                                                                |
+| ------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Contract      | valid/invalid page, max 500, scope, policy clamp, provenance, no path/provider/delivery leakage                  |
+| Resolver      | active/archive, exact identity, profile separation, symlink/traversal refusal, movement                          |
+| Parser        | old/current fixtures, session/turn/message/tool/timing/compaction, native-id preference                          |
+| Robustness    | corrupt middle/tail, partial/oversized line, truncation/replacement, multi-GB sparse paging                      |
+| Privacy       | secret fixtures, all payload policies, diagnostic/cache/binding no-content assertions                            |
+| Paging/tail   | restart stability, duplicate import, 500 boundary, append, invalid/stale/cross-scope cursor                      |
+| Lifecycle     | A/B switch, allow/ask/deny/timeout, block/restore, generation/fiber dispose                                      |
+| Consumer      | one store seam, historical/live/fixture origin, overlap dedupe, stable ordering, coverage UI                     |
 | Real renderer | selected old session metadata-safe projection, current app route/header/DOM/URL preservation, report/screenshots |

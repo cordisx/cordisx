@@ -92,15 +92,25 @@ export class CordisXAgentHistoryService extends Service implements CordisXAgentH
     const console = serviceOptions(this).console
     const token = console?.tokenFromContext(this.ctx)
     return token === undefined || console === undefined ? await this.queryBound(input) : await console.run(
-      token, 'agentHistory.query', input, invocation => this.queryBound(input, token, invocation), { sessionId: input.sessionId },
+      token,
+      'agentHistory.query',
+      input,
+      invocation => this.queryBound(input, token, invocation),
+      { sessionId: input.sessionId },
     )
   }
 
-  private async queryBound(input: CordisXAgentHistoryQuery, token?: PluginPrincipalToken, invocation?: { dispatch(message?: string): void }): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>> {
+  private async queryBound(
+    input: CordisXAgentHistoryQuery,
+    token?: PluginPrincipalToken,
+    invocation?: { dispatch(message?: string): void },
+  ): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>> {
     const caller = token === undefined ? identity(this.ctx) : serviceOptions(this).console?.owner(token)
     if (caller === undefined) return failure('permission-denied', 'Agent history requires a plugin context')
     if (!validQuery(input)) return failure('invalid-request', 'Agent history query is invalid')
-    const grant = await serviceOptions(this).broker.authorize(caller, 'agent.history.read', { agentSessionId: input.sessionId })
+    const grant = await serviceOptions(this).broker.authorize(caller, 'agent.history.read', {
+      agentSessionId: input.sessionId,
+    })
     if (!grant.ok) return grant
     invocation?.dispatch('Dispatched to Host history store')
     return await serviceOptions(this).adapter.query(input, {
@@ -113,15 +123,25 @@ export class CordisXAgentHistoryService extends Service implements CordisXAgentH
     const console = serviceOptions(this).console
     const token = console?.tokenFromContext(this.ctx)
     return token === undefined || console === undefined ? await this.tailBound(input) : await console.run(
-      token, 'agentHistory.tail', input, invocation => this.tailBound(input, token, invocation), { sessionId: input.sessionId },
+      token,
+      'agentHistory.tail',
+      input,
+      invocation => this.tailBound(input, token, invocation),
+      { sessionId: input.sessionId },
     )
   }
 
-  private async tailBound(input: CordisXAgentHistoryTailQuery, token?: PluginPrincipalToken, invocation?: { dispatch(message?: string): void }): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>> {
+  private async tailBound(
+    input: CordisXAgentHistoryTailQuery,
+    token?: PluginPrincipalToken,
+    invocation?: { dispatch(message?: string): void },
+  ): Promise<CordisXPlatformResult<CordisXAgentHistoryPage>> {
     const caller = token === undefined ? identity(this.ctx) : serviceOptions(this).console?.owner(token)
     if (caller === undefined) return failure('permission-denied', 'Agent history requires a plugin context')
     if (!validTail(input)) return failure('invalid-request', 'Agent history tail query is invalid')
-    const grant = await serviceOptions(this).broker.authorize(caller, 'agent.history.read', { agentSessionId: input.sessionId })
+    const grant = await serviceOptions(this).broker.authorize(caller, 'agent.history.read', {
+      agentSessionId: input.sessionId,
+    })
     if (!grant.ok) return grant
     invocation?.dispatch('Dispatched to Host history store')
     return await serviceOptions(this).adapter.tail(input, {

@@ -1,23 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { constants, watchFile, unwatchFile, type Stats } from 'node:fs'
-import {
-  chmod,
-  lstat,
-  mkdir,
-  open,
-  rename,
-  unlink,
-} from 'node:fs/promises'
+import { constants, type Stats, unwatchFile, watchFile } from 'node:fs'
+import { chmod, lstat, mkdir, open, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
-import {
-  loadHomeConfig,
-  type HomeConfigMarketplaceTrustSource,
-} from '../config/home-config.js'
-import {
-  canonicalPluginSource,
-  marketplacePluginIdentity,
-  parseMarketplaceFeed,
-} from '../renderer/marketplace.js'
+import { type HomeConfigMarketplaceTrustSource, loadHomeConfig } from '../config/home-config.js'
+import { canonicalPluginSource, marketplacePluginIdentity, parseMarketplaceFeed } from '../renderer/marketplace.js'
 import type { MarketplaceCertifiedPermissionProjectionV1 } from '../renderer/marketplace-trust.js'
 import { fetchMarketplaceFeed, type MarketplaceFetchResult } from './marketplace.js'
 
@@ -35,7 +21,8 @@ const MAX_REQUEST_TIMEOUT_MS = 30_000
 const CONFIG_WATCH_INTERVAL_MS = 250
 const PROFILE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
-const SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+const SEMVER =
+  /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
 const INTEGRITY = /^sha256:[a-f0-9]{64}$/
 
 export interface MarketplaceCertifiedArtifactIdentity {
@@ -125,9 +112,15 @@ function parseExactIdentity(value: unknown): MarketplaceCertifiedArtifactIdentit
   if (typeof identity.source !== 'string') throw new Error('Marketplace Certified artifact identity.source is invalid')
   const source = canonicalPluginSource(identity.source)
   if (source !== identity.source) throw new Error('Marketplace Certified artifact identity.source must be canonical')
-  if (typeof identity.pluginId !== 'string' || !PLUGIN_ID.test(identity.pluginId)) throw new Error('Marketplace Certified artifact identity.pluginId is invalid')
-  if (typeof identity.version !== 'string' || !SEMVER.test(identity.version)) throw new Error('Marketplace Certified artifact identity.version is invalid')
-  if (typeof identity.integrity !== 'string' || !INTEGRITY.test(identity.integrity)) throw new Error('Marketplace Certified artifact identity.integrity is invalid')
+  if (typeof identity.pluginId !== 'string' || !PLUGIN_ID.test(identity.pluginId)) {
+    throw new Error('Marketplace Certified artifact identity.pluginId is invalid')
+  }
+  if (typeof identity.version !== 'string' || !SEMVER.test(identity.version)) {
+    throw new Error('Marketplace Certified artifact identity.version is invalid')
+  }
+  if (typeof identity.integrity !== 'string' || !INTEGRITY.test(identity.integrity)) {
+    throw new Error('Marketplace Certified artifact identity.integrity is invalid')
+  }
   return {
     source,
     pluginId: identity.pluginId,
@@ -166,33 +159,47 @@ function withoutFeed(
 }
 
 function strictNonNegativeInteger(value: unknown, label: string): number {
-  if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error(`${label} must be a non-negative safe integer`)
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error(`${label} must be a non-negative safe integer`)
+  }
   return value as number
 }
 
 function strictInstant(value: unknown, label: string): string {
-  if (typeof value !== 'string' || value.length > 64 || !Number.isFinite(Date.parse(value))) throw new Error(`${label} must be a valid timestamp`)
+  if (typeof value !== 'string' || value.length > 64 || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`${label} must be a valid timestamp`)
+  }
   return value
 }
 
 function parsePersistedState(value: unknown): PersistedAuthorityState {
   const state = object(value, 'Marketplace Certified authority state')
   exactKeys(state, ['contract', 'revision', 'projectionDigest', 'sources'], 'Marketplace Certified authority state')
-  if (state.contract !== STATE_CONTRACT) throw new Error('Marketplace Certified authority state contract is unsupported')
+  if (state.contract !== STATE_CONTRACT) {
+    throw new Error('Marketplace Certified authority state contract is unsupported')
+  }
   if (typeof state.projectionDigest !== 'string' || !INTEGRITY.test(state.projectionDigest)) {
     throw new Error('Marketplace Certified authority state projectionDigest is invalid')
   }
   const sourceValues = object(state.sources, 'Marketplace Certified authority state.sources')
-  if (Object.keys(sourceValues).length > MAX_TRACKED_SOURCES) throw new Error('Marketplace Certified authority tracks too many sources')
+  if (Object.keys(sourceValues).length > MAX_TRACKED_SOURCES) {
+    throw new Error('Marketplace Certified authority tracks too many sources')
+  }
   const sources: Record<string, PersistedSourceState> = Object.create(null) as Record<string, PersistedSourceState>
   for (const [sourceUrl, rawSource] of Object.entries(sourceValues)) {
     canonicalTrustRoot(sourceUrl, 'Marketplace Certified authority source key')
     const source = object(rawSource, `Marketplace Certified authority source ${sourceUrl}`)
-    exactKeys(source, ['enabled', 'generatedAt', 'digest', 'feedText', 'requiresNewer'], `Marketplace Certified authority source ${sourceUrl}`)
+    exactKeys(
+      source,
+      ['enabled', 'generatedAt', 'digest', 'feedText', 'requiresNewer'],
+      `Marketplace Certified authority source ${sourceUrl}`,
+    )
     if (typeof source.enabled !== 'boolean' || typeof source.requiresNewer !== 'boolean') {
       throw new Error(`Marketplace Certified authority source ${sourceUrl} flags are invalid`)
     }
-    const generatedAt = source.generatedAt === undefined ? undefined : strictInstant(source.generatedAt, `Marketplace Certified authority source ${sourceUrl}.generatedAt`)
+    const generatedAt = source.generatedAt === undefined
+      ? undefined
+      : strictInstant(source.generatedAt, `Marketplace Certified authority source ${sourceUrl}.generatedAt`)
     const digest = source.digest
     if (digest !== undefined && (typeof digest !== 'string' || !INTEGRITY.test(digest))) {
       throw new Error(`Marketplace Certified authority source ${sourceUrl}.digest is invalid`)
@@ -208,7 +215,9 @@ function parsePersistedState(value: unknown): PersistedAuthorityState {
       if (digest === undefined || sha256(feedText) !== digest) {
         throw new Error(`Marketplace Certified authority source ${sourceUrl}.feedText digest mismatch`)
       }
-      if (!source.enabled) throw new Error(`Marketplace Certified authority source ${sourceUrl}.feedText must be absent while disabled`)
+      if (!source.enabled) {
+        throw new Error(`Marketplace Certified authority source ${sourceUrl}.feedText must be absent while disabled`)
+      }
       const feed = parseTrustedFeed(feedText, sourceUrl, generatedAt ?? '')
       if (feed.trust?.generatedAt !== generatedAt) {
         throw new Error(`Marketplace Certified authority source ${sourceUrl}.generatedAt does not match feed`)
@@ -238,7 +247,9 @@ function parseTrustedFeed(text: string, root: string, now: string): ReturnType<t
     throw new Error('Marketplace trust feed is not valid JSON', { cause: error })
   }
   const feed = parseMarketplaceFeed(value, { feedUrl: root, trustedRoots: [root], now })
-  if (feed.schemaVersion < 3 || feed.trust?.trusted !== true) throw new Error('Marketplace trust feed is not a trusted v3+ feed')
+  if (feed.schemaVersion < 3 || feed.trust?.trusted !== true) {
+    throw new Error('Marketplace trust feed is not a trusted v3+ feed')
+  }
   return feed
 }
 
@@ -264,21 +275,26 @@ function projectionsFromSources(
     if (!source.enabled || source.feedText === undefined || source.generatedAt === undefined) continue
     const feed = parseTrustedFeed(source.feedText, root, source.generatedAt)
     for (const plugin of feed.plugins) {
-      const projection = feed.trust?.byPluginIdentity.get(marketplacePluginIdentity(plugin.source, plugin.id))?.certifiedPermission
+      const projection = feed.trust?.byPluginIdentity.get(marketplacePluginIdentity(plugin.source, plugin.id))
+        ?.certifiedPermission
       if (projection === undefined || Date.parse(projection.expiresAt) <= now) continue
       const key = identityKey(projection)
       candidates.set(key, [...(candidates.get(key) ?? []), projection])
     }
   }
-  return Object.freeze([...candidates.entries()]
-    .filter(([, values]) => values.length === 1)
-    .map(([, values]) => values[0] as MarketplaceCertifiedPermissionProjectionV1)
-    .sort((left, right) => identityKey(left).localeCompare(identityKey(right))))
+  return Object.freeze(
+    [...candidates.entries()]
+      .filter(([, values]) => values.length === 1)
+      .map(([, values]) => values[0] as MarketplaceCertifiedPermissionProjectionV1)
+      .sort((left, right) => identityKey(left).localeCompare(identityKey(right))),
+  )
 }
 
 function normalizedLimit(value: number | undefined, fallback: number, maximum: number, label: string): number {
   const result = value ?? fallback
-  if (!Number.isSafeInteger(result) || result < 1 || result > maximum) throw new Error(`${label} must be an integer from 1 to ${maximum}`)
+  if (!Number.isSafeInteger(result) || result < 1 || result > maximum) {
+    throw new Error(`${label} must be an integer from 1 to ${maximum}`)
+  }
   return result
 }
 
@@ -289,7 +305,9 @@ async function ensureRealPrivateDirectory(directory: string): Promise<void> {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
   }
   const metadata = await lstat(directory)
-  if (metadata.isSymbolicLink() || !metadata.isDirectory()) throw new Error(`Marketplace Certified authority directory must be a real directory: ${directory}`)
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+    throw new Error(`Marketplace Certified authority directory must be a real directory: ${directory}`)
+  }
   if (process.platform !== 'win32') await chmod(directory, 0o700)
 }
 
@@ -330,19 +348,37 @@ export class LauncherMarketplaceCertifiedAuthority {
   private constructor(private readonly options: LauncherMarketplaceCertifiedAuthorityOptions) {
     this.fetcher = options.fetcher ?? fetchMarketplaceFeed
     this.now = options.now ?? Date.now
-    this.timeoutMs = normalizedLimit(options.requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS, MAX_REQUEST_TIMEOUT_MS, 'requestTimeoutMs')
-    this.concurrency = normalizedLimit(options.maxConcurrentFetches, DEFAULT_FETCH_CONCURRENCY, MAX_FETCH_CONCURRENCY, 'maxConcurrentFetches')
+    this.timeoutMs = normalizedLimit(
+      options.requestTimeoutMs,
+      DEFAULT_REQUEST_TIMEOUT_MS,
+      MAX_REQUEST_TIMEOUT_MS,
+      'requestTimeoutMs',
+    )
+    this.concurrency = normalizedLimit(
+      options.maxConcurrentFetches,
+      DEFAULT_FETCH_CONCURRENCY,
+      MAX_FETCH_CONCURRENCY,
+      'maxConcurrentFetches',
+    )
     this.stateFile = path.join(options.homeDir, 'state', 'marketplace-certified', `${options.profileId}.v1.json`)
   }
 
-  static async open(options: LauncherMarketplaceCertifiedAuthorityOptions): Promise<LauncherMarketplaceCertifiedAuthority> {
-    if (!path.isAbsolute(options.homeDir) || !path.isAbsolute(options.configPath)) throw new Error('Marketplace Certified authority paths must be absolute')
+  static async open(
+    options: LauncherMarketplaceCertifiedAuthorityOptions,
+  ): Promise<LauncherMarketplaceCertifiedAuthority> {
+    if (!path.isAbsolute(options.homeDir) || !path.isAbsolute(options.configPath)) {
+      throw new Error('Marketplace Certified authority paths must be absolute')
+    }
     const homeDir = path.resolve(options.homeDir)
     const configPath = path.resolve(options.configPath)
-    if (path.dirname(configPath) !== homeDir) throw new Error('Marketplace Certified authority configPath must be inside homeDir')
+    if (path.dirname(configPath) !== homeDir) {
+      throw new Error('Marketplace Certified authority configPath must be inside homeDir')
+    }
     if (!PROFILE_ID.test(options.profileId)) throw new Error('Marketplace Certified authority profileId is invalid')
     const home = await lstat(homeDir)
-    if (home.isSymbolicLink() || !home.isDirectory()) throw new Error('Marketplace Certified authority homeDir must be a real directory')
+    if (home.isSymbolicLink() || !home.isDirectory()) {
+      throw new Error('Marketplace Certified authority homeDir must be a real directory')
+    }
     const stateDirectory = path.join(homeDir, 'state')
     await ensureRealPrivateDirectory(stateDirectory)
     await ensureRealPrivateDirectory(path.join(stateDirectory, 'marketplace-certified'))
@@ -420,9 +456,14 @@ export class LauncherMarketplaceCertifiedAuthority {
       await this.commitDisabledSources()
       return this.snapshot()
     }
-    if (configured.length > MAX_CONFIGURED_SOURCES) throw new Error('Marketplace Certified authority has too many configured sources')
+    if (configured.length > MAX_CONFIGURED_SOURCES) {
+      throw new Error('Marketplace Certified authority has too many configured sources')
+    }
     const configuredUrls = new Set(configured.map(source => source.url))
-    const nextSources: Record<string, PersistedSourceState> = Object.create(null) as Record<string, PersistedSourceState>
+    const nextSources: Record<string, PersistedSourceState> = Object.create(null) as Record<
+      string,
+      PersistedSourceState
+    >
     for (const [url, source] of Object.entries(this.state.sources)) {
       const configuredSource = configured.find(candidate => candidate.url === url)
       nextSources[url] = configuredSource?.enabled === true
@@ -432,7 +473,9 @@ export class LauncherMarketplaceCertifiedAuthority {
     for (const source of configured) {
       canonicalTrustRoot(source.url, 'Marketplace Certified trust source')
       if (!Object.hasOwn(nextSources, source.url)) {
-        if (Object.keys(nextSources).length >= MAX_TRACKED_SOURCES) throw new Error('Marketplace Certified authority source history is full')
+        if (Object.keys(nextSources).length >= MAX_TRACKED_SOURCES) {
+          throw new Error('Marketplace Certified authority source history is full')
+        }
         nextSources[source.url] = { enabled: source.enabled, requiresNewer: false }
       }
     }
@@ -458,7 +501,11 @@ export class LauncherMarketplaceCertifiedAuthority {
     await this.commitSources(disabled)
   }
 
-  private acceptFetch(root: string, previous: PersistedSourceState, result: MarketplaceFetchResult): PersistedSourceState {
+  private acceptFetch(
+    root: string,
+    previous: PersistedSourceState,
+    result: MarketplaceFetchResult,
+  ): PersistedSourceState {
     if (result.status < 200 || result.status >= 300) return previous
     const invalid = (): PersistedSourceState => withoutFeed(previous, true, true)
     if (result.url !== root || Buffer.byteLength(result.text) > MAX_FEED_BYTES) return invalid()
@@ -595,7 +642,9 @@ export class LauncherMarketplaceCertifiedAuthority {
 
   private async readState(): Promise<PersistedAuthorityState> {
     const pathStat = await lstat(this.stateFile)
-    if (pathStat.isSymbolicLink() || !pathStat.isFile()) throw new Error('Marketplace Certified authority state must be a regular file')
+    if (pathStat.isSymbolicLink() || !pathStat.isFile()) {
+      throw new Error('Marketplace Certified authority state must be a regular file')
+    }
     if (pathStat.size > MAX_STATE_BYTES) throw new Error('Marketplace Certified authority state is too large')
     const noFollow = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0
     const handle = await open(this.stateFile, constants.O_RDONLY | noFollow)
@@ -622,7 +671,9 @@ export class LauncherMarketplaceCertifiedAuthority {
       await handle.close()
       try {
         const target = await lstat(this.stateFile)
-        if (target.isSymbolicLink() || !target.isFile()) throw new Error('refusing to replace non-regular Marketplace Certified authority state')
+        if (target.isSymbolicLink() || !target.isFile()) {
+          throw new Error('refusing to replace non-regular Marketplace Certified authority state')
+        }
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       }

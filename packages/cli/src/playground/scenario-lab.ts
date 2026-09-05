@@ -7,10 +7,7 @@ import type {
 import type { AgentLoopTaskDetailsUrl } from '@cordisx/protocol/agent-loop/v3'
 import { createGeneratedAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { SessionEvent } from '@cordisx/protocol/sessions/v1'
-import {
-  CORDISX_AGENT_DEFINITION_SCHEMA_V1,
-  CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V4,
-} from '../agent-loop-contracts.js'
+import { CORDISX_AGENT_DEFINITION_SCHEMA_V1, CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V4 } from '../agent-loop-contracts.js'
 import { CordisXAgentLoopBrokerV4 } from '../renderer/agent-loop-v4.js'
 import {
   PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE,
@@ -19,11 +16,11 @@ import {
   type PlaygroundMockTaskTrace,
 } from '../renderer/playground-mock-agent-loop.js'
 import {
-  createAgentConversationModel,
   type AgentConversationApproval,
   type AgentConversationEntry,
   type AgentConversationMessage,
   type AgentConversationModel,
+  createAgentConversationModel,
 } from '../renderer/host-ui/conversation/model.js'
 import type {
   PlaygroundRoomSimulationBinding,
@@ -54,37 +51,55 @@ export const PLAYGROUND_SCENARIO_CATALOG: readonly PlaygroundScenarioCatalogEntr
   {
     id: 'continuous-sends',
     title: { 'zh-CN': '连续发送', en: 'Continuous sends' },
-    description: { 'zh-CN': '同一 binding 短时间提交四条独立消息，并保持操作与响应顺序。', en: 'Submit four independent messages to one binding while preserving operation and response order.' },
+    description: {
+      'zh-CN': '同一 binding 短时间提交四条独立消息，并保持操作与响应顺序。',
+      en: 'Submit four independent messages to one binding while preserving operation and response order.',
+    },
     availability: { state: 'available' },
   },
   {
     id: 'human-interruption',
     title: { 'zh-CN': '人类消息打断', en: 'Human interruption' },
-    description: { 'zh-CN': '在人类消息前后显示同一 Agent 回复，证明分组边界会被人类消息打断。', en: 'Place replies from the same Agent around human input to prove that human messages break grouping.' },
+    description: {
+      'zh-CN': '在人类消息前后显示同一 Agent 回复，证明分组边界会被人类消息打断。',
+      en: 'Place replies from the same Agent around human input to prove that human messages break grouping.',
+    },
     availability: { state: 'available' },
   },
   {
     id: 'approval-decision',
     title: { 'zh-CN': '权限申请', en: 'Approval request' },
-    description: { 'zh-CN': '通过正式 AgentLoop v4 命令分别完成允许、拒绝与取消决策。', en: 'Exercise approve, deny, and cancel through formal AgentLoop v4 commands.' },
+    description: {
+      'zh-CN': '通过正式 AgentLoop v4 命令分别完成允许、拒绝与取消决策。',
+      en: 'Exercise approve, deny, and cancel through formal AgentLoop v4 commands.',
+    },
     availability: { state: 'available' },
   },
   {
     id: 'multi-binding',
     title: { 'zh-CN': '多 Agent 并发', en: 'Concurrent agents' },
-    description: { 'zh-CN': '为三个通用 Agent 创建独立 binding，并并发提交互不串流的输入。', en: 'Create independent bindings for three generic agents and submit isolated inputs concurrently.' },
+    description: {
+      'zh-CN': '为三个通用 Agent 创建独立 binding，并并发提交互不串流的输入。',
+      en: 'Create independent bindings for three generic agents and submit isolated inputs concurrently.',
+    },
     availability: { state: 'available' },
   },
   {
     id: 'failure-retry',
     title: { 'zh-CN': '失败与重试', en: 'Failure and retry' },
-    description: { 'zh-CN': '先触发 typed CLI failure，再以新的逻辑操作重试并恢复。', en: 'Trigger a typed CLI failure, then retry as a new logical operation and recover.' },
+    description: {
+      'zh-CN': '先触发 typed CLI failure，再以新的逻辑操作重试并恢复。',
+      en: 'Trigger a typed CLI failure, then retry as a new logical operation and recover.',
+    },
     availability: { state: 'available' },
   },
   {
     id: 'plain-text-stress',
     title: { 'zh-CN': '富文本压力', en: 'Rich text stress' },
-    description: { 'zh-CN': '提交长文本、多行、代码和链接，验证纯文本 AgentLoop 内容边界。', en: 'Submit long text, multiple lines, code, and links through the text-only AgentLoop boundary.' },
+    description: {
+      'zh-CN': '提交长文本、多行、代码和链接，验证纯文本 AgentLoop 内容边界。',
+      en: 'Submit long text, multiple lines, code, and links through the text-only AgentLoop boundary.',
+    },
     availability: { state: 'available' },
   },
 ])
@@ -111,9 +126,23 @@ export interface PlaygroundScenarioLabSnapshot {
   readonly error?: string
 }
 
-export type PlaygroundScenarioTaskContext = Readonly<Pick<PlaygroundMockTaskTrace,
-  'taskRef' | 'sessionId' | 'debugTaskId' | 'detailsUrl' | 'agentLabel' | 'status' | 'identity' | 'catalog' | 'input' | 'execution' | 'events' | 'simulationBinding'
->>
+export type PlaygroundScenarioTaskContext = Readonly<
+  Pick<
+    PlaygroundMockTaskTrace,
+    | 'taskRef'
+    | 'sessionId'
+    | 'debugTaskId'
+    | 'detailsUrl'
+    | 'agentLabel'
+    | 'status'
+    | 'identity'
+    | 'catalog'
+    | 'input'
+    | 'execution'
+    | 'events'
+    | 'simulationBinding'
+  >
+>
 
 export type PlaygroundTaskTraceDirection =
   | 'chatroom-to-agent-host'
@@ -193,7 +222,12 @@ interface ScenarioStep {
 }
 
 const inherit: AgentDefinition['inherit'] = Object.freeze({
-  promptSections: 'append', rules: 'append', skills: 'append', tools: 'merge', mcpServers: 'merge', runtimeDefaults: 'merge',
+  promptSections: 'append',
+  rules: 'append',
+  skills: 'append',
+  tools: 'merge',
+  mcpServers: 'merge',
+  runtimeDefaults: 'merge',
 })
 
 const aliases = ['a', 'b', 'c'] as const
@@ -209,22 +243,31 @@ function stableLocalTaskScope(taskRef: string): string {
   return `${slug === '' ? 'task' : slug}-${hash.toString(36)}`
 }
 
-function traceDirection(event: PlaygroundMockTaskTrace['events'][number], source: 'original' | 'simulated'): PlaygroundTaskTraceDirection {
+function traceDirection(
+  event: PlaygroundMockTaskTrace['events'][number],
+  source: 'original' | 'simulated',
+): PlaygroundTaskTraceDirection {
   if (event.sessionEvent !== undefined) {
     if (event.sessionEvent.type === 'user/message') return 'chatroom-to-agent-host'
-    if (event.sessionEvent.type === 'assistant/message'
-      || event.sessionEvent.type === 'approval/asked' || event.sessionEvent.type === 'approval/decided') return 'agent-host-to-chatroom'
+    if (
+      event.sessionEvent.type === 'assistant/message'
+      || event.sessionEvent.type === 'approval/asked' || event.sessionEvent.type === 'approval/decided'
+    ) return 'agent-host-to-chatroom'
     if (event.sessionEvent.type === 'tool/call') return 'agent-to-tool'
     if (event.sessionEvent.type === 'tool/result') return 'tool-to-agent'
-    if (event.sessionEvent.type === 'turn/start' || event.sessionEvent.type === 'turn/end'
+    if (
+      event.sessionEvent.type === 'turn/start' || event.sessionEvent.type === 'turn/end'
       || event.sessionEvent.type === 'step/start' || event.sessionEvent.type === 'step/end'
       || event.sessionEvent.type === 'assistant/chunk' || event.sessionEvent.type === 'request/header'
       || event.sessionEvent.type === 'request/context' || event.sessionEvent.type === 'agent/inbox/spliced'
-      || event.sessionEvent.type === 'playground/scenario') return 'agent-execution'
+      || event.sessionEvent.type === 'playground/scenario'
+    ) return 'agent-execution'
     return 'host-lifecycle'
   }
   const type = event.type
-  if (type === 'task.created' || type === 'task.bound' || type === 'task.closed' || type === 'execution.started') return 'host-lifecycle'
+  if (type === 'task.created' || type === 'task.bound' || type === 'task.closed' || type === 'execution.started') {
+    return 'host-lifecycle'
+  }
   if (type === 'approval.required') return source === 'simulated' ? 'simulator-to-chatroom' : 'agent-host-to-chatroom'
   if (type === 'execution.completed' || type === 'execution.failed') return 'agent-host-to-chatroom'
   return source === 'simulated' ? 'injector-to-agent-host' : 'chatroom-to-agent-host'
@@ -232,8 +275,10 @@ function traceDirection(event: PlaygroundMockTaskTrace['events'][number], source
 
 function tracePresentation(event: PlaygroundMockTaskTrace['events'][number]): PlaygroundTaskTracePresentation {
   switch (event.sessionEvent?.type) {
-    case 'user/message': return 'user-input'
-    case 'assistant/message': return 'assistant-response'
+    case 'user/message':
+      return 'user-input'
+    case 'assistant/message':
+      return 'assistant-response'
     case 'assistant/chunk':
     case 'turn/start':
     case 'turn/end':
@@ -241,14 +286,21 @@ function tracePresentation(event: PlaygroundMockTaskTrace['events'][number]): Pl
     case 'step/end':
     case 'request/header':
     case 'request/context':
-    case 'agent/inbox/spliced': return 'agent-execution'
-    case 'playground/scenario': return 'agent-execution'
-    case 'tool/call': return 'tool-use'
-    case 'tool/result': return 'tool-result'
+    case 'agent/inbox/spliced':
+      return 'agent-execution'
+    case 'playground/scenario':
+      return 'agent-execution'
+    case 'tool/call':
+      return 'tool-use'
+    case 'tool/result':
+      return 'tool-result'
     case 'approval/asked':
-    case 'approval/decided': return 'approval'
-    case 'session/end-seed': return 'lifecycle'
-    default: return event.sessionEvent === undefined ? 'legacy' : 'lifecycle'
+    case 'approval/decided':
+      return 'approval'
+    case 'session/end-seed':
+      return 'lifecycle'
+    default:
+      return event.sessionEvent === undefined ? 'legacy' : 'lifecycle'
   }
 }
 
@@ -286,8 +338,11 @@ function originalTrace(sourceTask: PlaygroundScenarioTaskContext): readonly Play
         ...(output.length === 0 && sourceTask.simulationBinding !== undefined
           ? { roomSimulationBinding: sourceTask.simulationBinding }
           : {}),
-        ...(event.type === 'input.accepted' && sourceTask.input !== undefined ? { latestTaskInputSnapshot: sourceTask.input } : {}),
-        ...((event.type === 'execution.completed' || event.type === 'execution.failed') && sourceTask.execution !== undefined
+        ...(event.type === 'input.accepted' && sourceTask.input !== undefined
+          ? { latestTaskInputSnapshot: sourceTask.input }
+          : {}),
+        ...((event.type === 'execution.completed' || event.type === 'execution.failed')
+            && sourceTask.execution !== undefined
           ? { latestTaskExecutionSnapshot: sourceTask.execution }
           : {}),
       }),
@@ -311,9 +366,11 @@ function originalTrace(sourceTask: PlaygroundScenarioTaskContext): readonly Play
       : undefined
     const matchingAssistantChunks = assistantMessage !== undefined
       && pendingAssistantChunks.length > 0
-      && pendingAssistantChunks.every(chunk => chunk.sessionEvent?.type === 'assistant/chunk'
+      && pendingAssistantChunks.every(chunk =>
+        chunk.sessionEvent?.type === 'assistant/chunk'
         && chunk.sessionEvent.data.turn === assistantMessage.data.turn
-        && chunk.sessionEvent.data.step === assistantMessage.data.step)
+        && chunk.sessionEvent.data.step === assistantMessage.data.step
+      )
     if (matchingAssistantChunks && assistantMessage !== undefined) {
       const raw = [
         ...pendingAssistantChunks.flatMap(chunk => chunk.sessionEvent === undefined ? [] : [chunk.sessionEvent]),
@@ -340,7 +397,11 @@ function agent(alias: 'a' | 'b' | 'c'): AgentDefinition {
     name: label,
     inherit,
     promptSections: [
-      { sectionId: 'introduction', kind: 'introduction', text: `${label} is a deterministic interaction-scenario participant.` },
+      {
+        sectionId: 'introduction',
+        kind: 'introduction',
+        text: `${label} is a deterministic interaction-scenario participant.`,
+      },
       { sectionId: 'role', kind: 'role', text: `Process only inputs addressed to ${label}.` },
     ],
     rules: ['Keep every binding isolated.', 'Return deterministic plain text.'],
@@ -404,7 +465,9 @@ function createCommand(
     commandId: scenarioCommandId(scope, `${scenarioId}:create:${alias}`),
     type: 'create-or-bind',
     definition: definition.identity,
-    definitions: definitions.length === 0 ? [definition] : definitions as readonly [AgentDefinition, ...AgentDefinition[]],
+    definitions: definitions.length === 0
+      ? [definition]
+      : definitions as readonly [AgentDefinition, ...AgentDefinition[]],
     target: { mode: 'create' },
   }
 }
@@ -422,7 +485,9 @@ function sendCommand(
     contract: 'cordisx.agent-loop-command/v4',
     schemaVersion: 4,
     commandId: scenarioCommandId(scope, `${scenarioId}:send:${alias}:${ordinal}`),
-    type: 'send', binding, content: [{ kind: 'text', text }],
+    type: 'send',
+    binding,
+    content: [{ kind: 'text', text }],
   }
 }
 
@@ -437,84 +502,118 @@ function approvalCommand(
   const turn = `simulated-turn-${ordinal}`
   return {
     $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V4,
-    contract: 'cordisx.agent-loop-command/v4', schemaVersion: 4,
+    contract: 'cordisx.agent-loop-command/v4',
+    schemaVersion: 4,
     commandId: scenarioCommandId(scope, `${scenarioId}:approval:${alias}:${ordinal}:${decision}`),
-    type: 'approval-decision', binding, turn,
-    approvalId: `simulated-approval-${turn}`, decision,
+    type: 'approval-decision',
+    binding,
+    turn,
+    approvalId: `simulated-approval-${turn}`,
+    decision,
   }
 }
 
 function stepsFor(id: PlaygroundScenarioId): readonly ScenarioStep[] {
-  if (id === 'continuous-sends') return [
-    { id: 'create-a', execute: context => context.create('a', agent('a')) },
-    {
-      id: 'send-four',
-      execute: async context => {
-        await Promise.all([
-          context.send('a', 1, 'First short message.'),
-          context.send('a', 2, 'Second short message.'),
-          context.send('a', 3, 'Third short message.'),
-          context.send('a', 4, 'Fourth short message.'),
-        ])
+  if (id === 'continuous-sends') {
+    return [
+      { id: 'create-a', execute: context => context.create('a', agent('a')) },
+      {
+        id: 'send-four',
+        execute: async context => {
+          await Promise.all([
+            context.send('a', 1, 'First short message.'),
+            context.send('a', 2, 'Second short message.'),
+            context.send('a', 3, 'Third short message.'),
+            context.send('a', 4, 'Fourth short message.'),
+          ])
+        },
       },
-    },
-  ]
-  if (id === 'human-interruption') return [
-    { id: 'create-a', execute: context => context.create('a', agent('a')) },
-    {
-      id: 'send-around-human', execute: async context => {
-        await context.send('a', 1, 'First human message before the interruption boundary.')
-        await context.send('a', 2, 'Second human message interrupts the Agent message group.')
+    ]
+  }
+  if (id === 'human-interruption') {
+    return [
+      { id: 'create-a', execute: context => context.create('a', agent('a')) },
+      {
+        id: 'send-around-human',
+        execute: async context => {
+          await context.send('a', 1, 'First human message before the interruption boundary.')
+          await context.send('a', 2, 'Second human message interrupts the Agent message group.')
+        },
       },
-    },
-  ]
-  if (id === 'multi-binding') return [
-    {
-      id: 'create-three', execute: async context => {
-        await Promise.all((['a', 'b', 'c'] as const).map(alias => context.create(alias, agent(alias))))
+    ]
+  }
+  if (id === 'multi-binding') {
+    return [
+      {
+        id: 'create-three',
+        execute: async context => {
+          await Promise.all((['a', 'b', 'c'] as const).map(alias => context.create(alias, agent(alias))))
+        },
       },
-    },
-    {
-      id: 'send-three', execute: async context => {
-        await Promise.all((['a', 'b', 'c'] as const).map((alias, index) => context.send(alias, index + 1, `Independent input for Agent ${alias.toUpperCase()}.`)))
+      {
+        id: 'send-three',
+        execute: async context => {
+          await Promise.all(
+            (['a', 'b', 'c'] as const).map((alias, index) =>
+              context.send(alias, index + 1, `Independent input for Agent ${alias.toUpperCase()}.`)
+            ),
+          )
+        },
       },
-    },
-  ]
-  if (id === 'approval-decision') return [
-    { id: 'create-a', execute: context => context.create('a', agent('a')) },
-    {
-      id: 'request-three', execute: async context => {
-        for (let ordinal = 1; ordinal <= 3; ordinal += 1) await context.send('a', ordinal, `Request approval ${ordinal}. [approval]`)
+    ]
+  }
+  if (id === 'approval-decision') {
+    return [
+      { id: 'create-a', execute: context => context.create('a', agent('a')) },
+      {
+        id: 'request-three',
+        execute: async context => {
+          for (let ordinal = 1; ordinal <= 3; ordinal += 1) {
+            await context.send('a', ordinal, `Request approval ${ordinal}. [approval]`)
+          }
+        },
       },
-    },
-    {
-      id: 'decide-three', execute: async context => {
-        await context.decide('a', 1, 'approved')
-        await context.decide('a', 2, 'denied')
-        await context.decide('a', 3, 'cancelled')
+      {
+        id: 'decide-three',
+        execute: async context => {
+          await context.decide('a', 1, 'approved')
+          await context.decide('a', 2, 'denied')
+          await context.decide('a', 3, 'cancelled')
+        },
       },
-    },
-  ]
-  if (id === 'failure-retry') return [
-    { id: 'create-a', execute: context => context.create('a', agent('a')) },
-    { id: 'fail', execute: context => context.send('a', 1, 'Exercise the typed failure path. [cli-fail]') },
-    { id: 'retry', execute: context => context.send('a', 2, 'Retry with a fresh logical operation.') },
-  ]
-  if (id === 'plain-text-stress') return [
-    { id: 'create-a', execute: context => context.create('a', agent('a')) },
-    {
-      id: 'stress', execute: context => context.send('a', 1, [
-        'A deliberately long first paragraph verifies wrapping without changing the structured AgentLoop content boundary. '.repeat(4),
-        '',
-        '```ts',
-        "const link = new URL('https://example.com/scenario')",
-        'console.log(link.href)',
-        '```',
-        '',
-        'Reference: https://example.com/scenario?mode=deterministic',
-      ].join('\n')),
-    },
-  ]
+    ]
+  }
+  if (id === 'failure-retry') {
+    return [
+      { id: 'create-a', execute: context => context.create('a', agent('a')) },
+      { id: 'fail', execute: context => context.send('a', 1, 'Exercise the typed failure path. [cli-fail]') },
+      { id: 'retry', execute: context => context.send('a', 2, 'Retry with a fresh logical operation.') },
+    ]
+  }
+  if (id === 'plain-text-stress') {
+    return [
+      { id: 'create-a', execute: context => context.create('a', agent('a')) },
+      {
+        id: 'stress',
+        execute: context =>
+          context.send(
+            'a',
+            1,
+            [
+              'A deliberately long first paragraph verifies wrapping without changing the structured AgentLoop content boundary. '
+                .repeat(4),
+              '',
+              '```ts',
+              "const link = new URL('https://example.com/scenario')",
+              'console.log(link.href)',
+              '```',
+              '',
+              'Reference: https://example.com/scenario?mode=deterministic',
+            ].join('\n'),
+          ),
+      },
+    ]
+  }
   return []
 }
 
@@ -540,16 +639,18 @@ export function createPlaygroundScenarioLabRuntime(): PlaygroundScenarioLabRunti
 
 function standaloneScenarioTaskContext(): PlaygroundScenarioTaskContext {
   const definition = agent('a')
-  return Object.freeze({
-    taskRef: 'debug:scenario-lab/standalone',
-    debugTaskId: 'Standalone Scenario Task',
-    detailsUrl: { url: 'app://-/playground/simulator/tasks/Standalone%20Scenario%20Task', target: 'host' },
-    agentLabel: definition.name ?? definition.identity.agentId,
-    status: 'created',
-    identity: definition.identity,
-    catalog: Object.freeze([definition]),
-    events: Object.freeze([]),
-  } satisfies PlaygroundScenarioTaskContext)
+  return Object.freeze(
+    {
+      taskRef: 'debug:scenario-lab/standalone',
+      debugTaskId: 'Standalone Scenario Task',
+      detailsUrl: { url: 'app://-/playground/simulator/tasks/Standalone%20Scenario%20Task', target: 'host' },
+      agentLabel: definition.name ?? definition.identity.agentId,
+      status: 'created',
+      identity: definition.identity,
+      catalog: Object.freeze([definition]),
+      events: Object.freeze([]),
+    } satisfies PlaygroundScenarioTaskContext,
+  )
 }
 
 export class PlaygroundScenarioLabController {
@@ -598,7 +699,8 @@ export class PlaygroundScenarioLabController {
   constructor(sourceTask: PlaygroundScenarioTaskContext)
   constructor(delay?: () => Promise<void>, runtimeFactory?: PlaygroundScenarioLabRuntimeFactory)
   constructor(
-    sourceTaskOrDelay: PlaygroundScenarioTaskContext | (() => Promise<void>) = () => new Promise(resolve => setTimeout(resolve, 160)),
+    sourceTaskOrDelay: PlaygroundScenarioTaskContext | (() => Promise<void>) = () =>
+      new Promise(resolve => setTimeout(resolve, 160)),
     runtimeFactory: PlaygroundScenarioLabRuntimeFactory = createPlaygroundScenarioLabRuntime,
   ) {
     this.sourceTask = typeof sourceTaskOrDelay === 'function' ? standaloneScenarioTaskContext() : sourceTaskOrDelay
@@ -610,7 +712,7 @@ export class PlaygroundScenarioLabController {
     this.connectRoomBridge()
   }
 
-  readonly subscribe = (listener: Listener): (() => void) => {
+  readonly subscribe = (listener: Listener): () => void => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
@@ -631,7 +733,10 @@ export class PlaygroundScenarioLabController {
         eventCount: this.simulatedTrace.length,
         roomBridge: Object.freeze({ ...this.roomBridgeState }),
         ...(this.pendingApproval === undefined ? {} : {
-          pendingApproval: Object.freeze({ turn: this.pendingApproval.turn, approvalId: this.pendingApproval.approvalId }),
+          pendingApproval: Object.freeze({
+            turn: this.pendingApproval.turn,
+            approvalId: this.pendingApproval.approvalId,
+          }),
         }),
       }),
       tasks: this.runtime.host.snapshot().tasks,
@@ -657,9 +762,15 @@ export class PlaygroundScenarioLabController {
     this.phase = 'running'
     this.publish()
     this.running = (async () => {
-      while (generation === this.generation && this.phase === 'running' && this.cursor < stepsFor(this.selectedScenarioId).length) {
+      while (
+        generation === this.generation && this.phase === 'running'
+        && this.cursor < stepsFor(this.selectedScenarioId).length
+      ) {
         await this.executeNext('running')
-        if (generation === this.generation && this.phase === 'running' && this.cursor < stepsFor(this.selectedScenarioId).length) await this.delay()
+        if (
+          generation === this.generation && this.phase === 'running'
+          && this.cursor < stepsFor(this.selectedScenarioId).length
+        ) await this.delay()
       }
     })().finally(() => {
       if (generation !== this.generation) return
@@ -748,12 +859,15 @@ export class PlaygroundScenarioLabController {
   }
 
   private appendSimulatedTrace(input: Omit<PlaygroundTaskTraceEntry, 'id' | 'source' | 'generation'>): void {
-    this.simulatedTrace = [...this.simulatedTrace, Object.freeze({
-      ...input,
-      id: `simulated-${this.generation + 1}-${this.simulatedTrace.length + 1}`,
-      source: 'simulated' as const,
-      generation: this.disposableGeneration(),
-    })]
+    this.simulatedTrace = [
+      ...this.simulatedTrace,
+      Object.freeze({
+        ...input,
+        id: `simulated-${this.generation + 1}-${this.simulatedTrace.length + 1}`,
+        source: 'simulated' as const,
+        generation: this.disposableGeneration(),
+      }),
+    ]
     this.publish()
   }
 
@@ -770,7 +884,8 @@ export class PlaygroundScenarioLabController {
         payload: Object.freeze({
           event,
           ...(event.type === 'input.accepted' && task.input !== undefined ? { input: task.input } : {}),
-          ...((event.type === 'execution.completed' || event.type === 'execution.failed') && task.execution !== undefined
+          ...((event.type === 'execution.completed' || event.type === 'execution.failed')
+              && task.execution !== undefined
             ? { execution: task.execution }
             : {}),
         }),
@@ -840,7 +955,9 @@ export class PlaygroundScenarioLabController {
       await this.send(this.generation, this.runtime, this.bindings, 'a', ordinal, normalized, 'event-injector')
       this.captureRuntimeTrace(binding.task, new Date().toISOString())
       const sent = this.latestInjectedSend
-      if (sent === undefined || sent.ordinal !== ordinal) throw new Error('The disposable send result was not correlated')
+      if (sent === undefined || sent.ordinal !== ordinal) {
+        throw new Error('The disposable send result was not correlated')
+      }
       this.appendSimulatedTrace({
         direction: 'agent-host-to-chatroom',
         type: 'typed-failure.observed',
@@ -865,7 +982,9 @@ export class PlaygroundScenarioLabController {
       const client = await this.requireRoomBridge(binding)
       const result = await client.emitAgentReply(binding, operationId, { text: normalized })
       const receipt = this.requireRoomBridgeReceipt(result, 'Agent reply emission')
-      if (receipt.phase === 'rejected' || receipt.phase === 'failed') throw new Error(this.receiptFailure('Agent reply emission', receipt))
+      if (receipt.phase === 'rejected' || receipt.phase === 'failed') {
+        throw new Error(this.receiptFailure('Agent reply emission', receipt))
+      }
       this.appendSimulatedTrace({
         direction: 'agent-host-to-chatroom',
         type: 'agent-egress.accepted',
@@ -901,7 +1020,9 @@ export class PlaygroundScenarioLabController {
       const client = await this.requireRoomBridge(binding)
       const result = await client.emitAgentApprovalRequest(binding, operationId, { reason: normalized })
       const receipt = this.requireRoomBridgeReceipt(result, 'Agent approval request')
-      if (receipt.phase === 'rejected' || receipt.phase === 'failed') throw new Error(this.receiptFailure('Agent approval request', receipt))
+      if (receipt.phase === 'rejected' || receipt.phase === 'failed') {
+        throw new Error(this.receiptFailure('Agent approval request', receipt))
+      }
       if (receipt.approvalId !== undefined) {
         this.pendingApproval = {
           binding,
@@ -1000,15 +1121,27 @@ export class PlaygroundScenarioLabController {
     const connection = this.roomBridgeConnection
     const client = this.roomBridgeClient()
     if (client === undefined) {
-      this.roomBridgeState = { state: 'unavailable', delegationTargets: Object.freeze([]), message: '当前 Playground 未安装 Room simulation bridge。' }
+      this.roomBridgeState = {
+        state: 'unavailable',
+        delegationTargets: Object.freeze([]),
+        message: '当前 Playground 未安装 Room simulation bridge。',
+      }
       return
     }
     this.roomBridgeState = { state: 'checking', delegationTargets: Object.freeze([]) }
     const resolveBinding = this.sourceTask.simulationBinding !== undefined
-      ? Promise.resolve({ status: 'available' as const, ownerGeneration: this.sourceTask.simulationBinding.ownerGeneration, value: this.sourceTask.simulationBinding })
+      ? Promise.resolve({
+        status: 'available' as const,
+        ownerGeneration: this.sourceTask.simulationBinding.ownerGeneration,
+        value: this.sourceTask.simulationBinding,
+      })
       : this.sourceTask.sessionId === undefined
-        ? Promise.resolve({ status: 'unavailable' as const, code: 'invalid-binding', message: '当前 task 没有关联可用的 Agent Session。' })
-        : client.resolveSession(this.sourceTask.sessionId)
+      ? Promise.resolve({
+        status: 'unavailable' as const,
+        code: 'invalid-binding',
+        message: '当前 task 没有关联可用的 Agent Session。',
+      })
+      : client.resolveSession(this.sourceTask.sessionId)
     void resolveBinding.then(resolved => {
       if (connection !== this.roomBridgeConnection) return
       if (resolved.status === 'unavailable') {
@@ -1023,27 +1156,29 @@ export class PlaygroundScenarioLabController {
       })
       return Promise.all([client.inspect(binding), client.snapshot(binding)]).then(([result, snapshot]) => {
         if (connection !== this.roomBridgeConnection) return
-      if (result.status === 'unavailable') {
-        this.markRoomBridgeUnavailable(`${result.code}: ${result.message}`)
-        return
-      }
-      if (snapshot.status === 'unavailable') {
-        this.markRoomBridgeUnavailable(`${snapshot.code}: ${snapshot.message}`)
-        return
-      }
-      if (result.value.lifecycle !== 'active') {
-        this.markRoomBridgeUnavailable(result.value.reason ?? `关联 Room 当前状态为 ${result.value.lifecycle}。`)
-        return
-      }
-      this.observeRoomBridgeSnapshotOperationIds(snapshot.value)
-      this.roomBridgeState = {
-        state: 'available',
-        delegationTargets: Object.freeze([...result.value.delegationTargets]),
-      }
-      this.publish()
+        if (result.status === 'unavailable') {
+          this.markRoomBridgeUnavailable(`${result.code}: ${result.message}`)
+          return
+        }
+        if (snapshot.status === 'unavailable') {
+          this.markRoomBridgeUnavailable(`${snapshot.code}: ${snapshot.message}`)
+          return
+        }
+        if (result.value.lifecycle !== 'active') {
+          this.markRoomBridgeUnavailable(result.value.reason ?? `关联 Room 当前状态为 ${result.value.lifecycle}。`)
+          return
+        }
+        this.observeRoomBridgeSnapshotOperationIds(snapshot.value)
+        this.roomBridgeState = {
+          state: 'available',
+          delegationTargets: Object.freeze([...result.value.delegationTargets]),
+        }
+        this.publish()
       })
     }).catch(cause => {
-      if (connection === this.roomBridgeConnection) this.markRoomBridgeUnavailable(cause instanceof Error ? cause.message : String(cause))
+      if (connection === this.roomBridgeConnection) {
+        this.markRoomBridgeUnavailable(cause instanceof Error ? cause.message : String(cause))
+      }
     })
   }
 
@@ -1059,7 +1194,9 @@ export class PlaygroundScenarioLabController {
     this.publish()
   }
 
-  private async requireRoomBridge(binding: PlaygroundRoomSimulationBinding): Promise<PlaygroundRoomSimulationForwardingClient> {
+  private async requireRoomBridge(
+    binding: PlaygroundRoomSimulationBinding,
+  ): Promise<PlaygroundRoomSimulationForwardingClient> {
     const client = this.roomBridgeClient()
     if (client === undefined) throw new Error('The Playground Room simulation bridge is unavailable.')
     const inspection = await client.inspect(binding)
@@ -1121,9 +1258,12 @@ export class PlaygroundScenarioLabController {
   private observeRoomBridgeEventOperationIds(event: PlaygroundRoomSimulationEvent): void {
     const scope = this.commandScope()
     observeScenarioRoomOperationId(scope, event.operationId)
-    observeScenarioRoomOperationId(scope, typeof event.detail?.requestOperationId === 'string'
-      ? event.detail.requestOperationId
-      : undefined)
+    observeScenarioRoomOperationId(
+      scope,
+      typeof event.detail?.requestOperationId === 'string'
+        ? event.detail.requestOperationId
+        : undefined,
+    )
   }
 
   private consumeRoomBridgeEvent(result: PlaygroundRoomSimulationResult<PlaygroundRoomSimulationEvent>): void {
@@ -1140,8 +1280,10 @@ export class PlaygroundScenarioLabController {
     const isTrackedOperation = event.operationId !== undefined && this.roomBridgeOperationIds.has(event.operationId)
     const isTrackedRequest = requestOperationId !== undefined && this.roomBridgeOperationIds.has(requestOperationId)
     if (event.operationId !== undefined && !isTrackedOperation && !isTrackedRequest) return
-    if (event.operationId === undefined && !isTrackedRequest
-      && (event.kind !== 'room.run.lifecycle' || this.roomBridgeOperationIds.size === 0)) return
+    if (
+      event.operationId === undefined && !isTrackedRequest
+      && (event.kind !== 'room.run.lifecycle' || this.roomBridgeOperationIds.size === 0)
+    ) return
     const fingerprint = event.kind === 'room.agent-task-delegation.projected'
       ? `${event.kind}\u0000${event.operationId ?? ''}`
       : `${event.kind}\u0000${event.operationId ?? ''}\u0000${JSON.stringify(event.detail ?? {})}`
@@ -1149,16 +1291,21 @@ export class PlaygroundScenarioLabController {
     this.roomBridgeEventFingerprints.add(fingerprint)
     const approvalId = typeof event.detail?.approvalId === 'string' ? event.detail.approvalId : undefined
     const turn = typeof event.detail?.turnId === 'string' ? event.detail.turnId : undefined
-    if ((event.kind === 'room.agent-approval.pending' || event.kind === 'room.permission.pending')
-      && approvalId !== undefined && event.operationId !== undefined) {
+    if (
+      (event.kind === 'room.agent-approval.pending' || event.kind === 'room.permission.pending')
+      && approvalId !== undefined && event.operationId !== undefined
+    ) {
       this.pendingApproval = {
         binding: event.binding,
         requestOperationId: event.operationId,
         turn: turn ?? approvalId,
         approvalId,
       }
-    } else if ((event.kind === 'room.agent-approval.terminal' || event.kind === 'room.permission.terminal' || event.kind === 'room.permission-decision.terminal')
-      && approvalId !== undefined && this.pendingApproval?.approvalId === approvalId) {
+    } else if (
+      (event.kind === 'room.agent-approval.terminal' || event.kind === 'room.permission.terminal'
+        || event.kind === 'room.permission-decision.terminal')
+      && approvalId !== undefined && this.pendingApproval?.approvalId === approvalId
+    ) {
       this.pendingApproval = undefined
     }
     this.appendSimulatedTrace({
@@ -1179,12 +1326,14 @@ export class PlaygroundScenarioLabController {
 
   private roomBridgeEventDirection(event: PlaygroundRoomSimulationEvent): PlaygroundTaskTraceDirection {
     if (event.kind === 'room.message.projected') return 'simulator-to-chatroom'
-    if (event.kind === 'room.agent-message.projected'
+    if (
+      event.kind === 'room.agent-message.projected'
       || event.kind.startsWith('room.agent-message.targeted.')
       || event.kind.startsWith('room.agent-egress.')
       || event.kind.startsWith('room.agent-task-delegation.')
       || event.kind.startsWith('room.agent-approval.')
-      || event.kind === 'room.permission.pending' || event.kind === 'room.permission.terminal') {
+      || event.kind === 'room.permission.pending' || event.kind === 'room.permission.terminal'
+    ) {
       return 'agent-host-to-chatroom'
     }
     if (event.kind.startsWith('room.permission-decision.')) return 'simulator-to-chatroom'
@@ -1193,34 +1342,73 @@ export class PlaygroundScenarioLabController {
 
   private roomBridgeEventSummary(event: PlaygroundRoomSimulationEvent): string {
     const detail = event.detail ?? {}
-    if (event.kind === 'room.message.projected') return 'The simulated input is visible in the associated Room timeline.'
-    if (event.kind === 'room.agent-message.projected') return 'The Agent response is visible in the associated Room timeline.'
-    if (event.kind === 'room.agent-message.targeted.projected') return 'The addressed Agent message is visible in the associated Room timeline.'
-    if (event.kind === 'room.agent-message.targeted.accepted') return `Chatroom delivered the message only to ${String(detail.targetMemberId ?? 'the mentioned entity')}.`
-    if (event.kind === 'room.agent-egress.projected') return 'The bound Agent reply is visible in the associated Room timeline.'
+    if (event.kind === 'room.message.projected') {
+      return 'The simulated input is visible in the associated Room timeline.'
+    }
+    if (event.kind === 'room.agent-message.projected') {
+      return 'The Agent response is visible in the associated Room timeline.'
+    }
+    if (event.kind === 'room.agent-message.targeted.projected') {
+      return 'The addressed Agent message is visible in the associated Room timeline.'
+    }
+    if (event.kind === 'room.agent-message.targeted.accepted') {
+      return `Chatroom delivered the message only to ${String(detail.targetMemberId ?? 'the mentioned entity')}.`
+    }
+    if (event.kind === 'room.agent-egress.projected') {
+      return 'The bound Agent reply is visible in the associated Room timeline.'
+    }
     if (event.kind === 'room.agent-egress.delivery.accepted') return 'Chatroom accepted the bound Agent reply delivery.'
-    if (event.kind === 'room.agent-egress.ack.terminal') return `The Agent reply acknowledgement reached ${String(detail.state ?? 'a terminal state')}.`
-    if (event.kind === 'room.agent-task-delegation.projected') return 'The delegated task is visible in the associated Room timeline.'
-    if (event.kind === 'room.agent-task-delegation.accepted') return `Chatroom accepted the delegated task for ${String(detail.targetMemberId ?? 'the target entity')}.`
-    if (event.kind === 'room.agent-approval.projected') return 'The bound Agent approval card is visible in the associated Room timeline.'
-    if (event.kind === 'room.agent-approval.pending') return 'The bound Agent approval request is pending in the associated Room.'
-    if (event.kind === 'room.agent-approval.decision.accepted') return `Chatroom accepted the ${String(detail.decision ?? 'updated')} decision for the Agent approval request.`
-    if (event.kind === 'room.agent-approval.terminal') return `The Agent approval request reached ${String(detail.state ?? detail.decision ?? 'a terminal state')}.`
+    if (event.kind === 'room.agent-egress.ack.terminal') {
+      return `The Agent reply acknowledgement reached ${String(detail.state ?? 'a terminal state')}.`
+    }
+    if (event.kind === 'room.agent-task-delegation.projected') {
+      return 'The delegated task is visible in the associated Room timeline.'
+    }
+    if (event.kind === 'room.agent-task-delegation.accepted') {
+      return `Chatroom accepted the delegated task for ${String(detail.targetMemberId ?? 'the target entity')}.`
+    }
+    if (event.kind === 'room.agent-approval.projected') {
+      return 'The bound Agent approval card is visible in the associated Room timeline.'
+    }
+    if (event.kind === 'room.agent-approval.pending') {
+      return 'The bound Agent approval request is pending in the associated Room.'
+    }
+    if (event.kind === 'room.agent-approval.decision.accepted') {
+      return `Chatroom accepted the ${String(detail.decision ?? 'updated')} decision for the Agent approval request.`
+    }
+    if (event.kind === 'room.agent-approval.terminal') {
+      return `The Agent approval request reached ${String(detail.state ?? detail.decision ?? 'a terminal state')}.`
+    }
     if (event.kind === 'room.permission.pending') return 'Chatroom projected a pending permission request.'
-    if (event.kind === 'room.permission.terminal') return `The Room permission request reached ${String(detail.state ?? 'a terminal state')}.`
+    if (event.kind === 'room.permission.terminal') {
+      return `The Room permission request reached ${String(detail.state ?? 'a terminal state')}.`
+    }
     if (event.kind === 'room.delivery.accepted') return 'Chatroom accepted the Room delivery.'
-    if (event.kind === 'room.delivery.failed') return `The Room delivery failed${typeof detail.failureCode === 'string' ? `: ${detail.failureCode}` : '.'}`
-    if (event.kind === 'room.ack.terminal') return `The Room acknowledgement reached ${String(detail.state ?? 'a terminal state')}.`
-    if (event.kind.startsWith('room.permission-decision.')) return `The permission decision is ${String(detail.state ?? detail.decision ?? 'updated')}.`
-    if (event.kind === 'room.run.lifecycle') return `Run ${String(detail.status ?? 'state')} · ${String(detail.presence ?? 'presence unavailable')}`
+    if (event.kind === 'room.delivery.failed') {
+      return `The Room delivery failed${typeof detail.failureCode === 'string' ? `: ${detail.failureCode}` : '.'}`
+    }
+    if (event.kind === 'room.ack.terminal') {
+      return `The Room acknowledgement reached ${String(detail.state ?? 'a terminal state')}.`
+    }
+    if (event.kind.startsWith('room.permission-decision.')) {
+      return `The permission decision is ${String(detail.state ?? detail.decision ?? 'updated')}.`
+    }
+    if (event.kind === 'room.run.lifecycle') {
+      return `Run ${String(detail.status ?? 'state')} · ${String(detail.presence ?? 'presence unavailable')}`
+    }
     return event.kind
   }
 
-  private async injectIntroductionEvent(input: { readonly participantId: string; readonly memberId: string; readonly runId: string }): Promise<void> {
+  private async injectIntroductionEvent(
+    input: { readonly participantId: string; readonly memberId: string; readonly runId: string },
+  ): Promise<void> {
     if (input.participantId.trim() === '' || input.memberId.trim() === '' || input.runId.trim() === '') return
     await this.performInjection('member-self-introduction', input, async () => {
       const binding = await this.ensureInjectorBinding()
-      const commandId = scenarioCommandId(this.commandScope(), `event-injector:introduction:${this.nextInjectionOrdinal()}`)
+      const commandId = scenarioCommandId(
+        this.commandScope(),
+        `event-injector:introduction:${this.nextInjectionOrdinal()}`,
+      )
       const result = await this.runtime.client.requestMemberSelfIntroduction({
         $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V4,
         contract: 'cordisx.agent-loop-command/v4',
@@ -1233,7 +1421,9 @@ export class PlaygroundScenarioLabController {
         runId: input.runId,
         intent: { kind: 'member-self-introduction', audience: 'room', output: 'assistant-message' },
       })
-      if (result.status !== 'accepted') throw new Error(`member-self-introduction: ${result.status}${'code' in result ? `/${result.code}` : ''}`)
+      if (result.status !== 'accepted') {
+        throw new Error(`member-self-introduction: ${result.status}${'code' in result ? `/${result.code}` : ''}`)
+      }
       this.captureRuntimeTrace(binding.task, new Date().toISOString())
       await this.delay()
       this.captureRuntimeTrace(binding.task, new Date().toISOString())
@@ -1253,31 +1443,44 @@ export class PlaygroundScenarioLabController {
     if (pending === undefined) return
     const operationId = this.roomBridgeOperationId(`permission-decision:${this.nextInjectionOrdinal()}:${decision}`)
     this.roomBridgeOperationIds.add(operationId)
-    await this.performInjection('permission-decision', { approvalId: pending.approvalId, turn: pending.turn, decision }, async () => {
-      const client = await this.requireRoomBridge(pending.binding)
-      const result = await client.decidePermission(
-        pending.binding,
-        operationId,
-        pending.approvalId,
-        decision === 'approved' ? 'allow' : decision === 'denied' ? 'deny' : 'cancel',
-      )
-      const receipt = this.requireRoomBridgeReceipt(result, 'permission decision')
-      if (receipt.phase === 'rejected' || receipt.phase === 'failed') throw new Error(this.receiptFailure('permission decision', receipt))
-      this.pendingApproval = undefined
-      this.appendSimulatedTrace({
+    await this.performInjection(
+      'permission-decision',
+      { approvalId: pending.approvalId, turn: pending.turn, decision },
+      async () => {
+        const client = await this.requireRoomBridge(pending.binding)
+        const result = await client.decidePermission(
+          pending.binding,
+          operationId,
+          pending.approvalId,
+          decision === 'approved' ? 'allow' : decision === 'denied' ? 'deny' : 'cancel',
+        )
+        const receipt = this.requireRoomBridgeReceipt(result, 'permission decision')
+        if (receipt.phase === 'rejected' || receipt.phase === 'failed') {
+          throw new Error(
+            this.receiptFailure('permission decision', receipt),
+          )
+        }
+        this.pendingApproval = undefined
+        this.appendSimulatedTrace({
+          direction: 'simulator-to-chatroom',
+          type: 'permission-decision.accepted',
+          summary: `Chatroom accepted the ${decision} permission decision.`,
+          timestamp: new Date().toISOString(),
+          payload: receipt,
+          correlations: {
+            operationId,
+            turn: receipt.turnId ?? pending.turn,
+            runId: receipt.runId ?? pending.binding.runId,
+          },
+        })
+        await this.refreshRoomBridgeSnapshot(client, pending.binding)
+      },
+      {
         direction: 'simulator-to-chatroom',
-        type: 'permission-decision.accepted',
-        summary: `Chatroom accepted the ${decision} permission decision.`,
-        timestamp: new Date().toISOString(),
-        payload: receipt,
-        correlations: { operationId, turn: receipt.turnId ?? pending.turn, runId: receipt.runId ?? pending.binding.runId },
-      })
-      await this.refreshRoomBridgeSnapshot(client, pending.binding)
-    }, {
-      direction: 'simulator-to-chatroom',
-      summary: 'Send a decision to the pending Chatroom permission request.',
-      correlations: { operationId, turn: pending.turn, runId: pending.binding.runId },
-    })
+        summary: 'Send a decision to the pending Chatroom permission request.',
+        correlations: { operationId, turn: pending.turn, runId: pending.binding.runId },
+      },
+    )
   }
 
   private async executeNext(resumePhase: 'running' | 'paused'): Promise<void> {
@@ -1323,8 +1526,10 @@ export class PlaygroundScenarioLabController {
     flowId: string = this.selectedScenarioId,
   ): Promise<void> {
     const sourceDefinition = alias === 'a'
-      ? this.sourceTask.catalog.find(candidate => candidate.identity.agentId === this.sourceTask.identity.agentId
-        && candidate.identity.revision === this.sourceTask.identity.revision)
+      ? this.sourceTask.catalog.find(candidate =>
+        candidate.identity.agentId === this.sourceTask.identity.agentId
+        && candidate.identity.revision === this.sourceTask.identity.revision
+      )
       : undefined
     const selectedDefinition = sourceDefinition ?? definition
     const definitions = sourceDefinition === undefined ? [selectedDefinition] : this.sourceTask.catalog
@@ -1336,7 +1541,9 @@ export class PlaygroundScenarioLabController {
       definitions,
     ))
     if (!this.current(generation, runtime, bindings)) return
-    if (result.status !== 'accepted') throw new Error(`create ${alias}: ${result.status}${'code' in result ? `/${result.code}` : ''}`)
+    if (result.status !== 'accepted') {
+      throw new Error(`create ${alias}: ${result.status}${'code' in result ? `/${result.code}` : ''}`)
+    }
     bindings.set(alias, result.binding)
     this.definitions.set(alias, selectedDefinition)
     // A disposable generation is inspected in the source task workbench. Its
@@ -1381,17 +1588,21 @@ export class PlaygroundScenarioLabController {
       this.updateUserDelivery(alias, ordinal, 'failed')
       throw new Error(`send ${alias}/${ordinal}: ${result.status}${'code' in result ? `/${result.code}` : ''}`)
     }
-    if (flowId === 'event-injector') this.latestInjectedSend = {
-      binding,
-      ordinal,
-      turn: result.turn,
-      messageId: result.messageId,
+    if (flowId === 'event-injector') {
+      this.latestInjectedSend = {
+        binding,
+        ordinal,
+        turn: result.turn,
+        messageId: result.messageId,
+      }
     }
     this.updateUserDelivery(alias, ordinal, 'delivered')
     const definition = this.definitions.get(alias)
-    const task = runtime.host.snapshot().tasks.find(candidate => definition !== undefined
+    const task = runtime.host.snapshot().tasks.find(candidate =>
+      definition !== undefined
       && candidate.identity.agentId === definition.identity.agentId
-      && candidate.identity.revision === definition.identity.revision)
+      && candidate.identity.revision === definition.identity.revision
+    )
     const output = task?.execution?.result.status === 'ok'
       ? task.execution.result.stdout ?? 'Completed successfully.'
       : task?.execution?.result.error?.message ?? 'The deterministic scenario operation failed.'
@@ -1431,7 +1642,9 @@ export class PlaygroundScenarioLabController {
       decision,
     ))
     if (!this.current(generation, runtime, bindings)) return
-    if (result.status !== 'accepted') throw new Error(`approval ${alias}/${ordinal}: ${result.status}${'code' in result ? `/${result.code}` : ''}`)
+    if (result.status !== 'accepted') {
+      throw new Error(`approval ${alias}/${ordinal}: ${result.status}${'code' in result ? `/${result.code}` : ''}`)
+    }
     this.resolveApproval(alias, ordinal, result.decision)
     this.append('result', `approval ${alias}/${ordinal}: ${result.decision}/${result.delivery.disposition}`)
   }
@@ -1512,9 +1725,11 @@ export class PlaygroundScenarioLabController {
 
   private resolveApproval(alias: string, ordinal: number, decision: 'approved' | 'denied' | 'cancelled'): void {
     const itemId = `approval-${alias}-${ordinal}`
-    this.conversationEntries = this.conversationEntries.map(entry => entry.kind === 'approval' && entry.itemId === itemId
-      ? { ...entry, state: decision, actions: [] }
-      : entry)
+    this.conversationEntries = this.conversationEntries.map(entry =>
+      entry.kind === 'approval' && entry.itemId === itemId
+        ? { ...entry, state: decision, actions: [] }
+        : entry
+    )
     this.publish()
   }
 
@@ -1522,16 +1737,22 @@ export class PlaygroundScenarioLabController {
     const selected = this.selectedScenarioId
     const scope = this.commandScope()
     const participatingAliases = aliases.filter(alias => this.definitions.has(alias))
-    const participants = [{ id: 'scenario-human', role: 'human' as const, name: 'You' }, ...participatingAliases.map(alias => {
-      const definition = this.definitions.get(alias)!
-      return {
-        id: `scenario-agent-${alias}`,
-        role: 'agent' as const,
-        name: definition.name ?? labelFor(alias),
-        agentIdentity: definition.identity,
-        avatar: createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: definition.identity.agentId }),
-      }
-    })]
+    const participants = [
+      { id: 'scenario-human', role: 'human' as const, name: 'You' },
+      ...participatingAliases.map(alias => {
+        const definition = this.definitions.get(alias)!
+        return {
+          id: `scenario-agent-${alias}`,
+          role: 'agent' as const,
+          name: definition.name ?? labelFor(alias),
+          agentIdentity: definition.identity,
+          avatar: createGeneratedAgentAvatarRef({
+            namespace: 'agent-definition',
+            agentId: definition.identity.agentId,
+          }),
+        }
+      }),
+    ]
     const activeRuns = participatingAliases.flatMap(alias => {
       const detailsUrl = this.detailsUrls.get(alias)
       return detailsUrl === undefined ? [] : [{
@@ -1545,17 +1766,26 @@ export class PlaygroundScenarioLabController {
     return createAgentConversationModel({
       ownerId: scope === '' ? 'host-playground-scenario-lab' : `host-playground-simulator-task-${scope}`,
       shell: 'agent-desktop',
-      binding: { bindingId: scope === '' ? 'scenario-shell' : `scenario-shell-${scope}`, ownerGeneration: `scenario-generation-${this.generation}` },
+      binding: {
+        bindingId: scope === '' ? 'scenario-shell' : `scenario-shell-${scope}`,
+        ownerGeneration: `scenario-generation-${this.generation}`,
+      },
       generation: `scenario-snapshot-${this.generation}`,
       snapshotSequence: this.conversationSequence,
       selection: {
-        kind: 'room', roomId: scope === '' ? `scenario-${selected}` : `scenario-${scope}-${selected}`,
+        kind: 'room',
+        roomId: scope === '' ? `scenario-${selected}` : `scenario-${scope}-${selected}`,
         title: scope === ''
           ? PLAYGROUND_SCENARIO_CATALOG.find(item => item.id === selected)!.title.en
-          : `${this.sourceTask.agentLabel} · ${PLAYGROUND_SCENARIO_CATALOG.find(item => item.id === selected)!.title.en}`,
-        description: { state: 'present', text: scope === ''
-          ? 'Developer-only disposable Conversation Shell preview.'
-          : `Disposable generation for ${this.sourceTask.debugTaskId}; the source task snapshot is unchanged.` },
+          : `${this.sourceTask.agentLabel} · ${
+            PLAYGROUND_SCENARIO_CATALOG.find(item => item.id === selected)!.title.en
+          }`,
+        description: {
+          state: 'present',
+          text: scope === ''
+            ? 'Developer-only disposable Conversation Shell preview.'
+            : `Disposable generation for ${this.sourceTask.debugTaskId}; the source task snapshot is unchanged.`,
+        },
         multiParticipant: participants.length > 1,
         participantPresentation: participants.length > 1 ? 'host-initials' : 'none',
         participants,
@@ -1563,8 +1793,12 @@ export class PlaygroundScenarioLabController {
       },
       entries: this.conversationEntries,
       composer: {
-        availability: 'unavailable', placeholder: 'Use Run or Next to drive this disposable scenario.', disabled: true,
-        disabledReason: 'Scenario controls own this deterministic preview.', shortcutPolicy: 'enter', submit: { id: 'scenario.submit' },
+        availability: 'unavailable',
+        placeholder: 'Use Run or Next to drive this disposable scenario.',
+        disabled: true,
+        disabledReason: 'Scenario controls own this deterministic preview.',
+        shortcutPolicy: 'enter',
+        submit: { id: 'scenario.submit' },
       },
       headerActions: [],
     })

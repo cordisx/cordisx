@@ -1,6 +1,7 @@
 import type { RasterImageSnapshotV1 } from '@cordisx/protocol/raster-image/v1'
 
-const SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/raster-image-snapshot.v1.schema.json' as const
+const SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/raster-image-snapshot.v1.schema.json' as const
 const CONTRACT = 'cordisx.raster-image-snapshot/v1' as const
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10] as const
 const MAX_BASE64_LENGTH = 349_528
@@ -33,7 +34,8 @@ function decodeCanonicalBase64(value: string): Uint8Array {
 }
 
 function uint32(bytes: Uint8Array, offset: number): number {
-  return (((bytes[offset]! * 0x100 + bytes[offset + 1]!) * 0x100 + bytes[offset + 2]!) * 0x100 + bytes[offset + 3]!) >>> 0
+  return (((bytes[offset]! * 0x100 + bytes[offset + 1]!) * 0x100 + bytes[offset + 2]!) * 0x100 + bytes[offset + 3]!)
+    >>> 0
 }
 
 let crcTable: Uint32Array | undefined
@@ -67,10 +69,14 @@ function assertPng(bytes: Uint8Array, width: number, height: number): void {
     const dataOffset = offset + 8
     const crcOffset = dataOffset + length
     const end = crcOffset + 4
-    if (length > MAX_DECODED_BYTES || end > bytes.length) throw new Error('raster image PNG has invalid chunk boundaries')
+    if (length > MAX_DECODED_BYTES || end > bytes.length) {
+      throw new Error('raster image PNG has invalid chunk boundaries')
+    }
     const type = chunkName(bytes, typeOffset)
     if (!/^[A-Za-z]{4}$/u.test(type)) throw new Error('raster image PNG has an invalid chunk type')
-    if (pngCrc(bytes, typeOffset, crcOffset) !== uint32(bytes, crcOffset)) throw new Error(`raster image PNG ${type} CRC is invalid`)
+    if (pngCrc(bytes, typeOffset, crcOffset) !== uint32(bytes, crcOffset)) {
+      throw new Error(`raster image PNG ${type} CRC is invalid`)
+    }
     if (chunkIndex === 0) {
       if (type !== 'IHDR' || length !== 13) throw new Error('raster image PNG must begin with one IHDR')
       if (uint32(bytes, dataOffset) !== width || uint32(bytes, dataOffset + 4) !== height) {
@@ -103,11 +109,15 @@ function assertPng(bytes: Uint8Array, width: number, height: number): void {
 export function cloneRasterImageSnapshot(input: RasterImageSnapshotV1, label = 'raster image'): RasterImageSnapshotV1 {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) throw new Error(`${label} must be an object`)
   assertKeys(input, ['$schema', 'contract', 'schemaVersion', 'mediaType', 'encoding', 'data', 'width', 'height'], label)
-  if (input.$schema !== SCHEMA || input.contract !== CONTRACT || input.schemaVersion !== 1
-    || input.mediaType !== 'image/png' || input.encoding !== 'base64') throw new Error(`${label} has invalid contract identity`)
-  if (!Number.isInteger(input.width) || input.width < 1 || input.width > MAX_DIMENSION
+  if (
+    input.$schema !== SCHEMA || input.contract !== CONTRACT || input.schemaVersion !== 1
+    || input.mediaType !== 'image/png' || input.encoding !== 'base64'
+  ) throw new Error(`${label} has invalid contract identity`)
+  if (
+    !Number.isInteger(input.width) || input.width < 1 || input.width > MAX_DIMENSION
     || !Number.isInteger(input.height) || input.height < 1 || input.height > MAX_DIMENSION
-    || input.width * input.height > MAX_DIMENSION * MAX_DIMENSION) throw new Error(`${label} dimensions are invalid`)
+    || input.width * input.height > MAX_DIMENSION * MAX_DIMENSION
+  ) throw new Error(`${label} dimensions are invalid`)
   assertPng(decodeCanonicalBase64(input.data), input.width, input.height)
   return Object.freeze({
     $schema: SCHEMA,

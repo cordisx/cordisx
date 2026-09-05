@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { access, readFile, readdir, stat } from 'node:fs/promises'
+import { access, readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { build } from 'esbuild'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
@@ -9,7 +9,7 @@ import {
 } from '../plugin-lifecycle-contracts.js'
 import type { CordisXConfig } from './config.js'
 import { CdpPluginLifecycleRuntime } from './cdp.js'
-import { readEntityTemplatePayload, type EntityTemplatePayload } from './entity-directory.js'
+import { type EntityTemplatePayload, readEntityTemplatePayload } from './entity-directory.js'
 import {
   PLUGIN_PACKAGE_SCHEMA_V5,
   PLUGIN_PACKAGE_SCHEMA_V6,
@@ -28,7 +28,8 @@ const DEBOUNCE_MS = 120
 const ROLLBACK_RETRY_MS = 750
 const IGNORED_DIRECTORIES = new Set(['.git', '.next', 'coverage', 'dist', 'node_modules'])
 const MAX_DIAGNOSTIC_LENGTH = 4_000
-const ENTITY_FILE_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-file.v1.schema.json'
+const ENTITY_FILE_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-file.v1.schema.json'
 const LOCAL_ENTITY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u
 const ENTITY_TEMPLATE_PATH = /^\.\/entities\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\/entity\.json$/u
 const ENTITY_DIGEST = /^sha256:[a-f0-9]{64}$/u
@@ -78,10 +79,12 @@ export async function findPackageRoot(entry: string): Promise<string> {
   let directory = path.dirname(entry)
   while (true) {
     const manifestPath = path.join(directory, 'package.json')
-    if (await access(manifestPath).then(() => true).catch(error => {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
-      throw error
-    })) return directory
+    if (
+      await access(manifestPath).then(() => true).catch(error => {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+        throw error
+      })
+    ) return directory
     const parent = path.dirname(directory)
     if (parent === directory) return path.dirname(entry)
     directory = parent
@@ -136,7 +139,9 @@ async function resolveLocalDevelopmentEntry(rawEntry: string): Promise<LocalDeve
 }
 
 /** Host-private stable owner identity without compiling the local plugin candidate. */
-export async function localDevelopmentPluginIdentity(rawEntry: string): Promise<{ readonly id: string; readonly source: string }> {
+export async function localDevelopmentPluginIdentity(
+  rawEntry: string,
+): Promise<{ readonly id: string; readonly source: string }> {
   const resolved = await resolveLocalDevelopmentEntry(rawEntry)
   return { id: pluginId(resolved.entry), source: resolved.identitySource }
 }
@@ -162,7 +167,9 @@ async function readReadmes(root: string): Promise<{
   const fallback = values.find(value => value.locale === undefined)?.source
   return {
     ...(fallback === undefined ? {} : { default: fallback }),
-    localized: Object.fromEntries(values.flatMap(value => value.locale === undefined ? [] : [[value.locale, value.source]])),
+    localized: Object.fromEntries(
+      values.flatMap(value => value.locale === undefined ? [] : [[value.locale, value.source]]),
+    ),
     files,
   }
 }
@@ -190,23 +197,31 @@ async function readRendererOnlyPackage(root: string): Promise<{
   const runtimeManifestSchema = manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7
     ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7
     : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 && manifest.schemaVersion === 8
-      ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8
-      : undefined
+    ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8
+    : undefined
   const declaresV7OrV8 = manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 || manifest.schemaVersion === 7
     || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 || manifest.schemaVersion === 8
   if (manifest.runtimeManifest !== undefined && runtimeManifestSchema !== undefined) {
-    if (manifest.runtimeManifest === null || typeof manifest.runtimeManifest !== 'object' || Array.isArray(manifest.runtimeManifest)) {
+    if (
+      manifest.runtimeManifest === null || typeof manifest.runtimeManifest !== 'object'
+      || Array.isArray(manifest.runtimeManifest)
+    ) {
       throw new Error('local development runtimeManifest must be an object')
     }
     const declaration = manifest.runtimeManifest as Record<string, unknown>
-    if (Object.keys(declaration).some(key => !['path', 'schema', 'digest'].includes(key))
-      || typeof declaration.path !== 'string' || !/^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.json$/u.test(declaration.path)
+    if (
+      Object.keys(declaration).some(key => !['path', 'schema', 'digest'].includes(key))
+      || typeof declaration.path !== 'string'
+      || !/^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.json$/u.test(declaration.path)
       || declaration.schema !== runtimeManifestSchema
-      || typeof declaration.digest !== 'string' || !ENTITY_DIGEST.test(declaration.digest)) {
+      || typeof declaration.digest !== 'string' || !ENTITY_DIGEST.test(declaration.digest)
+    ) {
       throw new Error('local development runtimeManifest declaration is invalid')
     }
     runtimeManifestFile = path.resolve(root, declaration.path.slice(2))
-    if (!runtimeManifestFile.startsWith(`${path.resolve(root)}${path.sep}`)) throw new Error('local development runtimeManifest escapes package root')
+    if (!runtimeManifestFile.startsWith(`${path.resolve(root)}${path.sep}`)) {
+      throw new Error('local development runtimeManifest escapes package root')
+    }
     const runtimeText = await readFile(runtimeManifestFile, 'utf8')
     const actualDigest = `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`
     if (actualDigest !== declaration.digest) throw new Error('local development runtimeManifest digest mismatch')
@@ -218,21 +233,31 @@ async function readRendererOnlyPackage(root: string): Promise<{
   } else if (manifest.runtimeManifest !== undefined && declaresV7OrV8) {
     throw new Error('local development runtimeManifest requires exact plugin-package.v7 or plugin-package.v8')
   }
-  if (manifest.entityTemplates === undefined) return {
-    files: [manifestPath, ...(runtimeManifestFile === undefined ? [] : [runtimeManifestFile])],
-    entityTemplates: [],
-    ...(runtimeManifest === undefined ? {} : { manifest: runtimeManifest }),
+  if (manifest.entityTemplates === undefined) {
+    return {
+      files: [manifestPath, ...(runtimeManifestFile === undefined ? [] : [runtimeManifestFile])],
+      entityTemplates: [],
+      ...(runtimeManifest === undefined ? {} : { manifest: runtimeManifest }),
+    }
   }
-  if (!((manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V5 && manifest.schemaVersion === 5)
-    || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V6 && manifest.schemaVersion === 6)
-    || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7)
-    || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 && manifest.schemaVersion === 8))) {
-    throw new Error('local development entityTemplates require plugin-package.v5, plugin-package.v6, or plugin-package.v7; plugin-package.v8 is also supported')
+  if (
+    !((manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V5 && manifest.schemaVersion === 5)
+      || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V6 && manifest.schemaVersion === 6)
+      || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7)
+      || (manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 && manifest.schemaVersion === 8))
+  ) {
+    throw new Error(
+      'local development entityTemplates require plugin-package.v5, plugin-package.v6, or plugin-package.v7; plugin-package.v8 is also supported',
+    )
   }
   const compatibility = manifest.compatibility
-  if (compatibility === null || typeof compatibility !== 'object' || Array.isArray(compatibility)
+  if (
+    compatibility === null || typeof compatibility !== 'object' || Array.isArray(compatibility)
     || !Array.isArray((compatibility as Record<string, unknown>).protocolSchemas)
-    || !(compatibility as { readonly protocolSchemas: readonly unknown[] }).protocolSchemas.includes(ENTITY_FILE_SCHEMA_V1)) {
+    || !(compatibility as { readonly protocolSchemas: readonly unknown[] }).protocolSchemas.includes(
+      ENTITY_FILE_SCHEMA_V1,
+    )
+  ) {
     throw new Error('local development entityTemplates require entity-file.v1 compatibility')
   }
   if (!Array.isArray(manifest.entityTemplates) || manifest.entityTemplates.length > 64) {
@@ -247,17 +272,25 @@ async function readRendererOnlyPackage(root: string): Promise<{
     const agentId = item.agentId
     const entityPath = item.entityPath
     const digest = item.digest
-    if (Object.keys(item).some(key => !['agentId', 'entityPath', 'digest'].includes(key))
+    if (
+      Object.keys(item).some(key => !['agentId', 'entityPath', 'digest'].includes(key))
       || typeof agentId !== 'string' || !LOCAL_ENTITY_ID.test(agentId) || seen.has(agentId)
       || typeof entityPath !== 'string' || !ENTITY_TEMPLATE_PATH.test(entityPath)
       || entityPath !== `./entities/${agentId}/entity.json`
-      || typeof digest !== 'string' || !ENTITY_DIGEST.test(digest)) {
+      || typeof digest !== 'string' || !ENTITY_DIGEST.test(digest)
+    ) {
       throw new Error(`local development entityTemplates[${index}] is invalid or duplicated`)
     }
     seen.add(agentId)
-    return { agentId, entityPath: entityPath as `./entities/${string}/entity.json`, digest: digest as `sha256:${string}` }
+    return {
+      agentId,
+      entityPath: entityPath as `./entities/${string}/entity.json`,
+      digest: digest as `sha256:${string}`,
+    }
   })
-  const entityTemplates = await Promise.all(declarations.map(async declaration => await readEntityTemplatePayload(root, declaration)))
+  const entityTemplates = await Promise.all(
+    declarations.map(async declaration => await readEntityTemplatePayload(root, declaration)),
+  )
   const entityFiles = entityTemplates.flatMap(template => {
     const entityFile = path.resolve(root, template.declaration.entityPath.slice(2))
     const entityDirectory = path.dirname(entityFile)
@@ -273,9 +306,11 @@ async function readRendererOnlyPackage(root: string): Promise<{
 function absoluteInputs(root: string, inputs: Readonly<Record<string, unknown>>): readonly string[] {
   // esbuild reports Host-provided virtual modules in the metafile too. They
   // have no filesystem node and must never enter a file watcher/import graph.
-  return Object.keys(inputs).flatMap(input => input.startsWith('cordisx-shared-react:')
-    ? []
-    : [path.resolve(root, input)])
+  return Object.keys(inputs).flatMap(input =>
+    input.startsWith('cordisx-shared-react:')
+      ? []
+      : [path.resolve(root, input)]
+  )
 }
 
 /** Build one immutable local-dev candidate and return its complete esbuild input graph. */
@@ -320,22 +355,25 @@ export async function buildLocalDevelopmentPlugin(
   // Both an existing renderer and a future bootstrap must instantiate the
   // exact same module factory with the Host-issued Plugin Console facade.  Do
   // not evaluate a module object eagerly in the CDP global console.
-  const runtimeArtifactSource = `globalThis.__cordisxPendingPluginModuleFactoryV1 = (console) => {\n${moduleOutput.text}\nreturn __cordisxPluginModule;\n};\n`
-  const digest = `sha256:${createHash('sha256')
-    .update(moduleOutput.text)
-    .update('\0')
-    .update(runtimeArtifactSource)
-    .update('\0')
-    .update(version)
-    .update('\0')
-    .update(readmes.default ?? '')
-    .update('\0')
-    .update(JSON.stringify(readmes.localized))
-    .update('\0')
-    .update(JSON.stringify(packageSource.entityTemplates))
-    .update('\0')
-    .update(JSON.stringify(packageSource.manifest ?? null))
-    .digest('hex')}` as const
+  const runtimeArtifactSource =
+    `globalThis.__cordisxPendingPluginModuleFactoryV1 = (console) => {\n${moduleOutput.text}\nreturn __cordisxPluginModule;\n};\n`
+  const digest = `sha256:${
+    createHash('sha256')
+      .update(moduleOutput.text)
+      .update('\0')
+      .update(runtimeArtifactSource)
+      .update('\0')
+      .update(version)
+      .update('\0')
+      .update(readmes.default ?? '')
+      .update('\0')
+      .update(JSON.stringify(readmes.localized))
+      .update('\0')
+      .update(JSON.stringify(packageSource.entityTemplates))
+      .update('\0')
+      .update(JSON.stringify(packageSource.manifest ?? null))
+      .digest('hex')
+  }` as const
   const sourceKey = createHash('sha256').update(entry).digest('hex').slice(0, 24)
   return {
     id,
@@ -346,13 +384,15 @@ export async function buildLocalDevelopmentPlugin(
     digest,
     moduleFactorySource: moduleOutput.text,
     runtimeArtifactSource,
-    watchFiles: [...new Set([
-      entry,
-      path.join(root, 'package.json'),
-      ...packageSource.files,
-      ...readmes.files,
-      ...absoluteInputs(root, moduleResult.metafile.inputs),
-    ])].sort(),
+    watchFiles: [
+      ...new Set([
+        entry,
+        path.join(root, 'package.json'),
+        ...packageSource.files,
+        ...readmes.files,
+        ...absoluteInputs(root, moduleResult.metafile.inputs),
+      ]),
+    ].sort(),
     entityTemplates: packageSource.entityTemplates,
     ...(packageSource.manifest === undefined ? {} : { manifest: packageSource.manifest }),
     ...(readmes.default === undefined ? {} : { readme: readmes.default }),
@@ -381,15 +421,17 @@ async function sourceFiles(root: string): Promise<readonly string[]> {
 }
 
 async function fingerprint(files: readonly string[]): Promise<string> {
-  const values = await Promise.all([...new Set(files)].sort().map(async file => {
-    try {
-      const value = await stat(file)
-      return `${file}\0${value.size}\0${value.mtimeMs}`
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return `${file}\0missing`
-      throw error
-    }
-  }))
+  const values = await Promise.all(
+    [...new Set(files)].sort().map(async file => {
+      try {
+        const value = await stat(file)
+        return `${file}\0${value.size}\0${value.mtimeMs}`
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return `${file}\0missing`
+        throw error
+      }
+    }),
+  )
   return createHash('sha256').update(values.join('\n')).digest('hex')
 }
 
@@ -397,7 +439,8 @@ export interface LocalDevelopmentControllerOptions {
   readonly entry: string
   readonly runtimeGeneration: string
   readonly initialConfig: CordisXConfig
-  readonly runtime: Pick<CdpPluginLifecycleRuntime,
+  readonly runtime: Pick<
+    CdpPluginLifecycleRuntime,
     | 'currentRegistryEpoch'
     | 'cancelPreparation'
     | 'prepare'
@@ -406,7 +449,8 @@ export interface LocalDevelopmentControllerOptions {
     | 'complete'
     | 'finalize'
     | 'rollback'
-    | 'updateDevelopmentStatus'>
+    | 'updateDevelopmentStatus'
+  >
   readonly rebuildBootstrap: (
     config: CordisXConfig,
     activation: CordisXPluginActivationRecordV1,
@@ -481,7 +525,9 @@ export class LocalDevelopmentController {
     return await fingerprint([...this.watchFiles, ...await sourceFiles(this.sourceRoot)])
   }
 
-  private async restoreLastGoodBootstrap(restored: Awaited<ReturnType<CdpPluginLifecycleRuntime['rollback']>>): Promise<void> {
+  private async restoreLastGoodBootstrap(
+    restored: Awaited<ReturnType<CdpPluginLifecycleRuntime['rollback']>>,
+  ): Promise<void> {
     this.active = structuredClone(restored.active)
     const source = await this.options.rebuildBootstrap(this.lastGoodConfig, this.active, restored.registryEpoch)
     this.options.setBootstrap(source)

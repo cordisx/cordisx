@@ -1,14 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import {
-  chmod,
-  copyFile,
-  lstat,
-  mkdir,
-  opendir,
-  readFile,
-  realpath,
-  rm,
-} from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, opendir, readFile, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { x as extractTar } from 'tar'
@@ -62,10 +53,16 @@ async function copyDirectoryStrict(source: string, destination: string, relative
       continue
     }
     if (!child.isFile()) {
-      throw new PackageLifecycleError('package-special-file-rejected', `special files are not accepted: ${childRelative}`)
+      throw new PackageLifecycleError(
+        'package-special-file-rejected',
+        `special files are not accepted: ${childRelative}`,
+      )
     }
     if (child.nlink > 1) {
-      throw new PackageLifecycleError('package-hardlink-rejected', `hard-linked files are not accepted: ${childRelative}`)
+      throw new PackageLifecycleError(
+        'package-hardlink-rejected',
+        `hard-linked files are not accepted: ${childRelative}`,
+      )
     }
     await copyFile(from, to)
     await chmod(to, child.mode & 0o111 ? 0o700 : 0o600)
@@ -95,11 +92,17 @@ async function extractArchiveStrict(archive: string, destination: string): Promi
       filter: (entryPath, entry) => {
         const portable = entryPath.replaceAll('\\', '/')
         if (path.posix.isAbsolute(portable) || portable.split('/').some(part => part === '..')) {
-          rejectedEntry = { code: 'unsafe-package-path', message: `archive entry escapes the package root: ${entryPath}` }
+          rejectedEntry = {
+            code: 'unsafe-package-path',
+            message: `archive entry escapes the package root: ${entryPath}`,
+          }
           return false
         }
-        if (!('type' in entry)
-          || (entry.type !== 'File' && entry.type !== 'OldFile' && entry.type !== 'ContiguousFile' && entry.type !== 'Directory')) {
+        if (
+          !('type' in entry)
+          || (entry.type !== 'File' && entry.type !== 'OldFile' && entry.type !== 'ContiguousFile'
+            && entry.type !== 'Directory')
+        ) {
           rejectedEntry = { code: 'package-link-rejected', message: `archive entry type is not accepted: ${entryPath}` }
           return false
         }
@@ -108,7 +111,10 @@ async function extractArchiveStrict(archive: string, destination: string): Promi
     })
     if (rejectedEntry !== undefined) throw new PackageLifecycleError(rejectedEntry.code, rejectedEntry.message)
   } catch (error) {
-    throw new PackageLifecycleError('invalid-package-archive', `failed to extract local package archive: ${(error as Error).message}`)
+    throw new PackageLifecycleError(
+      'invalid-package-archive',
+      `failed to extract local package archive: ${(error as Error).message}`,
+    )
   }
   const root = await normalizedArchiveRoot(extracted)
   await copyDirectoryStrict(root, path.join(destination, 'payload'))
@@ -159,7 +165,9 @@ export async function hashPackageTree(root: string): Promise<string> {
 
 function parseExpectedIntegrity(value: string): string {
   const match = /^sha256:([a-f0-9]{64})$/.exec(value)
-  if (match === null) throw new PackageLifecycleError('invalid-expected-integrity', 'expected integrity must be sha256:<lowercase hex>')
+  if (match === null) {
+    throw new PackageLifecycleError('invalid-expected-integrity', 'expected integrity must be sha256:<lowercase hex>')
+  }
   return match[1]!
 }
 
@@ -179,26 +187,41 @@ export class PluginPackageSourceSnapshotter {
       throw new PackageLifecycleError('invalid-transaction-id', 'transaction id is invalid')
     }
     const canonicalPath = await realpath(path.resolve(source.path)).catch((error) => {
-      throw new PackageLifecycleError('package-source-unavailable', `cannot resolve package source: ${(error as Error).message}`)
+      throw new PackageLifecycleError(
+        'package-source-unavailable',
+        `cannot resolve package source: ${(error as Error).message}`,
+      )
     })
     const sourceStat = await lstat(canonicalPath)
-    if (sourceStat.isSymbolicLink()) throw new PackageLifecycleError('package-link-rejected', 'package source cannot be a symbolic link')
+    if (sourceStat.isSymbolicLink()) {
+      throw new PackageLifecycleError('package-link-rejected', 'package source cannot be a symbolic link')
+    }
     const stagingDirectory = path.join(this.#root, 'staging', `${transactionId}.${randomUUID()}`)
     const payloadDirectory = path.join(stagingDirectory, 'payload')
     await mkdir(stagingDirectory, { recursive: true, mode: 0o700 })
     try {
       if (source.kind === 'local-directory') {
-        if (!sourceStat.isDirectory()) throw new PackageLifecycleError('invalid-package-source', 'local-directory source must be a directory')
+        if (!sourceStat.isDirectory()) {
+          throw new PackageLifecycleError('invalid-package-source', 'local-directory source must be a directory')
+        }
         await copyDirectoryStrict(canonicalPath, payloadDirectory)
       } else if (source.kind === 'local-package' && sourceStat.isDirectory()) {
         await copyDirectoryStrict(canonicalPath, payloadDirectory)
       } else {
-        if (!sourceStat.isFile()) throw new PackageLifecycleError('invalid-package-source', `${source.kind} source must be a file or explicit package directory`)
+        if (!sourceStat.isFile()) {
+          throw new PackageLifecycleError(
+            'invalid-package-source',
+            `${source.kind} source must be a file or explicit package directory`,
+          )
+        }
         await extractArchiveStrict(canonicalPath, stagingDirectory)
       }
       const digest = await hashPackageTree(payloadDirectory)
       if (source.expectedIntegrity !== undefined && parseExpectedIntegrity(source.expectedIntegrity) !== digest) {
-        throw new PackageLifecycleError('integrity-mismatch', `expected ${source.expectedIntegrity}; received sha256:${digest}`)
+        throw new PackageLifecycleError(
+          'integrity-mismatch',
+          `expected ${source.expectedIntegrity}; received sha256:${digest}`,
+        )
       }
       return {
         stagingDirectory,

@@ -16,9 +16,9 @@ import {
   stageServiceConfigCandidate,
 } from '../packages/cli/src/config/service-config.js'
 import {
-  HostServiceConfigNarrowApi,
   type HostServiceConfigContract,
   type HostServiceConfigMutation,
+  HostServiceConfigNarrowApi,
   type HostServiceConfigPersistence,
 } from '../packages/cli/src/launcher/service-config.js'
 import {
@@ -60,7 +60,12 @@ function api(
     authorize: permission => options.authorize?.(permission) ?? true,
     secretState: ref => ref === undefined ? 'missing' : 'ready',
     ...(contract.configApplies === 'service-restart'
-      ? { restartService: options.restart ?? vi.fn(async () => ({ generation: 'provider-fleet-1', rollback: async () => undefined })) }
+      ? {
+        restartService: options.restart ?? vi.fn(async () => ({
+          generation: 'provider-fleet-1',
+          rollback: async () => undefined,
+        })),
+      }
       : {}),
     ...(options.persistence === undefined ? {} : { persistence: options.persistence }),
   })
@@ -68,7 +73,9 @@ function api(
 
 function runtimeProvider() {
   return {
-    id: 'gateway-a', displayName: 'Gateway A', enabled: true,
+    id: 'gateway-a',
+    displayName: 'Gateway A',
+    enabled: true,
     endpoint: { baseUrl: 'https://proxy.example.com/v1', secretRef: 'host-secret:env/GATEWAY_A_KEY' },
     models: { mappings: [] },
     timeoutMs: 30_000,
@@ -120,7 +127,9 @@ describe('Host service configuration narrow API', () => {
     expect(await service.descriptor()).toMatchObject({
       contract: 'cordisx.service-config-descriptor/v1',
       identity: { pluginId: 'cli-proxy-api', serviceId: 'providers-runtime' },
-      revision: 0, lastGoodRevision: 0, restartRequired: false,
+      revision: 0,
+      lastGoodRevision: 0,
+      restartRequired: false,
       configApplies: 'service-restart',
       configuration: { providers: [] },
     })
@@ -133,7 +142,9 @@ describe('Host service configuration narrow API', () => {
     expect(restart).toHaveBeenCalledTimes(1)
     const descriptor = await service.descriptor()
     expect(descriptor).toMatchObject({
-      revision: 1, lastGoodRevision: 1, restartRequired: false,
+      revision: 1,
+      lastGoodRevision: 1,
+      restartRequired: false,
       configuration: { providers: [{ endpoint: { baseUrl: 'https://proxy.example.com/v1' } }] },
       secrets: [{ path: ['providers', '0', 'endpoint', 'secretRef'], set: true }],
     })
@@ -175,17 +186,28 @@ describe('Host service configuration narrow API', () => {
   it('aborts a failed service restart and retains the last-good revision', async () => {
     const target = await configPath()
     const service = api(target, CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT, {
-      restart: vi.fn(async () => { throw new Error('provider process failed') }),
+      restart: vi.fn(async () => {
+        throw new Error('provider process failed')
+      }),
     })
-    expect(await service.mutate(mutation(
-      CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
-      0,
-      runtimeConfiguration([runtimeProvider()]),
-    ))).toMatchObject({
-      status: 'rejected', revision: 0, error: { code: 'service-restart-failed' },
+    expect(
+      await service.mutate(mutation(
+        CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
+        0,
+        runtimeConfiguration([runtimeProvider()]),
+      )),
+    ).toMatchObject({
+      status: 'rejected',
+      revision: 0,
+      error: { code: 'service-restart-failed' },
     })
-    expect(await service.descriptor()).toMatchObject({ revision: 0, lastGoodRevision: 0, configuration: { providers: [] } })
-    expect((await loadHomeConfig(target)).plugins[0]?.services?.['providers-runtime']?.profiles.default?.candidate).toBeUndefined()
+    expect(await service.descriptor()).toMatchObject({
+      revision: 0,
+      lastGoodRevision: 0,
+      configuration: { providers: [] },
+    })
+    expect((await loadHomeConfig(target)).plugins[0]?.services?.['providers-runtime']?.profiles.default?.candidate)
+      .toBeUndefined()
   })
 
   it('classifies permission denial distinctly before persistence or restart', async () => {
@@ -196,11 +218,13 @@ describe('Host service configuration narrow API', () => {
       restart,
     })
     expect(await service.descriptor()).toMatchObject({ writable: false, revision: 0 })
-    expect(await service.mutate(mutation(
-      CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
-      0,
-      runtimeConfiguration([runtimeProvider()]),
-    ))).toMatchObject({
+    expect(
+      await service.mutate(mutation(
+        CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
+        0,
+        runtimeConfiguration([runtimeProvider()]),
+      )),
+    ).toMatchObject({
       status: 'rejected',
       revision: 0,
       error: { code: 'permission-denied' },
@@ -216,49 +240,77 @@ describe('Host service configuration narrow API', () => {
     const persistence: HostServiceConfigPersistence = {
       read: readServiceConfigState,
       stage: stageServiceConfigCandidate,
-      commit: vi.fn(async (..._args: Parameters<typeof commitServiceConfigCandidate>) => { throw new Error('disk full') }),
+      commit: vi.fn(async (..._args: Parameters<typeof commitServiceConfigCandidate>) => {
+        throw new Error('disk full')
+      }),
       abort: abortServiceConfigCandidate,
     }
     const service = api(target, CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT, { restart, persistence })
-    expect(await service.mutate(mutation(
-      CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
-      0,
-      runtimeConfiguration([runtimeProvider()]),
-    ))).toMatchObject({
-      status: 'rejected', revision: 0, error: { code: 'persistence-failed' },
+    expect(
+      await service.mutate(mutation(
+        CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
+        0,
+        runtimeConfiguration([runtimeProvider()]),
+      )),
+    ).toMatchObject({
+      status: 'rejected',
+      revision: 0,
+      error: { code: 'persistence-failed' },
     })
     expect(restart).toHaveBeenCalledTimes(1)
     expect(rollback).toHaveBeenCalledTimes(1)
-    expect(await service.descriptor()).toMatchObject({ revision: 0, lastGoodRevision: 0, configuration: { providers: [] } })
+    expect(await service.descriptor()).toMatchObject({
+      revision: 0,
+      lastGoodRevision: 0,
+      configuration: { providers: [] },
+    })
   })
 
   it('fails closed on stale identity/generation and malformed generic persisted state', async () => {
     const target = await configPath()
     const service = api(target, CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT)
-    expect(await service.mutate(mutation(
-      CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
-      0,
-      runtimeConfiguration([]),
-      { identity: { ...CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT.identity, serviceId: 'other' } },
-    ))).toMatchObject({ status: 'rejected', error: { code: 'validation-failed' } })
-    expect(await service.mutate(mutation(
-      CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
-      0,
-      runtimeConfiguration([]),
-      { scope: { profileId: 'default', generation: 'other-generation' } },
-    ))).toMatchObject({ status: 'rejected', error: { code: 'stale-generation' } })
-    expect(() => parseHomeConfig({
-      version: 1,
-      defaultApp: 'codex',
-      providers: [],
-      permissions: [],
-      apps: { codex: { defaultProfile: 'default', profiles: { default: { displayName: 'Default', dataMode: 'shared' } } } },
-      plugins: [{
-        id: 'cli-proxy-api', entry: 'cordisx:cli-proxy-api',
-        services: { 'providers-startup': { profiles: { default: {
-          revision: 1, lastGoodRevision: 0, config: {}, restartRequired: true,
-        } } } },
-      }],
-    })).toThrow('lastGoodConfig is required')
+    expect(
+      await service.mutate(mutation(
+        CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
+        0,
+        runtimeConfiguration([]),
+        { identity: { ...CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT.identity, serviceId: 'other' } },
+      )),
+    ).toMatchObject({ status: 'rejected', error: { code: 'validation-failed' } })
+    expect(
+      await service.mutate(mutation(
+        CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
+        0,
+        runtimeConfiguration([]),
+        { scope: { profileId: 'default', generation: 'other-generation' } },
+      )),
+    ).toMatchObject({ status: 'rejected', error: { code: 'stale-generation' } })
+    expect(() =>
+      parseHomeConfig({
+        version: 1,
+        defaultApp: 'codex',
+        providers: [],
+        permissions: [],
+        apps: {
+          codex: { defaultProfile: 'default', profiles: { default: { displayName: 'Default', dataMode: 'shared' } } },
+        },
+        plugins: [{
+          id: 'cli-proxy-api',
+          entry: 'cordisx:cli-proxy-api',
+          services: {
+            'providers-startup': {
+              profiles: {
+                default: {
+                  revision: 1,
+                  lastGoodRevision: 0,
+                  config: {},
+                  restartRequired: true,
+                },
+              },
+            },
+          },
+        }],
+      })
+    ).toThrow('lastGoodConfig is required')
   })
 })

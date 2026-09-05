@@ -44,7 +44,10 @@ export class BrowserPluginLifecycleBridge {
     window[RECEIVER] = payload => this.receive(payload)
   }
 
-  request(expectedRevision: number, operation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1> {
+  request(
+    expectedRevision: number,
+    operation: CordisXPluginLifecycleOperationV1,
+  ): Promise<CordisXPluginLifecycleResultV1> {
     if (this.disposed) return Promise.reject(new Error('plugin lifecycle bridge is disposed'))
     const binding = window[BINDING]
     if (typeof binding !== 'function') return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
@@ -68,8 +71,10 @@ export class BrowserPluginLifecycleBridge {
     return this.send(requestId, {
       token: this.token,
       privateRequest: {
-        kind: 'bundle-snapshot-v1', requestId,
-        profileId: this.profileId, runtimeGeneration: this.generation,
+        kind: 'bundle-snapshot-v1',
+        requestId,
+        profileId: this.profileId,
+        runtimeGeneration: this.generation,
       },
     })
   }
@@ -92,8 +97,10 @@ export class BrowserPluginLifecycleBridge {
     return this.send(requestId, {
       token: this.token,
       privateRequest: {
-        kind: 'bundle-operation-v1', requestId,
-        profileId: this.profileId, runtimeGeneration: this.generation,
+        kind: 'bundle-operation-v1',
+        requestId,
+        profileId: this.profileId,
+        runtimeGeneration: this.generation,
         request,
       },
     })
@@ -101,7 +108,10 @@ export class BrowserPluginLifecycleBridge {
 
   permissionReviewPlanV2(
     expectedRevision: number,
-    target: { readonly kind: 'candidate'; readonly candidateId: string } | { readonly kind: 'enable'; readonly pluginId: string },
+    target: { readonly kind: 'candidate'; readonly candidateId: string } | {
+      readonly kind: 'enable'
+      readonly pluginId: string
+    },
   ): Promise<CordisXPermissionAuthorizationPlanV2 | undefined> {
     const requestId = this.requestId()
     return this.send(requestId, {
@@ -137,7 +147,10 @@ export class BrowserPluginLifecycleBridge {
 
   permissionReviewPlanV4(
     expectedRevision: number,
-    target: { readonly kind: 'candidate'; readonly candidateId: string } | { readonly kind: 'enable'; readonly pluginId: string },
+    target: { readonly kind: 'candidate'; readonly candidateId: string } | {
+      readonly kind: 'enable'
+      readonly pluginId: string
+    },
   ): Promise<CordisXPermissionAuthorizationPlanV4 | undefined> {
     const requestId = this.requestId()
     return this.send(requestId, {
@@ -209,14 +222,25 @@ export class BrowserPluginLifecycleBridge {
   }
 
   private receive(payload: string): void {
-    let response: { readonly requestId?: unknown; readonly ok?: unknown; readonly value?: unknown; readonly error?: unknown }
-    try { response = JSON.parse(payload) as typeof response } catch { return }
+    let response: {
+      readonly requestId?: unknown
+      readonly ok?: unknown
+      readonly value?: unknown
+      readonly error?: unknown
+    }
+    try {
+      response = JSON.parse(payload) as typeof response
+    } catch {
+      return
+    }
     if (typeof response.requestId !== 'string') return
     const pending = this.pending.get(response.requestId)
     if (pending === undefined) return
     this.pending.delete(response.requestId)
     clearTimeout(pending.timer)
     if (response.ok === true) pending.resolve(response.value)
-    else pending.reject(new Error(typeof response.error === 'string' ? response.error : 'plugin lifecycle request failed'))
+    else {pending.reject(
+        new Error(typeof response.error === 'string' ? response.error : 'plugin lifecycle request failed'),
+      )}
   }
 }

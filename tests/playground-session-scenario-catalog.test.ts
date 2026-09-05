@@ -27,19 +27,34 @@ import type {
 const plugin = { source: 'file:///fixtures/chatroom.ts', pluginId: 'chatroom' } as const
 const owner = { pluginId: `${plugin.source}:${plugin.pluginId}`, generation: 1 } as const
 const binding: PlaygroundRoomSimulationBinding = Object.freeze({
-  contract: 'cordisx.playground-room-simulation-binding/v1', sessionId: 'cx-session.lead',
-  roomId: 'room-one', runId: 'lead-run', memberId: 'lead-member', bindingId: 'binding-one',
-  ownerGeneration: 'owner-one', generation: 'room-generation-one',
+  contract: 'cordisx.playground-room-simulation-binding/v1',
+  sessionId: 'cx-session.lead',
+  roomId: 'room-one',
+  runId: 'lead-run',
+  memberId: 'lead-member',
+  bindingId: 'binding-one',
+  ownerGeneration: 'owner-one',
+  generation: 'room-generation-one',
 })
 
 function setup(agentId: string, name: string): AgentSetup {
   return {
     definition: { agentId, revision: 'scenario-v1' },
     definitions: [{
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
-      contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
-      identity: { agentId, revision: 'scenario-v1' }, name,
-      inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
+      contract: 'cordisx.agent-definition/v1',
+      schemaVersion: 1,
+      identity: { agentId, revision: 'scenario-v1' },
+      name,
+      inherit: {
+        promptSections: 'none',
+        rules: 'none',
+        skills: 'none',
+        tools: 'none',
+        mcpServers: 'none',
+        runtimeDefaults: 'none',
+      },
       promptSections: [],
     }],
   }
@@ -47,51 +62,112 @@ function setup(agentId: string, name: string): AgentSetup {
 
 function message(id: string, text: string): UserMessage {
   return {
-    id, role: 'user', content: [{ type: 'text', text }],
-    source: { kind: 'plugin', pluginId: owner.pluginId, generation: owner.generation, correlation: { namespace: 'chatroom.room-run', id: 'room-one/lead-run' } },
+    id,
+    role: 'user',
+    content: [{ type: 'text', text }],
+    source: {
+      kind: 'plugin',
+      pluginId: owner.pluginId,
+      generation: owner.generation,
+      correlation: { namespace: 'chatroom.room-run', id: 'room-one/lead-run' },
+    },
   }
 }
 
 function catalog(enabled = true): PlaygroundSessionScenarioCatalogV1 {
   const parsed = parsePlaygroundSessionScenarioCatalog({
-    version: 1, revision: 'catalog-september-1', enabled,
+    version: 1,
+    revision: 'catalog-september-1',
+    enabled,
     scenarios: {
-      '0': { entryAgentId: 'chatroom.generalist', steps: [{ type: 'assistant-reply', text: 'Plain declared reply.', stream: false }] },
-      '1': { entryAgentId: 'chatroom.generalist', steps: [{ type: 'assistant-reply', text: 'Streaming declared reply.', stream: true }] },
-      '2': { entryAgentId: 'chatroom.generalist', steps: [
-        { type: 'tool-call', call: 'inspect', name: 'workspace.inspect', arguments: { scope: 'current' } },
-        { type: 'tool-result', call: 'inspect', content: 'Inspection complete.' },
-      ] },
-      '3': { entryAgentId: 'chatroom.generalist', steps: [{
-        type: 'approval-request', request: 'publish', toolName: 'workspace.publish', reason: 'Publish deterministic fixture?',
-        branches: {
-          'allowed-once': [{ type: 'assistant-reply', text: 'Approval accepted.' }],
-          rejected: [{ type: 'failure', code: 'approval-rejected', message: 'Approval was rejected.' }],
-        },
-      }] },
-      '4': { entryAgentId: 'chatroom.generalist', steps: [
-        { type: 'room-delegation', as: 'reviewer', memberId: 'reviewer-member', targetAgentId: 'chatroom.reviewer', task: 'Review the declared flow.' },
-        { type: 'assistant-reply', actor: 'reviewer', text: 'Reviewer completed.' },
-      ] },
-      '01234': { entryAgentId: 'chatroom.generalist', label: 'Full deterministic smoke', steps: [
-        { type: 'assistant-reply', text: 'Scenario accepted.', stream: true },
-        { type: 'room-delegation', as: 'reviewer', memberId: 'reviewer-member', targetAgentId: 'chatroom.reviewer', task: 'Review the declared full smoke.' },
-        { type: 'tool-call', actor: 'reviewer', call: 'inspect', name: 'workspace.inspect', arguments: { scope: 'current' } },
-        { type: 'tool-result', actor: 'reviewer', call: 'inspect', content: 'Inspection complete.' },
-        { type: 'assistant-reply', actor: 'reviewer', text: 'Reviewer found no issues.' },
-        { type: 'followup', text: 'Incorporate the Reviewer result.' },
-        { type: 'approval-request', request: 'publish', toolName: 'workspace.publish', reason: 'Publish the final summary?', branches: {
-          'allowed-once': [{ type: 'assistant-reply', text: 'Approval accepted.' }],
-        } },
-        { type: 'final-summary', text: 'Lead summary: full smoke completed.', stream: false },
-      ] },
-      fail: { entryAgentId: 'chatroom.generalist', steps: [
-        { type: 'assistant-reply', text: 'Starting failure scenario.' },
-        { type: 'failure', code: 'declared-stop', message: 'Declared failure at the second step.' },
-      ] },
-      cancel: { entryAgentId: 'chatroom.generalist', steps: [
-        { type: 'cancel', reason: 'Declared cancellation.' },
-      ] },
+      '0': {
+        entryAgentId: 'chatroom.generalist',
+        steps: [{ type: 'assistant-reply', text: 'Plain declared reply.', stream: false }],
+      },
+      '1': {
+        entryAgentId: 'chatroom.generalist',
+        steps: [{ type: 'assistant-reply', text: 'Streaming declared reply.', stream: true }],
+      },
+      '2': {
+        entryAgentId: 'chatroom.generalist',
+        steps: [
+          { type: 'tool-call', call: 'inspect', name: 'workspace.inspect', arguments: { scope: 'current' } },
+          { type: 'tool-result', call: 'inspect', content: 'Inspection complete.' },
+        ],
+      },
+      '3': {
+        entryAgentId: 'chatroom.generalist',
+        steps: [{
+          type: 'approval-request',
+          request: 'publish',
+          toolName: 'workspace.publish',
+          reason: 'Publish deterministic fixture?',
+          branches: {
+            'allowed-once': [{ type: 'assistant-reply', text: 'Approval accepted.' }],
+            rejected: [{ type: 'failure', code: 'approval-rejected', message: 'Approval was rejected.' }],
+          },
+        }],
+      },
+      '4': {
+        entryAgentId: 'chatroom.generalist',
+        steps: [
+          {
+            type: 'room-delegation',
+            as: 'reviewer',
+            memberId: 'reviewer-member',
+            targetAgentId: 'chatroom.reviewer',
+            task: 'Review the declared flow.',
+          },
+          { type: 'assistant-reply', actor: 'reviewer', text: 'Reviewer completed.' },
+        ],
+      },
+      '01234': {
+        entryAgentId: 'chatroom.generalist',
+        label: 'Full deterministic smoke',
+        steps: [
+          { type: 'assistant-reply', text: 'Scenario accepted.', stream: true },
+          {
+            type: 'room-delegation',
+            as: 'reviewer',
+            memberId: 'reviewer-member',
+            targetAgentId: 'chatroom.reviewer',
+            task: 'Review the declared full smoke.',
+          },
+          {
+            type: 'tool-call',
+            actor: 'reviewer',
+            call: 'inspect',
+            name: 'workspace.inspect',
+            arguments: { scope: 'current' },
+          },
+          { type: 'tool-result', actor: 'reviewer', call: 'inspect', content: 'Inspection complete.' },
+          { type: 'assistant-reply', actor: 'reviewer', text: 'Reviewer found no issues.' },
+          { type: 'followup', text: 'Incorporate the Reviewer result.' },
+          {
+            type: 'approval-request',
+            request: 'publish',
+            toolName: 'workspace.publish',
+            reason: 'Publish the final summary?',
+            branches: {
+              'allowed-once': [{ type: 'assistant-reply', text: 'Approval accepted.' }],
+            },
+          },
+          { type: 'final-summary', text: 'Lead summary: full smoke completed.', stream: false },
+        ],
+      },
+      fail: {
+        entryAgentId: 'chatroom.generalist',
+        steps: [
+          { type: 'assistant-reply', text: 'Starting failure scenario.' },
+          { type: 'failure', code: 'declared-stop', message: 'Declared failure at the second step.' },
+        ],
+      },
+      cancel: {
+        entryAgentId: 'chatroom.generalist',
+        steps: [
+          { type: 'cancel', reason: 'Declared cancellation.' },
+        ],
+      },
     },
   })
   if (parsed === undefined) throw new Error('Scenario catalog fixture did not parse')
@@ -100,15 +176,35 @@ function catalog(enabled = true): PlaygroundSessionScenarioCatalogV1 {
 
 function delegatedApprovalCatalog(): PlaygroundSessionScenarioCatalogV1 {
   const parsed = parsePlaygroundSessionScenarioCatalog({
-    version: 1, revision: 'delegated-approval-v1', enabled: true,
+    version: 1,
+    revision: 'delegated-approval-v1',
+    enabled: true,
     scenarios: Object.fromEntries(['delegated', 'delegated-rejected'].map(code => [code, {
-      entryAgentId: 'chatroom.generalist', steps: [
-        { type: 'room-delegation', as: 'reviewer', memberId: 'reviewer-member', targetAgentId: 'chatroom.reviewer', task: 'Approve the reviewed task.' },
+      entryAgentId: 'chatroom.generalist',
+      steps: [
+        {
+          type: 'room-delegation',
+          as: 'reviewer',
+          memberId: 'reviewer-member',
+          targetAgentId: 'chatroom.reviewer',
+          task: 'Approve the reviewed task.',
+        },
         { type: 'activate-session-scope', actor: 'reviewer' },
-        { type: 'approval-request', actor: 'reviewer', request: 'publish', toolName: 'workspace.publish', branches: {
-          'allowed-once': [{ type: 'assistant-reply', actor: 'reviewer', text: 'Reviewer approval succeeded.' }],
-          rejected: [{ type: 'failure', actor: 'reviewer', code: 'reviewer-rejected', message: 'Reviewer rejected approval.' }],
-        } },
+        {
+          type: 'approval-request',
+          actor: 'reviewer',
+          request: 'publish',
+          toolName: 'workspace.publish',
+          branches: {
+            'allowed-once': [{ type: 'assistant-reply', actor: 'reviewer', text: 'Reviewer approval succeeded.' }],
+            rejected: [{
+              type: 'failure',
+              actor: 'reviewer',
+              code: 'reviewer-rejected',
+              message: 'Reviewer rejected approval.',
+            }],
+          },
+        },
       ],
     }])),
   })
@@ -124,34 +220,58 @@ function bridgeFor(
   const unavailable = { status: 'unavailable' as const, code: 'unsupported', message: 'not used' }
   return {
     status: () => ({ installed: true, revision: 1, ownerState: 'available', ownerGeneration: binding.ownerGeneration }),
-    resolveSession: async sessionId => sessionId === binding.sessionId
-      ? { status: 'available', ownerGeneration: binding.ownerGeneration, value: binding }
-      : unavailable,
-    inspect: async () => ({ status: 'available', ownerGeneration: binding.ownerGeneration, value: {
-      binding, lifecycle: 'active', revision: 1, delegationTargets: [{ memberId: 'reviewer-member', label: 'Reviewer' }],
-    } }),
+    resolveSession: async sessionId =>
+      sessionId === binding.sessionId
+        ? { status: 'available', ownerGeneration: binding.ownerGeneration, value: binding }
+        : unavailable,
+    inspect: async () => ({
+      status: 'available',
+      ownerGeneration: binding.ownerGeneration,
+      value: {
+        binding,
+        lifecycle: 'active',
+        revision: 1,
+        delegationTargets: [{ memberId: 'reviewer-member', label: 'Reviewer' }],
+      },
+    }),
     delegateTask: async (_binding, operationId, request) => {
       observations.delegations += 1
       observations.operationIds.push(operationId)
       let reviewer = await runtime().get(owner, 'cx-session.reviewer')
       if (reviewer === undefined) {
-        const created = await runtime().create(owner, { sessionId: 'cx-session.reviewer', setup: setup('chatroom.reviewer', 'Reviewer') })
+        const created = await runtime().create(owner, {
+          sessionId: 'cx-session.reviewer',
+          setup: setup('chatroom.reviewer', 'Reviewer'),
+        })
         if (created.status !== 'accepted') throw new Error('Reviewer Session create failed')
         reviewer = created.handle.agent
       }
       await prepareReviewer?.(reviewer)
-      const admitted = await reviewer.followup(message(`cx-message.delegated.${observations.delegations}`, request.task))
+      const admitted = await reviewer.followup(
+        message(`cx-message.delegated.${observations.delegations}`, request.task),
+      )
       if (admitted.status !== 'accepted') throw new Error('Reviewer task admission failed')
-      return { status: 'available', ownerGeneration: binding.ownerGeneration, value: {
-        operationId, phase: 'accepted', binding, messageId: admitted.messageId,
-      } }
+      return {
+        status: 'available',
+        ownerGeneration: binding.ownerGeneration,
+        value: {
+          operationId,
+          phase: 'accepted',
+          binding,
+          messageId: admitted.messageId,
+        },
+      }
     },
     injectMessage: async () => unavailable,
     emitAgentReply: async () => unavailable,
     emitAgentApprovalRequest: async () => unavailable,
     requestPermission: async () => unavailable,
     decidePermission: async () => unavailable,
-    snapshot: async () => ({ status: 'available', ownerGeneration: binding.ownerGeneration, value: { binding, revision: 1, events: [] } }),
+    snapshot: async () => ({
+      status: 'available',
+      ownerGeneration: binding.ownerGeneration,
+      value: { binding, revision: 1, events: [] },
+    }),
     subscribe: () => () => {},
   }
 }
@@ -167,20 +287,44 @@ async function readAll(runtime: CordisXAgentSessionRuntime, sessionId: string) {
 describe('Host Playground Session scenario catalog', () => {
   it('strictly parses a versioned multi-code catalog and injects it only through the explicit Playground composition', async () => {
     expect(Object.keys(catalog().scenarios)).toEqual(['0', '1', '2', '3', '4', '01234', 'fail', 'cancel'])
-    expect(() => parsePlaygroundSessionScenarioCatalog({ version: 1, revision: 'r1', enabled: true, scenarios: {
-      'bad code': { entryAgentId: 'lead', steps: [{ type: 'assistant-reply', text: 'no' }] },
-    } })).toThrow('code "bad code" is invalid')
-    expect(() => parsePlaygroundSessionScenarioCatalog({ version: 1, revision: 'r1', enabled: true, scenarios: {
-      '1': { entryAgentId: 'lead', steps: [{ type: 'unknown' }] },
-    } })).toThrow('.type is unsupported')
-    expect(() => parsePlaygroundSessionScenarioCatalog({ version: 1, revision: 'r1', enabled: true, scenarios: {
-      '1': { entryAgentId: 'lead', steps: [{ type: 'activate-session-scope' }] },
-    } })).toThrow('.actor is required')
+    expect(() =>
+      parsePlaygroundSessionScenarioCatalog({
+        version: 1,
+        revision: 'r1',
+        enabled: true,
+        scenarios: {
+          'bad code': { entryAgentId: 'lead', steps: [{ type: 'assistant-reply', text: 'no' }] },
+        },
+      })
+    ).toThrow('code "bad code" is invalid')
+    expect(() =>
+      parsePlaygroundSessionScenarioCatalog({
+        version: 1,
+        revision: 'r1',
+        enabled: true,
+        scenarios: {
+          '1': { entryAgentId: 'lead', steps: [{ type: 'unknown' }] },
+        },
+      })
+    ).toThrow('.type is unsupported')
+    expect(() =>
+      parsePlaygroundSessionScenarioCatalog({
+        version: 1,
+        revision: 'r1',
+        enabled: true,
+        scenarios: {
+          '1': { entryAgentId: 'lead', steps: [{ type: 'activate-session-scope' }] },
+        },
+      })
+    ).toThrow('.actor is required')
 
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-session-scenario-config-'))
     const configPath = path.join(root, 'cordisx.config.json')
     try {
-      await writeFile(configPath, JSON.stringify({ version: 1, playground: { sessionScenarios: catalog() }, plugins: [] }))
+      await writeFile(
+        configPath,
+        JSON.stringify({ version: 1, playground: { sessionScenarios: catalog() }, plugins: [] }),
+      )
       const session = await createPlaygroundSession(configPath)
       const composition = await session.buildComposition('/runtime.ts')
       expect(composition.source).toContain('playgroundSessionScenarios')
@@ -190,53 +334,96 @@ describe('Host Playground Session scenario catalog', () => {
         readFile(path.resolve('packages/cli/src/playground/client/App.tsx'), 'utf8'),
         readFile(path.resolve('packages/cli/src/playground/client/components/MockAgentTaskPage.tsx'), 'utf8'),
       ])
-      expect(app).toContain("secondary: `${en ? 'Scenario' : '场景'} ${task.scenario.code}")
+      expect(app).toMatch(/secondary:\s*`\$\{\s*en\s+\?\s+'Scenario'\s+:\s+'场景'\s*\} \$\{task\.scenario\.code\}/u)
       expect(taskPage).toContain('data-scenario-code={task.scenario.code}')
       expect(taskPage).toContain('data-scenario-step={task.scenario.stepIndex}')
       await session.close()
       const source = JSON.parse(await readFile(configPath, 'utf8')) as { playground: { sessionScenarios: unknown } }
       expect(source.playground.sessionScenarios).toBeDefined()
-    } finally { await rm(root, { recursive: true, force: true }) }
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
 
-    await expect(buildRendererCompositionSource({ version: 1, rootDir: process.cwd(), codex: { debugPort: 9229 }, providers: [], plugins: [] }, {
-      playgroundSessionScenarios: catalog(),
-    })).rejects.toThrow('only in the explicit UI Playground')
+    await expect(
+      buildRendererCompositionSource({
+        version: 1,
+        rootDir: process.cwd(),
+        codex: { debugPort: 9229 },
+        providers: [],
+        plugins: [],
+      }, {
+        playgroundSessionScenarios: catalog(),
+      }),
+    ).rejects.toThrow('only in the explicit UI Playground')
   })
 
   it('executes an enabled composite flow across Lead and delegated Reviewer Sessions with real facts', async () => {
     const observations = { delegations: 0, operationIds: [] as string[] }
     let runtime!: CordisXAgentSessionRuntime
-    const driver = new DeterministicAgentSessionTransport({ scenarioCatalog: catalog(), roomBridge: bridgeFor(() => runtime, observations), delegationTimeoutMs: 1_000 })
+    const driver = new DeterministicAgentSessionTransport({
+      scenarioCatalog: catalog(),
+      roomBridge: bridgeFor(() => runtime, observations),
+      delegationTimeoutMs: 1_000,
+    })
     runtime = new CordisXAgentSessionRuntime({ driver, authorize: async () => true })
-    const created = await runtime.create(owner, { sessionId: binding.sessionId!, setup: setup('chatroom.generalist', 'Lead') })
+    const created = await runtime.create(owner, {
+      sessionId: binding.sessionId!,
+      setup: setup('chatroom.generalist', 'Lead'),
+    })
     if (created.status !== 'accepted') throw new Error('Lead Session create failed')
     await runtime.registerAnswerer(owner, created.handle.agent, async () => 'allowed-once')
-    expect(await created.handle.agent.followup(message('cx-message.scenario.01234', '01234'))).toMatchObject({ status: 'accepted' })
+    expect(await created.handle.agent.followup(message('cx-message.scenario.01234', '01234'))).toMatchObject({
+      status: 'accepted',
+    })
     expect(await created.handle.agent.whenIdle()).toEqual({ status: 'idle' })
 
     const lead = await readAll(runtime, binding.sessionId!)
     const reviewer = await readAll(runtime, 'cx-session.reviewer')
     expect(lead.filter(event => event.type === 'user/message')).toHaveLength(1)
-    expect(lead.filter(event => event.type === 'assistant/message').map(event => event.type === 'assistant/message' ? event.data.message.content[0] : undefined))
-      .toMatchObject([{ text: 'Scenario accepted.' }, { text: 'Approval accepted.' }, { text: 'Lead summary: full smoke completed.' }])
-    expect(lead.find(event => event.type === 'tool/call' && event.data.name === 'playground.room.delegate')).toBeDefined()
+    expect(
+      lead.filter(event => event.type === 'assistant/message').map(event =>
+        event.type === 'assistant/message' ? event.data.message.content[0] : undefined
+      ),
+    )
+      .toMatchObject([{ text: 'Scenario accepted.' }, { text: 'Approval accepted.' }, {
+        text: 'Lead summary: full smoke completed.',
+      }])
+    expect(lead.find(event => event.type === 'tool/call' && event.data.name === 'playground.room.delegate'))
+      .toBeDefined()
     expect(lead.find(event => event.type === 'tool/result' && event.data.meta !== undefined)).toBeDefined()
-    expect(lead.find(event => event.type === 'approval/asked')).toMatchObject({ data: { toolName: 'workspace.publish' } })
+    expect(lead.find(event => event.type === 'approval/asked')).toMatchObject({
+      data: { toolName: 'workspace.publish' },
+    })
     expect(lead.find(event => event.type === 'approval/decided')).toMatchObject({ data: { outcome: 'allowed-once' } })
-    expect(lead.find(event => event.type === 'agent/inbox/spliced'
-      && event.data.inserted.some(inserted => inserted.source.kind === 'plugin' && inserted.source.form === 'instructions'))).toBeDefined()
+    expect(lead.find(event =>
+      event.type === 'agent/inbox/spliced'
+      && event.data.inserted.some(inserted =>
+        inserted.source.kind === 'plugin' && inserted.source.form === 'instructions'
+      )
+    )).toBeDefined()
     expect(lead.find(event => event.type === 'playground/scenario' && event.data.phase === 'completed')).toMatchObject({
-      ignorable: true, data: { code: '01234', sourceMessageId: 'cx-message.scenario.01234', catalogRevision: 'catalog-september-1' },
+      ignorable: true,
+      data: { code: '01234', sourceMessageId: 'cx-message.scenario.01234', catalogRevision: 'catalog-september-1' },
     })
     expect(reviewer.find(event => event.type === 'tool/call')).toMatchObject({ data: { name: 'workspace.inspect' } })
-    expect(reviewer.find(event => event.type === 'tool/result')).toMatchObject({ data: { message: { content: [{ content: [{ text: 'Inspection complete.' }] }] } } })
-    expect(reviewer.find(event => event.type === 'assistant/message')).toMatchObject({ data: { message: { content: [{ text: 'Reviewer found no issues.' }] } } })
+    expect(reviewer.find(event => event.type === 'tool/result')).toMatchObject({
+      data: { message: { content: [{ content: [{ text: 'Inspection complete.' }] }] } },
+    })
+    expect(reviewer.find(event => event.type === 'assistant/message')).toMatchObject({
+      data: { message: { content: [{ text: 'Reviewer found no issues.' }] } },
+    })
     expect(observations.delegations).toBe(1)
     expect(observations.operationIds[0]).toMatch(/^playground-scenario\.[a-f0-9]{36}\.delegate\.2\.reviewer$/u)
 
     const projected = projectPlaygroundAgentSessions(runtime.playgroundProjection())!.tasks
-    expect(projected.find(task => task.sessionId === binding.sessionId)?.scenario).toMatchObject({ code: '01234', phase: 'completed' })
-    expect(projected.find(task => task.sessionId === 'cx-session.reviewer')?.scenario).toMatchObject({ code: '01234', actor: 'reviewer' })
+    expect(projected.find(task => task.sessionId === binding.sessionId)?.scenario).toMatchObject({
+      code: '01234',
+      phase: 'completed',
+    })
+    expect(projected.find(task => task.sessionId === 'cx-session.reviewer')?.scenario).toMatchObject({
+      code: '01234',
+      actor: 'reviewer',
+    })
     await runtime.dispose()
   })
 
@@ -249,19 +436,36 @@ describe('Host Playground Session scenario catalog', () => {
       activeRoute: () => {
         const route = scopeAuthority.effectiveRoute()
         return route === undefined ? undefined : {
-          owner, routeId: route.routeId,
-          instanceId: route.routeInstanceId, params: route.params,
+          owner,
+          routeId: route.routeId,
+          instanceId: route.routeInstanceId,
+          params: route.params,
         }
       },
-      routes: plugin => plugin.pluginId === owner.pluginId && plugin.generation === owner.generation
-        ? [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId', schemaVersion: 2 }]
-        : [],
+      routes: plugin =>
+        plugin.pluginId === owner.pluginId && plugin.generation === owner.generation
+          ? [{
+            id: 'room-session-detail',
+            path: '/main/chatroom/:roomId/run/:runId/session/:sessionId',
+            schemaVersion: 2,
+          }]
+          : [],
       decide: async plan => ({ authorized: plan.scope.sessionIds.length === 1 }),
       connectionGeneration: () => 1,
     })
     routeScopes.install(owner, [
-      { manifestVersion: 6, name: 'approvals.request', required: false, scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
-      { manifestVersion: 6, name: 'approvals.answer', required: false, scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } } },
+      {
+        manifestVersion: 6,
+        name: 'approvals.request',
+        required: false,
+        scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } },
+      },
+      {
+        manifestVersion: 6,
+        name: 'approvals.answer',
+        required: false,
+        scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } },
+      },
     ])
     let approvalOutcome: ApprovalOutcome = 'allowed-once'
     let reviewerAnswererRegistered = false
@@ -270,45 +474,69 @@ describe('Host Playground Session scenario catalog', () => {
       connectionGeneration: () => 1,
       currentRoute: () => undefined,
       ownerForSession: sessionId => runtime?.ownerForSession(sessionId),
-      routeOwner: agentOwner => agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation ? plugin : undefined,
-      permissionRoute: () => ({ routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }),
-      authorize: async (agentOwner, capability, sessionId) => await routeScopes.authorize(agentOwner, capability, sessionId),
+      routeOwner: agentOwner =>
+        agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation ? plugin : undefined,
+      permissionRoute: () => ({
+        routeId: 'room-session-detail',
+        path: '/main/chatroom/:roomId/run/:runId/session/:sessionId',
+      }),
+      authorize: async (agentOwner, capability, sessionId) =>
+        await routeScopes.authorize(agentOwner, capability, sessionId),
       mountRoute: () => () => {},
       changed: () => routeScopes.reconcileRoutes(),
     })
     const driver = new DeterministicAgentSessionTransport({
-      scenarioCatalog: scopedCatalog, roomBridge: bridgeFor(() => runtime, observations, async reviewer => {
+      scenarioCatalog: scopedCatalog,
+      roomBridge: bridgeFor(() => runtime, observations, async reviewer => {
         if (reviewerAnswererRegistered) return
         await runtime.registerAnswerer(owner, reviewer, async () => approvalOutcome)
         reviewerAnswererRegistered = true
       }),
-      scenarioSessionScope: scopeAuthority.client, delegationTimeoutMs: 1_000,
+      scenarioSessionScope: scopeAuthority.client,
+      delegationTimeoutMs: 1_000,
     })
     runtime = new CordisXAgentSessionRuntime({
       driver,
-      authorize: async (agentOwner, capability, sessionId) => capability === 'approvals.request' || capability === 'approvals.answer'
-        ? await routeScopes.authorize(agentOwner, capability, sessionId)
-        : true,
+      authorize: async (agentOwner, capability, sessionId) =>
+        capability === 'approvals.request' || capability === 'approvals.answer'
+          ? await routeScopes.authorize(agentOwner, capability, sessionId)
+          : true,
       declares: (agentOwner, capability) => routeScopes.declares(agentOwner, capability),
-      captureSubmission: (agentOwner, sessionId, messageId) => scopeAuthority.captureSubmission(agentOwner, sessionId, messageId),
+      captureSubmission: (agentOwner, sessionId, messageId) =>
+        scopeAuthority.captureSubmission(agentOwner, sessionId, messageId),
     })
-    const lead = await runtime.create(owner, { sessionId: binding.sessionId!, setup: setup('chatroom.generalist', 'Lead') })
+    const lead = await runtime.create(owner, {
+      sessionId: binding.sessionId!,
+      setup: setup('chatroom.generalist', 'Lead'),
+    })
     if (lead.status !== 'accepted') throw new Error('Lead Session create failed')
-    const originatingCommand = async (messageId: string, code: string) => await scopeAuthority.conversationSource.execute({
-      owner, bindingId: `binding-${messageId}`, ownerGeneration: 'owner-generation-one',
-      snapshotGeneration: 'snapshot-generation-one', roomId: 'room-one', routeId: 'chatroom:room',
-      runs: [{ runId: 'room-run-lead', sessionId: binding.sessionId! }], active: () => true,
-    }, async () => await lead.handle.agent.followup(message(messageId, code)))
+    const originatingCommand = async (messageId: string, code: string) =>
+      await scopeAuthority.conversationSource.execute({
+        owner,
+        bindingId: `binding-${messageId}`,
+        ownerGeneration: 'owner-generation-one',
+        snapshotGeneration: 'snapshot-generation-one',
+        roomId: 'room-one',
+        routeId: 'chatroom:room',
+        runs: [{ runId: 'room-run-lead', sessionId: binding.sessionId! }],
+        active: () => true,
+      }, async () => await lead.handle.agent.followup(message(messageId, code)))
     await originatingCommand('cx-message.delegated-approval', 'delegated')
     await lead.handle.agent.whenIdle()
 
     const reviewer = await readAll(runtime, 'cx-session.reviewer')
-    expect(reviewer.find(event => event.type === 'approval/asked')).toMatchObject({ data: { toolName: 'workspace.publish' } })
-    expect(reviewer.find(event => event.type === 'approval/decided')).toMatchObject({ data: { outcome: 'allowed-once' } })
+    expect(reviewer.find(event => event.type === 'approval/asked')).toMatchObject({
+      data: { toolName: 'workspace.publish' },
+    })
+    expect(reviewer.find(event => event.type === 'approval/decided')).toMatchObject({
+      data: { outcome: 'allowed-once' },
+    })
     expect(reviewer.find(event => event.type === 'assistant/message')).toMatchObject({
       data: { message: { content: [{ text: 'Reviewer approval succeeded.' }] } },
     })
-    expect(reviewer.find(event => event.type === 'playground/scenario' && event.data.stepType === 'activate-session-scope'))
+    expect(
+      reviewer.find(event => event.type === 'playground/scenario' && event.data.stepType === 'activate-session-scope'),
+    )
       .toMatchObject({ data: { actor: 'reviewer', phase: 'step-started' } })
     expect(scopeAuthority.effectiveRoute()).toBeUndefined()
 
@@ -316,7 +544,9 @@ describe('Host Playground Session scenario catalog', () => {
     await originatingCommand('cx-message.delegated-rejected', 'delegated-rejected')
     await lead.handle.agent.whenIdle()
     const rejectedReviewer = await readAll(runtime, 'cx-session.reviewer')
-    expect(rejectedReviewer.findLast(event => event.type === 'approval/decided')).toMatchObject({ data: { outcome: 'rejected' } })
+    expect(rejectedReviewer.findLast(event => event.type === 'approval/decided')).toMatchObject({
+      data: { outcome: 'rejected' },
+    })
     const rejectedLead = await readAll(runtime, binding.sessionId!)
     expect(rejectedLead.findLast(event => event.type === 'playground/scenario')).toMatchObject({
       data: { code: 'delegated-rejected', phase: 'failed', error: { code: 'reviewer-rejected' } },
@@ -334,7 +564,9 @@ describe('Host Playground Session scenario catalog', () => {
         setup: setup(scenarioCatalog.enabled ? 'chatroom.reviewer' : 'chatroom.generalist', 'Ordinary'),
       })
       if (created.status !== 'accepted') throw new Error('Pass-through Session create failed')
-      await created.handle.agent.followup(message(`cx-message.pass-${scenarioCatalog.enabled}`, scenarioCatalog.enabled ? 'unknown-code' : '01234'))
+      await created.handle.agent.followup(
+        message(`cx-message.pass-${scenarioCatalog.enabled}`, scenarioCatalog.enabled ? 'unknown-code' : '01234'),
+      )
       await created.handle.agent.whenIdle()
       const events = await readAll(runtime, created.sessionId)
       expect(events.some(event => event.type === 'playground/scenario')).toBe(false)
@@ -346,11 +578,18 @@ describe('Host Playground Session scenario catalog', () => {
 
     const driver = new DeterministicAgentSessionTransport({ scenarioCatalog: catalog() })
     const runtime = new CordisXAgentSessionRuntime({ driver, authorize: async () => true })
-    const created = await runtime.create(owner, { sessionId: 'cx-session.code-with-attachment', setup: setup('chatroom.generalist', 'Ordinary') })
+    const created = await runtime.create(owner, {
+      sessionId: 'cx-session.code-with-attachment',
+      setup: setup('chatroom.generalist', 'Ordinary'),
+    })
     if (created.status !== 'accepted') throw new Error('Attachment Session create failed')
     await created.handle.agent.followup({
       ...message('cx-message.code-with-attachment', '1'),
-      content: [{ type: 'text', text: '1' }, { type: 'image', ref: 'data:image/png;base64,AA==', mediaType: 'image/png' }],
+      content: [{ type: 'text', text: '1' }, {
+        type: 'image',
+        ref: 'data:image/png;base64,AA==',
+        mediaType: 'image/png',
+      }],
     })
     await created.handle.agent.whenIdle()
     const events = await readAll(runtime, created.sessionId)
@@ -364,9 +603,16 @@ describe('Host Playground Session scenario catalog', () => {
       const store = new PlaygroundAgentSessionStore(home)
       let first!: CordisXAgentSessionRuntime
       const firstObservations = { delegations: 0, operationIds: [] as string[] }
-      const firstDriver = new DeterministicAgentSessionTransport({ scenarioCatalog: catalog(), roomBridge: bridgeFor(() => first, firstObservations), delegationTimeoutMs: 1_000 })
+      const firstDriver = new DeterministicAgentSessionTransport({
+        scenarioCatalog: catalog(),
+        roomBridge: bridgeFor(() => first, firstObservations),
+        delegationTimeoutMs: 1_000,
+      })
       first = new CordisXAgentSessionRuntime({ driver: firstDriver, authorize: async () => true, persistence: store })
-      const lead = await first.create(owner, { sessionId: binding.sessionId!, setup: setup('chatroom.generalist', 'Lead') })
+      const lead = await first.create(owner, {
+        sessionId: binding.sessionId!,
+        setup: setup('chatroom.generalist', 'Lead'),
+      })
       if (lead.status !== 'accepted') throw new Error('Persisted Lead create failed')
       await first.registerAnswerer(owner, lead.handle.agent, async () => 'allowed-once')
       const source = message('cx-message.persisted-scenario', '01234')
@@ -378,8 +624,18 @@ describe('Host Playground Session scenario catalog', () => {
       const recovered = await store.load()
       const secondObservations = { delegations: 0, operationIds: [] as string[] }
       let second!: CordisXAgentSessionRuntime
-      const secondDriver = new DeterministicAgentSessionTransport({ recoveredSessions: recovered, scenarioCatalog: catalog(), roomBridge: bridgeFor(() => second, secondObservations), delegationTimeoutMs: 1_000 })
-      second = new CordisXAgentSessionRuntime({ driver: secondDriver, authorize: async () => true, persistence: store, initialSessions: recovered })
+      const secondDriver = new DeterministicAgentSessionTransport({
+        recoveredSessions: recovered,
+        scenarioCatalog: catalog(),
+        roomBridge: bridgeFor(() => second, secondObservations),
+        delegationTimeoutMs: 1_000,
+      })
+      second = new CordisXAgentSessionRuntime({
+        driver: secondDriver,
+        authorize: async () => true,
+        persistence: store,
+        initialSessions: recovered,
+      })
       const resumed = await second.resume(owner, { sessionId: binding.sessionId! })
       if (resumed.status !== 'accepted') throw new Error('Persisted Lead resume failed')
       expect(await resumed.handle.agent.followup(source)).toMatchObject({ status: 'accepted' })
@@ -392,10 +648,20 @@ describe('Host Playground Session scenario catalog', () => {
       await resumed.handle.agent.whenIdle()
       const failed = await readAll(second, binding.sessionId!)
       expect(failed.findLast(event => event.type === 'playground/scenario')).toMatchObject({
-        data: { code: 'fail', phase: 'failed', stepIndex: 2, stepType: 'failure', error: { code: 'declared-stop', message: 'Declared failure at the second step.' } },
+        data: {
+          code: 'fail',
+          phase: 'failed',
+          stepIndex: 2,
+          stepType: 'failure',
+          error: { code: 'declared-stop', message: 'Declared failure at the second step.' },
+        },
       })
-      expect(failed.findLast(event => event.type === 'turn/end')).toMatchObject({ data: { reason: { kind: 'error', error: { code: 'declared-stop' } } } })
-      const firstFailedRun = failed.findLast(event => event.type === 'playground/scenario')?.type === 'playground/scenario'
+      expect(failed.findLast(event => event.type === 'turn/end')).toMatchObject({
+        data: { reason: { kind: 'error', error: { code: 'declared-stop' } } },
+      })
+      const firstFailedRun = failed.findLast(event =>
+          event.type === 'playground/scenario'
+        )?.type === 'playground/scenario'
         ? failed.findLast(event => event.type === 'playground/scenario')!.data.runId
         : undefined
       await resumed.handle.agent.followup(message('cx-message.retry-failure-two', 'fail'))
@@ -410,11 +676,21 @@ describe('Host Playground Session scenario catalog', () => {
       await resumed.handle.agent.whenIdle()
       const cancelled = await readAll(second, binding.sessionId!)
       expect(cancelled.findLast(event => event.type === 'playground/scenario')).toMatchObject({
-        data: { code: 'cancel', phase: 'cancelled', stepIndex: 1, stepType: 'cancel', error: { code: 'scenario-cancelled', message: 'Declared cancellation.' } },
+        data: {
+          code: 'cancel',
+          phase: 'cancelled',
+          stepIndex: 1,
+          stepType: 'cancel',
+          error: { code: 'scenario-cancelled', message: 'Declared cancellation.' },
+        },
       })
-      expect(cancelled.findLast(event => event.type === 'turn/end')).toMatchObject({ data: { reason: { kind: 'aborted' } } })
+      expect(cancelled.findLast(event => event.type === 'turn/end')).toMatchObject({
+        data: { reason: { kind: 'aborted' } },
+      })
       await second.dispose()
-    } finally { await rm(home, { recursive: true, force: true }) }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
   })
 
   it('does not repeat delegated scope activation when the same durable source message is replayed after restart', async () => {
@@ -427,26 +703,46 @@ describe('Host Playground Session scenario catalog', () => {
         activate: async input => {
           activations += 1
           const agent = await runtime.get(owner, input.targetSessionId)
-          if (agent === undefined) return { status: 'unavailable', code: 'session-unavailable', message: 'missing target' }
+          if (agent === undefined) {
+            return { status: 'unavailable', code: 'session-unavailable', message: 'missing target' }
+          }
           await runtime.registerAnswerer(owner, agent, async () => 'allowed-once')
           let active = true
           let settle!: (value: { readonly code: 'completed' }) => void
-          const closed = new Promise<{ readonly code: 'completed' }>(resolve => { settle = resolve })
-          return { status: 'available', handle: Object.freeze({
-            runId: input.runId, sessionId: input.targetSessionId, routeInstanceId: `scenario:${input.runId}`, closed,
-            active: () => active,
-            close: () => { if (active) { active = false; settle({ code: 'completed' }) } },
-          }) }
+          const closed = new Promise<{ readonly code: 'completed' }>(resolve => {
+            settle = resolve
+          })
+          return {
+            status: 'available',
+            handle: Object.freeze({
+              runId: input.runId,
+              sessionId: input.targetSessionId,
+              routeInstanceId: `scenario:${input.runId}`,
+              closed,
+              active: () => active,
+              close: () => {
+                if (active) {
+                  active = false
+                  settle({ code: 'completed' })
+                }
+              },
+            }),
+          }
         },
         release: () => {},
       })
       const firstObservations = { delegations: 0, operationIds: [] as string[] }
       const firstDriver = new DeterministicAgentSessionTransport({
-        scenarioCatalog: delegatedApprovalCatalog(), roomBridge: bridgeFor(() => runtime, firstObservations),
-        scenarioSessionScope: scopeClient(), delegationTimeoutMs: 1_000,
+        scenarioCatalog: delegatedApprovalCatalog(),
+        roomBridge: bridgeFor(() => runtime, firstObservations),
+        scenarioSessionScope: scopeClient(),
+        delegationTimeoutMs: 1_000,
       })
       runtime = new CordisXAgentSessionRuntime({ driver: firstDriver, authorize: async () => true, persistence: store })
-      const lead = await runtime.create(owner, { sessionId: binding.sessionId!, setup: setup('chatroom.generalist', 'Lead') })
+      const lead = await runtime.create(owner, {
+        sessionId: binding.sessionId!,
+        setup: setup('chatroom.generalist', 'Lead'),
+      })
       if (lead.status !== 'accepted') throw new Error('Persisted scoped Lead create failed')
       const source = message('cx-message.persisted-delegated-scope', 'delegated')
       await lead.handle.agent.followup(source)
@@ -458,10 +754,18 @@ describe('Host Playground Session scenario catalog', () => {
       const recovered = await store.load()
       const secondObservations = { delegations: 0, operationIds: [] as string[] }
       const secondDriver = new DeterministicAgentSessionTransport({
-        recoveredSessions: recovered, scenarioCatalog: delegatedApprovalCatalog(),
-        roomBridge: bridgeFor(() => runtime, secondObservations), scenarioSessionScope: scopeClient(), delegationTimeoutMs: 1_000,
+        recoveredSessions: recovered,
+        scenarioCatalog: delegatedApprovalCatalog(),
+        roomBridge: bridgeFor(() => runtime, secondObservations),
+        scenarioSessionScope: scopeClient(),
+        delegationTimeoutMs: 1_000,
       })
-      runtime = new CordisXAgentSessionRuntime({ driver: secondDriver, authorize: async () => true, persistence: store, initialSessions: recovered })
+      runtime = new CordisXAgentSessionRuntime({
+        driver: secondDriver,
+        authorize: async () => true,
+        persistence: store,
+        initialSessions: recovered,
+      })
       const resumed = await runtime.resume(owner, { sessionId: binding.sessionId! })
       if (resumed.status !== 'accepted') throw new Error('Persisted scoped Lead resume failed')
       expect(await resumed.handle.agent.followup(source)).toMatchObject({ status: 'accepted' })
@@ -469,26 +773,42 @@ describe('Host Playground Session scenario catalog', () => {
       expect(activations).toBe(1)
       expect(secondObservations.delegations).toBe(0)
       await runtime.dispose()
-    } finally { await rm(home, { recursive: true, force: true }) }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
   })
 
   it('does not queue a duplicate scenario operation after the first source message was claimed', async () => {
     const pendingCatalog = parsePlaygroundSessionScenarioCatalog({
-      version: 1, revision: 'pending-approval-1', enabled: true,
-      scenarios: { hold: { entryAgentId: 'chatroom.generalist', steps: [
-        { type: 'approval-request', request: 'hold', toolName: 'fixture.hold' },
-        { type: 'final-summary', text: 'Released.' },
-      ] } },
+      version: 1,
+      revision: 'pending-approval-1',
+      enabled: true,
+      scenarios: {
+        hold: {
+          entryAgentId: 'chatroom.generalist',
+          steps: [
+            { type: 'approval-request', request: 'hold', toolName: 'fixture.hold' },
+            { type: 'final-summary', text: 'Released.' },
+          ],
+        },
+      },
     })
     if (pendingCatalog === undefined) throw new Error('Pending catalog fixture did not parse')
     const driver = new DeterministicAgentSessionTransport({ scenarioCatalog: pendingCatalog })
     const runtime = new CordisXAgentSessionRuntime({ driver, authorize: async () => true })
-    const created = await runtime.create(owner, { sessionId: 'cx-session.duplicate-active', setup: setup('chatroom.generalist', 'Lead') })
+    const created = await runtime.create(owner, {
+      sessionId: 'cx-session.duplicate-active',
+      setup: setup('chatroom.generalist', 'Lead'),
+    })
     if (created.status !== 'accepted') throw new Error('Duplicate test Session create failed')
     let release!: (outcome: 'allowed-once') => void
-    const waiting = new Promise<'allowed-once'>(resolve => { release = resolve })
+    const waiting = new Promise<'allowed-once'>(resolve => {
+      release = resolve
+    })
     let approvalStarted!: () => void
-    const started = new Promise<void>(resolve => { approvalStarted = resolve })
+    const started = new Promise<void>(resolve => {
+      approvalStarted = resolve
+    })
     await runtime.registerAnswerer(owner, created.handle.agent, async () => {
       approvalStarted()
       return await waiting
@@ -501,9 +821,12 @@ describe('Host Playground Session scenario catalog', () => {
     expect(await created.handle.agent.whenIdle()).toEqual({ status: 'idle' })
     const events = await readAll(runtime, created.sessionId)
     expect(events.filter(event => event.type === 'user/message')).toHaveLength(1)
-    expect(events.filter(event => event.type === 'playground/scenario' && event.data.phase === 'completed')).toHaveLength(1)
+    expect(events.filter(event => event.type === 'playground/scenario' && event.data.phase === 'completed'))
+      .toHaveLength(1)
     expect(events.filter(event => event.type === 'agent/inbox/spliced')).toHaveLength(2)
-    expect(events.findLast(event => event.type === 'agent/inbox/spliced')).toMatchObject({ data: { removedCount: 1, inserted: [] } })
+    expect(events.findLast(event => event.type === 'agent/inbox/spliced')).toMatchObject({
+      data: { removedCount: 1, inserted: [] },
+    })
     await runtime.dispose()
   })
 
@@ -512,31 +835,56 @@ describe('Host Playground Session scenario catalog', () => {
     try {
       const store = new PlaygroundAgentSessionStore(home)
       await store.create({
-        id: binding.sessionId!, generation: 1,
+        id: binding.sessionId!,
+        generation: 1,
         header: { id: binding.sessionId!, formatVersion: 1, createdAt: 1_780_000_000_000, isSeeded: false },
         setup: setup('chatroom.generalist', 'Lead'),
         events: [{
-          $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/session-event.v1.schema.json',
-          contract: 'cordisx.session-event/v1', schemaVersion: 1, sessionId: binding.sessionId!, seq: 0,
-          time: 1_780_000_000_001, type: 'playground/scenario', ignorable: true,
+          $schema:
+            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/session-event.v1.schema.json',
+          contract: 'cordisx.session-event/v1',
+          schemaVersion: 1,
+          sessionId: binding.sessionId!,
+          seq: 0,
+          time: 1_780_000_000_001,
+          type: 'playground/scenario',
+          ignorable: true,
           data: {
-            runId: 'playground-scenario.interrupted', sourceMessageId: 'cx-message.interrupted', catalogRevision: 'catalog-september-1', code: '01234',
-            actor: 'lead', phase: 'step-started', stepIndex: 2, stepCount: 8, stepType: 'room-delegation',
+            runId: 'playground-scenario.interrupted',
+            sourceMessageId: 'cx-message.interrupted',
+            catalogRevision: 'catalog-september-1',
+            code: '01234',
+            actor: 'lead',
+            phase: 'step-started',
+            stepIndex: 2,
+            stepCount: 8,
+            stepType: 'room-delegation',
           },
         }],
       })
       const recovered = await store.load()
-      const driver = new DeterministicAgentSessionTransport({ recoveredSessions: recovered, scenarioCatalog: catalog() })
-      const runtime = new CordisXAgentSessionRuntime({ driver, authorize: async () => true, persistence: store, initialSessions: recovered })
+      const driver = new DeterministicAgentSessionTransport({
+        recoveredSessions: recovered,
+        scenarioCatalog: catalog(),
+      })
+      const runtime = new CordisXAgentSessionRuntime({
+        driver,
+        authorize: async () => true,
+        persistence: store,
+        initialSessions: recovered,
+      })
       const resumed = await runtime.resume(owner, { sessionId: binding.sessionId! })
       expect(resumed.status).toBe('accepted')
       await new Promise(resolve => setTimeout(resolve, 10))
       const events = await readAll(runtime, binding.sessionId!)
       expect(events).toHaveLength(2)
       expect(events[1]).toMatchObject({
-        type: 'playground/scenario', ignorable: true,
+        type: 'playground/scenario',
+        ignorable: true,
         data: {
-          runId: 'playground-scenario.interrupted', phase: 'failed', stepIndex: 2,
+          runId: 'playground-scenario.interrupted',
+          phase: 'failed',
+          stepIndex: 2,
           error: { code: 'scenario-runtime-replaced', message: expect.stringContaining('retry safely') },
         },
       })
@@ -545,12 +893,16 @@ describe('Host Playground Session scenario catalog', () => {
       const after = await store.load()
       const next = new CordisXAgentSessionRuntime({
         driver: new DeterministicAgentSessionTransport({ recoveredSessions: after, scenarioCatalog: catalog() }),
-        authorize: async () => true, persistence: store, initialSessions: after,
+        authorize: async () => true,
+        persistence: store,
+        initialSessions: after,
       })
       expect((await next.resume(owner, { sessionId: binding.sessionId! })).status).toBe('accepted')
       await new Promise(resolve => setTimeout(resolve, 10))
       expect(await readAll(next, binding.sessionId!)).toHaveLength(2)
       await next.dispose()
-    } finally { await rm(home, { recursive: true, force: true }) }
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
   })
 })

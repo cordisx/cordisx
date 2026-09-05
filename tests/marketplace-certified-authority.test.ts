@@ -5,8 +5,8 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   DEFAULT_MARKETPLACE_TRUST_SOURCE,
   ensureHomeConfig,
-  updateHomeConfigAtomic,
   type HomeConfigMarketplaceTrustSource,
+  updateHomeConfigAtomic,
 } from '../packages/cli/src/config/home-config.js'
 import {
   LauncherMarketplaceCertifiedAuthority,
@@ -16,7 +16,9 @@ import {
 const PLUGIN_SOURCE = 'https://github.com/cordisx/trusted-smoke'
 const INTEGRITY = `sha256:${'a'.repeat(64)}`
 const ALTERNATE_ROOT = 'https://marketplace.example/trust.json'
-const BASE_FEED = JSON.parse(await readFile(new URL('./fixtures/marketplace-trust-v3.json', import.meta.url), 'utf8')) as Record<string, unknown>
+const BASE_FEED = JSON.parse(
+  await readFile(new URL('./fixtures/marketplace-trust-v3.json', import.meta.url), 'utf8'),
+) as Record<string, unknown>
 
 interface Fixture {
   readonly homeDir: string
@@ -62,7 +64,8 @@ function exactIdentity(integrity = INTEGRITY): Record<string, string> {
 async function open(
   target: Fixture,
   fetcher: LauncherMarketplaceFeedFetcher,
-  options: { readonly now?: () => number; readonly requestTimeoutMs?: number; readonly maxConcurrentFetches?: number } = {},
+  options: { readonly now?: () => number; readonly requestTimeoutMs?: number; readonly maxConcurrentFetches?: number } =
+    {},
 ): Promise<LauncherMarketplaceCertifiedAuthority> {
   return await LauncherMarketplaceCertifiedAuthority.open({
     ...target,
@@ -108,7 +111,7 @@ describe('Launcher Marketplace Certified authority', () => {
       text = trustFeed({
         generatedAt: '2026-08-25T12:31:00Z',
         mutate(feed) {
-          ((feed.plugins as Array<Record<string, unknown>>)[0] as Record<string, unknown>).certified = true
+          ;((feed.plugins as Array<Record<string, unknown>>)[0] as Record<string, unknown>).certified = true
         },
       })
       await authority.refresh()
@@ -208,7 +211,11 @@ describe('Launcher Marketplace Certified authority', () => {
     let text = trustFeed()
     const authority = await open(target, async url => ({ url, status: 200, text }))
     try {
-      text = trustFeed({ mutate(feed) { feed.name = 'Divergent Marketplace' } })
+      text = trustFeed({
+        mutate(feed) {
+          feed.name = 'Divergent Marketplace'
+        },
+      })
       await authority.refresh()
       expect(authority.snapshot().projections).toEqual([])
 
@@ -306,7 +313,9 @@ describe('Launcher Marketplace Certified authority', () => {
 
     const timeoutTarget = await fixture()
     const startedAt = Date.now()
-    const timedOut = await open(timeoutTarget, async () => await new Promise<never>(() => undefined), { requestTimeoutMs: 10 })
+    const timedOut = await open(timeoutTarget, async () => await new Promise<never>(() => undefined), {
+      requestTimeoutMs: 10,
+    })
     expect(Date.now() - startedAt).toBeLessThan(1_000)
     expect(timedOut.snapshot().projections).toEqual([])
     await timedOut.dispose()

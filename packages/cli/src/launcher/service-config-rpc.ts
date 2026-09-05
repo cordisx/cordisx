@@ -26,7 +26,9 @@ export interface ServiceConfigBridgeHandler {
   readonly token: string
   readonly profileId: string
   readonly generation: string
-  handle(request: ServiceConfigRequest): Promise<readonly HostServiceConfigDescriptor[] | HostServiceConfigMutationResult>
+  handle(
+    request: ServiceConfigRequest,
+  ): Promise<readonly HostServiceConfigDescriptor[] | HostServiceConfigMutationResult>
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -47,23 +49,38 @@ function localId(value: unknown, label: string): string {
 }
 
 function requestId(value: unknown): string {
-  if (typeof value !== 'string' || !/^[A-Za-z0-9-]{1,96}$/.test(value)) throw new Error('service configuration request id is invalid')
+  if (typeof value !== 'string' || !/^[A-Za-z0-9-]{1,96}$/.test(value)) {
+    throw new Error('service configuration request id is invalid')
+  }
   return value
 }
 
-function scope(value: unknown, profileId: string, generation: string): { readonly profileId: string; readonly generation: string } {
+function scope(
+  value: unknown,
+  profileId: string,
+  generation: string,
+): { readonly profileId: string; readonly generation: string } {
   const result = exact(value, ['profileId', 'generation'], 'service configuration scope')
-  if (result.profileId !== profileId || result.generation !== generation) throw new Error('service configuration scope is stale or spoofed')
+  if (result.profileId !== profileId || result.generation !== generation) {
+    throw new Error('service configuration scope is stale or spoofed')
+  }
   return { profileId, generation }
 }
 
 function mutation(value: unknown, profileId: string, generation: string): HostServiceConfigMutation {
-  const result = exact(value, ['contract', 'schemaVersion', 'identity', 'scope', 'expectedRevision', 'configuration'], 'service configuration mutation')
+  const result = exact(
+    value,
+    ['contract', 'schemaVersion', 'identity', 'scope', 'expectedRevision', 'configuration'],
+    'service configuration mutation',
+  )
   if (result.contract !== 'cordisx.service-config-mutation/v1' || result.schemaVersion !== 1) {
     throw new Error('service configuration mutation contract is unsupported')
   }
   const identity = exact(result.identity, ['source', 'pluginId', 'serviceId'], 'service configuration identity')
-  if (typeof identity.source !== 'string' || (!identity.source.startsWith('https:') && !identity.source.startsWith('file:'))) {
+  if (
+    typeof identity.source !== 'string'
+    || (!identity.source.startsWith('https:') && !identity.source.startsWith('file:'))
+  ) {
     throw new Error('service configuration source is invalid')
   }
   if (!Number.isSafeInteger(result.expectedRevision) || (result.expectedRevision as number) < 0) {
@@ -72,7 +89,11 @@ function mutation(value: unknown, profileId: string, generation: string): HostSe
   return {
     contract: 'cordisx.service-config-mutation/v1',
     schemaVersion: 1,
-    identity: { source: identity.source, pluginId: localId(identity.pluginId, 'service configuration plugin id'), serviceId: localId(identity.serviceId, 'service configuration id') },
+    identity: {
+      source: identity.source,
+      pluginId: localId(identity.pluginId, 'service configuration plugin id'),
+      serviceId: localId(identity.serviceId, 'service configuration id'),
+    },
     scope: scope(result.scope, profileId, generation),
     expectedRevision: result.expectedRevision as number,
     configuration: result.configuration as HostServiceConfigMutation['configuration'],
@@ -80,14 +101,30 @@ function mutation(value: unknown, profileId: string, generation: string): HostSe
 }
 
 /** Parse the token-bound, intentionally narrow renderer service-config surface. */
-export function parseServiceConfigBindingRequest(value: unknown, token: string, profileId: string, generation: string): ServiceConfigRequest {
-  const result = exact(value, ['version', 'token', 'requestId', 'operation', 'pluginId', 'scope', 'mutation'], 'service configuration request')
+export function parseServiceConfigBindingRequest(
+  value: unknown,
+  token: string,
+  profileId: string,
+  generation: string,
+): ServiceConfigRequest {
+  const result = exact(
+    value,
+    ['version', 'token', 'requestId', 'operation', 'pluginId', 'scope', 'mutation'],
+    'service configuration request',
+  )
   if (result.version !== 1 || result.token !== token) throw new Error('service configuration request is not authorized')
   const id = requestId(result.requestId)
   if (result.operation === 'list') {
-    return { requestId: id, operation: 'list', pluginId: localId(result.pluginId, 'service configuration plugin id'), scope: scope(result.scope, profileId, generation) }
+    return {
+      requestId: id,
+      operation: 'list',
+      pluginId: localId(result.pluginId, 'service configuration plugin id'),
+      scope: scope(result.scope, profileId, generation),
+    }
   }
-  if (result.operation === 'mutate') return { requestId: id, operation: 'mutate', mutation: mutation(result.mutation, profileId, generation) }
+  if (result.operation === 'mutate') {
+    return { requestId: id, operation: 'mutate', mutation: mutation(result.mutation, profileId, generation) }
+  }
   throw new Error('service configuration operation is invalid')
 }
 
@@ -95,7 +132,11 @@ export function createServiceConfigBridgeHandler(input: {
   readonly token: string
   readonly profileId: string
   readonly generation: string
-  readonly services: readonly { readonly pluginId: string; readonly serviceId: string; readonly api: HostServiceConfigNarrowApi }[]
+  readonly services: readonly {
+    readonly pluginId: string
+    readonly serviceId: string
+    readonly api: HostServiceConfigNarrowApi
+  }[]
 }): ServiceConfigBridgeHandler {
   const services = new Map<string, HostServiceConfigNarrowApi>()
   for (const service of input.services) {
@@ -120,6 +161,8 @@ export function createServiceConfigBridgeHandler(input: {
 
 export function serviceConfigBridgeError(error: unknown): { readonly code: string; readonly error: string } {
   const message = error instanceof Error ? error.message : String(error)
-  if (/permission/iu.test(message)) return { code: 'permission-denied', error: 'Service configuration permission was denied.' }
+  if (/permission/iu.test(message)) {
+    return { code: 'permission-denied', error: 'Service configuration permission was denied.' }
+  }
   return { code: 'unavailable', error: 'Service configuration is unavailable.' }
 }

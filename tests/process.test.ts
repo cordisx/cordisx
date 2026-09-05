@@ -5,13 +5,13 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  ONLINE_DEVTOOLS_ORIGIN,
   assertLoopbackPortAvailable,
   codexExecutableCandidates,
   codexLaunchArgs,
   defaultIsolatedProfileDir,
   findFreeLoopbackPort,
   launchCodex,
+  ONLINE_DEVTOOLS_ORIGIN,
   prepareIsolatedCodexProfile,
   projectProfileKey,
   resolveCodexExecutable,
@@ -93,7 +93,9 @@ describe('isolated Codex process support', () => {
         `loopback CDP port is unavailable: ${address.port}`,
       )
     } finally {
-      await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
+      await new Promise<void>((resolve, reject) =>
+        server.close(error => error === undefined ? resolve() : reject(error))
+      )
     }
   })
 
@@ -119,7 +121,9 @@ describe('isolated Codex process support', () => {
     let launched: ReturnType<typeof launchCodex> | undefined
     let descendantPid: number | undefined
     try {
-      await writeFile(executable, `#!/usr/bin/env node
+      await writeFile(
+        executable,
+        `#!/usr/bin/env node
 const { spawn } = require('node:child_process')
 const { writeFileSync } = require('node:fs')
 if (process.argv.includes('--descendant')) setInterval(() => {}, 1000)
@@ -128,7 +132,8 @@ const child = spawn(process.argv[1], ['--descendant', '--database=${profile.user
 writeFileSync(${JSON.stringify(descendantPidPath)}, String(child.pid))
 setInterval(() => {}, 1000)
 }
-`)
+`,
+      )
       await chmod(executable, 0o755)
       launched = launchCodex(executable, 43123, [], profile)
       for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -153,7 +158,9 @@ setInterval(() => {}, 1000)
         await terminateIsolatedCodex(launched, profile).catch(() => undefined)
       }
       if (descendantPid !== undefined) {
-        try { process.kill(descendantPid, 'SIGKILL') } catch (error) {
+        try {
+          process.kill(descendantPid, 'SIGKILL')
+        } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
         }
       }

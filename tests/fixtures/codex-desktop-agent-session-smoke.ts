@@ -1,19 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type {
-  Agent,
-  AgentHandle,
-  AgentLiveSubscription,
-} from '@cordisx/protocol/agents/v1'
+import type { Agent, AgentHandle, AgentLiveSubscription } from '@cordisx/protocol/agents/v1'
 import type { ApprovalAnswererHandle } from '@cordisx/protocol/approval/v1'
-import type {
-  SessionEvent,
-  SessionSubscription,
-  UserMessage,
-} from '@cordisx/protocol/sessions/v1'
-import {
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
-  type CordisXPluginManifestV5,
-} from '../../packages/cli/src/contracts.js'
+import type { SessionEvent, SessionSubscription, UserMessage } from '@cordisx/protocol/sessions/v1'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V5, type CordisXPluginManifestV5 } from '../../packages/cli/src/contracts.js'
 
 export const manifest = {
   $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
@@ -70,7 +59,10 @@ export interface DesktopAgentSessionSmokeController {
 }
 
 const plain = (value: unknown): unknown => {
-  if (value === undefined || value === null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value
+  if (
+    value === undefined || value === null || typeof value === 'string' || typeof value === 'number'
+    || typeof value === 'boolean'
+  ) return value
   if (Array.isArray(value)) return value.map(plain)
   if (typeof value !== 'object') return String(value)
   const result: Record<string, unknown> = {}
@@ -90,7 +82,11 @@ const requiredText = (value: unknown, label: string): string => {
   return value
 }
 
-const message = (id: string, text: string, owner: { readonly pluginId: string; readonly generation: number }): UserMessage => ({
+const message = (
+  id: string,
+  text: string,
+  owner: { readonly pluginId: string; readonly generation: number },
+): UserMessage => ({
   id,
   role: 'user',
   content: [{ type: 'text', text }],
@@ -113,7 +109,9 @@ export function createCodexDesktopAgentSessionSmokeController(
   let last: DesktopAgentSessionSmokeSnapshot['last']
 
   const record = (kind: DesktopAgentSessionSmokeEntry['kind'], name: string, value?: unknown): void => {
-    entries.push(Object.freeze({ time: Date.now(), kind, name, ...(value === undefined ? {} : { value: plain(value) }) }))
+    entries.push(
+      Object.freeze({ time: Date.now(), kind, name, ...(value === undefined ? {} : { value: plain(value) }) }),
+    )
   }
 
   const requireAgent = (): Agent => {
@@ -137,11 +135,13 @@ export function createCodexDesktopAgentSessionSmokeController(
   const operations: Readonly<Record<string, (input: unknown) => Promise<unknown>>> = {
     create: async input => {
       const data = object(input)
-      return acquire(await ctx.agents.create({
-        sessionId: requiredText(data.sessionId, 'sessionId'),
-        mutationId: requiredText(data.mutationId, 'mutationId'),
-        ...(typeof data.model === 'string' && data.model !== '' ? { options: { model: data.model } } : {}),
-      }))
+      return acquire(
+        await ctx.agents.create({
+          sessionId: requiredText(data.sessionId, 'sessionId'),
+          mutationId: requiredText(data.mutationId, 'mutationId'),
+          ...(typeof data.model === 'string' && data.model !== '' ? { options: { model: data.model } } : {}),
+        }),
+      )
     },
     resume: async input => {
       const data = object(input)
@@ -154,8 +154,11 @@ export function createCodexDesktopAgentSessionSmokeController(
     get: async input => {
       const found = await ctx.agents.get(requiredText(object(input).sessionId, 'sessionId'))
       return found === undefined ? { status: 'not-found' } : {
-        status: 'found', id: found.id, generation: found.generation,
-        sessionId: found.session.id, sessionGeneration: found.session.generation,
+        status: 'found',
+        id: found.id,
+        generation: found.generation,
+        sessionId: found.session.id,
+        sessionGeneration: found.session.generation,
         ...(found.detail === undefined ? {} : { detail: found.detail }),
       }
     },
@@ -171,7 +174,9 @@ export function createCodexDesktopAgentSessionSmokeController(
       const sessionResult = await currentAgent.session.subscribe({ afterSeq: -1, pageSize: 500 }, page => {
         for (const event of page.events) record('session', event.type, event)
       })
-      if (sessionResult.status !== 'subscribed') throw new Error(`Session subscription unavailable: ${sessionResult.status}`)
+      if (sessionResult.status !== 'subscribed') {
+        throw new Error(`Session subscription unavailable: ${sessionResult.status}`)
+      }
       sessionSubscription = sessionResult.subscription
       void sessionSubscription.closed.then(closed => record('subscription-closed', closed.code, closed))
       return {
@@ -185,31 +190,42 @@ export function createCodexDesktopAgentSessionSmokeController(
         },
       }
     },
-    approval: async input => await ctx.approvals.request({
-      agent: requireAgent(),
-      toolName: requiredText(object(input).toolName, 'toolName'),
-      reason: requiredText(object(input).reason, 'reason'),
-    }),
+    approval: async input =>
+      await ctx.approvals.request({
+        agent: requireAgent(),
+        toolName: requiredText(object(input).toolName, 'toolName'),
+        reason: requiredText(object(input).reason, 'reason'),
+      }),
     send: async input => {
       const data = object(input)
       const currentAgent = requireAgent()
-      const value = message(requiredText(data.messageId, 'messageId'), requiredText(data.text, 'text'), requireHandle().owner)
+      const value = message(
+        requiredText(data.messageId, 'messageId'),
+        requiredText(data.text, 'text'),
+        requireHandle().owner,
+      )
       const mode = data.mode
       if (mode === 'followup') return await currentAgent.followup(value)
       if (mode === 'steer') return await currentAgent.steer(value)
       if (mode === 'inject') return await currentAgent.inject(value)
-      if (mode === 'send') return await currentAgent.send(
-        value,
-        data.target === 'next-step' ? 'next-step' : 'next-turn',
-        data.wakeup !== false,
-      )
+      if (mode === 'send') {
+        return await currentAgent.send(
+          value,
+          data.target === 'next-step' ? 'next-step' : 'next-turn',
+          data.wakeup !== false,
+        )
+      }
       throw new Error('unsupported send mode')
     },
     discard: async input => await requireAgent().discard(requiredText(object(input).messageId, 'messageId')),
-    cancel: async input => await requireAgent().cancel(
-      { kind: 'user' },
-      { mutationId: requiredText(object(input).mutationId, 'mutationId'), keepInbox: object(input).keepInbox === true },
-    ),
+    cancel: async input =>
+      await requireAgent().cancel(
+        { kind: 'user' },
+        {
+          mutationId: requiredText(object(input).mutationId, 'mutationId'),
+          keepInbox: object(input).keepInbox === true,
+        },
+      ),
     idle: async () => await requireAgent().whenIdle(),
     read: async () => {
       const session = requireAgent().session
@@ -244,20 +260,21 @@ export function createCodexDesktopAgentSessionSmokeController(
     },
   }
 
-  const snapshot = (): DesktopAgentSessionSmokeSnapshot => Object.freeze({
-    marker: config.marker,
-    busy,
-    operationOrdinal: ordinal,
-    ...(current === undefined ? {} : { current }),
-    ...(last === undefined ? {} : { last: plain(last) as DesktopAgentSessionSmokeSnapshot['last'] }),
-    ...(agent === undefined ? {} : {
-      sessionId: agent.id,
-      agentGeneration: agent.generation,
-      sessionGeneration: agent.session.generation,
-      ...(agent.detail === undefined ? {} : { detailRef: agent.detail.ref }),
-    }),
-    entries: entries.map(entry => plain(entry) as DesktopAgentSessionSmokeEntry),
-  })
+  const snapshot = (): DesktopAgentSessionSmokeSnapshot =>
+    Object.freeze({
+      marker: config.marker,
+      busy,
+      operationOrdinal: ordinal,
+      ...(current === undefined ? {} : { current }),
+      ...(last === undefined ? {} : { last: plain(last) as DesktopAgentSessionSmokeSnapshot['last'] }),
+      ...(agent === undefined ? {} : {
+        sessionId: agent.id,
+        agentGeneration: agent.generation,
+        sessionGeneration: agent.session.generation,
+        ...(agent.detail === undefined ? {} : { detailRef: agent.detail.ref }),
+      }),
+      entries: entries.map(entry => plain(entry) as DesktopAgentSessionSmokeEntry),
+    })
 
   const dispose = async (): Promise<void> => {
     if (answerer !== undefined) await answerer.dispose().catch(() => undefined)

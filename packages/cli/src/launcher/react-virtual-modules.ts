@@ -53,12 +53,25 @@ const REACT_EXPORTS = [
   'version',
 ] as const
 
-const UI_EXPORTS = ['Button', 'Card', 'EmptyState', 'Heading', 'Icon', 'MarkdownViewer', 'Select', 'SelectionRail', 'Stack', 'Text'] as const
+const UI_EXPORTS = [
+  'Button',
+  'Card',
+  'EmptyState',
+  'Heading',
+  'Icon',
+  'MarkdownViewer',
+  'Select',
+  'SelectionRail',
+  'Stack',
+  'Text',
+] as const
 
-export const CONTRACTS_MODULE_PATH = fileURLToPath(new URL(
-  import.meta.url.endsWith('.ts') ? '../contracts.ts' : '../contracts.js',
-  import.meta.url,
-))
+export const CONTRACTS_MODULE_PATH = fileURLToPath(
+  new URL(
+    import.meta.url.endsWith('.ts') ? '../contracts.ts' : '../contracts.js',
+    import.meta.url,
+  ),
+)
 
 function runtimePrelude(): string {
   return `const runtime = globalThis.__cordisxSharedReactRuntime;
@@ -78,14 +91,30 @@ function jsxRuntimeModule(development: boolean): string {
   return `${runtimePrelude()}
 const jsxRuntime = runtime.${source};
 export const Fragment = jsxRuntime.Fragment;
-${development
-    ? 'export const jsxDEV = jsxRuntime.jsxDEV;'
-    : 'export const jsx = jsxRuntime.jsx;\nexport const jsxs = jsxRuntime.jsxs;'}`
+${
+    development
+      ? 'export const jsxDEV = jsxRuntime.jsxDEV;'
+      : 'export const jsx = jsxRuntime.jsx;\nexport const jsxs = jsxRuntime.jsxs;'
+  }`
 }
 
 function peerDomModule(client: boolean): string {
-  const names = client ? ['createRoot', 'hydrateRoot', 'version']
-    : ['createPortal', 'flushSync', 'prefetchDNS', 'preconnect', 'preinit', 'preinitModule', 'preload', 'preloadModule', 'requestFormReset', 'useFormState', 'useFormStatus', 'version']
+  const names = client
+    ? ['createRoot', 'hydrateRoot', 'version']
+    : [
+      'createPortal',
+      'flushSync',
+      'prefetchDNS',
+      'preconnect',
+      'preinit',
+      'preinitModule',
+      'preload',
+      'preloadModule',
+      'requestFormReset',
+      'useFormState',
+      'useFormStatus',
+      'version',
+    ]
   return `${runtimePrelude()}
 const peer = runtime.${client ? 'reactDomClient' : 'reactDom'};
 export default peer;
@@ -111,7 +140,9 @@ export function cordisXSharedModuleSource(id: string): string {
 /** Resolve public plugin authoring modules against this exact Host generation. */
 export function cordisXReactVirtualModules(entry: string): Plugin {
   let pluginRoot = path.dirname(path.resolve(entry))
-  while (!existsSync(path.join(pluginRoot, 'package.json')) && path.dirname(pluginRoot) !== pluginRoot) pluginRoot = path.dirname(pluginRoot)
+  while (!existsSync(path.join(pluginRoot, 'package.json')) && path.dirname(pluginRoot) !== pluginRoot) {
+    pluginRoot = path.dirname(pluginRoot)
+  }
 
   return {
     name: 'cordisx-shared-react',
@@ -122,7 +153,10 @@ export function cordisXReactVirtualModules(entry: string): Plugin {
         const relative = path.relative(pluginRoot, args.importer).replaceAll('\\', '/')
         if (!relative.startsWith('../') && !relative.split('/').includes('node_modules')) return
         if (!/(?:^|\/)node_modules\//u.test(args.importer.replaceAll('\\', '/'))) return
-        return { path: args.path.startsWith('react-dom') ? `peer:${args.path}` : `cordisx/${args.path}`, namespace: 'cordisx-shared-react' }
+        return {
+          path: args.path.startsWith('react-dom') ? `peer:${args.path}` : `cordisx/${args.path}`,
+          namespace: 'cordisx-shared-react',
+        }
       })
       build.onResolve({ filter: /^cordisx\/contracts$/ }, () => ({ path: CONTRACTS_MODULE_PATH }))
       build.onResolve({ filter: /^cordisx\/(react(\/jsx-(dev-)?runtime)?|ui)$/ }, args => ({

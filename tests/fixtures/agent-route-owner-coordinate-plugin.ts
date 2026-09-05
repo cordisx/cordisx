@@ -1,7 +1,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from 'cordisx/contracts'
 
-const message = (key: string, fallback: string) => ({ namespace: 'agent-route-owner-coordinate', key, fallback } as const)
+const message = (
+  key: string,
+  fallback: string,
+) => ({ namespace: 'agent-route-owner-coordinate', key, fallback } as const)
 
 export const inject = ['i18n', 'pages', 'routes']
 

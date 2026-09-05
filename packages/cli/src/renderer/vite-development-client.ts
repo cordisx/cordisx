@@ -40,7 +40,9 @@ export class NativeViteDevelopmentClient {
       if (this.stopped) throw new Error('CordisX Vite development session is closed')
       return await action()
     })
-    this.queue = result.catch(error => { console.error('[cordisx] Vite update failed; previous version retained where possible', error) })
+    this.queue = result.catch(error => {
+      console.error('[cordisx] Vite update failed; previous version retained where possible', error)
+    })
     return result
   }
 
@@ -105,7 +107,8 @@ export class NativeViteDevelopmentClient {
       const mutation: RendererPluginMutation = {
         transactionId,
         operation: previous.plugins.some(value => value.id === plugin.id) ? 'update' : 'install',
-        previous, candidate,
+        previous,
+        candidate,
         targetId: plugin.id,
         affectedPluginIds: [plugin.id],
         developmentPackage: {
@@ -138,9 +141,17 @@ export class NativeViteDevelopmentClient {
         // Restore renderer state before returning Host declarations to last-good.
         const rollbackErrors: unknown[] = []
         if (rendererTransactionStarted) {
-          try { await runtime.rollbackPluginMutation(transactionId) } catch (rollbackError) { rollbackErrors.push(rollbackError) }
+          try {
+            await runtime.rollbackPluginMutation(transactionId)
+          } catch (rollbackError) {
+            rollbackErrors.push(rollbackError)
+          }
         }
-        try { await generationTransaction?.rollback() } catch (rollbackError) { rollbackErrors.push(rollbackError) }
+        try {
+          await generationTransaction?.rollback()
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError)
+        }
         if (rollbackErrors.length > 0) {
           this.stopped = true
           throw new AggregateError([error, ...rollbackErrors], 'Vite plugin rollback failed; updates paused')

@@ -15,11 +15,25 @@ import {
 
 const digest = (character: string): `sha256:${string}` => `sha256:${character.repeat(64)}`
 
-function plugin(id: string, moduleGeneration: string, dependencies: readonly { id: string; version: string }[] = []): CordisXPluginActivationItemV1 {
-  return { id, version: '1.0.0', digest: digest(id === 'base' ? 'a' : 'b'), moduleGeneration, enabled: true, dependencies }
+function plugin(
+  id: string,
+  moduleGeneration: string,
+  dependencies: readonly { id: string; version: string }[] = [],
+): CordisXPluginActivationItemV1 {
+  return {
+    id,
+    version: '1.0.0',
+    digest: digest(id === 'base' ? 'a' : 'b'),
+    moduleGeneration,
+    enabled: true,
+    dependencies,
+  }
 }
 
-function activation(revision: number, plugins: readonly CordisXPluginActivationItemV1[]): CordisXPluginActivationRecordV1 {
+function activation(
+  revision: number,
+  plugins: readonly CordisXPluginActivationItemV1[],
+): CordisXPluginActivationRecordV1 {
   return {
     $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
     schemaVersion: 1,
@@ -39,10 +53,12 @@ class ExistingRegistry {
   readonly notifiedVersions: number[] = []
 
   constructor(private readonly visibility: GenerationVisibilityCoordinator) {
-    visibility.connect({ notify: version => {
-      this.notifications += 1
-      this.notifiedVersions.push(version)
-    } })
+    visibility.connect({
+      notify: version => {
+        this.notifications += 1
+        this.notifiedVersions.push(version)
+      },
+    })
   }
 
   register(ctx: Context, value: string): () => void {
@@ -100,10 +116,12 @@ describe('generation visibility coordinator', () => {
     expect(pages.snapshot(visibility.view(consumerCandidate))).toEqual(['new-page'])
     expect([commands.notifications, pages.notifications]).toEqual([0, 0])
 
-    visibility.connect({ notify: () => {
-      expect(commands.snapshot()).toEqual(['new-command'])
-      expect(pages.snapshot()).toEqual(['new-page'])
-    } })
+    visibility.connect({
+      notify: () => {
+        expect(commands.snapshot()).toEqual(['new-command'])
+        expect(pages.snapshot()).toEqual(['new-page'])
+      },
+    })
     const receipt = visibility.confirmReadiness(handle)
     const barrier = visibility.preparePublish(handle, receipt)
     const publication = visibility.publish(barrier)
@@ -121,9 +139,11 @@ describe('generation visibility coordinator', () => {
       recordKind: 'candidate' as const,
       transactionId: 'update-base-again',
       revision: 3,
-      plugins: committed.plugins.map(item => item.id === 'base'
-        ? { ...item, digest: digest('d'), moduleGeneration: 'base-3' }
-        : item),
+      plugins: committed.plugins.map(item =>
+        item.id === 'base'
+          ? { ...item, digest: digest('d'), moduleGeneration: 'base-3' }
+          : item
+      ),
     }
     expect(visibility.begin('update-base-again', committed, next).affectedPluginIds).toEqual(['base', 'consumer'])
   })
@@ -144,8 +164,12 @@ describe('generation visibility coordinator', () => {
 
     let notifications = 0
     const disconnect = visibility.connect({
-      prepare: () => { throw new Error('fixture prepare failure') },
-      notify: () => { notifications += 1 },
+      prepare: () => {
+        throw new Error('fixture prepare failure')
+      },
+      notify: () => {
+        notifications += 1
+      },
     })
     const receipt = visibility.confirmReadiness(handle)
     expect(() => visibility.preparePublish(handle, receipt)).toThrow('fixture prepare failure')
@@ -154,8 +178,16 @@ describe('generation visibility coordinator', () => {
     disconnect()
 
     const notifiedVersions: number[] = []
-    visibility.connect({ notify: version => { notifiedVersions.push(version) } })
-    visibility.connect({ notify: () => { throw new Error('fixture listener failure') } })
+    visibility.connect({
+      notify: version => {
+        notifiedVersions.push(version)
+      },
+    })
+    visibility.connect({
+      notify: () => {
+        throw new Error('fixture listener failure')
+      },
+    })
     const publication = visibility.publish(visibility.preparePublish(handle, receipt))
     expect(publication.active).toBe(candidate)
     expect(publication.notificationErrors).toHaveLength(1)

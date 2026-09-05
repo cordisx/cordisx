@@ -11,9 +11,18 @@ export const CORDISX_PLUGIN_BUNDLE_MANAGER_SNAPSHOT_SCHEMA_V1 =
 
 export type CordisXPluginBundlePolicy = 'ask' | 'allow' | 'deny'
 export type CordisXPluginBundleStatus =
-  | 'active' | 'disabled' | 'partial' | 'permission-blocked' | 'version-conflict'
-  | 'installing' | 'updating' | 'enabling' | 'disabling' | 'uninstalling'
-  | 'failed' | 'rollback-failed'
+  | 'active'
+  | 'disabled'
+  | 'partial'
+  | 'permission-blocked'
+  | 'version-conflict'
+  | 'installing'
+  | 'updating'
+  | 'enabling'
+  | 'disabling'
+  | 'uninstalling'
+  | 'failed'
+  | 'rollback-failed'
 
 export interface CordisXPluginBundleMemberV1 {
   readonly id: string
@@ -70,8 +79,19 @@ export type CordisXPluginBundleLifecycleOperationV1 =
     readonly clearPluginOverrides: readonly CordisXPluginBundlePluginPermissionReferenceV1[]
     readonly impactToken: string
   }
-  | { readonly kind: 'set-optional-member'; readonly bundleId: string; readonly pluginId: string; readonly enabled: boolean; readonly impactToken: string }
-  | { readonly kind: 'adopt-member'; readonly bundleId: string; readonly pluginId: string; readonly impactToken: string }
+  | {
+    readonly kind: 'set-optional-member'
+    readonly bundleId: string
+    readonly pluginId: string
+    readonly enabled: boolean
+    readonly impactToken: string
+  }
+  | {
+    readonly kind: 'adopt-member'
+    readonly bundleId: string
+    readonly pluginId: string
+    readonly impactToken: string
+  }
 
 export interface CordisXPluginBundleLifecycleRequestV1 {
   readonly $schema: typeof CORDISX_PLUGIN_BUNDLE_LIFECYCLE_OPERATION_SCHEMA_V1
@@ -85,10 +105,22 @@ export interface CordisXPluginBundleLifecycleRequestV1 {
 }
 
 export type CordisXPluginBundleMemberAction =
-  | 'install' | 'update' | 'share' | 'enable' | 'disable' | 'retain' | 'remove' | 'skip'
+  | 'install'
+  | 'update'
+  | 'share'
+  | 'enable'
+  | 'disable'
+  | 'retain'
+  | 'remove'
+  | 'skip'
 export type CordisXPluginBundleMemberReason =
-  | 'bundle-required' | 'bundle-optional' | 'existing-exact' | 'direct-claim'
-  | 'other-bundle-claim' | 'runtime-dependency' | 'orphaned'
+  | 'bundle-required'
+  | 'bundle-optional'
+  | 'existing-exact'
+  | 'direct-claim'
+  | 'other-bundle-claim'
+  | 'runtime-dependency'
+  | 'orphaned'
 
 export interface CordisXPluginBundlePlanV1 {
   readonly bundle: {
@@ -137,8 +169,17 @@ export interface CordisXPluginBundleLifecycleResultV1 {
   readonly removedPluginIds: readonly string[]
   readonly plan?: CordisXPluginBundlePlanV1
   readonly error?: {
-    readonly code: 'invalid-source' | 'invalid-bundle' | 'stale-revision' | 'stale-generation' | 'impact-changed'
-      | 'version-conflict' | 'permission-review-required' | 'operation-unavailable' | 'apply-failed' | 'rollback-failed'
+    readonly code:
+      | 'invalid-source'
+      | 'invalid-bundle'
+      | 'stale-revision'
+      | 'stale-generation'
+      | 'impact-changed'
+      | 'version-conflict'
+      | 'permission-review-required'
+      | 'operation-unavailable'
+      | 'apply-failed'
+      | 'rollback-failed'
     readonly message: string
   }
 }
@@ -152,12 +193,22 @@ export interface CordisXPluginBundleManagerMemberV1 {
   readonly required: boolean
   readonly enabledByDefault: boolean
   readonly enabled: boolean
-  readonly state: 'active' | 'disabled' | 'not-installed' | 'shared' | 'permission-blocked' | 'version-conflict' | 'failed'
+  readonly state:
+    | 'active'
+    | 'disabled'
+    | 'not-installed'
+    | 'shared'
+    | 'permission-blocked'
+    | 'version-conflict'
+    | 'failed'
   readonly installedViaBundle: boolean
   readonly bundleIds: readonly string[]
   readonly directClaim: boolean
   readonly runtimeDependentIds: readonly string[]
-  readonly conflict?: { readonly code: 'version-mismatch' | 'digest-mismatch' | 'dependency-conflict'; readonly message: string }
+  readonly conflict?: {
+    readonly code: 'version-mismatch' | 'digest-mismatch' | 'dependency-conflict'
+    readonly message: string
+  }
 }
 
 export interface CordisXPluginBundleManagerPermissionV1 {
@@ -191,8 +242,16 @@ export interface CordisXPluginBundleManagerItemV1 {
   readonly availableOperations: readonly ('update' | 'enable' | 'disable' | 'repair' | 'uninstall')[]
   readonly members: readonly CordisXPluginBundleManagerMemberV1[]
   readonly permissions: readonly CordisXPluginBundleManagerPermissionV1[]
-  readonly claims: readonly { readonly pluginId: string; readonly kind: 'bundle' | 'direct' | 'runtime-dependency'; readonly claimantId: string }[]
-  readonly dependencies: readonly { readonly pluginId: string; readonly dependencyId: string; readonly version: string }[]
+  readonly claims: readonly {
+    readonly pluginId: string
+    readonly kind: 'bundle' | 'direct' | 'runtime-dependency'
+    readonly claimantId: string
+  }[]
+  readonly dependencies: readonly {
+    readonly pluginId: string
+    readonly dependencyId: string
+    readonly version: string
+  }[]
   readonly records: readonly {
     readonly recordId: string
     readonly at: string

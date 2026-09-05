@@ -14,29 +14,54 @@ function snapshot(): ManagerSnapshot {
   return {
     version: 'test',
     plugins: [{
-      id: 'demo', source: 'file:///plugins/demo.js', name: 'Demo plugin',
-      inject: [], config: {}, status: 'active',
+      id: 'demo',
+      source: 'file:///plugins/demo.js',
+      name: 'Demo plugin',
+      inject: [],
+      config: {},
+      status: 'active',
       configuration: {
-        namespace: 'demo', schemaKind: 'none', applies: 'plugin-restart', writable: false,
-        revision: 1, lastGoodRevision: 1, value: {}, fields: [], secrets: [],
+        namespace: 'demo',
+        schemaKind: 'none',
+        applies: 'plugin-restart',
+        writable: false,
+        revision: 1,
+        lastGoodRevision: 1,
+        value: {},
+        fields: [],
+        secrets: [],
       },
       development: {
-        origin: 'local-dev', pluginId: 'demo', sourcePath: '/plugins/demo.ts', state: 'ready',
+        origin: 'local-dev',
+        pluginId: 'demo',
+        sourcePath: '/plugins/demo.ts',
+        state: 'ready',
         lastSuccessfulAt: '2026-09-04T00:00:00.000Z',
       },
     }],
-    registrations: [], commands: [], navigation: { routes: [], pages: [], outlets: [] },
+    registrations: [],
+    commands: [],
+    navigation: { routes: [], pages: [], outlets: [] },
     localization: { locale: 'en', direction: 'ltr', version: 1 },
-    localeCatalogs: [], localizationDiagnostics: [], permissions: [],
+    localeCatalogs: [],
+    localizationDiagnostics: [],
+    permissions: [],
     pluginLifecycle: { profileId: 'work', revision: 1, runtimeGeneration: 'runtime-a', operationsAvailable: true },
     platform: {
-      hostId: 'codex-desktop', hostName: 'Codex Desktop', mode: 'unavailable',
-      supportedCapabilities: [], diagnostics: [], secondConnectionCreated: false, rawBridgeExposed: false,
+      hostId: 'codex-desktop',
+      hostName: 'Codex Desktop',
+      mode: 'unavailable',
+      supportedCapabilities: [],
+      diagnostics: [],
+      secondConnectionCreated: false,
+      rawBridgeExposed: false,
     },
   }
 }
 
-async function settle(): Promise<void> { await new Promise(resolve => setTimeout(resolve, 0)) }
+async function settle(): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, 0))
+}
 
 async function click(document: Document, selector: string): Promise<void> {
   await act(async () => {
@@ -47,18 +72,30 @@ async function click(document: Document, selector: string): Promise<void> {
 
 describe('React Manager localization', () => {
   it('renders English Host chrome, plugin management, searches, and empty states from the copy catalog', async () => {
-    const dom = new JSDOM('<!doctype html><html lang="en"><head></head><body></body></html>', { url: 'https://codex.local/' })
-    const previousActEnvironment = (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT
+    const dom = new JSDOM('<!doctype html><html lang="en"><head></head><body></body></html>', {
+      url: 'https://codex.local/',
+    })
+    const previousActEnvironment =
+      (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT
     const previous = {
-      document: globalThis.document, window: globalThis.window,
-      HTMLElement: globalThis.HTMLElement, Element: globalThis.Element, Node: globalThis.Node,
-      MutationObserver: globalThis.MutationObserver, getComputedStyle: globalThis.getComputedStyle,
-      requestAnimationFrame: globalThis.requestAnimationFrame, cancelAnimationFrame: globalThis.cancelAnimationFrame,
+      document: globalThis.document,
+      window: globalThis.window,
+      HTMLElement: globalThis.HTMLElement,
+      Element: globalThis.Element,
+      Node: globalThis.Node,
+      MutationObserver: globalThis.MutationObserver,
+      getComputedStyle: globalThis.getComputedStyle,
+      requestAnimationFrame: globalThis.requestAnimationFrame,
+      cancelAnimationFrame: globalThis.cancelAnimationFrame,
     }
     Object.assign(globalThis, {
-      document: dom.window.document, window: dom.window,
-      HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, Node: dom.window.Node,
-      MutationObserver: dom.window.MutationObserver, getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+      document: dom.window.document,
+      window: dom.window,
+      HTMLElement: dom.window.HTMLElement,
+      Element: dom.window.Element,
+      Node: dom.window.Node,
+      MutationObserver: dom.window.MutationObserver,
+      getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
       requestAnimationFrame: (callback: FrameRequestCallback) => dom.window.setTimeout(() => callback(Date.now()), 0),
       cancelAnimationFrame: (handle: number) => dom.window.clearTimeout(handle),
       IS_REACT_ACT_ENVIRONMENT: true,
@@ -67,23 +104,32 @@ describe('React Manager localization', () => {
       attachEvent: { configurable: true, value() {} },
       detachEvent: { configurable: true, value() {} },
     })
-    Object.defineProperty(dom.window, 'matchMedia', { value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) })
+    Object.defineProperty(dom.window, 'matchMedia', {
+      value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+    })
     const confirm = vi.fn(() => false)
     Object.defineProperty(dom.window, 'confirm', { configurable: true, value: confirm })
     const { ManagerApp } = await import('../packages/cli/src/renderer/manager/ManagerApp.js')
     const state = snapshot()
     const requestPluginLifecycle = vi.fn(async () => ({
-      outcome: 'planned', impactToken: 'impact:demo', affectedPluginIds: ['demo'],
+      outcome: 'planned',
+      impactToken: 'impact:demo',
+      affectedPluginIds: ['demo'],
     }))
     const model = {
-      snapshot: () => state, subscribe: () => () => {},
-      setPluginBlocked: async () => {}, setPermissionPolicy: async () => {}, requestPluginLifecycle,
+      snapshot: () => state,
+      subscribe: () => () => {},
+      setPluginBlocked: async () => {},
+      setPermissionPolicy: async () => {},
+      requestPluginLifecycle,
     } as unknown as ManagerModel
     const seat = dom.window.document.createElement('span')
     dom.window.document.body.append(seat)
     const root = createRoot(dom.window.document.body.appendChild(dom.window.document.createElement('div')))
     try {
-      await act(async () => root.render(<ManagerApp model={model} marketplace={{} as MarketplaceModel} triggerSeat={seat} />))
+      await act(async () =>
+        root.render(<ManagerApp model={model} marketplace={{} as MarketplaceModel} triggerSeat={seat} />)
+      )
       const trigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!
       expect(trigger.getAttribute('aria-label')).toBe('Manage CordisX plugins')
       expect(trigger.title).toBe('Manage CordisX plugins')
@@ -96,7 +142,9 @@ describe('React Manager localization', () => {
       expect(dialog.querySelector('[data-tab="plugin-bundles"]')?.textContent).toBe('Plugin bundles')
       expect(dialog.querySelector('.cxr-heading')?.textContent).toBe('Plugins')
       expect(dialog.querySelector('[data-plugin-origin="local-dev"]')?.textContent).toContain('Local development')
-      expect(dialog.querySelector('[data-plugin-id="demo"]')?.getAttribute('aria-label')).toBe('Open plugin details · Demo plugin')
+      expect(dialog.querySelector('[data-plugin-id="demo"]')?.getAttribute('aria-label')).toBe(
+        'Open plugin details · Demo plugin',
+      )
       expect(dialog.querySelector('[aria-label="Disable plugin"]')).not.toBeNull()
       expect(dialog.querySelector('[aria-label="Reload plugin"]')).not.toBeNull()
       expect(dialog.querySelector('[aria-label="Demo plugin · More plugin actions"]')).not.toBeNull()
@@ -114,7 +162,19 @@ describe('React Manager localization', () => {
       await click(dom.window.document, '[data-plugin-detail-tab="permissions"]')
       expect(dialog.textContent).toContain('This plugin does not declare platform permissions.')
       await click(dom.window.document, '[data-plugin-detail-tab="runtime"]')
-      for (const copy of ['Local development', 'Source path', 'Build status', 'Last successful build', 'Status', 'Permissions', 'Injected capabilities', 'Dependencies', 'None']) {
+      for (
+        const copy of [
+          'Local development',
+          'Source path',
+          'Build status',
+          'Last successful build',
+          'Status',
+          'Permissions',
+          'Injected capabilities',
+          'Dependencies',
+          'None',
+        ]
+      ) {
         expect(dialog.textContent).toContain(copy)
       }
       await click(dom.window.document, '[data-plugin-detail-tab="extension-points"]')
@@ -134,8 +194,12 @@ describe('React Manager localization', () => {
     } finally {
       await act(async () => root.unmount())
       Object.assign(globalThis, previous)
-      if (previousActEnvironment === undefined) delete (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT
-      else (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = previousActEnvironment
+      if (previousActEnvironment === undefined) {
+        delete (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT
+      } else {
+        ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+          previousActEnvironment
+      }
       dom.window.close()
     }
   }, 30_000)

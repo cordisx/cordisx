@@ -36,7 +36,11 @@ export class BrowserServiceConfigBridge {
   private readonly listRequests = new Map<string, Promise<readonly HostServiceConfigDescriptor[]>>()
   private closed = false
 
-  private constructor(private readonly token: string, private readonly profileId: string, private readonly generation: string) {
+  private constructor(
+    private readonly token: string,
+    private readonly profileId: string,
+    private readonly generation: string,
+  ) {
     globalThis[SERVICE_CONFIG_RECEIVER] = this.receive
   }
 
@@ -100,7 +104,9 @@ export class BrowserServiceConfigBridge {
     if (this.closed) return Promise.reject(new Error('Service configuration bridge is unavailable'))
     const binding = globalThis[SERVICE_CONFIG_BINDING]
     if (typeof binding !== 'function') return Promise.reject(new Error('Service configuration bridge is unavailable'))
-    const requestId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const requestId = typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId)
@@ -119,7 +125,11 @@ export class BrowserServiceConfigBridge {
 
   private readonly receive = (payload: string): void => {
     let response: { requestId?: unknown; ok?: unknown; value?: unknown; code?: unknown; error?: unknown }
-    try { response = JSON.parse(payload) as typeof response } catch { return }
+    try {
+      response = JSON.parse(payload) as typeof response
+    } catch {
+      return
+    }
     if (typeof response.requestId !== 'string') return
     const pending = this.pending.get(response.requestId)
     if (pending === undefined) return

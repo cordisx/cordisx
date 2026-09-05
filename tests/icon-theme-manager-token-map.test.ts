@@ -5,7 +5,7 @@ import { MANAGER_ICON_SEMANTICS, MANAGER_ICON_TOKENS } from '../packages/cli/src
 describe('Manager icon token audit table', () => {
   it('covers every current token exactly once', async () => {
     const source = await readFile(new URL('../.agents/docs/icon-theme-manager-token-map.md', import.meta.url), 'utf8')
-    const rows = [...source.matchAll(/^\| `([^`]+?)` \|/gmu)].map(match => match[1]!)
+    const rows = [...source.matchAll(/^\|[ \t]+`([^`]+?)`[ \t]+\|/gmu)].map(match => match[1]!)
     expect([...rows].sort()).toEqual([...MANAGER_ICON_TOKENS].sort())
     expect(new Set(rows).size).toBe(rows.length)
   })
@@ -13,11 +13,26 @@ describe('Manager icon token audit table', () => {
   it('records all 13 formally mapped semantics as current', async () => {
     const source = await readFile(new URL('../.agents/docs/icon-theme-manager-token-map.md', import.meta.url), 'utf8')
     const targets = [
-      'action.move', 'action.export', 'action.follow', 'action.pause', 'action.resume',
-      'action.favorite', 'action.import', 'action.enable', 'action.disable', 'action.submit',
-      'content.contributions', 'content.acknowledgements', 'agent.turn-control',
+      'action.move',
+      'action.export',
+      'action.follow',
+      'action.pause',
+      'action.resume',
+      'action.favorite',
+      'action.import',
+      'action.enable',
+      'action.disable',
+      'action.submit',
+      'content.contributions',
+      'content.acknowledgements',
+      'agent.turn-control',
     ]
-    for (const semantic of targets) expect(source).toContain(`| \`${semantic}\` | same |`)
+    const rows = source.split('\n').map(row => row.split('|').slice(1, -1).map(cell => cell.trim()))
+    for (const semantic of targets) {
+      expect(rows.some(row => row.some((name, index) => name === `\`${semantic}\`` && row[index + 1] === 'same'))).toBe(
+        true,
+      )
+    }
     expect(source).not.toContain('wait for formal 64-key API')
     expect({
       move: MANAGER_ICON_SEMANTICS.move,

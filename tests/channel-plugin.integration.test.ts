@@ -10,17 +10,29 @@ import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../packages/cli/src/capabili
 import { CORDISX_PERMISSION_POLICY_SCHEMA_V3 } from '../packages/cli/src/permission-contracts.js'
 import { domPermissionAuthorizationKeyV3 } from '../packages/cli/src/permission-model-v3.js'
 import {
-  CordisXChannelManagerService,
   type ChannelManagerProjectionV1,
+  CordisXChannelManagerService,
 } from '../packages/cli/src/renderer/channel-manager.js'
 
 interface RuntimeHandle {
   snapshot(): {
-    plugins: readonly { id: string; status: string; configuration: { schemaKind: string; fields: readonly unknown[] } }[]
+    plugins: readonly {
+      id: string
+      status: string
+      configuration: { schemaKind: string; fields: readonly unknown[] }
+    }[]
     registrations: readonly { owner: string; surface: string; qualifiedId: string; valid: boolean; pending: boolean }[]
     navigation: {
-      routes: readonly { qualifiedId: string; valid: boolean; productMetadata: { title?: string; diagnostics: readonly unknown[] } }[]
-      pages: readonly { qualifiedId: string; metadata: { chrome?: string }; productMetadata: { title?: string; diagnostics: readonly unknown[] } }[]
+      routes: readonly {
+        qualifiedId: string
+        valid: boolean
+        productMetadata: { title?: string; diagnostics: readonly unknown[] }
+      }[]
+      pages: readonly {
+        qualifiedId: string
+        metadata: { chrome?: string }
+        productMetadata: { title?: string; diagnostics: readonly unknown[] }
+      }[]
       outlets: readonly { id: string; available: boolean; mounted: boolean; activeRoute?: string }[]
     }
   }
@@ -55,32 +67,60 @@ const projection: ChannelManagerProjectionV1 = {
   contract: 'cordisx.channel-manager-projection/v1',
   schemaVersion: 1,
   status: 'experimental',
-  service: { configurationKind: 'host', configApplies: 'service-restart', revision: 4, lastGoodRevision: 4, writable: false },
+  service: {
+    configurationKind: 'host',
+    configApplies: 'service-restart',
+    revision: 4,
+    lastGoodRevision: 4,
+    writable: false,
+  },
   connections: [{
     ref: { adapterId: 'simulator', accountId: 'local', tenantId: 'test' },
-    adapterKind: 'simulator', enabled: true, transportMode: 'simulator', secretState: 'unavailable',
+    adapterKind: 'simulator',
+    enabled: true,
+    transportMode: 'simulator',
+    secretState: 'unavailable',
   }],
   routes: [{
     id: 'default',
     connection: { adapterId: 'simulator', accountId: 'local', tenantId: 'test' },
-    enabled: true, workspaceAlias: 'cordisx', provider: 'codex', model: 'default', profile: 'work',
+    enabled: true,
+    workspaceAlias: 'cordisx',
+    provider: 'codex',
+    model: 'default',
+    profile: 'work',
     notifications: ['completion', 'failure'],
   }],
   accounts: [{
     ref: { adapterId: 'simulator', accountId: 'local', tenantId: 'test' },
-    adapterKind: 'simulator', enabled: true, transportMode: 'simulator', secretState: 'unavailable',
-    implementationStatus: 'verified', connectionState: 'ready', generation: 3,
-    inbound: { pending: 0, retrying: 0, deadLetter: 0 }, outbound: { pending: 1, retrying: 0, deadLetter: 0 },
+    adapterKind: 'simulator',
+    enabled: true,
+    transportMode: 'simulator',
+    secretState: 'unavailable',
+    implementationStatus: 'verified',
+    connectionState: 'ready',
+    generation: 3,
+    inbound: { pending: 0, retrying: 0, deadLetter: 0 },
+    outbound: { pending: 1, retrying: 0, deadLetter: 0 },
   }],
   bindings: [{
     bindingId: 'binding-1',
     channel: {
-      adapterId: 'simulator', accountId: 'local', tenantId: 'test', conversationId: 'direct-alice', threadId: 'direct-alice',
+      adapterId: 'simulator',
+      accountId: 'local',
+      tenantId: 'test',
+      conversationId: 'direct-alice',
+      threadId: 'direct-alice',
     },
     session: { providerId: 'codex', remoteSessionId: 'same-id-safe-by-provider' },
-    routeId: 'default', state: 'active',
+    routeId: 'default',
+    state: 'active',
   }],
-  diagnostics: [{ id: 'simulator', status: 'verified', message: 'Local simulator verified without an external account.' }],
+  diagnostics: [{
+    id: 'simulator',
+    status: 'verified',
+    message: 'Local simulator verified without an external account.',
+  }],
 }
 
 function channelDomPolicies(entry: string) {
@@ -110,7 +150,9 @@ describe('built-in Channel product bundle', () => {
       schemaVersion: 4,
       id: 'channel',
       services: [{
-        id: 'runtime', kind: 'channel-adapter', entry: './service.mjs',
+        id: 'runtime',
+        kind: 'channel-adapter',
+        entry: './service.mjs',
         configuration: { kind: 'host', configApplies: 'restart' },
       }],
     })
@@ -118,33 +160,50 @@ describe('built-in Channel product bundle', () => {
 
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const entry = path.join(root, 'packages/cli/src/plugins/channel/index.ts')
-    const rendererComposition = await buildRendererComposition({
-      version: 1,
-      rootDir: root,
-      codex: { debugPort: 9229 },
-      providers: [],
-      plugins: [{ id: 'channel', entry, enabled: true, config: {} }],
-    }, () => undefined, {
-      profileId: 'work',
-      permission: { profileId: 'work', policies: channelDomPolicies(entry), persistent: true },
-      channelManager: projection,
-      channelActionsBridgeToken: 'a'.repeat(64),
-    })
+    const rendererComposition = await buildRendererComposition(
+      {
+        version: 1,
+        rootDir: root,
+        codex: { debugPort: 9229 },
+        providers: [],
+        plugins: [{ id: 'channel', entry, enabled: true, config: {} }],
+      },
+      () => undefined,
+      {
+        profileId: 'work',
+        permission: { profileId: 'work', policies: channelDomPolicies(entry), persistent: true },
+        channelManager: projection,
+        channelActionsBridgeToken: 'a'.repeat(64),
+      },
+    )
     const bundle = rendererComposition.source
-    const dom = new JSDOM(`
+    const dom = new JSDOM(
+      `
       <html lang="en" class="electron-dark"><head></head><body>
         <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
       </body></html>
-    `, { runScripts: 'dangerously', url: 'https://codex.local/native' })
+    `,
+      { runScripts: 'dangerously', url: 'https://codex.local/native' },
+    )
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
-    Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
+    Object.defineProperty(dom.window, 'fetch', {
+      value: async () => ({ ok: false, status: 503, text: async () => '' }),
+    })
     installNoopPermissionBridge(dom.window)
     const actionRequests: unknown[] = []
-    Object.defineProperty(dom.window, '__cordisxChannelActionsRequestV1', { configurable: true, value: (payload: string) => {
-      const request = JSON.parse(payload) as { requestId: string; token: string }
-      actionRequests.push(request)
-      queueMicrotask(() => (dom.window as unknown as { __cordisxChannelActionsReceiveV1?: (response: string) => void }).__cordisxChannelActionsReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value: { status: 'applied' } })))
-    } })
+    Object.defineProperty(dom.window, '__cordisxChannelActionsRequestV1', {
+      configurable: true,
+      value: (payload: string) => {
+        const request = JSON.parse(payload) as { requestId: string; token: string }
+        actionRequests.push(request)
+        queueMicrotask(() =>
+          (dom.window as unknown as { __cordisxChannelActionsReceiveV1?: (response: string) => void })
+            .__cordisxChannelActionsReceiveV1?.(
+              JSON.stringify({ requestId: request.requestId, ok: true, value: { status: 'applied' } }),
+            )
+        )
+      },
+    })
     dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
     dom.window.eval(bundle)
     await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true')
@@ -152,17 +211,24 @@ describe('built-in Channel product bundle', () => {
     try {
       const snapshot = runtime.snapshot()
       expect(snapshot.plugins).toEqual([expect.objectContaining({
-        id: 'channel', status: 'active', configuration: expect.objectContaining({ schemaKind: 'none', fields: [] }),
+        id: 'channel',
+        status: 'active',
+        configuration: expect.objectContaining({ schemaKind: 'none', fields: [] }),
       })])
       expect(snapshot.registrations).toContainEqual(expect.objectContaining({
-        owner: 'channel', surface: 'manager.settings.navigation-items', qualifiedId: 'channel:channels', valid: true,
+        owner: 'channel',
+        surface: 'manager.settings.navigation-items',
+        qualifiedId: 'channel:channels',
+        valid: true,
       }))
       expect(snapshot.navigation.routes).toContainEqual(expect.objectContaining({
-        qualifiedId: 'channel:settings', valid: true,
+        qualifiedId: 'channel:settings',
+        valid: true,
         productMetadata: expect.objectContaining({ title: 'Channel settings', diagnostics: [] }),
       }))
       expect(snapshot.navigation.pages).toContainEqual(expect.objectContaining({
-        qualifiedId: 'channel:settings', metadata: expect.objectContaining({ chrome: 'standard' }),
+        qualifiedId: 'channel:settings',
+        metadata: expect.objectContaining({ chrome: 'standard' }),
         productMetadata: expect.objectContaining({
           title: 'Channels',
           description: 'Manage configured channel accounts, connections, and sessions.',
@@ -174,7 +240,9 @@ describe('built-in Channel product bundle', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')!.click()
       const managerRoot = dom.window.document.querySelector<HTMLElement>('.cxr-root')!
       expect(dom.window.getComputedStyle(managerRoot).fontSize).toBe('13px')
-      const channelEntry = dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="channel:channels"]')!
+      const channelEntry = dom.window.document.querySelector<HTMLButtonElement>(
+        '[data-settings-navigation-item="channel:channels"]',
+      )!
       expect(channelEntry.textContent).toContain('Channel settings')
       expect(channelEntry.querySelector('[data-host-icon="host:layers"]')).not.toBeNull()
       channelEntry.click()
@@ -186,7 +254,9 @@ describe('built-in Channel product bundle', () => {
       expect(dom.window.document.querySelector('.cxr-heading')?.textContent).toContain('Channels')
       expect(dom.window.document.querySelector('.cxr-content')?.textContent).not.toContain('正在加载插件页面')
       expect(runtime.snapshot().navigation.outlets).toContainEqual(expect.objectContaining({
-        id: 'manager.content', mounted: true, activeRoute: 'channel:settings',
+        id: 'manager.content',
+        mounted: true,
+        activeRoute: 'channel:settings',
       }))
       expect(dom.window.location.href).toBe('https://codex.local/native')
     } finally {
@@ -208,34 +278,60 @@ describe('built-in Channel product bundle', () => {
       providers: [],
       plugins: [{ id: 'channel', entry, enabled: true, config: {} }],
     }, {
-      profileId: 'work', generation, serviceConfigBridgeToken: serviceConfigToken,
+      profileId: 'work',
+      generation,
+      serviceConfigBridgeToken: serviceConfigToken,
       permission: { profileId: 'work', policies: channelDomPolicies(entry), bridgeToken: 'b'.repeat(64) },
       channelManager: { ...projection, service: { ...projection.service, writable: true } },
     })
-    const dom = new JSDOM(`
+    const dom = new JSDOM(
+      `
       <html lang="en" class="electron-dark"><head></head><body>
         <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
       </body></html>
-    `, { runScripts: 'dangerously', url: 'https://codex.local/native' })
+    `,
+      { runScripts: 'dangerously', url: 'https://codex.local/native' },
+    )
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
-    Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
+    Object.defineProperty(dom.window, 'fetch', {
+      value: async () => ({ ok: false, status: 503, text: async () => '' }),
+    })
     installNoopPermissionBridge(dom.window)
     const descriptor = {
-      contract: 'cordisx.service-config-descriptor/v1', schemaVersion: 1,
+      contract: 'cordisx.service-config-descriptor/v1',
+      schemaVersion: 1,
       identity: { source: 'file:///channel', pluginId: 'channel', serviceId: 'runtime' },
       scope: { profileId: 'work', generation },
       schema: { id: 'https://example.test/channel-runtime', projection: { kind: 'standard', renderable: false } },
-      revision: 4, lastGoodRevision: 4, configApplies: 'service-restart', writable: true, restartRequired: false,
+      revision: 4,
+      lastGoodRevision: 4,
+      configApplies: 'service-restart',
+      writable: true,
+      restartRequired: false,
       configuration: {
-        contract: 'cordisx.channel-service-config/v1', schemaVersion: 1,
-        connections: [{ ref: projection.connections[0]!.ref, adapterKind: 'simulator', enabled: true, transport: { mode: 'simulator' } }],
-        routes: [], reliability: {
+        contract: 'cordisx.channel-service-config/v1',
+        schemaVersion: 1,
+        connections: [{
+          ref: projection.connections[0]!.ref,
+          adapterKind: 'simulator',
+          enabled: true,
+          transport: { mode: 'simulator' },
+        }],
+        routes: [],
+        reliability: {
           leaseMs: 30_000,
           retry: { maxAttempts: 5, baseDelayMs: 1_000, maxDelayMs: 60_000, maxAgeMs: 86_400_000, jitterRatio: .2 },
-          rateLimit: { perAccountPerMinute: 120, perUserPerMinute: 20, perConversationPerMinute: 60, maxConcurrent: 8, maxBacklog: 1_000 },
+          rateLimit: {
+            perAccountPerMinute: 120,
+            perUserPerMinute: 20,
+            perConversationPerMinute: 60,
+            maxConcurrent: 8,
+            maxBacklog: 1_000,
+          },
           attachments: { maxFiles: 4, maxBytesPerFile: 10_485_760, allowedMediaTypes: ['text/plain'] },
         },
-      }, secrets: [],
+      },
+      secrets: [],
     }
     Object.defineProperty(dom.window, '__cordisxServiceConfigRequestV1', {
       configurable: true,
@@ -245,12 +341,18 @@ describe('built-in Channel product bundle', () => {
         const value = request.operation === 'list'
           ? [descriptor]
           : {
-              contract: 'cordisx.service-config-result/v1', schemaVersion: 1,
-              identity: descriptor.identity, scope: descriptor.scope, revision: 5,
-              status: 'applied', configApplies: 'service-restart', serviceGeneration: 'channel-created-record-next',
-            }
+            contract: 'cordisx.service-config-result/v1',
+            schemaVersion: 1,
+            identity: descriptor.identity,
+            scope: descriptor.scope,
+            revision: 5,
+            status: 'applied',
+            configApplies: 'service-restart',
+            serviceGeneration: 'channel-created-record-next',
+          }
         queueMicrotask(() => {
-          const receiver = (dom.window as unknown as { __cordisxServiceConfigReceiveV1?: (response: string) => void }).__cordisxServiceConfigReceiveV1
+          const receiver = (dom.window as unknown as { __cordisxServiceConfigReceiveV1?: (response: string) => void })
+            .__cordisxServiceConfigReceiveV1
           receiver?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
         })
       },
@@ -263,7 +365,8 @@ describe('built-in Channel product bundle', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
       await waitFor(() => dom.window.document.querySelector('[data-tab="plugins"]') !== null)
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')!.click()
-      dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="channel:channels"]')!.click()
+      dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="channel:channels"]')!
+        .click()
       await waitFor(() => dom.window.document.querySelector('[data-channel-page="list"]') !== null)
       dom.window.document.querySelector<HTMLButtonElement>('[data-channel-create="true"]')!.click()
       await waitFor(() => dom.window.document.querySelector('[data-channel-page="create"]') !== null)
@@ -279,10 +382,16 @@ describe('built-in Channel product bundle', () => {
       expect(card.querySelector('.cxc-avatar')).not.toBeNull()
       expect(card.querySelector('.cxc-channel-status[data-state]')).not.toBeNull()
       card.click()
-      await waitFor(() => dom.window.document.querySelector('[data-channel-page="detail"][data-channel-detail="simulator/local-smoke/local"]') !== null)
+      await waitFor(() =>
+        dom.window.document.querySelector(
+          '[data-channel-page="detail"][data-channel-detail="simulator/local-smoke/local"]',
+        ) !== null
+      )
       await waitFor(() => dom.window.document.querySelector('[data-manager-content-tabs]') !== null)
       expect(dom.window.document.querySelector('.cxr-heading')?.textContent).toContain('Channels')
-      expect(dom.window.document.querySelector('[data-manager-content-tabs] [data-manager-content-tab="configuration"]')).not.toBeNull()
+      expect(
+        dom.window.document.querySelector('[data-manager-content-tabs] [data-manager-content-tab="configuration"]'),
+      ).not.toBeNull()
     } finally {
       await runtime.dispose()
       dom.window.close()
@@ -296,46 +405,112 @@ describe('built-in Channel product bundle', () => {
     const credentialToken = 'c'.repeat(64)
     const generation = 'channel-feishu-create-test'
     const bundle = await buildRendererBundle({
-      version: 1, rootDir: root, codex: { debugPort: 9229 }, providers: [],
+      version: 1,
+      rootDir: root,
+      codex: { debugPort: 9229 },
+      providers: [],
       plugins: [{ id: 'channel', entry, enabled: true, config: {} }],
     }, {
-      profileId: 'work', generation, serviceConfigBridgeToken: serviceConfigToken, channelCredentialBridgeToken: credentialToken,
+      profileId: 'work',
+      generation,
+      serviceConfigBridgeToken: serviceConfigToken,
+      channelCredentialBridgeToken: credentialToken,
       permission: { profileId: 'work', policies: channelDomPolicies(entry), bridgeToken: 'd'.repeat(64) },
       channelManager: { ...projection, service: { ...projection.service, writable: true } },
     })
-    const dom = new JSDOM('<html lang="en" class="electron-dark"><body><div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div></body></html>', {
-      runScripts: 'dangerously', url: 'https://codex.local/native',
-    })
+    const dom = new JSDOM(
+      '<html lang="en" class="electron-dark"><body><div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div></body></html>',
+      {
+        runScripts: 'dangerously',
+        url: 'https://codex.local/native',
+      },
+    )
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
-    Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
+    Object.defineProperty(dom.window, 'fetch', {
+      value: async () => ({ ok: false, status: 503, text: async () => '' }),
+    })
     installNoopPermissionBridge(dom.window)
     const descriptor = {
-      contract: 'cordisx.service-config-descriptor/v1', schemaVersion: 1,
+      contract: 'cordisx.service-config-descriptor/v1',
+      schemaVersion: 1,
       identity: { source: 'file:///channel', pluginId: 'channel', serviceId: 'runtime' },
-      scope: { profileId: 'work', generation }, schema: { id: 'https://example.test/channel-runtime', projection: { kind: 'standard', renderable: false } },
-      revision: 4, lastGoodRevision: 4, configApplies: 'service-restart', writable: true, restartRequired: false,
+      scope: { profileId: 'work', generation },
+      schema: { id: 'https://example.test/channel-runtime', projection: { kind: 'standard', renderable: false } },
+      revision: 4,
+      lastGoodRevision: 4,
+      configApplies: 'service-restart',
+      writable: true,
+      restartRequired: false,
       configuration: {
-        contract: 'cordisx.channel-service-config/v1', schemaVersion: 1, connections: [], routes: [], reliability: {
-          leaseMs: 30_000, retry: { maxAttempts: 5, baseDelayMs: 1_000, maxDelayMs: 60_000, maxAgeMs: 86_400_000, jitterRatio: .2 },
-          rateLimit: { perAccountPerMinute: 120, perUserPerMinute: 20, perConversationPerMinute: 60, maxConcurrent: 8, maxBacklog: 1_000 },
+        contract: 'cordisx.channel-service-config/v1',
+        schemaVersion: 1,
+        connections: [],
+        routes: [],
+        reliability: {
+          leaseMs: 30_000,
+          retry: { maxAttempts: 5, baseDelayMs: 1_000, maxDelayMs: 60_000, maxAgeMs: 86_400_000, jitterRatio: .2 },
+          rateLimit: {
+            perAccountPerMinute: 120,
+            perUserPerMinute: 20,
+            perConversationPerMinute: 60,
+            maxConcurrent: 8,
+            maxBacklog: 1_000,
+          },
           attachments: { maxFiles: 4, maxBytesPerFile: 10_485_760, allowedMediaTypes: ['text/plain'] },
         },
-      }, secrets: [],
+      },
+      secrets: [],
     }
     const requests: unknown[] = []
-    Object.defineProperty(dom.window, '__cordisxServiceConfigRequestV1', { configurable: true, value: (payload: string) => {
-      const request = JSON.parse(payload) as { requestId: string; operation: 'list' | 'mutate' }
-      queueMicrotask(() => (dom.window as unknown as { __cordisxServiceConfigReceiveV1?: (response: string) => void }).__cordisxServiceConfigReceiveV1?.(JSON.stringify({
-        requestId: request.requestId, ok: true, value: request.operation === 'list' ? [descriptor] : { contract: 'cordisx.service-config-result/v1', schemaVersion: 1, identity: descriptor.identity, scope: descriptor.scope, revision: 5, status: 'applied', configApplies: 'service-restart', serviceGeneration: 'next' },
-      })))
-    } })
-    Object.defineProperty(dom.window, '__cordisxChannelCredentialRequestV1', { configurable: true, value: (payload: string) => {
-      const request = JSON.parse(payload) as { requestId: string; token: string; secret?: string; mutation?: unknown }
-      requests.push(request)
-      queueMicrotask(() => (dom.window as unknown as { __cordisxChannelCredentialReceiveV1?: (response: string) => void }).__cordisxChannelCredentialReceiveV1?.(JSON.stringify({
-        requestId: request.requestId, ok: true, value: { contract: 'cordisx.service-config-result/v1', schemaVersion: 1, identity: descriptor.identity, scope: descriptor.scope, revision: 5, status: 'applied', configApplies: 'service-restart', serviceGeneration: 'next' },
-      })))
-    } })
+    Object.defineProperty(dom.window, '__cordisxServiceConfigRequestV1', {
+      configurable: true,
+      value: (payload: string) => {
+        const request = JSON.parse(payload) as { requestId: string; operation: 'list' | 'mutate' }
+        queueMicrotask(() =>
+          (dom.window as unknown as { __cordisxServiceConfigReceiveV1?: (response: string) => void })
+            .__cordisxServiceConfigReceiveV1?.(JSON.stringify({
+              requestId: request.requestId,
+              ok: true,
+              value: request.operation === 'list'
+                ? [descriptor]
+                : {
+                  contract: 'cordisx.service-config-result/v1',
+                  schemaVersion: 1,
+                  identity: descriptor.identity,
+                  scope: descriptor.scope,
+                  revision: 5,
+                  status: 'applied',
+                  configApplies: 'service-restart',
+                  serviceGeneration: 'next',
+                },
+            }))
+        )
+      },
+    })
+    Object.defineProperty(dom.window, '__cordisxChannelCredentialRequestV1', {
+      configurable: true,
+      value: (payload: string) => {
+        const request = JSON.parse(payload) as { requestId: string; token: string; secret?: string; mutation?: unknown }
+        requests.push(request)
+        queueMicrotask(() =>
+          (dom.window as unknown as { __cordisxChannelCredentialReceiveV1?: (response: string) => void })
+            .__cordisxChannelCredentialReceiveV1?.(JSON.stringify({
+              requestId: request.requestId,
+              ok: true,
+              value: {
+                contract: 'cordisx.service-config-result/v1',
+                schemaVersion: 1,
+                identity: descriptor.identity,
+                scope: descriptor.scope,
+                revision: 5,
+                status: 'applied',
+                configApplies: 'service-restart',
+                serviceGeneration: 'next',
+              },
+            }))
+        )
+      },
+    })
     dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
     dom.window.eval(bundle)
     await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true')
@@ -345,25 +520,43 @@ describe('built-in Channel product bundle', () => {
       dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
       await waitFor(() => dom.window.document.querySelector('[data-tab="plugins"]') !== null)
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="plugins"]')!.click()
-      dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="channel:channels"]')!.click()
+      dom.window.document.querySelector<HTMLButtonElement>('[data-settings-navigation-item="channel:channels"]')!
+        .click()
       await waitFor(() => dom.window.document.querySelector('[data-channel-page="list"]') !== null)
       dom.window.document.querySelector<HTMLButtonElement>('[data-channel-create="true"]')!.click()
       await waitFor(() => dom.window.document.querySelector('[data-channel-page="create"]') !== null)
-      setControl(dom.window, dom.window.document.querySelector<HTMLInputElement>('#channel-create-name')!, 'Feishu smoke')
-      dom.window.document.querySelector<HTMLButtonElement>('.cxc-channel-platform-select .cxr-ui-select-trigger')!.click()
-      await waitFor(() => [...dom.window.document.querySelectorAll<HTMLElement>('[role="option"]')]
-        .some(option => option.textContent?.includes('Feishu') === true))
+      setControl(
+        dom.window,
+        dom.window.document.querySelector<HTMLInputElement>('#channel-create-name')!,
+        'Feishu smoke',
+      )
+      dom.window.document.querySelector<HTMLButtonElement>('.cxc-channel-platform-select .cxr-ui-select-trigger')!
+        .click()
+      await waitFor(() =>
+        [...dom.window.document.querySelectorAll<HTMLElement>('[role="option"]')]
+          .some(option => option.textContent?.includes('Feishu') === true)
+      )
       ;[...dom.window.document.querySelectorAll<HTMLElement>('[role="option"]')]
         .find(option => option.textContent?.includes('Feishu') === true)!.click()
       await waitFor(() => dom.window.document.querySelector('#channel-create-app-id') !== null)
-      setControl(dom.window, dom.window.document.querySelector<HTMLInputElement>('#channel-create-app-id')!, 'cli_smoke')
-      const credential = dom.window.document.querySelector<HTMLInputElement>('[data-channel-credential-capture="true"]')!
+      setControl(
+        dom.window,
+        dom.window.document.querySelector<HTMLInputElement>('#channel-create-app-id')!,
+        'cli_smoke',
+      )
+      const credential = dom.window.document.querySelector<HTMLInputElement>(
+        '[data-channel-credential-capture="true"]',
+      )!
       setControl(dom.window, credential, 'test-only-credential')
       await new Promise(resolve => dom.window.setTimeout(resolve, 0))
       dom.window.document.querySelector<HTMLButtonElement>('[data-channel-create-submit="true"]')!.click()
       await new Promise(resolve => dom.window.setTimeout(resolve, 50))
       await waitFor(() => requests.length === 1)
-      expect(requests[0]).toMatchObject({ token: credentialToken, secret: 'test-only-credential', account: { adapterId: 'feishu', accountId: 'cli_smoke' } })
+      expect(requests[0]).toMatchObject({
+        token: credentialToken,
+        secret: 'test-only-credential',
+        account: { adapterId: 'feishu', accountId: 'cli_smoke' },
+      })
       expect(dom.window.document.body.textContent).not.toContain('test-only-credential')
       expect(dom.window.document.documentElement.outerHTML).not.toMatch(/secretRef|keychain:/i)
     } finally {
@@ -377,7 +570,9 @@ describe('built-in Channel product bundle', () => {
     const first = manager.snapshot()
     expect(manager.snapshot()).toBe(first)
     let updates = 0
-    const dispose = manager.subscribe(() => { updates += 1 })
+    const dispose = manager.subscribe(() => {
+      updates += 1
+    })
     manager.rememberLocalCandidate({
       ref: { adapterId: 'simulator', accountId: 'local-smoke', tenantId: 'local' },
       displayName: 'Local smoke',
@@ -401,23 +596,37 @@ describe('built-in Channel product bundle', () => {
     const requests: unknown[] = []
     const credentialRequests: unknown[] = []
     const descriptor = {
-      contract: 'cordisx.service-config-descriptor/v1', schemaVersion: 1,
+      contract: 'cordisx.service-config-descriptor/v1',
+      schemaVersion: 1,
       identity: { source: 'file:///channel', pluginId: 'channel', serviceId: 'runtime' },
       scope: { profileId: 'work', generation: 'channel-test-generation' },
       schema: { id: 'https://example.test/channel', projection: { kind: 'standard', renderable: false } },
-      revision: 4, lastGoodRevision: 4, configApplies: 'service-restart', writable: true, restartRequired: false,
-      configuration: { connections: [], routes: [] }, secrets: [],
+      revision: 4,
+      lastGoodRevision: 4,
+      configApplies: 'service-restart',
+      writable: true,
+      restartRequired: false,
+      configuration: { connections: [], routes: [] },
+      secrets: [],
     } as const
     const result = {
-      contract: 'cordisx.service-config-result/v1', schemaVersion: 1,
-      identity: descriptor.identity, scope: descriptor.scope, revision: 5,
-      status: 'applied', configApplies: 'service-restart', serviceGeneration: 'next',
+      contract: 'cordisx.service-config-result/v1',
+      schemaVersion: 1,
+      identity: descriptor.identity,
+      scope: descriptor.scope,
+      revision: 5,
+      status: 'applied',
+      configApplies: 'service-restart',
+      serviceGeneration: 'next',
     } as const
     const manager = new CordisXChannelManagerService(new Context(), {
       projection,
       serviceConfig: {
         list: async () => [descriptor] as never,
-        mutate: async mutation => { requests.push(mutation); return result },
+        mutate: async mutation => {
+          requests.push(mutation)
+          return result
+        },
       },
       createCredentialedConnection: async input => {
         credentialRequests.push(input)
@@ -426,8 +635,11 @@ describe('built-in Channel product bundle', () => {
     })
     expect(await manager.serviceConfiguration()).toEqual(descriptor)
     const mutation = {
-      contract: 'cordisx.service-config-mutation/v1', schemaVersion: 1,
-      identity: descriptor.identity, scope: descriptor.scope, expectedRevision: 4,
+      contract: 'cordisx.service-config-mutation/v1',
+      schemaVersion: 1,
+      identity: descriptor.identity,
+      scope: descriptor.scope,
+      expectedRevision: 4,
       configuration: { connections: [], routes: [] },
     } as const
     await manager.mutateServiceConfiguration(mutation as never)
@@ -448,10 +660,12 @@ describe('built-in Channel product bundle', () => {
     const requests: Array<{ action: string; input: Record<string, unknown> }> = []
     const manager = new CordisXChannelManagerService(new Context(), {
       projection,
-      actions: { run: async (action, input) => {
-        requests.push({ action, input })
-        return { status: 'applied' }
-      } },
+      actions: {
+        run: async (action, input) => {
+          requests.push({ action, input })
+          return { status: 'applied' }
+        },
+      },
     })
     expect(manager.actionsAvailable()).toBe(true)
     await manager.runAction('reconnect', { ref: projection.connections[0]!.ref })

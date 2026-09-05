@@ -8,9 +8,7 @@ import type {
   PluginRuntimeManifestV6,
 } from '@cordisx/protocol/plugin-manifest/v6'
 import type { PluginRuntimeManifestV7 } from '@cordisx/protocol/plugin-manifest/v7'
-import type {
-  PluginRuntimeManifestV8,
-} from '@cordisx/protocol/plugin-manifest/v8'
+import type { PluginRuntimeManifestV8 } from '@cordisx/protocol/plugin-manifest/v8'
 
 export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v4.schema.json'
@@ -171,7 +169,8 @@ export type CordisXPluginServiceConfigurationV4 =
   | { readonly kind: 'none' }
   | {
     readonly kind: 'host'
-    readonly schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json'
+    readonly schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json'
     readonly configApplies: 'restart'
   }
 
@@ -221,7 +220,9 @@ export interface CordisXPluginManifestV5 {
 export type CordisXCapabilityDeclarationV6 = PluginManifestCapabilityDeclarationV6
 export type CordisXPluginManifestV6 = PluginRuntimeManifestV6
 export type CordisXPluginManifestV7 = PluginRuntimeManifestV7
-export type CordisXCapabilityDeclarationV8 = PluginManifestCapabilityDeclarationV6 | PluginRuntimeManifestV8['capabilities'][number]
+export type CordisXCapabilityDeclarationV8 =
+  | PluginManifestCapabilityDeclarationV6
+  | PluginRuntimeManifestV8['capabilities'][number]
 export type CordisXPluginManifestV8 = PluginRuntimeManifestV8
 
 export interface CordisXPermissionIdentityV2 {

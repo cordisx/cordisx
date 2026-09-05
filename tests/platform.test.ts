@@ -13,27 +13,34 @@ import {
   type CordisXSessionSummary,
 } from '../packages/cli/src/contracts.js'
 import {
+  type CordisXPlatformAdapter,
   CordisXPlatformService,
   MemoryPermissionPolicyStore,
+  normalizePluginManifest,
   PermissionBroker,
+  type PermissionPolicyStore,
+  type PermissionPrompt,
   ProjectionPlatformAdapter,
   UnavailablePlatformAdapter,
-  normalizePluginManifest,
-  type CordisXPlatformAdapter,
-  type PermissionPrompt,
-  type PermissionPolicyStore,
 } from '../packages/cli/src/renderer/platform.js'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from '../packages/cli/src/renderer/service.js'
 
 const identity: CordisXPluginIdentity = { source: 'file:///plugins/demo.ts', id: 'demo' }
 const models: readonly CordisXModelDescriptor[] = [
   {
-    contract: 'cordisx.platform-model/v1', schemaVersion: 1,
-    hostId: 'desktop', ref: { providerId: 'codex', modelId: 'gpt-5.6' }, label: 'GPT-5.6', isDefault: true,
+    contract: 'cordisx.platform-model/v1',
+    schemaVersion: 1,
+    hostId: 'desktop',
+    ref: { providerId: 'codex', modelId: 'gpt-5.6' },
+    label: 'GPT-5.6',
+    isDefault: true,
   },
   {
-    contract: 'cordisx.platform-model/v1', schemaVersion: 1,
-    hostId: 'desktop', ref: { providerId: 'zcode', modelId: 'z-1' }, label: 'Z-1',
+    contract: 'cordisx.platform-model/v1',
+    schemaVersion: 1,
+    hostId: 'desktop',
+    ref: { providerId: 'zcode', modelId: 'z-1' },
+    label: 'Z-1',
   },
 ]
 const session: CordisXSessionSummary = {
@@ -67,7 +74,9 @@ function manifest(id: string, capabilities: readonly CordisXCapabilityDeclaratio
   }, id)
 }
 
-function prompt(decision: 'allow' | 'allow-once' | 'deny' = 'allow'): PermissionPrompt & { request: ReturnType<typeof vi.fn> } {
+function prompt(
+  decision: 'allow' | 'allow-once' | 'deny' = 'allow',
+): PermissionPrompt & { request: ReturnType<typeof vi.fn> } {
   return { request: vi.fn(async () => decision) }
 }
 
@@ -128,9 +137,11 @@ function fakeAdapter(overrides: Partial<CordisXPlatformAdapter> = {}): CordisXPl
     })),
     readTask: vi.fn(async () => ({ ok: true as const, value: { ...session, turns: [] } })),
     createTask: vi.fn(async () => ({ ok: true as const, value: session })),
-    controlTask: vi.fn(async input => input.action === 'delete'
-      ? { ok: true as const, value: { action: 'delete' as const, session: input.session, deleted: true as const } }
-      : { ok: true as const, value: { action: input.action, session } }),
+    controlTask: vi.fn(async input =>
+      input.action === 'delete'
+        ? { ok: true as const, value: { action: 'delete' as const, session: input.session, deleted: true as const } }
+        : { ok: true as const, value: { action: input.action, session } }
+    ),
     submitTurn: vi.fn(async input => ({ ok: true as const, value: { session: input.session, turnId: 'turn-1' } })),
     controlTurn: vi.fn(async input => ({ ok: true as const, value: { action: input.action, session: input.session } })),
   }
@@ -217,13 +228,20 @@ describe('Platform capability runtime', () => {
   it('enforces ask, deny, allow, required/optional, and scope without adapter dispatch on denial', async () => {
     const ask = prompt('deny')
     const adapter = fakeAdapter()
-    const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), ask, () => new Date('2026-08-23T08:00:00.000Z'))
-    broker.register(identity, manifest(identity.id, [
-      declaration('models.read', { required: true, scope: { providers: ['codex'] } }),
-      declaration('turns.submit', {
-        scope: { sessions: [{ providerId: 'codex', remoteSessionId: 'task-1' }], cwdRoots: ['/other'] },
-      }),
-    ]))
+    const broker = new PermissionBroker(
+      new MemoryPermissionPolicyStore(),
+      ask,
+      () => new Date('2026-08-23T08:00:00.000Z'),
+    )
+    broker.register(
+      identity,
+      manifest(identity.id, [
+        declaration('models.read', { required: true, scope: { providers: ['codex'] } }),
+        declaration('turns.submit', {
+          scope: { sessions: [{ providerId: 'codex', remoteSessionId: 'task-1' }], cwdRoots: ['/other'] },
+        }),
+      ]),
+    )
     const { fiber, ctx } = await platformContext(adapter, broker)
     try {
       await expect(ctx.platform.models.list({ providerIds: ['codex'] }))
@@ -242,15 +260,18 @@ describe('Platform capability runtime', () => {
 
       broker.setPolicy(identity, 'turns.submit', 'allow')
       await expect(ctx.platform.turns.submit({
-        session: { providerId: 'codex', remoteSessionId: 'task-2' }, message: 'outside scope',
+        session: { providerId: 'codex', remoteSessionId: 'task-2' },
+        message: 'outside scope',
       }))
         .resolves.toMatchObject({ ok: false, error: { code: 'permission-scope-denied' } })
       await expect(ctx.platform.turns.submit({
-        session: { providerId: 'zcode', remoteSessionId: 'task-1' }, message: 'same local id, other provider',
+        session: { providerId: 'zcode', remoteSessionId: 'task-1' },
+        message: 'same local id, other provider',
       }))
         .resolves.toMatchObject({ ok: false, error: { code: 'permission-scope-denied' } })
       await expect(ctx.platform.turns.submit({
-        session: { providerId: 'codex', remoteSessionId: 'task-1' }, message: 'outside cwd scope',
+        session: { providerId: 'codex', remoteSessionId: 'task-1' },
+        message: 'outside cwd scope',
       }))
         .resolves.toMatchObject({ ok: false, error: { code: 'permission-scope-denied' } })
       expect(adapter.submitTurn).not.toHaveBeenCalled()
@@ -268,19 +289,27 @@ describe('Platform capability runtime', () => {
     const other: CordisXPluginIdentity = { source: 'file:///plugins/other.ts', id: 'other' }
     const adapter = fakeAdapter()
     const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), prompt())
-    broker.register(identity, manifest(identity.id, [declaration('turns.submit', {
-      scope: { sessions: [{ providerId: 'codex', remoteSessionId: 'task-1' }] },
-    })]))
-    broker.register(other, manifest(other.id, [declaration('turns.submit', {
-      scope: { sessions: [{ providerId: 'codex', remoteSessionId: 'other-task' }] },
-    })]))
+    broker.register(
+      identity,
+      manifest(identity.id, [declaration('turns.submit', {
+        scope: { sessions: [{ providerId: 'codex', remoteSessionId: 'task-1' }] },
+      })]),
+    )
+    broker.register(
+      other,
+      manifest(other.id, [declaration('turns.submit', {
+        scope: { sessions: [{ providerId: 'codex', remoteSessionId: 'other-task' }] },
+      })]),
+    )
     broker.setPolicy(identity, 'turns.submit', 'allow')
     broker.setPolicy(other, 'turns.submit', 'deny')
     const { fiber, ctx } = await platformContext(adapter, broker, identity)
     try {
       const spoofed = {
         session: { providerId: 'codex', remoteSessionId: 'task-1' },
-        message: 'hello', pluginId: 'other', source: other.source,
+        message: 'hello',
+        pluginId: 'other',
+        source: other.source,
       }
       await expect(ctx.platform.turns.submit(spoofed)).resolves.toMatchObject({ ok: true })
       expect(adapter.submitTurn).toHaveBeenCalledWith(spoofed)
@@ -303,7 +332,10 @@ describe('Platform capability runtime', () => {
     broker.setPolicy(identity, 'models.read', 'allow')
     expect(broker.policy(identity, 'models.read')).toBe('allow')
     expect(broker.authorizationPlan(identity).declarations[0]?.decisionRequired).toBe(false)
-    broker.register(identity, manifest(identity.id, [declaration('models.read', { scope: { providers: ['codex', 'zcode'] } })]))
+    broker.register(
+      identity,
+      manifest(identity.id, [declaration('models.read', { scope: { providers: ['codex', 'zcode'] } })]),
+    )
     expect(broker.policy(identity, 'models.read')).toBe('ask')
     expect(broker.authorizationPlan(identity).declarations[0]?.decisionRequired).toBe(true)
     const adapter = fakeAdapter()
@@ -319,17 +351,23 @@ describe('Platform capability runtime', () => {
 
   it('keeps authority stable across required/reason metadata changes', async () => {
     const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), prompt())
-    broker.register(identity, manifest(identity.id, [declaration('models.read', {
-      required: false,
-      reason: { key: 'permission.models', fallback: 'Read models' },
-      scope: { providers: ['codex'] },
-    })]))
+    broker.register(
+      identity,
+      manifest(identity.id, [declaration('models.read', {
+        required: false,
+        reason: { key: 'permission.models', fallback: 'Read models' },
+        scope: { providers: ['codex'] },
+      })]),
+    )
     await broker.setPolicy(identity, 'models.read', 'allow')
-    broker.register(identity, manifest(identity.id, [declaration('models.read', {
-      required: true,
-      reason: { key: 'permission.models.updated', fallback: 'Updated explanation' },
-      scope: { providers: ['codex'] },
-    })]))
+    broker.register(
+      identity,
+      manifest(identity.id, [declaration('models.read', {
+        required: true,
+        reason: { key: 'permission.models.updated', fallback: 'Updated explanation' },
+        scope: { providers: ['codex'] },
+      })]),
+    )
     expect(broker.policy(identity, 'models.read')).toBe('allow')
     await broker.setPolicy(identity, 'models.read', 'ask')
     expect(broker.authorizationPlan(identity).declarations[0]).toMatchObject({ policy: 'ask', decisionRequired: false })
@@ -362,7 +400,8 @@ describe('Platform capability runtime', () => {
     try {
       await expect(ctx.platform.models.list({})).resolves.toMatchObject({ ok: true })
       await expect(ctx.platform.models.list({})).resolves.toMatchObject({
-        ok: false, error: { code: 'permission-denied' },
+        ok: false,
+        error: { code: 'permission-denied' },
       })
       expect(write).not.toHaveBeenCalled()
       expect(broker.policy(identity, 'models.read')).toBe('ask')
@@ -377,7 +416,9 @@ describe('Platform capability runtime', () => {
     let releaseWrite: (() => void) | undefined
     const store = new MemoryPermissionPolicyStore()
     vi.spyOn(store, 'write').mockImplementation(async (records) => {
-      await new Promise<void>(resolve => { releaseWrite = resolve })
+      await new Promise<void>(resolve => {
+        releaseWrite = resolve
+      })
       store.records = records
     })
     const ask = prompt('allow')
@@ -404,10 +445,13 @@ describe('Platform capability runtime', () => {
     const store = new MemoryPermissionPolicyStore()
     const write = vi.spyOn(store, 'write')
     const broker = new PermissionBroker(store, prompt('deny'), () => new Date(), 30_000, 'work', 'generation-1')
-    broker.register(identity, manifest(identity.id, [
-      declaration('models.read', { required: true }),
-      declaration('tasks.catalog.read'),
-    ]))
+    broker.register(
+      identity,
+      manifest(identity.id, [
+        declaration('models.read', { required: true }),
+        declaration('tasks.catalog.read'),
+      ]),
+    )
     await broker.setPolicy(identity, 'models.read', 'deny')
     write.mockClear()
     const plan = broker.authorizationPlan(identity)
@@ -441,16 +485,23 @@ describe('Platform capability runtime', () => {
     const retired: unknown[] = []
     const store: PermissionPolicyStore = {
       read: () => [],
-      write: async records => { written.push(records) },
+      write: async records => {
+        written.push(records)
+      },
       legacy: () => [legacy, { ...legacy, identityKey: JSON.stringify(['file:///plugins/other.js', identity.id]) }],
-      retireLegacy: async record => { retired.push(record) },
+      retireLegacy: async record => {
+        retired.push(record)
+      },
     }
     const broker = new PermissionBroker(store, prompt(), () => new Date(), 30_000, 'work', 'generation-1')
-    broker.register(identity, manifest(identity.id, [declaration('models.read', {
-      required: false,
-      reason: { key: 'new.reason', fallback: 'New reason' },
-      scope: { providers: ['codex'] },
-    })]))
+    broker.register(
+      identity,
+      manifest(identity.id, [declaration('models.read', {
+        required: false,
+        reason: { key: 'new.reason', fallback: 'New reason' },
+        scope: { providers: ['codex'] },
+      })]),
+    )
     await broker.settled()
     expect(broker.policy(identity, 'models.read')).toBe('allow')
     expect(written).toHaveLength(1)
@@ -461,7 +512,9 @@ describe('Platform capability runtime', () => {
   it('rolls a persistent policy back when Host configuration rejects the write', async () => {
     const store: PermissionPolicyStore = {
       read: () => [],
-      write: async () => { throw new Error('write failed') },
+      write: async () => {
+        throw new Error('write failed')
+      },
     }
     const broker = new PermissionBroker(store, prompt())
     broker.register(identity, manifest(identity.id, [declaration('models.read')]))
@@ -473,23 +526,32 @@ describe('Platform capability runtime', () => {
     const store = new MemoryPermissionPolicyStore()
     const write = vi.spyOn(store, 'write')
     const broker = new PermissionBroker(store, prompt(), () => new Date(), 30_000, 'work', 'generation-1')
-    broker.register(identity, manifest(identity.id, [
-      declaration('models.read', { required: true }),
-      declaration('tasks.catalog.read'),
-    ]))
+    broker.register(
+      identity,
+      manifest(identity.id, [
+        declaration('models.read', { required: true }),
+        declaration('tasks.catalog.read'),
+      ]),
+    )
     const plan = broker.authorizationPlan(identity)
-    await expect(broker.authorizeActivation(identity, activationDecision(plan, {
-      'models.read': 'allow',
-    }))).rejects.toThrow('incomplete')
+    await expect(broker.authorizeActivation(
+      identity,
+      activationDecision(plan, {
+        'models.read': 'allow',
+      }),
+    )).rejects.toThrow('incomplete')
     await expect(broker.authorizeActivation(identity, {
       ...activationDecision(plan, { 'models.read': 'ask', 'tasks.catalog.read': 'deny' }),
       profileId: 'spoofed',
     })).rejects.toThrow('current plan')
     expect(write).not.toHaveBeenCalled()
-    await broker.authorizeActivation(identity, activationDecision(plan, {
-      'models.read': 'allow',
-      'tasks.catalog.read': 'deny',
-    }))
+    await broker.authorizeActivation(
+      identity,
+      activationDecision(plan, {
+        'models.read': 'allow',
+        'tasks.catalog.read': 'deny',
+      }),
+    )
     expect(write).toHaveBeenCalledTimes(1)
     expect(write).toHaveBeenCalledWith([
       expect.objectContaining({ key: expect.objectContaining({ capability: 'models.read' }), policy: 'allow' }),
@@ -501,12 +563,13 @@ describe('Platform capability runtime', () => {
 
   it('normalizes composite session scope and fails closed on naked, malformed, duplicate, or unknown scope', () => {
     const reason = { key: 'permission.turn-submit', fallback: 'Submit turns' }
-    const scoped = (scope: unknown) => normalizePluginManifest({
-      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
-      schemaVersion: 1,
-      id: identity.id,
-      capabilities: [{ name: 'turns.submit', required: false, reason, scope }],
-    }, identity.id)
+    const scoped = (scope: unknown) =>
+      normalizePluginManifest({
+        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+        schemaVersion: 1,
+        id: identity.id,
+        capabilities: [{ name: 'turns.submit', required: false, reason, scope }],
+      }, identity.id)
 
     expect(() => scoped({ taskIds: ['thread-1'] })).toThrow('unknown field taskIds')
     expect(() => scoped({ sessionIds: ['agent-session-1'] })).toThrow('cannot use Agent sessionIds scope')
@@ -514,41 +577,53 @@ describe('Platform capability runtime', () => {
     expect(() => scoped({ sessions: [{ remoteSessionId: 'thread-1' }] })).toThrow('providerId is invalid')
     expect(() => scoped({ sessions: [{ providerId: 'main', remoteSessionId: 'thread-1', raw: true }] }))
       .toThrow('unknown field raw')
-    expect(() => scoped({ sessions: [
-      { providerId: 'main', remoteSessionId: 'thread-1' },
-      { providerId: 'main', remoteSessionId: 'thread-1' },
-    ] })).toThrow('duplicate session references')
+    expect(() =>
+      scoped({
+        sessions: [
+          { providerId: 'main', remoteSessionId: 'thread-1' },
+          { providerId: 'main', remoteSessionId: 'thread-1' },
+        ],
+      })
+    ).toThrow('duplicate session references')
 
-    const normalized = scoped({ sessions: [
-      { providerId: 'zcode', remoteSessionId: 'thread-1' },
-      { providerId: 'codex', remoteSessionId: 'thread-1' },
-    ] })
+    const normalized = scoped({
+      sessions: [
+        { providerId: 'zcode', remoteSessionId: 'thread-1' },
+        { providerId: 'codex', remoteSessionId: 'thread-1' },
+      ],
+    })
     expect(normalized.capabilities[0]?.scope.sessions).toEqual([
       { providerId: 'codex', remoteSessionId: 'thread-1' },
       { providerId: 'zcode', remoteSessionId: 'thread-1' },
     ])
 
-    expect(() => normalizePluginManifest({
-      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
-      schemaVersion: 1,
-      id: identity.id,
-      capabilities: [{
-        name: 'agent.events.read', required: false,
-        reason: { key: 'permission.agent-events', fallback: 'Read Agent events' },
-        scope: { sessions: [{ providerId: 'main', remoteSessionId: 'thread-1' }] },
-      }],
-    }, identity.id)).toThrow('cannot use Platform sessions scope')
+    expect(() =>
+      normalizePluginManifest({
+        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+        schemaVersion: 1,
+        id: identity.id,
+        capabilities: [{
+          name: 'agent.events.read',
+          required: false,
+          reason: { key: 'permission.agent-events', fallback: 'Read Agent events' },
+          scope: { sessions: [{ providerId: 'main', remoteSessionId: 'thread-1' }] },
+        }],
+      }, identity.id)
+    ).toThrow('cannot use Platform sessions scope')
 
-    expect(normalizePluginManifest({
-      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
-      schemaVersion: 1,
-      id: identity.id,
-      capabilities: [{
-        name: 'agent.events.read', required: false,
-        reason: { key: 'permission.agent-events', fallback: 'Read Agent events' },
-        scope: { sessionIds: ['agent-session-1'] },
-      }],
-    }, identity.id).capabilities[0]?.scope).toEqual({ sessionIds: ['agent-session-1'] })
+    expect(
+      normalizePluginManifest({
+        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+        schemaVersion: 1,
+        id: identity.id,
+        capabilities: [{
+          name: 'agent.events.read',
+          required: false,
+          reason: { key: 'permission.agent-events', fallback: 'Read Agent events' },
+          scope: { sessionIds: ['agent-session-1'] },
+        }],
+      }, identity.id).capabilities[0]?.scope,
+    ).toEqual({ sessionIds: ['agent-session-1'] })
   })
 
   it('offers authoritative read-only projections while refusing writes', async () => {
@@ -568,7 +643,8 @@ describe('Platform capability runtime', () => {
       rawBridgeExposed: false,
     })
     await expect(projection.listModels({ providerIds: ['codex'] })).resolves.toMatchObject({
-      ok: true, value: { models: [{ ref: { modelId: 'gpt-5.6' } }] },
+      ok: true,
+      value: { models: [{ ref: { modelId: 'gpt-5.6' } }] },
     })
     await expect(projection.readTask({ session: { providerId: 'codex', remoteSessionId: 'task-1' } }))
       .resolves.toMatchObject({ ok: true, value: { turns: [] } })

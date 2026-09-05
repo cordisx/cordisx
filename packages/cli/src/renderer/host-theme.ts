@@ -8,20 +8,54 @@ export interface HostThemeSnapshot {
 }
 
 const TOKEN_NAMES = [
-  'surface', 'surface-raised', 'backdrop', 'text', 'muted', 'border', 'primary',
-  'primary-text', 'danger', 'hover', 'pressed', 'focus', 'disabled', 'shadow',
+  'surface',
+  'surface-raised',
+  'backdrop',
+  'text',
+  'muted',
+  'border',
+  'primary',
+  'primary-text',
+  'danger',
+  'hover',
+  'pressed',
+  'focus',
+  'disabled',
+  'shadow',
 ] as const
 
 const TOKENS: Readonly<Record<HostAppTheme, Readonly<Record<typeof TOKEN_NAMES[number], string>>>> = {
   dark: {
-    surface: '#17191d', 'surface-raised': '#20242b', backdrop: 'rgb(5 7 12 / 66%)', text: '#eef0f3', muted: '#aeb5c3',
-    border: 'rgb(255 255 255 / 12%)', primary: '#c7ccd4', 'primary-text': '#17191c', danger: '#ff9da5',
-    hover: 'rgb(199 204 212 / 14%)', pressed: 'rgb(199 204 212 / 20%)', focus: '#c7ccd4', disabled: '0.42', shadow: 'rgb(0 0 0 / 55%)',
+    surface: '#17191d',
+    'surface-raised': '#20242b',
+    backdrop: 'rgb(5 7 12 / 66%)',
+    text: '#eef0f3',
+    muted: '#aeb5c3',
+    border: 'rgb(255 255 255 / 12%)',
+    primary: '#c7ccd4',
+    'primary-text': '#17191c',
+    danger: '#ff9da5',
+    hover: 'rgb(199 204 212 / 14%)',
+    pressed: 'rgb(199 204 212 / 20%)',
+    focus: '#c7ccd4',
+    disabled: '0.42',
+    shadow: 'rgb(0 0 0 / 55%)',
   },
   light: {
-    surface: '#f8fafc', 'surface-raised': '#ffffff', backdrop: 'rgb(15 23 42 / 42%)', text: '#18212f', muted: '#526071',
-    border: 'rgb(24 33 47 / 18%)', primary: '#3d4755', 'primary-text': '#ffffff', danger: '#bb3345',
-    hover: 'rgb(61 71 85 / 10%)', pressed: 'rgb(61 71 85 / 16%)', focus: '#245fba', disabled: '0.48', shadow: 'rgb(15 23 42 / 24%)',
+    surface: '#f8fafc',
+    'surface-raised': '#ffffff',
+    backdrop: 'rgb(15 23 42 / 42%)',
+    text: '#18212f',
+    muted: '#526071',
+    border: 'rgb(24 33 47 / 18%)',
+    primary: '#3d4755',
+    'primary-text': '#ffffff',
+    danger: '#bb3345',
+    hover: 'rgb(61 71 85 / 10%)',
+    pressed: 'rgb(61 71 85 / 16%)',
+    focus: '#245fba',
+    disabled: '0.48',
+    shadow: 'rgb(15 23 42 / 24%)',
   },
 }
 
@@ -124,10 +158,12 @@ export class HostThemeProjection {
           attributes: true,
           attributeFilter: ['class', 'style', 'data-theme', 'data-color-theme', 'data-color-scheme'],
         })
-        if (this.document.body !== null) this.observer.observe(this.document.body, {
-          attributes: true,
-          attributeFilter: ['class', 'style', 'data-theme', 'data-color-theme', 'data-color-scheme'],
-        })
+        if (this.document.body !== null) {
+          this.observer.observe(this.document.body, {
+            attributes: true,
+            attributeFilter: ['class', 'style', 'data-theme', 'data-color-theme', 'data-color-scheme'],
+          })
+        }
       }
     }
     if (this.media === undefined) {

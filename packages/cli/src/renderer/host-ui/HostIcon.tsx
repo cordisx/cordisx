@@ -1,12 +1,12 @@
 import { useLayoutEffect, useRef } from 'react'
 import {
-  MANAGER_ICON_TOKENS,
+  type HostIconState,
   iconThemeRegistryForDocument,
-  renderManagerIconSvg,
+  MANAGER_ICON_TOKENS,
+  type ManagerIconToken,
   renderHostIconSvg,
   renderHostSurfaceIconSvg,
-  type HostIconState,
-  type ManagerIconToken,
+  renderManagerIconSvg,
 } from '../icons.js'
 import { resolveHostTheme } from '../host-theme.js'
 
@@ -39,11 +39,13 @@ export function HostIcon({ token, className, size, state, surfaceToken }: HostIc
         ...(size === undefined ? {} : { size }),
         ...(resolvedState === undefined ? {} : { state: resolvedState }),
       }
-      icon.replaceChildren((surfaceToken !== undefined
-        ? renderHostSurfaceIconSvg(document, surfaceToken, options)
-        : isManagerIconToken(token)
+      icon.replaceChildren(
+        (surfaceToken !== undefined
+          ? renderHostSurfaceIconSvg(document, surfaceToken, options)
+          : isManagerIconToken(token)
           ? renderManagerIconSvg(document, token, options)
-          : renderHostIconSvg(document, token, options)).svg)
+          : renderHostIconSvg(document, token, options)).svg,
+      )
     }
     render()
     const unsubscribe = iconThemeRegistryForDocument(document)?.subscribe(render)
@@ -51,11 +53,24 @@ export function HostIcon({ token, className, size, state, surfaceToken }: HostIc
     const themeRoot = icon.closest<HTMLElement>('[data-cordisx-app-theme]') ?? document.documentElement
     if (Observer === undefined) return unsubscribe
     const observer = new Observer(render)
-    observer.observe(themeRoot, { attributes: true, attributeFilter: ['class', 'data-cordisx-app-theme', 'data-theme', 'data-color-theme', 'data-color-scheme'] })
-    return () => { observer.disconnect(); unsubscribe?.() }
+    observer.observe(themeRoot, {
+      attributes: true,
+      attributeFilter: ['class', 'data-cordisx-app-theme', 'data-theme', 'data-color-theme', 'data-color-scheme'],
+    })
+    return () => {
+      observer.disconnect()
+      unsubscribe?.()
+    }
   }, [resolvedState, size, surfaceToken, token])
-  return <span ref={ref} className={['cordisx-host-icon', className].filter(Boolean).join(' ')}
-    data-host-icon-key={token} {...(surfaceToken === undefined ? {} : { 'data-host-icon': surfaceToken })}
-    aria-hidden="true" draggable={false}
-    {...(size === undefined ? {} : { style: { inlineSize: size, blockSize: size, flexBasis: size } })} />
+  return (
+    <span
+      ref={ref}
+      className={['cordisx-host-icon', className].filter(Boolean).join(' ')}
+      data-host-icon-key={token}
+      {...(surfaceToken === undefined ? {} : { 'data-host-icon': surfaceToken })}
+      aria-hidden="true"
+      draggable={false}
+      {...(size === undefined ? {} : { style: { inlineSize: size, blockSize: size, flexBasis: size } })}
+    />
+  )
 }

@@ -87,11 +87,11 @@ The public envelope records:
 methods are aligned with DeepSeek Harness `dsh-v0.1.1-rc.2` at
 `deepseek-harness@b150a551`:
 
-| Method | Target | Wakeup | Semantic |
-| --- | --- | --- | --- |
-| `followup(message)` | `next-turn` | `true` | waking next turn |
-| `steer(message)` | `next-step` | `true` | waking next step |
-| `inject(message)` | `next-step` | `false` | non-waking next-step queue |
+| Method              | Target      | Wakeup  | Semantic                   |
+| ------------------- | ----------- | ------- | -------------------------- |
+| `followup(message)` | `next-turn` | `true`  | waking next turn           |
+| `steer(message)`    | `next-step` | `true`  | waking next step           |
+| `inject(message)`   | `next-step` | `false` | non-waking next-step queue |
 
 Every send method returns an immutable public delivery handle bound to the
 calling plugin owner and current generation. The handle exposes its stable
@@ -147,14 +147,14 @@ parallel Trace events. `input.contribution` identifies one of
 `pre-step.append`, `system-prompt.section`, or `system-prompt.context` and uses
 only stages the HostRuntime actually completed:
 
-| Stage | Meaning |
-| --- | --- |
-| `registered` | a prompt contribution passed permission and entered the generation registry |
-| `evaluated` | a handler or prompt contribution successfully produced step input |
-| `projected` | the HostRuntime incorporated that output into the immutable step projection |
-| `forwarded` | the completed projection left the HostRuntime for the next host boundary |
-| `released` | the owning registration was removed explicitly, blocked, disposed, or replaced |
-| `failed` | permission, evaluation, validation, or projection failed |
+| Stage        | Meaning                                                                        |
+| ------------ | ------------------------------------------------------------------------------ |
+| `registered` | a prompt contribution passed permission and entered the generation registry    |
+| `evaluated`  | a handler or prompt contribution successfully produced step input              |
+| `projected`  | the HostRuntime incorporated that output into the immutable step projection    |
+| `forwarded`  | the completed projection left the HostRuntime for the next host boundary       |
+| `released`   | the owning registration was removed explicitly, blocked, disposed, or replaced |
+| `failed`     | permission, evaluation, validation, or projection failed                       |
 
 `forwarded` means only that CordisX returned the projection to its host caller;
 it never means model-consumed. An adapter may record model consumption only
@@ -211,18 +211,18 @@ These observations were made through a test-only isolated app-server. They do
 not prove access to the Desktop current connection and do not change the
 unavailable product default.
 
-| Question | Observation | Contract status |
-| --- | --- | --- |
-| order | Object insertion order was not retained; entries were materialized in deterministic key order before the direct user message | experimental; adapter never promises native order |
-| native preservation | Distinct native entries remained present when CordisX added its own entry in controlled projection tests | required implementation behavior |
-| one-shot/persistence | Entries were emitted once for the submitted turn, then persisted in durable model history and affected later turns | experimental host behavior |
-| history visibility | `thread/read(includeTurns=true)` hid entries while the rollout retained them | public history visibility unavailable |
-| resume | A new app-server process resumed the thread and retained their model-history effect | experimental host behavior |
-| fork | A fork copied the entry-bearing seed history while public turn items still hid it | experimental host behavior |
-| compaction | Plaintext entries disappeared from replacement history, while marker information remained model-visible after compaction and resume | representation unavailable; behavior experimental |
-| token use | Same prompt/control used 19,592 input tokens; four roughly 90-character entries used 19,803 (+211), with the same cached input and output | experimental observation, not a pricing/token formula |
-| paginated history | The probed paginated thread rejected `thread/read(includeTurns=true)` | unavailable on this path |
-| live compaction notification | Generated types declare it, but the probe did not observe the expected notification | unavailable in this probe |
+| Question                     | Observation                                                                                                                               | Contract status                                       |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| order                        | Object insertion order was not retained; entries were materialized in deterministic key order before the direct user message              | experimental; adapter never promises native order     |
+| native preservation          | Distinct native entries remained present when CordisX added its own entry in controlled projection tests                                  | required implementation behavior                      |
+| one-shot/persistence         | Entries were emitted once for the submitted turn, then persisted in durable model history and affected later turns                        | experimental host behavior                            |
+| history visibility           | `thread/read(includeTurns=true)` hid entries while the rollout retained them                                                              | public history visibility unavailable                 |
+| resume                       | A new app-server process resumed the thread and retained their model-history effect                                                       | experimental host behavior                            |
+| fork                         | A fork copied the entry-bearing seed history while public turn items still hid it                                                         | experimental host behavior                            |
+| compaction                   | Plaintext entries disappeared from replacement history, while marker information remained model-visible after compaction and resume       | representation unavailable; behavior experimental     |
+| token use                    | Same prompt/control used 19,592 input tokens; four roughly 90-character entries used 19,803 (+211), with the same cached input and output | experimental observation, not a pricing/token formula |
+| paginated history            | The probed paginated thread rejected `thread/read(includeTurns=true)`                                                                     | unavailable on this path                              |
+| live compaction notification | Generated types declare it, but the probe did not observe the expected notification                                                       | unavailable in this probe                             |
 
 Evidence sessions are
 `01a0304a-cde7-7472-8fba-be20dc2bbff1` (legacy),

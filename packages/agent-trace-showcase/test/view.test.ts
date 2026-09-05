@@ -10,7 +10,9 @@ import type { TraceShowcaseStore } from '../src/types.js'
 vi.mock('cordisx/ui', async () => {
   const React = await import('react')
   return {
-    Button: ({ children, variant: _variant, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string }) => React.createElement('button', props, children),
+    Button: (
+      { children, variant: _variant, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string },
+    ) => React.createElement('button', props, children),
   }
 })
 
@@ -20,16 +22,21 @@ function propsFor(): CordisXReactPageProps {
     outlet: 'session.content',
     params: { sessionId: 'session-a' },
     navigation: {
-      navigate: async () => {}, back: async () => {}, close: async () => {},
+      navigate: async () => {},
+      back: async () => {},
+      close: async () => {},
     },
     localeNamespace: 'agent-trace-showcase',
     t: key => key,
     localization: {
-      namespace: 'agent-trace-showcase', t: key => key,
+      namespace: 'agent-trace-showcase',
+      t: key => key,
       message: key => ({ key }),
       getSnapshot: () => ({ locale: 'en', direction: 'ltr', version: 1 }),
-      subscribe: () => () => {}, effect: setup => setup({ locale: 'en', direction: 'ltr', version: 1 }),
-      bindText: () => () => {}, bindAttribute: () => () => {},
+      subscribe: () => () => {},
+      effect: setup => setup({ locale: 'en', direction: 'ltr', version: 1 }),
+      bindText: () => () => {},
+      bindAttribute: () => () => {},
     },
   } as CordisXReactPageProps
 }
@@ -67,10 +74,16 @@ describe('Agent Trace Timeline page', () => {
     expect(document.querySelector('[data-agent-trace-showcase]')).not.toBeNull()
     expect(document.querySelector('.cxt-overview-title')?.textContent).toBe('Overview')
     expect([...document.querySelectorAll('.cxt-lane-labels span')].map(item => item.textContent)).toEqual([
-      'Input', 'Model', 'Tools', 'Inject',
+      'Input',
+      'Model',
+      'Tools',
+      'Inject',
     ])
     expect(document.querySelectorAll('.cxt-overview-span').length).toBe(16)
-    expect([...document.querySelectorAll('.cxt-group[data-kind="turn"]')].map(item => item.textContent)).toEqual(['Turn 7', 'Turn 8'])
+    expect([...document.querySelectorAll('.cxt-group[data-kind="turn"]')].map(item => item.textContent)).toEqual([
+      'Turn 7',
+      'Turn 8',
+    ])
     expect(document.querySelectorAll('.cxt-row').length).toBe(16)
     expect(document.querySelector('.cxt-integrity')?.textContent).toContain('fixture')
     expect(document.querySelector('.cxt-integrity')?.textContent).toContain('cordisx.agent-events/v2')
@@ -110,7 +123,9 @@ describe('Agent Trace Timeline page', () => {
     const store = new UnavailableTraceShowcaseStore('session-a')
     const root = await mountReact(dom, store)
     expect(dom.window.document.querySelector('.cxt-empty')?.textContent).toContain('unavailable')
-    expect([...dom.window.document.querySelectorAll<HTMLButtonElement>('[data-demo-kind]')].every(button => button.disabled)).toBe(true)
+    expect(
+      [...dom.window.document.querySelectorAll<HTMLButtonElement>('[data-demo-kind]')].every(button => button.disabled),
+    ).toBe(true)
     expect(dom.window.document.querySelector('.cxt-integrity')?.textContent).toContain('unavailable')
     root.unmount()
   })

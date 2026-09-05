@@ -7,27 +7,27 @@ import type {
 } from './contracts.js'
 
 export {
-  Activity,
-  Children,
-  Component,
-  Fragment,
-  Profiler,
-  PureComponent,
-  StrictMode,
-  Suspense,
   act,
+  Activity,
   cache,
   cacheSignal,
   captureOwnerStack,
+  Children,
   cloneElement,
+  Component,
   createContext,
   createElement,
   createRef,
   forwardRef,
+  Fragment,
   isValidElement,
   lazy,
   memo,
+  Profiler,
+  PureComponent,
   startTransition,
+  StrictMode,
+  Suspense,
   use,
   useActionState,
   useCallback,
@@ -60,8 +60,8 @@ export type {
   ChangeEventHandler,
   ClassAttributes,
   ComponentProps,
-  ComponentPropsWithRef,
   ComponentPropsWithoutRef,
+  ComponentPropsWithRef,
   ComponentRef,
   ComponentState,
   ComponentType,
@@ -95,11 +95,11 @@ export type {
   ReactElement,
   ReactEventHandler,
   ReactNode,
+  Reducer,
   Ref,
   RefAttributes,
   RefCallback,
   RefObject,
-  Reducer,
   SelectHTMLAttributes,
   SetStateAction,
   SyntheticEvent,
@@ -118,5 +118,7 @@ export function defineReactPage<
   Messages extends CordisXMessageDefinition<Messages> = CordisXMessageSchema,
 >(component: CordisXReactPageComponent<Messages>): CordisXPageMount<Messages> {
   void component
-  return () => { throw new Error('defineReactPage is available only inside the CordisX renderer Host') }
+  return () => {
+    throw new Error('defineReactPage is available only inside the CordisX renderer Host')
+  }
 }

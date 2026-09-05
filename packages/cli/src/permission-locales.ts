@@ -204,7 +204,8 @@ const ZH_PREFIXED_CAPABILITY_MESSAGES: Readonly<Record<string, string>> = Object
   'permission.ui.host-dom.modify.name': '修改受控宿主界面',
   'permission.ui.host-dom.modify.description': '通过封闭且可回收的操作修改允许的宿主界面根。',
   'permission.ui.host-dom.modify.risk': '可能改变可见内容、安全属性、自有子项或焦点。',
-  'permission.ui.host-dom.modify.limitation': '不提供原始 HTML、selector、样式、脚本、事件处理器、节点、回调或私有 bridge。',
+  'permission.ui.host-dom.modify.limitation':
+    '不提供原始 HTML、selector、样式、脚本、事件处理器、节点、回调或私有 bridge。',
 })
 
 const ZH_CAPABILITY_MESSAGES = Object.freeze(Object.fromEntries(HOST_CAPABILITY_RISK_ENTRIES.flatMap(entry => (

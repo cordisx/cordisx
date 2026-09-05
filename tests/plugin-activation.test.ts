@@ -2,8 +2,8 @@ import { chmod, mkdtemp, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  PluginActivationStore,
   normalizePluginActivation,
+  PluginActivationStore,
   pluginDependentClosure,
   topologicalPluginOrder,
   validatePluginActivationGraph,
@@ -24,7 +24,10 @@ afterEach(async () => {
   temporary.clear()
 })
 
-function plugin(id: string, dependencies: readonly { id: string; version: string }[] = []): CordisXPluginActivationItemV1 {
+function plugin(
+  id: string,
+  dependencies: readonly { id: string; version: string }[] = [],
+): CordisXPluginActivationItemV1 {
   return {
     id,
     version: '1.0.0',
@@ -70,18 +73,24 @@ describe('plugin activation graph and persistence', () => {
 
   it('rejects missing, incompatible, disabled, and cyclic dependency graphs', () => {
     expect(() => validatePluginActivationGraph([plugin('a', [{ id: 'missing', version: '1.0.0' }])])).toThrow('missing')
-    expect(() => validatePluginActivationGraph([
-      { ...plugin('base'), version: '2.0.0' },
-      plugin('a', [{ id: 'base', version: '1.0.0' }]),
-    ])).toThrow('found 2.0.0')
-    expect(() => validatePluginActivationGraph([
-      { ...plugin('base'), enabled: false },
-      plugin('a', [{ id: 'base', version: '1.0.0' }]),
-    ])).toThrow('depends on disabled')
-    expect(() => validatePluginActivationGraph([
-      plugin('a', [{ id: 'b', version: '1.0.0' }]),
-      plugin('b', [{ id: 'a', version: '1.0.0' }]),
-    ])).toThrow('cycle')
+    expect(() =>
+      validatePluginActivationGraph([
+        { ...plugin('base'), version: '2.0.0' },
+        plugin('a', [{ id: 'base', version: '1.0.0' }]),
+      ])
+    ).toThrow('found 2.0.0')
+    expect(() =>
+      validatePluginActivationGraph([
+        { ...plugin('base'), enabled: false },
+        plugin('a', [{ id: 'base', version: '1.0.0' }]),
+      ])
+    ).toThrow('depends on disabled')
+    expect(() =>
+      validatePluginActivationGraph([
+        plugin('a', [{ id: 'b', version: '1.0.0' }]),
+        plugin('b', [{ id: 'a', version: '1.0.0' }]),
+      ])
+    ).toThrow('cycle')
   })
 
   it('atomically commits one candidate and recovers interrupted candidates without changing active', async () => {
@@ -91,7 +100,11 @@ describe('plugin activation graph and persistence', () => {
     expect(await store.loadActive()).toMatchObject({ revision: 0, plugins: [] })
     const first = candidate('work', 'runtime-1', 'candidate-1', 1, [plugin('base')])
     await store.writeCandidate(first)
-    expect(await store.commitCandidate('candidate-1')).toMatchObject({ recordKind: 'active', revision: 1, lastGoodRevision: 1 })
+    expect(await store.commitCandidate('candidate-1')).toMatchObject({
+      recordKind: 'active',
+      revision: 1,
+      lastGoodRevision: 1,
+    })
 
     const interrupted = candidate('work', 'runtime-1', 'candidate-2', 2, [plugin('base'), plugin('unrelated')])
     await store.writeCandidate(interrupted)
@@ -101,20 +114,24 @@ describe('plugin activation graph and persistence', () => {
   })
 
   it('rejects future last-good and stale candidate scopes on readback', async () => {
-    expect(() => normalizePluginActivation({
-      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
-      schemaVersion: 1,
-      recordKind: 'active',
-      profileId: 'work',
-      revision: 1,
-      lastGoodRevision: 2,
-      runtimeGeneration: 'runtime-1',
-      plugins: [],
-    })).toThrow('exceeds')
+    expect(() =>
+      normalizePluginActivation({
+        $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+        schemaVersion: 1,
+        recordKind: 'active',
+        profileId: 'work',
+        revision: 1,
+        lastGoodRevision: 2,
+        runtimeGeneration: 'runtime-1',
+        plugins: [],
+      })
+    ).toThrow('exceeds')
 
     const home = await mkdtemp(path.join(process.cwd(), '.plugin-activation-test-'))
     temporary.add(home)
     const store = new PluginActivationStore(home, 'work', 'runtime-1')
-    await expect(store.writeCandidate(candidate('other', 'runtime-1', 'candidate-1', 1, []))).rejects.toThrow('scope is stale')
+    await expect(store.writeCandidate(candidate('other', 'runtime-1', 'candidate-1', 1, []))).rejects.toThrow(
+      'scope is stale',
+    )
   })
 })

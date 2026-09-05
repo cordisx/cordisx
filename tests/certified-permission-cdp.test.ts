@@ -87,7 +87,9 @@ class FakeSession implements CertifiedPermissionCdpSession {
       if (params.expression === 'globalThis === globalThis.top') {
         const contextId = params.contextId as number
         if (this.deferredTopContextIds.delete(contextId)) {
-          return await new Promise(resolve => { this.deferredTopResolvers.set(contextId, resolve) })
+          return await new Promise(resolve => {
+            this.deferredTopResolvers.set(contextId, resolve)
+          })
         }
         return { result: { value: this.topFrames.get(contextId) ?? true } }
       }
@@ -118,7 +120,9 @@ class FakeSession implements CertifiedPermissionCdpSession {
       }
       if (declaration.includes('this.deliver')) {
         if (this.deferredDeliveryObjectIds.delete(objectId)) {
-          return await new Promise(resolve => { this.deferredDeliveryResolvers.set(objectId, resolve) })
+          return await new Promise(resolve => {
+            this.deferredDeliveryResolvers.set(objectId, resolve)
+          })
         }
         const payload = this.deliveryPayloads(objectId).at(-1)
         if (payload === undefined) throw new Error(`delivery payload for ${objectId} is unavailable`)
@@ -152,8 +156,10 @@ class FakeSession implements CertifiedPermissionCdpSession {
   }
 
   calls(method: string, declaration?: 'describe' | 'deliver' | 'close'): SentCall[] {
-    return this.sent.filter(call => call.method === method && (declaration === undefined
-      || String(call.params.functionDeclaration).includes(`this.${declaration}`)))
+    return this.sent.filter(call =>
+      call.method === method && (declaration === undefined
+        || String(call.params.functionDeclaration).includes(`this.${declaration}`))
+    )
   }
 
   deliveryPayload(index: number): Record<string, unknown> {
@@ -250,7 +256,9 @@ describe('Launcher Certified permission CDP channel', () => {
 
       expect(session.calls('Runtime.evaluate')).toHaveLength(3)
       expect(session.calls('Runtime.evaluate')[0]?.params).toMatchObject({
-        expression: 'globalThis === globalThis.top', contextId: 7, returnByValue: true,
+        expression: 'globalThis === globalThis.top',
+        contextId: 7,
+        returnByValue: true,
       })
       expect(session.calls('Runtime.evaluate')[1]?.params).toMatchObject({
         expression: `globalThis[${JSON.stringify(certifiedPermissionEndpointTakeKey(token))}]?.()`,
@@ -354,15 +362,22 @@ describe('Launcher Certified permission CDP channel', () => {
         descriptionResponse: { exceptionDetails: { text: 'hostile describe' }, result: { objectId: 'error-1' } },
       })
       await eventually(() => expect(session.calls('Runtime.callFunctionOn', 'describe')).toHaveLength(2))
-      await eventually(() => expect(session.calls('Runtime.releaseObject').some(call =>
-        call.params.objectId === 'exception-endpoint')).toBe(true))
+      await eventually(() =>
+        expect(session.calls('Runtime.releaseObject').some(call => call.params.objectId === 'exception-endpoint')).toBe(
+          true,
+        )
+      )
 
       contextCreated(session, 12, {
         objectId: 'error-endpoint',
         descriptionResponse: { result: { type: 'object', subtype: 'error', objectId: 'error-2' } },
       })
       await eventually(() => expect(session.calls('Runtime.callFunctionOn', 'describe')).toHaveLength(3))
-      await eventually(() => expect(session.calls('Runtime.releaseObject').some(call => call.params.objectId === 'error-endpoint')).toBe(true))
+      await eventually(() =>
+        expect(session.calls('Runtime.releaseObject').some(call => call.params.objectId === 'error-endpoint')).toBe(
+          true,
+        )
+      )
 
       authority.notify(2, Object.freeze({ revision: 2, projections: Object.freeze([]) }))
       await eventually(() => expect(session.deliveryPayloads('endpoint-1')).toHaveLength(2))
@@ -373,10 +388,12 @@ describe('Launcher Certified permission CDP channel', () => {
     }
   })
 
-  it.each([
-    ['profile', { profileId: 'other', runtimeGeneration }],
-    ['runtime', { profileId, runtimeGeneration: 'runtime-2' }],
-  ] as const)('keeps the live endpoint when a replacement describes the wrong %s', async (_case, binding) => {
+  it.each(
+    [
+      ['profile', { profileId: 'other', runtimeGeneration }],
+      ['runtime', { profileId, runtimeGeneration: 'runtime-2' }],
+    ] as const,
+  )('keeps the live endpoint when a replacement describes the wrong %s', async (_case, binding) => {
     const session = new FakeSession()
     const authority = new FakeAuthority()
     const value = channel(session, authority)
@@ -391,7 +408,11 @@ describe('Launcher Certified permission CDP channel', () => {
           documentEpoch: 'document_epoch_F2',
         },
       })
-      await eventually(() => expect(session.calls('Runtime.releaseObject').some(call => call.params.objectId === `wrong-${_case}`)).toBe(true))
+      await eventually(() =>
+        expect(session.calls('Runtime.releaseObject').some(call => call.params.objectId === `wrong-${_case}`)).toBe(
+          true,
+        )
+      )
 
       authority.notify(2, Object.freeze({ revision: 2, projections: Object.freeze([]) }))
       await eventually(() => expect(session.deliveryPayloads('endpoint-1')).toHaveLength(2))
@@ -421,7 +442,10 @@ describe('Launcher Certified permission CDP channel', () => {
       authority.notify(3, Object.freeze({ revision: 3, projections: Object.freeze([]) }))
       await new Promise<void>(resolve => setTimeout(resolve, 0))
       expect(session.calls('Runtime.callFunctionOn', 'deliver')).toHaveLength(2)
-      expect(session.calls('Runtime.releaseObject').map(call => call.params.objectId)).toEqual(['endpoint-1', 'endpoint-2'])
+      expect(session.calls('Runtime.releaseObject').map(call => call.params.objectId)).toEqual([
+        'endpoint-1',
+        'endpoint-2',
+      ])
     } finally {
       await value.dispose()
     }
@@ -472,19 +496,25 @@ describe('Launcher Certified permission CDP channel', () => {
       contextCreated(session, 20, { documentEpoch: 'document_epoch_reused_new' })
       session.resolveDelivery('endpoint-1')
 
-      await eventually(() => expect(session.calls('Runtime.evaluate').filter(call =>
-        call.params.expression === 'globalThis === globalThis.top')).toHaveLength(2))
-      await eventually(() => expect(session.calls('Runtime.releaseObject').some(call =>
-        call.params.objectId === 'endpoint-1')).toBe(true))
+      await eventually(() =>
+        expect(
+          session.calls('Runtime.evaluate').filter(call => call.params.expression === 'globalThis === globalThis.top'),
+        ).toHaveLength(2)
+      )
+      await eventually(() =>
+        expect(session.calls('Runtime.releaseObject').some(call => call.params.objectId === 'endpoint-1')).toBe(true)
+      )
       expect(session.calls('Runtime.callFunctionOn', 'close')).toContainEqual(expect.objectContaining({
         params: expect.objectContaining({ objectId: 'endpoint-1' }),
       }))
 
       session.resolveTop(20)
       replacementTopResolved = true
-      await eventually(() => expect(session.deliveryPayloads('endpoint-2')).toEqual([
-        expect.objectContaining({ documentEpoch: 'document_epoch_reused_new', deliverySequence: 1 }),
-      ]))
+      await eventually(() =>
+        expect(session.deliveryPayloads('endpoint-2')).toEqual([
+          expect.objectContaining({ documentEpoch: 'document_epoch_reused_new', deliverySequence: 1 }),
+        ])
+      )
 
       authority.notify(2, Object.freeze({ revision: 2, projections: Object.freeze([]) }))
       await eventually(() => expect(session.deliveryPayloads('endpoint-2')).toHaveLength(2))
@@ -533,7 +563,9 @@ describe('Launcher Certified permission CDP channel', () => {
       await eventually(() => expect(session.calls('Runtime.callFunctionOn', 'deliver')).toHaveLength(3))
       expect(session.calls('Runtime.releaseObject').some(call => call.params.objectId === 'endpoint-1')).toBe(true)
       expect(session.deliveryPayloads('endpoint-2')).toEqual([expect.objectContaining({
-        documentEpoch: 'document_epoch_I2', deliverySequence: 1, authorityRevision: 2,
+        documentEpoch: 'document_epoch_I2',
+        deliverySequence: 1,
+        authorityRevision: 2,
       })])
 
       authority.notify(3, Object.freeze({ revision: 3, projections: Object.freeze([]) }))
@@ -571,16 +603,20 @@ describe('Launcher Certified permission CDP channel', () => {
 
   it('keeps the unguessable take capability out of the current-live source and only in future documents', async () => {
     const splitToken = 'e'.repeat(64)
-    const composition = await buildRendererComposition({
-      version: 1,
-      rootDir: process.cwd(),
-      codex: { debugPort: 9229 },
-      providers: [],
-      plugins: [],
-    }, () => undefined, {
-      profileId,
-      certifiedPermissionChannelToken: splitToken,
-    })
+    const composition = await buildRendererComposition(
+      {
+        version: 1,
+        rootDir: process.cwd(),
+        codex: { debugPort: 9229 },
+        providers: [],
+        plugins: [],
+      },
+      () => undefined,
+      {
+        profileId,
+        certifiedPermissionChannelToken: splitToken,
+      },
+    )
 
     expect(composition.source).not.toContain(splitToken)
     expect(composition.source).not.toContain(certifiedPermissionEndpointTakeKey(splitToken))

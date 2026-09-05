@@ -1,8 +1,8 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  mountNavigationCollectionActions,
   type HostNavigationCollectionAction,
+  mountNavigationCollectionActions,
 } from '../packages/cli/src/renderer/host-ui/NavigationCollectionActions.js'
 
 function action(overrides: Partial<HostNavigationCollectionAction> = {}): HostNavigationCollectionAction {
@@ -59,7 +59,8 @@ describe('NavigationCollectionActions mount lifecycle', () => {
     await Promise.resolve()
 
     expect(document.querySelector('.cordisx-navigation-confirm-backdrop')).toBeNull()
-    expect(removeEventListener.mock.calls.some(([type, _listener, options]) => type === 'keydown' && options === true)).toBe(true)
+    expect(removeEventListener.mock.calls.some(([type, _listener, options]) => type === 'keydown' && options === true))
+      .toBe(true)
     expect(invoke).not.toHaveBeenCalled()
     dom.window.close()
   })
@@ -73,7 +74,10 @@ describe('NavigationCollectionActions mount lifecycle', () => {
 
     let resolveAction = (): void => {}
     const disposePending = mountNavigationCollectionActions(document, container, [action({
-      invoke: async () => await new Promise<void>(resolve => { resolveAction = resolve }),
+      invoke: async () =>
+        await new Promise<void>(resolve => {
+          resolveAction = resolve
+        }),
     })])
     document.querySelector<HTMLButtonElement>('.cordisx-navigation-direct-action')!.click()
     await Promise.resolve()
@@ -96,8 +100,11 @@ describe('NavigationCollectionActions mount lifecycle', () => {
     expect(clearTimeout).toHaveBeenCalled()
     expect(document.querySelector('.cordisx-navigation-feedback')).toBeNull()
     expect(document.querySelector('.cordisx-navigation-menu')).toBeNull()
-    expect(removeEventListener.mock.calls.some(([type, _listener, options]) => type === 'pointerdown' && options === true)).toBe(true)
-    expect(removeEventListener.mock.calls.some(([type, _listener, options]) => type === 'keydown' && options === true)).toBe(true)
+    expect(
+      removeEventListener.mock.calls.some(([type, _listener, options]) => type === 'pointerdown' && options === true),
+    ).toBe(true)
+    expect(removeEventListener.mock.calls.some(([type, _listener, options]) => type === 'keydown' && options === true))
+      .toBe(true)
     dom.window.close()
   })
 })

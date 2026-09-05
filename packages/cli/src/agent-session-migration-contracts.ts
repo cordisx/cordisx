@@ -5,16 +5,27 @@ import type { ApprovalService as ApprovalServiceV1 } from '@cordisx/protocol/app
 import type { ApprovalService as ApprovalServiceV2 } from '@cordisx/protocol/approval/v2'
 import type { ApprovalService as ApprovalServiceV3 } from '@cordisx/protocol/approval/v3'
 import type { AgentAdmissionReservationService } from '@cordisx/protocol/agent-admission/v2'
-import type { AgentAdmissionTargetOriginService, AgentAdmissionTargetReservationService } from '@cordisx/protocol/agent-admission/v3'
-import type { AgentAdmissionBootstrapReservationService, AgentAdmissionBootstrapTargetService } from '@cordisx/protocol/agent-admission/v4'
-import type { AgentAdmissionBootstrapRoomReservationService, AgentAdmissionBootstrapRoomTargetService } from '@cordisx/protocol/agent-admission/v5'
-import type { AgentAdmissionBootstrapRouteDeclarationService, AgentAdmissionBootstrapRouteReservationService } from '@cordisx/protocol/agent-admission/v6'
+import type {
+  AgentAdmissionTargetOriginService,
+  AgentAdmissionTargetReservationService,
+} from '@cordisx/protocol/agent-admission/v3'
+import type {
+  AgentAdmissionBootstrapReservationService,
+  AgentAdmissionBootstrapTargetService,
+} from '@cordisx/protocol/agent-admission/v4'
+import type {
+  AgentAdmissionBootstrapRoomReservationService,
+  AgentAdmissionBootstrapRoomTargetService,
+} from '@cordisx/protocol/agent-admission/v5'
+import type {
+  AgentAdmissionBootstrapRouteDeclarationService,
+  AgentAdmissionBootstrapRouteReservationService,
+} from '@cordisx/protocol/agent-admission/v6'
 import type { SessionId, SessionRegistry } from '@cordisx/protocol/sessions/v1'
 
 export const CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx/main/packages/cli/schemas/agent-session-legacy-acquire.v1.schema.json' as const
-export const CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_CONTRACT_V1 =
-  'cordisx.host-agent-session-legacy-acquire/v1' as const
+export const CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_CONTRACT_V1 = 'cordisx.host-agent-session-legacy-acquire/v1' as const
 
 /**
  * One bounded migration request for a durable AgentLoop v4 binding. The Host
@@ -38,20 +49,28 @@ interface ResultEnvelope {
   readonly mutationId: string
 }
 
-export type CordisXAgentSessionLegacyAcquireResultV1 = ResultEnvelope & (
-  | {
-    readonly status: 'accepted'
-    readonly sessionId: SessionId
-    readonly identitySource: 'agent-loop-authority'
-    readonly acquire: Extract<AgentAcquireResult, { readonly status: 'accepted' }>
-  }
-  | { readonly status: 'denied'; readonly code: 'permission-denied' }
-  | { readonly status: 'conflict'; readonly code: 'mutation-conflict' | 'agent-already-live' | 'setup-conflict' }
-  | {
-    readonly status: 'unavailable'
-    readonly code: 'binding-unresolved' | 'binding-closed' | 'plugin-generation-replaced' | 'connection-replaced' | 'host-unavailable' | 'unsupported'
-  }
-)
+export type CordisXAgentSessionLegacyAcquireResultV1 =
+  & ResultEnvelope
+  & (
+    | {
+      readonly status: 'accepted'
+      readonly sessionId: SessionId
+      readonly identitySource: 'agent-loop-authority'
+      readonly acquire: Extract<AgentAcquireResult, { readonly status: 'accepted' }>
+    }
+    | { readonly status: 'denied'; readonly code: 'permission-denied' }
+    | { readonly status: 'conflict'; readonly code: 'mutation-conflict' | 'agent-already-live' | 'setup-conflict' }
+    | {
+      readonly status: 'unavailable'
+      readonly code:
+        | 'binding-unresolved'
+        | 'binding-closed'
+        | 'plugin-generation-replaced'
+        | 'connection-replaced'
+        | 'host-unavailable'
+        | 'unsupported'
+    }
+  )
 
 /** Host extension of the formal Protocol registry; still injected only as ctx.agents. */
 export interface CordisXAgentRegistryV1 extends EntityBackedAgentRegistry {

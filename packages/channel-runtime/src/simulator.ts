@@ -1,9 +1,9 @@
 import { RetryableChannelError } from './runtime.js'
 import {
   CHANNEL_SERVICE_CONFIG_SCHEMA_V1,
-  parseChannelServiceConfig,
-  type ChannelServiceConfigV1,
   type ChannelServiceConfigurationDeclaration,
+  type ChannelServiceConfigV1,
+  parseChannelServiceConfig,
 } from './config.js'
 import type {
   ChannelAdapterDefinition,

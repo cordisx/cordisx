@@ -8,8 +8,12 @@ export interface SearchFieldProps extends Omit<InputHTMLAttributes<HTMLInputElem
 
 /** Shared Host-owned search control with a consistent semantic leading icon. */
 export function SearchField({ className, value, onChange, ...props }: SearchFieldProps) {
-  return <span className={['cxh-search-field', className].filter(Boolean).join(' ')}>
-    <span className="cxh-search-icon" aria-hidden="true"><HostIcon token="search" /></span>
-    <input {...props} type="search" value={value} onChange={event => onChange(event.currentTarget.value)} />
-  </span>
+  return (
+    <span className={['cxh-search-field', className].filter(Boolean).join(' ')}>
+      <span className="cxh-search-icon" aria-hidden="true">
+        <HostIcon token="search" />
+      </span>
+      <input {...props} type="search" value={value} onChange={event => onChange(event.currentTarget.value)} />
+    </span>
+  )
 }

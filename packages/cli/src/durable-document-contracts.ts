@@ -25,13 +25,13 @@ export type CordisXOwnerDocumentLoadResultV1 =
   | { readonly status: 'loaded'; readonly snapshot: CordisXOwnerDocumentSnapshotV1 }
   | { readonly status: 'missing'; readonly revision: 0 }
   | {
-      readonly status: 'unavailable'
-      readonly code: CordisXOwnerDocumentUnavailableCodeV1
-      /** Bounded Host diagnostic. Stored document values are never included. */
-      readonly diagnostic: string
-      /** The Host retained the original store for recovery and did not overwrite it. */
-      readonly recoverable: boolean
-    }
+    readonly status: 'unavailable'
+    readonly code: CordisXOwnerDocumentUnavailableCodeV1
+    /** Bounded Host diagnostic. Stored document values are never included. */
+    readonly diagnostic: string
+    /** The Host retained the original store for recovery and did not overwrite it. */
+    readonly recoverable: boolean
+  }
 
 export interface CordisXOwnerDocumentReplaceCommandV1 {
   readonly contract: typeof CORDISX_OWNER_DOCUMENT_SERVICE_V1

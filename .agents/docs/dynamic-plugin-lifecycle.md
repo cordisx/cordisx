@@ -40,13 +40,13 @@ introduce a second runtime identity.
 
 The lifecycle planner selects the minimum safe scope for a requested change:
 
-| Change | Apply scope | Observable effect |
-| --- | --- | --- |
-| a `live` configuration field | `config-live` | publish the committed value to watchers; do not call `apply()` again |
-| a `restart` configuration field or explicit reload | `plugin-restart` | dispose and recreate only the owning plugin fiber from its current module generation |
-| package code, entry, version, or declared dependency changes | `plugin-generation` | replace the target plus its transitive dependents, leaving unrelated fibers and Host services untouched |
-| CordisX Host implementation or shared renderer ABI changes | `runtime-generation` | replace the complete CordisX renderer generation without restarting the Codex window |
-| executable, Chromium profile, process environment, or startup arguments change | `app-restart` | explicitly require a new host process; never present it as plugin reload |
+| Change                                                                         | Apply scope          | Observable effect                                                                                       |
+| ------------------------------------------------------------------------------ | -------------------- | ------------------------------------------------------------------------------------------------------- |
+| a `live` configuration field                                                   | `config-live`        | publish the committed value to watchers; do not call `apply()` again                                    |
+| a `restart` configuration field or explicit reload                             | `plugin-restart`     | dispose and recreate only the owning plugin fiber from its current module generation                    |
+| package code, entry, version, or declared dependency changes                   | `plugin-generation`  | replace the target plus its transitive dependents, leaving unrelated fibers and Host services untouched |
+| CordisX Host implementation or shared renderer ABI changes                     | `runtime-generation` | replace the complete CordisX renderer generation without restarting the Codex window                    |
+| executable, Chromium profile, process environment, or startup arguments change | `app-restart`        | explicitly require a new host process; never present it as plugin reload                                |
 
 A package operation cannot silently escalate its own scope. A Host may return
 a fresh plan that explicitly requires `runtime-generation` or `app-restart`,
@@ -284,20 +284,20 @@ reads or reconstructs journal fields in renderer code.
 
 ### Owning files and registry adaptation
 
-| Owning file | Generation transaction change |
-| --- | --- |
-| `renderer/generation-visibility.ts` | coordinator, authenticated seat/view, closure/fence validation, prepare/publish/rollback barrier, versioned notification |
-| `renderer/ownership.ts` | Host-only Context identity accessors; no public plugin input |
-| `renderer/commands.ts` | generation-qualified records, view-filtered lookup/snapshot, callback fence |
-| `renderer/navigation.ts` | generation-qualified page/route records; candidate-local reference validation; active-version stack/settings mount reconciliation |
-| `renderer/surfaces.ts` | generation-qualified contributions; active projection; rendered state bound to an unrepeatable registration token |
-| `renderer/configuration.ts` | generation-fenced config renderers/watchers while retaining one profile/plugin value and revision plane; active form remount on flip |
-| `renderer/i18n.ts` | generation-qualified catalogs/injections; candidate-local winner; one active locale projection version |
-| `renderer/agent.ts` | generation-fenced prompts, subscriptions, pending deliveries, and owner drain |
-| `renderer/platform.ts` | generation-fenced service tickets/calls without changing permission policy identity |
-| `renderer/extension-points.ts` | keep the descriptor catalog Host-owned; make plugin identity/policy decisions and usage generation-aware without changing public access shapes |
-| `renderer/runtime.ts` | candidate/active/retiring fibers, closure readiness receipt, publish and cleanup orchestration |
-| `launcher/cdp.ts` | all-renderer readiness, publish, rollback, and retryable cleanup observation handshake |
+| Owning file                         | Generation transaction change                                                                                                                  |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `renderer/generation-visibility.ts` | coordinator, authenticated seat/view, closure/fence validation, prepare/publish/rollback barrier, versioned notification                       |
+| `renderer/ownership.ts`             | Host-only Context identity accessors; no public plugin input                                                                                   |
+| `renderer/commands.ts`              | generation-qualified records, view-filtered lookup/snapshot, callback fence                                                                    |
+| `renderer/navigation.ts`            | generation-qualified page/route records; candidate-local reference validation; active-version stack/settings mount reconciliation              |
+| `renderer/surfaces.ts`              | generation-qualified contributions; active projection; rendered state bound to an unrepeatable registration token                              |
+| `renderer/configuration.ts`         | generation-fenced config renderers/watchers while retaining one profile/plugin value and revision plane; active form remount on flip           |
+| `renderer/i18n.ts`                  | generation-qualified catalogs/injections; candidate-local winner; one active locale projection version                                         |
+| `renderer/agent.ts`                 | generation-fenced prompts, subscriptions, pending deliveries, and owner drain                                                                  |
+| `renderer/platform.ts`              | generation-fenced service tickets/calls without changing permission policy identity                                                            |
+| `renderer/extension-points.ts`      | keep the descriptor catalog Host-owned; make plugin identity/policy decisions and usage generation-aware without changing public access shapes |
+| `renderer/runtime.ts`               | candidate/active/retiring fibers, closure readiness receipt, publish and cleanup orchestration                                                 |
+| `launcher/cdp.ts`                   | all-renderer readiness, publish, rollback, and retryable cleanup observation handshake                                                         |
 
 Configuration values remain keyed by profile and plugin id and are not copied
 per generation. The generation seam applies to fiber-owned watchers and
@@ -316,30 +316,30 @@ project or resurrect a retiring generation.
 
 Implementation priority is:
 
-| Priority | Required closure |
-| --- | --- |
-| P0 | configuration owner-only overwrite, i18n candidate winner, route/page mount identity, surface rendered-token isolation, permission/extension-point identity when package source changes |
-| P1 | shared notification batching and Manager snapshot consistency, generation-qualified inactive diagnostics, active config-renderer remount without watcher churn |
+| Priority | Required closure                                                                                                                                                                        |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P0       | configuration owner-only overwrite, i18n candidate winner, route/page mount identity, surface rendered-token isolation, permission/extension-point identity when package source changes |
+| P1       | shared notification batching and Manager snapshot consistency, generation-qualified inactive diagnostics, active config-renderer remount without watcher churn                          |
 
 ### Generation transaction test matrix
 
-| Evidence | Required assertion |
-| --- | --- |
-| coordinator unit tests | full tuple and dependency fence, Host-recomputed closure, forged/stale seat rejection |
-| two-registry consistency fixture | candidate self-view, ordinary live zero-visibility, same-plugin coexistence, one-version atomic publish, one bounded notification per registry |
-| registry-focused tests | generation-qualified duplicate ids, active projection de-duplication, stale lookup/callback/handle rejection, hidden abort without notification |
-| publish fault tests | registry prepare failure produces zero map/projection change; listener failure cannot split the epoch |
-| command tests | active-only execute/has/snapshot, old disposer isolation, old in-flight abort after flip |
-| navigation tests | same-path coexistence, candidate-local page resolution, active mount/stack preservation on abort, settings tab/content generation agreement |
-| surface/adapter tests | no staged duplicate projection, one flip rebuild, rendered-token isolation, no native flicker |
-| configuration tests | candidate settings self-view, Manager active view, schema/renderer flip, abort with zero watcher churn |
-| localization tests | candidate-local catalog winner, active zero visibility, one locale version/notification, abort without diagnostic churn |
-| extension-point tests | old/new source coexistence, active decision/usage until flip, rollback without authority leakage |
-| runtime integration | staged snapshot/execute/navigate/DOM remain old, old fiber remains mounted, dependency-ordered closure readiness, one publish, rollback flip, commit-last-good retiring disposal, retryable cleanup observation |
-| bundle snapshot tests | every Manager snapshot is entirely old or new and the runtime subscription publishes exactly once |
-| lifecycle regressions | block/restore, permission blocking, config live/restart, unload cleanup of services/pages/routes/commands/surfaces/subscriptions/pending deliveries |
-| isolated real `app://` smoke | candidate readiness and publish/rollback in one Codex window while unrelated fibers, native Codex DOM identity, page state, and data stream remain continuous |
-| isolated process/recovery smoke | fresh profile and CDP port; pre-publish abort, post-publish rollback, process restart from rollback-pending, native Console `method + args[]`, zero pending permission/lifecycle dialogs, zero Crashpad dump delta, closed port, and no process retaining the profile |
+| Evidence                         | Required assertion                                                                                                                                                                                                                                                    |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| coordinator unit tests           | full tuple and dependency fence, Host-recomputed closure, forged/stale seat rejection                                                                                                                                                                                 |
+| two-registry consistency fixture | candidate self-view, ordinary live zero-visibility, same-plugin coexistence, one-version atomic publish, one bounded notification per registry                                                                                                                        |
+| registry-focused tests           | generation-qualified duplicate ids, active projection de-duplication, stale lookup/callback/handle rejection, hidden abort without notification                                                                                                                       |
+| publish fault tests              | registry prepare failure produces zero map/projection change; listener failure cannot split the epoch                                                                                                                                                                 |
+| command tests                    | active-only execute/has/snapshot, old disposer isolation, old in-flight abort after flip                                                                                                                                                                              |
+| navigation tests                 | same-path coexistence, candidate-local page resolution, active mount/stack preservation on abort, settings tab/content generation agreement                                                                                                                           |
+| surface/adapter tests            | no staged duplicate projection, one flip rebuild, rendered-token isolation, no native flicker                                                                                                                                                                         |
+| configuration tests              | candidate settings self-view, Manager active view, schema/renderer flip, abort with zero watcher churn                                                                                                                                                                |
+| localization tests               | candidate-local catalog winner, active zero visibility, one locale version/notification, abort without diagnostic churn                                                                                                                                               |
+| extension-point tests            | old/new source coexistence, active decision/usage until flip, rollback without authority leakage                                                                                                                                                                      |
+| runtime integration              | staged snapshot/execute/navigate/DOM remain old, old fiber remains mounted, dependency-ordered closure readiness, one publish, rollback flip, commit-last-good retiring disposal, retryable cleanup observation                                                       |
+| bundle snapshot tests            | every Manager snapshot is entirely old or new and the runtime subscription publishes exactly once                                                                                                                                                                     |
+| lifecycle regressions            | block/restore, permission blocking, config live/restart, unload cleanup of services/pages/routes/commands/surfaces/subscriptions/pending deliveries                                                                                                                   |
+| isolated real `app://` smoke     | candidate readiness and publish/rollback in one Codex window while unrelated fibers, native Codex DOM identity, page state, and data stream remain continuous                                                                                                         |
+| isolated process/recovery smoke  | fresh profile and CDP port; pre-publish abort, post-publish rollback, process restart from rollback-pending, native Console `method + args[]`, zero pending permission/lifecycle dialogs, zero Crashpad dump delta, closed port, and no process retaining the profile |
 
 The `smoke:isolated-app` runner owns a separate process group, starts the
 isolated window minimized, waits for the actual CordisX runtime rather than

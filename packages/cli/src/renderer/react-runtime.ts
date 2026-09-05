@@ -129,7 +129,14 @@ function Button({ variant = 'secondary', className, type = 'button', ...props }:
 }
 
 function Stack({
-  direction = 'column', gap = 'medium', align, justify, wrap = false, className, style, ...props
+  direction = 'column',
+  gap = 'medium',
+  align,
+  justify,
+  wrap = false,
+  className,
+  style,
+  ...props
 }: StackProps): React.ReactElement {
   return React.createElement('div', {
     ...props,
@@ -162,7 +169,9 @@ function Heading({ level = 2, className, ...props }: HeadingProps): React.ReactE
 }
 
 function EmptyState({ title, description, action, className, ...props }: EmptyStateProps): React.ReactElement {
-  return React.createElement('div', { ...props, className: joinClassName('cxr-ui-empty', className) },
+  return React.createElement(
+    'div',
+    { ...props, className: joinClassName('cxr-ui-empty', className) },
     React.createElement('div', { className: 'cxr-ui-empty-title' }, title),
     description === undefined ? null : React.createElement('div', undefined, description),
     action === undefined ? null : React.createElement('div', undefined, action),
@@ -171,16 +180,28 @@ function EmptyState({ title, description, action, className, ...props }: EmptySt
 
 function Icon({ name, className, ...props }: IconProps): React.ReactElement {
   const paths: Readonly<Record<string, string>> = {
-    search: 'M10.5 4a6.5 6.5 0 1 0 4.05 11.58L19 20l1-1-4.42-4.45A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z',
+    search:
+      'M10.5 4a6.5 6.5 0 1 0 4.05 11.58L19 20l1-1-4.42-4.45A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z',
     create: 'M5 3h10l4 4v14H5V3Zm2 2v14h10V8h-3V5H7Zm4 5h2v2h2v2h-2v2h-2v-2H9v-2h2v-2Z',
     success: 'm5 12 4 4L19 6l1.4 1.4L9 18.8l-5.4-5.4L5 12Z',
     'host:tags': 'M3 5V3h8l10 10-8 8L3 11V5Zm2 0v5.17l8 8L18.17 13l-8-8H5Zm3 1.5A1.5 1.5 0 1 1 8 9a1.5 1.5 0 0 1 0-3Z',
     'host:folder': 'M3 5h7l2 2h9v12H3V5Zm2 2v10h14V9h-7.83l-2-2H5Z',
-    'host:key': 'M14 4a6 6 0 0 0-5.66 8H3v4h3v3h4v-3h2v-2.34A6 6 0 1 0 14 4Zm0 2a4 4 0 1 1-3.36 6.17L10.34 12H5v2h3v3h1v-3h2.2l.3-.76A4 4 0 0 1 14 6Zm2 2a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z',
+    'host:key':
+      'M14 4a6 6 0 0 0-5.66 8H3v4h3v3h4v-3h2v-2.34A6 6 0 1 0 14 4Zm0 2a4 4 0 1 1-3.36 6.17L10.34 12H5v2h3v3h1v-3h2.2l.3-.76A4 4 0 0 1 14 6Zm2 2a1 1 0 1 1 0 2 1 1 0 0 1 0-2Z',
   }
   const path = paths[name] ?? 'M5 5h14v14H5V5Zm2 2v10h10V7H7Z'
-  const icon = React.createElement('svg', { viewBox: '0 0 24 24', width: 18, height: 18, fill: 'currentColor', focusable: false }, React.createElement('path', { d: path }))
-  return React.createElement('span', { ...props, className: joinClassName('cxr-ui-icon', className), 'aria-hidden': props['aria-label'] === undefined }, icon)
+  const icon = React.createElement('svg', {
+    viewBox: '0 0 24 24',
+    width: 18,
+    height: 18,
+    fill: 'currentColor',
+    focusable: false,
+  }, React.createElement('path', { d: path }))
+  return React.createElement('span', {
+    ...props,
+    className: joinClassName('cxr-ui-icon', className),
+    'aria-hidden': props['aria-label'] === undefined,
+  }, icon)
 }
 
 function Select({ options, onChange, className, 'aria-label': ariaLabel, value }: SelectProps): React.ReactElement {
@@ -208,41 +229,78 @@ function Select({ options, onChange, className, 'aria-label': ariaLabel, value }
       close()
       return
     }
-    const next = event.key === 'ArrowDown' ? (index + 1) % options.length
-      : event.key === 'ArrowUp' ? (index - 1 + options.length) % options.length
-        : event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : undefined
+    const next = event.key === 'ArrowDown'
+      ? (index + 1) % options.length
+      : event.key === 'ArrowUp'
+      ? (index - 1 + options.length) % options.length
+      : event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+      ? options.length - 1
+      : undefined
     if (next === undefined) return
     event.preventDefault()
     event.stopPropagation()
     focusOption(next)
   }
-  return React.createElement('div', { className: joinClassName('cxr-ui-select', className) },
-    React.createElement('button', {
-      ref: trigger,
-      type: 'button', className: 'cxr-ui-select-trigger', 'aria-label': ariaLabel,
-      'aria-haspopup': 'listbox', 'aria-expanded': open, onClick: () => setOpen(current => !current),
-      onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => {
-        if (event.key === 'Escape' && open) {
+  return React.createElement(
+    'div',
+    { className: joinClassName('cxr-ui-select', className) },
+    React.createElement(
+      'button',
+      {
+        ref: trigger,
+        type: 'button',
+        className: 'cxr-ui-select-trigger',
+        'aria-label': ariaLabel,
+        'aria-haspopup': 'listbox',
+        'aria-expanded': open,
+        onClick: () => setOpen(current => !current),
+        onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => {
+          if (event.key === 'Escape' && open) {
+            event.preventDefault()
+            event.stopPropagation()
+            close()
+            return
+          }
+          if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
           event.preventDefault()
           event.stopPropagation()
-          close()
-          return
-        }
-        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
-        event.preventDefault()
-        event.stopPropagation()
-        openAt(event.key === 'ArrowDown' ? 0 : options.length - 1)
+          openAt(event.key === 'ArrowDown' ? 0 : options.length - 1)
+        },
       },
-    }, selected?.prefixIcon, React.createElement('span', undefined, selected?.label ?? '')),
-    open ? React.createElement('div', { className: 'cxr-ui-select-list', role: 'listbox', 'aria-label': ariaLabel },
-      options.map((option, index) => React.createElement('button', {
-        ref: (element: HTMLButtonElement | null) => { if (element === null) optionElements.current.delete(option.value); else optionElements.current.set(option.value, element) },
-        key: option.value, type: 'button', className: 'cxr-ui-select-option', role: 'option',
-        'aria-selected': option.value === value,
-        onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => optionKeyDown(event, index),
-        onClick: () => { onChange(option.value); close() },
-      }, option.prefixIcon, React.createElement('span', undefined, option.label))),
-    ) : null,
+      selected?.prefixIcon,
+      React.createElement('span', undefined, selected?.label ?? ''),
+    ),
+    open
+      ? React.createElement(
+        'div',
+        { className: 'cxr-ui-select-list', role: 'listbox', 'aria-label': ariaLabel },
+        options.map((option, index) =>
+          React.createElement(
+            'button',
+            {
+              ref: (element: HTMLButtonElement | null) => {
+                if (element === null) optionElements.current.delete(option.value)
+                else optionElements.current.set(option.value, element)
+              },
+              key: option.value,
+              type: 'button',
+              className: 'cxr-ui-select-option',
+              role: 'option',
+              'aria-selected': option.value === value,
+              onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => optionKeyDown(event, index),
+              onClick: () => {
+                onChange(option.value)
+                close()
+              },
+            },
+            option.prefixIcon,
+            React.createElement('span', undefined, option.label),
+          )
+        ),
+      )
+      : null,
   )
 }
 
@@ -267,7 +325,9 @@ class SharedReactErrorBoundary extends React.Component<ErrorBoundaryProps, Error
 
   render(): React.ReactNode {
     if (this.state.error !== undefined) {
-      return React.createElement('div', { className: 'cxr-ui-error', role: 'alert' },
+      return React.createElement(
+        'div',
+        { className: 'cxr-ui-error', role: 'alert' },
         React.createElement('strong', undefined, 'Plugin page failed to render'),
         React.createElement('span', undefined, this.state.error.message),
       )
@@ -370,7 +430,18 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
     reactDomClient: ReactDOMClient,
     jsxRuntime,
     jsxDevRuntime,
-    ui: Object.freeze({ Button, Card, EmptyState, Heading, Icon, MarkdownViewer: PublicMarkdownViewer, Select, SelectionRail: PublicSelectionRail, Stack, Text }),
+    ui: Object.freeze({
+      Button,
+      Card,
+      EmptyState,
+      Heading,
+      Icon,
+      MarkdownViewer: PublicMarkdownViewer,
+      Select,
+      SelectionRail: PublicSelectionRail,
+      Stack,
+      Text,
+    }),
     defineReactPage,
     dispose(): void {
       if (disposed) return

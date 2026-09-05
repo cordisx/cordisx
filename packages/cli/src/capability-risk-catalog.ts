@@ -1,32 +1,32 @@
 import {
-  CORDISX_PERMISSION_CAPABILITIES_V2,
-  CORDISX_PERMISSION_CAPABILITIES_V3,
-  CORDISX_PERMISSION_CAPABILITIES_V4,
   CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V2,
   CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V3,
   CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V4,
-  type CordisXCertifiedPermissionProjectionV1,
+  CORDISX_PERMISSION_CAPABILITIES_V2,
+  CORDISX_PERMISSION_CAPABILITIES_V3,
+  CORDISX_PERMISSION_CAPABILITIES_V4,
+  type CordisXCapabilityDeclarationV2,
   type CordisXCapabilityDeclarationV3,
   type CordisXCapabilityDeclarationV4,
-  type CordisXPermissionCapabilityV2,
-  type CordisXPermissionCapabilityV3,
-  type CordisXPermissionCapabilityV4,
-  type CordisXCapabilityDeclarationV2,
+  type CordisXCertifiedPermissionProjectionV1,
   type CordisXPermissionAuthorizationBindingV2,
-  type CordisXPermissionDecisionV2,
-  type CordisXPermissionHostPresentationV2,
   type CordisXPermissionAuthorizationPlanV2,
   type CordisXPermissionAuthorizationPlanV3,
   type CordisXPermissionAuthorizationPlanV4,
+  type CordisXPermissionCapabilityV2,
+  type CordisXPermissionCapabilityV3,
+  type CordisXPermissionCapabilityV4,
+  type CordisXPermissionDecisionV2,
+  type CordisXPermissionHostPresentationV2,
   type CordisXPermissionIdentityV2,
   type CordisXPermissionPolicyRecordV2,
   type CordisXPermissionPolicyRecordV3,
   type CordisXPermissionPolicyRecordV4,
   type CordisXPermissionPolicyV2,
+  type CordisXPermissionResourceClassV4,
   type CordisXPermissionScopeV2,
   type CordisXPermissionScopeV3,
   type CordisXPermissionScopeV4,
-  type CordisXPermissionResourceClassV4,
   type CordisXPermissionSensitivity,
 } from './permission-contracts.js'
 import {
@@ -124,7 +124,8 @@ function entry(
     resourceClass: resource.resourceClass,
     certifiedImplicitApproval: resource.certifiedImplicitApproval,
     sensitivity,
-    recommendedPolicy: resource.recommendedPolicy ?? (sensitivity === 'low' || sensitivity === 'general' ? 'allow-persistent' : 'ask'),
+    recommendedPolicy: resource.recommendedPolicy
+      ?? (sensitivity === 'low' || sensitivity === 'general' ? 'allow-persistent' : 'ask'),
     persistentAllow: resource.persistentAllow ?? !highRisk,
     persistentDeny: true,
     maximumScope: Object.freeze({ allowedDimensions: Object.freeze([...dimensions]), unscopedAllowed }),
@@ -140,122 +141,227 @@ function entry(
   })
 }
 
-export const HOST_CAPABILITY_RISK_ENTRIES = Object.freeze([
-  entry('models.read', 'platform', 'low', ['providers'], true, [
-    'Read available models', 'List models exposed by an allowed provider.',
-    'This reveals configured model availability.', 'It cannot read conversations or credentials.',
-  ]),
-  entry('tasks.catalog.read', 'platform', 'general', ['providers', 'cwdRoots'], true, [
-    'List tasks', 'List task summaries for allowed providers and workspaces.',
-    'Task titles and workspace metadata may be visible.', 'It cannot read task content.',
-  ]),
-  entry('tasks.content.read', 'platform', 'sensitive', ['sessions'], false, [
-    'Read task content', 'Read messages and results from allowed tasks.',
-    'Task content may contain private or sensitive text.', 'Only explicitly allowed task identities are readable.',
-  ]),
-  entry('tasks.create', 'platform', 'sensitive', ['providers', 'cwdRoots'], false, [
-    'Create tasks', 'Create tasks and optionally submit their first message.',
-    'The selected provider receives the initial task content.', 'Provider, model, and workspace remain Host validated.',
-  ]),
-  entry('tasks.control', 'platform', 'high-risk', ['sessions'], false, [
-    'Control tasks', 'Continue, fork, archive, restore, or delete allowed tasks.',
-    'Destructive actions can remove or replace task state.', 'Every target and action remains Host validated.',
-  ]),
-  entry('turns.submit', 'platform', 'sensitive', ['sessions'], false, [
-    'Submit turns', 'Send a new message to an allowed task.',
-    'Submitted content is sent to the selected provider.', 'Only allowed task identities can receive content.',
-  ]),
-  entry('turns.control', 'platform', 'high-risk', ['sessions'], false, [
-    'Control active turns', 'Steer or interrupt an active turn.',
-    'This can change or stop in-progress work.', 'Only the explicitly targeted turn is affected.',
-  ]),
-  entry('turns.introduce', 'platform', 'sensitive', ['sessions'], false, [
-    'Request member introductions', 'Ask an allowed Agent task to introduce a Room member run.',
-    'The provider receives the structured introduction intent.', 'The Host binds it to one exact member run and task.',
-  ]),
-  entry('approvals.decide', 'platform', 'high-risk', ['sessions'], false, [
-    'Decide Agent approvals', 'Approve, deny, or cancel a pending action for an allowed Agent task.',
-    'Approval can authorize an external or file-changing action.', 'The Host binds the decision to one exact pending approval.',
-  ]),
-  entry('agent.events.read', 'agent', 'sensitive', ['sessionIds'], false, [
-    'Read Agent events', 'Read structured events for allowed Agent sessions.',
-    'Events can reveal task activity and tool metadata.', 'Raw bridge and filesystem access remain unavailable.',
-  ]),
-  entry('agent.history.read', 'agent', 'sensitive', ['sessionIds'], false, [
-    'Read Agent history', 'Read redacted historical Agent projections.',
-    'Historical activity may contain sensitive context.', 'The Host keeps paths and raw storage private.',
-  ]),
-  entry('agent.messages.append', 'agent', 'sensitive', ['sessionIds'], false, [
-    'Append Agent messages', 'Append attributed content to an allowed Agent session.',
-    'Added content can influence subsequent model input.', 'The Host preserves attribution and ordering.',
-  ]),
-  entry('agent.steps.reject', 'agent', 'high-risk', ['sessionIds'], false, [
-    'Reject Agent steps', 'Reject an Agent step before it proceeds.',
-    'This can stop or alter Agent execution.', 'Only the current allowed step may be rejected.',
-  ]),
-  entry('agent.messages.transform', 'agent', 'high-risk', ['sessionIds'], false, [
-    'Transform Agent messages', 'Transform attributed messages before model use.',
-    'This can materially change model input.', 'Original order and attribution remain Host controlled.',
-  ]),
-  entry('agent.prompt.section', 'agent', 'sensitive', ['sessionIds'], false, [
-    'Add prompt sections', 'Add an attributed section to model input.',
-    'Added text can influence model behavior.', 'The Host controls ordering and attribution.',
-  ]),
-  entry('agent.prompt.context', 'agent', 'sensitive', ['sessionIds'], false, [
-    'Add prompt context', 'Add attributed context to model input.',
-    'Added context can influence model behavior.', 'The Host controls ordering and attribution.',
-  ]),
-  entry('channel.accounts.read', 'channel', 'general', ['channelAccounts', 'channelTenants'], true, [
-    'Read Channel accounts', 'List configured Channel account descriptors.',
-    'Account identity and readiness may be visible.', 'Credentials and secret references remain private.',
-  ]),
-  entry('channel.accounts.connect', 'channel', 'sensitive', ['channelAccounts', 'channelTenants'], false, [
-    'Connect Channel accounts', 'Start a Host-owned Channel account connection.',
-    'The external account may begin receiving events.', 'Credentials and transport stay Host owned.',
-  ]),
-  entry('channel.events.receive', 'channel', 'sensitive', ['channelAccounts', 'channelTenants', 'channelConversations', 'channelUsers'], false, [
-    'Receive Channel events', 'Receive sourced events from allowed Channel identities.',
-    'Events can contain private external conversation content.', 'The Host enforces identity, tenant, and conversation scope.',
-  ]),
-  entry('channel.events.subscribe', 'channel', 'sensitive', ['channelAccounts', 'channelTenants', 'channelConversations', 'channelUsers'], false, [
-    'Subscribe to Channel events', 'Keep a live subscription to allowed Channel events.',
-    'A subscription can continuously expose external activity.', 'The Host owns cancellation and connection lifetime.',
-  ]),
-  entry('channel.messages.send', 'channel', 'high-risk', ['channelAccounts', 'channelTenants', 'channelConversations', 'channelUsers'], false, [
-    'Send Channel messages', 'Send content to an external Channel conversation.',
-    'This performs an external action as the connected account.', 'Every account and conversation remains explicitly scoped.',
-  ]),
-  entry('channel.bindings.read', 'channel', 'general', ['channelAccounts', 'channelTenants', 'channelConversations'], true, [
-    'Read Channel bindings', 'Read mappings between Channel conversations and Platform sessions.',
-    'Bindings reveal cross-system identity relationships.', 'Message content and credentials are not included.',
-  ]),
-  entry('channel.bindings.write', 'channel', 'high-risk', ['channelAccounts', 'channelTenants', 'channelConversations'], false, [
-    'Change Channel bindings', 'Create or replace conversation-to-session mappings.',
-    'Incorrect bindings can route future messages to the wrong session.', 'The Host validates both sides of every binding.',
-  ]),
-  entry('channel.attachments.read', 'channel', 'sensitive', ['channelAccounts', 'channelTenants', 'channelConversations', 'channelUsers'], false, [
-    'Read Channel attachments', 'Read attachments from allowed Channel conversations.',
-    'Attachments may contain private files or sensitive data.', 'Only Host-fetched content within declared scope is available.',
-  ]),
-  entry('ui.extension-points.render', 'ui', 'general', ['extensionPoints'], false, [
-    'Render controlled interface contributions', 'Render structured contributions at allowed Host extension points.',
-    'The contribution changes visible Host interface content.', 'Raw DOM selectors, nodes, scripts, styles, and bridges remain unavailable.',
-  ], {
-    resourceClass: 'dom-rendering', certifiedImplicitApproval: true, recommendedPolicy: 'ask',
-    installPrompt: 'explicit', runtimePrompt: 'dynamic-scope',
-  }),
-  entry('ui.host-dom.read', 'ui', 'sensitive', ['rootIds', 'operations'], false, [
-    'Read bounded Host interface state', 'Read bounded, redacted state from allowed Host interface roots.',
-    'Visible user text and interface state may be exposed.', 'Only catalog roots, closed operations, bounded projections, and opaque node references are available.',
-  ], { resourceClass: 'host-dom', certifiedImplicitApproval: true }),
-  entry('ui.host-dom.modify', 'ui', 'high-risk', ['rootIds', 'operations'], false, [
-    'Modify bounded Host interface state', 'Modify allowed Host interface roots through closed reversible operations.',
-    'Visible content, safe attributes, owned children, or focus may change.', 'No raw HTML, selector, style, script, event handler, node, callback, or private bridge is available.',
-  ], {
-    resourceClass: 'host-dom', certifiedImplicitApproval: true, persistentAllow: false,
-    scopeUpgrade: 'strict-expansion', installPrompt: 'explicit', runtimePrompt: 'always',
-  }),
-] satisfies readonly CordisXCapabilityRiskCatalogEntry[])
+export const HOST_CAPABILITY_RISK_ENTRIES = Object.freeze(
+  [
+    entry('models.read', 'platform', 'low', ['providers'], true, [
+      'Read available models',
+      'List models exposed by an allowed provider.',
+      'This reveals configured model availability.',
+      'It cannot read conversations or credentials.',
+    ]),
+    entry('tasks.catalog.read', 'platform', 'general', ['providers', 'cwdRoots'], true, [
+      'List tasks',
+      'List task summaries for allowed providers and workspaces.',
+      'Task titles and workspace metadata may be visible.',
+      'It cannot read task content.',
+    ]),
+    entry('tasks.content.read', 'platform', 'sensitive', ['sessions'], false, [
+      'Read task content',
+      'Read messages and results from allowed tasks.',
+      'Task content may contain private or sensitive text.',
+      'Only explicitly allowed task identities are readable.',
+    ]),
+    entry('tasks.create', 'platform', 'sensitive', ['providers', 'cwdRoots'], false, [
+      'Create tasks',
+      'Create tasks and optionally submit their first message.',
+      'The selected provider receives the initial task content.',
+      'Provider, model, and workspace remain Host validated.',
+    ]),
+    entry('tasks.control', 'platform', 'high-risk', ['sessions'], false, [
+      'Control tasks',
+      'Continue, fork, archive, restore, or delete allowed tasks.',
+      'Destructive actions can remove or replace task state.',
+      'Every target and action remains Host validated.',
+    ]),
+    entry('turns.submit', 'platform', 'sensitive', ['sessions'], false, [
+      'Submit turns',
+      'Send a new message to an allowed task.',
+      'Submitted content is sent to the selected provider.',
+      'Only allowed task identities can receive content.',
+    ]),
+    entry('turns.control', 'platform', 'high-risk', ['sessions'], false, [
+      'Control active turns',
+      'Steer or interrupt an active turn.',
+      'This can change or stop in-progress work.',
+      'Only the explicitly targeted turn is affected.',
+    ]),
+    entry('turns.introduce', 'platform', 'sensitive', ['sessions'], false, [
+      'Request member introductions',
+      'Ask an allowed Agent task to introduce a Room member run.',
+      'The provider receives the structured introduction intent.',
+      'The Host binds it to one exact member run and task.',
+    ]),
+    entry('approvals.decide', 'platform', 'high-risk', ['sessions'], false, [
+      'Decide Agent approvals',
+      'Approve, deny, or cancel a pending action for an allowed Agent task.',
+      'Approval can authorize an external or file-changing action.',
+      'The Host binds the decision to one exact pending approval.',
+    ]),
+    entry('agent.events.read', 'agent', 'sensitive', ['sessionIds'], false, [
+      'Read Agent events',
+      'Read structured events for allowed Agent sessions.',
+      'Events can reveal task activity and tool metadata.',
+      'Raw bridge and filesystem access remain unavailable.',
+    ]),
+    entry('agent.history.read', 'agent', 'sensitive', ['sessionIds'], false, [
+      'Read Agent history',
+      'Read redacted historical Agent projections.',
+      'Historical activity may contain sensitive context.',
+      'The Host keeps paths and raw storage private.',
+    ]),
+    entry('agent.messages.append', 'agent', 'sensitive', ['sessionIds'], false, [
+      'Append Agent messages',
+      'Append attributed content to an allowed Agent session.',
+      'Added content can influence subsequent model input.',
+      'The Host preserves attribution and ordering.',
+    ]),
+    entry('agent.steps.reject', 'agent', 'high-risk', ['sessionIds'], false, [
+      'Reject Agent steps',
+      'Reject an Agent step before it proceeds.',
+      'This can stop or alter Agent execution.',
+      'Only the current allowed step may be rejected.',
+    ]),
+    entry('agent.messages.transform', 'agent', 'high-risk', ['sessionIds'], false, [
+      'Transform Agent messages',
+      'Transform attributed messages before model use.',
+      'This can materially change model input.',
+      'Original order and attribution remain Host controlled.',
+    ]),
+    entry('agent.prompt.section', 'agent', 'sensitive', ['sessionIds'], false, [
+      'Add prompt sections',
+      'Add an attributed section to model input.',
+      'Added text can influence model behavior.',
+      'The Host controls ordering and attribution.',
+    ]),
+    entry('agent.prompt.context', 'agent', 'sensitive', ['sessionIds'], false, [
+      'Add prompt context',
+      'Add attributed context to model input.',
+      'Added context can influence model behavior.',
+      'The Host controls ordering and attribution.',
+    ]),
+    entry('channel.accounts.read', 'channel', 'general', ['channelAccounts', 'channelTenants'], true, [
+      'Read Channel accounts',
+      'List configured Channel account descriptors.',
+      'Account identity and readiness may be visible.',
+      'Credentials and secret references remain private.',
+    ]),
+    entry('channel.accounts.connect', 'channel', 'sensitive', ['channelAccounts', 'channelTenants'], false, [
+      'Connect Channel accounts',
+      'Start a Host-owned Channel account connection.',
+      'The external account may begin receiving events.',
+      'Credentials and transport stay Host owned.',
+    ]),
+    entry(
+      'channel.events.receive',
+      'channel',
+      'sensitive',
+      ['channelAccounts', 'channelTenants', 'channelConversations', 'channelUsers'],
+      false,
+      [
+        'Receive Channel events',
+        'Receive sourced events from allowed Channel identities.',
+        'Events can contain private external conversation content.',
+        'The Host enforces identity, tenant, and conversation scope.',
+      ],
+    ),
+    entry(
+      'channel.events.subscribe',
+      'channel',
+      'sensitive',
+      ['channelAccounts', 'channelTenants', 'channelConversations', 'channelUsers'],
+      false,
+      [
+        'Subscribe to Channel events',
+        'Keep a live subscription to allowed Channel events.',
+        'A subscription can continuously expose external activity.',
+        'The Host owns cancellation and connection lifetime.',
+      ],
+    ),
+    entry(
+      'channel.messages.send',
+      'channel',
+      'high-risk',
+      ['channelAccounts', 'channelTenants', 'channelConversations', 'channelUsers'],
+      false,
+      [
+        'Send Channel messages',
+        'Send content to an external Channel conversation.',
+        'This performs an external action as the connected account.',
+        'Every account and conversation remains explicitly scoped.',
+      ],
+    ),
+    entry(
+      'channel.bindings.read',
+      'channel',
+      'general',
+      ['channelAccounts', 'channelTenants', 'channelConversations'],
+      true,
+      [
+        'Read Channel bindings',
+        'Read mappings between Channel conversations and Platform sessions.',
+        'Bindings reveal cross-system identity relationships.',
+        'Message content and credentials are not included.',
+      ],
+    ),
+    entry(
+      'channel.bindings.write',
+      'channel',
+      'high-risk',
+      ['channelAccounts', 'channelTenants', 'channelConversations'],
+      false,
+      [
+        'Change Channel bindings',
+        'Create or replace conversation-to-session mappings.',
+        'Incorrect bindings can route future messages to the wrong session.',
+        'The Host validates both sides of every binding.',
+      ],
+    ),
+    entry(
+      'channel.attachments.read',
+      'channel',
+      'sensitive',
+      ['channelAccounts', 'channelTenants', 'channelConversations', 'channelUsers'],
+      false,
+      [
+        'Read Channel attachments',
+        'Read attachments from allowed Channel conversations.',
+        'Attachments may contain private files or sensitive data.',
+        'Only Host-fetched content within declared scope is available.',
+      ],
+    ),
+    entry('ui.extension-points.render', 'ui', 'general', ['extensionPoints'], false, [
+      'Render controlled interface contributions',
+      'Render structured contributions at allowed Host extension points.',
+      'The contribution changes visible Host interface content.',
+      'Raw DOM selectors, nodes, scripts, styles, and bridges remain unavailable.',
+    ], {
+      resourceClass: 'dom-rendering',
+      certifiedImplicitApproval: true,
+      recommendedPolicy: 'ask',
+      installPrompt: 'explicit',
+      runtimePrompt: 'dynamic-scope',
+    }),
+    entry('ui.host-dom.read', 'ui', 'sensitive', ['rootIds', 'operations'], false, [
+      'Read bounded Host interface state',
+      'Read bounded, redacted state from allowed Host interface roots.',
+      'Visible user text and interface state may be exposed.',
+      'Only catalog roots, closed operations, bounded projections, and opaque node references are available.',
+    ], { resourceClass: 'host-dom', certifiedImplicitApproval: true }),
+    entry('ui.host-dom.modify', 'ui', 'high-risk', ['rootIds', 'operations'], false, [
+      'Modify bounded Host interface state',
+      'Modify allowed Host interface roots through closed reversible operations.',
+      'Visible content, safe attributes, owned children, or focus may change.',
+      'No raw HTML, selector, style, script, event handler, node, callback, or private bridge is available.',
+    ], {
+      resourceClass: 'host-dom',
+      certifiedImplicitApproval: true,
+      persistentAllow: false,
+      scopeUpgrade: 'strict-expansion',
+      installPrompt: 'explicit',
+      runtimePrompt: 'always',
+    }),
+  ] satisfies readonly CordisXCapabilityRiskCatalogEntry[],
+)
 
 export class CapabilityRiskCatalog {
   readonly version = CORDISX_CAPABILITY_CATALOG_VERSION
@@ -279,8 +385,10 @@ export class CapabilityRiskCatalog {
           throw new Error('ui.extension-points.render must be the catalog-owned certified DOM capability')
         }
       } else if (item.capability === 'ui.host-dom.read' || item.capability === 'ui.host-dom.modify') {
-        if (item.providerFamily !== 'ui' || item.resourceClass !== 'host-dom' || !item.certifiedImplicitApproval
-          || item.maximumScope.allowedDimensions.join(',') !== 'rootIds,operations' || item.maximumScope.unscopedAllowed) {
+        if (
+          item.providerFamily !== 'ui' || item.resourceClass !== 'host-dom' || !item.certifiedImplicitApproval
+          || item.maximumScope.allowedDimensions.join(',') !== 'rootIds,operations' || item.maximumScope.unscopedAllowed
+        ) {
           throw new Error(`${item.capability} must be the catalog-owned bounded Host DOM capability`)
         }
         if (item.capability === 'ui.host-dom.read' && item.sensitivity !== 'sensitive') {
@@ -298,7 +406,9 @@ export class CapabilityRiskCatalog {
       if (!this.#entries.has(capability)) throw new Error(`capability catalog metadata missing: ${capability}`)
     }
     for (const capability of this.#entries.keys()) {
-      if (!accepted.includes(capability)) throw new Error(`capability catalog contains unsupported entry: ${capability}`)
+      if (!accepted.includes(capability)) {
+        throw new Error(`capability catalog contains unsupported entry: ${capability}`)
+      }
     }
   }
 
@@ -315,8 +425,12 @@ export class CapabilityRiskCatalog {
   assertScope(capability: CordisXPermissionCapabilityV4, scope: CordisXPermissionScopeV4): void {
     const item = this.get(capability)
     const dimensions = Object.entries(scope).filter(([, value]) => value !== undefined).map(([key]) => key)
-    const unknown = dimensions.find(key => !item.maximumScope.allowedDimensions.includes(key as CordisXPermissionScopeDimension))
-    if (unknown !== undefined) throw new Error(`${capability} scope dimension ${unknown} exceeds the Host catalog maximum`)
+    const unknown = dimensions.find(key =>
+      !item.maximumScope.allowedDimensions.includes(key as CordisXPermissionScopeDimension)
+    )
+    if (unknown !== undefined) {
+      throw new Error(`${capability} scope dimension ${unknown} exceeds the Host catalog maximum`)
+    }
     if (!item.maximumScope.unscopedAllowed && dimensions.length === 0) {
       throw new Error(`${capability} requires an explicit scope`)
     }
@@ -346,11 +460,13 @@ export class PermissionDecisionEngine {
     } else if (item.sensitivity === 'sensitive') decision = 'allow-once'
     else decision = item.persistentAllow ? 'allow-persistent' : 'allow-once'
 
-    if (decision === 'allow-persistent' && (
-      context.policy === 'ask'
-      && context.providerKind === 'external-provider'
-      && context.providerTrust !== 'configured'
-    )) decision = 'allow-once'
+    if (
+      decision === 'allow-persistent' && (
+        context.policy === 'ask'
+        && context.providerKind === 'external-provider'
+        && context.providerTrust !== 'configured'
+      )
+    ) decision = 'allow-once'
 
     return Object.freeze({
       allowedDecisions: Object.freeze(allowed),
@@ -367,7 +483,9 @@ export interface PermissionAuthorizationPlanInput {
   readonly binding: CordisXPermissionAuthorizationBindingV2
   readonly declarations: readonly CordisXCapabilityDeclarationV2[]
   readonly policies: readonly CordisXPermissionPolicyRecordV2[]
-  readonly contextFor: (declaration: CordisXCapabilityDeclarationV2) => Omit<PermissionDecisionContext, 'policy' | 'scope' | 'required'>
+  readonly contextFor: (
+    declaration: CordisXCapabilityDeclarationV2,
+  ) => Omit<PermissionDecisionContext, 'policy' | 'scope' | 'required'>
 }
 
 export interface PermissionReviewGroups {
@@ -488,14 +606,16 @@ export function buildDomPermissionAuthorizationPlanV3(
   const policy = input.policies.map(item => normalizePermissionPolicyRecordV3(item))
     .find(item => permissionRecordKeyV3(item) === exactKey)?.policy ?? 'ask'
   const certification = input.certification !== undefined
-    && input.certification.source === identity.source
-    && input.certification.pluginId === identity.pluginId
+      && input.certification.source === identity.source
+      && input.certification.pluginId === identity.pluginId
     ? input.certification
     : undefined
   const certifiedImplicitEligible = metadata.resourceClass === 'dom-rendering'
     && metadata.certifiedImplicitApproval
   const authorizationMode = policy === 'ask'
-    ? certification === undefined || !certifiedImplicitEligible ? 'explicit-user' as const : 'certified-implicit' as const
+    ? certification === undefined || !certifiedImplicitEligible
+      ? 'explicit-user' as const
+      : 'certified-implicit' as const
     : 'persistent-policy' as const
   const recommendation = engine.recommend(declaration.name, {
     operation: 'runtime',
@@ -573,13 +693,15 @@ export function buildHostDomPermissionAuthorizationPlanV4(
   const policy = input.policies.map(item => normalizePermissionPolicyRecordV4(item))
     .find(item => permissionRecordKeyV4(item) === exactKey)?.policy ?? 'ask'
   const certification = input.certification !== undefined
-    && input.certification.source === identity.source
-    && input.certification.pluginId === identity.pluginId
+      && input.certification.source === identity.source
+      && input.certification.pluginId === identity.pluginId
     ? input.certification
     : undefined
   const certifiedImplicitEligible = metadata.resourceClass === 'host-dom' && metadata.certifiedImplicitApproval
   const authorizationMode = policy === 'ask'
-    ? certification === undefined || !certifiedImplicitEligible ? 'explicit-user' as const : 'certified-implicit' as const
+    ? certification === undefined || !certifiedImplicitEligible
+      ? 'explicit-user' as const
+      : 'certified-implicit' as const
     : 'persistent-policy' as const
   const recommendation = engine.recommend(declaration.name, {
     operation: 'runtime',
@@ -645,7 +767,7 @@ export function buildPermissionAuthorizationPlanV4(
   const identity = normalizePermissionIdentityV2(input.identity, 'permission v4 identity')
   const binding = normalizePermissionAuthorizationBindingV2(input.binding)
   const certification = input.certification !== undefined
-    && input.certification.source === identity.source && input.certification.pluginId === identity.pluginId
+      && input.certification.source === identity.source && input.certification.pluginId === identity.pluginId
     ? input.certification
     : undefined
   const seen = new Set<CordisXPermissionCapabilityV4>()
@@ -661,7 +783,8 @@ export function buildPermissionAuthorizationPlanV4(
     if (hostDom) {
       securityFingerprint = permissionSecurityFingerprintV4(catalog.versionV4, declaration)
       const target = normalizePermissionPolicyRecordV4({
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v4.schema.json',
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v4.schema.json',
         schemaVersion: 4,
         key: { profileId, identity, capability: declaration.name, scope: declaration.scope, securityFingerprint },
         policy: 'ask',
@@ -673,7 +796,8 @@ export function buildPermissionAuthorizationPlanV4(
       const legacy = normalizeCapabilityDeclarationV2(declaration)
       securityFingerprint = permissionSecurityFingerprint(catalog.version, legacy)
       const target = normalizePermissionPolicyRecordV2({
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v2.schema.json',
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v2.schema.json',
         schemaVersion: 2,
         key: { profileId, identity, capability: legacy.name, scope: legacy.scope, securityFingerprint },
         policy: 'ask',
@@ -735,7 +859,9 @@ export function partitionPermissionReviewPlan(
   plan: CordisXPermissionAuthorizationPlanV2,
   catalog = new CapabilityRiskCatalog(),
 ): PermissionReviewGroups {
-  const batchEligible = plan.declarations.filter(item => catalog.get(item.capability).installPrompt === 'batch-eligible')
+  const batchEligible = plan.declarations.filter(item =>
+    catalog.get(item.capability).installPrompt === 'batch-eligible'
+  )
   const explicit = plan.declarations.filter(item => catalog.get(item.capability).installPrompt === 'explicit')
   return Object.freeze({ batchEligible: Object.freeze(batchEligible), explicit: Object.freeze(explicit) })
 }

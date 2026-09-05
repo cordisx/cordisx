@@ -5,30 +5,33 @@ import { highlightSafeMarkdownCodeBlocks, renderSafeMarkdown } from '../packages
 describe('safe manager Markdown renderer', () => {
   it('renders README structure without interpreting raw HTML', () => {
     const dom = new JSDOM('<!doctype html><html><body></body></html>')
-    const article = renderSafeMarkdown(dom.window.document, [
-      '# Demo',
-      '',
-      'A **trusted** plugin with `slots` and [docs](https://cordisx.github.io/).',
-      '',
-      '- first',
-      '- <img src=x onerror=alert(1)>',
-      '- [x] shipped',
-      '',
-      '1. first step',
-      '2. second step',
-      '',
-      '> A **safe** quote.',
-      '',
-      '| Name | State |',
-      '| --- | --- |',
-      '| Demo | Ready |',
-      '',
-      '---',
-      '',
-      '```html',
-      '<script>alert(1)</script>',
-      '```',
-    ].join('\n'))
+    const article = renderSafeMarkdown(
+      dom.window.document,
+      [
+        '# Demo',
+        '',
+        'A **trusted** plugin with `slots` and [docs](https://cordisx.github.io/).',
+        '',
+        '- first',
+        '- <img src=x onerror=alert(1)>',
+        '- [x] shipped',
+        '',
+        '1. first step',
+        '2. second step',
+        '',
+        '> A **safe** quote.',
+        '',
+        '| Name | State |',
+        '| --- | --- |',
+        '| Demo | Ready |',
+        '',
+        '---',
+        '',
+        '```html',
+        '<script>alert(1)</script>',
+        '```',
+      ].join('\n'),
+    )
 
     expect(article.querySelector('h1')?.textContent).toBe('Demo')
     expect(article.querySelector('strong')?.textContent).toBe('trusted')
@@ -63,7 +66,9 @@ describe('safe manager Markdown renderer', () => {
   })
 
   it('does not project the closing-fence newline as an empty code row', async () => {
-    const dom = new JSDOM('<!doctype html><html><body><article><pre><code data-language="bash">npm run dev\n</code></pre></article></body></html>')
+    const dom = new JSDOM(
+      '<!doctype html><html><body><article><pre><code data-language="bash">npm run dev\n</code></pre></article></body></html>',
+    )
     const article = dom.window.document.querySelector<HTMLElement>('article')!
     await highlightSafeMarkdownCodeBlocks(article, 'dark')
     expect(article.querySelectorAll('.cxm-readme-code-line')).toHaveLength(1)

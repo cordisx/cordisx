@@ -28,34 +28,47 @@ function DraftField({ definition, error, resetVersion, locale, onClearError }: {
   readonly onClearError: () => void
 }) {
   const [value, setValue] = useState(definition.initialValue)
-  useEffect(() => { setValue(definition.initialValue) }, [definition.initialValue, resetVersion])
+  useEffect(() => {
+    setValue(definition.initialValue)
+  }, [definition.initialValue, resetVersion])
   const commit = (next: unknown) => {
     setValue(next)
     definition.onChange(next)
     onClearError()
   }
-  return <HostFieldRow
-    field={definition.field}
-    value={value}
-    changed={!Object.is(value, definition.initialValue)}
-    locale={locale}
-    idPrefix={`draft-${definition.id}`}
-    {...(error === undefined ? {} : { issueText: error })}
-    {...(definition.forceFullWidth === undefined ? {} : { forceFullWidth: definition.forceFullWidth })}
-    {...(definition.controlId === undefined ? {} : { controlId: definition.controlId })}
-    {...(definition.transientSecret === undefined ? {} : { transientSecret: definition.transientSecret })}
-    onChange={commit}
-    onUseDefault={() => { if (definition.field.hasDefault === true) commit(definition.field.defaultValue) }}
-    onRollback={() => commit(definition.initialValue)}
-    onCopyPath={() => {
-      const clipboard = window.navigator.clipboard
-      if (typeof clipboard?.writeText === 'function') void clipboard.writeText(definition.field.path.join('.')).catch(() => undefined)
-    }}
-  />
+  return (
+    <HostFieldRow
+      field={definition.field}
+      value={value}
+      changed={!Object.is(value, definition.initialValue)}
+      locale={locale}
+      idPrefix={`draft-${definition.id}`}
+      {...(error === undefined ? {} : { issueText: error })}
+      {...(definition.forceFullWidth === undefined ? {} : { forceFullWidth: definition.forceFullWidth })}
+      {...(definition.controlId === undefined ? {} : { controlId: definition.controlId })}
+      {...(definition.transientSecret === undefined ? {} : { transientSecret: definition.transientSecret })}
+      onChange={commit}
+      onUseDefault={() => {
+        if (definition.field.hasDefault === true) commit(definition.field.defaultValue)
+      }}
+      onRollback={() => commit(definition.initialValue)}
+      onCopyPath={() => {
+        const clipboard = window.navigator.clipboard
+        if (typeof clipboard?.writeText === 'function') {
+          void clipboard.writeText(definition.field.path.join('.'))
+            .catch(() => undefined)
+        }
+      }}
+    />
+  )
 }
 
 /** Mounts the same React field rows used by plugin configuration into a Host draft surface. */
-export function mountHostDraftFields(container: HTMLElement, definitions: readonly HostDraftFieldDefinition[], locale: string): HostDraftFieldsMount {
+export function mountHostDraftFields(
+  container: HTMLElement,
+  definitions: readonly HostDraftFieldDefinition[],
+  locale: string,
+): HostDraftFieldsMount {
   const root = createRoot(container)
   const errors = new Map<string, string>()
   const resets = new Map<string, number>()
@@ -63,22 +76,28 @@ export function mountHostDraftFields(container: HTMLElement, definitions: readon
   const render = () => {
     if (disposed) return
     const attach = () => container
-    root.render(<ConfigProvider globalConfig={{ attach }}><div className="cxf-form-grid">
-      {definitions.map(definition => {
-        const error = errors.get(definition.id)
-        return <DraftField
-          key={definition.id}
-          definition={definition}
-          locale={locale}
-          resetVersion={resets.get(definition.id) ?? 0}
-          {...(error === undefined ? {} : { error })}
-          onClearError={() => {
-            if (!errors.delete(definition.id)) return
-            render()
-          }}
-        />
-      })}
-    </div></ConfigProvider>)
+    root.render(
+      <ConfigProvider globalConfig={{ attach }}>
+        <div className="cxf-form-grid">
+          {definitions.map(definition => {
+            const error = errors.get(definition.id)
+            return (
+              <DraftField
+                key={definition.id}
+                definition={definition}
+                locale={locale}
+                resetVersion={resets.get(definition.id) ?? 0}
+                {...(error === undefined ? {} : { error })}
+                onClearError={() => {
+                  if (!errors.delete(definition.id)) return
+                  render()
+                }}
+              />
+            )
+          })}
+        </div>
+      </ConfigProvider>,
+    )
   }
   render()
   return {

@@ -28,7 +28,8 @@ export function apply(ctx: Context): void {
     locale: 'en',
     default: true,
     messages: {
-      action: 'Hello from CordisX', command: 'Show hello notification',
+      action: 'Hello from CordisX',
+      command: 'Show hello notification',
       'plugin.name': 'Hello Toolbar',
       'plugin.description': 'Provides a simple greeting action in the workspace toolbar.',
     },
@@ -37,7 +38,8 @@ export function apply(ctx: Context): void {
     namespace: 'hello',
     locale: 'zh-CN',
     messages: {
-      action: '来自 CordisX 的问候', command: '显示问候通知',
+      action: '来自 CordisX 的问候',
+      command: '显示问候通知',
       'plugin.name': '工具栏问候',
       'plugin.description': '在工作区工具栏提供一个简单的问候操作。',
     },
@@ -45,15 +47,16 @@ export function apply(ctx: Context): void {
   ctx.commands.register({ id: 'hello', title: text('command') }, () => {
     console.info('[cordisx] hello-toolbar command invoked')
   })
-  ctx.slots.inject('workspace.toolbar.items', () => ctx.slots.register({
-    name: 'workspace.toolbar.items',
-    id: 'hello',
-    order: 100,
-  }, {
-    anchor: 'workspace.primary',
-    placement: 'menu',
-    label: text('action'),
-    icon: 'host:info',
-    command: { id: 'hello' },
-  }))
+  ctx.slots.inject('workspace.toolbar.items', () =>
+    ctx.slots.register({
+      name: 'workspace.toolbar.items',
+      id: 'hello',
+      order: 100,
+    }, {
+      anchor: 'workspace.primary',
+      placement: 'menu',
+      label: text('action'),
+      icon: 'host:info',
+      command: { id: 'hello' },
+    }))
 }

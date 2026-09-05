@@ -4,15 +4,20 @@ import path from 'node:path'
 import { parseArgs } from 'node:util'
 import WebSocket from 'ws'
 
-const parsed = parseArgs({ options: {
-  port: { type: 'string' },
-  'bundle-source': { type: 'string' },
-  report: { type: 'string' },
-} })
+const parsed = parseArgs({
+  options: {
+    port: { type: 'string' },
+    'bundle-source': { type: 'string' },
+    report: { type: 'string' },
+  },
+})
 const port = Number(parsed.values.port)
 const bundleSource = parsed.values['bundle-source']
 const reportPath = parsed.values.report
-if (!Number.isInteger(port) || port < 1024 || port > 65535 || bundleSource === undefined || !path.isAbsolute(bundleSource) || reportPath === undefined) {
+if (
+  !Number.isInteger(port) || port < 1024 || port > 65535 || bundleSource === undefined || !path.isAbsolute(bundleSource)
+  || reportPath === undefined
+) {
   throw new Error('plugin bundle smoke requires --port, an absolute --bundle-source, and --report')
 }
 
@@ -23,14 +28,20 @@ const target = targets.find(item => item.type === 'page' && item.url === 'app://
 if (target?.webSocketDebuggerUrl === undefined) throw new Error('main Codex app:// target not found')
 
 const socket = new WebSocket(target.webSocketDebuggerUrl)
-await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject) })
+await new Promise((resolve, reject) => {
+  socket.once('open', resolve)
+  socket.once('error', reject)
+})
 let nextId = 1
 const pending = new Map()
 const runtimeExceptions = []
 socket.on('message', data => {
   const message = JSON.parse(data.toString())
   if (message.method === 'Runtime.exceptionThrown') {
-    runtimeExceptions.push(message.params?.exceptionDetails?.exception?.description ?? message.params?.exceptionDetails?.text ?? 'unknown renderer exception')
+    runtimeExceptions.push(
+      message.params?.exceptionDetails?.exception?.description ?? message.params?.exceptionDetails?.text
+        ?? 'unknown renderer exception',
+    )
     return
   }
   if (message.id === undefined) return
@@ -159,7 +170,10 @@ try {
     returnByValue: true,
   })
   if (evaluated.exceptionDetails !== undefined) {
-    throw new Error(evaluated.exceptionDetails.exception?.description ?? evaluated.exceptionDetails.text ?? 'bundle smoke evaluation failed')
+    throw new Error(
+      evaluated.exceptionDetails.exception?.description ?? evaluated.exceptionDetails.text
+        ?? 'bundle smoke evaluation failed',
+    )
   }
   const result = evaluated.result?.value
   const expectedTabs = ['readme', 'members', 'permissions', 'relations', 'records']
@@ -181,7 +195,9 @@ try {
   const report = { kind: 'plugin-bundle-production-smoke-v1', result, assertions, runtimeExceptions }
   await mkdir(path.dirname(path.resolve(reportPath)), { recursive: true })
   await writeFile(path.resolve(reportPath), `${JSON.stringify(report, null, 2)}\n`)
-  if (Object.values(assertions).some(value => value !== true)) throw new Error(`plugin bundle app:// smoke failed: ${JSON.stringify(report)}`)
+  if (Object.values(assertions).some(value => value !== true)) {
+    throw new Error(`plugin bundle app:// smoke failed: ${JSON.stringify(report)}`)
+  }
   console.log(`[cordisx-plugin-bundle-smoke] ${JSON.stringify(report)}`)
 } finally {
   socket.close()

@@ -6,17 +6,34 @@ import type { BrowserOwnerDocumentBridge } from '../packages/cli/src/renderer/ow
 
 describe('entity registry renderer service', () => {
   it('keeps proxy methods bound and closes subscriptions once on generation disposal', async () => {
-    const binding = { profileId: 'profile-a', installationId: 'cx-installation.test', pluginId: 'chatroom', pluginGeneration: 1 }
+    const binding = {
+      profileId: 'profile-a',
+      installationId: 'cx-installation.test',
+      pluginId: 'chatroom',
+      pluginGeneration: 1,
+    }
     const requests: string[] = []
     const bridge = {
       request: async (_token: string, value: Record<string, unknown>) => {
         requests.push(String(value.operation))
-        if (value.operation === 'entity-snapshot') return {
-          $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-registry-snapshot.v1.schema.json',
-          contract: 'cordisx.entity-registry-snapshot/v1', schemaVersion: 1, binding, registryRevision: 3, entities: [],
+        if (value.operation === 'entity-snapshot') {
+          return {
+            $schema:
+              'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-registry-snapshot.v1.schema.json',
+            contract: 'cordisx.entity-registry-snapshot/v1',
+            schemaVersion: 1,
+            binding,
+            registryRevision: 3,
+            entities: [],
+          }
         }
-        if (value.operation === 'entity-subscribe') return {
-          subscriptionId: 'cx-entity-subscription.test', binding, afterRevision: value.afterRevision, replayThrough: 3,
+        if (value.operation === 'entity-subscribe') {
+          return {
+            subscriptionId: 'cx-entity-subscription.test',
+            binding,
+            afterRevision: value.afterRevision,
+            replayThrough: 3,
+          }
         }
         if (value.operation === 'entity-unsubscribe') return { status: 'closed', code: 'unsubscribed' }
         throw new Error('unexpected operation')
@@ -26,11 +43,21 @@ describe('entity registry renderer service', () => {
     const ctx = new Context()
     const fiber = ctx.plugin(CordisXEntityRegistryServiceV1, {
       bridge,
-      principal: { source: 'file:///chatroom.js', pluginId: 'chatroom', moduleGeneration: 'module-one', installationId: binding.installationId, pluginGeneration: binding.pluginGeneration, token: 'secret' },
-      profileId: binding.profileId, pluginGeneration: binding.pluginGeneration, active: () => active,
+      principal: {
+        source: 'file:///chatroom.js',
+        pluginId: 'chatroom',
+        moduleGeneration: 'module-one',
+        installationId: binding.installationId,
+        pluginGeneration: binding.pluginGeneration,
+        token: 'secret',
+      },
+      profileId: binding.profileId,
+      pluginGeneration: binding.pluginGeneration,
+      active: () => active,
     })
     await fiber
-    const registry = (ctx as Context & { readonly entities: InstanceType<typeof CordisXEntityRegistryServiceV1> }).entities
+    const registry =
+      (ctx as Context & { readonly entities: InstanceType<typeof CordisXEntityRegistryServiceV1> }).entities
     const { snapshot, subscribe } = registry
     expect(await snapshot()).toMatchObject({ registryRevision: 3, binding })
     const result = await subscribe(1)
@@ -39,7 +66,10 @@ describe('entity registry renderer service', () => {
     active = false
     await fiber.dispose()
     await expect(result.subscription.closed).resolves.toMatchObject({
-      status: 'closed', code: 'plugin-generation-replaced', subscriptionId: 'cx-entity-subscription.test', binding,
+      status: 'closed',
+      code: 'plugin-generation-replaced',
+      subscriptionId: 'cx-entity-subscription.test',
+      binding,
     })
     await expect(result.subscription.unsubscribe()).resolves.toMatchObject({ code: 'plugin-generation-replaced' })
     expect(requests).toEqual(['entity-snapshot', 'entity-subscribe', 'entity-unsubscribe'])

@@ -1,10 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
-import {
-  type CordisXPluginManifestV1,
-} from '../../packages/cli/src/contracts.js'
-import {
-  type CordisXConnectorRegistrationIdentity,
-} from '../../packages/cli/src/renderer/connectors.js'
+import { type CordisXPluginManifestV1 } from '../../packages/cli/src/contracts.js'
+import { type CordisXConnectorRegistrationIdentity } from '../../packages/cli/src/renderer/connectors.js'
 
 type Scenario = 'flow' | 'unsubscribe' | 'owner-replay' | 'owner-live'
 
@@ -47,12 +43,18 @@ export function connectorProductionPlugin(id: string, scenario: Scenario) {
     capabilities: [{
       name: 'agent.events.read',
       required: false,
-      reason: { key: 'connector.production.fixture', fallback: 'Read the Host Connector fixture during isolated smoke.' },
+      reason: {
+        key: 'connector.production.fixture',
+        fallback: 'Read the Host Connector fixture during isolated smoke.',
+      },
       scope: {},
     }, {
       name: 'agent.messages.append',
       required: false,
-      reason: { key: 'connector.production.fixture.write', fallback: 'Exercise the Host Connector fixture during isolated smoke.' },
+      reason: {
+        key: 'connector.production.fixture.write',
+        fallback: 'Exercise the Host Connector fixture during isolated smoke.',
+      },
       scope: {},
     }],
   } as const satisfies CordisXPluginManifestV1
@@ -68,7 +70,9 @@ export function connectorProductionPlugin(id: string, scenario: Scenario) {
           if (discovery.status === 'denied') return result(id, 'denied')
           if (discovery.status !== 'accepted') return result(id, `failed:${stage}`)
           stage = 'registration'
-          const registration = discovery.snapshot.registrations.find(item => item.registration.connectorId === connectorId)?.registration
+          const registration = discovery.snapshot.registrations.find(item =>
+            item.registration.connectorId === connectorId
+          )?.registration
           if (registration === undefined) return result(id, `failed:${stage}`)
           stage = 'seed'
           const seed = await ctx.connectors.execute(command(registration, `${scenario}-seed`))
@@ -116,17 +120,25 @@ export function connectorProductionPlugin(id: string, scenario: Scenario) {
           const pages = await Promise.all(Array.from({ length: 5 }, async () => await iterator.next()))
           const sequences = pages.flatMap(page => page.value?.events.map(event => event.sequence) ?? [])
           const phases = pages.map(page => page.value?.phase)
-          if (sequences.join(',') !== '0,1,2,3,4' || phases.slice(0, 2).some(phase => phase !== 'replay') || phases.slice(2).some(phase => phase !== 'live')) {
+          if (
+            sequences.join(',') !== '0,1,2,3,4' || phases.slice(0, 2).some(phase => phase !== 'replay')
+            || phases.slice(2).some(phase => phase !== 'live')
+          ) {
             return result(id, 'failed')
           }
           stage = 'flow-terminal'
           result(id, 'replace-ready')
           const terminal = await iterator.next()
           const afterTerminal = await iterator.next()
-          return result(id, terminal.done === false
-            && terminal.value?.events[0]?.type === 'connector.disposed'
-            && terminal.value?.events[0]?.disposeReason === 'generation-replaced'
-            && afterTerminal.done === true ? 'passed' : 'failed')
+          return result(
+            id,
+            terminal.done === false
+              && terminal.value?.events[0]?.type === 'connector.disposed'
+              && terminal.value?.events[0]?.disposeReason === 'generation-replaced'
+              && afterTerminal.done === true
+              ? 'passed'
+              : 'failed',
+          )
         } catch {
           result(id, `failed:${stage}`)
         }

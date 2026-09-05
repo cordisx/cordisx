@@ -1,16 +1,26 @@
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
-import { MARKETPLACE_SOURCES_KEY, OFFICIAL_MARKETPLACE_SOURCE, parseMarketplaceFeed } from '../packages/cli/src/renderer/marketplace.js'
+import {
+  MARKETPLACE_SOURCES_KEY,
+  OFFICIAL_MARKETPLACE_SOURCE,
+  parseMarketplaceFeed,
+} from '../packages/cli/src/renderer/marketplace.js'
 import { installCordisXManager, type ManagerModel, type ManagerSnapshot } from '../packages/cli/src/renderer/manager.js'
 import { managerCopy } from '../packages/cli/src/renderer/ui-copy.js'
 
 const SOURCE = 'https://marketplace.example/feed.json'
-const PLUGIN_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v2.schema.json'
-const FEED_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json'
-const PLUGIN_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v3.schema.json'
-const FEED_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v3.schema.json'
-const OFFICIAL_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-official.v1.schema.json'
-const CERTIFICATION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certification.v1.schema.json'
+const PLUGIN_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v2.schema.json'
+const FEED_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json'
+const PLUGIN_SCHEMA_V3 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v3.schema.json'
+const FEED_SCHEMA_V3 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v3.schema.json'
+const OFFICIAL_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-official.v1.schema.json'
+const CERTIFICATION_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certification.v1.schema.json'
 const EVIDENCE = `https://github.com/cordisx/marketplace/commit/${'b'.repeat(40)}`
 const DIGEST = `sha256:${'a'.repeat(64)}`
 
@@ -154,8 +164,13 @@ function snapshot(locale: 'en' | 'zh-CN'): ManagerSnapshot {
     localeCatalogs: [],
     localizationDiagnostics: [],
     platform: {
-      hostId: 'codex-desktop', hostName: 'Codex Desktop', mode: 'unavailable',
-      supportedCapabilities: [], diagnostics: [], secondConnectionCreated: false, rawBridgeExposed: false,
+      hostId: 'codex-desktop',
+      hostName: 'Codex Desktop',
+      mode: 'unavailable',
+      supportedCapabilities: [],
+      diagnostics: [],
+      secondConnectionCreated: false,
+      rawBridgeExposed: false,
     },
     permissions: [],
   }
@@ -167,7 +182,9 @@ async function settle(): Promise<void> {
 
 describe('Manager Marketplace product list', () => {
   it('uses the standard clickable card, locale projection/search, and no permanent trust warning', async () => {
-    const dom = new JSDOM('<!doctype html><html class="electron-dark"><head></head><body></body></html>', { url: 'https://codex.local/' })
+    const dom = new JSDOM('<!doctype html><html class="electron-dark"><head></head><body></body></html>', {
+      url: 'https://codex.local/',
+    })
     dom.window.localStorage.setItem(MARKETPLACE_SOURCES_KEY, JSON.stringify([SOURCE]))
     let requests = 0
     Object.defineProperty(dom.window, 'fetch', {
@@ -183,12 +200,19 @@ describe('Manager Marketplace product list', () => {
       snapshot: () => state,
       setPluginBlocked: async () => {},
       setPermissionPolicy: async () => {},
-      subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) },
+      subscribe: listener => {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
     }
     const dispose = installCordisXManager(dom.window.document, model)
     try {
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="marketplace"]')!.click()
-      for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-marketplace-plugin]') === null; attempt += 1) await settle()
+      for (
+        let attempt = 0;
+        attempt < 20 && dom.window.document.querySelector('[data-marketplace-plugin]') === null;
+        attempt += 1
+      ) await settle()
 
       const card = dom.window.document.querySelector<HTMLElement>('[data-marketplace-plugin="slot-showcase"]')!
       const primary = card.querySelector<HTMLButtonElement>('.cxc-primary')!
@@ -209,21 +233,36 @@ describe('Manager Marketplace product list', () => {
       expect(tools.querySelector('.cxm-toolbar > [data-marketplace-source-menu]')).not.toBeNull()
       expect(tools.querySelector('.cxm-marketplace-filter-row [data-marketplace-certified-only]')).not.toBeNull()
       expect(tools.querySelector('.cxm-marketplace-filter-row [data-marketplace-official-only]')).not.toBeNull()
-      expect(tools.querySelector('[data-marketplace-certified-only] svg')?.getAttribute('data-host-icon-key')).toBe('trust.certified')
-      expect(tools.querySelector('[data-marketplace-official-only] svg')?.getAttribute('data-host-icon-key')).toBe('trust.official')
-      expect(tools.querySelector('[data-marketplace-certified-only] svg')?.getAttribute('data-host-icon-variant')).toBe('regular')
+      expect(tools.querySelector('[data-marketplace-certified-only] svg')?.getAttribute('data-host-icon-key')).toBe(
+        'trust.certified',
+      )
+      expect(tools.querySelector('[data-marketplace-official-only] svg')?.getAttribute('data-host-icon-key')).toBe(
+        'trust.official',
+      )
+      expect(tools.querySelector('[data-marketplace-certified-only] svg')?.getAttribute('data-host-icon-variant')).toBe(
+        'regular',
+      )
       expect(results.contains(tools)).toBe(false)
-      expect([...dom.window.document.querySelectorAll('a')].some(link => link.textContent?.includes('插件商店文档'))).toBe(false)
+      expect([...dom.window.document.querySelectorAll('a')].some(link => link.textContent?.includes('插件商店文档')))
+        .toBe(false)
       expect(dom.window.document.body.textContent).not.toContain('商店收录、schema 校验和页面展示都不代表')
       expect(dom.window.document.body.textContent).not.toContain('Shows structured CordisX extension points.')
 
       const sourceMenu = tools.querySelector<HTMLButtonElement>('[data-marketplace-source-menu]')!
       expect(sourceMenu.getAttribute('aria-expanded')).toBe('false')
       sourceMenu.click()
-      expect(dom.window.document.querySelector<HTMLElement>(`[data-manager-action-menu="${managerCopy('zh-CN', 'marketplace.source-menu-label')}"]`)).not.toBeNull()
+      expect(
+        dom.window.document.querySelector<HTMLElement>(
+          `[data-manager-action-menu="${managerCopy('zh-CN', 'marketplace.source-menu-label')}"]`,
+        ),
+      ).not.toBeNull()
       expect(sourceMenu.getAttribute('aria-expanded')).toBe('true')
       dom.window.document.querySelector<HTMLButtonElement>('[data-manager-menu-action="manage"]')!.click()
-      for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-marketplace-source-page="index"]') === null; attempt += 1) await settle()
+      for (
+        let attempt = 0;
+        attempt < 20 && dom.window.document.querySelector('[data-marketplace-source-page="index"]') === null;
+        attempt += 1
+      ) await settle()
       expect(dom.window.document.querySelector('[data-marketplace-source-page="index"]')).not.toBeNull()
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="marketplace"]')!.click()
 
@@ -238,7 +277,9 @@ describe('Manager Marketplace product list', () => {
       search.value = 'Slot Showcase'
       search.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
       expect(dom.window.document.querySelector('[data-marketplace-plugin="slot-showcase"]')).not.toBeNull()
-      const fallbackSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="marketplace"]')!
+      const fallbackSearch = dom.window.document.querySelector<HTMLInputElement>(
+        '[data-collection-search="marketplace"]',
+      )!
       fallbackSearch.value = 'CordisX Team'
       fallbackSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
       expect(dom.window.document.querySelector('[data-marketplace-plugin="slot-showcase"]')).not.toBeNull()
@@ -249,16 +290,21 @@ describe('Manager Marketplace product list', () => {
       enSearch.value = 'Slot Showcase'
       enSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
       expect(dom.window.document.querySelector('.cxc-title')?.textContent).toBe('Slot Showcase')
-      expect(dom.window.document.querySelector('.cxc-description')?.textContent).toBe('Shows structured CordisX extension points.')
+      expect(dom.window.document.querySelector('.cxc-description')?.textContent).toBe(
+        'Shows structured CordisX extension points.',
+      )
       expect(requests).toBe(1)
 
       dom.window.document.documentElement.className = 'electron-light'
       await settle()
-      expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')?.dataset.cordisxAppTheme).toBe('light')
+      expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')?.dataset.cordisxAppTheme)
+        .toBe('light')
 
       dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-plugin] .cxc-primary')!.click()
       expect(dom.window.document.querySelector('[data-manager-page-route^="marketplace:"]')).not.toBeNull()
-      expect(dom.window.document.querySelector('.cxm-detail-description')?.textContent).toBe('Shows structured CordisX extension points.')
+      expect(dom.window.document.querySelector('.cxm-detail-description')?.textContent).toBe(
+        'Shows structured CordisX extension points.',
+      )
       expect(dom.window.document.body.textContent).not.toContain('外部链接不代表代码审计')
     } finally {
       dispose()
@@ -267,12 +313,16 @@ describe('Manager Marketplace product list', () => {
   })
 
   it('keeps Official and Certified separate, ranks within text tiers, filters eligibility, and explains provenance accessibly', async () => {
-    expect(() => parseMarketplaceFeed(trustedFeed, {
-      feedUrl: OFFICIAL_MARKETPLACE_SOURCE,
-      trustedRoots: [OFFICIAL_MARKETPLACE_SOURCE],
-      now: '2026-08-24T13:00:00Z',
-    })).not.toThrow()
-    const dom = new JSDOM('<!doctype html><html class="electron-dark"><head></head><body></body></html>', { url: 'https://codex.local/' })
+    expect(() =>
+      parseMarketplaceFeed(trustedFeed, {
+        feedUrl: OFFICIAL_MARKETPLACE_SOURCE,
+        trustedRoots: [OFFICIAL_MARKETPLACE_SOURCE],
+        now: '2026-08-24T13:00:00Z',
+      })
+    ).not.toThrow()
+    const dom = new JSDOM('<!doctype html><html class="electron-dark"><head></head><body></body></html>', {
+      url: 'https://codex.local/',
+    })
     dom.window.localStorage.setItem(MARKETPLACE_SOURCES_KEY, JSON.stringify([OFFICIAL_MARKETPLACE_SOURCE]))
     Object.defineProperty(dom.window, 'fetch', {
       configurable: true,
@@ -289,10 +339,19 @@ describe('Manager Marketplace product list', () => {
     const dispose = installCordisXManager(dom.window.document, model)
     try {
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="marketplace"]')!.click()
-      for (let attempt = 0; attempt < 20 && dom.window.document.querySelectorAll('[data-marketplace-plugin]').length < 4; attempt += 1) await settle()
+      for (
+        let attempt = 0;
+        attempt < 20 && dom.window.document.querySelectorAll('[data-marketplace-plugin]').length < 4;
+        attempt += 1
+      ) await settle()
 
       const rows = [...dom.window.document.querySelectorAll<HTMLElement>('[data-marketplace-plugin]')]
-      expect(rows.map(row => row.dataset.marketplacePlugin)).toEqual(['official-only', 'trusted', 'community-certified', 'exact-match'])
+      expect(rows.map(row => row.dataset.marketplacePlugin)).toEqual([
+        'official-only',
+        'trusted',
+        'community-certified',
+        'exact-match',
+      ])
       expect(dom.window.document.querySelector('[data-marketplace-plugin="blocked"]')).toBeNull()
 
       const trusted = dom.window.document.querySelector<HTMLElement>('[data-marketplace-plugin="trusted"]')!
@@ -313,7 +372,9 @@ describe('Manager Marketplace product list', () => {
       expect(dom.window.document.querySelector('[role="tooltip"]')?.textContent).not.toContain('信任加权')
       expect(trustedPrimary.getAttribute('aria-describedby')).toMatch(/^cordisx-host-tooltip-/)
       trustedPrimary.blur()
-      const community = dom.window.document.querySelector<HTMLElement>('[data-marketplace-plugin="community-certified"]')!
+      const community = dom.window.document.querySelector<HTMLElement>(
+        '[data-marketplace-plugin="community-certified"]',
+      )!
       expect(community.dataset.marketplaceOfficial).toBe('false')
       expect(community.dataset.marketplaceCertified).toBe('true')
       expect(community.querySelector('.cxc-status')?.getAttribute('aria-label')).toContain('Certified')
@@ -330,17 +391,39 @@ describe('Manager Marketplace product list', () => {
       const filter = dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-certified-only]')!
       expect(filter.getAttribute('aria-pressed')).toBe('false')
       filter.click()
-      expect(dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-certified-only]')?.getAttribute('aria-pressed')).toBe('true')
-      expect(dom.window.document.querySelector('[data-marketplace-certified-only] svg')?.getAttribute('data-host-icon-state')).toBe('active')
-      expect(dom.window.document.querySelector('[data-marketplace-certified-only] svg')?.getAttribute('data-host-icon-variant')).toBe('filled')
-      expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-marketplace-plugin]')].map(row => row.dataset.marketplacePlugin)).toEqual(['trusted'])
+      expect(
+        dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-certified-only]')?.getAttribute(
+          'aria-pressed',
+        ),
+      ).toBe('true')
+      expect(
+        dom.window.document.querySelector('[data-marketplace-certified-only] svg')?.getAttribute(
+          'data-host-icon-state',
+        ),
+      ).toBe('active')
+      expect(
+        dom.window.document.querySelector('[data-marketplace-certified-only] svg')?.getAttribute(
+          'data-host-icon-variant',
+        ),
+      ).toBe('filled')
+      expect(
+        [...dom.window.document.querySelectorAll<HTMLElement>('[data-marketplace-plugin]')].map(row =>
+          row.dataset.marketplacePlugin
+        ),
+      ).toEqual(['trusted'])
 
-      const filteredSearch = dom.window.document.querySelector<HTMLInputElement>('[data-collection-search="marketplace"]')!
+      const filteredSearch = dom.window.document.querySelector<HTMLInputElement>(
+        '[data-collection-search="marketplace"]',
+      )!
       filteredSearch.value = ''
       filteredSearch.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
       dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-plugin="trusted"] .cxc-primary')!.click()
-      const officialDetail = dom.window.document.querySelector<HTMLElement>('[data-marketplace-trust-dimension="official"]')!
-      const certifiedDetail = dom.window.document.querySelector<HTMLElement>('[data-marketplace-trust-dimension="certified"]')!
+      const officialDetail = dom.window.document.querySelector<HTMLElement>(
+        '[data-marketplace-trust-dimension="official"]',
+      )!
+      const certifiedDetail = dom.window.document.querySelector<HTMLElement>(
+        '[data-marketplace-trust-dimension="certified"]',
+      )!
       expect(officialDetail.textContent).toContain('Created and maintained by CordisX.')
       expect(officialDetail.textContent).toContain('never changes PermissionBroker decisions')
       expect(officialDetail.textContent).not.toContain('DOM/render')

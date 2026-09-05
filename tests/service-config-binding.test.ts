@@ -40,9 +40,13 @@ describe('browser service configuration bridge', () => {
     globals.__cordisxServiceConfigRequestV1 = vi.fn(payload => {
       const request = JSON.parse(payload) as { readonly requestId: string }
       calls += 1
-      queueMicrotask(() => globals.__cordisxServiceConfigReceiveV1?.(JSON.stringify(calls === 1
-        ? { requestId: request.requestId, ok: false, code: 'unavailable' }
-        : { requestId: request.requestId, ok: true, value: [] })))
+      queueMicrotask(() =>
+        globals.__cordisxServiceConfigReceiveV1?.(JSON.stringify(
+          calls === 1
+            ? { requestId: request.requestId, ok: false, code: 'unavailable' }
+            : { requestId: request.requestId, ok: true, value: [] },
+        ))
+      )
     })
     const bridge = BrowserServiceConfigBridge.connect('token', 'smoke', 'generation')
     await expect(bridge.list('cli-proxy-api')).resolves.toEqual([])

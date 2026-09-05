@@ -73,11 +73,11 @@ CordisX Manager. Configuration applies on plugin restart because changing the
 data source replaces the session provider, subscriptions, history cursor/tail
 timer, and plugin-owned pending contributions as one fiber-owned lifecycle.
 
-| Setting | Default | Allowed values | Purpose |
-| --- | --- | --- | --- |
-| `mode` | `live` | `live`, `historical`, `fixture` | Select the public live ledger, Host-brokered history merged with live observations, or deterministic fixture data. |
-| `historyPageSize` | `100` | `25`–`500`, step `25` | Set the number of historical records requested per opaque Host page. It is used only by historical mode. |
-| `timelineWindowSize` | `500` | `50`–`500`, step `50` | Bound the number of merged records retained by the current Timeline projection. |
+| Setting              | Default | Allowed values                  | Purpose                                                                                                            |
+| -------------------- | ------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `mode`               | `live`  | `live`, `historical`, `fixture` | Select the public live ledger, Host-brokered history merged with live observations, or deterministic fixture data. |
+| `historyPageSize`    | `100`   | `25`–`500`, step `25`           | Set the number of historical records requested per opaque Host page. It is used only by historical mode.           |
+| `timelineWindowSize` | `500`   | `50`–`500`, step `50`           | Bound the number of merged records retained by the current Timeline projection.                                    |
 
 `live` does not request local history. `historical` combines imported evidence
 with public live observations in the same deduplicated Timeline. `fixture`

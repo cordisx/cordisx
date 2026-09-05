@@ -8,9 +8,16 @@ import type { ManagerContentAgentDefinitionTarget } from '../packages/cli/src/re
 
 function item(overrides: Partial<ManagerSettingsNavigationItemSnapshot> = {}): ManagerSettingsNavigationItemSnapshot {
   return {
-    id: 'chatroom:team', owner: 'chatroom', group: 'before-settings', order: 10,
-    disabled: false, title: 'Team Architecture', description: 'Entities',
-    pageTitle: 'Team Architecture', pageDescription: 'Entities', icon: 'host:layers',
+    id: 'chatroom:team',
+    owner: 'chatroom',
+    group: 'before-settings',
+    order: 10,
+    disabled: false,
+    title: 'Team Architecture',
+    description: 'Entities',
+    pageTitle: 'Team Architecture',
+    pageDescription: 'Entities',
+    icon: 'host:layers',
     route: { id: 'team', params: { profile: 'work', view: 'entities' } },
     ...overrides,
   }
@@ -18,7 +25,8 @@ function item(overrides: Partial<ManagerSettingsNavigationItemSnapshot> = {}): M
 
 function target(overrides: Partial<ManagerContentAgentDefinitionTarget> = {}): ManagerContentAgentDefinitionTarget {
   return {
-    owner: 'chatroom', generation: { pluginId: 'chatroom', moduleGeneration: 'g1' },
+    owner: 'chatroom',
+    generation: { pluginId: 'chatroom', moduleGeneration: 'g1' },
     identity: { agentId: 'lead', revision: 'sha256:r1' },
     parent: { id: 'team', params: { view: 'entities', profile: 'work' } },
     route: { id: 'entity-overview', params: { entityId: 'lead' } },
@@ -40,7 +48,8 @@ describe('Host Manager exact Agent-definition navigation', () => {
     expect(resolveHostManagerAgentDefinitionOpenRequest(target({ parent: undefined }), [item()])).toBeUndefined()
     expect(resolveHostManagerAgentDefinitionOpenRequest(target(), [item({ disabled: true })])).toBeUndefined()
     expect(resolveHostManagerAgentDefinitionOpenRequest(target(), [item({ owner: 'other' })])).toBeUndefined()
-    expect(resolveHostManagerAgentDefinitionOpenRequest(target(), [item(), item({ id: 'chatroom:duplicate' })])).toBeUndefined()
+    expect(resolveHostManagerAgentDefinitionOpenRequest(target(), [item(), item({ id: 'chatroom:duplicate' })]))
+      .toBeUndefined()
   })
 
   it('delivers one cloned request to the single Manager modal binding', () => {

@@ -9,7 +9,10 @@ import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { defaultUiPlaygroundConfig } from '../packages/cli/src/playground/defaults.js'
 import { startUiPlayground } from '../packages/cli/src/playground/server.js'
 import { createPlaygroundSession } from '../packages/cli/src/playground/session.js'
-import { activatePlaygroundReviewNavigation, authorizePlaygroundReviewNavigation } from '../packages/cli/src/playground/client/review-navigation.js'
+import {
+  activatePlaygroundReviewNavigation,
+  authorizePlaygroundReviewNavigation,
+} from '../packages/cli/src/playground/client/review-navigation.js'
 import {
   clearPlaygroundSimulatorSessionRegistry,
   subscribePlaygroundTaskLocation,
@@ -19,8 +22,13 @@ import { createSidebarItem } from '../packages/cli/src/renderer/host-ui/SidebarI
 import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
 
 const defaultPluginIds = [
-  'slot-showcase', 'hello-toolbar', 'form-schema-gallery', 'settings-tab-demo',
-  'console-showcase', 'channel', 'cli-proxy-api',
+  'slot-showcase',
+  'hello-toolbar',
+  'form-schema-gallery',
+  'settings-tab-demo',
+  'console-showcase',
+  'channel',
+  'cli-proxy-api',
 ]
 
 describe('UI Playground', () => {
@@ -33,12 +41,27 @@ describe('UI Playground', () => {
           { id: 'other', source: 'file:///plugins/other.ts', status: 'active' },
         ],
         registrations: [
-          { owner: 'other', qualifiedId: 'other:row', surface: 'sidebar.navigation.items', authorized: false, pointPolicyReason: 'permission.review-pending' },
-          { owner: 'chatroom', qualifiedId: 'chatroom:chatroom', surface: 'sidebar.navigation.items', authorized: false, pointPolicyReason: 'permission.review-pending', item: { route: { id: 'new-room' } } },
+          {
+            owner: 'other',
+            qualifiedId: 'other:row',
+            surface: 'sidebar.navigation.items',
+            authorized: false,
+            pointPolicyReason: 'permission.review-pending',
+          },
+          {
+            owner: 'chatroom',
+            qualifiedId: 'chatroom:chatroom',
+            surface: 'sidebar.navigation.items',
+            authorized: false,
+            pointPolicyReason: 'permission.review-pending',
+            item: { route: { id: 'new-room' } },
+          },
         ],
         navigation: { routes: [{ owner: 'chatroom', id: 'new-room', definition: { outlet: 'main' } }] },
       }),
-      setExtensionPointPolicies: async (...args: unknown[]) => { calls.push(args) },
+      setExtensionPointPolicies: async (...args: unknown[]) => {
+        calls.push(args)
+      },
     }
     await authorizePlaygroundReviewNavigation(runtime, 'chatroom:chatroom')
     expect(calls).toEqual([['file:///plugins/chatroom.ts', 'chatroom', [
@@ -53,12 +76,26 @@ describe('UI Playground', () => {
       snapshot: () => ({
         plugins: [{ id: 'chatroom', source: 'file:///plugins/chatroom.ts', status: 'active' }],
         registrations: [
-          { owner: 'chatroom', qualifiedId: 'chatroom:chatroom', surface: 'sidebar.navigation.items', authorized: false, pointPolicyReason: 'permission.policy-denied' },
-          { owner: 'chatroom', qualifiedId: 'chatroom:toolbar', surface: 'workspace.toolbar.items', authorized: false, pointPolicyReason: 'permission.review-pending' },
+          {
+            owner: 'chatroom',
+            qualifiedId: 'chatroom:chatroom',
+            surface: 'sidebar.navigation.items',
+            authorized: false,
+            pointPolicyReason: 'permission.policy-denied',
+          },
+          {
+            owner: 'chatroom',
+            qualifiedId: 'chatroom:toolbar',
+            surface: 'workspace.toolbar.items',
+            authorized: false,
+            pointPolicyReason: 'permission.review-pending',
+          },
         ],
         navigation: { routes: [] },
       }),
-      setExtensionPointPolicies: async (...args: unknown[]) => { calls.push(args) },
+      setExtensionPointPolicies: async (...args: unknown[]) => {
+        calls.push(args)
+      },
     }
     await authorizePlaygroundReviewNavigation(runtime, 'chatroom:chatroom')
     await authorizePlaygroundReviewNavigation(runtime, 'chatroom:toolbar')
@@ -71,8 +108,12 @@ describe('UI Playground', () => {
       snapshot: () => ({
         plugins: [{ id: 'chatroom', source: 'file:///plugins/chatroom.ts', status: 'active' }],
         registrations: [{
-          owner: 'chatroom', qualifiedId: 'chatroom:chatroom', surface: 'sidebar.navigation.items',
-          authorized: false, pointPolicyReason: 'permission.review-pending', item: { route: { id: 'new-room' } },
+          owner: 'chatroom',
+          qualifiedId: 'chatroom:chatroom',
+          surface: 'sidebar.navigation.items',
+          authorized: false,
+          pointPolicyReason: 'permission.review-pending',
+          item: { route: { id: 'new-room' } },
         }],
         navigation: { routes: [{ owner: 'chatroom', id: 'new-room', definition: { outlet: 'main' } }] },
       }),
@@ -81,7 +122,9 @@ describe('UI Playground', () => {
         throw new Error('atomic policy replacement unavailable')
       },
     }
-    await expect(authorizePlaygroundReviewNavigation(runtime, 'chatroom:chatroom')).rejects.toThrow('atomic policy replacement unavailable')
+    await expect(authorizePlaygroundReviewNavigation(runtime, 'chatroom:chatroom')).rejects.toThrow(
+      'atomic policy replacement unavailable',
+    )
     expect(calls).toEqual([['file:///plugins/chatroom.ts', 'chatroom', [
       { pointId: 'sidebar.navigation.items', policy: 'allow' },
       { pointId: 'main', policy: 'allow' },
@@ -89,12 +132,22 @@ describe('UI Playground', () => {
   })
 
   it('restores the Host outlet before a Room route projects during Task history back and forward', async () => {
-    const dom = new JSDOM('<!doctype html><body><div id="root"><main data-host-seats><div data-cordisx-playground-seat="main"></div></main></div></body>', {
-      url: 'http://127.0.0.1/',
-    })
+    const dom = new JSDOM(
+      '<!doctype html><body><div id="root"><main data-host-seats><div data-cordisx-playground-seat="main"></div></main></div></body>',
+      {
+        url: 'http://127.0.0.1/',
+      },
+    )
     const roomEntry = {
-      key: 'room', idx: 1,
-      __cordisxRouteV1: { schemaVersion: 1, owner: 'chatroom', routeId: 'chatroom:room', outlet: 'main', params: { roomId: 'room-1' } },
+      key: 'room',
+      idx: 1,
+      __cordisxRouteV1: {
+        schemaVersion: 1,
+        owner: 'chatroom',
+        routeId: 'chatroom:room',
+        outlet: 'main',
+        params: { roomId: 'room-1' },
+      },
     }
     dom.window.history.replaceState(roomEntry, '', '/')
     const root = dom.window.document.getElementById('root')!
@@ -106,7 +159,9 @@ describe('UI Playground', () => {
     dom.window.addEventListener('popstate', () => {
       const route = dom.window.history.state?.__cordisxRouteV1
       const outlet = dom.window.document.querySelector('[data-cordisx-playground-seat="main"]')
-      if (route?.params?.roomId === 'room-1' && outlet !== null) outlet.innerHTML = '<article data-room-page="room-1">Room one</article>'
+      if (route?.params?.roomId === 'room-1' && outlet !== null) {
+        outlet.innerHTML = '<article data-room-page="room-1">Room one</article>'
+      }
     })
 
     dom.window.history.pushState({ key: 'task', idx: 2 }, '', '/playground/simulator/tasks/Lead')
@@ -142,11 +197,14 @@ describe('UI Playground', () => {
   it('enters an exact configured review navigation row without selecting a debug fixture', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-review-navigation-'))
     const configPath = path.join(root, 'cordisx.config.json')
-    await writeFile(configPath, JSON.stringify({
-      version: 1,
-      playground: { name: 'External review', reviewNavigationItem: 'chatroom:chatroom' },
-      plugins: [],
-    }))
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        playground: { name: 'External review', reviewNavigationItem: 'chatroom:chatroom' },
+        plugins: [],
+      }),
+    )
     const session = await createPlaygroundSession(configPath)
     expect(session.fixture).toEqual({
       name: 'External review',
@@ -154,12 +212,27 @@ describe('UI Playground', () => {
       reviewNavigationItem: 'chatroom:chatroom',
     })
 
-    const dom = new JSDOM('<!doctype html><body><nav data-cordisx-playground-surface="sidebar.navigation.items"></nav></body>', { url: 'http://127.0.0.1/' })
+    const dom = new JSDOM(
+      '<!doctype html><body><nav data-cordisx-playground-surface="sidebar.navigation.items"></nav></body>',
+      { url: 'http://127.0.0.1/' },
+    )
     let exactActivations = 0
     let adjacentActivations = 0
     const dispose = activatePlaygroundReviewNavigation(dom.window.document, session.fixture.reviewNavigationItem!)
-    const adjacent = createSidebarItem(dom.window.document, { id: 'chatroom:other', label: 'Other', onActivate: () => { adjacentActivations += 1 } })
-    const exact = createSidebarItem(dom.window.document, { id: 'chatroom:chatroom', label: 'New room', onActivate: () => { exactActivations += 1 } })
+    const adjacent = createSidebarItem(dom.window.document, {
+      id: 'chatroom:other',
+      label: 'Other',
+      onActivate: () => {
+        adjacentActivations += 1
+      },
+    })
+    const exact = createSidebarItem(dom.window.document, {
+      id: 'chatroom:chatroom',
+      label: 'New room',
+      onActivate: () => {
+        exactActivations += 1
+      },
+    })
     dom.window.document.querySelector('nav')?.append(adjacent.element, exact.element)
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(exactActivations).toBe(1)
@@ -171,22 +244,42 @@ describe('UI Playground', () => {
   })
 
   it('preserves existing plugin and Host task history entries during review boot', () => {
-    const plugin = new JSDOM('<!doctype html><body><nav><div data-sidebar-item="chatroom:chatroom"><button class="cxsi-primary">New room</button></div></nav></body>', { url: 'http://127.0.0.1/' })
-    plugin.window.history.replaceState({
-      __cordisxRouteV1: { schemaVersion: 1, owner: 'chatroom', routeId: 'chatroom:room', outlet: 'main', params: { roomId: 'room-2' } },
-    }, '', '/')
+    const plugin = new JSDOM(
+      '<!doctype html><body><nav><div data-sidebar-item="chatroom:chatroom"><button class="cxsi-primary">New room</button></div></nav></body>',
+      { url: 'http://127.0.0.1/' },
+    )
+    plugin.window.history.replaceState(
+      {
+        __cordisxRouteV1: {
+          schemaVersion: 1,
+          owner: 'chatroom',
+          routeId: 'chatroom:room',
+          outlet: 'main',
+          params: { roomId: 'room-2' },
+        },
+      },
+      '',
+      '/',
+    )
     let pluginActivations = 0
-    plugin.window.document.querySelector('button')?.addEventListener('click', () => { pluginActivations += 1 })
+    plugin.window.document.querySelector('button')?.addEventListener('click', () => {
+      pluginActivations += 1
+    })
     activatePlaygroundReviewNavigation(plugin.window.document, 'chatroom:chatroom')
     expect(pluginActivations).toBe(0)
     expect(plugin.window.history.state.__cordisxRouteV1.params.roomId).toBe('room-2')
     plugin.window.close()
 
-    const task = new JSDOM('<!doctype html><body><nav><div data-sidebar-item="chatroom:chatroom"><button class="cxsi-primary">New room</button></div></nav></body>', {
-      url: 'http://127.0.0.1/playground/simulator/tasks/Simulator%20Task%201',
-    })
+    const task = new JSDOM(
+      '<!doctype html><body><nav><div data-sidebar-item="chatroom:chatroom"><button class="cxsi-primary">New room</button></div></nav></body>',
+      {
+        url: 'http://127.0.0.1/playground/simulator/tasks/Simulator%20Task%201',
+      },
+    )
     let taskActivations = 0
-    task.window.document.querySelector('button')?.addEventListener('click', () => { taskActivations += 1 })
+    task.window.document.querySelector('button')?.addEventListener('click', () => {
+      taskActivations += 1
+    })
     activatePlaygroundReviewNavigation(task.window.document, 'chatroom:chatroom')
     expect(taskActivations).toBe(0)
     expect(task.window.location.pathname).toBe('/playground/simulator/tasks/Simulator%20Task%201')
@@ -196,11 +289,14 @@ describe('UI Playground', () => {
   it('rejects a non-qualified Playground review navigation target', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-review-navigation-invalid-'))
     const configPath = path.join(root, 'cordisx.config.json')
-    await writeFile(configPath, JSON.stringify({
-      version: 1,
-      playground: { reviewNavigationItem: 'chatroom' },
-      plugins: [],
-    }))
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        playground: { reviewNavigationItem: 'chatroom' },
+        plugins: [],
+      }),
+    )
     await expect(createPlaygroundSession(configPath)).rejects.toThrow(
       'playground.reviewNavigationItem must be an exact owner-qualified contribution id',
     )
@@ -214,7 +310,9 @@ describe('UI Playground', () => {
       readFile(path.resolve('packages/cli/src/playground/client/styles.css'), 'utf8'),
     ])
 
-    expect(app).toContain('<span className="pg-manager-anchor" data-cordisx-playground-manager-trigger aria-hidden="true" />')
+    expect(app).toContain(
+      '<span className="pg-manager-anchor" data-cordisx-playground-manager-trigger aria-hidden="true" />',
+    )
     expect(app.match(/data-cordisx-playground-manager-trigger/g)).toHaveLength(1)
     expect(app.indexOf('data-cordisx-playground-manager-trigger')).toBeLessThan(app.indexOf('action.new'))
     expect(manager).toContain("id: 'host.manager'")
@@ -224,7 +322,9 @@ describe('UI Playground', () => {
     expect(styles).not.toContain('.pg-brand-row')
     expect(styles).toContain('.pg-sidebar .cxsi-brand-mark')
     expect(styles).not.toContain('.pg-sidebar-footer .cxr-trigger-seat')
-    expect(styles).toContain('html[data-theme="light"] .pg-sidebar .cxsi-brand-mark > .cxr-brand-mark-light { display: block; }')
+    expect(styles).toContain(
+      'html[data-theme="light"] .pg-sidebar .cxsi-brand-mark > .cxr-brand-mark-light { display: block; }',
+    )
   })
 
   it('uses one Host sidebar primitive and one accessible sidebar environment menu', async () => {
@@ -236,7 +336,7 @@ describe('UI Playground', () => {
       readFile(path.resolve('packages/cli/src/renderer/host-ui/HostMenu.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/environment.ts'), 'utf8'),
     ])
-    expect(app).toContain("createSidebarItem(document")
+    expect(app).toContain('createSidebarItem(document')
     expect(adapter).toContain('createSidebarItem(this.document')
     expect(app).toContain('id="action.new"')
     expect(app).toContain('data-cordisx-playground-surface="sidebar.navigation.items"')
@@ -288,7 +388,7 @@ describe('UI Playground', () => {
     expect(app).toContain('fixture.reviewNavigationItem === undefined')
     expect(app).toContain("en ? 'Playground fixtures' : 'Playground 测试场景'")
     expect(app).not.toContain('pg-simulator-task-list')
-    expect(app).toContain("fixture.reviewNavigationItem === undefined")
+    expect(app).toContain('fixture.reviewNavigationItem === undefined')
     expect(seats).toContain('Product pages are supplied only by plugins')
     expect(seats).not.toContain('AgentConversationRenderer')
     expect(styles).not.toContain('插件导航贡献会显示在这里')
@@ -298,13 +398,40 @@ describe('UI Playground', () => {
 
   it('renders brand, built-in, contributed, and recent rows with one readable semantic primitive', async () => {
     const styles = await readFile(path.resolve('packages/cli/src/playground/client/styles.css'), 'utf8')
-    const dom = new JSDOM(`<!doctype html><html data-theme="dark"><head><style>${styles}</style></head><body><aside class="pg-sidebar"></aside></body></html>`, { url: 'http://127.0.0.1/' })
+    const dom = new JSDOM(
+      `<!doctype html><html data-theme="dark"><head><style>${styles}</style></head><body><aside class="pg-sidebar"></aside></body></html>`,
+      { url: 'http://127.0.0.1/' },
+    )
     let activations = 0
     const brandMark = dom.window.document.createElement('span')
     brandMark.className = 'cxsi-brand-mark'
-    const brand = createSidebarItem(dom.window.document, { id: 'brand', label: 'CordisX', secondary: 'UI Playground', iconElement: brandMark, onActivate: () => { activations += 1 } })
-    const single = createSidebarItem(dom.window.document, { id: 'built-in', label: 'Playground', icon: 'host:playground', onActivate: () => { activations += 1 } })
-    const recent = createSidebarItem(dom.window.document, { id: 'recent', label: 'Room', secondary: 'Latest task', icon: 'host:history', selected: true, onActivate: () => { activations += 1 } })
+    const brand = createSidebarItem(dom.window.document, {
+      id: 'brand',
+      label: 'CordisX',
+      secondary: 'UI Playground',
+      iconElement: brandMark,
+      onActivate: () => {
+        activations += 1
+      },
+    })
+    const single = createSidebarItem(dom.window.document, {
+      id: 'built-in',
+      label: 'Playground',
+      icon: 'host:playground',
+      onActivate: () => {
+        activations += 1
+      },
+    })
+    const recent = createSidebarItem(dom.window.document, {
+      id: 'recent',
+      label: 'Room',
+      secondary: 'Latest task',
+      icon: 'host:history',
+      selected: true,
+      onActivate: () => {
+        activations += 1
+      },
+    })
     dom.window.document.querySelector('.pg-sidebar')?.append(brand.element, single.element, recent.element)
     expect(brand.primary.classList.contains('cxsi-primary')).toBe(true)
     expect(single.primary.classList.contains('cxsi-primary')).toBe(true)
@@ -317,15 +444,27 @@ describe('UI Playground', () => {
     const darkSelected = dom.window.getComputedStyle(recent.primary).color
     expect(darkUnselected).toBe('var(--pg-muted)')
     expect(darkSelected).toBe('var(--pg-text)')
-    expect(dom.window.getComputedStyle(dom.window.document.documentElement).getPropertyValue('--pg-muted').trim()).toBe('#999')
-    expect(dom.window.getComputedStyle(dom.window.document.documentElement).getPropertyValue('--pg-text').trim()).toBe('#ececec')
+    expect(dom.window.getComputedStyle(dom.window.document.documentElement).getPropertyValue('--pg-muted').trim()).toBe(
+      '#999',
+    )
+    expect(dom.window.getComputedStyle(dom.window.document.documentElement).getPropertyValue('--pg-text').trim()).toBe(
+      '#ececec',
+    )
     expect(single.primary.querySelector('svg')?.getAttribute('fill') ?? '').not.toMatch(/black|#000(?:000)?/i)
-    expect([...single.primary.querySelectorAll('[fill], [stroke]')].map(node => `${node.getAttribute('fill')} ${node.getAttribute('stroke')}`).join(' ')).not.toMatch(/black|#000(?:000)?/i)
+    expect(
+      [...single.primary.querySelectorAll('[fill], [stroke]')].map(node =>
+        `${node.getAttribute('fill')} ${node.getAttribute('stroke')}`
+      ).join(' '),
+    ).not.toMatch(/black|#000(?:000)?/i)
     dom.window.document.documentElement.dataset.theme = 'light'
     expect(dom.window.getComputedStyle(single.primary).color).toBe('var(--pg-muted)')
     expect(dom.window.getComputedStyle(recent.primary).color).toBe('var(--pg-text)')
-    expect(dom.window.getComputedStyle(dom.window.document.documentElement).getPropertyValue('--pg-muted').trim()).toBe('#6f6f6b')
-    expect(dom.window.getComputedStyle(dom.window.document.documentElement).getPropertyValue('--pg-text').trim()).toBe('#202020')
+    expect(dom.window.getComputedStyle(dom.window.document.documentElement).getPropertyValue('--pg-muted').trim()).toBe(
+      '#6f6f6b',
+    )
+    expect(dom.window.getComputedStyle(dom.window.document.documentElement).getPropertyValue('--pg-text').trim()).toBe(
+      '#202020',
+    )
     brand.primary.click()
     single.primary.click()
     recent.primary.click()
@@ -364,9 +503,14 @@ describe('UI Playground', () => {
       expect(serviceConfigToken).toBeDefined()
       expect(generation).toBeDefined()
       const serviceList = await fetch(`${playground.url}api/service-config`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          version: 1, token: serviceConfigToken, requestId: 'playground-service-list', operation: 'list', pluginId: 'channel',
+          version: 1,
+          token: serviceConfigToken,
+          requestId: 'playground-service-list',
+          operation: 'list',
+          pluginId: 'channel',
           scope: { profileId: 'playground', generation },
         }),
       }).then(response => response.json()) as { ok: boolean; value?: Array<{ writable?: boolean }> }
@@ -374,7 +518,9 @@ describe('UI Playground', () => {
       expect(serviceList.value?.[0]?.writable).toBe(true)
       const materialized = path.join(playground.homeDir, 'config', 'playground.config.json')
       const materializedInitial = await readFile(materialized, 'utf8')
-      expect(JSON.parse(materializedInitial).plugins.map((plugin: { id: string }) => plugin.id)).toEqual(defaultPluginIds)
+      expect(JSON.parse(materializedInitial).plugins.map((plugin: { id: string }) => plugin.id)).toEqual(
+        defaultPluginIds,
+      )
       await writeFile(materialized, '{"version":1,"plugins":[]}\n')
       await fetch(`${playground.url}api/reset`, { method: 'POST' }).then(response => expect(response.ok).toBe(true))
       expect(await readFile(materialized, 'utf8')).toBe(materializedInitial)
@@ -390,40 +536,66 @@ describe('UI Playground', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-playground-permissions-'))
     const entry = path.resolve('tests/fixtures/agent-loop-runtime-plugin.ts')
     const identity = { source: pathToFileURL(entry).href, id: 'agent-loop-runtime' }
-    const policies = (['tasks.create', 'tasks.content.read', 'turns.submit'] as const).map(capability => createPermissionPolicyRecord({
-      profileId: 'playground', identity, capability, scope: { providers: ['gateway-a'] }, policy: 'allow',
-    }))
+    const policies = (['tasks.create', 'tasks.content.read', 'turns.submit'] as const).map(capability =>
+      createPermissionPolicyRecord({
+        profileId: 'playground',
+        identity,
+        capability,
+        scope: { providers: ['gateway-a'] },
+        policy: 'allow',
+      })
+    )
     const configPath = path.join(root, 'cordisx.config.json')
-    await writeFile(configPath, `${JSON.stringify({
-      version: 1,
-      plugins: [{ id: identity.id, entry, enabled: true, config: {} }],
-      playground: { permissionPolicies: policies },
-    })}\n`)
+    await writeFile(
+      configPath,
+      `${
+        JSON.stringify({
+          version: 1,
+          plugins: [{ id: identity.id, entry, enabled: true, config: {} }],
+          playground: { permissionPolicies: policies },
+        })
+      }\n`,
+    )
     const playground = await startUiPlayground({ configPath })
     try {
       const bundle = await fetch(`${playground.url}api/bundle`).then(response => response.text())
-      const dom = new JSDOM('<!doctype html><html><body><nav data-cordisx-playground-surface="sidebar.navigation.items"></nav></body></html>', {
-        runScripts: 'dangerously', url: playground.url,
-      })
+      const dom = new JSDOM(
+        '<!doctype html><html><body><nav data-cordisx-playground-surface="sidebar.navigation.items"></nav></body></html>',
+        {
+          runScripts: 'dangerously',
+          url: playground.url,
+        },
+      )
       try {
         Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
         Object.defineProperty(dom.window, 'structuredClone', { value: globalThis.structuredClone })
         dom.window.eval(bundle)
         await (dom.window as unknown as { __cordisxBoot?: Promise<unknown> }).__cordisxBoot
         const snapshot = (dom.window as unknown as {
-          __cordisxRuntime?: { snapshot(): {
-            plugins: readonly { id: string; status: string; blockedReason?: string }[]
-            permissions: readonly { capability: string; policy: string; availability: { status: string } }[]
-          }; dispose(): Promise<void> }
+          __cordisxRuntime?: {
+            snapshot(): {
+              plugins: readonly { id: string; status: string; blockedReason?: string }[]
+              permissions: readonly { capability: string; policy: string; availability: { status: string } }[]
+            }
+            dispose(): Promise<void>
+          }
         }).__cordisxRuntime?.snapshot()
         expect(snapshot?.plugins).toEqual([expect.objectContaining({ id: identity.id, status: 'active' })])
-        expect(snapshot?.permissions.map(item => ({ capability: item.capability, policy: item.policy, availability: item.availability.status }))).toEqual([
+        expect(
+          snapshot?.permissions.map(item => ({
+            capability: item.capability,
+            policy: item.policy,
+            availability: item.availability.status,
+          })),
+        ).toEqual([
           { capability: 'tasks.create', policy: 'allow', availability: 'unavailable' },
           { capability: 'tasks.content.read', policy: 'allow', availability: 'unavailable' },
           { capability: 'turns.submit', policy: 'allow', availability: 'unavailable' },
         ])
         await (dom.window as unknown as { __cordisxRuntime?: { dispose(): Promise<void> } }).__cordisxRuntime?.dispose()
-      } finally { dom.window.close() }
+      } finally {
+        dom.window.close()
+      }
     } finally {
       await playground.close()
       await rm(root, { recursive: true, force: true })
@@ -439,14 +611,21 @@ describe('UI Playground', () => {
       pointIds: ['sidebar.navigation.items', 'main'],
     }])
     const configPath = path.join(root, 'cordisx.config.json')
-    await writeFile(configPath, `${JSON.stringify({
-      version: 1,
-      plugins: [{ id: 'agent-loop-runtime', entry, enabled: true, config: {} }],
-      playground: { permissionPolicies: policies },
-    })}\n`)
+    await writeFile(
+      configPath,
+      `${
+        JSON.stringify({
+          version: 1,
+          plugins: [{ id: 'agent-loop-runtime', entry, enabled: true, config: {} }],
+          playground: { permissionPolicies: policies },
+        })
+      }\n`,
+    )
     const session = await createPlaygroundSession(configPath)
     try {
-      const materialized = JSON.parse(await readFile(path.join(session.homeDir, 'config', 'playground.home.json'), 'utf8')) as {
+      const materialized = JSON.parse(
+        await readFile(path.join(session.homeDir, 'config', 'playground.home.json'), 'utf8'),
+      ) as {
         permissions: readonly unknown[]
       }
       expect(materialized.permissions).toEqual(policies)
@@ -456,34 +635,50 @@ describe('UI Playground', () => {
     }
   })
 
-  it('boots, reloads, and disposes the comprehensive real plugin runtime with explicit Playground seats only', async () => {
-    const config = await loadConfig(defaultUiPlaygroundConfig, { profileId: 'playground' })
-    expect(config.plugins.map(plugin => plugin.id)).toEqual(defaultPluginIds)
-    const pointIdsByPlugin = new Map<string, readonly string[]>([
-      ['slot-showcase', [
-        'app', 'main', 'session.content', 'sidebar.footer.before-control',
-        'sidebar.footer.after-control', 'sidebar.footer.menu', 'sidebar.account.menu',
-        'sidebar.navigation.items', 'workspace.toolbar.items', 'session.header.actions',
-        'composer.toolbar.items', 'environment.panel.header-actions',
-        'environment.panel.sections', 'environment.section.actions',
-        'environment.section.rows', 'environment.row.trailing-actions',
-      ]],
-      ['hello-toolbar', ['workspace.toolbar.items']],
-      ['settings-tab-demo', ['manager.settings.navigation-items', 'manager.content']],
-      ['channel', ['manager.settings.navigation-items', 'manager.content']],
-      ['cli-proxy-api', ['sidebar.navigation.items', 'main']],
-    ])
-    const permissionPolicies = exactDomPermissionPolicies('playground', config.plugins.flatMap(plugin => {
-      const pointIds = pointIdsByPlugin.get(plugin.id)
-      return pointIds === undefined ? [] : [{ id: plugin.id, entry: plugin.entry, pointIds }]
-    }))
-    const bundle = await buildRendererBundle(config, {
-      playground: true,
-      generation: 'playground-test-1',
-      profileId: 'playground',
-      permission: { profileId: 'playground', bridgeToken: '5'.repeat(64), policies: permissionPolicies },
-    })
-    const dom = new JSDOM(`<!doctype html><html data-theme="dark"><head></head><body>
+  it(
+    'boots, reloads, and disposes the comprehensive real plugin runtime with explicit Playground seats only',
+    async () => {
+      const config = await loadConfig(defaultUiPlaygroundConfig, { profileId: 'playground' })
+      expect(config.plugins.map(plugin => plugin.id)).toEqual(defaultPluginIds)
+      const pointIdsByPlugin = new Map<string, readonly string[]>([
+        ['slot-showcase', [
+          'app',
+          'main',
+          'session.content',
+          'sidebar.footer.before-control',
+          'sidebar.footer.after-control',
+          'sidebar.footer.menu',
+          'sidebar.account.menu',
+          'sidebar.navigation.items',
+          'workspace.toolbar.items',
+          'session.header.actions',
+          'composer.toolbar.items',
+          'environment.panel.header-actions',
+          'environment.panel.sections',
+          'environment.section.actions',
+          'environment.section.rows',
+          'environment.row.trailing-actions',
+        ]],
+        ['hello-toolbar', ['workspace.toolbar.items']],
+        ['settings-tab-demo', ['manager.settings.navigation-items', 'manager.content']],
+        ['channel', ['manager.settings.navigation-items', 'manager.content']],
+        ['cli-proxy-api', ['sidebar.navigation.items', 'main']],
+      ])
+      const permissionPolicies = exactDomPermissionPolicies(
+        'playground',
+        config.plugins.flatMap(plugin => {
+          const pointIds = pointIdsByPlugin.get(plugin.id)
+          return pointIds === undefined ? [] : [{ id: plugin.id, entry: plugin.entry, pointIds }]
+        }),
+      )
+      const bundle = await buildRendererBundle(config, {
+        playground: true,
+        generation: 'playground-test-1',
+        profileId: 'playground',
+        permission: { profileId: 'playground', bridgeToken: '5'.repeat(64), policies: permissionPolicies },
+      })
+      const dom = new JSDOM(
+        `<!doctype html><html data-theme="dark"><head></head><body>
       <aside>
         <nav data-cordisx-playground-surface="sidebar.navigation.items"></nav>
         <footer><span data-cordisx-playground-surface="sidebar.footer.before-control"></span><button data-cordisx-playground-template="sidebar.footer">Tools</button><span data-cordisx-playground-surface="sidebar.footer.after-control"></span></footer>
@@ -495,233 +690,390 @@ describe('UI Playground', () => {
         <input data-cordisx-playground-reasoning type="range" min="0" max="4" value="2">
       </main>
       <main data-cordisx-playground-seat="app"></main><main data-cordisx-playground-seat="main"></main><main data-cordisx-playground-seat="session.content"></main>
-    </body></html>`, { runScripts: 'dangerously', url: 'http://127.0.0.1/' })
-    try {
-      Object.defineProperty(dom.window, 'structuredClone', { configurable: true, value: structuredClone })
-      installPermissionPolicyBridge(dom.window)
-      dom.window.eval(bundle)
-      for (let attempt = 0; attempt < 100 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
-        await new Promise(resolve => setTimeout(resolve, 10))
-      }
-      const runtime = dom.window as unknown as { __cordisxRuntime?: { snapshot(): { plugins: readonly { id: string; name: string; description?: string; icon?: string; status: string }[]; platform: { mode: string }; navigation: { outlets: readonly { id: string; activeRoute?: string; presentation: string }[] } }; dispose(): Promise<void> } }
-      expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
-      expect(runtime.__cordisxRuntime?.snapshot().plugins.map(plugin => ({ id: plugin.id, status: plugin.status })))
-        .toEqual(defaultPluginIds.map(id => ({ id, status: 'active' })))
-      expect(runtime.__cordisxRuntime?.snapshot().plugins.map(plugin => plugin.name)).toEqual([
-        'Slot Showcase', 'Hello Toolbar', 'Form Schema Gallery', 'Settings Navigation Demo',
-        'Plugin Console Showcase', 'Channels', 'CLIProxy Providers',
-      ])
-      dom.window.document.documentElement.lang = 'zh-CN'
-      await new Promise(resolve => setTimeout(resolve, 0))
-      await new Promise(resolve => setTimeout(resolve, 0))
-      expect(runtime.__cordisxRuntime?.snapshot().plugins.map(plugin => plugin.name)).toEqual([
-        '点位展示', '工具栏问候', '表单结构展示', '设置导航演示',
-        '插件控制台展示', '渠道', 'CLIProxy 提供方',
-      ])
-      expect(runtime.__cordisxRuntime?.snapshot().plugins.find(plugin => plugin.id === 'channel')?.description)
-        .toBe('管理渠道账号、连接和会话。')
-      expect(runtime.__cordisxRuntime?.snapshot().plugins.find(plugin => plugin.id === 'cli-proxy-api')?.icon)
-        .toMatch(/^data:image\/png;base64,/)
-      expect(runtime.__cordisxRuntime?.snapshot().platform.mode).toBe('unavailable')
-      for (let attempt = 0; attempt < 100 && dom.window.document.querySelector('[data-cordisx-playground-surface="sidebar.navigation.items"] [data-cordisx-surface-host]') === null; attempt += 1) {
-        await new Promise(resolve => setTimeout(resolve, 10))
-      }
-      expect(dom.window.document.querySelector('[data-cordisx-playground-surface="sidebar.navigation.items"] [data-cordisx-surface-host]')).not.toBeNull()
-      expect(dom.window.document.querySelector('[data-cordisx-playground-surface="session.header.actions"] [data-cordisx-surface-host]')).not.toBeNull()
-      expect(dom.window.document.querySelector('[data-cordisx-playground-surface="composer.toolbar.items"] [data-cordisx-surface-host]')).not.toBeNull()
-      const showcaseNavigation = [...dom.window.document.querySelectorAll<HTMLButtonElement>('[data-cordisx-playground-surface="sidebar.navigation.items"] .cordisx-nav-primary')]
-        .find(button => button.textContent?.includes('结构化 UI 演示'))
-      expect(showcaseNavigation).toBeDefined()
-      expect(showcaseNavigation?.closest('[data-sidebar-item]')).not.toBeNull()
-      showcaseNavigation?.click()
-      for (let attempt = 0; attempt < 100 && runtime.__cordisxRuntime?.snapshot().navigation.outlets.find(item => item.id === 'main')?.activeRoute !== 'slot-showcase:main.analytics'; attempt += 1) {
-        await new Promise(resolve => setTimeout(resolve, 10))
-      }
-      expect(runtime.__cordisxRuntime?.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({
-        activeRoute: 'slot-showcase:main.analytics', presentation: 'presented',
-      })
-      expect(dom.window.document.querySelector('[data-cordisx-page-outlet="main"]')?.hidden).toBe(false)
-      const publicSnapshotJson = JSON.stringify(runtime.__cordisxRuntime?.snapshot())
-      expect(publicSnapshotJson).not.toContain('extensionPointControls')
-      expect(publicSnapshotJson).not.toContain('principalHandle')
-      expect(publicSnapshotJson).not.toContain('principal:')
-      const trigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!
-      const reactManager = dom.window.document.querySelector('[data-cordisx-react-manager="true"]')
-      expect(reactManager).not.toBeNull()
-      const managerStyles = dom.window.document.getElementById('cordisx-react-manager-style')?.textContent ?? ''
-      expect(managerStyles).toContain('.t-input {')
-      expect(managerStyles).toContain('.t-textarea__inner {')
-      expect(managerStyles).toContain('.cxr-root { position: relative; z-index: 2147483500;')
-      expect(managerStyles).toContain('.cxr-root :is(.t-popup,.t-dialog__ctx) { z-index: 2147483600 !important; }')
-      expect(managerStyles).toContain('.cxr-backdrop { position: fixed; inset: 0; z-index: 2147483500;')
-      expect(managerStyles).toContain('.cxr-tabs { display: flex; min-height: 38px; flex: none;')
-      expect(managerStyles).toContain('.cxr-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));')
-      expect(managerStyles).toContain('.cxr-plugin-actions { position: absolute; top: 50%;')
-      expect(managerStyles).toContain('transform: translateY(-50%);')
-      expect(managerStyles).toContain('.cxf-form-body { display: grid; min-width: 0; align-content: start; grid-auto-rows: max-content;')
-      expect(managerStyles).toContain('.cxf-item[data-control-layout="compact"] .cxf-control-seat { width: auto; max-width: 100%; justify-self: end; }')
-      expect(managerStyles).not.toContain('.cxf-control-seat { width: auto; max-width: 100%; padding-right: 10px;')
-      expect(managerStyles).toContain('.cxf-form-page-stack, .cxf-form-page-root, .cxf-form-page-layer, .cxf-form-subpage { display: flex;')
-      expect(managerStyles).toContain('.cxf-form-subpage-header { display: grid;')
-      expect(managerStyles).toContain('.cxf-form-subpage-body { min-width: 0; min-height: 0; flex: 1; overflow: auto;')
-      expect(managerStyles).toContain('.cxf-array-item-fields { gap: 0; }')
-      expect(managerStyles).not.toContain('.cxf-array-dialog-control')
-      expect(managerStyles).toContain('.cxr-page[data-plugin-detail]:has(> .cxr-plugin-config-panel)')
-      expect(managerStyles).toContain('.cxr-plugin-config-panel > .cxf-react-form-shell { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }')
-      expect(managerStyles).not.toContain('.cxr-page[data-plugin-detail] { display: flex;')
-      expect(trigger.closest('.cxr-trigger-seat')?.previousElementSibling).toBe(dom.window.document.querySelector('[data-cordisx-playground-manager-trigger]'))
-      expect(trigger.closest('[data-sidebar-item="host.manager"]')?.querySelector('.cxsi-brand-mark img')).not.toBeNull()
-      expect(trigger.classList.contains('cxsi-primary')).toBe(true)
-      expect(trigger.querySelector('svg')).toBeNull()
-      trigger.click()
-      expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')).not.toBeNull()
-      expect(dom.window.document.querySelector<HTMLImageElement>('[data-plugin-id="cli-proxy-api"] .cxr-card-icon img')?.src)
-        .toMatch(/^data:image\/png;base64,/)
-      const internalAccents = new Map([
-        ['slot-showcase', 'spectral'],
-        ['hello-toolbar', 'solar'],
-        ['form-schema-gallery', 'violet'],
-        ['settings-tab-demo', 'polar'],
-        ['console-showcase', 'ember'],
-        ['channel', 'jade'],
-      ])
-      const gradientPhases = new Set<string>()
-      for (const [pluginId, accent] of internalAccents) {
-        const internalBadge = dom.window.document.querySelector(`[data-plugin-id="${pluginId}"] [data-internal-plugin-badge="${pluginId}"]`)
-        expect(internalBadge?.getAttribute('data-accent')).toBe(accent)
-        expect(internalBadge?.getAttribute('data-brand-geometry')).toBe('official-1440-segments')
-        expect(internalBadge?.getAttribute('data-gradient-mode')).toBe('segment-depth')
-        expect(internalBadge?.getAttribute('data-gradient-phase')).toMatch(/^\d+$/)
-        gradientPhases.add(internalBadge?.getAttribute('data-gradient-phase') ?? '')
-        const derivedMarks = internalBadge?.querySelectorAll<HTMLImageElement>('img') ?? []
-        expect(derivedMarks).toHaveLength(2)
-        for (const mark of derivedMarks) expect(mark.src).toMatch(/^data:image\/svg\+xml;charset=utf-8,/)
-        expect(internalBadge?.textContent).toBe('')
-      }
-      expect(gradientPhases.size).toBe(internalAccents.size)
-      dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="form-schema-gallery"]')?.click()
-      await new Promise(resolve => setTimeout(resolve, 0))
-      dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
-      await new Promise(resolve => setTimeout(resolve, 0))
-      expect(dom.window.document.querySelector('.cxf-array-row-summary')?.tagName).toBe('SPAN')
-      const configFormState = () => dom.window.document.querySelector<HTMLElement>('[data-plugin-config-form="form-schema-gallery"]')?.dataset.state
-      const notificationRows = () => dom.window.document.querySelectorAll('[data-config-path="notificationRules"] .cxf-array-row').length
-      const visibleArrayDialog = () => [...dom.window.document.querySelectorAll<HTMLElement>('.t-dialog__ctx')]
-        .find(dialog => dom.window.getComputedStyle(dialog).display !== 'none' && dialog.querySelector('.cxf-array-item-dialog') !== null)
-      const visibleArrayPage = () => dom.window.document.querySelector<HTMLElement>('[data-plugin-config-form="form-schema-gallery"] .cxf-form-page-layer:not([hidden])')
-      const initialNotificationRows = notificationRows()
-      expect(configFormState()).toBe('pristine')
-      const notificationAdd = dom.window.document.querySelector<HTMLButtonElement>('[data-config-path="notificationRules"] [data-array-action="add"]')
-      notificationAdd?.click()
-      await new Promise(resolve => setTimeout(resolve, 10))
-      let createPage = visibleArrayPage()
-      expect(createPage?.textContent).toContain('创建数组项')
-      expect(visibleArrayDialog()).toBeUndefined()
-      expect(createPage?.querySelector('.cxf-form-subpage-header .cxr-breadcrumbs')?.textContent).toContain('通知规则/创建数组项')
-      expect(createPage?.querySelector('.cxr-breadcrumbs [aria-current="page"]')?.textContent).toBe('创建数组项')
-      expect(dom.window.document.querySelector<HTMLElement>('[data-plugin-config-form="form-schema-gallery"] .cxf-form-page-root')?.hidden).toBe(true)
-      expect(dom.window.document.querySelector('[data-plugin-config-form="form-schema-gallery"]')?.querySelectorAll('form')).toHaveLength(1)
-      const pageFieldRows = [...createPage!.querySelectorAll<HTMLElement>('.cxf-array-item-fields.cxf-form-grid > .cxf-item')]
-      expect(pageFieldRows.map(row => row.dataset.hostFormPrimitive)).toEqual(['input', 'checkbox'])
-      for (const row of pageFieldRows) {
-        const label = row.querySelector<HTMLElement>(':scope > .cxf-label-row')
-        const control = row.querySelector<HTMLElement>(':scope > .cxf-control-seat')
-        expect(label).not.toBeNull()
-        expect(control?.getAttribute('aria-labelledby')).toBe(label?.id)
-        expect(row.querySelector(':scope > .cxf-error')).not.toBeNull()
-      }
-      expect(createPage?.querySelector('.cxf-array-item-fields > [data-host-form-primitive="checkbox"][data-control-layout="compact"]')).not.toBeNull()
-      expect(createPage?.querySelector<HTMLInputElement>('.cxf-array-item-fields input[type="checkbox"]')?.checked).toBe(true)
-      expect(createPage?.querySelector('[data-host-form-action="field-actions"]')).toBeNull()
-      expect(createPage?.querySelector('.cxf-array-dialog-field, .cxf-array-dialog-control')).toBeNull()
-      expect([...createPage!.querySelectorAll<HTMLButtonElement>('.cxf-form-subpage-actions button')].find(button => button.textContent?.trim() === '创建')?.disabled).toBe(true)
-      expect(createPage?.textContent).toContain('此项为必填项')
-      const invalidDestinationInput = createPage?.querySelector<HTMLInputElement>('.cxf-array-item-fields input[type="text"]')
-      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')?.set?.call(invalidDestinationInput, 'x')
-      invalidDestinationInput?.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-      await new Promise(resolve => setTimeout(resolve, 0))
-      expect(createPage?.textContent).toContain('请输入符合长度要求的文本')
-      expect([...createPage!.querySelectorAll<HTMLButtonElement>('.cxf-form-subpage-actions button')].find(button => button.textContent?.trim() === '创建')?.disabled).toBe(true)
-      const firstCreateFieldPath = pageFieldRows[0]?.dataset.configPath
-      expect(firstCreateFieldPath).toBeTruthy()
-      expect(notificationRows()).toBe(initialNotificationRows)
-      expect(configFormState()).toBe('pristine')
-      ;[...createPage!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === '取消')?.click()
-      await new Promise(resolve => setTimeout(resolve, 10))
-      expect(notificationRows()).toBe(initialNotificationRows)
-      expect(configFormState()).toBe('pristine')
-      expect(visibleArrayPage()).toBeNull()
-      expect(notificationAdd).toBe(dom.window.document.activeElement)
-      dom.window.document.querySelector<HTMLButtonElement>('[data-config-path="notificationRules"] [data-array-action="add"]')?.click()
-      await new Promise(resolve => setTimeout(resolve, 10))
-      createPage = visibleArrayPage()
-      expect(createPage?.querySelector<HTMLElement>('.cxf-array-item-fields > .cxf-item')?.dataset.configPath).not.toBe(firstCreateFieldPath)
-      const destinationInput = createPage?.querySelector<HTMLInputElement>('.cxf-array-item-fields input[type="text"]')
-      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')?.set?.call(destinationInput, 'Created after confirm')
-      destinationInput?.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-      await new Promise(resolve => setTimeout(resolve, 0))
-      expect([...createPage!.querySelectorAll<HTMLButtonElement>('.cxf-form-subpage-actions button')].find(button => button.textContent?.trim() === '创建')?.disabled).toBe(false)
-      ;[...createPage!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === '创建')?.click()
-      await new Promise(resolve => setTimeout(resolve, 0))
-      expect(notificationRows()).toBe(initialNotificationRows + 1)
-      expect(configFormState()).toBe('dirty')
-      const createdRow = [...dom.window.document.querySelectorAll<HTMLElement>('[data-config-path="notificationRules"] .cxf-array-row')].at(-1)
-      const createdRowId = createdRow?.dataset.hostArrayItemId
-      expect(createdRowId).toBeTruthy()
-      createdRow?.querySelector<HTMLButtonElement>('.cxf-array-row-actions button[aria-label="编辑条目"]')?.click()
-      let arrayPage: HTMLElement | null = null
-      for (let attempt = 0; attempt < 10 && arrayPage === null; attempt += 1) {
-        await new Promise(resolve => setTimeout(resolve, 10))
-        arrayPage = visibleArrayPage()
-      }
-      expect(arrayPage).not.toBeNull()
-      expect(arrayPage?.querySelector('.cxf-array-item-fields > .cxf-item')?.getAttribute('data-config-path')).toContain(createdRowId)
-      expect(arrayPage?.querySelector('.cxr-breadcrumbs [aria-current="page"]')?.textContent).toBe('编辑第 2 项')
-      ;[...arrayPage!.querySelectorAll<HTMLButtonElement>('.cxr-breadcrumbs button')].find(button => button.textContent?.trim() === '通知规则')?.click()
-      await new Promise(resolve => setTimeout(resolve, 0))
-      const firstNotificationRow = dom.window.document.querySelector<HTMLElement>('[data-config-path="notificationRules"] .cxf-array-row')
-      firstNotificationRow?.querySelector<HTMLButtonElement>('button[aria-label="删除条目"]')?.click()
-      await new Promise(resolve => setTimeout(resolve, 0))
-      expect(notificationRows()).toBe(1)
-      expect(dom.window.document.querySelector<HTMLElement>('[data-config-path="notificationRules"] .cxf-array-row')?.dataset.hostArrayItemId).toBe(createdRowId)
-      ;[...dom.window.document.querySelectorAll<HTMLButtonElement>('.cxf-form-action-buttons button')].find(button => button.textContent?.includes('重置'))?.click()
-      await new Promise(resolve => setTimeout(resolve, 10))
-      expect(configFormState()).toBe('pristine')
-      expect(notificationRows()).toBe(initialNotificationRows)
-      expect(dom.window.document.querySelector<HTMLElement>('[data-config-path="notificationRules"] .cxf-array-row')?.dataset.hostArrayItemId).not.toBe(createdRowId)
-      dom.window.document.querySelector<HTMLButtonElement>('.cxr-breadcrumbs button')?.click()
-      await new Promise(resolve => setTimeout(resolve, 0))
-      for (const [index, id] of defaultPluginIds.entries()) {
-        dom.window.document.querySelector<HTMLButtonElement>(`[data-plugin-id="${id}"]`)?.click()
-        await new Promise(resolve => setTimeout(resolve, 0))
-        expect(dom.window.document.querySelector('[data-plugin-detail]')?.getAttribute('data-plugin-detail')).toBe(id)
-        expect(dom.window.document.querySelectorAll('[data-plugin-detail-tab]')).toHaveLength(7)
-        if (index < defaultPluginIds.length - 1) {
-          dom.window.document.querySelector<HTMLButtonElement>('.cxr-breadcrumbs button')?.click()
-          await new Promise(resolve => setTimeout(resolve, 0))
+    </body></html>`,
+        { runScripts: 'dangerously', url: 'http://127.0.0.1/' },
+      )
+      try {
+        Object.defineProperty(dom.window, 'structuredClone', { configurable: true, value: structuredClone })
+        installPermissionPolicyBridge(dom.window)
+        dom.window.eval(bundle)
+        for (
+          let attempt = 0;
+          attempt < 100 && dom.window.document.documentElement.dataset.cordisxReady !== 'true';
+          attempt += 1
+        ) {
+          await new Promise(resolve => setTimeout(resolve, 10))
         }
-      }
-      const firstRuntime = runtime.__cordisxRuntime!
-      let disposed = false
-      const dispose = firstRuntime.dispose.bind(firstRuntime)
-      firstRuntime.dispose = async () => { disposed = true; await dispose() }
-      const reload = await buildRendererBundle(config, {
-        playground: true,
-        generation: 'playground-test-2',
-        profileId: 'playground',
-        permission: { profileId: 'playground', bridgeToken: '5'.repeat(64), policies: permissionPolicies },
-      })
-      dom.window.eval(reload)
-      for (let attempt = 0; attempt < 100 && runtime.__cordisxRuntime === firstRuntime; attempt += 1) {
+        const runtime = dom.window as unknown as {
+          __cordisxRuntime?: {
+            snapshot(): {
+              plugins: readonly { id: string; name: string; description?: string; icon?: string; status: string }[]
+              platform: { mode: string }
+              navigation: { outlets: readonly { id: string; activeRoute?: string; presentation: string }[] }
+            }
+            dispose(): Promise<void>
+          }
+        }
+        expect(dom.window.document.documentElement.dataset.cordisxReady).toBe('true')
+        expect(runtime.__cordisxRuntime?.snapshot().plugins.map(plugin => ({ id: plugin.id, status: plugin.status })))
+          .toEqual(defaultPluginIds.map(id => ({ id, status: 'active' })))
+        expect(runtime.__cordisxRuntime?.snapshot().plugins.map(plugin => plugin.name)).toEqual([
+          'Slot Showcase',
+          'Hello Toolbar',
+          'Form Schema Gallery',
+          'Settings Navigation Demo',
+          'Plugin Console Showcase',
+          'Channels',
+          'CLIProxy Providers',
+        ])
+        dom.window.document.documentElement.lang = 'zh-CN'
+        await new Promise(resolve => setTimeout(resolve, 0))
+        await new Promise(resolve => setTimeout(resolve, 0))
+        expect(runtime.__cordisxRuntime?.snapshot().plugins.map(plugin => plugin.name)).toEqual([
+          '点位展示',
+          '工具栏问候',
+          '表单结构展示',
+          '设置导航演示',
+          '插件控制台展示',
+          '渠道',
+          'CLIProxy 提供方',
+        ])
+        expect(runtime.__cordisxRuntime?.snapshot().plugins.find(plugin => plugin.id === 'channel')?.description)
+          .toBe('管理渠道账号、连接和会话。')
+        expect(runtime.__cordisxRuntime?.snapshot().plugins.find(plugin => plugin.id === 'cli-proxy-api')?.icon)
+          .toMatch(/^data:image\/png;base64,/)
+        expect(runtime.__cordisxRuntime?.snapshot().platform.mode).toBe('unavailable')
+        for (
+          let attempt = 0;
+          attempt < 100
+          && dom.window.document.querySelector(
+              '[data-cordisx-playground-surface="sidebar.navigation.items"] [data-cordisx-surface-host]',
+            ) === null;
+          attempt += 1
+        ) {
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
+        expect(
+          dom.window.document.querySelector(
+            '[data-cordisx-playground-surface="sidebar.navigation.items"] [data-cordisx-surface-host]',
+          ),
+        ).not.toBeNull()
+        expect(
+          dom.window.document.querySelector(
+            '[data-cordisx-playground-surface="session.header.actions"] [data-cordisx-surface-host]',
+          ),
+        ).not.toBeNull()
+        expect(
+          dom.window.document.querySelector(
+            '[data-cordisx-playground-surface="composer.toolbar.items"] [data-cordisx-surface-host]',
+          ),
+        ).not.toBeNull()
+        const showcaseNavigation = [
+          ...dom.window.document.querySelectorAll<HTMLButtonElement>(
+            '[data-cordisx-playground-surface="sidebar.navigation.items"] .cordisx-nav-primary',
+          ),
+        ]
+          .find(button => button.textContent?.includes('结构化 UI 演示'))
+        expect(showcaseNavigation).toBeDefined()
+        expect(showcaseNavigation?.closest('[data-sidebar-item]')).not.toBeNull()
+        showcaseNavigation?.click()
+        for (
+          let attempt = 0;
+          attempt < 100
+          && runtime.__cordisxRuntime?.snapshot().navigation.outlets.find(item => item.id === 'main')?.activeRoute
+            !== 'slot-showcase:main.analytics';
+          attempt += 1
+        ) {
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
+        expect(runtime.__cordisxRuntime?.snapshot().navigation.outlets.find(item => item.id === 'main')).toMatchObject({
+          activeRoute: 'slot-showcase:main.analytics',
+          presentation: 'presented',
+        })
+        expect(dom.window.document.querySelector('[data-cordisx-page-outlet="main"]')?.hidden).toBe(false)
+        const publicSnapshotJson = JSON.stringify(runtime.__cordisxRuntime?.snapshot())
+        expect(publicSnapshotJson).not.toContain('extensionPointControls')
+        expect(publicSnapshotJson).not.toContain('principalHandle')
+        expect(publicSnapshotJson).not.toContain('principal:')
+        const trigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!
+        const reactManager = dom.window.document.querySelector('[data-cordisx-react-manager="true"]')
+        expect(reactManager).not.toBeNull()
+        const managerStyles = dom.window.document.getElementById('cordisx-react-manager-style')?.textContent ?? ''
+        expect(managerStyles).toContain('.t-input {')
+        expect(managerStyles).toContain('.t-textarea__inner {')
+        expect(managerStyles).toContain('.cxr-root { position: relative; z-index: 2147483500;')
+        expect(managerStyles).toContain('.cxr-root :is(.t-popup,.t-dialog__ctx) { z-index: 2147483600 !important; }')
+        expect(managerStyles).toContain('.cxr-backdrop { position: fixed; inset: 0; z-index: 2147483500;')
+        expect(managerStyles).toContain('.cxr-tabs { display: flex; min-height: 38px; flex: none;')
+        expect(managerStyles).toContain(
+          '.cxr-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));',
+        )
+        expect(managerStyles).toContain('.cxr-plugin-actions { position: absolute; top: 50%;')
+        expect(managerStyles).toContain('transform: translateY(-50%);')
+        expect(managerStyles).toContain(
+          '.cxf-form-body { display: grid; min-width: 0; align-content: start; grid-auto-rows: max-content;',
+        )
+        expect(managerStyles).toContain(
+          '.cxf-item[data-control-layout="compact"] .cxf-control-seat { width: auto; max-width: 100%; justify-self: end; }',
+        )
+        expect(managerStyles).not.toContain('.cxf-control-seat { width: auto; max-width: 100%; padding-right: 10px;')
+        expect(managerStyles).toContain(
+          '.cxf-form-page-stack, .cxf-form-page-root, .cxf-form-page-layer, .cxf-form-subpage { display: flex;',
+        )
+        expect(managerStyles).toContain('.cxf-form-subpage-header { display: grid;')
+        expect(managerStyles).toContain(
+          '.cxf-form-subpage-body { min-width: 0; min-height: 0; flex: 1; overflow: auto;',
+        )
+        expect(managerStyles).toContain('.cxf-array-item-fields { gap: 0; }')
+        expect(managerStyles).not.toContain('.cxf-array-dialog-control')
+        expect(managerStyles).toContain('.cxr-page[data-plugin-detail]:has(> .cxr-plugin-config-panel)')
+        expect(managerStyles).toContain(
+          '.cxr-plugin-config-panel > .cxf-react-form-shell { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }',
+        )
+        expect(managerStyles).not.toContain('.cxr-page[data-plugin-detail] { display: flex;')
+        expect(trigger.closest('.cxr-trigger-seat')?.previousElementSibling).toBe(
+          dom.window.document.querySelector('[data-cordisx-playground-manager-trigger]'),
+        )
+        expect(trigger.closest('[data-sidebar-item="host.manager"]')?.querySelector('.cxsi-brand-mark img')).not
+          .toBeNull()
+        expect(trigger.classList.contains('cxsi-primary')).toBe(true)
+        expect(trigger.querySelector('svg')).toBeNull()
+        trigger.click()
+        expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-manager-modal]')).not.toBeNull()
+        expect(
+          dom.window.document.querySelector<HTMLImageElement>('[data-plugin-id="cli-proxy-api"] .cxr-card-icon img')
+            ?.src,
+        )
+          .toMatch(/^data:image\/png;base64,/)
+        const internalAccents = new Map([
+          ['slot-showcase', 'spectral'],
+          ['hello-toolbar', 'solar'],
+          ['form-schema-gallery', 'violet'],
+          ['settings-tab-demo', 'polar'],
+          ['console-showcase', 'ember'],
+          ['channel', 'jade'],
+        ])
+        const gradientPhases = new Set<string>()
+        for (const [pluginId, accent] of internalAccents) {
+          const internalBadge = dom.window.document.querySelector(
+            `[data-plugin-id="${pluginId}"] [data-internal-plugin-badge="${pluginId}"]`,
+          )
+          expect(internalBadge?.getAttribute('data-accent')).toBe(accent)
+          expect(internalBadge?.getAttribute('data-brand-geometry')).toBe('official-1440-segments')
+          expect(internalBadge?.getAttribute('data-gradient-mode')).toBe('segment-depth')
+          expect(internalBadge?.getAttribute('data-gradient-phase')).toMatch(/^\d+$/)
+          gradientPhases.add(internalBadge?.getAttribute('data-gradient-phase') ?? '')
+          const derivedMarks = internalBadge?.querySelectorAll<HTMLImageElement>('img') ?? []
+          expect(derivedMarks).toHaveLength(2)
+          for (const mark of derivedMarks) expect(mark.src).toMatch(/^data:image\/svg\+xml;charset=utf-8,/)
+          expect(internalBadge?.textContent).toBe('')
+        }
+        expect(gradientPhases.size).toBe(internalAccents.size)
+        dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="form-schema-gallery"]')?.click()
+        await new Promise(resolve => setTimeout(resolve, 0))
+        dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
+        await new Promise(resolve => setTimeout(resolve, 0))
+        expect(dom.window.document.querySelector('.cxf-array-row-summary')?.tagName).toBe('SPAN')
+        const configFormState = () =>
+          dom.window.document.querySelector<HTMLElement>('[data-plugin-config-form="form-schema-gallery"]')?.dataset
+            .state
+        const notificationRows = () =>
+          dom.window.document.querySelectorAll('[data-config-path="notificationRules"] .cxf-array-row').length
+        const visibleArrayDialog = () =>
+          [...dom.window.document.querySelectorAll<HTMLElement>('.t-dialog__ctx')]
+            .find(dialog =>
+              dom.window.getComputedStyle(dialog).display !== 'none'
+              && dialog.querySelector('.cxf-array-item-dialog') !== null
+            )
+        const visibleArrayPage = () =>
+          dom.window.document.querySelector<HTMLElement>(
+            '[data-plugin-config-form="form-schema-gallery"] .cxf-form-page-layer:not([hidden])',
+          )
+        const initialNotificationRows = notificationRows()
+        expect(configFormState()).toBe('pristine')
+        const notificationAdd = dom.window.document.querySelector<HTMLButtonElement>(
+          '[data-config-path="notificationRules"] [data-array-action="add"]',
+        )
+        notificationAdd?.click()
         await new Promise(resolve => setTimeout(resolve, 10))
+        let createPage = visibleArrayPage()
+        expect(createPage?.textContent).toContain('创建数组项')
+        expect(visibleArrayDialog()).toBeUndefined()
+        expect(createPage?.querySelector('.cxf-form-subpage-header .cxr-breadcrumbs')?.textContent).toContain(
+          '通知规则/创建数组项',
+        )
+        expect(createPage?.querySelector('.cxr-breadcrumbs [aria-current="page"]')?.textContent).toBe('创建数组项')
+        expect(
+          dom.window.document.querySelector<HTMLElement>(
+            '[data-plugin-config-form="form-schema-gallery"] .cxf-form-page-root',
+          )?.hidden,
+        ).toBe(true)
+        expect(
+          dom.window.document.querySelector('[data-plugin-config-form="form-schema-gallery"]')?.querySelectorAll(
+            'form',
+          ),
+        ).toHaveLength(1)
+        const pageFieldRows = [
+          ...createPage!.querySelectorAll<HTMLElement>('.cxf-array-item-fields.cxf-form-grid > .cxf-item'),
+        ]
+        expect(pageFieldRows.map(row => row.dataset.hostFormPrimitive)).toEqual(['input', 'checkbox'])
+        for (const row of pageFieldRows) {
+          const label = row.querySelector<HTMLElement>(':scope > .cxf-label-row')
+          const control = row.querySelector<HTMLElement>(':scope > .cxf-control-seat')
+          expect(label).not.toBeNull()
+          expect(control?.getAttribute('aria-labelledby')).toBe(label?.id)
+          expect(row.querySelector(':scope > .cxf-error')).not.toBeNull()
+        }
+        expect(
+          createPage?.querySelector(
+            '.cxf-array-item-fields > [data-host-form-primitive="checkbox"][data-control-layout="compact"]',
+          ),
+        ).not.toBeNull()
+        expect(createPage?.querySelector<HTMLInputElement>('.cxf-array-item-fields input[type="checkbox"]')?.checked)
+          .toBe(true)
+        expect(createPage?.querySelector('[data-host-form-action="field-actions"]')).toBeNull()
+        expect(createPage?.querySelector('.cxf-array-dialog-field, .cxf-array-dialog-control')).toBeNull()
+        expect(
+          [...createPage!.querySelectorAll<HTMLButtonElement>('.cxf-form-subpage-actions button')].find(button =>
+            button.textContent?.trim() === '创建'
+          )?.disabled,
+        ).toBe(true)
+        expect(createPage?.textContent).toContain('此项为必填项')
+        const invalidDestinationInput = createPage?.querySelector<HTMLInputElement>(
+          '.cxf-array-item-fields input[type="text"]',
+        )
+        Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')?.set?.call(
+          invalidDestinationInput,
+          'x',
+        )
+        invalidDestinationInput?.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+        await new Promise(resolve => setTimeout(resolve, 0))
+        expect(createPage?.textContent).toContain('请输入符合长度要求的文本')
+        expect(
+          [...createPage!.querySelectorAll<HTMLButtonElement>('.cxf-form-subpage-actions button')].find(button =>
+            button.textContent?.trim() === '创建'
+          )?.disabled,
+        ).toBe(true)
+        const firstCreateFieldPath = pageFieldRows[0]?.dataset.configPath
+        expect(firstCreateFieldPath).toBeTruthy()
+        expect(notificationRows()).toBe(initialNotificationRows)
+        expect(configFormState()).toBe('pristine')
+        ;[...createPage!.querySelectorAll<HTMLButtonElement>('button')].find(button =>
+          button.textContent?.trim() === '取消'
+        )?.click()
+        await new Promise(resolve => setTimeout(resolve, 10))
+        expect(notificationRows()).toBe(initialNotificationRows)
+        expect(configFormState()).toBe('pristine')
+        expect(visibleArrayPage()).toBeNull()
+        expect(notificationAdd).toBe(dom.window.document.activeElement)
+        dom.window.document.querySelector<HTMLButtonElement>(
+          '[data-config-path="notificationRules"] [data-array-action="add"]',
+        )?.click()
+        await new Promise(resolve => setTimeout(resolve, 10))
+        createPage = visibleArrayPage()
+        expect(createPage?.querySelector<HTMLElement>('.cxf-array-item-fields > .cxf-item')?.dataset.configPath).not
+          .toBe(firstCreateFieldPath)
+        const destinationInput = createPage?.querySelector<HTMLInputElement>(
+          '.cxf-array-item-fields input[type="text"]',
+        )
+        Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')?.set?.call(
+          destinationInput,
+          'Created after confirm',
+        )
+        destinationInput?.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+        await new Promise(resolve => setTimeout(resolve, 0))
+        expect(
+          [...createPage!.querySelectorAll<HTMLButtonElement>('.cxf-form-subpage-actions button')].find(button =>
+            button.textContent?.trim() === '创建'
+          )?.disabled,
+        ).toBe(false)
+        ;[...createPage!.querySelectorAll<HTMLButtonElement>('button')].find(button =>
+          button.textContent?.trim() === '创建'
+        )?.click()
+        await new Promise(resolve => setTimeout(resolve, 0))
+        expect(notificationRows()).toBe(initialNotificationRows + 1)
+        expect(configFormState()).toBe('dirty')
+        const createdRow = [
+          ...dom.window.document.querySelectorAll<HTMLElement>('[data-config-path="notificationRules"] .cxf-array-row'),
+        ].at(-1)
+        const createdRowId = createdRow?.dataset.hostArrayItemId
+        expect(createdRowId).toBeTruthy()
+        createdRow?.querySelector<HTMLButtonElement>('.cxf-array-row-actions button[aria-label="编辑条目"]')?.click()
+        let arrayPage: HTMLElement | null = null
+        for (let attempt = 0; attempt < 10 && arrayPage === null; attempt += 1) {
+          await new Promise(resolve => setTimeout(resolve, 10))
+          arrayPage = visibleArrayPage()
+        }
+        expect(arrayPage).not.toBeNull()
+        expect(arrayPage?.querySelector('.cxf-array-item-fields > .cxf-item')?.getAttribute('data-config-path'))
+          .toContain(createdRowId)
+        expect(arrayPage?.querySelector('.cxr-breadcrumbs [aria-current="page"]')?.textContent).toBe('编辑第 2 项')
+        ;[...arrayPage!.querySelectorAll<HTMLButtonElement>('.cxr-breadcrumbs button')].find(button =>
+          button.textContent?.trim() === '通知规则'
+        )?.click()
+        await new Promise(resolve => setTimeout(resolve, 0))
+        const firstNotificationRow = dom.window.document.querySelector<HTMLElement>(
+          '[data-config-path="notificationRules"] .cxf-array-row',
+        )
+        firstNotificationRow?.querySelector<HTMLButtonElement>('button[aria-label="删除条目"]')?.click()
+        await new Promise(resolve => setTimeout(resolve, 0))
+        expect(notificationRows()).toBe(1)
+        expect(
+          dom.window.document.querySelector<HTMLElement>('[data-config-path="notificationRules"] .cxf-array-row')
+            ?.dataset.hostArrayItemId,
+        ).toBe(createdRowId)
+        ;[...dom.window.document.querySelectorAll<HTMLButtonElement>('.cxf-form-action-buttons button')].find(button =>
+          button.textContent?.includes('重置')
+        )?.click()
+        await new Promise(resolve => setTimeout(resolve, 10))
+        expect(configFormState()).toBe('pristine')
+        expect(notificationRows()).toBe(initialNotificationRows)
+        expect(
+          dom.window.document.querySelector<HTMLElement>('[data-config-path="notificationRules"] .cxf-array-row')
+            ?.dataset.hostArrayItemId,
+        ).not.toBe(createdRowId)
+        dom.window.document.querySelector<HTMLButtonElement>('.cxr-breadcrumbs button')?.click()
+        await new Promise(resolve => setTimeout(resolve, 0))
+        for (const [index, id] of defaultPluginIds.entries()) {
+          dom.window.document.querySelector<HTMLButtonElement>(`[data-plugin-id="${id}"]`)?.click()
+          await new Promise(resolve => setTimeout(resolve, 0))
+          expect(dom.window.document.querySelector('[data-plugin-detail]')?.getAttribute('data-plugin-detail')).toBe(id)
+          expect(dom.window.document.querySelectorAll('[data-plugin-detail-tab]')).toHaveLength(7)
+          if (index < defaultPluginIds.length - 1) {
+            dom.window.document.querySelector<HTMLButtonElement>('.cxr-breadcrumbs button')?.click()
+            await new Promise(resolve => setTimeout(resolve, 0))
+          }
+        }
+        const firstRuntime = runtime.__cordisxRuntime!
+        let disposed = false
+        const dispose = firstRuntime.dispose.bind(firstRuntime)
+        firstRuntime.dispose = async () => {
+          disposed = true
+          await dispose()
+        }
+        const reload = await buildRendererBundle(config, {
+          playground: true,
+          generation: 'playground-test-2',
+          profileId: 'playground',
+          permission: { profileId: 'playground', bridgeToken: '5'.repeat(64), policies: permissionPolicies },
+        })
+        dom.window.eval(reload)
+        for (let attempt = 0; attempt < 100 && runtime.__cordisxRuntime === firstRuntime; attempt += 1) {
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
+        expect(disposed).toBe(true)
+        expect(runtime.__cordisxRuntime?.snapshot().plugins.map(plugin => ({ id: plugin.id, status: plugin.status })))
+          .toEqual(defaultPluginIds.map(id => ({ id, status: 'active' })))
+        expect(dom.window.document.querySelector('[data-plugin-detail]')?.getAttribute('data-plugin-detail')).toBe(
+          'cli-proxy-api',
+        )
+        expect(dom.window.document.querySelectorAll('[data-plugin-detail-tab]')).toHaveLength(7)
+        await runtime.__cordisxRuntime?.dispose()
+        await new Promise(resolve => setTimeout(resolve, 200))
+      } finally {
+        dom.window.close()
       }
-      expect(disposed).toBe(true)
-      expect(runtime.__cordisxRuntime?.snapshot().plugins.map(plugin => ({ id: plugin.id, status: plugin.status })))
-        .toEqual(defaultPluginIds.map(id => ({ id, status: 'active' })))
-      expect(dom.window.document.querySelector('[data-plugin-detail]')?.getAttribute('data-plugin-detail')).toBe('cli-proxy-api')
-      expect(dom.window.document.querySelectorAll('[data-plugin-detail-tab]')).toHaveLength(7)
-      await runtime.__cordisxRuntime?.dispose()
-      await new Promise(resolve => setTimeout(resolve, 200))
-    } finally { dom.window.close() }
-  }, 60_000)
+    },
+    60_000,
+  )
 })

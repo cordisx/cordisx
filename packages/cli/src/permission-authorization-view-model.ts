@@ -113,52 +113,60 @@ export interface PermissionAuthorizationDialogProjection {
 export type PermissionAuthorizationDialogResult =
   | { readonly status: 'cancelled' }
   | { readonly status: 'manage-permissions' }
-  | { readonly status: 'confirmed'; readonly decision: CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV3 | CordisXPermissionAuthorizationDecisionV4 }
+  | {
+    readonly status: 'confirmed'
+    readonly decision:
+      | CordisXPermissionAuthorizationDecisionV2
+      | CordisXPermissionAuthorizationDecisionV3
+      | CordisXPermissionAuthorizationDecisionV4
+  }
 
-const UI_FALLBACKS = Object.freeze({
-  'dialog.install-title': 'Review permissions before installing',
-  'dialog.update-title': 'Review permission changes',
-  'dialog.enable-title': 'Review permissions before enabling',
-  'dialog.runtime-title': 'Permission request',
-  'dialog.required': 'Required',
-  'dialog.optional': 'Optional',
-  'dialog.sensitivity.low': 'Low risk',
-  'dialog.sensitivity.general': 'General access',
-  'dialog.sensitivity.sensitive': 'Sensitive',
-  'dialog.sensitivity.high-risk': 'High risk',
-  'dialog.review-mode.batch-eligible': 'Batch review',
-  'dialog.review-mode.explicit': 'Explicit review',
-  'dialog.plugin-rationale': 'Plugin-provided explanation',
-  'dialog.plugin-feature': 'Feature',
-  'dialog.plugin-denied-behavior': 'If denied',
-  'dialog.can-do': 'What it can do',
-  'dialog.cannot-do': 'What it cannot do',
-  'dialog.scope': 'Scope',
-  'dialog.availability.supported': 'Available',
-  'dialog.availability.degraded': 'Degraded',
-  'dialog.availability.unavailable': 'Unavailable now',
-  'dialog.authorization-method': 'Authorization method',
-  'dialog.decision.allow-once': 'Allow only this time',
-  'dialog.decision.allow-persistent': 'Always allow',
-  'dialog.decision.deny-once': 'Do not allow this time',
-  'dialog.decision.deny-persistent': 'Always deny',
-  'dialog.required-denied': 'The plugin will be blocked because this permission is required.',
-  'dialog.optional-denied': 'The related feature will remain unavailable; the plugin can continue.',
-  'dialog.technical-details': 'Technical details',
-  'dialog.capability-id': 'Capability ID',
-  'dialog.provider': 'Provider',
-  'dialog.runtime-generation': 'Runtime generation',
-  'dialog.module-generation': 'Plugin generation',
-  'dialog.request-source': 'Request source',
-  'dialog.plugin-source': 'Source',
-  'dialog.plugin-trust': 'Trust',
-  'dialog.cancel': 'Cancel',
-  'dialog.confirm': 'Confirm',
-  'dialog.manage-permissions': 'Manage plugin permissions',
-  'dialog.trust.native': 'Built into the Host',
-  'dialog.trust.configured': 'Configured source',
-  'dialog.trust.unverified': 'Unverified source',
-} as const)
+const UI_FALLBACKS = Object.freeze(
+  {
+    'dialog.install-title': 'Review permissions before installing',
+    'dialog.update-title': 'Review permission changes',
+    'dialog.enable-title': 'Review permissions before enabling',
+    'dialog.runtime-title': 'Permission request',
+    'dialog.required': 'Required',
+    'dialog.optional': 'Optional',
+    'dialog.sensitivity.low': 'Low risk',
+    'dialog.sensitivity.general': 'General access',
+    'dialog.sensitivity.sensitive': 'Sensitive',
+    'dialog.sensitivity.high-risk': 'High risk',
+    'dialog.review-mode.batch-eligible': 'Batch review',
+    'dialog.review-mode.explicit': 'Explicit review',
+    'dialog.plugin-rationale': 'Plugin-provided explanation',
+    'dialog.plugin-feature': 'Feature',
+    'dialog.plugin-denied-behavior': 'If denied',
+    'dialog.can-do': 'What it can do',
+    'dialog.cannot-do': 'What it cannot do',
+    'dialog.scope': 'Scope',
+    'dialog.availability.supported': 'Available',
+    'dialog.availability.degraded': 'Degraded',
+    'dialog.availability.unavailable': 'Unavailable now',
+    'dialog.authorization-method': 'Authorization method',
+    'dialog.decision.allow-once': 'Allow only this time',
+    'dialog.decision.allow-persistent': 'Always allow',
+    'dialog.decision.deny-once': 'Do not allow this time',
+    'dialog.decision.deny-persistent': 'Always deny',
+    'dialog.required-denied': 'The plugin will be blocked because this permission is required.',
+    'dialog.optional-denied': 'The related feature will remain unavailable; the plugin can continue.',
+    'dialog.technical-details': 'Technical details',
+    'dialog.capability-id': 'Capability ID',
+    'dialog.provider': 'Provider',
+    'dialog.runtime-generation': 'Runtime generation',
+    'dialog.module-generation': 'Plugin generation',
+    'dialog.request-source': 'Request source',
+    'dialog.plugin-source': 'Source',
+    'dialog.plugin-trust': 'Trust',
+    'dialog.cancel': 'Cancel',
+    'dialog.confirm': 'Confirm',
+    'dialog.manage-permissions': 'Manage plugin permissions',
+    'dialog.trust.native': 'Built into the Host',
+    'dialog.trust.configured': 'Configured source',
+    'dialog.trust.unverified': 'Unverified source',
+  } as const,
+)
 
 function ui(key: keyof typeof UI_FALLBACKS): CordisXLocalizedText {
   return Object.freeze({ namespace: CORDISX_PERMISSION_NAMESPACE, key, fallback: UI_FALLBACKS[key] })
@@ -171,10 +179,17 @@ export class PermissionAuthorizationViewModel {
   readonly #selected = new Map<CordisXPermissionCapabilityV4, CordisXPermissionDecisionV2>()
   #settled = false
 
-  constructor(readonly plan: CordisXPermissionAuthorizationPlanV2 | CordisXPermissionAuthorizationPlanV3 | CordisXPermissionAuthorizationPlanV4) {
+  constructor(
+    readonly plan:
+      | CordisXPermissionAuthorizationPlanV2
+      | CordisXPermissionAuthorizationPlanV3
+      | CordisXPermissionAuthorizationPlanV4,
+  ) {
     const seen = new Set<CordisXPermissionCapabilityV4>()
     for (const item of plan.declarations) {
-      if (seen.has(item.capability)) throw new Error(`permission plan contains duplicate capability: ${item.capability}`)
+      if (seen.has(item.capability)) {
+        throw new Error(`permission plan contains duplicate capability: ${item.capability}`)
+      }
       if (!item.allowedDecisions.includes(item.defaultDecision)) {
         throw new Error(`permission plan default is not allowed: ${item.capability}`)
       }
@@ -245,11 +260,13 @@ export class PermissionAuthorizationViewModel {
           }),
         }),
         authorizationLabel: resolve(ui('dialog.authorization-method')),
-        authorizationOptions: Object.freeze(item.allowedDecisions.map(decision => Object.freeze({
-          value: decision,
-          label: resolve(ui(`dialog.decision.${decision}`)),
-          selected: selected === decision,
-        }))),
+        authorizationOptions: Object.freeze(item.allowedDecisions.map(decision =>
+          Object.freeze({
+            value: decision,
+            label: resolve(ui(`dialog.decision.${decision}`)),
+            selected: selected === decision,
+          })
+        )),
         denialImpact: resolve(ui(item.required ? 'dialog.required-denied' : 'dialog.optional-denied')),
         technical: Object.freeze({
           label: resolve(ui('dialog.technical-details')),
@@ -316,12 +333,16 @@ export class PermissionAuthorizationViewModel {
           profileId: plan.profileId,
           identity: plan.identity,
           binding: plan.binding,
-          decisions: Object.freeze(plan.declarations.filter(item => item.decisionRequired).map(item => Object.freeze({
-            capability: item.capability,
-            scope: item.scope,
-            securityFingerprint: item.securityFingerprint,
-            decision: this.#selected.get(item.capability)!,
-          }))),
+          decisions: Object.freeze(
+            plan.declarations.filter(item => item.decisionRequired).map(item =>
+              Object.freeze({
+                capability: item.capability,
+                scope: item.scope,
+                securityFingerprint: item.securityFingerprint,
+                decision: this.#selected.get(item.capability)!,
+              })
+            ),
+          ),
         }),
       })
     }
@@ -338,12 +359,14 @@ export class PermissionAuthorizationViewModel {
           profileId: plan.profileId,
           identity: plan.identity,
           binding: plan.binding,
-          decisions: Object.freeze(plan.declarations.map(item => Object.freeze({
-            capability: item.capability,
-            scope: item.scope,
-            securityFingerprint: item.securityFingerprint,
-            decision: this.#selected.get(item.capability)!,
-          }))),
+          decisions: Object.freeze(plan.declarations.map(item =>
+            Object.freeze({
+              capability: item.capability,
+              scope: item.scope,
+              securityFingerprint: item.securityFingerprint,
+              decision: this.#selected.get(item.capability)!,
+            })
+          )),
         }),
       })
     }
@@ -358,12 +381,14 @@ export class PermissionAuthorizationViewModel {
         profileId: plan.profileId,
         identity: plan.identity,
         binding: plan.binding,
-        decisions: Object.freeze(plan.declarations.map(item => Object.freeze({
-          capability: item.capability,
-          scope: item.scope,
-          securityFingerprint: item.securityFingerprint,
-          decision: this.#selected.get(item.capability)!,
-        }))),
+        decisions: Object.freeze(plan.declarations.map(item =>
+          Object.freeze({
+            capability: item.capability,
+            scope: item.scope,
+            securityFingerprint: item.securityFingerprint,
+            decision: this.#selected.get(item.capability)!,
+          })
+        )),
       }),
     })
   }

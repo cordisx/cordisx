@@ -3,9 +3,20 @@ import { HostThemeProjection } from './host-theme.js'
 export type HostTooltipPlacement = 'top' | 'bottom'
 
 const NATIVE_TOOLTIP_CLASS = [
-  'w-fit', 'select-none', 'text-sm', 'whitespace-normal', 'break-words', 'z-50',
-  'rounded-lg', 'border', 'border-text', 'bg-primary-solid', 'text-primary-solid',
-  'px-2', 'py-1.5', 'cordisx-host-tooltip',
+  'w-fit',
+  'select-none',
+  'text-sm',
+  'whitespace-normal',
+  'break-words',
+  'z-50',
+  'rounded-lg',
+  'border',
+  'border-text',
+  'bg-primary-solid',
+  'text-primary-solid',
+  'px-2',
+  'py-1.5',
+  'cordisx-host-tooltip',
 ].join(' ')
 
 let tooltipSequence = 0
@@ -98,9 +109,16 @@ export class HostTooltipController {
     tooltip.dataset.side = preferredPlacement
     tooltip.textContent = text
     Object.assign(tooltip.style, {
-      position: 'fixed', left: '0', top: '0', maxWidth: 'min(20rem, calc(100vw - 16px))',
-      pointerEvents: 'none', zIndex: '2147483600', background: 'var(--cx-surface-raised)', color: 'var(--cx-text)',
-      border: '1px solid var(--cx-border)', boxShadow: '0 8px 28px var(--cx-shadow)',
+      position: 'fixed',
+      left: '0',
+      top: '0',
+      maxWidth: 'min(20rem, calc(100vw - 16px))',
+      pointerEvents: 'none',
+      zIndex: '2147483600',
+      background: 'var(--cx-surface-raised)',
+      color: 'var(--cx-text)',
+      border: '1px solid var(--cx-border)',
+      boxShadow: '0 8px 28px var(--cx-shadow)',
     })
     this.document.body.append(tooltip)
     const triggerRect = target.getBoundingClientRect()
@@ -128,6 +146,9 @@ export class HostTooltipController {
     target.setAttribute('aria-describedby', tooltip.id)
     this.activeTooltip = tooltip
     const remove = tooltip.remove.bind(tooltip)
-    tooltip.remove = () => { detachTheme(); remove() }
+    tooltip.remove = () => {
+      detachTheme()
+      remove()
+    }
   }
 }

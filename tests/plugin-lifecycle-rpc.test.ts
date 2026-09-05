@@ -51,22 +51,46 @@ describe('Host-private permission lifecycle binding', () => {
   })
 
   it('rejects token/profile/generation confusion and extra private fields', () => {
-    expect(() => parsePluginLifecycleBindingRequest({ ...privatePlan(), token: 'impostor' }, handler)).toThrow(/token mismatch/)
-    expect(() => parsePluginLifecycleBindingRequest(privatePlan({ profileId: 'other' }), handler)).toThrow(/scope is stale/)
-    expect(() => parsePluginLifecycleBindingRequest(privatePlan({ runtimeGeneration: 'runtime-old' }), handler)).toThrow(/scope is stale/)
-    expect(() => parsePluginLifecycleBindingRequest(privatePlan({ pluginDecision: {} }), handler)).toThrow(/unsupported/)
-    expect(() => parsePluginLifecycleBindingRequest(privatePlan({
-      kind: 'permission-review-plan-v4', certification: { status: 'active' },
-    }), handler)).toThrow(/unsupported/)
-    expect(() => parsePluginLifecycleBindingRequest(privatePlan({
-      kind: 'permission-review-plan-v4', official: true,
-    }), handler)).toThrow(/unsupported/)
+    expect(() => parsePluginLifecycleBindingRequest({ ...privatePlan(), token: 'impostor' }, handler)).toThrow(
+      /token mismatch/,
+    )
+    expect(() => parsePluginLifecycleBindingRequest(privatePlan({ profileId: 'other' }), handler)).toThrow(
+      /scope is stale/,
+    )
+    expect(() => parsePluginLifecycleBindingRequest(privatePlan({ runtimeGeneration: 'runtime-old' }), handler))
+      .toThrow(/scope is stale/)
+    expect(() => parsePluginLifecycleBindingRequest(privatePlan({ pluginDecision: {} }), handler)).toThrow(
+      /unsupported/,
+    )
+    expect(() =>
+      parsePluginLifecycleBindingRequest(
+        privatePlan({
+          kind: 'permission-review-plan-v4',
+          certification: { status: 'active' },
+        }),
+        handler,
+      )
+    ).toThrow(/unsupported/)
+    expect(() =>
+      parsePluginLifecycleBindingRequest(
+        privatePlan({
+          kind: 'permission-review-plan-v4',
+          official: true,
+        }),
+        handler,
+      )
+    ).toThrow(/unsupported/)
   })
 
   it('rejects mixed public/private envelopes and forged target shapes', () => {
     expect(() => parsePluginLifecycleBindingRequest({ ...privatePlan(), request: {} }, handler)).toThrow(/exactly one/)
-    expect(() => parsePluginLifecycleBindingRequest(privatePlan({
-      target: { kind: 'candidate', candidateId: 'plugin-candidate-1', pluginId: 'other' },
-    }), handler)).toThrow(/unsupported/)
+    expect(() =>
+      parsePluginLifecycleBindingRequest(
+        privatePlan({
+          target: { kind: 'candidate', candidateId: 'plugin-candidate-1', pluginId: 'other' },
+        }),
+        handler,
+      )
+    ).toThrow(/unsupported/)
   })
 })

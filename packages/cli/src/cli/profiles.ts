@@ -1,9 +1,5 @@
 import type { CordisXDataMode } from './parse.js'
-import {
-  type HomeConfig,
-  type HomeConfigProfile,
-  updateHomeConfigAtomic,
-} from '../config/home-config.js'
+import { type HomeConfig, type HomeConfigProfile, updateHomeConfigAtomic } from '../config/home-config.js'
 
 export interface ResolvedProfileSelection {
   readonly config: HomeConfig

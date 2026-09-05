@@ -40,7 +40,9 @@ function own(owner: MountOwner, cleanup: () => void): () => void {
     return () => {}
   }
   owner.cleanups.add(cleanup)
-  return () => { owner.cleanups.delete(cleanup) }
+  return () => {
+    owner.cleanups.delete(cleanup)
+  }
 }
 
 function disposeOwner(owner: MountOwner): void {
@@ -195,7 +197,13 @@ function actionButton(
   iconSlot.setAttribute('aria-hidden', 'true')
   if (action.icon !== undefined) {
     iconSlot.append(createHostSurfaceIcon(document, action.icon, {
-      state: action.disabled ? 'disabled' : action.tone === 'danger' ? 'danger' : action.pressed ? 'selected' : 'default',
+      state: action.disabled
+        ? 'disabled'
+        : action.tone === 'danger'
+        ? 'danger'
+        : action.pressed
+        ? 'selected'
+        : 'default',
     }))
   }
   button.append(iconSlot)

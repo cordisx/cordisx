@@ -38,7 +38,8 @@ export interface PlaygroundPreviewResetSourceBreakdown {
   readonly finalSelector: number
 }
 
-const disposableSessionNamespace = /^cordisx\.playground\.(?:simulator|host-session|scenario-lab|debug-generation|agent-loop)(?:[/:.]|$)/u
+const disposableSessionNamespace =
+  /^cordisx\.playground\.(?:simulator|host-session|scenario-lab|debug-generation|agent-loop)(?:[/:.]|$)/u
 
 function parse<Value>(storage: Storage, key: string): Value | undefined {
   try {
@@ -72,13 +73,15 @@ export function countPlaygroundDisposableSessionRecords(storage: Storage): numbe
   return count
 }
 
-export function readPlaygroundPreviewResetMarker(storage: Storage | undefined): PlaygroundPreviewResetMarker | undefined {
+export function readPlaygroundPreviewResetMarker(
+  storage: Storage | undefined,
+): PlaygroundPreviewResetMarker | undefined {
   if (storage === undefined) return undefined
   const marker = parse<Partial<PlaygroundPreviewResetMarker>>(storage, PLAYGROUND_PREVIEW_RESET_MARKER_KEY)
   return marker?.version === 1
-    && typeof marker.nonce === 'string' && marker.nonce !== ''
-    && (marker.phase === 'requesting' || marker.phase === 'awaiting-readback' || marker.phase === 'verifying')
-    && typeof marker.startedAt === 'string'
+      && typeof marker.nonce === 'string' && marker.nonce !== ''
+      && (marker.phase === 'requesting' || marker.phase === 'awaiting-readback' || marker.phase === 'verifying')
+      && typeof marker.startedAt === 'string'
     ? marker as PlaygroundPreviewResetMarker
     : undefined
 }
@@ -95,15 +98,15 @@ export function readPlaygroundPreviewResetResult(storage: Storage): PlaygroundPr
   const result = parse<Partial<PlaygroundPreviewResetResult>>(storage, PLAYGROUND_PREVIEW_RESET_RESULT_KEY)
   const sources = result?.sources as Partial<PlaygroundPreviewResetSourceBreakdown> | undefined
   return result?.version === 1
-    && (result.status === 'complete' || result.status === 'failed')
-    && Number.isSafeInteger(result.roomRows) && Number.isSafeInteger(result.recentTaskRows)
-    && Number.isSafeInteger(result.simulatorRecords) && typeof result.completedAt === 'string'
-    && typeof result.instanceId === 'string' && result.instanceId !== ''
-    && Number.isSafeInteger(result.serverGeneration) && Number.isSafeInteger(result.appliedGeneration)
-    && sources !== undefined
-    && Number.isSafeInteger(sources.liveRuntime) && Number.isSafeInteger(sources.runtimeMemory)
-    && Number.isSafeInteger(sources.taskSnapshotRegistry) && Number.isSafeInteger(sources.hostSessionRegistry)
-    && Number.isSafeInteger(sources.legacyAliasRegistry) && Number.isSafeInteger(sources.finalSelector)
+      && (result.status === 'complete' || result.status === 'failed')
+      && Number.isSafeInteger(result.roomRows) && Number.isSafeInteger(result.recentTaskRows)
+      && Number.isSafeInteger(result.simulatorRecords) && typeof result.completedAt === 'string'
+      && typeof result.instanceId === 'string' && result.instanceId !== ''
+      && Number.isSafeInteger(result.serverGeneration) && Number.isSafeInteger(result.appliedGeneration)
+      && sources !== undefined
+      && Number.isSafeInteger(sources.liveRuntime) && Number.isSafeInteger(sources.runtimeMemory)
+      && Number.isSafeInteger(sources.taskSnapshotRegistry) && Number.isSafeInteger(sources.hostSessionRegistry)
+      && Number.isSafeInteger(sources.legacyAliasRegistry) && Number.isSafeInteger(sources.finalSelector)
     ? result as PlaygroundPreviewResetResult
     : undefined
 }
@@ -120,7 +123,9 @@ export function isPlaygroundPreviewResetEpoch(value: unknown): value is Playgrou
     && Number.isSafeInteger(epoch.generation) && (epoch.generation ?? -1) >= 0
 }
 
-export function readPlaygroundPreviewResetApplied(storage: Storage | undefined): PlaygroundPreviewResetEpoch | undefined {
+export function readPlaygroundPreviewResetApplied(
+  storage: Storage | undefined,
+): PlaygroundPreviewResetEpoch | undefined {
   if (storage === undefined) return undefined
   const epoch = parse<unknown>(storage, PLAYGROUND_PREVIEW_RESET_APPLIED_KEY)
   return isPlaygroundPreviewResetEpoch(epoch) ? epoch : undefined
@@ -178,8 +183,16 @@ export interface PlaygroundPreviewResetDisposition {
 }
 
 export function playgroundPreviewResetDisposition(
-  result: Pick<PlaygroundPreviewResetResult,
-    'roomRows' | 'recentTaskRows' | 'simulatorRecords' | 'sources' | 'instanceId' | 'serverGeneration' | 'appliedGeneration'>,
+  result: Pick<
+    PlaygroundPreviewResetResult,
+    | 'roomRows'
+    | 'recentTaskRows'
+    | 'simulatorRecords'
+    | 'sources'
+    | 'instanceId'
+    | 'serverGeneration'
+    | 'appliedGeneration'
+  >,
 ): PlaygroundPreviewResetDisposition {
   const complete = result.instanceId !== 'unavailable'
     && result.serverGeneration >= 0 && result.appliedGeneration === result.serverGeneration

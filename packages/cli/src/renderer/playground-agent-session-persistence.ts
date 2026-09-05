@@ -1,7 +1,4 @@
-import type {
-  CordisXPersistedSession,
-  CordisXSessionEventPersistence,
-} from './agent-session-runtime.js'
+import type { CordisXPersistedSession, CordisXSessionEventPersistence } from './agent-session-runtime.js'
 
 const REQUEST = '__cordisxPlaygroundAgentSessionRequestV1'
 const RECEIVE = '__cordisxPlaygroundAgentSessionReceiveV1'
@@ -24,7 +21,9 @@ type StoreResult =
   | { readonly status: 'accepted'; readonly nextSeq: number; readonly disposition: 'committed' | 'replayed' }
   | { readonly status: 'unavailable'; readonly code: string }
 
-function clone<Value>(value: Value): Value { return structuredClone(value) }
+function clone<Value>(value: Value): Value {
+  return structuredClone(value)
+}
 
 /** Host-private loopback transport; never installed outside an explicit Playground. */
 export class BrowserPlaygroundAgentSessionPersistence implements CordisXSessionEventPersistence {
@@ -37,14 +36,18 @@ export class BrowserPlaygroundAgentSessionPersistence implements CordisXSessionE
       const parsed = JSON.parse(payload) as unknown
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return
       response = parsed as Record<string, unknown>
-    } catch { return }
+    } catch {
+      return
+    }
     if (typeof response.requestId !== 'string') return
     const pending = this.pending.get(response.requestId)
     if (pending === undefined) return
     this.pending.delete(response.requestId)
     clearTimeout(pending.timer)
     if (response.ok === true) pending.resolve(response.value)
-    else pending.reject(new Error(typeof response.error === 'string' ? response.error : 'Playground Session store rejected request'))
+    else {pending.reject(
+        new Error(typeof response.error === 'string' ? response.error : 'Playground Session store rejected request'),
+      )}
   }
 
   static connect(token: string, runtimeGeneration: string): BrowserPlaygroundAgentSessionPersistence | undefined {
@@ -61,26 +64,36 @@ export class BrowserPlaygroundAgentSessionPersistence implements CordisXSessionE
 
   async load(): Promise<readonly CordisXPersistedSession[]> {
     const result = await this.request({ operation: 'load' })
-    if (result.status !== 'loaded') throw new Error(`Playground Session recovery failed: ${result.status === 'unavailable' ? result.code : 'invalid-response'}`)
+    if (result.status !== 'loaded') {
+      throw new Error(
+        `Playground Session recovery failed: ${result.status === 'unavailable' ? result.code : 'invalid-response'}`,
+      )
+    }
     return clone(result.sessions)
   }
 
   async create(session: CordisXPersistedSession): Promise<void> {
     const result = await this.request({ operation: 'create', session: clone(session) })
-    if (result.status !== 'accepted' || result.nextSeq !== session.events.length) throw new Error('Playground Session create was not committed')
+    if (result.status !== 'accepted' || result.nextSeq !== session.events.length) {
+      throw new Error('Playground Session create was not committed')
+    }
   }
 
   async append(input: Parameters<CordisXSessionEventPersistence['append']>[0]): Promise<void> {
     const result = await this.request({ operation: 'append', ...clone(input) })
     if (result.status !== 'accepted' || result.nextSeq !== input.expectedSeq + input.events.length) {
-      throw new Error(`Playground Session append failed: ${result.status === 'unavailable' ? result.code : 'invalid-response'}`)
+      throw new Error(
+        `Playground Session append failed: ${result.status === 'unavailable' ? result.code : 'invalid-response'}`,
+      )
     }
   }
 
   async updateSetup(input: Parameters<NonNullable<CordisXSessionEventPersistence['updateSetup']>>[0]): Promise<void> {
     const result = await this.request({ operation: 'update-setup', ...clone(input) })
     if (result.status !== 'accepted') {
-      throw new Error(`Playground Session setup update failed: ${result.status === 'unavailable' ? result.code : 'invalid-response'}`)
+      throw new Error(
+        `Playground Session setup update failed: ${result.status === 'unavailable' ? result.code : 'invalid-response'}`,
+      )
     }
   }
 
@@ -110,7 +123,15 @@ export class BrowserPlaygroundAgentSessionPersistence implements CordisXSessionE
       }, REQUEST_TIMEOUT_MS)
       this.pending.set(requestId, { resolve: value => resolve(value as StoreResult), reject, timer })
       try {
-        binding(JSON.stringify({ version: 1, requestId, token: this.token, runtimeGeneration: this.runtimeGeneration, ...operation }))
+        binding(
+          JSON.stringify({
+            version: 1,
+            requestId,
+            token: this.token,
+            runtimeGeneration: this.runtimeGeneration,
+            ...operation,
+          }),
+        )
       } catch (error) {
         clearTimeout(timer)
         this.pending.delete(requestId)

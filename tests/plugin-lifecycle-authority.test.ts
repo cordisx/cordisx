@@ -1,14 +1,14 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  PackageLifecycleAuthority,
+  type CandidateAccess,
   createHostPermissionReviewAuthority,
   createHostRegistryReceiptAuthority,
-  type CandidateAccess,
   type HostPermissionReviewDecision,
   type PackageCandidatePlan,
+  PackageLifecycleAuthority,
   type PackageRollbackToken,
   type PackageRuntimeObservation,
 } from '../packages/cli/src/launcher/packages/index.js'
@@ -43,21 +43,30 @@ async function setup(
   const source = path.join(root, 'source')
   await mkdir(path.join(source, 'src'), { recursive: true })
   await writeFile(path.join(source, 'src/index.ts'), 'export function apply() {}\n')
-  await writeFile(path.join(source, 'cordisx.plugin.json'), `${JSON.stringify({
-    $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
-    schemaVersion: 1,
-    id: 'candidate',
-    version: '1.0.0',
-    entry: './src/index.ts',
-    compatibility: { runtimeAbi: 1, protocol: 1 },
-    dependencies: [],
-    runtimeManifest: {
-      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
-      schemaVersion: 1,
-      id: 'candidate',
-      capabilities: [],
-    },
-  }, null, 2)}\n`)
+  await writeFile(
+    path.join(source, 'cordisx.plugin.json'),
+    `${
+      JSON.stringify(
+        {
+          $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
+          schemaVersion: 1,
+          id: 'candidate',
+          version: '1.0.0',
+          entry: './src/index.ts',
+          compatibility: { runtimeAbi: 1, protocol: 1 },
+          dependencies: [],
+          runtimeManifest: {
+            $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+            schemaVersion: 1,
+            id: 'candidate',
+            capabilities: [],
+          },
+        },
+        null,
+        2,
+      )
+    }\n`,
+  )
   const staged = await stageLocalPluginPackage(homeDir, source)
   const revoked: string[][] = []
   const permissionAuthority = createHostPermissionReviewAuthority(async input => ({
@@ -70,7 +79,9 @@ async function setup(
     deniedRequired: [],
     oneShotGrantIds: ['once:opaque'],
     ...decision,
-  }), async grantIds => { revoked.push([...grantIds]) })
+  }), async grantIds => {
+    revoked.push([...grantIds])
+  })
   const authority = await PackageLifecycleAuthority.open({
     homeDir,
     profileId: 'default',
@@ -159,11 +170,13 @@ describe('Host-private package lifecycle authority', () => {
       expect((await current.authority.resolveCandidate(current.access, boundary)).candidateFingerprint)
         .toBe(current.prepared.candidateFingerprint)
     }
-    expect(await current.authority.resolveImpact({
-      ownerId: 'generation-runtime',
-      profileId: 'default',
-      impactToken: current.prepared.impactToken,
-    }, 'plan')).toMatchObject({ affectedPluginIds: ['candidate'] })
+    expect(
+      await current.authority.resolveImpact({
+        ownerId: 'generation-runtime',
+        profileId: 'default',
+        impactToken: current.prepared.impactToken,
+      }, 'plan'),
+    ).toMatchObject({ affectedPluginIds: ['candidate'] })
     await expect(current.authority.resolveCandidate({ ...current.access, ownerId: 'renderer' }, 'plan'))
       .rejects.toMatchObject({ code: 'token-scope-mismatch' })
     await expect(current.authority.resolveCandidate({
@@ -178,10 +191,15 @@ describe('Host-private package lifecycle authority', () => {
 
   it('fails closed before stage/readiness/activation when required permission is denied and cleans one-shot grants on abort', async () => {
     const denied = await setup({ requiredSatisfied: false, deniedRequired: ['models.read'] })
-    await expect(denied.authority.requestActivation(denied.access)).rejects.toMatchObject({ code: 'permission-review-required' })
+    await expect(denied.authority.requestActivation(denied.access)).rejects.toMatchObject({
+      code: 'permission-review-required',
+    })
     await denied.authority.abort(denied.access, 'permission-denied')
     expect(denied.revoked).toEqual([['once:opaque']])
-    const journal = await readFile(path.join(denied.homeDir, 'state/profiles/default/package-authority/journal.v1.json'), 'utf8')
+    const journal = await readFile(
+      path.join(denied.homeDir, 'state/profiles/default/package-authority/journal.v1.json'),
+      'utf8',
+    )
     expect(journal).not.toContain('models.read scope=')
     expect(journal).not.toContain('secret')
   })
@@ -200,39 +218,54 @@ describe('Host-private package lifecycle authority', () => {
       receiptFingerprint: '0'.repeat(64),
     })).rejects.toMatchObject({ code: 'stale-readiness-receipt' })
     const registry = createHostRegistryReceiptAuthority()
-    await expect(current.authority.confirmReadiness(current.access, registry.issueReadiness({
-      transactionId: plan.transactionId,
-      transactionEpoch: String(plan.expectedRegistryEpoch),
-      candidateFingerprint: fingerprint,
-      expectedRegistryEpoch: plan.expectedRegistryEpoch,
-      afterRegistryEpoch: plan.afterRegistryEpoch,
-      observation: runtimeObservation(plan.after, plan.afterRegistryEpoch),
-    }))).rejects.toMatchObject({ code: 'stale-readiness-receipt' })
-    await expect(current.authority.confirmReadiness(current.access, registry.issueReadiness({
-      transactionId: plan.transactionId,
-      transactionEpoch: plan.transactionEpoch,
-      candidateFingerprint: fingerprint,
-      expectedRegistryEpoch: plan.expectedRegistryEpoch,
-      afterRegistryEpoch: plan.afterRegistryEpoch + 1,
-      observation: runtimeObservation(plan.after, plan.afterRegistryEpoch + 1),
-    }))).rejects.toMatchObject({ code: 'stale-readiness-receipt' })
-    await current.authority.confirmReadiness(current.access, registry.issueReadiness({
-      transactionId: plan.transactionId,
-      transactionEpoch: plan.transactionEpoch,
-      candidateFingerprint: fingerprint,
-      expectedRegistryEpoch: plan.expectedRegistryEpoch,
-      afterRegistryEpoch: plan.afterRegistryEpoch,
-      observation: runtimeObservation(plan.after, plan.afterRegistryEpoch),
-    }))
-    expect(await current.authority.commit(current.access)).toMatchObject({ revision: 1, plugins: [{ id: 'candidate' }] })
-    await current.authority.completeCommit(current.access, registry.issueCommit({
-      transactionId: plan.transactionId,
-      transactionEpoch: plan.transactionEpoch,
-      candidateFingerprint: fingerprint,
-      registryEpoch: plan.afterRegistryEpoch,
-      active: runtimeObservation(plan.after, plan.afterRegistryEpoch),
-      disposedAfter: runtimeObservation(plan.expected, plan.expectedRegistryEpoch),
-    }))
+    await expect(current.authority.confirmReadiness(
+      current.access,
+      registry.issueReadiness({
+        transactionId: plan.transactionId,
+        transactionEpoch: String(plan.expectedRegistryEpoch),
+        candidateFingerprint: fingerprint,
+        expectedRegistryEpoch: plan.expectedRegistryEpoch,
+        afterRegistryEpoch: plan.afterRegistryEpoch,
+        observation: runtimeObservation(plan.after, plan.afterRegistryEpoch),
+      }),
+    )).rejects.toMatchObject({ code: 'stale-readiness-receipt' })
+    await expect(current.authority.confirmReadiness(
+      current.access,
+      registry.issueReadiness({
+        transactionId: plan.transactionId,
+        transactionEpoch: plan.transactionEpoch,
+        candidateFingerprint: fingerprint,
+        expectedRegistryEpoch: plan.expectedRegistryEpoch,
+        afterRegistryEpoch: plan.afterRegistryEpoch + 1,
+        observation: runtimeObservation(plan.after, plan.afterRegistryEpoch + 1),
+      }),
+    )).rejects.toMatchObject({ code: 'stale-readiness-receipt' })
+    await current.authority.confirmReadiness(
+      current.access,
+      registry.issueReadiness({
+        transactionId: plan.transactionId,
+        transactionEpoch: plan.transactionEpoch,
+        candidateFingerprint: fingerprint,
+        expectedRegistryEpoch: plan.expectedRegistryEpoch,
+        afterRegistryEpoch: plan.afterRegistryEpoch,
+        observation: runtimeObservation(plan.after, plan.afterRegistryEpoch),
+      }),
+    )
+    expect(await current.authority.commit(current.access)).toMatchObject({
+      revision: 1,
+      plugins: [{ id: 'candidate' }],
+    })
+    await current.authority.completeCommit(
+      current.access,
+      registry.issueCommit({
+        transactionId: plan.transactionId,
+        transactionEpoch: plan.transactionEpoch,
+        candidateFingerprint: fingerprint,
+        registryEpoch: plan.afterRegistryEpoch,
+        active: runtimeObservation(plan.after, plan.afterRegistryEpoch),
+        disposedAfter: runtimeObservation(plan.expected, plan.expectedRegistryEpoch),
+      }),
+    )
   })
 
   it('pins rollback state after atomic publish until a Host-authenticated restore+cleanup receipt', async () => {
@@ -242,7 +275,9 @@ describe('Host-private package lifecycle authority', () => {
     const rollback = await current.authority.beginRollback(current.access, 'post-publish-handshake-failed')
     expect((await current.authority.resolveCandidate(current.access, 'rollback')).candidateFingerprint)
       .toBe(current.prepared.candidateFingerprint)
-    await expect(current.authority.abort(current.access, 'too-early')).rejects.toMatchObject({ code: 'rollback-required' })
+    await expect(current.authority.abort(current.access, 'too-early')).rejects.toMatchObject({
+      code: 'rollback-required',
+    })
     await expect(current.authority.prepare({
       ownerId: 'generation-runtime',
       operation: 'install',
@@ -260,27 +295,33 @@ describe('Host-private package lifecycle authority', () => {
       ownerId: 'generation-runtime',
       profileId: 'default',
       rollbackToken: rollback.rollbackToken,
-    }, { ...registry.issueRollback({
-      transactionId: rollback.transactionId,
-      transactionEpoch: rollback.transactionEpoch,
-      candidateFingerprint: rollback.candidateFingerprint,
-      registryEpoch: rollback.rollbackRegistryEpoch,
-      active,
-      disposedAfter,
-    }), receiptFingerprint: 'f'.repeat(64) })).rejects.toMatchObject({ code: 'stale-rollback-receipt' })
+    }, {
+      ...registry.issueRollback({
+        transactionId: rollback.transactionId,
+        transactionEpoch: rollback.transactionEpoch,
+        candidateFingerprint: rollback.candidateFingerprint,
+        registryEpoch: rollback.rollbackRegistryEpoch,
+        active,
+        disposedAfter,
+      }),
+      receiptFingerprint: 'f'.repeat(64),
+    })).rejects.toMatchObject({ code: 'stale-rollback-receipt' })
 
-    const restored = await current.authority.completeRollback({
-      ownerId: 'generation-runtime',
-      profileId: 'default',
-      rollbackToken: rollback.rollbackToken,
-    }, registry.issueRollback({
-      transactionId: rollback.transactionId,
-      transactionEpoch: rollback.transactionEpoch,
-      candidateFingerprint: rollback.candidateFingerprint,
-      registryEpoch: rollback.rollbackRegistryEpoch,
-      active,
-      disposedAfter,
-    }))
+    const restored = await current.authority.completeRollback(
+      {
+        ownerId: 'generation-runtime',
+        profileId: 'default',
+        rollbackToken: rollback.rollbackToken,
+      },
+      registry.issueRollback({
+        transactionId: rollback.transactionId,
+        transactionEpoch: rollback.transactionEpoch,
+        candidateFingerprint: rollback.candidateFingerprint,
+        registryEpoch: rollback.rollbackRegistryEpoch,
+        active,
+        disposedAfter,
+      }),
+    )
     expect(restored.plugins).toEqual([])
     expect(current.revoked).toEqual([['once:opaque']])
     expect(plan.afterRegistryEpoch).toBe(5)
@@ -294,15 +335,52 @@ describe('Host-private package lifecycle authority', () => {
     const unregister = runtime.register({
       async send(_method: string, params: Record<string, unknown>) {
         const expression = String(params.expression ?? '')
-        if (expression.includes('stagePluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'transaction-1', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1,
-        } } } }
-        if (expression.includes('publishPluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'transaction-1', transactionEpoch, registryEpoch: 1, active: candidate,
-        } } } }
-        if (expression.includes('completePluginMutation')) return { result: { value: { ok: true, result: {
-          transactionId: 'transaction-1', transactionEpoch, registryEpoch: 1, active: candidate, disposedAfter: previous,
-        } } } }
+        if (expression.includes('stagePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'transaction-1',
+                  transactionEpoch,
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('publishPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'transaction-1',
+                  transactionEpoch,
+                  registryEpoch: 1,
+                  active: candidate,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('completePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'transaction-1',
+                  transactionEpoch,
+                  registryEpoch: 1,
+                  active: candidate,
+                  disposedAfter: previous,
+                },
+              },
+            },
+          }
+        }
         return {}
       },
     } as never)
@@ -312,20 +390,29 @@ describe('Host-private package lifecycle authority', () => {
     previous = await current.authority.activation.loadActive()
     candidate = await current.authority.activation.loadCandidate('transaction-1')
     const mutation: PluginRuntimeMutation = {
-      transactionId: 'transaction-1', ...fence, afterRegistryEpoch: 1, operation: 'install', previous, candidate,
-      targetId: 'candidate', affectedPluginIds: ['candidate'],
+      transactionId: 'transaction-1',
+      ...fence,
+      afterRegistryEpoch: 1,
+      operation: 'install',
+      previous,
+      candidate,
+      targetId: 'candidate',
+      affectedPluginIds: ['candidate'],
     }
     const plan = await current.authority.requestActivation(current.access)
     const readiness = await runtime.stage(mutation)
     const registry = createHostRegistryReceiptAuthority()
-    await current.authority.confirmReadiness(current.access, registry.issueReadiness({
-      transactionId: plan.transactionId,
-      transactionEpoch: plan.transactionEpoch,
-      candidateFingerprint: plan.candidateFingerprint,
-      expectedRegistryEpoch: readiness.expectedRegistryEpoch,
-      afterRegistryEpoch: readiness.afterRegistryEpoch,
-      observation: runtimeObservation(plan.after, readiness.afterRegistryEpoch),
-    }))
+    await current.authority.confirmReadiness(
+      current.access,
+      registry.issueReadiness({
+        transactionId: plan.transactionId,
+        transactionEpoch: plan.transactionEpoch,
+        candidateFingerprint: plan.candidateFingerprint,
+        expectedRegistryEpoch: readiness.expectedRegistryEpoch,
+        afterRegistryEpoch: readiness.afterRegistryEpoch,
+        observation: runtimeObservation(plan.after, readiness.afterRegistryEpoch),
+      }),
+    )
     const publication = await runtime.publish('transaction-1')
     await current.authority.commit(current.access)
     expect(publication).toMatchObject({ registryEpoch: 1, active: candidate })
@@ -333,19 +420,26 @@ describe('Host-private package lifecycle authority', () => {
     const rollback = await current.authority.beginRollback(current.access, 'renderer-closed-after-publish')
     unregister()
     const restored = await runtime.rollback('transaction-1')
-    expect(restored).toMatchObject({ registryEpoch: rollback.rollbackRegistryEpoch, active: previous, disposedAfter: candidate })
-    const accepted = await current.authority.completeRollback({
-      ownerId: 'generation-runtime',
-      profileId: 'default',
-      rollbackToken: rollback.rollbackToken,
-    }, registry.issueRollback({
-      transactionId: rollback.transactionId,
-      transactionEpoch: rollback.transactionEpoch,
-      candidateFingerprint: rollback.candidateFingerprint,
-      registryEpoch: restored.registryEpoch,
-      active: runtimeObservation(rollback.rollbackTarget, restored.registryEpoch),
-      disposedAfter: runtimeObservation(rollback.expectedPublished, rollback.expectedRegistryEpoch),
-    }))
+    expect(restored).toMatchObject({
+      registryEpoch: rollback.rollbackRegistryEpoch,
+      active: previous,
+      disposedAfter: candidate,
+    })
+    const accepted = await current.authority.completeRollback(
+      {
+        ownerId: 'generation-runtime',
+        profileId: 'default',
+        rollbackToken: rollback.rollbackToken,
+      },
+      registry.issueRollback({
+        transactionId: rollback.transactionId,
+        transactionEpoch: rollback.transactionEpoch,
+        candidateFingerprint: rollback.candidateFingerprint,
+        registryEpoch: restored.registryEpoch,
+        active: runtimeObservation(rollback.rollbackTarget, restored.registryEpoch),
+        disposedAfter: runtimeObservation(rollback.expectedPublished, rollback.expectedRegistryEpoch),
+      }),
+    )
     expect(accepted.plugins).toEqual([])
   })
 
@@ -408,18 +502,21 @@ describe('Host-private package lifecycle authority', () => {
     expect(await reopened.collectGarbage(0)).toEqual([])
 
     const registry = createHostRegistryReceiptAuthority()
-    await reopened.completeRollback({
-      ownerId: 'generation-runtime',
-      profileId: 'default',
-      rollbackToken,
-    }, registry.issueRollback({
-      transactionId: rollback.transactionId,
-      transactionEpoch: rollback.transactionEpoch,
-      candidateFingerprint: rollback.candidateFingerprint,
-      registryEpoch: rollback.rollbackRegistryEpoch,
-      active: runtimeObservation(rollback.rollbackTarget, rollback.rollbackRegistryEpoch),
-      disposedAfter: runtimeObservation(rollback.expectedPublished, rollback.expectedRegistryEpoch),
-    }))
+    await reopened.completeRollback(
+      {
+        ownerId: 'generation-runtime',
+        profileId: 'default',
+        rollbackToken,
+      },
+      registry.issueRollback({
+        transactionId: rollback.transactionId,
+        transactionEpoch: rollback.transactionEpoch,
+        candidateFingerprint: rollback.candidateFingerprint,
+        registryEpoch: rollback.rollbackRegistryEpoch,
+        active: runtimeObservation(rollback.rollbackTarget, rollback.rollbackRegistryEpoch),
+        disposedAfter: runtimeObservation(rollback.expectedPublished, rollback.expectedRegistryEpoch),
+      }),
+    )
     await expect(reopened.resolveRollback({
       ownerId: 'generation-runtime',
       profileId: 'default',

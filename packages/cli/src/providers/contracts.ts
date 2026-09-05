@@ -72,10 +72,12 @@ export interface ProviderConnection {
   readonly generation: string
   status(): ProviderConnectionStatus
   listModels(): Promise<CordisXPlatformResult<readonly CordisXModelDescriptor[]>>
-  listSessions(input: Omit<CordisXTasksListInput, 'providerIds'>): Promise<CordisXPlatformResult<{
-    readonly sessions: readonly CordisXSessionSummary[]
-    readonly nextCursor?: string
-  }>>
+  listSessions(input: Omit<CordisXTasksListInput, 'providerIds'>): Promise<
+    CordisXPlatformResult<{
+      readonly sessions: readonly CordisXSessionSummary[]
+      readonly nextCursor?: string
+    }>
+  >
   readSession(ref: CordisXPlatformSessionRef): Promise<CordisXPlatformResult<CordisXSessionProjection>>
   createSession(input: {
     readonly model: CordisXPlatformModelRef
@@ -100,7 +102,11 @@ export interface ProviderConnection {
     readonly decision: 'approved' | 'denied' | 'cancelled'
     readonly operationId: string
     readonly operationDigest: string
-  }): Promise<CordisXPlatformResult<{ readonly turnId: string; readonly approvalId: string; readonly decision: 'approved' | 'denied' | 'cancelled' }>>
+  }): Promise<
+    CordisXPlatformResult<
+      { readonly turnId: string; readonly approvalId: string; readonly decision: 'approved' | 'denied' | 'cancelled' }
+    >
+  >
   requestMemberSelfIntroduction(input: {
     readonly session: CordisXPlatformSessionRef
     readonly operationId: string
@@ -127,5 +133,10 @@ export interface ProviderLifecycleSignal {
   readonly type: 'turn.started' | 'turn.completed' | 'turn.failed' | 'approval.required' | 'approval.resolved'
   readonly output?: readonly { readonly type: 'text'; readonly text: string }[]
   readonly failure?: { readonly code: string; readonly retryable: boolean }
-  readonly approval?: { readonly approvalId: string; readonly kind: 'command' | 'file-change' | 'external-action' | 'other'; readonly state: 'pending' | 'resolved'; readonly outcome?: 'approved' | 'denied' | 'expired' | 'cancelled' }
+  readonly approval?: {
+    readonly approvalId: string
+    readonly kind: 'command' | 'file-change' | 'external-action' | 'other'
+    readonly state: 'pending' | 'resolved'
+    readonly outcome?: 'approved' | 'denied' | 'expired' | 'cancelled'
+  }
 }

@@ -77,12 +77,14 @@ function parseEntry(value: unknown): CodexRouteHistoryEntry | undefined {
   const allowed = new Set(['schemaVersion', 'owner', 'routeId', 'outlet', 'path', 'params'])
   if (Object.keys(value).some(key => !allowed.has(key))) return undefined
   const params = parseScalarParams(value.params)
-  if (value.schemaVersion !== 1
+  if (
+    value.schemaVersion !== 1
     || typeof value.owner !== 'string'
     || typeof value.routeId !== 'string'
     || typeof value.outlet !== 'string'
     || typeof value.path !== 'string'
-    || params === undefined) return undefined
+    || params === undefined
+  ) return undefined
   return Object.freeze({
     schemaVersion: 1,
     owner: value.owner,
@@ -98,7 +100,8 @@ function parseBrowserRouteReloadRecord(value: unknown): BrowserRouteReloadRecord
   const allowed = new Set(['schemaVersion', 'key', 'index', 'pathname', 'search', 'hash', 'entry'])
   if (Object.keys(value).some(key => !allowed.has(key))) return undefined
   const entry = parseEntry(value.entry)
-  if (value.schemaVersion !== 1
+  if (
+    value.schemaVersion !== 1
     || typeof value.key !== 'string'
     || value.key.length === 0
     || value.key.length > 512
@@ -113,7 +116,8 @@ function parseBrowserRouteReloadRecord(value: unknown): BrowserRouteReloadRecord
     || typeof value.hash !== 'string'
     || (value.hash !== '' && !value.hash.startsWith('#'))
     || value.hash.length > 2048
-    || entry === undefined) return undefined
+    || entry === undefined
+  ) return undefined
   return Object.freeze({
     schemaVersion: 1,
     key: value.key,
@@ -199,7 +203,8 @@ interface RouteReloadCheckpoint {
 }
 
 function routerNavigator(value: unknown): CodexRouterNavigator | undefined {
-  if (!isRecord(value)
+  if (
+    !isRecord(value)
     || !Number.isSafeInteger(value.index)
     || (value.index as number) < 0
     || typeof value.action !== 'string'
@@ -212,7 +217,8 @@ function routerNavigator(value: unknown): CodexRouterNavigator | undefined {
     || typeof value.push !== 'function'
     || typeof value.replace !== 'function'
     || typeof value.go !== 'function'
-    || typeof value.listen !== 'function') return undefined
+    || typeof value.listen !== 'function'
+  ) return undefined
   return value as unknown as CodexRouterNavigator
 }
 
@@ -239,7 +245,9 @@ function findCodexRouterNavigator(document: Document): CodexRouterNavigator | un
   return undefined
 }
 
-function routerTarget(location: CodexRouterLocation): Readonly<Pick<CodexRouterLocation, 'pathname' | 'search' | 'hash'>> {
+function routerTarget(
+  location: CodexRouterLocation,
+): Readonly<Pick<CodexRouterLocation, 'pathname' | 'search' | 'hash'>> {
   return Object.freeze({ pathname: location.pathname, search: location.search, hash: location.hash })
 }
 
@@ -264,11 +272,13 @@ function parseReloadCheckpoint(value: unknown): RouteReloadCheckpoint | undefine
   const allowed = new Set(['schemaVersion', 'pathname', 'search', 'hash', 'entry'])
   if (Object.keys(value).some(key => !allowed.has(key))) return undefined
   const entry = parseEntry(value.entry)
-  if (value.schemaVersion !== 1
+  if (
+    value.schemaVersion !== 1
     || typeof value.pathname !== 'string'
     || typeof value.search !== 'string'
     || typeof value.hash !== 'string'
-    || entry === undefined) return undefined
+    || entry === undefined
+  ) return undefined
   return Object.freeze({
     schemaVersion: 1,
     pathname: value.pathname,
@@ -323,11 +333,16 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
       })
     }
     const location = this.navigator.location
-    if (!Number.isSafeInteger(this.navigator.index)
+    if (
+      !Number.isSafeInteger(this.navigator.index)
       || this.navigator.index < 0
       || typeof location.key !== 'string'
-      || location.key.length === 0) {
-      return Object.freeze({ available: false, reason: 'Codex React Router navigator has an invalid index or location key' })
+      || location.key.length === 0
+    ) {
+      return Object.freeze({
+        available: false,
+        reason: 'Codex React Router navigator has an invalid index or location key',
+      })
     }
     const entry = isRecord(location.state) ? parseEntry(location.state[CORDISX_ROUTE_STATE_KEY]) : undefined
     return Object.freeze({
@@ -346,14 +361,22 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
   push(entry: CodexRouteHistoryEntry): CodexRouteHistorySnapshot {
     const navigator = this.requireNavigator()
     const location = navigator.location
-    this.transition(location, entry, () => navigator.push(routerTarget(location), stateWithEntry(location.state, entry)))
+    this.transition(
+      location,
+      entry,
+      () => navigator.push(routerTarget(location), stateWithEntry(location.state, entry)),
+    )
     return this.snapshot()
   }
 
   replace(entry?: CodexRouteHistoryEntry): CodexRouteHistorySnapshot {
     const navigator = this.requireNavigator()
     const location = navigator.location
-    this.transition(location, entry, () => navigator.replace(routerTarget(location), stateWithEntry(location.state, entry)))
+    this.transition(
+      location,
+      entry,
+      () => navigator.replace(routerTarget(location), stateWithEntry(location.state, entry)),
+    )
     return this.snapshot()
   }
 
@@ -375,7 +398,9 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
     const navigator = this.navigator
     if (navigator !== undefined) {
       if (navigator.push === this.wrappedPush) this.restoreMethod(navigator, 'push', this.originalPushDescriptor)
-      if (navigator.replace === this.wrappedReplace) this.restoreMethod(navigator, 'replace', this.originalReplaceDescriptor)
+      if (navigator.replace === this.wrappedReplace) {
+        this.restoreMethod(navigator, 'replace', this.originalReplaceDescriptor)
+      }
       if (navigator.go === this.wrappedGo) this.restoreMethod(navigator, 'go', this.originalGoDescriptor)
     }
     this.listeners.clear()
@@ -391,7 +416,9 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
     try {
       this.view.history.replaceState(this.view.history.state, '')
     } catch (error) {
-      this.installReason = `CordisX reload checkpoint is unavailable: ${error instanceof Error ? error.message : String(error)}`
+      this.installReason = `CordisX reload checkpoint is unavailable: ${
+        error instanceof Error ? error.message : String(error)
+      }`
       return
     }
     const adapter = this
@@ -419,9 +446,13 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
       navigator.go = this.wrappedGo
     } catch (error) {
       if (navigator.push === this.wrappedPush) this.restoreMethod(navigator, 'push', this.originalPushDescriptor)
-      if (navigator.replace === this.wrappedReplace) this.restoreMethod(navigator, 'replace', this.originalReplaceDescriptor)
+      if (navigator.replace === this.wrappedReplace) {
+        this.restoreMethod(navigator, 'replace', this.originalReplaceDescriptor)
+      }
       if (navigator.go === this.wrappedGo) this.restoreMethod(navigator, 'go', this.originalGoDescriptor)
-      this.installReason = `Codex React Router navigator cannot be observed: ${error instanceof Error ? error.message : String(error)}`
+      this.installReason = `Codex React Router navigator cannot be observed: ${
+        error instanceof Error ? error.message : String(error)
+      }`
       return
     }
     this.navigator = navigator
@@ -444,7 +475,11 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
     }
   }
 
-  private transition(location: CodexRouterLocation, entry: CodexRouteHistoryEntry | undefined, operation: () => void): void {
+  private transition(
+    location: CodexRouterLocation,
+    entry: CodexRouteHistoryEntry | undefined,
+    operation: () => void,
+  ): void {
     const previousBrowserState: unknown = this.view.history.state
     this.writeCheckpoint(location, entry)
     try {
@@ -483,8 +518,7 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
         this.view.history.replaceState(state[CORDISX_BROWSER_STATE_KEY], '')
         return
       }
-    }
-    else {
+    } else {
       state[CORDISX_ROUTE_RELOAD_KEY] = Object.freeze({
         schemaVersion: 1,
         pathname: location.pathname,
@@ -516,16 +550,20 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
     const deepLink = parseRouteDeepLink(this.view)
     if (deepLink !== undefined) {
       this.view.history.replaceState(this.view.history.state, '', urlWithoutRouteDeepLink(this.view))
-      this.write(() => navigator.replace({ ...routerTarget(location), hash: '' }, stateWithEntry(location.state, deepLink)))
+      this.write(() =>
+        navigator.replace({ ...routerTarget(location), hash: '' }, stateWithEntry(location.state, deepLink))
+      )
       return
     }
     const checkpoint = isRecord(this.view.history.state)
       ? parseReloadCheckpoint(this.view.history.state[CORDISX_ROUTE_RELOAD_KEY])
       : undefined
-    if (checkpoint === undefined
+    if (
+      checkpoint === undefined
       || checkpoint.pathname !== location.pathname
       || checkpoint.search !== location.search
-      || checkpoint.hash !== location.hash) {
+      || checkpoint.hash !== location.hash
+    ) {
       this.writeCheckpoint(location)
       return
     }
@@ -584,13 +622,19 @@ export class BrowserRouteHistoryAdapter implements CodexRouteHistoryAdapter {
       || typeof view.history.state.key !== 'string'
       || !Number.isSafeInteger(view.history.state.idx))
     if (initialized) {
-      view.history.replaceState({ ...(isRecord(view.history.state) ? view.history.state : {}), key: 'default', idx: 0 }, '')
+      view.history.replaceState(
+        { ...(isRecord(view.history.state) ? view.history.state : {}), key: 'default', idx: 0 },
+        '',
+      )
     }
     const deepLink = parseRouteDeepLink(view)
     if (deepLink !== undefined && isRecord(view.history.state)) {
-      view.history.replaceState({ ...view.history.state, [CORDISX_ROUTE_STATE_KEY]: deepLink }, '', urlWithoutRouteDeepLink(view))
-    }
-    else if (!initialized) {
+      view.history.replaceState(
+        { ...view.history.state, [CORDISX_ROUTE_STATE_KEY]: deepLink },
+        '',
+        urlWithoutRouteDeepLink(view),
+      )
+    } else if (!initialized) {
       this.restoreReloadCheckpoint()
     }
     this.persistReloadCheckpoint()
@@ -604,10 +648,10 @@ export class BrowserRouteHistoryAdapter implements CodexRouteHistoryAdapter {
       const nextData = nextIndex === undefined
         ? data
         : {
-            ...(isRecord(data) ? data : { [CORDISX_BROWSER_STATE_KEY]: data }),
-            key: nextKey(adapter.view),
-            idx: nextIndex,
-          }
+          ...(isRecord(data) ? data : { [CORDISX_BROWSER_STATE_KEY]: data }),
+          key: nextKey(adapter.view),
+          idx: nextIndex,
+        }
       adapter.originalPushState.call(this, nextData, unused, url)
       if (nextIndex !== undefined) adapter.updateMaxIndex(nextIndex)
       adapter.persistReloadCheckpoint()
@@ -625,18 +669,22 @@ export class BrowserRouteHistoryAdapter implements CodexRouteHistoryAdapter {
     } catch (error) {
       if (view.history.pushState === this.wrappedPushState) view.history.pushState = this.originalPushState
       if (view.history.replaceState === this.wrappedReplaceState) view.history.replaceState = this.originalReplaceState
-      this.installReason = `Codex React Router history methods cannot be observed: ${error instanceof Error ? error.message : String(error)}`
+      this.installReason = `Codex React Router history methods cannot be observed: ${
+        error instanceof Error ? error.message : String(error)
+      }`
     }
   }
 
   snapshot(): CodexRouteHistorySnapshot {
     if (this.installReason !== undefined) return Object.freeze({ available: false, reason: this.installReason })
     const state: unknown = this.view.history.state
-    if (!isRecord(state)
+    if (
+      !isRecord(state)
       || typeof state.key !== 'string'
       || state.key.length === 0
       || !Number.isSafeInteger(state.idx)
-      || (state.idx as number) < 0) {
+      || (state.idx as number) < 0
+    ) {
       return Object.freeze({
         available: false,
         reason: 'Codex React Router history state is unavailable (expected non-empty key and non-negative integer idx)',
@@ -714,7 +762,9 @@ export class BrowserRouteHistoryAdapter implements CodexRouteHistoryAdapter {
     this.disposed = true
     this.view.removeEventListener('popstate', this.onPopState)
     if (this.view.history.pushState === this.wrappedPushState) this.view.history.pushState = this.originalPushState
-    if (this.view.history.replaceState === this.wrappedReplaceState) this.view.history.replaceState = this.originalReplaceState
+    if (this.view.history.replaceState === this.wrappedReplaceState) {
+      this.view.history.replaceState = this.originalReplaceState
+    }
     this.listeners.clear()
   }
 
@@ -749,18 +799,26 @@ export class BrowserRouteHistoryAdapter implements CodexRouteHistoryAdapter {
 
   private updateMaxIndex(index: number): void {
     this.maxIndex = index
-    try { this.view.sessionStorage.setItem(CORDISX_BROWSER_MAX_INDEX_KEY, String(index)) } catch { /* optional Playground session metadata */ }
+    try {
+      this.view.sessionStorage.setItem(CORDISX_BROWSER_MAX_INDEX_KEY, String(index))
+    } catch { /* optional Playground session metadata */ }
   }
 
-  private currentReloadIdentity(state: unknown = this.view.history.state): Omit<BrowserRouteReloadRecord, 'schemaVersion' | 'entry'> | undefined {
-    if (!isRecord(state)
+  private currentReloadIdentity(
+    state: unknown = this.view.history.state,
+  ): Omit<BrowserRouteReloadRecord, 'schemaVersion' | 'entry'> | undefined {
+    if (
+      !isRecord(state)
       || typeof state.key !== 'string'
       || state.key.length === 0
       || state.key.length > 512
       || !Number.isSafeInteger(state.idx)
-      || (state.idx as number) < 0) return undefined
+      || (state.idx as number) < 0
+    ) return undefined
     const { pathname, search, hash } = this.view.location
-    if (!pathname.startsWith('/') || pathname.length > 2048 || search.length > 2048 || hash.length > 2048) return undefined
+    if (!pathname.startsWith('/') || pathname.length > 2048 || search.length > 2048 || hash.length > 2048) {
+      return undefined
+    }
     return Object.freeze({ key: state.key, index: state.idx as number, pathname, search, hash })
   }
 
@@ -801,15 +859,25 @@ export class BrowserRouteHistoryAdapter implements CodexRouteHistoryAdapter {
   }
 
   private readReloadCheckpoints(): readonly BrowserRouteReloadRecord[] {
-    try { return readBrowserRouteReloadRecords(this.view.sessionStorage.getItem(CORDISX_BROWSER_ROUTE_RELOAD_KEY)) } catch { return [] }
+    try {
+      return readBrowserRouteReloadRecords(this.view.sessionStorage.getItem(CORDISX_BROWSER_ROUTE_RELOAD_KEY))
+    } catch {
+      return []
+    }
   }
 
   private writeReloadCheckpoints(records: readonly BrowserRouteReloadRecord[]): void {
     const bounded = [...records].slice(-MAX_BROWSER_ROUTE_RELOAD_ENTRIES)
-    while (bounded.length > 0 && JSON.stringify({ schemaVersion: 1, records: bounded }).length > MAX_BROWSER_ROUTE_RELOAD_BYTES) bounded.shift()
+    while (
+      bounded.length > 0
+      && JSON.stringify({ schemaVersion: 1, records: bounded }).length > MAX_BROWSER_ROUTE_RELOAD_BYTES
+    ) bounded.shift()
     try {
       if (bounded.length === 0) this.view.sessionStorage.removeItem(CORDISX_BROWSER_ROUTE_RELOAD_KEY)
-      else this.view.sessionStorage.setItem(CORDISX_BROWSER_ROUTE_RELOAD_KEY, JSON.stringify({ schemaVersion: 1, records: bounded }))
+      else {this.view.sessionStorage.setItem(
+          CORDISX_BROWSER_ROUTE_RELOAD_KEY,
+          JSON.stringify({ schemaVersion: 1, records: bounded }),
+        )}
     } catch {
       // Reload restoration is optional when browser session storage is unavailable.
     }

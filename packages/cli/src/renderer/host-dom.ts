@@ -6,18 +6,21 @@ import type {
   HostDomHandle,
   HostDomModifyOperation,
   HostDomNodeRef,
+  HostDomReadableAttribute,
   HostDomReadOperation,
   HostDomReadProjection,
-  HostDomReadableAttribute,
   HostDomRootCatalog,
   HostDomStructuredChild,
   LocalizedText,
 } from '@cordisx/protocol/host-dom/v1'
 import type { HostDomPermissionAccessDecision } from './platform.js'
 
-const REQUEST_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-dom-bridge-request.v1.schema.json'
-const RESULT_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-dom-bridge-result.v1.schema.json'
-const CATALOG_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-dom-root-catalog.v1.schema.json'
+const REQUEST_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-dom-bridge-request.v1.schema.json'
+const RESULT_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-dom-bridge-result.v1.schema.json'
+const CATALOG_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-dom-root-catalog.v1.schema.json'
 const CONTRACT = 'cordisx.bound-host-dom/v1'
 const MAX_REQUEST_BYTES = 64 * 1024
 const MAX_TEXT = 16 * 1024
@@ -29,13 +32,40 @@ const MAX_HANDLES_PER_CLIENT = 32
 const MAX_NODE_REFS_PER_CLIENT = 512
 const MAX_MODIFY_HANDLE_LIFETIME_MS = 60_000
 const PROHIBITED_ELEMENT_TAGS = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT'])
-const READ_ATTRIBUTES = Object.freeze([
-  'aria-label', 'aria-description', 'aria-expanded', 'aria-selected', 'aria-pressed',
-  'aria-current', 'aria-disabled', 'role', 'title', 'value', 'checked', 'disabled', 'hidden', 'tabindex',
-] as const satisfies readonly HostDomReadableAttribute[])
-const MUTABLE_ATTRIBUTES: ReadonlySet<HostDomReadableAttribute> = new Set(READ_ATTRIBUTES.filter(attribute => attribute !== 'role'))
-const READ_OPERATIONS = new Set<HostDomReadOperation>(['inspect-structure', 'read-text', 'read-attributes', 'read-state'])
-const MODIFY_OPERATIONS = new Set<HostDomModifyOperation>(['set-text', 'set-attribute', 'insert-owned-structured-child', 'remove-owned-child', 'focus'])
+const READ_ATTRIBUTES = Object.freeze(
+  [
+    'aria-label',
+    'aria-description',
+    'aria-expanded',
+    'aria-selected',
+    'aria-pressed',
+    'aria-current',
+    'aria-disabled',
+    'role',
+    'title',
+    'value',
+    'checked',
+    'disabled',
+    'hidden',
+    'tabindex',
+  ] as const satisfies readonly HostDomReadableAttribute[],
+)
+const MUTABLE_ATTRIBUTES: ReadonlySet<HostDomReadableAttribute> = new Set(
+  READ_ATTRIBUTES.filter(attribute => attribute !== 'role'),
+)
+const READ_OPERATIONS = new Set<HostDomReadOperation>([
+  'inspect-structure',
+  'read-text',
+  'read-attributes',
+  'read-state',
+])
+const MODIFY_OPERATIONS = new Set<HostDomModifyOperation>([
+  'set-text',
+  'set-attribute',
+  'insert-owned-structured-child',
+  'remove-owned-child',
+  'focus',
+])
 
 export const HOST_DOM_ROOT_CATALOG_VERSION = '2026-08-31'
 
@@ -75,7 +105,10 @@ export interface HostDomClientBinding {
   readonly leaseActive: (leaseId: string) => boolean
   /** Required lifecycle signal: revocation must rollback mutations without waiting for another request. */
   readonly subscribeInvalidation: (listener: () => void) => () => void
-  readonly invokeCommand?: (commandId: string, args?: Readonly<Record<string, HostDomAttributeValue>>) => void | Promise<void>
+  readonly invokeCommand?: (
+    commandId: string,
+    args?: Readonly<Record<string, HostDomAttributeValue>>,
+  ) => void | Promise<void>
 }
 
 interface HandleRecord {
@@ -132,7 +165,11 @@ function attributeValueInput(value: unknown): value is HostDomAttributeValue {
 }
 
 function serializableSize(value: unknown): number {
-  try { return new TextEncoder().encode(JSON.stringify(value)).byteLength } catch { return Number.POSITIVE_INFINITY }
+  try {
+    return new TextEncoder().encode(JSON.stringify(value)).byteLength
+  } catch {
+    return Number.POSITIVE_INFINITY
+  }
 }
 
 function immutableSnapshot<Value>(value: Value): Value | undefined {
@@ -151,13 +188,15 @@ function immutableSnapshot<Value>(value: Value): Value | undefined {
 }
 
 function base(request: Pick<HostDomBridgeRequest, 'requestId'>, hostGeneration: string) {
-  return Object.freeze({
-    $schema: RESULT_SCHEMA,
-    contract: CONTRACT,
-    schemaVersion: 1 as const,
-    requestId: request.requestId,
-    hostGeneration,
-  } as const)
+  return Object.freeze(
+    {
+      $schema: RESULT_SCHEMA,
+      contract: CONTRACT,
+      schemaVersion: 1 as const,
+      requestId: request.requestId,
+      hostGeneration,
+    } as const,
+  )
 }
 
 function unavailable(
@@ -179,10 +218,13 @@ function denied(
 function stateUnavailable(
   state: ReturnType<HostDomClientBinding['state']>,
 ): Extract<HostDomBridgeResult, { status: 'unavailable' }>['code'] | undefined {
-  return state === 'active' ? undefined
-    : state === 'disabled' ? 'plugin-disabled'
-      : state === 'uninstalled' ? 'plugin-uninstalled'
-        : 'generation-replaced'
+  return state === 'active'
+    ? undefined
+    : state === 'disabled'
+    ? 'plugin-disabled'
+    : state === 'uninstalled'
+    ? 'plugin-uninstalled'
+    : 'generation-replaced'
 }
 
 function elementKind(element: Element): Extract<HostDomReadProjection, { kind: 'structure' }>['nodes'][number]['kind'] {
@@ -227,17 +269,25 @@ function boundedText(element: Element): Extract<HostDomReadProjection, { kind: '
   let visited = 0
   const visit = (node: Node): void => {
     visited += 1
-    if (visited > MAX_TEXT_VISITED_NODES) { truncated = true; return }
+    if (visited > MAX_TEXT_VISITED_NODES) {
+      truncated = true
+      return
+    }
     if (node.nodeType === 3) {
       const value = node.nodeValue ?? ''
       const remaining = MAX_TEXT - text.length
-      if (value.length > remaining) { text += value.slice(0, Math.max(remaining, 0)); truncated = true }
-      else text += value
+      if (value.length > remaining) {
+        text += value.slice(0, Math.max(remaining, 0))
+        truncated = true
+      } else text += value
       return
     }
     if (node.nodeType !== 1) return
     const child = node as Element
-    if (child !== element && redactedSubtree(child)) { redacted = true; return }
+    if (child !== element && redactedSubtree(child)) {
+      redacted = true
+      return
+    }
     for (const entry of child.childNodes) {
       if (truncated) return
       visit(entry)
@@ -272,11 +322,13 @@ function localized(value: LocalizedText, resolve?: (input: LocalizedText) => str
 
 function validLocalized(value: unknown): value is LocalizedText {
   const input = record(value)
-  if (input === undefined || !exact(input, ['namespace', 'key', 'params', 'fallback'])
+  if (
+    input === undefined || !exact(input, ['namespace', 'key', 'params', 'fallback'])
     || !localId(input.key)
     || (input.namespace !== undefined && !reference(input.namespace))
     || (input.fallback !== undefined && (typeof input.fallback !== 'string'
-      || input.fallback.length < 1 || input.fallback.length > 4000))) return false
+      || input.fallback.length < 1 || input.fallback.length > 4000))
+  ) return false
   const params = input.params === undefined ? undefined : record(input.params)
   if (params === undefined) return input.params === undefined
   return Object.keys(params).length <= 16
@@ -288,13 +340,18 @@ function validStructuredChild(value: unknown): value is HostDomStructuredChild {
   const child = record(value)
   if (child === undefined || !localId(child.id)) return false
   if (child.kind === 'text') return exact(child, ['id', 'kind', 'text']) && validLocalized(child.text)
-  if (child.kind !== 'action' || !exact(child, ['id', 'kind', 'label', 'command', 'disabled']) || !validLocalized(child.label)) return false
+  if (
+    child.kind !== 'action' || !exact(child, ['id', 'kind', 'label', 'command', 'disabled'])
+    || !validLocalized(child.label)
+  ) return false
   const command = record(child.command)
   if (command === undefined || !exact(command, ['id', 'arguments']) || !localId(command.id)) return false
   const args = command.arguments === undefined ? undefined : record(command.arguments)
-  if (args !== undefined && (Object.keys(args).length > 16
-    || Object.keys(args).some(key => !/^[a-z][a-zA-Z0-9]*$/u.test(key))
-    || Object.values(args).some(item => !attributeValueInput(item)))) return false
+  if (
+    args !== undefined && (Object.keys(args).length > 16
+      || Object.keys(args).some(key => !/^[a-z][a-zA-Z0-9]*$/u.test(key))
+      || Object.values(args).some(item => !attributeValueInput(item)))
+  ) return false
   if (child.disabled === undefined) return true
   const disabled = record(child.disabled)
   return disabled !== undefined && exact(disabled, ['value', 'reason']) && typeof disabled.value === 'boolean'
@@ -329,32 +386,44 @@ export class HostDomAuthority {
     }
     const roots = new Map<string, HostDomRootDefinition>()
     for (const root of options.roots) {
-      if (!localId(root.rootId) || roots.has(root.rootId)) throw new Error(`Host DOM root id is invalid or duplicated: ${root.rootId}`)
+      if (!localId(root.rootId) || roots.has(root.rootId)) {
+        throw new Error(`Host DOM root id is invalid or duplicated: ${root.rootId}`)
+      }
       if (!validLocalized(root.name) || !validLocalized(root.description)) {
         throw new Error(`Host DOM root ${root.rootId} has invalid localized metadata`)
       }
-      if (root.readOperations.some(operation => !READ_OPERATIONS.has(operation))
-        || root.modifyOperations.some(operation => !MODIFY_OPERATIONS.has(operation))) {
+      if (
+        root.readOperations.some(operation => !READ_OPERATIONS.has(operation))
+        || root.modifyOperations.some(operation => !MODIFY_OPERATIONS.has(operation))
+      ) {
         throw new Error(`Host DOM root ${root.rootId} declares an unknown operation`)
       }
-      const requiredSensitivity = root.modifyOperations.length > 0 ? 'high-risk'
-        : root.readOperations.length > 0 ? 'sensitive' : 'general'
+      const requiredSensitivity = root.modifyOperations.length > 0
+        ? 'high-risk'
+        : root.readOperations.length > 0
+        ? 'sensitive'
+        : 'general'
       if (root.sensitivity !== requiredSensitivity) {
         throw new Error(`Host DOM root ${root.rootId} must use ${requiredSensitivity} sensitivity`)
       }
-      roots.set(root.rootId, Object.freeze({
-        ...root,
-        readOperations: Object.freeze([...new Set(root.readOperations)]),
-        modifyOperations: Object.freeze([...new Set(root.modifyOperations)]),
-      }))
+      roots.set(
+        root.rootId,
+        Object.freeze({
+          ...root,
+          readOperations: Object.freeze([...new Set(root.readOperations)]),
+          modifyOperations: Object.freeze([...new Set(root.modifyOperations)]),
+        }),
+      )
     }
     this.roots = roots
   }
 
   bind(binding: HostDomClientBinding): BoundHostDomClient {
     if (this.disposed) throw new Error('Host DOM authority is disposed')
-    if (binding.ownerKey.length < 1 || binding.ownerKey.length > 512
-      || binding.moduleGeneration.length < 1 || binding.moduleGeneration.length > 200) {
+    if (
+      binding.ownerKey.length < 1 || binding.ownerKey.length > 512
+      || binding.moduleGeneration.length < 1 || binding.moduleGeneration.length > 200
+    ) {
       throw new Error('Host DOM client binding is invalid')
     }
     const handles = new Map<HostDomHandle, HandleRecord>()
@@ -376,24 +445,32 @@ export class HostDomAuthority {
       if (handle.expiryTimer !== undefined) clearTimeout(handle.expiryTimer)
       delete handle.expiryTimer
       for (const action of [...handle.rollback].reverse()) {
-        try { action() } catch { /* cleanup is best effort and never restores a broader node */ }
+        try {
+          action()
+        } catch { /* cleanup is best effort and never restores a broader node */ }
       }
       handle.rollback.length = 0
     }
     const reconcile = () => {
       for (const handle of [...handles.values()]) {
-        if (clientDisposed || this.disposed || currentGeneration() !== this.options.hostGeneration
-          || binding.state() !== 'active' || !binding.leaseActive(handle.leaseId)) rollback(handle)
+        if (
+          clientDisposed || this.disposed || currentGeneration() !== this.options.hostGeneration
+          || binding.state() !== 'active' || !binding.leaseActive(handle.leaseId)
+        ) rollback(handle)
       }
       for (const [node, entry] of nodes) {
         const root = this.roots.get(entry.rootId)?.resolve()
-        if (root === undefined || !entry.element.isConnected || (entry.element !== root && !root.contains(entry.element))) {
-          nodes.delete(node); deleteNodeRef(entry.element, entry.rootId)
+        if (
+          root === undefined || !entry.element.isConnected || (entry.element !== root && !root.contains(entry.element))
+        ) {
+          nodes.delete(node)
+          deleteNodeRef(entry.element, entry.rootId)
         }
       }
     }
     const detachInvalidation = binding.subscribeInvalidation(reconcile)
-    const detachHostGenerationInvalidation = this.options.subscribeHostGenerationInvalidation?.(reconcile) ?? (() => undefined)
+    const detachHostGenerationInvalidation = this.options.subscribeHostGenerationInvalidation?.(reconcile)
+      ?? (() => undefined)
 
     const catalog = async (): Promise<HostDomRootCatalog> => {
       const hostGeneration = currentGeneration()
@@ -415,9 +492,13 @@ export class HostDomAuthority {
             sensitivity: root.sensitivity,
             availability: available ? 'available' as const : 'unavailable' as const,
             ...(available ? {} : {
-              unavailableReason: !generationCurrent ? 'generation-replaced' as const
-                : !this.options.isolatedPluginBoundary ? 'unsupported' as const
-                  : !mounted ? 'not-mounted' as const : 'profile-unavailable' as const,
+              unavailableReason: !generationCurrent
+                ? 'generation-replaced' as const
+                : !this.options.isolatedPluginBoundary
+                ? 'unsupported' as const
+                : !mounted
+                ? 'not-mounted' as const
+                : 'profile-unavailable' as const,
             }),
             readOperations: root.readOperations,
             modifyOperations: root.modifyOperations,
@@ -470,10 +551,12 @@ export class HostDomAuthority {
     const resolveNode = (handle: HandleRecord, node?: HostDomNodeRef): Element | undefined => {
       if (node === undefined) return handle.root
       const candidate = nodes.get(node)
-      if (candidate === undefined || candidate.ownerKey !== binding.ownerKey
+      if (
+        candidate === undefined || candidate.ownerKey !== binding.ownerKey
         || candidate.moduleGeneration !== binding.moduleGeneration || candidate.rootId !== handle.rootId
         || !candidate.element.isConnected
-        || (candidate.element !== handle.root && !handle.root.contains(candidate.element))) return undefined
+        || (candidate.element !== handle.root && !handle.root.contains(candidate.element))
+      ) return undefined
       return candidate.element
     }
 
@@ -482,12 +565,18 @@ export class HostDomAuthority {
       let truncated = false
       let redacted = false
       const visit = (element: Element, depth: number) => {
-        if (entries.length >= MAX_STRUCTURE_NODES || depth > MAX_STRUCTURE_DEPTH) { truncated = true; return }
+        if (entries.length >= MAX_STRUCTURE_NODES || depth > MAX_STRUCTURE_DEPTH) {
+          truncated = true
+          return
+        }
         const hidden = redactedSubtree(element)
         redacted ||= hidden
         if (hidden && element !== target) return
         const node = nodeRef(element, handle.rootId)
-        if (node === undefined) { truncated = true; return }
+        if (node === undefined) {
+          truncated = true
+          return
+        }
         entries.push({
           node,
           kind: element === handle.root ? 'root' : elementKind(element),
@@ -514,8 +603,10 @@ export class HostDomAuthority {
       else if (request.operation === 'read-text') {
         projection = boundedText(target)
       } else if (request.operation === 'read-attributes') {
-        if (new Set(request.attributes).size !== request.attributes.length
-          || request.attributes.some(attribute => !READ_ATTRIBUTES.includes(attribute))) {
+        if (
+          new Set(request.attributes).size !== request.attributes.length
+          || request.attributes.some(attribute => !READ_ATTRIBUTES.includes(attribute))
+        ) {
           return denied(request, currentGeneration(), 'operation-denied')
         }
         const redacted = redactedSubtree(target)
@@ -528,24 +619,38 @@ export class HostDomAuthority {
         const view = target.ownerDocument.defaultView
         const style = view?.getComputedStyle(target)
         const redacted = redactedSubtree(target)
-        projection = redacted ? {
-          kind: 'state', visible: false, enabled: false, focused: false,
-          expanded: null, selected: null, pressed: null, redacted: true,
-        } : {
-          kind: 'state',
-          visible: style?.display !== 'none' && style?.visibility !== 'hidden' && !target.hasAttribute('hidden'),
-          enabled: !target.hasAttribute('disabled') && target.getAttribute('aria-disabled') !== 'true',
-          focused: target.ownerDocument.activeElement === target,
-          expanded: target.hasAttribute('aria-expanded') ? target.getAttribute('aria-expanded') === 'true' : null,
-          selected: target.hasAttribute('aria-selected') ? target.getAttribute('aria-selected') === 'true' : null,
-          pressed: target.hasAttribute('aria-pressed') ? target.getAttribute('aria-pressed') === 'true' : null,
-          redacted: false,
-        }
+        projection = redacted
+          ? {
+            kind: 'state',
+            visible: false,
+            enabled: false,
+            focused: false,
+            expanded: null,
+            selected: null,
+            pressed: null,
+            redacted: true,
+          }
+          : {
+            kind: 'state',
+            visible: style?.display !== 'none' && style?.visibility !== 'hidden' && !target.hasAttribute('hidden'),
+            enabled: !target.hasAttribute('disabled') && target.getAttribute('aria-disabled') !== 'true',
+            focused: target.ownerDocument.activeElement === target,
+            expanded: target.hasAttribute('aria-expanded') ? target.getAttribute('aria-expanded') === 'true' : null,
+            selected: target.hasAttribute('aria-selected') ? target.getAttribute('aria-selected') === 'true' : null,
+            pressed: target.hasAttribute('aria-pressed') ? target.getAttribute('aria-pressed') === 'true' : null,
+            redacted: false,
+          }
       }
       return {
         ...base(request, currentGeneration()),
-        type: 'read', status: 'accepted', code: 'allowed', handle: checked.id,
-        capability: 'ui.host-dom.read', rootId: checked.rootId, operation: request.operation, projection,
+        type: 'read',
+        status: 'accepted',
+        code: 'allowed',
+        handle: checked.id,
+        capability: 'ui.host-dom.read',
+        rootId: checked.rootId,
+        operation: request.operation,
+        projection,
       }
     }
 
@@ -562,10 +667,14 @@ export class HostDomAuthority {
         ;(element as HTMLButtonElement).disabled = child.disabled?.value === true
         element.addEventListener('click', () => {
           const root = this.roots.get(handle.rootId)?.resolve()
-          if (!handles.has(handle.id) || !binding.leaseActive(handle.leaseId) || binding.state() !== 'active'
+          if (
+            !handles.has(handle.id) || !binding.leaseActive(handle.leaseId) || binding.state() !== 'active'
             || currentGeneration() !== this.options.hostGeneration || root !== handle.root || !handle.root.isConnected
-            || !element.isConnected || (element !== handle.root && !handle.root.contains(element))) return
-          void Promise.resolve(binding.invokeCommand?.(child.command.id, child.command.arguments)).catch(() => undefined)
+            || !element.isConnected || (element !== handle.root && !handle.root.contains(element))
+          ) return
+          void Promise.resolve(binding.invokeCommand?.(child.command.id, child.command.arguments)).catch(() =>
+            undefined
+          )
         })
       }
       return element
@@ -582,81 +691,123 @@ export class HostDomAuthority {
       let changed = false
       let ownedChild: string | undefined
       if (request.operation === 'set-text') {
-        if (typeof request.text !== 'string' || request.text.length > MAX_WRITE_TEXT
-          || (target.children.length > 0 && target.getAttribute('data-cordisx-host-dom-owner') !== binding.ownerKey)) {
+        if (
+          typeof request.text !== 'string' || request.text.length > MAX_WRITE_TEXT
+          || (target.children.length > 0 && target.getAttribute('data-cordisx-host-dom-owner') !== binding.ownerKey)
+        ) {
           return denied(request, currentGeneration(), 'operation-denied')
         }
         const before = target.textContent
         if (before !== request.text) {
-          target.textContent = request.text; changed = true
-          checked.rollback.push(() => { if (target.textContent === request.text) target.textContent = before })
+          target.textContent = request.text
+          changed = true
+          checked.rollback.push(() => {
+            if (target.textContent === request.text) target.textContent = before
+          })
         }
       } else if (request.operation === 'set-attribute') {
-        if (!MUTABLE_ATTRIBUTES.has(request.attribute) || (typeof request.value === 'string' && request.value.length > 512)) {
+        if (
+          !MUTABLE_ATTRIBUTES.has(request.attribute)
+          || (typeof request.value === 'string' && request.value.length > 512)
+        ) {
           return denied(request, currentGeneration(), 'operation-denied')
         }
         const before = target.getAttribute(request.attribute)
         const next = normalizeAttributeValue(request.value)
         if (before !== next) {
-          if (next === null) target.removeAttribute(request.attribute); else target.setAttribute(request.attribute, next)
+          if (next === null) target.removeAttribute(request.attribute)
+          else target.setAttribute(request.attribute, next)
           changed = true
           checked.rollback.push(() => {
             if (target.getAttribute(request.attribute) !== next) return
-            if (before === null) target.removeAttribute(request.attribute); else target.setAttribute(request.attribute, before)
+            if (before === null) target.removeAttribute(request.attribute)
+            else target.setAttribute(request.attribute, before)
           })
         }
       } else if (request.operation === 'insert-owned-structured-child') {
-        const duplicate = [...checked.root.querySelectorAll('[data-cordisx-host-dom-owner][data-cordisx-host-dom-child]')]
-          .find(element => element.getAttribute('data-cordisx-host-dom-owner') === binding.ownerKey
-            && element.getAttribute('data-cordisx-host-dom-child') === request.child.id)
+        const duplicate = [
+          ...checked.root.querySelectorAll('[data-cordisx-host-dom-owner][data-cordisx-host-dom-child]'),
+        ]
+          .find(element =>
+            element.getAttribute('data-cordisx-host-dom-owner') === binding.ownerKey
+            && element.getAttribute('data-cordisx-host-dom-child') === request.child.id
+          )
         const child = duplicate === undefined ? createChild(checked, request.child) : undefined
         if (child === undefined) return denied(request, currentGeneration(), 'operation-denied')
-        target.append(child); changed = true; ownedChild = request.child.id
-        checked.rollback.push(() => { if (child.parentElement !== null) child.remove() })
+        target.append(child)
+        changed = true
+        ownedChild = request.child.id
+        checked.rollback.push(() => {
+          if (child.parentElement !== null) child.remove()
+        })
       } else if (request.operation === 'remove-owned-child') {
         if (!localId(request.childId)) return denied(request, currentGeneration(), 'operation-denied')
         const children = [...target.children]
-        const child = children.find(element => element.getAttribute('data-cordisx-host-dom-owner') === binding.ownerKey
-          && element.getAttribute('data-cordisx-host-dom-child') === request.childId)
+        const child = children.find(element =>
+          element.getAttribute('data-cordisx-host-dom-owner') === binding.ownerKey
+          && element.getAttribute('data-cordisx-host-dom-child') === request.childId
+        )
         if (child !== undefined) {
-          child.remove(); changed = true
+          child.remove()
+          changed = true
           nodes.forEach((entry, key) => {
             if (entry.element !== child && !child.contains(entry.element)) return
-            nodes.delete(key); deleteNodeRef(entry.element, entry.rootId)
+            nodes.delete(key)
+            deleteNodeRef(entry.element, entry.rootId)
           })
         }
       } else {
         const focusTarget = target as HTMLElement
         if (typeof focusTarget.focus !== 'function') return denied(request, currentGeneration(), 'operation-denied')
-        focusTarget.focus({ preventScroll: true }); changed = target.ownerDocument.activeElement === target
+        focusTarget.focus({ preventScroll: true })
+        changed = target.ownerDocument.activeElement === target
       }
       return {
         ...base(request, currentGeneration()),
-        type: 'modify', status: 'accepted', code: 'allowed', handle: checked.id,
-        capability: 'ui.host-dom.modify', rootId: checked.rootId, operation: request.operation, changed,
+        type: 'modify',
+        status: 'accepted',
+        code: 'allowed',
+        handle: checked.id,
+        capability: 'ui.host-dom.modify',
+        rootId: checked.rootId,
+        operation: request.operation,
+        changed,
         ...(ownedChild === undefined ? {} : { ownedChild }),
       }
     }
 
-    const acquire = async (request: Extract<HostDomBridgeRequest, { type: 'acquire' }>): Promise<HostDomBridgeResult> => {
+    const acquire = async (
+      request: Extract<HostDomBridgeRequest, { type: 'acquire' }>,
+    ): Promise<HostDomBridgeResult> => {
       reconcile()
       if (!this.options.isolatedPluginBoundary) return unavailable(request, currentGeneration(), 'unsupported')
       const stateCode = stateUnavailable(binding.state())
       if (stateCode !== undefined) return unavailable(request, currentGeneration(), stateCode)
-      if (currentGeneration() !== this.options.hostGeneration) return unavailable(request, currentGeneration(), 'generation-replaced')
+      if (currentGeneration() !== this.options.hostGeneration) {
+        return unavailable(request, currentGeneration(), 'generation-replaced')
+      }
       const definition = this.roots.get(request.rootId)
       if (definition === undefined) return unavailable(request, currentGeneration(), 'unknown-root')
       const root = definition.resolve()
       if (root === undefined || !root.isConnected) return unavailable(request, currentGeneration(), 'not-mounted')
-      const allowedOperations = request.capability === 'ui.host-dom.read' ? definition.readOperations : definition.modifyOperations
-      if (request.operations.length < 1 || new Set(request.operations).size !== request.operations.length
-        || request.operations.some(operation => !allowedOperations.includes(operation as never))) {
+      const allowedOperations = request.capability === 'ui.host-dom.read'
+        ? definition.readOperations
+        : definition.modifyOperations
+      if (
+        request.operations.length < 1 || new Set(request.operations).size !== request.operations.length
+        || request.operations.some(operation => !allowedOperations.includes(operation as never))
+      ) {
         return denied(request, currentGeneration(), 'operation-denied')
       }
-      if (handles.size + pendingHandles >= MAX_HANDLES_PER_CLIENT) return denied(request, currentGeneration(), 'permission-denied')
+      if (handles.size + pendingHandles >= MAX_HANDLES_PER_CLIENT) {
+        return denied(request, currentGeneration(), 'permission-denied')
+      }
       const modify = request.capability === 'ui.host-dom.modify'
-      const overlaps = (candidate: Element) => candidate === root || candidate.contains(root) || root.contains(candidate)
-      if (modify && ([...this.activeModifyRoots.values()].some(overlaps) || [...this.pendingModifyRoots].some(overlaps))) {
+      const overlaps = (candidate: Element) =>
+        candidate === root || candidate.contains(root) || root.contains(candidate)
+      if (
+        modify && ([...this.activeModifyRoots.values()].some(overlaps) || [...this.pendingModifyRoots].some(overlaps))
+      ) {
         return denied(request, currentGeneration(), 'operation-denied')
       }
       if (modify) this.pendingModifyRoots.add(root)
@@ -669,11 +820,16 @@ export class HostDomAuthority {
           return unavailable(request, currentGeneration(), postState ?? 'generation-replaced')
         }
         if (!decision.authorized || decision.lease === undefined) {
-          return denied(request, currentGeneration(), decision.reason === 'permission.denied-persistent' ? 'persistent-deny' : 'permission-denied')
+          return denied(
+            request,
+            currentGeneration(),
+            decision.reason === 'permission.denied-persistent' ? 'persistent-deny' : 'permission-denied',
+          )
         }
         const lease = decision.lease
         const currentRoot = definition.resolve()
-        if (currentRoot === undefined || currentRoot !== root || !currentRoot.isConnected
+        if (
+          currentRoot === undefined || currentRoot !== root || !currentRoot.isConnected
           || !binding.leaseActive(lease.leaseId)
           || lease.runtimeGeneration !== binding.runtimeGeneration
           || lease.moduleGeneration !== binding.moduleGeneration
@@ -682,7 +838,8 @@ export class HostDomAuthority {
           || lease.key.identity.pluginId !== binding.identity.pluginId
           || lease.key.capability !== request.capability
           || !lease.key.scope.rootIds?.includes(request.rootId)
-          || request.operations.some(operation => !lease.key.scope.operations?.includes(operation as never))) {
+          || request.operations.some(operation => !lease.key.scope.operations?.includes(operation as never))
+        ) {
           return denied(request, currentGeneration(), 'permission-denied')
         }
         const handle = makeOpaque('hdh', ++this.sequence) as HostDomHandle
@@ -704,9 +861,27 @@ export class HostDomAuthority {
           ;(record.expiryTimer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.()
         }
         if (request.capability === 'ui.host-dom.read') {
-          return { ...base(request, currentGeneration()), type: 'acquire', status: 'accepted', code: 'allowed', handle, capability: request.capability, rootId: request.rootId, operations: request.operations }
+          return {
+            ...base(request, currentGeneration()),
+            type: 'acquire',
+            status: 'accepted',
+            code: 'allowed',
+            handle,
+            capability: request.capability,
+            rootId: request.rootId,
+            operations: request.operations,
+          }
         }
-        return { ...base(request, currentGeneration()), type: 'acquire', status: 'accepted', code: 'allowed', handle, capability: request.capability, rootId: request.rootId, operations: request.operations }
+        return {
+          ...base(request, currentGeneration()),
+          type: 'acquire',
+          status: 'accepted',
+          code: 'allowed',
+          handle,
+          capability: request.capability,
+          rootId: request.rootId,
+          operations: request.operations,
+        }
       } finally {
         pendingHandles -= 1
         if (modify) this.pendingModifyRoots.delete(root)
@@ -716,37 +891,58 @@ export class HostDomAuthority {
     const parse = (value: HostDomBridgeRequest): HostDomBridgeRequest | undefined => {
       const snapshot = immutableSnapshot(value)
       const input = record(snapshot)
-      if (input === undefined || serializableSize(snapshot) > MAX_REQUEST_BYTES
+      if (
+        input === undefined || serializableSize(snapshot) > MAX_REQUEST_BYTES
         || input.$schema !== REQUEST_SCHEMA || input.contract !== CONTRACT || input.schemaVersion !== 1
-        || !requestId(input.requestId) || !['acquire', 'read', 'modify', 'release'].includes(String(input.type))) return undefined
+        || !requestId(input.requestId) || !['acquire', 'read', 'modify', 'release'].includes(String(input.type))
+      ) return undefined
       const common = ['$schema', 'contract', 'schemaVersion', 'requestId', 'type']
       if (input.type === 'acquire') {
-        if (!exact(input, [...common, 'capability', 'rootId', 'operations']) || !localId(input.rootId)
-          || (input.capability !== 'ui.host-dom.read' && input.capability !== 'ui.host-dom.modify') || !Array.isArray(input.operations)
+        if (
+          !exact(input, [...common, 'capability', 'rootId', 'operations']) || !localId(input.rootId)
+          || (input.capability !== 'ui.host-dom.read' && input.capability !== 'ui.host-dom.modify')
+          || !Array.isArray(input.operations)
           || input.operations.length < 1 || new Set(input.operations).size !== input.operations.length
           || input.operations.some(operation => typeof operation !== 'string')
           || (input.capability === 'ui.host-dom.read'
             ? input.operations.some(operation => !READ_OPERATIONS.has(operation as HostDomReadOperation))
-            : input.operations.some(operation => !MODIFY_OPERATIONS.has(operation as HostDomModifyOperation)))) return undefined
+            : input.operations.some(operation => !MODIFY_OPERATIONS.has(operation as HostDomModifyOperation)))
+        ) return undefined
       } else if (input.type === 'release') {
         if (!exact(input, [...common, 'handle']) || !opaqueId(input.handle, 'hdh')) return undefined
       } else if (input.type === 'read') {
-        const keys = input.operation === 'read-attributes' ? [...common, 'handle', 'operation', 'node', 'attributes'] : [...common, 'handle', 'operation', 'node']
-        if (!exact(input, keys) || !opaqueId(input.handle, 'hdh') || !READ_OPERATIONS.has(input.operation as HostDomReadOperation)
+        const keys = input.operation === 'read-attributes'
+          ? [...common, 'handle', 'operation', 'node', 'attributes']
+          : [...common, 'handle', 'operation', 'node']
+        if (
+          !exact(input, keys) || !opaqueId(input.handle, 'hdh')
+          || !READ_OPERATIONS.has(input.operation as HostDomReadOperation)
           || (input.node !== undefined && !opaqueId(input.node, 'hdn'))
           || (input.operation === 'read-attributes' && (!Array.isArray(input.attributes)
             || input.attributes.length < 1 || input.attributes.length > 16
             || new Set(input.attributes).size !== input.attributes.length
-            || input.attributes.some(attribute => typeof attribute !== 'string' || !READ_ATTRIBUTES.includes(attribute as HostDomReadableAttribute))))) return undefined
+            || input.attributes.some(attribute =>
+              typeof attribute !== 'string' || !READ_ATTRIBUTES.includes(attribute as HostDomReadableAttribute)
+            )))
+        ) return undefined
       } else {
         const operation = input.operation as HostDomModifyOperation
-        const extra = operation === 'set-text' ? ['text'] : operation === 'set-attribute' ? ['attribute', 'value']
-          : operation === 'insert-owned-structured-child' ? ['child'] : operation === 'remove-owned-child' ? ['childId'] : []
-        if (!exact(input, [...common, 'handle', 'node', 'operation', ...extra]) || !opaqueId(input.handle, 'hdh')
-          || (input.node !== undefined && !opaqueId(input.node, 'hdn')) || !MODIFY_OPERATIONS.has(operation)) return undefined
+        const extra = operation === 'set-text' ? ['text'] : operation === 'set-attribute'
+          ? ['attribute', 'value']
+          : operation === 'insert-owned-structured-child'
+          ? ['child']
+          : operation === 'remove-owned-child'
+          ? ['childId']
+          : []
+        if (
+          !exact(input, [...common, 'handle', 'node', 'operation', ...extra]) || !opaqueId(input.handle, 'hdh')
+          || (input.node !== undefined && !opaqueId(input.node, 'hdn')) || !MODIFY_OPERATIONS.has(operation)
+        ) return undefined
         if (operation === 'set-text' && (typeof input.text !== 'string' || input.text.length > 16_384)) return undefined
-        if (operation === 'set-attribute' && (!MUTABLE_ATTRIBUTES.has(input.attribute as HostDomReadableAttribute)
-          || !attributeValueInput(input.value))) return undefined
+        if (
+          operation === 'set-attribute' && (!MUTABLE_ATTRIBUTES.has(input.attribute as HostDomReadableAttribute)
+            || !attributeValueInput(input.value))
+        ) return undefined
         if (operation === 'insert-owned-structured-child' && !validStructuredChild(input.child)) return undefined
         if (operation === 'remove-owned-child' && !localId(input.childId)) return undefined
       }
@@ -760,7 +956,8 @@ export class HostDomAuthority {
         const safeRequest = {
           requestId: requestId(fallback?.requestId) ? fallback.requestId : 'invalid-request',
           type: ['acquire', 'read', 'modify', 'release'].includes(String(fallback?.type))
-            ? fallback!.type as HostDomBridgeRequest['type'] : 'acquire' as const,
+            ? fallback!.type as HostDomBridgeRequest['type']
+            : 'acquire' as const,
         }
         return denied(safeRequest, currentGeneration(), 'operation-denied')
       }
@@ -785,7 +982,8 @@ export class HostDomAuthority {
       detachInvalidation()
       detachHostGenerationInvalidation()
       for (const handle of [...handles.values()]) rollback(handle)
-      nodes.clear(); seenRequests.clear()
+      nodes.clear()
+      seenRequests.clear()
       this.clientDisposers.delete(disposeClient)
     }
     this.clientDisposers.add(disposeClient)
@@ -814,16 +1012,23 @@ export function createCordisXHostDomRootDefinitions(document: Document): readonl
     Object.freeze({
       rootId: 'app.shell',
       name: Object.freeze({ key: 'host-dom.root.app-shell.name', fallback: 'App shell' }),
-      description: Object.freeze({ key: 'host-dom.root.app-shell.description', fallback: 'The visible Codex application shell.' }),
+      description: Object.freeze({
+        key: 'host-dom.root.app-shell.description',
+        fallback: 'The visible Codex application shell.',
+      }),
       sensitivity: 'high-risk' as const,
       readOperations: allRead,
       modifyOperations: allModify,
-      resolve: () => document.querySelector<HTMLElement>('#root, [data-testid="app-shell"]') ?? document.body ?? undefined,
+      resolve: () =>
+        document.querySelector<HTMLElement>('#root, [data-testid="app-shell"]') ?? document.body ?? undefined,
     }),
     Object.freeze({
       rootId: 'manager.surface',
       name: Object.freeze({ key: 'host-dom.root.manager.name', fallback: 'CordisX Manager' }),
-      description: Object.freeze({ key: 'host-dom.root.manager.description', fallback: 'The Host-owned CordisX Manager surface.' }),
+      description: Object.freeze({
+        key: 'host-dom.root.manager.description',
+        fallback: 'The Host-owned CordisX Manager surface.',
+      }),
       sensitivity: 'high-risk' as const,
       readOperations: allRead,
       modifyOperations: allModify,
@@ -832,11 +1037,15 @@ export function createCordisXHostDomRootDefinitions(document: Document): readonl
     Object.freeze({
       rootId: 'composer.surface',
       name: Object.freeze({ key: 'host-dom.root.composer.name', fallback: 'Composer' }),
-      description: Object.freeze({ key: 'host-dom.root.composer.description', fallback: 'The Host-owned message composer surface.' }),
+      description: Object.freeze({
+        key: 'host-dom.root.composer.description',
+        fallback: 'The Host-owned message composer surface.',
+      }),
       sensitivity: 'high-risk' as const,
       readOperations: allRead,
       modifyOperations: Object.freeze(['focus'] as const),
-      resolve: () => document.querySelector<HTMLElement>('[data-testid="composer"], [data-cordisx-host-composer]') ?? undefined,
+      resolve: () =>
+        document.querySelector<HTMLElement>('[data-testid="composer"], [data-cordisx-host-composer]') ?? undefined,
     }),
   ])
 }

@@ -20,11 +20,15 @@ interface RuntimeHandle {
       }
     }[]
   }
-  updatePluginConfig(id: string, expectedRevision: number, operations: readonly {
-    op: 'set' | 'unset'
-    path: readonly string[]
-    value?: unknown
-  }[]): Promise<void>
+  updatePluginConfig(
+    id: string,
+    expectedRevision: number,
+    operations: readonly {
+      op: 'set' | 'unset'
+      path: readonly string[]
+      value?: unknown
+    }[],
+  ): Promise<void>
   setPluginBlocked(id: string, blocked: boolean): Promise<void>
   dispose(): Promise<void>
 }
@@ -80,12 +84,20 @@ async function boot(): Promise<{
   }
   const token = 'a'.repeat(64)
   const bundle = await buildRendererBundle(config, { profileId: 'work', configBridgeToken: token })
-  const dom = new JSDOM(`<!doctype html><html lang="en"><head></head><body>
+  const dom = new JSDOM(
+    `<!doctype html><html lang="en"><head></head><body>
     <div class="sidebar-header"><button id="workspace" aria-haspopup="menu">Codex</button></div>
-  </body></html>`, { runScripts: 'dangerously', url: 'https://codex.local/native' })
+  </body></html>`,
+    { runScripts: 'dangerously', url: 'https://codex.local/native' },
+  )
   Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
   Object.defineProperty(dom.window, 'fetch', {
-    value: async () => ({ ok: false, status: 503, url: 'https://cordisx.github.io/marketplace/index.json', text: async () => '' }),
+    value: async () => ({
+      ok: false,
+      status: 503,
+      url: 'https://cordisx.github.io/marketplace/index.json',
+      text: async () => '',
+    }),
   })
   const bridge = new Map<string, BridgeState>([
     ['live-config', { revision: 0, config: { timeout: 30 } }],
@@ -107,7 +119,13 @@ async function boot(): Promise<{
     let response: Record<string, unknown>
     if (request.operation === 'stage') {
       if (state.revision !== request.expectedRevision || state.candidate !== undefined) {
-        response = { requestId: request.requestId, ok: false, code: 'conflict', actualRevision: state.revision, error: 'conflict' }
+        response = {
+          requestId: request.requestId,
+          ok: false,
+          code: 'conflict',
+          actualRevision: state.revision,
+          error: 'conflict',
+        }
       } else {
         state.candidate = { revision: state.revision + 1, config: request.config }
         response = { requestId: request.requestId, ok: true, value: { candidateRevision: state.revision + 1 } }
@@ -115,9 +133,14 @@ async function boot(): Promise<{
     } else if (request.operation === 'commit') {
       if (failCommit.delete(request.identity.pluginId)) {
         response = { requestId: request.requestId, ok: false, code: 'rejected', error: 'simulated persistence failure' }
-      } else
-      if (state.candidate?.revision !== request.candidateRevision) {
-        response = { requestId: request.requestId, ok: false, code: 'conflict', actualRevision: state.revision, error: 'conflict' }
+      } else if (state.candidate?.revision !== request.candidateRevision) {
+        response = {
+          requestId: request.requestId,
+          ok: false,
+          code: 'conflict',
+          actualRevision: state.revision,
+          error: 'conflict',
+        }
       } else {
         state.revision = state.candidate.revision
         state.config = state.candidate.config
@@ -129,12 +152,18 @@ async function boot(): Promise<{
       response = { requestId: request.requestId, ok: true }
     }
     queueMicrotask(() => {
-      const receive = (dom.window as unknown as Record<string, unknown>).__cordisxConfigReceiveV1 as ((value: string) => void) | undefined
+      const receive = (dom.window as unknown as Record<string, unknown>).__cordisxConfigReceiveV1 as
+        | ((value: string) => void)
+        | undefined
       receive?.(JSON.stringify(response))
     })
   }
   dom.window.eval(bundle)
-  for (let attempt = 0; attempt < 50 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
+  for (
+    let attempt = 0;
+    attempt < 50 && dom.window.document.documentElement.dataset.cordisxReady !== 'true';
+    attempt += 1
+  ) {
     await new Promise(resolve => setTimeout(resolve, 10))
   }
   const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime
@@ -154,7 +183,11 @@ describe('plugin config runtime', () => {
     expect(bridge.get('app-restart-config')).toMatchObject({ revision: 1, config: { label: 'next-launch' } })
     expect(appState).toEqual({ applyValues: ['active'], watchedValues: [] })
     expect(runtime.snapshot().plugins.find(plugin => plugin.id === 'app-restart-config')?.configuration).toMatchObject({
-      applies: 'app-restart', revision: 1, lastGoodRevision: 0, value: { label: 'next-launch' }, writable: true,
+      applies: 'app-restart',
+      revision: 1,
+      lastGoodRevision: 0,
+      value: { label: 'next-launch' },
+      writable: true,
     })
 
     const service = runtime.snapshot().plugins.find(plugin => plugin.id === 'service-restart-config')?.configuration
@@ -246,7 +279,9 @@ describe('plugin config runtime', () => {
     const state = (dom.window as unknown as {
       __cordisxRestartConfigFixture: { restartApply: string[]; restartDispose: number }
     }).__cordisxRestartConfigFixture
-    await expect(runtime.updatePluginConfig('restart-config', 0, [{ op: 'set', path: ['label'], value: 'fail-rollback' }]))
+    await expect(
+      runtime.updatePluginConfig('restart-config', 0, [{ op: 'set', path: ['label'], value: 'fail-rollback' }]),
+    )
       .rejects.toThrow('last-good rollback failed')
     expect(state.restartApply).toEqual(['good', 'fail-rollback', 'good'])
     expect(bridge.get('restart-config')).toMatchObject({ revision: 0, config: { label: 'good' } })
@@ -261,18 +296,30 @@ describe('plugin config runtime', () => {
     const { dom, runtime } = await boot()
     const trigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!
     trigger.click()
-    for (let attempt = 0; attempt < 200 && dom.window.document.querySelector('[data-plugin-id="live-config"]') === null; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 200 && dom.window.document.querySelector('[data-plugin-id="live-config"]') === null;
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     const row = [...dom.window.document.querySelectorAll<HTMLButtonElement>('[data-plugin-id]')]
       .find(element => element.dataset.pluginId === 'live-config')
     row?.click()
-    for (let attempt = 0; attempt < 200 && dom.window.document.querySelector('[data-plugin-detail-tab="config"]') === null; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 200 && dom.window.document.querySelector('[data-plugin-detail-tab="config"]') === null;
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
-    for (let attempt = 0; attempt < 200
-      && dom.window.document.querySelector('input[type="range"][data-host-form-primitive="custom"]') === null; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 200
+      && dom.window.document.querySelector('input[type="range"][data-host-form-primitive="custom"]') === null;
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     const configPanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="Configuration"]')
@@ -301,7 +348,9 @@ describe('plugin config runtime', () => {
     expect(save?.disabled).toBe(false)
     expect(dom.window.document.querySelector('.cxr-plugin-config-panel .cxf-status')?.textContent)
       .toBe('Unsaved changes · Applies immediately after saving')
-    expect(dom.window.document.querySelector('.cxr-plugin-config-panel .cxf-status')?.textContent).not.toMatch(/[\u3400-\u9fff]/u)
+    expect(dom.window.document.querySelector('.cxr-plugin-config-panel .cxf-status')?.textContent).not.toMatch(
+      /[\u3400-\u9fff]/u,
+    )
     expect(state.rendererMount).toBe(state.rendererDispose + 1)
     expect(state.rendererAbort).toBe(state.rendererDispose)
     await runtime.setPluginBlocked('live-config', true)
@@ -314,17 +363,29 @@ describe('plugin config runtime', () => {
   it('keeps a custom-renderer draft and exposes a bounded form error after a CAS conflict', async () => {
     const { dom, runtime, bridge } = await boot()
     dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
-    for (let attempt = 0; attempt < 200 && dom.window.document.querySelector('[data-plugin-id="live-config"]') === null; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 200 && dom.window.document.querySelector('[data-plugin-id="live-config"]') === null;
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     ;[...dom.window.document.querySelectorAll<HTMLButtonElement>('[data-plugin-id]')]
       .find(element => element.dataset.pluginId === 'live-config')?.click()
-    for (let attempt = 0; attempt < 200 && dom.window.document.querySelector('[data-plugin-detail-tab="config"]') === null; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 200 && dom.window.document.querySelector('[data-plugin-detail-tab="config"]') === null;
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
-    for (let attempt = 0; attempt < 200
-      && dom.window.document.querySelector('input[type="range"][data-host-form-primitive="custom"]') === null; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 200
+      && dom.window.document.querySelector('input[type="range"][data-host-form-primitive="custom"]') === null;
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     const range = dom.window.document.querySelector<HTMLInputElement>('input[type="range"]')!
@@ -333,20 +394,35 @@ describe('plugin config runtime', () => {
     expect(range.getAttribute('aria-describedby')).toContain('cxm-config-live-config-0-error')
     range.value = '45'
     range.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-    for (let attempt = 0; attempt < 20 && dom.window.document.querySelector('[data-plugin-config-form="live-config"][data-state="dirty"]') === null; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 20
+      && dom.window.document.querySelector('[data-plugin-config-form="live-config"][data-state="dirty"]') === null;
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 0))
     }
-    expect(dom.window.document.querySelector('[data-plugin-config-form="live-config"]')?.getAttribute('data-state')).toBe('dirty')
+    expect(dom.window.document.querySelector('[data-plugin-config-form="live-config"]')?.getAttribute('data-state'))
+      .toBe('dirty')
 
     bridge.get('live-config')!.revision = 1
-    dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-config-form="live-config"] button[type="submit"]')!.click()
-    for (let attempt = 0; attempt < 30 && dom.window.document.querySelector('[data-plugin-config-form="live-config"][data-state="conflict"]') === null; attempt += 1) {
+    dom.window.document.querySelector<HTMLButtonElement>(
+      '[data-plugin-config-form="live-config"] button[type="submit"]',
+    )!.click()
+    for (
+      let attempt = 0;
+      attempt < 30
+      && dom.window.document.querySelector('[data-plugin-config-form="live-config"][data-state="conflict"]') === null;
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 0))
     }
     const conflicted = dom.window.document.querySelector<HTMLElement>('[data-plugin-config-form="live-config"]')!
     expect(conflicted.dataset.state).toBe('conflict')
     expect(dom.window.document.querySelector<HTMLInputElement>('input[type="range"]')?.value).toBe('45')
-    expect(dom.window.document.querySelector('.cxf-alert[data-tone="error"]')?.textContent).toContain('Your draft is retained')
+    expect(dom.window.document.querySelector('.cxf-alert[data-tone="error"]')?.textContent).toContain(
+      'Your draft is retained',
+    )
     expect(conflicted.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(false)
     await runtime.dispose()
   })

@@ -32,42 +32,84 @@ describe('service configuration renderer bridge', () => {
   it('binds only token/profile/generation-fenced plugin services and never exposes arbitrary identities', async () => {
     const api = new HostServiceConfigNarrowApi({
       contract: CLI_PROXY_PROVIDER_STARTUP_CONFIG_CONTRACT,
-      profileId: 'default', generation, ownerToken: token, configPath: await target(), writable: true,
+      profileId: 'default',
+      generation,
+      ownerToken: token,
+      configPath: await target(),
+      writable: true,
       authorize: () => true,
     })
     const bridge = createServiceConfigBridgeHandler({
-      token, profileId: 'default', generation,
+      token,
+      profileId: 'default',
+      generation,
       services: [{ pluginId: 'cli-proxy-api', serviceId: CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID, api }],
     })
-    const request = parseServiceConfigBindingRequest({
-      version: 1, token, requestId: 'request-1', operation: 'list', pluginId: 'cli-proxy-api',
-      scope: { profileId: 'default', generation },
-    }, token, 'default', generation)
+    const request = parseServiceConfigBindingRequest(
+      {
+        version: 1,
+        token,
+        requestId: 'request-1',
+        operation: 'list',
+        pluginId: 'cli-proxy-api',
+        scope: { profileId: 'default', generation },
+      },
+      token,
+      'default',
+      generation,
+    )
     await expect(bridge.handle(request)).resolves.toMatchObject([
       { identity: { pluginId: 'cli-proxy-api', serviceId: 'providers-startup' }, configApplies: 'app-restart' },
     ])
-    expect(() => parseServiceConfigBindingRequest({
-      version: 1, token, requestId: 'request-2', operation: 'list', pluginId: 'cli-proxy-api',
-      scope: { profileId: 'other', generation },
-    }, token, 'default', generation)).toThrow(/stale or spoofed/iu)
-    const unregistered = parseServiceConfigBindingRequest({
-      version: 1, token, requestId: 'request-3', operation: 'mutate',
-      mutation: {
-        contract: 'cordisx.service-config-mutation/v1', schemaVersion: 1,
-        identity: { ...CLI_PROXY_PROVIDER_STARTUP_CONFIG_CONTRACT.identity, serviceId: 'unregistered' },
-        scope: { profileId: 'default', generation }, expectedRevision: 0,
-        configuration: { contract: 'cordisx.cli-proxy-provider-startup-config/v1', schemaVersion: 1, providers: [] },
+    expect(() =>
+      parseServiceConfigBindingRequest(
+        {
+          version: 1,
+          token,
+          requestId: 'request-2',
+          operation: 'list',
+          pluginId: 'cli-proxy-api',
+          scope: { profileId: 'other', generation },
+        },
+        token,
+        'default',
+        generation,
+      )
+    ).toThrow(/stale or spoofed/iu)
+    const unregistered = parseServiceConfigBindingRequest(
+      {
+        version: 1,
+        token,
+        requestId: 'request-3',
+        operation: 'mutate',
+        mutation: {
+          contract: 'cordisx.service-config-mutation/v1',
+          schemaVersion: 1,
+          identity: { ...CLI_PROXY_PROVIDER_STARTUP_CONFIG_CONTRACT.identity, serviceId: 'unregistered' },
+          scope: { profileId: 'default', generation },
+          expectedRevision: 0,
+          configuration: { contract: 'cordisx.cli-proxy-provider-startup-config/v1', schemaVersion: 1, providers: [] },
+        },
       },
-    }, token, 'default', generation)
+      token,
+      'default',
+      generation,
+    )
     await expect(bridge.handle(unregistered)).rejects.toThrow(/identity is unavailable/iu)
 
     const denied = new HostServiceConfigNarrowApi({
       contract: CLI_PROXY_PROVIDER_STARTUP_CONFIG_CONTRACT,
-      profileId: 'default', generation, ownerToken: token, configPath: await target(), writable: true,
+      profileId: 'default',
+      generation,
+      ownerToken: token,
+      configPath: await target(),
+      writable: true,
       authorize: () => false,
     })
     const deniedBridge = createServiceConfigBridgeHandler({
-      token, profileId: 'default', generation,
+      token,
+      profileId: 'default',
+      generation,
       services: [{ pluginId: 'cli-proxy-api', serviceId: CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID, api: denied }],
     })
     const deniedError = await deniedBridge.handle(request).then(
@@ -75,7 +117,8 @@ describe('service configuration renderer bridge', () => {
       error => error,
     )
     expect(serviceConfigBridgeError(deniedError)).toEqual({
-      code: 'permission-denied', error: 'Service configuration permission was denied.',
+      code: 'permission-denied',
+      error: 'Service configuration permission was denied.',
     })
   })
 })

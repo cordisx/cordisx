@@ -29,7 +29,9 @@ function jsonValue(value: unknown, label: string): JsonValue {
   if (Array.isArray(value)) return value.map((item, index) => jsonValue(item, `${label}[${index}]`))
   if (value === null || typeof value !== 'object') throw new Error(`${label} is not JSON-compatible`)
   const output: Record<string, JsonValue> = Object.create(null) as Record<string, JsonValue>
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) output[key] = jsonValue(item, `${label}.${key}`)
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    output[key] = jsonValue(item, `${label}.${key}`)
+  }
   return output
 }
 
@@ -65,13 +67,20 @@ export class PackagePluginConfigStore {
   async load(pluginId: string): Promise<{ readonly revision: number; readonly config: JsonValue }> {
     const filePath = this.file(pluginId)
     let raw: unknown
-    try { raw = JSON.parse(await readFile(filePath, 'utf8')) as unknown } catch (error) {
+    try {
+      raw = JSON.parse(await readFile(filePath, 'utf8')) as unknown
+    } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { revision: 0, config: {} }
       throw error
     }
-    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('package plugin config state is invalid')
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error('package plugin config state is invalid')
+    }
     const record = raw as Partial<State>
-    if (record.version !== 1 || record.pluginId !== pluginId || !Number.isInteger(record.revision) || (record.revision as number) < 0) {
+    if (
+      record.version !== 1 || record.pluginId !== pluginId || !Number.isInteger(record.revision)
+      || (record.revision as number) < 0
+    ) {
       throw new Error('package plugin config state is invalid')
     }
     const config = jsonValue(record.config, 'package plugin config')
@@ -81,26 +90,48 @@ export class PackagePluginConfigStore {
     return { revision: record.revision as number, config }
   }
 
-  stage(pluginId: string, expectedRevision: number, config: JsonValue, ownerToken: string): Promise<{ readonly candidateRevision: number }> {
+  stage(
+    pluginId: string,
+    expectedRevision: number,
+    config: JsonValue,
+    ownerToken: string,
+  ): Promise<{ readonly candidateRevision: number }> {
     return this.update(pluginId, async state => {
-      if (state.revision !== expectedRevision || state.candidate !== undefined) throw new PluginConfigConflictError(state.revision)
+      if (state.revision !== expectedRevision || state.candidate !== undefined) {
+        throw new PluginConfigConflictError(state.revision)
+      }
       const candidateRevision = expectedRevision + 1
       return {
         state: {
           ...state,
-          candidate: { revision: candidateRevision, config, ownerToken, generation: this.generation, createdAt: new Date().toISOString() },
+          candidate: {
+            revision: candidateRevision,
+            config,
+            ownerToken,
+            generation: this.generation,
+            createdAt: new Date().toISOString(),
+          },
         },
         result: { candidateRevision },
       }
     })
   }
 
-  commit(pluginId: string, candidateRevision: number, ownerToken: string): Promise<{ readonly revision: number; readonly config: JsonValue }> {
+  commit(
+    pluginId: string,
+    candidateRevision: number,
+    ownerToken: string,
+  ): Promise<{ readonly revision: number; readonly config: JsonValue }> {
     return this.update(pluginId, async state => {
       const candidate = state.candidate
-      if (candidate === undefined || candidate.revision !== candidateRevision
-        || candidate.ownerToken !== ownerToken || candidate.generation !== this.generation) {
-        throw new PluginConfigConflictError(state.revision, 'package plugin config candidate is not owned by this generation')
+      if (
+        candidate === undefined || candidate.revision !== candidateRevision
+        || candidate.ownerToken !== ownerToken || candidate.generation !== this.generation
+      ) {
+        throw new PluginConfigConflictError(
+          state.revision,
+          'package plugin config candidate is not owned by this generation',
+        )
       }
       return {
         state: { version: 1, pluginId, revision: candidate.revision, config: candidate.config },
@@ -113,18 +144,29 @@ export class PackagePluginConfigStore {
     return this.update(pluginId, async state => {
       const candidate = state.candidate
       if (candidate === undefined) return { state, result: undefined }
-      if (candidate.revision !== candidateRevision || candidate.ownerToken !== ownerToken || candidate.generation !== this.generation) {
-        throw new PluginConfigConflictError(state.revision, 'package plugin config candidate is not owned by this generation')
+      if (
+        candidate.revision !== candidateRevision || candidate.ownerToken !== ownerToken
+        || candidate.generation !== this.generation
+      ) {
+        throw new PluginConfigConflictError(
+          state.revision,
+          'package plugin config candidate is not owned by this generation',
+        )
       }
       return { state: { version: 1, pluginId, revision: state.revision, config: state.config }, result: undefined }
     })
   }
 
-  private async update<T>(pluginId: string, operation: (state: State) => Promise<{ readonly state: State; readonly result: T }>): Promise<T> {
+  private async update<T>(
+    pluginId: string,
+    operation: (state: State) => Promise<{ readonly state: State; readonly result: T }>,
+  ): Promise<T> {
     const filePath = this.file(pluginId)
     const previous = queues.get(filePath) ?? Promise.resolve()
     let release!: () => void
-    const current = new Promise<void>(resolve => { release = resolve })
+    const current = new Promise<void>(resolve => {
+      release = resolve
+    })
     const tail = previous.catch(() => undefined).then(() => current)
     queues.set(filePath, tail)
     await previous.catch(() => undefined)
@@ -135,7 +177,12 @@ export class PackagePluginConfigStore {
         const raw = JSON.parse(await readFile(filePath, 'utf8')) as { candidate?: Candidate }
         if (raw.candidate?.generation === this.generation) rawCandidate = raw.candidate
       } catch {}
-      const state: State = { version: 1, pluginId, ...loaded, ...(rawCandidate === undefined ? {} : { candidate: rawCandidate }) }
+      const state: State = {
+        version: 1,
+        pluginId,
+        ...loaded,
+        ...(rawCandidate === undefined ? {} : { candidate: rawCandidate }),
+      }
       const next = await operation(state)
       await publishAtomic(filePath, next.state)
       return next.result

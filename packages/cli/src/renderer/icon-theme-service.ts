@@ -1,14 +1,11 @@
-import { Service, type Context } from '@deepseek-ai/cordis'
+import { type Context, Service } from '@deepseek-ai/cordis'
 import type {
   CordisXIconThemeProviderDefinitionV1,
   CordisXIconThemeRegistrationHandle,
   CordisXIconThemes,
 } from '../icon-theme-contracts.js'
 import { generationFromContext, ownerFromContext } from './ownership.js'
-import {
-  BUILTIN_REICON_PROVIDER_GENERATION,
-  IconThemeRegistry,
-} from './icon-theme-registry.js'
+import { BUILTIN_REICON_PROVIDER_GENERATION, IconThemeRegistry } from './icon-theme-registry.js'
 
 /** Cordis service exposes data registration only; provider execution is absent. */
 export class CordisXIconThemeService extends Service implements CordisXIconThemes {
@@ -23,7 +20,9 @@ export class CordisXIconThemeService extends Service implements CordisXIconTheme
   register(definition: CordisXIconThemeProviderDefinitionV1): CordisXIconThemeRegistrationHandle {
     const pluginId = ownerFromContext(this.ctx)
     const providerGeneration = generationFromContext(this.ctx)
-    if (pluginId === 'host' || providerGeneration === undefined) throw new Error('icon theme registration requires an owned plugin generation')
+    if (pluginId === 'host' || providerGeneration === undefined) {
+      throw new Error('icon theme registration requires an owned plugin generation')
+    }
     const principalKey = `${pluginId}\0${providerGeneration}`
     let principalHandle = this.principals.get(principalKey)
     if (principalHandle === undefined) {
@@ -38,7 +37,9 @@ export class CordisXIconThemeService extends Service implements CordisXIconTheme
       definition,
     )
     const registration = registered.registration
-    if (registration === undefined) throw new Error(`icon theme registration rejected: ${registered.result.error?.code ?? registered.result.outcome}`)
+    if (registration === undefined) {
+      throw new Error(`icon theme registration rejected: ${registered.result.error?.code ?? registered.result.outcome}`)
+    }
     let live = true
     const dispose = (): void => {
       if (!live) return

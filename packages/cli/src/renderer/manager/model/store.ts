@@ -14,7 +14,11 @@ function storeFor(model: ManagerModel): ReactManagerStore {
   let current = model.snapshot()
   const store: ReactManagerStore = {
     getSnapshot: () => current,
-    subscribe: listener => model.subscribe(() => { current = model.snapshot(); listener() }),
+    subscribe: listener =>
+      model.subscribe(() => {
+        current = model.snapshot()
+        listener()
+      }),
   }
   stores.set(model, store)
   return store

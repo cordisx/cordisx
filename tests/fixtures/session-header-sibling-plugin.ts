@@ -4,7 +4,10 @@ import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from 'cordisx/contrac
 export const name = 'session-header-sibling-fixture'
 export const inject = ['i18n', 'pages', 'routes', 'slots']
 
-const message = (key: string, fallback: string) => ({ namespace: 'session-header-sibling-fixture', key, fallback } as const)
+const message = (
+  key: string,
+  fallback: string,
+) => ({ namespace: 'session-header-sibling-fixture', key, fallback } as const)
 
 export function apply(ctx: Context): void {
   ctx.i18n.define({

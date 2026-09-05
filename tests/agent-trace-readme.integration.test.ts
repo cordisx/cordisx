@@ -25,8 +25,15 @@ interface RuntimeHandle {
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
   return {
-    x: left, y: top, left, top, right: left + width, bottom: top + height,
-    width, height, toJSON: () => ({}),
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON: () => ({}),
   } as DOMRect
 }
 
@@ -70,7 +77,8 @@ describe('Agent Trace built README projection', () => {
     }
     const bundle = await buildRendererBundle(config)
     const sessionId = 'readme-session'
-    dom = new JSDOM(`
+    dom = new JSDOM(
+      `
       <html lang="zh-CN" class="electron-dark"><head></head><body>
         <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
         <header data-app-shell-application-menu-bar>
@@ -98,7 +106,9 @@ describe('Agent Trace built README projection', () => {
           </section>
         </main>
       </body></html>
-    `, { runScripts: 'dangerously', url: 'https://codex.local/native' })
+    `,
+      { runScripts: 'dangerously', url: 'https://codex.local/native' },
+    )
     Object.defineProperty(dom.window, 'structuredClone', { configurable: true, value: structuredClone })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', {
       configurable: true,
@@ -120,7 +130,11 @@ describe('Agent Trace built README projection', () => {
     )
 
     dom.window.eval(bundle)
-    for (let attempt = 0; attempt < 50 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 50 && dom.window.document.documentElement.dataset.cordisxReady !== 'true';
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     const handle = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime
@@ -164,11 +178,19 @@ describe('Agent Trace built README projection', () => {
     const trigger = dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')
     expect(trigger).not.toBeNull()
     trigger?.click()
-    for (let attempt = 0; attempt < 200 && dom.window.document.querySelector('[data-plugin-id="agent-trace-showcase"]') === null; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 200 && dom.window.document.querySelector('[data-plugin-id="agent-trace-showcase"]') === null;
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-id="agent-trace-showcase"]')!.click()
-    for (let attempt = 0; attempt < 200 && dom.window.document.querySelector('[role="tabpanel"][aria-label="README"]') === null; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 200 && dom.window.document.querySelector('[role="tabpanel"][aria-label="README"]') === null;
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
 

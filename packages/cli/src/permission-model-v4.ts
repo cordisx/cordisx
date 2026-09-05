@@ -1,8 +1,8 @@
 import type { HostDomModifyOperation, HostDomOperation, HostDomReadOperation } from '@cordisx/protocol/host-dom/v1'
 import {
-  CORDISX_PERMISSION_CAPABILITIES_V2,
   CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
+  CORDISX_PERMISSION_CAPABILITIES_V2,
   CORDISX_PERMISSION_POLICY_SCHEMA_V4,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
@@ -10,14 +10,14 @@ import {
   type CordisXCapabilityDeclarationV4,
   type CordisXCapabilityDeclarationV5,
   type CordisXCertifiedPermissionProjectionV1,
-  type CordisXPermissionAuthorizationKeyV4,
   type CordisXPermissionAuthorizationDecisionV4,
+  type CordisXPermissionAuthorizationKeyV4,
   type CordisXPermissionAuthorizationPlanV4,
   type CordisXPermissionCapabilityV4,
   type CordisXPermissionCapabilityV5,
-  type CordisXPermissionScopeV5,
   type CordisXPermissionPolicyRecordV4,
   type CordisXPermissionScopeV4,
+  type CordisXPermissionScopeV5,
   type CordisXPluginManifestV5,
   type CordisXPluginManifestV6,
   type CordisXPluginManifestV7,
@@ -38,34 +38,67 @@ import {
 const FINGERPRINT = /^sha256:[a-f0-9]{64}$/u
 const LOCAL_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u
 const SERVICE_ENTRY = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:mjs|js)$/u
-const CHANNEL_SERVICE_CONFIG_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json'
+const CHANNEL_SERVICE_CONFIG_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json'
 const AGENT_RUNTIME_CAPABILITIES = new Set<AgentRuntimeCapability>([
-  'agents.create', 'agents.resume', 'agents.get', 'agents.message.submit', 'agents.message.cancel', 'agents.cancel',
-  'agents.live.subscribe', 'sessions.get', 'sessions.read', 'sessions.subscribe', 'approvals.request', 'approvals.answer',
+  'agents.create',
+  'agents.resume',
+  'agents.get',
+  'agents.message.submit',
+  'agents.message.cancel',
+  'agents.cancel',
+  'agents.live.subscribe',
+  'sessions.get',
+  'sessions.read',
+  'sessions.subscribe',
+  'approvals.request',
+  'approvals.answer',
 ])
 const MANIFEST_V5_LEGACY_CAPABILITIES = new Set<string>([
-  'models.read', 'tasks.catalog.read', 'tasks.content.read', 'tasks.create', 'tasks.control',
-  'turns.submit', 'turns.control', 'agent.events.read', 'agent.history.read', 'agent.messages.append',
-  'agent.steps.reject', 'agent.messages.transform', 'agent.prompt.section', 'agent.prompt.context',
-  'channel.accounts.read', 'channel.accounts.connect', 'channel.events.receive', 'channel.events.subscribe',
-  'channel.messages.send', 'channel.bindings.read', 'channel.bindings.write', 'channel.attachments.read',
-  'ui.host-dom.read', 'ui.host-dom.modify',
+  'models.read',
+  'tasks.catalog.read',
+  'tasks.content.read',
+  'tasks.create',
+  'tasks.control',
+  'turns.submit',
+  'turns.control',
+  'agent.events.read',
+  'agent.history.read',
+  'agent.messages.append',
+  'agent.steps.reject',
+  'agent.messages.transform',
+  'agent.prompt.section',
+  'agent.prompt.context',
+  'channel.accounts.read',
+  'channel.accounts.connect',
+  'channel.events.receive',
+  'channel.events.subscribe',
+  'channel.messages.send',
+  'channel.bindings.read',
+  'channel.bindings.write',
+  'channel.attachments.read',
+  'ui.host-dom.read',
+  'ui.host-dom.modify',
 ])
 
-export const HOST_DOM_READ_OPERATIONS = Object.freeze([
-  'inspect-structure',
-  'read-text',
-  'read-attributes',
-  'read-state',
-] as const satisfies readonly HostDomReadOperation[])
+export const HOST_DOM_READ_OPERATIONS = Object.freeze(
+  [
+    'inspect-structure',
+    'read-text',
+    'read-attributes',
+    'read-state',
+  ] as const satisfies readonly HostDomReadOperation[],
+)
 
-export const HOST_DOM_MODIFY_OPERATIONS = Object.freeze([
-  'set-text',
-  'set-attribute',
-  'insert-owned-structured-child',
-  'remove-owned-child',
-  'focus',
-] as const satisfies readonly HostDomModifyOperation[])
+export const HOST_DOM_MODIFY_OPERATIONS = Object.freeze(
+  [
+    'set-text',
+    'set-attribute',
+    'insert-owned-structured-child',
+    'remove-owned-child',
+    'focus',
+  ] as const satisfies readonly HostDomModifyOperation[],
+)
 
 function object(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
@@ -115,10 +148,24 @@ export function normalizeCertifiedPermissionProjectionV1(
   if (value === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
   const input = value as Record<string, unknown>
   const expected = [
-    '$schema', 'schemaVersion', 'kind', 'status', 'source', 'pluginId', 'version', 'integrity', 'reviewPolicy',
-    'reviewedAt', 'expiresAt', 'evidence', 'feed', 'fingerprint', 'revision',
+    '$schema',
+    'schemaVersion',
+    'kind',
+    'status',
+    'source',
+    'pluginId',
+    'version',
+    'integrity',
+    'reviewPolicy',
+    'reviewedAt',
+    'expiresAt',
+    'evidence',
+    'feed',
+    'fingerprint',
+    'revision',
   ]
-  if (Object.keys(input).some(key => !expected.includes(key))
+  if (
+    Object.keys(input).some(key => !expected.includes(key))
     || input.$schema !== CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1
     || input.schemaVersion !== 1
     || input.kind !== 'cordisx-certified-permission-eligibility'
@@ -130,31 +177,44 @@ export function normalizeCertifiedPermissionProjectionV1(
     || typeof input.reviewedAt !== 'string'
     || typeof input.expiresAt !== 'string'
     || typeof input.fingerprint !== 'string'
-    || typeof input.revision !== 'string') return undefined
-  const reviewPolicy = input.reviewPolicy !== null && typeof input.reviewPolicy === 'object' && !Array.isArray(input.reviewPolicy)
-    ? input.reviewPolicy as Record<string, unknown> : undefined
+    || typeof input.revision !== 'string'
+  ) return undefined
+  const reviewPolicy =
+    input.reviewPolicy !== null && typeof input.reviewPolicy === 'object' && !Array.isArray(input.reviewPolicy)
+      ? input.reviewPolicy as Record<string, unknown>
+      : undefined
   const evidence = input.evidence !== null && typeof input.evidence === 'object' && !Array.isArray(input.evidence)
-    ? input.evidence as Record<string, unknown> : undefined
+    ? input.evidence as Record<string, unknown>
+    : undefined
   const feed = input.feed !== null && typeof input.feed === 'object' && !Array.isArray(input.feed)
-    ? input.feed as Record<string, unknown> : undefined
-  if (reviewPolicy === undefined || evidence === undefined || feed === undefined
+    ? input.feed as Record<string, unknown>
+    : undefined
+  if (
+    reviewPolicy === undefined || evidence === undefined || feed === undefined
     || Object.keys(reviewPolicy).some(key => !['id', 'version'].includes(key))
     || reviewPolicy.id !== 'cordisx-marketplace-review' || typeof reviewPolicy.version !== 'string'
-    || !/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(reviewPolicy.version)
+    || !/^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.test(
+      reviewPolicy.version,
+    )
     || Object.keys(evidence).some(key => !['kind', 'reference'].includes(key))
     || evidence.kind !== 'protected-marketplace-review' || typeof evidence.reference !== 'string'
-    || !/^https:\/\/github\.com\/cordisx\/marketplace\/(?:pull\/[1-9][0-9]*|commit\/[a-f0-9]{40})$/u.test(evidence.reference)
+    || !/^https:\/\/github\.com\/cordisx\/marketplace\/(?:pull\/[1-9][0-9]*|commit\/[a-f0-9]{40})$/u.test(
+      evidence.reference,
+    )
     || Object.keys(feed).some(key => !['generatedAt', 'root', 'authority'].includes(key))
     || typeof feed.generatedAt !== 'string' || typeof feed.root !== 'string'
     || !/^https:\/\/[^?#]+$/u.test(feed.root) || feed.root.length > 2048
     || feed.authority !== 'cordisx.marketplace.codeowners/v1'
     || input.revision !== feed.generatedAt
-    || !/^sha256:[a-f0-9]{64}$/u.test(input.fingerprint)) return undefined
+    || !/^sha256:[a-f0-9]{64}$/u.test(input.fingerprint)
+  ) return undefined
   const reviewedAt = Date.parse(input.reviewedAt)
   const expiresAt = Date.parse(input.expiresAt)
   const generatedAt = Date.parse(feed.generatedAt)
-  if (!Number.isFinite(reviewedAt) || !Number.isFinite(expiresAt) || !Number.isFinite(generatedAt)
-    || reviewedAt > generatedAt || generatedAt > now.getTime() || now.getTime() >= expiresAt) return undefined
+  if (
+    !Number.isFinite(reviewedAt) || !Number.isFinite(expiresAt) || !Number.isFinite(generatedAt)
+    || reviewedAt > generatedAt || generatedAt > now.getTime() || now.getTime() >= expiresAt
+  ) return undefined
   const payload = {
     source: input.source,
     pluginId: input.pluginId,
@@ -205,7 +265,9 @@ export function normalizeCapabilityDeclarationV4(
 ): CordisXCapabilityDeclarationV4 {
   const declaration = object(value, label)
   if (!isHostDomPermissionCapability(declaration.name)) {
-    if (declaration.name === 'ui.extension-points.render') throw new Error(`${label}.name is not supported by manifest v5`)
+    if (declaration.name === 'ui.extension-points.render') {
+      throw new Error(`${label}.name is not supported by manifest v5`)
+    }
     const normalized = normalizeCapabilityDeclarationV2(value, label)
     return normalized as CordisXCapabilityDeclarationV4
   }
@@ -231,24 +293,49 @@ function normalizeAgentRuntimeDeclarationV5(value: unknown, label: string): Cord
   const scope = object(declaration.scope, `${label}.scope`)
   exact(scope, ['sessionIds'], `${label}.scope`)
   const raw = scope.sessionIds
-  const dynamic = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : undefined
+  const dynamic = raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : undefined
   const sessionIds: CordisXPermissionScopeV5['sessionIds'] = raw === undefined
     ? undefined
     : dynamic === undefined
-      ? uniqueSortedStrings(raw, `${label}.scope.sessionIds`, 100, item => item !== '*' && item.length <= 512)
-      : (() => {
-        exact(dynamic, ['kind', 'routeId', 'param'], `${label}.scope.sessionIds`)
-        if (dynamic.kind !== 'host-route-param' || typeof dynamic.routeId !== 'string' || !LOCAL_ID.test(dynamic.routeId)
-          || typeof dynamic.param !== 'string' || !/^[a-z][a-zA-Z0-9]*$/u.test(dynamic.param)) throw new Error(`${label}.scope.sessionIds is invalid`)
-        if (declaration.required || !['agents.create', 'agents.resume', 'agents.get', 'agents.message.submit', 'agents.message.cancel', 'agents.cancel', 'agents.live.subscribe', 'sessions.get', 'sessions.read', 'sessions.subscribe', 'approvals.request', 'approvals.answer'].includes(declaration.name as string)) {
-          throw new Error(`${label}.scope.sessionIds dynamic binding is invalid for this capability`)
-        }
-        return Object.freeze({ kind: 'host-route-param' as const, routeId: dynamic.routeId, param: dynamic.param })
-        })()
+    ? uniqueSortedStrings(raw, `${label}.scope.sessionIds`, 100, item => item !== '*' && item.length <= 512)
+    : (() => {
+      exact(dynamic, ['kind', 'routeId', 'param'], `${label}.scope.sessionIds`)
+      if (
+        dynamic.kind !== 'host-route-param' || typeof dynamic.routeId !== 'string' || !LOCAL_ID.test(dynamic.routeId)
+        || typeof dynamic.param !== 'string' || !/^[a-z][a-zA-Z0-9]*$/u.test(dynamic.param)
+      ) throw new Error(`${label}.scope.sessionIds is invalid`)
+      if (
+        declaration.required
+        || ![
+          'agents.create',
+          'agents.resume',
+          'agents.get',
+          'agents.message.submit',
+          'agents.message.cancel',
+          'agents.cancel',
+          'agents.live.subscribe',
+          'sessions.get',
+          'sessions.read',
+          'sessions.subscribe',
+          'approvals.request',
+          'approvals.answer',
+        ].includes(declaration.name as string)
+      ) {
+        throw new Error(`${label}.scope.sessionIds dynamic binding is invalid for this capability`)
+      }
+      return Object.freeze({ kind: 'host-route-param' as const, routeId: dynamic.routeId, param: dynamic.param })
+    })()
   return Object.freeze({
-    name: declaration.name as AgentRuntimeCapability, required: declaration.required,
-    ...(declaration.rationale === undefined ? {} : { rationale: normalizePermissionRationaleV2(declaration.rationale, `${label}.rationale`) }),
-    ...(declaration.security === undefined ? {} : { security: normalizePermissionSecurityV2(declaration.security, `${label}.security`) }),
+    name: declaration.name as AgentRuntimeCapability,
+    required: declaration.required,
+    ...(declaration.rationale === undefined
+      ? {}
+      : { rationale: normalizePermissionRationaleV2(declaration.rationale, `${label}.rationale`) }),
+    ...(declaration.security === undefined
+      ? {}
+      : { security: normalizePermissionSecurityV2(declaration.security, `${label}.security`) }),
     scope: Object.freeze(sessionIds === undefined ? {} : { sessionIds }),
   })
 }
@@ -261,27 +348,48 @@ function normalizeAgentRuntimeDeclarationV6(value: unknown, label: string): Cord
   const scope = object(declaration.scope, `${label}.scope`)
   exact(scope, ['sessionIds'], `${label}.scope`)
   const raw = scope.sessionIds
-  const dynamic = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : undefined
+  const dynamic = raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw as Record<string, unknown>
+    : undefined
   let sessionIds: CordisXPermissionScopeV5['sessionIds']
   if (raw === undefined) {
-    if (declaration.name === 'approvals.request' || declaration.name === 'approvals.answer' || declaration.required !== true) {
+    if (
+      declaration.name === 'approvals.request' || declaration.name === 'approvals.answer'
+      || declaration.required !== true
+    ) {
       throw new Error(`${label}.scope.sessionIds is required`)
     }
     sessionIds = undefined
   } else if (dynamic === undefined) {
-    sessionIds = uniqueSortedStrings(raw, `${label}.scope.sessionIds`, 100, item => item.length > 0 && !item.includes('*') && item.length <= 512)
+    sessionIds = uniqueSortedStrings(
+      raw,
+      `${label}.scope.sessionIds`,
+      100,
+      item => item.length > 0 && !item.includes('*') && item.length <= 512,
+    )
   } else {
     exact(dynamic, ['kind', 'routeId', 'param'], `${label}.scope.sessionIds`)
-    if (dynamic.kind !== 'host-route-param' || typeof dynamic.routeId !== 'string' || !LOCAL_ID.test(dynamic.routeId)
-      || dynamic.param !== 'sessionId' || declaration.required !== false) {
+    if (
+      dynamic.kind !== 'host-route-param' || typeof dynamic.routeId !== 'string' || !LOCAL_ID.test(dynamic.routeId)
+      || dynamic.param !== 'sessionId' || declaration.required !== false
+    ) {
       throw new Error(`${label}.scope.sessionIds is invalid`)
     }
-    sessionIds = Object.freeze({ kind: 'host-route-param' as const, routeId: dynamic.routeId, param: 'sessionId' as const })
+    sessionIds = Object.freeze({
+      kind: 'host-route-param' as const,
+      routeId: dynamic.routeId,
+      param: 'sessionId' as const,
+    })
   }
   return Object.freeze({
-    name: declaration.name as AgentRuntimeCapability, required: declaration.required,
-    ...(declaration.rationale === undefined ? {} : { rationale: normalizePermissionRationaleV2(declaration.rationale, `${label}.rationale`) }),
-    ...(declaration.security === undefined ? {} : { security: normalizePermissionSecurityV2(declaration.security, `${label}.security`) }),
+    name: declaration.name as AgentRuntimeCapability,
+    required: declaration.required,
+    ...(declaration.rationale === undefined
+      ? {}
+      : { rationale: normalizePermissionRationaleV2(declaration.rationale, `${label}.rationale`) }),
+    ...(declaration.security === undefined
+      ? {}
+      : { security: normalizePermissionSecurityV2(declaration.security, `${label}.security`) }),
     scope: Object.freeze(sessionIds === undefined ? {} : { sessionIds }),
   })
 }
@@ -301,8 +409,10 @@ function serviceConfiguration(value: unknown, label: string): CordisXPluginServi
     return Object.freeze({ kind: 'none' })
   }
   exact(configuration, ['kind', 'schema', 'configApplies'], label)
-  if (configuration.kind !== 'host' || configuration.schema !== CHANNEL_SERVICE_CONFIG_SCHEMA
-    || configuration.configApplies !== 'restart') throw new Error(`${label} is unsupported`)
+  if (
+    configuration.kind !== 'host' || configuration.schema !== CHANNEL_SERVICE_CONFIG_SCHEMA
+    || configuration.configApplies !== 'restart'
+  ) throw new Error(`${label} is unsupported`)
   return Object.freeze({ kind: 'host', schema: CHANNEL_SERVICE_CONFIG_SCHEMA, configApplies: 'restart' })
 }
 
@@ -314,7 +424,12 @@ function serviceDeclaration(value: unknown, label: string): CordisXPluginService
   if (!LOCAL_ID.test(id) || !SERVICE_ENTRY.test(entry) || entry.includes('..') || service.kind !== 'channel-adapter') {
     throw new Error(`${label} is unsupported`)
   }
-  return Object.freeze({ id, kind: 'channel-adapter', entry, configuration: serviceConfiguration(service.configuration, `${label}.configuration`) })
+  return Object.freeze({
+    id,
+    kind: 'channel-adapter',
+    entry,
+    configuration: serviceConfiguration(service.configuration, `${label}.configuration`),
+  })
 }
 
 export interface PermissionCapabilityCatalogBoundaryV4 {
@@ -343,7 +458,10 @@ export function normalizePluginManifestV5(
     if (seenCapabilities.has(declaration.name)) throw new Error(`duplicate capability declaration: ${declaration.name}`)
     seenCapabilities.add(declaration.name)
     if (!AGENT_RUNTIME_CAPABILITIES.has(declaration.name as AgentRuntimeCapability)) {
-      catalog.assertScope(declaration.name as CordisXPermissionCapabilityV4, declaration.scope as CordisXPermissionScopeV4)
+      catalog.assertScope(
+        declaration.name as CordisXPermissionCapabilityV4,
+        declaration.scope as CordisXPermissionScopeV4,
+      )
     }
     return declaration
   }))
@@ -389,7 +507,10 @@ export function normalizePluginManifestV6(
     if (seenCapabilities.has(declaration.name)) throw new Error(`duplicate capability declaration: ${declaration.name}`)
     seenCapabilities.add(declaration.name)
     if (!AGENT_RUNTIME_CAPABILITIES.has(declaration.name as AgentRuntimeCapability)) {
-      catalog.assertScope(declaration.name as CordisXPermissionCapabilityV4, declaration.scope as CordisXPermissionScopeV4)
+      catalog.assertScope(
+        declaration.name as CordisXPermissionCapabilityV4,
+        declaration.scope as CordisXPermissionScopeV4,
+      )
     }
     return declaration
   }))
@@ -413,17 +534,51 @@ export function normalizePluginManifestV6(
   }) as CordisXPluginManifestV6
 }
 
-export function normalizePluginManifestV7(value: unknown, expectedId: string, catalog: PermissionCapabilityCatalogBoundaryV4): CordisXPluginManifestV7 {
+export function normalizePluginManifestV7(
+  value: unknown,
+  expectedId: string,
+  catalog: PermissionCapabilityCatalogBoundaryV4,
+): CordisXPluginManifestV7 {
   const manifest = object(value, 'plugin manifest')
-  exact(manifest, ['$schema', 'schemaVersion', 'id', 'name', 'capabilities', 'services', 'execution'], 'plugin manifest')
-  if (manifest.$schema !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v7.schema.json' || manifest.schemaVersion !== 7) throw new Error('plugin manifest schema is unsupported')
-  if (Array.isArray(manifest.capabilities) && manifest.capabilities.some(capability => capability !== null && typeof capability === 'object' && !Array.isArray(capability) && isHostDomPermissionCapability((capability as Record<string, unknown>).name))) throw new Error('plugin manifest-v7 must not declare Host DOM capabilities')
+  exact(
+    manifest,
+    ['$schema', 'schemaVersion', 'id', 'name', 'capabilities', 'services', 'execution'],
+    'plugin manifest',
+  )
+  if (
+    manifest.$schema
+      !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v7.schema.json'
+    || manifest.schemaVersion !== 7
+  ) throw new Error('plugin manifest schema is unsupported')
+  if (
+    Array.isArray(manifest.capabilities)
+    && manifest.capabilities.some(capability =>
+      capability !== null && typeof capability === 'object' && !Array.isArray(capability)
+      && isHostDomPermissionCapability((capability as Record<string, unknown>).name)
+    )
+  ) throw new Error('plugin manifest-v7 must not declare Host DOM capabilities')
   const { execution: _execution, ...baseManifest } = manifest
-  const base = normalizePluginManifestV6({ ...baseManifest, $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V6, schemaVersion: 6 }, expectedId, catalog)
+  const base = normalizePluginManifestV6(
+    { ...baseManifest, $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V6, schemaVersion: 6 },
+    expectedId,
+    catalog,
+  )
   const execution = object(manifest.execution, 'plugin manifest.execution')
   exact(execution, ['realm', 'interfaces'], 'plugin manifest.execution')
-  if (execution.realm !== 'isolated-worker' || !Array.isArray(execution.interfaces) || execution.interfaces.length !== 1 || execution.interfaces[0] !== 'ui.transient-canvas/v1') throw new Error('plugin manifest.execution must select only ui.transient-canvas/v1 in isolated-worker')
-  return Object.freeze({ ...base, $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v7.schema.json' as const, schemaVersion: 7 as const, execution: Object.freeze({ realm: 'isolated-worker' as const, interfaces: Object.freeze(['ui.transient-canvas/v1'] as const) }) }) as CordisXPluginManifestV7
+  if (
+    execution.realm !== 'isolated-worker' || !Array.isArray(execution.interfaces) || execution.interfaces.length !== 1
+    || execution.interfaces[0] !== 'ui.transient-canvas/v1'
+  ) throw new Error('plugin manifest.execution must select only ui.transient-canvas/v1 in isolated-worker')
+  return Object.freeze({
+    ...base,
+    $schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v7.schema.json' as const,
+    schemaVersion: 7 as const,
+    execution: Object.freeze({
+      realm: 'isolated-worker' as const,
+      interfaces: Object.freeze(['ui.transient-canvas/v1'] as const),
+    }),
+  }) as CordisXPluginManifestV7
 }
 
 /** Additive v8: only approval answer may bind a distinct authority to its requester route. */
@@ -434,18 +589,24 @@ export function normalizePluginManifestV8(
 ): CordisXPluginManifestV8 {
   const manifest = object(value, 'plugin manifest')
   exact(manifest, ['$schema', 'schemaVersion', 'id', 'name', 'capabilities', 'services'], 'plugin manifest')
-  if (manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 || manifest.schemaVersion !== 8) throw new Error('plugin manifest schema is unsupported')
+  if (manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 || manifest.schemaVersion !== 8) {
+    throw new Error('plugin manifest schema is unsupported')
+  }
   const id = nonEmpty(manifest.id, 'plugin manifest.id', 96)
   if (!LOCAL_ID.test(id) || id !== expectedId) throw new Error('plugin manifest id does not match its Host identity')
-  if (!Array.isArray(manifest.capabilities) || manifest.capabilities.length > 36) throw new Error('plugin manifest.capabilities must be an array of at most 36 items')
+  if (!Array.isArray(manifest.capabilities) || manifest.capabilities.length > 36) {
+    throw new Error('plugin manifest.capabilities must be an array of at most 36 items')
+  }
   const seen = new Set<string>()
   const capabilities = Object.freeze(manifest.capabilities.map((candidate, index) => {
     const label = `plugin manifest.capabilities[${index}]`
     const declaration = object(candidate, label)
     let normalized: unknown
-    if (declaration.name === 'approvals.answer' && declaration.scope !== null
+    if (
+      declaration.name === 'approvals.answer' && declaration.scope !== null
       && typeof declaration.scope === 'object' && !Array.isArray(declaration.scope)
-      && 'authorityRequester' in declaration.scope) {
+      && 'authorityRequester' in declaration.scope
+    ) {
       exact(declaration, ['name', 'required', 'rationale', 'security', 'scope'], label)
       if (declaration.required !== false) throw new Error(`${label}.required is invalid`)
       const scope = object(declaration.scope, `${label}.scope`)
@@ -454,37 +615,70 @@ export function normalizePluginManifestV8(
       exact(authorityRequester, ['kind', 'requester'], `${label}.scope.authorityRequester`)
       const requester = object(authorityRequester.requester, `${label}.scope.authorityRequester.requester`)
       exact(requester, ['kind', 'routeId', 'param'], `${label}.scope.authorityRequester.requester`)
-      if (authorityRequester.kind !== 'approval-authority-requester-route' || requester.kind !== 'host-route-param'
-        || typeof requester.routeId !== 'string' || !LOCAL_ID.test(requester.routeId) || requester.param !== 'sessionId') throw new Error(`${label}.scope.authorityRequester is invalid`)
+      if (
+        authorityRequester.kind !== 'approval-authority-requester-route' || requester.kind !== 'host-route-param'
+        || typeof requester.routeId !== 'string' || !LOCAL_ID.test(requester.routeId) || requester.param !== 'sessionId'
+      ) throw new Error(`${label}.scope.authorityRequester is invalid`)
       normalized = Object.freeze({
-        name: 'approvals.answer' as const, required: false as const,
-        ...(declaration.rationale === undefined ? {} : { rationale: normalizePermissionRationaleV2(declaration.rationale, `${label}.rationale`) }),
-        ...(declaration.security === undefined ? {} : { security: normalizePermissionSecurityV2(declaration.security, `${label}.security`) }),
-        scope: Object.freeze({ authorityRequester: Object.freeze({ kind: 'approval-authority-requester-route' as const, requester: Object.freeze({ kind: 'host-route-param' as const, routeId: requester.routeId, param: 'sessionId' as const }) }) }),
+        name: 'approvals.answer' as const,
+        required: false as const,
+        ...(declaration.rationale === undefined
+          ? {}
+          : { rationale: normalizePermissionRationaleV2(declaration.rationale, `${label}.rationale`) }),
+        ...(declaration.security === undefined
+          ? {}
+          : { security: normalizePermissionSecurityV2(declaration.security, `${label}.security`) }),
+        scope: Object.freeze({
+          authorityRequester: Object.freeze({
+            kind: 'approval-authority-requester-route' as const,
+            requester: Object.freeze({
+              kind: 'host-route-param' as const,
+              routeId: requester.routeId,
+              param: 'sessionId' as const,
+            }),
+          }),
+        }),
       })
     } else {
-      normalized = normalizeAgentRuntimeDeclarationV6(candidate, label) ?? normalizeLegacyCapabilityDeclarationV6(candidate, label)
+      normalized = normalizeAgentRuntimeDeclarationV6(candidate, label)
+        ?? normalizeLegacyCapabilityDeclarationV6(candidate, label)
     }
     const name = (normalized as { name: string }).name
     if (seen.has(name)) throw new Error(`duplicate capability declaration: ${name}`)
     seen.add(name)
-    if (!AGENT_RUNTIME_CAPABILITIES.has(name as AgentRuntimeCapability)) catalog.assertScope(name as CordisXPermissionCapabilityV4, (normalized as CordisXCapabilityDeclarationV4).scope)
+    if (!AGENT_RUNTIME_CAPABILITIES.has(name as AgentRuntimeCapability)) {
+      catalog.assertScope(name as CordisXPermissionCapabilityV4, (normalized as CordisXCapabilityDeclarationV4).scope)
+    }
     return normalized
   }))
-  if (!Array.isArray(manifest.services) || manifest.services.length > 16) throw new Error('plugin manifest.services must be an array of at most 16 items')
-  const services = Object.freeze(manifest.services.map((candidate, index) => serviceDeclaration(candidate, `plugin manifest.services[${index}]`)))
+  if (!Array.isArray(manifest.services) || manifest.services.length > 16) {
+    throw new Error('plugin manifest.services must be an array of at most 16 items')
+  }
+  const services = Object.freeze(
+    manifest.services.map((candidate, index) => serviceDeclaration(candidate, `plugin manifest.services[${index}]`)),
+  )
   if (new Set(services.map(item => item.id)).size !== services.length) throw new Error('duplicate service declaration')
-  return Object.freeze({ $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V8, schemaVersion: 8, id,
-    ...(manifest.name === undefined ? {} : { name: nonEmpty(manifest.name, 'plugin manifest.name', 200) }), capabilities, services }) as CordisXPluginManifestV8
+  return Object.freeze({
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
+    schemaVersion: 8,
+    id,
+    ...(manifest.name === undefined ? {} : { name: nonEmpty(manifest.name, 'plugin manifest.name', 200) }),
+    capabilities,
+    services,
+  }) as CordisXPluginManifestV8
 }
 
 function normalizedForFingerprint(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(normalizedForFingerprint)
-    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+  if (Array.isArray(value)) {
+    return value.map(normalizedForFingerprint)
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+  }
   if (value === null || typeof value !== 'object') return value
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, entry]) => [key, normalizedForFingerprint(entry)]))
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, normalizedForFingerprint(entry)]),
+  )
 }
 
 export function permissionSecurityFingerprintV4(
@@ -492,13 +686,15 @@ export function permissionSecurityFingerprintV4(
   declaration: CordisXCapabilityDeclarationV4,
 ): `sha256:${string}` {
   const normalized = normalizeCapabilityDeclarationV4(declaration)
-  return `sha256:${sha256Hex(JSON.stringify(normalizedForFingerprint({
-    catalogVersion,
-    capability: normalized.name,
-    rationale: normalized.rationale ?? null,
-    scope: normalized.scope,
-    security: normalized.security ?? null,
-  })))}`
+  return `sha256:${
+    sha256Hex(JSON.stringify(normalizedForFingerprint({
+      catalogVersion,
+      capability: normalized.name,
+      rationale: normalized.rationale ?? null,
+      scope: normalized.scope,
+      security: normalized.security ?? null,
+    })))
+  }`
 }
 
 export function normalizePermissionPolicyRecordV4(
@@ -513,7 +709,9 @@ export function normalizePermissionPolicyRecordV4(
   const key = object(record.key, `${label}.key`)
   exact(key, ['profileId', 'identity', 'capability', 'scope', 'securityFingerprint'], `${label}.key`)
   const agentCapability = AGENT_RUNTIME_CAPABILITIES.has(key.capability as AgentRuntimeCapability)
-  if (!isHostDomPermissionCapability(key.capability) && !agentCapability) throw new Error(`${label} capability is unsupported`)
+  if (!isHostDomPermissionCapability(key.capability) && !agentCapability) {
+    throw new Error(`${label} capability is unsupported`)
+  }
   if (typeof key.securityFingerprint !== 'string' || !FINGERPRINT.test(key.securityFingerprint)) {
     throw new Error(`${label}.key.securityFingerprint is invalid`)
   }
@@ -532,7 +730,11 @@ export function normalizePermissionPolicyRecordV4(
       capability: key.capability as CordisXPermissionCapabilityV5,
       scope: agentCapability
         ? normalizeAgentRuntimePolicyScopeV4(key.scope, `${label}.key.scope`)
-        : normalizeHostDomPermissionScopeV4(key.scope, key.capability as 'ui.host-dom.read' | 'ui.host-dom.modify', `${label}.key.scope`),
+        : normalizeHostDomPermissionScopeV4(
+          key.scope,
+          key.capability as 'ui.host-dom.read' | 'ui.host-dom.modify',
+          `${label}.key.scope`,
+        ),
       securityFingerprint: key.securityFingerprint as `sha256:${string}`,
     }),
     policy: record.policy,
@@ -544,7 +746,12 @@ function normalizeAgentRuntimePolicyScopeV4(value: unknown, label: string): Cord
   const scope = object(value, label)
   exact(scope, ['sessionIds'], label)
   return Object.freeze({
-    sessionIds: uniqueSortedStrings(scope.sessionIds, `${label}.sessionIds`, 1, item => item !== '*' && item.length <= 512),
+    sessionIds: uniqueSortedStrings(
+      scope.sessionIds,
+      `${label}.sessionIds`,
+      1,
+      item => item !== '*' && item.length <= 512,
+    ),
   })
 }
 
@@ -567,7 +774,9 @@ export function hostDomPermissionAuthorizationKeyV4(input: {
   readonly catalogVersion: string
 }): CordisXPermissionAuthorizationKeyV4 {
   const declaration = normalizeCapabilityDeclarationV4(input.declaration)
-  if (!isHostDomPermissionCapability(declaration.name)) throw new Error('Host DOM authorization key requires a Host DOM capability')
+  if (!isHostDomPermissionCapability(declaration.name)) {
+    throw new Error('Host DOM authorization key requires a Host DOM capability')
+  }
   return Object.freeze({
     profileId: normalizePermissionLocalIdV2(input.profileId, 'Host DOM permission profile id'),
     identity: normalizePermissionIdentityV2(input.identity, 'Host DOM permission identity'),
@@ -582,7 +791,8 @@ export function assertPermissionAuthorizationDecisionV4(
   plan: CordisXPermissionAuthorizationPlanV4,
   decision: CordisXPermissionAuthorizationDecisionV4,
 ): void {
-  if (decision === null || typeof decision !== 'object'
+  if (
+    decision === null || typeof decision !== 'object'
     || decision.$schema !== CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4
     || decision.schemaVersion !== 4
     || decision.origin !== 'explicit-user'
@@ -591,19 +801,24 @@ export function assertPermissionAuthorizationDecisionV4(
     || decision.profileId !== plan.profileId
     || JSON.stringify(decision.identity) !== JSON.stringify(plan.identity)
     || JSON.stringify(decision.binding) !== JSON.stringify(plan.binding)
-    || !Array.isArray(decision.decisions)) {
+    || !Array.isArray(decision.decisions)
+  ) {
     throw new Error('permission v4 decision does not match the exact plan')
   }
-  const expected = new Map(plan.declarations
-    .filter(item => item.decisionRequired)
-    .map(item => [item.capability, item]))
+  const expected = new Map(
+    plan.declarations
+      .filter(item => item.decisionRequired)
+      .map(item => [item.capability, item]),
+  )
   const seen = new Set<string>()
   for (const selected of decision.decisions) {
     const item = expected.get(selected.capability)
-    if (item === undefined || seen.has(selected.capability)
+    if (
+      item === undefined || seen.has(selected.capability)
       || JSON.stringify(selected.scope) !== JSON.stringify(item.scope)
       || selected.securityFingerprint !== item.securityFingerprint
-      || !item.allowedDecisions.includes(selected.decision)) {
+      || !item.allowedDecisions.includes(selected.decision)
+    ) {
       throw new Error('permission v4 decision exceeds or does not match the exact plan')
     }
     seen.add(selected.capability)

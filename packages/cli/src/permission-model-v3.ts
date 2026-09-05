@@ -7,11 +7,7 @@ import {
   type CordisXPermissionPolicyRecordV3,
   type CordisXPermissionScopeV3,
 } from './permission-contracts.js'
-import {
-  normalizePermissionIdentityV2,
-  normalizePermissionLocalIdV2,
-  sha256Hex,
-} from './permission-model-v2.js'
+import { normalizePermissionIdentityV2, normalizePermissionLocalIdV2, sha256Hex } from './permission-model-v2.js'
 
 const FINGERPRINT = /^sha256:[a-f0-9]{64}$/u
 const POINT_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u
@@ -27,7 +23,9 @@ function exact(value: Record<string, unknown>, keys: readonly string[], label: s
 }
 
 function extensionPoints(value: unknown, label: string): readonly string[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 64) throw new Error(`${label} must contain 1 to 64 point ids`)
+  if (!Array.isArray(value) || value.length < 1 || value.length > 64) {
+    throw new Error(`${label} must contain 1 to 64 point ids`)
+  }
   const normalized = value.map((item, index) => {
     if (typeof item !== 'string' || !POINT_ID.test(item)) throw new Error(`${label}[${index}] is invalid`)
     return item
@@ -36,7 +34,10 @@ function extensionPoints(value: unknown, label: string): readonly string[] {
   return Object.freeze([...normalized].sort())
 }
 
-export function normalizeDomPermissionScopeV3(value: unknown, label = 'DOM permission scope'): CordisXPermissionScopeV3 {
+export function normalizeDomPermissionScopeV3(
+  value: unknown,
+  label = 'DOM permission scope',
+): CordisXPermissionScopeV3 {
   const scope = object(value, label)
   exact(scope, ['extensionPoints'], label)
   return Object.freeze({ extensionPoints: extensionPoints(scope.extensionPoints, `${label}.extensionPoints`) })
@@ -62,13 +63,15 @@ export function permissionSecurityFingerprintV3(
   declaration: CordisXCapabilityDeclarationV3,
 ): `sha256:${string}` {
   const normalized = normalizeDomCapabilityDeclarationV3(declaration)
-  return `sha256:${sha256Hex(JSON.stringify({
-    catalogVersion,
-    capability: normalized.name,
-    rationale: null,
-    scope: normalized.scope,
-    security: null,
-  }))}`
+  return `sha256:${
+    sha256Hex(JSON.stringify({
+      catalogVersion,
+      capability: normalized.name,
+      rationale: null,
+      scope: normalized.scope,
+      security: null,
+    }))
+  }`
 }
 
 export function normalizePermissionPolicyRecordV3(
@@ -84,10 +87,15 @@ export function normalizePermissionPolicyRecordV3(
   exact(key, ['profileId', 'identity', 'capability', 'scope', 'securityFingerprint'], `${label}.key`)
   const profileId = normalizePermissionLocalIdV2(key.profileId, `${label}.key.profileId`)
   const identity = normalizePermissionIdentityV2(key.identity, `${label}.key.identity`)
-  if (typeof key.capability !== 'string' || !(CORDISX_PERMISSION_CAPABILITIES_V3 as readonly string[]).includes(key.capability)) {
+  if (
+    typeof key.capability !== 'string'
+    || !(CORDISX_PERMISSION_CAPABILITIES_V3 as readonly string[]).includes(key.capability)
+  ) {
     throw new Error(`${label}.key.capability is unsupported`)
   }
-  if (key.capability !== 'ui.extension-points.render') throw new Error(`${label} non-DOM capability must remain a v2 record`)
+  if (key.capability !== 'ui.extension-points.render') {
+    throw new Error(`${label} non-DOM capability must remain a v2 record`)
+  }
   if (typeof key.securityFingerprint !== 'string' || !FINGERPRINT.test(key.securityFingerprint)) {
     throw new Error(`${label}.key.securityFingerprint is invalid`)
   }

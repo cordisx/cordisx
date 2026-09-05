@@ -34,27 +34,51 @@ describe('permission persistence RPC', () => {
       records: [{ key: { profileId: 'work', identity: { pluginId: 'demo' } }, policy: 'allow' }],
     })
     expect(() => parsePermissionBindingRequest(request({ token: 'b'.repeat(64) }), context)).toThrow('token is invalid')
-    expect(() => parsePermissionBindingRequest(request({
-      records: [createPermissionPolicyRecord({
-        profileId: 'other', identity, capability: 'models.read', scope: {}, policy: 'allow',
-      })],
-    }), context)).toThrow('profile is invalid')
-    expect(() => parsePermissionBindingRequest(request({
-      records: [createPermissionPolicyRecord({
-        profileId: 'work',
-        identity: { source: 'file:///plugins/spoof.js', id: 'demo' },
-        capability: 'models.read', scope: {}, policy: 'allow',
-      })],
-    }), context)).toThrow('identity is invalid')
-    expect(() => parsePermissionBindingRequest({
-      ...(request() as Record<string, unknown>),
-      records: [{
-        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v1.schema.json',
-        schemaVersion: 1,
-        key: { profileId: 'work', identity: { source: identity.source, pluginId: identity.id }, capability: 'models.read', scope: { sessionIds: ['agent-1'] } },
-        policy: 'allow',
-      }],
-    }, context)).toThrow('cannot use Agent sessionIds')
+    expect(() =>
+      parsePermissionBindingRequest(
+        request({
+          records: [createPermissionPolicyRecord({
+            profileId: 'other',
+            identity,
+            capability: 'models.read',
+            scope: {},
+            policy: 'allow',
+          })],
+        }),
+        context,
+      )
+    ).toThrow('profile is invalid')
+    expect(() =>
+      parsePermissionBindingRequest(
+        request({
+          records: [createPermissionPolicyRecord({
+            profileId: 'work',
+            identity: { source: 'file:///plugins/spoof.js', id: 'demo' },
+            capability: 'models.read',
+            scope: {},
+            policy: 'allow',
+          })],
+        }),
+        context,
+      )
+    ).toThrow('identity is invalid')
+    expect(() =>
+      parsePermissionBindingRequest({
+        ...(request() as Record<string, unknown>),
+        records: [{
+          $schema:
+            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v1.schema.json',
+          schemaVersion: 1,
+          key: {
+            profileId: 'work',
+            identity: { source: identity.source, pluginId: identity.id },
+            capability: 'models.read',
+            scope: { sessionIds: ['agent-1'] },
+          },
+          policy: 'allow',
+        }],
+      }, context)
+    ).toThrow('cannot use Agent sessionIds')
   })
 
   it('atomically persists and reads back only the normalized policy record', async () => {
@@ -67,10 +91,18 @@ describe('permission persistence RPC', () => {
     expect(readback.permissions).toEqual(parsed.records)
 
     const deny = createPermissionPolicyRecord({
-      profileId: 'work', identity, capability: 'models.read', scope: { providers: ['codex'] }, policy: 'deny',
+      profileId: 'work',
+      identity,
+      capability: 'models.read',
+      scope: { providers: ['codex'] },
+      policy: 'deny',
     })
     const optionalDeny = createPermissionPolicyRecord({
-      profileId: 'work', identity, capability: 'tasks.catalog.read', scope: {}, policy: 'deny',
+      profileId: 'work',
+      identity,
+      capability: 'tasks.catalog.read',
+      scope: {},
+      policy: 'deny',
     })
     await persistPermissionPolicies({ configPath }, [deny, optionalDeny])
     expect((await loadHomeConfig(configPath)).permissions).toEqual([deny, optionalDeny])

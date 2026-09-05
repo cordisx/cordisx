@@ -124,19 +124,21 @@ function projectSnapshot(snapshot: ChannelRuntimeSnapshot): ChannelManagerRuntim
     contract: 'cordisx.channel-manager-runtime/v1',
     schemaVersion: 1,
     observedAt: snapshot.observedAt,
-    accounts: snapshot.accounts.map(account => Object.freeze({
-      ref: { ...account.ref },
-      adapterKind: account.adapterKind,
-      implementationStatus: account.implementationStatus,
-      connectionState: account.connectionState,
-      secretState: account.secretState,
-      generation: account.generation,
-      lastGoodRevision: account.lastGoodRevision,
-      ...(account.cursorUpdatedAt === undefined ? {} : { cursorUpdatedAt: account.cursorUpdatedAt }),
-      ...(account.lastErrorCode === undefined ? {} : { lastErrorCode: account.lastErrorCode }),
-      inbound: { ...account.inbound },
-      outbound: { ...account.outbound },
-    })),
+    accounts: snapshot.accounts.map(account =>
+      Object.freeze({
+        ref: { ...account.ref },
+        adapterKind: account.adapterKind,
+        implementationStatus: account.implementationStatus,
+        connectionState: account.connectionState,
+        secretState: account.secretState,
+        generation: account.generation,
+        lastGoodRevision: account.lastGoodRevision,
+        ...(account.cursorUpdatedAt === undefined ? {} : { cursorUpdatedAt: account.cursorUpdatedAt }),
+        ...(account.lastErrorCode === undefined ? {} : { lastErrorCode: account.lastErrorCode }),
+        inbound: { ...account.inbound },
+        outbound: { ...account.outbound },
+      })
+    ),
     bindings: Object.freeze([]) as readonly ChannelManagerBindingProjection[],
   })
 }
@@ -144,7 +146,9 @@ function projectSnapshot(snapshot: ChannelRuntimeSnapshot): ChannelManagerRuntim
 function projectLog(record: ChannelAuditSnapshot, snapshot: ChannelRuntimeSnapshot): ChannelManagerLogRecord {
   const account = snapshot.accounts.find(candidate => (
     record.accountKey === JSON.stringify([
-      candidate.ref.adapterId, candidate.ref.accountId, candidate.ref.tenantId,
+      candidate.ref.adapterId,
+      candidate.ref.accountId,
+      candidate.ref.tenantId,
     ])
   ))
   return Object.freeze({
@@ -176,7 +180,9 @@ function filteredLogs(
   const snapshot = active.runtime.snapshot()
   return active.runtime.auditSnapshot()
     .map(record => projectLog(record, snapshot))
-    .filter(record => query.account === undefined || (record.account !== undefined && sameAccount(record.account, query.account)))
+    .filter(record =>
+      query.account === undefined || (record.account !== undefined && sameAccount(record.account, query.account))
+    )
     .filter(record => query.action === undefined || record.action === query.action)
     .filter(record => query.outcome === undefined || record.outcome === query.outcome)
     .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt) || right.id.localeCompare(left.id))
@@ -203,7 +209,9 @@ function expectedActive(
   input: ChannelManagerActionInput,
 ): ActiveChannelManagerRuntime | undefined {
   const active = access.active()
-  if (active === undefined || (input.generation !== undefined && input.generation !== active.generation)) return undefined
+  if (active === undefined || (input.generation !== undefined && input.generation !== active.generation)) {
+    return undefined
+  }
   return active
 }
 
@@ -211,7 +219,9 @@ function result(access: ChannelManagerRuntimeAccess, status: ChannelManagerActio
   const active = access.active()
   return Object.freeze({
     status,
-    ...(active === undefined ? {} : { generation: active.generation, projection: projectSnapshot(active.runtime.snapshot()) }),
+    ...(active === undefined
+      ? {}
+      : { generation: active.generation, projection: projectSnapshot(active.runtime.snapshot()) }),
   })
 }
 
@@ -238,8 +248,8 @@ export function createChannelManagerApi(access: ChannelManagerRuntimeAccess): Ch
     const status = action === 'archive'
       ? 'unavailable'
       : action === 'restore'
-        ? 'unavailable'
-        : 'unavailable'
+      ? 'unavailable'
+      : 'unavailable'
     return result(access, status)
   }
 
@@ -254,12 +264,18 @@ export function createChannelManagerApi(access: ChannelManagerRuntimeAccess): Ch
       const exportedAt = new Date().toISOString()
       return Object.freeze({
         filename: `cordisx-channel-logs-${exportedAt.replace(/[:.]/g, '-')}.json`,
-        payload: `${JSON.stringify({
-          contract: 'cordisx.channel-manager-logs-export/v1',
-          schemaVersion: 1,
-          exportedAt,
-          records,
-        }, null, 2)}\n`,
+        payload: `${
+          JSON.stringify(
+            {
+              contract: 'cordisx.channel-manager-logs-export/v1',
+              schemaVersion: 1,
+              exportedAt,
+              records,
+            },
+            null,
+            2,
+          )
+        }\n`,
       })
     },
     connections: Object.freeze({

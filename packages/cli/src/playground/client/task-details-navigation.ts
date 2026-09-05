@@ -5,9 +5,9 @@ import {
   type PlaygroundMockTaskTrace,
 } from '../../renderer/playground-mock-agent-loop.js'
 import {
-  CORDISX_AGENT_DEFINITION_SCHEMA_V1,
   type AgentDefinition,
   type AgentDefinitionIdentity,
+  CORDISX_AGENT_DEFINITION_SCHEMA_V1,
 } from '../../agent-loop-contracts.js'
 import {
   CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT,
@@ -19,10 +19,7 @@ import {
   isPlaygroundRoomSimulationBinding,
   type PlaygroundRoomSimulationBinding,
 } from '../../renderer/playground-room-simulation-bridge.js'
-import {
-  clearPlaygroundDisposableSessionData,
-  countPlaygroundDisposableSessionRecords,
-} from './preview-reset.js'
+import { clearPlaygroundDisposableSessionData, countPlaygroundDisposableSessionRecords } from './preview-reset.js'
 
 export const PLAYGROUND_SIMULATOR_SESSION_PREFIX = 'cordisx.playground.simulator/v1:'
 export const PLAYGROUND_SIMULATOR_TASK_SNAPSHOT_KEY = `${PLAYGROUND_SIMULATOR_SESSION_PREFIX}task-snapshots/v2`
@@ -56,10 +53,12 @@ function stableTaskDetailsUrl(taskRef: string): PlaygroundMockTaskDetailsUrl {
 function normalizeTaskSnapshot(value: unknown): PlaygroundMockTaskTrace | undefined {
   if (value === null || typeof value !== 'object') return undefined
   const task = value as Partial<PlaygroundMockTaskTrace>
-  if (typeof task.debugTaskId !== 'string' || task.debugTaskId === ''
+  if (
+    typeof task.debugTaskId !== 'string' || task.debugTaskId === ''
     || typeof task.agentLabel !== 'string' || task.agentLabel === ''
     || !Array.isArray(task.catalog) || !Array.isArray(task.layers) || !Array.isArray(task.events)
-    || task.identity === undefined || task.effective === undefined) return undefined
+    || task.identity === undefined || task.effective === undefined
+  ) return undefined
   const taskRef = typeof task.taskRef === 'string' && task.taskRef !== ''
     ? task.taskRef
     : `legacy-title:${task.debugTaskId}`
@@ -80,15 +79,24 @@ export function projectPlaygroundHostSessionTask(
   const routeRef = target?.kind === 'host' && target.historyUrl !== undefined
     ? simulatorTaskIdFromPath(target.historyUrl)
     : undefined
-  const cached = readPlaygroundSimulatorTaskSnapshots(storage)?.tasks.find(task => task.taskRef === routeRef || task.debugTaskId === routeRef)
-  if (cached !== undefined) return input.simulationBinding === undefined
-    ? cached
-    : { ...cached, simulationBinding: { ...input.simulationBinding } }
+  const cached = readPlaygroundSimulatorTaskSnapshots(storage)?.tasks.find(task =>
+    task.taskRef === routeRef || task.debugTaskId === routeRef
+  )
+  if (cached !== undefined) {
+    return input.simulationBinding === undefined
+      ? cached
+      : { ...cached, simulationBinding: { ...input.simulationBinding } }
+  }
 
   const taskRef = `host-session:${input.runId}`
   const detailsUrl = stableTaskDetailsUrl(taskRef)
   const inherit: AgentDefinition['inherit'] = {
-    promptSections: 'append', rules: 'append', skills: 'append', tools: 'merge', mcpServers: 'merge', runtimeDefaults: 'merge',
+    promptSections: 'append',
+    rules: 'append',
+    skills: 'append',
+    tools: 'merge',
+    mcpServers: 'merge',
+    runtimeDefaults: 'merge',
   }
   const definition: AgentDefinition = {
     $schema: CORDISX_AGENT_DEFINITION_SCHEMA_V1,
@@ -144,14 +152,18 @@ export function projectPlaygroundHostSessionTask(
   }
 }
 
-export function readPlaygroundSimulatorTaskSnapshots(storage: Storage | undefined): PlaygroundMockAgentLoopSnapshot | undefined {
+export function readPlaygroundSimulatorTaskSnapshots(
+  storage: Storage | undefined,
+): PlaygroundMockAgentLoopSnapshot | undefined {
   try {
     if (storage === undefined) return undefined
     const raw = storage.getItem(PLAYGROUND_SIMULATOR_TASK_SNAPSHOT_KEY)
     if (raw === null) return undefined
     const value = JSON.parse(raw) as Partial<PlaygroundSimulatorTaskSnapshotRegistry>
     if (value.version !== 2 || !Array.isArray(value.tasks)) return undefined
-    const tasks = value.tasks.map(normalizeTaskSnapshot).filter((task): task is PlaygroundMockTaskTrace => task !== undefined)
+    const tasks = value.tasks.map(normalizeTaskSnapshot).filter((task): task is PlaygroundMockTaskTrace =>
+      task !== undefined
+    )
     if (tasks.length === 0) return undefined
     return { namespace: PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE, label: 'Mock / Simulator', tasks }
   } catch {
@@ -173,9 +185,12 @@ export function mergePlaygroundSimulatorTaskSnapshots(
     const task = normalizeTaskSnapshot(value)
     if (task !== undefined) {
       const cachedTask = tasks.get(task.taskRef)
-      tasks.set(task.taskRef, task.simulationBinding !== undefined || cachedTask?.simulationBinding === undefined
-        ? task
-        : { ...task, simulationBinding: cachedTask.simulationBinding })
+      tasks.set(
+        task.taskRef,
+        task.simulationBinding !== undefined || cachedTask?.simulationBinding === undefined
+          ? task
+          : { ...task, simulationBinding: cachedTask.simulationBinding },
+      )
     }
   }
   const cachedSnapshot = {
@@ -210,7 +225,9 @@ export interface PlaygroundTaskNavigationTarget {
   readonly historyUrl?: string
 }
 
-export function taskNavigationTarget(detailsUrl: PlaygroundMockTaskDetailsUrl): PlaygroundTaskNavigationTarget | undefined {
+export function taskNavigationTarget(
+  detailsUrl: PlaygroundMockTaskDetailsUrl,
+): PlaygroundTaskNavigationTarget | undefined {
   let validated: PlaygroundMockTaskDetailsUrl
   let parsed: URL
   try {

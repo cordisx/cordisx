@@ -32,7 +32,8 @@ export function apply(ctx: Context): void {
       'route.overview.title': 'Open lifecycle management',
       'route.overview.description': 'Open from the sidebar to inspect the installed local-package lifecycle fixture.',
       'page.overview.title': 'Lifecycle management',
-      'page.overview.description': 'Shows the apply, reload, disable, enable, and uninstall state of the lifecycle-smoke package.',
+      'page.overview.description':
+        'Shows the apply, reload, disable, enable, and uninstall state of the lifecycle-smoke package.',
     },
   })
   ctx.i18n.define({
@@ -47,7 +48,9 @@ export function apply(ctx: Context): void {
     },
   })
   const label = message('navigation.title', 'Lifecycle smoke')
-  ctx.commands.register({ id: 'invoke', title: label }, () => { counters.invoke += 1 })
+  ctx.commands.register({ id: 'invoke', title: label }, () => {
+    counters.invoke += 1
+  })
   ctx.pages.register({
     $schema: CORDISX_PAGE_SCHEMA_V3,
     schemaVersion: 3,
@@ -72,5 +75,7 @@ export function apply(ctx: Context): void {
     icon: 'host:refresh',
     route: { id: 'overview' },
   })
-  ctx.effect(() => () => { counters.dispose += 1 }, 'lifecycle smoke cleanup')
+  ctx.effect(() => () => {
+    counters.dispose += 1
+  }, 'lifecycle smoke cleanup')
 }

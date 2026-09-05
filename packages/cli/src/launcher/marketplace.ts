@@ -24,7 +24,10 @@ function publicIpv4(value: string): boolean {
   const octets = value.split('.').map(Number)
   const first = octets[0]
   const second = octets[1]
-  if (octets.length !== 4 || first === undefined || second === undefined || octets.some(octet => !Number.isInteger(octet) || octet < 0 || octet > 255)) return false
+  if (
+    octets.length !== 4 || first === undefined || second === undefined
+    || octets.some(octet => !Number.isInteger(octet) || octet < 0 || octet > 255)
+  ) return false
   if (first === 0 || first === 10 || first === 127 || first >= 224) return false
   if (first === 100 && second >= 64 && second <= 127) return false
   if (first === 169 && second === 254) return false
@@ -72,14 +75,18 @@ async function resolvePublicAddress(hostname: string): Promise<{ readonly addres
     ? await lookup(hostname, { all: true, verbatim: true })
     : [{ address: hostname, family: literalFamily }]
   const resolvedHostname = literalFamily === 0
-  if (addresses.length === 0 || addresses.some(item => {
-    return !isPublicMarketplaceAddress(item.address)
-      && !(resolvedHostname && syntheticProxyIpv4(item.address))
-  })) {
+  if (
+    addresses.length === 0 || addresses.some(item => {
+      return !isPublicMarketplaceAddress(item.address)
+        && !(resolvedHostname && syntheticProxyIpv4(item.address))
+    })
+  ) {
     throw new Error('marketplace feed resolved to a non-public address')
   }
   const selected = addresses[0]
-  if (selected === undefined || (selected.family !== 4 && selected.family !== 6)) throw new Error('marketplace feed address family is unsupported')
+  if (selected === undefined || (selected.family !== 4 && selected.family !== 6)) {
+    throw new Error('marketplace feed address family is unsupported')
+  }
   return { address: selected.address, family: selected.family }
 }
 
@@ -124,11 +131,12 @@ async function requestOnce(url: URL, signal?: AbortSignal): Promise<HttpsResult>
         }
         chunks.push(buffer)
       })
-      response.once('end', () => resolve({
-        status,
-        ...(typeof response.headers.location === 'string' ? { location: response.headers.location } : {}),
-        body: Buffer.concat(chunks),
-      }))
+      response.once('end', () =>
+        resolve({
+          status,
+          ...(typeof response.headers.location === 'string' ? { location: response.headers.location } : {}),
+          body: Buffer.concat(chunks),
+        }))
       response.once('error', reject)
     })
     operation.setTimeout(REQUEST_TIMEOUT_MS, () => operation.destroy(new Error('marketplace feed request timed out')))

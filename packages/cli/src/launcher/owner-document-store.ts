@@ -42,9 +42,14 @@ interface StoredOwnerDocuments {
 
 type StoreRead =
   | { readonly status: 'ready'; readonly value: StoredOwnerDocuments }
-  | { readonly status: 'unavailable'; readonly result: Extract<CordisXOwnerDocumentLoadResultV1, { readonly status: 'unavailable' }> }
+  | {
+    readonly status: 'unavailable'
+    readonly result: Extract<CordisXOwnerDocumentLoadResultV1, { readonly status: 'unavailable' }>
+  }
 
-function byteLength(value: string): number { return Buffer.byteLength(value, 'utf8') }
+function byteLength(value: string): number {
+  return Buffer.byteLength(value, 'utf8')
+}
 
 function unavailable(
   code: Extract<CordisXOwnerDocumentLoadResultV1, { readonly status: 'unavailable' }>['code'],
@@ -61,7 +66,9 @@ function assertDocumentId(documentId: string): void {
 function assertScope(scope: OwnerDocumentStoreScope): void {
   if (scope.profileId.length === 0 || scope.profileId.length > 128) throw new Error('profileId is invalid')
   if (!/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(scope.identity.pluginId)) throw new Error('pluginId is invalid')
-  if (scope.identity.source.length === 0 || byteLength(scope.identity.source) > 4096) throw new Error('plugin source is invalid')
+  if (scope.identity.source.length === 0 || byteLength(scope.identity.source) > 4096) {
+    throw new Error('plugin source is invalid')
+  }
 }
 
 function assertExactKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
@@ -97,23 +104,37 @@ function parseStored(value: unknown, scope: OwnerDocumentStoreScope): StoredOwne
   }
   if (root.profileId !== scope.profileId) throw new Error('store profile identity is invalid')
   const identity = root.identity
-  if (identity === null || typeof identity !== 'object' || Array.isArray(identity)) throw new Error('store owner identity is invalid')
+  if (identity === null || typeof identity !== 'object' || Array.isArray(identity)) {
+    throw new Error('store owner identity is invalid')
+  }
   const owner = identity as Record<string, unknown>
   assertExactKeys(owner, ['source', 'pluginId'], 'store owner identity')
-  if (owner.source !== scope.identity.source || owner.pluginId !== scope.identity.pluginId) throw new Error('store owner identity is invalid')
-  if (root.documents === null || typeof root.documents !== 'object' || Array.isArray(root.documents)) throw new Error('store documents are invalid')
+  if (owner.source !== scope.identity.source || owner.pluginId !== scope.identity.pluginId) {
+    throw new Error('store owner identity is invalid')
+  }
+  if (root.documents === null || typeof root.documents !== 'object' || Array.isArray(root.documents)) {
+    throw new Error('store documents are invalid')
+  }
   const entries = Object.entries(root.documents as Record<string, unknown>)
   if (entries.length > OWNER_DOCUMENT_MAX_DOCUMENTS) throw new Error('store document count exceeds quota')
   const documents: Record<string, StoredDocument> = Object.create(null) as Record<string, StoredDocument>
   for (const [documentId, candidate] of entries) {
     assertDocumentId(documentId)
-    if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) throw new Error('stored document is invalid')
+    if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      throw new Error('stored document is invalid')
+    }
     const item = candidate as Record<string, unknown>
     assertExactKeys(item, ['revision', 'schemaVersion', 'value'], `stored document ${documentId}`)
-    if (!Number.isSafeInteger(item.revision) || (item.revision as number) < 1) throw new Error('stored document revision is invalid')
-    if (!Number.isSafeInteger(item.schemaVersion) || (item.schemaVersion as number) < 1) throw new Error('stored document schemaVersion is invalid')
+    if (!Number.isSafeInteger(item.revision) || (item.revision as number) < 1) {
+      throw new Error('stored document revision is invalid')
+    }
+    if (!Number.isSafeInteger(item.schemaVersion) || (item.schemaVersion as number) < 1) {
+      throw new Error('stored document schemaVersion is invalid')
+    }
     const normalized = jsonValue(item.value, `documents.${documentId}.value`)
-    if (byteLength(JSON.stringify(normalized)) > OWNER_DOCUMENT_MAX_DOCUMENT_BYTES) throw new Error('stored document exceeds quota')
+    if (byteLength(JSON.stringify(normalized)) > OWNER_DOCUMENT_MAX_DOCUMENT_BYTES) {
+      throw new Error('stored document exceeds quota')
+    }
     documents[documentId] = {
       revision: item.revision as number,
       schemaVersion: item.schemaVersion as number,
@@ -161,9 +182,15 @@ export class OwnerDocumentStore {
   private async serialized<Value>(operation: () => Promise<Value>): Promise<Value> {
     const previous = this.queue
     let release!: () => void
-    this.queue = new Promise<void>(resolve => { release = resolve })
+    this.queue = new Promise<void>(resolve => {
+      release = resolve
+    })
     await previous
-    try { return await operation() } finally { release() }
+    try {
+      return await operation()
+    } finally {
+      release()
+    }
   }
 
   private async locked<Value>(scope: OwnerDocumentStoreScope, operation: () => Promise<Value>): Promise<Value> {
@@ -189,13 +216,17 @@ export class OwnerDocumentStore {
             // Re-read only after exclusively owning recovery. This prevents two
             // cleaners from deleting a newly reacquired live lock.
             const current = await stat(lock).catch(() => undefined)
-            if (current !== undefined && Date.now() - current.mtimeMs > LOCK_STALE_MS
-              && !await this.lockOwnerLive(lock)) await rm(lock, { recursive: true, force: true })
+            if (
+              current !== undefined && Date.now() - current.mtimeMs > LOCK_STALE_MS
+              && !await this.lockOwnerLive(lock)
+            ) await rm(lock, { recursive: true, force: true })
           } catch (recoveryError) {
             if ((recoveryError as NodeJS.ErrnoException).code !== 'EEXIST') throw recoveryError
             const recoveryMetadata = await stat(recovery).catch(() => undefined)
-            if (recoveryMetadata !== undefined && Date.now() - recoveryMetadata.mtimeMs > LOCK_STALE_MS
-              && !await this.lockOwnerLive(recovery)) await rm(recovery, { recursive: true, force: true })
+            if (
+              recoveryMetadata !== undefined && Date.now() - recoveryMetadata.mtimeMs > LOCK_STALE_MS
+              && !await this.lockOwnerLive(recovery)
+            ) await rm(recovery, { recursive: true, force: true })
           } finally {
             if (recoveryOwned) await rm(recovery, { recursive: true, force: true })
           }
@@ -205,14 +236,23 @@ export class OwnerDocumentStore {
         await new Promise(resolve => setTimeout(resolve, 10))
       }
     }
-    try { return await operation() } finally { await rm(lock, { recursive: true, force: true }) }
+    try {
+      return await operation()
+    } finally {
+      await rm(lock, { recursive: true, force: true })
+    }
   }
 
   private async lockOwnerLive(lock: string): Promise<boolean> {
     const owner = await readFile(path.join(lock, 'owner'), 'utf8').catch(() => '')
     const pid = Number.parseInt(owner.split('\n')[0] ?? '', 10)
     if (!Number.isSafeInteger(pid) || pid <= 0) return false
-    try { process.kill(pid, 0); return true } catch (probe) { return (probe as NodeJS.ErrnoException).code === 'EPERM' }
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch (probe) {
+      return (probe as NodeJS.ErrnoException).code === 'EPERM'
+    }
   }
 
   private async read(scope: OwnerDocumentStoreScope): Promise<StoreRead> {
@@ -220,34 +260,47 @@ export class OwnerDocumentStore {
     let raw: string
     try {
       const metadata = await stat(file)
-      if (!metadata.isFile()) return { status: 'unavailable', result: unavailable('corrupt-store', 'owner document store is not a file') }
+      if (!metadata.isFile()) {
+        return { status: 'unavailable', result: unavailable('corrupt-store', 'owner document store is not a file') }
+      }
       if (metadata.size > OWNER_DOCUMENT_MAX_OWNER_BYTES) {
         return { status: 'unavailable', result: unavailable('quota-exceeded', 'owner document store exceeds quota') }
       }
       raw = await readFile(file, 'utf8')
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { status: 'ready', value: emptyStore(scope) }
-      return { status: 'unavailable', result: unavailable('host-unavailable', 'owner document store could not be read') }
+      return {
+        status: 'unavailable',
+        result: unavailable('host-unavailable', 'owner document store could not be read'),
+      }
     }
     if (byteLength(raw) > OWNER_DOCUMENT_MAX_OWNER_BYTES) {
       return { status: 'unavailable', result: unavailable('quota-exceeded', 'owner document store exceeds quota') }
     }
     let parsed: unknown
-    try { parsed = JSON.parse(raw) } catch {
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
       return { status: 'unavailable', result: unavailable('corrupt-store', 'owner document store is corrupt') }
     }
     try {
       return { status: 'ready', value: parseStored(parsed, scope) }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'owner document store is invalid'
-      const code = message.includes('schema is unsupported') ? 'unsupported-store-schema' as const
-        : message.includes('quota') ? 'quota-exceeded' as const
-          : 'corrupt-store' as const
+      const code = message.includes('schema is unsupported')
+        ? 'unsupported-store-schema' as const
+        : message.includes('quota')
+        ? 'quota-exceeded' as const
+        : 'corrupt-store' as const
       return { status: 'unavailable', result: unavailable(code, message) }
     }
   }
 
-  private async write(scope: OwnerDocumentStoreScope, value: StoredOwnerDocuments, commitAllowed?: () => boolean): Promise<boolean> {
+  private async write(
+    scope: OwnerDocumentStoreScope,
+    value: StoredOwnerDocuments,
+    commitAllowed?: () => boolean,
+  ): Promise<boolean> {
     const output = `${JSON.stringify(value)}\n`
     if (byteLength(output) > OWNER_DOCUMENT_MAX_OWNER_BYTES) throw new Error('owner document store exceeds quota')
     const file = this.ownerPath(scope)
@@ -272,7 +325,9 @@ export class OwnerDocumentStore {
 
   async load(scope: OwnerDocumentStoreScope, documentId: string): Promise<CordisXOwnerDocumentLoadResultV1> {
     return await this.serialized(async () => {
-      try { assertDocumentId(documentId) } catch {
+      try {
+        assertDocumentId(documentId)
+      } catch {
         return unavailable('invalid-request', 'documentId is invalid', false)
       }
       const read = await this.read(scope)
@@ -281,14 +336,14 @@ export class OwnerDocumentStore {
       return document === undefined
         ? { status: 'missing', revision: 0 }
         : {
-            status: 'loaded',
-            snapshot: {
-              contract: CORDISX_OWNER_DOCUMENT_SERVICE_V1,
-              revision: document.revision,
-              schemaVersion: document.schemaVersion,
-              value: document.value,
-            },
-          }
+          status: 'loaded',
+          snapshot: {
+            contract: CORDISX_OWNER_DOCUMENT_SERVICE_V1,
+            revision: document.revision,
+            schemaVersion: document.schemaVersion,
+            value: document.value,
+          },
+        }
     })
   }
 
@@ -306,8 +361,12 @@ export class OwnerDocumentStore {
         return await this.locked(input.scope, async () => {
           try {
             assertDocumentId(input.documentId)
-            if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) throw new Error('expectedRevision is invalid')
-            if (!Number.isSafeInteger(input.schemaVersion) || input.schemaVersion < 1) throw new Error('schemaVersion is invalid')
+            if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
+              throw new Error('expectedRevision is invalid')
+            }
+            if (!Number.isSafeInteger(input.schemaVersion) || input.schemaVersion < 1) {
+              throw new Error('schemaVersion is invalid')
+            }
             const value = jsonValue(input.value, 'value')
             if (byteLength(JSON.stringify(value)) > OWNER_DOCUMENT_MAX_DOCUMENT_BYTES) {
               return unavailable('quota-exceeded', 'document exceeds quota', false)
@@ -316,8 +375,10 @@ export class OwnerDocumentStore {
             if (read.status === 'unavailable') return read.result
             const actualRevision = read.value.documents[input.documentId]?.revision ?? 0
             if (actualRevision !== input.expectedRevision) return { status: 'conflict', actualRevision }
-            if (read.value.documents[input.documentId] === undefined
-              && Object.keys(read.value.documents).length >= OWNER_DOCUMENT_MAX_DOCUMENTS) {
+            if (
+              read.value.documents[input.documentId] === undefined
+              && Object.keys(read.value.documents).length >= OWNER_DOCUMENT_MAX_DOCUMENTS
+            ) {
               return unavailable('quota-exceeded', 'owner document count exceeds quota', false)
             }
             const revision = actualRevision + 1
@@ -333,7 +394,9 @@ export class OwnerDocumentStore {
                 return unavailable('stale-generation', 'plugin owner is stale', true)
               }
             } catch (error) {
-              if (error instanceof Error && error.message.includes('quota')) return unavailable('quota-exceeded', error.message, false)
+              if (error instanceof Error && error.message.includes('quota')) {
+                return unavailable('quota-exceeded', error.message, false)
+              }
               return unavailable('host-unavailable', 'owner document store could not be committed')
             }
             return {

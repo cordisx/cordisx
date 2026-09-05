@@ -8,21 +8,30 @@ import {
   type CordisXUserMessage,
 } from '../packages/cli/src/contracts.js'
 import {
-  CordisXAgentService,
-  CordisXHostAgentRuntime,
-  CordisXSystemPromptService,
   type CordisXAgentAdapter,
   type CordisXAgentDeliveryControl,
   type CordisXAgentDeliveryInput,
+  CordisXAgentService,
+  CordisXHostAgentRuntime,
+  CordisXSystemPromptService,
 } from '../packages/cli/src/renderer/agent.js'
-import { MemoryPermissionPolicyStore, PermissionBroker, normalizePluginManifest } from '../packages/cli/src/renderer/platform.js'
+import {
+  MemoryPermissionPolicyStore,
+  normalizePluginManifest,
+  PermissionBroker,
+} from '../packages/cli/src/renderer/platform.js'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from '../packages/cli/src/renderer/service.js'
 import { UnavailableCodexHostAdapter } from '../packages/cli/src/adapters/codex-agent.js'
 
 const identity: CordisXPluginIdentity = { source: 'file:///plugins/audit.ts', id: 'audit' }
 
 function capability(name: CordisXCapabilityDeclaration['name']): CordisXCapabilityDeclaration {
-  return { name, required: false, reason: { key: `permission.${name}`, fallback: name }, scope: { sessionIds: ['session-1'] } }
+  return {
+    name,
+    required: false,
+    reason: { key: `permission.${name}`, fallback: name },
+    scope: { sessionIds: ['session-1'] },
+  }
 }
 
 function manifest(names: readonly CordisXCapabilityDeclaration['name'][]): CordisXPluginManifestV1 {
@@ -38,8 +47,15 @@ class RecordingAdapter implements CordisXAgentAdapter {
   readonly deliveries: CordisXAgentDeliveryInput[] = []
   agentStatus() {
     return {
-      hostId: 'fixture', hostName: 'Fixture', mode: 'read-write' as const, adapterId: 'fixture', adapterVersion: '1',
-      experimental: [], diagnostics: [], secondConnectionCreated: false as const, rawBridgeExposed: false as const,
+      hostId: 'fixture',
+      hostName: 'Fixture',
+      mode: 'read-write' as const,
+      adapterId: 'fixture',
+      adapterVersion: '1',
+      experimental: [],
+      diagnostics: [],
+      secondConnectionCreated: false as const,
+      rawBridgeExposed: false as const,
     }
   }
   async deliver(input: CordisXAgentDeliveryInput, control: CordisXAgentDeliveryControl) {
@@ -50,16 +66,26 @@ class RecordingAdapter implements CordisXAgentAdapter {
   }
 }
 
-function allowedRuntime(adapter: CordisXAgentAdapter = new RecordingAdapter(), names: readonly CordisXCapabilityDeclaration['name'][] = ['agent.messages.append']) {
-  const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), { request: vi.fn(async () => 'allow' as const) })
+function allowedRuntime(
+  adapter: CordisXAgentAdapter = new RecordingAdapter(),
+  names: readonly CordisXCapabilityDeclaration['name'][] = ['agent.messages.append'],
+) {
+  const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), {
+    request: vi.fn(async () => 'allow' as const),
+  })
   broker.register(identity, manifest(names))
   for (const name of names) broker.setPolicy(identity, name, 'allow')
-  return { broker, runtime: new CordisXHostAgentRuntime({ adapter, broker, generation: 'generation-1', now: () => 1000 }) }
+  return {
+    broker,
+    runtime: new CordisXHostAgentRuntime({ adapter, broker, generation: 'generation-1', now: () => 1000 }),
+  }
 }
 
 function observed(id: string, text: string): CordisXUserMessage {
   return Object.freeze({
-    id, role: 'user', content: Object.freeze([{ type: 'text', text }]),
+    id,
+    role: 'user',
+    content: Object.freeze([{ type: 'text', text }]),
     source: Object.freeze({ kind: 'adapter', adapterId: 'fixture', adapterVersion: '1', hostId: 'fixture' }),
   })
 }
@@ -76,20 +102,27 @@ describe('Agent runtime', () => {
     ctx.agents.get('session-1').steer('steer')
     ctx.agents.get('session-1').followup('followup')
     expect(inject.snapshot()).toMatchObject({
-      contract: 'cordisx.agent-delivery/v1', schemaVersion: 1,
-      deliveryId: inject.deliveryId, sessionId: 'session-1', stage: 'requested', valid: true,
+      contract: 'cordisx.agent-delivery/v1',
+      schemaVersion: 1,
+      deliveryId: inject.deliveryId,
+      sessionId: 'session-1',
+      stage: 'requested',
+      valid: true,
     })
     await runtime.settled()
     expect(inject.snapshot()).toMatchObject({ stage: 'forwarded', terminal: true, cancellable: false, valid: true })
     expect(adapter.deliveries.map(item => [item.target, item.wakeup])).toEqual([
-      ['next-step', false], ['next-step', true], ['next-turn', true],
+      ['next-step', false],
+      ['next-step', true],
+      ['next-turn', true],
     ])
     const stages = runtime.ledger.query({ sessionId: 'session-1', limit: 100 }).events
       .filter(event => event.messageId === adapter.deliveries[0]?.message.id)
       .map(event => (event.data as { stage: string }).stage)
     expect(stages).toEqual(['requested', 'permission', 'queued', 'claimed', 'projected', 'forwarded'])
     expect(adapter.deliveries[0]?.message).toMatchObject({
-      role: 'user', source: { kind: 'plugin', source: identity.source, id: identity.id, version: null, generation: 'generation-1' },
+      role: 'user',
+      source: { kind: 'plugin', source: identity.source, id: identity.id, version: null, generation: 'generation-1' },
     })
     await fiber.dispose()
     await runtime.dispose()
@@ -97,28 +130,44 @@ describe('Agent runtime', () => {
 
   it('fences cancellation at claim, clears only the current owner, and keeps terminal operations idempotent', async () => {
     let releaseQueued!: () => void
-    const queuedGate = new Promise<void>(resolve => { releaseQueued = resolve })
+    const queuedGate = new Promise<void>(resolve => {
+      releaseQueued = resolve
+    })
     const queuedAdapter: CordisXAgentAdapter = {
       agentStatus: () => ({
-        hostId: 'fixture', hostName: 'Fixture', mode: 'read-write', adapterId: 'fixture', adapterVersion: '1',
-        experimental: [], diagnostics: [], secondConnectionCreated: false, rawBridgeExposed: false,
+        hostId: 'fixture',
+        hostName: 'Fixture',
+        mode: 'read-write',
+        adapterId: 'fixture',
+        adapterVersion: '1',
+        experimental: [],
+        diagnostics: [],
+        secondConnectionCreated: false,
+        rawBridgeExposed: false,
       }),
       deliver: vi.fn(async (_input, control) => {
         await queuedGate
-        if (!control.claim()) return { terminal: 'failed', diagnostic: { code: 'interrupted', message: 'cancelled before claim' } }
+        if (!control.claim()) {
+          return { terminal: 'failed', diagnostic: { code: 'interrupted', message: 'cancelled before claim' } }
+        }
         control.projected()
         return { terminal: 'forwarded' }
       }),
     }
     const other = { source: 'file:///plugins/other.ts', id: 'other' }
-    const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), { request: vi.fn(async () => 'allow' as const) })
+    const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), {
+      request: vi.fn(async () => 'allow' as const),
+    })
     for (const plugin of [identity, other]) {
-      broker.register(plugin, normalizePluginManifest({
-        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
-        schemaVersion: 1,
-        id: plugin.id,
-        capabilities: [capability('agent.messages.append')],
-      }, plugin.id))
+      broker.register(
+        plugin,
+        normalizePluginManifest({
+          $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+          schemaVersion: 1,
+          id: plugin.id,
+          capabilities: [capability('agent.messages.append')],
+        }, plugin.id),
+      )
       broker.setPolicy(plugin, 'agent.messages.append', 'allow')
     }
     const runtime = new CordisXHostAgentRuntime({ adapter: queuedAdapter, broker, generation: 'generation-clear' })
@@ -133,14 +182,18 @@ describe('Agent runtime', () => {
     releaseQueued()
     await runtime.settled()
     expect(foreign.snapshot().stage).toBe('forwarded')
-    expect(runtime.ledger.query({ sessionId: 'session-1' }).events
-      .filter(event => event.deliveryId === owned.deliveryId)
-      .map(event => (event.data as { stage: string }).stage))
+    expect(
+      runtime.ledger.query({ sessionId: 'session-1' }).events
+        .filter(event => event.deliveryId === owned.deliveryId)
+        .map(event => (event.data as { stage: string }).stage),
+    )
       .toEqual(['requested', 'permission', 'queued', 'cancelled'])
     await runtime.dispose()
 
     let releaseClaimed!: () => void
-    const claimedGate = new Promise<void>(resolve => { releaseClaimed = resolve })
+    const claimedGate = new Promise<void>(resolve => {
+      releaseClaimed = resolve
+    })
     const claimedAdapter: CordisXAgentAdapter = {
       ...queuedAdapter,
       deliver: vi.fn(async (_input, control) => {
@@ -157,19 +210,30 @@ describe('Agent runtime', () => {
     releaseClaimed()
     await claimedRuntime.settled()
     expect(claimed.cancel()).toMatchObject({ ok: false, reason: 'terminal', snapshot: { stage: 'forwarded' } })
-    expect(claimedRuntime.ledger.query({ sessionId: 'session-1' }).events
-      .filter(event => event.deliveryId === claimed.deliveryId)
-      .some(event => (event.data as { stage: string }).stage === 'cancelled')).toBe(false)
+    expect(
+      claimedRuntime.ledger.query({ sessionId: 'session-1' }).events
+        .filter(event => event.deliveryId === claimed.deliveryId)
+        .some(event => (event.data as { stage: string }).stage === 'cancelled'),
+    ).toBe(false)
     await claimedRuntime.dispose()
   })
 
   it('invalidates old handles with auditable terminals on owner and generation disposal', async () => {
     let release!: () => void
-    const gate = new Promise<void>(resolve => { release = resolve })
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
     const adapter: CordisXAgentAdapter = {
       agentStatus: () => ({
-        hostId: 'fixture', hostName: 'Fixture', mode: 'read-write', adapterId: 'fixture', adapterVersion: '1',
-        experimental: [], diagnostics: [], secondConnectionCreated: false, rawBridgeExposed: false,
+        hostId: 'fixture',
+        hostName: 'Fixture',
+        mode: 'read-write',
+        adapterId: 'fixture',
+        adapterVersion: '1',
+        experimental: [],
+        diagnostics: [],
+        secondConnectionCreated: false,
+        rawBridgeExposed: false,
       }),
       deliver: vi.fn(async (_input, control) => {
         control.claim()
@@ -186,14 +250,22 @@ describe('Agent runtime', () => {
     expect(handle.cancel()).toMatchObject({ ok: false, reason: 'stale-generation' })
     release()
     await runtime.settled()
-    expect(handle.snapshot()).toMatchObject({ stage: 'failed', terminal: true, valid: false, diagnostic: { code: 'adapter-failure' } })
+    expect(handle.snapshot()).toMatchObject({
+      stage: 'failed',
+      terminal: true,
+      valid: false,
+      diagnostic: { code: 'adapter-failure' },
+    })
     expect(runtime.ledger.query({ sessionId: 'session-1' }).events.at(-1)).toMatchObject({
-      type: 'message.delivery', data: { stage: 'failed', diagnostic: { code: 'adapter-failure' } },
+      type: 'message.delivery',
+      data: { stage: 'failed', diagnostic: { code: 'adapter-failure' } },
     })
     await runtime.dispose()
 
     let releaseGeneration!: () => void
-    const generationGate = new Promise<void>(resolve => { releaseGeneration = resolve })
+    const generationGate = new Promise<void>(resolve => {
+      releaseGeneration = resolve
+    })
     const generationAdapter: CordisXAgentAdapter = {
       ...adapter,
       deliver: vi.fn(async (_input, control) => {
@@ -216,11 +288,20 @@ describe('Agent runtime', () => {
 
   it('releases only the retiring module generation for the same plugin identity', async () => {
     let release!: () => void
-    const gate = new Promise<void>(resolve => { release = resolve })
+    const gate = new Promise<void>(resolve => {
+      release = resolve
+    })
     const adapter: CordisXAgentAdapter = {
       agentStatus: () => ({
-        hostId: 'fixture', hostName: 'Fixture', mode: 'read-write', adapterId: 'fixture', adapterVersion: '1',
-        experimental: [], diagnostics: [], secondConnectionCreated: false, rawBridgeExposed: false,
+        hostId: 'fixture',
+        hostName: 'Fixture',
+        mode: 'read-write',
+        adapterId: 'fixture',
+        adapterVersion: '1',
+        experimental: [],
+        diagnostics: [],
+        secondConnectionCreated: false,
+        rawBridgeExposed: false,
       }),
       deliver: vi.fn(async (_input, control) => {
         await gate
@@ -268,17 +349,33 @@ describe('Agent runtime', () => {
     runtime.send(identity, 'session-1', 'queued but unavailable', 'next-step', false)
     await runtime.settled()
     const events = runtime.ledger.query({ sessionId: 'session-1' }).events
-    expect(events.map(event => (event.data as { stage: string }).stage)).toEqual(['requested', 'permission', 'queued', 'failed'])
+    expect(events.map(event => (event.data as { stage: string }).stage)).toEqual([
+      'requested',
+      'permission',
+      'queued',
+      'failed',
+    ])
     expect(events.at(-1)?.data).toMatchObject({ diagnostic: { code: 'current-connection-client-unavailable' } })
-    expect(runtime.status()).toMatchObject({ mode: 'unavailable', secondConnectionCreated: false, rawBridgeExposed: false })
+    expect(runtime.status()).toMatchObject({
+      mode: 'unavailable',
+      secondConnectionCreated: false,
+      rawBridgeExposed: false,
+    })
     await runtime.dispose()
   })
 
   it('records explicit expired and cancelled terminal paths and enforces session scope', async () => {
     const terminalAdapter: CordisXAgentAdapter = {
       agentStatus: () => ({
-        hostId: 'fixture', hostName: 'Fixture', mode: 'read-write', adapterId: 'fixture', adapterVersion: '1',
-        experimental: [], diagnostics: [], secondConnectionCreated: false, rawBridgeExposed: false,
+        hostId: 'fixture',
+        hostName: 'Fixture',
+        mode: 'read-write',
+        adapterId: 'fixture',
+        adapterVersion: '1',
+        experimental: [],
+        diagnostics: [],
+        secondConnectionCreated: false,
+        rawBridgeExposed: false,
       }),
       deliver: vi.fn(async (_input, control) => {
         control.claim()
@@ -288,8 +385,10 @@ describe('Agent runtime', () => {
     const { runtime: expiredRuntime } = allowedRuntime(terminalAdapter)
     expiredRuntime.send(identity, 'session-1', 'expired', 'next-step', false)
     await expiredRuntime.settled()
-    expect(expiredRuntime.ledger.query({ sessionId: 'session-1' }).events
-      .map(event => (event.data as { stage: string }).stage))
+    expect(
+      expiredRuntime.ledger.query({ sessionId: 'session-1' }).events
+        .map(event => (event.data as { stage: string }).stage),
+    )
       .toEqual(['requested', 'permission', 'queued', 'claimed', 'expired'])
     await expiredRuntime.dispose()
 
@@ -297,8 +396,10 @@ describe('Agent runtime', () => {
     const cancelled = cancelledRuntime.send(identity, 'session-1', 'cancelled', 'next-step', false)
     expect(cancelled.cancel()).toMatchObject({ ok: true, snapshot: { stage: 'cancelled', terminal: true } })
     await cancelledRuntime.settled()
-    expect(cancelledRuntime.ledger.query({ sessionId: 'session-1' }).events
-      .map(event => (event.data as { stage: string }).stage))
+    expect(
+      cancelledRuntime.ledger.query({ sessionId: 'session-1' }).events
+        .map(event => (event.data as { stage: string }).stage),
+    )
       .toEqual(['requested', 'cancelled'])
     await cancelledRuntime.dispose()
     const adapter = new RecordingAdapter()
@@ -307,7 +408,8 @@ describe('Agent runtime', () => {
     await runtime.settled()
     expect(adapter.deliveries).toHaveLength(0)
     expect(runtime.ledger.query({ sessionId: 'session-outside-scope' }).events.at(-1)?.data).toMatchObject({
-      stage: 'failed', diagnostic: { code: 'permission-scope-denied' },
+      stage: 'failed',
+      diagnostic: { code: 'permission-scope-denied' },
     })
     await runtime.dispose()
   })
@@ -324,26 +426,48 @@ describe('Agent runtime', () => {
       seen.push(input.messages.map(message => message.id))
       return { kind: 'transform', operations: [{ type: 'move', messageId: 'user-2', beforeMessageId: 'user-1' }] }
     })
-    const outcome = await runtime.runPreStep({ sessionId: 'session-1', turnId: 'turn-1', stepId: 'step-1', messages: original })
+    const outcome = await runtime.runPreStep({
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      stepId: 'step-1',
+      messages: original,
+    })
     expect(seen[0]).toEqual(['user-1', 'user-2'])
     expect(seen[1]?.slice(0, 2)).toEqual(['user-1', 'user-2'])
     expect(outcome.status).toBe('continued')
     expect(outcome.messages.map(message => message.id).slice(0, 2)).toEqual(['user-2', 'user-1'])
-    expect(outcome.messages.at(-1)?.source).toMatchObject({ kind: 'plugin', id: identity.id, generation: 'generation-1' })
+    expect(outcome.messages.at(-1)?.source).toMatchObject({
+      kind: 'plugin',
+      id: identity.id,
+      generation: 'generation-1',
+    })
     expect(original.map(message => message.id)).toEqual(['user-1', 'user-2'])
     await runtime.dispose()
   })
 
   it('writes successful pre-step and system-prompt contribution lifecycles into the shared ledger', async () => {
     const { runtime } = allowedRuntime(new RecordingAdapter(), [
-      'agent.messages.append', 'agent.prompt.section', 'agent.prompt.context',
+      'agent.messages.append',
+      'agent.prompt.section',
+      'agent.prompt.context',
     ])
-    const section = runtime.registerPrompt(identity, 'section', { sessionId: 'session-1', id: 'policy', content: 'Policy' })
-    const context = runtime.registerPrompt(identity, 'context', { sessionId: 'session-1', id: 'facts', content: 'Facts' })
+    const section = runtime.registerPrompt(identity, 'section', {
+      sessionId: 'session-1',
+      id: 'policy',
+      content: 'Policy',
+    })
+    const context = runtime.registerPrompt(identity, 'context', {
+      sessionId: 'session-1',
+      id: 'facts',
+      content: 'Facts',
+    })
     runtime.registerPreStep(identity, () => ({ kind: 'append', messages: ['plugin append'] }))
     await runtime.settled()
     const outcome = await runtime.runPreStep({
-      sessionId: 'session-1', turnId: 'turn-1', stepId: 'step-1', messages: [observed('user-1', 'first')],
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      stepId: 'step-1',
+      messages: [observed('user-1', 'first')],
     })
     expect(outcome).toMatchObject({
       status: 'continued',
@@ -356,15 +480,22 @@ describe('Agent runtime', () => {
     context()
     const contributions = runtime.ledger.query({ sessionId: 'session-1', limit: 100 }).events
       .filter(event => event.type === 'input.contribution')
-    const byKind = (kind: string) => contributions
-      .filter(event => (event.data as { kind: string }).kind === kind)
-      .map(event => (event.data as { stage: string }).stage)
+    const byKind = (kind: string) =>
+      contributions
+        .filter(event => (event.data as { kind: string }).kind === kind)
+        .map(event => (event.data as { stage: string }).stage)
     expect(byKind('pre-step.append')).toEqual(['evaluated', 'projected', 'forwarded'])
     expect(byKind('system-prompt.section')).toEqual(['registered', 'evaluated', 'projected', 'forwarded', 'released'])
     expect(byKind('system-prompt.context')).toEqual(['registered', 'evaluated', 'projected', 'forwarded', 'released'])
-    expect(contributions.filter(event => (event.data as { stage: string }).stage !== 'registered')).toEqual(expect.arrayContaining([
-      expect.objectContaining({ turnId: 'turn-1', stepId: 'step-1', source: expect.objectContaining({ id: identity.id, generation: 'generation-1' }) }),
-    ]))
+    expect(contributions.filter(event => (event.data as { stage: string }).stage !== 'registered')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          turnId: 'turn-1',
+          stepId: 'step-1',
+          source: expect.objectContaining({ id: identity.id, generation: 'generation-1' }),
+        }),
+      ]),
+    )
     expect(contributions.some(event => JSON.stringify(event).includes('model-consumed'))).toBe(false)
     await runtime.dispose()
   })
@@ -376,19 +507,27 @@ describe('Agent runtime', () => {
     const promptEvents = runtime.ledger.query({ sessionId: 'session-1' }).events
       .filter(event => event.type === 'input.contribution')
     expect(promptEvents).toEqual([
-      expect.objectContaining({ data: expect.objectContaining({
-        kind: 'system-prompt.section', stage: 'failed', diagnostic: expect.objectContaining({ code: 'permission-undeclared' }),
-      }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: 'system-prompt.section',
+          stage: 'failed',
+          diagnostic: expect.objectContaining({ code: 'permission-undeclared' }),
+        }),
+      }),
     ])
     expect(runtime.promptSnapshot('session-1')).toEqual([])
 
     runtime.registerPreStep(identity, () => ({ kind: 'append', messages: [] }))
     const outcome = await runtime.runPreStep({
-      sessionId: 'session-1', turnId: 'turn-1', stepId: 'step-1', messages: [observed('user-1', 'first')],
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      stepId: 'step-1',
+      messages: [observed('user-1', 'first')],
     })
     expect(outcome).toMatchObject({ status: 'failed', error: { code: 'invalid-request' } })
     expect(runtime.ledger.query({ sessionId: 'session-1', limit: 100 }).events.at(-1)).toMatchObject({
-      type: 'input.contribution', data: { kind: 'pre-step.append', stage: 'failed', diagnostic: { code: 'invalid-request' } },
+      type: 'input.contribution',
+      data: { kind: 'pre-step.append', stage: 'failed', diagnostic: { code: 'invalid-request' } },
     })
     await runtime.dispose()
   })
@@ -411,11 +550,21 @@ describe('Agent runtime', () => {
     await pluginFiber
     await runtime.settled()
     expect(runtime.promptSnapshot('session-1')).toHaveLength(1)
-    const denied = await runtime.runPreStep({ sessionId: 'session-1', turnId: 'turn-1', stepId: 'step-1', messages: [observed('user-1', 'first')] })
+    const denied = await runtime.runPreStep({
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      stepId: 'step-1',
+      messages: [observed('user-1', 'first')],
+    })
     expect(denied).toMatchObject({ status: 'failed', error: { code: 'permission-undeclared' } })
     await pluginFiber.dispose()
     expect(runtime.promptSnapshot('session-1')).toHaveLength(0)
-    const afterDispose = await runtime.runPreStep({ sessionId: 'session-1', turnId: 'turn-1', stepId: 'step-2', messages: [observed('user-1', 'first')] })
+    const afterDispose = await runtime.runPreStep({
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      stepId: 'step-2',
+      messages: [observed('user-1', 'first')],
+    })
     expect(afterDispose.status).toBe('continued')
     await promptFiber.dispose()
     await agentFiber.dispose()
@@ -425,25 +574,45 @@ describe('Agent runtime', () => {
   it('contains pre-step handler failures and invalid adapter forwarding claims', async () => {
     const invalidAdapter: CordisXAgentAdapter = {
       agentStatus: () => ({
-        hostId: 'fixture', hostName: 'Fixture', mode: 'read-write', adapterId: 'fixture', adapterVersion: '1',
-        experimental: [], diagnostics: [], secondConnectionCreated: false, rawBridgeExposed: false,
+        hostId: 'fixture',
+        hostName: 'Fixture',
+        mode: 'read-write',
+        adapterId: 'fixture',
+        adapterVersion: '1',
+        experimental: [],
+        diagnostics: [],
+        secondConnectionCreated: false,
+        rawBridgeExposed: false,
       }),
       deliver: vi.fn(async () => ({ terminal: 'forwarded' })),
     }
     const { runtime } = allowedRuntime(invalidAdapter)
-    runtime.registerPreStep(identity, () => { throw new Error('plugin failure') })
-    const preStep = await runtime.runPreStep({
-      sessionId: 'session-1', turnId: 'turn-1', stepId: 'step-1', messages: [observed('user-1', 'first')],
+    runtime.registerPreStep(identity, () => {
+      throw new Error('plugin failure')
     })
-    expect(preStep).toMatchObject({ status: 'failed', error: { code: 'adapter-failure', message: expect.stringContaining('plugin failure') } })
+    const preStep = await runtime.runPreStep({
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      stepId: 'step-1',
+      messages: [observed('user-1', 'first')],
+    })
+    expect(preStep).toMatchObject({
+      status: 'failed',
+      error: { code: 'adapter-failure', message: expect.stringContaining('plugin failure') },
+    })
     expect(runtime.ledger.query({ sessionId: 'session-1' }).events.at(-1)).toMatchObject({
-      type: 'diagnostic', provenance: 'cordisx', source: { kind: 'plugin', id: identity.id },
+      type: 'diagnostic',
+      provenance: 'cordisx',
+      source: { kind: 'plugin', id: identity.id },
     })
     runtime.send(identity, 'session-1', 'invalid adapter', 'next-step', false)
     await runtime.settled()
-    const delivery = runtime.ledger.query({ sessionId: 'session-1' }).events.filter(event => event.type === 'message.delivery')
-    expect((delivery.at(-1)?.data as { stage: string; diagnostic: { code: string } })).toMatchObject({
-      stage: 'failed', diagnostic: { code: 'adapter-failure' },
+    const delivery = runtime.ledger.query({ sessionId: 'session-1' }).events.filter(event =>
+      event.type === 'message.delivery'
+    )
+    expect(delivery.at(-1)?.data as { stage: string; diagnostic: { code: string } }).toMatchObject({
+      stage: 'failed',
+      diagnostic: { code: 'adapter-failure' },
     })
     expect(delivery.some(event => (event.data as { stage: string }).stage === 'forwarded')).toBe(false)
     await runtime.dispose()

@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import type { CliProxyProviderConfig, LocalCodexProviderConfig } from './contracts.js'
@@ -28,14 +28,21 @@ export function codexAppServerArguments(
   config: CliProxyProviderConfig,
   credentialEnvironmentKey = config.apiKeyEnv,
 ): readonly string[] {
-  if (credentialEnvironmentKey === undefined) throw new Error(`provider ${config.id} credential reference is unavailable`)
-  const provider = `{ ${tomlString(config.id)} = { name = ${tomlString(config.displayName)}, base_url = ${tomlString(config.baseUrl)}, env_key = ${tomlString(credentialEnvironmentKey)}, wire_api = "responses" } }`
+  if (credentialEnvironmentKey === undefined) {
+    throw new Error(`provider ${config.id} credential reference is unavailable`)
+  }
+  const provider = `{ ${tomlString(config.id)} = { name = ${tomlString(config.displayName)}, base_url = ${
+    tomlString(config.baseUrl)
+  }, env_key = ${tomlString(credentialEnvironmentKey)}, wire_api = "responses" } }`
   return Object.freeze([
     'app-server',
     '--stdio',
-    '-c', `model_provider=${tomlString(config.id)}`,
-    '-c', `model_providers=${provider}`,
-    '-c', 'analytics.enabled=false',
+    '-c',
+    `model_provider=${tomlString(config.id)}`,
+    '-c',
+    `model_providers=${provider}`,
+    '-c',
+    'analytics.enabled=false',
   ])
 }
 
@@ -61,7 +68,9 @@ class SpawnedCodexAppServer implements CodexAppServerRpc {
         for (const listener of this.notifications) listener(method, params)
       },
       onRequest: async (method, params) => {
-        const listener = this.requests.values().next().value as ((method: string, params: unknown) => unknown | Promise<unknown>) | undefined
+        const listener = this.requests.values().next().value as
+          | ((method: string, params: unknown) => unknown | Promise<unknown>)
+          | undefined
         if (listener === undefined) throw new Error(`Unsupported App Server request: ${method}`)
         return await listener(method, params)
       },

@@ -47,15 +47,24 @@ describe('local development Manager projection', () => {
       pluginActivation: activation,
       initialRegistryEpoch: 0,
     })
-    const dom = new JSDOM('<!doctype html><html><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>', {
-      runScripts: 'dangerously',
-      url: 'https://codex.local/native',
-    })
+    const dom = new JSDOM(
+      '<!doctype html><html><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>',
+      {
+        runScripts: 'dangerously',
+        url: 'https://codex.local/native',
+      },
+    )
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
-    Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
+    Object.defineProperty(dom.window, 'fetch', {
+      value: async () => ({ ok: false, status: 503, text: async () => '' }),
+    })
     Object.defineProperty(dom.window, 'structuredClone', { value: structuredClone })
     dom.window.eval(bundle)
-    for (let attempt = 0; attempt < 50 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 50 && dom.window.document.documentElement.dataset.cordisxReady !== 'true';
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     const runtime = (dom.window as unknown as { __cordisxRuntime?: DevelopmentRuntimeHandle }).__cordisxRuntime!
@@ -89,8 +98,12 @@ describe('local development Manager projection', () => {
       transactionId: 'manifest-id-mismatch',
       revision: 1,
       plugins: [{
-        id: 'demo', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` as const,
-        moduleGeneration: 'demo-local-dev-1', enabled: true, dependencies: [],
+        id: 'demo',
+        version: '1.0.0',
+        digest: `sha256:${'a'.repeat(64)}` as const,
+        moduleGeneration: 'demo-local-dev-1',
+        enabled: true,
+        dependencies: [],
       }],
     }
     const mismatchedModule: CordisXPluginModule = {
@@ -110,7 +123,9 @@ describe('local development Manager projection', () => {
       targetId: 'demo',
       affectedPluginIds: ['demo'],
       developmentPackage: {
-        id: 'demo', version: '1.0.0', digest: candidate.plugins[0]!.digest,
+        id: 'demo',
+        version: '1.0.0',
+        digest: candidate.plugins[0]!.digest,
         identitySource: 'file:///cordisx-local-dev/fixture/demo.js',
         development: { origin: 'local-dev', pluginId: 'demo', sourcePath, state: 'building' },
       },
@@ -138,7 +153,9 @@ describe('local development Manager projection', () => {
       targetId: 'demo',
       affectedPluginIds: ['demo'],
       developmentPackage: {
-        id: 'demo', version: '1.0.0', digest: serviceCandidate.plugins[0]!.digest,
+        id: 'demo',
+        version: '1.0.0',
+        digest: serviceCandidate.plugins[0]!.digest,
         identitySource: 'file:///cordisx-local-dev/fixture/demo.js',
         development: { origin: 'local-dev', pluginId: 'demo', sourcePath, state: 'building' },
       },

@@ -10,7 +10,8 @@ import { managerCopy } from '../packages/cli/src/renderer/ui-copy.js'
 
 const CUSTOM_SOURCE = 'https://marketplace.example/community.json'
 const CLIPBOARD_SOURCE = 'https://plugins.example/catalog.json'
-const FEED_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json'
+const FEED_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json'
 
 const feed = {
   $schema: FEED_SCHEMA_V2,
@@ -33,8 +34,13 @@ function snapshot(locale = 'zh-CN'): ManagerSnapshot {
     localeCatalogs: [],
     localizationDiagnostics: [],
     platform: {
-      hostId: 'codex-desktop', hostName: 'Codex Desktop', mode: 'unavailable',
-      supportedCapabilities: [], diagnostics: [], secondConnectionCreated: false, rawBridgeExposed: false,
+      hostId: 'codex-desktop',
+      hostName: 'Codex Desktop',
+      mode: 'unavailable',
+      supportedCapabilities: [],
+      diagnostics: [],
+      secondConnectionCreated: false,
+      rawBridgeExposed: false,
     },
     permissions: [],
   }
@@ -61,13 +67,19 @@ async function waitFor(check: () => boolean): Promise<void> {
   throw new Error('condition did not settle')
 }
 
-function installFixture(records?: readonly unknown[], locale?: string): { readonly dom: JSDOM; readonly dispose: () => void } {
+function installFixture(
+  records?: readonly unknown[],
+  locale?: string,
+): { readonly dom: JSDOM; readonly dispose: () => void } {
   const dom = new JSDOM('<!doctype html><html class="electron-dark"><head></head><body></body></html>', {
     url: 'https://codex.local/native',
     pretendToBeVisual: true,
   })
   if (records !== undefined) {
-    dom.window.localStorage.setItem(MARKETPLACE_SOURCE_RECORDS_KEY, JSON.stringify({ schemaVersion: 2, sources: records }))
+    dom.window.localStorage.setItem(
+      MARKETPLACE_SOURCE_RECORDS_KEY,
+      JSON.stringify({ schemaVersion: 2, sources: records }),
+    )
   }
   Object.defineProperty(dom.window, 'fetch', {
     configurable: true,
@@ -83,7 +95,8 @@ describe('Manager Marketplace discovery and source IA', () => {
   ])('uses locale-first Manager and Marketplace chrome for %s', async (locale, navigation) => {
     const { dom, dispose } = installFixture([], locale)
     try {
-      expect([...dom.window.document.querySelectorAll<HTMLElement>('.cxm-nav-label')].map(item => item.textContent)).toEqual(navigation)
+      expect([...dom.window.document.querySelectorAll<HTMLElement>('.cxm-nav-label')].map(item => item.textContent))
+        .toEqual(navigation)
       dom.window.document.querySelector<HTMLButtonElement>('[data-tab="marketplace"]')!.click()
       await waitFor(() => dom.window.document.querySelector('[data-marketplace-discovery-page]') !== null)
       const page = dom.window.document.querySelector<HTMLElement>('[data-marketplace-discovery-page]')!
@@ -117,7 +130,8 @@ describe('Manager Marketplace discovery and source IA', () => {
       expect(filter.parentElement?.classList.contains('cxm-marketplace-filter-row')).toBe(true)
       expect(officialFilter.parentElement).toBe(filter.parentElement)
       expect(results.contains(tools)).toBe(false)
-      expect([...dom.window.document.querySelectorAll('a, button')].map(item => item.textContent).join(' ')).not.toMatch(/docs|文档/iu)
+      expect([...dom.window.document.querySelectorAll('a, button')].map(item => item.textContent).join(' ')).not
+        .toMatch(/docs|文档/iu)
 
       const styles = [...dom.window.document.querySelectorAll('style')].map(item => item.textContent ?? '').join('\n')
       expect(styles).toContain('.cxm-content[data-marketplace-discovery="true"] { overflow: hidden; }')
@@ -126,19 +140,29 @@ describe('Manager Marketplace discovery and source IA', () => {
 
       const sourceMenu = tools.querySelector<HTMLButtonElement>('[data-marketplace-source-menu]')!
       sourceMenu.click()
-      const popup = dom.window.document.querySelector<HTMLElement>(`[data-manager-action-menu="${managerCopy('zh-CN', 'marketplace.source-menu-label')}"]`)!
+      const popup = dom.window.document.querySelector<HTMLElement>(
+        `[data-manager-action-menu="${managerCopy('zh-CN', 'marketplace.source-menu-label')}"]`,
+      )!
       expect(popup.parentElement).toBe(dom.window.document.body)
       expect(popup.getAttribute('data-cordisx-app-theme')).toBe('dark')
       expect(sourceMenu.getAttribute('aria-expanded')).toBe('true')
       expect(dom.window.document.activeElement?.getAttribute('data-manager-menu-action')).toBe('create')
-      popup.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+      popup.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }),
+      )
       expect(dom.window.document.activeElement?.getAttribute('data-manager-menu-action')).toBe('clipboard')
       popup.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-      expect(dom.window.document.querySelector(`[data-manager-action-menu="${managerCopy('zh-CN', 'marketplace.source-menu-label')}"]`)).toBeNull()
+      expect(
+        dom.window.document.querySelector(
+          `[data-manager-action-menu="${managerCopy('zh-CN', 'marketplace.source-menu-label')}"]`,
+        ),
+      ).toBeNull()
       expect(dom.window.document.activeElement).toBe(sourceMenu)
       expect(sourceMenu.getAttribute('aria-expanded')).toBe('false')
       sourceMenu.click()
-      const reopened = dom.window.document.querySelector<HTMLElement>(`[data-manager-action-menu="${managerCopy('zh-CN', 'marketplace.source-menu-label')}"]`)!
+      const reopened = dom.window.document.querySelector<HTMLElement>(
+        `[data-manager-action-menu="${managerCopy('zh-CN', 'marketplace.source-menu-label')}"]`,
+      )!
       reopened.querySelector<HTMLButtonElement>('[data-manager-menu-action="manage"]')!.click()
 
       await waitFor(() => dom.window.document.querySelector('[data-marketplace-source-page="index"]') !== null)
@@ -152,7 +176,9 @@ describe('Manager Marketplace discovery and source IA', () => {
       official.querySelector<HTMLButtonElement>('.cxc-menu-trigger')!.click()
       const remove = dom.window.document.querySelector<HTMLButtonElement>('[data-collection-action="remove"]')!
       expect(remove.disabled).toBe(true)
-      expect(remove.getAttribute('aria-label')).toContain(managerCopy('zh-CN', 'marketplace.source.official-remove-unavailable'))
+      expect(remove.getAttribute('aria-label')).toContain(
+        managerCopy('zh-CN', 'marketplace.source.official-remove-unavailable'),
+      )
       expect(dom.window.document.body.textContent).not.toContain('重新加载')
     } finally {
       dispose()
@@ -190,32 +216,48 @@ describe('Manager Marketplace discovery and source IA', () => {
       expect(urlError.hidden).toBe(false)
       expect(urlError.textContent).toBe(managerCopy('zh-CN', 'marketplace.source.url-required'))
 
-      const url = form.querySelector<HTMLElement & { onChange?: (value: string) => void }>('#cxm-marketplace-source-url')!
-      const name = form.querySelector<HTMLElement & { onChange?: (value: string) => void }>('#cxm-marketplace-source-name')!
-      const description = form.querySelector<HTMLElement & { onChange?: (value: string) => void }>('#cxm-marketplace-source-description')!
-      const note = form.querySelector<HTMLElement & { onChange?: (value: string) => void }>('#cxm-marketplace-source-note')!
+      const url = form.querySelector<HTMLElement & { onChange?: (value: string) => void }>(
+        '#cxm-marketplace-source-url',
+      )!
+      const name = form.querySelector<HTMLElement & { onChange?: (value: string) => void }>(
+        '#cxm-marketplace-source-name',
+      )!
+      const description = form.querySelector<HTMLElement & { onChange?: (value: string) => void }>(
+        '#cxm-marketplace-source-description',
+      )!
+      const note = form.querySelector<HTMLElement & { onChange?: (value: string) => void }>(
+        '#cxm-marketplace-source-note',
+      )!
       url.onChange?.(CUSTOM_SOURCE)
       name.onChange?.('本地团队来源')
       description.onChange?.('团队维护的插件发现来源。')
       note.onChange?.('仅当前 profile 可见')
       form.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }))
       await waitFor(() => dom.window.document.querySelector('[data-marketplace-source-page="index"]') !== null)
-      expect(dom.window.document.querySelector(`[data-collection-item="${CUSTOM_SOURCE}"]`)?.textContent).toContain('本地团队来源')
+      expect(dom.window.document.querySelector(`[data-collection-item="${CUSTOM_SOURCE}"]`)?.textContent).toContain(
+        '本地团队来源',
+      )
 
       const persisted = JSON.parse(dom.window.localStorage.getItem(MARKETPLACE_SOURCE_RECORDS_KEY)!) as {
         sources: Array<{ url: string; local?: { name?: string; description?: string; note?: string } }>
       }
       expect(persisted.sources.find(item => item.url === CUSTOM_SOURCE)?.local).toEqual({
-        name: '本地团队来源', description: '团队维护的插件发现来源。', note: '仅当前 profile 可见',
+        name: '本地团队来源',
+        description: '团队维护的插件发现来源。',
+        note: '仅当前 profile 可见',
       })
 
       dom.window.document.querySelector<HTMLButtonElement>('[data-breadcrumb-target="primary:marketplace"]')!.click()
       await waitFor(() => dom.window.document.querySelector('[data-marketplace-source-menu]') !== null)
       dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-source-menu]')!.click()
       dom.window.document.querySelector<HTMLButtonElement>('[data-manager-menu-action="clipboard"]')!.click()
-      await waitFor(() => [...dom.window.document.querySelectorAll<HTMLElement>('[data-collection-item]')]
-        .some(item => item.dataset.collectionItem === CLIPBOARD_SOURCE))
-      expect(dom.window.document.querySelector(`[data-collection-item="${CLIPBOARD_SOURCE}"]`)?.textContent).toContain('剪贴板来源')
+      await waitFor(() =>
+        [...dom.window.document.querySelectorAll<HTMLElement>('[data-collection-item]')]
+          .some(item => item.dataset.collectionItem === CLIPBOARD_SOURCE)
+      )
+      expect(dom.window.document.querySelector(`[data-collection-item="${CLIPBOARD_SOURCE}"]`)?.textContent).toContain(
+        '剪贴板来源',
+      )
       expect(dom.window.document.body.textContent).toContain(managerCopy('zh-CN', 'marketplace.source.imported'))
       expect(dom.window.document.querySelector('[data-settings-tab="host:marketplace"]')).toBeNull()
 
@@ -253,7 +295,9 @@ describe('Manager Marketplace discovery and source IA', () => {
       const page = dom.window.document.querySelector<HTMLElement>('[data-marketplace-source-page="create"]')!
       expect(page.textContent).toContain(addSource)
       expect(page.textContent).toContain(sourceUrl)
-      expect(page.textContent).not.toMatch(/Host|profile|canonical identity|marketplace-source\.v1|renderer|启动器|渲染器|规范标识/iu)
+      expect(page.textContent).not.toMatch(
+        /Host|profile|canonical identity|marketplace-source\.v1|renderer|启动器|渲染器|规范标识/iu,
+      )
       expect(page.querySelector('#cxm-marketplace-source-url-error')?.textContent).toBe('')
     } finally {
       dispose()

@@ -270,26 +270,26 @@ this mapping and continue to use the official assets described below.
 
 The semantic mapping is stable and host-owned:
 
-| Manager meaning | Material symbol |
-| --- | --- |
-| plugins | `extension` |
-| contributions and routes | `hub` |
-| marketplace | `storefront` |
-| settings page | `settings` |
-| plugin configuration | `tune` |
-| document / README | `description` |
-| permissions | `shield` |
-| runtime status | `monitor_heart` |
-| outlets | `account_tree` |
-| launcher | `rocket_launch` |
-| enable, disable, reload, and favorite | `play_circle`, `pause_circle`, `refresh`, `star` / `star_outline` |
-| overflow, share, and uninstall | `more_horiz`, `share`, `delete` |
-| read models | `model_training` |
-| list, read, create, and control tasks | `view_list`, `summarize`, `note_add`, `tune` |
-| submit and control turns | `send`, `pause_circle` |
+| Manager meaning                                    | Material symbol                                                   |
+| -------------------------------------------------- | ----------------------------------------------------------------- |
+| plugins                                            | `extension`                                                       |
+| contributions and routes                           | `hub`                                                             |
+| marketplace                                        | `storefront`                                                      |
+| settings page                                      | `settings`                                                        |
+| plugin configuration                               | `tune`                                                            |
+| document / README                                  | `description`                                                     |
+| permissions                                        | `shield`                                                          |
+| runtime status                                     | `monitor_heart`                                                   |
+| outlets                                            | `account_tree`                                                    |
+| launcher                                           | `rocket_launch`                                                   |
+| enable, disable, reload, and favorite              | `play_circle`, `pause_circle`, `refresh`, `star` / `star_outline` |
+| overflow, share, and uninstall                     | `more_horiz`, `share`, `delete`                                   |
+| read models                                        | `model_training`                                                  |
+| list, read, create, and control tasks              | `view_list`, `summarize`, `note_add`, `tune`                      |
+| submit and control turns                           | `send`, `pause_circle`                                            |
 | back, disclosure, search, close, and external link | `chevron_left`, `chevron_right`, `search`, `close`, `open_in_new` |
-| plugin favorite and overflow | `star`, `more_horiz` |
-| unknown capability fallback | `help` |
+| plugin favorite and overflow                       | `star`, `more_horiz`                                              |
+| unknown capability fallback                        | `help`                                                            |
 
 All of these symbols are decorative beside a visible label or an
 accessible-name-bearing control. Their wrappers and SVGs use

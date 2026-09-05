@@ -1,5 +1,5 @@
 import type { CordisXIconToken, CordisXJsonValue } from '../../../contracts.js'
-import { cloneAgentAvatarRef, type AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
+import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity, AgentDetailReference } from '@cordisx/protocol/agents/v1'
 import type { ApprovalAgentBinding, ApprovalReason } from '@cordisx/protocol/approval/v2'
 import type { AgentLoopBindingIdentity, AgentLoopTaskDetailsUrl } from '@cordisx/protocol/agent-loop/v3'
@@ -43,15 +43,20 @@ interface AgentConversationActiveRunBase {
   readonly lifecycle: { readonly phase: 'active' | 'running' | 'waiting' | 'attention'; readonly updatedAt?: string }
 }
 
-export type AgentConversationActiveRun = AgentConversationActiveRunBase & (
-  | { readonly detailsUrl: AgentLoopTaskDetailsUrl }
-  | { readonly sessionId: SessionId; readonly details?: AgentDetailReference }
-)
+export type AgentConversationActiveRun =
+  & AgentConversationActiveRunBase
+  & (
+    | { readonly detailsUrl: AgentLoopTaskDetailsUrl }
+    | { readonly sessionId: SessionId; readonly details?: AgentDetailReference }
+  )
 
 export interface AgentConversationReaction {
   readonly reactionId: string
   readonly actorParticipantId: string
-  readonly value: { readonly kind: 'emoji'; readonly emoji: string } | { readonly kind: 'semantic'; readonly token: string }
+  readonly value: { readonly kind: 'emoji'; readonly emoji: string } | {
+    readonly kind: 'semantic'
+    readonly token: string
+  }
   readonly state: 'pending' | 'completed' | 'failed'
 }
 
@@ -75,8 +80,21 @@ export interface AgentConversationMessage {
     | { readonly kind: 'chatroom-acknowledgement' }
   readonly reactions?: readonly AgentConversationReaction[]
   readonly semantic?:
-    | { readonly purpose: 'conversation'; readonly causation?: { readonly operationId: string }; readonly correlation?: { readonly requestMessageId: string } }
-    | { readonly purpose: 'member-self-introduction'; readonly causation?: { readonly operationId: string }; readonly correlation?: { readonly sessionId: SessionId; readonly requestMessageId: string }; readonly participantId: string; readonly memberId: string; readonly runId: string; readonly binding?: AgentLoopBindingIdentity; readonly turn?: string }
+    | {
+      readonly purpose: 'conversation'
+      readonly causation?: { readonly operationId: string }
+      readonly correlation?: { readonly requestMessageId: string }
+    }
+    | {
+      readonly purpose: 'member-self-introduction'
+      readonly causation?: { readonly operationId: string }
+      readonly correlation?: { readonly sessionId: SessionId; readonly requestMessageId: string }
+      readonly participantId: string
+      readonly memberId: string
+      readonly runId: string
+      readonly binding?: AgentLoopBindingIdentity
+      readonly turn?: string
+    }
     | { readonly purpose: 'chatroom-acknowledgement' }
 }
 
@@ -113,7 +131,10 @@ interface AgentConversationApprovalBase {
   readonly approvalId: string
   readonly approvalKind: 'command' | 'file-change' | 'external-action' | 'other'
   readonly state: 'pending' | 'approved' | 'denied' | 'cancelled' | 'failed'
-  readonly actions: readonly { readonly decision: 'approve' | 'deny' | 'cancel' | 'reject'; readonly command: AgentConversationCommandReference }[]
+  readonly actions: readonly {
+    readonly decision: 'approve' | 'deny' | 'cancel' | 'reject'
+    readonly command: AgentConversationCommandReference
+  }[]
   readonly rationale?: string
   readonly diagnostic?: string
 }
@@ -122,7 +143,11 @@ export type AgentConversationApprovalV7 = AgentConversationApprovalBase & {
   readonly sessionId: SessionId
   readonly agentGeneration?: number
   readonly requester: AgentDefinitionIdentity
-  readonly authority: { readonly participantId: string; readonly memberId: string; readonly identity: AgentDefinitionIdentity }
+  readonly authority: {
+    readonly participantId: string
+    readonly memberId: string
+    readonly identity: AgentDefinitionIdentity
+  }
   readonly reason: ApprovalReason
   readonly authorityBinding?: ApprovalAgentBinding
   readonly rationale?: never
@@ -132,44 +157,51 @@ export type AgentConversationApprovalV7 = AgentConversationApprovalBase & {
 
 export type AgentConversationApproval =
   | (AgentConversationApprovalBase & {
-      readonly binding: AgentLoopBindingIdentity
-      readonly turn: string
-      readonly sessionId?: never
-      readonly agentGeneration?: never
-      readonly requester?: never
-      readonly authority?: never
-      readonly reason?: never
-      readonly authorityBinding?: never
-    })
+    readonly binding: AgentLoopBindingIdentity
+    readonly turn: string
+    readonly sessionId?: never
+    readonly agentGeneration?: never
+    readonly requester?: never
+    readonly authority?: never
+    readonly reason?: never
+    readonly authorityBinding?: never
+  })
   | (AgentConversationApprovalBase & {
-      readonly sessionId: SessionId
-      readonly agentGeneration?: number
-      readonly binding?: never
-      readonly turn?: never
-      readonly requester?: never
-      readonly authority?: never
-      readonly reason?: never
-      readonly authorityBinding?: never
-    })
+    readonly sessionId: SessionId
+    readonly agentGeneration?: number
+    readonly binding?: never
+    readonly turn?: never
+    readonly requester?: never
+    readonly authority?: never
+    readonly reason?: never
+    readonly authorityBinding?: never
+  })
   | AgentConversationApprovalV7
 
-export type AgentConversationEntry = AgentConversationMessage | AgentConversationStatus | AgentConversationMemberPresence | AgentConversationApproval
+export type AgentConversationEntry =
+  | AgentConversationMessage
+  | AgentConversationStatus
+  | AgentConversationMemberPresence
+  | AgentConversationApproval
 
-export type AgentConversationRoomDescription = { readonly state: 'empty' } | { readonly state: 'present'; readonly text: string }
+export type AgentConversationRoomDescription = { readonly state: 'empty' } | {
+  readonly state: 'present'
+  readonly text: string
+}
 
 export type AgentConversationSelection =
   | { readonly kind: 'no-room' }
   | {
-      readonly kind: 'room'
-      readonly roomId: string
-      readonly title: string
-      readonly description?: AgentConversationRoomDescription
-      readonly secondary?: string
-      readonly multiParticipant: boolean
-      readonly participantPresentation: 'none' | 'host-initials'
-      readonly participants: readonly AgentConversationParticipant[]
-      readonly activeRuns?: readonly AgentConversationActiveRun[]
-    }
+    readonly kind: 'room'
+    readonly roomId: string
+    readonly title: string
+    readonly description?: AgentConversationRoomDescription
+    readonly secondary?: string
+    readonly multiParticipant: boolean
+    readonly participantPresentation: 'none' | 'host-initials'
+    readonly participants: readonly AgentConversationParticipant[]
+    readonly activeRuns?: readonly AgentConversationActiveRun[]
+  }
 
 export interface AgentConversationComposer {
   readonly availability: 'available' | 'unavailable'
@@ -244,7 +276,9 @@ function assertAction(action: AgentConversationAction, label: string): void {
   assertKnownKeys(action, ['id', 'label', 'icon', 'command', 'disabled', 'disabledReason'], label)
   if (!LOCAL_ID_PATTERN.test(action.id)) throw new Error(`${label}.id is invalid`)
   assertText(action.label, `${label}.label`, 400)
-  if (action.icon !== undefined && !HOST_ICONS.has(action.icon)) throw new Error(`${label}.icon is not a closed Host icon`)
+  if (action.icon !== undefined && !HOST_ICONS.has(action.icon)) {
+    throw new Error(`${label}.icon is not a closed Host icon`)
+  }
   if (typeof action.disabled !== 'boolean') throw new Error(`${label}.disabled must be boolean`)
   if (action.disabledReason !== undefined) assertText(action.disabledReason, `${label}.disabledReason`, 400)
   assertCommand(action.command, `${label}.command`)
@@ -265,13 +299,24 @@ function assertSelection(selection: AgentConversationSelection): void {
     assertKnownKeys(selection, ['kind'], 'selection')
     return
   }
-  assertKnownKeys(selection, ['kind', 'roomId', 'title', 'description', 'secondary', 'multiParticipant', 'participantPresentation', 'participants', 'activeRuns'], 'selection')
+  assertKnownKeys(selection, [
+    'kind',
+    'roomId',
+    'title',
+    'description',
+    'secondary',
+    'multiParticipant',
+    'participantPresentation',
+    'participants',
+    'activeRuns',
+  ], 'selection')
   assertOpaque(selection.roomId, 'selection.roomId')
   assertText(selection.title, 'selection.title', 1_000)
   if (selection.description !== undefined) {
     assertKnownKeys(selection.description, ['state', 'text'], 'selection.description')
-    if (selection.description.state === 'present') assertText(selection.description.text, 'selection.description.text', 4_000)
-    else if (selection.description.state !== 'empty') throw new Error('selection.description.state is invalid')
+    if (selection.description.state === 'present') {
+      assertText(selection.description.text, 'selection.description.text', 4_000)
+    } else if (selection.description.state !== 'empty') throw new Error('selection.description.state is invalid')
   }
   if (selection.secondary !== undefined) assertText(selection.secondary, 'selection.secondary', 1_000)
   if (!selection.multiParticipant && selection.participantPresentation !== 'none') {
@@ -284,13 +329,20 @@ function assertSelection(selection: AgentConversationSelection): void {
     assertOpaque(participant.id, `selection.participants[${index}].id`)
     if (participantIds.has(participant.id)) throw new Error(`duplicate participant ${participant.id}`)
     participantIds.add(participant.id)
-    if (!['human', 'agent', 'system'].includes(participant.role)) throw new Error(`selection.participants[${index}].role is invalid`)
+    if (!['human', 'agent', 'system'].includes(participant.role)) {
+      throw new Error(`selection.participants[${index}].role is invalid`)
+    }
     assertText(participant.name, `selection.participants[${index}].name`, 400)
     if (participant.avatar !== undefined) cloneAgentAvatarRef(participant.avatar)
     if (participant.agentIdentity !== undefined) {
-      if (participant.role !== 'agent') throw new Error(`selection.participants[${index}].agentIdentity requires agent role`)
+      if (participant.role !== 'agent') {
+        throw new Error(`selection.participants[${index}].agentIdentity requires agent role`)
+      }
       assertOpaque(participant.agentIdentity.agentId, `selection.participants[${index}].agentIdentity.agentId`)
-      assertDefinitionRevision(participant.agentIdentity.revision, `selection.participants[${index}].agentIdentity.revision`)
+      assertDefinitionRevision(
+        participant.agentIdentity.revision,
+        `selection.participants[${index}].agentIdentity.revision`,
+      )
     }
   }
   const activeRuns = selection.activeRuns ?? []
@@ -300,8 +352,12 @@ function assertSelection(selection: AgentConversationSelection): void {
     assertOpaque(run.participantId, `selection.activeRuns[${index}].participantId`)
     assertOpaque(run.memberId, `selection.activeRuns[${index}].memberId`)
     assertOpaque(run.runId, `selection.activeRuns[${index}].runId`)
-    if (!participantIds.has(run.participantId)) throw new Error(`selection.activeRuns[${index}] references an unknown participant`)
-    if (!['active', 'running', 'waiting', 'attention'].includes(run.lifecycle.phase)) throw new Error(`selection.activeRuns[${index}].lifecycle is invalid`)
+    if (!participantIds.has(run.participantId)) {
+      throw new Error(`selection.activeRuns[${index}] references an unknown participant`)
+    }
+    if (!['active', 'running', 'waiting', 'attention'].includes(run.lifecycle.phase)) {
+      throw new Error(`selection.activeRuns[${index}].lifecycle is invalid`)
+    }
     if ('detailsUrl' in run) validateAgentLoopTaskDetailsUrl(run.detailsUrl)
     else {
       assertOpaque(run.sessionId, `selection.activeRuns[${index}].sessionId`)
@@ -323,13 +379,65 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
   let previousSequence = -1
   const participantIds = new Set(selection.kind === 'room' ? selection.participants.map(item => item.id) : [])
   for (const [index, entry] of entries.entries()) {
-    assertKnownKeys(entry, entry.kind === 'message'
-      ? ['kind', 'itemId', 'messageId', 'sequence', 'authorId', 'body', 'timestamp', 'deliveryState', 'runState', 'ariaLive', 'actions', 'source', 'reactions', 'semantic']
-      : entry.kind === 'approval'
-        ? ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'runId', 'binding', 'turn', 'sessionId', 'agentGeneration', 'approvalId', 'approvalKind', 'state', 'actions', 'rationale', 'diagnostic', 'requester', 'authority', 'reason', 'authorityBinding']
-      : entry.kind === 'member-presence'
-        ? ['kind', 'itemId', 'sequence', 'participantId', 'memberId', 'runId', 'sessionId', 'state', 'retryable', 'diagnostic', 'retry']
-        : ['kind', 'itemId', 'sequence', 'label', 'state', 'ariaLive'], `entries[${index}]`)
+    assertKnownKeys(
+      entry,
+      entry.kind === 'message'
+        ? [
+          'kind',
+          'itemId',
+          'messageId',
+          'sequence',
+          'authorId',
+          'body',
+          'timestamp',
+          'deliveryState',
+          'runState',
+          'ariaLive',
+          'actions',
+          'source',
+          'reactions',
+          'semantic',
+        ]
+        : entry.kind === 'approval'
+        ? [
+          'kind',
+          'itemId',
+          'sequence',
+          'participantId',
+          'memberId',
+          'runId',
+          'binding',
+          'turn',
+          'sessionId',
+          'agentGeneration',
+          'approvalId',
+          'approvalKind',
+          'state',
+          'actions',
+          'rationale',
+          'diagnostic',
+          'requester',
+          'authority',
+          'reason',
+          'authorityBinding',
+        ]
+        : entry.kind === 'member-presence'
+        ? [
+          'kind',
+          'itemId',
+          'sequence',
+          'participantId',
+          'memberId',
+          'runId',
+          'sessionId',
+          'state',
+          'retryable',
+          'diagnostic',
+          'retry',
+        ]
+        : ['kind', 'itemId', 'sequence', 'label', 'state', 'ariaLive'],
+      `entries[${index}]`,
+    )
     assertOpaque(entry.itemId, `entries[${index}].itemId`)
     if (entryIds.has(entry.itemId)) throw new Error(`duplicate entry ${entry.itemId}`)
     entryIds.add(entry.itemId)
@@ -347,7 +455,9 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
       assertOpaque(entry.memberId, `entries[${index}].memberId`)
       assertOpaque(entry.runId, `entries[${index}].runId`)
       if (!participantIds.has(entry.participantId)) throw new Error(`entries[${index}] presence association is invalid`)
-      if (!['inviting', 'creating', 'joined', 'ready', 'failed'].includes(entry.state)) throw new Error(`entries[${index}].state is invalid`)
+      if (!['inviting', 'creating', 'joined', 'ready', 'failed'].includes(entry.state)) {
+        throw new Error(`entries[${index}].state is invalid`)
+      }
       if (entry.retry !== undefined) assertCommand(entry.retry, `entries[${index}].retry`)
       continue
     }
@@ -363,38 +473,64 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
         if (entry.state === 'pending' && (!Number.isSafeInteger(entry.agentGeneration) || entry.agentGeneration! < 1)) {
           throw new Error(`entries[${index}].agentGeneration is invalid`)
         }
-        if (entry.state !== 'pending' && entry.agentGeneration !== undefined
-          && (!Number.isSafeInteger(entry.agentGeneration) || entry.agentGeneration < 1)) {
+        if (
+          entry.state !== 'pending' && entry.agentGeneration !== undefined
+          && (!Number.isSafeInteger(entry.agentGeneration) || entry.agentGeneration < 1)
+        ) {
           throw new Error(`entries[${index}].agentGeneration is invalid`)
         }
       }
       assertAgentLoopHandle(entry.approvalId, `entries[${index}].approvalId`)
       if (!participantIds.has(entry.participantId)) throw new Error(`entries[${index}] approval association is invalid`)
-      if (!['pending', 'approved', 'denied', 'cancelled', 'failed'].includes(entry.state)) throw new Error(`entries[${index}].state is invalid`)
-      if (entry.state === 'pending' && (entry.actions.length < 1 || entry.actions.length > 3)) throw new Error(`entries[${index}].actions is invalid`)
-      if (entry.state !== 'pending' && entry.actions.length !== 0) throw new Error(`entries[${index}].actions require pending state`)
+      if (!['pending', 'approved', 'denied', 'cancelled', 'failed'].includes(entry.state)) {
+        throw new Error(`entries[${index}].state is invalid`)
+      }
+      if (entry.state === 'pending' && (entry.actions.length < 1 || entry.actions.length > 3)) {
+        throw new Error(`entries[${index}].actions is invalid`)
+      }
+      if (entry.state !== 'pending' && entry.actions.length !== 0) {
+        throw new Error(`entries[${index}].actions require pending state`)
+      }
       if (entry.requester !== undefined) {
         const v7 = entry as AgentConversationApprovalV7
-        const requester = selection.kind === 'room' ? selection.participants.find(item => item.id === v7.participantId) : undefined
-        const authority = selection.kind === 'room' ? selection.participants.find(item => item.id === v7.authority.participantId) : undefined
-        if (requester?.role !== 'agent' || requester.agentIdentity?.agentId !== v7.requester.agentId || requester.agentIdentity?.revision !== v7.requester.revision) throw new Error(`entries[${index}].requester is invalid`)
-        if (authority?.role !== 'agent' || authority.agentIdentity?.agentId !== v7.authority.identity.agentId || authority.agentIdentity?.revision !== v7.authority.identity.revision) throw new Error(`entries[${index}].authority is invalid`)
+        const requester = selection.kind === 'room'
+          ? selection.participants.find(item => item.id === v7.participantId)
+          : undefined
+        const authority = selection.kind === 'room'
+          ? selection.participants.find(item => item.id === v7.authority.participantId)
+          : undefined
+        if (
+          requester?.role !== 'agent' || requester.agentIdentity?.agentId !== v7.requester.agentId
+          || requester.agentIdentity?.revision !== v7.requester.revision
+        ) throw new Error(`entries[${index}].requester is invalid`)
+        if (
+          authority?.role !== 'agent' || authority.agentIdentity?.agentId !== v7.authority.identity.agentId
+          || authority.agentIdentity?.revision !== v7.authority.identity.revision
+        ) throw new Error(`entries[${index}].authority is invalid`)
         assertOpaque(v7.authority.memberId, `entries[${index}].authority.memberId`)
         if (v7.reason.kind !== 'plain-text') throw new Error(`entries[${index}].reason.kind is invalid`)
         assertText(v7.reason.text, `entries[${index}].reason.text`, 10_000)
         if (v7.state === 'pending') {
-          if (v7.authorityBinding === undefined || v7.actions.length !== 2
-            || v7.actions[0]?.decision !== 'approve' || v7.actions[1]?.decision !== 'reject') throw new Error(`entries[${index}] pending authority binding is invalid`)
+          if (
+            v7.authorityBinding === undefined || v7.actions.length !== 2
+            || v7.actions[0]?.decision !== 'approve' || v7.actions[1]?.decision !== 'reject'
+          ) throw new Error(`entries[${index}] pending authority binding is invalid`)
           assertOpaque(v7.authorityBinding.agentId, `entries[${index}].authorityBinding.agentId`)
           assertOpaque(v7.authorityBinding.sessionId, `entries[${index}].authorityBinding.sessionId`)
-          if (v7.authorityBinding.agentId !== v7.authorityBinding.sessionId
+          if (
+            v7.authorityBinding.agentId !== v7.authorityBinding.sessionId
             || v7.authorityBinding.definition.agentId !== v7.authority.identity.agentId
             || v7.authorityBinding.definition.revision !== v7.authority.identity.revision
-            || !Number.isSafeInteger(v7.authorityBinding.agentGeneration) || v7.authorityBinding.agentGeneration < 1) throw new Error(`entries[${index}].authorityBinding is invalid`)
-        } else if (v7.authorityBinding !== undefined) throw new Error(`entries[${index}] terminal authority binding is invokable`)
+            || !Number.isSafeInteger(v7.authorityBinding.agentGeneration) || v7.authorityBinding.agentGeneration < 1
+          ) throw new Error(`entries[${index}].authorityBinding is invalid`)
+        } else if (v7.authorityBinding !== undefined) {
+          throw new Error(`entries[${index}] terminal authority binding is invokable`)
+        }
       }
       for (const [actionIndex, action] of entry.actions.entries()) {
-        if (!['approve', 'deny', 'cancel', 'reject'].includes(action.decision)) throw new Error(`entries[${index}].actions[${actionIndex}] decision is invalid`)
+        if (!['approve', 'deny', 'cancel', 'reject'].includes(action.decision)) {
+          throw new Error(`entries[${index}].actions[${actionIndex}] decision is invalid`)
+        }
         assertCommand(action.command, `entries[${index}].actions[${actionIndex}].command`)
       }
       if (entry.rationale !== undefined) assertText(entry.rationale, `entries[${index}].rationale`, 4_000)
@@ -404,44 +540,80 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
     assertOpaque(entry.messageId, `entries[${index}].messageId`)
     assertOpaque(entry.authorId, `entries[${index}].authorId`)
     if (!participantIds.has(entry.authorId)) throw new Error(`entries[${index}] references an unknown participant`)
-    if (entry.body.length === 0 || entry.body.length > 64) throw new Error(`entries[${index}].body must contain 1 to 64 blocks`)
-    for (const [bodyIndex, body] of entry.body.entries()) assertText(body, `entries[${index}].body[${bodyIndex}]`, 32_000)
+    if (entry.body.length === 0 || entry.body.length > 64) {
+      throw new Error(`entries[${index}].body must contain 1 to 64 blocks`)
+    }
+    for (const [bodyIndex, body] of entry.body.entries()) {
+      assertText(body, `entries[${index}].body[${bodyIndex}]`, 32_000)
+    }
     if (!Number.isFinite(Date.parse(entry.timestamp))) throw new Error(`entries[${index}].timestamp is invalid`)
     if (!DELIVERY_STATES.has(entry.deliveryState)) throw new Error(`entries[${index}].deliveryState is invalid`)
     if (!RUN_STATES.has(entry.runState)) throw new Error(`entries[${index}].runState is invalid`)
     assertActions(entry.actions, `entries[${index}].actions`, 8)
     if (typeof entry.source === 'string') {
-      if (entry.source !== 'agent-loop' && entry.source !== 'chatroom-acknowledgement') throw new Error(`entries[${index}].source is invalid`)
+      if (entry.source !== 'agent-loop' && entry.source !== 'chatroom-acknowledgement') {
+        throw new Error(`entries[${index}].source is invalid`)
+      }
     } else if (entry.source !== undefined) {
-      assertKnownKeys(entry.source, entry.source.kind === 'session-event' ? ['kind', 'sessionId', 'eventSeq'] : ['kind'], `entries[${index}].source`)
-      if (!['agent-loop', 'session-event', 'chatroom-acknowledgement'].includes(entry.source.kind)) throw new Error(`entries[${index}].source is invalid`)
+      assertKnownKeys(
+        entry.source,
+        entry.source.kind === 'session-event' ? ['kind', 'sessionId', 'eventSeq'] : ['kind'],
+        `entries[${index}].source`,
+      )
+      if (!['agent-loop', 'session-event', 'chatroom-acknowledgement'].includes(entry.source.kind)) {
+        throw new Error(`entries[${index}].source is invalid`)
+      }
       if (entry.source.kind === 'session-event') {
         assertOpaque(entry.source.sessionId, `entries[${index}].source.sessionId`)
-        if (!Number.isSafeInteger(entry.source.eventSeq) || entry.source.eventSeq < 1) throw new Error(`entries[${index}].source.eventSeq is invalid`)
+        if (!Number.isSafeInteger(entry.source.eventSeq) || entry.source.eventSeq < 1) {
+          throw new Error(`entries[${index}].source.eventSeq is invalid`)
+        }
       }
     }
     if (entry.semantic !== undefined) {
-      if (!['conversation', 'member-self-introduction', 'chatroom-acknowledgement'].includes(entry.semantic.purpose)) throw new Error(`entries[${index}].semantic is invalid`)
+      if (!['conversation', 'member-self-introduction', 'chatroom-acknowledgement'].includes(entry.semantic.purpose)) {
+        throw new Error(`entries[${index}].semantic is invalid`)
+      }
       if (entry.semantic.purpose === 'member-self-introduction') {
         assertOpaque(entry.semantic.participantId, `entries[${index}].semantic.participantId`)
         assertOpaque(entry.semantic.memberId, `entries[${index}].semantic.memberId`)
         assertOpaque(entry.semantic.runId, `entries[${index}].semantic.runId`)
-        if (entry.semantic.causation !== undefined) assertAgentLoopHandle(entry.semantic.causation.operationId, `entries[${index}].semantic.causation.operationId`)
+        if (entry.semantic.causation !== undefined) {
+          assertAgentLoopHandle(
+            entry.semantic.causation.operationId,
+            `entries[${index}].semantic.causation.operationId`,
+          )
+        }
         if (entry.semantic.correlation !== undefined) {
           assertOpaque(entry.semantic.correlation.sessionId, `entries[${index}].semantic.correlation.sessionId`)
-          assertOpaque(entry.semantic.correlation.requestMessageId, `entries[${index}].semantic.correlation.requestMessageId`)
+          assertOpaque(
+            entry.semantic.correlation.requestMessageId,
+            `entries[${index}].semantic.correlation.requestMessageId`,
+          )
         }
-        if (entry.semantic.turn !== undefined) assertAgentLoopHandle(entry.semantic.turn, `entries[${index}].semantic.turn`)
-        if (entry.authorId !== entry.semantic.participantId) throw new Error(`entries[${index}] self-introduction association is invalid`)
-        if ((entry.source === 'agent-loop' || typeof entry.source === 'object' && entry.source?.kind === 'agent-loop') && entry.semantic.causation === undefined) throw new Error(`entries[${index}] AgentLoop self-introduction causation is missing`)
-        if (typeof entry.source === 'object' && entry.source?.kind === 'session-event' && entry.semantic.correlation === undefined) throw new Error(`entries[${index}] Session self-introduction correlation is missing`)
+        if (entry.semantic.turn !== undefined) {
+          assertAgentLoopHandle(entry.semantic.turn, `entries[${index}].semantic.turn`)
+        }
+        if (entry.authorId !== entry.semantic.participantId) {
+          throw new Error(`entries[${index}] self-introduction association is invalid`)
+        }
+        if (
+          (entry.source === 'agent-loop' || typeof entry.source === 'object' && entry.source?.kind === 'agent-loop')
+          && entry.semantic.causation === undefined
+        ) throw new Error(`entries[${index}] AgentLoop self-introduction causation is missing`)
+        if (
+          typeof entry.source === 'object' && entry.source?.kind === 'session-event'
+          && entry.semantic.correlation === undefined
+        ) throw new Error(`entries[${index}] Session self-introduction correlation is missing`)
       }
     }
     const reactionIds = new Set<string>()
     for (const [reactionIndex, reaction] of (entry.reactions ?? []).entries()) {
       assertOpaque(reaction.reactionId, `entries[${index}].reactions[${reactionIndex}].reactionId`)
       assertOpaque(reaction.actorParticipantId, `entries[${index}].reactions[${reactionIndex}].actorParticipantId`)
-      if (!participantIds.has(reaction.actorParticipantId)) throw new Error(`entries[${index}].reactions[${reactionIndex}] actor is unknown`)
+      if (!participantIds.has(reaction.actorParticipantId)) {
+        throw new Error(`entries[${index}].reactions[${reactionIndex}] actor is unknown`)
+      }
       if (reactionIds.has(reaction.reactionId)) throw new Error(`entries[${index}] has duplicate reaction`)
       reactionIds.add(reaction.reactionId)
     }
@@ -450,7 +622,17 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
 
 /** Validate, clone and deeply freeze one renderer projection. */
 export function createAgentConversationModel(input: AgentConversationModel): AgentConversationModel {
-  assertKnownKeys(input, ['ownerId', 'shell', 'binding', 'generation', 'snapshotSequence', 'selection', 'entries', 'composer', 'headerActions'], 'model')
+  assertKnownKeys(input, [
+    'ownerId',
+    'shell',
+    'binding',
+    'generation',
+    'snapshotSequence',
+    'selection',
+    'entries',
+    'composer',
+    'headerActions',
+  ], 'model')
   assertOpaque(input.ownerId, 'ownerId')
   if (input.shell !== 'agent-desktop') throw new Error('shell must be agent-desktop')
   assertKnownKeys(input.binding, ['bindingId', 'ownerGeneration'], 'binding')
@@ -467,11 +649,22 @@ export function createAgentConversationModel(input: AgentConversationModel): Age
     if (input.entries.length !== 0) throw new Error('no-room selection cannot contain timeline entries')
     if (input.headerActions.length !== 0) throw new Error('no-room selection forbids header actions')
   }
-  assertKnownKeys(input.composer, ['availability', 'placeholder', 'disabled', 'disabledReason', 'shortcutPolicy', 'submit'], 'composer')
-  if (!['available', 'unavailable'].includes(input.composer.availability)) throw new Error('composer.availability is invalid')
+  assertKnownKeys(input.composer, [
+    'availability',
+    'placeholder',
+    'disabled',
+    'disabledReason',
+    'shortcutPolicy',
+    'submit',
+  ], 'composer')
+  if (!['available', 'unavailable'].includes(input.composer.availability)) {
+    throw new Error('composer.availability is invalid')
+  }
   assertText(input.composer.placeholder, 'composer.placeholder', 1_000)
   if (typeof input.composer.disabled !== 'boolean') throw new Error('composer.disabled must be boolean')
-  if (input.composer.disabledReason !== undefined) assertText(input.composer.disabledReason, 'composer.disabledReason', 1_000)
+  if (input.composer.disabledReason !== undefined) {
+    assertText(input.composer.disabledReason, 'composer.disabledReason', 1_000)
+  }
   if (input.composer.shortcutPolicy !== 'enter' && input.composer.shortcutPolicy !== 'mod-enter') {
     throw new Error('composer.shortcutPolicy is invalid')
   }
@@ -486,7 +679,10 @@ export function participantInitials(name: string): string {
   return `${[...segments[0]!][0] ?? ''}${[...segments.at(-1)!][0] ?? ''}`.toLocaleUpperCase()
 }
 
-export function participantFor(model: AgentConversationModel, participantId: string): AgentConversationParticipant | undefined {
+export function participantFor(
+  model: AgentConversationModel,
+  participantId: string,
+): AgentConversationParticipant | undefined {
   if (model.selection.kind !== 'room') return undefined
   return model.selection.participants.find(participant => participant.id === participantId)
 }

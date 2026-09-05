@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { AgentRouteSessionScopeAuthority, type AgentActiveRoute, type AgentPermissionPlanV4 } from '../packages/cli/src/renderer/agent-route-session-scope.js'
+import {
+  type AgentActiveRoute,
+  type AgentPermissionPlanV4,
+  AgentRouteSessionScopeAuthority,
+} from '../packages/cli/src/renderer/agent-route-session-scope.js'
 
 const owner = { pluginId: 'file:///plugins/chatroom.mjs:org.cordisx.chatroom', generation: 7 } as const
 const declaration = {
@@ -14,16 +18,27 @@ function harness(input: { active?: AgentActiveRoute; allow?: boolean } = {}) {
   const plans: { readonly scope: { readonly sessionIds: readonly string[] } }[] = []
   const authority = new AgentRouteSessionScopeAuthority({
     activeRoute: () => active,
-    routes: plugin => plugin.pluginId === owner.pluginId && plugin.generation === owner.generation
-      ? [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId', schemaVersion: 2 }]
-      : [],
+    routes: plugin =>
+      plugin.pluginId === owner.pluginId && plugin.generation === owner.generation
+        ? [{
+          id: 'room-session-detail',
+          path: '/main/chatroom/:roomId/run/:runId/session/:sessionId',
+          schemaVersion: 2,
+        }]
+        : [],
     decide: async plan => {
       plans.push(plan)
       return Object.freeze({ authorized: input.allow !== false && plan.scope.sessionIds.length === 1 })
     },
     connectionGeneration: () => 1,
   })
-  return { authority, plans, setActive: (next: AgentActiveRoute | undefined) => { active = next } }
+  return {
+    authority,
+    plans,
+    setActive: (next: AgentActiveRoute | undefined) => {
+      active = next
+    },
+  }
 }
 
 describe('Host route-bound Agent Session authorization', () => {
@@ -32,7 +47,10 @@ describe('Host route-bound Agent Session authorization', () => {
     const authority = new AgentRouteSessionScopeAuthority({
       activeRoute: () => undefined,
       routes: () => [],
-      decide: async plan => { plans.push(plan); return { authorized: true } },
+      decide: async plan => {
+        plans.push(plan)
+        return { authorized: true }
+      },
       connectionGeneration: () => 1,
     })
     authority.install(owner, [{ name: 'sessions.subscribe', required: false, scope: {} }])
@@ -41,7 +59,9 @@ describe('Host route-bound Agent Session authorization', () => {
   })
 
   it('allows only the exact SessionId from the active same-plugin route and emits an exact v4 plan', async () => {
-    const { authority, plans } = harness({ active: { owner, routeId: 'room-session-detail', instanceId: 'route-1', params: { sessionId: 'session-1' } } })
+    const { authority, plans } = harness({
+      active: { owner, routeId: 'room-session-detail', instanceId: 'route-1', params: { sessionId: 'session-1' } },
+    })
     authority.install(owner, [declaration])
     authority.validateInstalledRoutes(owner)
     expect(authority.declares(owner, 'sessions.subscribe')).toBe(true)
@@ -53,9 +73,17 @@ describe('Host route-bound Agent Session authorization', () => {
   })
 
   it('requires create to use the active route SessionId before the Session exists', async () => {
-    const { authority, plans } = harness({ active: { owner, routeId: 'room-session-detail', instanceId: 'route-1', params: { sessionId: 'session-to-create' } } })
+    const { authority, plans } = harness({
+      active: {
+        owner,
+        routeId: 'room-session-detail',
+        instanceId: 'route-1',
+        params: { sessionId: 'session-to-create' },
+      },
+    })
     authority.install(owner, [{
-      name: 'agents.create', required: false,
+      name: 'agents.create',
+      required: false,
       scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } },
     }])
     authority.validateInstalledRoutes(owner)
@@ -66,17 +94,31 @@ describe('Host route-bound Agent Session authorization', () => {
   })
 
   it('rejects empty, wildcard, cross-owner, inactive, unresolved, and required dynamic declarations', async () => {
-    const { authority, setActive } = harness({ active: { owner: { pluginId: 'https://other.test:chatroom', generation: owner.generation }, routeId: 'room-session-detail', instanceId: 'route-1', params: { sessionId: 'session-1' } } })
+    const { authority, setActive } = harness({
+      active: {
+        owner: { pluginId: 'https://other.test:chatroom', generation: owner.generation },
+        routeId: 'room-session-detail',
+        instanceId: 'route-1',
+        params: { sessionId: 'session-1' },
+      },
+    })
     authority.install(owner, [declaration])
     authority.validateInstalledRoutes(owner)
     await expect(authority.authorize(owner, 'sessions.subscribe', 'session-1')).resolves.toBe(false)
     setActive(undefined)
     await expect(authority.authorize(owner, 'sessions.subscribe', 'session-1')).resolves.toBe(false)
     expect(() => authority.install(owner, [{ ...declaration, required: true }])).toThrow('invalid dynamic')
-    expect(() => authority.install(owner, [{ ...declaration, scope: { sessionIds: [] } }])).toThrow('exact Agent Session')
-    expect(() => authority.install(owner, [{ ...declaration, scope: { sessionIds: ['*'] } }])).toThrow('exact Agent Session')
+    expect(() => authority.install(owner, [{ ...declaration, scope: { sessionIds: [] } }])).toThrow(
+      'exact Agent Session',
+    )
+    expect(() => authority.install(owner, [{ ...declaration, scope: { sessionIds: ['*'] } }])).toThrow(
+      'exact Agent Session',
+    )
     const unresolved = new AgentRouteSessionScopeAuthority({
-      activeRoute: () => undefined, routes: () => [], decide: async () => Object.freeze({ authorized: true }), connectionGeneration: () => 1,
+      activeRoute: () => undefined,
+      routes: () => [],
+      decide: async () => Object.freeze({ authorized: true }),
+      connectionGeneration: () => 1,
     })
     unresolved.install(owner, [declaration])
     expect(() => unresolved.validateInstalledRoutes(owner)).toThrow('owned route')
@@ -91,7 +133,9 @@ describe('Host route-bound Agent Session authorization', () => {
   })
 
   it('settles the route lease only once when navigation or permission revocation fences it', async () => {
-    const { authority, setActive } = harness({ active: { owner, routeId: 'room-session-detail', instanceId: 'route-1', params: { sessionId: 'session-1' } } })
+    const { authority, setActive } = harness({
+      active: { owner, routeId: 'room-session-detail', instanceId: 'route-1', params: { sessionId: 'session-1' } },
+    })
     authority.install(owner, [declaration])
     authority.validateInstalledRoutes(owner)
     expect(await authority.authorize(owner, 'sessions.subscribe', 'session-1')).toBe(true)
@@ -106,7 +150,10 @@ describe('Host route-bound Agent Session authorization', () => {
   it('rejects duplicate route params and stale plugin generations, then fences connection replacement', async () => {
     let connectionGeneration = 1
     const active: AgentActiveRoute = {
-      owner, routeId: 'room-session-detail', instanceId: 'route-1', params: { sessionId: 'session-1' },
+      owner,
+      routeId: 'room-session-detail',
+      instanceId: 'route-1',
+      params: { sessionId: 'session-1' },
     }
     const duplicateRoute = new AgentRouteSessionScopeAuthority({
       activeRoute: () => active,
@@ -119,13 +166,16 @@ describe('Host route-bound Agent Session authorization', () => {
 
     const validRoute = new AgentRouteSessionScopeAuthority({
       activeRoute: () => active,
-      routes: () => [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/session/:sessionId', schemaVersion: 2 }],
+      routes:
+        () => [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/session/:sessionId', schemaVersion: 2 }],
       decide: async () => ({ authorized: true }),
       connectionGeneration: () => connectionGeneration,
     })
     validRoute.install(owner, [declaration])
     validRoute.validateInstalledRoutes(owner)
-    await expect(validRoute.authorize({ ...owner, generation: owner.generation + 1 }, 'sessions.subscribe', 'session-1')).resolves.toBe(false)
+    await expect(
+      validRoute.authorize({ ...owner, generation: owner.generation + 1 }, 'sessions.subscribe', 'session-1'),
+    ).resolves.toBe(false)
     await expect(validRoute.authorize(owner, 'sessions.subscribe', 'session-1')).resolves.toBe(true)
     const fences: string[] = []
     validRoute.subscribe((_owner, sessionId, code) => fences.push(`${sessionId}:${code}`))
@@ -142,9 +192,10 @@ describe('Host route-bound Agent Session authorization', () => {
         instanceId: 'legacy-route-one',
         params: { legacySession: 'session-legacy' },
       }),
-      routes: exactOwner => exactOwner.pluginId === owner.pluginId && exactOwner.generation === owner.generation
-        ? [{ id: 'legacy-session-detail', path: '/legacy/:legacySession' }]
-        : [],
+      routes: exactOwner =>
+        exactOwner.pluginId === owner.pluginId && exactOwner.generation === owner.generation
+          ? [{ id: 'legacy-session-detail', path: '/legacy/:legacySession' }]
+          : [],
       decide: async () => ({ authorized: true }),
       connectionGeneration: () => 1,
     })
@@ -163,9 +214,10 @@ describe('Host route-bound Agent Session authorization', () => {
     let mounted = false
     const authority = new AgentRouteSessionScopeAuthority({
       activeRoute: () => undefined,
-      routes: candidate => !mounted || candidate.pluginId !== owner.pluginId || candidate.generation !== owner.generation
-        ? []
-        : [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/session/:sessionId', schemaVersion: 2 }],
+      routes: candidate =>
+        !mounted || candidate.pluginId !== owner.pluginId || candidate.generation !== owner.generation
+          ? []
+          : [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/session/:sessionId', schemaVersion: 2 }],
       decide: async () => ({ authorized: true }),
       connectionGeneration: () => 1,
     })
@@ -173,23 +225,43 @@ describe('Host route-bound Agent Session authorization', () => {
       manifestVersion: 8 as const,
       name: 'approvals.answer' as const,
       required: false,
-      scope: { authorityRequester: { kind: 'approval-authority-requester-route' as const, requester: { kind: 'host-route-param' as const, routeId: 'room-session-detail', param: 'sessionId' } } },
+      scope: {
+        authorityRequester: {
+          kind: 'approval-authority-requester-route' as const,
+          requester: { kind: 'host-route-param' as const, routeId: 'room-session-detail', param: 'sessionId' },
+        },
+      },
     }
     expect(() => authority.install(owner, [answer])).not.toThrow()
     expect(authority.declares(owner, 'approvals.answer')).toBe(false)
-    expect(() => authority.validateInstalledRoutes(owner)).toThrow('invalid approval authority requester route declaration')
+    expect(() => authority.validateInstalledRoutes(owner)).toThrow(
+      'invalid approval authority requester route declaration',
+    )
     mounted = true
     expect(() => authority.validateInstalledRoutes(owner)).not.toThrow()
     expect(authority.declares(owner, 'approvals.answer')).toBe(true)
 
     const legacyRoute = new AgentRouteSessionScopeAuthority({
       activeRoute: () => undefined,
-      routes: () => [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/session/:sessionId', schemaVersion: 1 }],
+      routes:
+        () => [{ id: 'room-session-detail', path: '/main/chatroom/:roomId/session/:sessionId', schemaVersion: 1 }],
       decide: async () => ({ authorized: true }),
       connectionGeneration: () => 1,
     })
     legacyRoute.install(owner, [answer])
-    expect(() => legacyRoute.validateInstalledRoutes(owner)).toThrow('invalid approval authority requester route declaration')
-    expect(() => authority.install(owner, [{ ...answer, scope: { authorityRequester: { ...answer.scope.authorityRequester, requester: { ...answer.scope.authorityRequester.requester, param: 'otherSession' } } } }])).toThrow('invalid approval authority requester route declaration')
+    expect(() => legacyRoute.validateInstalledRoutes(owner)).toThrow(
+      'invalid approval authority requester route declaration',
+    )
+    expect(() =>
+      authority.install(owner, [{
+        ...answer,
+        scope: {
+          authorityRequester: {
+            ...answer.scope.authorityRequester,
+            requester: { ...answer.scope.authorityRequester.requester, param: 'otherSession' },
+          },
+        },
+      }])
+    ).toThrow('invalid approval authority requester route declaration')
   })
 })

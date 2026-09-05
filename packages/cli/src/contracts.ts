@@ -20,7 +20,13 @@ import type {
 } from '@cordisx/protocol/navigation-collection-actions/v1'
 import type { ComponentType } from 'react'
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
-import type { CordisXPluginManifestV4, CordisXPluginManifestV5, CordisXPluginManifestV6, CordisXPluginManifestV7, CordisXPluginManifestV8 } from './permission-contracts.js'
+import type {
+  CordisXPluginManifestV4,
+  CordisXPluginManifestV5,
+  CordisXPluginManifestV6,
+  CordisXPluginManifestV7,
+  CordisXPluginManifestV8,
+} from './permission-contracts.js'
 import type { CordisXPluginDependencyV1 } from './plugin-lifecycle-contracts.js'
 import type { CordisXExtensionPointControlMode, CordisXExtensionPointControlResultV1 } from './control-contracts.js'
 
@@ -135,9 +141,11 @@ export interface CordisXLocalizedText<Params extends CordisXMessageParams = Cord
 
 /** Plugin-augmentable key-to-parameter vocabulary used by typed translator seats. */
 export type CordisXMessageSchema = Record<string, CordisXMessageParams | undefined>
-export type CordisXMessageDefinition<Messages> = Readonly<{
-  [Key in keyof Messages]: CordisXMessageParams | undefined
-}>
+export type CordisXMessageDefinition<Messages> = Readonly<
+  {
+    [Key in keyof Messages]: CordisXMessageParams | undefined
+  }
+>
 
 /** One fiber-owned namespace/locale dictionary. Values use ICU MessageFormat. */
 export interface CordisXLocaleCatalog<
@@ -209,7 +217,9 @@ export interface CordisXPageLocalizationProps<
 
 /** DSH-style localization service exposed to trusted-local plugins. */
 export interface CordisXI18n {
-  define<Messages extends CordisXMessageDefinition<Messages>>(catalog: CordisXLocaleCatalog<Messages>): Disposable<void | Promise<void>>
+  define<Messages extends CordisXMessageDefinition<Messages>>(
+    catalog: CordisXLocaleCatalog<Messages>,
+  ): Disposable<void | Promise<void>>
   inject<Messages extends CordisXMessageDefinition<Messages>>(
     namespace: string,
     setup: (seat: CordisXLocalizationSeat<Messages>) => Effect,
@@ -221,7 +231,9 @@ export interface CordisXI18n {
 }
 
 export type CordisXJsonScalar = string | number | boolean | null
-export type CordisXJsonValue = CordisXJsonScalar | readonly CordisXJsonValue[] | { readonly [key: string]: CordisXJsonValue }
+export type CordisXJsonValue = CordisXJsonScalar | readonly CordisXJsonValue[] | {
+  readonly [key: string]: CordisXJsonValue
+}
 
 export const CORDISX_PLUGIN_CONSOLE_ENTRY_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-console-entry.v1.schema.json' as const
@@ -232,8 +244,17 @@ export type CordisXPluginConsoleKind = 'console' | 'invocation' | 'permission' |
 export type CordisXPluginConsoleMethod = 'debug' | 'log' | 'info' | 'warn' | 'error'
 export type CordisXPluginConsoleCoverage = 'host-mediated' | 'scoped-console' | 'best-effort' | 'unknown'
 export type CordisXPluginConsolePhase =
-  | 'requested' | 'ask' | 'allow' | 'deny' | 'dispatch'
-  | 'success' | 'failure' | 'cancel' | 'activate' | 'dispose' | 'reload'
+  | 'requested'
+  | 'ask'
+  | 'allow'
+  | 'deny'
+  | 'dispatch'
+  | 'success'
+  | 'failure'
+  | 'cancel'
+  | 'activate'
+  | 'dispose'
+  | 'reload'
 export type CordisXPluginConsoleStatus = 'pending' | 'success' | 'failure' | 'denied' | 'cancelled'
 
 export interface CordisXPluginConsoleIdentityV1 {
@@ -242,7 +263,22 @@ export interface CordisXPluginConsoleIdentityV1 {
 }
 
 export interface CordisXPluginConsoleValueSummaryV1 {
-  readonly type: 'undefined' | 'null' | 'boolean' | 'number' | 'string' | 'bigint' | 'symbol' | 'function' | 'error' | 'array' | 'object' | 'element' | 'circular' | 'unavailable' | 'redacted'
+  readonly type:
+    | 'undefined'
+    | 'null'
+    | 'boolean'
+    | 'number'
+    | 'string'
+    | 'bigint'
+    | 'symbol'
+    | 'function'
+    | 'error'
+    | 'array'
+    | 'object'
+    | 'element'
+    | 'circular'
+    | 'unavailable'
+    | 'redacted'
   readonly preview: string
   readonly value?: string | number | boolean | null
   readonly name?: string
@@ -970,12 +1006,11 @@ interface CordisXContributionOptionsBase<Name extends CordisXSurfaceName> {
 export type CordisXManagerSettingsNavigationGroup = 'before-settings' | 'after-settings'
 
 export type CordisXContributionOptions<Name extends CordisXSurfaceName = CordisXSurfaceName> =
-  CordisXContributionOptionsBase<Name>
-  & (Name extends 'manager.settings.navigation-items'
-    ? { readonly group: CordisXManagerSettingsNavigationGroup }
+  & CordisXContributionOptionsBase<Name>
+  & (Name extends 'manager.settings.navigation-items' ? { readonly group: CordisXManagerSettingsNavigationGroup }
     : Name extends 'manager.settings.tabs' | 'composer.reasoning-intensity' | 'composer.submit.effects'
       ? { readonly group?: never }
-      : { readonly group?: string })
+    : { readonly group?: string })
 
 export interface CordisXContributionPresentationOptions {
   readonly group?: string
@@ -1000,14 +1035,19 @@ export interface CordisXExtensionPointControlLeaseSnapshot {
   readonly reason: string
   readonly properties: Readonly<Record<string, CordisXJsonScalar>>
   readonly commands: readonly Readonly<{ id: string; available: boolean; reason?: string }>[]
-  readonly events: readonly Readonly<{ id: string; sequence: number; payload: Readonly<Record<string, CordisXJsonScalar>> }>[]
+  readonly events: readonly Readonly<
+    { id: string; sequence: number; payload: Readonly<Record<string, CordisXJsonScalar>> }
+  >[]
 }
 
 /** Claim-scoped safe projection; it never exposes selectors, nodes, native callbacks, or event objects. */
 export interface CordisXExtensionPointControlLease {
   snapshot(): CordisXExtensionPointControlLeaseSnapshot
   subscribe(listener: () => void): () => void
-  invoke(commandId: string, arguments_?: Readonly<Record<string, CordisXJsonScalar>>): Promise<CordisXExtensionPointControlResultV1>
+  invoke(
+    commandId: string,
+    arguments_?: Readonly<Record<string, CordisXJsonScalar>>,
+  ): Promise<CordisXExtensionPointControlResultV1>
 }
 
 /** DSH-style slot service with structured data instead of a DOM component. */
@@ -1189,7 +1229,7 @@ export interface CordisXManagerContentNavigationProjectionV1 {
 /** Additive atomic catalog replacement that may contain navigation v3 declarations. */
 export interface CordisXManagerContentNavigationCatalogProjectionV2 {
   readonly declarations: readonly (
-    CordisXManagerContentNavigationDeclarationV1
+    | CordisXManagerContentNavigationDeclarationV1
     | CordisXManagerContentNavigationDeclarationV2
     | CordisXManagerContentNavigationDeclarationV3
   )[]
@@ -1199,7 +1239,7 @@ export interface CordisXManagerContentNavigationCatalogProjectionV2 {
 /** Additive atomic catalog replacement that may contain Host-owned config-form bodies. */
 export interface CordisXManagerContentNavigationCatalogProjectionV3 {
   readonly declarations: readonly (
-    CordisXManagerContentNavigationDeclarationV1
+    | CordisXManagerContentNavigationDeclarationV1
     | CordisXManagerContentNavigationDeclarationV2
     | CordisXManagerContentNavigationDeclarationV3
     | CordisXManagerContentNavigationDeclarationV4
@@ -1210,7 +1250,7 @@ export interface CordisXManagerContentNavigationCatalogProjectionV3 {
 /** Additive atomic catalog replacement that may contain localized-choice config forms. */
 export interface CordisXManagerContentNavigationCatalogProjectionV4 {
   readonly declarations: readonly (
-    CordisXManagerContentNavigationDeclarationV1
+    | CordisXManagerContentNavigationDeclarationV1
     | CordisXManagerContentNavigationDeclarationV2
     | CordisXManagerContentNavigationDeclarationV3
     | CordisXManagerContentNavigationDeclarationV4
@@ -1251,14 +1291,16 @@ export interface CordisXPageMetadata {
 }
 
 /** Closed protocol page.v3 document. Owner-default i18n replaces the legacy localeNamespace hint. */
-export type CordisXPageMetadataV3 = Omit<
-  CordisXPageMetadata,
-  '$schema' | 'schemaVersion' | 'description' | 'localeNamespace'
-> & {
-  readonly $schema: typeof CORDISX_PAGE_SCHEMA_V3
-  readonly schemaVersion: 3
-  readonly description: CordisXLocalizedText
-}
+export type CordisXPageMetadataV3 =
+  & Omit<
+    CordisXPageMetadata,
+    '$schema' | 'schemaVersion' | 'description' | 'localeNamespace'
+  >
+  & {
+    readonly $schema: typeof CORDISX_PAGE_SCHEMA_V3
+    readonly schemaVersion: 3
+    readonly description: CordisXLocalizedText
+  }
 
 export interface CordisXPageNavigation {
   /**
@@ -1280,7 +1322,10 @@ export interface CordisXPageNavigation {
 export interface CordisXPageSelectControl<Value extends CordisXJsonScalar = CordisXJsonScalar> {
   readonly root: HTMLElement
   readonly value: Value | undefined
-  set(options: readonly { readonly label: string; readonly value: Value; readonly disabled?: boolean }[], value?: Value): void
+  set(
+    options: readonly { readonly label: string; readonly value: Value; readonly disabled?: boolean }[],
+    value?: Value,
+  ): void
   dispose(): void
 }
 
@@ -1299,8 +1344,7 @@ export interface CordisXPageControls {
 
 export interface CordisXPageMountContext<
   Messages extends CordisXMessageDefinition<Messages> = CordisXMessageSchema,
->
-  extends CordisXPageLocalizationProps<Messages> {
+> extends CordisXPageLocalizationProps<Messages> {
   readonly container: HTMLElement
   readonly document: Document
   readonly signal: AbortSignal
@@ -1356,18 +1400,22 @@ export interface CordisXRouteDefinition<Outlet extends CordisXOutletName = Cordi
 }
 
 /** Closed protocol route.v2 document with required localized product metadata. */
-export type CordisXRouteDefinitionV2<Outlet extends CordisXOutletName = CordisXOutletName> = Omit<
-  CordisXRouteDefinition<Outlet>,
-  '$schema' | 'schemaVersion' | 'title' | 'description'
-> & {
-  readonly $schema: typeof CORDISX_ROUTE_SCHEMA_V2
-  readonly schemaVersion: 2
-  readonly title: CordisXLocalizedText
-  readonly description: CordisXLocalizedText
-}
+export type CordisXRouteDefinitionV2<Outlet extends CordisXOutletName = CordisXOutletName> =
+  & Omit<
+    CordisXRouteDefinition<Outlet>,
+    '$schema' | 'schemaVersion' | 'title' | 'description'
+  >
+  & {
+    readonly $schema: typeof CORDISX_ROUTE_SCHEMA_V2
+    readonly schemaVersion: 2
+    readonly title: CordisXLocalizedText
+    readonly description: CordisXLocalizedText
+  }
 
 export interface CordisXRoutes extends CordisXPageNavigation {
-  register<Outlet extends CordisXOutletName>(definition: CordisXRouteDefinition<Outlet>): Disposable<void | Promise<void>>
+  register<Outlet extends CordisXOutletName>(
+    definition: CordisXRouteDefinition<Outlet>,
+  ): Disposable<void | Promise<void>>
 }
 
 /** Canonical configuration-v2 application plane exposed by runtime snapshots. */
@@ -1404,9 +1452,17 @@ export type CordisXConfigFieldPath = readonly string[]
 
 /** Closed semantic icon vocabulary for Host-owned configuration presentation. */
 export type CordisXConfigFormIcon =
-  | 'host:calendar' | 'host:clock' | 'host:palette' | 'host:tags'
-  | 'host:folder' | 'host:key' | 'host:settings' | 'host:info'
-  | 'host:files' | 'host:save' | 'host:reset'
+  | 'host:calendar'
+  | 'host:clock'
+  | 'host:palette'
+  | 'host:tags'
+  | 'host:folder'
+  | 'host:key'
+  | 'host:settings'
+  | 'host:info'
+  | 'host:files'
+  | 'host:save'
+  | 'host:reset'
 
 export interface CordisXConfigFormGroupSnapshot {
   readonly id: string
@@ -1422,10 +1478,17 @@ export interface CordisXConfigFormActionIcons {
 
 /** Closed v1 Host Form Presenter Catalog tokens from plugin-config-common.v1. */
 export type CordisXConfigFormPresenterKind =
-  | 'choice.select' | 'choice.radio' | 'choice.segmented'
-  | 'number.input' | 'number.stepper' | 'number.slider'
-  | 'array.scalar-tags' | 'array.scalar-rows'
-  | 'array.object-auto' | 'array.object-dialog' | 'array.object-page'
+  | 'choice.select'
+  | 'choice.radio'
+  | 'choice.segmented'
+  | 'number.input'
+  | 'number.stepper'
+  | 'number.slider'
+  | 'array.scalar-tags'
+  | 'array.scalar-rows'
+  | 'array.object-auto'
+  | 'array.object-dialog'
+  | 'array.object-page'
 
 export interface CordisXConfigFormPresenter {
   readonly version: 1
@@ -1565,7 +1628,13 @@ export interface CordisXPluginModule {
   readonly icon?: CordisXPluginBrandIcon
   /** User-facing identity; stable ids and manifest names remain untranslated fallbacks. */
   readonly presentation?: CordisXPluginPresentation
-  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8
+  readonly manifest?:
+    | CordisXPluginManifestV1
+    | CordisXPluginManifestV4
+    | CordisXPluginManifestV5
+    | CordisXPluginManifestV6
+    | CordisXPluginManifestV7
+    | CordisXPluginManifestV8
   readonly inject?: readonly string[] | Record<string, unknown>
   readonly Config?: CordisXStandardSchema
   readonly configApplies?: CordisXConfigAppliesInput
@@ -1591,7 +1660,13 @@ export interface CordisXBrowserPlugin {
   readonly config: unknown
   readonly revision: number
   /** Package-authoritative manifest, used instead of executing module metadata when present. */
-  readonly manifest?: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8
+  readonly manifest?:
+    | CordisXPluginManifestV1
+    | CordisXPluginManifestV4
+    | CordisXPluginManifestV5
+    | CordisXPluginManifestV6
+    | CordisXPluginManifestV7
+    | CordisXPluginManifestV8
   /** Immutable package and module generation metadata owned by the launcher. */
   readonly package?: {
     readonly version: string

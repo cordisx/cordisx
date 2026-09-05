@@ -7,11 +7,13 @@ export const inject = ['i18n', 'commands', 'agentEvents', 'platform', 'pages', '
 
 const message = (key: string, fallback: string) => ({ namespace: 'permission-v3-smoke', key, fallback } as const)
 
-const domSmokePage = defineReactPage(() => createElement(
-  'section',
-  { 'data-permission-v3-smoke-page': 'true' },
-  'Permission v3 controlled-rendering smoke',
-))
+const domSmokePage = defineReactPage(() =>
+  createElement(
+    'section',
+    { 'data-permission-v3-smoke-page': 'true' },
+    'Permission v3 controlled-rendering smoke',
+  )
+)
 
 /** Real-renderer probe: all authorization remains owned by the Host PermissionBroker. */
 export function apply(ctx: Context): void {

@@ -21,10 +21,10 @@ Providers or general Settings categories.
 
 The two existing extension contracts stay distinct:
 
-| Capability | Stable surface | Outlet | Current Host projection |
-| --- | --- | --- | --- |
-| A: Settings content tabs | `manager.settings.tabs` | `manager.settings.content` | Compatibility-only; current context is `not-mounted` because no Settings page exists. |
-| B: Settings-adjacent navigation | `manager.settings.navigation-items` | `manager.content` | A real first-level Manager destination using the standard Host page shell. |
+| Capability                      | Stable surface                      | Outlet                     | Current Host projection                                                               |
+| ------------------------------- | ----------------------------------- | -------------------------- | ------------------------------------------------------------------------------------- |
+| A: Settings content tabs        | `manager.settings.tabs`             | `manager.settings.content` | Compatibility-only; current context is `not-mounted` because no Settings page exists. |
+| B: Settings-adjacent navigation | `manager.settings.navigation-items` | `manager.content`          | A real first-level Manager destination using the standard Host page shell.            |
 
 The A identities, versions, point-policy tuples, registry diagnostics, and
 body-only compatibility rules remain valid. The Host must not manufacture an
@@ -256,18 +256,18 @@ Mono is explicitly out of scope. No gitlink is updated by this delivery.
 
 ## Validation matrix
 
-| Layer | Required evidence |
-| --- | --- |
-| Protocol | Closed-version rejection; no free DOM/header/CSS/selector; Host icons; deterministic groups/order/collisions; same-owner route/page; pending dependencies; exact origins; lifecycle/fallback; configuration v1-to-v2 normalization. |
-| Registry/runtime | Immutable owner/point/id, stable sorting, duplicate path rejection, when/disabled/update, locale reprojection, availability/policy/generation fencing, pending diagnostics, no raw bridge. |
-| IA | No top-level Settings, Runtime, or Launcher placeholder rows/pages; startup parsing and diagnostics remain; plugin detail retains configuration and permissions; CLIProxy owns Providers; Plugin Store owns sources. |
-| Manager navigation | Built-ins plus B in fixed order; pointer/keyboard/roving focus/a11y; exact selected state; constrained and wide layouts; About anchoring; active identity retained across reorder. |
-| Routing/page shell | Manager-local deep link, Back/breadcrumb, refresh/reopen, unchanged outer URL/history; Host icon/title/description/actions; plugin body child only; one scroll owner. |
-| Lifecycle | hide/disable/remove/uninstall/block/restore/deny/generation replace/close/reopen/mount throw; Abort before one dispose; stale work fenced; fallback to `host:plugins`; restore does not steal activation. |
-| Configuration | `live`, plugin restart rollback, app-restart stage without current apply/watch, unbound service-restart refusal, legacy `restart` normalization, CLI/startup parsing unchanged. |
-| Extension Points | Four distinct A/B rows in English/Chinese; A current context not-mounted; B real usage and policy/diagnostic attribution. |
-| Isolated renderer | Real `app://` wide/narrow and light/dark evidence for B order, pointer/keyboard/deep link/Back/selection, Host header/body, lifecycle/fallback, locale/generation; no placeholder Settings/Runtime/Launcher; no selector/raw bridge; native data flow and outer URL unchanged. |
-| Release | Focused tests, typecheck, build, full `npm run check`, `git diff --check`, screenshots and machine report, normal CI, formal head-fenced merge. |
+| Layer              | Required evidence                                                                                                                                                                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Protocol           | Closed-version rejection; no free DOM/header/CSS/selector; Host icons; deterministic groups/order/collisions; same-owner route/page; pending dependencies; exact origins; lifecycle/fallback; configuration v1-to-v2 normalization.                                            |
+| Registry/runtime   | Immutable owner/point/id, stable sorting, duplicate path rejection, when/disabled/update, locale reprojection, availability/policy/generation fencing, pending diagnostics, no raw bridge.                                                                                     |
+| IA                 | No top-level Settings, Runtime, or Launcher placeholder rows/pages; startup parsing and diagnostics remain; plugin detail retains configuration and permissions; CLIProxy owns Providers; Plugin Store owns sources.                                                           |
+| Manager navigation | Built-ins plus B in fixed order; pointer/keyboard/roving focus/a11y; exact selected state; constrained and wide layouts; About anchoring; active identity retained across reorder.                                                                                             |
+| Routing/page shell | Manager-local deep link, Back/breadcrumb, refresh/reopen, unchanged outer URL/history; Host icon/title/description/actions; plugin body child only; one scroll owner.                                                                                                          |
+| Lifecycle          | hide/disable/remove/uninstall/block/restore/deny/generation replace/close/reopen/mount throw; Abort before one dispose; stale work fenced; fallback to `host:plugins`; restore does not steal activation.                                                                      |
+| Configuration      | `live`, plugin restart rollback, app-restart stage without current apply/watch, unbound service-restart refusal, legacy `restart` normalization, CLI/startup parsing unchanged.                                                                                                |
+| Extension Points   | Four distinct A/B rows in English/Chinese; A current context not-mounted; B real usage and policy/diagnostic attribution.                                                                                                                                                      |
+| Isolated renderer  | Real `app://` wide/narrow and light/dark evidence for B order, pointer/keyboard/deep link/Back/selection, Host header/body, lifecycle/fallback, locale/generation; no placeholder Settings/Runtime/Launcher; no selector/raw bridge; native data flow and outer URL unchanged. |
+| Release            | Focused tests, typecheck, build, full `npm run check`, `git diff --check`, screenshots and machine report, normal CI, formal head-fenced merge.                                                                                                                                |
 
 Screenshots complement machine assertions; they do not prove lifecycle,
 permission, generation fencing, or sandboxing.

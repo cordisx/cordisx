@@ -52,7 +52,9 @@ function protocolEdges(documents: ProtocolPinDocuments): ReadonlyArray<readonly 
 
 function protocolPinViolations(documents: ProtocolPinDocuments): string[] {
   return protocolEdges(documents)
-    .filter(([label, source]) => source !== (label === 'package-lock installed resolution' ? protocolResolvedSource : protocolSource))
+    .filter(([label, source]) =>
+      source !== (label === 'package-lock installed resolution' ? protocolResolvedSource : protocolSource)
+    )
     .map(([label]) => label)
 }
 
@@ -98,11 +100,13 @@ describe('formal Connector Protocol public type import', () => {
     const current: ProtocolPinDocuments = {
       rootManifest: { devDependencies: { '@cordisx/protocol': protocolSource } },
       cliManifest: currentManifest,
-      lockfile: { packages: {
-        '': { devDependencies: { '@cordisx/protocol': protocolSource } },
-        'packages/cli': currentManifest,
-        'node_modules/@cordisx/protocol': { resolved: protocolResolvedSource },
-      } },
+      lockfile: {
+        packages: {
+          '': { devDependencies: { '@cordisx/protocol': protocolSource } },
+          'packages/cli': currentManifest,
+          'node_modules/@cordisx/protocol': { resolved: protocolResolvedSource },
+        },
+      },
     }
     const staleSource = `git+https://github.com/cordisx/cordisx-protocol.git#${staleProtocolCommit}`
     expect(protocolPinViolations({
@@ -111,10 +115,12 @@ describe('formal Connector Protocol public type import', () => {
     })).toEqual(['packages/cli/package.json dependencies'])
     expect(protocolPinViolations({
       ...current,
-      lockfile: { packages: {
-        ...current.lockfile.packages,
-        'packages/cli': { ...currentManifest, dependencies: { '@cordisx/protocol': staleSource } },
-      } },
+      lockfile: {
+        packages: {
+          ...current.lockfile.packages,
+          'packages/cli': { ...currentManifest, dependencies: { '@cordisx/protocol': staleSource } },
+        },
+      },
     })).toEqual(['package-lock CLI dependencies'])
   })
 })

@@ -33,11 +33,11 @@ Fixture 模式使用一个集中、确定性的 provider。它可以在不读取
 
 插件导出由 CordisX Manager 消费的标准 Schemastery `Config` schema。配置在插件重启时应用，因为切换数据源会把 session provider、订阅、历史 cursor/尾部定时器和插件拥有的待处理 contribution 作为一个由 fiber 管理的生命周期整体替换。
 
-| 设置 | 默认值 | 可选值 | 用途 |
-| --- | --- | --- | --- |
-| `mode` | `live` | `live`、`historical`、`fixture` | 选择公开实时 ledger、Host 代理的历史记录与实时观测合并，或确定性 fixture 数据。 |
-| `historyPageSize` | `100` | `25`–`500`，步长 `25` | 每个不透明 Host 页面请求的历史记录数，仅历史模式使用。 |
-| `timelineWindowSize` | `500` | `50`–`500`，步长 `50` | 限制当前时间线投影保留的合并记录数。 |
+| 设置                 | 默认值 | 可选值                          | 用途                                                                            |
+| -------------------- | ------ | ------------------------------- | ------------------------------------------------------------------------------- |
+| `mode`               | `live` | `live`、`historical`、`fixture` | 选择公开实时 ledger、Host 代理的历史记录与实时观测合并，或确定性 fixture 数据。 |
+| `historyPageSize`    | `100`  | `25`–`500`，步长 `25`           | 每个不透明 Host 页面请求的历史记录数，仅历史模式使用。                          |
+| `timelineWindowSize` | `500`  | `50`–`500`，步长 `50`           | 限制当前时间线投影保留的合并记录数。                                            |
 
 `live` 不请求本地历史；`historical` 在同一个去重时间线中合并导入证据与公开实时观测；`fixture` 保持确定性，不能指向自行配置的 session identity，页面始终由 Host 绑定到当前活动会话。
 

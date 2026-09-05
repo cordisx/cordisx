@@ -18,11 +18,13 @@ const APP_PIN = Object.freeze({
 })
 const TEMP_PREFIX = 'cordisx-desktop-agent-session-smoke-'
 
-const parsed = parseArgs({ options: {
-  report: { type: 'string' },
-  marker: { type: 'string' },
-  executable: { type: 'string' },
-} })
+const parsed = parseArgs({
+  options: {
+    report: { type: 'string' },
+    marker: { type: 'string' },
+    executable: { type: 'string' },
+  },
+})
 const reportPath = parsed.values.report
 if (typeof reportPath !== 'string' || !path.isAbsolute(reportPath)) {
   throw new Error('usage: --report <absolute-json> [--marker <marker>] [--executable <Codex executable>]')
@@ -48,7 +50,9 @@ async function executable() {
 }
 
 function plistValue(appRoot, key) {
-  return execFileSync('plutil', ['-extract', key, 'raw', '-o', '-', path.join(appRoot, 'Contents', 'Info.plist')], { encoding: 'utf8' }).trim()
+  return execFileSync('plutil', ['-extract', key, 'raw', '-o', '-', path.join(appRoot, 'Contents', 'Info.plist')], {
+    encoding: 'utf8',
+  }).trim()
 }
 
 async function freePort() {
@@ -87,7 +91,9 @@ function run(command, args, environment, onStage) {
         for (const line of lines) {
           const prefix = '[cordisx-desktop-agent-session-stage] '
           if (!line.startsWith(prefix)) continue
-          try { onStage(JSON.parse(line.slice(prefix.length))) } catch {}
+          try {
+            onStage(JSON.parse(line.slice(prefix.length)))
+          } catch {}
         }
       })
     }
@@ -110,7 +116,9 @@ async function portClosed(port) {
   }
 }
 
-if (process.platform !== 'darwin') throw new Error('the pinned Codex Desktop live harness currently supports macOS only')
+if (process.platform !== 'darwin') {
+  throw new Error('the pinned Codex Desktop live harness currently supports macOS only')
+}
 const appExecutable = await executable()
 const appRoot = path.resolve(appExecutable, '../../..')
 const installed = {
@@ -118,8 +126,10 @@ const installed = {
   appVersion: plistValue(appRoot, 'CFBundleShortVersionString'),
   buildNumber: plistValue(appRoot, 'CFBundleVersion'),
 }
-if (installed.bundleId !== APP_PIN.bundleId || installed.appVersion !== APP_PIN.appVersion
-  || installed.buildNumber !== APP_PIN.buildNumber) {
+if (
+  installed.bundleId !== APP_PIN.bundleId || installed.appVersion !== APP_PIN.appVersion
+  || installed.buildNumber !== APP_PIN.buildNumber
+) {
   throw new Error(`installed Desktop build does not match the audited pin: ${JSON.stringify(installed)}`)
 }
 
@@ -133,25 +143,44 @@ const runner = path.resolve('packages/cli/scripts/run-isolated-app-smoke.mjs')
 const fixture = path.resolve('tests/fixtures/codex-desktop-agent-session-smoke.ts')
 await mkdir(profileDir, { recursive: true, mode: 0o700 })
 await mkdir(cordisxHome, { recursive: true, mode: 0o700 })
-await writeFile(configPath, `${JSON.stringify({
-  version: 1,
-  codex: { debugPort: port, executable: appExecutable },
-  providers: [],
-  plugins: [{
-    id: 'codex-desktop-agent-session-smoke', entry: fixture, enabled: true, config: { marker },
-  }],
-}, null, 2)}\n`, { mode: 0o600 })
+await writeFile(
+  configPath,
+  `${
+    JSON.stringify(
+      {
+        version: 1,
+        codex: { debugPort: port, executable: appExecutable },
+        providers: [],
+        plugins: [{
+          id: 'codex-desktop-agent-session-smoke',
+          entry: fixture,
+          enabled: true,
+          config: { marker },
+        }],
+      },
+      null,
+      2,
+    )
+  }\n`,
+  { mode: 0o600 },
+)
 
 const args = [
   runner,
-  '--port', String(port),
-  '--profile-dir', profileDir,
-  '--dev-config', configPath,
+  '--port',
+  String(port),
+  '--profile-dir',
+  profileDir,
+  '--dev-config',
+  configPath,
   '--desktop-agent-session-harness',
   '--',
-  '--report', reportPath,
-  '--marker', marker,
-  '--session-id', sessionId,
+  '--report',
+  reportPath,
+  '--marker',
+  marker,
+  '--session-id',
+  sessionId,
 ]
 const startedAt = Date.now()
 const stages = []
@@ -201,8 +230,12 @@ try {
     sessionId,
     renderer: { url: 'app://-/index.html', ready: false, fixtureReady: false },
     bridge: {
-      instrumentation: false, observationMode: 'unavailable', hostId: 'local',
-      outboundMethods: [], inboundMethods: [], connectionEvents: [],
+      instrumentation: false,
+      observationMode: 'unavailable',
+      hostId: 'local',
+      outboundMethods: [],
+      inboundMethods: [],
+      connectionEvents: [],
     },
     operations: [],
     permissionPrompts: [],
@@ -216,7 +249,9 @@ try {
     if (error === undefined) error = annotateError
   })
   if ((!isPortClosed || active.length > 0 || !temporaryRootRemoved) && error === undefined) {
-    error = new Error(`isolated harness cleanup incomplete: portClosed=${isPortClosed}, profileProcesses=${active.length}, temporaryRootRemoved=${temporaryRootRemoved}`)
+    error = new Error(
+      `isolated harness cleanup incomplete: portClosed=${isPortClosed}, profileProcesses=${active.length}, temporaryRootRemoved=${temporaryRootRemoved}`,
+    )
   }
 }
 if (error !== undefined) throw error

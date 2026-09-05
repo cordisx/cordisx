@@ -66,7 +66,9 @@ function copyText(entry: CordisXPluginConsoleEntryV1): string {
   const metadata = [new Date(entry.time).toISOString(), entry.method, entry.source, entry.kind, entry.correlationId]
     .filter((value): value is string => value !== undefined)
     .join(' · ')
-  return `${metadata}\n${entry.message}${entry.args.length === 0 ? '' : `\n${entry.args.map(argument => argument.preview).join(' ')}`}`
+  return `${metadata}\n${entry.message}${
+    entry.args.length === 0 ? '' : `\n${entry.args.map(argument => argument.preview).join(' ')}`
+  }`
 }
 
 async function writeClipboard(value: string): Promise<void> {
@@ -74,7 +76,11 @@ async function writeClipboard(value: string): Promise<void> {
 }
 
 function exportLogs(pluginId: string, page: CordisXPluginConsolePageV1): void {
-  const url = URL.createObjectURL(new Blob([JSON.stringify({ ...page, exportedAt: new Date().toISOString() }, null, 2)], { type: 'application/json' }))
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify({ ...page, exportedAt: new Date().toISOString() }, null, 2)], {
+      type: 'application/json',
+    }),
+  )
   const link = document.createElement('a')
   link.href = url
   link.download = `${pluginId}-logs.json`
@@ -86,7 +92,11 @@ function exportLogs(pluginId: string, page: CordisXPluginConsolePageV1): void {
 }
 
 export function PluginConsolePanel({ model, pluginId, pluginSource, locale }: PluginConsolePanelProps) {
-  const store = useMemo(() => createPluginConsoleStore(model, pluginId, fallbackPage(pluginId, pluginSource)), [model, pluginId, pluginSource])
+  const store = useMemo(() => createPluginConsoleStore(model, pluginId, fallbackPage(pluginId, pluginSource)), [
+    model,
+    pluginId,
+    pluginSource,
+  ])
   const livePage = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [pausedPage, setPausedPage] = useState<CordisXPluginConsolePageV1>()
   const [query, setQuery] = useState('')
@@ -99,9 +109,13 @@ export function PluginConsolePanel({ model, pluginId, pluginSource, locale }: Pl
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const entries = page.entries.filter(entry => (
     (method === 'all' || entry.method === method)
-    && (kind === 'all' || kind === 'host-api' && (entry.kind === 'invocation' || entry.kind === 'permission') || entry.kind === kind)
+    && (kind === 'all' || kind === 'host-api' && (entry.kind === 'invocation' || entry.kind === 'permission')
+      || entry.kind === kind)
     && (source === 'all' || entry.source === source)
-    && (normalizedQuery === '' || `${entry.message} ${entry.source} ${entry.correlationId ?? ''} ${entry.args.map(argument => argument.preview).join(' ')}`.toLocaleLowerCase().includes(normalizedQuery))
+    && (normalizedQuery === ''
+      || `${entry.message} ${entry.source} ${entry.correlationId ?? ''} ${
+        entry.args.map(argument => argument.preview).join(' ')
+      }`.toLocaleLowerCase().includes(normalizedQuery))
   ))
   const selected = entries.find(entry => entry.entryId === selectedId)
   const follow = useAutoFollow<HTMLDivElement>(entries.length)
@@ -110,12 +124,19 @@ export function PluginConsolePanel({ model, pluginId, pluginSource, locale }: Pl
   const selectRelative = (offset: number) => {
     if (entries.length === 0) return
     const current = entries.findIndex(entry => entry.entryId === selectedId)
-    const next = Math.max(0, Math.min(entries.length - 1, (current < 0 ? (offset > 0 ? -1 : entries.length) : current) + offset))
+    const next = Math.max(
+      0,
+      Math.min(entries.length - 1, (current < 0 ? (offset > 0 ? -1 : entries.length) : current) + offset),
+    )
     setSelectedId(entries[next]?.entryId)
   }
 
   return (
-    <div className="cxm-tab-panel cxm-console-panel" role="tabpanel" aria-label={managerCopy(locale, 'plugin-tab.logs')}>
+    <div
+      className="cxm-tab-panel cxm-console-panel"
+      role="tabpanel"
+      aria-label={managerCopy(locale, 'plugin-tab.logs')}
+    >
       <div className="cxm-console-controls">
         <SearchField
           className="cxm-console-search"
@@ -125,9 +146,28 @@ export function PluginConsolePanel({ model, pluginId, pluginSource, locale }: Pl
           onChange={setQuery}
         />
         <div className="cxm-console-filters">
-          <SelectField label={managerCopy(locale, 'console.level')} icon="configuration" value={method} options={options(['all', 'debug', 'log', 'info', 'warn', 'error'])} onChange={setMethod} />
-          <SelectField label={managerCopy(locale, 'console.kind')} icon="contributions" value={kind} options={options(['all', 'host-api', 'console', 'lifecycle', 'diagnostic'])} onChange={setKind} />
-          <SelectField className="cxm-console-source" label={managerCopy(locale, 'console.source')} icon="routes" value={source} options={options(['all', ...sources])} onChange={setSource} />
+          <SelectField
+            label={managerCopy(locale, 'console.level')}
+            icon="configuration"
+            value={method}
+            options={options(['all', 'debug', 'log', 'info', 'warn', 'error'])}
+            onChange={setMethod}
+          />
+          <SelectField
+            label={managerCopy(locale, 'console.kind')}
+            icon="contributions"
+            value={kind}
+            options={options(['all', 'host-api', 'console', 'lifecycle', 'diagnostic'])}
+            onChange={setKind}
+          />
+          <SelectField
+            className="cxm-console-source"
+            label={managerCopy(locale, 'console.source')}
+            icon="routes"
+            value={source}
+            options={options(['all', ...sources])}
+            onChange={setSource}
+          />
         </div>
         <div className="cxm-console-action-toolbar" role="toolbar" aria-label={managerCopy(locale, 'console.toolbar')}>
           <IconButton
@@ -141,12 +181,33 @@ export function PluginConsolePanel({ model, pluginId, pluginSource, locale }: Pl
             label={managerCopy(locale, 'console.clear')}
             description={managerCopy(locale, 'console.irreversible')}
             disabled={page.entries.length === 0}
-            onClick={() => { model.clearPluginConsole?.(pluginId); setSelectedId(undefined); setPausedPage(undefined) }}
+            onClick={() => {
+              model.clearPluginConsole?.(pluginId)
+              setSelectedId(undefined)
+              setPausedPage(undefined)
+            }}
           />
-          <MoreMenu label={managerCopy(locale, 'console.toolbar')} items={[
-            { id: 'copy', label: managerCopy(locale, 'console.copy'), icon: 'console-copy', disabled: selected === undefined, onSelect: () => { if (selected !== undefined) void writeClipboard(copyText(selected)) } },
-            { id: 'export', label: managerCopy(locale, 'console.export'), icon: 'console-export', disabled: page.entries.length === 0, onSelect: () => exportLogs(pluginId, page) },
-          ]} />
+          <MoreMenu
+            label={managerCopy(locale, 'console.toolbar')}
+            items={[
+              {
+                id: 'copy',
+                label: managerCopy(locale, 'console.copy'),
+                icon: 'console-copy',
+                disabled: selected === undefined,
+                onSelect: () => {
+                  if (selected !== undefined) void writeClipboard(copyText(selected))
+                },
+              },
+              {
+                id: 'export',
+                label: managerCopy(locale, 'console.export'),
+                icon: 'console-export',
+                disabled: page.entries.length === 0,
+                onSelect: () => exportLogs(pluginId, page),
+              },
+            ]}
+          />
         </div>
       </div>
       <div className="cxm-console-workspace" data-inspector={selected === undefined ? undefined : 'true'}>
@@ -159,12 +220,24 @@ export function PluginConsolePanel({ model, pluginId, pluginSource, locale }: Pl
             aria-label="插件控制台正文；使用上下方向键选择记录"
             onScroll={follow.onScroll}
             onKeyDown={event => {
-              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); selectRelative(event.key === 'ArrowDown' ? 1 : -1) }
-              if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'c' && selected !== undefined) { event.preventDefault(); void writeClipboard(copyText(selected)) }
+              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault()
+                selectRelative(event.key === 'ArrowDown' ? 1 : -1)
+              }
+              if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'c' && selected !== undefined) {
+                event.preventDefault()
+                void writeClipboard(copyText(selected))
+              }
             }}
           >
             {entries.length === 0
-              ? <div className="cxm-console-empty">{page.entries.length === 0 ? managerCopy(locale, 'console.empty') : managerCopy(locale, 'console.no-matches')}</div>
+              ? (
+                <div className="cxm-console-empty">
+                  {page.entries.length === 0
+                    ? managerCopy(locale, 'console.empty')
+                    : managerCopy(locale, 'console.no-matches')}
+                </div>
+              )
               : entries.map(entry => (
                 <button
                   key={entry.entryId}
@@ -176,7 +249,9 @@ export function PluginConsolePanel({ model, pluginId, pluginSource, locale }: Pl
                   aria-selected={entry.entryId === selectedId}
                   title={`${new Date(entry.time).toISOString()} · ${entry.source} · ${entry.kind}`}
                   onClick={() => setSelectedId(entry.entryId)}
-                >{entry.message}</button>
+                >
+                  {entry.message}
+                </button>
               ))}
           </div>
         </div>
@@ -184,7 +259,11 @@ export function PluginConsolePanel({ model, pluginId, pluginSource, locale }: Pl
           <aside className="cxm-console-inspector" data-console-detail={selected.entryId}>
             <div className="cxm-console-inspector-head">
               <span>{managerCopy(locale, 'console.entry-details')}</span>
-              <IconButton icon="close" label={managerCopy(locale, 'console.close-details')} onClick={() => setSelectedId(undefined)} />
+              <IconButton
+                icon="close"
+                label={managerCopy(locale, 'console.close-details')}
+                onClick={() => setSelectedId(undefined)}
+              />
             </div>
             <dl className="cxm-console-inspector-grid">
               {[
@@ -193,8 +272,16 @@ export function PluginConsolePanel({ model, pluginId, pluginSource, locale }: Pl
                 [managerCopy(locale, 'console.field.kind'), selected.kind],
                 [managerCopy(locale, 'console.field.correlation'), selected.correlationId],
                 [managerCopy(locale, 'console.field.status'), selected.status],
-                [managerCopy(locale, 'console.field.duration'), selected.durationMs === undefined ? undefined : `${selected.durationMs.toFixed(1)}ms`],
-              ].filter((item): item is [string, string] => item[1] !== undefined).map(([label, value]) => <span key={label}><dt>{label}</dt><dd>{value}</dd></span>)}
+                [
+                  managerCopy(locale, 'console.field.duration'),
+                  selected.durationMs === undefined ? undefined : `${selected.durationMs.toFixed(1)}ms`,
+                ],
+              ].filter((item): item is [string, string] => item[1] !== undefined).map(([label, value]) => (
+                <span key={label}>
+                  <dt>{label}</dt>
+                  <dd>{value}</dd>
+                </span>
+              ))}
             </dl>
           </aside>
         )}

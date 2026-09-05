@@ -15,8 +15,12 @@ async function read(url) {
   return await response.text()
 }
 
-function codePoint(value) { return Number.parseInt(value, 16) }
-function hex(value) { return value.toString(16).toUpperCase() }
+function codePoint(value) {
+  return Number.parseInt(value, 16)
+}
+function hex(value) {
+  return value.toString(16).toUpperCase()
+}
 
 const [derived, unicodeData] = await Promise.all([read(sources.derived), read(sources.unicodeData)])
 const nfkc = []
@@ -32,7 +36,9 @@ for (const raw of derived.split(/\r?\n/u)) {
   }
   if (property !== 'NFKC_CF') continue
   const [startText, endText = startText] = rangeText.split('..')
-  const mapping = mappingText === '' ? '' : mappingText.split(/\s+/u).map(value => String.fromCodePoint(codePoint(value))).join('')
+  const mapping = mappingText === ''
+    ? ''
+    : mappingText.split(/\s+/u).map(value => String.fromCodePoint(codePoint(value))).join('')
   for (let value = codePoint(startText); value <= codePoint(endText); value += 1) nfkc.push([value, mapping])
 }
 
@@ -70,7 +76,9 @@ export const UNICODE_MANAGER_COLLECTION_VERSION = '${unicodeVersion}' as const
 export const NFKC_CASEFOLD_MAPPINGS = new Map<number, string>(${JSON.stringify(nfkc)})
 export const CANONICAL_COMBINING_CLASSES = new Map<number, number>(${JSON.stringify(combining)})
 export const CANONICAL_DECOMPOSITIONS = new Map<number, readonly number[]>(${JSON.stringify(decomposition)})
-export const CANONICAL_COMPOSITIONS = new Map<string, number>(${JSON.stringify(composition.map(([left, right, composed]) => [String(left) + ':' + String(right), composed]))})
+export const CANONICAL_COMPOSITIONS = new Map<string, number>(${
+  JSON.stringify(composition.map(([left, right, composed]) => [String(left) + ':' + String(right), composed]))
+})
 `
 
 const output = fileURLToPath(new URL('../src/renderer/manager-collection-unicode-17.generated.ts', import.meta.url))

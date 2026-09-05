@@ -12,7 +12,11 @@ export function FixtureSummary({ plugins, locale }: FixtureSummaryProps) {
     <section className="pg-fixture" aria-labelledby="pg-fixture-name">
       <strong id="pg-fixture-name">{fixture.name}</strong>
       <small>Fixture · {fixture.source}</small>
-      <small>{en ? 'Switch composition with ' : '使用 '}<code>npm run dev:ui -- --config /path/to/cordisx.config.json</code>{en ? '.' : ' 切换组合。'}</small>
+      <small>
+        {en ? 'Switch composition with ' : '使用 '}
+        <code>npm run dev:ui -- --config /path/to/cordisx.config.json</code>
+        {en ? '.' : ' 切换组合。'}
+      </small>
       <span>{en ? `${active} / ${plugins.length} plugins active` : `${active} / ${plugins.length} 个插件已激活`}</span>
       <div className="pg-plugin-list">
         {plugins.map(plugin => <span className="pg-plugin" key={plugin.id}>{plugin.id} · {plugin.status}</span>)}

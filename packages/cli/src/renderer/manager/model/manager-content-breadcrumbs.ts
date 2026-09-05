@@ -7,7 +7,9 @@ export interface ManagerContentBreadcrumbSegment {
 }
 
 function referenceKey(reference: CordisXRouteReference): string {
-  return `${reference.id}\u0000${JSON.stringify(Object.entries(reference.params ?? {}).sort(([left], [right]) => left.localeCompare(right)))}`
+  return `${reference.id}\u0000${
+    JSON.stringify(Object.entries(reference.params ?? {}).sort(([left], [right]) => left.localeCompare(right)))
+  }`
 }
 
 /** Projects plugin-declared parent routes into Host-owned breadcrumb segments. */

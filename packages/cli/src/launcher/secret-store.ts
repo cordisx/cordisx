@@ -197,7 +197,10 @@ async function run(command: string, args: readonly string[], input?: Buffer): Pr
     const output: Buffer[] = []
     child.stdout.on('data', value => output.push(Buffer.from(value)))
     child.once('error', () => reject(new LauncherKeychainError('UNAVAILABLE')))
-    child.once('exit', code => code === 0 ? resolve(Buffer.concat(output)) : reject(new LauncherKeychainError('UNAVAILABLE')))
+    child.once(
+      'exit',
+      code => code === 0 ? resolve(Buffer.concat(output)) : reject(new LauncherKeychainError('UNAVAILABLE')),
+    )
     child.stdin.end(input)
   })
 }
@@ -237,9 +240,16 @@ async function macOSHelper(): Promise<string> {
   }
 }
 
-async function invokeMacOSHelper(operation: 'set' | 'read' | 'status' | 'remove', service: string, account: string, value?: string): Promise<Buffer> {
+async function invokeMacOSHelper(
+  operation: 'set' | 'read' | 'status' | 'remove',
+  service: string,
+  account: string,
+  value?: string,
+): Promise<Buffer> {
   const helper = await macOSHelper()
-  const request = Buffer.from(JSON.stringify({ operation, service, account, ...(value === undefined ? {} : { value }) }))
+  const request = Buffer.from(
+    JSON.stringify({ operation, service, account, ...(value === undefined ? {} : { value }) }),
+  )
   return await run(helper, [], request)
 }
 
@@ -260,7 +270,9 @@ export function createMacOSKeychainBackend(): LauncherKeychainBackend {
       if (!validSecret(value)) throw new LauncherKeychainError('UNAVAILABLE')
       await invokeMacOSHelper('set', service, account, value)
     },
-    remove: async (service, account) => { await invokeMacOSHelper('remove', service, account) },
+    remove: async (service, account) => {
+      await invokeMacOSHelper('remove', service, account)
+    },
     status: async (service, account) => {
       try {
         const result = (await invokeMacOSHelper('status', service, account)).toString('utf8')

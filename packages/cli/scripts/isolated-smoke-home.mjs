@@ -1,4 +1,4 @@
-import { access, chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, copyFile, lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -39,8 +39,10 @@ export async function prepareIsolatedSmokeHome(homeConfig) {
     let changed = false
     if (Array.isArray(source?.plugins)) {
       source.plugins = source.plugins.map(plugin => {
-        if (plugin === null || typeof plugin !== 'object' || typeof plugin.entry !== 'string'
-          || path.isAbsolute(plugin.entry) || plugin.entry.startsWith('cordisx:')) return plugin
+        if (
+          plugin === null || typeof plugin !== 'object' || typeof plugin.entry !== 'string'
+          || path.isAbsolute(plugin.entry) || plugin.entry.startsWith('cordisx:')
+        ) return plugin
         changed = true
         return { ...plugin, entry: path.resolve(path.dirname(homeConfig), plugin.entry) }
       })

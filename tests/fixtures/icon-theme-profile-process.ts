@@ -2,18 +2,15 @@ import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
-import {
-  ensureHomeConfig,
-  loadHomeConfig,
-} from '../../packages/cli/src/config/home-config.js'
+import { ensureHomeConfig, loadHomeConfig } from '../../packages/cli/src/config/home-config.js'
 import { buildRendererBundle } from '../../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../../packages/cli/src/launcher/config.js'
 import {
+  type IconThemePreferenceBindingRequest,
   iconThemePreferenceBridgeError,
+  type IconThemePreferencePersistenceContext,
   parseIconThemePreferenceBindingRequest,
   persistIconThemePreference,
-  type IconThemePreferenceBindingRequest,
-  type IconThemePreferencePersistenceContext,
 } from '../../packages/cli/src/launcher/icon-theme-rpc.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -45,13 +42,19 @@ class HostPrivateWindowMicrotaskScope {
 
   queue(callback: VoidFunction): void {
     if (!this.accepting) return
-    const task = Promise.resolve().then(callback).catch(error => { this.errors.push(error) })
+    const task = Promise.resolve().then(callback).catch(error => {
+      this.errors.push(error)
+    })
     this.tasks.add(task)
     void task.then(() => this.tasks.delete(task))
   }
 
-  stop(): void { this.accepting = false }
-  pending(): number { return this.tasks.size }
+  stop(): void {
+    this.accepting = false
+  }
+  pending(): number {
+    return this.tasks.size
+  }
 
   async drain(): Promise<void> {
     let stableTurns = 0
@@ -61,7 +64,9 @@ class HostPrivateWindowMicrotaskScope {
       if (this.tasks.size === 0) {
         stableTurns += 1
         if (stableTurns === 2) {
-          if (this.errors.length > 0) throw new AggregateError(this.errors, 'Host-private window microtask drain failed')
+          if (this.errors.length > 0) {
+            throw new AggregateError(this.errors, 'Host-private window microtask drain failed')
+          }
           return
         }
       } else {
@@ -75,15 +80,27 @@ class HostPrivateWindowMicrotaskScope {
 const windowMicrotasks = new WeakMap<JSDOM, HostPrivateWindowMicrotaskScope>()
 
 function page(): JSDOM {
-  const dom = new JSDOM('<!doctype html><html lang="en" class="electron-dark"><head></head><body><button data-cordisx-playground-manager-trigger>Manager</button><main data-cordisx-playground-seat="app"></main></body></html>', {
-    runScripts: 'dangerously',
-    url: 'https://cordisx.local/',
-    pretendToBeVisual: true,
+  const dom = new JSDOM(
+    '<!doctype html><html lang="en" class="electron-dark"><head></head><body><button data-cordisx-playground-manager-trigger>Manager</button><main data-cordisx-playground-seat="app"></main></body></html>',
+    {
+      runScripts: 'dangerously',
+      url: 'https://cordisx.local/',
+      pretendToBeVisual: true,
+    },
+  )
+  Object.defineProperty(dom.window, 'matchMedia', {
+    configurable: true,
+    value: () => ({
+      matches: false,
+      media: '',
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
   })
-  Object.defineProperty(dom.window, 'matchMedia', { configurable: true, value: () => ({
-    matches: false, media: '', onchange: null,
-    addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
-  }) })
   const microtasks = new HostPrivateWindowMicrotaskScope()
   Object.defineProperty(dom.window, 'queueMicrotask', {
     configurable: true,
@@ -112,7 +129,9 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, label: strin
 
 function deferred(): { readonly promise: Promise<void>; resolve(): void } {
   let resolve!: () => void
-  const promise = new Promise<void>(done => { resolve = done })
+  const promise = new Promise<void>(done => {
+    resolve = done
+  })
   return { promise, resolve }
 }
 
@@ -123,14 +142,22 @@ class HostPrivateCallbackScope {
 
   run(callback: () => Promise<void>): void {
     if (!this.accepting) return
-    const task = Promise.resolve().then(callback).catch(error => { this.errors.push(error) })
+    const task = Promise.resolve().then(callback).catch(error => {
+      this.errors.push(error)
+    })
     this.tasks.add(task)
     void task.then(() => this.tasks.delete(task))
   }
 
-  stop(): void { this.accepting = false }
-  active(): boolean { return this.accepting }
-  pending(): number { return this.tasks.size }
+  stop(): void {
+    this.accepting = false
+  }
+  active(): boolean {
+    return this.accepting
+  }
+  pending(): number {
+    return this.tasks.size
+  }
   async drain(): Promise<void> {
     await Promise.all([...this.tasks])
     if (this.errors.length > 0) throw new AggregateError(this.errors, 'Host-private callback drain failed')
@@ -148,7 +175,12 @@ async function composition(enabled = true, config: unknown = {}): Promise<Return
 async function boot(
   config: Awaited<ReturnType<typeof loadConfig>>,
   preference: Awaited<ReturnType<typeof loadHomeConfig>>['apps'][string]['profiles'][string]['iconTheme'],
-): Promise<{ selected: { providerId: string; providerGeneration: string }; providers: readonly { providerId: string; providerGeneration: string }[] }> {
+): Promise<
+  {
+    selected: { providerId: string; providerGeneration: string }
+    providers: readonly { providerId: string; providerGeneration: string }[]
+  }
+> {
   const bundle = await buildRendererBundle(config, {
     playground: true,
     appId: 'codex',
@@ -162,7 +194,10 @@ async function boot(
     await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true', 'renderer readiness')
     const runtime = (dom.window as unknown as { __cordisxRuntime?: Runtime }).__cordisxRuntime!
     const snapshot = runtime.snapshot().iconThemes!
-    const result = { selected: { ...snapshot.selected }, providers: snapshot.providers.map(provider => ({ ...provider })) }
+    const result = {
+      selected: { ...snapshot.selected },
+      providers: snapshot.providers.map(provider => ({ ...provider })),
+    }
     await runtime.dispose()
     return result
   } finally {
@@ -193,39 +228,48 @@ async function processA(): Promise<Record<string, unknown>> {
     hostGeneration,
     token,
   }
-  Object.defineProperty(dom.window, '__cordisxIconThemePreferenceRequestV1', { configurable: true, value: (payload: string) => {
-    if (!callbacks.active()) return
-    const request = JSON.parse(payload) as Record<string, unknown>
-    if (request.kind === 'document-ready') {
-      readyLeaseRevision += 1
-      ;(dom.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => unknown })
-        .__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
-          kind: 'document-ready', requestId: request.requestId, ok: true,
-          readyLeaseToken: `ready_process_${String(readyLeaseRevision).padStart(8, '0')}`,
-          readyLeaseRevision,
-          documentEpoch: request.documentEpoch, synchronization: 'complete',
-          requiredRevision: request.currentRevision, currentRevision: request.currentRevision,
-        }))
-      return
-    }
-    wireCandidateKeys = Object.keys(request.candidate as Record<string, unknown>).sort()
-    callbacks.run(async () => {
-      try {
-        const parsed = parseIconThemePreferenceBindingRequest(request, context)
-        const value = await persistIconThemePreference(context, parsed)
-        await releasePersistedResponse.promise
-        if (!callbacks.active()) return
-        lateCallbackTouchedDom = true
-        ;(dom.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => void })
-          .__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
-      } catch (error) {
-        if (!callbacks.active()) return
-        lateCallbackTouchedDom = true
-        ;(dom.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => void })
-          .__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: false, ...iconThemePreferenceBridgeError(error) }))
+  Object.defineProperty(dom.window, '__cordisxIconThemePreferenceRequestV1', {
+    configurable: true,
+    value: (payload: string) => {
+      if (!callbacks.active()) return
+      const request = JSON.parse(payload) as Record<string, unknown>
+      if (request.kind === 'document-ready') {
+        readyLeaseRevision += 1
+        ;(dom.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => unknown })
+          .__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({
+            kind: 'document-ready',
+            requestId: request.requestId,
+            ok: true,
+            readyLeaseToken: `ready_process_${String(readyLeaseRevision).padStart(8, '0')}`,
+            readyLeaseRevision,
+            documentEpoch: request.documentEpoch,
+            synchronization: 'complete',
+            requiredRevision: request.currentRevision,
+            currentRevision: request.currentRevision,
+          }))
+        return
       }
-    })
-  } })
+      wireCandidateKeys = Object.keys(request.candidate as Record<string, unknown>).sort()
+      callbacks.run(async () => {
+        try {
+          const parsed = parseIconThemePreferenceBindingRequest(request, context)
+          const value = await persistIconThemePreference(context, parsed)
+          await releasePersistedResponse.promise
+          if (!callbacks.active()) return
+          lateCallbackTouchedDom = true
+          ;(dom.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => void })
+            .__cordisxIconThemePreferenceReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
+        } catch (error) {
+          if (!callbacks.active()) return
+          lateCallbackTouchedDom = true
+          ;(dom.window as unknown as { __cordisxIconThemePreferenceReceiveV1?: (payload: string) => void })
+            .__cordisxIconThemePreferenceReceiveV1?.(
+              JSON.stringify({ requestId: request.requestId, ok: false, ...iconThemePreferenceBridgeError(error) }),
+            )
+        }
+      })
+    },
+  })
   try {
     dom.window.eval(bundle)
     await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true', 'process A readiness')
@@ -233,7 +277,9 @@ async function processA(): Promise<Record<string, unknown>> {
     const snapshot = runtime.snapshot().iconThemes!
     dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')?.click()
     dom.window.document.querySelector<HTMLButtonElement>('[data-tab="about"]')?.click()
-    if (dom.window.document.querySelector('#cxr-icon-theme-provider') !== null) throw new Error('removed icon-theme picker is visible')
+    if (dom.window.document.querySelector('#cxr-icon-theme-provider') !== null) {
+      throw new Error('removed icon-theme picker is visible')
+    }
     const provider = snapshot.providers.find(item => item.providerId === 'plugin:icon-theme-test:aurora')
     if (provider === undefined) throw new Error('Aurora provider is unavailable')
     const candidate = {
@@ -258,7 +304,11 @@ async function processA(): Promise<Record<string, unknown>> {
     releasePersistedResponse.resolve()
     await callbacks.drain()
     let nestedWindowMicrotasksDrained = false
-    dom.window.queueMicrotask(() => dom.window.queueMicrotask(() => { nestedWindowMicrotasksDrained = true }))
+    dom.window.queueMicrotask(() =>
+      dom.window.queueMicrotask(() => {
+        nestedWindowMicrotasksDrained = true
+      })
+    )
     await windowMicrotasks.get(dom)?.drain()
     return {
       hostGeneration,
@@ -287,12 +337,22 @@ async function processB(): Promise<Record<string, unknown>> {
   const changedArtifact = await boot(await composition(true, { artifactRevision: 2 }), preference)
   const missing = await boot({ ...(await composition()), plugins: [] }, preference)
   const disabled = await boot(await composition(false), preference)
-  return { hostGeneration, preference, exact, changedArtifact, missing, disabled, configMode: (await stat(configPath)).mode & 0o777 }
+  return {
+    hostGeneration,
+    preference,
+    exact,
+    changedArtifact,
+    missing,
+    disabled,
+    configMode: (await stat(configPath)).mode & 0o777,
+  }
 }
 
 async function processDrainFailure(): Promise<Record<string, unknown>> {
   const callbacks = new HostPrivateCallbackScope()
-  callbacks.run(async () => { throw new Error('discriminating callback failure') })
+  callbacks.run(async () => {
+    throw new Error('discriminating callback failure')
+  })
   callbacks.stop()
   await callbacks.drain()
   return { unreachable: true }

@@ -289,10 +289,10 @@ must not imply that the placeholder `latest` package is functional.
 
 The beta package boundaries are:
 
-| Package | Owns | Must not imply |
-| --- | --- | --- |
-| `cordisx` | Launcher CLI, home configuration, trusted-local plugin loading, public contracts, direct Vite development modules, and generation replacement | Marketplace installation, signing, an execution sandbox, or enforced capability isolation |
-| `create-cordisx-plugin` | Standalone, multi-plugin workspace, and embedded project creation; versioned plugin templates; project scripts; workspace integration; and generated-project verification | Registry/catalog submission, signing, permission grants, or marketplace activation |
+| Package                 | Owns                                                                                                                                                                      | Must not imply                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `cordisx`               | Launcher CLI, home configuration, trusted-local plugin loading, public contracts, direct Vite development modules, and generation replacement                             | Marketplace installation, signing, an execution sandbox, or enforced capability isolation |
+| `create-cordisx-plugin` | Standalone, multi-plugin workspace, and embedded project creation; versioned plugin templates; project scripts; workspace integration; and generated-project verification | Registry/catalog submission, signing, permission grants, or marketplace activation        |
 
 The scaffolder package exclusively owns
 `packages/create-cordisx-plugin/template`. It is copied from the published

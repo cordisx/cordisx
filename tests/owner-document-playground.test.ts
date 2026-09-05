@@ -23,23 +23,35 @@ describe('Playground owner document bridge', () => {
     roots.push(root)
     const entry = path.resolve('tests/fixtures/owner-documents-runtime-plugin.ts')
     const configPath = path.join(root, 'composition.json')
-    await writeFile(configPath, `${JSON.stringify({
-      version: 1,
-      codex: { debugPort: 9229 },
-      providers: [],
-      plugins: [{ id: 'owner-documents-runtime', entry, enabled: true, config: {} }],
-    })}\n`)
+    await writeFile(
+      configPath,
+      `${
+        JSON.stringify({
+          version: 1,
+          codex: { debugPort: 9229 },
+          providers: [],
+          plugins: [{ id: 'owner-documents-runtime', entry, enabled: true, config: {} }],
+        })
+      }\n`,
+    )
     const session = await createPlaygroundSession(configPath)
     try {
       const first = await session.buildBundle()
       const firstMetadata = { token: tokenFrom(first.source), generation: first.generation }
       const replace = {
-        version: 1, requestId: 'replace-one', token: firstMetadata.token, operation: 'replace',
-        documentId: 'rooms', expectedRevision: 0, schemaVersion: 1,
+        version: 1,
+        requestId: 'replace-one',
+        token: firstMetadata.token,
+        operation: 'replace',
+        documentId: 'rooms',
+        expectedRevision: 0,
+        schemaVersion: 1,
         value: { operationId: 'stable-create-1', state: 'planned' },
       }
       await expect(session.handleOwnerDocumentRequest(JSON.stringify(replace))).resolves.toMatchObject({
-        requestId: 'replace-one', ok: true, value: { status: 'accepted', snapshot: { revision: 1 } },
+        requestId: 'replace-one',
+        ok: true,
+        value: { status: 'accepted', snapshot: { revision: 1 } },
       })
 
       const second = await session.buildBundle()
@@ -47,20 +59,34 @@ describe('Playground owner document bridge', () => {
       expect(secondMetadata.generation).not.toBe(firstMetadata.generation)
       await expect(session.handleOwnerDocumentRequest(JSON.stringify({
         ...replace,
-        requestId: 'load-after-reload', token: secondMetadata.token, operation: 'load',
-        expectedRevision: undefined, schemaVersion: undefined, value: undefined,
+        requestId: 'load-after-reload',
+        token: secondMetadata.token,
+        operation: 'load',
+        expectedRevision: undefined,
+        schemaVersion: undefined,
+        value: undefined,
       }))).resolves.toMatchObject({
-        requestId: 'load-after-reload', ok: true,
-        value: { status: 'loaded', snapshot: { revision: 1, value: { operationId: 'stable-create-1', state: 'planned' } } },
+        requestId: 'load-after-reload',
+        ok: true,
+        value: {
+          status: 'loaded',
+          snapshot: { revision: 1, value: { operationId: 'stable-create-1', state: 'planned' } },
+        },
       })
-      await expect(session.handleOwnerDocumentRequest(JSON.stringify({ ...replace, requestId: 'stale-load', operation: 'load' })))
+      await expect(
+        session.handleOwnerDocumentRequest(JSON.stringify({ ...replace, requestId: 'stale-load', operation: 'load' })),
+      )
         .resolves.toMatchObject({ value: { status: 'unavailable', code: 'stale-generation' } })
 
       await session.reset()
       const third = await session.buildBundle()
       const thirdMetadata = { token: tokenFrom(third.source), generation: third.generation }
       await expect(session.handleOwnerDocumentRequest(JSON.stringify({
-        version: 1, requestId: 'load-after-reset', token: thirdMetadata.token, operation: 'load', documentId: 'rooms',
+        version: 1,
+        requestId: 'load-after-reset',
+        token: thirdMetadata.token,
+        operation: 'load',
+        documentId: 'rooms',
       }))).resolves.toMatchObject({ requestId: 'load-after-reset', value: { status: 'missing', revision: 0 } })
     } finally {
       await session.close()

@@ -67,7 +67,7 @@ Each resumed task receives one concise handoff containing:
 
 - its owning repository and exclusive files or surfaces;
 - the user-visible decision that is already settled;
-- the last usable protocol and Host *formal* commits, not speculative heads;
+- the last usable protocol and Host _formal_ commits, not speculative heads;
 - its dependency order and the exact event that unblocks UI integration;
 - required validation, PR, CI, head-fenced merge, and mono-pointer boundary;
 - a reminder to preserve interrupted worktree changes and to re-audit remote

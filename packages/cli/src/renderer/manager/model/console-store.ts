@@ -14,8 +14,12 @@ export function createPluginConsoleStore(
   let current = model.pluginConsole?.(pluginId) ?? fallback
   return {
     getSnapshot: () => current,
-    subscribe: listener => model.subscribePluginConsole?.(changedId => {
-      if (changedId === pluginId) { current = model.pluginConsole?.(pluginId) ?? fallback; listener() }
-    }) ?? (() => {}),
+    subscribe: listener =>
+      model.subscribePluginConsole?.(changedId => {
+        if (changedId === pluginId) {
+          current = model.pluginConsole?.(pluginId) ?? fallback
+          listener()
+        }
+      }) ?? (() => {}),
   }
 }

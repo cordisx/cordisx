@@ -44,7 +44,11 @@ function numericAttribute(tag: string, name: string): number {
 function strokeColor(tag: string): Rgb {
   const value = tag.match(/stroke="#([\da-f]{6})"/i)?.[1]
   if (value === undefined) throw new Error('CordisX mark is missing stroke')
-  return [Number.parseInt(value.slice(0, 2), 16), Number.parseInt(value.slice(2, 4), 16), Number.parseInt(value.slice(4, 6), 16)]
+  return [
+    Number.parseInt(value.slice(0, 2), 16),
+    Number.parseInt(value.slice(2, 4), 16),
+    Number.parseInt(value.slice(4, 6), 16),
+  ]
 }
 
 function clamp(value: number, minimum = 0, maximum = 1): number {
@@ -93,7 +97,10 @@ function derivedMarkUri(id: string, preset: InternalBadgePreset, appearance: App
     return tag.replace(/stroke="#[\da-f]{6}"/i, `stroke="${toHex(shaded)}"`)
   })
     .replace(/<title[^>]*>.*?<\/title>/, `<title>CordisX ${id} mark</title>`)
-    .replace(/<desc[^>]*>.*?<\/desc>/, '<desc>CordisX official three-ring geometry with plugin-specific segment shading.</desc>')
+    .replace(
+      /<desc[^>]*>.*?<\/desc>/,
+      '<desc>CordisX official three-ring geometry with plugin-specific segment shading.</desc>',
+    )
   const uri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(recolored)}`
   badgeUriCache.set(cacheKey, uri)
   return uri
@@ -108,8 +115,23 @@ export function PluginIdentityMark({ pluginId, name, icon }: {
   if (icon !== undefined) return <img src={icon} alt="" />
   const preset = INTERNAL_BADGE_PRESETS[pluginId]
   if (preset === undefined) return <>{name.slice(0, 2).toLocaleUpperCase()}</>
-  return <span className="cxr-plugin-badge" data-accent={preset.accent} data-brand-geometry="official-1440-segments" data-gradient-mode="segment-depth" data-gradient-phase={stablePhase(pluginId)} data-internal-plugin-badge={pluginId} aria-hidden="true">
-    <img className="cxr-plugin-badge-dark" src={derivedMarkUri(pluginId, preset, 'dark')} alt="" draggable={false} />
-    <img className="cxr-plugin-badge-light" src={derivedMarkUri(pluginId, preset, 'light')} alt="" draggable={false} />
-  </span>
+  return (
+    <span
+      className="cxr-plugin-badge"
+      data-accent={preset.accent}
+      data-brand-geometry="official-1440-segments"
+      data-gradient-mode="segment-depth"
+      data-gradient-phase={stablePhase(pluginId)}
+      data-internal-plugin-badge={pluginId}
+      aria-hidden="true"
+    >
+      <img className="cxr-plugin-badge-dark" src={derivedMarkUri(pluginId, preset, 'dark')} alt="" draggable={false} />
+      <img
+        className="cxr-plugin-badge-light"
+        src={derivedMarkUri(pluginId, preset, 'light')}
+        alt=""
+        draggable={false}
+      />
+    </span>
+  )
 }

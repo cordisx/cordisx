@@ -1,20 +1,12 @@
 import { constants } from 'node:fs'
-import {
-  chmod,
-  lstat,
-  mkdir,
-  open,
-  rename,
-  stat,
-  unlink,
-} from 'node:fs/promises'
+import { chmod, lstat, mkdir, open, rename, stat, unlink } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {
+  type CordisXPersistedPermissionPolicyRecord,
   normalizePersistedPermissionPolicyRecord,
   persistedPermissionRecordKey,
-  type CordisXPersistedPermissionPolicyRecord,
 } from '../permission-persistence.js'
 
 export type HomeDataMode = 'shared' | 'host-isolated'
@@ -148,15 +140,18 @@ export interface HomeConfigWriteOptions extends HomeConfigPathOptions {
 
 const APP_OR_PROFILE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
-const ICON_PROVIDER_ID = /^(?:builtin:[a-z0-9][a-z0-9._-]{0,63}|plugin:[a-z0-9][a-z0-9._-]{0,63}:[a-z0-9][a-z0-9._-]{0,63})$/
+const ICON_PROVIDER_ID =
+  /^(?:builtin:[a-z0-9][a-z0-9._-]{0,63}|plugin:[a-z0-9][a-z0-9._-]{0,63}:[a-z0-9][a-z0-9._-]{0,63})$/
 const ICON_NAMESPACE = /^[a-z0-9][a-z0-9._-]{0,63}$/
 const ICON_GENERATION = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
-const SEMVER = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+const SEMVER =
+  /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
 const DEFAULT_LOCK_TIMEOUT_MS = 2_000
 const DEFAULT_LOCK_RETRY_MS = 25
 const DEFAULT_LOCK_STALE_MS = 30_000
 const MAX_MARKETPLACE_TRUST_SOURCES = 8
-export const DEFAULT_MARKETPLACE_TRUST_SOURCE = 'https://raw.githubusercontent.com/cordisx/marketplace/main/marketplace.json'
+export const DEFAULT_MARKETPLACE_TRUST_SOURCE =
+  'https://raw.githubusercontent.com/cordisx/marketplace/main/marketplace.json'
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -250,7 +245,9 @@ function parsePlugin(value: unknown, index: number): HomeConfigPlugin {
 }
 
 function nonNegativeRevision(value: unknown, label: string): number {
-  if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error(`${label} must be a non-negative safe integer`)
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error(`${label} must be a non-negative safe integer`)
+  }
   return value as number
 }
 
@@ -287,15 +284,24 @@ function parsePluginServiceCandidate(
 function parsePluginServiceProfile(value: unknown, label: string): HomeConfigPluginServiceProfile {
   const profile = record(value, label)
   rejectUnknownKeys(profile, [
-    'revision', 'lastGoodRevision', 'config', 'lastGoodConfig', 'restartRequired', 'candidate',
+    'revision',
+    'lastGoodRevision',
+    'config',
+    'lastGoodConfig',
+    'restartRequired',
+    'candidate',
   ], label)
   const revision = nonNegativeRevision(profile.revision, `${label}.revision`)
   const lastGoodRevision = nonNegativeRevision(profile.lastGoodRevision, `${label}.lastGoodRevision`)
   if (lastGoodRevision > revision) throw new Error(`${label}.lastGoodRevision must not exceed revision`)
   const pending = lastGoodRevision < revision
   if (pending) {
-    if (profile.restartRequired !== true) throw new Error(`${label}.restartRequired must be true while app restart is pending`)
-    if (profile.lastGoodConfig === undefined) throw new Error(`${label}.lastGoodConfig is required while app restart is pending`)
+    if (profile.restartRequired !== true) {
+      throw new Error(`${label}.restartRequired must be true while app restart is pending`)
+    }
+    if (profile.lastGoodConfig === undefined) {
+      throw new Error(`${label}.lastGoodConfig is required while app restart is pending`)
+    }
   } else if (profile.restartRequired !== undefined || profile.lastGoodConfig !== undefined) {
     throw new Error(`${label} must not retain app-restart state at last-good revision`)
   }
@@ -303,10 +309,12 @@ function parsePluginServiceProfile(value: unknown, label: string): HomeConfigPlu
     revision,
     lastGoodRevision,
     config: jsonValue(profile.config, `${label}.config`),
-    ...(pending ? {
-      lastGoodConfig: jsonValue(profile.lastGoodConfig, `${label}.lastGoodConfig`),
-      restartRequired: true as const,
-    } : {}),
+    ...(pending
+      ? {
+        lastGoodConfig: jsonValue(profile.lastGoodConfig, `${label}.lastGoodConfig`),
+        restartRequired: true as const,
+      }
+      : {}),
     ...(profile.candidate === undefined ? {} : {
       candidate: parsePluginServiceCandidate(profile.candidate, `${label}.candidate`, revision),
     }),
@@ -317,7 +325,10 @@ function parsePluginService(value: unknown, label: string): HomeConfigPluginServ
   const service = record(value, label)
   rejectUnknownKeys(service, ['profiles'], label)
   const source = record(service.profiles, `${label}.profiles`)
-  const profiles: Record<string, HomeConfigPluginServiceProfile> = Object.create(null) as Record<string, HomeConfigPluginServiceProfile>
+  const profiles: Record<string, HomeConfigPluginServiceProfile> = Object.create(null) as Record<
+    string,
+    HomeConfigPluginServiceProfile
+  >
   for (const [profileId, rawProfile] of Object.entries(source)) {
     portableId(profileId, `${label}.profiles profile id`)
     profiles[profileId] = parsePluginServiceProfile(rawProfile, `${label}.profiles.${profileId}`)
@@ -366,7 +377,15 @@ function parseProvider(value: unknown, index: number): HomeConfigProvider {
   const label = `config.providers[${index}]`
   const provider = record(value, label)
   rejectUnknownKeys(provider, [
-    'id', 'kind', 'displayName', 'baseUrl', 'apiKeyEnv', 'codexExecutable', 'dataDir', 'enabled', 'timeoutMs',
+    'id',
+    'kind',
+    'displayName',
+    'baseUrl',
+    'apiKeyEnv',
+    'codexExecutable',
+    'dataDir',
+    'enabled',
+    'timeoutMs',
   ], label)
   const id = nonEmptyString(provider.id, `${label}.id`)
   if (!/^[a-z0-9][a-z0-9._-]{0,95}$/.test(id)) throw new Error(`${label}.id is invalid: ${id}`)
@@ -374,15 +393,21 @@ function parseProvider(value: unknown, index: number): HomeConfigProvider {
   const displayName = nonEmptyString(provider.displayName, `${label}.displayName`)
   const baseUrl = nonEmptyString(provider.baseUrl, `${label}.baseUrl`)
   const apiKeyEnv = nonEmptyString(provider.apiKeyEnv, `${label}.apiKeyEnv`)
-  if (provider.enabled !== undefined && typeof provider.enabled !== 'boolean') throw new Error(`${label}.enabled must be a boolean`)
-  if (provider.timeoutMs !== undefined && !Number.isInteger(provider.timeoutMs)) throw new Error(`${label}.timeoutMs must be an integer`)
+  if (provider.enabled !== undefined && typeof provider.enabled !== 'boolean') {
+    throw new Error(`${label}.enabled must be a boolean`)
+  }
+  if (provider.timeoutMs !== undefined && !Number.isInteger(provider.timeoutMs)) {
+    throw new Error(`${label}.timeoutMs must be an integer`)
+  }
   return {
     id,
     kind: 'cli-proxy-api',
     displayName,
     baseUrl,
     apiKeyEnv,
-    ...(provider.codexExecutable === undefined ? {} : { codexExecutable: nonEmptyString(provider.codexExecutable, `${label}.codexExecutable`) }),
+    ...(provider.codexExecutable === undefined
+      ? {}
+      : { codexExecutable: nonEmptyString(provider.codexExecutable, `${label}.codexExecutable`) }),
     ...(provider.dataDir === undefined ? {} : { dataDir: nonEmptyString(provider.dataDir, `${label}.dataDir`) }),
     ...(provider.enabled === undefined ? {} : { enabled: provider.enabled }),
     ...(provider.timeoutMs === undefined ? {} : { timeoutMs: provider.timeoutMs as number }),
@@ -394,12 +419,14 @@ function parseIconThemePreference(value: unknown): HomeConfigIconThemePreference
   // unavailable. Discard it atomically and let the pinned Reicon default win.
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
   const preference = value as Record<string, unknown>
-  if (Object.keys(preference).sort().join(',') !== 'namespace,providerGeneration,providerId,providerVersion,revision'
+  if (
+    Object.keys(preference).sort().join(',') !== 'namespace,providerGeneration,providerId,providerVersion,revision'
     || !Number.isSafeInteger(preference.revision) || (preference.revision as number) < 1
     || typeof preference.providerId !== 'string' || !ICON_PROVIDER_ID.test(preference.providerId)
     || typeof preference.namespace !== 'string' || !ICON_NAMESPACE.test(preference.namespace)
     || typeof preference.providerVersion !== 'string' || !SEMVER.test(preference.providerVersion)
-    || typeof preference.providerGeneration !== 'string' || !ICON_GENERATION.test(preference.providerGeneration)) return undefined
+    || typeof preference.providerGeneration !== 'string' || !ICON_GENERATION.test(preference.providerGeneration)
+  ) return undefined
   return {
     revision: preference.revision as number,
     providerId: preference.providerId as HomeConfigIconThemePreference['providerId'],
@@ -450,7 +477,9 @@ function parsePublisherGrantIssuer(value: unknown, index: number): HomeConfigPub
   const keyId = nonEmptyString(issuer.keyId, `${label}.keyId`)
   if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(id)) throw new Error(`${label}.id is invalid`)
   if (!/^[A-Za-z0-9._-]{1,128}$/.test(keyId)) throw new Error(`${label}.keyId is invalid`)
-  if (issuer.environment !== 'sandbox' && issuer.environment !== 'live') throw new Error(`${label}.environment is invalid`)
+  if (issuer.environment !== 'sandbox' && issuer.environment !== 'live') {
+    throw new Error(`${label}.environment is invalid`)
+  }
   const publicKeySpki = nonEmptyString(issuer.publicKeySpki, `${label}.publicKeySpki`)
   if (!/^[A-Za-z0-9_-]+$/.test(publicKeySpki)) throw new Error(`${label}.publicKeySpki must be base64url`)
   return { id, keyId, environment: issuer.environment, publicKeySpki }
@@ -480,10 +509,21 @@ function parseMarketplaceTrustSource(value: unknown, index: number): HomeConfigM
 /** Strictly validate and normalize a version-1 CordisX home configuration. */
 export function parseHomeConfig(value: unknown): HomeConfig {
   const config = record(value, 'config')
-  rejectUnknownKeys(config, ['version', 'defaultApp', 'providers', 'plugins', 'permissions', 'publisherGrantIssuers', 'marketplaceTrustSources', 'apps'], 'config')
+  rejectUnknownKeys(config, [
+    'version',
+    'defaultApp',
+    'providers',
+    'plugins',
+    'permissions',
+    'publisherGrantIssuers',
+    'marketplaceTrustSources',
+    'apps',
+  ], 'config')
   if (config.version !== 1) throw new Error('config.version must be 1')
   const defaultApp = portableId(config.defaultApp, 'config.defaultApp')
-  if (config.providers !== undefined && !Array.isArray(config.providers)) throw new Error('config.providers must be an array')
+  if (config.providers !== undefined && !Array.isArray(config.providers)) {
+    throw new Error('config.providers must be an array')
+  }
   const seenProviders = new Set<string>()
   const providers = (config.providers ?? []).map((value, index) => {
     const provider = parseProvider(value, index)
@@ -499,7 +539,9 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     seenPlugins.add(plugin.id)
     return plugin
   })
-  if (config.permissions !== undefined && !Array.isArray(config.permissions)) throw new Error('config.permissions must be an array')
+  if (config.permissions !== undefined && !Array.isArray(config.permissions)) {
+    throw new Error('config.permissions must be an array')
+  }
   const seenPermissions = new Set<string>()
   const permissions = (config.permissions ?? []).map((value, index) => {
     const policy = normalizePersistedPermissionPolicyRecord(value, `config.permissions[${index}]`)
@@ -508,7 +550,9 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     seenPermissions.add(key)
     return policy
   })
-  if (config.publisherGrantIssuers !== undefined && !Array.isArray(config.publisherGrantIssuers)) throw new Error('config.publisherGrantIssuers must be an array')
+  if (config.publisherGrantIssuers !== undefined && !Array.isArray(config.publisherGrantIssuers)) {
+    throw new Error('config.publisherGrantIssuers must be an array')
+  }
   const publisherGrantIssuers = (config.publisherGrantIssuers ?? []).map(parsePublisherGrantIssuer)
   const seenIssuerKeys = new Set<string>()
   for (const issuer of publisherGrantIssuers) {
@@ -528,7 +572,9 @@ export function parseHomeConfig(value: unknown): HomeConfig {
   }
   const seenMarketplaceTrustSources = new Set<string>()
   for (const source of marketplaceTrustSources) {
-    if (seenMarketplaceTrustSources.has(source.url)) throw new Error(`duplicate Marketplace trust source: ${source.url}`)
+    if (seenMarketplaceTrustSources.has(source.url)) {
+      throw new Error(`duplicate Marketplace trust source: ${source.url}`)
+    }
     seenMarketplaceTrustSources.add(source.url)
   }
   const rawApps = record(config.apps, 'config.apps')
@@ -538,7 +584,16 @@ export function parseHomeConfig(value: unknown): HomeConfig {
     apps[appId] = parseApp(rawApp, `config.apps.${appId}`)
   }
   if (!Object.hasOwn(apps, defaultApp)) throw new Error(`config.defaultApp references missing app: ${defaultApp}`)
-  return { version: 1, defaultApp, providers, plugins, permissions, publisherGrantIssuers, marketplaceTrustSources, apps }
+  return {
+    version: 1,
+    defaultApp,
+    providers,
+    plugins,
+    permissions,
+    publisherGrantIssuers,
+    marketplaceTrustSources,
+    apps,
+  }
 }
 
 /** Return a new deterministic configuration for first launch or non-interactive setup. */
@@ -703,7 +758,9 @@ async function ensurePrivateDirectory(directory: string, policy: PrivateDirector
       if (policy.requireCurrentUserOwnership) {
         const uid = process.getuid?.()
         if (uid === undefined || metadata.uid !== uid) {
-          throw new Error(`CordisX home must be owned by the current user before CordisX can make it private: ${directory}`)
+          throw new Error(
+            `CordisX home must be owned by the current user before CordisX can make it private: ${directory}`,
+          )
         }
       }
       await chmod(directory, 0o700)

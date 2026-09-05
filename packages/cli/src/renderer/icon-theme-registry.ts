@@ -1,14 +1,9 @@
 import {
   BUILTIN_REICON_IDENTITY,
+  type CordisXIconThemeProviderDefinitionV1,
   ICON_STATES,
   ICON_THEME_CATALOG_DIGEST,
   ICON_VARIANTS,
-  SEMANTIC_ICON_KEYS,
-  isIconState,
-  isIconVariant,
-  isNormalizedVectorDescriptor,
-  isSemanticIconKey,
-  type CordisXIconThemeProviderDefinitionV1,
   type IconState,
   type IconThemeCoverage,
   type IconThemeLifecycleResult,
@@ -19,22 +14,33 @@ import {
   type IconThemeResolutionResult,
   type IconThemeSelection,
   type IconVariant,
+  isIconState,
+  isIconVariant,
+  isNormalizedVectorDescriptor,
+  isSemanticIconKey,
   type NormalizedVectorDescriptor,
+  SEMANTIC_ICON_KEYS,
   type SemanticIconKey,
 } from '../icon-theme-contracts.js'
 import { resolveBuiltinReiconDescriptor } from './reicon-icon-backend.js'
 
-const REGISTRATION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-provider-registration.v1.schema.json' as const
-const SELECTION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-selection.v1.schema.json' as const
-const REQUEST_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-resolution-request.v1.schema.json' as const
-const RESULT_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-resolution-result.v1.schema.json' as const
-const LIFECYCLE_RESULT_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-lifecycle-result.v1.schema.json' as const
+const REGISTRATION_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-provider-registration.v1.schema.json' as const
+const SELECTION_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-selection.v1.schema.json' as const
+const REQUEST_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-resolution-request.v1.schema.json' as const
+const RESULT_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-resolution-result.v1.schema.json' as const
+const LIFECYCLE_RESULT_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/icon-theme-lifecycle-result.v1.schema.json' as const
 const BUILTIN_GENERATION = 'reicon-1.2.1' as const
 const namespacePattern = /^[a-z0-9][a-z0-9._-]{0,63}$/u
 const pluginIdPattern = /^[a-z0-9][a-z0-9._-]{0,63}$/u
 const generationPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u
 const principalPattern = /^ipp_[A-Za-z0-9_-]{16,124}$/u
-const semverPattern = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u
+const semverPattern =
+  /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u
 
 export interface IconThemePluginPrincipal {
   readonly principalHandle: `ipp_${string}`
@@ -65,7 +71,12 @@ export interface IconThemeResolution {
 export interface RedactedIconThemeSnapshot {
   readonly profileId: string
   readonly profileRevision: number
-  readonly selected: Readonly<Pick<IconThemeProviderReference, 'providerId' | 'namespace' | 'protocolVersion' | 'providerVersion' | 'providerGeneration'>>
+  readonly selected: Readonly<
+    Pick<
+      IconThemeProviderReference,
+      'providerId' | 'namespace' | 'protocolVersion' | 'providerVersion' | 'providerGeneration'
+    >
+  >
   readonly providers: readonly {
     readonly providerId: string
     readonly namespace: string
@@ -127,20 +138,39 @@ export class IconThemeRegistry {
   private readonly listeners = new Set<() => void>()
 
   constructor(readonly hostGeneration: string, readonly profileId: string) {
-    if (!generationPattern.test(hostGeneration) || profileId.length < 1 || profileId.length > 128) throw new Error('invalid icon-theme Host scope')
+    if (!generationPattern.test(hostGeneration) || profileId.length < 1 || profileId.length > 128) {
+      throw new Error('invalid icon-theme Host scope')
+    }
     this.builtinProviderHandle = `iph_${this.handleNonce}_00000000`
     this.selectedHandle = this.builtinProviderHandle
-    for (const key of SEMANTIC_ICON_KEYS) for (const variant of ICON_VARIANTS) for (const state of ICON_STATES) {
-      if (!isNormalizedVectorDescriptor(resolveBuiltinReiconDescriptor(key, variant, state))) throw new Error('built-in Reicon conformance failed')
+    for (const key of SEMANTIC_ICON_KEYS) {
+      for (const variant of ICON_VARIANTS) {
+        for (const state of ICON_STATES) {
+          if (!isNormalizedVectorDescriptor(resolveBuiltinReiconDescriptor(key, variant, state))) {
+            throw new Error('built-in Reicon conformance failed')
+          }
+        }
+      }
     }
     const coverage: IconThemeCoverage = {
       kind: 'complete',
       proof: {
-        kind: 'host-conformance', proofId: 'reiconproof00000001', catalogVersion: 1,
-        catalogDigest: ICON_THEME_CATALOG_DIGEST, providerId: BUILTIN_REICON_IDENTITY.providerId,
-        namespace: BUILTIN_REICON_IDENTITY.namespace, providerVersion: BUILTIN_REICON_IDENTITY.providerVersion,
-        providerGeneration: BUILTIN_GENERATION, protocolVersion: 1, descriptorFormatVersion: 1,
-        keyCount: 64, variantCount: 3, stateCount: 8, tupleCount: 1536, outcome: 'passed', rawDataExported: false,
+        kind: 'host-conformance',
+        proofId: 'reiconproof00000001',
+        catalogVersion: 1,
+        catalogDigest: ICON_THEME_CATALOG_DIGEST,
+        providerId: BUILTIN_REICON_IDENTITY.providerId,
+        namespace: BUILTIN_REICON_IDENTITY.namespace,
+        providerVersion: BUILTIN_REICON_IDENTITY.providerVersion,
+        providerGeneration: BUILTIN_GENERATION,
+        protocolVersion: 1,
+        descriptorFormatVersion: 1,
+        keyCount: 64,
+        variantCount: 3,
+        stateCount: 8,
+        tupleCount: 1536,
+        outcome: 'passed',
+        rawDataExported: false,
       },
     }
     const builtin: ProviderRecord = {
@@ -171,11 +201,17 @@ export class IconThemeRegistry {
     return this.selectedHandle === this.builtinProviderHandle ? 'none' : 'reicon'
   }
 
-  private notify(): void { for (const listener of this.listeners) listener() }
+  private notify(): void {
+    for (const listener of this.listeners) listener()
+  }
 
-  private assertLive(): void { if (this.disposed) throw new Error('icon-theme registry is disposed') }
+  private assertLive(): void {
+    if (this.disposed) throw new Error('icon-theme registry is disposed')
+  }
 
-  private active(): ProviderRecord { return this.records.get(this.selectedHandle)! }
+  private active(): ProviderRecord {
+    return this.records.get(this.selectedHandle)!
+  }
 
   private result(
     requestId: string,
@@ -184,9 +220,17 @@ export class IconThemeRegistry {
     extra: Pick<IconThemeLifecycleResult, 'affectedProviderHandle' | 'disposedGeneration' | 'error'> = {},
   ): IconThemeLifecycleResult {
     return {
-      $schema: LIFECYCLE_RESULT_SCHEMA, schemaVersion: 1, authority: 'host', requestId,
-      profileId: this.profileId, operation, outcome, profileRevision: this.profileRevision,
-      hostGeneration: this.hostGeneration, activeProvider: reference(this.active()), ...extra,
+      $schema: LIFECYCLE_RESULT_SCHEMA,
+      schemaVersion: 1,
+      authority: 'host',
+      requestId,
+      profileId: this.profileId,
+      operation,
+      outcome,
+      profileRevision: this.profileRevision,
+      hostGeneration: this.hostGeneration,
+      activeProvider: reference(this.active()),
+      ...extra,
     }
   }
 
@@ -196,8 +240,12 @@ export class IconThemeRegistry {
     expectedProfileRevision: number,
     hostGeneration: string,
   ): IconThemeLifecycleResult | undefined {
-    if (hostGeneration !== this.hostGeneration) return this.result(requestId, operation, 'conflict', { error: { code: 'stale-host-generation' } })
-    if (expectedProfileRevision !== this.profileRevision) return this.result(requestId, operation, 'conflict', { error: { code: 'stale-revision' } })
+    if (hostGeneration !== this.hostGeneration) {
+      return this.result(requestId, operation, 'conflict', { error: { code: 'stale-host-generation' } })
+    }
+    if (expectedProfileRevision !== this.profileRevision) {
+      return this.result(requestId, operation, 'conflict', { error: { code: 'stale-revision' } })
+    }
     return undefined
   }
 
@@ -211,21 +259,28 @@ export class IconThemeRegistry {
     this.assertLive()
     const conflict = this.fence(requestId, 'register', expectedProfileRevision, hostGeneration)
     if (conflict !== undefined) return { result: conflict }
-    if (!pluginIdPattern.test(principal.pluginId) || !principalPattern.test(principal.principalHandle)
+    if (
+      !pluginIdPattern.test(principal.pluginId) || !principalPattern.test(principal.principalHandle)
       || !generationPattern.test(principal.providerGeneration) || definition === null || typeof definition !== 'object'
       || Object.keys(definition).sort().join(',') !== 'descriptors,namespace,providerVersion,schemaVersion'
       || definition.schemaVersion !== 1 || !namespacePattern.test(definition.namespace)
       || !semverPattern.test(definition.providerVersion) || !Array.isArray(definition.descriptors)
-      || definition.descriptors.length < 1 || definition.descriptors.length > 1535) {
+      || definition.descriptors.length < 1 || definition.descriptors.length > 1535
+    ) {
       return { result: this.result(requestId, 'register', 'rejected', { error: { code: 'identity-mismatch' } }) }
     }
-    if (this.namespaces.has(definition.namespace)) return { result: this.result(requestId, 'register', 'rejected', { error: { code: 'namespace-conflict' } }) }
+    if (this.namespaces.has(definition.namespace)) {
+      return { result: this.result(requestId, 'register', 'rejected', { error: { code: 'namespace-conflict' } }) }
+    }
     const descriptors = new Map<string, NormalizedVectorDescriptor>()
     try {
       for (const entry of definition.descriptors) {
-        if (entry === null || typeof entry !== 'object' || Object.keys(entry).sort().join(',') !== 'descriptor,key,state,variant'
+        if (
+          entry === null || typeof entry !== 'object'
+          || Object.keys(entry).sort().join(',') !== 'descriptor,key,state,variant'
           || !isSemanticIconKey(entry.key) || !isIconVariant(entry.variant) || !isIconState(entry.state)
-          || !isNormalizedVectorDescriptor(entry.descriptor)) throw new Error('invalid descriptor entry')
+          || !isNormalizedVectorDescriptor(entry.descriptor)
+        ) throw new Error('invalid descriptor entry')
         const key = tupleKey(entry.key, entry.variant, entry.state)
         if (descriptors.has(key)) throw new Error('duplicate descriptor tuple')
         descriptors.set(key, cloneDescriptor(entry.descriptor))
@@ -234,12 +289,14 @@ export class IconThemeRegistry {
       return { result: this.result(requestId, 'register', 'rejected', { error: { code: 'invalid-descriptor' } }) }
     }
     const providerHandle = `iph_${this.handleNonce}_${String(this.nextHandle++).padStart(8, '0')}` as const
-    const identity = Object.freeze({
-      providerId: `plugin:${principal.pluginId}:${definition.namespace}`,
-      namespace: definition.namespace,
-      protocolVersion: 1,
-      providerVersion: definition.providerVersion,
-    } as const satisfies IconThemeProviderIdentity)
+    const identity = Object.freeze(
+      {
+        providerId: `plugin:${principal.pluginId}:${definition.namespace}`,
+        namespace: definition.namespace,
+        protocolVersion: 1,
+        providerVersion: definition.providerVersion,
+      } as const satisfies IconThemeProviderIdentity,
+    )
     const coverage: IconThemeCoverage = {
       kind: 'partial',
       entries: definition.descriptors.map(({ key, variant, state }) => ({ key, variant, state })),
@@ -264,16 +321,36 @@ export class IconThemeRegistry {
     }
   }
 
-  select(requestId: string, expectedProfileRevision: number, hostGeneration: string, providerHandle: `iph_${string}`, providerGeneration: string): IconThemeLifecycleResult {
+  select(
+    requestId: string,
+    expectedProfileRevision: number,
+    hostGeneration: string,
+    providerHandle: `iph_${string}`,
+    providerGeneration: string,
+  ): IconThemeLifecycleResult {
     this.assertLive()
     const conflict = this.fence(requestId, 'select', expectedProfileRevision, hostGeneration)
     if (conflict !== undefined) return conflict
     const record = this.records.get(providerHandle)
-    if (record === undefined) return this.result(requestId, 'select', 'rejected', { error: { code: 'unknown-provider' } })
-    if (record.providerGeneration !== providerGeneration) return this.result(requestId, 'select', 'rejected', { affectedProviderHandle: providerHandle, error: { code: 'stale-provider-generation' } })
-    if (record.status !== 'ready' && record.status !== 'active') return this.result(requestId, 'select', 'rejected', { affectedProviderHandle: providerHandle, error: { code: 'prepare-failed' } })
+    if (record === undefined) {
+      return this.result(requestId, 'select', 'rejected', { error: { code: 'unknown-provider' } })
+    }
+    if (record.providerGeneration !== providerGeneration) {
+      return this.result(requestId, 'select', 'rejected', {
+        affectedProviderHandle: providerHandle,
+        error: { code: 'stale-provider-generation' },
+      })
+    }
+    if (record.status !== 'ready' && record.status !== 'active') {
+      return this.result(requestId, 'select', 'rejected', {
+        affectedProviderHandle: providerHandle,
+        error: { code: 'prepare-failed' },
+      })
+    }
     const previous = this.active()
-    if (previous.providerHandle !== this.builtinProviderHandle && previous.providerHandle !== providerHandle) previous.status = 'ready'
+    if (previous.providerHandle !== this.builtinProviderHandle && previous.providerHandle !== providerHandle) {
+      previous.status = 'ready'
+    }
     record.status = 'active'
     record.lastGoodGeneration = record.providerGeneration
     this.selectedHandle = providerHandle
@@ -297,29 +374,65 @@ export class IconThemeRegistry {
     this.assertLive()
     const conflict = this.fence(requestId, 'select', expectedProfileRevision, hostGeneration)
     if (conflict !== undefined) return conflict
-    const record = [...this.records.values()].find(item => item.identity.providerId === candidate.providerId
+    const record = [...this.records.values()].find(item =>
+      item.identity.providerId === candidate.providerId
       && item.identity.namespace === candidate.namespace && item.identity.providerVersion === candidate.providerVersion
-      && item.providerGeneration === candidate.providerGeneration)
-    if (record === undefined) return this.result(requestId, 'select', 'rejected', { error: { code: 'unknown-provider' } })
-    return this.select(requestId, expectedProfileRevision, hostGeneration, record.providerHandle, candidate.providerGeneration)
+      && item.providerGeneration === candidate.providerGeneration
+    )
+    if (record === undefined) {
+      return this.result(requestId, 'select', 'rejected', { error: { code: 'unknown-provider' } })
+    }
+    return this.select(
+      requestId,
+      expectedProfileRevision,
+      hostGeneration,
+      record.providerHandle,
+      candidate.providerGeneration,
+    )
   }
 
-  disposeProvider(requestId: string, expectedProfileRevision: number, hostGeneration: string, providerHandle: `iph_${string}`, providerGeneration: string): IconThemeLifecycleResult {
+  disposeProvider(
+    requestId: string,
+    expectedProfileRevision: number,
+    hostGeneration: string,
+    providerHandle: `iph_${string}`,
+    providerGeneration: string,
+  ): IconThemeLifecycleResult {
     this.assertLive()
     const conflict = this.fence(requestId, 'dispose', expectedProfileRevision, hostGeneration)
     if (conflict !== undefined) return conflict
     const record = this.records.get(providerHandle)
-    if (record === undefined) return this.result(requestId, 'dispose', 'rejected', { error: { code: 'unknown-provider' } })
-    if (record.providerGeneration !== providerGeneration) return this.result(requestId, 'dispose', 'rejected', { affectedProviderHandle: providerHandle, error: { code: 'stale-provider-generation' } })
-    if (this.selectedHandle === providerHandle) return this.result(requestId, 'dispose', 'rejected', { affectedProviderHandle: providerHandle, error: { code: 'provider-selected' } })
-    if (record.status === 'disposed') return this.result(requestId, 'dispose', 'applied', { affectedProviderHandle: providerHandle, disposedGeneration: providerGeneration })
+    if (record === undefined) {
+      return this.result(requestId, 'dispose', 'rejected', { error: { code: 'unknown-provider' } })
+    }
+    if (record.providerGeneration !== providerGeneration) {
+      return this.result(requestId, 'dispose', 'rejected', {
+        affectedProviderHandle: providerHandle,
+        error: { code: 'stale-provider-generation' },
+      })
+    }
+    if (this.selectedHandle === providerHandle) {
+      return this.result(requestId, 'dispose', 'rejected', {
+        affectedProviderHandle: providerHandle,
+        error: { code: 'provider-selected' },
+      })
+    }
+    if (record.status === 'disposed') {
+      return this.result(requestId, 'dispose', 'applied', {
+        affectedProviderHandle: providerHandle,
+        disposedGeneration: providerGeneration,
+      })
+    }
     record.status = 'disposed'
     record.failureCode = 'disposed'
     this.namespaces.delete(record.identity.namespace)
     this.profileRevision += 1
     record.revision = this.profileRevision
     this.notify()
-    return this.result(requestId, 'dispose', 'applied', { affectedProviderHandle: providerHandle, disposedGeneration: providerGeneration })
+    return this.result(requestId, 'dispose', 'applied', {
+      affectedProviderHandle: providerHandle,
+      disposedGeneration: providerGeneration,
+    })
   }
 
   rollback(
@@ -330,19 +443,30 @@ export class IconThemeRegistry {
     failedGeneration: string,
     restoreProviderHandle: `iph_${string}`,
     restoreGeneration: string,
-    reason: 'prepare-failed' | 'resolution-failed' | 'invalid-descriptor' | 'provider-unavailable' = 'resolution-failed',
+    reason: 'prepare-failed' | 'resolution-failed' | 'invalid-descriptor' | 'provider-unavailable' =
+      'resolution-failed',
   ): IconThemeLifecycleResult {
     this.assertLive()
     const conflict = this.fence(requestId, 'rollback', expectedProfileRevision, hostGeneration)
     if (conflict !== undefined) return conflict
     const failed = this.records.get(failedProviderHandle)
     const restore = this.records.get(restoreProviderHandle)
-    if (failed === undefined || failed.providerGeneration !== failedGeneration || this.selectedHandle !== failedProviderHandle
-      || restore === undefined || restore.providerHandle !== this.builtinProviderHandle || restore.providerGeneration !== restoreGeneration || restore.status === 'disposed') {
-      if (failed !== undefined && failed.providerGeneration === failedGeneration && this.selectedHandle === failedProviderHandle) failed.status = 'failed'
+    if (
+      failed === undefined || failed.providerGeneration !== failedGeneration
+      || this.selectedHandle !== failedProviderHandle
+      || restore === undefined || restore.providerHandle !== this.builtinProviderHandle
+      || restore.providerGeneration !== restoreGeneration || restore.status === 'disposed'
+    ) {
+      if (
+        failed !== undefined && failed.providerGeneration === failedGeneration
+        && this.selectedHandle === failedProviderHandle
+      ) failed.status = 'failed'
       this.forceNeutralFallback = true
       this.notify()
-      return this.result(requestId, 'rollback', 'rollback-failed', { affectedProviderHandle: failedProviderHandle, error: { code: 'rollback-failed' } })
+      return this.result(requestId, 'rollback', 'rollback-failed', {
+        affectedProviderHandle: failedProviderHandle,
+        error: { code: 'rollback-failed' },
+      })
     }
     failed.status = 'failed'
     failed.failureCode = reason === 'provider-unavailable' ? 'resolution-failed' : reason
@@ -363,9 +487,15 @@ export class IconThemeRegistry {
     this.assertLive()
     const selected = this.active()
     return {
-      $schema: REQUEST_SCHEMA, schemaVersion: 1, requestId: `iconrequest_${String(this.nextRequest++).padStart(16, '0')}`,
-      hostGeneration: this.hostGeneration, providerHandle: selected.providerHandle,
-      providerGeneration: selected.providerGeneration, key, variant, state,
+      $schema: REQUEST_SCHEMA,
+      schemaVersion: 1,
+      requestId: `iconrequest_${String(this.nextRequest++).padStart(16, '0')}`,
+      hostGeneration: this.hostGeneration,
+      providerHandle: selected.providerHandle,
+      providerGeneration: selected.providerGeneration,
+      key,
+      variant,
+      state,
     }
   }
 
@@ -379,8 +509,10 @@ export class IconThemeRegistry {
       && result.requestId === request.requestId && result.providerGeneration === request.providerGeneration
       && record !== undefined && record.providerGeneration === request.providerGeneration
       && record.status !== 'disposed' && record.status !== 'failed' && this.selectedHandle === request.providerHandle
-    if (correlated && result.outcome === 'resolved' && isNormalizedVectorDescriptor(result.descriptor)
-      && record.descriptors.has(tupleKey(request.key, request.variant, request.state))) {
+    if (
+      correlated && result.outcome === 'resolved' && isNormalizedVectorDescriptor(result.descriptor)
+      && record.descriptors.has(tupleKey(request.key, request.variant, request.state))
+    ) {
       return { descriptor: cloneDescriptor(result.descriptor), provider: reference(record), fallback: 'none', request }
     }
     return this.reiconFallback(request)
@@ -393,28 +525,44 @@ export class IconThemeRegistry {
       const descriptor = record.descriptors.get(tupleKey(key, variant, state))
       if (descriptor !== undefined) {
         return this.acceptResolution(request, {
-          $schema: RESULT_SCHEMA, schemaVersion: 1, requestId: request.requestId,
-          providerGeneration: record.providerGeneration, outcome: 'resolved', descriptor,
+          $schema: RESULT_SCHEMA,
+          schemaVersion: 1,
+          requestId: request.requestId,
+          providerGeneration: record.providerGeneration,
+          outcome: 'resolved',
+          descriptor,
         })
       }
     }
     return this.reiconFallback(request, record.providerHandle === this.builtinProviderHandle ? 'none' : 'reicon')
   }
 
-  private reiconFallback(request: IconThemeResolutionRequest, fallback: 'none' | 'reicon' = 'reicon'): IconThemeResolution {
+  private reiconFallback(
+    request: IconThemeResolutionRequest,
+    fallback: 'none' | 'reicon' = 'reicon',
+  ): IconThemeResolution {
     if (this.forceNeutralFallback) {
       return {
         descriptor: resolveBuiltinReiconDescriptor('control.minus', 'regular', 'default'),
-        provider: { providerId: 'host:neutral' }, fallback: 'neutral', request,
+        provider: { providerId: 'host:neutral' },
+        fallback: 'neutral',
+        request,
       }
     }
     const builtin = this.records.get(this.builtinProviderHandle)
     if (builtin !== undefined && builtin.status !== 'disposed' && builtin.status !== 'failed') {
-      return { descriptor: resolveBuiltinReiconDescriptor(request.key, request.variant, request.state), provider: reference(builtin), fallback, request }
+      return {
+        descriptor: resolveBuiltinReiconDescriptor(request.key, request.variant, request.state),
+        provider: reference(builtin),
+        fallback,
+        request,
+      }
     }
     return {
       descriptor: resolveBuiltinReiconDescriptor('control.minus', 'regular', 'default'),
-      provider: { providerId: 'host:neutral' }, fallback: 'neutral', request,
+      provider: { providerId: 'host:neutral' },
+      fallback: 'neutral',
+      request,
     }
   }
 
@@ -422,9 +570,16 @@ export class IconThemeRegistry {
     const record = this.records.get(providerHandle)
     if (record === undefined) return undefined
     return {
-      $schema: REGISTRATION_SCHEMA, schemaVersion: 1, authority: 'host', hostGeneration: this.hostGeneration,
-      revision: record.revision, providerHandle: record.providerHandle, principal: clone(record.principal),
-      identity: { ...record.identity }, providerGeneration: record.providerGeneration, status: record.status,
+      $schema: REGISTRATION_SCHEMA,
+      schemaVersion: 1,
+      authority: 'host',
+      hostGeneration: this.hostGeneration,
+      revision: record.revision,
+      providerHandle: record.providerHandle,
+      principal: clone(record.principal),
+      identity: { ...record.identity },
+      providerGeneration: record.providerGeneration,
+      status: record.status,
       coverage: clone(record.coverage),
       ...(record.lastGoodGeneration === undefined ? {} : { lastGoodGeneration: record.lastGoodGeneration }),
       ...(record.failureCode === undefined ? {} : { failureCode: record.failureCode }),
@@ -434,7 +589,10 @@ export class IconThemeRegistry {
   selection(): IconThemeSelection {
     const builtin = this.records.get(this.builtinProviderHandle)!
     const selected = this.active()
-    const pin = <T extends ProviderRecord>(record: T) => ({ ...reference(record), profileRevision: this.profileRevision })
+    const pin = <T extends ProviderRecord>(record: T) => ({
+      ...reference(record),
+      profileRevision: this.profileRevision,
+    })
     const builtinPin = {
       providerHandle: builtin.providerHandle,
       providerId: 'builtin:reicon' as const,
@@ -445,11 +603,18 @@ export class IconThemeRegistry {
       profileRevision: this.profileRevision,
     }
     return {
-      $schema: SELECTION_SCHEMA, schemaVersion: 1, authority: 'host', profileId: this.profileId,
-      profileRevision: this.profileRevision, hostGeneration: this.hostGeneration,
+      $schema: SELECTION_SCHEMA,
+      schemaVersion: 1,
+      authority: 'host',
+      profileId: this.profileId,
+      profileRevision: this.profileRevision,
+      hostGeneration: this.hostGeneration,
       ...(this.requestedProviderHandle === undefined ? {} : { requestedProviderHandle: this.requestedProviderHandle }),
-      defaultProvider: builtinPin, selectedProvider: pin(selected), fallbackProvider: { ...builtinPin },
-      outcome: this.selectionOutcome, reason: this.selectionReason,
+      defaultProvider: builtinPin,
+      selectedProvider: pin(selected),
+      fallbackProvider: { ...builtinPin },
+      outcome: this.selectionOutcome,
+      reason: this.selectionReason,
     }
   }
 
@@ -459,14 +624,22 @@ export class IconThemeRegistry {
       profileId: this.profileId,
       profileRevision: this.profileRevision,
       selected: {
-        providerId: selected.providerId, namespace: selected.namespace, protocolVersion: selected.protocolVersion,
-        providerVersion: selected.providerVersion, providerGeneration: selected.providerGeneration,
+        providerId: selected.providerId,
+        namespace: selected.namespace,
+        protocolVersion: selected.protocolVersion,
+        providerVersion: selected.providerVersion,
+        providerGeneration: selected.providerGeneration,
       },
       providers: [...this.records.values()].map(record => ({
-        providerId: record.identity.providerId, namespace: record.identity.namespace,
-        providerVersion: record.identity.providerVersion, providerGeneration: record.providerGeneration,
-        status: record.status, coverage: record.coverage.kind,
-        tupleCount: record.coverage.kind === 'complete' ? record.coverage.proof.tupleCount : record.coverage.entries.length,
+        providerId: record.identity.providerId,
+        namespace: record.identity.namespace,
+        providerVersion: record.identity.providerVersion,
+        providerGeneration: record.providerGeneration,
+        status: record.status,
+        coverage: record.coverage.kind,
+        tupleCount: record.coverage.kind === 'complete'
+          ? record.coverage.proof.tupleCount
+          : record.coverage.entries.length,
       })),
     }
   }

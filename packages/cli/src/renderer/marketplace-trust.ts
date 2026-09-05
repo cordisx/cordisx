@@ -4,10 +4,12 @@ const TRUST_AUTHORITY = 'cordisx.marketplace.codeowners/v1'
 const TRUST_GRANT_MODEL = 'protected-merge-chain-v1'
 const OFFICIAL_DESIGNATION = 'cordisx-official'
 const CERTIFICATION_LEVEL = 'cordisx-certified'
-const CERTIFIED_PERMISSION_PROJECTION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v1.schema.json'
+const CERTIFIED_PERMISSION_PROJECTION_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v1.schema.json'
 const LOCAL_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const REFERENCE_PATTERN = /^[a-z0-9][a-z0-9._-]{0,95}(?::[a-z0-9][a-z0-9._-]{0,95})?$/
-const SEMVER_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+const SEMVER_PATTERN =
+  /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/
 const OFFICIAL_SOURCE_PATTERN = /^https:\/\/github\.com\/cordisx\/[A-Za-z0-9_.-]+$/
 const EVIDENCE_PATTERN = /^https:\/\/github\.com\/cordisx\/marketplace\/(?:pull\/[1-9][0-9]*|commit\/[a-f0-9]{40})$/
@@ -122,11 +124,18 @@ export interface MarketplaceTrustOptions {
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} 必须是 JSON object`)
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} 必须是 JSON object`)
+  }
   return value as Record<string, unknown>
 }
 
-function assertKeys(value: Record<string, unknown>, allowed: readonly string[], required: readonly string[], label: string): void {
+function assertKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  required: readonly string[],
+  label: string,
+): void {
   const allowedSet = new Set(allowed)
   const unexpected = Object.keys(value).filter(key => !allowedSet.has(key))
   if (unexpected.length > 0) throw new Error(`${label} 包含不支持的字段: ${unexpected.join(', ')}`)
@@ -135,7 +144,10 @@ function assertKeys(value: Record<string, unknown>, allowed: readonly string[], 
 }
 
 function string(value: unknown, label: string, pattern?: RegExp, maxLength = 2048): string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > maxLength || (pattern !== undefined && !pattern.test(value))) {
+  if (
+    typeof value !== 'string' || value.length === 0 || value.length > maxLength
+    || (pattern !== undefined && !pattern.test(value))
+  ) {
     throw new Error(`${label} 不是有效字符串`)
   }
   return value
@@ -171,10 +183,14 @@ function localizedText(value: unknown, label: string): MarketplaceLocalizedText 
     ? undefined
     : string(entry.namespace, `${label}.namespace`, REFERENCE_PATTERN, 193)
   const paramsValue = entry.params === undefined ? undefined : object(entry.params, `${label}.params`)
-  if (paramsValue !== undefined && Object.keys(paramsValue).length > 32) throw new Error(`${label}.params 不能超过 32 项`)
+  if (paramsValue !== undefined && Object.keys(paramsValue).length > 32) {
+    throw new Error(`${label}.params 不能超过 32 项`)
+  }
   const params: Record<string, string | number | boolean | null> = {}
   for (const [key, param] of Object.entries(paramsValue ?? {})) {
-    if (!/^[a-z][a-zA-Z0-9]*$/.test(key) || (param !== null && !['string', 'number', 'boolean'].includes(typeof param))) {
+    if (
+      !/^[a-z][a-zA-Z0-9]*$/.test(key) || (param !== null && !['string', 'number', 'boolean'].includes(typeof param))
+    ) {
       throw new Error(`${label}.params.${key} 不是有效 scalar 参数`)
     }
     params[key] = param as string | number | boolean | null
@@ -187,7 +203,10 @@ function localizedText(value: unknown, label: string): MarketplaceLocalizedText 
   }
 }
 
-function reviewer(value: unknown, label: string): { readonly authority: typeof TRUST_AUTHORITY; readonly evidenceRef: string } {
+function reviewer(
+  value: unknown,
+  label: string,
+): { readonly authority: typeof TRUST_AUTHORITY; readonly evidenceRef: string } {
   const entry = object(value, label)
   assertKeys(entry, ['authority', 'evidenceRef'], ['authority', 'evidenceRef'], label)
   return {
@@ -200,20 +219,47 @@ function officialRecord(value: unknown, index: number, generatedAt: number): Mar
   const label = `official[${index}]`
   const entry = object(value, label)
   assertKeys(entry, [
-    '$schema', 'schemaVersion', 'designation', 'identity', 'verificationPolicy', 'verifiedAt', 'reviewer', 'status',
-    'revokedAt', 'label', 'description',
+    '$schema',
+    'schemaVersion',
+    'designation',
+    'identity',
+    'verificationPolicy',
+    'verifiedAt',
+    'reviewer',
+    'status',
+    'revokedAt',
+    'label',
+    'description',
   ], [
-    '$schema', 'schemaVersion', 'designation', 'identity', 'verificationPolicy', 'verifiedAt', 'reviewer', 'status',
-    'label', 'description',
+    '$schema',
+    'schemaVersion',
+    'designation',
+    'identity',
+    'verificationPolicy',
+    'verifiedAt',
+    'reviewer',
+    'status',
+    'label',
+    'description',
   ], label)
-  literal(entry.$schema, 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-official.v1.schema.json', `${label}.$schema`)
+  literal(
+    entry.$schema,
+    'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-official.v1.schema.json',
+    `${label}.$schema`,
+  )
   if (entry.schemaVersion !== 1) throw new Error(`${label}.schemaVersion 必须为 1`)
   const identityValue = object(entry.identity, `${label}.identity`)
   assertKeys(identityValue, ['pluginId', 'canonicalSource', 'publisherIdentity', 'packageNamespace', 'packageName'], [
-    'pluginId', 'canonicalSource', 'publisherIdentity', 'packageNamespace', 'packageName',
+    'pluginId',
+    'canonicalSource',
+    'publisherIdentity',
+    'packageNamespace',
+    'packageName',
   ], `${label}.identity`)
   const canonicalSource = canonicalHttpsUrl(identityValue.canonicalSource, `${label}.identity.canonicalSource`)
-  if (!OFFICIAL_SOURCE_PATTERN.test(canonicalSource)) throw new Error(`${label}.identity.canonicalSource 不是 CordisX official source`)
+  if (!OFFICIAL_SOURCE_PATTERN.test(canonicalSource)) {
+    throw new Error(`${label}.identity.canonicalSource 不是 CordisX official source`)
+  }
   const policy = object(entry.verificationPolicy, `${label}.verificationPolicy`)
   assertKeys(policy, ['id', 'version'], ['id', 'version'], `${label}.verificationPolicy`)
   const verifiedAt = instant(entry.verifiedAt, `${label}.verifiedAt`)
@@ -222,7 +268,10 @@ function officialRecord(value: unknown, index: number, generatedAt: number): Mar
   if (status === undefined) throw new Error(`${label}.status 不受支持`)
   const revokedAt = entry.revokedAt === undefined ? undefined : instant(entry.revokedAt, `${label}.revokedAt`)
   if (status === 'active' && revokedAt !== undefined) throw new Error(`${label} active 时不能包含 revokedAt`)
-  if (status === 'revoked' && (revokedAt === undefined || revokedAt.epoch < verifiedAt.epoch || revokedAt.epoch > generatedAt)) {
+  if (
+    status === 'revoked'
+    && (revokedAt === undefined || revokedAt.epoch < verifiedAt.epoch || revokedAt.epoch > generatedAt)
+  ) {
     throw new Error(`${label} revokedAt 缺失或超出有效区间`)
   }
   return {
@@ -230,9 +279,18 @@ function officialRecord(value: unknown, index: number, generatedAt: number): Mar
     identity: {
       pluginId: string(identityValue.pluginId, `${label}.identity.pluginId`, LOCAL_ID_PATTERN, 96),
       canonicalSource,
-      publisherIdentity: literal(identityValue.publisherIdentity, 'npm:@cordisx', `${label}.identity.publisherIdentity`),
+      publisherIdentity: literal(
+        identityValue.publisherIdentity,
+        'npm:@cordisx',
+        `${label}.identity.publisherIdentity`,
+      ),
       packageNamespace: literal(identityValue.packageNamespace, '@cordisx', `${label}.identity.packageNamespace`),
-      packageName: string(identityValue.packageName, `${label}.identity.packageName`, /^@cordisx\/[a-z0-9][a-z0-9._-]*$/, 214),
+      packageName: string(
+        identityValue.packageName,
+        `${label}.identity.packageName`,
+        /^@cordisx\/[a-z0-9][a-z0-9._-]*$/,
+        214,
+      ),
     },
     verificationPolicy: {
       id: literal(policy.id, 'cordisx-official-publisher', `${label}.verificationPolicy.id`),
@@ -247,21 +305,52 @@ function officialRecord(value: unknown, index: number, generatedAt: number): Mar
   }
 }
 
-function certificationRecord(value: unknown, index: number, evaluatedAt: number, generatedAt: number): MarketplaceCertificationRecord {
+function certificationRecord(
+  value: unknown,
+  index: number,
+  evaluatedAt: number,
+  generatedAt: number,
+): MarketplaceCertificationRecord {
   const label = `certifications[${index}]`
   const entry = object(value, label)
   assertKeys(entry, [
-    '$schema', 'schemaVersion', 'level', 'identity', 'reviewPolicy', 'reviewedAt', 'expiresAt', 'reviewer', 'status',
-    'revokedAt', 'label', 'description',
+    '$schema',
+    'schemaVersion',
+    'level',
+    'identity',
+    'reviewPolicy',
+    'reviewedAt',
+    'expiresAt',
+    'reviewer',
+    'status',
+    'revokedAt',
+    'label',
+    'description',
   ], [
-    '$schema', 'schemaVersion', 'level', 'identity', 'reviewPolicy', 'reviewedAt', 'expiresAt', 'reviewer', 'status',
-    'label', 'description',
+    '$schema',
+    'schemaVersion',
+    'level',
+    'identity',
+    'reviewPolicy',
+    'reviewedAt',
+    'expiresAt',
+    'reviewer',
+    'status',
+    'label',
+    'description',
   ], label)
-  literal(entry.$schema, 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certification.v1.schema.json', `${label}.$schema`)
+  literal(
+    entry.$schema,
+    'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certification.v1.schema.json',
+    `${label}.$schema`,
+  )
   if (entry.schemaVersion !== 1) throw new Error(`${label}.schemaVersion 必须为 1`)
   const identityValue = object(entry.identity, `${label}.identity`)
   assertKeys(identityValue, ['pluginId', 'version', 'canonicalSource', 'integrity'], [
-    'pluginId', 'version', 'canonicalSource', 'integrity',
+    'pluginId',
+    'version',
+    'canonicalSource',
+    'integrity',
   ], `${label}.identity`)
   const policy = object(entry.reviewPolicy, `${label}.reviewPolicy`)
   assertKeys(policy, ['id', 'version'], ['id', 'version'], `${label}.reviewPolicy`)
@@ -269,7 +358,9 @@ function certificationRecord(value: unknown, index: number, evaluatedAt: number,
   const expiresAt = instant(entry.expiresAt, `${label}.expiresAt`)
   if (reviewedAt.epoch > generatedAt) throw new Error(`${label}.reviewedAt 晚于 feed generatedAt`)
   if (expiresAt.epoch <= reviewedAt.epoch) throw new Error(`${label}.expiresAt 必须晚于 reviewedAt`)
-  const status = entry.status === 'active' || entry.status === 'revoked' || entry.status === 'expired' ? entry.status : undefined
+  const status = entry.status === 'active' || entry.status === 'revoked' || entry.status === 'expired'
+    ? entry.status
+    : undefined
   if (status === undefined) throw new Error(`${label}.status 不受支持`)
   const revokedAt = entry.revokedAt === undefined ? undefined : instant(entry.revokedAt, `${label}.revokedAt`)
   if (status === 'active' && (revokedAt !== undefined || expiresAt.epoch <= evaluatedAt)) {
@@ -278,7 +369,10 @@ function certificationRecord(value: unknown, index: number, evaluatedAt: number,
   if (status === 'expired' && (revokedAt !== undefined || expiresAt.epoch > evaluatedAt)) {
     throw new Error(`${label} status=expired 与时效不匹配`)
   }
-  if (status === 'revoked' && (revokedAt === undefined || revokedAt.epoch < reviewedAt.epoch || revokedAt.epoch > evaluatedAt)) {
+  if (
+    status === 'revoked'
+    && (revokedAt === undefined || revokedAt.epoch < reviewedAt.epoch || revokedAt.epoch > evaluatedAt)
+  ) {
     throw new Error(`${label} revokedAt 缺失或超出有效区间`)
   }
   return {
@@ -332,7 +426,10 @@ function createMarketplaceCertifiedPermissionProjection(
   feed: { readonly generatedAt: string; readonly root: string; readonly authority: typeof TRUST_AUTHORITY },
 ): MarketplaceCertifiedPermissionProjectionV1 {
   const reviewPolicy = Object.freeze({ id: record.reviewPolicy.id, version: record.reviewPolicy.version })
-  const evidence = Object.freeze({ kind: 'protected-marketplace-review' as const, reference: record.reviewer.evidenceRef })
+  const evidence = Object.freeze({
+    kind: 'protected-marketplace-review' as const,
+    reference: record.reviewer.evidenceRef,
+  })
   const feedIdentity = Object.freeze({ generatedAt: feed.generatedAt, root: feed.root, authority: feed.authority })
   const fingerprintPayload = {
     source: record.identity.canonicalSource,
@@ -374,26 +471,37 @@ export function evaluateMarketplaceTrust(
   const evaluatedAt = Math.max(generatedAt.epoch, now)
   const trust = object(feed.trust, 'feed.trust')
   assertKeys(trust, ['authority', 'root', 'grantModel', 'cryptographicAttestation'], [
-    'authority', 'root', 'grantModel', 'cryptographicAttestation',
+    'authority',
+    'root',
+    'grantModel',
+    'cryptographicAttestation',
   ], 'feed.trust')
   const authority = literal(trust.authority, TRUST_AUTHORITY, 'feed.trust.authority')
   const root = canonicalHttpsUrl(trust.root, 'feed.trust.root')
   literal(trust.grantModel, TRUST_GRANT_MODEL, 'feed.trust.grantModel')
   literal(trust.cryptographicAttestation, 'unsupported', 'feed.trust.cryptographicAttestation')
   const normalizedFeedUrl = canonicalHttpsUrl(options.feedUrl, 'options.feedUrl')
-  const normalizedTrustedRoots = options.trustedRoots.map((value, index) => canonicalHttpsUrl(value, `options.trustedRoots[${index}]`))
+  const normalizedTrustedRoots = options.trustedRoots.map((value, index) =>
+    canonicalHttpsUrl(value, `options.trustedRoots[${index}]`)
+  )
   const isConfiguredFeed = normalizedTrustedRoots.includes(normalizedFeedUrl)
-  if (isConfiguredFeed && root !== normalizedFeedUrl) throw new Error('configured Marketplace trust feed 的 trust.root 与 feed URL 不匹配')
+  if (isConfiguredFeed && root !== normalizedFeedUrl) {
+    throw new Error('configured Marketplace trust feed 的 trust.root 与 feed URL 不匹配')
+  }
   const trusted = isConfiguredFeed && root === normalizedFeedUrl
 
   if (!Array.isArray(feed.official)) throw new Error('feed.official 必须是数组')
   if (!Array.isArray(feed.certifications)) throw new Error('feed.certifications 必须是数组')
   const official = feed.official.map((record, index) => officialRecord(record, index, generatedAt.epoch))
-  const certifications = feed.certifications.map((record, index) => certificationRecord(record, index, evaluatedAt, generatedAt.epoch))
+  const certifications = feed.certifications.map((record, index) =>
+    certificationRecord(record, index, evaluatedAt, generatedAt.epoch)
+  )
   const officialKeys = official.map(officialIdentity)
   const certificationKeys = certifications.map(certificationIdentity)
   if (new Set(officialKeys).size !== officialKeys.length) throw new Error('feed.official 包含重复 identity')
-  if (new Set(certificationKeys).size !== certificationKeys.length) throw new Error('feed.certifications 包含重复 exact artifact identity')
+  if (new Set(certificationKeys).size !== certificationKeys.length) {
+    throw new Error('feed.certifications 包含重复 exact artifact identity')
+  }
   if (officialKeys.some((key, index) => index > 0 && compareText(officialKeys[index - 1] ?? '', key) > 0)) {
     throw new Error('feed.official 未按 identity 确定性排序')
   }
@@ -406,12 +514,14 @@ export function evaluateMarketplaceTrust(
   for (const record of official) {
     const identity = `${record.identity.canonicalSource}\u0000${record.identity.pluginId}`
     const plugin = pluginByIdentity.get(identity)
-    if (plugin?.artifact === undefined
+    if (
+      plugin?.artifact === undefined
       || plugin.id !== record.identity.pluginId
       || plugin.source !== record.identity.canonicalSource
       || plugin.artifact.publisherIdentity !== record.identity.publisherIdentity
       || plugin.artifact.packageNamespace !== record.identity.packageNamespace
-      || plugin.artifact.packageName !== record.identity.packageName) {
+      || plugin.artifact.packageName !== record.identity.packageName
+    ) {
       throw new Error(`official identity 与当前插件发布链不匹配: ${record.identity.pluginId}`)
     }
     if (trusted && record.status === 'active') projected.set(identity, { ...projected.get(identity), official: record })
@@ -419,12 +529,16 @@ export function evaluateMarketplaceTrust(
   for (const record of certifications) {
     const identity = `${record.identity.canonicalSource}\u0000${record.identity.pluginId}`
     const plugin = pluginByIdentity.get(identity)
-    if (plugin?.artifact === undefined
+    if (
+      plugin?.artifact === undefined
       || plugin.id !== record.identity.pluginId
       || plugin.version !== record.identity.version
       || plugin.source !== record.identity.canonicalSource
-      || plugin.artifact.integrity !== record.identity.integrity) {
-      throw new Error(`certification 与当前 exact artifact 不匹配: ${record.identity.pluginId}@${record.identity.version}`)
+      || plugin.artifact.integrity !== record.identity.integrity
+    ) {
+      throw new Error(
+        `certification 与当前 exact artifact 不匹配: ${record.identity.pluginId}@${record.identity.version}`,
+      )
     }
     if (trusted && record.status === 'active') {
       projected.set(identity, {

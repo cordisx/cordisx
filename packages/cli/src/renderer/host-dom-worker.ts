@@ -29,7 +29,7 @@ export const HOST_DOM_WORKER_IFRAME_CSP = [
   "style-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
-  "worker-src blob:",
+  'worker-src blob:',
   "script-src 'unsafe-inline' blob:",
 ].join('; ')
 
@@ -112,14 +112,18 @@ function jsonSnapshot(value: unknown, maximumBytes: number): unknown {
       for (const child of candidate) validate(child, depth + 1)
     } else {
       const prototype = Object.getPrototypeOf(candidate)
-      if (prototype !== Object.prototype && prototype !== null) throw new Error('payload must contain plain objects only')
+      if (prototype !== Object.prototype && prototype !== null) {
+        throw new Error('payload must contain plain objects only')
+      }
       for (const child of Object.values(candidate)) validate(child, depth + 1)
     }
     seen.delete(candidate)
   }
   validate(value, 0)
   const serialized = JSON.stringify(value)
-  if (serialized === undefined || byteSize(serialized) > maximumBytes) throw new Error('serializable payload exceeds byte limit')
+  if (serialized === undefined || byteSize(serialized) > maximumBytes) {
+    throw new Error('serializable payload exceeds byte limit')
+  }
   return JSON.parse(serialized) as unknown
 }
 
@@ -136,7 +140,9 @@ function boundedError(value: unknown): string {
 
 function token(): string {
   const bytes = new Uint32Array(4)
-  if (typeof globalThis.crypto?.getRandomValues !== 'function') throw new Error('secure randomness is required for Host DOM worker isolation')
+  if (typeof globalThis.crypto?.getRandomValues !== 'function') {
+    throw new Error('secure randomness is required for Host DOM worker isolation')
+  }
   globalThis.crypto.getRandomValues(bytes)
   return [...bytes].map(value => value.toString(16).padStart(8, '0')).join('')
 }
@@ -468,8 +474,10 @@ export function createBrowserHostDomWorkerEnvironment(document: Document): HostD
   })()
   const Channel = globalThis.MessageChannel
   const view = document.defaultView
-  if (typeof Channel !== 'function' || view === null || typeof view.postMessage !== 'function'
-    || parentNodeDescriptor === undefined || contentWindowDescriptor === undefined) {
+  if (
+    typeof Channel !== 'function' || view === null || typeof view.postMessage !== 'function'
+    || parentNodeDescriptor === undefined || contentWindowDescriptor === undefined
+  ) {
     throw new Error('native browser primitives are required for Host DOM worker isolation')
   }
   const windowPostMessage = view.postMessage
@@ -506,24 +514,38 @@ export function createBrowserHostDomWorkerEnvironment(document: Document): HostD
         const contentWindow = apply(contentWindowDescriptor, frame, []) as Window | null
         if (started || destroyed || contentWindow === null) return
         started = true
-        apply(windowPostMessage, contentWindow, [{
-          contract: FRAME_MESSAGE,
-          type: 'start',
-          token: input.token,
-          bootstrapSource: input.bootstrapSource,
-          artifactSource: input.artifactSource,
-          config: input.config,
-          interfaces: input.interfaces,
-        }, '*', [channel.port2]])
+        apply(windowPostMessage, contentWindow, [
+          {
+            contract: FRAME_MESSAGE,
+            type: 'start',
+            token: input.token,
+            bootstrapSource: input.bootstrapSource,
+            artifactSource: input.artifactSource,
+            config: input.config,
+            interfaces: input.interfaces,
+          },
+          '*',
+          [channel.port2],
+        ])
       }
       apply(addEventListener, frame, ['load', start, { once: true }])
       apply(appendChild, input.document.body ?? input.document.documentElement, [frame])
       return {
-        post: (message, transfer = []) => { apply(portPostMessage, channel.port1, [message, transfer]) },
-        subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) },
+        post: (message, transfer = []) => {
+          apply(portPostMessage, channel.port1, [message, transfer])
+        },
+        subscribe: listener => {
+          listeners.add(listener)
+          return () => listeners.delete(listener)
+        },
         terminate: () => {
           const contentWindow = apply(contentWindowDescriptor, frame, []) as Window | null
-          if (contentWindow !== null) apply(windowPostMessage, contentWindow, [{ contract: FRAME_MESSAGE, type: 'terminate', token: input.token }, '*'])
+          if (contentWindow !== null) {
+            apply(windowPostMessage, contentWindow, [
+              { contract: FRAME_MESSAGE, type: 'terminate', token: input.token },
+              '*',
+            ])
+          }
         },
         destroy: () => {
           if (destroyed) return
@@ -532,7 +554,9 @@ export function createBrowserHostDomWorkerEnvironment(document: Document): HostD
           apply(portRemoveEventListener, channel.port1, ['message', receive])
           listeners.clear()
           apply(portClose, channel.port1, [])
-          try { apply(portClose, channel.port2, []) } catch {}
+          try {
+            apply(portClose, channel.port2, [])
+          } catch {}
           const parent = apply(parentNodeDescriptor, frame, []) as Node | null
           if (parent !== null) apply(removeChild, parent, [frame])
         },
@@ -565,7 +589,10 @@ export class HostDomWorkerBoundary {
     }
     const config = jsonSnapshot(options.config ?? null, MAX_CONFIG_BYTES)
     this.boundaryToken = token()
-    this.ready = new Promise<void>((resolve, reject) => { this.resolveReady = resolve; this.rejectReady = reject })
+    this.ready = new Promise<void>((resolve, reject) => {
+      this.resolveReady = resolve
+      this.rejectReady = reject
+    })
     this.transport = options.environment.start({
       document: options.document,
       token: this.boundaryToken,
@@ -579,7 +606,9 @@ export class HostDomWorkerBoundary {
         ...(options.transientCanvas === undefined ? [] : ['ui.transient-canvas/v1' as const]),
       ]),
     })
-    this.releaseTransportListener = this.transport.subscribe(message => { void this.receive(message) })
+    this.releaseTransportListener = this.transport.subscribe(message => {
+      void this.receive(message)
+    })
     this.listeners.add(options.onStatus ?? (() => {}))
     options.onStatus?.(this.currentStatus)
     const timeout = options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS
@@ -633,19 +662,27 @@ export class HostDomWorkerBoundary {
     } catch {
       message = undefined
     }
-    if (message === undefined || message.contract !== WORKER_MESSAGE
-      || message.token !== this.boundaryToken || typeof message.type !== 'string') {
+    if (
+      message === undefined || message.contract !== WORKER_MESSAGE
+      || message.token !== this.boundaryToken || typeof message.type !== 'string'
+    ) {
       this.fail('Host DOM worker sent an invalid envelope')
       return
     }
     if (message.type === 'status') {
-      if (message.status === 'ready' && exact(message, ['contract', 'token', 'type', 'status']) && this.currentStatus.status === 'starting') {
+      if (
+        message.status === 'ready' && exact(message, ['contract', 'token', 'type', 'status'])
+        && this.currentStatus.status === 'starting'
+      ) {
         this.clearStartupTimer()
         this.setStatus({ status: 'ready' })
         this.resolveReady()
         return
       }
-      if (message.status === 'error' && exact(message, ['contract', 'token', 'type', 'status', 'error']) && typeof message.error === 'string') {
+      if (
+        message.status === 'error' && exact(message, ['contract', 'token', 'type', 'status', 'error'])
+        && typeof message.error === 'string'
+      ) {
         this.fail(message.error)
         return
       }
@@ -660,7 +697,11 @@ export class HostDomWorkerBoundary {
       this.fail('Host DOM worker sent an unknown message')
       return
     }
-    try { await this.rpc(message) } catch (error) { this.fail(error) }
+    try {
+      await this.rpc(message)
+    } catch (error) {
+      this.fail(error)
+    }
   }
 
   private async rpc(message: Record<string, unknown>): Promise<void> {
@@ -668,11 +709,14 @@ export class HostDomWorkerBoundary {
     const keys = ['request', 'canvas-register', 'canvas-unregister'].includes(String(method))
       ? ['contract', 'token', 'type', 'sequence', 'requestId', 'method', 'payload']
       : ['contract', 'token', 'type', 'sequence', 'requestId', 'method']
-    if (!exact(message, keys)
+    if (
+      !exact(message, keys)
       || !Number.isSafeInteger(message.sequence) || message.sequence !== this.expectedSequence
       || !boundedRequestId(message.requestId) || this.seenRequestIds.has(message.requestId)
-      || typeof method !== 'string' || !['catalog', 'request', 'dispose', 'canvas-register', 'canvas-unregister'].includes(method)
-      || this.expectedSequence > MAX_REQUESTS || this.inflight >= MAX_INFLIGHT) {
+      || typeof method !== 'string'
+      || !['catalog', 'request', 'dispose', 'canvas-register', 'canvas-unregister'].includes(method)
+      || this.expectedSequence > MAX_REQUESTS || this.inflight >= MAX_INFLIGHT
+    ) {
       this.fail('Host DOM worker violated RPC sequence or request bounds')
       return
     }
@@ -689,7 +733,9 @@ export class HostDomWorkerBoundary {
       } else if (method === 'request') {
         if (this.options.hostDom === undefined) throw new Error('Host DOM interface is unavailable')
         const payload = jsonSnapshot(message.payload, MAX_RPC_BYTES) as HostDomBridgeRequest
-        if (record(payload)?.requestId !== requestId) throw new Error('Host DOM request id does not match its RPC envelope')
+        if (record(payload)?.requestId !== requestId) {
+          throw new Error('Host DOM request id does not match its RPC envelope')
+        }
         result = await this.options.hostDom.request(payload)
       } else if (method === 'canvas-register') {
         if (this.options.transientCanvas === undefined) throw new Error('transient canvas interface is unavailable')
@@ -706,9 +752,25 @@ export class HostDomWorkerBoundary {
         this.disposeClient()
         result = null
       }
-      this.respond({ contract: WORKER_MESSAGE, token: this.boundaryToken, type: 'rpc-result', sequence, requestId, ok: true, value: jsonSnapshot(result, MAX_RPC_BYTES) })
+      this.respond({
+        contract: WORKER_MESSAGE,
+        token: this.boundaryToken,
+        type: 'rpc-result',
+        sequence,
+        requestId,
+        ok: true,
+        value: jsonSnapshot(result, MAX_RPC_BYTES),
+      })
     } catch (error) {
-      this.respond({ contract: WORKER_MESSAGE, token: this.boundaryToken, type: 'rpc-result', sequence, requestId, ok: false, error: boundedError(error) })
+      this.respond({
+        contract: WORKER_MESSAGE,
+        token: this.boundaryToken,
+        type: 'rpc-result',
+        sequence,
+        requestId,
+        ok: false,
+        error: boundedError(error),
+      })
     } finally {
       this.inflight -= 1
     }
@@ -732,10 +794,16 @@ export class HostDomWorkerBoundary {
   private async disposeInternal(): Promise<void> {
     if (this.currentStatus.status === 'disposed') return
     this.clearStartupTimer()
-    if (this.currentStatus.status === 'starting') this.rejectReady(new Error('Host DOM worker disposed before becoming ready'))
+    if (this.currentStatus.status === 'starting') {
+      this.rejectReady(new Error('Host DOM worker disposed before becoming ready'))
+    }
     if (!this.resourcesDestroyed) {
-      const disposed = new Promise<void>(resolve => { this.disposedSignal = resolve })
-      try { this.transport.post({ contract: WORKER_MESSAGE, token: this.boundaryToken, type: 'dispose' }) } catch {}
+      const disposed = new Promise<void>(resolve => {
+        this.disposedSignal = resolve
+      })
+      try {
+        this.transport.post({ contract: WORKER_MESSAGE, token: this.boundaryToken, type: 'dispose' })
+      } catch {}
       const timeout = this.options.disposeTimeoutMs ?? DEFAULT_DISPOSE_TIMEOUT_MS
       await Promise.race([disposed, new Promise<void>(resolve => setTimeout(resolve, timeout))])
     }

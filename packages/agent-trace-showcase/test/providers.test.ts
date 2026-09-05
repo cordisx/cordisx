@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  FixtureTraceShowcaseStore,
-  SHOWCASE_PLUGIN,
-  UnavailableTraceShowcaseStore,
-} from '../src/providers.js'
+import { FixtureTraceShowcaseStore, SHOWCASE_PLUGIN, UnavailableTraceShowcaseStore } from '../src/providers.js'
 import { Config, createTraceShowcaseStore } from '../src/index.js'
 
 describe('Agent Trace fixture provider', () => {
@@ -11,7 +7,8 @@ describe('Agent Trace fixture provider', () => {
     const store = new FixtureTraceShowcaseStore({ sessionId: 'session-a' })
     const initial = store.getSnapshot()
     expect(initial).toMatchObject({
-      sessionId: 'session-a', hasEarlier: true,
+      sessionId: 'session-a',
+      hasEarlier: true,
       status: {
         mode: 'fixture',
         completeness: 'complete',
@@ -32,11 +29,15 @@ describe('Agent Trace fixture provider', () => {
     const chain = store.getSnapshot().events.filter(event => event.requestId === requestId)
     expect(chain.map(event => event.phase)).toEqual(['requested', 'permission', 'queued'])
     expect(chain[0]).toMatchObject({
-      type: 'message.delivery', semanticType: 'agent.inject', plugin: SHOWCASE_PLUGIN,
+      type: 'message.delivery',
+      semanticType: 'agent.inject',
+      plugin: SHOWCASE_PLUGIN,
       payload: { target: 'next-step', wakeup: false, content: 'fixture payload' },
     })
     expect(chain[1]?.permission).toMatchObject({
-      capability: 'agent.messages.append', policy: 'allow', outcome: 'allowed',
+      capability: 'agent.messages.append',
+      policy: 'allow',
+      outcome: 'allowed',
     })
     expect(await store.cancelQueued(requestId)).toBe(true)
     expect(store.getSnapshot().events.filter(event => event.requestId === requestId).at(-1)?.phase).toBe('cancelled')
@@ -50,10 +51,12 @@ describe('Agent Trace fixture provider', () => {
     store.dispose()
   })
 
-  it.each([
-    ['ask', ['requested', 'permission'], 'ask-pending'],
-    ['deny', ['requested', 'permission', 'failed'], 'denied'],
-  ] as const)('projects %s permission honestly without a queued success', async (policy, phases, outcome) => {
+  it.each(
+    [
+      ['ask', ['requested', 'permission'], 'ask-pending'],
+      ['deny', ['requested', 'permission', 'failed'], 'denied'],
+    ] as const,
+  )('projects %s permission honestly without a queued success', async (policy, phases, outcome) => {
     const store = new FixtureTraceShowcaseStore({ sessionId: 'session-a', permissionPolicy: policy })
     const requestId = await store.requestDemo({ kind: 'steer' })
     const chain = store.getSnapshot().events.filter(event => event.requestId === requestId)
@@ -63,21 +66,25 @@ describe('Agent Trace fixture provider', () => {
     store.dispose()
   })
 
-  it.each([
-    ['followup', 'agent.messages.append', { target: 'next-turn', wakeup: true }],
-    ['steer', 'agent.messages.append', { target: 'next-step', wakeup: true }],
-    ['inject', 'agent.messages.append', { target: 'next-step', wakeup: false }],
-    ['pre-step', 'agent.messages.append', { mode: 'append-only', sourcePreserved: true }],
-    ['system-prompt-section', 'agent.prompt.section', { section: 'showcase.demo' }],
-    ['system-prompt-context', 'agent.prompt.context', { context: 'showcase.demo' }],
-  ] as const)('projects %s semantics through the merged capability vocabulary', async (kind, capability, semantics) => {
+  it.each(
+    [
+      ['followup', 'agent.messages.append', { target: 'next-turn', wakeup: true }],
+      ['steer', 'agent.messages.append', { target: 'next-step', wakeup: true }],
+      ['inject', 'agent.messages.append', { target: 'next-step', wakeup: false }],
+      ['pre-step', 'agent.messages.append', { mode: 'append-only', sourcePreserved: true }],
+      ['system-prompt-section', 'agent.prompt.section', { section: 'showcase.demo' }],
+      ['system-prompt-context', 'agent.prompt.context', { context: 'showcase.demo' }],
+    ] as const,
+  )('projects %s semantics through the merged capability vocabulary', async (kind, capability, semantics) => {
     const store = new FixtureTraceShowcaseStore({ sessionId: 'session-a' })
     const requestId = await store.requestDemo({ kind })
     const chain = store.getSnapshot().events.filter(event => event.requestId === requestId)
     const contribution = kind === 'pre-step' || kind === 'system-prompt-section' || kind === 'system-prompt-context'
-    expect(chain.map(event => event.phase)).toEqual(contribution
-      ? kind === 'pre-step' ? ['permission', 'evaluated', 'projected', 'forwarded'] : ['permission', 'registered']
-      : ['requested', 'permission', 'queued'])
+    expect(chain.map(event => event.phase)).toEqual(
+      contribution
+        ? kind === 'pre-step' ? ['permission', 'evaluated', 'projected', 'forwarded'] : ['permission', 'registered']
+        : ['requested', 'permission', 'queued'],
+    )
     expect(chain.find(event => event.semanticType !== 'permission.decision')?.payload).toMatchObject(semantics)
     expect(chain.find(event => event.phase === 'permission')?.permission?.capability).toBe(capability)
     expect(chain.every(event => event.plugin === SHOWCASE_PLUGIN)).toBe(true)
@@ -96,7 +103,9 @@ describe('Agent Trace fixture provider', () => {
 
     const unavailable = new UnavailableTraceShowcaseStore('session-a')
     expect(unavailable.getSnapshot()).toMatchObject({
-      sessionId: 'session-a', events: [], status: {
+      sessionId: 'session-a',
+      events: [],
+      status: {
         mode: 'unavailable',
         completeness: 'unavailable',
         coreHead: '08dcdc11aae38ea9c0e91e4ad17cf31b8c756747',

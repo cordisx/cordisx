@@ -57,12 +57,15 @@ describe('isolated app smoke runner', () => {
     const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-isolated-smoke-test-'))
     try {
       const homeConfig = path.join(fixtureRoot, 'ui-demo.json')
-      await writeFile(homeConfig, JSON.stringify({
-        plugins: [
-          { id: 'local', entry: './plugins/local.ts' },
-          { id: 'builtin', entry: 'cordisx:channel' },
-        ],
-      }))
+      await writeFile(
+        homeConfig,
+        JSON.stringify({
+          plugins: [
+            { id: 'local', entry: './plugins/local.ts' },
+            { id: 'builtin', entry: 'cordisx:channel' },
+          ],
+        }),
+      )
       const homeRoot = await homeHelper.prepareIsolatedSmokeHome(homeConfig)
       const copied = JSON.parse(await readFile(path.join(homeRoot, '.cordisx', 'config.json'), 'utf8'))
       expect(copied.plugins).toEqual([
@@ -82,7 +85,9 @@ describe('isolated app smoke runner', () => {
     expect(source).toContain("'--dev-config and --home-config are mutually exclusive'")
     expect(source).toContain('prepareIsolatedSmokeHome(homeConfig)')
     expect(source).toContain('cleanupIsolatedSmokeHome(homeRoot)')
-    expect(source.indexOf('cleanupIsolatedSmokeHome(homeRoot)')).toBeGreaterThan(source.lastIndexOf('profileProcesses()'))
+    expect(source.indexOf('cleanupIsolatedSmokeHome(homeRoot)')).toBeGreaterThan(
+      source.lastIndexOf('profileProcesses()'),
+    )
     expect(homeHelperSource).toContain('maxRetries: 20, retryDelay: 100')
   })
 })

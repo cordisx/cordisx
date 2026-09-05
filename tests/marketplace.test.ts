@@ -2,34 +2,46 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   BrowserMarketplaceModel,
+  canonicalPluginSource,
   MARKETPLACE_SOURCE_RECORDS_KEY,
   MARKETPLACE_SOURCES_KEY,
-  OFFICIAL_MARKETPLACE_SOURCE,
-  canonicalPluginSource,
+  type MarketplaceFetcher,
   marketplacePluginIdentity,
+  type MarketplaceStorage,
   normalizeMarketplaceSource,
+  OFFICIAL_MARKETPLACE_SOURCE,
   parseMarketplaceFeed,
   projectMarketplacePlugin,
   projectMarketplaceSource,
   searchMarketplaceCatalog,
-  type MarketplaceFetcher,
-  type MarketplaceStorage,
 } from '../packages/cli/src/renderer/marketplace.js'
 
-const PLUGIN_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v1.schema.json'
-const FEED_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v1.schema.json'
-const PLUGIN_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v2.schema.json'
-const FEED_SCHEMA_V2 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json'
-const PLUGIN_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v3.schema.json'
-const FEED_SCHEMA_V3 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v3.schema.json'
-const PLUGIN_SCHEMA_V4 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v4.schema.json'
-const FEED_SCHEMA_V4 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v4.schema.json'
-const OFFICIAL_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-official.v1.schema.json'
-const CERTIFICATION_SCHEMA = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certification.v1.schema.json'
+const PLUGIN_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v1.schema.json'
+const FEED_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v1.schema.json'
+const PLUGIN_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v2.schema.json'
+const FEED_SCHEMA_V2 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v2.schema.json'
+const PLUGIN_SCHEMA_V3 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v3.schema.json'
+const FEED_SCHEMA_V3 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v3.schema.json'
+const PLUGIN_SCHEMA_V4 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-plugin.v4.schema.json'
+const FEED_SCHEMA_V4 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-feed.v4.schema.json'
+const OFFICIAL_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-official.v1.schema.json'
+const CERTIFICATION_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certification.v1.schema.json'
 const TRUST_SOURCE = 'https://github.com/cordisx/trusted'
 const TRUST_DIGEST = `sha256:${'a'.repeat(64)}`
 const TRUST_EVIDENCE = `https://github.com/cordisx/marketplace/commit/${'b'.repeat(40)}`
-const TRUST_SMOKE_FIXTURE = JSON.parse(readFileSync(new URL('./fixtures/marketplace-trust-v3.json', import.meta.url), 'utf8')) as unknown
+const TRUST_SMOKE_FIXTURE = JSON.parse(
+  readFileSync(new URL('./fixtures/marketplace-trust-v3.json', import.meta.url), 'utf8'),
+) as unknown
 
 function plugin(id: string, name: string, source = `https://github.com/example/${id}`): Record<string, unknown> {
   return {
@@ -190,26 +202,34 @@ function fetcher(entries: ReadonlyMap<string, string | Error>): MarketplaceFetch
 describe('marketplace feed', () => {
   it('uses canonical plugin source plus lowercase id as identity', () => {
     expect(canonicalPluginSource('https://github.com/example/plugin')).toBe('https://github.com/example/plugin')
-    expect(marketplacePluginIdentity('https://github.com/example/plugin', 'demo')).toBe('https://github.com/example/plugin\u0000demo')
+    expect(marketplacePluginIdentity('https://github.com/example/plugin', 'demo')).toBe(
+      'https://github.com/example/plugin\u0000demo',
+    )
     expect(canonicalPluginSource('https://github.com/example/plugin/')).toBe('https://github.com/example/plugin')
-    expect(() => parseMarketplaceFeed({
-      $schema: FEED_SCHEMA,
-      schemaVersion: 1,
-      name: 'Invalid source',
-      homepage: 'https://example.com/',
-      plugins: [plugin('demo', 'Invalid source', 'https://github.com/example/plugin/')],
-    })).toThrow('不是 canonical URL')
-    expect(() => parseMarketplaceFeed({
-      $schema: FEED_SCHEMA,
-      schemaVersion: 1,
-      name: 'Invalid',
-      homepage: 'https://example.com/',
-      plugins: [plugin('Not-Lowercase', 'Invalid')],
-    })).toThrow('小写规范 id')
+    expect(() =>
+      parseMarketplaceFeed({
+        $schema: FEED_SCHEMA,
+        schemaVersion: 1,
+        name: 'Invalid source',
+        homepage: 'https://example.com/',
+        plugins: [plugin('demo', 'Invalid source', 'https://github.com/example/plugin/')],
+      })
+    ).toThrow('不是 canonical URL')
+    expect(() =>
+      parseMarketplaceFeed({
+        $schema: FEED_SCHEMA,
+        schemaVersion: 1,
+        name: 'Invalid',
+        homepage: 'https://example.com/',
+        plugins: [plugin('Not-Lowercase', 'Invalid')],
+      })
+    ).toThrow('小写规范 id')
   })
 
   it('normalizes configured feed URLs without making them plugin identity', () => {
-    expect(normalizeMarketplaceSource('https://EXAMPLE.com:443/feed.json?channel=stable')).toBe('https://example.com/feed.json?channel=stable')
+    expect(normalizeMarketplaceSource('https://EXAMPLE.com:443/feed.json?channel=stable')).toBe(
+      'https://example.com/feed.json?channel=stable',
+    )
     expect(() => normalizeMarketplaceSource('http://example.com/feed.json')).toThrow('HTTPS URL')
     expect(() => normalizeMarketplaceSource('https://user@example.com/feed.json')).toThrow('无凭据')
   })
@@ -224,7 +244,9 @@ describe('marketplace feed', () => {
     })
 
     const wrongAuthors = structuredClone(localizedFeed())
-    ;((wrongAuthors.plugins as Record<string, unknown>[])[0]!.localizations as Record<string, Record<string, unknown>>)['zh-CN']!.authors = ['甲', '乙']
+    ;((wrongAuthors.plugins as Record<string, unknown>[])[0]!.localizations as Record<string, Record<string, unknown>>)[
+      'zh-CN'
+    ]!.authors = ['甲', '乙']
     expect(() => parseMarketplaceFeed(wrongAuthors)).toThrow('保持作者顺序和数量')
 
     const noncanonical = structuredClone(localizedFeed())
@@ -256,27 +278,61 @@ describe('marketplace feed', () => {
       ;(malicious.plugins as Record<string, unknown>[])[0]![field] = true
       expect(() => parseMarketplaceFeed(malicious)).toThrow(`不支持的字段: ${field}`)
     }
-    expect(parseMarketplaceFeed(TRUST_SMOKE_FIXTURE, {
-      feedUrl: OFFICIAL_MARKETPLACE_SOURCE,
-      trustedRoots: [OFFICIAL_MARKETPLACE_SOURCE],
-      now: '2026-08-24T13:00:00Z',
-    }).trust?.byPluginIdentity.size).toBe(1)
+    expect(
+      parseMarketplaceFeed(TRUST_SMOKE_FIXTURE, {
+        feedUrl: OFFICIAL_MARKETPLACE_SOURCE,
+        trustedRoots: [OFFICIAL_MARKETPLACE_SOURCE],
+        now: '2026-08-24T13:00:00Z',
+      }).trust?.byPluginIdentity.size,
+    ).toBe(1)
   })
 
   it('accepts only versioned external-publisher commerce without price or payment state', () => {
     const value = {
-      $schema: FEED_SCHEMA_V4, schemaVersion: 4, generatedAt: '2026-08-26T00:00:00Z',
-      trust: { authority: 'cordisx.marketplace.codeowners/v1', root: 'https://catalog.example/feed.json', grantModel: 'protected-merge-chain-v1', cryptographicAttestation: 'unsupported' },
-      fallbackLocale: 'en', name: 'Example', homepage: 'https://catalog.example/', official: [], certifications: [],
+      $schema: FEED_SCHEMA_V4,
+      schemaVersion: 4,
+      generatedAt: '2026-08-26T00:00:00Z',
+      trust: {
+        authority: 'cordisx.marketplace.codeowners/v1',
+        root: 'https://catalog.example/feed.json',
+        grantModel: 'protected-merge-chain-v1',
+        cryptographicAttestation: 'unsupported',
+      },
+      fallbackLocale: 'en',
+      name: 'Example',
+      homepage: 'https://catalog.example/',
+      official: [],
+      certifications: [],
       plugins: [{
-        $schema: PLUGIN_SCHEMA_V4, schemaVersion: 4, id: 'paid-notes', fallbackLocale: 'en', name: 'Paid Notes', description: 'Publisher-authorized notes.', version: '1.2.3', source: 'https://github.com/example/paid-notes', license: 'Proprietary', compatibility: { cordisx: '^0.1.0' }, authors: [{ name: 'Example' }],
-        commerce: { $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/commerce-descriptor.v1.schema.json', schemaVersion: 1, mode: 'external-publisher-v1', purchaseUrl: 'https://example.com/buy', authorization: { method: 'publisher-grant.v1', environment: 'live' } },
+        $schema: PLUGIN_SCHEMA_V4,
+        schemaVersion: 4,
+        id: 'paid-notes',
+        fallbackLocale: 'en',
+        name: 'Paid Notes',
+        description: 'Publisher-authorized notes.',
+        version: '1.2.3',
+        source: 'https://github.com/example/paid-notes',
+        license: 'Proprietary',
+        compatibility: { cordisx: '^0.1.0' },
+        authors: [{ name: 'Example' }],
+        commerce: {
+          $schema:
+            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/commerce-descriptor.v1.schema.json',
+          schemaVersion: 1,
+          mode: 'external-publisher-v1',
+          purchaseUrl: 'https://example.com/buy',
+          authorization: { method: 'publisher-grant.v1', environment: 'live' },
+        },
       }],
     }
-    expect(parseMarketplaceFeed(value, { feedUrl: 'https://catalog.example/feed.json', trustedRoots: [] }).plugins[0]?.commerce).toEqual(expect.objectContaining({ purchaseUrl: 'https://example.com/buy', environment: 'live' }))
+    expect(
+      parseMarketplaceFeed(value, { feedUrl: 'https://catalog.example/feed.json', trustedRoots: [] }).plugins[0]
+        ?.commerce,
+    ).toEqual(expect.objectContaining({ purchaseUrl: 'https://example.com/buy', environment: 'live' }))
     const priced = structuredClone(value)
     ;((priced.plugins[0] as Record<string, unknown>).commerce as Record<string, unknown>).price = '9.99'
-    expect(() => parseMarketplaceFeed(priced, { feedUrl: 'https://catalog.example/feed.json', trustedRoots: [] })).toThrow('不支持的字段: price')
+    expect(() => parseMarketplaceFeed(priced, { feedUrl: 'https://catalog.example/feed.json', trustedRoots: [] }))
+      .toThrow('不支持的字段: price')
   })
 })
 
@@ -288,11 +344,21 @@ describe('BrowserMarketplaceModel', () => {
     const sharedSource = 'https://github.com/example/shared'
     const storage = new MemoryStorage()
     storage.setItem(MARKETPLACE_SOURCES_KEY, JSON.stringify([first, failed, later]))
-    const model = new BrowserMarketplaceModel(storage, fetcher(new Map([
-      [first, feed('First', [plugin('shared', 'First winner', sharedSource)])],
-      [failed, new Error('network unavailable')],
-      [later, feed('Later', [plugin('shared', 'Later duplicate', sharedSource), plugin('unique', 'Unique plugin')])],
-    ])), [OFFICIAL_MARKETPLACE_SOURCE], { retryDelays: [] })
+    const model = new BrowserMarketplaceModel(
+      storage,
+      fetcher(
+        new Map([
+          [first, feed('First', [plugin('shared', 'First winner', sharedSource)])],
+          [failed, new Error('network unavailable')],
+          [
+            later,
+            feed('Later', [plugin('shared', 'Later duplicate', sharedSource), plugin('unique', 'Unique plugin')]),
+          ],
+        ]),
+      ),
+      [OFFICIAL_MARKETPLACE_SOURCE],
+      { retryDelays: [] },
+    )
 
     await model.reload()
     const snapshot = model.snapshot()
@@ -365,9 +431,14 @@ describe('BrowserMarketplaceModel', () => {
     })
     expect(en).toMatchObject({ name: 'Slot Showcase', feedName: 'CordisX Marketplace' })
     expect(zh.searchValues).toEqual(expect.arrayContaining([
-      '点位展示', '扩展点', 'CordisX 插件商店',
-      'Slot Showcase', 'extensions', 'CordisX Marketplace',
-      'slot-showcase', '1.2.3',
+      '点位展示',
+      '扩展点',
+      'CordisX 插件商店',
+      'Slot Showcase',
+      'extensions',
+      'CordisX Marketplace',
+      'slot-showcase',
+      '1.2.3',
     ]))
     expect(requests).toBe(1)
     model.dispose()
@@ -408,15 +479,21 @@ describe('BrowserMarketplaceModel', () => {
 
   it('publishes Certified projection replacement and removal through snapshot invalidation', async () => {
     let currentFeed = trustedFeed('active', '2026-08-24T12:31:00Z')
-    const model = new BrowserMarketplaceModel(undefined, async () => ({
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify(currentFeed),
-    }), [OFFICIAL_MARKETPLACE_SOURCE], { retryDelays: [] })
+    const model = new BrowserMarketplaceModel(
+      undefined,
+      async () => ({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(currentFeed),
+      }),
+      [OFFICIAL_MARKETPLACE_SOURCE],
+      { retryDelays: [] },
+    )
     const observed: string[] = []
     let previous: string | undefined
     const readProjection = (): void => {
-      const projection = model.snapshot().plugins.find(plugin => plugin.identity === `${TRUST_SOURCE}\u0000trusted`)?.certifiedPermission
+      const projection = model.snapshot().plugins.find(plugin => plugin.identity === `${TRUST_SOURCE}\u0000trusted`)
+        ?.certifiedPermission
       const current = projection === undefined ? 'absent' : `${projection.revision}\u0000${projection.fingerprint}`
       if (current !== previous) observed.push(current)
       previous = current
@@ -454,11 +531,16 @@ describe('BrowserMarketplaceModel', () => {
 
   it('keeps the later revoked feed when a replacement attempts to roll trust revision backward', async () => {
     let currentFeed = trustedFeed('active', '2026-08-24T12:31:00Z')
-    const model = new BrowserMarketplaceModel(undefined, async () => ({
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify(currentFeed),
-    }), [OFFICIAL_MARKETPLACE_SOURCE], { retryDelays: [] })
+    const model = new BrowserMarketplaceModel(
+      undefined,
+      async () => ({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify(currentFeed),
+      }),
+      [OFFICIAL_MARKETPLACE_SOURCE],
+      { retryDelays: [] },
+    )
 
     await model.reload()
     currentFeed = trustedFeed('revoked', '2026-08-24T12:32:00Z')
@@ -477,10 +559,15 @@ describe('BrowserMarketplaceModel', () => {
   it('drops Certified and its permission projection when a stale last-good feed expires locally', async () => {
     let now = Date.parse('2026-08-24T13:00:00Z')
     let offline = false
-    const model = new BrowserMarketplaceModel(undefined, async () => {
-      if (offline) throw new Error('network offline')
-      return { ok: true, status: 200, text: async () => JSON.stringify(trustedFeed()) }
-    }, [OFFICIAL_MARKETPLACE_SOURCE], { now: () => now, retryDelays: [] })
+    const model = new BrowserMarketplaceModel(
+      undefined,
+      async () => {
+        if (offline) throw new Error('network offline')
+        return { ok: true, status: 200, text: async () => JSON.stringify(trustedFeed()) }
+      },
+      [OFFICIAL_MARKETPLACE_SOURCE],
+      { now: () => now, retryDelays: [] },
+    )
 
     await model.reload()
     expect(model.snapshot().plugins[0]?.certifiedPermission).toBeDefined()
@@ -497,22 +584,34 @@ describe('BrowserMarketplaceModel', () => {
     const source = 'https://catalog.example/stale.json'
     const storage = new MemoryStorage()
     let now = 1_000
-    const seeded = new BrowserMarketplaceModel(storage, fetcher(new Map([
-      [source, feed('Cached catalog', [plugin('cached', 'Cached plugin')])],
-    ])), [OFFICIAL_MARKETPLACE_SOURCE], { now: () => now, retryDelays: [] })
+    const seeded = new BrowserMarketplaceModel(
+      storage,
+      fetcher(
+        new Map([
+          [source, feed('Cached catalog', [plugin('cached', 'Cached plugin')])],
+        ]),
+      ),
+      [OFFICIAL_MARKETPLACE_SOURCE],
+      { now: () => now, retryDelays: [] },
+    )
     await seeded.setSources([source])
     seeded.dispose()
 
     now = 20_000
     let requests = 0
-    const model = new BrowserMarketplaceModel(storage, async () => {
-      requests += 1
-      throw new Error('network offline')
-    }, [OFFICIAL_MARKETPLACE_SOURCE], {
-      now: () => now,
-      staleAfterMs: 1_000,
-      retryDelays: [],
-    })
+    const model = new BrowserMarketplaceModel(
+      storage,
+      async () => {
+        requests += 1
+        throw new Error('network offline')
+      },
+      [OFFICIAL_MARKETPLACE_SOURCE],
+      {
+        now: () => now,
+        staleAfterMs: 1_000,
+        retryDelays: [],
+      },
+    )
 
     expect(model.snapshot()).toEqual(expect.objectContaining({
       plugins: [expect.objectContaining({ id: 'cached' })],
@@ -546,19 +645,28 @@ describe('BrowserMarketplaceModel', () => {
     let requests = 0
     const sleeps: number[] = []
     let release: (() => void) | undefined
-    const firstRequest = new Promise<void>(resolve => { release = resolve })
-    const model = new BrowserMarketplaceModel(storage, async () => {
-      requests += 1
-      if (requests === 1) {
-        await firstRequest
-        return { ok: false, status: 503, text: async () => '' }
-      }
-      if (requests === 2) return { ok: false, status: 429, text: async () => '' }
-      return { ok: true, status: 200, text: async () => feed('Recovered', [plugin('recovered', 'Recovered plugin')]) }
-    }, [OFFICIAL_MARKETPLACE_SOURCE], {
-      retryDelays: [10, 20],
-      sleep: async milliseconds => { sleeps.push(milliseconds) },
+    const firstRequest = new Promise<void>(resolve => {
+      release = resolve
     })
+    const model = new BrowserMarketplaceModel(
+      storage,
+      async () => {
+        requests += 1
+        if (requests === 1) {
+          await firstRequest
+          return { ok: false, status: 503, text: async () => '' }
+        }
+        if (requests === 2) return { ok: false, status: 429, text: async () => '' }
+        return { ok: true, status: 200, text: async () => feed('Recovered', [plugin('recovered', 'Recovered plugin')]) }
+      },
+      [OFFICIAL_MARKETPLACE_SOURCE],
+      {
+        retryDelays: [10, 20],
+        sleep: async milliseconds => {
+          sleeps.push(milliseconds)
+        },
+      },
+    )
     const configured = model.setSources([source])
     const duplicate = model.reload()
     expect(requests).toBe(1)
@@ -581,17 +689,25 @@ describe('BrowserMarketplaceModel', () => {
     const first = 'https://catalog.example/first.json'
     const second = 'https://catalog.example/second.json'
     let releaseFirst: (() => void) | undefined
-    const firstPending = new Promise<void>(resolve => { releaseFirst = resolve })
+    const firstPending = new Promise<void>(resolve => {
+      releaseFirst = resolve
+    })
     const requests: string[] = []
-    const model = new BrowserMarketplaceModel(undefined, async (url) => {
-      requests.push(url)
-      if (url === first) await firstPending
-      return {
-        ok: true,
-        status: 200,
-        text: async () => feed(url === first ? 'First' : 'Second', [plugin(url === first ? 'first' : 'second', 'Plugin')]),
-      }
-    }, [OFFICIAL_MARKETPLACE_SOURCE], { retryDelays: [] })
+    const model = new BrowserMarketplaceModel(
+      undefined,
+      async (url) => {
+        requests.push(url)
+        if (url === first) await firstPending
+        return {
+          ok: true,
+          status: 200,
+          text: async () =>
+            feed(url === first ? 'First' : 'Second', [plugin(url === first ? 'first' : 'second', 'Plugin')]),
+        }
+      },
+      [OFFICIAL_MARKETPLACE_SOURCE],
+      { retryDelays: [] },
+    )
 
     const oldGeneration = model.setSourceRecords([{ url: first, enabled: true }])
     await Promise.resolve()

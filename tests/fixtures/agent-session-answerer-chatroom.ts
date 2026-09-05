@@ -1,13 +1,12 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentRegistry } from '@cordisx/protocol/agents/v1'
 import type { ApprovalService } from '@cordisx/protocol/approval/v1'
-import {
-  CORDISX_PAGE_SCHEMA_V3,
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
-  CORDISX_ROUTE_SCHEMA_V2,
-} from 'cordisx/contracts'
+import { CORDISX_PAGE_SCHEMA_V3, CORDISX_PLUGIN_MANIFEST_SCHEMA_V6, CORDISX_ROUTE_SCHEMA_V2 } from 'cordisx/contracts'
 
-const message = (key: string, fallback: string) => ({ namespace: 'agent-session-answerer-chatroom', key, fallback } as const)
+const message = (
+  key: string,
+  fallback: string,
+) => ({ namespace: 'agent-session-answerer-chatroom', key, fallback } as const)
 
 export const manifest = {
   $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
@@ -15,20 +14,25 @@ export const manifest = {
   id: 'agent-session-answerer-chatroom',
   services: [],
   capabilities: [{
-    name: 'agents.create', required: false,
+    name: 'agents.create',
+    required: false,
     scope: { sessionIds: ['cx-session.answerer-before-route'] },
   }, {
-    name: 'approvals.request', required: false,
+    name: 'approvals.request',
+    required: false,
     scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } },
   }, {
-    name: 'approvals.answer', required: false,
+    name: 'approvals.answer',
+    required: false,
     scope: { sessionIds: { kind: 'host-route-param', routeId: 'room-session-detail', param: 'sessionId' } },
   }],
 } as const
 
 export const inject = ['i18n', 'pages', 'routes', 'agents', 'approvals']
 
-export async function apply(ctx: Context & { readonly agents: AgentRegistry; readonly approvals: ApprovalService }): Promise<void> {
+export async function apply(
+  ctx: Context & { readonly agents: AgentRegistry; readonly approvals: ApprovalService },
+): Promise<void> {
   ctx.i18n.define({
     namespace: 'agent-session-answerer-chatroom',
     locale: 'en',

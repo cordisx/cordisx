@@ -27,11 +27,13 @@ function lineData(tag) {
 function splitRings(lineTags) {
   const endpoints = lineTags.map(tag => [point(tag, '1'), point(tag, '2')])
   const touching = new Map()
-  endpoints.forEach((pair, index) => pair.forEach((key) => {
-    const list = touching.get(key) ?? []
-    list.push(index)
-    touching.set(key, list)
-  }))
+  endpoints.forEach((pair, index) =>
+    pair.forEach((key) => {
+      const list = touching.get(key) ?? []
+      list.push(index)
+      touching.set(key, list)
+    })
+  )
 
   const seen = new Set()
   const components = []

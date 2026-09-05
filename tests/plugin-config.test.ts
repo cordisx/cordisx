@@ -20,12 +20,15 @@ import {
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import {
   ConfigRendererRegistry,
-  PluginConfigurationRegistry,
   moduleConfigApplies,
+  PluginConfigurationRegistry,
 } from '../packages/cli/src/renderer/configuration.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
-import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1, type CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
+import {
+  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+  type CordisXPluginActivationRecordV1,
+} from '../packages/cli/src/plugin-lifecycle-contracts.js'
 
 async function configFixture(): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-plugin-config-'))
@@ -94,7 +97,10 @@ describe('plugin config persistence', () => {
 
   it('rejects concurrent revisions and preserves last-good when a candidate is aborted', async () => {
     const configPath = await configFixture()
-    const staged = await stagePluginConfigCandidate({ ...scope, expectedRevision: 0, config: { timeout: 60 } }, configPath)
+    const staged = await stagePluginConfigCandidate(
+      { ...scope, expectedRevision: 0, config: { timeout: 60 } },
+      configPath,
+    )
     await expect(stagePluginConfigCandidate({ ...scope, expectedRevision: 0, config: { timeout: 90 } }, configPath))
       .rejects.toBeInstanceOf(PluginConfigConflictError)
     await expect(commitPluginConfigCandidate({
@@ -129,7 +135,10 @@ describe('plugin config registry', () => {
     const registry = new PluginConfigurationRegistry()
     registry.register({
       identity: { id: 'example', source: 'file:///example.ts' },
-      applies: 'app-restart', raw: { label: 'active' }, revision: 3, writable: true,
+      applies: 'app-restart',
+      raw: { label: 'active' },
+      revision: 3,
+      writable: true,
     })
     const watcher = vi.fn()
     registry.watch('example', watcher)
@@ -137,7 +146,10 @@ describe('plugin config registry', () => {
     registry.commitForAppRestart('example', 4, first)
     expect(registry.get('example')).toEqual({ label: 'active' })
     expect(registry.descriptor('example', 'en')).toMatchObject({
-      applies: 'app-restart', revision: 4, lastGoodRevision: 3, value: { label: 'next' },
+      applies: 'app-restart',
+      revision: 4,
+      lastGoodRevision: 3,
+      value: { label: 'next' },
     })
     expect(watcher).not.toHaveBeenCalled()
 
@@ -145,7 +157,9 @@ describe('plugin config registry', () => {
     registry.commitForAppRestart('example', 5, second)
     expect(registry.get('example')).toEqual({ label: 'active' })
     expect(registry.descriptor('example', 'en')).toMatchObject({
-      revision: 5, lastGoodRevision: 3, value: { label: 'next', extra: true },
+      revision: 5,
+      lastGoodRevision: 3,
+      value: { label: 'next', extra: true },
     })
     expect(watcher).not.toHaveBeenCalled()
     registry.dispose()
@@ -157,10 +171,17 @@ describe('plugin config registry', () => {
       schemaVersion: 1,
       recordKind: revision === 1 ? 'active' : 'candidate',
       ...(revision === 1 ? {} : { transactionId: 'update-example' }),
-      profileId: 'work', revision, lastGoodRevision: 1, runtimeGeneration: 'runtime-1',
+      profileId: 'work',
+      revision,
+      lastGoodRevision: 1,
+      runtimeGeneration: 'runtime-1',
       plugins: [{
-        id: 'example', version: '1.0.0', digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`,
-        moduleGeneration, enabled: true, dependencies: [],
+        id: 'example',
+        version: '1.0.0',
+        digest: `sha256:${(revision === 1 ? 'a' : 'b').repeat(64)}`,
+        moduleGeneration,
+        enabled: true,
+        dependencies: [],
       }],
     })
     const previous = activation(1, 'example-1')
@@ -168,11 +189,17 @@ describe('plugin config registry', () => {
     const visibility = new GenerationVisibilityCoordinator(previous)
     const registry = new PluginConfigurationRegistry(visibility)
     registry.register({
-      identity: { id: 'example', source: 'file:///old' }, moduleGeneration: 'example-1',
-      applies: 'plugin-restart', raw: { value: 'old' }, revision: 1, writable: true,
+      identity: { id: 'example', source: 'file:///old' },
+      moduleGeneration: 'example-1',
+      applies: 'plugin-restart',
+      raw: { value: 'old' },
+      revision: 1,
+      writable: true,
     })
     let notifications = 0
-    registry.subscribe(() => { notifications += 1 })
+    registry.subscribe(() => {
+      notifications += 1
+    })
     const handle = visibility.begin('update-example', previous, candidate)
     const candidateContext = new Context().extend({
       [CORDISX_PLUGIN_ID]: 'example',
@@ -181,8 +208,13 @@ describe('plugin config registry', () => {
     })
     const candidateView = visibility.view(candidateContext)
     registry.register({
-      identity: { id: 'example', source: 'file:///new' }, moduleGeneration: 'example-2', candidateView,
-      applies: 'plugin-restart', raw: { value: 'new' }, revision: 1, writable: true,
+      identity: { id: 'example', source: 'file:///new' },
+      moduleGeneration: 'example-2',
+      candidateView,
+      applies: 'plugin-restart',
+      raw: { value: 'new' },
+      revision: 1,
+      writable: true,
     })
     expect(registry.get('example')).toEqual({ value: 'old' })
     expect(registry.get('example', candidateView)).toEqual({ value: 'new' })
@@ -220,9 +252,16 @@ describe('plugin config registry', () => {
     expect(descriptor.fields.find(field => field.path.join('.') === 'timeout')?.label).toBe('Request timeout')
     expect(descriptor.value).toEqual({})
     expect(descriptor.fields.find(field => field.path.join('.') === 'timeout')).toMatchObject({
-      value: 30, defaultValue: 30, hasDefault: true, min: 1, max: 120,
+      value: 30,
+      defaultValue: 30,
+      hasDefault: true,
+      min: 1,
+      max: 120,
     })
-    expect(descriptor.fields.find(field => field.path.join('.') === 'apiKey')).toMatchObject({ value: undefined, disabled: true })
+    expect(descriptor.fields.find(field => field.path.join('.') === 'apiKey')).toMatchObject({
+      value: undefined,
+      disabled: true,
+    })
     expect(descriptor.secrets).toEqual([{ path: ['apiKey'], set: false }])
 
     const listener = vi.fn()
@@ -246,7 +285,11 @@ describe('plugin config registry', () => {
     const schema = Schema.object({
       reviewDate: Schema.string().default('2026-09-01').role('date').extra('extra', {
         label: { en: 'Review date' },
-        cordisxForm: { icon: 'host:calendar', presenter: { version: 1, kind: 'choice.segmented', options: { density: 'compact' } }, group: { id: 'schedule', title: { en: 'Schedule' }, icon: 'host:clock' } },
+        cordisxForm: {
+          icon: 'host:calendar',
+          presenter: { version: 1, kind: 'choice.segmented', options: { density: 'compact' } },
+          group: { id: 'schedule', title: { en: 'Schedule' }, icon: 'host:clock' },
+        },
       }),
       audiences: Schema.array(Schema.union([Schema.const('design'), Schema.const('research')]))
         .default(['design']).min(1).max(2).role('multi-select'),
@@ -257,18 +300,26 @@ describe('plugin config registry', () => {
       }).extra('extra', { cordisxForm: { group: { id: 'not-inherited', title: { en: 'Not inherited' } } } }),
     }).extra('extra', { cordisxForm: { actions: { save: 'host:save', reset: 'host:reset' } } })
     registry.register({
-      identity: { id: 'presentation', source: 'file:///presentation.ts' }, schema,
-      applies: 'live', raw: {}, revision: 1, writable: true,
+      identity: { id: 'presentation', source: 'file:///presentation.ts' },
+      schema,
+      applies: 'live',
+      raw: {},
+      revision: 1,
+      writable: true,
     })
     const descriptor = registry.descriptor('presentation', 'en')
     expect(descriptor.actionIcons).toEqual({ save: 'host:save', reset: 'host:reset' })
     expect(descriptor.fields.find(field => field.path[0] === 'reviewDate')).toMatchObject({
-      icon: 'host:calendar', group: { id: 'schedule', title: 'Schedule', icon: 'host:clock' },
+      icon: 'host:calendar',
+      group: { id: 'schedule', title: 'Schedule', icon: 'host:clock' },
       presenter: { version: 1, kind: 'choice.segmented', options: { density: 'compact' } },
-      hasDefault: true, defaultValue: '2026-09-01',
+      hasDefault: true,
+      defaultValue: '2026-09-01',
     })
     expect(descriptor.fields.find(field => field.path[0] === 'audiences')).toMatchObject({
-      choices: [{ label: 'design', value: 'design' }, { label: 'research', value: 'research' }], min: 1, max: 2,
+      choices: [{ label: 'design', value: 'design' }, { label: 'research', value: 'research' }],
+      min: 1,
+      max: 2,
     })
     expect(descriptor.fields.find(field => field.path[0] === 'tags')).toMatchObject({ arrayItemType: 'string', max: 4 })
     expect(descriptor.fields.find(field => field.path[0] === 'ignored')?.icon).toBeUndefined()
@@ -295,7 +346,10 @@ describe('plugin config registry', () => {
           })).default([{}]),
         })).default([]),
       }),
-      applies: 'live', raw: {}, revision: 1, writable: true,
+      applies: 'live',
+      raw: {},
+      revision: 1,
+      writable: true,
     })
     expect(defaultsRegistry.descriptor('nested-defaults', 'en').fields[0]?.arrayItemDefault).toEqual({
       settings: { name: 'parent-name', enabled: true },
@@ -328,55 +382,65 @@ describe('plugin config registry', () => {
 
   it('rejects asynchronous Standard Schema validators', () => {
     const registry = new PluginConfigurationRegistry()
-    expect(() => registry.register({
-      identity: { id: 'async', source: 'file:///async.ts' },
-      schema: { '~standard': { version: 1, vendor: 'test', validate: async value => ({ value }) } },
-      applies: 'plugin-restart',
-      raw: {},
-      revision: 0,
-      writable: true,
-    })).toThrow('must be synchronous')
+    expect(() =>
+      registry.register({
+        identity: { id: 'async', source: 'file:///async.ts' },
+        schema: { '~standard': { version: 1, vendor: 'test', validate: async value => ({ value }) } },
+        applies: 'plugin-restart',
+        raw: {},
+        revision: 0,
+        writable: true,
+      })
+    ).toThrow('must be synchronous')
   })
 
   it('fails closed on secret defaults and unresolved lazy Schemastery metadata', () => {
     const registry = new PluginConfigurationRegistry()
-    expect(() => registry.register({
-      identity: { id: 'secret-default', source: 'file:///secret.ts' },
-      schema: Schema.object({ apiKey: Schema.string().default('leak').role('secret') }),
-      applies: 'plugin-restart',
-      raw: {},
-      revision: 0,
-      writable: true,
-    })).toThrow('must not declare a JSON default')
-    expect(() => registry.register({
-      identity: { id: 'ancestor-secret-default', source: 'file:///ancestor-secret.ts' },
-      schema: Schema.object({
-        rules: Schema.array(Schema.object({
-          name: Schema.string(),
-          token: Schema.string().role('secret'),
-        })).default([{ name: 'fixture', token: 'fixture-secret' }]),
-      }),
-      applies: 'plugin-restart',
-      raw: {},
-      revision: 0,
-      writable: true,
-    })).toThrow('secret config field rules.0.token must not declare a JSON default')
-    expect(() => registry.register({
-      identity: { id: 'non-json-default', source: 'file:///non-json.ts' },
-      schema: Schema.object({ value: Schema.any().default(new Date('2026-01-01T00:00:00.000Z')) }),
-      applies: 'plugin-restart',
-      raw: {},
-      revision: 0,
-      writable: true,
-    })).toThrow('must be a plain JSON object')
-    expect(() => registry.register({
-      identity: { id: 'lazy', source: 'file:///lazy.ts' },
-      schema: Schema.lazy(() => Schema.object({ value: Schema.string() })),
-      applies: 'plugin-restart',
-      raw: {},
-      revision: 0,
-      writable: true,
-    })).toThrow('cannot prove secret positions')
+    expect(() =>
+      registry.register({
+        identity: { id: 'secret-default', source: 'file:///secret.ts' },
+        schema: Schema.object({ apiKey: Schema.string().default('leak').role('secret') }),
+        applies: 'plugin-restart',
+        raw: {},
+        revision: 0,
+        writable: true,
+      })
+    ).toThrow('must not declare a JSON default')
+    expect(() =>
+      registry.register({
+        identity: { id: 'ancestor-secret-default', source: 'file:///ancestor-secret.ts' },
+        schema: Schema.object({
+          rules: Schema.array(Schema.object({
+            name: Schema.string(),
+            token: Schema.string().role('secret'),
+          })).default([{ name: 'fixture', token: 'fixture-secret' }]),
+        }),
+        applies: 'plugin-restart',
+        raw: {},
+        revision: 0,
+        writable: true,
+      })
+    ).toThrow('secret config field rules.0.token must not declare a JSON default')
+    expect(() =>
+      registry.register({
+        identity: { id: 'non-json-default', source: 'file:///non-json.ts' },
+        schema: Schema.object({ value: Schema.any().default(new Date('2026-01-01T00:00:00.000Z')) }),
+        applies: 'plugin-restart',
+        raw: {},
+        revision: 0,
+        writable: true,
+      })
+    ).toThrow('must be a plain JSON object')
+    expect(() =>
+      registry.register({
+        identity: { id: 'lazy', source: 'file:///lazy.ts' },
+        schema: Schema.lazy(() => Schema.object({ value: Schema.string() })),
+        applies: 'plugin-restart',
+        raw: {},
+        revision: 0,
+        writable: true,
+      })
+    ).toThrow('cannot prove secret positions')
   })
 })
 
@@ -389,19 +453,30 @@ describe('custom config renderers', () => {
     const cleanup = vi.fn()
     let aborted = false
     registry.register('example', { id: 'role', selector: { role: 'duration' } }, role)
-    const unregister = registry.register('example', { id: 'path', selector: { path: ['timeout'] } }, (_container, field) => {
-      field.signal.addEventListener('abort', () => { aborted = true })
-      return cleanup
-    })
-    const mounted = await registry.mount('example', {
-      namespace: 'example',
-      path: ['timeout'],
-      type: 'number',
-      role: 'duration',
-      value: 30,
-      disabled: false,
-      required: false,
-    }, container, () => {})
+    const unregister = registry.register(
+      'example',
+      { id: 'path', selector: { path: ['timeout'] } },
+      (_container, field) => {
+        field.signal.addEventListener('abort', () => {
+          aborted = true
+        })
+        return cleanup
+      },
+    )
+    const mounted = await registry.mount(
+      'example',
+      {
+        namespace: 'example',
+        path: ['timeout'],
+        type: 'number',
+        role: 'duration',
+        value: 30,
+        disabled: false,
+        required: false,
+      },
+      container,
+      () => {},
+    )
     expect(mounted.mounted).toBe(true)
     expect(role).not.toHaveBeenCalled()
     unregister()
@@ -427,14 +502,19 @@ describe('custom config renderers', () => {
     })
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     try {
-      const mounted = await registry.mount('example', {
-        namespace: 'example',
-        path: ['timeout'],
-        type: 'number',
-        value: 30,
-        disabled: false,
-        required: false,
-      }, dom.window.document.getElementById('field') as HTMLElement, () => {})
+      const mounted = await registry.mount(
+        'example',
+        {
+          namespace: 'example',
+          path: ['timeout'],
+          type: 'number',
+          value: 30,
+          disabled: false,
+          required: false,
+        },
+        dom.window.document.getElementById('field') as HTMLElement,
+        () => {},
+      )
       expect(mounted.mounted).toBe(false)
       expect(diagnostic).toHaveBeenCalledWith(expect.stringContaining('example:broken failed'), expect.any(Error))
     } finally {

@@ -1,8 +1,5 @@
 import type { CordisXAgentAdapter } from '../renderer/agent.js'
-import {
-  CORDISX_CONNECTOR_DESCRIPTOR_SCHEMA_V1,
-  type CordisXHostConnector,
-} from '../renderer/connectors.js'
+import { CORDISX_CONNECTOR_DESCRIPTOR_SCHEMA_V1, type CordisXHostConnector } from '../renderer/connectors.js'
 
 /**
  * Built-in Connector boundary for the real Host Agent adapter only.
@@ -20,10 +17,17 @@ export function createCodexAgentConnector(agent: Pick<CordisXAgentAdapter, 'agen
       schemaVersion: 1 as const,
       connectorId: 'agent.connector',
       protocolVersion: 1 as const,
-      capabilities: Object.freeze([
-        'conversation.open', 'conversation.continue', 'message.send', 'events.receive',
-        'run.stop', 'conversation.close', 'lifecycle.dispose',
-      ] as const),
+      capabilities: Object.freeze(
+        [
+          'conversation.open',
+          'conversation.continue',
+          'message.send',
+          'events.receive',
+          'run.stop',
+          'conversation.close',
+          'lifecycle.dispose',
+        ] as const,
+      ),
     }),
     async available() {
       const status = agent.agentStatus()

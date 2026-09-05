@@ -49,7 +49,9 @@ describe('React Marketplace plugin detail', () => {
     expect(page).toContain('cxr-list cxr-permission-list')
     expect(page).toContain('<article className="cxr-card cxr-permission-summary" role="listitem"')
     expect(page).not.toContain('permissionReason')
-    expect(styles).toContain('.cxr-permission-summary .cxr-card-description { overflow: visible; text-overflow: clip; white-space: normal; }')
+    expect(styles).toContain(
+      '.cxr-permission-summary .cxr-card-description { overflow: visible; text-overflow: clip; white-space: normal; }',
+    )
     expect(styles).toContain('.cxr-permission-list { grid-template-columns: minmax(0,1fr); }')
     expect(page).not.toContain("router.navigate({ kind: 'permission'")
     expect(page).toContain('item.required ? copy.required : copy.optional')

@@ -8,7 +8,9 @@ import { npmPackItem } from './npm-pack-report.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined ? undefined : path.resolve(process.env.CORDISX_PROTOCOL_TARBALL)
+const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
+  ? undefined
+  : path.resolve(process.env.CORDISX_PROTOCOL_TARBALL)
 
 async function run(file, args, options = {}) {
   try {
@@ -85,9 +87,11 @@ async function verifyGeneratedProject(project, cordisxTarball, expectedVersion) 
   })
   await run('npm', ['run', 'check'], { cwd: project, env: process.env })
   const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project, env: process.env })
-  if (!dryRun.stdout.includes('[cordisx] Vite entry ready:')
+  if (
+    !dryRun.stdout.includes('[cordisx] Vite entry ready:')
     || !dryRun.stdout.includes('"status": "ready"')
-    || !dryRun.stdout.includes('"transport": "vite"')) {
+    || !dryRun.stdout.includes('"transport": "vite"')
+  ) {
     throw new Error('generated plugin was not accepted by cordisx dev --dry-run')
   }
 }
@@ -102,10 +106,12 @@ async function usePackedCordisX(packagePath, cordisxTarball, expectedVersion) {
 }
 
 function assertViteProjectDryRun(stdout, pluginIds) {
-  if (!stdout.includes('[cordisx] Vite entry ready:')
+  if (
+    !stdout.includes('[cordisx] Vite entry ready:')
     || !stdout.includes('"status": "ready"')
     || !stdout.includes('"transport": "vite"')
-    || pluginIds.some(id => !stdout.includes(`"${id}"`))) {
+    || pluginIds.some(id => !stdout.includes(`"${id}"`))
+  ) {
     throw new Error('generated multi-plugin project was not accepted by cordisx dev --dry-run')
   }
 }
@@ -178,8 +184,10 @@ try {
 
   const installedCordisXRoot = path.join(runnerDirectory, 'node_modules', 'cordisx')
   const installedCordisXManifest = JSON.parse(await readFile(path.join(installedCordisXRoot, 'package.json'), 'utf8'))
-  if (installedCordisXManifest.dependencies?.['@oneworks/avatar'] !== undefined
-    || installedCordisXManifest.dependencies?.['@oneworks/avatar-react'] !== undefined) {
+  if (
+    installedCordisXManifest.dependencies?.['@oneworks/avatar'] !== undefined
+    || installedCordisXManifest.dependencies?.['@oneworks/avatar-react'] !== undefined
+  ) {
     throw new Error('installed cordisx must not include product-owned avatar renderers')
   }
 
@@ -193,7 +201,9 @@ try {
     await access(path.join(packageRoot, 'CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md'))
   }
 
-  await writeFile(path.join(runnerDirectory, 'connector-consumer.ts'), `
+  await writeFile(
+    path.join(runnerDirectory, 'connector-consumer.ts'),
+    `
 import type {
   ConnectorEventSubscription,
   ConnectorSubscribeRuntimeResult,
@@ -212,8 +222,12 @@ protocolSubscription satisfies CordisXConnectorEventSubscription
 hostSubscription satisfies ConnectorEventSubscription
 if ('handle' in protocolResult) protocolResult.handle.unsubscribe()
 if ('handle' in hostResult) hostResult.handle.unsubscribe()
-`, 'utf8')
-  await writeFile(path.join(runnerDirectory, 'agent-session-consumer.ts'), `
+`,
+    'utf8',
+  )
+  await writeFile(
+    path.join(runnerDirectory, 'agent-session-consumer.ts'),
+    `
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentRegistry } from '@cordisx/protocol/agents/v1'
 import type { ApprovalService } from '@cordisx/protocol/approval/v1'
@@ -237,8 +251,12 @@ const migrated: Promise<CordisXAgentSessionLegacyAcquireResultV1> = ctx.agents.a
 migrated satisfies Promise<CordisXAgentSessionLegacyAcquireResultV1>
 protocolManifestV6 satisfies CordisXPluginManifestV6
 hostManifestV6 satisfies PluginRuntimeManifestV6
-`, 'utf8')
-  await writeFile(path.join(runnerDirectory, 'agent-loop-collection-consumer.ts'), `
+`,
+    'utf8',
+  )
+  await writeFile(
+    path.join(runnerDirectory, 'agent-loop-collection-consumer.ts'),
+    `
 import type { Context } from '@deepseek-ai/cordis'
 import type {
   AgentDefinition as ProtocolAgentDefinition,
@@ -421,22 +439,41 @@ ctx.slots.registerCollection({
   id: 'chatroom.rooms',
   group: { id: 'chatroom', label: { key: 'chatroom.rooms', fallback: 'Rooms' } },
 }, source).dispose()
-`, 'utf8')
-  await writeFile(path.join(runnerDirectory, 'tsconfig.json'), `${JSON.stringify({
-    compilerOptions: {
-      target: 'ES2022', module: 'NodeNext', moduleResolution: 'NodeNext', strict: true,
-      exactOptionalPropertyTypes: true, noEmit: true, skipLibCheck: false,
-    },
-    include: ['connector-consumer.ts', 'agent-session-consumer.ts', 'agent-loop-collection-consumer.ts'],
-  }, null, 2)}\n`, 'utf8')
-  const rootBin = name => path.join(repositoryRoot, 'node_modules', '.bin', process.platform === 'win32' ? `${name}.cmd` : name)
+`,
+    'utf8',
+  )
+  await writeFile(
+    path.join(runnerDirectory, 'tsconfig.json'),
+    `${
+      JSON.stringify(
+        {
+          compilerOptions: {
+            target: 'ES2022',
+            module: 'NodeNext',
+            moduleResolution: 'NodeNext',
+            strict: true,
+            exactOptionalPropertyTypes: true,
+            noEmit: true,
+            skipLibCheck: false,
+          },
+          include: ['connector-consumer.ts', 'agent-session-consumer.ts', 'agent-loop-collection-consumer.ts'],
+        },
+        null,
+        2,
+      )
+    }\n`,
+    'utf8',
+  )
+  const rootBin = name =>
+    path.join(repositoryRoot, 'node_modules', '.bin', process.platform === 'win32' ? `${name}.cmd` : name)
   await run(rootBin('tsc'), ['-p', 'tsconfig.json'], { cwd: runnerDirectory, env: process.env })
 
   const binDirectory = path.join(runnerDirectory, 'node_modules', '.bin')
-  const executable = name => path.join(
-    binDirectory,
-    process.platform === 'win32' ? `${name}.cmd` : name,
-  )
+  const executable = name =>
+    path.join(
+      binDirectory,
+      process.platform === 'win32' ? `${name}.cmd` : name,
+    )
   const cliEnvironment = { ...process.env, CORDISX_HOME: cordisxHome }
   const help = await run(executable('cordisx'), ['--help'], {
     cwd: runnerDirectory,
@@ -459,14 +496,23 @@ ctx.slots.registerCollection({
   await writeFile(configPath, `${JSON.stringify(initialConfig, null, 2)}\n`, 'utf8')
   const installedSchemasteryUiRoot = path.join(installedCordisXRoot, 'node_modules', '@cordisx', 'schemastery-ui')
   await access(path.join(installedSchemasteryUiRoot, 'dist', 'index.js'))
-  const installedSchemasteryUiManifest = JSON.parse(await readFile(path.join(installedSchemasteryUiRoot, 'package.json'), 'utf8'))
-  if (installedSchemasteryUiManifest.name !== '@cordisx/schemastery-ui' || installedSchemasteryUiManifest.version !== '0.1.0-beta.2') {
+  const installedSchemasteryUiManifest = JSON.parse(
+    await readFile(path.join(installedSchemasteryUiRoot, 'package.json'), 'utf8'),
+  )
+  if (
+    installedSchemasteryUiManifest.name !== '@cordisx/schemastery-ui'
+    || installedSchemasteryUiManifest.version !== '0.1.0-beta.2'
+  ) {
     throw new Error('installed cordisx tarball is missing the pinned @cordisx/schemastery-ui runtime')
   }
   const [
-    { loadConfig }, { buildRendererBundle }, { OwnerDocumentStore },
-    { createOwnerDocumentBridgeHandler, parseOwnerDocumentBindingRequest }, { JSDOM },
-    { CordisXAgentLoopBrokerV4 }, { PlaygroundMockAgentLoopHost, PlaygroundMockAgentLoopV4Transport },
+    { loadConfig },
+    { buildRendererBundle },
+    { OwnerDocumentStore },
+    { createOwnerDocumentBridgeHandler, parseOwnerDocumentBindingRequest },
+    { JSDOM },
+    { CordisXAgentLoopBrokerV4 },
+    { PlaygroundMockAgentLoopHost, PlaygroundMockAgentLoopV4Transport },
     agentLoopContracts,
   ] = await Promise.all([
     import(pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/config.js')).href),
@@ -484,14 +530,22 @@ ctx.slots.registerCollection({
   }
   const installedDocumentStore = new OwnerDocumentStore(cordisxHome)
   const durableOperation = {
-    deliveryId: 'delivery-installed-1', operationId: 'stable-operation-installed-1',
-    issuedAt: 1, exactPayload: { text: 'hello' }, state: 'planned',
+    deliveryId: 'delivery-installed-1',
+    operationId: 'stable-operation-installed-1',
+    issuedAt: 1,
+    exactPayload: { text: 'hello' },
+    state: 'planned',
   }
   const durableAccepted = await installedDocumentStore.replace({
-    scope: ownerDocumentScope, documentId: 'room-registry', expectedRevision: 0, schemaVersion: 1,
+    scope: ownerDocumentScope,
+    documentId: 'room-registry',
+    expectedRevision: 0,
+    schemaVersion: 1,
     value: durableOperation,
   })
-  if (durableAccepted.status !== 'accepted') throw new Error('installed owner document store did not accept an outbox operation')
+  if (durableAccepted.status !== 'accepted') {
+    throw new Error('installed owner document store did not accept an outbox operation')
+  }
   const durableReload = await new OwnerDocumentStore(cordisxHome).load(ownerDocumentScope, 'room-registry')
   if (durableReload.status !== 'loaded' || durableReload.snapshot.value.operationId !== durableOperation.operationId) {
     throw new Error('installed owner document store did not reload the exact outbox operation')
@@ -500,140 +554,234 @@ ctx.slots.registerCollection({
   // launcher authority. The direct store reload above is intentionally not the
   // only durability evidence.
   const durablePluginEntry = path.join(runnerDirectory, 'durable-plugin.mjs')
-  await writeFile(durablePluginEntry, `export const inject = ['documents']\nexport function apply(ctx) { globalThis.__installedDurableClient = ctx.documents }\n`, 'utf8')
+  await writeFile(
+    durablePluginEntry,
+    `export const inject = ['documents']\nexport function apply(ctx) { globalThis.__installedDurableClient = ctx.documents }\n`,
+    'utf8',
+  )
   const durableSource = pathToFileURL(durablePluginEntry).href
   const durableGeneration = 'installed-owner-documents-generation'
   const durableHandler = createOwnerDocumentBridgeHandler({
-    secret: 'installed-owner-documents-secret', profileId: 'installed', generation: durableGeneration,
+    secret: 'installed-owner-documents-secret',
+    profileId: 'installed',
+    generation: durableGeneration,
     store: new OwnerDocumentStore(cordisxHome),
-    principalAllowed: principal => principal.identity.source === durableSource && principal.identity.pluginId === 'durable-plugin',
+    principalAllowed: principal =>
+      principal.identity.source === durableSource && principal.identity.pluginId === 'durable-plugin',
   })
   const durableBundle = await buildRendererBundle({
-    version: 1, rootDir: runnerDirectory, codex: { debugPort: 9229 }, providers: [],
+    version: 1,
+    rootDir: runnerDirectory,
+    codex: { debugPort: 9229 },
+    providers: [],
     plugins: [{ id: 'durable-plugin', entry: durablePluginEntry, source: durableSource, enabled: true, config: {} }],
   }, {
-    profileId: 'installed', generation: durableGeneration,
-    ownerDocumentAuthority: { secret: 'installed-owner-documents-secret', profileId: 'installed', generation: durableGeneration },
+    profileId: 'installed',
+    generation: durableGeneration,
+    ownerDocumentAuthority: {
+      secret: 'installed-owner-documents-secret',
+      profileId: 'installed',
+      generation: durableGeneration,
+    },
   })
-  const durableDom = new JSDOM('<html lang="en"><head></head><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>', {
-    runScripts: 'dangerously', url: 'https://codex.local/',
-  })
+  const durableDom = new JSDOM(
+    '<html lang="en"><head></head><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>',
+    {
+      runScripts: 'dangerously',
+      url: 'https://codex.local/',
+    },
+  )
   Object.defineProperty(durableDom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
   Object.defineProperty(durableDom.window, 'structuredClone', { value: globalThis.structuredClone })
   Object.defineProperty(durableDom.window, 'TextEncoder', { value: globalThis.TextEncoder })
   Object.defineProperty(durableDom.window, 'TextDecoder', { value: globalThis.TextDecoder })
   Object.defineProperty(durableDom.window, '__cordisxOwnerDocumentRequestV1', {
     configurable: true,
-    value: payload => { void (async () => {
-      const request = parseOwnerDocumentBindingRequest(JSON.parse(payload))
-      const value = request.operation === 'load' ? await durableHandler.load(request) : await durableHandler.replace(request)
-      durableDom.window.__cordisxOwnerDocumentReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
-    })() },
+    value: payload => {
+      void (async () => {
+        const request = parseOwnerDocumentBindingRequest(JSON.parse(payload))
+        const value = request.operation === 'load'
+          ? await durableHandler.load(request)
+          : await durableHandler.replace(request)
+        durableDom.window.__cordisxOwnerDocumentReceiveV1?.(
+          JSON.stringify({ requestId: request.requestId, ok: true, value }),
+        )
+      })()
+    },
   })
   durableDom.window.eval(durableBundle)
   await durableDom.window.__cordisxBoot
   const durableClient = durableDom.window.__installedDurableClient
-  if (durableClient === undefined || Object.keys(durableClient).length !== 0) throw new Error('installed public ctx.documents client is missing or leaks binding state')
+  if (durableClient === undefined || Object.keys(durableClient).length !== 0) {
+    throw new Error('installed public ctx.documents client is missing or leaks binding state')
+  }
   const bridgeAccepted = await durableClient.replace({
-    contract: 'cordisx.owner-documents/v1', documentId: 'room-outbox', expectedRevision: 0, schemaVersion: 1,
+    contract: 'cordisx.owner-documents/v1',
+    documentId: 'room-outbox',
+    expectedRevision: 0,
+    schemaVersion: 1,
     value: { operationId: 'installed-public-bridge-operation', state: 'planned' },
   })
   if (bridgeAccepted.status !== 'accepted') throw new Error('installed public ctx.documents bridge did not commit')
   await durableDom.window.__cordisxRuntime?.dispose()
   durableDom.window.close()
   const bridgeReload = await new OwnerDocumentStore(cordisxHome).load({
-    profileId: 'installed', identity: { source: durableSource, pluginId: 'durable-plugin' },
+    profileId: 'installed',
+    identity: { source: durableSource, pluginId: 'durable-plugin' },
   }, 'room-outbox')
-  if (bridgeReload.status !== 'loaded' || bridgeReload.snapshot.value.operationId !== 'installed-public-bridge-operation') {
+  if (
+    bridgeReload.status !== 'loaded' || bridgeReload.snapshot.value.operationId !== 'installed-public-bridge-operation'
+  ) {
     throw new Error('installed public ctx.documents bridge did not survive launcher store reload')
   }
   const installedBundle = await buildRendererBundle(await loadConfig(configPath))
-  if (!installedBundle.includes('# CLIProxy Providers') || !installedBundle.includes('External providers and the native connection')) {
+  if (
+    !installedBundle.includes('# CLIProxy Providers')
+    || !installedBundle.includes('External providers and the native connection')
+  ) {
     throw new Error('installed built-in CLIProxy plugin bundle is missing its product README')
   }
   const localAgentLoopConfigPath = path.join(runnerDirectory, 'local-agent-loop.config.json')
-  await writeFile(localAgentLoopConfigPath, `${JSON.stringify({
-    version: 1,
-    codex: { debugPort: 9229, agentLoopBackend: 'local-cli' },
-    providers: [],
-    plugins: [],
-  }, null, 2)}\n`, 'utf8')
+  await writeFile(
+    localAgentLoopConfigPath,
+    `${
+      JSON.stringify(
+        {
+          version: 1,
+          codex: { debugPort: 9229, agentLoopBackend: 'local-cli' },
+          providers: [],
+          plugins: [],
+        },
+        null,
+        2,
+      )
+    }\n`,
+    'utf8',
+  )
   const localAgentLoopBundle = await buildRendererBundle(await loadConfig(localAgentLoopConfigPath), {
     playground: true,
     profileId: 'playground',
     providerBridgeToken: 'installed-local-agent-loop-token',
   })
-  if (!localAgentLoopBundle.includes('codex-local') || !localAgentLoopBundle.includes('installed-local-agent-loop-token')) {
+  if (
+    !localAgentLoopBundle.includes('codex-local') || !localAgentLoopBundle.includes('installed-local-agent-loop-token')
+  ) {
     throw new Error('installed cordisx tarball does not compose the explicit local AgentLoop provider bridge')
   }
 
   const installedMockHost = new PlaygroundMockAgentLoopHost()
   const installedMockTransport = new PlaygroundMockAgentLoopV4Transport(installedMockHost)
-  const installedBroker = new CordisXAgentLoopBrokerV4(installedMockTransport, installedMockHost, 'installed', 'installed-composition')
+  const installedBroker = new CordisXAgentLoopBrokerV4(
+    installedMockTransport,
+    installedMockHost,
+    'installed',
+    'installed-composition',
+  )
   const installedClient = installedBroker.bind({
-    ownerKey: 'installed-runtime-owner', active: () => true,
+    ownerKey: 'installed-runtime-owner',
+    active: () => true,
     authorize: async request => ({ capability: request.capability, state: 'allowed', code: 'allowed' }),
     authorizeV4: async request => ({ capability: request.capability, state: 'allowed', code: 'allowed' }),
   })
   const commandBase = commandId => ({
     $schema: agentLoopContracts.CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V4,
-    contract: 'cordisx.agent-loop-command/v4', schemaVersion: 4, commandId,
+    contract: 'cordisx.agent-loop-command/v4',
+    schemaVersion: 4,
+    commandId,
   })
   const installedDefinition = {
     $schema: agentLoopContracts.CORDISX_AGENT_DEFINITION_SCHEMA_V1,
-    contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
+    contract: 'cordisx.agent-definition/v1',
+    schemaVersion: 1,
     identity: { agentId: 'installed-agent', revision: 'revision-1' },
-    inherit: { promptSections: 'none', rules: 'none', skills: 'none', tools: 'none', mcpServers: 'none', runtimeDefaults: 'none' },
+    inherit: {
+      promptSections: 'none',
+      rules: 'none',
+      skills: 'none',
+      tools: 'none',
+      mcpServers: 'none',
+      runtimeDefaults: 'none',
+    },
   }
   const installedCreated = await installedClient.createOrBind({
-    ...commandBase('installed-create'), type: 'create-or-bind', definition: installedDefinition.identity,
-    definitions: [installedDefinition], target: { mode: 'create' },
+    ...commandBase('installed-create'),
+    type: 'create-or-bind',
+    definition: installedDefinition.identity,
+    definitions: [installedDefinition],
+    target: { mode: 'create' },
   })
   if (installedCreated.status !== 'accepted') throw new Error('installed v4 runtime create was not accepted')
   const installedSendCommand = {
-    ...commandBase('installed-send'), type: 'send', binding: installedCreated.binding,
+    ...commandBase('installed-send'),
+    type: 'send',
+    binding: installedCreated.binding,
     content: [{ kind: 'text', text: '[approval]' }],
   }
   const [installedSent, installedReplayed] = await Promise.all([
-    installedClient.send(installedSendCommand), installedClient.send(installedSendCommand),
+    installedClient.send(installedSendCommand),
+    installedClient.send(installedSendCommand),
   ])
-  if (installedSent.status !== 'accepted' || installedReplayed.status !== 'accepted'
-    || [installedSent.delivery.disposition, installedReplayed.delivery.disposition].sort().join(',') !== 'executed,replayed') {
+  if (
+    installedSent.status !== 'accepted' || installedReplayed.status !== 'accepted'
+    || [installedSent.delivery.disposition, installedReplayed.delivery.disposition].sort().join(',')
+      !== 'executed,replayed'
+  ) {
     throw new Error('installed v4 runtime did not execute and replay one concurrent send')
   }
   const installedApproval = await installedClient.decideApproval({
-    ...commandBase('installed-approval'), type: 'approval-decision', binding: installedCreated.binding,
-    turn: installedSent.turn, approvalId: `simulated-approval-${installedSent.turn}`, decision: 'approved',
+    ...commandBase('installed-approval'),
+    type: 'approval-decision',
+    binding: installedCreated.binding,
+    turn: installedSent.turn,
+    approvalId: `simulated-approval-${installedSent.turn}`,
+    decision: 'approved',
   })
   if (installedApproval.status !== 'accepted' || installedApproval.causation.operationId !== 'installed-approval') {
     throw new Error('installed v4 runtime approval decision lost durable causation')
   }
   const installedIntroductionCommand = {
-    ...commandBase('installed-introduction'), type: 'request-member-self-introduction', binding: installedCreated.binding,
-    participantId: 'installed-participant', memberId: 'installed-member', runId: 'installed-run',
+    ...commandBase('installed-introduction'),
+    type: 'request-member-self-introduction',
+    binding: installedCreated.binding,
+    participantId: 'installed-participant',
+    memberId: 'installed-member',
+    runId: 'installed-run',
     intent: { kind: 'member-self-introduction', audience: 'room', output: 'assistant-message' },
   }
   const installedIntroduction = await installedClient.requestMemberSelfIntroduction(installedIntroductionCommand)
   if (installedIntroduction.status !== 'accepted') throw new Error('installed v4 runtime introduction was not accepted')
   const installedCancelCommand = {
-    ...commandBase('installed-cancel'), type: 'cancel-member-self-introduction', binding: installedCreated.binding,
-    participantId: installedIntroductionCommand.participantId, memberId: installedIntroductionCommand.memberId,
-    runId: installedIntroductionCommand.runId, requestOperationId: installedIntroductionCommand.commandId,
+    ...commandBase('installed-cancel'),
+    type: 'cancel-member-self-introduction',
+    binding: installedCreated.binding,
+    participantId: installedIntroductionCommand.participantId,
+    memberId: installedIntroductionCommand.memberId,
+    runId: installedIntroductionCommand.runId,
+    requestOperationId: installedIntroductionCommand.commandId,
   }
   const installedCancelled = await installedClient.cancelMemberSelfIntroduction(installedCancelCommand)
   const installedCancelReplay = await installedClient.cancelMemberSelfIntroduction(installedCancelCommand)
-  const installedCancelConflict = await installedClient.cancelMemberSelfIntroduction({ ...installedCancelCommand, commandId: 'installed-cancel-again' })
-  if (installedCancelled.status !== 'accepted' || installedCancelReplay.status !== 'accepted'
+  const installedCancelConflict = await installedClient.cancelMemberSelfIntroduction({
+    ...installedCancelCommand,
+    commandId: 'installed-cancel-again',
+  })
+  if (
+    installedCancelled.status !== 'accepted' || installedCancelReplay.status !== 'accepted'
     || installedCancelReplay.delivery.disposition !== 'replayed'
-    || installedCancelConflict.status !== 'conflict' || installedCancelConflict.code !== 'introduction-cancelled') {
+    || installedCancelConflict.status !== 'conflict' || installedCancelConflict.code !== 'introduction-cancelled'
+  ) {
     throw new Error('installed v4 runtime cancellation state or replay drifted')
   }
   const installedSubscription = await installedClient.subscribe(installedCreated.binding, 0)
   if (installedSubscription.status !== 'accepted') throw new Error('installed v4 runtime subscription was unavailable')
   const installedPage = await installedSubscription.handle.pages[Symbol.asyncIterator]().next()
-  if (!installedPage.value?.events.some(event => event.type === 'lifecycle'
-      && event.lifecycle.phase === 'turn.cancelled' && event.causation?.operationId === 'installed-cancel')
-    || installedPage.value.events.some(event => event.type === 'message' && event.turn === installedIntroduction.turn)) {
+  if (
+    !installedPage.value?.events.some(event =>
+      event.type === 'lifecycle'
+      && event.lifecycle.phase === 'turn.cancelled' && event.causation?.operationId === 'installed-cancel'
+    )
+    || installedPage.value.events.some(event => event.type === 'message' && event.turn === installedIntroduction.turn)
+  ) {
     throw new Error('installed v4 runtime emitted an invalid cancellation event sequence')
   }
   installedSubscription.handle.unsubscribe()
@@ -680,40 +828,101 @@ ctx.slots.registerCollection({
     cwd: runnerDirectory,
     env: process.env,
   })
-  const creatorManifest = JSON.parse(await readFile(
-    path.join(runnerDirectory, 'node_modules/create-cordisx-plugin/package.json'),
-    'utf8',
-  ))
+  const creatorManifest = JSON.parse(
+    await readFile(
+      path.join(runnerDirectory, 'node_modules/create-cordisx-plugin/package.json'),
+      'utf8',
+    ),
+  )
   await verifyGeneratedProject(createTarget, cordisxTarball, creatorManifest.version)
   await verifyGeneratedProject(npxTarget, cordisxTarball, creatorManifest.version)
 
   await run(executable('create-cordisx-plugin'), [
-    '--mode', 'workspace', workspaceTarget, '--plugin', 'alpha', '--plugin', 'beta',
+    '--mode',
+    'workspace',
+    workspaceTarget,
+    '--plugin',
+    'alpha',
+    '--plugin',
+    'beta',
   ], { cwd: runnerDirectory, env: process.env })
   await verifyGeneratedWorkspace(workspaceTarget, cordisxTarball, creatorManifest.version, ['alpha', 'beta'])
 
   for (const project of [embeddedWorkspaceTarget, embeddedIsolatedTarget]) {
     await mkdir(project, { recursive: true })
   }
-  await writeFile(path.join(embeddedWorkspaceTarget, 'package.json'), `${JSON.stringify({
-    name: 'embedded-workspace-fixture', private: true, workspaces: [],
-  }, null, 2)}\n`, 'utf8')
-  await writeFile(path.join(embeddedIsolatedTarget, 'package.json'), `${JSON.stringify({
-    name: 'embedded-isolated-fixture', private: true,
-  }, null, 2)}\n`, 'utf8')
+  await writeFile(
+    path.join(embeddedWorkspaceTarget, 'package.json'),
+    `${
+      JSON.stringify(
+        {
+          name: 'embedded-workspace-fixture',
+          private: true,
+          workspaces: [],
+        },
+        null,
+        2,
+      )
+    }\n`,
+    'utf8',
+  )
+  await writeFile(
+    path.join(embeddedIsolatedTarget, 'package.json'),
+    `${
+      JSON.stringify(
+        {
+          name: 'embedded-isolated-fixture',
+          private: true,
+        },
+        null,
+        2,
+      )
+    }\n`,
+    'utf8',
+  )
   await run(executable('create-cordisx-plugin'), [
-    '--mode', 'embedded', embeddedWorkspaceTarget, '--plugin', 'alpha', '--package-manager', 'npm',
+    '--mode',
+    'embedded',
+    embeddedWorkspaceTarget,
+    '--plugin',
+    'alpha',
+    '--package-manager',
+    'npm',
   ], { cwd: runnerDirectory, env: process.env })
   await run(executable('create-cordisx-plugin'), [
-    '--mode', 'embedded', embeddedWorkspaceTarget, '--plugin', 'beta', '--package-manager', 'npm',
+    '--mode',
+    'embedded',
+    embeddedWorkspaceTarget,
+    '--plugin',
+    'beta',
+    '--package-manager',
+    'npm',
   ], { cwd: runnerDirectory, env: process.env })
   await run(executable('create-cordisx-plugin'), [
-    '--mode', 'embedded', embeddedIsolatedTarget, '--plugin', 'solo', '--integration', 'isolated', '--package-manager', 'npm',
+    '--mode',
+    'embedded',
+    embeddedIsolatedTarget,
+    '--plugin',
+    'solo',
+    '--integration',
+    'isolated',
+    '--package-manager',
+    'npm',
   ], { cwd: runnerDirectory, env: process.env })
-  await verifyGeneratedEmbedded(embeddedWorkspaceTarget, cordisxTarball, creatorManifest.version, ['alpha', 'beta'], true)
+  await verifyGeneratedEmbedded(
+    embeddedWorkspaceTarget,
+    cordisxTarball,
+    creatorManifest.version,
+    ['alpha', 'beta'],
+    true,
+  )
   await verifyGeneratedEmbedded(embeddedIsolatedTarget, cordisxTarball, creatorManifest.version, ['solo'], false)
 
-  console.log(`[cordisx] installed tarballs verified: licenses, no OneWorks Avatar runtime dependency, combined multi-binding AgentLoop, executable v4 create/send concurrent replay/approval/introduction/cancel/subscription, owner documents, and generic raster navigation collection${protocolTarball === undefined ? '' : ', exact local Protocol'}, durable outbox reload, local AgentLoop provider composition, Connector consumer types, CLI, built-in README, both creator commands, standalone/workspace/embedded-isolated/embedded-workspace generated checks, Vite dev dry-run`)
+  console.log(
+    `[cordisx] installed tarballs verified: licenses, no OneWorks Avatar runtime dependency, combined multi-binding AgentLoop, executable v4 create/send concurrent replay/approval/introduction/cancel/subscription, owner documents, and generic raster navigation collection${
+      protocolTarball === undefined ? '' : ', exact local Protocol'
+    }, durable outbox reload, local AgentLoop provider composition, Connector consumer types, CLI, built-in README, both creator commands, standalone/workspace/embedded-isolated/embedded-workspace generated checks, Vite dev dry-run`,
+  )
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
 }

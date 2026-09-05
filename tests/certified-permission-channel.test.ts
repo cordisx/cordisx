@@ -76,14 +76,16 @@ function certification(): CordisXCertifiedPermissionProjectionV1 {
   }
 }
 
-function envelope(input: Readonly<{
-  documentEpoch: string
-  deliverySequence?: number
-  authorityRevision?: number
-  snapshot?: Snapshot
-  profileId?: string
-  runtimeGeneration?: string
-}>): string {
+function envelope(
+  input: Readonly<{
+    documentEpoch: string
+    deliverySequence?: number
+    authorityRevision?: number
+    snapshot?: Snapshot
+    profileId?: string
+    runtimeGeneration?: string
+  }>,
+): string {
   const authorityRevision = input.authorityRevision ?? input.snapshot?.revision ?? 1
   return JSON.stringify({
     contract: CERTIFIED_PERMISSION_CHANNEL_CONTRACT,
@@ -108,8 +110,12 @@ function setup(input: Readonly<{
     profileId,
     runtimeGeneration,
     sink: {
-      replaceCertifiedPermissionSnapshot: snapshot => { replacements.push(snapshot) },
-      clearCertifiedPermissionSnapshot: () => { clears += 1 },
+      replaceCertifiedPermissionSnapshot: snapshot => {
+        replacements.push(snapshot)
+      },
+      clearCertifiedPermissionSnapshot: () => {
+        clears += 1
+      },
     },
     now: () => new Date('2026-08-30T12:00:00.000Z'),
     ...input,
@@ -155,11 +161,13 @@ describe('renderer Certified permission document channel', () => {
     context.channel.dispose()
   })
 
-  it.each([
-    ['profile', { profileId: 'other' }],
-    ['runtime generation', { runtimeGeneration: 'runtime-2' }],
-    ['document', { documentEpoch: 'different_document_epoch_1234' }],
-  ] as const)('rejects a forged %s binding and clears any prior snapshot', (_case, mutation) => {
+  it.each(
+    [
+      ['profile', { profileId: 'other' }],
+      ['runtime generation', { runtimeGeneration: 'runtime-2' }],
+      ['document', { documentEpoch: 'different_document_epoch_1234' }],
+    ] as const,
+  )('rejects a forged %s binding and clears any prior snapshot', (_case, mutation) => {
     const context = setup()
     const endpoint = context.take?.()
     expect(endpoint).toBeDefined()
@@ -190,11 +198,13 @@ describe('renderer Certified permission document channel', () => {
       snapshot,
     }))).toMatchObject({ deliverySequence: 1, authorityRevision: 4 })
 
-    expect(() => endpoint!.deliver(envelope({
-      documentEpoch: context.channel.documentEpoch,
-      deliverySequence: 1,
-      snapshot,
-    }))).toThrow(/stale or invalid/)
+    expect(() =>
+      endpoint!.deliver(envelope({
+        documentEpoch: context.channel.documentEpoch,
+        deliverySequence: 1,
+        snapshot,
+      }))
+    ).toThrow(/stale or invalid/)
     expect(context.clears()).toBe(1)
 
     expect(endpoint!.deliver(envelope({
@@ -204,20 +214,24 @@ describe('renderer Certified permission document channel', () => {
     }))).toMatchObject({ deliverySequence: 2, authorityRevision: 4 })
     expect(context.replacements).toHaveLength(2)
 
-    expect(() => endpoint!.deliver(envelope({
-      documentEpoch: context.channel.documentEpoch,
-      deliverySequence: 3,
-      authorityRevision: 3,
-      snapshot: { revision: 3, projections: [certification()] },
-    }))).toThrow(/stale or invalid/)
+    expect(() =>
+      endpoint!.deliver(envelope({
+        documentEpoch: context.channel.documentEpoch,
+        deliverySequence: 3,
+        authorityRevision: 3,
+        snapshot: { revision: 3, projections: [certification()] },
+      }))
+    ).toThrow(/stale or invalid/)
     expect(context.clears()).toBe(2)
 
-    expect(() => endpoint!.deliver(envelope({
-      documentEpoch: context.channel.documentEpoch,
-      deliverySequence: 4,
-      authorityRevision: 4,
-      snapshot: { revision: 4, projections: [] },
-    }))).toThrow(/equivocated/)
+    expect(() =>
+      endpoint!.deliver(envelope({
+        documentEpoch: context.channel.documentEpoch,
+        deliverySequence: 4,
+        authorityRevision: 4,
+        snapshot: { revision: 4, projections: [] },
+      }))
+    ).toThrow(/equivocated/)
     expect(context.clears()).toBe(3)
     context.channel.dispose()
   })
@@ -233,10 +247,12 @@ describe('renderer Certified permission document channel', () => {
     expect(context.clears()).toBe(1)
     expect(endpoint!.close()).toBe(true)
     expect(context.clears()).toBe(2)
-    expect(() => endpoint!.deliver(envelope({
-      documentEpoch: context.channel.documentEpoch,
-      deliverySequence: 2,
-    }))).toThrow(/rejected/)
+    expect(() =>
+      endpoint!.deliver(envelope({
+        documentEpoch: context.channel.documentEpoch,
+        deliverySequence: 2,
+      }))
+    ).toThrow(/rejected/)
   })
 
   it('disposes the ready channel when a later renderer bootstrap step fails', async () => {
@@ -286,11 +302,13 @@ describe('renderer Certified permission document channel', () => {
 
     await expect(boot).rejects.toThrow('fixture post-channel bootstrap failure')
     expect(internalBootstrap).toHaveBeenCalledOnce()
-    expect(() => endpoint!.deliver(envelope({
-      documentEpoch: endpoint!.describe().documentEpoch,
-      deliverySequence: 2,
-      snapshot: { revision: 2, projections: [] },
-    }))).toThrow(/rejected/)
+    expect(() =>
+      endpoint!.deliver(envelope({
+        documentEpoch: endpoint!.describe().documentEpoch,
+        deliverySequence: 2,
+        snapshot: { revision: 2, projections: [] },
+      }))
+    ).toThrow(/rejected/)
     dom.window.close()
   }, 60_000)
 })

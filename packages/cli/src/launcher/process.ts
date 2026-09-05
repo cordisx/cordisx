@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import { access, chmod, mkdir, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { type ChildProcess, execFileSync, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:net'
 
@@ -66,7 +66,9 @@ export async function resolveCodexExecutable(explicit?: string): Promise<string>
     return await executableFile(resolved)
   }
   const found = await firstExecutable(codexExecutableCandidates())
-  if (found === undefined) throw new Error('Codex/ChatGPT executable not found; pass --executable <path> or use --attach')
+  if (found === undefined) {
+    throw new Error('Codex/ChatGPT executable not found; pass --executable <path> or use --attach')
+  }
   return found
 }
 
@@ -216,7 +218,9 @@ function signalLaunchedHost(child: ChildProcess, signal: NodeJS.Signals): void {
     } catch (error) {
       // Unit callers may pass a process not created by launchCodex; retain the
       // exact-child fallback without ever broadening the target.
-      if (!(error instanceof Error) || !('code' in error) || (error.code !== 'ESRCH' && error.code !== 'EPERM')) throw error
+      if (!(error instanceof Error) || !('code' in error) || (error.code !== 'ESRCH' && error.code !== 'EPERM')) {
+        throw error
+      }
     }
   }
   child.kill(signal)
@@ -246,7 +250,9 @@ function profileProcessIds(userDataDir: string): readonly number[] {
 async function terminateProfileProcesses(userDataDir: string): Promise<void> {
   const stop = (signal: NodeJS.Signals): void => {
     for (const pid of profileProcessIds(userDataDir)) {
-      try { process.kill(pid, signal) } catch (error) {
+      try {
+        process.kill(pid, signal)
+      } catch (error) {
         if (!(error instanceof Error) || !('code' in error) || error.code !== 'ESRCH') throw error
       }
     }

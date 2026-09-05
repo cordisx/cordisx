@@ -1,8 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type {
-  CordisXPluginActivationItemV1,
-  CordisXPluginActivationRecordV1,
-} from '../plugin-lifecycle-contracts.js'
+import type { CordisXPluginActivationItemV1, CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import { generationFromContext, ownerFromContext } from './ownership.js'
 
 /** Host-private metadata inherited by candidate effects. */
@@ -88,15 +85,20 @@ interface TransitionState {
   publication?: PluginGenerationPublication
 }
 
-function pluginEqual(left: CordisXPluginActivationItemV1 | undefined, right: CordisXPluginActivationItemV1 | undefined): boolean {
+function pluginEqual(
+  left: CordisXPluginActivationItemV1 | undefined,
+  right: CordisXPluginActivationItemV1 | undefined,
+): boolean {
   if (left === undefined || right === undefined) return left === right
-  if (left.id !== right.id
+  if (
+    left.id !== right.id
     || left.version !== right.version
     || left.digest !== right.digest
     || left.moduleGeneration !== right.moduleGeneration
     || left.enabled !== right.enabled
     || left.canonicalSource !== right.canonicalSource
-    || left.dependencies.length !== right.dependencies.length) return false
+    || left.dependencies.length !== right.dependencies.length
+  ) return false
   return left.dependencies.every((dependency, index) => {
     const candidate = right.dependencies[index]
     return candidate?.id === dependency.id && candidate.version === dependency.version
@@ -104,11 +106,13 @@ function pluginEqual(left: CordisXPluginActivationItemV1 | undefined, right: Cor
 }
 
 function activationEqual(left: CordisXPluginActivationRecordV1, right: CordisXPluginActivationRecordV1): boolean {
-  if (left.profileId !== right.profileId
+  if (
+    left.profileId !== right.profileId
     || left.revision !== right.revision
     || left.lastGoodRevision !== right.lastGoodRevision
     || left.runtimeGeneration !== right.runtimeGeneration
-    || left.plugins.length !== right.plugins.length) return false
+    || left.plugins.length !== right.plugins.length
+  ) return false
   const rightById = new Map(right.plugins.map(plugin => [plugin.id, plugin]))
   return left.plugins.every(plugin => pluginEqual(plugin, rightById.get(plugin.id)))
 }
@@ -165,17 +169,21 @@ export class GenerationVisibilityCoordinator {
   private readonly participants = new Set<PluginGenerationParticipant>()
 
   constructor(active: CordisXPluginActivationRecordV1, initialRegistryEpoch = 0) {
-    if (!Number.isSafeInteger(initialRegistryEpoch) || initialRegistryEpoch < 0) throw new Error('invalid initial registry epoch')
+    if (!Number.isSafeInteger(initialRegistryEpoch) || initialRegistryEpoch < 0) {
+      throw new Error('invalid initial registry epoch')
+    }
     this.active = active
     this.visibilityVersion = initialRegistryEpoch
   }
 
   /** Canonicalize the durable active record after a startup rollback receipt commits. */
   adoptRecoveredActivation(active: CordisXPluginActivationRecordV1, registryEpoch: number): void {
-    if (this.transition !== undefined || registryEpoch !== this.visibilityVersion
+    if (
+      this.transition !== undefined || registryEpoch !== this.visibilityVersion
       || active.profileId !== this.active.profileId
       || active.runtimeGeneration !== this.active.runtimeGeneration
-      || active.plugins.length !== this.active.plugins.length) {
+      || active.plugins.length !== this.active.plugins.length
+    ) {
       throw new Error('recovered activation scope is stale')
     }
     const current = new Map(this.active.plugins.map(plugin => [plugin.id, plugin]))
@@ -214,7 +222,9 @@ export class GenerationVisibilityCoordinator {
   bindStable(pluginId: string, moduleGeneration: string): void {
     if (this.transition !== undefined) throw new Error('cannot bind a stable plugin during a generation transaction')
     const existing = this.stableGenerations.get(pluginId)
-    if (existing !== undefined && existing !== moduleGeneration) throw new Error('stable plugin generation is already bound')
+    if (existing !== undefined && existing !== moduleGeneration) {
+      throw new Error('stable plugin generation is already bound')
+    }
     this.stableGenerations.set(pluginId, moduleGeneration)
   }
 
@@ -268,7 +278,12 @@ export class GenerationVisibilityCoordinator {
     }
     const plugin = transition.after.plugins.find(item => item.id === pluginId)
     if (plugin === undefined) throw new Error(`candidate activation is missing plugin ${pluginId}`)
-    const seat: TransactionSeat = Object.freeze({ handle, pluginId, moduleGeneration: plugin.moduleGeneration, target: 'after' })
+    const seat: TransactionSeat = Object.freeze({
+      handle,
+      pluginId,
+      moduleGeneration: plugin.moduleGeneration,
+      target: 'after',
+    })
     return { [CORDISX_PLUGIN_GENERATION_TRANSACTION]: seat }
   }
 
@@ -295,9 +310,11 @@ export class GenerationVisibilityCoordinator {
     ]
     if (seat !== undefined) {
       const transition = this.transition
-      if (!this.handles.has(seat.handle as object)
+      if (
+        !this.handles.has(seat.handle as object)
         || seat.pluginId !== pluginId
-        || seat.moduleGeneration !== moduleGeneration) {
+        || seat.moduleGeneration !== moduleGeneration
+      ) {
         throw new Error('stale or forged plugin generation transaction effect')
       }
       if (transition?.handle === seat.handle) {
@@ -376,8 +393,10 @@ export class GenerationVisibilityCoordinator {
     let effectiveView = view
     if (view?.transactionId !== undefined) {
       const transition = this.transition
-      if (transition?.handle.transactionId === view.transactionId
-        && transition.handle.transactionEpoch === view.transactionEpoch) {
+      if (
+        transition?.handle.transactionId === view.transactionId
+        && transition.handle.transactionEpoch === view.transactionEpoch
+      ) {
         if (transition.phase === 'rolled-back') {
           if (this.visible(effect)) return
           throw new Error('stale plugin generation handle')
@@ -413,10 +432,12 @@ export class GenerationVisibilityCoordinator {
     receipt: PluginGenerationReadinessReceipt,
   ): PluginGenerationPublishBarrier {
     const transition = this.assertHandle(handle)
-    if (transition.phase !== 'staged'
+    if (
+      transition.phase !== 'staged'
       || transition.readiness !== receipt
       || !this.receipts.has(receipt as object)
-      || !activationEqual(this.active, transition.expected)) {
+      || !activationEqual(this.active, transition.expected)
+    ) {
       throw new Error('stale plugin generation readiness receipt')
     }
     const participantTransition: PluginGenerationParticipantTransition = {
@@ -441,12 +462,14 @@ export class GenerationVisibilityCoordinator {
 
   publish(barrier: PluginGenerationPublishBarrier): PluginGenerationPublication {
     const transition = this.transition
-    if (transition?.phase !== 'prepared'
+    if (
+      transition?.phase !== 'prepared'
       || transition.barrier !== barrier
       || !this.barriers.has(barrier as object)
       || !activationEqual(this.active, transition.expected)
       || barrier.expectedRegistryEpoch !== this.visibilityVersion
-      || barrier.afterRegistryEpoch !== this.visibilityVersion + 1) {
+      || barrier.afterRegistryEpoch !== this.visibilityVersion + 1
+    ) {
       throw new Error('stale or forged plugin generation publish barrier')
     }
     this.active = transition.after
@@ -554,10 +577,12 @@ export class GenerationVisibilityCoordinator {
 
   private assertHandle(handle: PluginGenerationTransitionHandle): TransitionState {
     const transition = this.transition
-    if (!this.handles.has(handle as object)
+    if (
+      !this.handles.has(handle as object)
       || transition?.handle !== handle
       || transition.handle.transactionId !== handle.transactionId
-      || transition.handle.transactionEpoch !== handle.transactionEpoch) {
+      || transition.handle.transactionEpoch !== handle.transactionEpoch
+    ) {
       throw new Error('stale or forged plugin generation transaction')
     }
     return transition

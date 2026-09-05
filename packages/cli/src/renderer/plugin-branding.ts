@@ -9,10 +9,12 @@ export function pluginBrandIconDataUrl(value: unknown): string | undefined {
   const icon = value as Partial<CordisXPluginBrandIcon> & Record<string, unknown>
   if (Object.keys(icon).some(key => key !== 'mediaType' && key !== 'data')) return undefined
   if (icon.mediaType !== 'image/png' && icon.mediaType !== 'image/webp') return undefined
-  if (typeof icon.data !== 'string'
+  if (
+    typeof icon.data !== 'string'
     || icon.data.length < 32
     || icon.data.length > MAX_BRAND_ICON_BASE64_LENGTH
     || icon.data.length % 4 !== 0
-    || !BASE64.test(icon.data)) return undefined
+    || !BASE64.test(icon.data)
+  ) return undefined
   return `data:${icon.mediaType};base64,${icon.data}`
 }

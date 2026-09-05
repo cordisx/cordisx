@@ -2,41 +2,41 @@ import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
   CordisXBrowserPlugin,
+  CordisXCapabilityScope,
   CordisXCommandReference,
-  CordisXManagerSettingsTabItem,
+  CordisXExtensionPointControlMode,
+  CordisXLocalizedText,
   CordisXManagerSettingsNavigationItem,
+  CordisXManagerSettingsTabItem,
   CordisXPermissionAuthorizationDecisionV1,
-  CordisXPermissionPolicy,
   CordisXPermissionAuthorizationPlanV1,
+  CordisXPermissionPolicy,
+  CordisXPlatformCapability,
+  CordisXPluginActivationRecordV1,
+  CordisXPluginBundleLifecycleOperationV1,
+  CordisXPluginBundleLifecycleResultV1,
+  CordisXPluginBundleManagerSnapshotV1,
+  CordisXPluginConsoleFacade,
+  CordisXPluginIdentity,
+  CordisXPluginLifecycleOperationV1,
+  CordisXPluginLifecycleResultV1,
+  CordisXPluginManifestV1,
   CordisXPluginManifestV4,
   CordisXPluginManifestV5,
   CordisXPluginManifestV6,
   CordisXPluginManifestV7,
   CordisXPluginManifestV8,
-  CordisXPointPolicy,
-  CordisXPlatformCapability,
-  CordisXCapabilityScope,
-  CordisXPluginIdentity,
-  CordisXPluginActivationRecordV1,
-  CordisXPluginPackageManifestV1,
-  CordisXPluginLifecycleOperationV1,
-  CordisXPluginLifecycleResultV1,
-  CordisXPluginBundleLifecycleOperationV1,
-  CordisXPluginBundleLifecycleResultV1,
-  CordisXPluginBundleManagerSnapshotV1,
-  CordisXPluginConsoleFacade,
-  CordisXLocalizedText,
-  CordisXPluginManifestV1,
   CordisXPluginModule,
+  CordisXPluginPackageManifestV1,
+  CordisXPointPolicy,
   CordisXRouteReference,
-  CordisXExtensionPointControlMode,
 } from '../contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 import {
+  type CordisXPersistedPermissionPolicyRecord,
   isPermissionPolicyRecordV2,
   isPermissionPolicyRecordV3,
   isPermissionPolicyRecordV4,
-  type CordisXPersistedPermissionPolicyRecord,
 } from '../permission-persistence.js'
 import type { HomeConfigIconThemePreference } from '../config/home-config.js'
 import type {
@@ -47,39 +47,42 @@ import type {
   CordisXPermissionCapabilityV4,
   CordisXPermissionScopeV4,
 } from '../permission-contracts.js'
-import { installCodexAdapter, installPlaygroundAdapter, type CodexAdapterHandle } from './adapter.js'
+import { type CodexAdapterHandle, installCodexAdapter, installPlaygroundAdapter } from './adapter.js'
 import { UnavailableCodexHostAdapter } from '../adapters/codex-agent.js'
 import { createCodexAgentConnector } from '../adapters/codex-agent-connector.js'
 import { CordisXHostAgentRuntime, CordisXSystemPromptService } from './agent.js'
 import {
-  CordisXAgentRegistryServiceV1,
-  CordisXAgentSessionRuntime,
-  CordisXApprovalServiceV1,
-  CordisXAgentAdmissionReservationService,
-  CordisXAgentAdmissionTargetOriginService,
-  CordisXAgentAdmissionTargetReservationService,
   CordisXAgentAdmissionBootstrapReservationService,
-  CordisXAgentAdmissionBootstrapTargetService,
   CordisXAgentAdmissionBootstrapRoomReservationService,
   CordisXAgentAdmissionBootstrapRoomTargetService,
   CordisXAgentAdmissionBootstrapRouteDeclarationService,
   CordisXAgentAdmissionBootstrapRouteReservationService,
-  CordisXSessionRegistryServiceV1,
+  CordisXAgentAdmissionBootstrapTargetService,
+  CordisXAgentAdmissionReservationService,
+  CordisXAgentAdmissionTargetOriginService,
+  CordisXAgentAdmissionTargetReservationService,
+  CordisXAgentRegistryServiceV1,
+  CordisXAgentSessionRuntime,
+  CordisXApprovalServiceV1,
   type CordisXPrivateAgentDriver,
+  CordisXSessionRegistryServiceV1,
 } from './agent-session-runtime.js'
-import { CodexDesktopAgentSessionTransport, UnavailableAgentSessionTransport } from './codex-desktop-agent-session-transport.js'
+import {
+  CodexDesktopAgentSessionTransport,
+  UnavailableAgentSessionTransport,
+} from './codex-desktop-agent-session-transport.js'
 import { DeterministicAgentSessionTransport } from './deterministic-agent-session-transport.js'
 import { PlaygroundScenarioSessionScopeAuthority } from './playground-scenario-session-scope.js'
 import { projectPlaygroundAgentSessions } from './playground-agent-session-projection.js'
 import {
-  AgentRouteSessionScopeAuthority,
   type AgentActiveRoute,
+  AgentRouteSessionScopeAuthority,
   type AgentRuntimePermissionDeclaration,
 } from './agent-route-session-scope.js'
 import {
-  CordisXConnectorBroker,
   type CordisXBoundConnectorClient,
   type CordisXConnectorAuthorization,
+  CordisXConnectorBroker,
   type CordisXConnectorClientCapability,
   type CordisXConnectorRegistrationIdentity,
 } from './connectors.js'
@@ -87,14 +90,12 @@ import {
   type ManagerModel,
   type ManagerPluginSnapshot,
   type ManagerPluginStatus,
-  type ManagerSnapshot,
-  type ManagerSettingsTabSnapshot,
   type ManagerSettingsNavigationItemSnapshot,
+  type ManagerSettingsTabSnapshot,
+  type ManagerSnapshot,
 } from './manager.js'
 import { installReactCordisXManager } from './manager/install.js'
-import {
-  HostManagerNavigationController,
-} from './manager/navigation-controller.js'
+import { HostManagerNavigationController } from './manager/navigation-controller.js'
 import { selectPluginReadme } from './readme.js'
 import { CordisXCommandService } from './commands.js'
 import { CordisXI18nService } from './i18n.js'
@@ -102,38 +103,38 @@ import { CordisXVisualService } from './visuals.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
 import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter } from './codex-router-history.js'
 import {
-  BrowserPermissionPolicyStore,
-  BrowserPermissionPrompt,
-  BrowserPermissionAuthorizationPromptV2,
-  CordisXPlatformService,
-  MemoryPermissionPolicyStore,
-  PermissionBroker,
-  normalizePluginManifest,
-  type PlatformPermissionSnapshot,
   type AgentRuntimeConnection,
   type AgentRuntimeRouteScope,
+  BrowserPermissionAuthorizationPromptV2,
+  BrowserPermissionPolicyStore,
+  BrowserPermissionPrompt,
+  CordisXPlatformService,
+  MemoryPermissionPolicyStore,
+  normalizePluginManifest,
+  PermissionBroker,
+  type PlatformPermissionSnapshot,
 } from './platform.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE, CordisXSlotService } from './service.js'
 import type { SurfaceContributionSnapshot } from './surfaces.js'
 import type { ControlledSurfaceGroupChoice } from './controlled-surfaces.js'
 import {
   BrowserExtensionPointPolicyStore,
+  buildExtensionPointRuntimeSnapshot,
   CORDISX_EXTENSION_POINT_LOCALE_CATALOGS,
   CORDISX_MANAGER_EXTENSION_POINT_CATALOG,
   ExtensionPointDescriptorRegistry,
   ExtensionPointPolicyBroker,
   MemoryExtensionPointPolicyStore,
-  buildExtensionPointRuntimeSnapshot,
 } from './extension-points.js'
 import { projectPublicRuntimeSnapshot } from './public-runtime-snapshot.js'
 import { sortManagerSettingsNavigationItems } from './manager-settings-navigation.js'
 import { BindingPlatformAdapter } from './provider-binding.js'
 import {
   BindingAgentLoopHost,
-  CordisXAgentLoopBroker,
-  UnavailableAgentLoopHost,
   type CordisXAgentLoopAuthorizationRequestV4,
+  CordisXAgentLoopBroker,
   type CordisXBoundAgentLoopClientOptions,
+  UnavailableAgentLoopHost,
 } from './agent-loop.js'
 import { combineAgentLoopClients, CordisXAgentLoopBrokerV2 } from './agent-loop-v2.js'
 import { adaptAgentLoopV3 } from './agent-loop-v3-compat.js'
@@ -141,8 +142,8 @@ import { CordisXAgentLoopBrokerV4 } from './agent-loop-v4.js'
 import {
   PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE,
   PlaygroundMockAgentLoopHost,
-  PlaygroundMockAgentLoopV4Transport,
   type PlaygroundMockAgentLoopSnapshot,
+  PlaygroundMockAgentLoopV4Transport,
 } from './playground-mock-agent-loop.js'
 import {
   CordisXPlaygroundRoomSimulationBridgeService,
@@ -152,36 +153,36 @@ import {
 import type { CompatibleBoundAgentLoopClient } from '../agent-loop-contracts.js'
 import {
   BrowserConfigBridge,
+  type ConfigCandidate,
+  type ConfigMutationOperation,
   ConfigRendererRegistry,
   CordisXConfigRendererService,
   CordisXPluginSettingsService,
-  PluginConfigurationRegistry,
   moduleConfigApplies,
   moduleConfigSchema,
-  type ConfigCandidate,
-  type ConfigMutationOperation,
+  PluginConfigurationRegistry,
 } from './configuration.js'
 import { ManagerContentConfigAuthority } from './manager-content-config.js'
 import { BrowserServiceConfigBridge } from './service-config-binding.js'
 import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
-import type { HostServiceConfigDescriptor, HostServiceConfigMutation, HostServiceConfigMutationResult } from '../launcher/service-config.js'
+import type {
+  HostServiceConfigDescriptor,
+  HostServiceConfigMutation,
+  HostServiceConfigMutationResult,
+} from '../launcher/service-config.js'
 import { BindingPermissionPolicyStore } from './permission-binding.js'
 import { CORDISX_PERMISSION_LOCALE_CATALOGS } from '../permission-locales.js'
 import { pluginBrandIconDataUrl } from './plugin-branding.js'
 import { BrowserPluginLifecycleBridge } from './plugin-lifecycle-binding.js'
 import {
-  CORDISX_CAPABILITY_AVAILABILITY_LOCALE_CATALOGS,
   CapabilityAvailabilityRegistry,
+  CORDISX_CAPABILITY_AVAILABILITY_LOCALE_CATALOGS,
   externalProviderCapabilityProviders,
   hostLocalCapabilityProviders,
   platformAdapterCapabilityProvider,
 } from './capability-availability.js'
-import {
-  CORDISX_PLUGIN_PRINCIPAL,
-  PluginConsoleAspect,
-  type PluginPrincipalToken,
-} from './plugin-console.js'
+import { CORDISX_PLUGIN_PRINCIPAL, PluginConsoleAspect, type PluginPrincipalToken } from './plugin-console.js'
 import {
   CORDISX_GENERATION_VISIBILITY_COORDINATOR,
   GenerationVisibilityCoordinator,
@@ -190,10 +191,7 @@ import {
   type PluginGenerationTransitionHandle,
   type PluginGenerationView,
 } from './generation-visibility.js'
-import {
-  CordisXChannelManagerService,
-  type ChannelManagerProjectionV1,
-} from './channel-manager.js'
+import { type ChannelManagerProjectionV1, CordisXChannelManagerService } from './channel-manager.js'
 import { installSharedReactRuntime } from './react-runtime.js'
 import { IconThemeRegistry } from './icon-theme-registry.js'
 import { CordisXIconThemeService } from './icon-theme-service.js'
@@ -201,13 +199,10 @@ import { bindIconThemeRegistry } from './icons.js'
 import { BrowserIconThemePreferenceBridge } from './icon-theme-preference-binding.js'
 import { reconcileIconThemePreference, selectAndPersistIconTheme } from './icon-theme-selection.js'
 import {
-  createCertifiedPermissionDocumentChannel,
   type CertifiedPermissionDocumentChannel,
+  createCertifiedPermissionDocumentChannel,
 } from './certified-permission-channel.js'
-import {
-  HostDomAuthority,
-  createCordisXHostDomRootDefinitions,
-} from './host-dom.js'
+import { createCordisXHostDomRootDefinitions, HostDomAuthority } from './host-dom.js'
 import {
   createBrowserHostDomWorkerEnvironment,
   createHostDomWorkerBoundary,
@@ -245,7 +240,14 @@ interface CordisXRuntimeMetadata {
   readonly agentHistoryBridgeToken?: string
   readonly configBridgeToken?: string
   readonly playgroundAgentSessionStoreToken?: string
-  readonly ownerDocumentBindings?: readonly { readonly source: string; readonly pluginId: string; readonly moduleGeneration: string; readonly installationId?: string; readonly pluginGeneration?: number; readonly token: string }[]
+  readonly ownerDocumentBindings?: readonly {
+    readonly source: string
+    readonly pluginId: string
+    readonly moduleGeneration: string
+    readonly installationId?: string
+    readonly pluginGeneration?: number
+    readonly token: string
+  }[]
   readonly serviceConfigBridgeToken?: string
   readonly channelCredentialBridgeToken?: string
   readonly channelActionsBridgeToken?: string
@@ -293,22 +295,33 @@ function isExplicitLocalDevelopmentArtifact(item: RuntimeBrowserPlugin): boolean
  * statically bundled its closure with the renderer. Plugins never receive the
  * broker passed here.
  */
-export type CordisXInternalRendererBootstrap = (host: Readonly<{
-  readonly connectors: CordisXConnectorBroker
-  /** Development-only setup seam; never injected into plugin Contexts. */
-  readonly agentRuntimePolicies?: Readonly<{
-    seed(identity: CordisXPluginIdentity, entries: readonly Readonly<{
-      capability: import('@cordisx/protocol/agents/v1').AgentRuntimeCapability
-      sessionIds: readonly [string, ...string[]]
-      policy: 'ask' | 'allow-persistent' | 'deny-persistent'
-    }>[]): Promise<void>
-  }>
-}>) => void | (() => void | Promise<void>) | Promise<void | (() => void | Promise<void>)>
+export type CordisXInternalRendererBootstrap = (
+  host: Readonly<{
+    readonly connectors: CordisXConnectorBroker
+    /** Development-only setup seam; never injected into plugin Contexts. */
+    readonly agentRuntimePolicies?: Readonly<{
+      seed(
+        identity: CordisXPluginIdentity,
+        entries: readonly Readonly<{
+          capability: import('@cordisx/protocol/agents/v1').AgentRuntimeCapability
+          sessionIds: readonly [string, ...string[]]
+          policy: 'ask' | 'allow-persistent' | 'deny-persistent'
+        }>[],
+      ): Promise<void>
+    }>
+  }>,
+) => void | (() => void | Promise<void>) | Promise<void | (() => void | Promise<void>)>
 
 interface PluginController {
   item: RuntimeBrowserPlugin
   readonly identity: CordisXPluginIdentity
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8
+  manifest:
+    | CordisXPluginManifestV1
+    | CordisXPluginManifestV4
+    | CordisXPluginManifestV5
+    | CordisXPluginManifestV6
+    | CordisXPluginManifestV7
+    | CordisXPluginManifestV8
   principal: PluginPrincipalToken
   activation: number
   principalLive: boolean
@@ -417,9 +430,19 @@ export interface RendererPluginMutation {
   }
   /** Host-only source held as data and executed solely in the isolated Host DOM worker. */
   readonly isolatedArtifactSource?: string
-  readonly authorizationDecision?: CordisXPermissionAuthorizationDecisionV1 | CordisXPermissionAuthorizationDecisionV2 | CordisXPermissionAuthorizationDecisionV4
+  readonly authorizationDecision?:
+    | CordisXPermissionAuthorizationDecisionV1
+    | CordisXPermissionAuthorizationDecisionV2
+    | CordisXPermissionAuthorizationDecisionV4
   /** Host-private activation lease; never projected to plugins. */
-  readonly ownerDocumentBindings?: readonly { readonly source: string; readonly pluginId: string; readonly moduleGeneration: string; readonly installationId?: string; readonly pluginGeneration?: number; readonly token: string }[]
+  readonly ownerDocumentBindings?: readonly {
+    readonly source: string
+    readonly pluginId: string
+    readonly moduleGeneration: string
+    readonly installationId?: string
+    readonly pluginGeneration?: number
+    readonly token: string
+  }[]
 }
 
 interface CordisXRuntimeHandle extends ManagerModel {
@@ -428,7 +451,11 @@ interface CordisXRuntimeHandle extends ManagerModel {
   execute(owner: string, reference: CordisXCommandReference, invocationKey?: string): Promise<unknown>
   navigate(owner: string, reference: CordisXRouteReference): Promise<void>
   setExtensionPointPolicy(source: string, pluginId: string, pointId: string, policy: CordisXPointPolicy): Promise<void>
-  setExtensionPointPolicies(source: string, pluginId: string, policies: readonly { readonly pointId: string; readonly policy: CordisXPointPolicy }[]): Promise<void>
+  setExtensionPointPolicies(
+    source: string,
+    pluginId: string,
+    policies: readonly { readonly pointId: string; readonly policy: CordisXPointPolicy }[],
+  ): Promise<void>
   permissionAuthorizationPlan(id: string): CordisXPermissionAuthorizationPlanV1
   authorizePlugin(id: string, decision: CordisXPermissionAuthorizationDecisionV1): Promise<void>
   permissionAuthorizationPlanV2(id: string): CordisXPermissionAuthorizationPlanV2 | undefined
@@ -507,7 +534,9 @@ function pluginFromModule(module: CordisXPluginModule): Plugin {
   if (typeof module.apply === 'function') return module as Plugin.Object
   const fallback = module.default
   if (typeof fallback === 'function') return fallback as Plugin
-  if (fallback !== null && typeof fallback === 'object' && typeof (fallback as { apply?: unknown }).apply === 'function') {
+  if (
+    fallback !== null && typeof fallback === 'object' && typeof (fallback as { apply?: unknown }).apply === 'function'
+  ) {
     return fallback as Plugin.Object
   }
   throw new Error('CordisX plugin module must export apply() or a default Cordis plugin')
@@ -524,9 +553,13 @@ function pluginReadmeSummary(readme: string | undefined): string | undefined {
   const paragraphs = readme.replace(/\r\n?/g, '\n').split(/\n\s*\n/)
   for (const paragraph of paragraphs) {
     const lines = paragraph.split('\n').map(line => line.trim()).filter(Boolean)
-    if (lines.length === 0
-      || lines.every(line => line.startsWith('#') || line.startsWith('![') || line.startsWith('<') || line.startsWith('```'))
-      || lines[0]?.startsWith('---') === true) continue
+    if (
+      lines.length === 0
+      || lines.every(line =>
+        line.startsWith('#') || line.startsWith('![') || line.startsWith('<') || line.startsWith('```')
+      )
+      || lines[0]?.startsWith('---') === true
+    ) continue
     const text = lines.join(' ')
       .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
       .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
@@ -579,15 +612,28 @@ function errorMessage(error: unknown): string {
 }
 
 function manifestUsesHostDom(
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8,
+  manifest:
+    | CordisXPluginManifestV1
+    | CordisXPluginManifestV4
+    | CordisXPluginManifestV5
+    | CordisXPluginManifestV6
+    | CordisXPluginManifestV7
+    | CordisXPluginManifestV8,
 ): manifest is CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV8 {
-  return (manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 8) && manifest.capabilities.some(capability => (
-    capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
-  ))
+  return (manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 8)
+    && manifest.capabilities.some(capability => (
+      capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
+    ))
 }
 
 function manifestUsesTransientCanvas(
-  manifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8,
+  manifest:
+    | CordisXPluginManifestV1
+    | CordisXPluginManifestV4
+    | CordisXPluginManifestV5
+    | CordisXPluginManifestV6
+    | CordisXPluginManifestV7
+    | CordisXPluginManifestV8,
 ): manifest is CordisXPluginManifestV7 {
   return manifest.schemaVersion === 7
     && manifest.execution.realm === 'isolated-worker'
@@ -610,7 +656,10 @@ function createController(item: RuntimeBrowserPlugin, pluginConsole: PluginConso
     const module = isolated ? undefined : item.moduleFactory?.(pluginConsole.consoleFacade(principal)) ?? item.module
     const boundItem: RuntimeBrowserPlugin = module === undefined || module === item.module ? item : { ...item, module }
     const manifest = normalizePluginManifest(item.manifest ?? module?.manifest, item.id)
-    if (isolated && (item.manifest === undefined || (!manifestUsesHostDom(manifest) && !manifestUsesTransientCanvas(manifest)))) {
+    if (
+      isolated
+      && (item.manifest === undefined || (!manifestUsesHostDom(manifest) && !manifestUsesTransientCanvas(manifest)))
+    ) {
       throw new Error('isolated artifact requires an authoritative isolated-worker manifest')
     }
     return {
@@ -682,14 +731,15 @@ async function start(
     ? new BrowserRouteHistoryAdapter(window, true)
     : new CodexRouterHistoryAdapter(window)
   const playgroundRoomSimulationBridgeRegistry = metadata.hostKind === 'playground'
-    && window.location.protocol === 'http:'
-    && ['127.0.0.1', 'localhost', '[::1]'].includes(window.location.hostname)
+      && window.location.protocol === 'http:'
+      && ['127.0.0.1', 'localhost', '[::1]'].includes(window.location.hostname)
     ? new PlaygroundRoomSimulationBridgeRegistry()
     : undefined
   const unbindIconThemeRegistry = bindIconThemeRegistry(document, iconThemeRegistry)
-  const iconThemePreferenceBridge = metadata.iconThemePreferenceBridgeToken === undefined || metadata.appId === undefined
-    ? undefined
-    : new BrowserIconThemePreferenceBridge(
+  const iconThemePreferenceBridge =
+    metadata.iconThemePreferenceBridgeToken === undefined || metadata.appId === undefined
+      ? undefined
+      : new BrowserIconThemePreferenceBridge(
         metadata.iconThemePreferenceBridgeToken,
         metadata.appId,
         metadata.profileId,
@@ -700,25 +750,33 @@ async function start(
   const permissionStore = metadata.permissionBridgeToken === undefined
     ? metadata.hostKind === 'playground' && metadata.permissionPolicies !== undefined
       ? new MemoryPermissionPolicyStore(
-          metadata.permissionPolicies.filter(record => !isPermissionPolicyRecordV2(record)
-            && !isPermissionPolicyRecordV3(record) && !isPermissionPolicyRecordV4(record)),
-          metadata.permissionPolicies.filter(isPermissionPolicyRecordV2),
-          metadata.permissionPolicies.filter(isPermissionPolicyRecordV3),
-          metadata.permissionPolicies.filter(isPermissionPolicyRecordV4),
-        )
+        metadata.permissionPolicies.filter(record =>
+          !isPermissionPolicyRecordV2(record)
+          && !isPermissionPolicyRecordV3(record) && !isPermissionPolicyRecordV4(record)
+        ),
+        metadata.permissionPolicies.filter(isPermissionPolicyRecordV2),
+        metadata.permissionPolicies.filter(isPermissionPolicyRecordV3),
+        metadata.permissionPolicies.filter(isPermissionPolicyRecordV4),
+      )
       : new BrowserPermissionPolicyStore(metadata.profileId)
     : BindingPermissionPolicyStore.connect(metadata.permissionBridgeToken, metadata.permissionPolicies ?? [])
   const configBridge = metadata.configBridgeToken === undefined
     ? undefined
     : new BrowserConfigBridge(metadata.configBridgeToken, metadata.profileId, generation)
-  const ownerDocumentBridge = metadata.ownerDocumentBindings === undefined ? undefined : new BrowserOwnerDocumentBridge()
+  const ownerDocumentBridge = metadata.ownerDocumentBindings === undefined
+    ? undefined
+    : new BrowserOwnerDocumentBridge()
   const ownerDocumentBroker = new CordisXOwnerDocumentBroker(ownerDocumentBridge, metadata.ownerDocumentBindings)
   const entityPrincipalBindings = new Map<string, EntityPrincipalBinding>()
   const registerEntityBindings = (bindings: CordisXRuntimeMetadata['ownerDocumentBindings']): void => {
-    for (const binding of bindings ?? []) if (binding.installationId !== undefined && binding.pluginGeneration !== undefined) entityPrincipalBindings.set(
-      JSON.stringify([binding.source, binding.pluginId, binding.moduleGeneration]),
-      binding as EntityPrincipalBinding,
-    )
+    for (const binding of bindings ?? []) {
+      if (binding.installationId !== undefined && binding.pluginGeneration !== undefined) {
+        entityPrincipalBindings.set(
+          JSON.stringify([binding.source, binding.pluginId, binding.moduleGeneration]),
+          binding as EntityPrincipalBinding,
+        )
+      }
+    }
   }
   registerEntityBindings(metadata.ownerDocumentBindings)
   const serviceConfigBridge = metadata.serviceConfigBridgeToken === undefined
@@ -733,9 +791,11 @@ async function start(
   const lifecycleBridge = metadata.pluginLifecycleBridgeToken === undefined
     ? undefined
     : new BrowserPluginLifecycleBridge(metadata.pluginLifecycleBridgeToken, metadata.profileId, generation)
-  const localDevelopment = new Map(plugins.flatMap(plugin => plugin.development === undefined
-    ? []
-    : [[plugin.development.sourcePath, structuredClone(plugin.development)] as const]))
+  const localDevelopment = new Map(plugins.flatMap(plugin =>
+    plugin.development === undefined
+      ? []
+      : [[plugin.development.sourcePath, structuredClone(plugin.development)] as const]
+  ))
   let currentActivation: CordisXPluginActivationRecordV1 = metadata.pluginActivation ?? {
     $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
     schemaVersion: 1,
@@ -762,2658 +822,3070 @@ async function start(
   }
   let certifiedPermissionChannel: CertifiedPermissionDocumentChannel | undefined
   try {
-  const generationVisibility = new GenerationVisibilityCoordinator(currentActivation, metadata.initialRegistryEpoch)
-  const pluginConsole = new PluginConsoleAspect(generation, 2000, () => Date.now(), generationVisibility)
-  let pluginErrorOwners = (): readonly {
-    readonly identity: CordisXPluginIdentity
-    readonly principal: PluginPrincipalToken
-    readonly source: string
-  }[] => []
-  const recordUnknownError = (event: Event): void => {
-    const candidate = event as Event & { readonly filename?: unknown; readonly error?: unknown; readonly reason?: unknown }
-    const error = candidate.error ?? candidate.reason
-    let evidence = typeof candidate.filename === 'string' ? candidate.filename : ''
-    try {
-      if (error instanceof Error && typeof error.stack === 'string') evidence += `\n${error.stack}`
-      else if (error !== undefined) evidence += `\n${String(error)}`
-    } catch { /* hostile rejection values do not affect the runtime */ }
-    const matches = pluginErrorOwners().filter(owner => owner.source !== '' && evidence.includes(owner.source))
-    if (matches.length === 1) {
-      pluginConsole.recordBestEffortError(matches[0]!.principal, `window.${event.type}`, error)
-    } else if (matches.length > 1) {
-      pluginConsole.recordUnattributedError(`${event.type}:${matches.map(owner => owner.identity.id).sort().join(',')}`)
+    const generationVisibility = new GenerationVisibilityCoordinator(currentActivation, metadata.initialRegistryEpoch)
+    const pluginConsole = new PluginConsoleAspect(generation, 2000, () => Date.now(), generationVisibility)
+    let pluginErrorOwners = (): readonly {
+      readonly identity: CordisXPluginIdentity
+      readonly principal: PluginPrincipalToken
+      readonly source: string
+    }[] => []
+    const recordUnknownError = (event: Event): void => {
+      const candidate = event as Event & {
+        readonly filename?: unknown
+        readonly error?: unknown
+        readonly reason?: unknown
+      }
+      const error = candidate.error ?? candidate.reason
+      let evidence = typeof candidate.filename === 'string' ? candidate.filename : ''
+      try {
+        if (error instanceof Error && typeof error.stack === 'string') evidence += `\n${error.stack}`
+        else if (error !== undefined) evidence += `\n${String(error)}`
+      } catch { /* hostile rejection values do not affect the runtime */ }
+      const matches = pluginErrorOwners().filter(owner => owner.source !== '' && evidence.includes(owner.source))
+      if (matches.length === 1) {
+        pluginConsole.recordBestEffortError(matches[0]!.principal, `window.${event.type}`, error)
+      } else if (matches.length > 1) {
+        pluginConsole.recordUnattributedError(
+          `${event.type}:${matches.map(owner => owner.identity.id).sort().join(',')}`,
+        )
+      }
     }
-  }
-  window.addEventListener('error', recordUnknownError)
-  window.addEventListener('unhandledrejection', recordUnknownError)
-  let consoleAffectedPluginIds: readonly string[] = []
-  const disconnectPluginConsoleVisibility = generationVisibility.connect({
-    prepare: transition => { consoleAffectedPluginIds = transition.affectedPluginIds },
-    notify: () => pluginConsole.visibilityChanged(consoleAffectedPluginIds),
-  })
-  const broker = new PermissionBroker(
-    permissionStore,
-    new BrowserPermissionPrompt(),
-    () => new Date(),
-    30_000,
-    metadata.profileId,
-    generation,
-    generationVisibility,
-    pluginConsole,
-    new BrowserPermissionAuthorizationPromptV2(document),
-  )
-  if (metadata.certifiedPermissionChannelToken !== undefined && window.top === window) {
-    certifiedPermissionChannel = createCertifiedPermissionDocumentChannel({
-      token: metadata.certifiedPermissionChannelToken,
-      profileId: metadata.profileId,
-      runtimeGeneration: generation,
-      sink: broker,
+    window.addEventListener('error', recordUnknownError)
+    window.addEventListener('unhandledrejection', recordUnknownError)
+    let consoleAffectedPluginIds: readonly string[] = []
+    const disconnectPluginConsoleVisibility = generationVisibility.connect({
+      prepare: transition => {
+        consoleAffectedPluginIds = transition.affectedPluginIds
+      },
+      notify: () => pluginConsole.visibilityChanged(consoleAffectedPluginIds),
     })
-    await certifiedPermissionChannel.ready
-  }
-  const hostDomAuthority = new HostDomAuthority({
-    hostGeneration: generation,
-    isolatedPluginBoundary: true,
-    roots: createCordisXHostDomRootDefinitions(document),
-  })
-  // Capture native browser/MessagePort primitives before any plugin module
-  // factory runs, then reuse the sealed environment for dynamic generations.
-  let hostDomWorkerEnvironment: HostDomWorkerEnvironment | undefined
-  try {
-    hostDomWorkerEnvironment = createBrowserHostDomWorkerEnvironment(document)
-  } catch (error) {
-    if (plugins.some(plugin => plugin.isolatedArtifactSource !== undefined)) throw error
-  }
-  for (const plugin of plugins) {
-    if (plugin.package === undefined) generationVisibility.bindStable(
-      plugin.id,
-      plugin.artifactGeneration ?? `${generation}:${plugin.id}:bundled`,
+    const broker = new PermissionBroker(
+      permissionStore,
+      new BrowserPermissionPrompt(),
+      () => new Date(),
+      30_000,
+      metadata.profileId,
+      generation,
+      generationVisibility,
+      pluginConsole,
+      new BrowserPermissionAuthorizationPromptV2(document),
     )
-  }
-  ctx = ctx.extend({ [CORDISX_GENERATION_VISIBILITY_COORDINATOR]: generationVisibility })
-  const configuration = new PluginConfigurationRegistry(generationVisibility)
-  const configRenderers = new ConfigRendererRegistry(generationVisibility)
-  const agentRuntime = new CordisXHostAgentRuntime({ adapter: agentAdapter, broker, generation })
-  let routeService: CordisXRouteService | undefined
-  if (metadata.agentLoopBackend === 'mock' && metadata.hostKind !== 'playground') {
-    throw new Error('The deterministic AgentLoop Simulator is available only in the explicit Playground host')
-  }
-  const simulatorSessionKey = `cordisx.playground.simulator/v1:${metadata.profileId}:${plugins.map(plugin => `${plugin.id}@${plugin.source}`).join('|')}`
-  const simulatorPersistence = {
-    read: () => {
-      try { return document.defaultView?.sessionStorage.getItem(simulatorSessionKey) ?? undefined } catch { return undefined }
-    },
-    write: (value: string) => {
-      try { document.defaultView?.sessionStorage.setItem(simulatorSessionKey, value) } catch { /* unavailable browser storage */ }
-    },
-  }
-  const playgroundMockAgentLoop = metadata.agentLoopBackend === 'mock'
-    ? new PlaygroundMockAgentLoopHost(undefined, simulatorPersistence, simulatorSessionKey)
-    : undefined
-  const simulatorV4Persistence = {
-    read: () => {
-      try { return document.defaultView?.sessionStorage.getItem(`${simulatorSessionKey}:agent-loop-v4-ledger`) ?? undefined } catch { return undefined }
-    },
-    write: (value: string) => {
-      try { document.defaultView?.sessionStorage.setItem(`${simulatorSessionKey}:agent-loop-v4-ledger`, value) } catch { /* unavailable browser storage */ }
-    },
-  }
-  const agentLoopHost = playgroundMockAgentLoop
-    ?? (bindingPlatformAdapter === undefined
-      ? new UnavailableAgentLoopHost()
-      : new BindingAgentLoopHost(bindingPlatformAdapter, metadata.workspaceCwd))
-  const agentLoopBroker = new CordisXAgentLoopBroker(agentLoopHost)
-  const agentLoopBrokerV2 = new CordisXAgentLoopBrokerV2(agentLoopHost, undefined, metadata.agentLoopBackend === 'mock'
-    ? {
-        providerKey: PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE,
-        read: () => {
-          try { return document.defaultView?.sessionStorage.getItem(`${simulatorSessionKey}:agent-loop-v2-ledger`) ?? undefined } catch { return undefined }
-        },
-        write: (value: string) => {
-          try { document.defaultView?.sessionStorage.setItem(`${simulatorSessionKey}:agent-loop-v2-ledger`, value) } catch { /* unavailable browser storage */ }
-        },
-      }
-    : undefined)
-  const playgroundMockAgentLoopV4Transport = playgroundMockAgentLoop === undefined
-    ? undefined
-    : new PlaygroundMockAgentLoopV4Transport(playgroundMockAgentLoop, simulatorV4Persistence)
-  const agentLoopBrokerV4 = new CordisXAgentLoopBrokerV4(
-    playgroundMockAgentLoopV4Transport ?? bindingPlatformAdapter,
-    agentLoopHost,
-    metadata.profileId,
-    generation,
-  )
-  // One Host-private authority backs all three public Agent/Session services.
-  // The environment chooses a transport before plugin activation; no public
-  // backend selector, raw bridge, or second app-server connection is exposed.
-  const desktopAgentSessionTransport = metadata.hostKind === 'playground'
-    ? undefined
-    : await CodexDesktopAgentSessionTransport.connect()
-  const playgroundAgentSessionPersistence = metadata.hostKind === 'playground'
-    && metadata.playgroundAgentSessionStoreToken !== undefined
-    ? BrowserPlaygroundAgentSessionPersistence.connect(metadata.playgroundAgentSessionStoreToken, generation)
-    : undefined
-  const recoveredPlaygroundSessions = playgroundAgentSessionPersistence === undefined
-    ? []
-    : await playgroundAgentSessionPersistence.load()
-  const agentRuntimeConnection: AgentRuntimeConnection = Object.freeze({
-    connectionId: metadata.hostKind === 'playground'
-      ? 'development-host-transport'
-      : desktopAgentSessionTransport === undefined ? 'unavailable-host-transport' : 'desktop-current-transport',
-    generation: 1,
-  })
-  broker.replaceAgentRuntimeConnection(agentRuntimeConnection)
-  // Created only by the Playground Host; each use still requires the
-  // launcher-owned provenance of one explicitly loaded local artifact.
-  const developmentAgentRuntimeAuthorization = metadata.hostKind === 'playground'
-    ? broker.createDevelopmentAgentRuntimeAuthorizationAuthority()
-    : undefined
-  const playgroundScenarioAgentRuntimeRoute = metadata.hostKind === 'playground'
-    && metadata.playgroundSessionScenarios?.enabled === true
-    ? broker.createPlaygroundScenarioAgentRuntimeRouteAuthority()
-    : undefined
-  let scenarioSessionOwner = (_sessionId: string): import('@cordisx/protocol/sessions/v1').PluginOwnerIdentity | undefined => undefined
-  let scenarioSessionScopeAuthority: PlaygroundScenarioSessionScopeAuthority | undefined
-  let activeAgentRuntimeRouteInstance: string | undefined
-  let reconcilingAgentRuntimeRoute = false
-  let agentRuntimeRouteDisposed = false
-  let agentSessionRuntime!: CordisXAgentSessionRuntime
-  const agentOwnerControllers = new Map<string, PluginController>()
-  const agentOwnerKey = (owner: AgentActiveRoute['owner']): string => `${owner.pluginId}\u0000${owner.generation}`
-  const agentOwnerForController = (controller: PluginController): AgentActiveRoute['owner'] => {
-    const owner = agentSessionRuntime.ownerForPlugin(
-      controller.item.source,
-      controller.item.id,
-      moduleGenerationOf(controller),
-    )
-    agentOwnerControllers.set(agentOwnerKey(owner), controller)
-    return owner
-  }
-  const controllerForAgentOwner = (owner: AgentActiveRoute['owner']): PluginController | undefined => {
-    const controller = agentOwnerControllers.get(agentOwnerKey(owner))
-    return controller !== undefined && controller.principalLive ? controller : undefined
-  }
-  const actualAgentRuntimeRoute = (): Readonly<{
-    readonly scope: AgentRuntimeRouteScope
-    readonly owner: AgentActiveRoute['owner']
-  }> | undefined => {
-    const snapshot = routeHistory.snapshot()
-    const entry = snapshot.entry
-    const route = entry === undefined ? undefined : routeService?.agentRuntimeRouteFromHistory(entry)
-    const controller = route === undefined ? undefined : controllers.find(item => (
-      item.item.source === route.owner.source
-      && item.item.id === route.owner.pluginId
-      && moduleGenerationOf(item) === route.owner.moduleGeneration
-    ))
-    const sessionId = entry?.params.sessionId
-    if (entry === undefined || controller === undefined || route === undefined || typeof sessionId !== 'string' || sessionId === '*') return undefined
-    return Object.freeze({
-      owner: agentOwnerForController(controller),
-      scope: Object.freeze({
-        kind: 'host-route' as const, active: true as const,
-        owner: Object.freeze({ source: controller.item.source, pluginId: controller.item.id }),
-        routeId: route.id, routeInstanceId: `${entry.outlet}:${snapshot.key ?? 'unkeyed'}`,
-        path: route.path, params: Object.freeze({ sessionId }),
-      }),
-    })
-  }
-  const agentRouteScopes: AgentRouteSessionScopeAuthority = new AgentRouteSessionScopeAuthority({
-    activeRoute: (): AgentActiveRoute | undefined => {
-      const supplementalOwner = scenarioSessionScopeAuthority?.supplementalOwner()
-      if (supplementalOwner !== undefined) {
-        const route = scenarioSessionScopeAuthority?.effectiveRoute()
-        return route === undefined ? undefined : {
-          owner: supplementalOwner,
-          routeId: route.routeId,
-          instanceId: route.routeInstanceId,
-          params: route.params,
-        }
-      }
-      const actual = actualAgentRuntimeRoute()
-      return actual === undefined ? undefined : {
-        owner: actual.owner,
-        routeId: actual.scope.routeId,
-        instanceId: actual.scope.routeInstanceId,
-        params: actual.scope.params,
-      }
-    },
-    routes: owner => {
-      const controller = controllerForAgentOwner(owner)
-      return controller === undefined ? [] : routeService?.agentRuntimeRoutesForOwner({
-        source: controller.item.source,
-        pluginId: controller.item.id,
-        moduleGeneration: moduleGenerationOf(controller),
-      }, controller.generationView) ?? []
-    },
-    decide: async plan => {
-      const controller = controllerForAgentOwner(plan.owner)
-      if (controller === undefined) return Object.freeze({ authorized: false })
-      const input = {
-        identity: controller.identity,
-        capability: plan.capability,
-        sessionId: plan.scope.sessionIds[0],
-        scopeSource: plan.scopeSource,
-        connection: agentRuntimeConnection,
-      }
-      const decision = developmentAgentRuntimeAuthorization !== undefined && isExplicitLocalDevelopmentArtifact(controller.item)
-        ? await broker.authorizeDevelopmentAgentRuntime(developmentAgentRuntimeAuthorization, input)
-        : await broker.authorizeAgentRuntime(input)
-      return Object.freeze({ authorized: decision.authorized, ...(decision.lease === undefined ? {} : { leaseId: decision.lease.leaseId }) })
-    },
-    isLeaseActive: (owner, leaseId) => {
-      const identity = controllerForAgentOwner(owner)?.identity
-      return identity !== undefined && broker.isAgentRuntimeLeaseActive(identity, leaseId)
-    },
-    connectionGeneration: () => agentRuntimeConnection.generation,
-  })
-  const reconcileAgentRuntimeRoute = (): void => {
-    if (agentRuntimeRouteDisposed || reconcilingAgentRuntimeRoute) return
-    reconcilingAgentRuntimeRoute = true
-    try {
-      scenarioSessionScopeAuthority?.reconcileVisibleRoute()
-      const route = actualAgentRuntimeRoute()
-      if (route === undefined) {
-        if (activeAgentRuntimeRouteInstance !== undefined) broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
-        activeAgentRuntimeRouteInstance = undefined
-        agentRouteScopes.reconcileRoutes()
-        return
-      }
-      if (activeAgentRuntimeRouteInstance !== undefined && activeAgentRuntimeRouteInstance !== route.scope.routeInstanceId) {
-        broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
-      }
-      broker.replaceAgentRuntimeRouteScope(route.scope)
-      activeAgentRuntimeRouteInstance = route.scope.routeInstanceId
-      if (scenarioSessionScopeAuthority?.active() !== true) agentRouteScopes.reconcileRoutes()
-    } finally {
-      reconcilingAgentRuntimeRoute = false
+    if (metadata.certifiedPermissionChannelToken !== undefined && window.top === window) {
+      certifiedPermissionChannel = createCertifiedPermissionDocumentChannel({
+        token: metadata.certifiedPermissionChannelToken,
+        profileId: metadata.profileId,
+        runtimeGeneration: generation,
+        sink: broker,
+      })
+      await certifiedPermissionChannel.ready
     }
-  }
-  if (metadata.hostKind === 'playground' && metadata.playgroundSessionScenarios?.enabled === true) {
-    scenarioSessionScopeAuthority = new PlaygroundScenarioSessionScopeAuthority({
+    const hostDomAuthority = new HostDomAuthority({
       hostGeneration: generation,
-      connectionGeneration: () => agentRuntimeConnection.generation,
-      currentRoute: () => actualAgentRuntimeRoute()?.scope,
-      ownerForSession: sessionId => scenarioSessionOwner(sessionId),
-      routeOwner: owner => {
-        const controller = controllerForAgentOwner(owner)
-        return controller === undefined ? undefined : Object.freeze({
-          source: controller.item.source,
-          pluginId: controller.item.id,
-        })
+      isolatedPluginBoundary: true,
+      roots: createCordisXHostDomRootDefinitions(document),
+    })
+    // Capture native browser/MessagePort primitives before any plugin module
+    // factory runs, then reuse the sealed environment for dynamic generations.
+    let hostDomWorkerEnvironment: HostDomWorkerEnvironment | undefined
+    try {
+      hostDomWorkerEnvironment = createBrowserHostDomWorkerEnvironment(document)
+    } catch (error) {
+      if (plugins.some(plugin => plugin.isolatedArtifactSource !== undefined)) throw error
+    }
+    for (const plugin of plugins) {
+      if (plugin.package === undefined) {
+        generationVisibility.bindStable(
+          plugin.id,
+          plugin.artifactGeneration ?? `${generation}:${plugin.id}:bundled`,
+        )
+      }
+    }
+    ctx = ctx.extend({ [CORDISX_GENERATION_VISIBILITY_COORDINATOR]: generationVisibility })
+    const configuration = new PluginConfigurationRegistry(generationVisibility)
+    const configRenderers = new ConfigRendererRegistry(generationVisibility)
+    const agentRuntime = new CordisXHostAgentRuntime({ adapter: agentAdapter, broker, generation })
+    let routeService: CordisXRouteService | undefined
+    if (metadata.agentLoopBackend === 'mock' && metadata.hostKind !== 'playground') {
+      throw new Error('The deterministic AgentLoop Simulator is available only in the explicit Playground host')
+    }
+    const simulatorSessionKey = `cordisx.playground.simulator/v1:${metadata.profileId}:${
+      plugins.map(plugin => `${plugin.id}@${plugin.source}`).join('|')
+    }`
+    const simulatorPersistence = {
+      read: () => {
+        try {
+          return document.defaultView?.sessionStorage.getItem(simulatorSessionKey) ?? undefined
+        } catch {
+          return undefined
+        }
       },
-      permissionRoute: (owner, capability) => {
-        const route = agentRouteScopes.permissionRoute(owner, capability)
-        return route === undefined ? undefined : { routeId: route.id, path: route.path }
+      write: (value: string) => {
+        try {
+          document.defaultView?.sessionStorage.setItem(simulatorSessionKey, value)
+        } catch { /* unavailable browser storage */ }
       },
-      bootstrapRouteRegistered: (owner, target) => {
+    }
+    const playgroundMockAgentLoop = metadata.agentLoopBackend === 'mock'
+      ? new PlaygroundMockAgentLoopHost(undefined, simulatorPersistence, simulatorSessionKey)
+      : undefined
+    const simulatorV4Persistence = {
+      read: () => {
+        try {
+          return document.defaultView?.sessionStorage.getItem(`${simulatorSessionKey}:agent-loop-v4-ledger`)
+            ?? undefined
+        } catch {
+          return undefined
+        }
+      },
+      write: (value: string) => {
+        try {
+          document.defaultView?.sessionStorage.setItem(`${simulatorSessionKey}:agent-loop-v4-ledger`, value)
+        } catch { /* unavailable browser storage */ }
+      },
+    }
+    const agentLoopHost = playgroundMockAgentLoop
+      ?? (bindingPlatformAdapter === undefined
+        ? new UnavailableAgentLoopHost()
+        : new BindingAgentLoopHost(bindingPlatformAdapter, metadata.workspaceCwd))
+    const agentLoopBroker = new CordisXAgentLoopBroker(agentLoopHost)
+    const agentLoopBrokerV2 = new CordisXAgentLoopBrokerV2(
+      agentLoopHost,
+      undefined,
+      metadata.agentLoopBackend === 'mock'
+        ? {
+          providerKey: PLAYGROUND_MOCK_AGENT_LOOP_NAMESPACE,
+          read: () => {
+            try {
+              return document.defaultView?.sessionStorage.getItem(`${simulatorSessionKey}:agent-loop-v2-ledger`)
+                ?? undefined
+            } catch {
+              return undefined
+            }
+          },
+          write: (value: string) => {
+            try {
+              document.defaultView?.sessionStorage.setItem(`${simulatorSessionKey}:agent-loop-v2-ledger`, value)
+            } catch { /* unavailable browser storage */ }
+          },
+        }
+        : undefined,
+    )
+    const playgroundMockAgentLoopV4Transport = playgroundMockAgentLoop === undefined
+      ? undefined
+      : new PlaygroundMockAgentLoopV4Transport(playgroundMockAgentLoop, simulatorV4Persistence)
+    const agentLoopBrokerV4 = new CordisXAgentLoopBrokerV4(
+      playgroundMockAgentLoopV4Transport ?? bindingPlatformAdapter,
+      agentLoopHost,
+      metadata.profileId,
+      generation,
+    )
+    // One Host-private authority backs all three public Agent/Session services.
+    // The environment chooses a transport before plugin activation; no public
+    // backend selector, raw bridge, or second app-server connection is exposed.
+    const desktopAgentSessionTransport = metadata.hostKind === 'playground'
+      ? undefined
+      : await CodexDesktopAgentSessionTransport.connect()
+    const playgroundAgentSessionPersistence = metadata.hostKind === 'playground'
+        && metadata.playgroundAgentSessionStoreToken !== undefined
+      ? BrowserPlaygroundAgentSessionPersistence.connect(metadata.playgroundAgentSessionStoreToken, generation)
+      : undefined
+    const recoveredPlaygroundSessions = playgroundAgentSessionPersistence === undefined
+      ? []
+      : await playgroundAgentSessionPersistence.load()
+    const agentRuntimeConnection: AgentRuntimeConnection = Object.freeze({
+      connectionId: metadata.hostKind === 'playground'
+        ? 'development-host-transport'
+        : desktopAgentSessionTransport === undefined
+        ? 'unavailable-host-transport'
+        : 'desktop-current-transport',
+      generation: 1,
+    })
+    broker.replaceAgentRuntimeConnection(agentRuntimeConnection)
+    // Created only by the Playground Host; each use still requires the
+    // launcher-owned provenance of one explicitly loaded local artifact.
+    const developmentAgentRuntimeAuthorization = metadata.hostKind === 'playground'
+      ? broker.createDevelopmentAgentRuntimeAuthorizationAuthority()
+      : undefined
+    const playgroundScenarioAgentRuntimeRoute = metadata.hostKind === 'playground'
+        && metadata.playgroundSessionScenarios?.enabled === true
+      ? broker.createPlaygroundScenarioAgentRuntimeRouteAuthority()
+      : undefined
+    let scenarioSessionOwner = (
+      _sessionId: string,
+    ): import('@cordisx/protocol/sessions/v1').PluginOwnerIdentity | undefined => undefined
+    let scenarioSessionScopeAuthority: PlaygroundScenarioSessionScopeAuthority | undefined
+    let activeAgentRuntimeRouteInstance: string | undefined
+    let reconcilingAgentRuntimeRoute = false
+    let agentRuntimeRouteDisposed = false
+    let agentSessionRuntime!: CordisXAgentSessionRuntime
+    const agentOwnerControllers = new Map<string, PluginController>()
+    const agentOwnerKey = (owner: AgentActiveRoute['owner']): string => `${owner.pluginId}\u0000${owner.generation}`
+    const agentOwnerForController = (controller: PluginController): AgentActiveRoute['owner'] => {
+      const owner = agentSessionRuntime.ownerForPlugin(
+        controller.item.source,
+        controller.item.id,
+        moduleGenerationOf(controller),
+      )
+      agentOwnerControllers.set(agentOwnerKey(owner), controller)
+      return owner
+    }
+    const controllerForAgentOwner = (owner: AgentActiveRoute['owner']): PluginController | undefined => {
+      const controller = agentOwnerControllers.get(agentOwnerKey(owner))
+      return controller !== undefined && controller.principalLive ? controller : undefined
+    }
+    const actualAgentRuntimeRoute = ():
+      | Readonly<{
+        readonly scope: AgentRuntimeRouteScope
+        readonly owner: AgentActiveRoute['owner']
+      }>
+      | undefined =>
+    {
+      const snapshot = routeHistory.snapshot()
+      const entry = snapshot.entry
+      const route = entry === undefined ? undefined : routeService?.agentRuntimeRouteFromHistory(entry)
+      const controller = route === undefined ? undefined : controllers.find(item => (
+        item.item.source === route.owner.source
+        && item.item.id === route.owner.pluginId
+        && moduleGenerationOf(item) === route.owner.moduleGeneration
+      ))
+      const sessionId = entry?.params.sessionId
+      if (
+        entry === undefined || controller === undefined || route === undefined || typeof sessionId !== 'string'
+        || sessionId === '*'
+      ) return undefined
+      return Object.freeze({
+        owner: agentOwnerForController(controller),
+        scope: Object.freeze({
+          kind: 'host-route' as const,
+          active: true as const,
+          owner: Object.freeze({ source: controller.item.source, pluginId: controller.item.id }),
+          routeId: route.id,
+          routeInstanceId: `${entry.outlet}:${snapshot.key ?? 'unkeyed'}`,
+          path: route.path,
+          params: Object.freeze({ sessionId }),
+        }),
+      })
+    }
+    const agentRouteScopes: AgentRouteSessionScopeAuthority = new AgentRouteSessionScopeAuthority({
+      activeRoute: (): AgentActiveRoute | undefined => {
+        const supplementalOwner = scenarioSessionScopeAuthority?.supplementalOwner()
+        if (supplementalOwner !== undefined) {
+          const route = scenarioSessionScopeAuthority?.effectiveRoute()
+          return route === undefined ? undefined : {
+            owner: supplementalOwner,
+            routeId: route.routeId,
+            instanceId: route.routeInstanceId,
+            params: route.params,
+          }
+        }
+        const actual = actualAgentRuntimeRoute()
+        return actual === undefined ? undefined : {
+          owner: actual.owner,
+          routeId: actual.scope.routeId,
+          instanceId: actual.scope.routeInstanceId,
+          params: actual.scope.params,
+        }
+      },
+      routes: owner => {
         const controller = controllerForAgentOwner(owner)
-        const route = controller === undefined ? undefined : routeService?.agentRuntimeRoutesForOwner({
+        return controller === undefined ? [] : routeService?.agentRuntimeRoutesForOwner({
           source: controller.item.source,
           pluginId: controller.item.id,
           moduleGeneration: moduleGenerationOf(controller),
-        }, controller.generationView).find(candidate => candidate.id === target.route.routeId)
-        return route !== undefined && target.route.param === 'roomId' && target.route.roomId === target.roomId
-          && route.path.split('/').filter(segment => segment === ':roomId').length === 1
+        }, controller.generationView) ?? []
       },
-      claimBootstrapRoute: (owner, request) => agentSessionRuntime.claimAdmissionBootstrapRoute(owner, request),
-      authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
-      mountRoute: route => {
-        if (playgroundScenarioAgentRuntimeRoute === undefined) throw new Error('Playground scenario route authority is unavailable')
-        return broker.activateCapturedPlaygroundScenarioAgentRuntimeRoute(playgroundScenarioAgentRuntimeRoute, route)
+      decide: async plan => {
+        const controller = controllerForAgentOwner(plan.owner)
+        if (controller === undefined) return Object.freeze({ authorized: false })
+        const input = {
+          identity: controller.identity,
+          capability: plan.capability,
+          sessionId: plan.scope.sessionIds[0],
+          scopeSource: plan.scopeSource,
+          connection: agentRuntimeConnection,
+        }
+        const decision =
+          developmentAgentRuntimeAuthorization !== undefined && isExplicitLocalDevelopmentArtifact(controller.item)
+            ? await broker.authorizeDevelopmentAgentRuntime(developmentAgentRuntimeAuthorization, input)
+            : await broker.authorizeAgentRuntime(input)
+        return Object.freeze({
+          authorized: decision.authorized,
+          ...(decision.lease === undefined ? {} : { leaseId: decision.lease.leaseId }),
+        })
       },
-      changed: active => { if (!active) agentRouteScopes.reconcileRoutes() },
+      isLeaseActive: (owner, leaseId) => {
+        const identity = controllerForAgentOwner(owner)?.identity
+        return identity !== undefined && broker.isAgentRuntimeLeaseActive(identity, leaseId)
+      },
+      connectionGeneration: () => agentRuntimeConnection.generation,
     })
-  }
-  const agentSessionTransport: CordisXPrivateAgentDriver = metadata.hostKind === 'playground'
-    ? new DeterministicAgentSessionTransport({
-        recoveredSessions: recoveredPlaygroundSessions,
-        ...(metadata.playgroundSessionScenarios === undefined ? {} : { scenarioCatalog: metadata.playgroundSessionScenarios }),
-        ...(playgroundRoomSimulationBridgeRegistry === undefined ? {} : { roomBridge: playgroundRoomSimulationBridgeRegistry.client }),
-        ...(scenarioSessionScopeAuthority === undefined ? {} : { scenarioSessionScope: scenarioSessionScopeAuthority.client }),
+    const reconcileAgentRuntimeRoute = (): void => {
+      if (agentRuntimeRouteDisposed || reconcilingAgentRuntimeRoute) return
+      reconcilingAgentRuntimeRoute = true
+      try {
+        scenarioSessionScopeAuthority?.reconcileVisibleRoute()
+        const route = actualAgentRuntimeRoute()
+        if (route === undefined) {
+          if (activeAgentRuntimeRouteInstance !== undefined) {
+            broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
+          }
+          activeAgentRuntimeRouteInstance = undefined
+          agentRouteScopes.reconcileRoutes()
+          return
+        }
+        if (
+          activeAgentRuntimeRouteInstance !== undefined
+          && activeAgentRuntimeRouteInstance !== route.scope.routeInstanceId
+        ) {
+          broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
+        }
+        broker.replaceAgentRuntimeRouteScope(route.scope)
+        activeAgentRuntimeRouteInstance = route.scope.routeInstanceId
+        if (scenarioSessionScopeAuthority?.active() !== true) agentRouteScopes.reconcileRoutes()
+      } finally {
+        reconcilingAgentRuntimeRoute = false
+      }
+    }
+    if (metadata.hostKind === 'playground' && metadata.playgroundSessionScenarios?.enabled === true) {
+      scenarioSessionScopeAuthority = new PlaygroundScenarioSessionScopeAuthority({
+        hostGeneration: generation,
+        connectionGeneration: () => agentRuntimeConnection.generation,
+        currentRoute: () => actualAgentRuntimeRoute()?.scope,
+        ownerForSession: sessionId => scenarioSessionOwner(sessionId),
+        routeOwner: owner => {
+          const controller = controllerForAgentOwner(owner)
+          return controller === undefined ? undefined : Object.freeze({
+            source: controller.item.source,
+            pluginId: controller.item.id,
+          })
+        },
+        permissionRoute: (owner, capability) => {
+          const route = agentRouteScopes.permissionRoute(owner, capability)
+          return route === undefined ? undefined : { routeId: route.id, path: route.path }
+        },
+        bootstrapRouteRegistered: (owner, target) => {
+          const controller = controllerForAgentOwner(owner)
+          const route = controller === undefined ? undefined : routeService?.agentRuntimeRoutesForOwner({
+            source: controller.item.source,
+            pluginId: controller.item.id,
+            moduleGeneration: moduleGenerationOf(controller),
+          }, controller.generationView).find(candidate => candidate.id === target.route.routeId)
+          return route !== undefined && target.route.param === 'roomId' && target.route.roomId === target.roomId
+            && route.path.split('/').filter(segment => segment === ':roomId').length === 1
+        },
+        claimBootstrapRoute: (owner, request) => agentSessionRuntime.claimAdmissionBootstrapRoute(owner, request),
+        authorize: async (owner, capability, sessionId) =>
+          await agentRouteScopes.authorize(owner, capability, sessionId),
+        mountRoute: route => {
+          if (playgroundScenarioAgentRuntimeRoute === undefined) {
+            throw new Error('Playground scenario route authority is unavailable')
+          }
+          return broker.activateCapturedPlaygroundScenarioAgentRuntimeRoute(playgroundScenarioAgentRuntimeRoute, route)
+        },
+        changed: active => {
+          if (!active) agentRouteScopes.reconcileRoutes()
+        },
       })
-    : desktopAgentSessionTransport ?? new UnavailableAgentSessionTransport()
-  agentSessionRuntime = new CordisXAgentSessionRuntime({
-    driver: agentSessionTransport,
-    authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
-    mintApprovalAuthorityLease: async (owner, input) => await agentRouteScopes.mintApprovalAuthorityLease(owner, input),
-    requiresApprovalAuthorityLease: owner => agentRouteScopes.requiresApprovalAuthorityLease(owner),
-    approvalAuthorityLeaseActive: (owner, lease, requester, authority) => agentRouteScopes.approvalAuthorityLeaseActive(owner, lease, requester, authority),
-    releaseApprovalAuthorityLease: lease => agentRouteScopes.releaseApprovalAuthorityLease(lease),
-    declares: (owner, capability) => agentRouteScopes.declares(owner, capability),
-    ...(scenarioSessionScopeAuthority === undefined ? {} : {
-      captureSubmission: (owner, sessionId, messageId) => scenarioSessionScopeAuthority.captureSubmission(owner, sessionId, messageId),
-      captureAdmission: (owner, origin, sessionId, generation, messageId) => scenarioSessionScopeAuthority.captureAdmission(owner, origin, sessionId, generation, messageId),
-      admissionTargetActive: (owner, origin, target) => scenarioSessionScopeAuthority.admissionTargetActive(owner, origin, target),
-      captureAdmissionTarget: (owner, origin, target, sessionId, generation, messageId) => scenarioSessionScopeAuthority.captureAdmissionTarget(owner, origin, target, sessionId, generation, messageId),
-      bootstrapAdmissionTargetActive: (owner, origin, target) => scenarioSessionScopeAuthority.bootstrapAdmissionTargetActive(owner, origin, target),
-      captureBootstrapAdmissionTarget: (owner, origin, target, sessionId, generation, messageId) => scenarioSessionScopeAuthority.captureBootstrapAdmissionTarget(owner, origin, target, sessionId, generation, messageId),
-      bootstrapAdmissionRoomTargetActive: (owner, origin, target) => scenarioSessionScopeAuthority.bootstrapAdmissionRoomTargetActive(owner, origin, target),
-      captureBootstrapAdmissionRoomTarget: (owner, origin, target, receipt, sessionId, generation, messageId) => scenarioSessionScopeAuthority.captureBootstrapAdmissionRoomTarget(owner, origin, target, receipt, sessionId, generation, messageId),
-      bootstrapAdmissionRouteTargetActive: (owner, origin, target) => scenarioSessionScopeAuthority.bootstrapAdmissionRouteTargetActive(owner, origin, target),
-      bootstrapAdmissionRouteClaimActive: (owner, origin, target) => scenarioSessionScopeAuthority.bootstrapAdmissionRouteClaimActive(owner, origin, target),
-      captureBootstrapAdmissionRouteTarget: (owner, origin, target, continuation, sessionId, generation, messageId) => scenarioSessionScopeAuthority.captureBootstrapAdmissionRouteTarget(owner, origin, target, continuation, sessionId, generation, messageId),
-    }),
-    ...(playgroundAgentSessionPersistence === undefined ? {} : {
-      persistence: playgroundAgentSessionPersistence,
-      initialSessions: recoveredPlaygroundSessions,
-    }),
-  })
-  scenarioSessionOwner = sessionId => agentSessionRuntime.ownerForSession(sessionId)
-  const disposeAgentRouteFences = agentRouteScopes.subscribe((owner, sessionId, code) => {
-    scenarioSessionScopeAuthority?.fenceSession(sessionId, code)
-    agentSessionRuntime.fenceSession(sessionId, code)
-    if (code !== 'route-replaced') agentSessionRuntime.fenceOwner(owner, code)
-  })
-  const disposeAgentPermissionFences = broker.subscribeAgentRuntimePermissionFences(fence => {
-    const owner = `${fence.identity.source}:${fence.identity.id}`
-    scenarioSessionScopeAuthority?.fenceSession(fence.sessionId, fence.code)
-    if (fence.code === 'route-replaced') agentRouteScopes.reconcileRoutes()
-    else agentRouteScopes.revoke(owner, fence.code)
-    agentSessionRuntime.fenceSession(fence.sessionId, fence.code)
-    if (fence.code !== 'route-replaced') agentSessionRuntime.fenceOwner(owner, fence.code)
-  })
-  const disposeAgentRouteHistory = routeHistory.subscribe(reconcileAgentRuntimeRoute)
-  // Host-owned only: no plugin or renderer global receives this broker/adapter.
-  const connectorBroker = new CordisXConnectorBroker()
-  const agentConnector = connectorBroker.register(createCodexAgentConnector(agentAdapter))
-  if (!agentConnector.ok) throw new Error(`Host Agent Connector registration failed: ${agentConnector.error.message}`)
-  // The bootstrap closure is selected only by the Host composition before it
-  // is bundled. It runs before controller construction/normal plugin
-  // activation and is never placed in metadata or a renderer global.
-  const developmentPolicySeed = metadata.hostKind === 'playground'
-    ? broker.createDevelopmentAgentRuntimePolicySeedAuthority()
-    : undefined
-  const bootstrapResult = await internalBootstrap?.(Object.freeze({
-    connectors: connectorBroker,
-    ...(developmentPolicySeed === undefined ? {} : {
-      agentRuntimePolicies: Object.freeze({
-        seed: async (identity: CordisXPluginIdentity, entries: readonly Readonly<{
-          capability: import('@cordisx/protocol/agents/v1').AgentRuntimeCapability
-          sessionIds: readonly [string, ...string[]]
-          policy: 'ask' | 'allow-persistent' | 'deny-persistent'
-        }>[]) => await broker.seedAgentRuntimePolicies(developmentPolicySeed, identity, entries),
+    }
+    const agentSessionTransport: CordisXPrivateAgentDriver = metadata.hostKind === 'playground'
+      ? new DeterministicAgentSessionTransport({
+        recoveredSessions: recoveredPlaygroundSessions,
+        ...(metadata.playgroundSessionScenarios === undefined
+          ? {}
+          : { scenarioCatalog: metadata.playgroundSessionScenarios }),
+        ...(playgroundRoomSimulationBridgeRegistry === undefined
+          ? {}
+          : { roomBridge: playgroundRoomSimulationBridgeRegistry.client }),
+        ...(scenarioSessionScopeAuthority === undefined
+          ? {}
+          : { scenarioSessionScope: scenarioSessionScopeAuthority.client }),
+      })
+      : desktopAgentSessionTransport ?? new UnavailableAgentSessionTransport()
+    agentSessionRuntime = new CordisXAgentSessionRuntime({
+      driver: agentSessionTransport,
+      authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
+      mintApprovalAuthorityLease: async (owner, input) =>
+        await agentRouteScopes.mintApprovalAuthorityLease(owner, input),
+      requiresApprovalAuthorityLease: owner => agentRouteScopes.requiresApprovalAuthorityLease(owner),
+      approvalAuthorityLeaseActive: (owner, lease, requester, authority) =>
+        agentRouteScopes.approvalAuthorityLeaseActive(owner, lease, requester, authority),
+      releaseApprovalAuthorityLease: lease => agentRouteScopes.releaseApprovalAuthorityLease(lease),
+      declares: (owner, capability) => agentRouteScopes.declares(owner, capability),
+      ...(scenarioSessionScopeAuthority === undefined ? {} : {
+        captureSubmission: (owner, sessionId, messageId) =>
+          scenarioSessionScopeAuthority.captureSubmission(owner, sessionId, messageId),
+        captureAdmission: (owner, origin, sessionId, generation, messageId) =>
+          scenarioSessionScopeAuthority.captureAdmission(owner, origin, sessionId, generation, messageId),
+        admissionTargetActive: (owner, origin, target) =>
+          scenarioSessionScopeAuthority.admissionTargetActive(owner, origin, target),
+        captureAdmissionTarget: (owner, origin, target, sessionId, generation, messageId) =>
+          scenarioSessionScopeAuthority.captureAdmissionTarget(owner, origin, target, sessionId, generation, messageId),
+        bootstrapAdmissionTargetActive: (owner, origin, target) =>
+          scenarioSessionScopeAuthority.bootstrapAdmissionTargetActive(owner, origin, target),
+        captureBootstrapAdmissionTarget: (owner, origin, target, sessionId, generation, messageId) =>
+          scenarioSessionScopeAuthority.captureBootstrapAdmissionTarget(
+            owner,
+            origin,
+            target,
+            sessionId,
+            generation,
+            messageId,
+          ),
+        bootstrapAdmissionRoomTargetActive: (owner, origin, target) =>
+          scenarioSessionScopeAuthority.bootstrapAdmissionRoomTargetActive(owner, origin, target),
+        captureBootstrapAdmissionRoomTarget: (owner, origin, target, receipt, sessionId, generation, messageId) =>
+          scenarioSessionScopeAuthority.captureBootstrapAdmissionRoomTarget(
+            owner,
+            origin,
+            target,
+            receipt,
+            sessionId,
+            generation,
+            messageId,
+          ),
+        bootstrapAdmissionRouteTargetActive: (owner, origin, target) =>
+          scenarioSessionScopeAuthority.bootstrapAdmissionRouteTargetActive(owner, origin, target),
+        bootstrapAdmissionRouteClaimActive: (owner, origin, target) =>
+          scenarioSessionScopeAuthority.bootstrapAdmissionRouteClaimActive(owner, origin, target),
+        captureBootstrapAdmissionRouteTarget: (owner, origin, target, continuation, sessionId, generation, messageId) =>
+          scenarioSessionScopeAuthority.captureBootstrapAdmissionRouteTarget(
+            owner,
+            origin,
+            target,
+            continuation,
+            sessionId,
+            generation,
+            messageId,
+          ),
       }),
-    }),
-  }))
-  if (typeof bootstrapResult === 'function') disposeInternalBootstrap = bootstrapResult
-  const boundProviderStatuses = bindingPlatformAdapter?.capabilityProviderStatuses() ?? []
-  const externalProviderStatuses = boundProviderStatuses.length > 0
-    ? boundProviderStatuses
-    : metadata.providers.map(provider => ({
-      providerId: provider.id,
-      displayName: provider.displayName,
-      state: 'unavailable' as const,
-    }))
-  const capabilityAvailability = new CapabilityAvailabilityRegistry([
-    platformAdapterCapabilityProvider(agentAdapter.status(), {
-      providerId: 'desktop-current-connection',
-      kind: 'current-connection',
-    }),
-    ...externalProviderCapabilityProviders(externalProviderStatuses),
-    ...hostLocalCapabilityProviders({
-      agentStatus: agentRuntime.status(),
-      historyStatus: {
-        hostId: 'cordisx-host', hostName: 'CordisX Host', mode: 'unavailable',
-        adapterId: 'retired-agent-history', adapterVersion: 'none', profileId: metadata.profileId,
-        defaultPayloadPolicy: 'referenced', diagnostics: [{ code: 'history-unavailable', severity: 'info', count: 1 }],
-        filesystemExposed: false, rawBridgeExposed: false,
-      },
-      configurationWritable: configBridge !== undefined,
-      packageLifecycleAvailable: lifecycleBridge !== undefined,
-    }),
-  ])
-  const extensionPointDescriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
-  const legacyExtensionPointPolicies = new BrowserExtensionPointPolicyStore().read()
-  const extensionPointBroker = new ExtensionPointPolicyBroker(
-    extensionPointDescriptors,
-    new MemoryExtensionPointPolicyStore(),
-    generation,
-    generationVisibility,
-    {
-      access: (identity, pointId, view) => broker.domAccess(identity, pointId, view),
-      policy: (identity, pointId) => broker.domPolicy(identity, pointId),
-      policies: () => broker.domPolicies(),
-    },
-  )
-  const controllers: PluginController[] = plugins.map(item => createController(item, pluginConsole))
-  const moduleGenerationOf = (controller: PluginController): string => (
-    controller.item.package?.moduleGeneration
-    ?? controller.item.artifactGeneration
-    ?? `${generation}:${controller.item.id}:bundled`
-  )
-  const projectedControllers = (): PluginController[] => controllers.filter(controller => (
-    generationVisibility.projected({
-      pluginId: controller.item.id,
-      moduleGeneration: moduleGenerationOf(controller),
+      ...(playgroundAgentSessionPersistence === undefined ? {} : {
+        persistence: playgroundAgentSessionPersistence,
+        initialSessions: recoveredPlaygroundSessions,
+      }),
     })
-  ))
-  const activeControllers = (): PluginController[] => projectedControllers().filter(controller => generationVisibility.visible({
-    pluginId: controller.item.id,
-    moduleGeneration: moduleGenerationOf(controller),
-  }))
-  const activeController = (id: string, source?: string): PluginController | undefined => projectedControllers().find(controller => (
-    controller.item.id === id && (source === undefined || controller.item.source === source)
-  ))
-  pluginErrorOwners = () => activeControllers().map(controller => ({
-    identity: controller.identity,
-    principal: controller.principal,
-    source: controller.item.source,
-  }))
-  const requiredBlockReason = (controller: PluginController): string | undefined => {
-    const denied = broker.requiredDenied(controller.identity, controller.generationView)
-    if (denied.length > 0) return `Required capability denied: ${denied.join(', ')}`
-    const declarations = controller.manifest.capabilities.flatMap(item => (
-      (CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
-        ? [{
+    scenarioSessionOwner = sessionId => agentSessionRuntime.ownerForSession(sessionId)
+    const disposeAgentRouteFences = agentRouteScopes.subscribe((owner, sessionId, code) => {
+      scenarioSessionScopeAuthority?.fenceSession(sessionId, code)
+      agentSessionRuntime.fenceSession(sessionId, code)
+      if (code !== 'route-replaced') agentSessionRuntime.fenceOwner(owner, code)
+    })
+    const disposeAgentPermissionFences = broker.subscribeAgentRuntimePermissionFences(fence => {
+      const owner = `${fence.identity.source}:${fence.identity.id}`
+      scenarioSessionScopeAuthority?.fenceSession(fence.sessionId, fence.code)
+      if (fence.code === 'route-replaced') agentRouteScopes.reconcileRoutes()
+      else agentRouteScopes.revoke(owner, fence.code)
+      agentSessionRuntime.fenceSession(fence.sessionId, fence.code)
+      if (fence.code !== 'route-replaced') agentSessionRuntime.fenceOwner(owner, fence.code)
+    })
+    const disposeAgentRouteHistory = routeHistory.subscribe(reconcileAgentRuntimeRoute)
+    // Host-owned only: no plugin or renderer global receives this broker/adapter.
+    const connectorBroker = new CordisXConnectorBroker()
+    const agentConnector = connectorBroker.register(createCodexAgentConnector(agentAdapter))
+    if (!agentConnector.ok) throw new Error(`Host Agent Connector registration failed: ${agentConnector.error.message}`)
+    // The bootstrap closure is selected only by the Host composition before it
+    // is bundled. It runs before controller construction/normal plugin
+    // activation and is never placed in metadata or a renderer global.
+    const developmentPolicySeed = metadata.hostKind === 'playground'
+      ? broker.createDevelopmentAgentRuntimePolicySeedAuthority()
+      : undefined
+    const bootstrapResult = await internalBootstrap?.(Object.freeze({
+      connectors: connectorBroker,
+      ...(developmentPolicySeed === undefined ? {} : {
+        agentRuntimePolicies: Object.freeze({
+          seed: async (
+            identity: CordisXPluginIdentity,
+            entries: readonly Readonly<{
+              capability: import('@cordisx/protocol/agents/v1').AgentRuntimeCapability
+              sessionIds: readonly [string, ...string[]]
+              policy: 'ask' | 'allow-persistent' | 'deny-persistent'
+            }>[],
+          ) => await broker.seedAgentRuntimePolicies(developmentPolicySeed, identity, entries),
+        }),
+      }),
+    }))
+    if (typeof bootstrapResult === 'function') disposeInternalBootstrap = bootstrapResult
+    const boundProviderStatuses = bindingPlatformAdapter?.capabilityProviderStatuses() ?? []
+    const externalProviderStatuses = boundProviderStatuses.length > 0
+      ? boundProviderStatuses
+      : metadata.providers.map(provider => ({
+        providerId: provider.id,
+        displayName: provider.displayName,
+        state: 'unavailable' as const,
+      }))
+    const capabilityAvailability = new CapabilityAvailabilityRegistry([
+      platformAdapterCapabilityProvider(agentAdapter.status(), {
+        providerId: 'desktop-current-connection',
+        kind: 'current-connection',
+      }),
+      ...externalProviderCapabilityProviders(externalProviderStatuses),
+      ...hostLocalCapabilityProviders({
+        agentStatus: agentRuntime.status(),
+        historyStatus: {
+          hostId: 'cordisx-host',
+          hostName: 'CordisX Host',
+          mode: 'unavailable',
+          adapterId: 'retired-agent-history',
+          adapterVersion: 'none',
+          profileId: metadata.profileId,
+          defaultPayloadPolicy: 'referenced',
+          diagnostics: [{ code: 'history-unavailable', severity: 'info', count: 1 }],
+          filesystemExposed: false,
+          rawBridgeExposed: false,
+        },
+        configurationWritable: configBridge !== undefined,
+        packageLifecycleAvailable: lifecycleBridge !== undefined,
+      }),
+    ])
+    const extensionPointDescriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
+    const legacyExtensionPointPolicies = new BrowserExtensionPointPolicyStore().read()
+    const extensionPointBroker = new ExtensionPointPolicyBroker(
+      extensionPointDescriptors,
+      new MemoryExtensionPointPolicyStore(),
+      generation,
+      generationVisibility,
+      {
+        access: (identity, pointId, view) => broker.domAccess(identity, pointId, view),
+        policy: (identity, pointId) => broker.domPolicy(identity, pointId),
+        policies: () => broker.domPolicies(),
+      },
+    )
+    const controllers: PluginController[] = plugins.map(item => createController(item, pluginConsole))
+    const moduleGenerationOf = (controller: PluginController): string => (
+      controller.item.package?.moduleGeneration
+        ?? controller.item.artifactGeneration
+        ?? `${generation}:${controller.item.id}:bundled`
+    )
+    const projectedControllers = (): PluginController[] =>
+      controllers.filter(controller => (
+        generationVisibility.projected({
+          pluginId: controller.item.id,
+          moduleGeneration: moduleGenerationOf(controller),
+        })
+      ))
+    const activeControllers = (): PluginController[] =>
+      projectedControllers().filter(controller =>
+        generationVisibility.visible({
+          pluginId: controller.item.id,
+          moduleGeneration: moduleGenerationOf(controller),
+        })
+      )
+    const activeController = (id: string, source?: string): PluginController | undefined =>
+      projectedControllers().find(controller => (
+        controller.item.id === id && (source === undefined || controller.item.source === source)
+      ))
+    pluginErrorOwners = () =>
+      activeControllers().map(controller => ({
+        identity: controller.identity,
+        principal: controller.principal,
+        source: controller.item.source,
+      }))
+    const requiredBlockReason = (controller: PluginController): string | undefined => {
+      const denied = broker.requiredDenied(controller.identity, controller.generationView)
+      if (denied.length > 0) return `Required capability denied: ${denied.join(', ')}`
+      const declarations = controller.manifest.capabilities.flatMap(item => (
+        (CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
+          ? [{
             name: item.name as CordisXPlatformCapability,
             required: item.required,
             scope: item.scope as CordisXCapabilityScope,
           }]
-        : []
-    ))
-    const isolatedHostDom = controller.item.isolatedArtifactSource !== undefined
-      && manifestUsesHostDom(controller.manifest)
-    const unavailable = capabilityAvailability.unavailableRequired(declarations)
-    const explicitlyAllowedInPlayground = metadata.hostKind === 'playground'
-      && unavailable.every(capability => broker.snapshots().some(permission => (
-        permission.identity.source === controller.identity.source
-        && permission.identity.id === controller.identity.id
-        && permission.capability === capability
-        && permission.policy === 'allow'
-      )))
-    if (unavailable.length > 0 && !explicitlyAllowedInPlayground) return `Required capability unavailable: ${unavailable.join(', ')}`
-    const requiredHostDom = controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 8
-      ? controller.manifest.capabilities.find(item => (
+          : []
+      ))
+      const isolatedHostDom = controller.item.isolatedArtifactSource !== undefined
+        && manifestUsesHostDom(controller.manifest)
+      const unavailable = capabilityAvailability.unavailableRequired(declarations)
+      const explicitlyAllowedInPlayground = metadata.hostKind === 'playground'
+        && unavailable.every(capability =>
+          broker.snapshots().some(permission => (
+            permission.identity.source === controller.identity.source
+            && permission.identity.id === controller.identity.id
+            && permission.capability === capability
+            && permission.policy === 'allow'
+          ))
+        )
+      if (unavailable.length > 0 && !explicitlyAllowedInPlayground) {
+        return `Required capability unavailable: ${unavailable.join(', ')}`
+      }
+      const requiredHostDom = controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6
+          || controller.manifest.schemaVersion === 8
+        ? controller.manifest.capabilities.find(item => (
           item.required && (item.name === 'ui.host-dom.read' || item.name === 'ui.host-dom.modify')
         ))
-      : undefined
-    if (requiredHostDom !== undefined && !isolatedHostDom) {
-      return `Required capability unavailable: ${requiredHostDom.name}`
-    }
-    return undefined
-  }
-  const registerController = (controller: PluginController, registerAuthority = true): void => {
-    if (registerAuthority) {
-      const artifact = controller.item.package === undefined ? undefined : {
-        version: controller.item.package.version,
-        integrity: controller.item.package.digest,
-      }
-      controller.unregisterPermissions = broker.register(controller.identity, controller.manifest, {
-        pluginId: controller.item.id,
-        moduleGeneration: moduleGenerationOf(controller),
-        ...(controller.generationView?.transactionId === undefined ? {} : {
-          transactionId: controller.generationView.transactionId,
-          transactionEpoch: controller.generationView.transactionEpoch,
-        }),
-      }, controller.generationView, artifact)
-      controller.unregisterExtensionPoints = extensionPointBroker.register(controller.identity, {
-        pluginId: controller.item.id,
-        moduleGeneration: moduleGenerationOf(controller),
-        ...(controller.generationView?.transactionId === undefined ? {} : {
-          transactionId: controller.generationView.transactionId,
-          transactionEpoch: controller.generationView.transactionEpoch,
-        }),
-      }, controller.generationView)
-      const agentRuntimeManifestVersion = controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7 || controller.manifest.schemaVersion === 8
-        ? controller.manifest.schemaVersion === 7 ? 6 : controller.manifest.schemaVersion
         : undefined
-      const agentRuntimeDeclarations = agentRuntimeManifestVersion !== undefined
-        ? controller.manifest.capabilities
-          .filter((item): item is typeof item & AgentRuntimePermissionDeclaration => (
+      if (requiredHostDom !== undefined && !isolatedHostDom) {
+        return `Required capability unavailable: ${requiredHostDom.name}`
+      }
+      return undefined
+    }
+    const registerController = (controller: PluginController, registerAuthority = true): void => {
+      if (registerAuthority) {
+        const artifact = controller.item.package === undefined ? undefined : {
+          version: controller.item.package.version,
+          integrity: controller.item.package.digest,
+        }
+        controller.unregisterPermissions = broker.register(
+          controller.identity,
+          controller.manifest,
+          {
+            pluginId: controller.item.id,
+            moduleGeneration: moduleGenerationOf(controller),
+            ...(controller.generationView?.transactionId === undefined ? {} : {
+              transactionId: controller.generationView.transactionId,
+              transactionEpoch: controller.generationView.transactionEpoch,
+            }),
+          },
+          controller.generationView,
+          artifact,
+        )
+        controller.unregisterExtensionPoints = extensionPointBroker.register(controller.identity, {
+          pluginId: controller.item.id,
+          moduleGeneration: moduleGenerationOf(controller),
+          ...(controller.generationView?.transactionId === undefined ? {} : {
+            transactionId: controller.generationView.transactionId,
+            transactionEpoch: controller.generationView.transactionEpoch,
+          }),
+        }, controller.generationView)
+        const agentRuntimeManifestVersion =
+          controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6
+            || controller.manifest.schemaVersion === 7 || controller.manifest.schemaVersion === 8
+            ? controller.manifest.schemaVersion === 7 ? 6 : controller.manifest.schemaVersion
+            : undefined
+        const agentRuntimeDeclarations = agentRuntimeManifestVersion !== undefined
+          ? controller.manifest.capabilities
+            .filter((item): item is typeof item & AgentRuntimePermissionDeclaration => (
               item.name.startsWith('agents.') || item.name.startsWith('sessions.') || item.name.startsWith('approvals.')
             ))
-          .map(item => Object.freeze({ ...item, manifestVersion: agentRuntimeManifestVersion }))
-        : []
-      agentRouteScopes.install(agentOwnerForController(controller), agentRuntimeDeclarations)
-    }
-    const configSchema = moduleConfigSchema(controller.item.module)
-    const configApplies = controller.item.isolatedArtifactSource === undefined
-      ? moduleConfigApplies(controller.item.module)
-      : 'plugin-restart' as const
-    configuration.register({
-      identity: controller.identity,
-      moduleGeneration: moduleGenerationOf(controller),
-      ...(controller.generationView === undefined ? {} : { candidateView: controller.generationView }),
-      ...(configSchema === undefined ? {} : { schema: configSchema }),
-      applies: configApplies,
-      raw: controller.item.config,
-      revision: controller.item.revision,
-      writable: configBridge !== undefined
-        && controller.item.enabled
-        && controllerHasRuntimeModule(controller)
-        && configApplies !== 'service-restart',
-    })
-  }
-  const unregisterController = (controller: PluginController): void => {
-    const index = controllers.indexOf(controller)
-    if (index >= 0) controllers.splice(index, 1)
-    controller.unregisterPermissions?.()
-    delete controller.unregisterPermissions
-    controller.unregisterExtensionPoints?.()
-    delete controller.unregisterExtensionPoints
-    const owner = `${controller.item.source}:${controller.item.id}`
-    const agentOwner = agentOwnerForController(controller)
-    agentRouteScopes.uninstall(agentOwner)
-    agentOwnerControllers.delete(agentOwnerKey(agentOwner))
-    agentSessionRuntime.fenceOwner(owner, 'plugin-generation-replaced')
-    configuration.unregister(
-      controller.item.id,
-      moduleGenerationOf(controller),
-    )
-  }
-  for (const controller of controllers) {
-    registerController(controller)
-    if (controller.status === 'active' && blockedPlugins.has(controller.item.id)) controller.status = 'blocked'
-  }
-  await broker.settled()
-  for (const controller of controllers) {
-    const blockedReason = requiredBlockReason(controller)
-    if (controller.status === 'active' && blockedReason !== undefined) {
-      controller.status = 'permission-blocked'
-      controller.blockedReason = blockedReason
-    }
-  }
-  const listeners = new Set<() => void>()
-  const knownRegistrations = new Map<string, readonly SurfaceContributionSnapshot[]>()
-  let slotService: CordisXSlotService | undefined
-  let commandService: CordisXCommandService | undefined
-  let pageService: CordisXPageService | undefined
-  let i18nService: CordisXI18nService | undefined
-  let i18nFiber: Fiber | undefined
-  let platformFiber: Fiber | undefined
-  let systemPromptFiber: Fiber | undefined
-  let commandFiber: Fiber | undefined
-  let pageFiber: Fiber | undefined
-  let routeFiber: Fiber | undefined
-  let managerContentFiber: Fiber | undefined
-  let managerContentConfigAuthority: ManagerContentConfigAuthority | undefined
-  let slotFiber: Fiber | undefined
-  let settingsFiber: Fiber | undefined
-  let configRendererFiber: Fiber | undefined
-  let iconThemeFiber: Fiber | undefined
-  let visualFiber: Fiber | undefined
-  let channelManagerFiber: Fiber | undefined
-  let playgroundRoomSimulationBridgeFiber: Fiber | undefined
-  let disposeManager: (() => void) | undefined
-  let undeclareManagerOutlet: (() => void) | undefined
-  let undeclareManagerContentOutlet: (() => void) | undefined
-  let unregisterManagerPointCatalog: (() => void) | undefined
-  let adapterHandle: CodexAdapterHandle | undefined
-  let transientCanvasCoordinator: TransientCanvasCoordinator | undefined
-  let disposeI18nSubscription: (() => void) | undefined
-  let disposePermissionSubscription: (() => void) | undefined
-  let disposeExtensionPointSubscription: (() => void) | undefined
-  const disposeExtensionPointCatalogs: (() => void | Promise<void>)[] = []
-  const registrySubscriptions: (() => void)[] = []
-  const generationTransactions = new Map<string, RendererGenerationTransaction>()
-  const finalizedTransactions = new Map<string, RendererGenerationTransaction>()
-  const rollbackReceipts = new Map<string, RendererGenerationCleanupObservation>()
-  let operation: Promise<unknown> = Promise.resolve()
-  let disposed = false
-  let notificationsSuppressed = false
-  const generationNotificationTrace: { source: string; registryEpoch: number; suppressed: boolean }[] = []
-  let settingsProjectionSites = new Set<string>()
-  let settingsNavigationProjectionSites = new Map<string, string>()
-  let extensionContributionProjectionSites = new Map<string, string>()
-
-  const traceNotification = (source: string, suppressed: boolean): void => {
-    generationNotificationTrace.push({ source, registryEpoch: generationVisibility.registryEpoch(), suppressed })
-    if (generationNotificationTrace.length > 256) generationNotificationTrace.shift()
-  }
-  const emitListeners = (): void => {
-    for (const listener of listeners) listener()
-  }
-
-  const rememberRollbackReceipt = (receipt: RendererGenerationCleanupObservation): RendererGenerationCleanupObservation => {
-    const stored = cloneRendererValue(receipt)
-    rollbackReceipts.set(receipt.transactionId, stored)
-    while (rollbackReceipts.size > MAX_ROLLBACK_RECEIPTS) {
-      const oldest = rollbackReceipts.keys().next().value as string | undefined
-      if (oldest === undefined) break
-      rollbackReceipts.delete(oldest)
-    }
-    return cloneRendererValue(stored)
-  }
-  const rememberFinalizedTransaction = (transactionId: string, transaction: RendererGenerationTransaction): void => {
-    finalizedTransactions.set(transactionId, transaction)
-    while (finalizedTransactions.size > MAX_ROLLBACK_RECEIPTS) {
-      const oldest = finalizedTransactions.keys().next().value as string | undefined
-      if (oldest === undefined) break
-      finalizedTransactions.delete(oldest)
-    }
-  }
-  const notifyBatch = (): void => {
-    traceNotification('generation-batch', false)
-    emitListeners()
-  }
-  const notify = (source = 'runtime'): void => {
-    traceNotification(source, notificationsSuppressed)
-    if (notificationsSuppressed) return
-    emitListeners()
-  }
-  const notifyFrom = (source: string): (() => void) => () => notify(source)
-  const drainSuppressedNotifications = async (): Promise<void> => {
-    await Promise.resolve()
-    await new Promise<void>(resolve => setTimeout(resolve, 0))
-    await Promise.resolve()
-  }
-  const drainBatchSubscriberMicrotasks = async (): Promise<void> => {
-    let observed = generationNotificationTrace.length
-    let stableTurns = 0
-    for (let turn = 0; turn < 32; turn += 1) {
-      await Promise.resolve()
-      if (generationNotificationTrace.length === observed) {
-        stableTurns += 1
-        if (stableTurns === 2) return
-      } else {
-        observed = generationNotificationTrace.length
-        stableTurns = 0
+            .map(item => Object.freeze({ ...item, manifestVersion: agentRuntimeManifestVersion }))
+          : []
+        agentRouteScopes.install(agentOwnerForController(controller), agentRuntimeDeclarations)
       }
-    }
-    throw new Error('generation batch subscribers did not reach a microtask fixed point')
-  }
-
-  const settleRegistryProjection = (): Promise<void> => {
-    const task = operation.then(async () => {
-      if (disposed) throw new Error('CordisX runtime is disposed')
-      await drainBatchSubscriberMicrotasks()
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const rememberRegistrations = (pluginId: string): void => {
-    const controller = activeController(pluginId)
-    if (controller === undefined) return
-    const registrations = slotService?.snapshot().filter(item => item.owner === pluginId) ?? []
-    if (registrations.length > 0) knownRegistrations.set(
-      `${pluginId}\u0000${moduleGenerationOf(controller)}`,
-      registrations,
-    )
-  }
-
-  const disposeControllerFiber = async (controller: PluginController, reason: 'owner-disposed' | 'generation-replaced'): Promise<void> => {
-    rememberRegistrations(controller.item.id)
-    agentRuntime.releaseOwner(controller.identity, reason, moduleGenerationOf(controller))
-    let failure: unknown
-    try {
-      await controller.hostDomWorker?.dispose()
-      await controller.fiber?.dispose()
-    } catch (error) {
-      failure = error
-    }
-    try {
-      await routeService?.settled()
-    } catch (error) {
-      failure ??= error
-    } finally {
-      const owner = `${controller.item.source}:${controller.item.id}`
-      agentRouteScopes.revoke(owner, 'plugin-generation-replaced')
-      agentSessionRuntime.fenceOwner(owner, 'plugin-generation-replaced')
-      await controller.agentAdmissionBootstrapRouteReservationFiber?.dispose()
-      delete controller.agentAdmissionBootstrapRouteReservationFiber
-      await controller.agentAdmissionBootstrapRouteDeclarationFiber?.dispose()
-      delete controller.agentAdmissionBootstrapRouteDeclarationFiber
-      await controller.agentAdmissionBootstrapReservationFiber?.dispose()
-      delete controller.agentAdmissionBootstrapReservationFiber
-      await controller.agentAdmissionBootstrapTargetFiber?.dispose()
-      delete controller.agentAdmissionBootstrapTargetFiber
-      await controller.agentAdmissionBootstrapRoomReservationFiber?.dispose()
-      delete controller.agentAdmissionBootstrapRoomReservationFiber
-      await controller.agentAdmissionBootstrapRoomTargetFiber?.dispose()
-      delete controller.agentAdmissionBootstrapRoomTargetFiber
-      await controller.agentAdmissionTargetReservationFiber?.dispose()
-      delete controller.agentAdmissionTargetReservationFiber
-      await controller.agentAdmissionTargetOriginFiber?.dispose()
-      delete controller.agentAdmissionTargetOriginFiber
-      await controller.agentAdmissionReservationFiber?.dispose()
-      delete controller.agentAdmissionReservationFiber
-      await controller.approvalServiceFiber?.dispose()
-      delete controller.approvalServiceFiber
-      await controller.sessionRegistryFiber?.dispose()
-      delete controller.sessionRegistryFiber
-      await controller.agentRegistryFiber?.dispose()
-      delete controller.agentRegistryFiber
-      await controller.entityRegistryFiber?.dispose()
-      delete controller.entityRegistryFiber
-      controller.unregisterAgentSessionMigration?.()
-      delete controller.unregisterAgentSessionMigration
-      controller.agentLoopClient?.dispose()
-      delete controller.agentLoopClient
-      await controller.unregisterAgentLoop?.()
-      delete controller.unregisterAgentLoop
-      controller.documentsClient?.dispose()
-      delete controller.documentsClient
-      await controller.unregisterDocuments?.()
-      delete controller.unregisterDocuments
-      controller.connectorClient?.dispose()
-      delete controller.connectorClient
-      await controller.unregisterConnector?.()
-      delete controller.unregisterConnector
-      retirePrincipal(controller, `Plugin disposed: ${reason}`)
-      delete controller.hostDomWorker
-      delete controller.fiber
-    }
-    if (failure !== undefined) throw failure
-  }
-
-  const renewPrincipal = (controller: PluginController): void => {
-    if (controller.principalLive) return
-    controller.activation += 1
-    controller.principal = pluginConsole.issue(
-      controller.identity,
-      moduleGenerationOf(controller),
-    )
-    controller.principalLive = true
-    const module = controller.item.isolatedArtifactSource === undefined
-      ? controller.item.moduleFactory?.(pluginConsole.consoleFacade(controller.principal)) ?? controller.item.module
-      : undefined
-    controller.item = module === undefined || module === controller.item.module ? controller.item : { ...controller.item, module }
-    controller.manifest = normalizePluginManifest(controller.item.manifest ?? module?.manifest, controller.item.id)
-  }
-
-  const retirePrincipal = (controller: PluginController, message: string): void => {
-    if (!controller.principalLive) return
-    pluginConsole.deactivate(controller.principal, message)
-    controller.principalLive = false
-  }
-
-  const mountPlugin = async (controller: PluginController): Promise<void> => {
-    renewPrincipal(controller)
-    const module = controller.item.module
-    const isolatedArtifactSource = controller.item.isolatedArtifactSource
-    if (module === undefined && isolatedArtifactSource === undefined) {
-      throw new Error(`plugin ${controller.item.id} is not bundled because it is disabled in configuration`)
-    }
-    const blockedReason = requiredBlockReason(controller)
-    if (blockedReason !== undefined) {
-      controller.status = 'permission-blocked'
-      controller.blockedReason = blockedReason
-      return
-    }
-    if (isolatedArtifactSource !== undefined) {
-      if (hostDomWorkerEnvironment === undefined) {
-        throw new Error('native browser primitives are unavailable for Host DOM worker isolation')
-      }
-      const hostDom = !manifestUsesHostDom(controller.manifest) ? undefined : hostDomAuthority.bind({
-        ownerKey: JSON.stringify([
-          metadata.profileId,
-          controller.identity.source,
-          controller.identity.id,
-          generation,
-          moduleGenerationOf(controller),
-        ]),
-        profileId: metadata.profileId,
-        identity: { source: controller.identity.source, pluginId: controller.identity.id },
-        runtimeGeneration: generation,
+      const configSchema = moduleConfigSchema(controller.item.module)
+      const configApplies = controller.item.isolatedArtifactSource === undefined
+        ? moduleConfigApplies(controller.item.module)
+        : 'plugin-restart' as const
+      configuration.register({
+        identity: controller.identity,
         moduleGeneration: moduleGenerationOf(controller),
-        state: () => !controllers.includes(controller) ? 'uninstalled'
-          : !controller.principalLive ? 'generation-replaced'
-            : !controller.item.enabled ? 'disabled' : 'active',
-        authorize: async (capability, rootId, operations) => await broker.authorizeHostDom(
-          controller.identity,
-          capability,
-          rootId,
-          operations,
-          controller.generationView,
-        ),
-        leaseActive: leaseId => broker.isHostDomLeaseActive(
-          controller.identity,
-          leaseId,
-          controller.generationView,
-        ),
-        subscribeInvalidation: listener => broker.subscribe(listener),
+        ...(controller.generationView === undefined ? {} : { candidateView: controller.generationView }),
+        ...(configSchema === undefined ? {} : { schema: configSchema }),
+        applies: configApplies,
+        raw: controller.item.config,
+        revision: controller.item.revision,
+        writable: configBridge !== undefined
+          && controller.item.enabled
+          && controllerHasRuntimeModule(controller)
+          && configApplies !== 'service-restart',
       })
-      let boundary: HostDomWorkerBoundary | undefined
-      const transientCanvas = !manifestUsesTransientCanvas(controller.manifest) || transientCanvasCoordinator === undefined
-        ? undefined
-        : transientCanvasCoordinator.bind({
-            owner: controller.item.id,
-            source: controller.identity.source,
-            moduleGeneration: moduleGenerationOf(controller),
-            generation: Object.freeze({
-              pluginId: controller.item.id,
-              moduleGeneration: moduleGenerationOf(controller),
-              ...(controller.generationView?.transactionId === undefined ? {} : {
-                transactionId: controller.generationView.transactionId,
-                transactionEpoch: controller.generationView.transactionEpoch,
-              }),
-            }),
-            ...(controller.generationView === undefined ? {} : { candidateView: controller.generationView }),
-            sink: {
-              start: input => boundary?.startTransientCanvas(input),
-              stop: sessionId => boundary?.stopTransientCanvas(sessionId),
-            },
-          })
-      try {
-        pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Isolated plugin activation started')
-        boundary = createHostDomWorkerBoundary({
-          document,
-          artifactSource: isolatedArtifactSource,
-          config: configuration.get(controller.item.id, controller.generationView),
-          ...(hostDom === undefined ? {} : { hostDom }),
-          ...(transientCanvas === undefined ? {} : { transientCanvas }),
-          environment: hostDomWorkerEnvironment,
-          onStatus: status => {
-            if (status.status !== 'error' || controller.hostDomWorker !== boundary) return
-            controller.status = 'failed'
-            controller.error = status.error
-            notify('isolated-worker')
-          },
-        })
-        controller.hostDomWorker = boundary
-        await boundary.ready
-        controller.status = 'active'
-        delete controller.error
-        delete controller.blockedReason
-        pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Isolated plugin activation completed')
-        return
-      } catch (error) {
-        await boundary?.dispose().catch(() => undefined)
-        hostDom?.dispose()
-        transientCanvas?.dispose()
-        delete controller.hostDomWorker
-        controller.status = 'failed'
-        controller.error = errorMessage(error)
-        pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Isolated plugin activation failed', error)
-        retirePrincipal(controller, 'Plugin disposed after isolated activation failure')
-        throw error
-      }
     }
-    if (module === undefined) throw new Error(`plugin ${controller.item.id} has no renderer module`)
-    let pluginContext: Context
-    const connectorAuthorization = async (
-      capability: CordisXConnectorClientCapability,
-      _registration?: CordisXConnectorRegistrationIdentity,
-    ): Promise<CordisXConnectorAuthorization> => {
-      if (!controller.principalLive) return { capability, state: 'unavailable', code: 'principal-unavailable' }
-      try {
-        const identity = pluginConsole.owner(controller.principal)
-        const permissionCapability: CordisXPlatformCapability = capability === 'connector.command.execute'
-          ? 'agent.messages.append'
-          : 'agent.events.read'
-        // Connector calls never open an implicit permission prompt. A plugin
-        // must have an explicit allow policy before this bound surface can use
-        // the PermissionBroker; ask and deny both fail closed.
-        if (broker.policy(identity, permissionCapability, generationVisibility.view(pluginContext)) !== 'allow') {
-          return { capability, state: 'denied', code: 'policy-denied' }
-        }
-        // Conversation handles are opaque and cannot be safely translated into
-        // a native Agent session scope. This conservative all-session request
-        // therefore never expands a manifest's declared session authority.
-        const authorization = await broker.authorize(
-          identity,
-          permissionCapability,
-          { allAgentSessions: true },
-          generationVisibility.view(pluginContext),
-        )
-        if (!authorization.ok) return { capability, state: 'denied', code: 'policy-denied' }
-        return { capability, state: 'allowed', code: 'allowed' }
-      } catch {
-        return { capability, state: 'unavailable', code: 'principal-unavailable' }
-      }
-    }
-    const connectorClient = connectorBroker.bind({
-      active: () => {
-        if (!controller.principalLive) return false
-        try {
-          const identity = pluginConsole.owner(controller.principal)
-          return identity.id === controller.identity.id && identity.source === controller.identity.source
-        } catch {
-          return false
-        }
-      },
-      authorize: connectorAuthorization,
-    })
-    const agentLoopAuthorizationV4 = async (
-      request: CordisXAgentLoopAuthorizationRequestV4,
-    ) => {
-      if (!controller.principalLive) return { capability: request.capability, state: 'unavailable' as const, code: 'host-unavailable' as const }
-      try {
-        const identity = pluginConsole.owner(controller.principal)
-        const authorization = await broker.authorize(identity, request.capability, {
-          ...(request.model === undefined ? {} : { providerId: request.model.providerId, model: request.model }),
-          ...(request.session === undefined ? {} : { providerId: request.session.providerId, session: request.session }),
-          ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
-        }, generationVisibility.view(pluginContext))
-        if (authorization.ok) return { capability: request.capability, state: 'allowed' as const, code: 'allowed' as const }
-        if (authorization.error.code === 'permission-denied') return { capability: request.capability, state: 'denied' as const, code: 'user-denied' as const }
-        if (authorization.error.code === 'permission-undeclared' || authorization.error.code === 'permission-scope-denied' || authorization.error.code === 'timeout') {
-          return { capability: request.capability, state: 'denied' as const, code: 'policy-denied' as const }
-        }
-        return { capability: request.capability, state: 'unavailable' as const, code: 'host-unavailable' as const }
-      } catch {
-        return { capability: request.capability, state: 'unavailable' as const, code: 'host-unavailable' as const }
-      }
-    }
-    const agentLoopOptions: CordisXBoundAgentLoopClientOptions = {
-      // v2 operation identities survive client generations for this exact
-      // source-owned plugin principal. Provider affinity is broker-fenced.
-      ownerKey: JSON.stringify([controller.identity.source, controller.identity.id]),
-      active: () => {
-        if (!controller.principalLive) return false
-        try {
-          const identity = pluginConsole.owner(controller.principal)
-          return identity.id === controller.identity.id && identity.source === controller.identity.source
-        } catch {
-          return false
-        }
-      },
-      authorize: request => agentLoopAuthorizationV4(request) as ReturnType<CordisXBoundAgentLoopClientOptions['authorize']>,
-      authorizeV4: agentLoopAuthorizationV4,
-      registerPrompt: (sessionId, definition) => (definition.promptSections ?? []).map((section, order) => agentRuntime.registerPrompt(
-        controller.identity,
-        'section',
-        {
-          sessionId,
-          id: `agent-definition:${definition.identity.agentId}:${definition.identity.revision}:${section.sectionId}`,
-          content: section.text,
-          order,
-        },
+    const unregisterController = (controller: PluginController): void => {
+      const index = controllers.indexOf(controller)
+      if (index >= 0) controllers.splice(index, 1)
+      controller.unregisterPermissions?.()
+      delete controller.unregisterPermissions
+      controller.unregisterExtensionPoints?.()
+      delete controller.unregisterExtensionPoints
+      const owner = `${controller.item.source}:${controller.item.id}`
+      const agentOwner = agentOwnerForController(controller)
+      agentRouteScopes.uninstall(agentOwner)
+      agentOwnerControllers.delete(agentOwnerKey(agentOwner))
+      agentSessionRuntime.fenceOwner(owner, 'plugin-generation-replaced')
+      configuration.unregister(
+        controller.item.id,
         moduleGenerationOf(controller),
-      )),
-    }
-    const agentLoopClientV4 = agentLoopBrokerV4.bind(agentLoopOptions)
-    const agentLoopClient = combineAgentLoopClients(
-      agentLoopBroker.bind(agentLoopOptions),
-      agentLoopBrokerV2.bind(agentLoopOptions),
-      adaptAgentLoopV3(agentLoopClientV4),
-      agentLoopClientV4,
-    )
-    controller.unregisterAgentSessionMigration = agentSessionRuntime.installLegacyBindingResolver(
-      `${controller.item.source}:${controller.item.id}`,
-      async binding => await agentLoopBrokerV4.resolveLegacySession(agentLoopOptions, binding),
-    )
-    const documentsClient = ownerDocumentBroker.bind({
-      identity: controller.identity,
-      moduleGeneration: moduleGenerationOf(controller),
-      active: () => {
-        if (!controller.principalLive) return false
-        try {
-          const identity = pluginConsole.owner(controller.principal)
-          return identity.id === controller.identity.id && identity.source === controller.identity.source
-        } catch {
-          return false
-        }
-      },
-    })
-    pluginContext = ctx.isolate('connectors').isolate('agentLoop').isolate('agents').isolate('sessions').isolate('approvals')
-      .isolate('agentAdmission').isolate('agentAdmissionOrigins').isolate('agentAdmissionReservations')
-      .isolate('agentAdmissionBootstrapTargets').isolate('agentAdmissionBootstrapReservations')
-      .isolate('agentAdmissionBootstrapRoomTargets').isolate('agentAdmissionBootstrapRoomReservations')
-      .isolate('agentAdmissionBootstrapRouteDeclarations').isolate('agentAdmissionBootstrapRouteReservations')
-      .isolate('entities').isolate('documents').extend({
-      [CORDISX_PLUGIN_ID]: controller.item.id,
-      [CORDISX_PLUGIN_SOURCE]: controller.item.source,
-      [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
-      [CORDISX_PLUGIN_PRINCIPAL]: controller.principal,
-      ...(controller.generationContext ?? {}),
-    })
-    controller.connectorClient = connectorClient
-    controller.unregisterConnector = pluginContext.reflect.provide('connectors', connectorClient)
-    controller.agentLoopClient = agentLoopClient
-    controller.unregisterAgentLoop = pluginContext.reflect.provide('agentLoop', agentLoopClient)
-    controller.documentsClient = documentsClient
-    controller.unregisterDocuments = pluginContext.reflect.provide('documents', documentsClient)
-    try {
-      const owner = agentSessionRuntime.ownerFromContext(pluginContext)
-      const entityPrincipal = entityPrincipalBindings.get(JSON.stringify([
-        controller.identity.source, controller.identity.id, moduleGenerationOf(controller),
-      ]))
-      controller.entityRegistryFiber = pluginContext.plugin(
-        CordisXEntityRegistryServiceV1, {
-          bridge: ownerDocumentBridge, principal: entityPrincipal,
-          profileId: metadata.profileId, pluginGeneration: entityPrincipal?.pluginGeneration ?? owner.generation,
-          active: () => controller.principalLive,
-        },
       )
-      await controller.entityRegistryFiber
-      const entityRegistry = (pluginContext as unknown as { readonly entities: EntityRegistry }).entities
-      controller.agentRegistryFiber = pluginContext.plugin(CordisXAgentRegistryServiceV1, { runtime: agentSessionRuntime, entities: entityRegistry })
-      await controller.agentRegistryFiber
-      controller.sessionRegistryFiber = pluginContext.plugin(CordisXSessionRegistryServiceV1, agentSessionRuntime)
-      await controller.sessionRegistryFiber
-      controller.approvalServiceFiber = pluginContext.plugin(CordisXApprovalServiceV1, agentSessionRuntime)
-      await controller.approvalServiceFiber
-      controller.agentAdmissionReservationFiber = pluginContext.plugin(CordisXAgentAdmissionReservationService, agentSessionRuntime)
-      await controller.agentAdmissionReservationFiber
-      controller.agentAdmissionTargetOriginFiber = pluginContext.plugin(CordisXAgentAdmissionTargetOriginService, agentSessionRuntime)
-      await controller.agentAdmissionTargetOriginFiber
-      controller.agentAdmissionTargetReservationFiber = pluginContext.plugin(CordisXAgentAdmissionTargetReservationService, agentSessionRuntime)
-      await controller.agentAdmissionTargetReservationFiber
-      controller.agentAdmissionBootstrapTargetFiber = pluginContext.plugin(CordisXAgentAdmissionBootstrapTargetService, agentSessionRuntime)
-      await controller.agentAdmissionBootstrapTargetFiber
-      controller.agentAdmissionBootstrapReservationFiber = pluginContext.plugin(CordisXAgentAdmissionBootstrapReservationService, agentSessionRuntime)
-      await controller.agentAdmissionBootstrapReservationFiber
-      controller.agentAdmissionBootstrapRoomTargetFiber = pluginContext.plugin(CordisXAgentAdmissionBootstrapRoomTargetService, agentSessionRuntime)
-      await controller.agentAdmissionBootstrapRoomTargetFiber
-      controller.agentAdmissionBootstrapRoomReservationFiber = pluginContext.plugin(CordisXAgentAdmissionBootstrapRoomReservationService, agentSessionRuntime)
-      await controller.agentAdmissionBootstrapRoomReservationFiber
-      controller.agentAdmissionBootstrapRouteDeclarationFiber = pluginContext.plugin(CordisXAgentAdmissionBootstrapRouteDeclarationService, agentSessionRuntime)
-      await controller.agentAdmissionBootstrapRouteDeclarationFiber
-      controller.agentAdmissionBootstrapRouteReservationFiber = pluginContext.plugin(CordisXAgentAdmissionBootstrapRouteReservationService, agentSessionRuntime)
-      await controller.agentAdmissionBootstrapRouteReservationFiber
-      pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Plugin activation started')
-      controller.fiber = pluginContext.plugin(
-        pluginFromModule(module),
-        configuration.get(controller.item.id, generationVisibility.view(pluginContext)),
-      )
-      await controller.fiber
-      agentRouteScopes.validateInstalledRoutes(owner)
-      controller.status = 'active'
-      pluginConsole.lifecycle(controller.principal, controller.activation === 1 ? 'activate' : 'reload', 'Plugin activation completed')
-      delete controller.error
-      delete controller.blockedReason
-      rememberRegistrations(controller.item.id)
-    } catch (error) {
-      controller.status = 'failed'
-      controller.error = errorMessage(error)
-      pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Plugin activation failed', error)
-      await controller.fiber?.dispose()
-      delete controller.fiber
-      await controller.agentAdmissionBootstrapRouteReservationFiber?.dispose()
-      delete controller.agentAdmissionBootstrapRouteReservationFiber
-      await controller.agentAdmissionBootstrapRouteDeclarationFiber?.dispose()
-      delete controller.agentAdmissionBootstrapRouteDeclarationFiber
-      await controller.agentAdmissionBootstrapReservationFiber?.dispose()
-      delete controller.agentAdmissionBootstrapReservationFiber
-      await controller.agentAdmissionBootstrapTargetFiber?.dispose()
-      delete controller.agentAdmissionBootstrapTargetFiber
-      await controller.agentAdmissionBootstrapRoomReservationFiber?.dispose()
-      delete controller.agentAdmissionBootstrapRoomReservationFiber
-      await controller.agentAdmissionBootstrapRoomTargetFiber?.dispose()
-      delete controller.agentAdmissionBootstrapRoomTargetFiber
-      await controller.agentAdmissionTargetReservationFiber?.dispose()
-      delete controller.agentAdmissionTargetReservationFiber
-      await controller.agentAdmissionTargetOriginFiber?.dispose()
-      delete controller.agentAdmissionTargetOriginFiber
-      await controller.agentAdmissionReservationFiber?.dispose()
-      delete controller.agentAdmissionReservationFiber
-      await controller.approvalServiceFiber?.dispose()
-      delete controller.approvalServiceFiber
-      await controller.sessionRegistryFiber?.dispose()
-      delete controller.sessionRegistryFiber
-      await controller.agentRegistryFiber?.dispose()
-      delete controller.agentRegistryFiber
-      await controller.entityRegistryFiber?.dispose()
-      delete controller.entityRegistryFiber
-      controller.unregisterAgentSessionMigration?.()
-      delete controller.unregisterAgentSessionMigration
-      agentLoopClient.dispose()
-      delete controller.agentLoopClient
-      await controller.unregisterAgentLoop?.()
-      delete controller.unregisterAgentLoop
-      documentsClient.dispose()
-      delete controller.documentsClient
-      await controller.unregisterDocuments?.()
-      delete controller.unregisterDocuments
-      connectorClient.dispose()
-      delete controller.connectorClient
-      await controller.unregisterConnector?.()
-      delete controller.unregisterConnector
-      retirePrincipal(controller, 'Plugin disposed after activation failure')
-      throw error
     }
-  }
+    for (const controller of controllers) {
+      registerController(controller)
+      if (controller.status === 'active' && blockedPlugins.has(controller.item.id)) controller.status = 'blocked'
+    }
+    await broker.settled()
+    for (const controller of controllers) {
+      const blockedReason = requiredBlockReason(controller)
+      if (controller.status === 'active' && blockedReason !== undefined) {
+        controller.status = 'permission-blocked'
+        controller.blockedReason = blockedReason
+      }
+    }
+    const listeners = new Set<() => void>()
+    const knownRegistrations = new Map<string, readonly SurfaceContributionSnapshot[]>()
+    let slotService: CordisXSlotService | undefined
+    let commandService: CordisXCommandService | undefined
+    let pageService: CordisXPageService | undefined
+    let i18nService: CordisXI18nService | undefined
+    let i18nFiber: Fiber | undefined
+    let platformFiber: Fiber | undefined
+    let systemPromptFiber: Fiber | undefined
+    let commandFiber: Fiber | undefined
+    let pageFiber: Fiber | undefined
+    let routeFiber: Fiber | undefined
+    let managerContentFiber: Fiber | undefined
+    let managerContentConfigAuthority: ManagerContentConfigAuthority | undefined
+    let slotFiber: Fiber | undefined
+    let settingsFiber: Fiber | undefined
+    let configRendererFiber: Fiber | undefined
+    let iconThemeFiber: Fiber | undefined
+    let visualFiber: Fiber | undefined
+    let channelManagerFiber: Fiber | undefined
+    let playgroundRoomSimulationBridgeFiber: Fiber | undefined
+    let disposeManager: (() => void) | undefined
+    let undeclareManagerOutlet: (() => void) | undefined
+    let undeclareManagerContentOutlet: (() => void) | undefined
+    let unregisterManagerPointCatalog: (() => void) | undefined
+    let adapterHandle: CodexAdapterHandle | undefined
+    let transientCanvasCoordinator: TransientCanvasCoordinator | undefined
+    let disposeI18nSubscription: (() => void) | undefined
+    let disposePermissionSubscription: (() => void) | undefined
+    let disposeExtensionPointSubscription: (() => void) | undefined
+    const disposeExtensionPointCatalogs: (() => void | Promise<void>)[] = []
+    const registrySubscriptions: (() => void)[] = []
+    const generationTransactions = new Map<string, RendererGenerationTransaction>()
+    const finalizedTransactions = new Map<string, RendererGenerationTransaction>()
+    const rollbackReceipts = new Map<string, RendererGenerationCleanupObservation>()
+    let operation: Promise<unknown> = Promise.resolve()
+    let disposed = false
+    let notificationsSuppressed = false
+    const generationNotificationTrace: { source: string; registryEpoch: number; suppressed: boolean }[] = []
+    let settingsProjectionSites = new Set<string>()
+    let settingsNavigationProjectionSites = new Map<string, string>()
+    let extensionContributionProjectionSites = new Map<string, string>()
 
-  const managerSnapshot = (): ManagerSnapshot => {
-    const liveRegistrations = slotService?.snapshot() ?? []
-    const extensionPointControls = slotService?.controlManagerSnapshot()
-    const livePluginIds = new Set(liveRegistrations.map(item => item.owner))
-    const activeRegistrationKeys = new Set(activeControllers().map(controller => (
-      `${controller.item.id}\u0000${moduleGenerationOf(controller)}`
-    )))
-    const inactiveRegistrations = [...knownRegistrations]
-      .filter(([key, registrations]) => activeRegistrationKeys.has(key)
-        && registrations.every(item => !livePluginIds.has(item.owner)))
-      .flatMap(([, registrations]) => registrations.map(item => ({
-        ...item,
-        visible: false,
-        rendered: false,
-        error: item.error ?? 'owning plugin is inactive',
-      })))
-    const allRegistrations = [...liveRegistrations, ...inactiveRegistrations]
-    const nextContributionSites = new Map<string, string>()
-    for (const registration of allRegistrations) {
-      nextContributionSites.set(`extension-point:contribution:${registration.qualifiedId}:title`, registration.owner)
-      nextContributionSites.set(`extension-point:contribution:${registration.qualifiedId}:description`, registration.owner)
+    const traceNotification = (source: string, suppressed: boolean): void => {
+      generationNotificationTrace.push({ source, registryEpoch: generationVisibility.registryEpoch(), suppressed })
+      if (generationNotificationTrace.length > 256) generationNotificationTrace.shift()
     }
-    for (const [site, owner] of extensionContributionProjectionSites) {
-      if (!nextContributionSites.has(site)) i18nService?.clearDiagnosticSite(owner, site)
+    const emitListeners = (): void => {
+      for (const listener of listeners) listener()
     }
-    extensionContributionProjectionSites = nextContributionSites
-    const navigation = routeService?.snapshot() ?? { routes: [], pages: [], outlets: [] }
-    const nextSettingsSites = new Set<string>()
-    const externalSettingsTabs = liveRegistrations
-      .filter(item => item.surface === 'manager.settings.tabs' && item.valid && item.visible && item.authorized && !item.pending)
-      .map((registration): ManagerSettingsTabSnapshot => {
-        const item = registration.item as CordisXManagerSettingsTabItem
-        const titleSite = `manager-settings:${registration.qualifiedId}:title`
-        nextSettingsSites.add(titleSite)
-        const disabledSite = `manager-settings:${registration.qualifiedId}:disabled`
-        if (registration.disabledReason !== undefined) nextSettingsSites.add(disabledSite)
-        return {
-          id: registration.qualifiedId,
-          owner: registration.owner,
-          title: i18nService?.resolveFor(registration.owner, item.title, titleSite).text ?? item.title.fallback ?? item.title.key,
-          icon: item.icon,
-          order: registration.order,
-          disabled: registration.disabled,
-          ...(registration.disabledReason === undefined ? {} : {
-            disabledReason: i18nService?.resolveFor(registration.owner, registration.disabledReason, disabledSite).text
-              ?? registration.disabledReason.fallback
-              ?? registration.disabledReason.key,
-          }),
-          builtin: false,
-          route: item.route,
+
+    const rememberRollbackReceipt = (
+      receipt: RendererGenerationCleanupObservation,
+    ): RendererGenerationCleanupObservation => {
+      const stored = cloneRendererValue(receipt)
+      rollbackReceipts.set(receipt.transactionId, stored)
+      while (rollbackReceipts.size > MAX_ROLLBACK_RECEIPTS) {
+        const oldest = rollbackReceipts.keys().next().value as string | undefined
+        if (oldest === undefined) break
+        rollbackReceipts.delete(oldest)
+      }
+      return cloneRendererValue(stored)
+    }
+    const rememberFinalizedTransaction = (transactionId: string, transaction: RendererGenerationTransaction): void => {
+      finalizedTransactions.set(transactionId, transaction)
+      while (finalizedTransactions.size > MAX_ROLLBACK_RECEIPTS) {
+        const oldest = finalizedTransactions.keys().next().value as string | undefined
+        if (oldest === undefined) break
+        finalizedTransactions.delete(oldest)
+      }
+    }
+    const notifyBatch = (): void => {
+      traceNotification('generation-batch', false)
+      emitListeners()
+    }
+    const notify = (source = 'runtime'): void => {
+      traceNotification(source, notificationsSuppressed)
+      if (notificationsSuppressed) return
+      emitListeners()
+    }
+    const notifyFrom = (source: string): () => void => () => notify(source)
+    const drainSuppressedNotifications = async (): Promise<void> => {
+      await Promise.resolve()
+      await new Promise<void>(resolve => setTimeout(resolve, 0))
+      await Promise.resolve()
+    }
+    const drainBatchSubscriberMicrotasks = async (): Promise<void> => {
+      let observed = generationNotificationTrace.length
+      let stableTurns = 0
+      for (let turn = 0; turn < 32; turn += 1) {
+        await Promise.resolve()
+        if (generationNotificationTrace.length === observed) {
+          stableTurns += 1
+          if (stableTurns === 2) return
+        } else {
+          observed = generationNotificationTrace.length
+          stableTurns = 0
         }
+      }
+      throw new Error('generation batch subscribers did not reach a microtask fixed point')
+    }
+
+    const settleRegistryProjection = (): Promise<void> => {
+      const task = operation.then(async () => {
+        if (disposed) throw new Error('CordisX runtime is disposed')
+        await drainBatchSubscriberMicrotasks()
       })
-    for (const site of settingsProjectionSites) {
-      if (!nextSettingsSites.has(site)) {
-        const owner = site.split(':')[1]
-        if (owner !== undefined) i18nService?.clearDiagnosticSite(owner, site)
+      operation = task.catch(() => {})
+      return task
+    }
+
+    const rememberRegistrations = (pluginId: string): void => {
+      const controller = activeController(pluginId)
+      if (controller === undefined) return
+      const registrations = slotService?.snapshot().filter(item => item.owner === pluginId) ?? []
+      if (registrations.length > 0) {
+        knownRegistrations.set(
+          `${pluginId}\u0000${moduleGenerationOf(controller)}`,
+          registrations,
+        )
       }
     }
-    settingsProjectionSites = nextSettingsSites
-    // Keep resolving compatibility descriptors for diagnostic/localization cleanup;
-    // they deliberately have no live Manager projection.
-    void externalSettingsTabs
-    // A is a retained protocol/catalog contract, not a current Manager product
-    // surface. Do not project a hidden Settings page or a clickable empty tab.
-    const settingsTabs: readonly ManagerSettingsTabSnapshot[] = Object.freeze([])
-    const nextSettingsNavigationSites = new Map<string, string>()
-    const settingsNavigationItems = sortManagerSettingsNavigationItems(
-      liveRegistrations
-        .filter(item => item.surface === 'manager.settings.navigation-items'
-          && item.valid && item.visible && item.authorized && !item.pending
-          && (item.group === 'before-settings' || item.group === 'after-settings'))
-        .flatMap((registration): readonly ManagerSettingsNavigationItemSnapshot[] => {
-          const item = registration.item as CordisXManagerSettingsNavigationItem
-          const route = navigation.routes.find(candidate => candidate.owner === registration.owner
-            && candidate.qualifiedId === `${registration.owner}:${item.route.id}`
-            && candidate.valid && candidate.authorized
-            && candidate.productMetadata.title !== undefined && candidate.productMetadata.description !== undefined)
-          if (route === undefined) return []
-          const page = navigation.pages.find(candidate => candidate.owner === registration.owner
-            && candidate.qualifiedId === `${registration.owner}:${route.definition.page}`
-            && candidate.metadata.icon !== undefined
-            && candidate.productMetadata.title !== undefined && candidate.productMetadata.description !== undefined)
-          if (page === undefined) return []
-          const title = route.productMetadata.title
-          const description = route.productMetadata.description
-          const pageTitle = page.productMetadata.title
-          const pageDescription = page.productMetadata.description
-          if (title === undefined || description === undefined || pageTitle === undefined || pageDescription === undefined) return []
-          const disabledSite = `manager-settings-navigation:${registration.qualifiedId}:disabled`
-          if (registration.disabledReason !== undefined) nextSettingsNavigationSites.set(disabledSite, registration.owner)
-          return [Object.freeze({
-            id: registration.qualifiedId,
-            owner: registration.owner,
-            group: registration.group as 'before-settings' | 'after-settings',
-            order: registration.order,
-            title,
-            description,
-            pageTitle,
-            pageDescription,
-            icon: page.metadata.icon!,
-            disabled: registration.disabled,
-            ...(registration.disabledReason === undefined ? {} : {
-              disabledReason: i18nService?.resolveFor(
-                registration.owner,
-                registration.disabledReason,
-                disabledSite,
-              ).text ?? registration.disabledReason.fallback ?? registration.disabledReason.key,
-            }),
-            route: item.route,
-          })]
-        }),
-    )
-    for (const [site, owner] of settingsNavigationProjectionSites) {
-      if (!nextSettingsNavigationSites.has(site)) i18nService?.clearDiagnosticSite(owner, site)
-    }
-    settingsNavigationProjectionSites = nextSettingsNavigationSites
-    const hostText = (value: CordisXLocalizedText, site: string): string => (
-      i18nService?.resolveFor('host', value, site).text
-      ?? value.fallback
-      ?? `[[host:${value.key}]]`
-    )
-    const locale = i18nService?.getSnapshot().locale ?? 'en'
-    return {
-      version: metadata.version,
-      plugins: projectedControllers().map((controller): ManagerPluginSnapshot => {
-        const icon = pluginBrandIconDataUrl(controller.item.module?.icon)
-        const readme = selectPluginReadme(controller.item, locale)
-        const development = [...localDevelopment.values()].find(item => item.pluginId === controller.item.id)
-        return {
-          id: controller.item.id,
-          source: controller.item.source,
-          ...pluginPresentation(controller, readme, i18nService),
-          ...(icon === undefined ? {} : { icon }),
-          inject: pluginInject(controller.item.module),
-          config: configuration.descriptor(controller.item.id, locale).value,
-          configuration: configuration.descriptor(controller.item.id, locale),
-          ...(readme === undefined ? {} : { readme }),
-          ...(controller.item.package === undefined ? {} : {
-            package: {
-              version: controller.item.package.version,
-              digest: controller.item.package.digest,
-              moduleGeneration: controller.item.package.moduleGeneration,
-              dependencies: controller.item.package.dependencies.map(item => item.id),
-              ...(controller.item.package.canonicalSource === undefined ? {} : { canonicalSource: controller.item.package.canonicalSource }),
-            },
-          }),
-          ...(development === undefined ? {} : { development }),
-          status: controller.status,
-          ...(controller.error === undefined ? {} : { error: controller.error }),
-          ...(controller.blockedReason === undefined ? {} : { blockedReason: controller.blockedReason }),
-        }
-      }),
-      localDevelopment: [...localDevelopment.values()].map(item => structuredClone(item)),
-      registrations: allRegistrations,
-      commands: commandService?.snapshot() ?? [],
-      navigation,
-      settingsTabs,
-      settingsNavigationItems,
-      localization: i18nService?.getSnapshot() ?? { locale: 'en', direction: 'ltr', version: 0 },
-      localeCatalogs: i18nService?.catalogs() ?? [],
-      localizationDiagnostics: i18nService?.diagnostics() ?? [],
-      platform: platformAdapter.status(),
-      capabilityProviders: capabilityAvailability.providerSnapshot().map(provider => ({
-        providerId: provider.providerId,
-        providerNameText: hostText(provider.providerName, `capability-provider:${provider.providerId}:name`),
-        kind: provider.kind,
-        family: provider.family,
-        status: provider.status,
-        reasonText: hostText(provider.reason, `capability-provider:${provider.providerId}:reason`),
-        ...(provider.generation === undefined ? {} : { generation: provider.generation }),
-      })),
-      pluginLifecycle: {
-        profileId: metadata.profileId,
-        revision: currentActivation.revision,
-        runtimeGeneration: generation,
-        operationsAvailable: lifecycleBridge !== undefined,
-      },
-      ...(currentPluginBundles === undefined ? {} : { pluginBundles: currentPluginBundles }),
-      iconThemes: iconThemeRegistry.redactedSnapshot(),
-      permissions: broker.snapshots().map((permission: PlatformPermissionSnapshot) => {
-        const pointId = permission.capability === 'ui.extension-points.render'
-          ? permission.scope.extensionPoints?.[0]
-          : undefined
-        const descriptor = pointId === undefined ? undefined : extensionPointDescriptors.descriptor(pointId)
-        const hostDomController = permission.capability === 'ui.host-dom.read' || permission.capability === 'ui.host-dom.modify'
-          ? activeController(permission.identity.id, permission.identity.source)
-          : undefined
-        const isolatedHostDomReady = hostDomController?.item.isolatedArtifactSource !== undefined
-          && hostDomController.hostDomWorker?.status().status === 'ready'
-        const availability = permission.capability === 'ui.host-dom.read' || permission.capability === 'ui.host-dom.modify'
-          ? isolatedHostDomReady ? {
-              status: 'supported' as const,
-              reason: Object.freeze({
-                namespace: 'cordisx.permission.host',
-                key: 'availability.host-dom-worker-ready',
-                fallback: 'Host DOM access is available through the isolated CordisX worker boundary.',
-              }),
-              providers: [{
-                providerId: 'host-dom-worker',
-                providerName: Object.freeze({
-                  namespace: 'cordisx.permission.host',
-                  key: 'provider.host-dom-worker.name',
-                  fallback: 'CordisX isolated Host DOM worker',
-                }),
-                kind: 'host-local' as const,
-                family: 'ui-rendering' as const,
-                status: 'supported' as const,
-                reason: Object.freeze({
-                  namespace: 'cordisx.permission.host',
-                  key: 'provider.host-dom-worker.ready',
-                  fallback: 'Plugin code has no ambient renderer DOM and uses bounded opaque handles.',
-                }),
-                generation,
-                scope: permission.scope,
-              }],
-            } : {
-              status: 'unavailable' as const,
-              reason: Object.freeze({
-                namespace: 'cordisx.permission.host',
-                key: 'availability.host-dom-isolation-unavailable',
-                fallback: 'Host DOM access is unavailable until plugins run without ambient renderer DOM access.',
-              }),
-              providers: [],
-            }
-          : permission.capability === 'ui.extension-points.render'
-          ? {
-              status: descriptor?.adapterSupport === 'supported'
-                ? 'supported' as const
-                : descriptor?.adapterSupport === 'unverified' ? 'degraded' as const : 'unavailable' as const,
-              reason: descriptor?.diagnostic ?? descriptor?.description ?? Object.freeze({
-                namespace: 'cordisx.manager.extension-points',
-                key: 'permission.point-unavailable',
-                fallback: 'The declared Host extension point is unavailable.',
-              }),
-              providers: descriptor === undefined ? [] : [{
-                providerId: `host-extension-point:${descriptor.id}`,
-                providerName: descriptor.title,
-                kind: 'host-local' as const,
-                family: 'ui-rendering' as const,
-                status: descriptor.adapterSupport === 'supported'
-                  ? 'supported' as const
-                  : descriptor.adapterSupport === 'unverified' ? 'degraded' as const : 'unavailable' as const,
-                reason: descriptor.diagnostic ?? descriptor.description,
-                scope: permission.scope,
-              }],
-            }
-          : capabilityAvailability.resolve(
-              permission.capability as CordisXPlatformCapability,
-              permission.scope as CordisXCapabilityScope,
-            )
-        const site = `permission:${permission.identity.source}:${permission.identity.id}:${permission.capability}:${permission.fingerprint}`
-        return {
-          identity: permission.identity,
-          capability: permission.capability,
-          required: permission.required,
-          reason: permission.reason,
-          reasonText: i18nService?.resolveFor(
-            permission.capability === 'ui.extension-points.render' ? 'host' : permission.identity.id,
-            permission.reason,
-            site,
-          ).text
-            ?? permission.reason.fallback
-            ?? `[[${permission.identity.id}:${permission.reason.key}]]`,
-          scope: permission.scope,
-          fingerprint: permission.fingerprint,
-          policy: permission.policy,
-          ...(permission.lastRequested === undefined ? {} : { lastRequested: permission.lastRequested }),
-          ...(permission.lastUsedAt === undefined ? {} : { lastUsedAt: permission.lastUsedAt }),
-          ...(permission.lastDeniedAt === undefined ? {} : { lastDeniedAt: permission.lastDeniedAt }),
-          denialCount: permission.denialCount,
-          ...(permission.blockedReason === undefined ? {} : { blockedReason: permission.blockedReason }),
-          ...(permission.authorizationOrigin === undefined ? {} : { authorizationOrigin: permission.authorizationOrigin }),
-          ...(permission.authorizationReason === undefined ? {} : { authorizationReason: permission.authorizationReason }),
-          ...(permission.certification === undefined ? {} : { certification: permission.certification }),
-          availability: {
-            status: availability.status,
-            reasonText: hostText(availability.reason, `${site}:availability`),
-            providers: availability.providers.map(provider => ({
-              providerId: provider.providerId,
-              providerNameText: hostText(provider.providerName, `${site}:provider:${provider.providerId}:name`),
-              kind: provider.kind,
-              family: provider.family,
-              status: provider.status,
-              reasonText: hostText(provider.reason, `${site}:provider:${provider.providerId}:reason`),
-              ...(!('generation' in provider) || provider.generation === undefined ? {} : { generation: provider.generation }),
-              scope: provider.scope,
-            })),
-          },
-        }
-      }),
-      extensionPoints: buildExtensionPointRuntimeSnapshot({
-        descriptors: extensionPointDescriptors,
-        broker: extensionPointBroker,
-        i18n: i18nService!,
-        plugins: activeControllers().map(controller => ({
-          id: controller.item.id,
-          source: controller.item.source,
-          ...pluginPresentation(controller, selectPluginReadme(controller.item, locale), i18nService),
-          status: controller.status,
-        })),
-        registrations: allRegistrations,
-        commands: commandService?.snapshot() ?? [],
-        navigation,
-        surfaceAvailability: slotService?.registry.availabilitySnapshot() ?? [],
-      }),
-      ...(extensionPointControls === undefined ? {} : { extensionPointControls }),
-    }
-  }
 
-  // The global runtime handle is a plugin-facing/debug surface. Absolute
-  // local paths and Host-private build diagnostics are available only to the
-  // Manager model installed below.
-  const publicSnapshot = (): ManagerSnapshot => projectPublicRuntimeSnapshot(managerSnapshot())
-
-  const setPluginBlocked = (id: string, blocked: boolean): Promise<void> => {
-    const task = operation.then(async () => {
-      if (disposed) throw new Error('CordisX runtime is disposed')
-      const controller = activeController(id)
-      if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
-      if (!controller.item.enabled || !controllerHasRuntimeModule(controller)) {
-        throw new Error(`plugin ${id} is disabled in cordisx.config.json and is not bundled`)
+    const disposeControllerFiber = async (
+      controller: PluginController,
+      reason: 'owner-disposed' | 'generation-replaced',
+    ): Promise<void> => {
+      rememberRegistrations(controller.item.id)
+      agentRuntime.releaseOwner(controller.identity, reason, moduleGenerationOf(controller))
+      let failure: unknown
+      try {
+        await controller.hostDomWorker?.dispose()
+        await controller.fiber?.dispose()
+      } catch (error) {
+        failure = error
       }
-
-      if (blocked) {
-        blockedPlugins.add(id)
-        writeBlockedPlugins(blockedPlugins)
-        broker.clearOnce(controller.identity)
-        await disposeControllerFiber(controller, 'owner-disposed')
-        controller.status = 'blocked'
-        delete controller.error
-        notify()
-        return
+      try {
+        await routeService?.settled()
+      } catch (error) {
+        failure ??= error
+      } finally {
+        const owner = `${controller.item.source}:${controller.item.id}`
+        agentRouteScopes.revoke(owner, 'plugin-generation-replaced')
+        agentSessionRuntime.fenceOwner(owner, 'plugin-generation-replaced')
+        await controller.agentAdmissionBootstrapRouteReservationFiber?.dispose()
+        delete controller.agentAdmissionBootstrapRouteReservationFiber
+        await controller.agentAdmissionBootstrapRouteDeclarationFiber?.dispose()
+        delete controller.agentAdmissionBootstrapRouteDeclarationFiber
+        await controller.agentAdmissionBootstrapReservationFiber?.dispose()
+        delete controller.agentAdmissionBootstrapReservationFiber
+        await controller.agentAdmissionBootstrapTargetFiber?.dispose()
+        delete controller.agentAdmissionBootstrapTargetFiber
+        await controller.agentAdmissionBootstrapRoomReservationFiber?.dispose()
+        delete controller.agentAdmissionBootstrapRoomReservationFiber
+        await controller.agentAdmissionBootstrapRoomTargetFiber?.dispose()
+        delete controller.agentAdmissionBootstrapRoomTargetFiber
+        await controller.agentAdmissionTargetReservationFiber?.dispose()
+        delete controller.agentAdmissionTargetReservationFiber
+        await controller.agentAdmissionTargetOriginFiber?.dispose()
+        delete controller.agentAdmissionTargetOriginFiber
+        await controller.agentAdmissionReservationFiber?.dispose()
+        delete controller.agentAdmissionReservationFiber
+        await controller.approvalServiceFiber?.dispose()
+        delete controller.approvalServiceFiber
+        await controller.sessionRegistryFiber?.dispose()
+        delete controller.sessionRegistryFiber
+        await controller.agentRegistryFiber?.dispose()
+        delete controller.agentRegistryFiber
+        await controller.entityRegistryFiber?.dispose()
+        delete controller.entityRegistryFiber
+        controller.unregisterAgentSessionMigration?.()
+        delete controller.unregisterAgentSessionMigration
+        controller.agentLoopClient?.dispose()
+        delete controller.agentLoopClient
+        await controller.unregisterAgentLoop?.()
+        delete controller.unregisterAgentLoop
+        controller.documentsClient?.dispose()
+        delete controller.documentsClient
+        await controller.unregisterDocuments?.()
+        delete controller.unregisterDocuments
+        controller.connectorClient?.dispose()
+        delete controller.connectorClient
+        await controller.unregisterConnector?.()
+        delete controller.unregisterConnector
+        retirePrincipal(controller, `Plugin disposed: ${reason}`)
+        delete controller.hostDomWorker
+        delete controller.fiber
       }
+      if (failure !== undefined) throw failure
+    }
 
-      if (controller.status === 'active') return
-      blockedPlugins.delete(id)
-      writeBlockedPlugins(blockedPlugins)
+    const renewPrincipal = (controller: PluginController): void => {
+      if (controller.principalLive) return
+      controller.activation += 1
+      controller.principal = pluginConsole.issue(
+        controller.identity,
+        moduleGenerationOf(controller),
+      )
+      controller.principalLive = true
+      const module = controller.item.isolatedArtifactSource === undefined
+        ? controller.item.moduleFactory?.(pluginConsole.consoleFacade(controller.principal)) ?? controller.item.module
+        : undefined
+      controller.item = module === undefined || module === controller.item.module
+        ? controller.item
+        : { ...controller.item, module }
+      controller.manifest = normalizePluginManifest(controller.item.manifest ?? module?.manifest, controller.item.id)
+    }
+
+    const retirePrincipal = (controller: PluginController, message: string): void => {
+      if (!controller.principalLive) return
+      pluginConsole.deactivate(controller.principal, message)
+      controller.principalLive = false
+    }
+
+    const mountPlugin = async (controller: PluginController): Promise<void> => {
+      renewPrincipal(controller)
+      const module = controller.item.module
+      const isolatedArtifactSource = controller.item.isolatedArtifactSource
+      if (module === undefined && isolatedArtifactSource === undefined) {
+        throw new Error(`plugin ${controller.item.id} is not bundled because it is disabled in configuration`)
+      }
       const blockedReason = requiredBlockReason(controller)
       if (blockedReason !== undefined) {
         controller.status = 'permission-blocked'
         controller.blockedReason = blockedReason
-        notify()
         return
       }
+      if (isolatedArtifactSource !== undefined) {
+        if (hostDomWorkerEnvironment === undefined) {
+          throw new Error('native browser primitives are unavailable for Host DOM worker isolation')
+        }
+        const hostDom = !manifestUsesHostDom(controller.manifest) ? undefined : hostDomAuthority.bind({
+          ownerKey: JSON.stringify([
+            metadata.profileId,
+            controller.identity.source,
+            controller.identity.id,
+            generation,
+            moduleGenerationOf(controller),
+          ]),
+          profileId: metadata.profileId,
+          identity: { source: controller.identity.source, pluginId: controller.identity.id },
+          runtimeGeneration: generation,
+          moduleGeneration: moduleGenerationOf(controller),
+          state: () =>
+            !controllers.includes(controller)
+              ? 'uninstalled'
+              : !controller.principalLive
+              ? 'generation-replaced'
+              : !controller.item.enabled
+              ? 'disabled'
+              : 'active',
+          authorize: async (capability, rootId, operations) =>
+            await broker.authorizeHostDom(
+              controller.identity,
+              capability,
+              rootId,
+              operations,
+              controller.generationView,
+            ),
+          leaseActive: leaseId =>
+            broker.isHostDomLeaseActive(
+              controller.identity,
+              leaseId,
+              controller.generationView,
+            ),
+          subscribeInvalidation: listener => broker.subscribe(listener),
+        })
+        let boundary: HostDomWorkerBoundary | undefined
+        const transientCanvas =
+          !manifestUsesTransientCanvas(controller.manifest) || transientCanvasCoordinator === undefined
+            ? undefined
+            : transientCanvasCoordinator.bind({
+              owner: controller.item.id,
+              source: controller.identity.source,
+              moduleGeneration: moduleGenerationOf(controller),
+              generation: Object.freeze({
+                pluginId: controller.item.id,
+                moduleGeneration: moduleGenerationOf(controller),
+                ...(controller.generationView?.transactionId === undefined ? {} : {
+                  transactionId: controller.generationView.transactionId,
+                  transactionEpoch: controller.generationView.transactionEpoch,
+                }),
+              }),
+              ...(controller.generationView === undefined ? {} : { candidateView: controller.generationView }),
+              sink: {
+                start: input => boundary?.startTransientCanvas(input),
+                stop: sessionId => boundary?.stopTransientCanvas(sessionId),
+              },
+            })
+        try {
+          pluginConsole.lifecycle(
+            controller.principal,
+            controller.activation === 1 ? 'activate' : 'reload',
+            'Isolated plugin activation started',
+          )
+          boundary = createHostDomWorkerBoundary({
+            document,
+            artifactSource: isolatedArtifactSource,
+            config: configuration.get(controller.item.id, controller.generationView),
+            ...(hostDom === undefined ? {} : { hostDom }),
+            ...(transientCanvas === undefined ? {} : { transientCanvas }),
+            environment: hostDomWorkerEnvironment,
+            onStatus: status => {
+              if (status.status !== 'error' || controller.hostDomWorker !== boundary) return
+              controller.status = 'failed'
+              controller.error = status.error
+              notify('isolated-worker')
+            },
+          })
+          controller.hostDomWorker = boundary
+          await boundary.ready
+          controller.status = 'active'
+          delete controller.error
+          delete controller.blockedReason
+          pluginConsole.lifecycle(
+            controller.principal,
+            controller.activation === 1 ? 'activate' : 'reload',
+            'Isolated plugin activation completed',
+          )
+          return
+        } catch (error) {
+          await boundary?.dispose().catch(() => undefined)
+          hostDom?.dispose()
+          transientCanvas?.dispose()
+          delete controller.hostDomWorker
+          controller.status = 'failed'
+          controller.error = errorMessage(error)
+          pluginConsole.diagnostic(
+            controller.principal,
+            'plugin.activation',
+            'Isolated plugin activation failed',
+            error,
+          )
+          retirePrincipal(controller, 'Plugin disposed after isolated activation failure')
+          throw error
+        }
+      }
+      if (module === undefined) throw new Error(`plugin ${controller.item.id} has no renderer module`)
+      let pluginContext: Context
+      const connectorAuthorization = async (
+        capability: CordisXConnectorClientCapability,
+        _registration?: CordisXConnectorRegistrationIdentity,
+      ): Promise<CordisXConnectorAuthorization> => {
+        if (!controller.principalLive) return { capability, state: 'unavailable', code: 'principal-unavailable' }
+        try {
+          const identity = pluginConsole.owner(controller.principal)
+          const permissionCapability: CordisXPlatformCapability = capability === 'connector.command.execute'
+            ? 'agent.messages.append'
+            : 'agent.events.read'
+          // Connector calls never open an implicit permission prompt. A plugin
+          // must have an explicit allow policy before this bound surface can use
+          // the PermissionBroker; ask and deny both fail closed.
+          if (broker.policy(identity, permissionCapability, generationVisibility.view(pluginContext)) !== 'allow') {
+            return { capability, state: 'denied', code: 'policy-denied' }
+          }
+          // Conversation handles are opaque and cannot be safely translated into
+          // a native Agent session scope. This conservative all-session request
+          // therefore never expands a manifest's declared session authority.
+          const authorization = await broker.authorize(
+            identity,
+            permissionCapability,
+            { allAgentSessions: true },
+            generationVisibility.view(pluginContext),
+          )
+          if (!authorization.ok) return { capability, state: 'denied', code: 'policy-denied' }
+          return { capability, state: 'allowed', code: 'allowed' }
+        } catch {
+          return { capability, state: 'unavailable', code: 'principal-unavailable' }
+        }
+      }
+      const connectorClient = connectorBroker.bind({
+        active: () => {
+          if (!controller.principalLive) return false
+          try {
+            const identity = pluginConsole.owner(controller.principal)
+            return identity.id === controller.identity.id && identity.source === controller.identity.source
+          } catch {
+            return false
+          }
+        },
+        authorize: connectorAuthorization,
+      })
+      const agentLoopAuthorizationV4 = async (
+        request: CordisXAgentLoopAuthorizationRequestV4,
+      ) => {
+        if (!controller.principalLive) {
+          return { capability: request.capability, state: 'unavailable' as const, code: 'host-unavailable' as const }
+        }
+        try {
+          const identity = pluginConsole.owner(controller.principal)
+          const authorization = await broker.authorize(identity, request.capability, {
+            ...(request.model === undefined ? {} : { providerId: request.model.providerId, model: request.model }),
+            ...(request.session === undefined
+              ? {}
+              : { providerId: request.session.providerId, session: request.session }),
+            ...(request.cwd === undefined ? {} : { cwd: request.cwd }),
+          }, generationVisibility.view(pluginContext))
+          if (authorization.ok) {
+            return { capability: request.capability, state: 'allowed' as const, code: 'allowed' as const }
+          }
+          if (authorization.error.code === 'permission-denied') {
+            return { capability: request.capability, state: 'denied' as const, code: 'user-denied' as const }
+          }
+          if (
+            authorization.error.code === 'permission-undeclared'
+            || authorization.error.code === 'permission-scope-denied' || authorization.error.code === 'timeout'
+          ) {
+            return { capability: request.capability, state: 'denied' as const, code: 'policy-denied' as const }
+          }
+          return { capability: request.capability, state: 'unavailable' as const, code: 'host-unavailable' as const }
+        } catch {
+          return { capability: request.capability, state: 'unavailable' as const, code: 'host-unavailable' as const }
+        }
+      }
+      const agentLoopOptions: CordisXBoundAgentLoopClientOptions = {
+        // v2 operation identities survive client generations for this exact
+        // source-owned plugin principal. Provider affinity is broker-fenced.
+        ownerKey: JSON.stringify([controller.identity.source, controller.identity.id]),
+        active: () => {
+          if (!controller.principalLive) return false
+          try {
+            const identity = pluginConsole.owner(controller.principal)
+            return identity.id === controller.identity.id && identity.source === controller.identity.source
+          } catch {
+            return false
+          }
+        },
+        authorize: request =>
+          agentLoopAuthorizationV4(request) as ReturnType<CordisXBoundAgentLoopClientOptions['authorize']>,
+        authorizeV4: agentLoopAuthorizationV4,
+        registerPrompt: (sessionId, definition) =>
+          (definition.promptSections ?? []).map((section, order) =>
+            agentRuntime.registerPrompt(
+              controller.identity,
+              'section',
+              {
+                sessionId,
+                id:
+                  `agent-definition:${definition.identity.agentId}:${definition.identity.revision}:${section.sectionId}`,
+                content: section.text,
+                order,
+              },
+              moduleGenerationOf(controller),
+            )
+          ),
+      }
+      const agentLoopClientV4 = agentLoopBrokerV4.bind(agentLoopOptions)
+      const agentLoopClient = combineAgentLoopClients(
+        agentLoopBroker.bind(agentLoopOptions),
+        agentLoopBrokerV2.bind(agentLoopOptions),
+        adaptAgentLoopV3(agentLoopClientV4),
+        agentLoopClientV4,
+      )
+      controller.unregisterAgentSessionMigration = agentSessionRuntime.installLegacyBindingResolver(
+        `${controller.item.source}:${controller.item.id}`,
+        async binding => await agentLoopBrokerV4.resolveLegacySession(agentLoopOptions, binding),
+      )
+      const documentsClient = ownerDocumentBroker.bind({
+        identity: controller.identity,
+        moduleGeneration: moduleGenerationOf(controller),
+        active: () => {
+          if (!controller.principalLive) return false
+          try {
+            const identity = pluginConsole.owner(controller.principal)
+            return identity.id === controller.identity.id && identity.source === controller.identity.source
+          } catch {
+            return false
+          }
+        },
+      })
+      pluginContext = ctx.isolate('connectors').isolate('agentLoop').isolate('agents').isolate('sessions').isolate(
+        'approvals',
+      )
+        .isolate('agentAdmission').isolate('agentAdmissionOrigins').isolate('agentAdmissionReservations')
+        .isolate('agentAdmissionBootstrapTargets').isolate('agentAdmissionBootstrapReservations')
+        .isolate('agentAdmissionBootstrapRoomTargets').isolate('agentAdmissionBootstrapRoomReservations')
+        .isolate('agentAdmissionBootstrapRouteDeclarations').isolate('agentAdmissionBootstrapRouteReservations')
+        .isolate('entities').isolate('documents').extend({
+          [CORDISX_PLUGIN_ID]: controller.item.id,
+          [CORDISX_PLUGIN_SOURCE]: controller.item.source,
+          [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
+          [CORDISX_PLUGIN_PRINCIPAL]: controller.principal,
+          ...(controller.generationContext ?? {}),
+        })
+      controller.connectorClient = connectorClient
+      controller.unregisterConnector = pluginContext.reflect.provide('connectors', connectorClient)
+      controller.agentLoopClient = agentLoopClient
+      controller.unregisterAgentLoop = pluginContext.reflect.provide('agentLoop', agentLoopClient)
+      controller.documentsClient = documentsClient
+      controller.unregisterDocuments = pluginContext.reflect.provide('documents', documentsClient)
       try {
-        await mountPlugin(controller)
+        const owner = agentSessionRuntime.ownerFromContext(pluginContext)
+        const entityPrincipal = entityPrincipalBindings.get(JSON.stringify([
+          controller.identity.source,
+          controller.identity.id,
+          moduleGenerationOf(controller),
+        ]))
+        controller.entityRegistryFiber = pluginContext.plugin(
+          CordisXEntityRegistryServiceV1,
+          {
+            bridge: ownerDocumentBridge,
+            principal: entityPrincipal,
+            profileId: metadata.profileId,
+            pluginGeneration: entityPrincipal?.pluginGeneration ?? owner.generation,
+            active: () => controller.principalLive,
+          },
+        )
+        await controller.entityRegistryFiber
+        const entityRegistry = (pluginContext as unknown as { readonly entities: EntityRegistry }).entities
+        controller.agentRegistryFiber = pluginContext.plugin(CordisXAgentRegistryServiceV1, {
+          runtime: agentSessionRuntime,
+          entities: entityRegistry,
+        })
+        await controller.agentRegistryFiber
+        controller.sessionRegistryFiber = pluginContext.plugin(CordisXSessionRegistryServiceV1, agentSessionRuntime)
+        await controller.sessionRegistryFiber
+        controller.approvalServiceFiber = pluginContext.plugin(CordisXApprovalServiceV1, agentSessionRuntime)
+        await controller.approvalServiceFiber
+        controller.agentAdmissionReservationFiber = pluginContext.plugin(
+          CordisXAgentAdmissionReservationService,
+          agentSessionRuntime,
+        )
+        await controller.agentAdmissionReservationFiber
+        controller.agentAdmissionTargetOriginFiber = pluginContext.plugin(
+          CordisXAgentAdmissionTargetOriginService,
+          agentSessionRuntime,
+        )
+        await controller.agentAdmissionTargetOriginFiber
+        controller.agentAdmissionTargetReservationFiber = pluginContext.plugin(
+          CordisXAgentAdmissionTargetReservationService,
+          agentSessionRuntime,
+        )
+        await controller.agentAdmissionTargetReservationFiber
+        controller.agentAdmissionBootstrapTargetFiber = pluginContext.plugin(
+          CordisXAgentAdmissionBootstrapTargetService,
+          agentSessionRuntime,
+        )
+        await controller.agentAdmissionBootstrapTargetFiber
+        controller.agentAdmissionBootstrapReservationFiber = pluginContext.plugin(
+          CordisXAgentAdmissionBootstrapReservationService,
+          agentSessionRuntime,
+        )
+        await controller.agentAdmissionBootstrapReservationFiber
+        controller.agentAdmissionBootstrapRoomTargetFiber = pluginContext.plugin(
+          CordisXAgentAdmissionBootstrapRoomTargetService,
+          agentSessionRuntime,
+        )
+        await controller.agentAdmissionBootstrapRoomTargetFiber
+        controller.agentAdmissionBootstrapRoomReservationFiber = pluginContext.plugin(
+          CordisXAgentAdmissionBootstrapRoomReservationService,
+          agentSessionRuntime,
+        )
+        await controller.agentAdmissionBootstrapRoomReservationFiber
+        controller.agentAdmissionBootstrapRouteDeclarationFiber = pluginContext.plugin(
+          CordisXAgentAdmissionBootstrapRouteDeclarationService,
+          agentSessionRuntime,
+        )
+        await controller.agentAdmissionBootstrapRouteDeclarationFiber
+        controller.agentAdmissionBootstrapRouteReservationFiber = pluginContext.plugin(
+          CordisXAgentAdmissionBootstrapRouteReservationService,
+          agentSessionRuntime,
+        )
+        await controller.agentAdmissionBootstrapRouteReservationFiber
+        pluginConsole.lifecycle(
+          controller.principal,
+          controller.activation === 1 ? 'activate' : 'reload',
+          'Plugin activation started',
+        )
+        controller.fiber = pluginContext.plugin(
+          pluginFromModule(module),
+          configuration.get(controller.item.id, generationVisibility.view(pluginContext)),
+        )
+        await controller.fiber
+        agentRouteScopes.validateInstalledRoutes(owner)
+        controller.status = 'active'
+        pluginConsole.lifecycle(
+          controller.principal,
+          controller.activation === 1 ? 'activate' : 'reload',
+          'Plugin activation completed',
+        )
+        delete controller.error
+        delete controller.blockedReason
+        rememberRegistrations(controller.item.id)
       } catch (error) {
-        blockedPlugins.add(id)
-        writeBlockedPlugins(blockedPlugins)
-        notify()
+        controller.status = 'failed'
+        controller.error = errorMessage(error)
+        pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Plugin activation failed', error)
+        await controller.fiber?.dispose()
+        delete controller.fiber
+        await controller.agentAdmissionBootstrapRouteReservationFiber?.dispose()
+        delete controller.agentAdmissionBootstrapRouteReservationFiber
+        await controller.agentAdmissionBootstrapRouteDeclarationFiber?.dispose()
+        delete controller.agentAdmissionBootstrapRouteDeclarationFiber
+        await controller.agentAdmissionBootstrapReservationFiber?.dispose()
+        delete controller.agentAdmissionBootstrapReservationFiber
+        await controller.agentAdmissionBootstrapTargetFiber?.dispose()
+        delete controller.agentAdmissionBootstrapTargetFiber
+        await controller.agentAdmissionBootstrapRoomReservationFiber?.dispose()
+        delete controller.agentAdmissionBootstrapRoomReservationFiber
+        await controller.agentAdmissionBootstrapRoomTargetFiber?.dispose()
+        delete controller.agentAdmissionBootstrapRoomTargetFiber
+        await controller.agentAdmissionTargetReservationFiber?.dispose()
+        delete controller.agentAdmissionTargetReservationFiber
+        await controller.agentAdmissionTargetOriginFiber?.dispose()
+        delete controller.agentAdmissionTargetOriginFiber
+        await controller.agentAdmissionReservationFiber?.dispose()
+        delete controller.agentAdmissionReservationFiber
+        await controller.approvalServiceFiber?.dispose()
+        delete controller.approvalServiceFiber
+        await controller.sessionRegistryFiber?.dispose()
+        delete controller.sessionRegistryFiber
+        await controller.agentRegistryFiber?.dispose()
+        delete controller.agentRegistryFiber
+        await controller.entityRegistryFiber?.dispose()
+        delete controller.entityRegistryFiber
+        controller.unregisterAgentSessionMigration?.()
+        delete controller.unregisterAgentSessionMigration
+        agentLoopClient.dispose()
+        delete controller.agentLoopClient
+        await controller.unregisterAgentLoop?.()
+        delete controller.unregisterAgentLoop
+        documentsClient.dispose()
+        delete controller.documentsClient
+        await controller.unregisterDocuments?.()
+        delete controller.unregisterDocuments
+        connectorClient.dispose()
+        delete controller.connectorClient
+        await controller.unregisterConnector?.()
+        delete controller.unregisterConnector
+        retirePrincipal(controller, 'Plugin disposed after activation failure')
         throw error
       }
-      notify()
-    })
-    operation = task.catch(() => {})
-    return task
-  }
+    }
 
-  const remountLastGood = async (controller: PluginController): Promise<void> => {
-    configuration.abort(controller.item.id)
-    await disposeControllerFiber(controller, 'owner-disposed')
-    await mountPlugin(controller)
-  }
-
-  const applyRestartCandidate = async (controller: PluginController, candidate: ConfigCandidate): Promise<void> => {
-    await disposeControllerFiber(controller, 'owner-disposed')
-    configuration.begin(controller.item.id, candidate)
-    await mountPlugin(controller)
-  }
-
-  const updatePluginConfig = (
-    id: string,
-    expectedRevision: number,
-    operations: readonly ConfigMutationOperation[],
-  ): Promise<void> => {
-    const task = operation.then(async () => {
-      if (disposed) throw new Error('CordisX runtime is disposed')
-      const controller = activeController(id)
-      if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
-      if (configBridge === undefined) throw new Error('plugin configuration writer is unavailable in this launcher mode')
-      const descriptor = configuration.descriptor(id, i18nService?.getSnapshot().locale ?? 'en')
-      if (descriptor.applies === 'service-restart') {
-        throw new Error('service-restart configuration requires an owning launcher service restart handler')
+    const managerSnapshot = (): ManagerSnapshot => {
+      const liveRegistrations = slotService?.snapshot() ?? []
+      const extensionPointControls = slotService?.controlManagerSnapshot()
+      const livePluginIds = new Set(liveRegistrations.map(item => item.owner))
+      const activeRegistrationKeys = new Set(
+        activeControllers().map(controller => (
+          `${controller.item.id}\u0000${moduleGenerationOf(controller)}`
+        )),
+      )
+      const inactiveRegistrations = [...knownRegistrations]
+        .filter(([key, registrations]) =>
+          activeRegistrationKeys.has(key)
+          && registrations.every(item => !livePluginIds.has(item.owner))
+        )
+        .flatMap(([, registrations]) =>
+          registrations.map(item => ({
+            ...item,
+            visible: false,
+            rendered: false,
+            error: item.error ?? 'owning plugin is inactive',
+          }))
+        )
+      const allRegistrations = [...liveRegistrations, ...inactiveRegistrations]
+      const nextContributionSites = new Map<string, string>()
+      for (const registration of allRegistrations) {
+        nextContributionSites.set(`extension-point:contribution:${registration.qualifiedId}:title`, registration.owner)
+        nextContributionSites.set(
+          `extension-point:contribution:${registration.qualifiedId}:description`,
+          registration.owner,
+        )
       }
-      const candidate = configuration.stage(id, expectedRevision, operations)
-      const staged = await configBridge.stage(controller.identity, expectedRevision, candidate.raw)
-      let candidateMounted = false
-      try {
-        const mayMount = controller.item.enabled
-          && controllerHasRuntimeModule(controller)
-          && !blockedPlugins.has(id)
-          && requiredBlockReason(controller) === undefined
-        if (descriptor.applies === 'plugin-restart' && mayMount) {
-          try {
-            await applyRestartCandidate(controller, candidate)
-            candidateMounted = true
-          } catch (restartError) {
-            configuration.abort(id)
-            await configBridge.abort(controller.identity, staged.candidateRevision).catch(() => undefined)
+      for (const [site, owner] of extensionContributionProjectionSites) {
+        if (!nextContributionSites.has(site)) i18nService?.clearDiagnosticSite(owner, site)
+      }
+      extensionContributionProjectionSites = nextContributionSites
+      const navigation = routeService?.snapshot() ?? { routes: [], pages: [], outlets: [] }
+      const nextSettingsSites = new Set<string>()
+      const externalSettingsTabs = liveRegistrations
+        .filter(item =>
+          item.surface === 'manager.settings.tabs' && item.valid && item.visible && item.authorized && !item.pending
+        )
+        .map((registration): ManagerSettingsTabSnapshot => {
+          const item = registration.item as CordisXManagerSettingsTabItem
+          const titleSite = `manager-settings:${registration.qualifiedId}:title`
+          nextSettingsSites.add(titleSite)
+          const disabledSite = `manager-settings:${registration.qualifiedId}:disabled`
+          if (registration.disabledReason !== undefined) nextSettingsSites.add(disabledSite)
+          return {
+            id: registration.qualifiedId,
+            owner: registration.owner,
+            title: i18nService?.resolveFor(registration.owner, item.title, titleSite).text ?? item.title.fallback
+              ?? item.title.key,
+            icon: item.icon,
+            order: registration.order,
+            disabled: registration.disabled,
+            ...(registration.disabledReason === undefined ? {} : {
+              disabledReason:
+                i18nService?.resolveFor(registration.owner, registration.disabledReason, disabledSite).text
+                  ?? registration.disabledReason.fallback
+                  ?? registration.disabledReason.key,
+            }),
+            builtin: false,
+            route: item.route,
+          }
+        })
+      for (const site of settingsProjectionSites) {
+        if (!nextSettingsSites.has(site)) {
+          const owner = site.split(':')[1]
+          if (owner !== undefined) i18nService?.clearDiagnosticSite(owner, site)
+        }
+      }
+      settingsProjectionSites = nextSettingsSites
+      // Keep resolving compatibility descriptors for diagnostic/localization cleanup;
+      // they deliberately have no live Manager projection.
+      void externalSettingsTabs
+      // A is a retained protocol/catalog contract, not a current Manager product
+      // surface. Do not project a hidden Settings page or a clickable empty tab.
+      const settingsTabs: readonly ManagerSettingsTabSnapshot[] = Object.freeze([])
+      const nextSettingsNavigationSites = new Map<string, string>()
+      const settingsNavigationItems = sortManagerSettingsNavigationItems(
+        liveRegistrations
+          .filter(item =>
+            item.surface === 'manager.settings.navigation-items'
+            && item.valid && item.visible && item.authorized && !item.pending
+            && (item.group === 'before-settings' || item.group === 'after-settings')
+          )
+          .flatMap((registration): readonly ManagerSettingsNavigationItemSnapshot[] => {
+            const item = registration.item as CordisXManagerSettingsNavigationItem
+            const route = navigation.routes.find(candidate =>
+              candidate.owner === registration.owner
+              && candidate.qualifiedId === `${registration.owner}:${item.route.id}`
+              && candidate.valid && candidate.authorized
+              && candidate.productMetadata.title !== undefined && candidate.productMetadata.description !== undefined
+            )
+            if (route === undefined) return []
+            const page = navigation.pages.find(candidate =>
+              candidate.owner === registration.owner
+              && candidate.qualifiedId === `${registration.owner}:${route.definition.page}`
+              && candidate.metadata.icon !== undefined
+              && candidate.productMetadata.title !== undefined && candidate.productMetadata.description !== undefined
+            )
+            if (page === undefined) return []
+            const title = route.productMetadata.title
+            const description = route.productMetadata.description
+            const pageTitle = page.productMetadata.title
+            const pageDescription = page.productMetadata.description
+            if (
+              title === undefined || description === undefined || pageTitle === undefined
+              || pageDescription === undefined
+            ) return []
+            const disabledSite = `manager-settings-navigation:${registration.qualifiedId}:disabled`
+            if (registration.disabledReason !== undefined) {
+              nextSettingsNavigationSites.set(disabledSite, registration.owner)
+            }
+            return [Object.freeze({
+              id: registration.qualifiedId,
+              owner: registration.owner,
+              group: registration.group as 'before-settings' | 'after-settings',
+              order: registration.order,
+              title,
+              description,
+              pageTitle,
+              pageDescription,
+              icon: page.metadata.icon!,
+              disabled: registration.disabled,
+              ...(registration.disabledReason === undefined ? {} : {
+                disabledReason: i18nService?.resolveFor(
+                  registration.owner,
+                  registration.disabledReason,
+                  disabledSite,
+                ).text ?? registration.disabledReason.fallback ?? registration.disabledReason.key,
+              }),
+              route: item.route,
+            })]
+          }),
+      )
+      for (const [site, owner] of settingsNavigationProjectionSites) {
+        if (!nextSettingsNavigationSites.has(site)) i18nService?.clearDiagnosticSite(owner, site)
+      }
+      settingsNavigationProjectionSites = nextSettingsNavigationSites
+      const hostText = (value: CordisXLocalizedText, site: string): string => (
+        i18nService?.resolveFor('host', value, site).text
+          ?? value.fallback
+          ?? `[[host:${value.key}]]`
+      )
+      const locale = i18nService?.getSnapshot().locale ?? 'en'
+      return {
+        version: metadata.version,
+        plugins: projectedControllers().map((controller): ManagerPluginSnapshot => {
+          const icon = pluginBrandIconDataUrl(controller.item.module?.icon)
+          const readme = selectPluginReadme(controller.item, locale)
+          const development = [...localDevelopment.values()].find(item => item.pluginId === controller.item.id)
+          return {
+            id: controller.item.id,
+            source: controller.item.source,
+            ...pluginPresentation(controller, readme, i18nService),
+            ...(icon === undefined ? {} : { icon }),
+            inject: pluginInject(controller.item.module),
+            config: configuration.descriptor(controller.item.id, locale).value,
+            configuration: configuration.descriptor(controller.item.id, locale),
+            ...(readme === undefined ? {} : { readme }),
+            ...(controller.item.package === undefined ? {} : {
+              package: {
+                version: controller.item.package.version,
+                digest: controller.item.package.digest,
+                moduleGeneration: controller.item.package.moduleGeneration,
+                dependencies: controller.item.package.dependencies.map(item => item.id),
+                ...(controller.item.package.canonicalSource === undefined
+                  ? {}
+                  : { canonicalSource: controller.item.package.canonicalSource }),
+              },
+            }),
+            ...(development === undefined ? {} : { development }),
+            status: controller.status,
+            ...(controller.error === undefined ? {} : { error: controller.error }),
+            ...(controller.blockedReason === undefined ? {} : { blockedReason: controller.blockedReason }),
+          }
+        }),
+        localDevelopment: [...localDevelopment.values()].map(item => structuredClone(item)),
+        registrations: allRegistrations,
+        commands: commandService?.snapshot() ?? [],
+        navigation,
+        settingsTabs,
+        settingsNavigationItems,
+        localization: i18nService?.getSnapshot() ?? { locale: 'en', direction: 'ltr', version: 0 },
+        localeCatalogs: i18nService?.catalogs() ?? [],
+        localizationDiagnostics: i18nService?.diagnostics() ?? [],
+        platform: platformAdapter.status(),
+        capabilityProviders: capabilityAvailability.providerSnapshot().map(provider => ({
+          providerId: provider.providerId,
+          providerNameText: hostText(provider.providerName, `capability-provider:${provider.providerId}:name`),
+          kind: provider.kind,
+          family: provider.family,
+          status: provider.status,
+          reasonText: hostText(provider.reason, `capability-provider:${provider.providerId}:reason`),
+          ...(provider.generation === undefined ? {} : { generation: provider.generation }),
+        })),
+        pluginLifecycle: {
+          profileId: metadata.profileId,
+          revision: currentActivation.revision,
+          runtimeGeneration: generation,
+          operationsAvailable: lifecycleBridge !== undefined,
+        },
+        ...(currentPluginBundles === undefined ? {} : { pluginBundles: currentPluginBundles }),
+        iconThemes: iconThemeRegistry.redactedSnapshot(),
+        permissions: broker.snapshots().map((permission: PlatformPermissionSnapshot) => {
+          const pointId = permission.capability === 'ui.extension-points.render'
+            ? permission.scope.extensionPoints?.[0]
+            : undefined
+          const descriptor = pointId === undefined ? undefined : extensionPointDescriptors.descriptor(pointId)
+          const hostDomController =
+            permission.capability === 'ui.host-dom.read' || permission.capability === 'ui.host-dom.modify'
+              ? activeController(permission.identity.id, permission.identity.source)
+              : undefined
+          const isolatedHostDomReady = hostDomController?.item.isolatedArtifactSource !== undefined
+            && hostDomController.hostDomWorker?.status().status === 'ready'
+          const availability =
+            permission.capability === 'ui.host-dom.read' || permission.capability === 'ui.host-dom.modify'
+              ? isolatedHostDomReady
+                ? {
+                  status: 'supported' as const,
+                  reason: Object.freeze({
+                    namespace: 'cordisx.permission.host',
+                    key: 'availability.host-dom-worker-ready',
+                    fallback: 'Host DOM access is available through the isolated CordisX worker boundary.',
+                  }),
+                  providers: [{
+                    providerId: 'host-dom-worker',
+                    providerName: Object.freeze({
+                      namespace: 'cordisx.permission.host',
+                      key: 'provider.host-dom-worker.name',
+                      fallback: 'CordisX isolated Host DOM worker',
+                    }),
+                    kind: 'host-local' as const,
+                    family: 'ui-rendering' as const,
+                    status: 'supported' as const,
+                    reason: Object.freeze({
+                      namespace: 'cordisx.permission.host',
+                      key: 'provider.host-dom-worker.ready',
+                      fallback: 'Plugin code has no ambient renderer DOM and uses bounded opaque handles.',
+                    }),
+                    generation,
+                    scope: permission.scope,
+                  }],
+                }
+                : {
+                  status: 'unavailable' as const,
+                  reason: Object.freeze({
+                    namespace: 'cordisx.permission.host',
+                    key: 'availability.host-dom-isolation-unavailable',
+                    fallback: 'Host DOM access is unavailable until plugins run without ambient renderer DOM access.',
+                  }),
+                  providers: [],
+                }
+              : permission.capability === 'ui.extension-points.render'
+              ? {
+                status: descriptor?.adapterSupport === 'supported'
+                  ? 'supported' as const
+                  : descriptor?.adapterSupport === 'unverified'
+                  ? 'degraded' as const
+                  : 'unavailable' as const,
+                reason: descriptor?.diagnostic ?? descriptor?.description ?? Object.freeze({
+                  namespace: 'cordisx.manager.extension-points',
+                  key: 'permission.point-unavailable',
+                  fallback: 'The declared Host extension point is unavailable.',
+                }),
+                providers: descriptor === undefined ? [] : [{
+                  providerId: `host-extension-point:${descriptor.id}`,
+                  providerName: descriptor.title,
+                  kind: 'host-local' as const,
+                  family: 'ui-rendering' as const,
+                  status: descriptor.adapterSupport === 'supported'
+                    ? 'supported' as const
+                    : descriptor.adapterSupport === 'unverified'
+                    ? 'degraded' as const
+                    : 'unavailable' as const,
+                  reason: descriptor.diagnostic ?? descriptor.description,
+                  scope: permission.scope,
+                }],
+              }
+              : capabilityAvailability.resolve(
+                permission.capability as CordisXPlatformCapability,
+                permission.scope as CordisXCapabilityScope,
+              )
+          const site =
+            `permission:${permission.identity.source}:${permission.identity.id}:${permission.capability}:${permission.fingerprint}`
+          return {
+            identity: permission.identity,
+            capability: permission.capability,
+            required: permission.required,
+            reason: permission.reason,
+            reasonText: i18nService?.resolveFor(
+              permission.capability === 'ui.extension-points.render' ? 'host' : permission.identity.id,
+              permission.reason,
+              site,
+            ).text
+              ?? permission.reason.fallback
+              ?? `[[${permission.identity.id}:${permission.reason.key}]]`,
+            scope: permission.scope,
+            fingerprint: permission.fingerprint,
+            policy: permission.policy,
+            ...(permission.lastRequested === undefined ? {} : { lastRequested: permission.lastRequested }),
+            ...(permission.lastUsedAt === undefined ? {} : { lastUsedAt: permission.lastUsedAt }),
+            ...(permission.lastDeniedAt === undefined ? {} : { lastDeniedAt: permission.lastDeniedAt }),
+            denialCount: permission.denialCount,
+            ...(permission.blockedReason === undefined ? {} : { blockedReason: permission.blockedReason }),
+            ...(permission.authorizationOrigin === undefined
+              ? {}
+              : { authorizationOrigin: permission.authorizationOrigin }),
+            ...(permission.authorizationReason === undefined
+              ? {}
+              : { authorizationReason: permission.authorizationReason }),
+            ...(permission.certification === undefined ? {} : { certification: permission.certification }),
+            availability: {
+              status: availability.status,
+              reasonText: hostText(availability.reason, `${site}:availability`),
+              providers: availability.providers.map(provider => ({
+                providerId: provider.providerId,
+                providerNameText: hostText(provider.providerName, `${site}:provider:${provider.providerId}:name`),
+                kind: provider.kind,
+                family: provider.family,
+                status: provider.status,
+                reasonText: hostText(provider.reason, `${site}:provider:${provider.providerId}:reason`),
+                ...(!('generation' in provider) || provider.generation === undefined
+                  ? {}
+                  : { generation: provider.generation }),
+                scope: provider.scope,
+              })),
+            },
+          }
+        }),
+        extensionPoints: buildExtensionPointRuntimeSnapshot({
+          descriptors: extensionPointDescriptors,
+          broker: extensionPointBroker,
+          i18n: i18nService!,
+          plugins: activeControllers().map(controller => ({
+            id: controller.item.id,
+            source: controller.item.source,
+            ...pluginPresentation(controller, selectPluginReadme(controller.item, locale), i18nService),
+            status: controller.status,
+          })),
+          registrations: allRegistrations,
+          commands: commandService?.snapshot() ?? [],
+          navigation,
+          surfaceAvailability: slotService?.registry.availabilitySnapshot() ?? [],
+        }),
+        ...(extensionPointControls === undefined ? {} : { extensionPointControls }),
+      }
+    }
+
+    // The global runtime handle is a plugin-facing/debug surface. Absolute
+    // local paths and Host-private build diagnostics are available only to the
+    // Manager model installed below.
+    const publicSnapshot = (): ManagerSnapshot => projectPublicRuntimeSnapshot(managerSnapshot())
+
+    const setPluginBlocked = (id: string, blocked: boolean): Promise<void> => {
+      const task = operation.then(async () => {
+        if (disposed) throw new Error('CordisX runtime is disposed')
+        const controller = activeController(id)
+        if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+        if (!controller.item.enabled || !controllerHasRuntimeModule(controller)) {
+          throw new Error(`plugin ${id} is disabled in cordisx.config.json and is not bundled`)
+        }
+
+        if (blocked) {
+          blockedPlugins.add(id)
+          writeBlockedPlugins(blockedPlugins)
+          broker.clearOnce(controller.identity)
+          await disposeControllerFiber(controller, 'owner-disposed')
+          controller.status = 'blocked'
+          delete controller.error
+          notify()
+          return
+        }
+
+        if (controller.status === 'active') return
+        blockedPlugins.delete(id)
+        writeBlockedPlugins(blockedPlugins)
+        const blockedReason = requiredBlockReason(controller)
+        if (blockedReason !== undefined) {
+          controller.status = 'permission-blocked'
+          controller.blockedReason = blockedReason
+          notify()
+          return
+        }
+        try {
+          await mountPlugin(controller)
+        } catch (error) {
+          blockedPlugins.add(id)
+          writeBlockedPlugins(blockedPlugins)
+          notify()
+          throw error
+        }
+        notify()
+      })
+      operation = task.catch(() => {})
+      return task
+    }
+
+    const remountLastGood = async (controller: PluginController): Promise<void> => {
+      configuration.abort(controller.item.id)
+      await disposeControllerFiber(controller, 'owner-disposed')
+      await mountPlugin(controller)
+    }
+
+    const applyRestartCandidate = async (controller: PluginController, candidate: ConfigCandidate): Promise<void> => {
+      await disposeControllerFiber(controller, 'owner-disposed')
+      configuration.begin(controller.item.id, candidate)
+      await mountPlugin(controller)
+    }
+
+    const updatePluginConfig = (
+      id: string,
+      expectedRevision: number,
+      operations: readonly ConfigMutationOperation[],
+    ): Promise<void> => {
+      const task = operation.then(async () => {
+        if (disposed) throw new Error('CordisX runtime is disposed')
+        const controller = activeController(id)
+        if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+        if (configBridge === undefined) {
+          throw new Error('plugin configuration writer is unavailable in this launcher mode')
+        }
+        const descriptor = configuration.descriptor(id, i18nService?.getSnapshot().locale ?? 'en')
+        if (descriptor.applies === 'service-restart') {
+          throw new Error('service-restart configuration requires an owning launcher service restart handler')
+        }
+        const candidate = configuration.stage(id, expectedRevision, operations)
+        const staged = await configBridge.stage(controller.identity, expectedRevision, candidate.raw)
+        let candidateMounted = false
+        try {
+          const mayMount = controller.item.enabled
+            && controllerHasRuntimeModule(controller)
+            && !blockedPlugins.has(id)
+            && requiredBlockReason(controller) === undefined
+          if (descriptor.applies === 'plugin-restart' && mayMount) {
+            try {
+              await applyRestartCandidate(controller, candidate)
+              candidateMounted = true
+            } catch (restartError) {
+              configuration.abort(id)
+              await configBridge.abort(controller.identity, staged.candidateRevision).catch(() => undefined)
+              try {
+                await remountLastGood(controller)
+              } catch (rollbackError) {
+                controller.status = 'failed'
+                controller.error = `rollback-failed: ${errorMessage(rollbackError)}`
+                notify()
+                throw new Error(
+                  `plugin restart failed (${errorMessage(restartError)}); last-good rollback failed (${
+                    errorMessage(rollbackError)
+                  })`,
+                )
+              }
+              throw new Error(`plugin restart failed; last-good restored: ${errorMessage(restartError)}`)
+            }
+          }
+          const committed = await configBridge.commit(controller.identity, staged.candidateRevision)
+          if (descriptor.applies === 'app-restart') {
+            configuration.commitForAppRestart(id, committed.revision, candidate)
+          } else {
+            configuration.commit(id, committed.revision, candidate)
+          }
+          notify()
+        } catch (error) {
+          if (candidateMounted) {
             try {
               await remountLastGood(controller)
             } catch (rollbackError) {
               controller.status = 'failed'
               controller.error = `rollback-failed: ${errorMessage(rollbackError)}`
-              notify()
-              throw new Error(`plugin restart failed (${errorMessage(restartError)}); last-good rollback failed (${errorMessage(rollbackError)})`)
             }
-            throw new Error(`plugin restart failed; last-good restored: ${errorMessage(restartError)}`)
+          } else {
+            configuration.abort(id)
           }
+          await configBridge.abort(controller.identity, staged.candidateRevision).catch(() => undefined)
+          notify()
+          throw error
         }
-        const committed = await configBridge.commit(controller.identity, staged.candidateRevision)
-        if (descriptor.applies === 'app-restart') {
-          configuration.commitForAppRestart(id, committed.revision, candidate)
-        } else {
-          configuration.commit(id, committed.revision, candidate)
-        }
-        notify()
-      } catch (error) {
-        if (candidateMounted) {
-          try {
-            await remountLastGood(controller)
-          } catch (rollbackError) {
-            controller.status = 'failed'
-            controller.error = `rollback-failed: ${errorMessage(rollbackError)}`
-          }
-        } else {
-          configuration.abort(id)
-        }
-        await configBridge.abort(controller.identity, staged.candidateRevision).catch(() => undefined)
-        notify()
-        throw error
-      }
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const setPermissionPolicy = (
-    id: string,
-    capability: CordisXPermissionCapabilityV4,
-    policy: CordisXPermissionPolicy,
-    scope?: CordisXPermissionScopeV4,
-  ): Promise<void> => {
-    const task = operation.then(async () => {
-      if (disposed) throw new Error('CordisX runtime is disposed')
-      const controller = activeController(id)
-      if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
-      if (capability === 'ui.extension-points.render') {
-        const points = scope?.extensionPoints
-        if (points === undefined || points.length !== 1) throw new Error('DOM permission policy requires one exact extension point scope')
-        await broker.setDomPolicy(
-          controller.identity,
-          points[0]!,
-          policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
-        )
-      } else if (capability === 'ui.host-dom.read' || capability === 'ui.host-dom.modify') {
-        await broker.setHostDomPolicy(
-          controller.identity,
-          capability,
-          policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
-          controller.generationView,
-        )
-      } else if (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7 || controller.manifest.schemaVersion === 8) {
-        await broker.setPolicyV2(
-          controller.identity,
-          capability,
-          policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
-        )
-      } else {
-        await broker.setPolicy(controller.identity, capability as CordisXPlatformCapability, policy)
-      }
-      const blockedReason = requiredBlockReason(controller)
-      if (blockedReason !== undefined) {
-        await disposeControllerFiber(controller, 'owner-disposed')
-        controller.status = 'permission-blocked'
-        controller.blockedReason = blockedReason
-        notify()
-        return
-      }
-      if (controller.status === 'permission-blocked') {
-        delete controller.blockedReason
-        if (blockedPlugins.has(id)) {
-          controller.status = 'blocked'
-        } else if (controller.item.enabled && controllerHasRuntimeModule(controller)) {
-          await mountPlugin(controller)
-        } else {
-          controller.status = 'configured-disabled'
-        }
-      }
-      notify()
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const subscribe = (listener: () => void): (() => void) => {
-    listeners.add(listener)
-    return () => listeners.delete(listener)
-  }
-
-  const setExtensionPointPolicy = (
-    source: string,
-    pluginId: string,
-    pointId: string,
-    policy: CordisXPointPolicy,
-  ): Promise<void> => {
-    const task = operation.then(async () => {
-      if (disposed) throw new Error('CordisX runtime is disposed')
-      const controller = activeController(pluginId, source)
-      if (controller === undefined) throw new Error(`unknown CordisX plugin identity: ${source} / ${pluginId}`)
-      await broker.setDomPolicy(
-        controller.identity,
-        pointId,
-        policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
-      )
-      slotService?.invalidatePointPolicies()
-      await routeService?.invalidatePointPolicies()
-      notify()
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const setExtensionPointPolicies = (
-    source: string,
-    pluginId: string,
-    policies: readonly { readonly pointId: string; readonly policy: CordisXPointPolicy }[],
-  ): Promise<void> => {
-    const task = operation.then(async () => {
-      if (disposed) throw new Error('CordisX runtime is disposed')
-      const controller = activeController(pluginId, source)
-      if (controller === undefined) throw new Error(`unknown CordisX plugin identity: ${source} / ${pluginId}`)
-      await broker.setDomPolicies(controller.identity, policies.map(({ pointId, policy }) => ({
-        pointId,
-        policy: policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
-      })))
-      slotService?.invalidatePointPolicies()
-      await routeService?.invalidatePointPolicies()
-      notify()
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const setExtensionPointControlAuthorization = (
-    _expectedPolicyRevision: number,
-    reference: Readonly<{
-      principalHandle: string
-      source: string
-      pluginId: string
-      pointId: string
-      claimId: string
-      mode: CordisXExtensionPointControlMode
-    }>,
-    policy: 'inherit' | 'allow' | 'deny',
-  ): Promise<void> => {
-    const task = operation.then(async () => {
-      if (disposed) throw new Error('CordisX runtime is disposed')
-      const controller = activeController(reference.pluginId, reference.source)
-      if (controller === undefined) throw new Error(`unknown CordisX plugin identity: ${reference.source} / ${reference.pluginId}`)
-      await broker.setDomPolicy(
-        controller.identity,
-        reference.pointId,
-        policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
-      )
-      slotService?.invalidatePointPolicies()
-      await routeService?.invalidatePointPolicies()
-      notify('controlled-surface-policy')
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const setExtensionPointControlGroupChoice = (expectedPolicyRevision: number, choice: ControlledSurfaceGroupChoice): Promise<void> => {
-    const task = operation.then(async () => {
-      if (disposed) throw new Error('CordisX runtime is disposed')
-      if (slotService === undefined) throw new Error('controlled surface runtime is unavailable')
-      slotService.setControlGroupChoice(expectedPolicyRevision, choice)
-      notify('controlled-surface-selection')
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const permissionAuthorizationPlan = (id: string): CordisXPermissionAuthorizationPlanV1 => {
-    const controller = activeController(id)
-    if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
-    return broker.authorizationPlan(controller.identity, 'enable')
-  }
-
-  const permissionAuthorizationPlanV2 = (id: string): CordisXPermissionAuthorizationPlanV2 | undefined => {
-    const controller = activeController(id)
-    if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
-    return controller.manifest.schemaVersion === 4
-      ? broker.authorizationPlanV2(controller.identity, 'enable', controller.generationView)
-      : undefined
-  }
-
-  const authorizePluginWith = (
-    id: string,
-    authorize: (controller: PluginController) => Promise<void>,
-  ): Promise<void> => {
-    const task = operation.then(async () => {
-      if (disposed) throw new Error('CordisX runtime is disposed')
-      const controller = activeController(id)
-      if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
-      if (!controller.item.enabled || !controllerHasRuntimeModule(controller)) {
-        throw new Error(`plugin ${id} is disabled in cordisx.config.json and is not bundled`)
-      }
-      await authorize(controller)
-      blockedPlugins.delete(id)
-      writeBlockedPlugins(blockedPlugins)
-      const blockedReason = requiredBlockReason(controller)
-      if (blockedReason !== undefined) {
-        await disposeControllerFiber(controller, 'owner-disposed')
-        controller.status = 'permission-blocked'
-        controller.blockedReason = blockedReason
-        notify()
-        return
-      }
-      if (controller.fiber === undefined && controller.hostDomWorker === undefined) await mountPlugin(controller)
-      notify()
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const authorizePlugin = (
-    id: string,
-    decision: CordisXPermissionAuthorizationDecisionV1,
-  ): Promise<void> => authorizePluginWith(id, async controller => {
-    await broker.authorizeActivation(controller.identity, decision, 'enable', controller.generationView)
-  })
-
-  const authorizePluginV2 = (
-    id: string,
-    decision: CordisXPermissionAuthorizationDecisionV2,
-  ): Promise<void> => authorizePluginWith(id, async controller => {
-    if (controller.manifest.schemaVersion !== 4) throw new Error(`plugin ${id} does not use permission v2`)
-    await broker.authorizeActivationV2(controller.identity, decision, 'enable', controller.generationView)
-  })
-
-  const authorizePluginV4 = (
-    id: string,
-    decision: CordisXPermissionAuthorizationDecisionV4,
-  ): Promise<void> => authorizePluginWith(id, async controller => {
-    if (controller.manifest.schemaVersion !== 5 && controller.manifest.schemaVersion !== 6 && controller.manifest.schemaVersion !== 7 && controller.manifest.schemaVersion !== 8) throw new Error(`plugin ${id} does not use permission v4`)
-    await broker.authorizeActivationV4(controller.identity, decision, 'enable', controller.generationView)
-  })
-
-  const candidateController = (
-    handle: PluginGenerationTransitionHandle,
-    mutation: RendererPluginMutation,
-    pluginId: string,
-    module?: CordisXPluginModule,
-    moduleFactory?: (console: CordisXPluginConsoleFacade) => CordisXPluginModule,
-  ): { readonly controller: PluginController; readonly registerAuthority: boolean } => {
-    const activation = mutation.candidate.plugins.find(item => item.id === pluginId)
-    if (activation === undefined) throw new Error(`candidate is missing affected plugin ${pluginId}`)
-    const existing = activeController(pluginId)
-    const replacesTarget = pluginId === mutation.targetId
-      && (mutation.operation === 'install' || mutation.operation === 'update' || mutation.operation === 'enable')
-    const replacementPackage = mutation.package ?? mutation.developmentPackage
-    const replacementId = mutation.package?.manifest.id ?? mutation.developmentPackage?.id
-    const replacementVersion = mutation.package?.manifest.version ?? mutation.developmentPackage?.version
-    if (!replacesTarget && existing === undefined) throw new Error(`affected plugin ${pluginId} is not active`)
-    if (replacesTarget && (replacementPackage === undefined
-      || (module === undefined && moduleFactory === undefined && mutation.isolatedArtifactSource === undefined))) {
-      throw new Error('candidate package module is unavailable')
-    }
-    if (replacesTarget && (replacementId !== pluginId
-      || replacementPackage!.digest !== activation.digest
-      || replacementVersion !== activation.version)) {
-      throw new Error('candidate package does not match the activation tuple')
-    }
-    const descriptor = existing === undefined
-      ? undefined
-      : configuration.descriptor(pluginId, i18nService?.getSnapshot().locale ?? 'en')
-    const candidateModule = replacesTarget ? module : existing!.item.module
-    const candidateModuleFactory = replacesTarget ? moduleFactory : existing!.item.moduleFactory
-    const candidateIsolatedArtifactSource = replacesTarget
-      ? mutation.isolatedArtifactSource
-      : existing!.item.isolatedArtifactSource
-    const candidateManifest = replacesTarget
-      ? mutation.package?.manifest.runtimeManifest ?? mutation.developmentPackage?.manifest
-      : existing!.item.manifest
-    const item: RuntimeBrowserPlugin = {
-      id: pluginId,
-      source: replacesTarget ? replacementPackage!.identitySource : existing!.item.source,
-      enabled: activation.enabled,
-      ...(candidateModule === undefined ? {} : { module: candidateModule }),
-      ...(candidateModuleFactory === undefined ? {} : { moduleFactory: candidateModuleFactory }),
-      ...(candidateIsolatedArtifactSource === undefined ? {} : { isolatedArtifactSource: candidateIsolatedArtifactSource }),
-      ...(replacesTarget
-        ? mutation.developmentPackage === undefined ? {} : { development: mutation.developmentPackage.development }
-        : existing!.item.development === undefined ? {} : { development: existing!.item.development }),
-      config: descriptor?.value ?? {},
-      revision: descriptor?.revision ?? 0,
-      ...(candidateManifest === undefined ? {} : { manifest: candidateManifest }),
-      package: {
-        version: activation.version,
-        digest: activation.digest,
-        moduleGeneration: activation.moduleGeneration,
-        dependencies: activation.dependencies,
-        ...(activation.canonicalSource === undefined ? {} : { canonicalSource: activation.canonicalSource }),
-      },
-      ...(replacesTarget
-        ? replacementPackage!.readme === undefined ? {} : { readme: replacementPackage!.readme }
-        : existing!.item.readme === undefined ? {} : { readme: existing!.item.readme }),
-      ...(!replacesTarget && existing!.item.readmes !== undefined ? { readmes: existing!.item.readmes } : {}),
-    }
-    const controller = createController(item, pluginConsole)
-    if (replacesTarget && mutation.developmentPackage !== undefined && controller.status === 'failed') {
-      throw new Error(`local development candidate ${pluginId} is invalid: ${controller.error ?? 'module initialization failed'}`)
-    }
-    if (replacesTarget && mutation.developmentPackage !== undefined
-      && (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7 || controller.manifest.schemaVersion === 8)
-      && controller.manifest.services.length > 0) {
-      throw new Error('local development phase 1 is renderer-only; manifest services are unavailable')
-    }
-    controller.generationContext = generationVisibility.context(handle, pluginId)
-    const candidateContext = ctx.extend({
-      [CORDISX_PLUGIN_ID]: controller.item.id,
-      [CORDISX_PLUGIN_SOURCE]: controller.item.source,
-      [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
-      ...controller.generationContext,
-    })
-    controller.generationView = generationVisibility.view(candidateContext)
-    return { controller, registerAuthority: true }
-  }
-
-  const disposeControllers = async (
-    items: readonly PluginController[],
-    activation: CordisXPluginActivationRecordV1,
-    disposedAfter: string[],
-  ): Promise<void> => {
-    const byId = new Map(items.map(controller => [controller.item.id, controller]))
-    const order = topologicalActivationOrder(activation, new Set(byId.keys())).reverse()
-    let failure: unknown
-    for (const id of order) {
-      if (disposedAfter.includes(id)) continue
-      const controller = byId.get(id)
-      if (controller === undefined) continue
-      try {
-        await disposeControllerFiber(controller, 'generation-replaced')
-      } catch (error) {
-        failure ??= error
-      } finally {
-        unregisterController(controller)
-        disposedAfter.push(id)
-      }
-    }
-    if (failure !== undefined) throw failure
-  }
-
-  const orderControllersFor = (activation: CordisXPluginActivationRecordV1): void => {
-    const order = new Map(activation.plugins.map((plugin, index) => [plugin.id, index]))
-    const generation = new Map(activation.plugins.map(plugin => [plugin.id, plugin.moduleGeneration]))
-    controllers.sort((left, right) => {
-      const byPlugin = (order.get(left.item.id) ?? Number.MAX_SAFE_INTEGER)
-        - (order.get(right.item.id) ?? Number.MAX_SAFE_INTEGER)
-      if (byPlugin !== 0) return byPlugin
-      const expected = generation.get(left.item.id)
-      if (moduleGenerationOf(left) === expected) return -1
-      if (moduleGenerationOf(right) === expected) return 1
-      return 0
-    })
-  }
-
-  const restoreControllers = async (
-    items: readonly PluginController[],
-    activation: CordisXPluginActivationRecordV1,
-    disposedAfter: string[],
-    publication?: PluginGenerationPublication,
-  ): Promise<void> => {
-    const byId = new Map(items.map(controller => [controller.item.id, controller]))
-    for (const id of topologicalActivationOrder(activation, new Set(disposedAfter))) {
-      const controller = byId.get(id)
-      if (controller === undefined || !disposedAfter.includes(id)) continue
-      if (publication !== undefined) {
-        controller.generationContext = generationVisibility.retiringContext(publication, id)
-        const rollbackContext = ctx.extend({
-          [CORDISX_PLUGIN_ID]: controller.item.id,
-          [CORDISX_PLUGIN_SOURCE]: controller.item.source,
-          [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
-          ...controller.generationContext,
-        })
-        controller.generationView = generationVisibility.view(rollbackContext)
-      }
-      if (!controllers.includes(controller)) {
-        registerController(controller)
-        controllers.push(controller)
-      }
-      const item = activation.plugins.find(plugin => plugin.id === id)
-      if (item?.enabled === true && !blockedPlugins.has(id)) await mountPlugin(controller)
-      const index = disposedAfter.indexOf(id)
-      if (index >= 0) disposedAfter.splice(index, 1)
-    }
-  }
-
-  const stagePluginMutation = (
-    mutation: RendererPluginMutation,
-    module?: CordisXPluginModule,
-    moduleFactory?: (console: CordisXPluginConsoleFacade) => CordisXPluginModule,
-  ): Promise<PluginGenerationReadinessReceipt> => {
-    const task = operation.then(async () => {
-      if (disposed) throw new Error('CordisX runtime is disposed')
-      if (mutation.previous.runtimeGeneration !== generation || mutation.candidate.runtimeGeneration !== generation) {
-        throw new Error('stale CordisX runtime generation')
-      }
-      if (mutation.candidate.lastGoodRevision !== mutation.previous.revision
-        || mutation.candidate.revision !== mutation.previous.revision + 1) {
-        throw new Error('invalid plugin activation revision transition')
-      }
-      if (rollbackReceipts.has(mutation.transactionId)) throw new Error('plugin generation transaction is already rolled back')
-      if (finalizedTransactions.has(mutation.transactionId)) throw new Error('plugin generation transaction is already finalized')
-      if (generationTransactions.has(mutation.transactionId)) throw new Error('plugin generation transaction already exists')
-      const handle = generationVisibility.begin(
-        mutation.transactionId,
-        mutation.previous,
-        mutation.candidate,
-        mutation.transactionEpoch,
-      )
-      const supplied = new Set(mutation.affectedPluginIds)
-      if (supplied.size !== handle.affectedPluginIds.length
-        || handle.affectedPluginIds.some(id => !supplied.has(id))
-        || !handle.affectedPluginIds.includes(mutation.targetId)) {
-        generationVisibility.abort(handle)
-        throw new Error('affected plugin set does not match the Host dependency closure')
-      }
-      const affected = new Set(handle.affectedPluginIds)
-      ownerDocumentBroker.registerBindings(mutation.ownerDocumentBindings ?? [])
-      registerEntityBindings(mutation.ownerDocumentBindings)
-      const previous = activeControllers().filter(controller => affected.has(controller.item.id))
-      const candidates: PluginController[] = []
-      notificationsSuppressed = true
-      try {
-        for (const id of handle.affectedPluginIds) {
-          if (!mutation.candidate.plugins.some(item => item.id === id)) continue
-          const candidate = candidateController(handle, mutation, id, module, moduleFactory)
-          registerController(candidate.controller, candidate.registerAuthority)
-          controllers.push(candidate.controller)
-          candidates.push(candidate.controller)
-          if (candidate.controller.item.id === mutation.targetId
-            && mutation.authorizationDecision !== undefined
-            && (mutation.operation === 'install' || mutation.operation === 'update' || mutation.operation === 'enable')) {
-            if (mutation.authorizationDecision.schemaVersion === 4) {
-              if (candidate.controller.manifest.schemaVersion !== 5 && candidate.controller.manifest.schemaVersion !== 6 && candidate.controller.manifest.schemaVersion !== 7 && candidate.controller.manifest.schemaVersion !== 8) throw new Error('permission v4 decision requires manifest-v5, manifest-v6, manifest-v7, or manifest-v8')
-              await broker.authorizeActivationV4(
-                candidate.controller.identity,
-                mutation.authorizationDecision,
-                mutation.operation as 'install' | 'update' | 'enable',
-                candidate.controller.generationView,
-              )
-            } else if (mutation.authorizationDecision.schemaVersion === 2) {
-              if (candidate.controller.manifest.schemaVersion !== 4) throw new Error('permission v2 decision requires manifest-v4')
-              await broker.authorizeActivationV2(
-                candidate.controller.identity,
-                mutation.authorizationDecision,
-                mutation.operation as 'install' | 'update' | 'enable',
-                candidate.controller.generationView,
-              )
-            } else {
-              await broker.authorizeActivation(
-                candidate.controller.identity,
-                mutation.authorizationDecision,
-                mutation.operation as 'install' | 'update' | 'enable',
-                candidate.controller.generationView,
-              )
-            }
-          }
-        }
-        await broker.settled()
-        const candidateById = new Map(candidates.map(controller => [controller.item.id, controller]))
-        for (const id of topologicalActivationOrder(mutation.candidate, affected)) {
-          const activation = mutation.candidate.plugins.find(item => item.id === id)
-          const controller = candidateById.get(id)
-          if (activation?.enabled !== true || controller === undefined) continue
-          if (blockedPlugins.has(id)) throw new Error(`candidate plugin ${id} is blocked`)
-          await mountPlugin(controller)
-          if (controller.status !== 'active') throw new Error(`candidate plugin ${id} is not ready: ${controller.blockedReason ?? controller.error ?? controller.status}`)
-        }
-        const readiness = generationVisibility.confirmReadiness(handle)
-        if ((mutation.expectedRegistryEpoch !== undefined && readiness.expectedRegistryEpoch !== mutation.expectedRegistryEpoch)
-          || (mutation.afterRegistryEpoch !== undefined && readiness.afterRegistryEpoch !== mutation.afterRegistryEpoch)) {
-          throw new Error('shared registry epoch does not match the Host activation plan')
-        }
-        generationTransactions.set(mutation.transactionId, {
-          handle,
-          readiness,
-          affectedPluginIds: handle.affectedPluginIds,
-          previous,
-          candidates,
-          previousActivation: mutation.previous,
-          candidateActivation: mutation.candidate,
-          disposedAfter: [],
-        })
-        return readiness
-      } catch (error) {
-        const disposedCandidates: string[] = []
-        await disposeControllers(candidates, mutation.candidate, disposedCandidates).catch(() => undefined)
-        generationTransactions.set(mutation.transactionId, {
-          handle,
-          affectedPluginIds: handle.affectedPluginIds,
-          previous,
-          candidates,
-          previousActivation: mutation.previous,
-          candidateActivation: mutation.candidate,
-          disposedAfter: disposedCandidates,
-          failedStage: true,
-        })
-        throw error
-      } finally {
-        notificationsSuppressed = false
-      }
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const publishPluginMutation = (transactionId: string): Promise<PluginGenerationPublication> => {
-    const task = operation.then(async () => {
-      const transaction = generationTransactions.get(transactionId)
-      if (transaction === undefined) throw new Error('unknown plugin generation transaction')
-      if (transaction.failedStage || transaction.readiness === undefined) throw new Error('plugin generation readiness failed')
-      if (transaction.publication === undefined) {
-        const barrier = generationVisibility.preparePublish(transaction.handle, transaction.readiness)
-        notificationsSuppressed = true
-        try {
-          orderControllersFor(transaction.candidateActivation)
-          transaction.publication = generationVisibility.publish(barrier)
-          currentActivation = transaction.candidateActivation
-          await routeService?.settled()
-          await broker.settled()
-          await drainSuppressedNotifications()
-          notifyBatch()
-          // Let synchronous subscribers enqueue their projection microtasks while
-          // registry-local notifications are still suppressed. Drain the finite
-          // projection/diagnostic microtask cascade without yielding a macrotask.
-          await drainBatchSubscriberMicrotasks()
-        } finally {
-          notificationsSuppressed = false
-        }
-      }
-      return transaction.publication
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const completePluginMutation = (transactionId: string): Promise<RendererGenerationCleanupObservation> => {
-    const task = operation.then(async () => {
-      const transaction = generationTransactions.get(transactionId)
-      if (transaction?.publication === undefined) throw new Error('plugin generation is not published')
-      notificationsSuppressed = true
-      try {
-        await disposeControllers(transaction.previous, transaction.previousActivation, transaction.disposedAfter)
-        await drainSuppressedNotifications()
-      } finally {
-        notificationsSuppressed = false
-      }
-      return {
-        transactionId,
-        transactionEpoch: transaction.publication.transactionEpoch,
-        registryEpoch: transaction.publication.registryEpoch,
-        active: transaction.candidateActivation,
-        disposedAfter: transaction.previousActivation,
-      }
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const finalizePluginMutation = (transactionId: string): Promise<void> => {
-    const task = operation.then(() => {
-      if (finalizedTransactions.has(transactionId)) return
-      const transaction = generationTransactions.get(transactionId)
-      if (transaction?.publication === undefined || transaction.disposedAfter.length !== transaction.previous.length) {
-        throw new Error('plugin generation cleanup is incomplete')
-      }
-      generationVisibility.completeLastGood(transaction.publication)
-      currentActivation = committedActivation(transaction.candidateActivation)
-      generationTransactions.delete(transactionId)
-      rememberFinalizedTransaction(transactionId, transaction)
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const commitPluginMutation = async (transactionId: string): Promise<void> => {
-    await publishPluginMutation(transactionId)
-    await completePluginMutation(transactionId)
-    await finalizePluginMutation(transactionId)
-  }
-
-  const rollbackPluginMutation = (transactionId: string): Promise<RendererGenerationCleanupObservation> => {
-    const task = operation.then(async () => {
-      const cached = rollbackReceipts.get(transactionId)
-      if (cached !== undefined) return cloneRendererValue(cached)
-      const liveTransaction = generationTransactions.get(transactionId)
-      const finalizedTransaction = finalizedTransactions.get(transactionId)
-      const transaction = liveTransaction ?? finalizedTransaction
-      if (transaction === undefined) throw new Error('unknown plugin generation transaction')
-      const disposedCandidates: string[] = []
-      if (transaction.publication === undefined) {
-        notificationsSuppressed = true
-        try {
-          await disposeControllers(transaction.candidates, transaction.candidateActivation, disposedCandidates)
-          await drainSuppressedNotifications()
-          const registryEpoch = generationVisibility.rollbackUnpublished(transaction.handle)
-          generationTransactions.delete(transactionId)
-          return rememberRollbackReceipt({
-            transactionId,
-            transactionEpoch: transaction.handle.transactionEpoch,
-            registryEpoch,
-            active: transaction.previousActivation,
-            disposedAfter: transaction.candidateActivation,
-          })
-        } finally {
-          notificationsSuppressed = false
-        }
-      } else {
-        notificationsSuppressed = true
-        try {
-          if (finalizedTransaction !== undefined && transaction.finalizedRollbackStarted !== true) {
-            generationVisibility.rollbackLastGood(transaction.publication)
-            currentActivation = transaction.previousActivation
-            transaction.finalizedRollbackStarted = true
-          }
-          if (finalizedTransaction !== undefined) {
-            for (const controller of transaction.previous) {
-              delete controller.generationContext
-              delete controller.generationView
-            }
-          }
-          await restoreControllers(
-            transaction.previous,
-            transaction.previousActivation,
-            transaction.disposedAfter,
-            finalizedTransaction === undefined ? transaction.publication : undefined,
-          )
-          orderControllersFor(transaction.previousActivation)
-          if (finalizedTransaction === undefined) {
-            generationVisibility.rollback(transaction.publication)
-            currentActivation = transaction.previousActivation
-          }
-          await disposeControllers(transaction.candidates, transaction.candidateActivation, disposedCandidates)
-          await routeService?.settled()
-          await broker.settled()
-          if (finalizedTransaction === undefined) generationVisibility.completeRollback(transaction.publication)
-          await drainSuppressedNotifications()
-          notifyBatch()
-          await drainBatchSubscriberMicrotasks()
-        } finally {
-          notificationsSuppressed = false
-        }
-      }
-      generationTransactions.delete(transactionId)
-      finalizedTransactions.delete(transactionId)
-      return rememberRollbackReceipt({
-        transactionId,
-        transactionEpoch: transaction.handle.transactionEpoch,
-        registryEpoch: generationVisibility.registryEpoch(),
-        active: transaction.previousActivation,
-        disposedAfter: transaction.candidateActivation,
       })
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const recoverPluginMutation = (
-    input: RendererGenerationCleanupObservation,
-  ): Promise<RendererGenerationCleanupObservation> => {
-    const task = operation.then(() => {
-      if (disposed) throw new Error('CordisX runtime is disposed')
-      if (generationTransactions.size !== 0) throw new Error('plugin generation recovery conflicts with a live transaction')
-      if (input.registryEpoch !== generationVisibility.registryEpoch()
-        || input.active.profileId !== currentActivation.profileId
-        || input.active.plugins.length !== currentActivation.plugins.length) {
-        throw new Error('plugin generation recovery scope is stale')
-      }
-      const live = new Map(currentActivation.plugins.map(plugin => [plugin.id, plugin]))
-      for (const plugin of input.active.plugins) {
-        const current = live.get(plugin.id)
-        if (current === undefined
-          || current.version !== plugin.version
-          || current.digest !== plugin.digest
-          || current.moduleGeneration !== plugin.moduleGeneration
-          || current.enabled !== plugin.enabled
-          || JSON.stringify(current.dependencies) !== JSON.stringify(plugin.dependencies)
-          || current.canonicalSource !== plugin.canonicalSource) {
-          throw new Error('plugin generation recovery closure is stale')
-        }
-      }
-      const disposedGenerations = new Map(input.disposedAfter.plugins.map(plugin => [plugin.id, plugin.moduleGeneration]))
-      for (const controller of projectedControllers()) {
-        const candidateGeneration = disposedGenerations.get(controller.item.id)
-        if (candidateGeneration !== undefined
-          && candidateGeneration === moduleGenerationOf(controller)
-          && candidateGeneration !== live.get(controller.item.id)?.moduleGeneration) {
-          throw new Error('published candidate generation survived process recovery')
-        }
-      }
-      return structuredClone(input)
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const adoptRecoveredActivation = (
-    active: CordisXPluginActivationRecordV1,
-    registryEpoch: number,
-  ): Promise<void> => {
-    const task = operation.then(() => {
-      if (disposed) throw new Error('CordisX runtime is disposed')
-      if (active.runtimeGeneration !== generation) throw new Error('recovered activation runtime generation is stale')
-      generationVisibility.adoptRecoveredActivation(active, registryEpoch)
-      currentActivation = active
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const abortPluginMutation = async (transactionId: string): Promise<void> => {
-    await rollbackPluginMutation(transactionId)
-  }
-
-  const reloadPluginGeneration = (pluginId: string, moduleGeneration: string, runtimeGeneration: string): Promise<void> => {
-    const task = operation.then(async () => {
-      if (disposed) throw new Error('CordisX runtime is disposed')
-      if (runtimeGeneration !== generation) throw new Error('stale CordisX runtime generation')
-      const controller = activeController(pluginId)
-      if (controller === undefined || controller.item.package?.moduleGeneration !== moduleGeneration) {
-        throw new Error('stale plugin module generation')
-      }
-      if (!controller.item.enabled || !controllerHasRuntimeModule(controller)) throw new Error('plugin is disabled')
-      await disposeControllerFiber(controller, 'owner-disposed')
-      try {
-        await mountPlugin(controller)
-      } catch (error) {
-        await mountPlugin(controller).catch(rollbackError => {
-          controller.status = 'failed'
-          controller.error = `rollback-failed: ${errorMessage(rollbackError)}`
-        })
-        throw error
-      } finally {
-        notify()
-      }
-    })
-    operation = task.catch(() => {})
-    return task
-  }
-
-  const updateLocalDevelopmentStatus = (
-    status: CordisXLocalDevelopmentSnapshot,
-  ): boolean => {
-    localDevelopment.set(status.sourcePath, structuredClone(status))
-    notify()
-    return true
-  }
-
-  const dispose = async (): Promise<void> => {
-    if (disposed) return
-    disposed = true
-    agentRuntimeRouteDisposed = true
-    scenarioSessionScopeAuthority?.dispose()
-    if (activeAgentRuntimeRouteInstance !== undefined) broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
-    activeAgentRuntimeRouteInstance = undefined
-    broker.clearAgentRuntimeConnection()
-    disposeAgentPermissionFences()
-    certifiedPermissionChannel?.dispose()
-    certifiedPermissionChannel = undefined
-    await disposeInternalBootstrap?.()
-    disposeInternalBootstrap = undefined
-    disposeManager?.()
-    disposeManager = undefined
-    disposeI18nSubscription?.()
-    disposeI18nSubscription = undefined
-    disposePermissionSubscription?.()
-    disposePermissionSubscription = undefined
-    disposeExtensionPointSubscription?.()
-    disposeExtensionPointSubscription = undefined
-    for (const unsubscribe of registrySubscriptions.splice(0)) unsubscribe()
-    await operation
-    for (const controller of [...controllers].reverse()) {
-      await controller.hostDomWorker?.dispose()
-      delete controller.hostDomWorker
-      controller.agentLoopClient?.dispose()
-      delete controller.agentLoopClient
-      await controller.unregisterAgentLoop?.()
-      delete controller.unregisterAgentLoop
-      await controller.agentAdmissionBootstrapRouteReservationFiber?.dispose()
-      delete controller.agentAdmissionBootstrapRouteReservationFiber
-      await controller.agentAdmissionBootstrapRouteDeclarationFiber?.dispose()
-      delete controller.agentAdmissionBootstrapRouteDeclarationFiber
-      await controller.agentAdmissionBootstrapReservationFiber?.dispose()
-      delete controller.agentAdmissionBootstrapReservationFiber
-      await controller.agentAdmissionBootstrapTargetFiber?.dispose()
-      delete controller.agentAdmissionBootstrapTargetFiber
-      await controller.agentAdmissionBootstrapRoomReservationFiber?.dispose()
-      delete controller.agentAdmissionBootstrapRoomReservationFiber
-      await controller.agentAdmissionBootstrapRoomTargetFiber?.dispose()
-      delete controller.agentAdmissionBootstrapRoomTargetFiber
-      await controller.agentAdmissionTargetReservationFiber?.dispose()
-      delete controller.agentAdmissionTargetReservationFiber
-      await controller.agentAdmissionTargetOriginFiber?.dispose()
-      delete controller.agentAdmissionTargetOriginFiber
-      await controller.agentAdmissionReservationFiber?.dispose()
-      delete controller.agentAdmissionReservationFiber
-      await controller.approvalServiceFiber?.dispose()
-      delete controller.approvalServiceFiber
-      await controller.sessionRegistryFiber?.dispose()
-      delete controller.sessionRegistryFiber
-      await controller.agentRegistryFiber?.dispose()
-      delete controller.agentRegistryFiber
-      await controller.entityRegistryFiber?.dispose()
-      delete controller.entityRegistryFiber
-      controller.unregisterAgentSessionMigration?.()
-      delete controller.unregisterAgentSessionMigration
-      controller.documentsClient?.dispose()
-      delete controller.documentsClient
-      await controller.unregisterDocuments?.()
-      delete controller.unregisterDocuments
-      agentRuntime.releaseOwner(controller.identity, 'generation-replaced', moduleGenerationOf(controller))
-      await controller.fiber?.dispose()
-      retirePrincipal(controller, 'Plugin disposed with runtime generation')
-      delete controller.fiber
+      operation = task.catch(() => {})
+      return task
     }
-    generationTransactions.clear()
-    finalizedTransactions.clear()
-    rollbackReceipts.clear()
-    configBridge?.dispose()
-    serviceConfigBridge?.dispose()
-    iconThemePreferenceBridge?.dispose()
-    disposeIconThemePreferenceSubscription?.()
-    disposeIconThemePreferenceSubscription = undefined
-    lifecycleBridge?.dispose()
-    managerContentConfigAuthority?.dispose()
-    managerContentConfigAuthority = undefined
-    configRenderers.dispose()
-    configuration.dispose()
-    unbindIconThemeRegistry()
-    adapterHandle?.dispose()
-    adapterHandle = undefined
-    transientCanvasCoordinator?.dispose()
-    transientCanvasCoordinator = undefined
-    undeclareManagerContentOutlet?.()
-    undeclareManagerContentOutlet = undefined
-    undeclareManagerOutlet?.()
-    undeclareManagerOutlet = undefined
-    await slotFiber?.dispose()
-    slotFiber = undefined
-    await configRendererFiber?.dispose()
-    configRendererFiber = undefined
-    await iconThemeFiber?.dispose()
-    iconThemeFiber = undefined
-    await visualFiber?.dispose()
-    visualFiber = undefined
-    await channelManagerFiber?.dispose()
-    channelManagerFiber = undefined
-    await playgroundRoomSimulationBridgeFiber?.dispose()
-    playgroundRoomSimulationBridgeFiber = undefined
-    playgroundRoomSimulationBridgeRegistry?.dispose()
-    await settingsFiber?.dispose()
-    settingsFiber = undefined
-    await managerContentFiber?.dispose()
-    managerContentFiber = undefined
-    await routeFiber?.dispose()
-    routeFiber = undefined
-    routeHistory.dispose()
-    await pageFiber?.dispose()
-    pageFiber = undefined
-    if (ownsSharedReactRuntime) sharedReactRuntime?.dispose()
-    sharedReactRuntime = undefined
-    ownsSharedReactRuntime = false
-    await commandFiber?.dispose()
-    commandFiber = undefined
-    await platformFiber?.dispose()
-    platformFiber = undefined
-    await systemPromptFiber?.dispose()
-    systemPromptFiber = undefined
-    connectorBroker.disposeAll()
-    agentLoopBroker.dispose()
-    agentLoopBrokerV2.dispose()
-    agentLoopBrokerV4.dispose()
-    disposeAgentRouteHistory()
-    disposeAgentRouteFences()
-    await agentSessionRuntime.dispose()
-    playgroundAgentSessionPersistence?.dispose()
-    ownerDocumentBroker.dispose()
-    await agentRuntime.dispose()
-    bindingPlatformAdapter?.dispose()
-    bindingPlatformAdapter = undefined
-    if (permissionStore instanceof BindingPermissionPolicyStore) permissionStore.dispose()
-    for (const remove of disposeExtensionPointCatalogs.splice(0).reverse()) await remove()
-    unregisterManagerPointCatalog?.()
-    unregisterManagerPointCatalog = undefined
-    await i18nFiber?.dispose()
-    i18nFiber = undefined
-    listeners.clear()
-    for (const controller of controllers) controller.unregisterPermissions?.()
-    for (const controller of controllers) controller.unregisterExtensionPoints?.()
-    hostDomAuthority.dispose()
-    broker.dispose()
-    window.removeEventListener('error', recordUnknownError)
-    window.removeEventListener('unhandledrejection', recordUnknownError)
-    disconnectPluginConsoleVisibility()
-    pluginConsole.dispose()
-    extensionPointBroker.dispose()
-    extensionPointDescriptors.dispose()
-    iconThemeRegistry.dispose()
-    settingsProjectionSites.clear()
-    settingsNavigationProjectionSites.clear()
-    extensionContributionProjectionSites.clear()
-    if (globalThis.__cordisxRuntime === handle) globalThis.__cordisxRuntime = undefined
-    document.documentElement.removeAttribute('data-cordisx-ready')
-  }
 
-  const handle: CordisXRuntimeHandle = {
-    version: metadata.version,
-    get pluginIds() { return projectedControllers().map(controller => controller.item.id) },
-    ...(browserHostedPlayground ? {
-      playgroundRouteHistory: () => {
-        const snapshot = routeHistory.snapshot()
-        return Object.freeze({
-          available: snapshot.available,
-          canGoBack: snapshot.available && snapshot.canGoBack === true,
-          canGoForward: snapshot.available && snapshot.canGoForward === true,
-          ...(snapshot.reason === undefined ? {} : { reason: snapshot.reason }),
-        })
-      },
-      subscribePlaygroundRouteHistory: (listener: () => void) => routeHistory.subscribe(listener),
-      goPlaygroundRouteHistory: async (delta: -1 | 1) => { await routeHistory.go(delta) },
-    } : {}),
-    ...(playgroundRoomSimulationBridgeRegistry === undefined ? {} : {
-      playgroundRoomSimulationBridge: playgroundRoomSimulationBridgeRegistry.client,
-    }),
-    execute: (owner, reference, invocationKey) => {
-      if (commandService === undefined) return Promise.reject(new Error('CordisX commands are not ready'))
-      return commandService.executeFor(owner, reference, invocationKey)
-    },
-    navigate: async (owner, reference) => {
-      if (routeService === undefined) return Promise.reject(new Error('CordisX routes are not ready'))
-      for (let attempt = 0; attempt < 8; attempt += 1) {
-        try {
-          return await routeService.navigateFor(owner, reference)
-        } catch (error) {
-          if (!(error instanceof Error) || error.message !== 'permission.review-pending') throw error
-          const controller = activeControllers().find(candidate => candidate.item.id === owner)
-          if (controller === undefined) throw error
-          const decisions = await broker.reviewPendingDomAccess(
+    const setPermissionPolicy = (
+      id: string,
+      capability: CordisXPermissionCapabilityV4,
+      policy: CordisXPermissionPolicy,
+      scope?: CordisXPermissionScopeV4,
+    ): Promise<void> => {
+      const task = operation.then(async () => {
+        if (disposed) throw new Error('CordisX runtime is disposed')
+        const controller = activeController(id)
+        if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+        if (capability === 'ui.extension-points.render') {
+          const points = scope?.extensionPoints
+          if (points === undefined || points.length !== 1) {
+            throw new Error('DOM permission policy requires one exact extension point scope')
+          }
+          await broker.setDomPolicy(
             controller.identity,
-            moduleGenerationOf(controller),
+            points[0]!,
+            policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
+          )
+        } else if (capability === 'ui.host-dom.read' || capability === 'ui.host-dom.modify') {
+          await broker.setHostDomPolicy(
+            controller.identity,
+            capability,
+            policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
             controller.generationView,
           )
-          if (decisions.length === 0) throw error
-          const denied = decisions.find(decision => !decision.authorized)
-          if (denied !== undefined) throw new Error(denied.reason)
+        } else if (
+          controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5
+          || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7
+          || controller.manifest.schemaVersion === 8
+        ) {
+          await broker.setPolicyV2(
+            controller.identity,
+            capability,
+            policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
+          )
+        } else {
+          await broker.setPolicy(controller.identity, capability as CordisXPlatformCapability, policy)
         }
-      }
-      throw new Error('permission.review-retry-exhausted')
-    },
-    mountSettingsTab: (id, panelBody) => {
-      if (routeService === undefined || slotService === undefined) return Promise.reject(new Error('CordisX manager settings are not ready'))
-      const registration = slotService.snapshot().find(item => item.surface === 'manager.settings.tabs'
-        && item.qualifiedId === id && item.valid && item.visible && item.authorized && !item.pending && !item.disabled)
-      if (registration === undefined) return Promise.reject(new Error(`manager settings tab ${id} is not activatable`))
-      const item = registration.item as CordisXManagerSettingsTabItem
-      return routeService.mountManagerSettingsFor(registration.owner, item.route, registration.qualifiedId, panelBody)
-    },
-    closeSettingsTabContent: () => routeService?.closeManagerSettings() ?? Promise.resolve(),
-    managerContentPresentation: (id, reference) => {
-      if (routeService === undefined || slotService === undefined) return undefined
-      const registration = slotService.snapshot().find(item => item.surface === 'manager.settings.navigation-items'
-        && item.qualifiedId === id && item.valid && item.visible && item.authorized && !item.pending && !item.disabled)
-      if (registration === undefined) return undefined
-      return routeService.managerContentPresentationFor(registration.owner, reference)
-    },
-    mountManagerContent: (id, reference, container, navigation) => {
-      if (routeService === undefined || slotService === undefined) return Promise.reject(new Error('CordisX manager content is not ready'))
-      const registration = slotService.snapshot().find(item => item.surface === 'manager.settings.navigation-items'
-        && item.qualifiedId === id && item.valid && item.visible && item.authorized && !item.pending && !item.disabled
-        && (item.group === 'before-settings' || item.group === 'after-settings'))
-      if (registration === undefined) return Promise.reject(new Error(`manager content item ${id} is not activatable`))
-      return routeService.mountManagerContentFor(registration.owner, reference, registration.qualifiedId, container, {
-        navigate: (next: CordisXRouteReference) => navigation.navigate(next),
-        back: () => navigation.back(),
-        close: () => navigation.back(),
-      })
-    },
-    closeManagerContent: () => routeService?.closeManagerContent() ?? Promise.resolve(),
-    pluginConsole: (id) => {
-      const controller = activeController(id)
-      if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
-      return pluginConsole.query(controller.identity)
-    },
-    clearPluginConsole: (id) => {
-      const controller = activeController(id)
-      if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
-      pluginConsole.clear(controller.identity)
-    },
-    subscribePluginConsole: listener => pluginConsole.subscribe(listener),
-    setExtensionPointPolicy,
-    setExtensionPointPolicies,
-    setExtensionPointControlAuthorization,
-    setExtensionPointControlGroupChoice,
-    permissionAuthorizationPlan,
-    authorizePlugin,
-    permissionAuthorizationPlanV2,
-    authorizePluginV2,
-    permissionAuthorizationPlanV4: id => {
-      const controller = activeController(id)
-      return controller === undefined ? undefined : broker.authorizationPlanV4(controller.identity, 'enable', controller.generationView)
-    },
-    authorizePluginV4,
-    activePluginGeneration: () => structuredClone(currentActivation),
-    generationNotificationTrace: () => generationNotificationTrace.map(item => ({ ...item })),
-    settleRegistryProjection,
-    requestPluginLifecycle: (lifecycleOperation: CordisXPluginLifecycleOperationV1): Promise<CordisXPluginLifecycleResultV1> => {
-      if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
-      return lifecycleBridge.request(currentActivation.revision, lifecycleOperation)
-    },
-    requestPluginBundleLifecycle: async (operation: CordisXPluginBundleLifecycleOperationV1): Promise<CordisXPluginBundleLifecycleResultV1> => {
-      if (lifecycleBridge === undefined || currentPluginBundles === undefined) throw new Error('plugin bundle lifecycle operations are unavailable')
-      const result = await lifecycleBridge.bundleRequest(currentPluginBundles, operation)
-      currentPluginBundles = await lifecycleBridge.bundleSnapshot()
-      if (result.outcome === 'applied') {
-        const effective = new Map(currentPluginBundles.bundles.flatMap(bundle => bundle.permissions).map(permission => [
-          `${permission.pluginId}\u0000${permission.permissionId}`,
-          permission,
-        ]))
-        const runtimePermissions = broker.snapshots()
-        for (const permission of effective.values()) {
-          const runtimePermission = runtimePermissions.find(item => item.identity.id === permission.pluginId
-            && item.capability === permission.capability && JSON.stringify(item.scope) === permission.scopeLabel)
-          if (runtimePermission !== undefined) {
-            await setPermissionPolicy(permission.pluginId, permission.capability as CordisXPermissionCapabilityV4, permission.effectivePolicy, runtimePermission.scope)
+        const blockedReason = requiredBlockReason(controller)
+        if (blockedReason !== undefined) {
+          await disposeControllerFiber(controller, 'owner-disposed')
+          controller.status = 'permission-blocked'
+          controller.blockedReason = blockedReason
+          notify()
+          return
+        }
+        if (controller.status === 'permission-blocked') {
+          delete controller.blockedReason
+          if (blockedPlugins.has(id)) {
+            controller.status = 'blocked'
+          } else if (controller.item.enabled && controllerHasRuntimeModule(controller)) {
+            await mountPlugin(controller)
+          } else {
+            controller.status = 'configured-disabled'
           }
         }
-      }
-      notify('plugin-bundles')
-      return result
-    },
-    permissionLifecycleReviewPlanV2: target => {
-      if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
-      return lifecycleBridge.permissionReviewPlanV2(currentActivation.revision, target)
-    },
-    applyPermissionLifecycleReviewV2: decision => {
-      if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
-      return lifecycleBridge.applyPermissionReviewV2(currentActivation.revision, decision)
-    },
-    permissionLifecycleReviewPlanV4: target => {
-      if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
-      return lifecycleBridge.permissionReviewPlanV4(currentActivation.revision, target)
-    },
-    applyPermissionLifecycleReviewV4: decision => {
-      if (lifecycleBridge === undefined) return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
-      return lifecycleBridge.applyPermissionReviewV4(currentActivation.revision, decision)
-    },
-    stagePluginMutation,
-    publishPluginMutation,
-    completePluginMutation,
-    finalizePluginMutation,
-    rollbackPluginMutation,
-    recoverPluginMutation,
-    adoptRecoveredActivation,
-    commitPluginMutation,
-    abortPluginMutation,
-    reloadPluginGeneration,
-    updateLocalDevelopmentStatus,
-    ...(metadata.hostKind === 'playground' ? {
-      playgroundAgentSessions: () => projectPlaygroundAgentSessions(agentSessionRuntime.playgroundProjection()),
-    } : {}),
-    ...(playgroundMockAgentLoop === undefined ? {} : {
-      playgroundMockAgentLoop: () => playgroundMockAgentLoop.snapshot(),
-      resetPlaygroundMockAgentLoop: () => {
-        const before = playgroundMockAgentLoop.snapshot().tasks.length
-        agentLoopBrokerV2.resetPlaygroundState()
-        agentLoopBrokerV4.resetPlaygroundState()
-        playgroundMockAgentLoopV4Transport?.resetPlaygroundState()
-        playgroundMockAgentLoop.resetPlaygroundState()
-        try {
-          document.defaultView?.sessionStorage.removeItem(simulatorSessionKey)
-          document.defaultView?.sessionStorage.removeItem(`${simulatorSessionKey}:agent-loop-v2-ledger`)
-          document.defaultView?.sessionStorage.removeItem(`${simulatorSessionKey}:agent-loop-v4-ledger`)
-        } catch { /* optional browser session storage */ }
-        return Object.freeze({ before, after: playgroundMockAgentLoop.snapshot().tasks.length })
-      },
-    }),
-    snapshot: publicSnapshot,
-    setPluginBlocked,
-    updatePluginConfig,
-    listServiceConfigs: async (pluginId: string): Promise<readonly HostServiceConfigDescriptor[]> => {
-      if (serviceConfigBridge === undefined) return []
-      return await serviceConfigBridge.list(pluginId)
-    },
-    updateServiceConfig: async (mutation: HostServiceConfigMutation): Promise<HostServiceConfigMutationResult> => {
-      if (serviceConfigBridge === undefined) throw new Error('service-config-unavailable')
-      return await serviceConfigBridge.mutate(mutation)
-    },
-    mountConfigRenderer: (pluginId, field, container, setDraft) => configRenderers.mount(pluginId, field, container, setDraft),
-    setPermissionPolicy,
-    subscribe,
-    dispose,
-  }
-  const managerModel: ManagerModel = {
-    ...handle,
-    snapshot: managerSnapshot,
-    iconThemePreferenceWritable: iconThemePreferenceBridge !== undefined,
-    selectIconTheme: (expectedProfileRevision, candidate) => selectAndPersistIconTheme(
-      iconThemeRegistry,
-      iconThemePreferenceBridge,
-      generation,
-      expectedProfileRevision,
-      candidate,
-    ),
-  }
-  const managerNavigationController = new HostManagerNavigationController()
+        notify()
+      })
+      operation = task.catch(() => {})
+      return task
+    }
 
-  try {
-    i18nFiber = ctx.plugin(CordisXI18nService)
-    await i18nFiber
-    if (playgroundRoomSimulationBridgeRegistry !== undefined) {
-      playgroundRoomSimulationBridgeFiber = ctx.plugin(
-        CordisXPlaygroundRoomSimulationBridgeService,
-        playgroundRoomSimulationBridgeRegistry,
-      )
-      await playgroundRoomSimulationBridgeFiber
+    const subscribe = (listener: () => void): () => void => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
     }
-    i18nService = ctx.i18n as CordisXI18nService
-    for (const catalog of CORDISX_EXTENSION_POINT_LOCALE_CATALOGS) {
-      disposeExtensionPointCatalogs.push(i18nService.define(catalog))
+
+    const setExtensionPointPolicy = (
+      source: string,
+      pluginId: string,
+      pointId: string,
+      policy: CordisXPointPolicy,
+    ): Promise<void> => {
+      const task = operation.then(async () => {
+        if (disposed) throw new Error('CordisX runtime is disposed')
+        const controller = activeController(pluginId, source)
+        if (controller === undefined) throw new Error(`unknown CordisX plugin identity: ${source} / ${pluginId}`)
+        await broker.setDomPolicy(
+          controller.identity,
+          pointId,
+          policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
+        )
+        slotService?.invalidatePointPolicies()
+        await routeService?.invalidatePointPolicies()
+        notify()
+      })
+      operation = task.catch(() => {})
+      return task
     }
-    for (const catalog of CORDISX_CAPABILITY_AVAILABILITY_LOCALE_CATALOGS) {
-      disposeExtensionPointCatalogs.push(i18nService.define(catalog))
+
+    const setExtensionPointPolicies = (
+      source: string,
+      pluginId: string,
+      policies: readonly { readonly pointId: string; readonly policy: CordisXPointPolicy }[],
+    ): Promise<void> => {
+      const task = operation.then(async () => {
+        if (disposed) throw new Error('CordisX runtime is disposed')
+        const controller = activeController(pluginId, source)
+        if (controller === undefined) throw new Error(`unknown CordisX plugin identity: ${source} / ${pluginId}`)
+        await broker.setDomPolicies(
+          controller.identity,
+          policies.map(({ pointId, policy }) => ({
+            pointId,
+            policy: policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
+          })),
+        )
+        slotService?.invalidatePointPolicies()
+        await routeService?.invalidatePointPolicies()
+        notify()
+      })
+      operation = task.catch(() => {})
+      return task
     }
-    for (const catalog of CORDISX_PERMISSION_LOCALE_CATALOGS) {
-      disposeExtensionPointCatalogs.push(i18nService.define(catalog))
+
+    const setExtensionPointControlAuthorization = (
+      _expectedPolicyRevision: number,
+      reference: Readonly<{
+        principalHandle: string
+        source: string
+        pluginId: string
+        pointId: string
+        claimId: string
+        mode: CordisXExtensionPointControlMode
+      }>,
+      policy: 'inherit' | 'allow' | 'deny',
+    ): Promise<void> => {
+      const task = operation.then(async () => {
+        if (disposed) throw new Error('CordisX runtime is disposed')
+        const controller = activeController(reference.pluginId, reference.source)
+        if (controller === undefined) {
+          throw new Error(`unknown CordisX plugin identity: ${reference.source} / ${reference.pluginId}`)
+        }
+        await broker.setDomPolicy(
+          controller.identity,
+          reference.pointId,
+          policy === 'allow' ? 'allow-persistent' : policy === 'deny' ? 'deny-persistent' : 'ask',
+        )
+        slotService?.invalidatePointPolicies()
+        await routeService?.invalidatePointPolicies()
+        notify('controlled-surface-policy')
+      })
+      operation = task.catch(() => {})
+      return task
     }
-    disposeI18nSubscription = i18nService.subscribeInternal(notifyFrom('i18n'))
-    disposePermissionSubscription = broker.subscribe(() => {
-      slotService?.invalidatePointPolicies()
-      void routeService?.invalidatePointPolicies()
-      notify('permissions')
-    })
-    disposeExtensionPointSubscription = extensionPointBroker.subscribe(notifyFrom('extension-policy'))
-    settingsFiber = ctx.plugin(CordisXPluginSettingsService, { registry: configuration, console: pluginConsole })
-    await settingsFiber
-    configRendererFiber = ctx.plugin(CordisXConfigRendererService, { registry: configRenderers, console: pluginConsole })
-    await configRendererFiber
-    iconThemeFiber = ctx.plugin(CordisXIconThemeService, iconThemeRegistry)
-    await iconThemeFiber
-    visualFiber = ctx.plugin(CordisXVisualService)
-    await visualFiber
-    channelManagerFiber = metadata.channelManager === undefined && serviceConfigBridge === undefined
-      ? ctx.plugin(CordisXChannelManagerService)
-      : ctx.plugin(CordisXChannelManagerService, {
+
+    const setExtensionPointControlGroupChoice = (
+      expectedPolicyRevision: number,
+      choice: ControlledSurfaceGroupChoice,
+    ): Promise<void> => {
+      const task = operation.then(async () => {
+        if (disposed) throw new Error('CordisX runtime is disposed')
+        if (slotService === undefined) throw new Error('controlled surface runtime is unavailable')
+        slotService.setControlGroupChoice(expectedPolicyRevision, choice)
+        notify('controlled-surface-selection')
+      })
+      operation = task.catch(() => {})
+      return task
+    }
+
+    const permissionAuthorizationPlan = (id: string): CordisXPermissionAuthorizationPlanV1 => {
+      const controller = activeController(id)
+      if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+      return broker.authorizationPlan(controller.identity, 'enable')
+    }
+
+    const permissionAuthorizationPlanV2 = (id: string): CordisXPermissionAuthorizationPlanV2 | undefined => {
+      const controller = activeController(id)
+      if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+      return controller.manifest.schemaVersion === 4
+        ? broker.authorizationPlanV2(controller.identity, 'enable', controller.generationView)
+        : undefined
+    }
+
+    const authorizePluginWith = (
+      id: string,
+      authorize: (controller: PluginController) => Promise<void>,
+    ): Promise<void> => {
+      const task = operation.then(async () => {
+        if (disposed) throw new Error('CordisX runtime is disposed')
+        const controller = activeController(id)
+        if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+        if (!controller.item.enabled || !controllerHasRuntimeModule(controller)) {
+          throw new Error(`plugin ${id} is disabled in cordisx.config.json and is not bundled`)
+        }
+        await authorize(controller)
+        blockedPlugins.delete(id)
+        writeBlockedPlugins(blockedPlugins)
+        const blockedReason = requiredBlockReason(controller)
+        if (blockedReason !== undefined) {
+          await disposeControllerFiber(controller, 'owner-disposed')
+          controller.status = 'permission-blocked'
+          controller.blockedReason = blockedReason
+          notify()
+          return
+        }
+        if (controller.fiber === undefined && controller.hostDomWorker === undefined) await mountPlugin(controller)
+        notify()
+      })
+      operation = task.catch(() => {})
+      return task
+    }
+
+    const authorizePlugin = (
+      id: string,
+      decision: CordisXPermissionAuthorizationDecisionV1,
+    ): Promise<void> =>
+      authorizePluginWith(id, async controller => {
+        await broker.authorizeActivation(controller.identity, decision, 'enable', controller.generationView)
+      })
+
+    const authorizePluginV2 = (
+      id: string,
+      decision: CordisXPermissionAuthorizationDecisionV2,
+    ): Promise<void> =>
+      authorizePluginWith(id, async controller => {
+        if (controller.manifest.schemaVersion !== 4) throw new Error(`plugin ${id} does not use permission v2`)
+        await broker.authorizeActivationV2(controller.identity, decision, 'enable', controller.generationView)
+      })
+
+    const authorizePluginV4 = (
+      id: string,
+      decision: CordisXPermissionAuthorizationDecisionV4,
+    ): Promise<void> =>
+      authorizePluginWith(id, async controller => {
+        if (
+          controller.manifest.schemaVersion !== 5 && controller.manifest.schemaVersion !== 6
+          && controller.manifest.schemaVersion !== 7 && controller.manifest.schemaVersion !== 8
+        ) throw new Error(`plugin ${id} does not use permission v4`)
+        await broker.authorizeActivationV4(controller.identity, decision, 'enable', controller.generationView)
+      })
+
+    const candidateController = (
+      handle: PluginGenerationTransitionHandle,
+      mutation: RendererPluginMutation,
+      pluginId: string,
+      module?: CordisXPluginModule,
+      moduleFactory?: (console: CordisXPluginConsoleFacade) => CordisXPluginModule,
+    ): { readonly controller: PluginController; readonly registerAuthority: boolean } => {
+      const activation = mutation.candidate.plugins.find(item => item.id === pluginId)
+      if (activation === undefined) throw new Error(`candidate is missing affected plugin ${pluginId}`)
+      const existing = activeController(pluginId)
+      const replacesTarget = pluginId === mutation.targetId
+        && (mutation.operation === 'install' || mutation.operation === 'update' || mutation.operation === 'enable')
+      const replacementPackage = mutation.package ?? mutation.developmentPackage
+      const replacementId = mutation.package?.manifest.id ?? mutation.developmentPackage?.id
+      const replacementVersion = mutation.package?.manifest.version ?? mutation.developmentPackage?.version
+      if (!replacesTarget && existing === undefined) throw new Error(`affected plugin ${pluginId} is not active`)
+      if (
+        replacesTarget && (replacementPackage === undefined
+          || (module === undefined && moduleFactory === undefined && mutation.isolatedArtifactSource === undefined))
+      ) {
+        throw new Error('candidate package module is unavailable')
+      }
+      if (
+        replacesTarget && (replacementId !== pluginId
+          || replacementPackage!.digest !== activation.digest
+          || replacementVersion !== activation.version)
+      ) {
+        throw new Error('candidate package does not match the activation tuple')
+      }
+      const descriptor = existing === undefined
+        ? undefined
+        : configuration.descriptor(pluginId, i18nService?.getSnapshot().locale ?? 'en')
+      const candidateModule = replacesTarget ? module : existing!.item.module
+      const candidateModuleFactory = replacesTarget ? moduleFactory : existing!.item.moduleFactory
+      const candidateIsolatedArtifactSource = replacesTarget
+        ? mutation.isolatedArtifactSource
+        : existing!.item.isolatedArtifactSource
+      const candidateManifest = replacesTarget
+        ? mutation.package?.manifest.runtimeManifest ?? mutation.developmentPackage?.manifest
+        : existing!.item.manifest
+      const item: RuntimeBrowserPlugin = {
+        id: pluginId,
+        source: replacesTarget ? replacementPackage!.identitySource : existing!.item.source,
+        enabled: activation.enabled,
+        ...(candidateModule === undefined ? {} : { module: candidateModule }),
+        ...(candidateModuleFactory === undefined ? {} : { moduleFactory: candidateModuleFactory }),
+        ...(candidateIsolatedArtifactSource === undefined
+          ? {}
+          : { isolatedArtifactSource: candidateIsolatedArtifactSource }),
+        ...(replacesTarget
+          ? mutation.developmentPackage === undefined ? {} : { development: mutation.developmentPackage.development }
+          : existing!.item.development === undefined
+          ? {}
+          : { development: existing!.item.development }),
+        config: descriptor?.value ?? {},
+        revision: descriptor?.revision ?? 0,
+        ...(candidateManifest === undefined ? {} : { manifest: candidateManifest }),
+        package: {
+          version: activation.version,
+          digest: activation.digest,
+          moduleGeneration: activation.moduleGeneration,
+          dependencies: activation.dependencies,
+          ...(activation.canonicalSource === undefined ? {} : { canonicalSource: activation.canonicalSource }),
+        },
+        ...(replacesTarget
+          ? replacementPackage!.readme === undefined ? {} : { readme: replacementPackage!.readme }
+          : existing!.item.readme === undefined
+          ? {}
+          : { readme: existing!.item.readme }),
+        ...(!replacesTarget && existing!.item.readmes !== undefined ? { readmes: existing!.item.readmes } : {}),
+      }
+      const controller = createController(item, pluginConsole)
+      if (replacesTarget && mutation.developmentPackage !== undefined && controller.status === 'failed') {
+        throw new Error(
+          `local development candidate ${pluginId} is invalid: ${controller.error ?? 'module initialization failed'}`,
+        )
+      }
+      if (
+        replacesTarget && mutation.developmentPackage !== undefined
+        && (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5
+          || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7
+          || controller.manifest.schemaVersion === 8)
+        && controller.manifest.services.length > 0
+      ) {
+        throw new Error('local development phase 1 is renderer-only; manifest services are unavailable')
+      }
+      controller.generationContext = generationVisibility.context(handle, pluginId)
+      const candidateContext = ctx.extend({
+        [CORDISX_PLUGIN_ID]: controller.item.id,
+        [CORDISX_PLUGIN_SOURCE]: controller.item.source,
+        [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
+        ...controller.generationContext,
+      })
+      controller.generationView = generationVisibility.view(candidateContext)
+      return { controller, registerAuthority: true }
+    }
+
+    const disposeControllers = async (
+      items: readonly PluginController[],
+      activation: CordisXPluginActivationRecordV1,
+      disposedAfter: string[],
+    ): Promise<void> => {
+      const byId = new Map(items.map(controller => [controller.item.id, controller]))
+      const order = topologicalActivationOrder(activation, new Set(byId.keys())).reverse()
+      let failure: unknown
+      for (const id of order) {
+        if (disposedAfter.includes(id)) continue
+        const controller = byId.get(id)
+        if (controller === undefined) continue
+        try {
+          await disposeControllerFiber(controller, 'generation-replaced')
+        } catch (error) {
+          failure ??= error
+        } finally {
+          unregisterController(controller)
+          disposedAfter.push(id)
+        }
+      }
+      if (failure !== undefined) throw failure
+    }
+
+    const orderControllersFor = (activation: CordisXPluginActivationRecordV1): void => {
+      const order = new Map(activation.plugins.map((plugin, index) => [plugin.id, index]))
+      const generation = new Map(activation.plugins.map(plugin => [plugin.id, plugin.moduleGeneration]))
+      controllers.sort((left, right) => {
+        const byPlugin = (order.get(left.item.id) ?? Number.MAX_SAFE_INTEGER)
+          - (order.get(right.item.id) ?? Number.MAX_SAFE_INTEGER)
+        if (byPlugin !== 0) return byPlugin
+        const expected = generation.get(left.item.id)
+        if (moduleGenerationOf(left) === expected) return -1
+        if (moduleGenerationOf(right) === expected) return 1
+        return 0
+      })
+    }
+
+    const restoreControllers = async (
+      items: readonly PluginController[],
+      activation: CordisXPluginActivationRecordV1,
+      disposedAfter: string[],
+      publication?: PluginGenerationPublication,
+    ): Promise<void> => {
+      const byId = new Map(items.map(controller => [controller.item.id, controller]))
+      for (const id of topologicalActivationOrder(activation, new Set(disposedAfter))) {
+        const controller = byId.get(id)
+        if (controller === undefined || !disposedAfter.includes(id)) continue
+        if (publication !== undefined) {
+          controller.generationContext = generationVisibility.retiringContext(publication, id)
+          const rollbackContext = ctx.extend({
+            [CORDISX_PLUGIN_ID]: controller.item.id,
+            [CORDISX_PLUGIN_SOURCE]: controller.item.source,
+            [CORDISX_PLUGIN_GENERATION]: moduleGenerationOf(controller),
+            ...controller.generationContext,
+          })
+          controller.generationView = generationVisibility.view(rollbackContext)
+        }
+        if (!controllers.includes(controller)) {
+          registerController(controller)
+          controllers.push(controller)
+        }
+        const item = activation.plugins.find(plugin => plugin.id === id)
+        if (item?.enabled === true && !blockedPlugins.has(id)) await mountPlugin(controller)
+        const index = disposedAfter.indexOf(id)
+        if (index >= 0) disposedAfter.splice(index, 1)
+      }
+    }
+
+    const stagePluginMutation = (
+      mutation: RendererPluginMutation,
+      module?: CordisXPluginModule,
+      moduleFactory?: (console: CordisXPluginConsoleFacade) => CordisXPluginModule,
+    ): Promise<PluginGenerationReadinessReceipt> => {
+      const task = operation.then(async () => {
+        if (disposed) throw new Error('CordisX runtime is disposed')
+        if (mutation.previous.runtimeGeneration !== generation || mutation.candidate.runtimeGeneration !== generation) {
+          throw new Error('stale CordisX runtime generation')
+        }
+        if (
+          mutation.candidate.lastGoodRevision !== mutation.previous.revision
+          || mutation.candidate.revision !== mutation.previous.revision + 1
+        ) {
+          throw new Error('invalid plugin activation revision transition')
+        }
+        if (rollbackReceipts.has(mutation.transactionId)) {
+          throw new Error('plugin generation transaction is already rolled back')
+        }
+        if (finalizedTransactions.has(mutation.transactionId)) {
+          throw new Error('plugin generation transaction is already finalized')
+        }
+        if (generationTransactions.has(mutation.transactionId)) {
+          throw new Error('plugin generation transaction already exists')
+        }
+        const handle = generationVisibility.begin(
+          mutation.transactionId,
+          mutation.previous,
+          mutation.candidate,
+          mutation.transactionEpoch,
+        )
+        const supplied = new Set(mutation.affectedPluginIds)
+        if (
+          supplied.size !== handle.affectedPluginIds.length
+          || handle.affectedPluginIds.some(id => !supplied.has(id))
+          || !handle.affectedPluginIds.includes(mutation.targetId)
+        ) {
+          generationVisibility.abort(handle)
+          throw new Error('affected plugin set does not match the Host dependency closure')
+        }
+        const affected = new Set(handle.affectedPluginIds)
+        ownerDocumentBroker.registerBindings(mutation.ownerDocumentBindings ?? [])
+        registerEntityBindings(mutation.ownerDocumentBindings)
+        const previous = activeControllers().filter(controller => affected.has(controller.item.id))
+        const candidates: PluginController[] = []
+        notificationsSuppressed = true
+        try {
+          for (const id of handle.affectedPluginIds) {
+            if (!mutation.candidate.plugins.some(item => item.id === id)) continue
+            const candidate = candidateController(handle, mutation, id, module, moduleFactory)
+            registerController(candidate.controller, candidate.registerAuthority)
+            controllers.push(candidate.controller)
+            candidates.push(candidate.controller)
+            if (
+              candidate.controller.item.id === mutation.targetId
+              && mutation.authorizationDecision !== undefined
+              && (mutation.operation === 'install' || mutation.operation === 'update'
+                || mutation.operation === 'enable')
+            ) {
+              if (mutation.authorizationDecision.schemaVersion === 4) {
+                if (
+                  candidate.controller.manifest.schemaVersion !== 5 && candidate.controller.manifest.schemaVersion !== 6
+                  && candidate.controller.manifest.schemaVersion !== 7
+                  && candidate.controller.manifest.schemaVersion !== 8
+                ) {
+                  throw new Error(
+                    'permission v4 decision requires manifest-v5, manifest-v6, manifest-v7, or manifest-v8',
+                  )
+                }
+                await broker.authorizeActivationV4(
+                  candidate.controller.identity,
+                  mutation.authorizationDecision,
+                  mutation.operation as 'install' | 'update' | 'enable',
+                  candidate.controller.generationView,
+                )
+              } else if (mutation.authorizationDecision.schemaVersion === 2) {
+                if (candidate.controller.manifest.schemaVersion !== 4) {
+                  throw new Error('permission v2 decision requires manifest-v4')
+                }
+                await broker.authorizeActivationV2(
+                  candidate.controller.identity,
+                  mutation.authorizationDecision,
+                  mutation.operation as 'install' | 'update' | 'enable',
+                  candidate.controller.generationView,
+                )
+              } else {
+                await broker.authorizeActivation(
+                  candidate.controller.identity,
+                  mutation.authorizationDecision,
+                  mutation.operation as 'install' | 'update' | 'enable',
+                  candidate.controller.generationView,
+                )
+              }
+            }
+          }
+          await broker.settled()
+          const candidateById = new Map(candidates.map(controller => [controller.item.id, controller]))
+          for (const id of topologicalActivationOrder(mutation.candidate, affected)) {
+            const activation = mutation.candidate.plugins.find(item => item.id === id)
+            const controller = candidateById.get(id)
+            if (activation?.enabled !== true || controller === undefined) continue
+            if (blockedPlugins.has(id)) throw new Error(`candidate plugin ${id} is blocked`)
+            await mountPlugin(controller)
+            if (controller.status !== 'active') {
+              throw new Error(
+                `candidate plugin ${id} is not ready: ${
+                  controller.blockedReason ?? controller.error ?? controller.status
+                }`,
+              )
+            }
+          }
+          const readiness = generationVisibility.confirmReadiness(handle)
+          if (
+            (mutation.expectedRegistryEpoch !== undefined
+              && readiness.expectedRegistryEpoch !== mutation.expectedRegistryEpoch)
+            || (mutation.afterRegistryEpoch !== undefined
+              && readiness.afterRegistryEpoch !== mutation.afterRegistryEpoch)
+          ) {
+            throw new Error('shared registry epoch does not match the Host activation plan')
+          }
+          generationTransactions.set(mutation.transactionId, {
+            handle,
+            readiness,
+            affectedPluginIds: handle.affectedPluginIds,
+            previous,
+            candidates,
+            previousActivation: mutation.previous,
+            candidateActivation: mutation.candidate,
+            disposedAfter: [],
+          })
+          return readiness
+        } catch (error) {
+          const disposedCandidates: string[] = []
+          await disposeControllers(candidates, mutation.candidate, disposedCandidates).catch(() => undefined)
+          generationTransactions.set(mutation.transactionId, {
+            handle,
+            affectedPluginIds: handle.affectedPluginIds,
+            previous,
+            candidates,
+            previousActivation: mutation.previous,
+            candidateActivation: mutation.candidate,
+            disposedAfter: disposedCandidates,
+            failedStage: true,
+          })
+          throw error
+        } finally {
+          notificationsSuppressed = false
+        }
+      })
+      operation = task.catch(() => {})
+      return task
+    }
+
+    const publishPluginMutation = (transactionId: string): Promise<PluginGenerationPublication> => {
+      const task = operation.then(async () => {
+        const transaction = generationTransactions.get(transactionId)
+        if (transaction === undefined) throw new Error('unknown plugin generation transaction')
+        if (transaction.failedStage || transaction.readiness === undefined) {
+          throw new Error('plugin generation readiness failed')
+        }
+        if (transaction.publication === undefined) {
+          const barrier = generationVisibility.preparePublish(transaction.handle, transaction.readiness)
+          notificationsSuppressed = true
+          try {
+            orderControllersFor(transaction.candidateActivation)
+            transaction.publication = generationVisibility.publish(barrier)
+            currentActivation = transaction.candidateActivation
+            await routeService?.settled()
+            await broker.settled()
+            await drainSuppressedNotifications()
+            notifyBatch()
+            // Let synchronous subscribers enqueue their projection microtasks while
+            // registry-local notifications are still suppressed. Drain the finite
+            // projection/diagnostic microtask cascade without yielding a macrotask.
+            await drainBatchSubscriberMicrotasks()
+          } finally {
+            notificationsSuppressed = false
+          }
+        }
+        return transaction.publication
+      })
+      operation = task.catch(() => {})
+      return task
+    }
+
+    const completePluginMutation = (transactionId: string): Promise<RendererGenerationCleanupObservation> => {
+      const task = operation.then(async () => {
+        const transaction = generationTransactions.get(transactionId)
+        if (transaction?.publication === undefined) throw new Error('plugin generation is not published')
+        notificationsSuppressed = true
+        try {
+          await disposeControllers(transaction.previous, transaction.previousActivation, transaction.disposedAfter)
+          await drainSuppressedNotifications()
+        } finally {
+          notificationsSuppressed = false
+        }
+        return {
+          transactionId,
+          transactionEpoch: transaction.publication.transactionEpoch,
+          registryEpoch: transaction.publication.registryEpoch,
+          active: transaction.candidateActivation,
+          disposedAfter: transaction.previousActivation,
+        }
+      })
+      operation = task.catch(() => {})
+      return task
+    }
+
+    const finalizePluginMutation = (transactionId: string): Promise<void> => {
+      const task = operation.then(() => {
+        if (finalizedTransactions.has(transactionId)) return
+        const transaction = generationTransactions.get(transactionId)
+        if (
+          transaction?.publication === undefined || transaction.disposedAfter.length !== transaction.previous.length
+        ) {
+          throw new Error('plugin generation cleanup is incomplete')
+        }
+        generationVisibility.completeLastGood(transaction.publication)
+        currentActivation = committedActivation(transaction.candidateActivation)
+        generationTransactions.delete(transactionId)
+        rememberFinalizedTransaction(transactionId, transaction)
+      })
+      operation = task.catch(() => {})
+      return task
+    }
+
+    const commitPluginMutation = async (transactionId: string): Promise<void> => {
+      await publishPluginMutation(transactionId)
+      await completePluginMutation(transactionId)
+      await finalizePluginMutation(transactionId)
+    }
+
+    const rollbackPluginMutation = (transactionId: string): Promise<RendererGenerationCleanupObservation> => {
+      const task = operation.then(async () => {
+        const cached = rollbackReceipts.get(transactionId)
+        if (cached !== undefined) return cloneRendererValue(cached)
+        const liveTransaction = generationTransactions.get(transactionId)
+        const finalizedTransaction = finalizedTransactions.get(transactionId)
+        const transaction = liveTransaction ?? finalizedTransaction
+        if (transaction === undefined) throw new Error('unknown plugin generation transaction')
+        const disposedCandidates: string[] = []
+        if (transaction.publication === undefined) {
+          notificationsSuppressed = true
+          try {
+            await disposeControllers(transaction.candidates, transaction.candidateActivation, disposedCandidates)
+            await drainSuppressedNotifications()
+            const registryEpoch = generationVisibility.rollbackUnpublished(transaction.handle)
+            generationTransactions.delete(transactionId)
+            return rememberRollbackReceipt({
+              transactionId,
+              transactionEpoch: transaction.handle.transactionEpoch,
+              registryEpoch,
+              active: transaction.previousActivation,
+              disposedAfter: transaction.candidateActivation,
+            })
+          } finally {
+            notificationsSuppressed = false
+          }
+        } else {
+          notificationsSuppressed = true
+          try {
+            if (finalizedTransaction !== undefined && transaction.finalizedRollbackStarted !== true) {
+              generationVisibility.rollbackLastGood(transaction.publication)
+              currentActivation = transaction.previousActivation
+              transaction.finalizedRollbackStarted = true
+            }
+            if (finalizedTransaction !== undefined) {
+              for (const controller of transaction.previous) {
+                delete controller.generationContext
+                delete controller.generationView
+              }
+            }
+            await restoreControllers(
+              transaction.previous,
+              transaction.previousActivation,
+              transaction.disposedAfter,
+              finalizedTransaction === undefined ? transaction.publication : undefined,
+            )
+            orderControllersFor(transaction.previousActivation)
+            if (finalizedTransaction === undefined) {
+              generationVisibility.rollback(transaction.publication)
+              currentActivation = transaction.previousActivation
+            }
+            await disposeControllers(transaction.candidates, transaction.candidateActivation, disposedCandidates)
+            await routeService?.settled()
+            await broker.settled()
+            if (finalizedTransaction === undefined) generationVisibility.completeRollback(transaction.publication)
+            await drainSuppressedNotifications()
+            notifyBatch()
+            await drainBatchSubscriberMicrotasks()
+          } finally {
+            notificationsSuppressed = false
+          }
+        }
+        generationTransactions.delete(transactionId)
+        finalizedTransactions.delete(transactionId)
+        return rememberRollbackReceipt({
+          transactionId,
+          transactionEpoch: transaction.handle.transactionEpoch,
+          registryEpoch: generationVisibility.registryEpoch(),
+          active: transaction.previousActivation,
+          disposedAfter: transaction.candidateActivation,
+        })
+      })
+      operation = task.catch(() => {})
+      return task
+    }
+
+    const recoverPluginMutation = (
+      input: RendererGenerationCleanupObservation,
+    ): Promise<RendererGenerationCleanupObservation> => {
+      const task = operation.then(() => {
+        if (disposed) throw new Error('CordisX runtime is disposed')
+        if (generationTransactions.size !== 0) {
+          throw new Error('plugin generation recovery conflicts with a live transaction')
+        }
+        if (
+          input.registryEpoch !== generationVisibility.registryEpoch()
+          || input.active.profileId !== currentActivation.profileId
+          || input.active.plugins.length !== currentActivation.plugins.length
+        ) {
+          throw new Error('plugin generation recovery scope is stale')
+        }
+        const live = new Map(currentActivation.plugins.map(plugin => [plugin.id, plugin]))
+        for (const plugin of input.active.plugins) {
+          const current = live.get(plugin.id)
+          if (
+            current === undefined
+            || current.version !== plugin.version
+            || current.digest !== plugin.digest
+            || current.moduleGeneration !== plugin.moduleGeneration
+            || current.enabled !== plugin.enabled
+            || JSON.stringify(current.dependencies) !== JSON.stringify(plugin.dependencies)
+            || current.canonicalSource !== plugin.canonicalSource
+          ) {
+            throw new Error('plugin generation recovery closure is stale')
+          }
+        }
+        const disposedGenerations = new Map(
+          input.disposedAfter.plugins.map(plugin => [plugin.id, plugin.moduleGeneration]),
+        )
+        for (const controller of projectedControllers()) {
+          const candidateGeneration = disposedGenerations.get(controller.item.id)
+          if (
+            candidateGeneration !== undefined
+            && candidateGeneration === moduleGenerationOf(controller)
+            && candidateGeneration !== live.get(controller.item.id)?.moduleGeneration
+          ) {
+            throw new Error('published candidate generation survived process recovery')
+          }
+        }
+        return structuredClone(input)
+      })
+      operation = task.catch(() => {})
+      return task
+    }
+
+    const adoptRecoveredActivation = (
+      active: CordisXPluginActivationRecordV1,
+      registryEpoch: number,
+    ): Promise<void> => {
+      const task = operation.then(() => {
+        if (disposed) throw new Error('CordisX runtime is disposed')
+        if (active.runtimeGeneration !== generation) throw new Error('recovered activation runtime generation is stale')
+        generationVisibility.adoptRecoveredActivation(active, registryEpoch)
+        currentActivation = active
+      })
+      operation = task.catch(() => {})
+      return task
+    }
+
+    const abortPluginMutation = async (transactionId: string): Promise<void> => {
+      await rollbackPluginMutation(transactionId)
+    }
+
+    const reloadPluginGeneration = (
+      pluginId: string,
+      moduleGeneration: string,
+      runtimeGeneration: string,
+    ): Promise<void> => {
+      const task = operation.then(async () => {
+        if (disposed) throw new Error('CordisX runtime is disposed')
+        if (runtimeGeneration !== generation) throw new Error('stale CordisX runtime generation')
+        const controller = activeController(pluginId)
+        if (controller === undefined || controller.item.package?.moduleGeneration !== moduleGeneration) {
+          throw new Error('stale plugin module generation')
+        }
+        if (!controller.item.enabled || !controllerHasRuntimeModule(controller)) throw new Error('plugin is disabled')
+        await disposeControllerFiber(controller, 'owner-disposed')
+        try {
+          await mountPlugin(controller)
+        } catch (error) {
+          await mountPlugin(controller).catch(rollbackError => {
+            controller.status = 'failed'
+            controller.error = `rollback-failed: ${errorMessage(rollbackError)}`
+          })
+          throw error
+        } finally {
+          notify()
+        }
+      })
+      operation = task.catch(() => {})
+      return task
+    }
+
+    const updateLocalDevelopmentStatus = (
+      status: CordisXLocalDevelopmentSnapshot,
+    ): boolean => {
+      localDevelopment.set(status.sourcePath, structuredClone(status))
+      notify()
+      return true
+    }
+
+    const dispose = async (): Promise<void> => {
+      if (disposed) return
+      disposed = true
+      agentRuntimeRouteDisposed = true
+      scenarioSessionScopeAuthority?.dispose()
+      if (activeAgentRuntimeRouteInstance !== undefined) broker.revokeAgentRuntimeRoute(activeAgentRuntimeRouteInstance)
+      activeAgentRuntimeRouteInstance = undefined
+      broker.clearAgentRuntimeConnection()
+      disposeAgentPermissionFences()
+      certifiedPermissionChannel?.dispose()
+      certifiedPermissionChannel = undefined
+      await disposeInternalBootstrap?.()
+      disposeInternalBootstrap = undefined
+      disposeManager?.()
+      disposeManager = undefined
+      disposeI18nSubscription?.()
+      disposeI18nSubscription = undefined
+      disposePermissionSubscription?.()
+      disposePermissionSubscription = undefined
+      disposeExtensionPointSubscription?.()
+      disposeExtensionPointSubscription = undefined
+      for (const unsubscribe of registrySubscriptions.splice(0)) unsubscribe()
+      await operation
+      for (const controller of [...controllers].reverse()) {
+        await controller.hostDomWorker?.dispose()
+        delete controller.hostDomWorker
+        controller.agentLoopClient?.dispose()
+        delete controller.agentLoopClient
+        await controller.unregisterAgentLoop?.()
+        delete controller.unregisterAgentLoop
+        await controller.agentAdmissionBootstrapRouteReservationFiber?.dispose()
+        delete controller.agentAdmissionBootstrapRouteReservationFiber
+        await controller.agentAdmissionBootstrapRouteDeclarationFiber?.dispose()
+        delete controller.agentAdmissionBootstrapRouteDeclarationFiber
+        await controller.agentAdmissionBootstrapReservationFiber?.dispose()
+        delete controller.agentAdmissionBootstrapReservationFiber
+        await controller.agentAdmissionBootstrapTargetFiber?.dispose()
+        delete controller.agentAdmissionBootstrapTargetFiber
+        await controller.agentAdmissionBootstrapRoomReservationFiber?.dispose()
+        delete controller.agentAdmissionBootstrapRoomReservationFiber
+        await controller.agentAdmissionBootstrapRoomTargetFiber?.dispose()
+        delete controller.agentAdmissionBootstrapRoomTargetFiber
+        await controller.agentAdmissionTargetReservationFiber?.dispose()
+        delete controller.agentAdmissionTargetReservationFiber
+        await controller.agentAdmissionTargetOriginFiber?.dispose()
+        delete controller.agentAdmissionTargetOriginFiber
+        await controller.agentAdmissionReservationFiber?.dispose()
+        delete controller.agentAdmissionReservationFiber
+        await controller.approvalServiceFiber?.dispose()
+        delete controller.approvalServiceFiber
+        await controller.sessionRegistryFiber?.dispose()
+        delete controller.sessionRegistryFiber
+        await controller.agentRegistryFiber?.dispose()
+        delete controller.agentRegistryFiber
+        await controller.entityRegistryFiber?.dispose()
+        delete controller.entityRegistryFiber
+        controller.unregisterAgentSessionMigration?.()
+        delete controller.unregisterAgentSessionMigration
+        controller.documentsClient?.dispose()
+        delete controller.documentsClient
+        await controller.unregisterDocuments?.()
+        delete controller.unregisterDocuments
+        agentRuntime.releaseOwner(controller.identity, 'generation-replaced', moduleGenerationOf(controller))
+        await controller.fiber?.dispose()
+        retirePrincipal(controller, 'Plugin disposed with runtime generation')
+        delete controller.fiber
+      }
+      generationTransactions.clear()
+      finalizedTransactions.clear()
+      rollbackReceipts.clear()
+      configBridge?.dispose()
+      serviceConfigBridge?.dispose()
+      iconThemePreferenceBridge?.dispose()
+      disposeIconThemePreferenceSubscription?.()
+      disposeIconThemePreferenceSubscription = undefined
+      lifecycleBridge?.dispose()
+      managerContentConfigAuthority?.dispose()
+      managerContentConfigAuthority = undefined
+      configRenderers.dispose()
+      configuration.dispose()
+      unbindIconThemeRegistry()
+      adapterHandle?.dispose()
+      adapterHandle = undefined
+      transientCanvasCoordinator?.dispose()
+      transientCanvasCoordinator = undefined
+      undeclareManagerContentOutlet?.()
+      undeclareManagerContentOutlet = undefined
+      undeclareManagerOutlet?.()
+      undeclareManagerOutlet = undefined
+      await slotFiber?.dispose()
+      slotFiber = undefined
+      await configRendererFiber?.dispose()
+      configRendererFiber = undefined
+      await iconThemeFiber?.dispose()
+      iconThemeFiber = undefined
+      await visualFiber?.dispose()
+      visualFiber = undefined
+      await channelManagerFiber?.dispose()
+      channelManagerFiber = undefined
+      await playgroundRoomSimulationBridgeFiber?.dispose()
+      playgroundRoomSimulationBridgeFiber = undefined
+      playgroundRoomSimulationBridgeRegistry?.dispose()
+      await settingsFiber?.dispose()
+      settingsFiber = undefined
+      await managerContentFiber?.dispose()
+      managerContentFiber = undefined
+      await routeFiber?.dispose()
+      routeFiber = undefined
+      routeHistory.dispose()
+      await pageFiber?.dispose()
+      pageFiber = undefined
+      if (ownsSharedReactRuntime) sharedReactRuntime?.dispose()
+      sharedReactRuntime = undefined
+      ownsSharedReactRuntime = false
+      await commandFiber?.dispose()
+      commandFiber = undefined
+      await platformFiber?.dispose()
+      platformFiber = undefined
+      await systemPromptFiber?.dispose()
+      systemPromptFiber = undefined
+      connectorBroker.disposeAll()
+      agentLoopBroker.dispose()
+      agentLoopBrokerV2.dispose()
+      agentLoopBrokerV4.dispose()
+      disposeAgentRouteHistory()
+      disposeAgentRouteFences()
+      await agentSessionRuntime.dispose()
+      playgroundAgentSessionPersistence?.dispose()
+      ownerDocumentBroker.dispose()
+      await agentRuntime.dispose()
+      bindingPlatformAdapter?.dispose()
+      bindingPlatformAdapter = undefined
+      if (permissionStore instanceof BindingPermissionPolicyStore) permissionStore.dispose()
+      for (const remove of disposeExtensionPointCatalogs.splice(0).reverse()) await remove()
+      unregisterManagerPointCatalog?.()
+      unregisterManagerPointCatalog = undefined
+      await i18nFiber?.dispose()
+      i18nFiber = undefined
+      listeners.clear()
+      for (const controller of controllers) controller.unregisterPermissions?.()
+      for (const controller of controllers) controller.unregisterExtensionPoints?.()
+      hostDomAuthority.dispose()
+      broker.dispose()
+      window.removeEventListener('error', recordUnknownError)
+      window.removeEventListener('unhandledrejection', recordUnknownError)
+      disconnectPluginConsoleVisibility()
+      pluginConsole.dispose()
+      extensionPointBroker.dispose()
+      extensionPointDescriptors.dispose()
+      iconThemeRegistry.dispose()
+      settingsProjectionSites.clear()
+      settingsNavigationProjectionSites.clear()
+      extensionContributionProjectionSites.clear()
+      if (globalThis.__cordisxRuntime === handle) globalThis.__cordisxRuntime = undefined
+      document.documentElement.removeAttribute('data-cordisx-ready')
+    }
+
+    const handle: CordisXRuntimeHandle = {
+      version: metadata.version,
+      get pluginIds() {
+        return projectedControllers().map(controller => controller.item.id)
+      },
+      ...(browserHostedPlayground
+        ? {
+          playgroundRouteHistory: () => {
+            const snapshot = routeHistory.snapshot()
+            return Object.freeze({
+              available: snapshot.available,
+              canGoBack: snapshot.available && snapshot.canGoBack === true,
+              canGoForward: snapshot.available && snapshot.canGoForward === true,
+              ...(snapshot.reason === undefined ? {} : { reason: snapshot.reason }),
+            })
+          },
+          subscribePlaygroundRouteHistory: (listener: () => void) => routeHistory.subscribe(listener),
+          goPlaygroundRouteHistory: async (delta: -1 | 1) => {
+            await routeHistory.go(delta)
+          },
+        }
+        : {}),
+      ...(playgroundRoomSimulationBridgeRegistry === undefined ? {} : {
+        playgroundRoomSimulationBridge: playgroundRoomSimulationBridgeRegistry.client,
+      }),
+      execute: (owner, reference, invocationKey) => {
+        if (commandService === undefined) return Promise.reject(new Error('CordisX commands are not ready'))
+        return commandService.executeFor(owner, reference, invocationKey)
+      },
+      navigate: async (owner, reference) => {
+        if (routeService === undefined) return Promise.reject(new Error('CordisX routes are not ready'))
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          try {
+            return await routeService.navigateFor(owner, reference)
+          } catch (error) {
+            if (!(error instanceof Error) || error.message !== 'permission.review-pending') throw error
+            const controller = activeControllers().find(candidate => candidate.item.id === owner)
+            if (controller === undefined) throw error
+            const decisions = await broker.reviewPendingDomAccess(
+              controller.identity,
+              moduleGenerationOf(controller),
+              controller.generationView,
+            )
+            if (decisions.length === 0) throw error
+            const denied = decisions.find(decision => !decision.authorized)
+            if (denied !== undefined) throw new Error(denied.reason)
+          }
+        }
+        throw new Error('permission.review-retry-exhausted')
+      },
+      mountSettingsTab: (id, panelBody) => {
+        if (routeService === undefined || slotService === undefined) {
+          return Promise.reject(new Error('CordisX manager settings are not ready'))
+        }
+        const registration = slotService.snapshot().find(item =>
+          item.surface === 'manager.settings.tabs'
+          && item.qualifiedId === id && item.valid && item.visible && item.authorized && !item.pending && !item.disabled
+        )
+        if (registration === undefined) {
+          return Promise.reject(new Error(`manager settings tab ${id} is not activatable`))
+        }
+        const item = registration.item as CordisXManagerSettingsTabItem
+        return routeService.mountManagerSettingsFor(registration.owner, item.route, registration.qualifiedId, panelBody)
+      },
+      closeSettingsTabContent: () => routeService?.closeManagerSettings() ?? Promise.resolve(),
+      managerContentPresentation: (id, reference) => {
+        if (routeService === undefined || slotService === undefined) return undefined
+        const registration = slotService.snapshot().find(item =>
+          item.surface === 'manager.settings.navigation-items'
+          && item.qualifiedId === id && item.valid && item.visible && item.authorized && !item.pending && !item.disabled
+        )
+        if (registration === undefined) return undefined
+        return routeService.managerContentPresentationFor(registration.owner, reference)
+      },
+      mountManagerContent: (id, reference, container, navigation) => {
+        if (routeService === undefined || slotService === undefined) {
+          return Promise.reject(new Error('CordisX manager content is not ready'))
+        }
+        const registration = slotService.snapshot().find(item =>
+          item.surface === 'manager.settings.navigation-items'
+          && item.qualifiedId === id && item.valid && item.visible && item.authorized && !item.pending && !item.disabled
+          && (item.group === 'before-settings' || item.group === 'after-settings')
+        )
+        if (registration === undefined) {
+          return Promise.reject(new Error(`manager content item ${id} is not activatable`))
+        }
+        return routeService.mountManagerContentFor(registration.owner, reference, registration.qualifiedId, container, {
+          navigate: (next: CordisXRouteReference) => navigation.navigate(next),
+          back: () => navigation.back(),
+          close: () => navigation.back(),
+        })
+      },
+      closeManagerContent: () => routeService?.closeManagerContent() ?? Promise.resolve(),
+      pluginConsole: (id) => {
+        const controller = activeController(id)
+        if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+        return pluginConsole.query(controller.identity)
+      },
+      clearPluginConsole: (id) => {
+        const controller = activeController(id)
+        if (controller === undefined) throw new Error(`unknown CordisX plugin: ${id}`)
+        pluginConsole.clear(controller.identity)
+      },
+      subscribePluginConsole: listener => pluginConsole.subscribe(listener),
+      setExtensionPointPolicy,
+      setExtensionPointPolicies,
+      setExtensionPointControlAuthorization,
+      setExtensionPointControlGroupChoice,
+      permissionAuthorizationPlan,
+      authorizePlugin,
+      permissionAuthorizationPlanV2,
+      authorizePluginV2,
+      permissionAuthorizationPlanV4: id => {
+        const controller = activeController(id)
+        return controller === undefined
+          ? undefined
+          : broker.authorizationPlanV4(controller.identity, 'enable', controller.generationView)
+      },
+      authorizePluginV4,
+      activePluginGeneration: () => structuredClone(currentActivation),
+      generationNotificationTrace: () => generationNotificationTrace.map(item => ({ ...item })),
+      settleRegistryProjection,
+      requestPluginLifecycle: (
+        lifecycleOperation: CordisXPluginLifecycleOperationV1,
+      ): Promise<CordisXPluginLifecycleResultV1> => {
+        if (lifecycleBridge === undefined) {
+          return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
+        }
+        return lifecycleBridge.request(currentActivation.revision, lifecycleOperation)
+      },
+      requestPluginBundleLifecycle: async (
+        operation: CordisXPluginBundleLifecycleOperationV1,
+      ): Promise<CordisXPluginBundleLifecycleResultV1> => {
+        if (lifecycleBridge === undefined || currentPluginBundles === undefined) {
+          throw new Error('plugin bundle lifecycle operations are unavailable')
+        }
+        const result = await lifecycleBridge.bundleRequest(currentPluginBundles, operation)
+        currentPluginBundles = await lifecycleBridge.bundleSnapshot()
+        if (result.outcome === 'applied') {
+          const effective = new Map(
+            currentPluginBundles.bundles.flatMap(bundle => bundle.permissions).map(permission => [
+              `${permission.pluginId}\u0000${permission.permissionId}`,
+              permission,
+            ]),
+          )
+          const runtimePermissions = broker.snapshots()
+          for (const permission of effective.values()) {
+            const runtimePermission = runtimePermissions.find(item =>
+              item.identity.id === permission.pluginId
+              && item.capability === permission.capability && JSON.stringify(item.scope) === permission.scopeLabel
+            )
+            if (runtimePermission !== undefined) {
+              await setPermissionPolicy(
+                permission.pluginId,
+                permission.capability as CordisXPermissionCapabilityV4,
+                permission.effectivePolicy,
+                runtimePermission.scope,
+              )
+            }
+          }
+        }
+        notify('plugin-bundles')
+        return result
+      },
+      permissionLifecycleReviewPlanV2: target => {
+        if (lifecycleBridge === undefined) {
+          return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
+        }
+        return lifecycleBridge.permissionReviewPlanV2(currentActivation.revision, target)
+      },
+      applyPermissionLifecycleReviewV2: decision => {
+        if (lifecycleBridge === undefined) {
+          return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
+        }
+        return lifecycleBridge.applyPermissionReviewV2(currentActivation.revision, decision)
+      },
+      permissionLifecycleReviewPlanV4: target => {
+        if (lifecycleBridge === undefined) {
+          return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
+        }
+        return lifecycleBridge.permissionReviewPlanV4(currentActivation.revision, target)
+      },
+      applyPermissionLifecycleReviewV4: decision => {
+        if (lifecycleBridge === undefined) {
+          return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
+        }
+        return lifecycleBridge.applyPermissionReviewV4(currentActivation.revision, decision)
+      },
+      stagePluginMutation,
+      publishPluginMutation,
+      completePluginMutation,
+      finalizePluginMutation,
+      rollbackPluginMutation,
+      recoverPluginMutation,
+      adoptRecoveredActivation,
+      commitPluginMutation,
+      abortPluginMutation,
+      reloadPluginGeneration,
+      updateLocalDevelopmentStatus,
+      ...(metadata.hostKind === 'playground'
+        ? {
+          playgroundAgentSessions: () => projectPlaygroundAgentSessions(agentSessionRuntime.playgroundProjection()),
+        }
+        : {}),
+      ...(playgroundMockAgentLoop === undefined ? {} : {
+        playgroundMockAgentLoop: () => playgroundMockAgentLoop.snapshot(),
+        resetPlaygroundMockAgentLoop: () => {
+          const before = playgroundMockAgentLoop.snapshot().tasks.length
+          agentLoopBrokerV2.resetPlaygroundState()
+          agentLoopBrokerV4.resetPlaygroundState()
+          playgroundMockAgentLoopV4Transport?.resetPlaygroundState()
+          playgroundMockAgentLoop.resetPlaygroundState()
+          try {
+            document.defaultView?.sessionStorage.removeItem(simulatorSessionKey)
+            document.defaultView?.sessionStorage.removeItem(`${simulatorSessionKey}:agent-loop-v2-ledger`)
+            document.defaultView?.sessionStorage.removeItem(`${simulatorSessionKey}:agent-loop-v4-ledger`)
+          } catch { /* optional browser session storage */ }
+          return Object.freeze({ before, after: playgroundMockAgentLoop.snapshot().tasks.length })
+        },
+      }),
+      snapshot: publicSnapshot,
+      setPluginBlocked,
+      updatePluginConfig,
+      listServiceConfigs: async (pluginId: string): Promise<readonly HostServiceConfigDescriptor[]> => {
+        if (serviceConfigBridge === undefined) return []
+        return await serviceConfigBridge.list(pluginId)
+      },
+      updateServiceConfig: async (mutation: HostServiceConfigMutation): Promise<HostServiceConfigMutationResult> => {
+        if (serviceConfigBridge === undefined) throw new Error('service-config-unavailable')
+        return await serviceConfigBridge.mutate(mutation)
+      },
+      mountConfigRenderer: (pluginId, field, container, setDraft) =>
+        configRenderers.mount(pluginId, field, container, setDraft),
+      setPermissionPolicy,
+      subscribe,
+      dispose,
+    }
+    const managerModel: ManagerModel = {
+      ...handle,
+      snapshot: managerSnapshot,
+      iconThemePreferenceWritable: iconThemePreferenceBridge !== undefined,
+      selectIconTheme: (expectedProfileRevision, candidate) =>
+        selectAndPersistIconTheme(
+          iconThemeRegistry,
+          iconThemePreferenceBridge,
+          generation,
+          expectedProfileRevision,
+          candidate,
+        ),
+    }
+    const managerNavigationController = new HostManagerNavigationController()
+
+    try {
+      i18nFiber = ctx.plugin(CordisXI18nService)
+      await i18nFiber
+      if (playgroundRoomSimulationBridgeRegistry !== undefined) {
+        playgroundRoomSimulationBridgeFiber = ctx.plugin(
+          CordisXPlaygroundRoomSimulationBridgeService,
+          playgroundRoomSimulationBridgeRegistry,
+        )
+        await playgroundRoomSimulationBridgeFiber
+      }
+      i18nService = ctx.i18n as CordisXI18nService
+      for (const catalog of CORDISX_EXTENSION_POINT_LOCALE_CATALOGS) {
+        disposeExtensionPointCatalogs.push(i18nService.define(catalog))
+      }
+      for (const catalog of CORDISX_CAPABILITY_AVAILABILITY_LOCALE_CATALOGS) {
+        disposeExtensionPointCatalogs.push(i18nService.define(catalog))
+      }
+      for (const catalog of CORDISX_PERMISSION_LOCALE_CATALOGS) {
+        disposeExtensionPointCatalogs.push(i18nService.define(catalog))
+      }
+      disposeI18nSubscription = i18nService.subscribeInternal(notifyFrom('i18n'))
+      disposePermissionSubscription = broker.subscribe(() => {
+        slotService?.invalidatePointPolicies()
+        void routeService?.invalidatePointPolicies()
+        notify('permissions')
+      })
+      disposeExtensionPointSubscription = extensionPointBroker.subscribe(notifyFrom('extension-policy'))
+      settingsFiber = ctx.plugin(CordisXPluginSettingsService, { registry: configuration, console: pluginConsole })
+      await settingsFiber
+      configRendererFiber = ctx.plugin(CordisXConfigRendererService, {
+        registry: configRenderers,
+        console: pluginConsole,
+      })
+      await configRendererFiber
+      iconThemeFiber = ctx.plugin(CordisXIconThemeService, iconThemeRegistry)
+      await iconThemeFiber
+      visualFiber = ctx.plugin(CordisXVisualService)
+      await visualFiber
+      channelManagerFiber = metadata.channelManager === undefined && serviceConfigBridge === undefined
+        ? ctx.plugin(CordisXChannelManagerService)
+        : ctx.plugin(CordisXChannelManagerService, {
           ...(metadata.channelManager === undefined ? {} : { projection: metadata.channelManager }),
           ...(serviceConfigBridge === undefined ? {} : {
             serviceConfig: {
@@ -3428,175 +3900,214 @@ async function start(
             actions: { run: async (action, input) => await channelActionsBridge.run(action, input) },
           }),
         })
-    await channelManagerFiber
-    registrySubscriptions.push(configuration.subscribe(notifyFrom('configuration')))
-    platformFiber = ctx.plugin(CordisXPlatformService, { adapter: platformAdapter, broker, console: pluginConsole })
-    await platformFiber
-    systemPromptFiber = ctx.plugin(CordisXSystemPromptService, { runtime: agentRuntime, console: pluginConsole })
-    await systemPromptFiber
-    commandFiber = ctx.plugin(CordisXCommandService, { console: pluginConsole })
-    await commandFiber
-    commandService = ctx.commands as CordisXCommandService
-    pageFiber = ctx.plugin(CordisXPageService, pluginConsole)
-    await pageFiber
-    pageService = ctx.pages as CordisXPageService
-    routeFiber = ctx.plugin(CordisXRouteService, { history: routeHistory, console: pluginConsole })
-    await routeFiber
-    routeService = ctx.routes as CordisXRouteService
-    managerContentConfigAuthority = new ManagerContentConfigAuthority({
-      configuration,
-      profileId: metadata.profileId,
-      runtimeGeneration: generation,
-      locale: () => i18nService?.getSnapshot().locale ?? 'en',
-      resolveText: (owner, message, site) => i18nService?.resolveFor(owner, message, site).text
-        ?? message.fallback
-        ?? message.key,
-      update: updatePluginConfig,
-    })
-    routeService.setManagerContentConfigFactory(input => managerContentConfigAuthority!.bind(input))
-    reconcileAgentRuntimeRoute()
-    managerContentFiber = ctx.plugin(CordisXManagerContentNavigationService)
-    await managerContentFiber
-    unregisterManagerPointCatalog = extensionPointDescriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
-    const managerOutletController = {
-      getSnapshot: () => ({ available: false, contextKey: generation, placement: 'absolute' as const }),
-      subscribe: (_listener: () => void) => () => {},
-      show: () => {},
-      hide: () => {},
-    }
-    undeclareManagerOutlet = routeService.outlets.declare({
-      schemaVersion: 1,
-      id: 'manager.settings.content',
-      authority: 'host-adapter',
-      scope: 'manager-settings',
-      preferredPlacement: 'absolute',
-      contextPolicy: 'generation',
-      presentationGroup: 'manager.settings',
-    }, managerOutletController, path => path.startsWith('/manager/settings/') && path.length > '/manager/settings/'.length)
-    const managerContentOutletController = {
-      getSnapshot: () => ({ available: false, contextKey: generation, placement: 'absolute' as const }),
-      subscribe: (_listener: () => void) => () => {},
-      show: () => {},
-      hide: () => {},
-    }
-    undeclareManagerContentOutlet = routeService.outlets.declare({
-      schemaVersion: 1,
-      id: 'manager.content',
-      authority: 'host-adapter',
-      scope: 'manager',
-      preferredPlacement: 'absolute',
-      contextPolicy: 'generation',
-      presentationGroup: 'manager',
-    }, managerContentOutletController, path => (
-      path.startsWith('/manager/extensions/') && path.length > '/manager/extensions/'.length
-    ))
-    slotFiber = ctx.plugin(CordisXSlotService, { console: pluginConsole })
-    await slotFiber
-    slotService = ctx.slots as CordisXSlotService
-    slotService.setResolvers({
-      command: (owner, reference, view) => commandService?.hasFor(owner, reference, view) ?? false,
-      route: (owner, id, view) => routeService?.hasFor(owner, id, view) ?? false,
-      managerSettingsRoute: (owner, id, view) => routeService?.managerSettingsRouteFor(owner, id, view)
-        ?? { state: 'pending', detail: 'CordisX routes are not ready' },
-      managerSettingsNavigationRoute: (owner, id, view) => routeService?.managerSettingsNavigationRouteFor(owner, id, view)
-        ?? { state: 'pending', detail: 'CordisX routes are not ready' },
-    })
-    commandService.setAccessResolver(extensionPointBroker)
-    routeService.setAccessResolver(extensionPointBroker)
-    slotService.setAccessResolver(extensionPointBroker)
-    transientCanvasCoordinator = new TransientCanvasCoordinator(document, slotService.registry)
-    registrySubscriptions.push(
-      extensionPointDescriptors.subscribe(notifyFrom('extension-descriptors')),
-      commandService.subscribeInternal(notifyFrom('commands')),
-      pageService.registry.subscribe(notifyFrom('pages')),
-      routeService.subscribeInternal(notifyFrom('routes')),
-      slotService.subscribeInternal(notifyFrom('surfaces')),
-      iconThemeRegistry.subscribe(notifyFrom('icon-themes')),
-    )
-    adapterHandle = metadata.hostKind === 'playground'
-      ? installPlaygroundAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, {
-          profileId: metadata.profileId,
-          transientCanvas: transientCanvasCoordinator,
-        })
-      : installCodexAdapter(document, slotService, commandService, routeService, i18nService, extensionPointDescriptors, {
-          generation,
-          adapterVersion: metadata.version,
-          profileId: metadata.profileId,
-          transientCanvas: transientCanvasCoordinator,
-        })
-    const legacyAuthorizationGroups = new Map<string, {
-      readonly source: string
-      readonly pluginId: string
-      readonly pointId: string
-      readonly policies: Set<'allow' | 'deny'>
-    }>()
-    for (const record of [
-      ...legacyExtensionPointPolicies.map(item => ({ identity: item.identity, policy: item.policy })),
-      ...slotService.controlLegacyAuthorizations().map(item => ({ identity: item.identity, policy: item.policy })),
-    ]) {
-      if (record.policy === 'inherit' || extensionPointDescriptors.descriptor(record.identity.pointId) === undefined) continue
-      const key = `${record.identity.source}\u0000${record.identity.pluginId}\u0000${record.identity.pointId}`
-      const group = legacyAuthorizationGroups.get(key) ?? {
-        source: record.identity.source,
-        pluginId: record.identity.pluginId,
-        pointId: record.identity.pointId,
-        policies: new Set<'allow' | 'deny'>(),
-      }
-      group.policies.add(record.policy)
-      legacyAuthorizationGroups.set(key, group)
-    }
-    for (const group of legacyAuthorizationGroups.values()) {
-      const controller = activeController(group.pluginId, group.source)
-      if (controller === undefined || group.policies.size !== 1 || broker.hasDomPolicy(controller.identity, group.pointId)) continue
-      await broker.setDomPolicy(
-        controller.identity,
-        group.pointId,
-        group.policies.has('allow') ? 'allow-persistent' : 'deny-persistent',
-      )
-    }
-    for (const controller of controllers) {
-      if (controller.status !== 'active') continue
-      await mountPlugin(controller)
-    }
-    await routeService.registry.startHistoryProjection()
-    if (metadata.iconThemePreference !== undefined) {
-      // Restore only after every provider has had a chance to register. An
-      // unknown, stale, disposed, or version-mismatched identity leaves the
-      // pinned Reicon default active without exposing private registration data.
-      iconThemeRegistry.selectProvider(
-        `iconrestore_${String(Date.now()).padStart(16, '0')}`,
-        iconThemeRegistry.selection().profileRevision,
-        generation,
-        metadata.iconThemePreference,
-      )
-    }
-    if (iconThemePreferenceBridge !== undefined) {
-      disposeIconThemePreferenceSubscription = iconThemePreferenceBridge.subscribe(preference => {
-        if (disposed) return
-        reconcileIconThemePreference(iconThemeRegistry, generation, preference)
+      await channelManagerFiber
+      registrySubscriptions.push(configuration.subscribe(notifyFrom('configuration')))
+      platformFiber = ctx.plugin(CordisXPlatformService, { adapter: platformAdapter, broker, console: pluginConsole })
+      await platformFiber
+      systemPromptFiber = ctx.plugin(CordisXSystemPromptService, { runtime: agentRuntime, console: pluginConsole })
+      await systemPromptFiber
+      commandFiber = ctx.plugin(CordisXCommandService, { console: pluginConsole })
+      await commandFiber
+      commandService = ctx.commands as CordisXCommandService
+      pageFiber = ctx.plugin(CordisXPageService, pluginConsole)
+      await pageFiber
+      pageService = ctx.pages as CordisXPageService
+      routeFiber = ctx.plugin(CordisXRouteService, { history: routeHistory, console: pluginConsole })
+      await routeFiber
+      routeService = ctx.routes as CordisXRouteService
+      managerContentConfigAuthority = new ManagerContentConfigAuthority({
+        configuration,
+        profileId: metadata.profileId,
+        runtimeGeneration: generation,
+        locale: () => i18nService?.getSnapshot().locale ?? 'en',
+        resolveText: (owner, message, site) =>
+          i18nService?.resolveFor(owner, message, site).text
+            ?? message.fallback
+            ?? message.key,
+        update: updatePluginConfig,
       })
-      const currentPreference = iconThemePreferenceBridge.current()
-      if (currentPreference !== undefined) {
-        reconcileIconThemePreference(iconThemeRegistry, generation, currentPreference)
+      routeService.setManagerContentConfigFactory(input => managerContentConfigAuthority!.bind(input))
+      reconcileAgentRuntimeRoute()
+      managerContentFiber = ctx.plugin(CordisXManagerContentNavigationService)
+      await managerContentFiber
+      unregisterManagerPointCatalog = extensionPointDescriptors.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
+      const managerOutletController = {
+        getSnapshot: () => ({ available: false, contextKey: generation, placement: 'absolute' as const }),
+        subscribe: (_listener: () => void) => () => {},
+        show: () => {},
+        hide: () => {},
       }
-      await iconThemePreferenceBridge.ready()
+      undeclareManagerOutlet = routeService.outlets.declare(
+        {
+          schemaVersion: 1,
+          id: 'manager.settings.content',
+          authority: 'host-adapter',
+          scope: 'manager-settings',
+          preferredPlacement: 'absolute',
+          contextPolicy: 'generation',
+          presentationGroup: 'manager.settings',
+        },
+        managerOutletController,
+        path => path.startsWith('/manager/settings/') && path.length > '/manager/settings/'.length,
+      )
+      const managerContentOutletController = {
+        getSnapshot: () => ({ available: false, contextKey: generation, placement: 'absolute' as const }),
+        subscribe: (_listener: () => void) => () => {},
+        show: () => {},
+        hide: () => {},
+      }
+      undeclareManagerContentOutlet = routeService.outlets.declare(
+        {
+          schemaVersion: 1,
+          id: 'manager.content',
+          authority: 'host-adapter',
+          scope: 'manager',
+          preferredPlacement: 'absolute',
+          contextPolicy: 'generation',
+          presentationGroup: 'manager',
+        },
+        managerContentOutletController,
+        path => (
+          path.startsWith('/manager/extensions/') && path.length > '/manager/extensions/'.length
+        ),
+      )
+      slotFiber = ctx.plugin(CordisXSlotService, { console: pluginConsole })
+      await slotFiber
+      slotService = ctx.slots as CordisXSlotService
+      slotService.setResolvers({
+        command: (owner, reference, view) => commandService?.hasFor(owner, reference, view) ?? false,
+        route: (owner, id, view) => routeService?.hasFor(owner, id, view) ?? false,
+        managerSettingsRoute: (owner, id, view) =>
+          routeService?.managerSettingsRouteFor(owner, id, view)
+            ?? { state: 'pending', detail: 'CordisX routes are not ready' },
+        managerSettingsNavigationRoute: (owner, id, view) =>
+          routeService?.managerSettingsNavigationRouteFor(owner, id, view)
+            ?? { state: 'pending', detail: 'CordisX routes are not ready' },
+      })
+      commandService.setAccessResolver(extensionPointBroker)
+      routeService.setAccessResolver(extensionPointBroker)
+      slotService.setAccessResolver(extensionPointBroker)
+      transientCanvasCoordinator = new TransientCanvasCoordinator(document, slotService.registry)
+      registrySubscriptions.push(
+        extensionPointDescriptors.subscribe(notifyFrom('extension-descriptors')),
+        commandService.subscribeInternal(notifyFrom('commands')),
+        pageService.registry.subscribe(notifyFrom('pages')),
+        routeService.subscribeInternal(notifyFrom('routes')),
+        slotService.subscribeInternal(notifyFrom('surfaces')),
+        iconThemeRegistry.subscribe(notifyFrom('icon-themes')),
+      )
+      adapterHandle = metadata.hostKind === 'playground'
+        ? installPlaygroundAdapter(
+          document,
+          slotService,
+          commandService,
+          routeService,
+          i18nService,
+          extensionPointDescriptors,
+          {
+            profileId: metadata.profileId,
+            transientCanvas: transientCanvasCoordinator,
+          },
+        )
+        : installCodexAdapter(
+          document,
+          slotService,
+          commandService,
+          routeService,
+          i18nService,
+          extensionPointDescriptors,
+          {
+            generation,
+            adapterVersion: metadata.version,
+            profileId: metadata.profileId,
+            transientCanvas: transientCanvasCoordinator,
+          },
+        )
+      const legacyAuthorizationGroups = new Map<string, {
+        readonly source: string
+        readonly pluginId: string
+        readonly pointId: string
+        readonly policies: Set<'allow' | 'deny'>
+      }>()
+      for (
+        const record of [
+          ...legacyExtensionPointPolicies.map(item => ({ identity: item.identity, policy: item.policy })),
+          ...slotService.controlLegacyAuthorizations().map(item => ({ identity: item.identity, policy: item.policy })),
+        ]
+      ) {
+        if (
+          record.policy === 'inherit' || extensionPointDescriptors.descriptor(record.identity.pointId) === undefined
+        ) continue
+        const key = `${record.identity.source}\u0000${record.identity.pluginId}\u0000${record.identity.pointId}`
+        const group = legacyAuthorizationGroups.get(key) ?? {
+          source: record.identity.source,
+          pluginId: record.identity.pluginId,
+          pointId: record.identity.pointId,
+          policies: new Set<'allow' | 'deny'>(),
+        }
+        group.policies.add(record.policy)
+        legacyAuthorizationGroups.set(key, group)
+      }
+      for (const group of legacyAuthorizationGroups.values()) {
+        const controller = activeController(group.pluginId, group.source)
+        if (
+          controller === undefined || group.policies.size !== 1
+          || broker.hasDomPolicy(controller.identity, group.pointId)
+        ) continue
+        await broker.setDomPolicy(
+          controller.identity,
+          group.pointId,
+          group.policies.has('allow') ? 'allow-persistent' : 'deny-persistent',
+        )
+      }
+      for (const controller of controllers) {
+        if (controller.status !== 'active') continue
+        await mountPlugin(controller)
+      }
+      await routeService.registry.startHistoryProjection()
+      if (metadata.iconThemePreference !== undefined) {
+        // Restore only after every provider has had a chance to register. An
+        // unknown, stale, disposed, or version-mismatched identity leaves the
+        // pinned Reicon default active without exposing private registration data.
+        iconThemeRegistry.selectProvider(
+          `iconrestore_${String(Date.now()).padStart(16, '0')}`,
+          iconThemeRegistry.selection().profileRevision,
+          generation,
+          metadata.iconThemePreference,
+        )
+      }
+      if (iconThemePreferenceBridge !== undefined) {
+        disposeIconThemePreferenceSubscription = iconThemePreferenceBridge.subscribe(preference => {
+          if (disposed) return
+          reconcileIconThemePreference(iconThemeRegistry, generation, preference)
+        })
+        const currentPreference = iconThemePreferenceBridge.current()
+        if (currentPreference !== undefined) {
+          reconcileIconThemePreference(iconThemeRegistry, generation, currentPreference)
+        }
+        await iconThemePreferenceBridge.ready()
+      }
+      disposeManager = installReactCordisXManager(document, managerModel, {
+        navigationController: managerNavigationController,
+        ...(metadata.hostKind === 'playground'
+          ? {
+            triggerTarget: () =>
+              document.querySelector<HTMLElement>('[data-cordisx-playground-manager-trigger]') ?? undefined,
+          }
+          : {}),
+      })
+    } catch (error) {
+      await dispose()
+      throw error
     }
-    disposeManager = installReactCordisXManager(document, managerModel, {
-      navigationController: managerNavigationController,
-      ...(metadata.hostKind === 'playground'
-        ? { triggerTarget: () => document.querySelector<HTMLElement>('[data-cordisx-playground-manager-trigger]') ?? undefined }
-        : {}),
-    })
-  } catch (error) {
-    await dispose()
-    throw error
-  }
 
-  globalThis.__cordisxRuntime = handle
-  document.documentElement.dataset.cordisxReady = 'true'
-  const activeIds = controllers.filter(controller => controller.status === 'active').map(controller => controller.item.id)
-  console.info(`[cordisx] mounted ${activeIds.length} plugin(s): ${activeIds.join(', ')}`)
-  return handle
+    globalThis.__cordisxRuntime = handle
+    document.documentElement.dataset.cordisxReady = 'true'
+    const activeIds = controllers.filter(controller => controller.status === 'active').map(controller =>
+      controller.item.id
+    )
+    console.info(`[cordisx] mounted ${activeIds.length} plugin(s): ${activeIds.join(', ')}`)
+    return handle
   } catch (error) {
     certifiedPermissionChannel?.dispose()
     certifiedPermissionChannel = undefined
@@ -3625,9 +4136,11 @@ export function installCordisX(
   metadata: CordisXRuntimeMetadata,
   internalBootstrap?: CordisXInternalRendererBootstrap,
 ): Promise<CordisXRuntimeHandle> {
-  if (metadata.generation !== undefined
+  if (
+    metadata.generation !== undefined
     && globalThis.__cordisxBootGeneration === metadata.generation
-    && globalThis.__cordisxBoot !== undefined) return globalThis.__cordisxBoot
+    && globalThis.__cordisxBoot !== undefined
+  ) return globalThis.__cordisxBoot
   globalThis.__cordisxRequestedGeneration = metadata.generation
   const previous = globalThis.__cordisxBoot ?? Promise.resolve(undefined)
   const next = previous.catch(() => undefined).then(async () => {
@@ -3635,8 +4148,10 @@ export function installCordisX(
     // their requested generation. A stale CDP registration therefore cannot
     // activate old plugin code before the newest registration supersedes it.
     await new Promise<void>(resolve => setTimeout(resolve, 0))
-    if (metadata.generation !== undefined
-      && globalThis.__cordisxRequestedGeneration !== metadata.generation) {
+    if (
+      metadata.generation !== undefined
+      && globalThis.__cordisxRequestedGeneration !== metadata.generation
+    ) {
       throw new Error('CordisX bootstrap generation was superseded')
     }
     return await start(plugins, metadata, internalBootstrap)

@@ -46,12 +46,14 @@ export const PLUGIN_RUNTIME_MANIFEST_SCHEMAS = [
 ] as const
 
 const LOCAL_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
-const SEMANTIC_VERSION = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+const SEMANTIC_VERSION =
+  /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
 const DIGEST = /^sha256:[a-f0-9]{64}$/
 const ENTRY = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:mjs|js|ts)$/
 const JSON_PATH = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.json$/
 const PUBLIC_HTTPS = /^https:\/\/[^?#]+$/
-const ENTITY_FILE_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-file.v1.schema.json'
+const ENTITY_FILE_SCHEMA_V1 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-file.v1.schema.json'
 const FORBIDDEN_RUNTIME_VALUE_KEYS = new Set([
   'connection',
   'connections',
@@ -85,11 +87,15 @@ function object(value: unknown, label: string): Record<string, unknown> {
 function exactKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
   const accepted = new Set(allowed)
   const unknown = Object.keys(value).find(key => !accepted.has(key))
-  if (unknown !== undefined) throw new PackageLifecycleError('invalid-package-manifest', `${label}.${unknown} is unsupported`)
+  if (unknown !== undefined) {
+    throw new PackageLifecycleError('invalid-package-manifest', `${label}.${unknown} is unsupported`)
+  }
 }
 
 function string(value: unknown, label: string): string {
-  if (typeof value !== 'string') throw new PackageLifecycleError('invalid-package-manifest', `${label} must be a string`)
+  if (typeof value !== 'string') {
+    throw new PackageLifecycleError('invalid-package-manifest', `${label} must be a string`)
+  }
   return value
 }
 
@@ -114,7 +120,10 @@ async function containedFile(root: string, relative: string, label: string): Pro
 
 function dependencies(value: unknown, packageId: string): readonly PackageDependency[] {
   if (!Array.isArray(value) || value.length > 32) {
-    throw new PackageLifecycleError('invalid-package-manifest', 'package dependencies must be an array of at most 32 items')
+    throw new PackageLifecycleError(
+      'invalid-package-manifest',
+      'package dependencies must be an array of at most 32 items',
+    )
   }
   const seen = new Set<string>()
   return value.map((entry, index) => {
@@ -123,7 +132,10 @@ function dependencies(value: unknown, packageId: string): readonly PackageDepend
     const id = string(item.id, `dependencies[${index}].id`)
     const version = string(item.version, `dependencies[${index}].version`)
     if (!LOCAL_ID.test(id) || !SEMANTIC_VERSION.test(version) || id === packageId || seen.has(id)) {
-      throw new PackageLifecycleError('invalid-package-manifest', `dependencies[${index}] is invalid, duplicated, or self-referential`)
+      throw new PackageLifecycleError(
+        'invalid-package-manifest',
+        `dependencies[${index}] is invalid, duplicated, or self-referential`,
+      )
     }
     seen.add(id)
     return { id, version }
@@ -138,7 +150,10 @@ function assertNoLauncherValues(value: unknown, trail = 'runtimeManifest'): void
   if (value === null || typeof value !== 'object') return
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
     if (FORBIDDEN_RUNTIME_VALUE_KEYS.has(key)) {
-      throw new PackageLifecycleError('launcher-config-tunnel', `${trail}.${key} is launcher-owned and forbidden in runtime manifest values`)
+      throw new PackageLifecycleError(
+        'launcher-config-tunnel',
+        `${trail}.${key} is launcher-owned and forbidden in runtime manifest values`,
+      )
     }
     assertNoLauncherValues(entry, `${trail}.${key}`)
   }
@@ -157,49 +172,78 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
 
   async resolve(snapshotRoot: string): Promise<ResolvedPackageCandidate> {
     const packageManifestPath = this.#options.packageManifestPath ?? './cordisx-package.json'
-    const manifestFile = await containedFile(snapshotRoot, safePath(packageManifestPath, JSON_PATH, 'package manifest path'), 'package manifest')
+    const manifestFile = await containedFile(
+      snapshotRoot,
+      safePath(packageManifestPath, JSON_PATH, 'package manifest path'),
+      'package manifest',
+    )
     const raw = JSON.parse(await readFile(manifestFile, 'utf8')) as unknown
     const manifest = object(raw, 'package manifest')
     exactKeys(manifest, [
-      '$schema', 'schemaVersion', 'id', 'version', 'entry', 'readme', 'canonicalSource',
-      'distribution', 'compatibility', 'dependencies', 'runtimeManifest', 'entityTemplates',
+      '$schema',
+      'schemaVersion',
+      'id',
+      'version',
+      'entry',
+      'readme',
+      'canonicalSource',
+      'distribution',
+      'compatibility',
+      'dependencies',
+      'runtimeManifest',
+      'entityTemplates',
     ], 'package manifest')
     const packageVersion = manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V2 && manifest.schemaVersion === 2
       ? 2
       : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V3 && manifest.schemaVersion === 3
-        ? 3
-        : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V4 && manifest.schemaVersion === 4
-          ? 4
-          : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V5 && manifest.schemaVersion === 5
-            ? 5
-            : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V6 && manifest.schemaVersion === 6
-              ? 6
-              : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7
-                ? 7
-              : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 && manifest.schemaVersion === 8
-                ? 8
-          : undefined
+      ? 3
+      : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V4 && manifest.schemaVersion === 4
+      ? 4
+      : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V5 && manifest.schemaVersion === 5
+      ? 5
+      : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V6 && manifest.schemaVersion === 6
+      ? 6
+      : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7
+      ? 7
+      : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 && manifest.schemaVersion === 8
+      ? 8
+      : undefined
     if (packageVersion === undefined) {
-      throw new PackageLifecycleError('invalid-package-manifest', 'package manifest must use plugin-package.v2 through plugin-package.v8')
+      throw new PackageLifecycleError(
+        'invalid-package-manifest',
+        'package manifest must use plugin-package.v2 through plugin-package.v8',
+      )
     }
     const pluginId = string(manifest.id, 'package manifest id')
-    if (!LOCAL_ID.test(pluginId)) throw new PackageLifecycleError('invalid-package-manifest', 'package manifest id is invalid')
+    if (!LOCAL_ID.test(pluginId)) {
+      throw new PackageLifecycleError('invalid-package-manifest', 'package manifest id is invalid')
+    }
     const version = string(manifest.version, 'package version')
-    if (!SEMANTIC_VERSION.test(version)) throw new PackageLifecycleError('invalid-package-manifest', 'package manifest version is not exact semantic version')
+    if (!SEMANTIC_VERSION.test(version)) {
+      throw new PackageLifecycleError(
+        'invalid-package-manifest',
+        'package manifest version is not exact semantic version',
+      )
+    }
     const entry = safePath(manifest.entry, ENTRY, 'package manifest entry')
     await containedFile(snapshotRoot, entry, 'package entry')
 
     const distribution = object(manifest.distribution, 'package distribution')
     exactKeys(distribution, ['mode', 'signature'], 'package distribution')
     if (distribution.mode !== 'explicit-local-v1' || distribution.signature !== 'unsupported') {
-      throw new PackageLifecycleError('unsupported-package-distribution', 'remote/signature package trust is unsupported')
+      throw new PackageLifecycleError(
+        'unsupported-package-distribution',
+        'remote/signature package trust is unsupported',
+      )
     }
     const compatibility = object(manifest.compatibility, 'package compatibility')
     exactKeys(compatibility, ['runtimeAbi', 'protocolSchemas'], 'package compatibility')
-    if (compatibility.runtimeAbi !== 1 || !Array.isArray(compatibility.protocolSchemas)
+    if (
+      compatibility.runtimeAbi !== 1 || !Array.isArray(compatibility.protocolSchemas)
       || compatibility.protocolSchemas.length < 1 || compatibility.protocolSchemas.length > 64
       || compatibility.protocolSchemas.some(schema => typeof schema !== 'string' || !schema.startsWith('https://'))
-      || new Set(compatibility.protocolSchemas).size !== compatibility.protocolSchemas.length) {
+      || new Set(compatibility.protocolSchemas).size !== compatibility.protocolSchemas.length
+    ) {
       throw new PackageLifecycleError('incompatible-runtime', 'package compatibility is invalid')
     }
 
@@ -208,15 +252,20 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
     const runtimePath = safePath(runtimeReference.path, JSON_PATH, 'runtime manifest path')
     const runtimeSchema = string(runtimeReference.schema, 'runtime manifest schema')
     const runtimeDigest = string(runtimeReference.digest, 'runtime manifest digest')
-    if (!PLUGIN_RUNTIME_MANIFEST_SCHEMAS.includes(runtimeSchema as typeof PLUGIN_RUNTIME_MANIFEST_SCHEMAS[number])
+    if (
+      !PLUGIN_RUNTIME_MANIFEST_SCHEMAS.includes(runtimeSchema as typeof PLUGIN_RUNTIME_MANIFEST_SCHEMAS[number])
       || (packageVersion === 2 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V4)
       || (packageVersion < 4 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V5)
       || (packageVersion < 6 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V6)
       || (packageVersion < 7 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7)
       || (packageVersion !== 8 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8)
       || !DIGEST.test(runtimeDigest)
-      || !(compatibility.protocolSchemas as readonly unknown[]).includes(runtimeSchema)) {
-      throw new PackageLifecycleError('incompatible-runtime', 'runtime manifest reference is unsupported or not declared compatible')
+      || !(compatibility.protocolSchemas as readonly unknown[]).includes(runtimeSchema)
+    ) {
+      throw new PackageLifecycleError(
+        'incompatible-runtime',
+        'runtime manifest reference is unsupported or not declared compatible',
+      )
     }
     if (packageVersion === 8 && runtimeSchema !== PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8) {
       throw new PackageLifecycleError('incompatible-runtime', 'plugin-package.v8 requires plugin-manifest.v8')
@@ -225,15 +274,23 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
     const runtimeBytes = await readFile(runtimeFile)
     const actualRuntimeDigest = `sha256:${createHash('sha256').update(runtimeBytes).digest('hex')}`
     if (actualRuntimeDigest !== runtimeDigest) {
-      throw new PackageLifecycleError('integrity-mismatch', `runtime manifest digest mismatch; received ${actualRuntimeDigest}`)
+      throw new PackageLifecycleError(
+        'integrity-mismatch',
+        `runtime manifest digest mismatch; received ${actualRuntimeDigest}`,
+      )
     }
     const runtimeRaw = JSON.parse(runtimeBytes.toString('utf8')) as unknown
     assertNoLauncherValues(runtimeRaw)
     const validator = this.#options.runtimeValidators[runtimeSchema]
-    if (validator === undefined) throw new PackageLifecycleError('incompatible-runtime', `no Host validator for ${runtimeSchema}`)
+    if (validator === undefined) {
+      throw new PackageLifecycleError('incompatible-runtime', `no Host validator for ${runtimeSchema}`)
+    }
     const runtimeManifest = validator(runtimeRaw)
     if (runtimeManifest.$schema !== runtimeSchema || runtimeManifest.id !== pluginId) {
-      throw new PackageLifecycleError('package-identity-mismatch', 'runtime manifest schema/id differs from its package reference')
+      throw new PackageLifecycleError(
+        'package-identity-mismatch',
+        'runtime manifest schema/id differs from its package reference',
+      )
     }
     for (const [index, service] of (runtimeManifest.services ?? []).entries()) {
       const serviceEntry = safePath(service.entry, ENTRY, `runtime manifest services[${index}].entry`)
@@ -242,12 +299,18 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
 
     const publicSource = manifest.canonicalSource
     if (publicSource !== undefined && (typeof publicSource !== 'string' || !PUBLIC_HTTPS.test(publicSource))) {
-      throw new PackageLifecycleError('invalid-package-manifest', 'canonicalSource must be public HTTPS without query or fragment')
+      throw new PackageLifecycleError(
+        'invalid-package-manifest',
+        'canonicalSource must be public HTTPS without query or fragment',
+      )
     }
     let entityTemplates: HostPackageManifest['entityTemplates']
     if (manifest.entityTemplates !== undefined) {
       if (packageVersion < 5 || !Array.isArray(manifest.entityTemplates) || manifest.entityTemplates.length > 64) {
-        throw new PackageLifecycleError('invalid-package-manifest', 'entityTemplates requires package v5 or v6 and at most 64 declarations')
+        throw new PackageLifecycleError(
+          'invalid-package-manifest',
+          'entityTemplates requires package v5 or v6 and at most 64 declarations',
+        )
       }
       const seen = new Set<string>()
       entityTemplates = manifest.entityTemplates.map((raw, index) => {
@@ -256,15 +319,29 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
         const agentId = string(template.agentId, `entityTemplates[${index}].agentId`)
         const entityPath = string(template.entityPath, `entityTemplates[${index}].entityPath`)
         const digest = string(template.digest, `entityTemplates[${index}].digest`)
-        if (!LOCAL_ID.test(agentId) || seen.has(agentId)
+        if (
+          !LOCAL_ID.test(agentId) || seen.has(agentId)
           || !/^\.\/entities\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\/entity\.json$/u.test(entityPath)
           || entityPath !== `./entities/${agentId}/entity.json`
-          || !DIGEST.test(digest)) throw new PackageLifecycleError('invalid-package-manifest', `entityTemplates[${index}] is invalid or duplicated`)
+          || !DIGEST.test(digest)
+        ) {
+          throw new PackageLifecycleError(
+            'invalid-package-manifest',
+            `entityTemplates[${index}] is invalid or duplicated`,
+          )
+        }
         seen.add(agentId)
-        return { agentId, entityPath: entityPath as `./entities/${string}/entity.json`, digest: digest as `sha256:${string}` }
+        return {
+          agentId,
+          entityPath: entityPath as `./entities/${string}/entity.json`,
+          digest: digest as `sha256:${string}`,
+        }
       })
       if (!(compatibility.protocolSchemas as readonly unknown[]).includes(ENTITY_FILE_SCHEMA_V1)) {
-        throw new PackageLifecycleError('incompatible-runtime', 'entity template packages must declare entity-file.v1 compatibility')
+        throw new PackageLifecycleError(
+          'incompatible-runtime',
+          'entity template packages must declare entity-file.v1 compatibility',
+        )
       }
     }
     const packageManifest: HostPackageManifest = {
@@ -272,7 +349,11 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
       version,
       entry,
       ...(manifest.readme === undefined ? {} : {
-        readme: safePath(manifest.readme, /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:md|markdown)$/, 'package readme'),
+        readme: safePath(
+          manifest.readme,
+          /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:md|markdown)$/,
+          'package readme',
+        ),
       }),
       dependencies: dependencies(manifest.dependencies, pluginId),
       compatibility: {

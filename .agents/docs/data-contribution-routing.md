@@ -196,19 +196,19 @@ manager catalog, per-plugin point policy, and enforcement plan are specified in
 
 The initial surface registry includes at least:
 
-| Surface | Structured contribution |
-| --- | --- |
-| `sidebar.footer.before-control` | compact action before the designated native control |
-| `sidebar.footer.after-control` | compact action after the designated native control |
-| `sidebar.footer.menu` | command menu item in the designated control menu |
-| `sidebar.account.menu` | command menu item in the native account/profile menu |
-| `sidebar.navigation.items` | main navigation row with primary activation and independent trailing actions |
-| `workspace.toolbar.items` | action before, after, or in the menu of a declared semantic toolbar anchor |
-| `environment.panel.header-actions` | panel-header command action |
-| `environment.panel.sections` | section metadata |
-| `environment.section.actions` | command action targeting a section id |
-| `environment.section.rows` | structured label/value/status row targeting a section id |
-| `environment.row.trailing-actions` | command action targeting a row id |
+| Surface                            | Structured contribution                                                      |
+| ---------------------------------- | ---------------------------------------------------------------------------- |
+| `sidebar.footer.before-control`    | compact action before the designated native control                          |
+| `sidebar.footer.after-control`     | compact action after the designated native control                           |
+| `sidebar.footer.menu`              | command menu item in the designated control menu                             |
+| `sidebar.account.menu`             | command menu item in the native account/profile menu                         |
+| `sidebar.navigation.items`         | main navigation row with primary activation and independent trailing actions |
+| `workspace.toolbar.items`          | action before, after, or in the menu of a declared semantic toolbar anchor   |
+| `environment.panel.header-actions` | panel-header command action                                                  |
+| `environment.panel.sections`       | section metadata                                                             |
+| `environment.section.actions`      | command action targeting a section id                                        |
+| `environment.section.rows`         | structured label/value/status row targeting a section id                     |
+| `environment.row.trailing-actions` | command action targeting a row id                                            |
 
 Navigation rows allow one or more trailing actions. The host renders separate
 buttons, stops their pointer and keyboard events before row activation, and

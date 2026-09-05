@@ -12,10 +12,13 @@ describe('loadConfig', () => {
   it('resolves plugin entries relative to the config', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-config-'))
     const configPath = path.join(directory, 'cordisx.config.json')
-    await writeFile(configPath, JSON.stringify({
-      version: 1,
-      plugins: [{ id: 'demo', entry: './plugins/demo.ts' }],
-    }))
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: 'demo', entry: './plugins/demo.ts' }],
+      }),
+    )
     const config = await loadConfig(configPath)
     expect(config.codex.debugPort).toBe(9229)
     expect(config.plugins[0]?.entry).toBe(path.join(directory, 'plugins/demo.ts'))
@@ -27,18 +30,24 @@ describe('loadConfig', () => {
     const configRoot = path.join(projectRoot, '.cordisx')
     const configPath = path.join(configRoot, 'config.json')
     await mkdir(configRoot)
-    await writeFile(configPath, JSON.stringify({
-      version: 1,
-      codex: { executable: './tools/codex' },
-      providers: [{
-        id: 'gateway', kind: 'cli-proxy-api', displayName: 'Gateway',
-        baseUrl: 'https://gateway.example.com/v1', apiKeyEnv: 'GATEWAY_KEY',
-      }],
-      plugins: [
-        { id: 'chatroom', entry: './plugins/chatroom/src/index.tsx' },
-        { id: 'calendar', entry: './plugins/calendar/src/index.tsx', enabled: false },
-      ],
-    }))
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        codex: { executable: './tools/codex' },
+        providers: [{
+          id: 'gateway',
+          kind: 'cli-proxy-api',
+          displayName: 'Gateway',
+          baseUrl: 'https://gateway.example.com/v1',
+          apiKeyEnv: 'GATEWAY_KEY',
+        }],
+        plugins: [
+          { id: 'chatroom', entry: './plugins/chatroom/src/index.tsx' },
+          { id: 'calendar', entry: './plugins/calendar/src/index.tsx', enabled: false },
+        ],
+      }),
+    )
 
     const config = await loadConfig(configPath)
 
@@ -112,10 +121,16 @@ describe('loadConfig', () => {
     await writeFile(configPath, JSON.stringify({ version: 1, plugins: [] }))
 
     await expect(findCordisXProjectConfig(nested)).resolves.toEqual({
-      layout: 'legacy', configPath, configRoot: projectRoot, projectRoot,
+      layout: 'legacy',
+      configPath,
+      configRoot: projectRoot,
+      projectRoot,
     })
     expect(resolveCordisXProjectConfig('../cordisx.config.json', nested)).toEqual({
-      layout: 'legacy', configPath, configRoot: projectRoot, projectRoot,
+      layout: 'legacy',
+      configPath,
+      configRoot: projectRoot,
+      projectRoot,
     })
     expect(resolveCordisXProjectConfig('./development.json', nested)).toEqual({
       layout: 'explicit',
@@ -133,45 +148,60 @@ describe('loadConfig', () => {
   it('rejects duplicate plugin ids', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-config-'))
     const configPath = path.join(directory, 'cordisx.config.json')
-    await writeFile(configPath, JSON.stringify({
-      version: 1,
-      plugins: [
-        { id: 'demo', entry: './one.ts' },
-        { id: 'demo', entry: './two.ts' },
-      ],
-    }))
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [
+          { id: 'demo', entry: './one.ts' },
+          { id: 'demo', entry: './two.ts' },
+        ],
+      }),
+    )
     await expect(loadConfig(configPath)).rejects.toThrow('duplicate plugin id: demo')
   })
 
   it('uses the same lowercase 96-character owner contract as renderer registries', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-config-'))
     const configPath = path.join(directory, 'cordisx.config.json')
-    await writeFile(configPath, JSON.stringify({
-      version: 1,
-      plugins: [{ id: 'Demo', entry: './demo.ts' }],
-    }))
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: 'Demo', entry: './demo.ts' }],
+      }),
+    )
     await expect(loadConfig(configPath)).rejects.toThrow('invalid plugin id: Demo')
 
-    await writeFile(configPath, JSON.stringify({
-      version: 1,
-      plugins: [{ id: `a${'b'.repeat(96)}`, entry: './demo.ts' }],
-    }))
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: `a${'b'.repeat(96)}`, entry: './demo.ts' }],
+      }),
+    )
     await expect(loadConfig(configPath)).rejects.toThrow(/invalid plugin id/)
 
-    await writeFile(configPath, JSON.stringify({
-      version: 1,
-      plugins: [{ id: 'host', entry: './demo.ts' }],
-    }))
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: 'host', entry: './demo.ts' }],
+      }),
+    )
     await expect(loadConfig(configPath)).rejects.toThrow('reserved plugin id: host')
   })
 
   it('resolves the built-in Channel renderer bundle without treating service config as renderer config', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-channel-config-'))
     const configPath = path.join(directory, 'cordisx.config.json')
-    await writeFile(configPath, JSON.stringify({
-      version: 1,
-      plugins: [{ id: 'channel', entry: 'cordisx:channel', enabled: true }],
-    }))
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: 'channel', entry: 'cordisx:channel', enabled: true }],
+      }),
+    )
     const config = await loadConfig(configPath)
     expect(config.plugins[0]).toMatchObject({ id: 'channel', enabled: true, config: {} })
     expect(config.plugins[0]?.entry).toMatch(/plugins\/channel\/index\.(?:ts|js)$/)

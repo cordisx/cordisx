@@ -15,17 +15,17 @@ import {
 } from '../packages/cli/src/permission-contracts.js'
 import { sha256Hex } from '../packages/cli/src/permission-model-v2.js'
 import {
-  MemoryPermissionPolicyStore,
   BrowserPermissionAuthorizationPromptV2,
-  PermissionBroker,
+  MemoryPermissionPolicyStore,
   normalizePluginManifest,
   type PermissionAuthorizationPromptV2,
+  PermissionBroker,
   type PermissionPolicyStore,
   type PermissionPrompt,
 } from '../packages/cli/src/renderer/platform.js'
 import {
-  CORDISX_EXTENSION_POINT_LOCALE_CATALOGS,
   CORDISX_BUILTIN_EXTENSION_POINT_CATALOG,
+  CORDISX_EXTENSION_POINT_LOCALE_CATALOGS,
   ExtensionPointDescriptorRegistry,
   ExtensionPointPolicyBroker,
   MemoryExtensionPointPolicyStore,
@@ -33,10 +33,7 @@ import {
 import { CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1 } from '../packages/cli/src/contracts.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
-import {
-  CORDISX_PLUGIN_GENERATION,
-  CORDISX_PLUGIN_ID,
-} from '../packages/cli/src/renderer/ownership.js'
+import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
 
 const identity = { source: 'https://plugins.example/certified-dom', id: 'certified-dom' } as const
 const digest = `sha256:${'a'.repeat(64)}` as const
@@ -52,7 +49,9 @@ function manifest(capabilities: CordisXPluginManifestV4['capabilities'] = []): C
   }, identity.id) as CordisXPluginManifestV4
 }
 
-function certification(overrides: Partial<CordisXCertifiedPermissionProjectionV1> = {}): CordisXCertifiedPermissionProjectionV1 {
+function certification(
+  overrides: Partial<CordisXCertifiedPermissionProjectionV1> = {},
+): CordisXCertifiedPermissionProjectionV1 {
   const payload = {
     source: identity.source,
     pluginId: identity.id,
@@ -83,7 +82,10 @@ function certification(overrides: Partial<CordisXCertifiedPermissionProjectionV1
   }
 }
 
-function explicitV3(plan: CordisXPermissionAuthorizationPlanV3, choice: CordisXPermissionAuthorizationDecisionV3['decisions'][number]['decision']): CordisXPermissionAuthorizationDecisionV3 {
+function explicitV3(
+  plan: CordisXPermissionAuthorizationPlanV3,
+  choice: CordisXPermissionAuthorizationDecisionV3['decisions'][number]['decision'],
+): CordisXPermissionAuthorizationDecisionV3 {
   return {
     $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V3,
     schemaVersion: 3,
@@ -133,8 +135,14 @@ function broker(input: {
   let domPrompts = 0
   let nonDomPrompts = 0
   const prompt: PermissionAuthorizationPromptV2 = {
-    request: async (plan) => { nonDomPrompts += 1; return explicitV2(plan) },
-    requestV3: async (plan) => { domPrompts += 1; return explicitV3(plan, input.domChoice ?? 'allow-once') },
+    request: async (plan) => {
+      nonDomPrompts += 1
+      return explicitV2(plan)
+    },
+    requestV3: async (plan) => {
+      domPrompts += 1
+      return explicitV3(plan, input.domChoice ?? 'allow-once')
+    },
   }
   const value = new PermissionBroker(
     input.store ?? new MemoryPermissionPolicyStore(),
@@ -176,14 +184,32 @@ describe('certified DOM authorization through the single PermissionBroker', () =
         }).then(() => backing.writeV3(records))
       },
     }
-    const value = new PermissionBroker(store, legacyPrompt, () => new Date('2026-08-30T12:00:00.000Z'), 100, 'work', 'runtime-1')
-    const unregister = value.register(identity, manifest(), { pluginId: identity.id, moduleGeneration: 'module-batch' }, undefined, { version: '1.2.3', integrity: digest })
+    const value = new PermissionBroker(
+      store,
+      legacyPrompt,
+      () => new Date('2026-08-30T12:00:00.000Z'),
+      100,
+      'work',
+      'runtime-1',
+    )
+    const unregister = value.register(
+      identity,
+      manifest(),
+      { pluginId: identity.id, moduleGeneration: 'module-batch' },
+      undefined,
+      { version: '1.2.3', integrity: digest },
+    )
     const points = ['sidebar.navigation.items', 'main'] as const
     await value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'deny-persistent' as const })))
     let changes = 0
-    const unsubscribe = value.subscribe(() => { changes += 1 })
+    const unsubscribe = value.subscribe(() => {
+      changes += 1
+    })
     deferPersistence = true
-    const update = value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'allow-persistent' as const })))
+    const update = value.setDomPolicies(
+      identity,
+      points.map(pointId => ({ pointId, policy: 'allow-persistent' as const })),
+    )
     await Promise.resolve()
     expect(deferredWrite).toBeDefined()
     expect(points.map(pointId => value.domPolicy(identity, pointId))).toEqual(['deny', 'deny'])
@@ -212,17 +238,37 @@ describe('certified DOM authorization through the single PermissionBroker', () =
       readV3: () => backing.readV3(),
       writeV3: records => {
         if (!deferPersistence) return backing.writeV3(records)
-        return new Promise<void>((_resolve, reject) => { rejectWrite = reject })
+        return new Promise<void>((_resolve, reject) => {
+          rejectWrite = reject
+        })
       },
     }
-    const value = new PermissionBroker(store, legacyPrompt, () => new Date('2026-08-30T12:00:00.000Z'), 100, 'work', 'runtime-1')
-    const unregister = value.register(identity, manifest(), { pluginId: identity.id, moduleGeneration: 'module-batch' }, undefined, { version: '1.2.3', integrity: digest })
+    const value = new PermissionBroker(
+      store,
+      legacyPrompt,
+      () => new Date('2026-08-30T12:00:00.000Z'),
+      100,
+      'work',
+      'runtime-1',
+    )
+    const unregister = value.register(
+      identity,
+      manifest(),
+      { pluginId: identity.id, moduleGeneration: 'module-batch' },
+      undefined,
+      { version: '1.2.3', integrity: digest },
+    )
     const points = ['sidebar.navigation.items', 'main'] as const
     await value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'deny-persistent' as const })))
     let changes = 0
-    const unsubscribe = value.subscribe(() => { changes += 1 })
+    const unsubscribe = value.subscribe(() => {
+      changes += 1
+    })
     deferPersistence = true
-    const update = value.setDomPolicies(identity, points.map(pointId => ({ pointId, policy: 'allow-persistent' as const })))
+    const update = value.setDomPolicies(
+      identity,
+      points.map(pointId => ({ pointId, policy: 'allow-persistent' as const })),
+    )
     await Promise.resolve()
     rejectWrite!(new Error('profile ledger unavailable'))
     await expect(update).rejects.toThrow('profile ledger unavailable')
@@ -233,12 +279,14 @@ describe('certified DOM authorization through the single PermissionBroker', () =
     unregister()
   })
 
-  it.each([
-    ['ordinary', false, false, 1, 'explicit-user'],
-    ['certified-only', true, false, 0, 'certified-implicit'],
-    ['official-only', false, true, 1, 'explicit-user'],
-    ['official-and-certified', true, true, 0, 'certified-implicit'],
-  ] as const)('keeps the %s state independent across trust dimensions', async (_state, certified, _official, prompts, origin) => {
+  it.each(
+    [
+      ['ordinary', false, false, 1, 'explicit-user'],
+      ['certified-only', true, false, 0, 'certified-implicit'],
+      ['official-only', false, true, 1, 'explicit-user'],
+      ['official-and-certified', true, true, 0, 'certified-implicit'],
+    ] as const,
+  )('keeps the %s state independent across trust dimensions', async (_state, certified, _official, prompts, origin) => {
     // Official is deliberately absent from every PermissionBroker input.
     const context = broker({ ...(certified ? { certified: certification() } : {}) })
     await expect(context.value.requestDomAccess(identity, 'workspace.toolbar.items')).resolves.toMatchObject({
@@ -250,17 +298,21 @@ describe('certified DOM authorization through the single PermissionBroker', () =
       .toMatchObject({ authorizationOrigin: origin })
   })
 
-  it.each([
-    ['ordinary', undefined],
-    ['certified-only', certification()],
-    ['official-only', undefined],
-    ['official-and-certified', certification()],
-  ] as const)('never lets the %s state bypass a non-DOM prompt', async (_state, certified) => {
+  it.each(
+    [
+      ['ordinary', undefined],
+      ['certified-only', certification()],
+      ['official-only', undefined],
+      ['official-and-certified', certification()],
+    ] as const,
+  )('never lets the %s state bypass a non-DOM prompt', async (_state, certified) => {
     const context = broker({
       ...(certified === undefined ? {} : { certified }),
       capabilities: [{ name: 'models.read', required: false, scope: { providers: ['codex'] } }],
     })
-    await expect(context.value.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({ ok: true })
+    await expect(context.value.authorize(identity, 'models.read', { providerId: 'codex' })).resolves.toMatchObject({
+      ok: true,
+    })
     expect(context.nonDomPrompts()).toBe(1)
   })
 
@@ -270,37 +322,47 @@ describe('certified DOM authorization through the single PermissionBroker', () =
     expect(exact.domPrompts()).toBe(0)
 
     const mismatched = broker({})
-    expect(() => mismatched.value.replaceCertifiedPermissionSnapshot({
-      revision: 1,
-      projections: [certification({ integrity: `sha256:${'b'.repeat(64)}` })],
-    })).toThrow(/invalid projection/)
+    expect(() =>
+      mismatched.value.replaceCertifiedPermissionSnapshot({
+        revision: 1,
+        projections: [certification({ integrity: `sha256:${'b'.repeat(64)}` })],
+      })
+    ).toThrow(/invalid projection/)
     await mismatched.value.requestDomAccess(identity, 'sidebar.footer.menu')
     expect(mismatched.domPrompts()).toBe(1)
 
     const forgedFingerprint = broker({})
-    expect(() => forgedFingerprint.value.replaceCertifiedPermissionSnapshot({
-      revision: 1,
-      projections: [certification({ fingerprint: `sha256:${'c'.repeat(64)}` })],
-    })).toThrow(/invalid projection/)
+    expect(() =>
+      forgedFingerprint.value.replaceCertifiedPermissionSnapshot({
+        revision: 1,
+        projections: [certification({ fingerprint: `sha256:${'c'.repeat(64)}` })],
+      })
+    ).toThrow(/invalid projection/)
     await forgedFingerprint.value.requestDomAccess(identity, 'sidebar.footer.menu')
     expect(forgedFingerprint.domPrompts()).toBe(1)
 
-    expect(() => normalizePluginManifest({
-      ...manifest(),
-      certified: true,
-      official: true,
-    }, identity.id)).toThrow(/unsupported|unknown/i)
+    expect(() =>
+      normalizePluginManifest({
+        ...manifest(),
+        certified: true,
+        official: true,
+      }, identity.id)
+    ).toThrow(/unsupported|unknown/i)
 
     const injected = broker({})
     injected.unregister()
     if (false) {
       // @ts-expect-error Plugin registration artifacts cannot carry trust projections.
       injected.value.register(identity, manifest(), { pluginId: identity.id }, undefined, {
-        version: '1.2.3', integrity: digest, certification: certification(),
+        version: '1.2.3',
+        integrity: digest,
+        certification: certification(),
       })
     }
     const maliciousArtifact = {
-      version: '1.2.3', integrity: digest, certification: certification(),
+      version: '1.2.3',
+      integrity: digest,
+      certification: certification(),
     } as unknown as { readonly version: string; readonly integrity: `sha256:${string}` }
     const unregisterInjected = injected.value.register(
       identity,
@@ -388,11 +450,16 @@ describe('certified DOM authorization through the single PermissionBroker', () =
 
   it('invalidates leases on trust refresh, scope change, generation replacement, and unload', async () => {
     const context = broker({ certified: certification() })
-    await expect(context.value.requestDomAccess(identity, 'sidebar.footer.menu')).resolves.toMatchObject({ authorized: true })
+    await expect(context.value.requestDomAccess(identity, 'sidebar.footer.menu')).resolves.toMatchObject({
+      authorized: true,
+    })
     expect(context.value.domAccess(identity, 'sidebar.footer.menu')).toMatchObject({ authorized: true })
 
     context.value.replaceCertifiedPermissionSnapshot({ revision: 2, projections: [] })
-    expect(context.value.domAccess(identity, 'sidebar.footer.menu')).toMatchObject({ authorized: false, state: 'pending' })
+    expect(context.value.domAccess(identity, 'sidebar.footer.menu')).toMatchObject({
+      authorized: false,
+      state: 'pending',
+    })
     await context.value.requestDomAccess(identity, 'sidebar.footer.menu')
     expect(context.domPrompts()).toBe(1)
 
@@ -401,7 +468,10 @@ describe('certified DOM authorization through the single PermissionBroker', () =
     expect(context.value.snapshots().filter(item => item.capability === 'ui.extension-points.render')).toHaveLength(2)
 
     context.unregister()
-    expect(context.value.domAccess(identity, 'sidebar.footer.menu')).toMatchObject({ authorized: false, state: 'denied' })
+    expect(context.value.domAccess(identity, 'sidebar.footer.menu')).toMatchObject({
+      authorized: false,
+      state: 'denied',
+    })
 
     const replacement = broker({ certified: certification(), generation: 'runtime-2', moduleGeneration: 'module-2' })
     expect(replacement.value.snapshots().filter(item => item.capability === 'ui.extension-points.render')).toEqual([])
@@ -414,15 +484,36 @@ describe('certified DOM authorization through the single PermissionBroker', () =
   it('keeps persistent deny and profile-scoped policy authoritative over certification', async () => {
     const store = new MemoryPermissionPolicyStore()
     const first = broker({ certified: certification(), store, domChoice: 'deny-persistent' })
-    await expect(first.value.requestDomAccess(identity, 'workspace.toolbar.items')).resolves.toMatchObject({ authorized: true })
+    await expect(first.value.requestDomAccess(identity, 'workspace.toolbar.items')).resolves.toMatchObject({
+      authorized: true,
+    })
     // Certified implicit approval does not create a persistent policy, so the user can still set an exact deny.
     await first.value.setDomPolicy(identity, 'workspace.toolbar.items', 'deny-persistent')
-    await expect(first.value.requestDomAccess(identity, 'workspace.toolbar.items')).resolves.toMatchObject({ authorized: false, policy: 'deny' })
+    await expect(first.value.requestDomAccess(identity, 'workspace.toolbar.items')).resolves.toMatchObject({
+      authorized: false,
+      policy: 'deny',
+    })
 
-    const sameProfile = broker({ certified: certification(), store, generation: 'runtime-2', moduleGeneration: 'module-2' })
-    await expect(sameProfile.value.requestDomAccess(identity, 'workspace.toolbar.items')).resolves.toMatchObject({ authorized: false, policy: 'deny' })
-    const otherProfile = broker({ certified: certification(), store, profile: 'other', generation: 'runtime-3', moduleGeneration: 'module-3' })
-    await expect(otherProfile.value.requestDomAccess(identity, 'workspace.toolbar.items')).resolves.toMatchObject({ authorized: true })
+    const sameProfile = broker({
+      certified: certification(),
+      store,
+      generation: 'runtime-2',
+      moduleGeneration: 'module-2',
+    })
+    await expect(sameProfile.value.requestDomAccess(identity, 'workspace.toolbar.items')).resolves.toMatchObject({
+      authorized: false,
+      policy: 'deny',
+    })
+    const otherProfile = broker({
+      certified: certification(),
+      store,
+      profile: 'other',
+      generation: 'runtime-3',
+      moduleGeneration: 'module-3',
+    })
+    await expect(otherProfile.value.requestDomAccess(identity, 'workspace.toolbar.items')).resolves.toMatchObject({
+      authorized: true,
+    })
   })
 
   it('keeps allow-once leases exact when another point policy changes', async () => {
@@ -432,7 +523,10 @@ describe('certified DOM authorization through the single PermissionBroker', () =
     expect(context.domPrompts()).toBe(2)
 
     await context.value.setDomPolicy(identity, 'workspace.toolbar.items', 'deny-persistent')
-    expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({ authorized: false, policy: 'deny' })
+    expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({
+      authorized: false,
+      policy: 'deny',
+    })
     expect(context.value.domAccess(identity, 'sidebar.footer.menu')).toMatchObject({
       authorized: true,
       authorizationOrigin: 'explicit-user',
@@ -499,13 +593,22 @@ describe('certified DOM authorization through the single PermissionBroker', () =
       undefined,
       {
         request: async plan => explicitV2(plan),
-        requestV3: async plan => { prompted.push(plan); return explicitV3(plan, 'allow-once') },
+        requestV3: async plan => {
+          prompted.push(plan)
+          return explicitV3(plan, 'allow-once')
+        },
       },
     )
-    const unregisterActive = value.register(identity, manifest(), {
-      pluginId: identity.id,
-      moduleGeneration: 'module-1',
-    }, undefined, { version: '1.2.3', integrity: oldDigest })
+    const unregisterActive = value.register(
+      identity,
+      manifest(),
+      {
+        pluginId: identity.id,
+        moduleGeneration: 'module-1',
+      },
+      undefined,
+      { version: '1.2.3', integrity: oldDigest },
+    )
     const handle = visibility.begin('update-certified-dom', previous, next)
     const candidateContext = new Context().extend({
       [CORDISX_PLUGIN_ID]: identity.id,
@@ -514,12 +617,18 @@ describe('certified DOM authorization through the single PermissionBroker', () =
     })
     const candidateView = visibility.view(candidateContext)
     value.replaceCertifiedPermissionSnapshot({ revision: 1, projections: [certification()] })
-    const unregisterCandidate = value.register(identity, manifest(), {
-      pluginId: identity.id,
-      moduleGeneration: 'module-2',
-      transactionId: handle.transactionId,
-      transactionEpoch: handle.transactionEpoch,
-    }, candidateView, { version: '1.2.3', integrity: digest })
+    const unregisterCandidate = value.register(
+      identity,
+      manifest(),
+      {
+        pluginId: identity.id,
+        moduleGeneration: 'module-2',
+        transactionId: handle.transactionId,
+        transactionEpoch: handle.transactionEpoch,
+      },
+      candidateView,
+      { version: '1.2.3', integrity: digest },
+    )
 
     expect(value.domAccess(identity, 'main', candidateView)).toMatchObject({
       authorized: true,
@@ -583,14 +692,23 @@ describe('certified DOM authorization through the single PermissionBroker', () =
       undefined,
       {
         request: async plan => explicitV2(plan),
-        requestV3: async plan => { prompted.push(plan); return explicitV3(plan, 'allow-once') },
+        requestV3: async plan => {
+          prompted.push(plan)
+          return explicitV3(plan, 'allow-once')
+        },
       },
     )
     value.replaceCertifiedPermissionSnapshot({ revision: 1, projections: [certification()] })
-    const unregisterOld = value.register(identity, manifest(), {
-      pluginId: identity.id,
-      moduleGeneration: 'module-1',
-    }, undefined, { version: '1.2.3', integrity: digest })
+    const unregisterOld = value.register(
+      identity,
+      manifest(),
+      {
+        pluginId: identity.id,
+        moduleGeneration: 'module-1',
+      },
+      undefined,
+      { version: '1.2.3', integrity: digest },
+    )
     expect(value.domAccess(identity, 'main')).toMatchObject({
       authorized: true,
       authorizationOrigin: 'certified-implicit',
@@ -603,12 +721,18 @@ describe('certified DOM authorization through the single PermissionBroker', () =
       ...visibility.context(handle, identity.id),
     })
     const candidateView = visibility.view(candidateContext)
-    const unregisterNew = value.register(identity, manifest(), {
-      pluginId: identity.id,
-      moduleGeneration: 'module-2',
-      transactionId: handle.transactionId,
-      transactionEpoch: handle.transactionEpoch,
-    }, candidateView, { version: '1.2.3', integrity: newDigest })
+    const unregisterNew = value.register(
+      identity,
+      manifest(),
+      {
+        pluginId: identity.id,
+        moduleGeneration: 'module-2',
+        transactionId: handle.transactionId,
+        transactionEpoch: handle.transactionEpoch,
+      },
+      candidateView,
+      { version: '1.2.3', integrity: newDigest },
+    )
     expect(value.domAccess(identity, 'main', candidateView)).toMatchObject({ authorized: false, state: 'pending' })
 
     const publication = visibility.publish(visibility.preparePublish(handle, visibility.confirmReadiness(handle)))
@@ -646,14 +770,22 @@ describe('certified DOM authorization through the single PermissionBroker', () =
         request: async plan => explicitV2(plan),
         requestV3: async plan => {
           requestedPlan = plan
-          return await new Promise(resolve => { resolveDecision = resolve })
+          return await new Promise(resolve => {
+            resolveDecision = resolve
+          })
         },
       },
     )
-    const unregister = value.register(identity, manifest(), {
-      pluginId: identity.id,
-      moduleGeneration: 'module-stale',
-    }, undefined, { version: '1.2.3', integrity: digest })
+    const unregister = value.register(
+      identity,
+      manifest(),
+      {
+        pluginId: identity.id,
+        moduleGeneration: 'module-stale',
+      },
+      undefined,
+      { version: '1.2.3', integrity: digest },
+    )
     const pending = value.requestDomAccess(identity, 'main')
     await Promise.resolve()
     expect(requestedPlan).toBeDefined()
@@ -670,9 +802,13 @@ describe('certified DOM authorization through the single PermissionBroker', () =
 
   it('never grants a stale generation when persistent policy storage resolves after unload', async () => {
     let markPersistStarted: (() => void) | undefined
-    const persistStarted = new Promise<void>(resolve => { markPersistStarted = resolve })
+    const persistStarted = new Promise<void>(resolve => {
+      markPersistStarted = resolve
+    })
     let releasePersist: (() => void) | undefined
-    const persistRelease = new Promise<void>(resolve => { releasePersist = resolve })
+    const persistRelease = new Promise<void>(resolve => {
+      releasePersist = resolve
+    })
     let persisted: readonly unknown[] = []
     const store: PermissionPolicyStore = {
       read: () => [],
@@ -698,10 +834,16 @@ describe('certified DOM authorization through the single PermissionBroker', () =
         requestV3: async plan => explicitV3(plan, 'allow-persistent'),
       },
     )
-    const unregister = value.register(identity, manifest(), {
-      pluginId: identity.id,
-      moduleGeneration: 'module-persist-stale',
-    }, undefined, { version: '1.2.3', integrity: digest })
+    const unregister = value.register(
+      identity,
+      manifest(),
+      {
+        pluginId: identity.id,
+        moduleGeneration: 'module-persist-stale',
+      },
+      undefined,
+      { version: '1.2.3', integrity: digest },
+    )
     const pending = value.requestDomAccess(identity, 'main')
     await persistStarted
 
@@ -735,10 +877,16 @@ describe('certified DOM authorization through the single PermissionBroker', () =
       },
     )
     value.replaceCertifiedPermissionSnapshot({ revision: 1, projections: [certification()] })
-    unregister = value.register(identity, manifest(), {
-      pluginId: identity.id,
-      moduleGeneration: 'module-observer-stale',
-    }, undefined, { version: '1.2.3', integrity: digest })
+    unregister = value.register(
+      identity,
+      manifest(),
+      {
+        pluginId: identity.id,
+        moduleGeneration: 'module-observer-stale',
+      },
+      undefined,
+      { version: '1.2.3', integrity: digest },
+    )
 
     await expect(value.requestDomAccess(identity, 'main')).resolves.toMatchObject({
       authorized: false,
@@ -769,10 +917,16 @@ describe('certified DOM authorization through the single PermissionBroker', () =
       undefined,
       prompt,
     )
-    const unregister = value.register(identity, manifest(), {
-      pluginId: identity.id,
-      moduleGeneration: 'module-dialog-stale',
-    }, undefined, { version: '1.2.3', integrity: digest })
+    const unregister = value.register(
+      identity,
+      manifest(),
+      {
+        pluginId: identity.id,
+        moduleGeneration: 'module-dialog-stale',
+      },
+      undefined,
+      { version: '1.2.3', integrity: digest },
+    )
     const pending = value.requestDomAccess(identity, 'main')
     await Promise.resolve()
     await Promise.resolve()
@@ -795,7 +949,10 @@ describe('certified DOM authorization through the single PermissionBroker', () =
     await context.value.requestDomAccess(identity, 'workspace.toolbar.items')
     expect(context.domPrompts()).toBe(0)
     now = new Date('2026-10-01T00:00:00.000Z')
-    expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({ authorized: false, state: 'pending' })
+    expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({
+      authorized: false,
+      state: 'pending',
+    })
     await context.value.requestDomAccess(identity, 'workspace.toolbar.items')
     expect(context.domPrompts()).toBe(1)
   })
@@ -827,11 +984,20 @@ describe('certified DOM authorization through the single PermissionBroker', () =
       certification: expect.objectContaining({ fingerprint: expiring.fingerprint }),
     }))
 
-    for (let attempt = 0; attempt < 100 && context.value.snapshots().some(item => item.certification !== undefined); attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 100 && context.value.snapshots().some(item => item.certification !== undefined);
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
-    expect(context.value.snapshots().find(item => item.capability === 'ui.extension-points.render')).not.toHaveProperty('certification')
-    expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({ authorized: false, state: 'pending' })
+    expect(context.value.snapshots().find(item => item.capability === 'ui.extension-points.render')).not.toHaveProperty(
+      'certification',
+    )
+    expect(context.value.domAccess(identity, 'workspace.toolbar.items')).toMatchObject({
+      authorized: false,
+      state: 'pending',
+    })
   })
 
   it('makes the legacy extension-point broker a descriptor gate over PermissionBroker authority only', async () => {
@@ -869,11 +1035,17 @@ describe('certified DOM authorization through the single PermissionBroker', () =
     const context = broker({ certified: certification() })
     const descriptors = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     descriptors.registerCatalog(CORDISX_BUILTIN_EXTENSION_POINT_CATALOG)
-    const points = new ExtensionPointPolicyBroker(descriptors, new MemoryExtensionPointPolicyStore(), 'runtime-1', undefined, {
-      access: (owner, pointId, view) => context.value.domAccess(owner, pointId, view),
-      policy: (owner, pointId) => context.value.domPolicy(owner, pointId),
-      policies: () => context.value.domPolicies(),
-    })
+    const points = new ExtensionPointPolicyBroker(
+      descriptors,
+      new MemoryExtensionPointPolicyStore(),
+      'runtime-1',
+      undefined,
+      {
+        access: (owner, pointId, view) => context.value.domAccess(owner, pointId, view),
+        policy: (owner, pointId) => context.value.domPolicy(owner, pointId),
+        policies: () => context.value.domPolicies(),
+      },
+    )
     points.register(identity, { pluginId: identity.id, moduleGeneration: 'module-1' })
 
     expect(points.decision(identity.id, 'sidebar.workspace.menu', 'surface')).toMatchObject({

@@ -1,10 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import React, { defineReactPage, useEffect, useState } from 'cordisx/react'
 import { Button, Card, Heading, MarkdownViewer, SelectionRail, Stack, Text } from 'cordisx/ui'
-import {
-  CORDISX_PAGE_SCHEMA_V3,
-  CORDISX_ROUTE_SCHEMA_V2,
-} from '../../packages/cli/src/contracts.js'
+import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from '../../packages/cli/src/contracts.js'
 
 declare global {
   // eslint-disable-next-line no-var
@@ -48,7 +45,9 @@ const mount = defineReactPage<Messages>(({ t }) => {
   const [section, setSection] = useState('overview')
   useEffect(() => {
     globalThis.__sharedReactEffectMounts = (globalThis.__sharedReactEffectMounts ?? 0) + 1
-    return () => { globalThis.__sharedReactEffectCleanups = (globalThis.__sharedReactEffectCleanups ?? 0) + 1 }
+    return () => {
+      globalThis.__sharedReactEffectCleanups = (globalThis.__sharedReactEffectCleanups ?? 0) + 1
+    }
   }, [])
   return (
     <Stack gap="medium" data-shared-react-page="mounted">
@@ -84,7 +83,9 @@ export const inject = ['i18n', 'pages', 'routes']
 export function apply(ctx: Context): void {
   globalThis.__sharedReactPluginReact = React
   ctx.i18n.define<Messages>({
-    namespace: 'shared-react', locale: 'en', default: true,
+    namespace: 'shared-react',
+    locale: 'en',
+    default: true,
     messages: {
       'page.title': 'Shared React',
       'page.description': 'One React instance renders this plugin page.',
@@ -94,7 +95,8 @@ export function apply(ctx: Context): void {
     },
   })
   ctx.i18n.define<Messages>({
-    namespace: 'shared-react', locale: 'zh-CN',
+    namespace: 'shared-react',
+    locale: 'zh-CN',
     messages: {
       'page.title': '共享 React',
       'page.description': '此插件页面由同一个 React 实例渲染。',

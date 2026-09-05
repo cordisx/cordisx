@@ -5,8 +5,8 @@ import {
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   CORDISX_ROUTE_SCHEMA_V2,
-  type CordisXAgentHistory,
   type CordisXAgentEvents,
+  type CordisXAgentHistory,
   type CordisXAgents,
   type CordisXPageMetadataV3,
   type CordisXPluginManifestV1,
@@ -15,14 +15,11 @@ import {
   type CordisXSystemPrompt,
 } from 'cordisx/contracts'
 import {
+  type SessionHeaderEntryAdapter,
   STRUCTURED_SESSION_HEADER_ENTRY,
   TRACE_SESSION_HEADER_ACTION,
-  type SessionHeaderEntryAdapter,
 } from './entry.js'
-import {
-  FixtureTraceShowcaseStore,
-  UnavailableTraceShowcaseStore,
-} from './providers.js'
+import { FixtureTraceShowcaseStore, UnavailableTraceShowcaseStore } from './providers.js'
 import { LiveTraceShowcaseStore } from './live-provider.js'
 import { HistoricalTraceShowcaseStore } from './history-provider.js'
 import type { TraceShowcaseStore } from './types.js'
@@ -35,40 +32,46 @@ function metadataText(key: string, fallback: string) {
   return Object.freeze({ namespace: 'agent-trace-showcase', key, fallback } as const)
 }
 
-export const presentation = Object.freeze({
-  name: metadataText('plugin.name', 'Agent Trace Showcase'),
-  description: metadataText(
-    'plugin.description',
-    'Inspects input, model, tool, delivery, and prompt-contribution events for Agent sessions.',
-  ),
-} satisfies CordisXPluginPresentation)
+export const presentation = Object.freeze(
+  {
+    name: metadataText('plugin.name', 'Agent Trace Showcase'),
+    description: metadataText(
+      'plugin.description',
+      'Inspects input, model, tool, delivery, and prompt-contribution events for Agent sessions.',
+    ),
+  } satisfies CordisXPluginPresentation,
+)
 
-export const TRACE_SESSION_PAGE_METADATA = Object.freeze({
-  $schema: CORDISX_PAGE_SCHEMA_V3,
-  schemaVersion: 3,
-  id: 'session.timeline',
-  title: metadataText('page.timeline.title', 'Agent Trace Timeline'),
-  description: metadataText(
-    'page.timeline.description',
-    'Inspect input, model, tool, delivery, and prompt-contribution events for the active Agent session.',
-  ),
-  icon: 'host:history',
-  chrome: 'body-only',
-} satisfies CordisXPageMetadataV3)
+export const TRACE_SESSION_PAGE_METADATA = Object.freeze(
+  {
+    $schema: CORDISX_PAGE_SCHEMA_V3,
+    schemaVersion: 3,
+    id: 'session.timeline',
+    title: metadataText('page.timeline.title', 'Agent Trace Timeline'),
+    description: metadataText(
+      'page.timeline.description',
+      'Inspect input, model, tool, delivery, and prompt-contribution events for the active Agent session.',
+    ),
+    icon: 'host:history',
+    chrome: 'body-only',
+  } satisfies CordisXPageMetadataV3,
+)
 
-export const TRACE_SESSION_ROUTE_DEFINITION = Object.freeze({
-  $schema: CORDISX_ROUTE_SCHEMA_V2,
-  schemaVersion: 2,
-  id: 'session.timeline',
-  path: '/sessions/:sessionId/agent-trace',
-  outlet: 'session.content',
-  page: 'session.timeline',
-  title: metadataText('route.timeline.title', 'Open Agent Trace'),
-  description: metadataText(
-    'route.timeline.description',
-    'Use the conversation header action to open the Agent Trace Timeline for the active session.',
-  ),
-} satisfies CordisXRouteDefinitionV2<'session.content'>)
+export const TRACE_SESSION_ROUTE_DEFINITION = Object.freeze(
+  {
+    $schema: CORDISX_ROUTE_SCHEMA_V2,
+    schemaVersion: 2,
+    id: 'session.timeline',
+    path: '/sessions/:sessionId/agent-trace',
+    outlet: 'session.content',
+    page: 'session.timeline',
+    title: metadataText('route.timeline.title', 'Open Agent Trace'),
+    description: metadataText(
+      'route.timeline.description',
+      'Use the conversation header action to open the Agent Trace Timeline for the active session.',
+    ),
+  } satisfies CordisXRouteDefinitionV2<'session.content'>,
+)
 
 export interface Config {
   readonly mode: 'live' | 'historical' | 'fixture'
@@ -84,7 +87,8 @@ export const Config = Schema.object({
   ]).default('live')
     .extra('extra', { label: { en: 'Data mode', 'zh-CN': '数据模式' } })
     .extra('description', {
-      en: 'Choose live public ledger data, Host-imported history merged with live observations, or deterministic fixture data.',
+      en:
+        'Choose live public ledger data, Host-imported history merged with live observations, or deterministic fixture data.',
       'zh-CN': '选择实时公开账本、与实时观察合并的 Host 历史导入，或确定性的 fixture 数据。',
     }),
   historyPageSize: Schema.natural().default(100).min(25).max(500).step(25)
@@ -115,28 +119,53 @@ export const manifest = {
   name: 'Agent Trace Showcase',
   capabilities: [
     {
-      name: 'agent.events.read', required: false,
-      reason: { namespace: 'agent-trace-showcase', key: 'permission.agent-events-read', fallback: 'Read the public Agent event ledger for the active session Timeline.' },
+      name: 'agent.events.read',
+      required: false,
+      reason: {
+        namespace: 'agent-trace-showcase',
+        key: 'permission.agent-events-read',
+        fallback: 'Read the public Agent event ledger for the active session Timeline.',
+      },
       scope: {},
     },
     {
-      name: 'agent.history.read', required: false,
-      reason: { namespace: 'agent-trace-showcase', key: 'permission.agent-history-read', fallback: 'Read the Host-redacted historical projection for the active Agent session.' },
+      name: 'agent.history.read',
+      required: false,
+      reason: {
+        namespace: 'agent-trace-showcase',
+        key: 'permission.agent-history-read',
+        fallback: 'Read the Host-redacted historical projection for the active Agent session.',
+      },
       scope: {},
     },
     {
-      name: 'agent.messages.append', required: false,
-      reason: { namespace: 'agent-trace-showcase', key: 'permission.messages-append', fallback: 'Run explicit followup, steer, inject, and append-only pre-step demonstrations.' },
+      name: 'agent.messages.append',
+      required: false,
+      reason: {
+        namespace: 'agent-trace-showcase',
+        key: 'permission.messages-append',
+        fallback: 'Run explicit followup, steer, inject, and append-only pre-step demonstrations.',
+      },
       scope: {},
     },
     {
-      name: 'agent.prompt.section', required: false,
-      reason: { namespace: 'agent-trace-showcase', key: 'permission.prompt-section', fallback: 'Register an explicit source-attributed system prompt section demonstration.' },
+      name: 'agent.prompt.section',
+      required: false,
+      reason: {
+        namespace: 'agent-trace-showcase',
+        key: 'permission.prompt-section',
+        fallback: 'Register an explicit source-attributed system prompt section demonstration.',
+      },
       scope: {},
     },
     {
-      name: 'agent.prompt.context', required: false,
-      reason: { namespace: 'agent-trace-showcase', key: 'permission.prompt-context', fallback: 'Register an explicit source-attributed system prompt context demonstration.' },
+      name: 'agent.prompt.context',
+      required: false,
+      reason: {
+        namespace: 'agent-trace-showcase',
+        key: 'permission.prompt-context',
+        fallback: 'Register an explicit source-attributed system prompt context demonstration.',
+      },
       scope: {},
     },
   ],
@@ -189,11 +218,16 @@ export function createTraceShowcaseStore(
       windowSize: config.timelineWindowSize,
     })
   }
-  if (config.mode === 'live' && sessionId !== undefined && agentEvents !== undefined && agents !== undefined && systemPrompt !== undefined) {
+  if (
+    config.mode === 'live' && sessionId !== undefined && agentEvents !== undefined && agents !== undefined
+    && systemPrompt !== undefined
+  ) {
     return new LiveTraceShowcaseStore(agentEvents, agents, systemPrompt, sessionId, config.timelineWindowSize)
   }
-  if (config.mode === 'historical' && sessionId !== undefined && agentEvents !== undefined
-    && agents !== undefined && systemPrompt !== undefined && agentHistory !== undefined) {
+  if (
+    config.mode === 'historical' && sessionId !== undefined && agentEvents !== undefined
+    && agents !== undefined && systemPrompt !== undefined && agentHistory !== undefined
+  ) {
     const live = new LiveTraceShowcaseStore(agentEvents, agents, systemPrompt, sessionId, config.timelineWindowSize)
     return new HistoricalTraceShowcaseStore(agentHistory, live, sessionId, {
       pageSize: config.historyPageSize,
@@ -220,9 +254,11 @@ export function installAgentTraceShowcase(
       'plugin.description': 'Inspects input, model, tool, delivery, and prompt-contribution events for Agent sessions.',
       'action.open': 'Open Agent Trace Timeline',
       'route.timeline.title': 'Open Agent Trace',
-      'route.timeline.description': 'Use the conversation header action to open the Agent Trace Timeline for the active session.',
+      'route.timeline.description':
+        'Use the conversation header action to open the Agent Trace Timeline for the active session.',
       'page.timeline.title': 'Agent Trace Timeline',
-      'page.timeline.description': 'Inspect input, model, tool, delivery, and prompt-contribution events for the active Agent session.',
+      'page.timeline.description':
+        'Inspect input, model, tool, delivery, and prompt-contribution events for the active Agent session.',
       'permission.agent-events-read': 'Read the public Agent event ledger for the active session Timeline.',
       'permission.agent-history-read': 'Read the Host-redacted historical projection for the active Agent session.',
       'permission.messages-append': 'Run explicit followup, steer, inject, and append-only pre-step demonstrations.',
@@ -251,14 +287,16 @@ export function installAgentTraceShowcase(
 
   ctx.pages.register(
     TRACE_SESSION_PAGE_METADATA,
-    defineReactPage(createTraceReactPage(sessionId => createTraceShowcaseStore(
-      config,
-      traceServices.agentEvents,
-      traceServices.agents,
-      ctx.systemPrompt,
-      sessionId,
-      traceServices.agentHistory,
-    ))),
+    defineReactPage(createTraceReactPage(sessionId =>
+      createTraceShowcaseStore(
+        config,
+        traceServices.agentEvents,
+        traceServices.agents,
+        ctx.systemPrompt,
+        sessionId,
+        traceServices.agentHistory,
+      )
+    )),
   )
   ctx.routes.register(TRACE_SESSION_ROUTE_DEFINITION)
 
@@ -274,8 +312,8 @@ export function apply(ctx: Context, config: unknown): void {
 
 export type * from './types.js'
 export {
-  STRUCTURED_SESSION_HEADER_ENTRY,
-  TRACE_SESSION_HEADER_ACTION,
   type SessionHeaderActionContributionV3,
   type SessionHeaderEntryAdapter,
+  STRUCTURED_SESSION_HEADER_ENTRY,
+  TRACE_SESSION_HEADER_ACTION,
 } from './entry.js'

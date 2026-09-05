@@ -5,7 +5,11 @@ describe('ProviderAdapterRegistry', () => {
   it('routes equal provider-local session ids by complete composite identity', async () => {
     const registry = new ProviderAdapterRegistry<{ readonly name: string }>()
     const removeMain = registry.register({ providerId: 'main', generation: 'g1', adapter: { name: 'main-adapter' } })
-    const removeBackup = registry.register({ providerId: 'backup', generation: 'g1', adapter: { name: 'backup-adapter' } })
+    const removeBackup = registry.register({
+      providerId: 'backup',
+      generation: 'g1',
+      adapter: { name: 'backup-adapter' },
+    })
     expect(() => registry.register({ providerId: 'main', generation: 'g2', adapter: { name: 'duplicate' } }))
       .toThrow('provider main is already registered')
 

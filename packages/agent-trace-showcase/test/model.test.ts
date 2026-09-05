@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  deriveOverview,
-  filterTraceEvents,
-  groupTraceEvents,
-  orderTraceEvents,
-} from '../src/model.js'
+import { deriveOverview, filterTraceEvents, groupTraceEvents, orderTraceEvents } from '../src/model.js'
 import { FixtureTraceShowcaseStore } from '../src/providers.js'
 
 describe('Agent Trace Timeline model', () => {
@@ -12,15 +7,29 @@ describe('Agent Trace Timeline model', () => {
     const store = new FixtureTraceShowcaseStore({ sessionId: 'session-a' })
     const events = store.getSnapshot().events
     expect(filterTraceEvents(events, {
-      search: 'Steer requested', lane: 'injection', truth: 'cordisx', origin: 'fixture', source: 'agent-trace-showcase',
-      type: 'message.delivery', phase: 'requested',
+      search: 'Steer requested',
+      lane: 'injection',
+      truth: 'cordisx',
+      origin: 'fixture',
+      source: 'agent-trace-showcase',
+      type: 'message.delivery',
+      phase: 'requested',
     })).toEqual([
       expect.objectContaining({
-        type: 'message.delivery', semanticType: 'agent.steer', phase: 'requested', lane: 'injection',
+        type: 'message.delivery',
+        semanticType: 'agent.steer',
+        phase: 'requested',
+        lane: 'injection',
       }),
     ])
     expect(filterTraceEvents(events, {
-      search: 'no-match', lane: 'all', truth: 'all', origin: 'all', source: 'all', type: 'all', phase: 'all',
+      search: 'no-match',
+      lane: 'all',
+      truth: 'all',
+      origin: 'all',
+      source: 'all',
+      type: 'all',
+      phase: 'all',
     })).toEqual([])
     store.dispose()
   })

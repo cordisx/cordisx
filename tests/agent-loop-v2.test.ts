@@ -1,25 +1,31 @@
 import { describe, expect, it } from 'vitest'
-import type {
-  AgentDefinition,
-  AgentLoopCommand,
-  AgentLoopTaskBinding,
-} from '@cordisx/protocol/agent-loop/v2'
+import type { AgentDefinition, AgentLoopCommand, AgentLoopTaskBinding } from '@cordisx/protocol/agent-loop/v2'
 import {
   CORDISX_AGENT_DEFINITION_SCHEMA_V1,
   CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V2,
 } from '../packages/cli/src/agent-loop-contracts.js'
-import { CordisXAgentLoopBrokerV2, canonicalAgentLoopTaskDetailsUrl } from '../packages/cli/src/renderer/agent-loop-v2.js'
+import {
+  canonicalAgentLoopTaskDetailsUrl,
+  CordisXAgentLoopBrokerV2,
+} from '../packages/cli/src/renderer/agent-loop-v2.js'
 import { PlaygroundMockAgentLoopHost } from '../packages/cli/src/renderer/playground-mock-agent-loop.js'
 
 const inherit: AgentDefinition['inherit'] = {
-  promptSections: 'append', rules: 'append', skills: 'append', tools: 'merge', mcpServers: 'merge', runtimeDefaults: 'merge',
+  promptSections: 'append',
+  rules: 'append',
+  skills: 'append',
+  tools: 'merge',
+  mcpServers: 'merge',
+  runtimeDefaults: 'merge',
 }
 
 function definition(agentId: string): AgentDefinition {
   return {
     $schema: CORDISX_AGENT_DEFINITION_SCHEMA_V1,
-    contract: 'cordisx.agent-definition/v1', schemaVersion: 1,
-    identity: { agentId, revision: 'r1' }, inherit,
+    contract: 'cordisx.agent-definition/v1',
+    schemaVersion: 1,
+    identity: { agentId, revision: 'r1' },
+    inherit,
     promptSections: [{ sectionId: 'introduction', kind: 'introduction', text: `${agentId} prompt` }],
     skills: ['summarize'],
   }
@@ -28,33 +34,57 @@ function definition(agentId: string): AgentDefinition {
 function create(commandId: string, target: AgentDefinition): Extract<AgentLoopCommand, { type: 'create-or-bind' }> {
   return {
     $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V2,
-    contract: 'cordisx.agent-loop-command/v2', schemaVersion: 2,
-    commandId, type: 'create-or-bind', definition: target.identity,
-    definitions: [target], target: { mode: 'create' },
+    contract: 'cordisx.agent-loop-command/v2',
+    schemaVersion: 2,
+    commandId,
+    type: 'create-or-bind',
+    definition: target.identity,
+    definitions: [target],
+    target: { mode: 'create' },
   }
 }
 
-function send(commandId: string, binding: AgentLoopTaskBinding, text: string): Extract<AgentLoopCommand, { type: 'send' }> {
+function send(
+  commandId: string,
+  binding: AgentLoopTaskBinding,
+  text: string,
+): Extract<AgentLoopCommand, { type: 'send' }> {
   return {
     $schema: CORDISX_AGENT_LOOP_COMMAND_SCHEMA_V2,
-    contract: 'cordisx.agent-loop-command/v2', schemaVersion: 2,
-    commandId, type: 'send', binding, content: [{ kind: 'text', text }],
+    contract: 'cordisx.agent-loop-command/v2',
+    schemaVersion: 2,
+    commandId,
+    type: 'send',
+    binding,
+    content: [{ kind: 'text', text }],
   }
 }
 
 const allowed = async (request: { capability: 'tasks.create' | 'tasks.content.read' | 'turns.submit' }) => ({
-  capability: request.capability, state: 'allowed' as const, code: 'allowed' as const,
+  capability: request.capability,
+  state: 'allowed' as const,
+  code: 'allowed' as const,
 })
 
 function memoryLedgerPersistence(providerKey = 'debug:agent-loop/mock/v1') {
   let value: string | undefined
-  return { providerKey, read: () => value, write: (next: string) => { value = next } }
+  return {
+    providerKey,
+    read: () => value,
+    write: (next: string) => {
+      value = next
+    },
+  }
 }
 
 describe('durable AgentLoop v2 broker', () => {
   it('executes and replays exact create/send operations while preserving details, ids, and event causation', async () => {
     const host = new PlaygroundMockAgentLoopHost()
-    const broker = new CordisXAgentLoopBrokerV2(host, () => new Date('2026-08-31T00:00:00.000Z'), memoryLedgerPersistence())
+    const broker = new CordisXAgentLoopBrokerV2(
+      host,
+      () => new Date('2026-08-31T00:00:00.000Z'),
+      memoryLedgerPersistence(),
+    )
     const client = broker.bind({ ownerKey: 'chatroom', active: () => true, authorize: allowed })
     const lead = definition('lead')
     const createLead = create('create-lead', lead)
@@ -74,7 +104,11 @@ describe('durable AgentLoop v2 broker', () => {
     expect(sent.status).toBe('accepted')
     expect(sendRetry.status).toBe('accepted')
     if (sent.status !== 'accepted' || sendRetry.status !== 'accepted') throw new Error('send unavailable')
-    expect(sendRetry).toMatchObject({ messageId: sent.messageId, turn: sent.turn, delivery: { disposition: 'replayed' } })
+    expect(sendRetry).toMatchObject({
+      messageId: sent.messageId,
+      turn: sent.turn,
+      delivery: { disposition: 'replayed' },
+    })
     expect(host.snapshot().tasks[0]?.events.filter(event => event.type === 'input.accepted')).toHaveLength(1)
 
     const subscribed = await client.subscribe(created.binding, -1)
@@ -126,11 +160,18 @@ describe('durable AgentLoop v2 broker', () => {
   it('restores the provider-scoped ledger across a renderer restart without repeating side effects or aliasing bindings', async () => {
     let hostState: string | undefined
     let ledgerState: string | undefined
-    const hostPersistence = { read: () => hostState, write: (value: string) => { hostState = value } }
+    const hostPersistence = {
+      read: () => hostState,
+      write: (value: string) => {
+        hostState = value
+      },
+    }
     const ledgerPersistence = {
       providerKey: 'debug:agent-loop/mock/v1',
       read: () => ledgerState,
-      write: (value: string) => { ledgerState = value },
+      write: (value: string) => {
+        ledgerState = value
+      },
     }
     const lead = definition('lead')
     const createLead = create('restart-create', lead)
@@ -160,12 +201,17 @@ describe('durable AgentLoop v2 broker', () => {
 
     const replayedSend = await second.send(sendLead)
     expect(replayedSend).toMatchObject({
-      status: 'accepted', messageId: sent.messageId, turn: sent.turn, delivery: { disposition: 'replayed' },
+      status: 'accepted',
+      messageId: sent.messageId,
+      turn: sent.turn,
+      delivery: { disposition: 'replayed' },
     })
     expect(secondHost.snapshot().tasks).toHaveLength(1)
     expect(secondHost.snapshot().tasks[0]?.events.filter(event => event.type === 'input.accepted')).toHaveLength(1)
 
-    expect((await second.send(send('fresh-send-on-stale-binding', created.binding, 'must not execute'))).status).toBe('unavailable')
+    expect((await second.send(send('fresh-send-on-stale-binding', created.binding, 'must not execute'))).status).toBe(
+      'unavailable',
+    )
     const fresh = await second.send(send('fresh-send', reconciled.binding, 'new input'))
     expect(fresh.status).toBe('accepted')
     expect(secondHost.snapshot().tasks[0]?.events.filter(event => event.type === 'input.accepted')).toHaveLength(2)
@@ -185,10 +231,12 @@ describe('durable AgentLoop v2 broker', () => {
   })
 
   it('validates canonical Host and external task URLs', () => {
-    expect(canonicalAgentLoopTaskDetailsUrl({ url: 'app://-/playground/simulator/tasks/1', target: 'host' })).toBeDefined()
+    expect(canonicalAgentLoopTaskDetailsUrl({ url: 'app://-/playground/simulator/tasks/1', target: 'host' }))
+      .toBeDefined()
     expect(canonicalAgentLoopTaskDetailsUrl({ url: 'codex:task/1', target: 'external' })).toBeDefined()
     expect(canonicalAgentLoopTaskDetailsUrl({ url: 'http://example.com', target: 'external' } as never)).toBeUndefined()
     expect(canonicalAgentLoopTaskDetailsUrl({ url: 'app://-/task', target: 'external' } as never)).toBeUndefined()
-    expect(canonicalAgentLoopTaskDetailsUrl({ url: 'https://user:pass@example.com/task', target: 'external' })).toBeUndefined()
+    expect(canonicalAgentLoopTaskDetailsUrl({ url: 'https://user:pass@example.com/task', target: 'external' }))
+      .toBeUndefined()
   })
 })

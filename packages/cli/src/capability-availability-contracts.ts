@@ -1,8 +1,4 @@
-import type {
-  CordisXCapabilityScope,
-  CordisXLocalizedText,
-  CordisXPlatformCapability,
-} from './contracts.js'
+import type { CordisXCapabilityScope, CordisXLocalizedText, CordisXPlatformCapability } from './contracts.js'
 
 export type CordisXCapabilityAvailabilityState = 'supported' | 'unavailable' | 'degraded'
 

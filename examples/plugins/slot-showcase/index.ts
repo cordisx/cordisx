@@ -5,11 +5,11 @@ import {
   CORDISX_PAGE_SCHEMA_V3,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   CORDISX_ROUTE_SCHEMA_V2,
-  type CordisXPluginManifestV1,
-  type CordisXPluginPresentation,
   type CordisXEnvironmentRow,
   type CordisXLocalizedText,
   type CordisXMessageParams,
+  type CordisXPluginManifestV1,
+  type CordisXPluginPresentation,
 } from '../../../packages/cli/src/contracts.js'
 import type {} from '../../../packages/cli/src/contracts.js'
 import { ShowcasePage } from './view.js'
@@ -19,7 +19,9 @@ export const inject = ['i18n', 'commands', 'slots', 'pages', 'routes']
 export const Config = Schema.object({
   sessionId: Schema.string().default('').max(128).pattern(/^(?:|[A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/u)
     .extra('extra', { label: { en: 'Native session ID', 'zh-CN': '原生会话 ID' } })
-    .description('Selected native session ID used by the optional navigation shortcut. Leave empty to hide that shortcut.')
+    .description(
+      'Selected native session ID used by the optional navigation shortcut. Leave empty to hide that shortcut.',
+    )
     .i18n({
       en: 'Selected native session ID used by the optional navigation shortcut. Leave empty to hide that shortcut.',
       'zh-CN': '可选导航快捷操作使用的原生会话 ID；留空时隐藏该快捷操作。',
@@ -146,13 +148,15 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'page.app.description': 'Presents the complete structured UI showcase as an application overview.',
       'page.app.title': 'Application overview',
       'page.main.body': 'Showcase page for the main area.',
-      'page.main.description': 'Presents the showcase analytics content beside the native sidebar while preserving the surrounding application shell.',
+      'page.main.description':
+        'Presents the showcase analytics content beside the native sidebar while preserving the surrounding application shell.',
       'page.main.title': 'Workspace analytics',
       'page.welcome.description': 'A CordisX-owned welcome page rendered inside the native Codex workspace shell.',
       'page.welcome.eyebrow': 'CORDISX · EXTENSIBLE WORKSPACE',
       'page.welcome.title': 'What should we extend?',
       'page.session.body': 'Session content page for native session {sessionId}.',
-      'page.session.description': 'Presents analytics for the currently selected native session below its persistent session header.',
+      'page.session.description':
+        'Presents analytics for the currently selected native session below its persistent session header.',
       'page.session.title': 'Session analytics',
       'page.tab.details': 'Details',
       'page.tab.overview': 'Overview',
@@ -163,7 +167,8 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
       'route.main.title': 'Workspace analytics',
       'route.welcome.description': 'Open the optional branded welcome destination from showcase navigation.',
       'route.welcome.title': 'CordisX welcome',
-      'route.session.description': 'Toggle analytics for the current session from its header, or open the configured session from showcase navigation.',
+      'route.session.description':
+        'Toggle analytics for the current session from its header, or open the configured session from showcase navigation.',
       'route.session.title': 'Session analytics',
     },
   })
@@ -308,16 +313,28 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
 
   let revision = 1
   let rowHandle: ReturnType<Context['slots']['register']> | undefined
-  ctx.commands.register({ id: 'open-app', title: message('command.open-app') }, () => ctx.routes.navigate({ id: 'app.overview' }))
-  ctx.commands.register({ id: 'open-main', title: message('command.open-main') }, () => ctx.routes.navigate({ id: 'main.analytics' }))
+  ctx.commands.register(
+    { id: 'open-app', title: message('command.open-app') },
+    () => ctx.routes.navigate({ id: 'app.overview' }),
+  )
+  ctx.commands.register(
+    { id: 'open-main', title: message('command.open-main') },
+    () => ctx.routes.navigate({ id: 'main.analytics' }),
+  )
   if (config.sessionId !== '') {
-    ctx.commands.register({ id: 'open-session', title: message('command.open-session') }, () => ctx.routes.navigate({
-      id: 'session.analytics',
-      params: { sessionId: config.sessionId },
-    }))
+    ctx.commands.register({ id: 'open-session', title: message('command.open-session') }, () =>
+      ctx.routes.navigate({
+        id: 'session.analytics',
+        params: { sessionId: config.sessionId },
+      }))
   }
-  ctx.commands.register({ id: 'quick', title: message('command.quick') }, () => { revision += 1 })
-  ctx.commands.register({ id: 'settings', title: message('command.settings') }, () => ctx.routes.navigate({ id: 'app.overview' }))
+  ctx.commands.register({ id: 'quick', title: message('command.quick') }, () => {
+    revision += 1
+  })
+  ctx.commands.register(
+    { id: 'settings', title: message('command.settings') },
+    () => ctx.routes.navigate({ id: 'app.overview' }),
+  )
   ctx.commands.register({ id: 'refresh', title: message('command.refresh') }, () => {
     revision += 1
     const row: CordisXEnvironmentRow = {
@@ -330,15 +347,31 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
     rowHandle?.update(row)
   })
 
-  const action = (label: CordisXLocalizedText, command: string, icon: 'host:open' | 'host:settings' | 'host:refresh') => ({
+  const action = (
+    label: CordisXLocalizedText,
+    command: string,
+    icon: 'host:open' | 'host:settings' | 'host:refresh',
+  ) => ({
     label,
     icon,
     command: { id: command },
   } as const)
-  ctx.slots.register({ name: 'sidebar.footer.before-control', id: 'open-app', order: 10 }, action(message('action.open-app'), 'open-app', 'host:open'))
-  ctx.slots.register({ name: 'sidebar.footer.after-control', id: 'settings', order: 20 }, action(message('action.settings'), 'settings', 'host:settings'))
-  ctx.slots.register({ name: 'sidebar.footer.menu', id: 'refresh', order: 10 }, action(message('action.refresh'), 'refresh', 'host:refresh'))
-  ctx.slots.register({ name: 'sidebar.account.menu', id: 'settings', order: 10 }, action(message('action.settings'), 'settings', 'host:settings'))
+  ctx.slots.register(
+    { name: 'sidebar.footer.before-control', id: 'open-app', order: 10 },
+    action(message('action.open-app'), 'open-app', 'host:open'),
+  )
+  ctx.slots.register(
+    { name: 'sidebar.footer.after-control', id: 'settings', order: 20 },
+    action(message('action.settings'), 'settings', 'host:settings'),
+  )
+  ctx.slots.register(
+    { name: 'sidebar.footer.menu', id: 'refresh', order: 10 },
+    action(message('action.refresh'), 'refresh', 'host:refresh'),
+  )
+  ctx.slots.register(
+    { name: 'sidebar.account.menu', id: 'settings', order: 10 },
+    action(message('action.settings'), 'settings', 'host:settings'),
+  )
   ctx.slots.register({ name: 'sidebar.navigation.items', id: 'main-page', order: 10 }, {
     label: message(config.welcomePage ? 'navigation.welcome.title' : 'navigation.title'),
     description: message('navigation.description'),
@@ -355,13 +388,19 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
     ],
   })
   ctx.slots.register({ name: 'workspace.toolbar.items', id: 'before', order: 10 }, {
-    anchor: 'workspace.primary', placement: 'before', ...action(message('action.open-main'), 'open-main', 'host:open'),
+    anchor: 'workspace.primary',
+    placement: 'before',
+    ...action(message('action.open-main'), 'open-main', 'host:open'),
   })
   ctx.slots.register({ name: 'workspace.toolbar.items', id: 'after', order: 20 }, {
-    anchor: 'workspace.primary', placement: 'after', ...action(message('action.refresh'), 'refresh', 'host:refresh'),
+    anchor: 'workspace.primary',
+    placement: 'after',
+    ...action(message('action.refresh'), 'refresh', 'host:refresh'),
   })
   ctx.slots.register({ name: 'workspace.toolbar.items', id: 'menu', order: 30 }, {
-    anchor: 'workspace.primary', placement: 'menu', ...action(message('action.settings'), 'settings', 'host:settings'),
+    anchor: 'workspace.primary',
+    placement: 'menu',
+    ...action(message('action.settings'), 'settings', 'host:settings'),
   })
   ctx.slots.register({ name: 'session.header.actions', id: 'trace', group: 'action', order: 10 }, {
     label: message('action.session-analytics'),
@@ -371,19 +410,33 @@ export function apply(ctx: Context, config: SlotShowcaseConfig = Config({})): vo
     routeBehavior: 'toggle',
   })
   ctx.slots.register({ name: 'composer.toolbar.items', id: 'submit-before', group: 'action', order: 10 }, {
-    anchor: 'submit', placement: 'before', ...action(message('action.refresh'), 'refresh', 'host:refresh'),
+    anchor: 'submit',
+    placement: 'before',
+    ...action(message('action.refresh'), 'refresh', 'host:refresh'),
   })
-  ctx.slots.register({ name: 'environment.panel.header-actions', id: 'refresh', order: 10 }, action(message('action.refresh'), 'refresh', 'host:refresh'))
+  ctx.slots.register(
+    { name: 'environment.panel.header-actions', id: 'refresh', order: 10 },
+    action(message('action.refresh'), 'refresh', 'host:refresh'),
+  )
   ctx.slots.register({ name: 'environment.panel.sections', id: 'runtime', order: 10 }, {
-    sectionId: 'runtime', title: message('environment.section'), description: message('environment.description'), icon: 'host:info',
+    sectionId: 'runtime',
+    title: message('environment.section'),
+    description: message('environment.description'),
+    icon: 'host:info',
   })
   ctx.slots.register({ name: 'environment.section.actions', id: 'settings', order: 10 }, {
-    sectionId: 'runtime', ...action(message('action.settings'), 'settings', 'host:settings'),
+    sectionId: 'runtime',
+    ...action(message('action.settings'), 'settings', 'host:settings'),
   })
   rowHandle = ctx.slots.register({ name: 'environment.section.rows', id: 'revision', order: 10 }, {
-    sectionId: 'runtime', rowId: 'revision', label: message('environment.status'), value: revision, status: 'host:success',
+    sectionId: 'runtime',
+    rowId: 'revision',
+    label: message('environment.status'),
+    value: revision,
+    status: 'host:success',
   })
   ctx.slots.register({ name: 'environment.row.trailing-actions', id: 'refresh', order: 10 }, {
-    rowId: 'revision', ...action(message('action.refresh'), 'refresh', 'host:refresh'),
+    rowId: 'revision',
+    ...action(message('action.refresh'), 'refresh', 'host:refresh'),
   })
 }

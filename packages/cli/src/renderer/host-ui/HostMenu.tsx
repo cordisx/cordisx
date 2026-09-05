@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { HostThemeProjection } from '../host-theme.js'
 
@@ -6,7 +6,14 @@ export type HostMenuItem =
   | { readonly kind: 'heading'; readonly id: string; readonly label: string }
   | { readonly kind: 'separator'; readonly id: string }
   | { readonly kind: 'status'; readonly id: string; readonly label: string; readonly value?: string }
-  | { readonly kind: 'action'; readonly id: string; readonly label: string; readonly selected?: boolean; readonly disabled?: boolean; readonly onSelect: () => void }
+  | {
+    readonly kind: 'action'
+    readonly id: string
+    readonly label: string
+    readonly selected?: boolean
+    readonly disabled?: boolean
+    readonly onSelect: () => void
+  }
 
 export interface HostMenuProps {
   readonly label: string
@@ -47,7 +54,9 @@ export function HostMenu({ label, className, icon, copy, items, footer }: HostMe
       const menuRect = menu.getBoundingClientRect()
       const left = Math.min(Math.max(edge, triggerRect.left), Math.max(edge, window.innerWidth - menuRect.width - edge))
       const above = triggerRect.top - menuRect.height - gap
-      const top = above >= edge ? above : Math.min(window.innerHeight - menuRect.height - edge, triggerRect.bottom + gap)
+      const top = above >= edge
+        ? above
+        : Math.min(window.innerHeight - menuRect.height - edge, triggerRect.bottom + gap)
       menu.style.left = `${Math.round(left)}px`
       menu.style.top = `${Math.max(edge, Math.round(top))}px`
     }
@@ -88,8 +97,12 @@ export function HostMenu({ label, className, icon, copy, items, footer }: HostMe
     const next = event.key === 'ArrowDown' || event.key === 'ArrowRight'
       ? buttons[(index + 1 + buttons.length) % buttons.length]
       : event.key === 'ArrowUp' || event.key === 'ArrowLeft'
-        ? buttons[(index - 1 + buttons.length) % buttons.length]
-        : event.key === 'Home' ? buttons[0] : event.key === 'End' ? buttons.at(-1) : undefined
+      ? buttons[(index - 1 + buttons.length) % buttons.length]
+      : event.key === 'Home'
+      ? buttons[0]
+      : event.key === 'End'
+      ? buttons.at(-1)
+      : undefined
     if (next !== undefined) {
       event.preventDefault()
       event.stopPropagation()
@@ -119,32 +132,47 @@ export function HostMenu({ label, className, icon, copy, items, footer }: HostMe
           })
         }}
       >
-        {icon}{copy}
+        {icon}
+        {copy}
       </button>
-      {open ? createPortal(
-        <div ref={menuRef} id={menuId} className="cxhm-menu" role="menu" aria-label={label} onKeyDown={onMenuKeyDown}>
-          {items.map(item => item.kind === 'separator'
-            ? <div key={item.id} className="cxhm-separator" role="separator" />
-            : item.kind === 'heading'
-              ? <div key={item.id} className="cxhm-heading" role="presentation">{item.label}</div>
-              : item.kind === 'status'
-                ? <div key={item.id} className="cxhm-status" role="presentation"><span>{item.label}</span>{item.value === undefined ? null : <strong>{item.value}</strong>}</div>
-                : <button
+      {open
+        ? createPortal(
+          <div ref={menuRef} id={menuId} className="cxhm-menu" role="menu" aria-label={label} onKeyDown={onMenuKeyDown}>
+            {items.map(item =>
+              item.kind === 'separator'
+                ? <div key={item.id} className="cxhm-separator" role="separator" />
+                : item.kind === 'heading'
+                ? <div key={item.id} className="cxhm-heading" role="presentation">{item.label}</div>
+                : item.kind === 'status'
+                ? (
+                  <div key={item.id} className="cxhm-status" role="presentation">
+                    <span>{item.label}</span>
+                    {item.value === undefined ? null : <strong>{item.value}</strong>}
+                  </div>
+                )
+                : (
+                  <button
                     key={item.id}
                     type="button"
                     className="cxhm-item"
                     role={item.selected === undefined ? 'menuitem' : 'menuitemradio'}
                     {...(item.selected === undefined ? {} : { 'aria-checked': item.selected })}
                     disabled={item.disabled}
-                    onClick={() => { close(true); item.onSelect() }}
+                    onClick={() => {
+                      close(true)
+                      item.onSelect()
+                    }}
                   >
                     <span className="cxhm-check" aria-hidden="true">{item.selected === true ? '✓' : ''}</span>
                     <span>{item.label}</span>
-                  </button>)}
-          {footer === undefined ? null : <div className="cxhm-footer" role="presentation">{footer}</div>}
-        </div>,
-        document.body,
-      ) : null}
+                  </button>
+                )
+            )}
+            {footer === undefined ? null : <div className="cxhm-footer" role="presentation">{footer}</div>}
+          </div>,
+          document.body,
+        )
+        : null}
     </>
   )
 }

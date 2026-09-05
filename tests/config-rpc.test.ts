@@ -1,9 +1,6 @@
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import {
-  createConfigBridgeHandler,
-  parseConfigBindingRequest,
-} from '../packages/cli/src/launcher/config-rpc.js'
+import { createConfigBridgeHandler, parseConfigBindingRequest } from '../packages/cli/src/launcher/config-rpc.js'
 
 const token = 'a'.repeat(64)
 const generation = 'b'.repeat(32)
@@ -27,9 +24,23 @@ describe('config CDP request boundary', () => {
     })
     expect(() => parseConfigBindingRequest({ ...request, token: 'b'.repeat(64) }, token, 'work', generation))
       .toThrow('token is invalid')
-    expect(() => parseConfigBindingRequest({ ...request, scope: { ...request.scope, profileId: 'other' } }, token, 'work', generation))
+    expect(() =>
+      parseConfigBindingRequest(
+        { ...request, scope: { ...request.scope, profileId: 'other' } },
+        token,
+        'work',
+        generation,
+      )
+    )
       .toThrow('profile is stale or spoofed')
-    expect(() => parseConfigBindingRequest({ ...request, scope: { ...request.scope, generation: 'old' } }, token, 'work', generation))
+    expect(() =>
+      parseConfigBindingRequest(
+        { ...request, scope: { ...request.scope, generation: 'old' } },
+        token,
+        'work',
+        generation,
+      )
+    )
       .toThrow('generation is stale or spoofed')
   })
 
@@ -57,10 +68,15 @@ describe('config CDP request boundary', () => {
         plugins: [{ id: 'example', entry, enabled: true, config: {}, revision: 0 }],
       },
     })
-    const parsed = parseConfigBindingRequest({
-      ...request,
-      identity: { source: 'file:///plugins/spoofed.ts', pluginId: 'example' },
-    }, token, 'work', generation)
+    const parsed = parseConfigBindingRequest(
+      {
+        ...request,
+        identity: { source: 'file:///plugins/spoofed.ts', pluginId: 'example' },
+      },
+      token,
+      'work',
+      generation,
+    )
     await expect(handler.handle(parsed)).rejects.toThrow('identity is stale or spoofed')
   })
 })

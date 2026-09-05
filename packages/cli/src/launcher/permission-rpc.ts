@@ -2,11 +2,11 @@ import { timingSafeEqual } from 'node:crypto'
 import type { CordisXPluginIdentity } from '../platform-contracts.js'
 import { updateHomeConfigAtomic } from '../config/home-config.js'
 import {
+  type CordisXPersistedPermissionPolicyRecord,
   isPermissionPolicyRecordV2,
   normalizePersistedPermissionPolicyRecord,
   persistedPermissionMigrationKey,
   persistedPermissionRecordKey,
-  type CordisXPersistedPermissionPolicyRecord,
 } from '../permission-persistence.js'
 
 export const PERMISSION_BINDING = '__cordisxPermissionPolicyRequestV1'
@@ -41,10 +41,16 @@ export class PluginPermissionIdentityRegistry {
     return this.current.get(identity.id) === identity.source
   }
 
-  stage(transactionId: string, operation: string, targetId: string, affected: readonly string[], source?: string): void {
+  stage(
+    transactionId: string,
+    operation: string,
+    targetId: string,
+    affected: readonly string[],
+    source?: string,
+  ): void {
     if (this.previous.has(transactionId)) throw new Error('permission identity transaction already exists')
     this.previous.set(transactionId, new Map(this.current))
-    if (operation === 'uninstall') for (const id of affected) this.current.delete(id)
+    if (operation === 'uninstall') { for (const id of affected) this.current.delete(id) }
     else if (source !== undefined) this.current.set(targetId, source)
   }
 
@@ -78,20 +84,27 @@ export function parsePermissionBindingRequest(
   const request = object(value, 'permission request')
   const unknown = Object.keys(request).filter(key => !['token', 'requestId', 'records'].includes(key))
   if (unknown.length > 0) throw new Error(`permission request contains unknown field ${unknown[0]}`)
-  if (typeof request.token !== 'string' || !sameToken(request.token, context.token)) throw new Error('permission request token is invalid')
+  if (typeof request.token !== 'string' || !sameToken(request.token, context.token)) {
+    throw new Error('permission request token is invalid')
+  }
   if (typeof request.requestId !== 'string' || !/^[a-z0-9-]{1,96}$/i.test(request.requestId)) {
     throw new Error('permission request id is invalid')
   }
-  if (!Array.isArray(request.records) || request.records.length < 1 || request.records.length > MAX_PERMISSION_POLICY_BATCH) {
+  if (
+    !Array.isArray(request.records) || request.records.length < 1
+    || request.records.length > MAX_PERMISSION_POLICY_BATCH
+  ) {
     throw new Error('permission request records are invalid')
   }
   const records = request.records.map(item => normalizePersistedPermissionPolicyRecord(item))
   const keys = new Set<string>()
   for (const record of records) {
     if (record.key.profileId !== context.profileId) throw new Error('permission request profile is invalid')
-    if (!context.identities.some(identity => (
-      identity.source === record.key.identity.source && identity.id === record.key.identity.pluginId
-    )) && context.identityAllowed?.({ source: record.key.identity.source, id: record.key.identity.pluginId }) !== true) {
+    if (
+      !context.identities.some(identity => (
+        identity.source === record.key.identity.source && identity.id === record.key.identity.pluginId
+      )) && context.identityAllowed?.({ source: record.key.identity.source, id: record.key.identity.pluginId }) !== true
+    ) {
       throw new Error('permission request identity is invalid')
     }
     const key = persistedPermissionRecordKey(record)
@@ -111,8 +124,10 @@ export async function persistPermissionPolicies(
   const updated = await updateHomeConfigAtomic(current => ({
     ...current,
     permissions: [
-      ...current.permissions.filter(item => !keys.has(persistedPermissionRecordKey(item))
-        && !(migrated.has(persistedPermissionMigrationKey(item)) && !isPermissionPolicyRecordV2(item))),
+      ...current.permissions.filter(item =>
+        !keys.has(persistedPermissionRecordKey(item))
+        && !(migrated.has(persistedPermissionMigrationKey(item)) && !isPermissionPolicyRecordV2(item))
+      ),
       ...normalized,
     ],
   }), context.configPath)

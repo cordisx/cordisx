@@ -127,11 +127,11 @@ When a Host exposes Settings, the historical three built-in tabs and external
 contributions enter one `ManagerSettingsTabProjection`. Built-ins are host
 records, not spoofable plugin registrations:
 
-| Qualified id | Stable order | Content owner |
-| --- | ---: | --- |
-| `host:marketplace` | 100 | CordisX marketplace settings |
-| `host:runtime` | 200 | Historical runtime placeholder |
-| `host:launcher` | 300 | Historical launcher placeholder |
+| Qualified id       | Stable order | Content owner                   |
+| ------------------ | -----------: | ------------------------------- |
+| `host:marketplace` |          100 | CordisX marketplace settings    |
+| `host:runtime`     |          200 | Historical runtime placeholder  |
+| `host:launcher`    |          300 | Historical launcher placeholder |
 
 Marketplace source management moved to the Marketplace discovery area. It is
 reached from the icon menu beside Marketplace search and is not a Settings tab.
@@ -265,19 +265,19 @@ dependency.
 
 ## Validation matrix
 
-| Layer | Required evidence |
-| --- | --- |
-| Protocol versions | v1/v2/v3 surface validators reject v4; v4 keeps its original meaning; older validators reject v5/catalog v4; v5 A and v4 A normalize to one stable `manager.settings.tabs` runtime point; unknown fields/versions fail closed. |
-| Protocol boundary | Accept localized title, required known host icon, same-owner route, envelope order/when/disabled; reject HTML, SVG, CSS, selector, node/component/render callback, `children`, header seat, arbitrary icon, badge, group, cross-owner route/page, wrong path/outlet, and plugin-supplied access origin. |
-| Protocol projection | Built-in and plugin same-local-id records coexist; exact identity conflicts fail; deterministic `order -> owner -> qualified id`; unresolved route/page/outlet is pending; stale generation is rejected. |
-| Registry/runtime | Registration and immutable item/options updates; unknown context; disabled and visibility transitions; locale reprojection without re-registration; policy and route/page dependency reconciliation; update-after-dispose and stale generation rejection. |
-| Manager DOM | One host-rendered tablist and active panel; no plugin header DOM; host icon only; exact order; stable active id across reorder/locale; horizontal overflow; roving tabindex; Arrow/Home/End; disabled skipping; focus restoration; `aria-controls`/`aria-labelledby`; one vertical scroll owner. |
-| Lifecycle | Block/restore, required-permission deny/recovery, active removal fallback, point deny/allow, stale generation, close/reopen, mount throw/retry, Abort-before-dispose, idempotent cleanup, and no activation theft after restore. |
-| Native data flow | Opening and switching settings content does not change `app://`, browser/Codex history, primary outlet presentation, native node identity, visibility, subscriptions, or simulated data updates. |
-| Extension Points | Both descriptors are searchable; surface/outlet usage is attributed to the plugin and exposes policy, pending, route/page, mount, and diagnostic state without counting resources as points. |
-| Demo | Compatibility fixtures still prove A validation, controlled body mount, no selector/header DOM, and fiber cleanup; the shipped demo uses B for its real first-level page. |
-| Isolated renderer | Real `app://` evidence proves A is not mounted and no empty Settings/Runtime/Launcher shell appears; B evidence belongs to the navigation architecture. |
-| Release | Preserve all A tests/evidence while adding B; focused tests, typecheck, build, full `npm run check`, `git diff --check`, normal Protocol/Host PR checks and head-fenced merges, exact merged revision evidence, and no mono update. |
+| Layer               | Required evidence                                                                                                                                                                                                                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Protocol versions   | v1/v2/v3 surface validators reject v4; v4 keeps its original meaning; older validators reject v5/catalog v4; v5 A and v4 A normalize to one stable `manager.settings.tabs` runtime point; unknown fields/versions fail closed.                                                                          |
+| Protocol boundary   | Accept localized title, required known host icon, same-owner route, envelope order/when/disabled; reject HTML, SVG, CSS, selector, node/component/render callback, `children`, header seat, arbitrary icon, badge, group, cross-owner route/page, wrong path/outlet, and plugin-supplied access origin. |
+| Protocol projection | Built-in and plugin same-local-id records coexist; exact identity conflicts fail; deterministic `order -> owner -> qualified id`; unresolved route/page/outlet is pending; stale generation is rejected.                                                                                                |
+| Registry/runtime    | Registration and immutable item/options updates; unknown context; disabled and visibility transitions; locale reprojection without re-registration; policy and route/page dependency reconciliation; update-after-dispose and stale generation rejection.                                               |
+| Manager DOM         | One host-rendered tablist and active panel; no plugin header DOM; host icon only; exact order; stable active id across reorder/locale; horizontal overflow; roving tabindex; Arrow/Home/End; disabled skipping; focus restoration; `aria-controls`/`aria-labelledby`; one vertical scroll owner.        |
+| Lifecycle           | Block/restore, required-permission deny/recovery, active removal fallback, point deny/allow, stale generation, close/reopen, mount throw/retry, Abort-before-dispose, idempotent cleanup, and no activation theft after restore.                                                                        |
+| Native data flow    | Opening and switching settings content does not change `app://`, browser/Codex history, primary outlet presentation, native node identity, visibility, subscriptions, or simulated data updates.                                                                                                        |
+| Extension Points    | Both descriptors are searchable; surface/outlet usage is attributed to the plugin and exposes policy, pending, route/page, mount, and diagnostic state without counting resources as points.                                                                                                            |
+| Demo                | Compatibility fixtures still prove A validation, controlled body mount, no selector/header DOM, and fiber cleanup; the shipped demo uses B for its real first-level page.                                                                                                                               |
+| Isolated renderer   | Real `app://` evidence proves A is not mounted and no empty Settings/Runtime/Launcher shell appears; B evidence belongs to the navigation architecture.                                                                                                                                                 |
+| Release             | Preserve all A tests/evidence while adding B; focused tests, typecheck, build, full `npm run check`, `git diff --check`, normal Protocol/Host PR checks and head-fenced merges, exact merged revision evidence, and no mono update.                                                                     |
 
 Screenshots complement machine assertions; they do not prove lifecycle or
 policy enforcement. A controlled body container is not evidence of a sandbox.

@@ -48,14 +48,23 @@ describe('Agent Session route owner runtime coordinate', () => {
       profileId: 'playground',
       generation: 'route-owner-coordinate-generation',
     })
-    const dom = new JSDOM('<!doctype html><html><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>', {
-      runScripts: 'dangerously',
-      url: 'https://codex.local/',
-    })
+    const dom = new JSDOM(
+      '<!doctype html><html><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>',
+      {
+        runScripts: 'dangerously',
+        url: 'https://codex.local/',
+      },
+    )
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
-    Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
+    Object.defineProperty(dom.window, 'fetch', {
+      value: async () => ({ ok: false, status: 503, text: async () => '' }),
+    })
     dom.window.eval(bundle)
-    for (let attempt = 0; attempt < 80 && dom.window.document.documentElement.dataset.cordisxReady !== 'true'; attempt += 1) {
+    for (
+      let attempt = 0;
+      attempt < 80 && dom.window.document.documentElement.dataset.cordisxReady !== 'true';
+      attempt += 1
+    ) {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     const runtime = (dom.window as unknown as { readonly __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime

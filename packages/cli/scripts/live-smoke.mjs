@@ -82,18 +82,28 @@ const parsed = parseArgs({
 })
 const port = Number(parsed.values.port)
 if (!Number.isInteger(port) || port < 1024 || port > 65535) {
-  throw new Error('Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--locale en|zh-CN] [--screenshot <png>] [--app-screenshot <png>] [--host-collection-menu-exercise --host-collection-menu-screenshot <png> --report <json>] [--plugin-owner <id> --open-route <id> | --click-surface <id> --click-label <aria-label>] [--permission-capability <name> --permission-policy allow|ask|deny] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-permission-capability <name> --manager-settings-tab <tab> --manager-settings-navigation-item <qualified-id> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-marketplace-view discovery|sources|create --manager-marketplace-open-menu --manager-marketplace-clipboard-exercise --manager-marketplace-source <https-url> --manager-marketplace-fixture <absolute-json> --manager-click-external --manager-viewport-width <pixels> --manager-breadcrumb-width <pixels>] [--manager-lifecycle-source <absolute-directory> --report <json>] [--trigger-screenshot <png>]')
+  throw new Error(
+    'Usage: npm run smoke -- --port <port> [--color-scheme light|dark] [--locale en|zh-CN] [--screenshot <png>] [--app-screenshot <png>] [--host-collection-menu-exercise --host-collection-menu-screenshot <png> --report <json>] [--plugin-owner <id> --open-route <id> | --click-surface <id> --click-label <aria-label>] [--permission-capability <name> --permission-policy allow|ask|deny] [--manager-screenshot <png> --manager-tab <tab> --manager-plugin <id> --manager-detail-tab <tab> --manager-permission-capability <name> --manager-settings-tab <tab> --manager-settings-navigation-item <qualified-id> --manager-extension-point <id> --manager-extension-point-tab <tab> --manager-route <qualified-id> --manager-marketplace-tab <tab> --manager-marketplace-view discovery|sources|create --manager-marketplace-open-menu --manager-marketplace-clipboard-exercise --manager-marketplace-source <https-url> --manager-marketplace-fixture <absolute-json> --manager-click-external --manager-viewport-width <pixels> --manager-breadcrumb-width <pixels>] [--manager-lifecycle-source <absolute-directory> --report <json>] [--trigger-screenshot <png>]',
+  )
 }
 if (parsed.values['ui-catalog'] && parsed.values.report === undefined) {
-  throw new Error('--ui-catalog requires --report so screenshots and machine-readable assertions share one artifact directory')
+  throw new Error(
+    '--ui-catalog requires --report so screenshots and machine-readable assertions share one artifact directory',
+  )
 }
 if (parsed.values['channel-data-plane'] && parsed.values.report === undefined) {
   throw new Error('--channel-data-plane requires --report')
 }
-if (parsed.values['channel-manager-exercise'] && (!parsed.values['channel-data-plane'] || parsed.values['manager-screenshot'] === undefined)) {
+if (
+  parsed.values['channel-manager-exercise']
+  && (!parsed.values['channel-data-plane'] || parsed.values['manager-screenshot'] === undefined)
+) {
   throw new Error('--channel-manager-exercise requires --channel-data-plane and --manager-screenshot')
 }
-if (parsed.values['channel-manager-existing-account'] && (!parsed.values['channel-data-plane'] || parsed.values['manager-screenshot'] === undefined)) {
+if (
+  parsed.values['channel-manager-existing-account']
+  && (!parsed.values['channel-data-plane'] || parsed.values['manager-screenshot'] === undefined)
+) {
   throw new Error('--channel-manager-existing-account requires --channel-data-plane and --manager-screenshot')
 }
 if (parsed.values['channel-manager-existing-account-save'] && !parsed.values['channel-manager-existing-account']) {
@@ -114,7 +124,8 @@ if (parsed.values['plugin-console-expanded-screenshot'] !== undefined && !parsed
 
 function pluginConsoleSmokeAssertions(report, owner) {
   const nonEmptyText = value => typeof value === 'string' && value.trim().length > 0
-  const positiveRect = value => value !== null
+  const positiveRect = value =>
+    value !== null
     && typeof value === 'object'
     && typeof value.width === 'number' && value.width > 0
     && typeof value.height === 'number' && value.height > 0
@@ -182,25 +193,34 @@ if (parsed.values['open-route'] !== undefined && parsed.values['click-surface'] 
 if ((parsed.values['permission-capability'] === undefined) !== (parsed.values['permission-policy'] === undefined)) {
   throw new Error('--permission-capability and --permission-policy must be provided together')
 }
-if (parsed.values['authorization-plugin'] === undefined && (
-  parsed.values['authorization-decision'] !== undefined
-  || parsed.values['authorization-decline-optional']
-  || parsed.values['authorization-screenshot'] !== undefined
-)) throw new Error('authorization smoke options require --authorization-plugin')
-if ((parsed.values['manager-light-screenshot'] !== undefined || parsed.values['manager-dark-screenshot'] !== undefined)
-  && !parsed.values['manager-theme-cycle']) throw new Error('manager theme screenshots require --manager-theme-cycle')
+if (
+  parsed.values['authorization-plugin'] === undefined && (
+    parsed.values['authorization-decision'] !== undefined
+    || parsed.values['authorization-decline-optional']
+    || parsed.values['authorization-screenshot'] !== undefined
+  )
+) throw new Error('authorization smoke options require --authorization-plugin')
+if (
+  (parsed.values['manager-light-screenshot'] !== undefined || parsed.values['manager-dark-screenshot'] !== undefined)
+  && !parsed.values['manager-theme-cycle']
+) throw new Error('manager theme screenshots require --manager-theme-cycle')
 if (parsed.values['manager-lifecycle-source'] !== undefined) {
   if (parsed.values.report === undefined) throw new Error('--manager-lifecycle-source requires --report')
   if (!path.isAbsolute(parsed.values['manager-lifecycle-source'])) {
     throw new Error('--manager-lifecycle-source must be an absolute local package directory')
   }
 }
-if ((parsed.values['permission-v2-source'] === undefined) !== (parsed.values['permission-v2-expanded-source'] === undefined)) {
+if (
+  (parsed.values['permission-v2-source'] === undefined)
+    !== (parsed.values['permission-v2-expanded-source'] === undefined)
+) {
   throw new Error('--permission-v2-source and --permission-v2-expanded-source must be provided together')
 }
 for (const option of ['permission-v2-source', 'permission-v2-expanded-source']) {
   const value = parsed.values[option]
-  if (value !== undefined && !path.isAbsolute(value)) throw new Error(`--${option} must be an absolute local package directory`)
+  if (value !== undefined && !path.isAbsolute(value)) {
+    throw new Error(`--${option} must be an absolute local package directory`)
+  }
 }
 if (parsed.values['permission-v2-source'] !== undefined && parsed.values.report === undefined) {
   throw new Error('--permission-v2-source requires --report')
@@ -252,16 +272,42 @@ async function pointerClick(rect) {
   const x = rect.x + rect.width / 2
   const y = rect.y + rect.height / 2
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, pointerType: 'mouse' })
-  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1, pointerType: 'mouse' })
-  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1, pointerType: 'mouse' })
+  await send('Input.dispatchMouseEvent', {
+    type: 'mousePressed',
+    x,
+    y,
+    button: 'left',
+    buttons: 1,
+    clickCount: 1,
+    pointerType: 'mouse',
+  })
+  await send('Input.dispatchMouseEvent', {
+    type: 'mouseReleased',
+    x,
+    y,
+    button: 'left',
+    buttons: 0,
+    clickCount: 1,
+    pointerType: 'mouse',
+  })
 }
 
 async function pressKey(key, code, keyCode) {
   await send('Input.dispatchKeyEvent', {
-    type: 'keyDown', key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode,
+    type: 'keyDown',
+    key,
+    code,
+    windowsVirtualKeyCode: keyCode,
+    nativeVirtualKeyCode: keyCode,
     ...(key.length === 1 ? { text: key } : {}),
   })
-  await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode })
+  await send('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key,
+    code,
+    windowsVirtualKeyCode: keyCode,
+    nativeVirtualKeyCode: keyCode,
+  })
 }
 
 await send('Runtime.enable')
@@ -444,7 +490,9 @@ if (parsed.values['click-surface'] !== undefined) {
         target: ${JSON.stringify(value)},
         page: page?.getAttribute('data-cordisx-page') ?? null,
         outlet: outlet?.getAttribute('data-cordisx-page-outlet') ?? null,
-        error: document.querySelector('[data-cordisx-surface-host=${JSON.stringify(parsed.values['click-surface'])}] button')?.dataset.error ?? null,
+        error: document.querySelector('[data-cordisx-surface-host=${
+      JSON.stringify(parsed.values['click-surface'])
+    }] button')?.dataset.error ?? null,
       }
     })()`,
     returnByValue: true,
@@ -462,7 +510,11 @@ if (parsed.values['demo-kind'] !== undefined) {
   }
   const platformMode = await evaluateByValue(`globalThis.__cordisxRuntime?.snapshot?.().platform?.mode ?? null`)
   if (platformMode !== 'unavailable') {
-    throw new Error(`refusing Agent Trace smoke writes while adapter mode is ${String(platformMode)}; use an unavailable isolated renderer`)
+    throw new Error(
+      `refusing Agent Trace smoke writes while adapter mode is ${
+        String(platformMode)
+      }; use an unavailable isolated renderer`,
+    )
   }
   const before = await evaluateByValue(`(() => ({
     page: document.querySelector('[data-agent-trace-showcase="true"]') !== null,
@@ -472,7 +524,9 @@ if (parsed.values['demo-kind'] !== undefined) {
   const invocations = []
   for (const kind of parsed.values['demo-kind']) {
     const target = await evaluateByValue(`(() => {
-      const button = document.querySelector('[data-agent-trace-showcase="true"] [data-demo-kind=${JSON.stringify(kind)}]')
+      const button = document.querySelector('[data-agent-trace-showcase="true"] [data-demo-kind=${
+      JSON.stringify(kind)
+    }]')
       const rect = button?.getBoundingClientRect()
       return rect === undefined ? null : { disabled: button.disabled, rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } }
     })()`)
@@ -522,7 +576,9 @@ if (parsed.values['plugin-lifecycle']) {
     const surfaceButtons = [...(root?.querySelectorAll('button') ?? [])]
     const surfaceToggle = ${JSON.stringify(label)} === undefined
       ? surfaceButtons.find(item => item.getAttribute('aria-pressed') === 'true')
-      : surfaceButtons.find(item => item.getAttribute('aria-label') === ${JSON.stringify(label)} && item.getAttribute('aria-pressed') === 'true')
+      : surfaceButtons.find(item => item.getAttribute('aria-label') === ${
+    JSON.stringify(label)
+  } && item.getAttribute('aria-pressed') === 'true')
     const button = pageClose ?? surfaceToggle
     const rect = button?.getBoundingClientRect()
     return {
@@ -538,8 +594,12 @@ if (parsed.values['plugin-lifecycle']) {
     page: document.querySelector('[data-cordisx-page]')?.getAttribute('data-cordisx-page') ?? null,
     mounted: globalThis.__cordisxRuntime?.snapshot?.().navigation?.outlets
       ?.find(item => item.id === 'session.content')?.mounted ?? null,
-    pressed: [...(document.querySelector('[data-cordisx-surface-host="' + CSS.escape(${JSON.stringify(surface)}) + '"]')?.querySelectorAll('button') ?? [])]
-      .find(item => ${JSON.stringify(label)} === undefined || item.getAttribute('aria-label') === ${JSON.stringify(label)})?.getAttribute('aria-pressed') ?? null,
+    pressed: [...(document.querySelector('[data-cordisx-surface-host="' + CSS.escape(${
+    JSON.stringify(surface)
+  }) + '"]')?.querySelectorAll('button') ?? [])]
+      .find(item => ${JSON.stringify(label)} === undefined || item.getAttribute('aria-label') === ${
+    JSON.stringify(label)
+  })?.getAttribute('aria-pressed') ?? null,
   }))()`)
   const reopenTarget = await evaluateByValue(`(() => {
     const root = document.querySelector('[data-cordisx-surface-host="' + CSS.escape(${JSON.stringify(surface)}) + '"]')
@@ -556,33 +616,56 @@ if (parsed.values['plugin-lifecycle']) {
   await new Promise(resolve => setTimeout(resolve, 200))
   const reopened = await evaluateByValue(`(() => ({
     page: document.querySelector('[data-cordisx-page]')?.getAttribute('data-cordisx-page') ?? null,
-    pressed: [...(document.querySelector('[data-cordisx-surface-host="' + CSS.escape(${JSON.stringify(surface)}) + '"]')?.querySelectorAll('button') ?? [])]
-      .find(item => ${JSON.stringify(label)} === undefined || item.getAttribute('aria-label') === ${JSON.stringify(label)})?.getAttribute('aria-pressed') ?? null,
+    pressed: [...(document.querySelector('[data-cordisx-surface-host="' + CSS.escape(${
+    JSON.stringify(surface)
+  }) + '"]')?.querySelectorAll('button') ?? [])]
+      .find(item => ${JSON.stringify(label)} === undefined || item.getAttribute('aria-label') === ${
+    JSON.stringify(label)
+  })?.getAttribute('aria-pressed') ?? null,
   }))()`)
-  const blocked = await evaluateByValue(`(async () => {
+  const blocked = await evaluateByValue(
+    `(async () => {
     await globalThis.__cordisxRuntime.setPluginBlocked(${JSON.stringify(owner)}, true)
     await new Promise(resolve => setTimeout(resolve, 120))
     const snapshot = globalThis.__cordisxRuntime.snapshot()
     return {
       status: snapshot.plugins.find(item => item.id === ${JSON.stringify(owner)})?.status ?? null,
-      surfaceEntries: document.querySelectorAll('[data-cordisx-surface-host="' + CSS.escape(${JSON.stringify(surface)}) + '"] button').length,
-      pages: snapshot.navigation.pages.filter(page => page.qualifiedId.startsWith(${JSON.stringify(`${owner}:`)})).length,
-      commands: snapshot.commands.filter(command => command.qualifiedId.startsWith(${JSON.stringify(`${owner}:`)})).length,
-      routes: snapshot.navigation.routes.filter(route => route.qualifiedId.startsWith(${JSON.stringify(`${owner}:`)})).length,
+      surfaceEntries: document.querySelectorAll('[data-cordisx-surface-host="' + CSS.escape(${
+      JSON.stringify(surface)
+    }) + '"] button').length,
+      pages: snapshot.navigation.pages.filter(page => page.qualifiedId.startsWith(${
+      JSON.stringify(`${owner}:`)
+    })).length,
+      commands: snapshot.commands.filter(command => command.qualifiedId.startsWith(${
+      JSON.stringify(`${owner}:`)
+    })).length,
+      routes: snapshot.navigation.routes.filter(route => route.qualifiedId.startsWith(${
+      JSON.stringify(`${owner}:`)
+    })).length,
     }
-  })()`, true)
-  const staleInvocation = await evaluateByValue(`(async () => {
+  })()`,
+    true,
+  )
+  const staleInvocation = await evaluateByValue(
+    `(async () => {
     globalThis.__cordisxAgentTraceStaleEntry?.click()
     await new Promise(resolve => setTimeout(resolve, 100))
     return {
       page: document.querySelector('[data-cordisx-page]')?.getAttribute('data-cordisx-page') ?? null,
-      status: globalThis.__cordisxRuntime.snapshot().plugins.find(item => item.id === ${JSON.stringify(owner)})?.status ?? null,
+      status: globalThis.__cordisxRuntime.snapshot().plugins.find(item => item.id === ${
+      JSON.stringify(owner)
+    })?.status ?? null,
     }
-  })()`, true)
-  const restored = await evaluateByValue(`(async () => {
+  })()`,
+    true,
+  )
+  const restored = await evaluateByValue(
+    `(async () => {
     await globalThis.__cordisxRuntime.setPluginBlocked(${JSON.stringify(owner)}, false)
     for (let attempt = 0; attempt < 20; attempt += 1) {
-      const root = document.querySelector('[data-cordisx-surface-host="' + CSS.escape(${JSON.stringify(surface)}) + '"]')
+      const root = document.querySelector('[data-cordisx-surface-host="' + CSS.escape(${
+      JSON.stringify(surface)
+    }) + '"]')
       const buttons = [...(root?.querySelectorAll('button') ?? [])]
       const button = ${JSON.stringify(label)} === undefined
         ? buttons[0]
@@ -590,7 +673,9 @@ if (parsed.values['plugin-lifecycle']) {
       if (button !== undefined) {
         const rect = button.getBoundingClientRect()
         return {
-          status: globalThis.__cordisxRuntime.snapshot().plugins.find(item => item.id === ${JSON.stringify(owner)})?.status ?? null,
+          status: globalThis.__cordisxRuntime.snapshot().plugins.find(item => item.id === ${
+      JSON.stringify(owner)
+    })?.status ?? null,
           freshEntry: button !== globalThis.__cordisxAgentTraceStaleEntry,
           rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
         }
@@ -598,15 +683,21 @@ if (parsed.values['plugin-lifecycle']) {
       await new Promise(resolve => setTimeout(resolve, 50))
     }
     return null
-  })()`, true)
+  })()`,
+    true,
+  )
   if (restored?.rect === undefined) throw new Error('plugin did not restore its surface entry')
   await pointerClick(restored.rect)
   await new Promise(resolve => setTimeout(resolve, 200))
   const afterRestoreClick = await evaluateByValue(`(() => ({
     page: document.querySelector('[data-cordisx-page]')?.getAttribute('data-cordisx-page') ?? null,
     outlet: document.querySelector('[data-cordisx-page]')?.closest('[data-cordisx-page-outlet]')?.getAttribute('data-cordisx-page-outlet') ?? null,
-    pressed: [...(document.querySelector('[data-cordisx-surface-host="' + CSS.escape(${JSON.stringify(surface)}) + '"]')?.querySelectorAll('button') ?? [])]
-      .find(item => ${JSON.stringify(label)} === undefined || item.getAttribute('aria-label') === ${JSON.stringify(label)})?.getAttribute('aria-pressed') ?? null,
+    pressed: [...(document.querySelector('[data-cordisx-surface-host="' + CSS.escape(${
+    JSON.stringify(surface)
+  }) + '"]')?.querySelectorAll('button') ?? [])]
+      .find(item => ${JSON.stringify(label)} === undefined || item.getAttribute('aria-label') === ${
+    JSON.stringify(label)
+  })?.getAttribute('aria-pressed') ?? null,
   }))()`)
   pluginLifecycleReport = { beforeClose, afterClose, reopened, blocked, staleInvocation, restored, afterRestoreClick }
   console.log(`plugin-lifecycle=${JSON.stringify(pluginLifecycleReport)}`)
@@ -803,7 +894,8 @@ async function evaluateByValue(expression, awaitPromise = false) {
 }
 
 async function ensureManagerVisible() {
-  const state = await evaluateByValue(`(async () => {
+  const state = await evaluateByValue(
+    `(async () => {
     const visibleManager = () => {
       const modal = document.querySelector('[data-cordisx-manager-modal]')
       const dialog = modal?.querySelector('[role="dialog"], .cxr-dialog')
@@ -829,13 +921,16 @@ async function ensureManagerVisible() {
       await new Promise(resolve => setTimeout(resolve, 40))
     }
     return { visible: false, openedBy: trigger instanceof HTMLElement ? 'manager-trigger' : 'legacy-fallback' }
-  })()`, true)
+  })()`,
+    true,
+  )
   if (state?.visible !== true) throw new Error(`CordisX manager is not visible: ${JSON.stringify(state)}`)
   return state
 }
 
 async function ensureManagerClosed() {
-  const state = await evaluateByValue(`(async () => {
+  const state = await evaluateByValue(
+    `(async () => {
     const visibleManager = () => {
       const modal = document.querySelector('[data-cordisx-manager-modal]')
       const dialog = modal?.querySelector('[role="dialog"], .cxr-dialog')
@@ -852,7 +947,9 @@ async function ensureManagerClosed() {
       await new Promise(resolve => setTimeout(resolve, 40))
     }
     return { closed: false, closedBy: 'manager-close' }
-  })()`, true)
+  })()`,
+    true,
+  )
   if (state?.closed !== true) throw new Error(`CordisX manager did not close: ${JSON.stringify(state)}`)
   return state
 }
@@ -863,7 +960,8 @@ let configExerciseReport
 if (false && parsed.values['manager-settings-exercise']) {
   const owner = parsed.values['plugin-owner'] ?? 'settings-tab-demo'
   const qualifiedTabId = `${owner}:settings`
-  const initial = await evaluateByValue(`(async () => {
+  const initial = await evaluateByValue(
+    `(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     const runtime = globalThis.__cordisxRuntime
     if (runtime === undefined) throw new Error('CordisX runtime is unavailable')
@@ -912,9 +1010,12 @@ if (false && parsed.values['manager-settings-exercise']) {
         selectedConnected: selected?.isConnected ?? false,
       },
     }
-  })()`, true)
+  })()`,
+    true,
+  )
 
-  const tabRect = async () => await evaluateByValue(`(() => {
+  const tabRect = async () =>
+    await evaluateByValue(`(() => {
     const tab = document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]')
     const rect = tab?.getBoundingClientRect()
     return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
@@ -940,8 +1041,20 @@ if (false && parsed.values['manager-settings-exercise']) {
     }
   })()`)
 
-  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 39 })
-  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39, nativeVirtualKeyCode: 39 })
+  await send('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    key: 'ArrowRight',
+    code: 'ArrowRight',
+    windowsVirtualKeyCode: 39,
+    nativeVirtualKeyCode: 39,
+  })
+  await send('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'ArrowRight',
+    code: 'ArrowRight',
+    windowsVirtualKeyCode: 39,
+    nativeVirtualKeyCode: 39,
+  })
   await new Promise(resolve => setTimeout(resolve, 220))
   const keyboard = await evaluateByValue(`(() => ({
     selected: document.querySelector('[data-settings-tab][aria-selected="true"]')?.getAttribute('data-settings-tab') ?? null,
@@ -956,12 +1069,18 @@ if (false && parsed.values['manager-settings-exercise']) {
     await new Promise(resolve => setTimeout(resolve, 220))
   }
   await mountAgain()
-  const source = await evaluateByValue(`globalThis.__cordisxRuntime.snapshot().plugins.find(item => item.id === ${JSON.stringify(owner)})?.source ?? null`)
+  const source = await evaluateByValue(
+    `globalThis.__cordisxRuntime.snapshot().plugins.find(item => item.id === ${JSON.stringify(owner)})?.source ?? null`,
+  )
   if (source === null) throw new Error(`manager settings demo plugin source not found: ${owner}`)
 
-  const denyPoint = async (pointId) => await evaluateByValue(`(async () => {
+  const denyPoint = async (pointId) =>
+    await evaluateByValue(
+      `(async () => {
     const runtime = globalThis.__cordisxRuntime
-    await runtime.setExtensionPointPolicy(${JSON.stringify(source)}, ${JSON.stringify(owner)}, ${JSON.stringify(pointId)}, 'deny')
+    await runtime.setExtensionPointPolicy(${JSON.stringify(source)}, ${JSON.stringify(owner)}, ${
+        JSON.stringify(pointId)
+      }, 'deny')
     await new Promise(resolve => setTimeout(resolve, 220))
     return {
       tabPresent: document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]') !== null,
@@ -969,16 +1088,24 @@ if (false && parsed.values['manager-settings-exercise']) {
       fallbackSelected: document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected') === 'true',
       outletMounted: runtime.snapshot().navigation.outlets.find(item => item.id === 'manager.settings.content')?.mounted ?? null,
     }
-  })()`, true)
-  const restorePoint = async (pointId) => await evaluateByValue(`(async () => {
+  })()`,
+      true,
+    )
+  const restorePoint = async (pointId) =>
+    await evaluateByValue(
+      `(async () => {
     const runtime = globalThis.__cordisxRuntime
-    await runtime.setExtensionPointPolicy(${JSON.stringify(source)}, ${JSON.stringify(owner)}, ${JSON.stringify(pointId)}, 'inherit')
+    await runtime.setExtensionPointPolicy(${JSON.stringify(source)}, ${JSON.stringify(owner)}, ${
+        JSON.stringify(pointId)
+      }, 'inherit')
     await new Promise(resolve => setTimeout(resolve, 220))
     return {
       tabPresent: document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]') !== null,
       fallbackSelected: document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected') === 'true',
     }
-  })()`, true)
+  })()`,
+      true,
+    )
 
   const surfaceDenied = await denyPoint('manager.settings.tabs')
   const surfaceRestored = await restorePoint('manager.settings.tabs')
@@ -987,7 +1114,8 @@ if (false && parsed.values['manager-settings-exercise']) {
   const outletRestored = await restorePoint('manager.settings.content')
   await mountAgain()
 
-  const blocked = await evaluateByValue(`(async () => {
+  const blocked = await evaluateByValue(
+    `(async () => {
     const runtime = globalThis.__cordisxRuntime
     await runtime.setPluginBlocked(${JSON.stringify(owner)}, true)
     await new Promise(resolve => setTimeout(resolve, 220))
@@ -997,8 +1125,11 @@ if (false && parsed.values['manager-settings-exercise']) {
       contentPresent: document.querySelector('[data-settings-demo-content]') !== null,
       fallbackSelected: document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected') === 'true',
     }
-  })()`, true)
-  const restored = await evaluateByValue(`(async () => {
+  })()`,
+    true,
+  )
+  const restored = await evaluateByValue(
+    `(async () => {
     const runtime = globalThis.__cordisxRuntime
     await runtime.setPluginBlocked(${JSON.stringify(owner)}, false)
     await new Promise(resolve => setTimeout(resolve, 260))
@@ -1007,24 +1138,35 @@ if (false && parsed.values['manager-settings-exercise']) {
       tabPresent: document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]') !== null,
       fallbackSelected: document.querySelector('[data-settings-tab="host:marketplace"]')?.getAttribute('aria-selected') === 'true',
     }
-  })()`, true)
+  })()`,
+    true,
+  )
 
-  const locale = await evaluateByValue(`(async () => {
+  const locale = await evaluateByValue(
+    `(async () => {
     const original = document.documentElement.lang
     const projectedLocale = original.toLowerCase().startsWith('zh') ? 'en' : 'zh-CN'
     document.documentElement.lang = projectedLocale
     await new Promise(resolve => setTimeout(resolve, 260))
-    const projected = document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]')?.textContent?.trim() ?? null
-    const runtimeTitle = globalThis.__cordisxRuntime.snapshot().settingsTabs.find(item => item.id === ${JSON.stringify(qualifiedTabId)})?.title ?? null
+    const projected = document.querySelector('[data-settings-tab=${
+      JSON.stringify(qualifiedTabId)
+    }]')?.textContent?.trim() ?? null
+    const runtimeTitle = globalThis.__cordisxRuntime.snapshot().settingsTabs.find(item => item.id === ${
+      JSON.stringify(qualifiedTabId)
+    })?.title ?? null
     document.documentElement.lang = original
     await new Promise(resolve => setTimeout(resolve, 260))
     return {
       original, projectedLocale, projected, runtimeTitle,
       expectedProjected: projectedLocale.toLowerCase().startsWith('zh') ? '演示插件' : 'Demo plugin',
       expectedRestored: original.toLowerCase().startsWith('zh') ? '演示插件' : 'Demo plugin',
-      restored: document.querySelector('[data-settings-tab=${JSON.stringify(qualifiedTabId)}]')?.textContent?.trim() ?? null,
+      restored: document.querySelector('[data-settings-tab=${
+      JSON.stringify(qualifiedTabId)
+    }]')?.textContent?.trim() ?? null,
     }
-  })()`, true)
+  })()`,
+    true,
+  )
   await mountAgain()
 
   const final = await evaluateByValue(`(() => {
@@ -1048,24 +1190,36 @@ if (false && parsed.values['manager-settings-exercise']) {
       access: {
         operations: [...new Set(accesses.map(item => item.request.operation))],
         generations: [...new Set(accesses.map(item => item.request.generation))],
-        allAttributed: accesses.length >= 3 && accesses.every(item => item.request.identity.source === ${JSON.stringify(source)}),
+        allAttributed: accesses.length >= 3 && accesses.every(item => item.request.identity.source === ${
+    JSON.stringify(source)
+  }),
       },
     }
   })()`)
   settingsTabsReport = {
-    owner, qualifiedTabId, initial, mounted, keyboard,
+    owner,
+    qualifiedTabId,
+    initial,
+    mounted,
+    keyboard,
     policy: { surfaceDenied, surfaceRestored, outletDenied, outletRestored },
-    lifecycle: { blocked, restored }, locale, final,
+    lifecycle: { blocked, restored },
+    locale,
+    final,
     passed: initial.url === 'app://-/index.html'
       && initial.structuredHeader === true
-      && initial.tabs.map(item => item.id).join(',') === ['host:marketplace', qualifiedTabId, 'host:runtime', 'host:launcher'].join(',')
+      && initial.tabs.map(item => item.id).join(',')
+        === ['host:marketplace', qualifiedTabId, 'host:runtime', 'host:launcher'].join(',')
       && mounted.contentMounted === true && mounted.bodyOnly === true && mounted.controlledBody === true
       && mounted.url === initial.url && keyboard.selected === 'host:runtime' && keyboard.focused === 'host:runtime'
-      && surfaceDenied.tabPresent === false && surfaceDenied.contentPresent === false && surfaceDenied.fallbackSelected === true
-      && outletDenied.tabPresent === false && outletDenied.contentPresent === false && outletDenied.fallbackSelected === true
+      && surfaceDenied.tabPresent === false && surfaceDenied.contentPresent === false
+      && surfaceDenied.fallbackSelected === true
+      && outletDenied.tabPresent === false && outletDenied.contentPresent === false
+      && outletDenied.fallbackSelected === true
       && surfaceRestored.tabPresent === true && surfaceRestored.fallbackSelected === true
       && outletRestored.tabPresent === true && outletRestored.fallbackSelected === true
-      && blocked.status === 'blocked' && blocked.tabPresent === false && blocked.contentPresent === false && blocked.fallbackSelected === true
+      && blocked.status === 'blocked' && blocked.tabPresent === false && blocked.contentPresent === false
+      && blocked.fallbackSelected === true
       && restored.status === 'active' && restored.tabPresent === true && restored.fallbackSelected === true
       && locale.projected === locale.expectedProjected && locale.runtimeTitle === locale.expectedProjected
       && locale.restored === locale.expectedRestored
@@ -1083,9 +1237,14 @@ if (false && parsed.values['manager-settings-exercise']) {
 if (parsed.values['manager-settings-navigation-exercise']) {
   const owner = parsed.values['plugin-owner'] ?? 'settings-tab-demo'
   const qualifiedId = `${owner}:navigation`
-  const source = await evaluateByValue(`globalThis.__cordisxRuntime?.snapshot?.().plugins?.find(item => item.id === ${JSON.stringify(owner)})?.source ?? null`)
+  const source = await evaluateByValue(
+    `globalThis.__cordisxRuntime?.snapshot?.().plugins?.find(item => item.id === ${
+      JSON.stringify(owner)
+    })?.source ?? null`,
+  )
   if (source === null) throw new Error(`settings navigation demo plugin source not found: ${owner}`)
-  const ready = await evaluateByValue(`(async () => {
+  const ready = await evaluateByValue(
+    `(async () => {
     const waitFor = async predicate => {
       for (let attempt = 0; attempt < 80; attempt += 1) {
         if (predicate()) return true
@@ -1098,16 +1257,22 @@ if (parsed.values['manager-settings-navigation-exercise']) {
     if (trigger instanceof HTMLElement) trigger.click()
     else if (modal instanceof HTMLElement && modal.hidden) modal.hidden = false
     return await waitFor(() => document.querySelector('[data-settings-navigation-item="${qualifiedId}"]') !== null)
-  })()`, true)
-  const rowRect = await evaluateByValue(`(() => {
+  })()`,
+    true,
+  )
+  const rowRect = await evaluateByValue(
+    `(() => {
     const row = document.querySelector('[data-settings-navigation-item="${qualifiedId}"]')
     if (!(row instanceof HTMLElement)) return null
     const rect = row.getBoundingClientRect()
     return rect.width > 0 && rect.height > 0 ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null
-  })()`, true)
+  })()`,
+    true,
+  )
   if (rowRect === null) throw new Error(`settings navigation item is not interactable: ${qualifiedId}`)
   await pointerClick(rowRect)
-  const initial = await evaluateByValue(`(async () => {
+  const initial = await evaluateByValue(
+    `(async () => {
     const waitFor = async predicate => {
       for (let attempt = 0; attempt < 80; attempt += 1) {
         if (predicate()) return true
@@ -1126,22 +1291,34 @@ if (parsed.values['manager-settings-navigation-exercise']) {
       hostHeader: document.querySelector('.cxm-heading-leading-stack [data-host-icon="host:settings"]') !== null,
       outlet: runtime.navigation.outlets.find(item => item.id === 'manager.content') ?? null,
     }
-  })()`, true)
+  })()`,
+    true,
+  )
   await pressKey('ArrowUp', 'ArrowUp', 38)
   const keyboardUp = await evaluateByValue(`document.activeElement?.getAttribute('data-manager-navigation-id') ?? null`)
   await pressKey('ArrowDown', 'ArrowDown', 40)
-  const keyboardDown = await evaluateByValue(`document.activeElement?.getAttribute('data-settings-navigation-item') ?? null`)
-  const lifecycle = await evaluateByValue(`(async () => {
+  const keyboardDown = await evaluateByValue(
+    `document.activeElement?.getAttribute('data-settings-navigation-item') ?? null`,
+  )
+  const lifecycle = await evaluateByValue(
+    `(async () => {
     const runtime = globalThis.__cordisxRuntime
-    await runtime.setExtensionPointPolicy(${JSON.stringify(source)}, ${JSON.stringify(owner)}, 'manager.settings.navigation-items', 'deny')
+    await runtime.setExtensionPointPolicy(${JSON.stringify(source)}, ${
+      JSON.stringify(owner)
+    }, 'manager.settings.navigation-items', 'deny')
     await new Promise(resolve => setTimeout(resolve, 140))
     const denied = { row: document.querySelector('[data-settings-navigation-item="${qualifiedId}"]') !== null, body: document.querySelector('[data-settings-navigation-demo-content]') !== null, fallback: document.querySelector('[data-tab="plugins"]')?.getAttribute('aria-current') === 'page', mounted: runtime.snapshot().navigation.outlets.find(item => item.id === 'manager.content')?.mounted ?? null }
-    await runtime.setExtensionPointPolicy(${JSON.stringify(source)}, ${JSON.stringify(owner)}, 'manager.settings.navigation-items', 'allow')
+    await runtime.setExtensionPointPolicy(${JSON.stringify(source)}, ${
+      JSON.stringify(owner)
+    }, 'manager.settings.navigation-items', 'allow')
     await new Promise(resolve => setTimeout(resolve, 140))
     const restored = document.querySelector('[data-settings-navigation-item="${qualifiedId}"]') !== null
     return { denied, restored }
-  })()`, true)
-  const localeResult = await evaluateByValue(`(async () => {
+  })()`,
+    true,
+  )
+  const localeResult = await evaluateByValue(
+    `(async () => {
     const target = document.documentElement.lang.toLowerCase().startsWith('zh') ? 'en' : 'zh-CN'
     globalThis.__cordisxSetSmokeLocale(target)
     for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -1153,24 +1330,36 @@ if (parsed.values['manager-settings-navigation-exercise']) {
     globalThis.__cordisxSetSmokeLocale(${JSON.stringify(locale ?? 'en')})
     for (let attempt = 0; attempt < 80; attempt += 1) {
       const snapshot = globalThis.__cordisxRuntime.snapshot().localization.locale
-      if (document.documentElement.lang === ${JSON.stringify(locale ?? 'en')} && snapshot === ${JSON.stringify(locale ?? 'en')}) break
+      if (document.documentElement.lang === ${JSON.stringify(locale ?? 'en')} && snapshot === ${
+      JSON.stringify(locale ?? 'en')
+    }) break
       await new Promise(resolve => setTimeout(resolve, 25))
     }
     return { target, title, restored: document.documentElement.lang, snapshot: globalThis.__cordisxRuntime.snapshot().localization.locale }
-  })()`, true)
+  })()`,
+    true,
+  )
   settingsTabsReport = {
-    initial, keyboard: { up: keyboardUp, down: keyboardDown }, lifecycle, locale: localeResult,
-    passed: initial.ready === true && initial.mounted === true && initial.rows.some(item => item.id === qualifiedId && item.icon === 'host:settings' && item.disabled === false)
-      && initial.settingsTabs.length === 0 && initial.legacySettings === false && initial.page === true && initial.hostHeader === true && initial.outlet?.mounted === true
+    initial,
+    keyboard: { up: keyboardUp, down: keyboardDown },
+    lifecycle,
+    locale: localeResult,
+    passed: initial.ready === true && initial.mounted === true && initial.rows.some(item =>
+      item.id === qualifiedId && item.icon === 'host:settings' && item.disabled === false
+    )
+      && initial.settingsTabs.length === 0 && initial.legacySettings === false && initial.page === true
+      && initial.hostHeader === true && initial.outlet?.mounted === true
       && keyboardUp === 'marketplace' && keyboardDown === qualifiedId
-      && lifecycle.denied.row === false && lifecycle.denied.body === false && lifecycle.denied.fallback === true && lifecycle.denied.mounted === false && lifecycle.restored === true
+      && lifecycle.denied.row === false && lifecycle.denied.body === false && lifecycle.denied.fallback === true
+      && lifecycle.denied.mounted === false && lifecycle.restored === true
       && localeResult.snapshot === (locale ?? 'en') && localeResult.restored === (locale ?? 'en'),
   }
   console.log(`manager-settings-navigation=${JSON.stringify(settingsTabsReport, null, 2)}`)
 }
 
 if (parsed.values['config-exercise']) {
-  configExerciseReport = await evaluateByValue(`(async () => {
+  configExerciseReport = await evaluateByValue(
+    `(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     const waitFor = async (predicate, label) => {
       for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -1266,7 +1455,9 @@ if (parsed.values['config-exercise']) {
       after,
       assertions,
     }
-  })()`, true)
+  })()`,
+    true,
+  )
   console.log(`configExercise=${JSON.stringify(configExerciseReport, null, 2)}`)
 }
 
@@ -1291,9 +1482,23 @@ if (parsed.values.exercise) {
     const startY = Math.max(80, separatorBefore.y + Math.min(separatorBefore.height / 2, 300))
     const endX = startX + 36
     await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: startY })
-    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: startX, y: startY, button: 'left', buttons: 1, clickCount: 1 })
+    await send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      x: startX,
+      y: startY,
+      button: 'left',
+      buttons: 1,
+      clickCount: 1,
+    })
     await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: endX, y: startY, button: 'left', buttons: 1 })
-    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: endX, y: startY, button: 'left', buttons: 0, clickCount: 1 })
+    await send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      x: endX,
+      y: startY,
+      button: 'left',
+      buttons: 0,
+      clickCount: 1,
+    })
     await new Promise(resolve => setTimeout(resolve, 350))
     const separatorAfter = await evaluateByValue(`(() => {
       const separator = [...document.querySelectorAll('[role="separator"]')]
@@ -1302,18 +1507,38 @@ if (parsed.values.exercise) {
       const rect = separator?.getBoundingClientRect()
       return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
     })()`)
-    drag = { attempted: true, before: separatorBefore, after: separatorAfter, deltaX: separatorAfter === null ? null : separatorAfter.x - separatorBefore.x }
+    drag = {
+      attempted: true,
+      before: separatorBefore,
+      after: separatorAfter,
+      deltaX: separatorAfter === null ? null : separatorAfter.x - separatorBefore.x,
+    }
     if (separatorAfter !== null) {
       const restoreX = separatorAfter.x + separatorAfter.width / 2
       await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: restoreX, y: startY })
-      await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: restoreX, y: startY, button: 'left', buttons: 1, clickCount: 1 })
+      await send('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x: restoreX,
+        y: startY,
+        button: 'left',
+        buttons: 1,
+        clickCount: 1,
+      })
       await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: startX, y: startY, button: 'left', buttons: 1 })
-      await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: startX, y: startY, button: 'left', buttons: 0, clickCount: 1 })
+      await send('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x: startX,
+        y: startY,
+        button: 'left',
+        buttons: 0,
+        clickCount: 1,
+      })
       await new Promise(resolve => setTimeout(resolve, 250))
     }
   }
 
-  exerciseReport = await evaluateByValue(`(async () => {
+  exerciseReport = await evaluateByValue(
+    `(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     const runtime = globalThis.__cordisxRuntime
     if (runtime === undefined) throw new Error('CordisX runtime is unavailable')
@@ -1535,7 +1760,9 @@ if (parsed.values.exercise) {
       browserUrlUnchanged: location.href === 'app://-/index.html',
       finalOutlet: runtime.snapshot().navigation.outlets.find(outlet => outlet.id === 'main'),
     }
-  })()`, true)
+  })()`,
+    true,
+  )
   exerciseReport.drag = drag
   console.log(`exercise=${JSON.stringify(exerciseReport, null, 2)}`)
 }
@@ -1592,15 +1819,24 @@ let hostCollectionMenuReport
 if (parsed.values['host-collection-menu-exercise']) {
   const source = await readFile(new URL('../src/renderer/host-collection.ts', import.meta.url), 'utf8')
   const compiled = await transform(source, {
-    loader: 'ts', format: 'iife', globalName: '__cordisxHostCollectionSmokeModule', target: 'es2022',
+    loader: 'ts',
+    format: 'iife',
+    globalName: '__cordisxHostCollectionSmokeModule',
+    target: 'es2022',
   })
   await send('Emulation.setDeviceMetricsOverride', {
-    width: 420, height: 800, deviceScaleFactor: 1, mobile: false,
+    width: 420,
+    height: 800,
+    deviceScaleFactor: 1,
+    mobile: false,
   })
   try {
     const loaded = await send('Runtime.evaluate', { expression: compiled.code, returnByValue: true })
     if (loaded.exceptionDetails !== undefined) {
-      throw new Error(loaded.exceptionDetails.exception?.description ?? loaded.exceptionDetails.text ?? 'Host collection smoke module failed to load')
+      throw new Error(
+        loaded.exceptionDetails.exception?.description ?? loaded.exceptionDetails.text
+          ?? 'Host collection smoke module failed to load',
+      )
     }
     const setup = await evaluateByValue(`(() => {
       globalThis.__cordisxHostCollectionMenuSmoke?.cleanup?.()
@@ -1717,9 +1953,12 @@ if (parsed.values['host-collection-menu-exercise']) {
       managerEscapeCount: globalThis.__cordisxHostCollectionMenuSmoke.managerEscapeCount(),
     }))()`)
     hostCollectionMenuReport = {
-      viewport: { width: 420, height: 800 }, initial,
+      viewport: { width: 420, height: 800 },
+      initial,
       keyboard: { arrowDown, arrowUp, end, home, wrappedUp },
-      escape, dispose, reopened,
+      escape,
+      dispose,
+      reopened,
     }
     hostCollectionMenuReport.passed = initial.open === true
       && initial.portaled === true
@@ -1770,7 +2009,8 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
   const extension = path.extname(reportPath)
   const stem = path.basename(reportPath, extension)
   const artifact = suffix => path.join(path.dirname(reportPath), `${stem}.${suffix}.png`)
-  const installed = await evaluateByValue(`(async () => {
+  const installed = await evaluateByValue(
+    `(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     const waitFor = async (predicate, label) => {
       for (let attempt = 0; attempt < 160; attempt += 1) {
@@ -1859,14 +2099,19 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
       primaryRect: rect(currentRow.querySelector('[data-plugin-primary="lifecycle-smoke"]')),
       managerRect: rect(document.querySelector('[data-cordisx-manager-modal] [role="dialog"]')),
     }
-  })()`, true)
-  if (installed.primaryRect === null || installed.primaryRect.width <= 0 || installed.primaryRect.height <= 0
-    || installed.managerRect === null) throw new Error('installed lifecycle fixture is not visible')
+  })()`,
+    true,
+  )
+  if (
+    installed.primaryRect === null || installed.primaryRect.width <= 0 || installed.primaryRect.height <= 0
+    || installed.managerRect === null
+  ) throw new Error('installed lifecycle fixture is not visible')
   const screenshots = {
     installed: await capture(installed.managerRect, artifact('lifecycle-installed'), 'installed lifecycle plugin'),
   }
 
-  const inspectPluginCard = async () => await evaluateByValue(`(() => {
+  const inspectPluginCard = async () =>
+    await evaluateByValue(`(() => {
     const row = document.querySelector('[data-plugin-card="lifecycle-smoke"]')
     const primary = row?.querySelector('[data-plugin-primary="lifecycle-smoke"]')
     const actions = row?.querySelector('.cxc-actions')
@@ -1901,9 +2146,16 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
     await new Promise(resolve => setTimeout(resolve, 50))
     hoveredTooltip = await inspectPluginCard()
   }
-  screenshots.tooltip = await capture(installed.managerRect, artifact('lifecycle-tooltip'), 'hovered plugin status tooltip')
+  screenshots.tooltip = await capture(
+    installed.managerRect,
+    artifact('lifecycle-tooltip'),
+    'hovered plugin status tooltip',
+  )
   await send('Input.dispatchMouseEvent', {
-    type: 'mouseMoved', pointerType: 'mouse', x: installed.managerRect.x + 12, y: installed.managerRect.y + 12,
+    type: 'mouseMoved',
+    pointerType: 'mouse',
+    x: installed.managerRect.x + 12,
+    y: installed.managerRect.y + 12,
   })
   await new Promise(resolve => setTimeout(resolve, 80))
   const tooltipDismissed = await evaluateByValue(`document.querySelector('[role="tooltip"]') === null`)
@@ -1913,7 +2165,8 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
   const cardInteraction = { hiddenActions, hoveredTooltip, focusedActions, tooltipDismissed }
 
   if (parsed.values['generation-transaction-exercise']) {
-    generationTransactionReport = await evaluateByValue(`(async () => {
+    generationTransactionReport = await evaluateByValue(
+      `(async () => {
       const runtime = globalThis.__cordisxRuntime
       if (runtime === undefined) throw new Error('CordisX runtime is unavailable')
       const targetId = 'lifecycle-smoke'
@@ -2071,7 +2324,9 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
           && location.href === 'app://-/index.html' && (document.querySelector('main') ?? document.body) === nativeNode
           && globalThis.__cordisxRuntime === runtime,
       }
-    })()`, true)
+    })()`,
+      true,
+    )
     console.log(`generation-transaction=${JSON.stringify(generationTransactionReport, null, 2)}`)
     if (generationTransactionReport.passed !== true) throw new Error('generation transaction smoke assertions failed')
   }
@@ -2081,36 +2336,45 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
   // here; run the full Manager lifecycle as a separate fresh-profile smoke so
   // its next Host transaction cannot inherit a renderer-only registry epoch.
   if (!parsed.values['generation-transaction-exercise']) {
-  await pointerClick(installed.primaryRect)
-  await new Promise(resolve => setTimeout(resolve, 180))
-  const pointerNavigation = await evaluateByValue(`(async () => {
+    await pointerClick(installed.primaryRect)
+    await new Promise(resolve => setTimeout(resolve, 180))
+    const pointerNavigation = await evaluateByValue(
+      `(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     const detail = document.querySelector('[data-manager-page-route^="plugin:lifecycle-smoke:"]') !== null
     document.querySelector('.cxm-back')?.click()
     for (let attempt = 0; attempt < 80 && document.querySelector('[data-plugin-primary="lifecycle-smoke"]') === null; attempt += 1) await wait(25)
     return { detail, restored: document.querySelector('[data-plugin-primary="lifecycle-smoke"]') !== null }
-  })()`, true)
+  })()`,
+      true,
+    )
 
-  const focusPrimary = async () => await evaluateByValue(`(() => {
+    const focusPrimary = async () =>
+      await evaluateByValue(`(() => {
     const primary = document.querySelector('[data-plugin-primary="lifecycle-smoke"]')
     primary?.focus()
     return document.activeElement === primary
   })()`)
-  const keyboardNavigation = {}
-  keyboardNavigation.enterFocused = await focusPrimary()
-  await pressKey('Enter', 'Enter', 13)
-  await new Promise(resolve => setTimeout(resolve, 120))
-  keyboardNavigation.enterDetail = await evaluateByValue(`document.querySelector('[data-manager-page-route^="plugin:lifecycle-smoke:"]') !== null`)
-  await evaluateByValue(`document.querySelector('.cxm-back')?.click()`)
-  await new Promise(resolve => setTimeout(resolve, 120))
-  keyboardNavigation.spaceFocused = await focusPrimary()
-  await pressKey(' ', 'Space', 32)
-  await new Promise(resolve => setTimeout(resolve, 120))
-  keyboardNavigation.spaceDetail = await evaluateByValue(`document.querySelector('[data-manager-page-route^="plugin:lifecycle-smoke:"]') !== null`)
-  await evaluateByValue(`document.querySelector('.cxm-back')?.click()`)
-  await new Promise(resolve => setTimeout(resolve, 120))
+    const keyboardNavigation = {}
+    keyboardNavigation.enterFocused = await focusPrimary()
+    await pressKey('Enter', 'Enter', 13)
+    await new Promise(resolve => setTimeout(resolve, 120))
+    keyboardNavigation.enterDetail = await evaluateByValue(
+      `document.querySelector('[data-manager-page-route^="plugin:lifecycle-smoke:"]') !== null`,
+    )
+    await evaluateByValue(`document.querySelector('.cxm-back')?.click()`)
+    await new Promise(resolve => setTimeout(resolve, 120))
+    keyboardNavigation.spaceFocused = await focusPrimary()
+    await pressKey(' ', 'Space', 32)
+    await new Promise(resolve => setTimeout(resolve, 120))
+    keyboardNavigation.spaceDetail = await evaluateByValue(
+      `document.querySelector('[data-manager-page-route^="plugin:lifecycle-smoke:"]') !== null`,
+    )
+    await evaluateByValue(`document.querySelector('.cxm-back')?.click()`)
+    await new Promise(resolve => setTimeout(resolve, 120))
 
-  const exercised = await evaluateByValue(`(async () => {
+    const exercised = await evaluateByValue(
+      `(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     const waitFor = async (predicate, label) => {
       for (let attempt = 0; attempt < 160; attempt += 1) {
@@ -2188,22 +2452,24 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
       routeAfterFavorite, favoriteFocusRestored, favoriteStored: localStorage.getItem('cordisx.manager.favoritePlugins.v1:smoke'),
       menu, menuRect: managerRect, modalWasHidden,
     }
-  })()`, true)
-  if (exercised.menuRect === null) throw new Error('lifecycle action menu is not visible')
-  screenshots.menu = await capture(exercised.menuRect, artifact('lifecycle-menu'), 'lifecycle action menu')
+  })()`,
+      true,
+    )
+    if (exercised.menuRect === null) throw new Error('lifecycle action menu is not visible')
+    screenshots.menu = await capture(exercised.menuRect, artifact('lifecycle-menu'), 'lifecycle action menu')
 
-  if (exercised.menu.triggerRect === null) throw new Error('lifecycle action menu trigger is not visible')
-  // Close/reopen with a trusted pointer, then validate keyboard, external-dismiss,
-  // diagnostic execution, and block/restore cleanup against the real renderer.
-  await pointerClick(exercised.menu.triggerRect)
-  const menuToggle = await evaluateByValue(`(() => ({
+    if (exercised.menu.triggerRect === null) throw new Error('lifecycle action menu trigger is not visible')
+    // Close/reopen with a trusted pointer, then validate keyboard, external-dismiss,
+    // diagnostic execution, and block/restore cleanup against the real renderer.
+    await pointerClick(exercised.menu.triggerRect)
+    const menuToggle = await evaluateByValue(`(() => ({
     closed: document.querySelector('body > .cxc-menu-popup') === null,
     triggerFocused: document.activeElement?.matches?.('[data-plugin-menu="lifecycle-smoke"] .cxc-menu-trigger') ?? false,
   }))()`)
-  await pointerClick(exercised.menu.triggerRect)
-  await pressKey('ArrowDown', 'ArrowDown', 40)
-  await pressKey('End', 'End', 35)
-  const menuKeyboard = await evaluateByValue(`(() => {
+    await pointerClick(exercised.menu.triggerRect)
+    await pressKey('ArrowDown', 'ArrowDown', 40)
+    await pressKey('End', 'End', 35)
+    const menuKeyboard = await evaluateByValue(`(() => {
     const popup = document.querySelector('body > .cxc-menu-popup')
     return {
       open: popup !== null,
@@ -2211,23 +2477,24 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
       activeAction: document.activeElement?.getAttribute?.('data-collection-action') ?? null,
     }
   })()`)
-  await pressKey('Escape', 'Escape', 27)
-  const menuEscape = await evaluateByValue(`(() => ({
+    await pressKey('Escape', 'Escape', 27)
+    const menuEscape = await evaluateByValue(`(() => ({
     closed: document.querySelector('body > .cxc-menu-popup') === null,
     triggerFocused: document.activeElement?.matches?.('[data-plugin-menu="lifecycle-smoke"] .cxc-menu-trigger') ?? false,
   }))()`)
 
-  await pointerClick(exercised.menu.triggerRect)
-  const diagnosticTarget = await evaluateByValue(`(() => {
+    await pointerClick(exercised.menu.triggerRect)
+    const diagnosticTarget = await evaluateByValue(`(() => {
     const button = document.querySelector('body > .cxc-menu-popup [data-collection-action="diagnostics"]')
     const rect = button?.getBoundingClientRect()
     return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
   })()`)
-  if (diagnosticTarget === null || diagnosticTarget.width <= 0 || diagnosticTarget.height <= 0) {
-    throw new Error('diagnostic menu action is not visible')
-  }
-  await pointerClick(diagnosticTarget)
-  const diagnosticExecution = await evaluateByValue(`(async () => {
+    if (diagnosticTarget === null || diagnosticTarget.width <= 0 || diagnosticTarget.height <= 0) {
+      throw new Error('diagnostic menu action is not visible')
+    }
+    await pointerClick(diagnosticTarget)
+    const diagnosticExecution = await evaluateByValue(
+      `(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     for (let attempt = 0; attempt < 80; attempt += 1) {
       if (document.querySelector('[data-manager-page-route="plugin:lifecycle-smoke:runtime"]') !== null) break
@@ -2237,30 +2504,33 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
       runtimeRoute: document.querySelector('[data-manager-page-route="plugin:lifecycle-smoke:runtime"]') !== null,
       popupClosed: document.querySelector('body > .cxc-menu-popup') === null,
     }
-  })()`, true)
-  await evaluateByValue(`document.querySelector('.cxm-back')?.click()`)
-  await new Promise(resolve => setTimeout(resolve, 120))
+  })()`,
+      true,
+    )
+    await evaluateByValue(`document.querySelector('.cxm-back')?.click()`)
+    await new Promise(resolve => setTimeout(resolve, 120))
 
-  const outsideTarget = await evaluateByValue(`(() => {
+    const outsideTarget = await evaluateByValue(`(() => {
     const trigger = document.querySelector('[data-plugin-menu="lifecycle-smoke"] .cxc-menu-trigger')
     const rect = trigger?.getBoundingClientRect()
     return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
   })()`)
-  if (outsideTarget === null) throw new Error('lifecycle action menu trigger disappeared')
-  await pointerClick(outsideTarget)
-  const outsideDismissTarget = await evaluateByValue(`(() => {
+    if (outsideTarget === null) throw new Error('lifecycle action menu trigger disappeared')
+    await pointerClick(outsideTarget)
+    const outsideDismissTarget = await evaluateByValue(`(() => {
     const target = document.querySelector('.cxm-heading')
     const rect = target?.getBoundingClientRect()
     return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
   })()`)
-  if (outsideDismissTarget === null || outsideDismissTarget.width <= 0 || outsideDismissTarget.height <= 0) {
-    throw new Error('manager outside-dismiss target is not visible')
-  }
-  await pointerClick(outsideDismissTarget)
-  const outsideDismiss = await evaluateByValue(`document.querySelector('body > .cxc-menu-popup') === null`)
+    if (outsideDismissTarget === null || outsideDismissTarget.width <= 0 || outsideDismissTarget.height <= 0) {
+      throw new Error('manager outside-dismiss target is not visible')
+    }
+    await pointerClick(outsideDismissTarget)
+    const outsideDismiss = await evaluateByValue(`document.querySelector('body > .cxc-menu-popup') === null`)
 
-  await pointerClick(outsideTarget)
-  const blockRestore = await evaluateByValue(`(async () => {
+    await pointerClick(outsideTarget)
+    const blockRestore = await evaluateByValue(
+      `(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     const runtime = globalThis.__cordisxRuntime
     await runtime.setPluginBlocked('lifecycle-smoke', true)
@@ -2279,9 +2549,12 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
       restored: runtime.snapshot().plugins.find(item => item.id === 'lifecycle-smoke')?.status === 'active',
       counters: { ...globalThis.__cordisxLifecycleSmoke },
     }
-  })()`, true)
+  })()`,
+      true,
+    )
 
-  const uninstallPlan = await evaluateByValue(`(async () => {
+    const uninstallPlan = await evaluateByValue(
+      `(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     let popup = document.querySelector('body > .cxc-menu-popup')
     if (popup === null) {
@@ -2304,11 +2577,18 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
       text: dialog.textContent?.trim() ?? '',
       rect: { x: value.x, y: value.y, width: value.width, height: value.height },
     }
-  })()`, true)
-  if (uninstallPlan?.rect === undefined) throw new Error('uninstall confirmation did not open')
-  screenshots.uninstall = await capture(uninstallPlan.rect, artifact('lifecycle-uninstall'), 'lifecycle uninstall confirmation')
+  })()`,
+      true,
+    )
+    if (uninstallPlan?.rect === undefined) throw new Error('uninstall confirmation did not open')
+    screenshots.uninstall = await capture(
+      uninstallPlan.rect,
+      artifact('lifecycle-uninstall'),
+      'lifecycle uninstall confirmation',
+    )
 
-  const removed = await evaluateByValue(`(async () => {
+    const removed = await evaluateByValue(
+      `(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     const runtime = globalThis.__cordisxRuntime
     const counters = globalThis.__cordisxLifecycleSmoke
@@ -2330,62 +2610,71 @@ if (parsed.values['manager-lifecycle-source'] !== undefined) {
       counters: { ...counters },
       appRenderer: location.href === 'app://-/index.html',
     }
-  })()`, true)
+  })()`,
+      true,
+    )
 
-  const assertions = {
-    appRenderer: installed.appRenderer && removed.appRenderer,
-    authorization: installed.authorization.mode === 'not-required'
-      || (/^(安装|更新)授权$/.test(installed.authorization.title ?? '') && installed.authorization.optional
-        && installed.authorization.primaryFocused),
-    installedWithoutLocalPath: installed.plugin.status === 'active' && installed.localSourceProjected === false
-      && installed.revision !== installed.revisionBefore
-      && installed.plugin.package?.canonicalSource === 'https://github.com/cordisx/cordisx/tree/main/examples/plugins/lifecycle-smoke',
-    cardPresentation: cardInteraction.hiddenActions.actionOpacity === '0'
-      && cardInteraction.hiddenActions.actionPointerEvents === 'none'
-      && Number(cardInteraction.hoveredTooltip.actionOpacity) > 0.9
-      && cardInteraction.hoveredTooltip.actionPointerEvents === 'auto'
-      && cardInteraction.focusedActions.actionOpacity === '1'
-      && cardInteraction.hiddenActions.actionWidth > 0 && cardInteraction.focusedActions.actionWidth > 0
-      && cardInteraction.hiddenActions.rowWidth === cardInteraction.hoveredTooltip.rowWidth
-      && cardInteraction.hoveredTooltip.rowWidth === cardInteraction.focusedActions.rowWidth
-      && cardInteraction.hiddenActions.rowHeight === cardInteraction.hoveredTooltip.rowHeight
-      && cardInteraction.hoveredTooltip.rowHeight === cardInteraction.focusedActions.rowHeight
-      && cardInteraction.hoveredTooltip.tooltip === '运行中' && cardInteraction.hoveredTooltip.describedBy !== null
-      && cardInteraction.hoveredTooltip.badge === 'success' && cardInteraction.focusedActions.focused
-      && !cardInteraction.hoveredTooltip.persistentStatusText && cardInteraction.tooltipDismissed,
-    pointerNavigation: pointerNavigation.detail && pointerNavigation.restored,
-    keyboardNavigation: Object.values(keyboardNavigation).every(Boolean),
-    owningReloadOnly: exercised.afterReload.apply === exercised.initial.apply + 1
-      && exercised.afterReload.dispose === exercised.initial.dispose + 1
-      && exercised.afterReload.revision === exercised.initial.revision,
-    disableEnable: exercised.disableImpact.includes('lifecycle-smoke')
-      && exercised.afterDisable.dispose === exercised.afterReload.dispose + 1
-      && exercised.afterEnable.apply === exercised.afterReload.apply + 1,
-    profileFavorite: exercised.routeAfterFavorite && exercised.favoriteFocusRestored
-      && JSON.parse(exercised.favoriteStored ?? '[]').includes('lifecycle-smoke'),
-    menu: exercised.menu.portaled && exercised.menu.bounded && exercised.menu.firstItemFocused
-      && exercised.menu.actions.some(item => item.action === 'share' && item.disabled === false)
-      && exercised.menu.actions.some(item => item.action === 'uninstall' && item.disabled === false)
-      && exercised.menu.icons.some(item => item.action === 'share' && item.icon === 'share-plugin')
-      && exercised.menu.icons.some(item => item.action === 'source' && item.icon === 'authors-source')
-      && exercised.menu.icons.some(item => item.action === 'diagnostics' && item.icon === 'diagnostics'),
-    menuInteraction: menuToggle.closed && menuToggle.triggerFocused
-      && menuKeyboard.open && menuKeyboard.focusedMenuItem && menuKeyboard.activeAction !== null
-      && menuEscape.closed && menuEscape.triggerFocused
-      && diagnosticExecution.runtimeRoute && diagnosticExecution.popupClosed
-      && outsideDismiss && blockRestore.closedOnBlock && blockRestore.restored,
-    uninstallImpact: uninstallPlan.text.includes('lifecycle-smoke') && uninstallPlan.text.includes('确认卸载'),
-    uninstallCleanup: removed.removed && removed.registrationsRemoved && removed.routesRemoved && removed.pagesRemoved
-      && removed.counters.dispose === blockRestore.counters.dispose + 1,
-  }
-  managerLifecycleReport = {
-    result: Object.values(assertions).every(Boolean) ? 'pass' : 'fail',
-    installed, cardInteraction, pointerNavigation, keyboardNavigation, exercised,
-    menuInteraction: { menuToggle, menuKeyboard, menuEscape, diagnosticExecution, outsideDismiss, blockRestore },
-    uninstallPlan: { text: uninstallPlan.text }, removed,
-    screenshots, assertions,
-  }
-  console.log(`manager-lifecycle=${JSON.stringify(managerLifecycleReport, null, 2)}`)
+    const assertions = {
+      appRenderer: installed.appRenderer && removed.appRenderer,
+      authorization: installed.authorization.mode === 'not-required'
+        || (/^(安装|更新)授权$/.test(installed.authorization.title ?? '') && installed.authorization.optional
+          && installed.authorization.primaryFocused),
+      installedWithoutLocalPath: installed.plugin.status === 'active' && installed.localSourceProjected === false
+        && installed.revision !== installed.revisionBefore
+        && installed.plugin.package?.canonicalSource
+          === 'https://github.com/cordisx/cordisx/tree/main/examples/plugins/lifecycle-smoke',
+      cardPresentation: cardInteraction.hiddenActions.actionOpacity === '0'
+        && cardInteraction.hiddenActions.actionPointerEvents === 'none'
+        && Number(cardInteraction.hoveredTooltip.actionOpacity) > 0.9
+        && cardInteraction.hoveredTooltip.actionPointerEvents === 'auto'
+        && cardInteraction.focusedActions.actionOpacity === '1'
+        && cardInteraction.hiddenActions.actionWidth > 0 && cardInteraction.focusedActions.actionWidth > 0
+        && cardInteraction.hiddenActions.rowWidth === cardInteraction.hoveredTooltip.rowWidth
+        && cardInteraction.hoveredTooltip.rowWidth === cardInteraction.focusedActions.rowWidth
+        && cardInteraction.hiddenActions.rowHeight === cardInteraction.hoveredTooltip.rowHeight
+        && cardInteraction.hoveredTooltip.rowHeight === cardInteraction.focusedActions.rowHeight
+        && cardInteraction.hoveredTooltip.tooltip === '运行中' && cardInteraction.hoveredTooltip.describedBy !== null
+        && cardInteraction.hoveredTooltip.badge === 'success' && cardInteraction.focusedActions.focused
+        && !cardInteraction.hoveredTooltip.persistentStatusText && cardInteraction.tooltipDismissed,
+      pointerNavigation: pointerNavigation.detail && pointerNavigation.restored,
+      keyboardNavigation: Object.values(keyboardNavigation).every(Boolean),
+      owningReloadOnly: exercised.afterReload.apply === exercised.initial.apply + 1
+        && exercised.afterReload.dispose === exercised.initial.dispose + 1
+        && exercised.afterReload.revision === exercised.initial.revision,
+      disableEnable: exercised.disableImpact.includes('lifecycle-smoke')
+        && exercised.afterDisable.dispose === exercised.afterReload.dispose + 1
+        && exercised.afterEnable.apply === exercised.afterReload.apply + 1,
+      profileFavorite: exercised.routeAfterFavorite && exercised.favoriteFocusRestored
+        && JSON.parse(exercised.favoriteStored ?? '[]').includes('lifecycle-smoke'),
+      menu: exercised.menu.portaled && exercised.menu.bounded && exercised.menu.firstItemFocused
+        && exercised.menu.actions.some(item => item.action === 'share' && item.disabled === false)
+        && exercised.menu.actions.some(item => item.action === 'uninstall' && item.disabled === false)
+        && exercised.menu.icons.some(item => item.action === 'share' && item.icon === 'share-plugin')
+        && exercised.menu.icons.some(item => item.action === 'source' && item.icon === 'authors-source')
+        && exercised.menu.icons.some(item => item.action === 'diagnostics' && item.icon === 'diagnostics'),
+      menuInteraction: menuToggle.closed && menuToggle.triggerFocused
+        && menuKeyboard.open && menuKeyboard.focusedMenuItem && menuKeyboard.activeAction !== null
+        && menuEscape.closed && menuEscape.triggerFocused
+        && diagnosticExecution.runtimeRoute && diagnosticExecution.popupClosed
+        && outsideDismiss && blockRestore.closedOnBlock && blockRestore.restored,
+      uninstallImpact: uninstallPlan.text.includes('lifecycle-smoke') && uninstallPlan.text.includes('确认卸载'),
+      uninstallCleanup: removed.removed && removed.registrationsRemoved && removed.routesRemoved && removed.pagesRemoved
+        && removed.counters.dispose === blockRestore.counters.dispose + 1,
+    }
+    managerLifecycleReport = {
+      result: Object.values(assertions).every(Boolean) ? 'pass' : 'fail',
+      installed,
+      cardInteraction,
+      pointerNavigation,
+      keyboardNavigation,
+      exercised,
+      menuInteraction: { menuToggle, menuKeyboard, menuEscape, diagnosticExecution, outsideDismiss, blockRestore },
+      uninstallPlan: { text: uninstallPlan.text },
+      removed,
+      screenshots,
+      assertions,
+    }
+    console.log(`manager-lifecycle=${JSON.stringify(managerLifecycleReport, null, 2)}`)
   }
 }
 
@@ -2399,7 +2688,8 @@ if (parsed.values['permission-v2-source'] !== undefined) {
     path.dirname(reportPath),
     `${path.basename(reportPath, path.extname(reportPath))}.permission-v2-authorization.png`,
   )
-  const opened = await evaluateByValue(`(async () => {
+  const opened = await evaluateByValue(
+    `(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     const waitFor = async (predicate, label) => {
       for (let attempt = 0; attempt < 160; attempt += 1) {
@@ -2448,10 +2738,13 @@ if (parsed.values['permission-v2-source'] !== undefined) {
       headings: dialog.querySelectorAll('h2').length,
       items,
     }
-  })()`, true)
+  })()`,
+    true,
+  )
   if (opened?.rect === undefined) throw new Error('permission v2 authorization dialog did not open')
   const screenshot = await capture(opened.rect, authorizationScreenshot, 'permission v2 authorization')
-  const exercised = await evaluateByValue(`(async () => {
+  const exercised = await evaluateByValue(
+    `(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     const waitFor = async (predicate, label) => {
       for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -2566,7 +2859,9 @@ if (parsed.values['permission-v2-source'] !== undefined) {
       finalPlan,
       appRenderer: location.href === 'app://-/index.html',
     }
-  })()`, true)
+  })()`,
+    true,
+  )
   const narrowTasks = exercised.narrowPlan?.declarations?.find(item => item.capability === 'tasks.catalog.read')
   const expandedTasks = exercised.expandedPlan?.declarations?.find(item => item.capability === 'tasks.catalog.read')
   const expandedEvents = exercised.expandedPlan?.declarations?.find(item => item.capability === 'agent.events.read')
@@ -2604,7 +2899,8 @@ if (parsed.values['permission-v2-source'] !== undefined) {
 
 let uiCatalogReport
 if (parsed.values['ui-catalog']) {
-  uiCatalogReport = await evaluateByValue(`(async () => {
+  uiCatalogReport = await evaluateByValue(
+    `(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     const waitFor = async (predicate, label) => {
       for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -2841,16 +3137,25 @@ if (parsed.values['ui-catalog']) {
     return { result: assertions.every(item => item.pass) ? 'pass' : 'fail', sessionId: snapshot.extensionPoints === undefined ? null
       : document.querySelector('[data-app-action-sidebar-thread-selected="true"]')?.getAttribute('data-app-action-sidebar-thread-id')?.replace(/^local:/, '') ?? null,
       points, iconControls, managerBrand, policyTransitions, pluginBlock, nativeMutation: mutation, safeInsets: { titlebar: titlebarRect, safeLeft }, assertions }
-  })()`, true)
+  })()`,
+    true,
+  )
 
   const reportPath = path.resolve(parsed.values.report)
   const extension = path.extname(reportPath)
   const stem = path.basename(reportPath, extension)
   const artifact = suffix => path.join(path.dirname(reportPath), `${stem}.${suffix}.png`)
   const screenshots = {}
-  for (const [id, suffix] of [['session.header.actions', 'session-header-actions'], ['composer.toolbar.items', 'composer-submit-before']]) {
+  for (
+    const [id, suffix] of [['session.header.actions', 'session-header-actions'], [
+      'composer.toolbar.items',
+      'composer-submit-before',
+    ]]
+  ) {
     const point = uiCatalogReport.points?.find(item => item.id === id)
-    if (point?.captureRect !== null && point?.captureRect !== undefined) screenshots[id] = await capture(point.captureRect, artifact(suffix), id)
+    if (point?.captureRect !== null && point?.captureRect !== undefined) {
+      screenshots[id] = await capture(point.captureRect, artifact(suffix), id)
+    }
   }
   const tooltipEvidence = async (id, key, suffix) => {
     const activations = []
@@ -2864,7 +3169,12 @@ if (parsed.values['ui-catalog']) {
         return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
       })()`)
       if (trigger === null) return { pass: false, error: 'trigger unavailable', activations }
-      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: trigger.x + trigger.width / 2, y: trigger.y + trigger.height / 2, pointerType: 'mouse' })
+      await send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: trigger.x + trigger.width / 2,
+        y: trigger.y + trigger.height / 2,
+        pointerType: 'mouse',
+      })
       const activation = await evaluateByValue(`(() => {
         const button = document.querySelector('[data-cordisx-surface-host=${JSON.stringify(key)}] button')
         if (!(button instanceof HTMLElement)) return { focused: false, pointerDispatched: false, connected: false }
@@ -2890,7 +3200,9 @@ if (parsed.values['ui-catalog']) {
       })()`)
     }
     evidence.activations = activations
-    if (evidence.rect !== undefined) evidence.screenshot = await capture(evidence.rect, artifact(suffix), `${id} tooltip`)
+    if (evidence.rect !== undefined) {
+      evidence.screenshot = await capture(evidence.rect, artifact(suffix), `${id} tooltip`)
+    }
     await evaluateByValue(`document.querySelector('[data-cordisx-surface-host=${JSON.stringify(key)}] button')?.blur()`)
     await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 100, pointerType: 'mouse' })
     await new Promise(resolve => setTimeout(resolve, 80))
@@ -2899,20 +3211,33 @@ if (parsed.values['ui-catalog']) {
     return evidence
   }
   const tooltips = {
-    'session.header.actions': await tooltipEvidence('session.header.actions', 'session.header.actions', 'session-header-actions-tooltip'),
-    'composer.toolbar.items': await tooltipEvidence('composer.toolbar.items', 'composer.submit.before', 'composer-submit-before-tooltip'),
+    'session.header.actions': await tooltipEvidence(
+      'session.header.actions',
+      'session.header.actions',
+      'session-header-actions-tooltip',
+    ),
+    'composer.toolbar.items': await tooltipEvidence(
+      'composer.toolbar.items',
+      'composer.submit.before',
+      'composer-submit-before-tooltip',
+    ),
   }
   for (const [id, evidence] of Object.entries(tooltips)) {
     const point = uiCatalogReport.points?.find(item => item.id === id)
     const sessionUnavailable = point?.hostNativeAvailable !== true
     uiCatalogReport.assertions.push({
-      id: `${id}.tooltip`, pass: sessionUnavailable || evidence.pass, actual: evidence,
-      expected: sessionUnavailable ? 'skipped because the clean isolated renderer has no native session anchor' : 'described, in viewport, dismissed',
+      id: `${id}.tooltip`,
+      pass: sessionUnavailable || evidence.pass,
+      actual: evidence,
+      expected: sessionUnavailable
+        ? 'skipped because the clean isolated renderer has no native session anchor'
+        : 'described, in viewport, dismissed',
       ...(sessionUnavailable ? { skipped: true } : {}),
     })
   }
 
-  const toolbarSnapshot = () => evaluateByValue(`(() => {
+  const toolbarSnapshot = () =>
+    evaluateByValue(`(() => {
     const rect = element => {
       const value = element?.getBoundingClientRect()
       return value === undefined ? null : { x: value.x, y: value.y, width: value.width, height: value.height, right: value.right, bottom: value.bottom }
@@ -3038,7 +3363,9 @@ if (parsed.values['ui-catalog']) {
     // catalog itself is still useful there, but a pointer exercise against a
     // non-existent host control is neither a product failure nor valid smoke
     // evidence.
-    const status = initialToolbarSnapshot.session.native === null ? 'session-unavailable' : 'native-geometry-unavailable'
+    const status = initialToolbarSnapshot.session.native === null
+      ? 'session-unavailable'
+      : 'native-geometry-unavailable'
     uiCatalogReport.assertions.push({
       id: 'toolbar.session-native',
       pass: true,
@@ -3048,224 +3375,359 @@ if (parsed.values['ui-catalog']) {
     })
     toolbarRegression = { status, skipped: true, initial: initialToolbarSnapshot }
   } else {
-  let inactive = initialToolbarSnapshot
-  const initialNativePressed = inactive.session.native?.pressed
-  if (initialNativePressed === 'true') {
-    await pointerClick(inactive.session.native.geometry)
-    await new Promise(resolve => setTimeout(resolve, 500))
-  }
-  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 500, pointerType: 'mouse' })
-  await new Promise(resolve => setTimeout(resolve, 160))
-  inactive = await toolbarSnapshot()
-  screenshots['toolbar.inactive'] = await annotateToolbar('inactive · independent gaps', 'toolbar-inactive-annotated')
+    let inactive = initialToolbarSnapshot
+    const initialNativePressed = inactive.session.native?.pressed
+    if (initialNativePressed === 'true') {
+      await pointerClick(inactive.session.native.geometry)
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 500, pointerType: 'mouse' })
+    await new Promise(resolve => setTimeout(resolve, 160))
+    inactive = await toolbarSnapshot()
+    screenshots['toolbar.inactive'] = await annotateToolbar('inactive · independent gaps', 'toolbar-inactive-annotated')
 
-  const originalThread = inactive.selectedThread
-  const threadTarget = await evaluateByValue(`(() => {
+    const originalThread = inactive.selectedThread
+    const threadTarget = await evaluateByValue(`(() => {
     const selected = ${JSON.stringify(inactive.selectedThread)}
     const row = [...document.querySelectorAll('[data-app-action-sidebar-thread-id]')]
       .find(element => element.getClientRects().length > 0 && element.getAttribute('data-app-action-sidebar-thread-id') !== selected)
     const rect = row?.getBoundingClientRect()
     return rect === undefined ? null : { id: row.getAttribute('data-app-action-sidebar-thread-id'), x: rect.x, y: rect.y, width: rect.width, height: rect.height }
   })()`)
-  let threadSwitch = { attempted: false }
-  if (threadTarget !== null && originalThread !== null) {
-    await evaluateByValue(`(() => {
+    let threadSwitch = { attempted: false }
+    if (threadTarget !== null && originalThread !== null) {
+      await evaluateByValue(`(() => {
       globalThis.__cordisxToolbarSmokeIdentity = {
         root: document.querySelector('[data-cordisx-surface-host="session.header.actions"]'),
         native: (() => { const root = document.querySelector('[data-cordisx-surface-host="session.header.actions"]'); const anchor = root?.nextElementSibling; return anchor?.matches('button') ? anchor : anchor?.querySelector('button') ?? null })(),
       }
       return true
     })()`)
-    await pointerClick(threadTarget)
-    await new Promise(resolve => setTimeout(resolve, 1800))
-    const originalTarget = await evaluateByValue(`(() => {
-      const row = [...document.querySelectorAll('[data-app-action-sidebar-thread-id]')]
-        .find(element => element.getAttribute('data-app-action-sidebar-thread-id') === ${JSON.stringify(originalThread)})
-      const rect = row?.getBoundingClientRect()
-      return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-    })()`)
-    if (originalTarget !== null) {
-      await pointerClick(originalTarget)
+      await pointerClick(threadTarget)
       await new Promise(resolve => setTimeout(resolve, 1800))
-    }
-    threadSwitch = await evaluateByValue(`(() => {
-      const root = document.querySelector('[data-cordisx-surface-host="session.header.actions"]')
-      const anchor = root?.nextElementSibling
-      const native = anchor?.matches('button') ? anchor : anchor?.querySelector('button') ?? null
-      return { attempted: true, alternate: ${JSON.stringify(threadTarget.id)}, restored: document.querySelector('[data-app-action-sidebar-thread-selected="true"]')?.getAttribute('data-app-action-sidebar-thread-id') === ${JSON.stringify(originalThread)},
-        rootConnected: root?.isConnected ?? false, immediateBefore: root?.nextElementSibling === anchor,
-        rootIdentityPreserved: root === globalThis.__cordisxToolbarSmokeIdentity?.root,
-        nativeIdentityPreserved: native === globalThis.__cordisxToolbarSmokeIdentity?.native }
-    })()`)
-  }
-
-  inactive = await toolbarSnapshot()
-  await pointerClick(inactive.session.native.geometry)
-  await new Promise(resolve => setTimeout(resolve, 500))
-  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 500, pointerType: 'mouse' })
-  await new Promise(resolve => setTimeout(resolve, 160))
-  const nativeActive = await toolbarSnapshot()
-  screenshots['toolbar.native-active'] = await annotateToolbar('native pressed · CordisX idle', 'toolbar-native-active-annotated')
-
-  if (nativeActive.session.native?.geometry !== null && nativeActive.session.native?.geometry !== undefined) {
-    const target = nativeActive.session.native.geometry
-    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: target.x + target.width / 2, y: target.y + target.height / 2, pointerType: 'mouse' })
-    await new Promise(resolve => setTimeout(resolve, 160))
-  }
-  const nativeActiveHovered = await toolbarSnapshot()
-
-  const hoverTarget = nativeActive.session.actions[0]?.geometry
-  if (hoverTarget !== null && hoverTarget !== undefined) {
-    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hoverTarget.x + hoverTarget.width / 2, y: hoverTarget.y + hoverTarget.height / 2, pointerType: 'mouse' })
-    await new Promise(resolve => setTimeout(resolve, 160))
-  }
-  const hovered = await toolbarSnapshot()
-  screenshots['toolbar.hover'] = await annotateToolbar('hover first · sibling idle', 'toolbar-hover-annotated')
-
-  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 500, pointerType: 'mouse' })
-  await evaluateByValue(`document.querySelector('[data-cordisx-surface-host="session.header.actions"] > button:nth-of-type(2)')?.focus()`)
-  await new Promise(resolve => setTimeout(resolve, 120))
-  const focused = await toolbarSnapshot()
-  screenshots['toolbar.focus'] = await annotateToolbar('focus second · state isolated', 'toolbar-focus-annotated')
-
-  await evaluateByValue(`document.activeElement?.blur?.()`)
-  const beforeRoute = await toolbarSnapshot()
-  if (beforeRoute.session.native?.pressed === 'true') {
-    await pointerClick(beforeRoute.session.native.geometry)
-    await new Promise(resolve => setTimeout(resolve, 500))
-  }
-  const routeTargetState = await toolbarSnapshot()
-  const routeTarget = routeTargetState.session.actions.find(item => item.routeState !== null)?.geometry ?? null
-  if (routeTarget !== null) {
-    await pointerClick(routeTarget)
-    await new Promise(resolve => setTimeout(resolve, 500))
-    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 500, pointerType: 'mouse' })
-    await new Promise(resolve => setTimeout(resolve, 160))
-  }
-  const routeActive = await toolbarSnapshot()
-  screenshots['toolbar.route-active'] = await annotateToolbar('single CordisX route pressed', 'toolbar-route-active-annotated')
-
-  const activeRouteTarget = routeActive.session.actions.find(item => item.pressed === 'true')?.geometry ?? null
-  if (activeRouteTarget !== null) {
-    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: activeRouteTarget.x + activeRouteTarget.width / 2, y: activeRouteTarget.y + activeRouteTarget.height / 2, pointerType: 'mouse' })
-    await new Promise(resolve => setTimeout(resolve, 160))
-  }
-  const routeHovered = await toolbarSnapshot()
-  screenshots['toolbar.route-active-hover'] = await annotateToolbar('route pressed + hover · siblings idle', 'toolbar-route-active-hover-annotated')
-
-  let routeSessionSwitch = { attempted: false }
-  if (threadTarget !== null && originalThread !== null) {
-    const alternateTarget = await evaluateByValue(`(() => {
-      const row = [...document.querySelectorAll('[data-app-action-sidebar-thread-id]')]
-        .find(element => element.getAttribute('data-app-action-sidebar-thread-id') === ${JSON.stringify(threadTarget.id)})
-      const rect = row?.getBoundingClientRect()
-      return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-    })()`)
-    if (alternateTarget !== null) {
-      await pointerClick(alternateTarget)
-      await new Promise(resolve => setTimeout(resolve, 1800))
-      const alternate = await toolbarSnapshot()
       const originalTarget = await evaluateByValue(`(() => {
-        const row = [...document.querySelectorAll('[data-app-action-sidebar-thread-id]')]
-          .find(element => element.getAttribute('data-app-action-sidebar-thread-id') === ${JSON.stringify(originalThread)})
-        const rect = row?.getBoundingClientRect()
-        return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-      })()`)
+      const row = [...document.querySelectorAll('[data-app-action-sidebar-thread-id]')]
+        .find(element => element.getAttribute('data-app-action-sidebar-thread-id') === ${
+        JSON.stringify(originalThread)
+      })
+      const rect = row?.getBoundingClientRect()
+      return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    })()`)
       if (originalTarget !== null) {
         await pointerClick(originalTarget)
         await new Promise(resolve => setTimeout(resolve, 1800))
       }
-      const restored = await toolbarSnapshot()
-      routeSessionSwitch = { attempted: true, alternate, restored }
+      threadSwitch = await evaluateByValue(`(() => {
+      const root = document.querySelector('[data-cordisx-surface-host="session.header.actions"]')
+      const anchor = root?.nextElementSibling
+      const native = anchor?.matches('button') ? anchor : anchor?.querySelector('button') ?? null
+      return { attempted: true, alternate: ${
+        JSON.stringify(threadTarget.id)
+      }, restored: document.querySelector('[data-app-action-sidebar-thread-selected="true"]')?.getAttribute('data-app-action-sidebar-thread-id') === ${
+        JSON.stringify(originalThread)
+      },
+        rootConnected: root?.isConnected ?? false, immediateBefore: root?.nextElementSibling === anchor,
+        rootIdentityPreserved: root === globalThis.__cordisxToolbarSmokeIdentity?.root,
+        nativeIdentityPreserved: native === globalThis.__cordisxToolbarSmokeIdentity?.native }
+    })()`)
     }
-  }
 
-  let beforeClose = await toolbarSnapshot()
-  if (!beforeClose.session.actions.some(item => item.pressed === 'true')) {
-    const reopenTarget = beforeClose.session.actions.find(item => item.routeState !== null)?.geometry ?? null
-    if (reopenTarget !== null) {
-      await pointerClick(reopenTarget)
-      await new Promise(resolve => setTimeout(resolve, 500))
-      beforeClose = await toolbarSnapshot()
-    }
-  }
-  const closeTarget = beforeClose.session.actions.find(item => item.pressed === 'true')?.geometry ?? null
-  if (closeTarget !== null) {
-    await pointerClick(closeTarget)
+    inactive = await toolbarSnapshot()
+    await pointerClick(inactive.session.native.geometry)
     await new Promise(resolve => setTimeout(resolve, 500))
     await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 500, pointerType: 'mouse' })
     await new Promise(resolve => setTimeout(resolve, 160))
-  }
-  const routeClosed = await toolbarSnapshot()
-  screenshots['toolbar.route-closed'] = await annotateToolbar('route closed · active cleared', 'toolbar-route-closed-annotated')
+    const nativeActive = await toolbarSnapshot()
+    screenshots['toolbar.native-active'] = await annotateToolbar(
+      'native pressed · CordisX idle',
+      'toolbar-native-active-annotated',
+    )
 
-  const originalViewport = routeActive.viewport
-  await send('Emulation.setDeviceMetricsOverride', { width: Math.max(1100, originalViewport.width - 180), height: Math.max(760, originalViewport.height - 120), deviceScaleFactor: originalViewport.dpr, mobile: false })
-  await new Promise(resolve => setTimeout(resolve, 500))
-  const resized = await toolbarSnapshot()
-  await send('Emulation.clearDeviceMetricsOverride')
-  await new Promise(resolve => setTimeout(resolve, 300))
+    if (nativeActive.session.native?.geometry !== null && nativeActive.session.native?.geometry !== undefined) {
+      const target = nativeActive.session.native.geometry
+      await send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: target.x + target.width / 2,
+        y: target.y + target.height / 2,
+        pointerType: 'mouse',
+      })
+      await new Promise(resolve => setTimeout(resolve, 160))
+    }
+    const nativeActiveHovered = await toolbarSnapshot()
 
-  const transparent = value => value === 'rgba(0, 0, 0, 0)' || value === 'transparent'
-  const six = value => value !== null && Math.abs(value - 6) <= 0.5
-  const inactivePass = inactive.session.native?.pressed === 'false'
-    && inactive.session.actions.every(item => item.pressed !== 'true' && transparent(item.background))
-  const nativeActivePass = nativeActive.session.native?.pressed === 'true'
-    && nativeActive.session.actions.every(item => item.pressed !== 'true' && transparent(item.background)
-      && !item.className.includes('bg-text/5') && !item.className.includes('codex-toolbar-button'))
-  const spacingPass = nativeActive.session.actionGaps.every(six) && six(nativeActive.session.nativeGap)
-  const hoverPass = hovered.session.actions[0]?.background !== inactive.session.actions[0]?.background
-    && hovered.session.actions.slice(1).every((item, index) => item.background === inactive.session.actions[index + 1]?.background)
-    && hovered.session.actions.every(item => item.pressed !== 'true')
-  const focusPass = focused.session.actions[1]?.focused === true && focused.session.actions[1]?.pressed !== 'true'
-    && focused.session.actions[0]?.pressed !== 'true' && focused.session.native?.pressed === 'true'
-  const routePressed = routeActive.session.actions.filter(item => item.pressed === 'true' && item.routeState === 'presented')
-  const routePass = routePressed.length === 1
-    && routePressed[0]?.owner === 'agent-trace-showcase'
-    && routePressed[0]?.background === nativeActive.session.native?.background
-    && routePressed[0]?.color === nativeActive.session.native?.color
-    && routePressed[0]?.geometry?.width === nativeActive.session.native?.geometry?.width
-    && routePressed[0]?.geometry?.height === nativeActive.session.native?.geometry?.height
-    && routeActive.session.actions.filter(item => item.pressed !== 'true').every(item => transparent(item.background))
-    && routeActive.session.native?.pressed === 'false'
-    && routeActive.agentTracePresented === true
-  const routeHoverPressed = routeHovered.session.actions.filter(item => item.pressed === 'true' && item.routeState === 'presented')
-  const routeHoverPass = routeHoverPressed.length === 1
-    && routeHoverPressed[0]?.background === nativeActiveHovered.session.native?.background
-    && routeHoverPressed[0]?.background !== routePressed[0]?.background
-    && routeHovered.session.actions.filter(item => item.pressed !== 'true').every(item => transparent(item.background))
-  const routeClosePass = routeClosed.agentTracePresented === false
-    && routeClosed.session.actions.every(item => item.pressed !== 'true' && item.routeState !== 'presented' && transparent(item.background))
-  const routeSessionPass = routeSessionSwitch.attempted === false || (
-    routeSessionSwitch.alternate.selectedThread === threadTarget?.id
-    && routeSessionSwitch.alternate.agentTracePresented === false
-    && routeSessionSwitch.alternate.session.actions.every(item => item.pressed !== 'true' && item.routeState !== 'presented')
-    && routeSessionSwitch.restored.selectedThread === originalThread
-    && routeSessionSwitch.restored.agentTracePresented === false
-    && routeSessionSwitch.restored.session.actions.every(item => item.pressed !== 'true' && item.routeState !== 'presented')
-  )
-  const workspacePass = nativeActive.workspace.slot?.inlineWidth === '126px'
-    && nativeActive.workspace.alignmentGroup?.hasMsAuto === true && six(nativeActive.workspace.outerGapFromSummary)
-  const resizePass = resized.session.actionGaps.every(six) && six(resized.session.nativeGap)
-    && resized.workspace.slot?.inlineWidth === '126px' && resized.session.root?.geometry?.right <= resized.viewport.width
-  uiCatalogReport.assertions.push(
-    { id: 'toolbar.state.inactive', pass: inactivePass, actual: inactive.session, expected: 'all controls inactive and transparent' },
-    { id: 'toolbar.state.native-isolated', pass: nativeActivePass, actual: nativeActive.session, expected: 'only native summary pressed' },
-    { id: 'toolbar.state.hover-isolated', pass: hoverPass, actual: hovered.session, expected: 'only hovered CordisX action changes background' },
-    { id: 'toolbar.state.focus-isolated', pass: focusPass, actual: focused.session, expected: 'focus belongs to one unpressed sibling' },
-    { id: 'toolbar.state.route-isolated', pass: routePass, actual: { route: routeActive.session, nativeReference: nativeActive.session.native }, expected: 'only Agent Trace uses the native-equivalent pressed token and 28px geometry' },
-    { id: 'toolbar.state.route-hover-isolated', pass: routeHoverPass, actual: { route: routeHovered.session, nativeReference: nativeActiveHovered.session.native }, expected: 'only the pressed Agent Trace action uses the native-equivalent pressed-hover token' },
-    { id: 'toolbar.state.route-closed', pass: routeClosePass, actual: routeClosed, expected: 'second real pointer activation closes the page and clears every active projection' },
-    { id: 'toolbar.state.route-session-isolated', pass: routeSessionPass, actual: routeSessionSwitch, expected: 'active route state is cleared on A/B switch and does not return to A' },
-    { id: 'toolbar.spacing.session', pass: spacingPass, actual: { actionGaps: nativeActive.session.actionGaps, nativeGap: nativeActive.session.nativeGap }, expected: '6px action and native boundary gaps' },
-    { id: 'toolbar.spacing.workspace-contract', pass: workspacePass, actual: nativeActive.workspace, expected: '126px slot, ms-auto, 6px outer group gap' },
-    { id: 'toolbar.resize', pass: resizePass, actual: resized, expected: 'state geometry survives renderer resize' },
-    { id: 'toolbar.thread-switch-reconcile', pass: threadSwitch.attempted === false || (threadSwitch.restored && threadSwitch.rootConnected && threadSwitch.immediateBefore), actual: threadSwitch, expected: 'real thread switch restores the selected session and valid sibling seat' },
-  )
-  toolbarRegression = { initialNativePressed, inactive, nativeActive, nativeActiveHovered, hovered, focused, routeActive, routeHovered, routeClosed, resized, threadSwitch, routeSessionSwitch }
+    const hoverTarget = nativeActive.session.actions[0]?.geometry
+    if (hoverTarget !== null && hoverTarget !== undefined) {
+      await send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: hoverTarget.x + hoverTarget.width / 2,
+        y: hoverTarget.y + hoverTarget.height / 2,
+        pointerType: 'mouse',
+      })
+      await new Promise(resolve => setTimeout(resolve, 160))
+    }
+    const hovered = await toolbarSnapshot()
+    screenshots['toolbar.hover'] = await annotateToolbar('hover first · sibling idle', 'toolbar-hover-annotated')
+
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 500, pointerType: 'mouse' })
+    await evaluateByValue(
+      `document.querySelector('[data-cordisx-surface-host="session.header.actions"] > button:nth-of-type(2)')?.focus()`,
+    )
+    await new Promise(resolve => setTimeout(resolve, 120))
+    const focused = await toolbarSnapshot()
+    screenshots['toolbar.focus'] = await annotateToolbar('focus second · state isolated', 'toolbar-focus-annotated')
+
+    await evaluateByValue(`document.activeElement?.blur?.()`)
+    const beforeRoute = await toolbarSnapshot()
+    if (beforeRoute.session.native?.pressed === 'true') {
+      await pointerClick(beforeRoute.session.native.geometry)
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
+    const routeTargetState = await toolbarSnapshot()
+    const routeTarget = routeTargetState.session.actions.find(item => item.routeState !== null)?.geometry ?? null
+    if (routeTarget !== null) {
+      await pointerClick(routeTarget)
+      await new Promise(resolve => setTimeout(resolve, 500))
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 500, pointerType: 'mouse' })
+      await new Promise(resolve => setTimeout(resolve, 160))
+    }
+    const routeActive = await toolbarSnapshot()
+    screenshots['toolbar.route-active'] = await annotateToolbar(
+      'single CordisX route pressed',
+      'toolbar-route-active-annotated',
+    )
+
+    const activeRouteTarget = routeActive.session.actions.find(item => item.pressed === 'true')?.geometry ?? null
+    if (activeRouteTarget !== null) {
+      await send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: activeRouteTarget.x + activeRouteTarget.width / 2,
+        y: activeRouteTarget.y + activeRouteTarget.height / 2,
+        pointerType: 'mouse',
+      })
+      await new Promise(resolve => setTimeout(resolve, 160))
+    }
+    const routeHovered = await toolbarSnapshot()
+    screenshots['toolbar.route-active-hover'] = await annotateToolbar(
+      'route pressed + hover · siblings idle',
+      'toolbar-route-active-hover-annotated',
+    )
+
+    let routeSessionSwitch = { attempted: false }
+    if (threadTarget !== null && originalThread !== null) {
+      const alternateTarget = await evaluateByValue(`(() => {
+      const row = [...document.querySelectorAll('[data-app-action-sidebar-thread-id]')]
+        .find(element => element.getAttribute('data-app-action-sidebar-thread-id') === ${
+        JSON.stringify(threadTarget.id)
+      })
+      const rect = row?.getBoundingClientRect()
+      return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    })()`)
+      if (alternateTarget !== null) {
+        await pointerClick(alternateTarget)
+        await new Promise(resolve => setTimeout(resolve, 1800))
+        const alternate = await toolbarSnapshot()
+        const originalTarget = await evaluateByValue(`(() => {
+        const row = [...document.querySelectorAll('[data-app-action-sidebar-thread-id]')]
+          .find(element => element.getAttribute('data-app-action-sidebar-thread-id') === ${
+          JSON.stringify(originalThread)
+        })
+        const rect = row?.getBoundingClientRect()
+        return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+      })()`)
+        if (originalTarget !== null) {
+          await pointerClick(originalTarget)
+          await new Promise(resolve => setTimeout(resolve, 1800))
+        }
+        const restored = await toolbarSnapshot()
+        routeSessionSwitch = { attempted: true, alternate, restored }
+      }
+    }
+
+    let beforeClose = await toolbarSnapshot()
+    if (!beforeClose.session.actions.some(item => item.pressed === 'true')) {
+      const reopenTarget = beforeClose.session.actions.find(item => item.routeState !== null)?.geometry ?? null
+      if (reopenTarget !== null) {
+        await pointerClick(reopenTarget)
+        await new Promise(resolve => setTimeout(resolve, 500))
+        beforeClose = await toolbarSnapshot()
+      }
+    }
+    const closeTarget = beforeClose.session.actions.find(item => item.pressed === 'true')?.geometry ?? null
+    if (closeTarget !== null) {
+      await pointerClick(closeTarget)
+      await new Promise(resolve => setTimeout(resolve, 500))
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1000, y: 500, pointerType: 'mouse' })
+      await new Promise(resolve => setTimeout(resolve, 160))
+    }
+    const routeClosed = await toolbarSnapshot()
+    screenshots['toolbar.route-closed'] = await annotateToolbar(
+      'route closed · active cleared',
+      'toolbar-route-closed-annotated',
+    )
+
+    const originalViewport = routeActive.viewport
+    await send('Emulation.setDeviceMetricsOverride', {
+      width: Math.max(1100, originalViewport.width - 180),
+      height: Math.max(760, originalViewport.height - 120),
+      deviceScaleFactor: originalViewport.dpr,
+      mobile: false,
+    })
+    await new Promise(resolve => setTimeout(resolve, 500))
+    const resized = await toolbarSnapshot()
+    await send('Emulation.clearDeviceMetricsOverride')
+    await new Promise(resolve => setTimeout(resolve, 300))
+
+    const transparent = value => value === 'rgba(0, 0, 0, 0)' || value === 'transparent'
+    const six = value => value !== null && Math.abs(value - 6) <= 0.5
+    const inactivePass = inactive.session.native?.pressed === 'false'
+      && inactive.session.actions.every(item => item.pressed !== 'true' && transparent(item.background))
+    const nativeActivePass = nativeActive.session.native?.pressed === 'true'
+      && nativeActive.session.actions.every(item =>
+        item.pressed !== 'true' && transparent(item.background)
+        && !item.className.includes('bg-text/5') && !item.className.includes('codex-toolbar-button')
+      )
+    const spacingPass = nativeActive.session.actionGaps.every(six) && six(nativeActive.session.nativeGap)
+    const hoverPass = hovered.session.actions[0]?.background !== inactive.session.actions[0]?.background
+      && hovered.session.actions.slice(1).every((item, index) =>
+        item.background === inactive.session.actions[index + 1]?.background
+      )
+      && hovered.session.actions.every(item => item.pressed !== 'true')
+    const focusPass = focused.session.actions[1]?.focused === true && focused.session.actions[1]?.pressed !== 'true'
+      && focused.session.actions[0]?.pressed !== 'true' && focused.session.native?.pressed === 'true'
+    const routePressed = routeActive.session.actions.filter(item =>
+      item.pressed === 'true' && item.routeState === 'presented'
+    )
+    const routePass = routePressed.length === 1
+      && routePressed[0]?.owner === 'agent-trace-showcase'
+      && routePressed[0]?.background === nativeActive.session.native?.background
+      && routePressed[0]?.color === nativeActive.session.native?.color
+      && routePressed[0]?.geometry?.width === nativeActive.session.native?.geometry?.width
+      && routePressed[0]?.geometry?.height === nativeActive.session.native?.geometry?.height
+      && routeActive.session.actions.filter(item => item.pressed !== 'true').every(item => transparent(item.background))
+      && routeActive.session.native?.pressed === 'false'
+      && routeActive.agentTracePresented === true
+    const routeHoverPressed = routeHovered.session.actions.filter(item =>
+      item.pressed === 'true' && item.routeState === 'presented'
+    )
+    const routeHoverPass = routeHoverPressed.length === 1
+      && routeHoverPressed[0]?.background === nativeActiveHovered.session.native?.background
+      && routeHoverPressed[0]?.background !== routePressed[0]?.background
+      && routeHovered.session.actions.filter(item => item.pressed !== 'true').every(item =>
+        transparent(item.background)
+      )
+    const routeClosePass = routeClosed.agentTracePresented === false
+      && routeClosed.session.actions.every(item =>
+        item.pressed !== 'true' && item.routeState !== 'presented' && transparent(item.background)
+      )
+    const routeSessionPass = routeSessionSwitch.attempted === false || (
+      routeSessionSwitch.alternate.selectedThread === threadTarget?.id
+      && routeSessionSwitch.alternate.agentTracePresented === false
+      && routeSessionSwitch.alternate.session.actions.every(item =>
+        item.pressed !== 'true' && item.routeState !== 'presented'
+      )
+      && routeSessionSwitch.restored.selectedThread === originalThread
+      && routeSessionSwitch.restored.agentTracePresented === false
+      && routeSessionSwitch.restored.session.actions.every(item =>
+        item.pressed !== 'true' && item.routeState !== 'presented'
+      )
+    )
+    const workspacePass = nativeActive.workspace.slot?.inlineWidth === '126px'
+      && nativeActive.workspace.alignmentGroup?.hasMsAuto === true && six(nativeActive.workspace.outerGapFromSummary)
+    const resizePass = resized.session.actionGaps.every(six) && six(resized.session.nativeGap)
+      && resized.workspace.slot?.inlineWidth === '126px'
+      && resized.session.root?.geometry?.right <= resized.viewport.width
+    uiCatalogReport.assertions.push(
+      {
+        id: 'toolbar.state.inactive',
+        pass: inactivePass,
+        actual: inactive.session,
+        expected: 'all controls inactive and transparent',
+      },
+      {
+        id: 'toolbar.state.native-isolated',
+        pass: nativeActivePass,
+        actual: nativeActive.session,
+        expected: 'only native summary pressed',
+      },
+      {
+        id: 'toolbar.state.hover-isolated',
+        pass: hoverPass,
+        actual: hovered.session,
+        expected: 'only hovered CordisX action changes background',
+      },
+      {
+        id: 'toolbar.state.focus-isolated',
+        pass: focusPass,
+        actual: focused.session,
+        expected: 'focus belongs to one unpressed sibling',
+      },
+      {
+        id: 'toolbar.state.route-isolated',
+        pass: routePass,
+        actual: { route: routeActive.session, nativeReference: nativeActive.session.native },
+        expected: 'only Agent Trace uses the native-equivalent pressed token and 28px geometry',
+      },
+      {
+        id: 'toolbar.state.route-hover-isolated',
+        pass: routeHoverPass,
+        actual: { route: routeHovered.session, nativeReference: nativeActiveHovered.session.native },
+        expected: 'only the pressed Agent Trace action uses the native-equivalent pressed-hover token',
+      },
+      {
+        id: 'toolbar.state.route-closed',
+        pass: routeClosePass,
+        actual: routeClosed,
+        expected: 'second real pointer activation closes the page and clears every active projection',
+      },
+      {
+        id: 'toolbar.state.route-session-isolated',
+        pass: routeSessionPass,
+        actual: routeSessionSwitch,
+        expected: 'active route state is cleared on A/B switch and does not return to A',
+      },
+      {
+        id: 'toolbar.spacing.session',
+        pass: spacingPass,
+        actual: { actionGaps: nativeActive.session.actionGaps, nativeGap: nativeActive.session.nativeGap },
+        expected: '6px action and native boundary gaps',
+      },
+      {
+        id: 'toolbar.spacing.workspace-contract',
+        pass: workspacePass,
+        actual: nativeActive.workspace,
+        expected: '126px slot, ms-auto, 6px outer group gap',
+      },
+      { id: 'toolbar.resize', pass: resizePass, actual: resized, expected: 'state geometry survives renderer resize' },
+      {
+        id: 'toolbar.thread-switch-reconcile',
+        pass: threadSwitch.attempted === false
+          || (threadSwitch.restored && threadSwitch.rootConnected && threadSwitch.immediateBefore),
+        actual: threadSwitch,
+        expected: 'real thread switch restores the selected session and valid sibling seat',
+      },
+    )
+    toolbarRegression = {
+      initialNativePressed,
+      inactive,
+      nativeActive,
+      nativeActiveHovered,
+      hovered,
+      focused,
+      routeActive,
+      routeHovered,
+      routeClosed,
+      resized,
+      threadSwitch,
+      routeSessionSwitch,
+    }
   }
-  uiCatalogReport = { ...uiCatalogReport, screenshots, tooltips, toolbarRegression,
-    result: uiCatalogReport.assertions.every(item => item.pass) ? 'pass' : 'fail' }
+  uiCatalogReport = {
+    ...uiCatalogReport,
+    screenshots,
+    tooltips,
+    toolbarRegression,
+    result: uiCatalogReport.assertions.every(item => item.pass) ? 'pass' : 'fail',
+  }
   console.log(`ui-catalog=${JSON.stringify(uiCatalogReport, null, 2)}`)
 }
 
@@ -3298,7 +3760,8 @@ if (parsed.values['authorization-plugin'] !== undefined) {
   if (decision !== undefined && !['allow', 'allow-once', 'deny'].includes(decision)) {
     throw new Error(`unknown authorization decision: ${decision}`)
   }
-  const opened = await evaluateByValue(`(async () => {
+  const opened = await evaluateByValue(
+    `(async () => {
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     const runtime = globalThis.__cordisxRuntime
     if (runtime === undefined) throw new Error('CordisX runtime is unavailable')
@@ -3331,7 +3794,9 @@ if (parsed.values['authorization-plugin'] !== undefined) {
         disabled: item.querySelector('input')?.disabled ?? null,
       })),
     }
-  })()`, true)
+  })()`,
+    true,
+  )
   if (opened?.rect === undefined) throw new Error(`authorization dialog did not open for ${pluginId}`)
   if (parsed.values['authorization-screenshot'] !== undefined) {
     await capture(opened.rect, parsed.values['authorization-screenshot'], 'CordisX authorization dialog')
@@ -3340,7 +3805,9 @@ if (parsed.values['authorization-plugin'] !== undefined) {
   if (decision !== undefined) {
     if (parsed.values['authorization-decline-optional']) {
       const optionalRect = await evaluateByValue(`(() => {
-        const choice = [...document.querySelectorAll('[data-permission-authorization=${JSON.stringify(pluginId)}] [data-authorization-choice]')]
+        const choice = [...document.querySelectorAll('[data-permission-authorization=${
+        JSON.stringify(pluginId)
+      }] [data-authorization-choice]')]
           .find(item => !item.disabled)
         const rect = choice?.getBoundingClientRect()
         return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
@@ -3349,7 +3816,9 @@ if (parsed.values['authorization-plugin'] !== undefined) {
       await pointerClick(optionalRect)
     }
     const actionRect = await evaluateByValue(`(() => {
-      const action = document.querySelector('[data-permission-authorization=${JSON.stringify(pluginId)}] [data-authorization-decision=${JSON.stringify(decision)}]')
+      const action = document.querySelector('[data-permission-authorization=${
+      JSON.stringify(pluginId)
+    }] [data-authorization-decision=${JSON.stringify(decision)}]')
       const rect = action?.getBoundingClientRect()
       return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
     })()`)
@@ -3361,7 +3830,9 @@ if (parsed.values['authorization-plugin'] !== undefined) {
       return {
         dialogPresent: document.querySelector('[data-permission-authorization=${JSON.stringify(pluginId)}]') !== null,
         plugin: snapshot.plugins.find(item => item.id === ${JSON.stringify(pluginId)}) ?? null,
-        permissions: snapshot.permissions.filter(item => item.identity.id === ${JSON.stringify(pluginId)}).map(item => ({
+        permissions: snapshot.permissions.filter(item => item.identity.id === ${
+      JSON.stringify(pluginId)
+    }).map(item => ({
           capability: item.capability, required: item.required, policy: item.policy,
         })),
         browserPolicies: localStorage.getItem('cordisx.platform.permissionPolicies.v2'),
@@ -3382,7 +3853,8 @@ if (parsed.values['plugin-console-exercise']) {
   const pluginConsoleLocale = locale === 'zh-CN'
     ? { kindSelect: 'API / 类型', diagnostics: '诊断' }
     : { kindSelect: 'API / type', diagnostics: 'Diagnostics' }
-  const toolbarTarget = await evaluateByValue(`(async () => {
+  const toolbarTarget = await evaluateByValue(
+    `(async () => {
     const owner = ${JSON.stringify(owner)}
     const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     document.querySelector('[data-permission-prompt] [data-permission-decision="deny"]')?.click()
@@ -3407,7 +3879,9 @@ if (parsed.values['plugin-console-exercise']) {
     }
     return rect === undefined || rect.width === 0 || rect.height === 0
       ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-  })()`, true)
+  })()`,
+    true,
+  )
   if (toolbarTarget === null) throw new Error('Plugin Console icon toolbar is unavailable')
   let pointerPaused
   let pointerTarget = toolbarTarget
@@ -3473,7 +3947,8 @@ if (parsed.values['plugin-console-exercise']) {
   if (!consoleEntryFocused) throw new Error('Plugin Console entry list cannot receive keyboard focus')
   await pressKey('ArrowDown', 'ArrowDown', 40)
   await new Promise(resolve => setTimeout(resolve, 80))
-  pluginConsoleReport = await evaluateByValue(`(async () => {
+  pluginConsoleReport = await evaluateByValue(
+    `(async () => {
     const owner = ${JSON.stringify(owner)}
     const runtime = globalThis.__cordisxRuntime
     if (runtime?.pluginConsole === undefined) throw new Error('Plugin Console runtime API is unavailable')
@@ -3502,7 +3977,9 @@ if (parsed.values['plugin-console-exercise']) {
     const paused = pause !== null && pausedPanel?.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed') === 'true'
     const detailOpened = document.querySelector('[data-console-detail]') !== null
     const inspectorText = document.querySelector('[data-console-detail]')?.textContent ?? ''
-    const kind = pausedPanel?.querySelector('t-select[aria-label=' + JSON.stringify(${JSON.stringify(pluginConsoleLocale.kindSelect)}) + ']')
+    const kind = pausedPanel?.querySelector('t-select[aria-label=' + JSON.stringify(${
+      JSON.stringify(pluginConsoleLocale.kindSelect)
+    }) + ']')
     kind?.setSelectedValue?.('console', true)
     let lunaFrame
     for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -3617,8 +4094,12 @@ if (parsed.values['plugin-console-exercise']) {
       diagnosticsCollapsed,
       runtimeStatusOnly: runtimeLifecycle === null && runtimeDiagnostics === null,
       diagnosticsExpanded: logsDiagnostics instanceof HTMLDetailsElement && logsDiagnostics.open,
-      diagnosticsLocalized: logsDiagnostics?.querySelector('summary')?.textContent === ${JSON.stringify(pluginConsoleLocale.diagnostics)},
-      diagnosticsNoCjk: ${JSON.stringify(locale !== 'zh-CN')} === false || !/[\u3400-\u9fff]/u.test(logsDiagnostics?.textContent ?? ''),
+      diagnosticsLocalized: logsDiagnostics?.querySelector('summary')?.textContent === ${
+      JSON.stringify(pluginConsoleLocale.diagnostics)
+    },
+      diagnosticsNoCjk: ${
+      JSON.stringify(locale !== 'zh-CN')
+    } === false || !/[\u3400-\u9fff]/u.test(logsDiagnostics?.textContent ?? ''),
     }
     return {
       owner,
@@ -3641,7 +4122,9 @@ if (parsed.values['plugin-console-exercise']) {
         independentEntries, independentEntryCount, mountedEntryCount: lunaEntries.length,
         levelVisuals, objectExpanded, coverageRemoved, iconToolbar, runtimeConsoleSummary,
         pointerPaused: ${JSON.stringify(pointerPaused.pressed)}, pointerPauseDetail: ${JSON.stringify(pointerPaused)},
-        keyboardFocused: ${JSON.stringify(keyboardFocused)}, keyboardResumed: ${JSON.stringify(keyboardResumed.pressed)},
+        keyboardFocused: ${JSON.stringify(keyboardFocused)}, keyboardResumed: ${
+      JSON.stringify(keyboardResumed.pressed)
+    },
         keyboardResumeDetail: ${JSON.stringify(keyboardResumed)},
         toolbarTooltip: ${JSON.stringify(toolbarTooltip)},
         returnLatestVisible, returnedToLatest, lightTheme, darkTheme, screenshotPreparedAtTop, runtimeChrome,
@@ -3656,7 +4139,9 @@ if (parsed.values['plugin-console-exercise']) {
         partialObservability: after.partialObservability === true,
       },
     }
-  })()`, true)
+  })()`,
+    true,
+  )
   pluginConsoleAssertions = pluginConsoleSmokeAssertions(pluginConsoleReport, owner)
   pluginConsoleReport = { ...pluginConsoleReport, assertions: pluginConsoleAssertions }
   if (parsed.values['plugin-console-expanded-screenshot'] !== undefined) {
@@ -3667,17 +4152,26 @@ if (parsed.values['plugin-console-exercise']) {
       return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
     })()`)
     if (expandedRect === null) throw new Error('expanded Plugin Console diagnostics panel is unavailable')
-    await capture(expandedRect, parsed.values['plugin-console-expanded-screenshot'], 'expanded Plugin Console diagnostics')
+    await capture(
+      expandedRect,
+      parsed.values['plugin-console-expanded-screenshot'],
+      'expanded Plugin Console diagnostics',
+    )
   }
   console.log(`plugin-console=${JSON.stringify(pluginConsoleReport, null, 2)}`)
 }
 if (parsed.values['manager-screenshot'] !== undefined) {
   const managerOpenState = await ensureManagerVisible()
   const managerTab = parsed.values['manager-tab'] ?? 'plugins'
-  if (!['about', 'extension-points', 'routes', 'plugins', 'marketplace', 'settings'].includes(managerTab)) throw new Error(`unknown manager tab: ${managerTab}`)
+  if (!['about', 'extension-points', 'routes', 'plugins', 'marketplace', 'settings'].includes(managerTab)) {
+    throw new Error(`unknown manager tab: ${managerTab}`)
+  }
   const managerPlugin = parsed.values['manager-plugin']
   const managerDetailTab = parsed.values['manager-detail-tab']
-  if (managerDetailTab !== undefined && !['readme', 'config', 'permissions', 'runtime', 'logs', 'extension-points', 'routes'].includes(managerDetailTab)) throw new Error(`unknown manager detail tab: ${managerDetailTab}`)
+  if (
+    managerDetailTab !== undefined
+    && !['readme', 'config', 'permissions', 'runtime', 'logs', 'extension-points', 'routes'].includes(managerDetailTab)
+  ) throw new Error(`unknown manager detail tab: ${managerDetailTab}`)
   const managerConfigScrollPath = parsed.values['manager-config-scroll-path']
   if (managerConfigScrollPath !== undefined && !/^[a-zA-Z0-9_.-]+$/.test(managerConfigScrollPath)) {
     throw new Error('--manager-config-scroll-path must be a dot-separated Host config path')
@@ -3686,43 +4180,66 @@ if (parsed.values['manager-screenshot'] !== undefined) {
     throw new Error('--manager-config-scroll-path requires --manager-detail-tab config')
   }
   const managerPermissionCapability = parsed.values['manager-permission-capability']
-  if (managerPermissionCapability !== undefined && managerDetailTab !== 'permissions') throw new Error('--manager-permission-capability requires --manager-detail-tab permissions')
+  if (managerPermissionCapability !== undefined && managerDetailTab !== 'permissions') {
+    throw new Error('--manager-permission-capability requires --manager-detail-tab permissions')
+  }
   const managerSettingsTab = parsed.values['manager-settings-tab']
-  if (managerSettingsTab !== undefined && !/^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)?$/.test(managerSettingsTab)) {
+  if (
+    managerSettingsTab !== undefined && !/^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)?$/.test(managerSettingsTab)
+  ) {
     throw new Error(`invalid manager settings tab id: ${managerSettingsTab}`)
   }
   const managerSettingsNavigationItem = parsed.values['manager-settings-navigation-item']
     ?? (parsed.values['channel-data-plane'] ? 'channel:channels' : undefined)
-  if (managerSettingsNavigationItem !== undefined && !/^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)?$/.test(managerSettingsNavigationItem)) {
+  if (
+    managerSettingsNavigationItem !== undefined
+    && !/^[a-z0-9][a-z0-9._-]*(?::[a-z0-9][a-z0-9._-]*)?$/.test(managerSettingsNavigationItem)
+  ) {
     throw new Error(`invalid manager settings navigation item id: ${managerSettingsNavigationItem}`)
   }
   const managerExtensionPoint = parsed.values['manager-extension-point']
   const managerExtensionPointTab = parsed.values['manager-extension-point-tab']
-  if (managerExtensionPointTab !== undefined && !['usage', 'information', 'diagnostics'].includes(managerExtensionPointTab)) throw new Error(`unknown manager extension point tab: ${managerExtensionPointTab}`)
+  if (
+    managerExtensionPointTab !== undefined
+    && !['usage', 'information', 'diagnostics'].includes(managerExtensionPointTab)
+  ) throw new Error(`unknown manager extension point tab: ${managerExtensionPointTab}`)
   const managerRoute = parsed.values['manager-route']
   const managerMarketplaceTab = parsed.values['manager-marketplace-tab']
-  if (managerMarketplaceTab !== undefined && !['overview', 'authors-source'].includes(managerMarketplaceTab)) throw new Error(`unknown manager marketplace tab: ${managerMarketplaceTab}`)
+  if (managerMarketplaceTab !== undefined && !['overview', 'authors-source'].includes(managerMarketplaceTab)) {
+    throw new Error(`unknown manager marketplace tab: ${managerMarketplaceTab}`)
+  }
   const managerMarketplaceView = parsed.values['manager-marketplace-view']
   if (managerMarketplaceView !== undefined && !['discovery', 'sources', 'create'].includes(managerMarketplaceView)) {
     throw new Error(`unknown manager marketplace view: ${managerMarketplaceView}`)
   }
-  if ((managerMarketplaceView !== undefined || parsed.values['manager-marketplace-open-menu']) && managerTab !== 'marketplace') {
+  if (
+    (managerMarketplaceView !== undefined || parsed.values['manager-marketplace-open-menu'])
+    && managerTab !== 'marketplace'
+  ) {
     throw new Error('--manager-marketplace-view and --manager-marketplace-open-menu require --manager-tab marketplace')
   }
   const managerMarketplaceSource = parsed.values['manager-marketplace-source']
   if (managerMarketplaceSource !== undefined) {
     const sourceUrl = new URL(managerMarketplaceSource)
-    if (sourceUrl.protocol !== 'https:' || sourceUrl.username !== '' || sourceUrl.password !== '' || sourceUrl.hash !== '') {
+    if (
+      sourceUrl.protocol !== 'https:' || sourceUrl.username !== '' || sourceUrl.password !== '' || sourceUrl.hash !== ''
+    ) {
       throw new Error('--manager-marketplace-source must be a credential-free HTTPS URL without a fragment')
     }
   }
   const managerMarketplaceFixturePath = parsed.values['manager-marketplace-fixture']
-  if (parsed.values['manager-marketplace-clipboard-exercise']
-    && (managerMarketplaceSource === undefined || managerMarketplaceFixturePath === undefined)) {
-    throw new Error('--manager-marketplace-clipboard-exercise requires --manager-marketplace-source and --manager-marketplace-fixture')
+  if (
+    parsed.values['manager-marketplace-clipboard-exercise']
+    && (managerMarketplaceSource === undefined || managerMarketplaceFixturePath === undefined)
+  ) {
+    throw new Error(
+      '--manager-marketplace-clipboard-exercise requires --manager-marketplace-source and --manager-marketplace-fixture',
+    )
   }
   if (parsed.values['manager-marketplace-clipboard-exercise'] && !parsed.values.generation) {
-    throw new Error('--manager-marketplace-clipboard-exercise requires --generation so imported state and Host cleanup share one report')
+    throw new Error(
+      '--manager-marketplace-clipboard-exercise requires --generation so imported state and Host cleanup share one report',
+    )
   }
   if (managerMarketplaceFixturePath !== undefined && managerMarketplaceSource === undefined) {
     throw new Error('--manager-marketplace-fixture requires --manager-marketplace-source')
@@ -3737,13 +4254,19 @@ if (parsed.values['manager-screenshot'] !== undefined) {
   const managerViewportWidth = parsed.values['manager-viewport-width'] === undefined
     ? undefined
     : Number(parsed.values['manager-viewport-width'])
-  if (managerViewportWidth !== undefined && (!Number.isInteger(managerViewportWidth) || managerViewportWidth < 400 || managerViewportWidth > 3840)) {
+  if (
+    managerViewportWidth !== undefined
+    && (!Number.isInteger(managerViewportWidth) || managerViewportWidth < 400 || managerViewportWidth > 3840)
+  ) {
     throw new Error('--manager-viewport-width must be an integer between 400 and 3840')
   }
   const managerBreadcrumbWidth = parsed.values['manager-breadcrumb-width'] === undefined
     ? undefined
     : Number(parsed.values['manager-breadcrumb-width'])
-  if (managerBreadcrumbWidth !== undefined && (!Number.isInteger(managerBreadcrumbWidth) || managerBreadcrumbWidth < 120 || managerBreadcrumbWidth > 800)) {
+  if (
+    managerBreadcrumbWidth !== undefined
+    && (!Number.isInteger(managerBreadcrumbWidth) || managerBreadcrumbWidth < 120 || managerBreadcrumbWidth > 800)
+  ) {
     throw new Error('--manager-breadcrumb-width must be an integer between 120 and 800')
   }
   if (managerViewportWidth !== undefined) {
@@ -4862,69 +5385,84 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       const dimensions = trustDetail?.dimensions ?? []
       const official = dimensions.find(item => item.dimension === 'official')
       const certified = dimensions.find(item => item.dimension === 'certified')
-      if (dimensions.length !== 2
+      if (
+        dimensions.length !== 2
         || official?.evidence === null || certified?.evidence === null
         || !/PermissionBroker|权限/iu.test(official?.text ?? '')
         || !/policy|策略/iu.test(certified?.text ?? '')
         || !/absolute safety|绝对安全/iu.test(certified?.text ?? '')
         || !/interface capabilities|界面能力/iu.test(certified?.text ?? '')
-        || !/absolute safety|绝对安全/iu.test(trustDetail?.boundary ?? '')) {
+        || !/absolute safety|绝对安全/iu.test(trustDetail?.boundary ?? '')
+      ) {
         throw new Error(`Marketplace trust detail assertions failed: ${JSON.stringify(trustDetail)}`)
       }
     } else if (requestedView === 'discovery') {
       const discovery = marketplaceState.discovery
-      if (discovery?.onlyResultsScroll !== true
+      if (
+        discovery?.onlyResultsScroll !== true
         || discovery.filterBelowSearch !== true
         || discovery.documentationPrimaryActionAbsent !== true
-        || discovery.fullWidth !== true) {
+        || discovery.fullWidth !== true
+      ) {
         throw new Error(`Marketplace discovery IA assertions failed: ${JSON.stringify(discovery)}`)
       }
       if (managerMarketplaceFixture !== undefined) {
         const row = managerReport?.marketplaceCatalog?.rows?.find(item => item.id === 'trusted-smoke')
-        if (row?.official !== 'true'
+        if (
+          row?.official !== 'true'
           || row.certified !== 'true'
           || row.rankingOfficialPriority !== '1'
           || !String(row.rankingExplanation ?? '').includes('认证状态不参与排序')
           || row.badges?.map(badge => badge.dimension).join(',') !== 'official,certified'
           || row.badges?.every(badge => typeof badge.ariaLabel === 'string' && badge.ariaLabel.length > 0) !== true
-          || row.badges?.map(badge => badge.icon).join(',') !== 'trust.official,trust.certified') {
+          || row.badges?.map(badge => badge.icon).join(',') !== 'trust.official,trust.certified'
+        ) {
           throw new Error(`Marketplace trust list assertions failed: ${JSON.stringify(row)}`)
         }
       }
     } else {
       const sources = marketplaceState.sources
-      if (sources?.manualReloadAbsent !== true
+      if (
+        sources?.manualReloadAbsent !== true
         || sources.topLevelSettingsTabAbsent !== true
         || sources.formFullWidth === false
         || sources.untouchedErrorAbsent !== true
         || sources.nativeUrlErrorAbsent !== true
         || sources.primaryDeveloperTermsAbsent !== true
-        || (requestedView === 'sources' && sources.officialPresent !== true)) {
+        || (requestedView === 'sources' && sources.officialPresent !== true)
+      ) {
         throw new Error(`Marketplace source IA assertions failed: ${JSON.stringify(sources)}`)
       }
-      if (requestedView === 'sources' && parsed.values['manager-marketplace-open-menu']
-        && sources.officialDeleteDisabled !== true) {
+      if (
+        requestedView === 'sources' && parsed.values['manager-marketplace-open-menu']
+        && sources.officialDeleteDisabled !== true
+      ) {
         throw new Error(`Marketplace official source delete boundary failed: ${JSON.stringify(sources)}`)
       }
       if (parsed.values['manager-marketplace-clipboard-exercise']) {
         const imported = sources.clipboardImport
-        if (imported?.rowPresent !== true
+        if (
+          imported?.rowPresent !== true
           || imported.title !== '剪贴板团队来源'
           || imported.description !== '从结构化来源描述导入。'
           || imported.machineId !== managerMarketplaceSource
           || imported.local?.name !== '剪贴板团队来源'
           || imported.local?.description !== '从结构化来源描述导入。'
           || imported.local?.note !== '真实 app:// smoke'
-          || imported.noticeVisible !== true) {
+          || imported.noticeVisible !== true
+        ) {
           throw new Error(`Marketplace clipboard/local override assertions failed: ${JSON.stringify(imported)}`)
         }
       }
     }
     if (parsed.values['manager-marketplace-open-menu']) {
       const menu = marketplaceState.menu
-      if (menu?.portaled !== true || menu.bounded !== true || menu.firstItemFocused !== true || menu.theme !== menu.managerTheme
+      if (
+        menu?.portaled !== true || menu.bounded !== true || menu.firstItemFocused !== true
+        || menu.theme !== menu.managerTheme
         || menu.keyboard?.arrowMoved !== true || menu.keyboard.closed !== true
-        || menu.keyboard.focusRestored !== true || menu.keyboard.reopened !== true) {
+        || menu.keyboard.focusRestored !== true || menu.keyboard.reopened !== true
+      ) {
         throw new Error(`Marketplace menu portal assertions failed: ${JSON.stringify(menu)}`)
       }
     }
@@ -4933,7 +5471,8 @@ if (parsed.values['manager-screenshot'] !== undefined) {
     const channel = managerReport?.channelDataPlane
     const channelLocale = channel?.locale
     const channelNavigationTitle = channelLocale === 'zh-CN' ? '渠道配置' : 'Channel settings'
-    if (channel?.plugin?.status !== 'active'
+    if (
+      channel?.plugin?.status !== 'active'
       || channel.plugin.schemaKind !== 'none'
       || channel.plugin.configFields !== 0
       || channel.registration?.valid !== true
@@ -4952,64 +5491,85 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       || channel.page.diagnostics !== 0
       || channel.outlet?.available !== true
       || channel.outlet.mounted !== true
-      || !['channel:settings', 'channel:configuration', 'channel:runtime', 'channel:logs', 'channel:sessions', 'channel:create'].includes(channel.outlet.activeRoute)
+      || ![
+        'channel:settings',
+        'channel:configuration',
+        'channel:runtime',
+        'channel:logs',
+        'channel:sessions',
+        'channel:create',
+      ].includes(channel.outlet.activeRoute)
       || channel.navigationItem?.label !== channelNavigationTitle
       || channel.navigationItem.icon !== 'host:layers'
       || typeof channel.pageTitle !== 'string' || channel.pageTitle.trim() === ''
-      || channel.mounted !== true) {
+      || channel.mounted !== true
+    ) {
       throw new Error(`Channel data-plane smoke assertions failed: ${JSON.stringify(channel)}`)
     }
-    if (parsed.values['channel-manager-exercise'] && (channel.managerFlow?.list !== true
-      || channel.managerFlow.create !== true
-      || channel.managerFlow.searched !== true
-      || channel.managerFlow.card !== true
-      || channel.managerFlow.configuration !== true
-      || channel.managerFlow.tabs?.join(',') !== 'configuration,runtime,logs,sessions'
-      || channel.managerFlow.runtimeAvailable !== true
-      || channel.managerFlow.logsAvailable !== true
-      || channel.managerFlow.sessionsAvailable !== true
-      || channel.managerFlow.logControlsPresent !== true
-      || (channel.managerFlow.logsEmpty === true && channel.managerFlow.logExportDisabled !== true)
-      || (channel.managerFlow.bindingActionCount !== 3 && channel.managerFlow.sessionEmpty !== true)
-      || channel.managerFlow.hostHeading !== channel.managerFlow.expectedHeading
-      || channel.managerFlow.nestedChannelChrome !== false
-      || channel.managerFlow.hostTabs !== true
-      || channel.managerFlow.managerFontSize !== channel.managerFlow.channelFontSize
-      || channel.managerFlow.returnedToList !== true
-      || channel.managerFlow.secretRendered !== false)) {
+    if (
+      parsed.values['channel-manager-exercise'] && (channel.managerFlow?.list !== true
+        || channel.managerFlow.create !== true
+        || channel.managerFlow.searched !== true
+        || channel.managerFlow.card !== true
+        || channel.managerFlow.configuration !== true
+        || channel.managerFlow.tabs?.join(',') !== 'configuration,runtime,logs,sessions'
+        || channel.managerFlow.runtimeAvailable !== true
+        || channel.managerFlow.logsAvailable !== true
+        || channel.managerFlow.sessionsAvailable !== true
+        || channel.managerFlow.logControlsPresent !== true
+        || (channel.managerFlow.logsEmpty === true && channel.managerFlow.logExportDisabled !== true)
+        || (channel.managerFlow.bindingActionCount !== 3 && channel.managerFlow.sessionEmpty !== true)
+        || channel.managerFlow.hostHeading !== channel.managerFlow.expectedHeading
+        || channel.managerFlow.nestedChannelChrome !== false
+        || channel.managerFlow.hostTabs !== true
+        || channel.managerFlow.managerFontSize !== channel.managerFlow.channelFontSize
+        || channel.managerFlow.returnedToList !== true
+        || channel.managerFlow.secretRendered !== false)
+    ) {
       throw new Error(`Channel Manager flow smoke assertions failed: ${JSON.stringify(channel.managerFlow)}`)
     }
-    if (parsed.values['channel-manager-existing-account'] && (channel.existingAccount?.list !== true
-      || channel.existingAccount.detail !== true || channel.existingAccount.form !== true
-      || channel.existingAccount.configurationAvailable !== true
-      || !['true', 'false'].includes(channel.existingAccount.switchValue)
-      || channel.existingAccount.switchPropsValue !== channel.existingAccount.switchValue
-      || channel.existingAccount.switchAriaChecked !== channel.existingAccount.switchValue
-      || channel.existingAccount.runtimeAvailable !== true
-      || channel.existingAccount.runtimeActionCount !== 3
-      || channel.existingAccount.runtimeActionsEnabled !== true
-      || channel.existingAccount.logsAvailable !== true
-      || channel.existingAccount.logsControlsPresent !== true
-      || (channel.existingAccount.logsEmpty === true && channel.existingAccount.logExportDisabled !== true)
-      || channel.existingAccount.sessionsAvailable !== true
-      || (channel.existingAccount.bindingActionCount !== 3 && channel.existingAccount.sessionEmpty !== true)
-      || channel.existingAccount.secretRendered !== false)) {
+    if (
+      parsed.values['channel-manager-existing-account'] && (channel.existingAccount?.list !== true
+        || channel.existingAccount.detail !== true || channel.existingAccount.form !== true
+        || channel.existingAccount.configurationAvailable !== true
+        || !['true', 'false'].includes(channel.existingAccount.switchValue)
+        || channel.existingAccount.switchPropsValue !== channel.existingAccount.switchValue
+        || channel.existingAccount.switchAriaChecked !== channel.existingAccount.switchValue
+        || channel.existingAccount.runtimeAvailable !== true
+        || channel.existingAccount.runtimeActionCount !== 3
+        || channel.existingAccount.runtimeActionsEnabled !== true
+        || channel.existingAccount.logsAvailable !== true
+        || channel.existingAccount.logsControlsPresent !== true
+        || (channel.existingAccount.logsEmpty === true && channel.existingAccount.logExportDisabled !== true)
+        || channel.existingAccount.sessionsAvailable !== true
+        || (channel.existingAccount.bindingActionCount !== 3 && channel.existingAccount.sessionEmpty !== true)
+        || channel.existingAccount.secretRendered !== false)
+    ) {
       throw new Error(`Channel existing-account smoke assertions failed: ${JSON.stringify(channel.existingAccount)}`)
     }
     if (parsed.values['channel-manager-existing-account-save'] && channel.existingAccount?.saved !== true) {
-      throw new Error(`Channel existing-account save smoke assertions failed: ${JSON.stringify(channel.existingAccount)}`)
+      throw new Error(
+        `Channel existing-account save smoke assertions failed: ${JSON.stringify(channel.existingAccount)}`,
+      )
     }
   }
   if (managerPlugin === 'cli-proxy-api' && managerDetailTab === 'config') {
     const serviceConfigs = managerReport?.serviceConfigs?.find(config => config.pluginId === 'cli-proxy-api')?.services
-    if (!Array.isArray(serviceConfigs) || serviceConfigs.length !== 2
-      || serviceConfigs.some(config => config.fullWidth !== 'true' || config.nativeSelects !== 0
-        || config.nestedControlChrome !== false || config.stickyFooter !== false || config.orphanedFooter !== false)) {
-      managerServiceConfigurationFailure = `CLIProxy Provider detail form assertions failed: ${JSON.stringify(managerReport?.serviceConfigs)}`
+    if (
+      !Array.isArray(serviceConfigs) || serviceConfigs.length !== 2
+      || serviceConfigs.some(config =>
+        config.fullWidth !== 'true' || config.nativeSelects !== 0
+        || config.nestedControlChrome !== false || config.stickyFooter !== false || config.orphanedFooter !== false
+      )
+    ) {
+      managerServiceConfigurationFailure = `CLIProxy Provider detail form assertions failed: ${
+        JSON.stringify(managerReport?.serviceConfigs)
+      }`
     }
   }
   if (managerTab === 'about') {
-    const aboutState = async () => await evaluateByValue(`(() => {
+    const aboutState = async () =>
+      await evaluateByValue(`(() => {
       const action = document.querySelector('.cxm-about-action')
       const item = action?.closest('.cxm-about-action-item')
       const actions = action?.closest('.cxm-about-actions')
@@ -5045,27 +5605,49 @@ if (parsed.values['manager-screenshot'] !== undefined) {
     const rest = await aboutState()
     if (rest === null) throw new Error('manager About action row is unavailable')
     await send('Input.dispatchMouseEvent', {
-      type: 'mouseMoved', x: rest.rect.x + rest.rect.width / 2, y: rest.rect.y + rest.rect.height / 2, pointerType: 'mouse',
+      type: 'mouseMoved',
+      x: rest.rect.x + rest.rect.width / 2,
+      y: rest.rect.y + rest.rect.height / 2,
+      pointerType: 'mouse',
     })
     await evaluateByValue(`new Promise(resolve => setTimeout(resolve, 120))`, true)
     const hover = await aboutState()
     await evaluateByValue(`(() => { document.querySelector('.cxm-about-action')?.focus(); return true })()`)
     await send('Input.dispatchKeyEvent', {
-      type: 'rawKeyDown', key: 'Tab', code: 'Tab', modifiers: 8, windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+      type: 'rawKeyDown',
+      key: 'Tab',
+      code: 'Tab',
+      modifiers: 8,
+      windowsVirtualKeyCode: 9,
+      nativeVirtualKeyCode: 9,
     })
     await send('Input.dispatchKeyEvent', {
-      type: 'keyUp', key: 'Tab', code: 'Tab', modifiers: 8, windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+      type: 'keyUp',
+      key: 'Tab',
+      code: 'Tab',
+      modifiers: 8,
+      windowsVirtualKeyCode: 9,
+      nativeVirtualKeyCode: 9,
     })
     await send('Input.dispatchKeyEvent', {
-      type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+      type: 'rawKeyDown',
+      key: 'Tab',
+      code: 'Tab',
+      windowsVirtualKeyCode: 9,
+      nativeVirtualKeyCode: 9,
     })
     await send('Input.dispatchKeyEvent', {
-      type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+      type: 'keyUp',
+      key: 'Tab',
+      code: 'Tab',
+      windowsVirtualKeyCode: 9,
+      nativeVirtualKeyCode: 9,
     })
     await evaluateByValue(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`, true)
     const focus = await aboutState()
     const transparent = value => value === 'transparent' || value === 'rgba(0, 0, 0, 0)'
-    const sameRect = (left, right) => left !== null && right !== null
+    const sameRect = (left, right) =>
+      left !== null && right !== null
       && ['x', 'y', 'width', 'height'].every(key => Math.abs(left.rect[key] - right.rect[key]) <= 0.5)
     const passed = hover?.hovered === true
       && hover.anchorBackground !== rest.anchorBackground
@@ -5086,7 +5668,8 @@ if (parsed.values['manager-screenshot'] !== undefined) {
     // The initial manager projection is intentionally captured before the
     // interaction.  It may be below the current viewport, so never reuse its
     // old (and possibly negative) rect for a physical pointer event.
-    const formControl = await evaluateByValue(`(async () => {
+    const formControl = await evaluateByValue(
+      `(async () => {
       const control = [...document.querySelectorAll('t-input[id], t-textarea[id], t-select[id], input[id], textarea[id], select[id]')]
         .find(item => item instanceof HTMLElement && item.getClientRects().length > 0
           && !item.matches(':disabled,[aria-disabled="true"]'))
@@ -5100,7 +5683,9 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         inViewport: rect.width > 0 && rect.height > 0 && rect.x >= 0 && rect.y >= 0
           && rect.right <= innerWidth && rect.bottom <= innerHeight,
       }
-    })()`, true)
+    })()`,
+      true,
+    )
     const firstRect = formControl?.rect
     if (firstRect === undefined || firstRect === null || formControl.inViewport !== true) {
       managerReport = { ...managerReport, hostFormInteraction: { pointer: null, keyboard: null, passed: false } }
@@ -5123,10 +5708,18 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       }
       })()`)
       await send('Input.dispatchKeyEvent', {
-        type: 'rawKeyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+        type: 'rawKeyDown',
+        key: 'Tab',
+        code: 'Tab',
+        windowsVirtualKeyCode: 9,
+        nativeVirtualKeyCode: 9,
       })
       await send('Input.dispatchKeyEvent', {
-        type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9,
+        type: 'keyUp',
+        key: 'Tab',
+        code: 'Tab',
+        windowsVirtualKeyCode: 9,
+        nativeVirtualKeyCode: 9,
       })
       const keyboard = await evaluateByValue(`(() => {
       const focusPath = []
@@ -5144,19 +5737,27 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         focusPath,
       }
       })()`)
-      managerReport = { ...managerReport, hostFormInteraction: {
-        target: formControl, pointer, keyboard,
-        passed: formControl.inViewport === true && pointer.id !== null && keyboard.tag !== 'body'
-          && (keyboard.id !== pointer.id || JSON.stringify(keyboard.focusPath) !== JSON.stringify(pointer.focusPath)),
-      } }
-      if (managerReport.hostFormInteraction.passed !== true) managerFormExerciseFailure = 'manager Host form mouse/keyboard exercise failed'
+      managerReport = {
+        ...managerReport,
+        hostFormInteraction: {
+          target: formControl,
+          pointer,
+          keyboard,
+          passed: formControl.inViewport === true && pointer.id !== null && keyboard.tag !== 'body'
+            && (keyboard.id !== pointer.id || JSON.stringify(keyboard.focusPath) !== JSON.stringify(pointer.focusPath)),
+        },
+      }
+      if (managerReport.hostFormInteraction.passed !== true) {
+        managerFormExerciseFailure = 'manager Host form mouse/keyboard exercise failed'
+      }
     }
     console.log(`manager-form-interaction=${JSON.stringify(managerReport.hostFormInteraction)}`)
   }
   if (parsed.values['manager-form-value-exercise']) {
     const galleryId = 'form-schema-gallery'
     const expected = 'CordisX smoke workspace'
-    const target = await evaluateByValue(`(async () => {
+    const target = await evaluateByValue(
+      `(async () => {
       const field = document.querySelector('[data-plugin-config-form="${galleryId}"] [data-config-path="workspaceName"]')
       const control = field?.querySelector('t-input[data-host-form-primitive="input"]')
       if (!(field instanceof HTMLElement) || !(control instanceof HTMLElement)) return null
@@ -5164,39 +5765,61 @@ if (parsed.values['manager-screenshot'] !== undefined) {
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
       const rect = control.getBoundingClientRect()
       return { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, inViewport: rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.bottom <= innerHeight }
-    })()`, true)
-    if (target?.inViewport !== true) throw new Error('gallery workspace input is unavailable for real Web Component exercise')
+    })()`,
+      true,
+    )
+    if (target?.inViewport !== true) {
+      throw new Error('gallery workspace input is unavailable for real Web Component exercise')
+    }
     await send('Page.bringToFront')
     await pointerClick(target.rect)
-    const focused = await evaluateByValue(`(() => {
+    const focused = await evaluateByValue(
+      `(() => {
       const input = document.querySelector('[data-plugin-config-form="${galleryId}"] [data-config-path="workspaceName"] t-input')?.shadowRoot?.querySelector('input')
       if (!(input instanceof HTMLInputElement)) return null
       input.focus()
       input.select()
       return { active: document.activeElement?.tagName.toLowerCase() ?? null, selected: input.selectionStart === 0 && input.selectionEnd === input.value.length }
-    })()`, true)
-    if (focused?.active !== 't-input' || focused.selected !== true) throw new Error('official TDesign shadow input did not accept keyboard focus')
+    })()`,
+      true,
+    )
+    if (focused?.active !== 't-input' || focused.selected !== true) {
+      throw new Error('official TDesign shadow input did not accept keyboard focus')
+    }
     // This is a trusted CDP text delivery to the actual focused Shadow input;
     // do not paper over a delivery failure with a synthetic event or callback.
     await send('Input.insertText', { text: expected })
-    const draft = await evaluateByValue(`(async () => {
+    const draft = await evaluateByValue(
+      `(async () => {
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
       const form = document.querySelector('[data-plugin-config-form="${galleryId}"]')
       const control = form?.querySelector('[data-config-path="workspaceName"] t-input')
       const shadowInput = control?.shadowRoot?.querySelector('input')
       return { state: form?.getAttribute('data-state') ?? null, value: control?.value ?? null, shadowValue: shadowInput?.value ?? null }
-    })()`, true)
-    if (draft?.state !== 'dirty' || draft.shadowValue !== expected || String(draft.value).includes('[object CustomEvent]')) {
-      throw new Error('official TDesign input did not deliver its typed value to the Host draft: ' + JSON.stringify({ draft }))
+    })()`,
+      true,
+    )
+    if (
+      draft?.state !== 'dirty' || draft.shadowValue !== expected || String(draft.value).includes('[object CustomEvent]')
+    ) {
+      throw new Error(
+        'official TDesign input did not deliver its typed value to the Host draft: ' + JSON.stringify({ draft }),
+      )
     }
-    const saveTarget = await evaluateByValue(`(() => {
+    const saveTarget = await evaluateByValue(
+      `(() => {
       const save = document.querySelector('[data-plugin-config-form="${galleryId}"] [data-host-form-action="save"]')
       const rect = save?.getBoundingClientRect()
       return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-    })()`, true)
-    if (saveTarget === null || saveTarget.width <= 0 || saveTarget.height <= 0) throw new Error('gallery save action did not appear in the sticky form action bar')
+    })()`,
+      true,
+    )
+    if (saveTarget === null || saveTarget.width <= 0 || saveTarget.height <= 0) {
+      throw new Error('gallery save action did not appear in the sticky form action bar')
+    }
     await pointerClick(saveTarget)
-    const saved = await evaluateByValue(`(async () => {
+    const saved = await evaluateByValue(
+      `(async () => {
       for (let attempt = 0; attempt < 120; attempt += 1) {
         const plugin = globalThis.__cordisxRuntime?.snapshot().plugins.find(item => item.id === '${galleryId}')
         const field = plugin?.configuration?.fields?.find(item => item.path?.join('.') === 'workspaceName')
@@ -5204,9 +5827,14 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         await new Promise(resolve => setTimeout(resolve, 25))
       }
       return null
-    })()`, true)
-    if (saved === null) throw new Error('gallery typed value did not persist through the isolated Host configuration writer')
-    const reopened = await evaluateByValue(`(async () => {
+    })()`,
+      true,
+    )
+    if (saved === null) {
+      throw new Error('gallery typed value did not persist through the isolated Host configuration writer')
+    }
+    const reopened = await evaluateByValue(
+      `(async () => {
       document.querySelector('.cxm-close')?.click()
       document.querySelector('[data-cordisx-manager-trigger]')?.click()
       document.querySelector('[data-tab="plugins"]')?.click()
@@ -5229,7 +5857,9 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         await new Promise(resolve => setTimeout(resolve, 25))
       }
       return null
-    })()`, true)
+    })()`,
+      true,
+    )
     if (reopened === null) throw new Error('gallery saved value did not survive Manager reopen')
     managerReport = { ...managerReport, hostFormValueInteraction: { target, draft, saved, reopened, passed: true } }
     console.log(`manager-form-value-interaction=${JSON.stringify(managerReport.hostFormValueInteraction)}`)
@@ -5256,7 +5886,9 @@ if (parsed.values['manager-screenshot'] !== undefined) {
         returnByValue: true,
       })
     }
-    if (managerViewportWidth !== undefined && !parsed.values['manager-theme-cycle']) await send('Emulation.clearDeviceMetricsOverride')
+    if (managerViewportWidth !== undefined && !parsed.values['manager-theme-cycle']) {
+      await send('Emulation.clearDeviceMetricsOverride')
+    }
   }
 }
 
@@ -5283,7 +5915,9 @@ if (parsed.values['manager-theme-cycle']) {
         const themePluginId = ${JSON.stringify(parsed.values['manager-plugin'])}
         const themeDetailTab = ${JSON.stringify(parsed.values['manager-detail-tab'])}
         if (themePluginId === undefined) {
-          if (!${JSON.stringify(parsed.values['manager-open-select'])}) document.querySelector('[data-tab="about"]')?.click()
+          if (!${
+        JSON.stringify(parsed.values['manager-open-select'])
+      }) document.querySelector('[data-tab="about"]')?.click()
         } else {
           document.querySelector('[data-tab="plugins"]')?.click()
           await new Promise(resolve => requestAnimationFrame(resolve))
@@ -5402,7 +6036,10 @@ if (parsed.values['manager-theme-cycle']) {
       returnByValue: true,
     })
     if (evaluated.exceptionDetails !== undefined) {
-      throw new Error(evaluated.exceptionDetails.exception?.description ?? evaluated.exceptionDetails.text ?? 'manager theme evaluation failed')
+      throw new Error(
+        evaluated.exceptionDetails.exception?.description ?? evaluated.exceptionDetails.text
+          ?? 'manager theme evaluation failed',
+      )
     }
     return evaluated.result?.value ?? null
   }
@@ -5472,7 +6109,8 @@ if (parsed.values.generation) {
     styles: document.querySelectorAll('#cordisx-structured-styles, #cordisx-manager-style').length,
     trigger: document.querySelector('[data-cordisx-manager-trigger]') !== null,
   }))()`)
-  const afterDispose = await evaluateByValue(`(async () => {
+  const afterDispose = await evaluateByValue(
+    `(async () => {
     await globalThis.__cordisxRuntime?.dispose?.()
     return {
       ready: document.documentElement.dataset.cordisxReady === 'true',
@@ -5485,14 +6123,21 @@ if (parsed.values.generation) {
       styles: document.querySelectorAll('#cordisx-structured-styles, #cordisx-manager-style').length,
       trigger: document.querySelector('[data-cordisx-manager-trigger]') !== null,
     }
-  })()`, true)
-  generationReport = { beforeDispose, afterDispose,
+  })()`,
+    true,
+  )
+  generationReport = {
+    beforeDispose,
+    afterDispose,
     cleaned: afterDispose.ready === false && afterDispose.runtimePresent === false && afterDispose.surfaces === 0
       && afterDispose.outlets === 0 && afterDispose.pages === 0 && afterDispose.tooltips === 0
       && afterDispose.settingsPages === 0
-      && afterDispose.styles === 0 && afterDispose.trigger === false }
+      && afterDispose.styles === 0 && afterDispose.trigger === false,
+  }
   console.log(`generation=${JSON.stringify(generationReport, null, 2)}`)
-  if (generationReport.cleaned !== true) throw new Error(`generation cleanup smoke assertions failed: ${JSON.stringify(generationReport)}`)
+  if (generationReport.cleaned !== true) {
+    throw new Error(`generation cleanup smoke assertions failed: ${JSON.stringify(generationReport)}`)
+  }
 }
 
 const interactionSafety = await evaluateByValue(`(() => ({

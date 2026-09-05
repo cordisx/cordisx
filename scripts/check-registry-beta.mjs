@@ -79,37 +79,49 @@ async function verifyGeneratedProject(project) {
   if (manifest.license !== 'UNLICENSED') throw new Error('generated plugin license choice is not explicit')
   if (manifest.devDependencies?.cordisx !== version) throw new Error('generated plugin CordisX version mismatch')
   await run('npm', [
-    'install', '--no-audit', '--no-fund', '--loglevel=error', `--registry=${registry}`,
+    'install',
+    '--no-audit',
+    '--no-fund',
+    '--loglevel=error',
+    `--registry=${registry}`,
   ], { cwd: project })
   await run('npm', ['run', 'check'], { cwd: project })
   const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project })
-  if (!dryRun.stdout.includes('[cordisx] Vite entry ready:')
+  if (
+    !dryRun.stdout.includes('[cordisx] Vite entry ready:')
     || !dryRun.stdout.includes('"status": "ready"')
-    || !dryRun.stdout.includes('"transport": "vite"')) {
+    || !dryRun.stdout.includes('"transport": "vite"')
+  ) {
     throw new Error('registry-generated plugin failed cordisx dev --dry-run')
   }
 }
 
 function assertViteProjectDryRun(stdout, pluginIds) {
-  if (!stdout.includes('[cordisx] Vite entry ready:')
+  if (
+    !stdout.includes('[cordisx] Vite entry ready:')
     || !stdout.includes('"status": "ready"')
     || !stdout.includes('"transport": "vite"')
-    || pluginIds.some(id => !stdout.includes(`"${id}"`))) {
+    || pluginIds.some(id => !stdout.includes(`"${id}"`))
+  ) {
     throw new Error('registry-generated multi-plugin project failed cordisx dev --dry-run')
   }
 }
 
 async function verifyGeneratedWorkspace(project, pluginIds) {
   const manifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'))
-  if (manifest.license !== 'UNLICENSED' || manifest.devDependencies?.cordisx !== version
-    || !Array.isArray(manifest.workspaces)) {
+  if (
+    manifest.license !== 'UNLICENSED' || manifest.devDependencies?.cordisx !== version
+    || !Array.isArray(manifest.workspaces)
+  ) {
     throw new Error('registry-generated plugin workspace metadata is invalid')
   }
   for (const id of pluginIds) {
     const plugin = JSON.parse(await readFile(path.join(project, 'plugins', id, 'package.json'), 'utf8'))
     if (plugin.devDependencies?.cordisx !== version) throw new Error(`registry-generated ${id} dependency mismatch`)
   }
-  await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error', `--registry=${registry}`], { cwd: project })
+  await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error', `--registry=${registry}`], {
+    cwd: project,
+  })
   await run('npm', ['run', 'check'], { cwd: project })
   const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project })
   assertViteProjectDryRun(dryRun.stdout, pluginIds)
@@ -202,34 +214,85 @@ try {
     process.platform === 'win32' ? 'create-cordisx-plugin.cmd' : 'create-cordisx-plugin',
   )
   await run('npm', [
-    'create', 'cordisx-plugin@beta', createTarget,
+    'create',
+    'cordisx-plugin@beta',
+    createTarget,
   ], { cwd: runner })
   await run('npx', ['--yes', 'create-cordisx-plugin@beta', npxTarget], { cwd: runner })
   await verifyGeneratedProject(createTarget)
   await verifyGeneratedProject(npxTarget)
 
   await run(creatorBin, [
-    '--mode', 'workspace', workspaceTarget, '--plugin', 'alpha', '--plugin', 'beta',
+    '--mode',
+    'workspace',
+    workspaceTarget,
+    '--plugin',
+    'alpha',
+    '--plugin',
+    'beta',
   ], { cwd: runner })
   await verifyGeneratedWorkspace(workspaceTarget, ['alpha', 'beta'])
 
   for (const project of [embeddedWorkspaceTarget, embeddedIsolatedTarget]) {
     await mkdir(project, { recursive: true })
   }
-  await writeFile(path.join(embeddedWorkspaceTarget, 'package.json'), `${JSON.stringify({
-    name: 'embedded-workspace-fixture', private: true, workspaces: [],
-  }, null, 2)}\n`, 'utf8')
-  await writeFile(path.join(embeddedIsolatedTarget, 'package.json'), `${JSON.stringify({
-    name: 'embedded-isolated-fixture', private: true,
-  }, null, 2)}\n`, 'utf8')
+  await writeFile(
+    path.join(embeddedWorkspaceTarget, 'package.json'),
+    `${
+      JSON.stringify(
+        {
+          name: 'embedded-workspace-fixture',
+          private: true,
+          workspaces: [],
+        },
+        null,
+        2,
+      )
+    }\n`,
+    'utf8',
+  )
+  await writeFile(
+    path.join(embeddedIsolatedTarget, 'package.json'),
+    `${
+      JSON.stringify(
+        {
+          name: 'embedded-isolated-fixture',
+          private: true,
+        },
+        null,
+        2,
+      )
+    }\n`,
+    'utf8',
+  )
   await run(creatorBin, [
-    '--mode', 'embedded', embeddedWorkspaceTarget, '--plugin', 'alpha', '--package-manager', 'npm',
+    '--mode',
+    'embedded',
+    embeddedWorkspaceTarget,
+    '--plugin',
+    'alpha',
+    '--package-manager',
+    'npm',
   ], { cwd: runner })
   await run(creatorBin, [
-    '--mode', 'embedded', embeddedWorkspaceTarget, '--plugin', 'beta', '--package-manager', 'npm',
+    '--mode',
+    'embedded',
+    embeddedWorkspaceTarget,
+    '--plugin',
+    'beta',
+    '--package-manager',
+    'npm',
   ], { cwd: runner })
   await run(creatorBin, [
-    '--mode', 'embedded', embeddedIsolatedTarget, '--plugin', 'solo', '--integration', 'isolated', '--package-manager', 'npm',
+    '--mode',
+    'embedded',
+    embeddedIsolatedTarget,
+    '--plugin',
+    'solo',
+    '--integration',
+    'isolated',
+    '--package-manager',
+    'npm',
   ], { cwd: runner })
   await verifyGeneratedEmbedded(embeddedWorkspaceTarget, ['alpha', 'beta'], true)
   await verifyGeneratedEmbedded(embeddedIsolatedTarget, ['solo'], false)

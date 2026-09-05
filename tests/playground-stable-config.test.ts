@@ -17,16 +17,29 @@ async function fixture(config: unknown = { shortcutPolicy: 'enter' }) {
   const sourcePath = path.join(root, 'source', 'playground.config.json')
   const homeDir = path.join(root, 'stable-home')
   await mkdir(path.dirname(sourcePath), { recursive: true })
-  const writeSource = async (value: unknown) => await writeFile(sourcePath, `${JSON.stringify({
-    version: 1,
-    codex: { debugPort: 9229, agentLoopBackend: 'mock' },
-    providers: [],
-    plugins: [{ id: 'cli-proxy-api', entry: 'cordisx:cli-proxy-api', enabled: true, config: value }],
-    futureLauncherField: { from: 'fixture' },
-  }, null, 2)}\n`)
+  const writeSource = async (value: unknown) =>
+    await writeFile(
+      sourcePath,
+      `${
+        JSON.stringify(
+          {
+            version: 1,
+            codex: { debugPort: 9229, agentLoopBackend: 'mock' },
+            providers: [],
+            plugins: [{ id: 'cli-proxy-api', entry: 'cordisx:cli-proxy-api', enabled: true, config: value }],
+            futureLauncherField: { from: 'fixture' },
+          },
+          null,
+          2,
+        )
+      }\n`,
+    )
   await writeSource(config)
   return {
-    root, sourcePath, homeDir, writeSource,
+    root,
+    sourcePath,
+    homeDir,
+    writeSource,
     launcherPath: path.join(homeDir, 'config', 'playground.config.json'),
     homeConfigPath: path.join(homeDir, 'config', 'playground.home.json'),
   }
@@ -36,7 +49,9 @@ function configBinding(source: string) {
   const token = /configBridgeToken: "([a-f0-9]{64})"/.exec(source)?.[1]
   const generation = /generation: "(playground-[a-f0-9]+)"/.exec(source)?.[1]
   const identity = /\{ id: "cli-proxy-api", source: "([^"]+)"/.exec(source)?.[1]
-  if (token === undefined || generation === undefined || identity === undefined) throw new Error('missing config binding')
+  if (token === undefined || generation === undefined || identity === undefined) {
+    throw new Error('missing config binding')
+  }
   return { token, generation, source: identity }
 }
 
@@ -48,7 +63,10 @@ function request(binding: ReturnType<typeof configBinding>, input: {
   readonly config?: unknown
 }) {
   return JSON.stringify({
-    version: 1, token: binding.token, operation: input.operation, requestId: input.requestId,
+    version: 1,
+    token: binding.token,
+    operation: input.operation,
+    requestId: input.requestId,
     identity: { source: binding.source, pluginId: 'cli-proxy-api' },
     scope: { profileId: 'playground', generation: binding.generation },
     ...(input.expectedRevision === undefined ? {} : { expectedRevision: input.expectedRevision }),
@@ -69,7 +87,8 @@ describe('stable Playground configuration materialization', () => {
         futureLauncherField: { from: 'fixture' },
       })
       expect(JSON.parse(await readFile(value.homeConfigPath, 'utf8'))).toMatchObject({
-        defaultApp: 'codex', apps: { codex: { defaultProfile: 'playground' } },
+        defaultApp: 'codex',
+        apps: { codex: { defaultProfile: 'playground' } },
       })
     } finally {
       await session.close()
@@ -84,11 +103,15 @@ describe('stable Playground configuration materialization', () => {
     const initial = await first.buildComposition('/runtime.ts')
     const binding = configBinding(initial.source)
     await first.handleConfigRequest(request(binding, {
-      operation: 'stage', requestId: 'stage-mod-enter', expectedRevision: 0,
+      operation: 'stage',
+      requestId: 'stage-mod-enter',
+      expectedRevision: 0,
       config: { shortcutPolicy: 'mod-enter' },
     }))
     await first.handleConfigRequest(request(binding, {
-      operation: 'commit', requestId: 'commit-mod-enter', candidateRevision: 1,
+      operation: 'commit',
+      requestId: 'commit-mod-enter',
+      candidateRevision: 1,
     }))
     await first.close()
     const persistedLauncher = await readFile(value.launcherPath, 'utf8')
@@ -113,11 +136,15 @@ describe('stable Playground configuration materialization', () => {
     const initial = await first.buildComposition('/runtime.ts')
     const binding = configBinding(initial.source)
     await first.handleConfigRequest(request(binding, {
-      operation: 'stage', requestId: 'stage-server-mod-enter', expectedRevision: 0,
+      operation: 'stage',
+      requestId: 'stage-server-mod-enter',
+      expectedRevision: 0,
       config: { shortcutPolicy: 'mod-enter' },
     }))
     await first.handleConfigRequest(request(binding, {
-      operation: 'commit', requestId: 'commit-server-mod-enter', candidateRevision: 1,
+      operation: 'commit',
+      requestId: 'commit-server-mod-enter',
+      candidateRevision: 1,
     }))
     await first.close()
 
@@ -133,35 +160,43 @@ describe('stable Playground configuration materialization', () => {
     }
   }, 30_000)
 
-  it('starts a new external-home server at generation zero without resetting retained owner or Session records', async () => {
-    const value = await fixture()
-    const initialized = await createPlaygroundSession(value.sourcePath, { homeDir: value.homeDir })
-    await initialized.close()
-    const retainedOwner = path.join(value.homeDir, 'state', 'owner-documents', 'v1', 'retained-room.json')
-    const retainedSessions = path.join(value.homeDir, 'state', 'playground-agent-sessions', 'v1', 'ledger.json')
-    await mkdir(path.dirname(retainedOwner), { recursive: true })
-    await mkdir(path.dirname(retainedSessions), { recursive: true })
-    await writeFile(retainedOwner, '{"rooms":3,"items":7}\n')
-    await writeFile(retainedSessions, '{"sessions":6}\n')
-    const launcherBefore = await readFile(value.launcherPath, 'utf8')
-    const homeBefore = await readFile(value.homeConfigPath, 'utf8')
+  it(
+    'starts a new external-home server at generation zero without resetting retained owner or Session records',
+    async () => {
+      const value = await fixture()
+      const initialized = await createPlaygroundSession(value.sourcePath, { homeDir: value.homeDir })
+      await initialized.close()
+      const retainedOwner = path.join(value.homeDir, 'state', 'owner-documents', 'v1', 'retained-room.json')
+      const retainedSessions = path.join(value.homeDir, 'state', 'playground-agent-sessions', 'v1', 'ledger.json')
+      await mkdir(path.dirname(retainedOwner), { recursive: true })
+      await mkdir(path.dirname(retainedSessions), { recursive: true })
+      await writeFile(retainedOwner, '{"rooms":3,"items":7}\n')
+      await writeFile(retainedSessions, '{"sessions":6}\n')
+      const launcherBefore = await readFile(value.launcherPath, 'utf8')
+      const homeBefore = await readFile(value.homeConfigPath, 'utf8')
 
-    const server = await startVitePlayground({ configPath: value.sourcePath, homeDir: value.homeDir })
-    try {
-      const epoch = await fetch(new URL('/api/reset-state', server.url)).then(async response => {
-        expect(response.ok).toBe(true)
-        return await response.json() as { readonly version: number; readonly instanceId: string; readonly generation: number }
-      })
-      expect(epoch).toMatchObject({ version: 1, generation: 0 })
-      expect(epoch.instanceId).not.toBe('')
-      expect(await readFile(value.launcherPath, 'utf8')).toBe(launcherBefore)
-      expect(await readFile(value.homeConfigPath, 'utf8')).toBe(homeBefore)
-      expect(await readFile(retainedOwner, 'utf8')).toBe('{"rooms":3,"items":7}\n')
-      expect(await readFile(retainedSessions, 'utf8')).toBe('{"sessions":6}\n')
-    } finally {
-      await server.close()
-    }
-  }, 30_000)
+      const server = await startVitePlayground({ configPath: value.sourcePath, homeDir: value.homeDir })
+      try {
+        const epoch = await fetch(new URL('/api/reset-state', server.url)).then(async response => {
+          expect(response.ok).toBe(true)
+          return await response.json() as {
+            readonly version: number
+            readonly instanceId: string
+            readonly generation: number
+          }
+        })
+        expect(epoch).toMatchObject({ version: 1, generation: 0 })
+        expect(epoch.instanceId).not.toBe('')
+        expect(await readFile(value.launcherPath, 'utf8')).toBe(launcherBefore)
+        expect(await readFile(value.homeConfigPath, 'utf8')).toBe(homeBefore)
+        expect(await readFile(retainedOwner, 'utf8')).toBe('{"rooms":3,"items":7}\n')
+        expect(await readFile(retainedSessions, 'utf8')).toBe('{"sessions":6}\n')
+      } finally {
+        await server.close()
+      }
+    },
+    30_000,
+  )
 
   it('fails closed on an existing malformed document without rewriting either config', async () => {
     const value = await fixture()

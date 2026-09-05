@@ -1,13 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import {
-  Button, Checkbox, ColorPicker, DatePicker, Dropdown, Form, Input, InputNumber,
-  RadioGroup, Select, Slider, Switch, TagInput, Textarea, TimePicker,
+  Button,
+  Checkbox,
+  ColorPicker,
+  DatePicker,
+  Dropdown,
   type DropdownOption,
+  Form,
+  Input,
+  InputNumber,
+  RadioGroup,
+  Select,
+  Slider,
+  Switch,
+  TagInput,
+  Textarea,
+  TimePicker,
 } from 'tdesign-react'
 import {
-  FormDraft, resolveFormPresenter, validateFormValue,
-  type FormDescriptor, type FormPrimitive,
+  type FormDescriptor,
+  FormDraft,
+  type FormPrimitive,
+  resolveFormPresenter,
+  validateFormValue,
 } from '@cordisx/schemastery-ui'
 import type { CordisXConfigFieldSnapshot, CordisXJsonValue } from '../../contracts.js'
 import type { ManagerModel, ManagerPluginSnapshot } from '../manager.js'
@@ -90,7 +106,9 @@ export const HOST_FORM_REACT_STYLES = String.raw`
 
 const SENSITIVE_ROLES = new Set(['secret', 'credential', 'credential-ref', 'permission', 'capability'])
 
-function pathKey(field: CordisXConfigFieldSnapshot): string { return field.path.join('.') }
+function pathKey(field: CordisXConfigFieldSnapshot): string {
+  return field.path.join('.')
+}
 
 function humanizeFieldName(value: string | undefined): string | undefined {
   if (value === undefined) return undefined
@@ -126,7 +144,16 @@ function primitive(field: CordisXConfigFieldSnapshot): FormPrimitive | 'sensitiv
 }
 
 function fullWidth(resolved: ReturnType<typeof primitive>): boolean {
-  return ['textarea', 'json-textarea', 'path-input', 'tag-input', 'multi-select', 'object-array', 'unsupported', 'sensitive-unavailable'].includes(resolved)
+  return [
+    'textarea',
+    'json-textarea',
+    'path-input',
+    'tag-input',
+    'multi-select',
+    'object-array',
+    'unsupported',
+    'sensitive-unavailable',
+  ].includes(resolved)
 }
 
 function numericProps(field: Pick<CordisXConfigFieldSnapshot, 'min' | 'max' | 'step'>) {
@@ -138,13 +165,19 @@ function numericProps(field: Pick<CordisXConfigFieldSnapshot, 'min' | 'max' | 's
 }
 
 /** Shared validation copy for schema-driven Host-owned forms. */
-export function hostFormValidationIssueText(field: CordisXConfigFieldSnapshot, value: unknown, locale: string): string | undefined {
+export function hostFormValidationIssueText(
+  field: CordisXConfigFieldSnapshot,
+  value: unknown,
+  locale: string,
+): string | undefined {
   const issue = validateFormValue(descriptor(field), value)[0]
   if (issue?.code === 'required') return managerCopy(locale, 'form.required')
   if (issue?.code === 'choice') return managerCopy(locale, 'form.choice-invalid')
   if (issue?.code === 'length') return managerCopy(locale, 'form.string-length-invalid')
   if (issue?.code === 'array') return managerCopy(locale, 'form.array-invalid')
-  if (issue?.code === 'number' || issue?.code === 'range' || issue?.code === 'step') return managerCopy(locale, field.type === 'natural' ? 'form.natural-invalid' : 'form.number-invalid')
+  if (issue?.code === 'number' || issue?.code === 'range' || issue?.code === 'step') {
+    return managerCopy(locale, field.type === 'natural' ? 'form.natural-invalid' : 'form.number-invalid')
+  }
   return undefined
 }
 
@@ -157,38 +190,167 @@ function Control({ field, resolved, value, onChange, controlId, locale, transien
   readonly locale: string
   readonly transientSecret?: boolean
 }) {
-  const choices = field.choices?.flatMap(choice => choice.value === null ? [] : [{ label: choice.label, value: choice.value }]) ?? []
-  if (resolved === 'sensitive-unavailable') return <div className="cxr-notice cxf-alert" role="note">{managerCopy(locale, 'form.sensitive-unavailable')}</div>
+  const choices =
+    field.choices?.flatMap(choice => choice.value === null ? [] : [{ label: choice.label, value: choice.value }]) ?? []
+  if (resolved === 'sensitive-unavailable') {
+    return <div className="cxr-notice cxf-alert" role="note">{managerCopy(locale, 'form.sensitive-unavailable')}</div>
+  }
   if (resolved === 'unsupported') return <div className="cxr-notice">当前 Schemastery 字段无法安全编辑</div>
-  if (resolved === 'object-array') return <ArrayEditor field={field} value={Array.isArray(value) ? value as Record<string, unknown>[] : []} onChange={onChange} locale={locale} validateField={candidate => hostFormValidationIssueText(candidate, candidate.value, locale)} renderFieldRow={props => <ArrayItemFieldRow {...props} locale={locale} />} />
-  if (resolved === 'textarea') return <Textarea className="cxf-textarea" value={typeof value === 'string' ? value : ''} autosize={{ minRows: 5, maxRows: 14 }} disabled={field.disabled} onChange={onChange} />
-  if (resolved === 'json-textarea') return <Textarea className="cxf-textarea cxf-json" value={typeof value === 'string' ? value : JSON.stringify(value, null, 2)} autosize={{ minRows: 5, maxRows: 18 }} disabled={field.disabled} onChange={text => { try { onChange(JSON.parse(text)) } catch { /* retain the last valid value */ } }} />
-  if (resolved === 'checkbox') return <Checkbox checked={value === true} disabled={field.disabled} onChange={onChange} />
+  if (resolved === 'object-array') {
+    return (
+      <ArrayEditor
+        field={field}
+        value={Array.isArray(value) ? value as Record<string, unknown>[] : []}
+        onChange={onChange}
+        locale={locale}
+        validateField={candidate => hostFormValidationIssueText(candidate, candidate.value, locale)}
+        renderFieldRow={props => <ArrayItemFieldRow {...props} locale={locale} />}
+      />
+    )
+  }
+  if (resolved === 'textarea') {
+    return (
+      <Textarea
+        className="cxf-textarea"
+        value={typeof value === 'string' ? value : ''}
+        autosize={{ minRows: 5, maxRows: 14 }}
+        disabled={field.disabled}
+        onChange={onChange}
+      />
+    )
+  }
+  if (resolved === 'json-textarea') {
+    return (
+      <Textarea
+        className="cxf-textarea cxf-json"
+        value={typeof value === 'string' ? value : JSON.stringify(value, null, 2)}
+        autosize={{ minRows: 5, maxRows: 18 }}
+        disabled={field.disabled}
+        onChange={text => {
+          try {
+            onChange(JSON.parse(text))
+          } catch { /* retain the last valid value */ }
+        }}
+      />
+    )
+  }
+  if (resolved === 'checkbox') {
+    return <Checkbox checked={value === true} disabled={field.disabled} onChange={onChange} />
+  }
   if (resolved === 'switch') return <Switch value={value === true} disabled={field.disabled} onChange={onChange} />
-  if (resolved === 'slider') return <div className="cxf-slider-control"><Slider value={typeof value === 'number' ? value : 0} {...numericProps(field)} disabled={field.disabled} onChange={onChange} /><InputNumber {...(typeof value === 'number' ? { value } : {})} {...numericProps(field)} disabled={field.disabled} onChange={onChange} /></div>
-  if (resolved === 'number-input') return <InputNumber {...(typeof value === 'number' ? { value } : {})} {...numericProps(field)} disabled={field.disabled} onChange={onChange} />
-  if (resolved === 'radio') return <RadioGroup {...(field.presenter?.kind === 'choice.segmented' ? { className: 'cxf-segmented' } : {})} variant={field.presenter?.kind === 'choice.segmented' ? 'primary-filled' : 'default-filled'} value={value as string | number | boolean} options={choices} disabled={field.disabled} onChange={onChange} />
-  if (resolved === 'select') return <Select {...(typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? { value } : {})} options={choices} disabled={field.disabled} clearable={!field.required} onChange={onChange} />
-  if (resolved === 'multi-select') return <Select multiple value={Array.isArray(value) ? value as (string | number)[] : []} options={choices} disabled={field.disabled} onChange={onChange} />
-  if (resolved === 'tag-input') return <TagInput value={Array.isArray(value) ? value.map(String) : []} disabled={field.disabled} onChange={onChange} />
-  if (resolved === 'date-picker') return <DatePicker value={typeof value === 'string' ? value : ''} enableTimePicker={field.role === 'datetime'} format={field.role === 'datetime' ? 'YYYY-MM-DD HH:mm:ss' : 'YYYY-MM-DD'} disabled={field.disabled} onChange={onChange} />
-  if (resolved === 'time-picker') return <TimePicker value={typeof value === 'string' ? value : ''} disabled={field.disabled} onChange={onChange} />
-  if (resolved === 'color-picker') return <ColorPicker value={typeof value === 'string' ? value : ''} disabled={field.disabled} onChange={onChange} />
-  return <Input {...(controlId === undefined ? {} : { id: controlId })} type={field.role === 'url' ? 'url' : field.role === 'password' ? 'password' : 'text'} value={typeof value === 'string' ? value : ''} disabled={field.disabled} {...(field.role === 'password' ? { autocomplete: 'new-password' } : {})} {...(transientSecret === true ? { 'data-channel-credential-capture': 'true' } : {})} onChange={onChange} />
+  if (resolved === 'slider') {
+    return (
+      <div className="cxf-slider-control">
+        <Slider
+          value={typeof value === 'number' ? value : 0}
+          {...numericProps(field)}
+          disabled={field.disabled}
+          onChange={onChange}
+        />
+        <InputNumber
+          {...(typeof value === 'number' ? { value } : {})}
+          {...numericProps(field)}
+          disabled={field.disabled}
+          onChange={onChange}
+        />
+      </div>
+    )
+  }
+  if (resolved === 'number-input') {
+    return (
+      <InputNumber
+        {...(typeof value === 'number' ? { value } : {})}
+        {...numericProps(field)}
+        disabled={field.disabled}
+        onChange={onChange}
+      />
+    )
+  }
+  if (resolved === 'radio') {
+    return (
+      <RadioGroup
+        {...(field.presenter?.kind === 'choice.segmented' ? { className: 'cxf-segmented' } : {})}
+        variant={field.presenter?.kind === 'choice.segmented' ? 'primary-filled' : 'default-filled'}
+        value={value as string | number | boolean}
+        options={choices}
+        disabled={field.disabled}
+        onChange={onChange}
+      />
+    )
+  }
+  if (resolved === 'select') {
+    return (
+      <Select
+        {...(typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? { value } : {})}
+        options={choices}
+        disabled={field.disabled}
+        clearable={!field.required}
+        onChange={onChange}
+      />
+    )
+  }
+  if (resolved === 'multi-select') {
+    return (
+      <Select
+        multiple
+        value={Array.isArray(value) ? value as (string | number)[] : []}
+        options={choices}
+        disabled={field.disabled}
+        onChange={onChange}
+      />
+    )
+  }
+  if (resolved === 'tag-input') {
+    return (
+      <TagInput value={Array.isArray(value) ? value.map(String) : []} disabled={field.disabled} onChange={onChange} />
+    )
+  }
+  if (resolved === 'date-picker') {
+    return (
+      <DatePicker
+        value={typeof value === 'string' ? value : ''}
+        enableTimePicker={field.role === 'datetime'}
+        format={field.role === 'datetime' ? 'YYYY-MM-DD HH:mm:ss' : 'YYYY-MM-DD'}
+        disabled={field.disabled}
+        onChange={onChange}
+      />
+    )
+  }
+  if (resolved === 'time-picker') {
+    return <TimePicker value={typeof value === 'string' ? value : ''} disabled={field.disabled} onChange={onChange} />
+  }
+  if (resolved === 'color-picker') {
+    return <ColorPicker value={typeof value === 'string' ? value : ''} disabled={field.disabled} onChange={onChange} />
+  }
+  return (
+    <Input
+      {...(controlId === undefined ? {} : { id: controlId })}
+      type={field.role === 'url' ? 'url' : field.role === 'password' ? 'password' : 'text'}
+      value={typeof value === 'string' ? value : ''}
+      disabled={field.disabled}
+      {...(field.role === 'password' ? { autocomplete: 'new-password' } : {})}
+      {...(transientSecret === true ? { 'data-channel-credential-capture': 'true' } : {})}
+      onChange={onChange}
+    />
+  )
 }
 
-function ArrayItemFieldRow({ field, controlId, issueText, onChange, locale }: ArrayEditorFieldRowRenderProps & { readonly locale: string }) {
-  return <HostFieldRow
-    field={field}
-    value={field.value}
-    changed={false}
-    locale={locale}
-    idPrefix={`array-item-${controlId}`}
-    controlId={controlId}
-    {...(issueText === undefined ? {} : { issueText })}
-    fieldActions="static"
-    onChange={onChange}
-  />
+function ArrayItemFieldRow(
+  { field, controlId, issueText, onChange, locale }: ArrayEditorFieldRowRenderProps & { readonly locale: string },
+) {
+  return (
+    <HostFieldRow
+      field={field}
+      value={field.value}
+      changed={false}
+      locale={locale}
+      idPrefix={`array-item-${controlId}`}
+      controlId={controlId}
+      {...(issueText === undefined ? {} : { issueText })}
+      fieldActions="static"
+      onChange={onChange}
+    />
+  )
 }
 
 function ConfigControl({ model, pluginId, field, value, resolved, onChange, controlId, locale }: {
@@ -209,64 +371,124 @@ function ConfigControl({ model, pluginId, field, value, resolved, onChange, cont
     if (model.mountConfigRenderer === undefined || custom.current === null || field.disabled) return
     let disposed = false
     let mount: Awaited<ReturnType<NonNullable<ManagerModel['mountConfigRenderer']>>> | undefined
-    void model.mountConfigRenderer(pluginId, { ...field, value }, custom.current, next => latestChange.current(next)).then(next => {
-      if (disposed) { void next.dispose(); return }
-      mount = next
-      if (!next.mounted) return
-      const focusable = custom.current?.querySelector<HTMLElement>('input,select,textarea,button,[tabindex]')
-      if (focusable !== null && focusable !== undefined) {
-        if (focusable.id === '') focusable.id = controlId
-        focusable.dataset.hostFormPrimitive = 'custom'
-        focusable.setAttribute('aria-describedby', `${controlId}-error`)
-        if (field.required) focusable.setAttribute('aria-required', 'true')
-      }
-      setCustomMounted(true)
-    }).catch(() => undefined)
-    return () => { disposed = true; void mount?.dispose() }
-  // The plugin renderer owns its draft after mounting; draft changes must not
-  // tear down and recreate that renderer.
+    void model.mountConfigRenderer(pluginId, { ...field, value }, custom.current, next => latestChange.current(next))
+      .then(next => {
+        if (disposed) {
+          void next.dispose()
+          return
+        }
+        mount = next
+        if (!next.mounted) return
+        const focusable = custom.current?.querySelector<HTMLElement>('input,select,textarea,button,[tabindex]')
+        if (focusable !== null && focusable !== undefined) {
+          if (focusable.id === '') focusable.id = controlId
+          focusable.dataset.hostFormPrimitive = 'custom'
+          focusable.setAttribute('aria-describedby', `${controlId}-error`)
+          if (field.required) focusable.setAttribute('aria-required', 'true')
+        }
+        setCustomMounted(true)
+      }).catch(() => undefined)
+    return () => {
+      disposed = true
+      void mount?.dispose()
+    }
+    // The plugin renderer owns its draft after mounting; draft changes must not
+    // tear down and recreate that renderer.
   }, [controlId, field.disabled, field.path, field.required, model, pluginId])
-  return <>
-    <div hidden={customMounted}><Control field={field} resolved={resolved} value={value} onChange={onChange} controlId={controlId} locale={locale} /></div>
-    <div ref={custom} className="cxm-config-renderer cxf-custom-seat" hidden={!customMounted} />
-  </>
+  return (
+    <>
+      <div hidden={customMounted}>
+        <Control
+          field={field}
+          resolved={resolved}
+          value={value}
+          onChange={onChange}
+          controlId={controlId}
+          locale={locale}
+        />
+      </div>
+      <div ref={custom} className="cxm-config-renderer cxf-custom-seat" hidden={!customMounted} />
+    </>
+  )
 }
 
-type FieldLabelProps = { readonly field: CordisXConfigFieldSnapshot } & (
-  | { readonly mode: 'static' }
-  | {
-    readonly mode: 'menu'
-    readonly changed: boolean
-    readonly locale: string
-    readonly onUseDefault: () => void
-    readonly onRollback: () => void
-    readonly onCopyPath: () => void
-  }
-)
+type FieldLabelProps =
+  & { readonly field: CordisXConfigFieldSnapshot }
+  & (
+    | { readonly mode: 'static' }
+    | {
+      readonly mode: 'menu'
+      readonly changed: boolean
+      readonly locale: string
+      readonly onUseDefault: () => void
+      readonly onRollback: () => void
+      readonly onCopyPath: () => void
+    }
+  )
 
 function FieldLabel(props: FieldLabelProps) {
   const { field } = props
-  if (props.mode === 'static') return <span className="cxf-field-label">
-    {field.icon === undefined ? null : <span className="cxf-field-icon" aria-hidden="true"><HostSurfaceIcon token={field.icon} /></span>}
-    <span className="cxf-field-label-text cxf-label">{field.label ?? humanizeFieldName(field.path.at(-1))}</span>
-  </span>
+  if (props.mode === 'static') {
+    return (
+      <span className="cxf-field-label">
+        {field.icon === undefined ? null : (
+          <span className="cxf-field-icon" aria-hidden="true">
+            <HostSurfaceIcon token={field.icon} />
+          </span>
+        )}
+        <span className="cxf-field-label-text cxf-label">{field.label ?? humanizeFieldName(field.path.at(-1))}</span>
+      </span>
+    )
+  }
   const icon = <HostSurfaceIcon token={field.icon ?? 'host:settings'} />
   const { changed, locale, onUseDefault, onRollback, onCopyPath } = props
   const options: DropdownOption[] = [
-    { value: 'default', content: managerCopy(locale, 'form.use-default'), prefixIcon: <HostSurfaceIcon token="host:reset" />, disabled: field.hasDefault !== true },
-    { value: 'rollback', content: managerCopy(locale, 'form.rollback-field'), prefixIcon: <HostSurfaceIcon token="host:reset" />, disabled: !changed },
-    { value: 'copy', content: managerCopy(locale, 'form.copy-path'), prefixIcon: <HostSurfaceIcon token="host:files" /> },
+    {
+      value: 'default',
+      content: managerCopy(locale, 'form.use-default'),
+      prefixIcon: <HostSurfaceIcon token="host:reset" />,
+      disabled: field.hasDefault !== true,
+    },
+    {
+      value: 'rollback',
+      content: managerCopy(locale, 'form.rollback-field'),
+      prefixIcon: <HostSurfaceIcon token="host:reset" />,
+      disabled: !changed,
+    },
+    {
+      value: 'copy',
+      content: managerCopy(locale, 'form.copy-path'),
+      prefixIcon: <HostSurfaceIcon token="host:files" />,
+    },
   ]
-  return <span className="cxf-field-label">
-    <Dropdown trigger="click" placement="bottom-left" options={options} minColumnWidth={208} onClick={item => {
-      if (item.value === 'default') onUseDefault()
-      else if (item.value === 'rollback') onRollback()
-      else if (item.value === 'copy') onCopyPath()
-    }}>
-      <Button type="button" shape="square" variant="text" className="cxf-field-menu-trigger" aria-label={managerCopy(locale, 'form.field-actions')} aria-haspopup="menu" data-host-form-action="field-actions" data-host-form-action-icon={field.icon ?? 'host:settings'} icon={icon} />
-    </Dropdown>
-    <span className="cxf-field-label-text cxf-label">{field.label ?? humanizeFieldName(field.path.at(-1))}</span>
-  </span>
+  return (
+    <span className="cxf-field-label">
+      <Dropdown
+        trigger="click"
+        placement="bottom-left"
+        options={options}
+        minColumnWidth={208}
+        onClick={item => {
+          if (item.value === 'default') onUseDefault()
+          else if (item.value === 'rollback') onRollback()
+          else if (item.value === 'copy') onCopyPath()
+        }}
+      >
+        <Button
+          type="button"
+          shape="square"
+          variant="text"
+          className="cxf-field-menu-trigger"
+          aria-label={managerCopy(locale, 'form.field-actions')}
+          aria-haspopup="menu"
+          data-host-form-action="field-actions"
+          data-host-form-action-icon={field.icon ?? 'host:settings'}
+          icon={icon}
+        />
+      </Dropdown>
+      <span className="cxf-field-label-text cxf-label">{field.label ?? humanizeFieldName(field.path.at(-1))}</span>
+    </span>
+  )
 }
 
 interface HostFieldRowBaseProps {
@@ -296,24 +518,83 @@ export type HostFieldRowProps = HostFieldRowBaseProps & HostFieldRowActions
 
 /** Shared React field row used by plugin configuration and Host-owned draft forms. */
 export function HostFieldRow(props: HostFieldRowProps) {
-  const { field, value, changed, locale, idPrefix, issueText, forceFullWidth, controlId, transientSecret, customControl, onChange } = props
+  const {
+    field,
+    value,
+    changed,
+    locale,
+    idPrefix,
+    issueText,
+    forceFullWidth,
+    controlId,
+    transientSecret,
+    customControl,
+    onChange,
+  } = props
   const resolved = primitive(field)
   const resolution = resolveFormPresenter(descriptor(field))
   const labelId = `cxf-label-${encodeURIComponent(idPrefix)}-${field.path.map(encodeURIComponent).join('-')}`
   const resolvedControlId = controlId ?? `cxm-config-${idPrefix}-${field.path.join('-')}`
-  return <div className="cxf-item" data-config-path={field.path.join('.')} data-host-form-primitive={resolved} data-full-width={String(forceFullWidth === true || fullWidth(resolved))} data-control-layout={resolution.layout} data-primitive={resolved} data-presenter={field.presenter?.kind ?? 'auto'} data-invalid={String(issueText !== undefined)}>
-    <div className="cxf-label-row" id={labelId}>
-      {props.fieldActions === 'static'
-        ? <FieldLabel field={field} mode="static" />
-        : <FieldLabel field={field} mode="menu" changed={changed} locale={locale} onUseDefault={props.onUseDefault} onRollback={props.onRollback} onCopyPath={props.onCopyPath} />}
-      {field.required ? <span className="cxf-required" aria-label={managerCopy(locale, 'form.required')}>*</span> : null}
+  return (
+    <div
+      className="cxf-item"
+      data-config-path={field.path.join('.')}
+      data-host-form-primitive={resolved}
+      data-full-width={String(forceFullWidth === true || fullWidth(resolved))}
+      data-control-layout={resolution.layout}
+      data-primitive={resolved}
+      data-presenter={field.presenter?.kind ?? 'auto'}
+      data-invalid={String(issueText !== undefined)}
+    >
+      <div className="cxf-label-row" id={labelId}>
+        {props.fieldActions === 'static'
+          ? <FieldLabel field={field} mode="static" />
+          : (
+            <FieldLabel
+              field={field}
+              mode="menu"
+              changed={changed}
+              locale={locale}
+              onUseDefault={props.onUseDefault}
+              onRollback={props.onRollback}
+              onCopyPath={props.onCopyPath}
+            />
+          )}
+        {field.required
+          ? <span className="cxf-required" aria-label={managerCopy(locale, 'form.required')}>*</span>
+          : null}
+      </div>
+      <div className="cxf-control-seat" role="group" aria-labelledby={labelId}>
+        {customControl === undefined || resolved === 'sensitive-unavailable'
+          ? (
+            <Control
+              field={field}
+              resolved={resolved}
+              value={value}
+              onChange={onChange}
+              controlId={resolvedControlId}
+              locale={locale}
+              {...(transientSecret === undefined ? {} : { transientSecret })}
+            />
+          )
+          : (
+            <ConfigControl
+              {...customControl}
+              field={field}
+              value={value}
+              resolved={resolved}
+              onChange={onChange}
+              controlId={resolvedControlId}
+              locale={locale}
+            />
+          )}
+      </div>
+      {field.description === undefined ? null : <p className="cxf-help">{field.description}</p>}
+      {issueText === undefined
+        ? <p className="cxf-error" id={`${resolvedControlId}-error`} role="alert" hidden />
+        : <p className="cxf-error" id={`${resolvedControlId}-error`} role="alert">{issueText}</p>}
     </div>
-    <div className="cxf-control-seat" role="group" aria-labelledby={labelId}>{customControl === undefined || resolved === 'sensitive-unavailable'
-      ? <Control field={field} resolved={resolved} value={value} onChange={onChange} controlId={resolvedControlId} locale={locale} {...(transientSecret === undefined ? {} : { transientSecret })} />
-      : <ConfigControl {...customControl} field={field} value={value} resolved={resolved} onChange={onChange} controlId={resolvedControlId} locale={locale} />}</div>
-    {field.description === undefined ? null : <p className="cxf-help">{field.description}</p>}
-    {issueText === undefined ? <p className="cxf-error" id={`${resolvedControlId}-error`} role="alert" hidden /> : <p className="cxf-error" id={`${resolvedControlId}-error`} role="alert">{issueText}</p>}
-  </div>
+  )
 }
 
 export function HostForm({ model, plugin }: { readonly model: ManagerModel; readonly plugin: ManagerPluginSnapshot }) {
@@ -321,14 +602,25 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
   const [draftOperations, setDraftOperations] = useState<ReadonlyMap<string, ConfigMutationOperation>>(() => new Map())
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string>()
-  const [formState, setFormState] = useState<'pristine' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error'>('pristine')
+  const [formState, setFormState] = useState<'pristine' | 'dirty' | 'saving' | 'saved' | 'conflict' | 'error'>(
+    'pristine',
+  )
   const locale = model.snapshot().localization.locale
-  useEffect(() => { setDraftOperations(new Map()); setFormState('pristine'); setMessage(undefined) }, [plugin.configuration.revision])
+  useEffect(() => {
+    setDraftOperations(new Map())
+    setFormState('pristine')
+    setMessage(undefined)
+  }, [plugin.configuration.revision])
   const groups = useMemo(() => {
     const result = new Map<string, { title?: string; description?: string; fields: CordisXConfigFieldSnapshot[] }>()
     for (const field of fields) {
       const id = field.group?.id ?? 'general'
-      const current = result.get(id) ?? { ...(field.group?.title === undefined ? {} : { title: field.group.title }), ...(field.group?.description === undefined ? {} : { description: field.group.description }), fields: [] }
+      const current = result.get(id)
+        ?? {
+          ...(field.group?.title === undefined ? {} : { title: field.group.title }),
+          ...(field.group?.description === undefined ? {} : { description: field.group.description }),
+          fields: [],
+        }
       current.fields.push(field)
       result.set(id, current)
     }
@@ -343,41 +635,151 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
     return next
   }, [draftOperations, fields])
   const operations = [...draftOperations.values()]
-  const change = (field: CordisXConfigFieldSnapshot, operation: ConfigMutationOperation) => flushSync(() => {
-    setFormState('dirty'); setMessage(undefined); setDraftOperations(current => {
-      const next = new Map(current); next.set(pathKey(field), operation); return next
+  const change = (field: CordisXConfigFieldSnapshot, operation: ConfigMutationOperation) =>
+    flushSync(() => {
+      setFormState('dirty')
+      setMessage(undefined)
+      setDraftOperations(current => {
+        const next = new Map(current)
+        next.set(pathKey(field), operation)
+        return next
+      })
     })
-  })
-  const rollback = (field: CordisXConfigFieldSnapshot) => setDraftOperations(current => {
-    const next = new Map(current); next.delete(pathKey(field)); return next
-  })
-  return <div className="cxf-react-form-shell" data-plugin-config-form={plugin.id} data-state={formState}><Form className="cxf-react-form" onSubmit={event => {
-    event.e?.preventDefault()
-    if (model.updatePluginConfig === undefined || operations.length === 0) return
-    setSaving(true); setFormState('saving'); setMessage(undefined)
-    void model.updatePluginConfig(plugin.id, plugin.configuration.revision, operations)
-      .then(() => { setFormState('saved'); setMessage(managerCopy(locale, 'form.configuration-saved')) })
-      .catch(error => { const text = error instanceof Error ? error.message : String(error); const conflict = /conflict|revision/iu.test(text); setFormState(conflict ? 'conflict' : 'error'); setMessage(conflict ? managerCopy(locale, 'form.conflict-retained') : text) })
-      .finally(() => setSaving(false))
-  }}><HostFormPageStack key={`${plugin.id}:${plugin.configuration.revision}`} resetKey={plugin.configuration.revision}>
-    <div className="cxf-form-body">{groups.map(([id, group]) => <section key={id} className="cxf-section">
-      {group.title === undefined && group.description === undefined ? null : <header className="cxf-section-heading">{group.title === undefined ? null : <h3>{group.title}</h3>}{group.description === undefined ? null : <p>{group.description}</p>}</header>}
-      <div className="cxf-form-grid">{group.fields.map((field, fieldIndex) => {
-        const value = formDraft.value(field.path, field.defaultValue)
-        const changed = formDraft.isDirty(field.path)
-        const issueText = hostFormValidationIssueText(field, value, locale)
-        return <HostFieldRow key={pathKey(field)} field={field} value={value} changed={changed} locale={locale} idPrefix={plugin.id} controlId={`cxm-config-${plugin.id}-${fieldIndex}`} customControl={{ model, pluginId: plugin.id }} {...(issueText === undefined ? {} : { issueText })} onUseDefault={() => { if (field.hasDefault === true) change(field, { op: 'unset', path: field.path }) }} onRollback={() => rollback(field)} onCopyPath={() => {
-              const clipboard = window.navigator.clipboard
-              if (typeof clipboard?.writeText !== 'function') { setMessage(managerCopy(locale, 'form.path-copy-unavailable')); return }
-              void clipboard.writeText(field.path.join('.')).then(() => setMessage(managerCopy(locale, 'form.path-copied'))).catch(() => setMessage(managerCopy(locale, 'form.path-copy-unavailable')))
-            }} onChange={next => change(field, next === undefined ? { op: 'unset', path: field.path } : { op: 'set', path: field.path, value: next as CordisXJsonValue })} />
-      })}</div>
-    </section>)}
-    {message === undefined ? null : <div className="cxr-notice cxf-alert" data-tone={formState === 'saved' ? 'info' : 'error'} role="status">{message}</div>}
+  const rollback = (field: CordisXConfigFieldSnapshot) =>
+    setDraftOperations(current => {
+      const next = new Map(current)
+      next.delete(pathKey(field))
+      return next
+    })
+  return (
+    <div className="cxf-react-form-shell" data-plugin-config-form={plugin.id} data-state={formState}>
+      <Form
+        className="cxf-react-form"
+        onSubmit={event => {
+          event.e?.preventDefault()
+          if (model.updatePluginConfig === undefined || operations.length === 0) return
+          setSaving(true)
+          setFormState('saving')
+          setMessage(undefined)
+          void model.updatePluginConfig(plugin.id, plugin.configuration.revision, operations)
+            .then(() => {
+              setFormState('saved')
+              setMessage(managerCopy(locale, 'form.configuration-saved'))
+            })
+            .catch(error => {
+              const text = error instanceof Error ? error.message : String(error)
+              const conflict = /conflict|revision/iu.test(text)
+              setFormState(conflict ? 'conflict' : 'error')
+              setMessage(conflict ? managerCopy(locale, 'form.conflict-retained') : text)
+            })
+            .finally(() => setSaving(false))
+        }}
+      >
+        <HostFormPageStack
+          key={`${plugin.id}:${plugin.configuration.revision}`}
+          resetKey={plugin.configuration.revision}
+        >
+          <div className="cxf-form-body">
+            {groups.map(([id, group]) => (
+              <section key={id} className="cxf-section">
+                {group.title === undefined && group.description === undefined
+                  ? null
+                  : (
+                    <header className="cxf-section-heading">
+                      {group.title === undefined ? null : <h3>{group.title}</h3>}
+                      {group.description === undefined ? null : <p>{group.description}</p>}
+                    </header>
+                  )}
+                <div className="cxf-form-grid">
+                  {group.fields.map((field, fieldIndex) => {
+                    const value = formDraft.value(field.path, field.defaultValue)
+                    const changed = formDraft.isDirty(field.path)
+                    const issueText = hostFormValidationIssueText(field, value, locale)
+                    return (
+                      <HostFieldRow
+                        key={pathKey(field)}
+                        field={field}
+                        value={value}
+                        changed={changed}
+                        locale={locale}
+                        idPrefix={plugin.id}
+                        controlId={`cxm-config-${plugin.id}-${fieldIndex}`}
+                        customControl={{ model, pluginId: plugin.id }}
+                        {...(issueText === undefined ? {} : { issueText })}
+                        onUseDefault={() => {
+                          if (field.hasDefault === true) change(field, { op: 'unset', path: field.path })
+                        }}
+                        onRollback={() => rollback(field)}
+                        onCopyPath={() => {
+                          const clipboard = window.navigator.clipboard
+                          if (typeof clipboard?.writeText !== 'function') {
+                            setMessage(managerCopy(locale, 'form.path-copy-unavailable'))
+                            return
+                          }
+                          void clipboard.writeText(field.path.join('.')).then(() =>
+                            setMessage(managerCopy(locale, 'form.path-copied'))
+                          ).catch(() => setMessage(managerCopy(locale, 'form.path-copy-unavailable')))
+                        }}
+                        onChange={next =>
+                          change(
+                            field,
+                            next === undefined
+                              ? { op: 'unset', path: field.path }
+                              : { op: 'set', path: field.path, value: next as CordisXJsonValue },
+                          )}
+                      />
+                    )
+                  })}
+                </div>
+              </section>
+            ))}
+            {message === undefined
+              ? null
+              : (
+                <div
+                  className="cxr-notice cxf-alert"
+                  data-tone={formState === 'saved' ? 'info' : 'error'}
+                  role="status"
+                >
+                  {message}
+                </div>
+              )}
+          </div>
+          <div className="cxf-form-actions">
+            <div className="cxf-status" data-state={formState} role="status">
+              {operations.length === 0
+                ? ''
+                : formState === 'saving'
+                ? managerCopy(locale, 'form.saving')
+                : `${managerCopy(locale, 'form.dirty-prefix')} · ${managerCopy(locale, 'form.apply-live')}`}
+            </div>
+            <div className="cxf-form-action-buttons">
+              <Button
+                type="reset"
+                variant="outline"
+                icon={<HostSurfaceIcon token="host:reset" />}
+                disabled={saving || operations.length === 0}
+                onClick={() => {
+                  setDraftOperations(new Map())
+                  setFormState('pristine')
+                  setMessage(undefined)
+                }}
+              >
+                重置
+              </Button>
+              <Button
+                type="submit"
+                theme="primary"
+                icon={<HostSurfaceIcon token="host:save" />}
+                loading={saving}
+                disabled={!plugin.configuration.writable || operations.length === 0}
+              >
+                保存
+              </Button>
+            </div>
+          </div>
+        </HostFormPageStack>
+      </Form>
     </div>
-    <div className="cxf-form-actions">
-      <div className="cxf-status" data-state={formState} role="status">{operations.length === 0 ? '' : formState === 'saving' ? managerCopy(locale, 'form.saving') : `${managerCopy(locale, 'form.dirty-prefix')} · ${managerCopy(locale, 'form.apply-live')}`}</div>
-      <div className="cxf-form-action-buttons"><Button type="reset" variant="outline" icon={<HostSurfaceIcon token="host:reset" />} disabled={saving || operations.length === 0} onClick={() => { setDraftOperations(new Map()); setFormState('pristine'); setMessage(undefined) }}>重置</Button><Button type="submit" theme="primary" icon={<HostSurfaceIcon token="host:save" />} loading={saving} disabled={!plugin.configuration.writable || operations.length === 0}>保存</Button></div>
-    </div>
-  </HostFormPageStack></Form></div>
+  )
 }

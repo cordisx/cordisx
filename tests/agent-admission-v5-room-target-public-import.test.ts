@@ -29,9 +29,20 @@ describe('formal admission v5 current-binding Room public imports', () => {
   it('typechecks an external consumer through the packaged cordisx/contracts entrypoint', () => {
     const root = fileURLToPath(new URL('../', import.meta.url))
     const tsc = fileURLToPath(new URL('../node_modules/typescript/bin/tsc', import.meta.url))
-    expect(() => execFileSync(process.execPath, [
-      tsc, '--noEmit', '--strict', '--target', 'ES2022', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '--skipLibCheck',
-      'tests/fixtures/agent-admission-v5-external-consumer.ts',
-    ], { cwd: root, encoding: 'utf8', stdio: 'pipe' })).not.toThrow()
+    expect(() =>
+      execFileSync(process.execPath, [
+        tsc,
+        '--noEmit',
+        '--strict',
+        '--target',
+        'ES2022',
+        '--module',
+        'NodeNext',
+        '--moduleResolution',
+        'NodeNext',
+        '--skipLibCheck',
+        'tests/fixtures/agent-admission-v5-external-consumer.ts',
+      ], { cwd: root, encoding: 'utf8', stdio: 'pipe' })
+    ).not.toThrow()
   })
 })

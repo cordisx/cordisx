@@ -1,13 +1,10 @@
-import { Service, type Context, type Disposable } from '@deepseek-ai/cordis'
+import { type Context, type Disposable, Service } from '@deepseek-ai/cordis'
 import type {
   HostServiceConfigDescriptor,
   HostServiceConfigMutation,
   HostServiceConfigMutationResult,
 } from '../launcher/service-config.js'
-import type {
-  ChannelManagerActionResult,
-  ChannelManagerRuntimeProjection,
-} from '../launcher/channel-manager-api.js'
+import type { ChannelManagerActionResult, ChannelManagerRuntimeProjection } from '../launcher/channel-manager-api.js'
 
 export type ChannelProductStatus = 'implemented' | 'verified' | 'experimental' | 'unavailable' | 'planned'
 
@@ -111,7 +108,8 @@ const EMPTY_PROJECTION: ChannelManagerProjectionV1 = Object.freeze({
     Object.freeze({
       id: 'real-adapters',
       status: 'unavailable',
-      message: 'Feishu and WeCom adapters require a developer account, Host credential handle, and an official transport.',
+      message:
+        'Feishu and WeCom adapters require a developer account, Host credential handle, and an official transport.',
     }),
   ]),
 })
@@ -130,7 +128,10 @@ interface ChannelManagerState {
 
 /** This renderer client can invoke only the launcher allowlist and receives only the redacted result projection. */
 export interface ChannelManagerActionsApi {
-  run(action: 'enable' | 'disable' | 'reconnect' | 'archive' | 'restore' | 'unbind', input: Record<string, unknown>): Promise<ChannelManagerActionResult>
+  run(
+    action: 'enable' | 'disable' | 'reconnect' | 'archive' | 'restore' | 'unbind',
+    input: Record<string, unknown>,
+  ): Promise<ChannelManagerActionResult>
 }
 
 const projections = new WeakMap<object, ChannelManagerState>()
@@ -170,7 +171,9 @@ function cloneJson<Value>(value: Value): Value {
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`${label} must be an object`)
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object`)
+  }
   return value as Record<string, unknown>
 }
 
@@ -181,7 +184,10 @@ function exactKeys(value: Record<string, unknown>, allowed: readonly string[], l
 }
 
 function boundedText(value: unknown, label: string, maximum = 512): string {
-  if (typeof value !== 'string' || value.length < 1 || value.length > maximum || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(value)) {
+  if (
+    typeof value !== 'string' || value.length < 1 || value.length > maximum
+    || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(value)
+  ) {
     throw new TypeError(`${label} is invalid`)
   }
   return value
@@ -220,7 +226,9 @@ function connection(value: unknown, label: string): ChannelManagerConnectionProj
   if (typeof item.enabled !== 'boolean') throw new TypeError(`${label}.enabled is invalid`)
   return {
     ref: ref(item.ref, `${label}.ref`),
-    ...(item.displayName === undefined ? {} : { displayName: boundedText(item.displayName, `${label}.displayName`, 160) }),
+    ...(item.displayName === undefined
+      ? {}
+      : { displayName: boundedText(item.displayName, `${label}.displayName`, 160) }),
     adapterKind: boundedText(item.adapterKind, `${label}.adapterKind`),
     enabled: item.enabled,
     transportMode: boundedText(item.transportMode, `${label}.transportMode`),
@@ -230,112 +238,187 @@ function connection(value: unknown, label: string): ChannelManagerConnectionProj
 
 function normalizeProjection(value: unknown): ChannelManagerProjectionV1 {
   const projection = object(value, 'Channel Manager projection')
-  exactKeys(projection, ['contract', 'schemaVersion', 'status', 'service', 'connections', 'routes', 'accounts', 'bindings', 'logs', 'diagnostics'], 'Channel Manager projection')
+  exactKeys(projection, [
+    'contract',
+    'schemaVersion',
+    'status',
+    'service',
+    'connections',
+    'routes',
+    'accounts',
+    'bindings',
+    'logs',
+    'diagnostics',
+  ], 'Channel Manager projection')
   if (projection.contract !== 'cordisx.channel-manager-projection/v1' || projection.schemaVersion !== 1) {
     throw new TypeError('Channel Manager projection contract is unsupported')
   }
   const service = object(projection.service, 'Channel Manager projection.service')
-  exactKeys(service, ['configurationKind', 'configApplies', 'revision', 'lastGoodRevision', 'writable'], 'Channel Manager projection.service')
-  if (service.configurationKind !== 'host' || service.configApplies !== 'service-restart' || typeof service.writable !== 'boolean') {
+  exactKeys(
+    service,
+    ['configurationKind', 'configApplies', 'revision', 'lastGoodRevision', 'writable'],
+    'Channel Manager projection.service',
+  )
+  if (
+    service.configurationKind !== 'host' || service.configApplies !== 'service-restart'
+    || typeof service.writable !== 'boolean'
+  ) {
     throw new TypeError('Channel Manager service projection is invalid')
   }
   const connections = array(projection.connections, 'Channel Manager projection.connections').map((item, index) => (
     connection(item, `Channel Manager projection.connections[${index}]`)
   ))
-  const routes = array(projection.routes, 'Channel Manager projection.routes').map((value, index): ChannelManagerRouteProjection => {
-    const item = object(value, `Channel Manager projection.routes[${index}]`)
-    const label = `Channel Manager projection.routes[${index}]`
-    exactKeys(item, ['id', 'connection', 'enabled', 'workspaceAlias', 'provider', 'model', 'profile', 'notifications'], label)
-    if (typeof item.enabled !== 'boolean') throw new TypeError(`${label}.enabled is invalid`)
-    return {
-      id: boundedText(item.id, `${label}.id`),
-      connection: ref(item.connection, `${label}.connection`),
-      enabled: item.enabled,
-      workspaceAlias: boundedText(item.workspaceAlias, `${label}.workspaceAlias`),
-      provider: boundedText(item.provider, `${label}.provider`),
-      model: boundedText(item.model, `${label}.model`),
-      profile: boundedText(item.profile, `${label}.profile`),
-      notifications: array(item.notifications, `${label}.notifications`, 32).map((entry, notificationIndex) => (
-        boundedText(entry, `${label}.notifications[${notificationIndex}]`)
-      )),
-    }
-  })
-  const accounts = array(projection.accounts, 'Channel Manager projection.accounts').map((value, index): ChannelManagerAccountProjection => {
-    const item = object(value, `Channel Manager projection.accounts[${index}]`)
-    const label = `Channel Manager projection.accounts[${index}]`
-    exactKeys(item, [
-      'ref', 'displayName', 'adapterKind', 'enabled', 'transportMode', 'secretState', 'implementationStatus', 'connectionState',
-      'generation', 'inbound', 'outbound',
-    ], label)
-    const base = connection(Object.fromEntries(
-      ['ref', 'displayName', 'adapterKind', 'enabled', 'transportMode', 'secretState'].map(key => [key, item[key]]),
-    ), label)
-    const counts = (raw: unknown, countLabel: string) => {
-      const count = object(raw, countLabel)
-      exactKeys(count, ['pending', 'retrying', 'deadLetter'], countLabel)
+  const routes = array(projection.routes, 'Channel Manager projection.routes').map(
+    (value, index): ChannelManagerRouteProjection => {
+      const item = object(value, `Channel Manager projection.routes[${index}]`)
+      const label = `Channel Manager projection.routes[${index}]`
+      exactKeys(item, [
+        'id',
+        'connection',
+        'enabled',
+        'workspaceAlias',
+        'provider',
+        'model',
+        'profile',
+        'notifications',
+      ], label)
+      if (typeof item.enabled !== 'boolean') throw new TypeError(`${label}.enabled is invalid`)
       return {
-        pending: boundedInteger(count.pending, `${countLabel}.pending`),
-        retrying: boundedInteger(count.retrying, `${countLabel}.retrying`),
-        deadLetter: boundedInteger(count.deadLetter, `${countLabel}.deadLetter`),
+        id: boundedText(item.id, `${label}.id`),
+        connection: ref(item.connection, `${label}.connection`),
+        enabled: item.enabled,
+        workspaceAlias: boundedText(item.workspaceAlias, `${label}.workspaceAlias`),
+        provider: boundedText(item.provider, `${label}.provider`),
+        model: boundedText(item.model, `${label}.model`),
+        profile: boundedText(item.profile, `${label}.profile`),
+        notifications: array(item.notifications, `${label}.notifications`, 32).map((entry, notificationIndex) => (
+          boundedText(entry, `${label}.notifications[${notificationIndex}]`)
+        )),
       }
-    }
-    return {
-      ...base,
-      implementationStatus: oneOf(item.implementationStatus, ['implemented', 'verified', 'experimental', 'unavailable', 'planned'], `${label}.implementationStatus`),
-      connectionState: oneOf(item.connectionState, ['disabled', 'starting', 'ready', 'retrying', 'unavailable', 'stopped'], `${label}.connectionState`),
-      generation: boundedInteger(item.generation, `${label}.generation`),
-      inbound: counts(item.inbound, `${label}.inbound`),
-      outbound: counts(item.outbound, `${label}.outbound`),
-    }
-  })
-  const bindings = array(projection.bindings, 'Channel Manager projection.bindings').map((value, index): ChannelManagerBindingProjection => {
-    const item = object(value, `Channel Manager projection.bindings[${index}]`)
-    const label = `Channel Manager projection.bindings[${index}]`
-    exactKeys(item, ['bindingId', 'channel', 'session', 'routeId', 'state'], label)
-    const channel = object(item.channel, `${label}.channel`)
-    exactKeys(channel, ['adapterId', 'accountId', 'tenantId', 'conversationId', 'threadId'], `${label}.channel`)
-    const session = object(item.session, `${label}.session`)
-    exactKeys(session, ['providerId', 'remoteSessionId'], `${label}.session`)
-    return {
-      bindingId: boundedText(item.bindingId, `${label}.bindingId`),
-      channel: {
-        ...ref({ adapterId: channel.adapterId, accountId: channel.accountId, tenantId: channel.tenantId }, `${label}.channel`),
-        conversationId: boundedText(channel.conversationId, `${label}.channel.conversationId`),
-        threadId: boundedText(channel.threadId, `${label}.channel.threadId`),
-      },
-      session: {
-        providerId: boundedText(session.providerId, `${label}.session.providerId`),
-        remoteSessionId: boundedText(session.remoteSessionId, `${label}.session.remoteSessionId`),
-      },
-      routeId: boundedText(item.routeId, `${label}.routeId`),
-      state: oneOf(item.state, ['active', 'archived', 'unavailable'], `${label}.state`),
-    }
-  })
-  const logs = (projection.logs === undefined ? [] : array(projection.logs, 'Channel Manager projection.logs', 2_000)).map((value, index): ChannelManagerLogProjection => {
-    const item = object(value, `Channel Manager projection.logs[${index}]`)
-    const label = `Channel Manager projection.logs[${index}]`
-    exactKeys(item, ['id', 'account', 'recordedAt', 'action', 'outcome'], label)
-    const recordedAt = boundedText(item.recordedAt, `${label}.recordedAt`, 64)
-    if (Number.isNaN(Date.parse(recordedAt))) throw new TypeError(`${label}.recordedAt is invalid`)
-    return {
-      id: boundedText(item.id, `${label}.id`, 256), account: ref(item.account, `${label}.account`), recordedAt,
-      action: boundedText(item.action, `${label}.action`, 160), outcome: boundedText(item.outcome, `${label}.outcome`, 160),
-    }
-  })
-  const diagnostics = array(projection.diagnostics, 'Channel Manager projection.diagnostics', 128).map((value, index): ChannelManagerDiagnosticProjection => {
-    const item = object(value, `Channel Manager projection.diagnostics[${index}]`)
-    const label = `Channel Manager projection.diagnostics[${index}]`
-    exactKeys(item, ['id', 'status', 'message'], label)
-    return {
-      id: boundedText(item.id, `${label}.id`),
-      status: oneOf(item.status, ['implemented', 'verified', 'experimental', 'unavailable', 'planned'], `${label}.status`),
-      message: boundedText(item.message, `${label}.message`, 4096),
-    }
-  })
+    },
+  )
+  const accounts = array(projection.accounts, 'Channel Manager projection.accounts').map(
+    (value, index): ChannelManagerAccountProjection => {
+      const item = object(value, `Channel Manager projection.accounts[${index}]`)
+      const label = `Channel Manager projection.accounts[${index}]`
+      exactKeys(item, [
+        'ref',
+        'displayName',
+        'adapterKind',
+        'enabled',
+        'transportMode',
+        'secretState',
+        'implementationStatus',
+        'connectionState',
+        'generation',
+        'inbound',
+        'outbound',
+      ], label)
+      const base = connection(
+        Object.fromEntries(
+          ['ref', 'displayName', 'adapterKind', 'enabled', 'transportMode', 'secretState'].map(key => [key, item[key]]),
+        ),
+        label,
+      )
+      const counts = (raw: unknown, countLabel: string) => {
+        const count = object(raw, countLabel)
+        exactKeys(count, ['pending', 'retrying', 'deadLetter'], countLabel)
+        return {
+          pending: boundedInteger(count.pending, `${countLabel}.pending`),
+          retrying: boundedInteger(count.retrying, `${countLabel}.retrying`),
+          deadLetter: boundedInteger(count.deadLetter, `${countLabel}.deadLetter`),
+        }
+      }
+      return {
+        ...base,
+        implementationStatus: oneOf(item.implementationStatus, [
+          'implemented',
+          'verified',
+          'experimental',
+          'unavailable',
+          'planned',
+        ], `${label}.implementationStatus`),
+        connectionState: oneOf(item.connectionState, [
+          'disabled',
+          'starting',
+          'ready',
+          'retrying',
+          'unavailable',
+          'stopped',
+        ], `${label}.connectionState`),
+        generation: boundedInteger(item.generation, `${label}.generation`),
+        inbound: counts(item.inbound, `${label}.inbound`),
+        outbound: counts(item.outbound, `${label}.outbound`),
+      }
+    },
+  )
+  const bindings = array(projection.bindings, 'Channel Manager projection.bindings').map(
+    (value, index): ChannelManagerBindingProjection => {
+      const item = object(value, `Channel Manager projection.bindings[${index}]`)
+      const label = `Channel Manager projection.bindings[${index}]`
+      exactKeys(item, ['bindingId', 'channel', 'session', 'routeId', 'state'], label)
+      const channel = object(item.channel, `${label}.channel`)
+      exactKeys(channel, ['adapterId', 'accountId', 'tenantId', 'conversationId', 'threadId'], `${label}.channel`)
+      const session = object(item.session, `${label}.session`)
+      exactKeys(session, ['providerId', 'remoteSessionId'], `${label}.session`)
+      return {
+        bindingId: boundedText(item.bindingId, `${label}.bindingId`),
+        channel: {
+          ...ref(
+            { adapterId: channel.adapterId, accountId: channel.accountId, tenantId: channel.tenantId },
+            `${label}.channel`,
+          ),
+          conversationId: boundedText(channel.conversationId, `${label}.channel.conversationId`),
+          threadId: boundedText(channel.threadId, `${label}.channel.threadId`),
+        },
+        session: {
+          providerId: boundedText(session.providerId, `${label}.session.providerId`),
+          remoteSessionId: boundedText(session.remoteSessionId, `${label}.session.remoteSessionId`),
+        },
+        routeId: boundedText(item.routeId, `${label}.routeId`),
+        state: oneOf(item.state, ['active', 'archived', 'unavailable'], `${label}.state`),
+      }
+    },
+  )
+  const logs = (projection.logs === undefined ? [] : array(projection.logs, 'Channel Manager projection.logs', 2_000))
+    .map((value, index): ChannelManagerLogProjection => {
+      const item = object(value, `Channel Manager projection.logs[${index}]`)
+      const label = `Channel Manager projection.logs[${index}]`
+      exactKeys(item, ['id', 'account', 'recordedAt', 'action', 'outcome'], label)
+      const recordedAt = boundedText(item.recordedAt, `${label}.recordedAt`, 64)
+      if (Number.isNaN(Date.parse(recordedAt))) throw new TypeError(`${label}.recordedAt is invalid`)
+      return {
+        id: boundedText(item.id, `${label}.id`, 256),
+        account: ref(item.account, `${label}.account`),
+        recordedAt,
+        action: boundedText(item.action, `${label}.action`, 160),
+        outcome: boundedText(item.outcome, `${label}.outcome`, 160),
+      }
+    })
+  const diagnostics = array(projection.diagnostics, 'Channel Manager projection.diagnostics', 128).map(
+    (value, index): ChannelManagerDiagnosticProjection => {
+      const item = object(value, `Channel Manager projection.diagnostics[${index}]`)
+      const label = `Channel Manager projection.diagnostics[${index}]`
+      exactKeys(item, ['id', 'status', 'message'], label)
+      return {
+        id: boundedText(item.id, `${label}.id`),
+        status: oneOf(
+          item.status,
+          ['implemented', 'verified', 'experimental', 'unavailable', 'planned'],
+          `${label}.status`,
+        ),
+        message: boundedText(item.message, `${label}.message`, 4096),
+      }
+    },
+  )
   return {
     contract: 'cordisx.channel-manager-projection/v1',
     schemaVersion: 1,
-    status: oneOf(projection.status, ['implemented', 'verified', 'experimental', 'unavailable', 'planned'], 'Channel Manager projection.status'),
+    status: oneOf(
+      projection.status,
+      ['implemented', 'verified', 'experimental', 'unavailable', 'planned'],
+      'Channel Manager projection.status',
+    ),
     service: {
       configurationKind: 'host',
       configApplies: 'service-restart',
@@ -432,7 +515,9 @@ export class CordisXChannelManagerService extends Service implements CordisXChan
     projections.set(this, {
       projection: normalizeProjection(wrapped.projection ?? EMPTY_PROJECTION),
       ...(wrapped.serviceConfig === undefined ? {} : { serviceConfig: wrapped.serviceConfig }),
-      ...(wrapped.createCredentialedConnection === undefined ? {} : { createCredentialedConnection: wrapped.createCredentialedConnection }),
+      ...(wrapped.createCredentialedConnection === undefined
+        ? {}
+        : { createCredentialedConnection: wrapped.createCredentialedConnection }),
       ...(wrapped.actions === undefined ? {} : { actions: wrapped.actions }),
       localConnections: [],
       listeners: new Set<() => void>(),

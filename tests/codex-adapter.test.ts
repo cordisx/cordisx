@@ -7,7 +7,9 @@ import { codexAdapter, isolatedCodexEnvironment } from '../packages/cli/src/adap
 const temporaryDirectories: string[] = []
 
 afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map(async directory => await rm(directory, { recursive: true, force: true })))
+  await Promise.all(
+    temporaryDirectories.splice(0).map(async directory => await rm(directory, { recursive: true, force: true })),
+  )
 })
 
 async function fixture(): Promise<{ root: string; executable: string }> {
@@ -35,7 +37,11 @@ describe('Codex adapter launch plan', () => {
       path: path.join(root, 'apps', 'codex', 'profiles', 'default', 'chromium'),
     })
     expect(plan.isolatedDataRoots).toEqual([
-      { name: 'Chromium profile', path: path.join(root, 'apps', 'codex', 'profiles', 'default', 'chromium'), managed: true },
+      {
+        name: 'Chromium profile',
+        path: path.join(root, 'apps', 'codex', 'profiles', 'default', 'chromium'),
+        managed: true,
+      },
     ])
     await codexAdapter.prepareLaunch(plan)
     await expect(access(path.join(root, 'apps', 'codex', 'profiles', 'default', 'chromium'))).resolves.toBeUndefined()
@@ -57,7 +63,11 @@ describe('Codex adapter launch plan', () => {
     expect(process.env.CODEX_HOME).toBe(before.CODEX_HOME)
 
     await codexAdapter.prepareLaunch(plan)
-    await expect(Promise.all(plan.isolatedDataRoots.map(async item => await import('node:fs/promises').then(fs => fs.access(item.path))))).resolves.toBeDefined()
+    await expect(
+      Promise.all(
+        plan.isolatedDataRoots.map(async item => await import('node:fs/promises').then(fs => fs.access(item.path))),
+      ),
+    ).resolves.toBeDefined()
     const managedRoot = plan.isolatedDataRoots.find(item => item.name === 'HOME')
     if (managedRoot === undefined) throw new Error('missing managed HOME root')
     await chmod(managedRoot.path, 0o755)

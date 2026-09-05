@@ -18,15 +18,29 @@ import type {
 
 const AVAILABILITY_NAMESPACE = 'cordisx.manager.capability-availability'
 const PLATFORM_CAPABILITIES: readonly CordisXPlatformCapability[] = Object.freeze([
-  'models.read', 'tasks.catalog.read', 'tasks.content.read', 'tasks.create',
-  'tasks.control', 'turns.submit', 'turns.control', 'turns.introduce', 'approvals.decide',
+  'models.read',
+  'tasks.catalog.read',
+  'tasks.content.read',
+  'tasks.create',
+  'tasks.control',
+  'turns.submit',
+  'turns.control',
+  'turns.introduce',
+  'approvals.decide',
 ])
 const AGENT_INPUT_CAPABILITIES: readonly CordisXPlatformCapability[] = Object.freeze([
-  'agent.messages.append', 'agent.steps.reject', 'agent.messages.transform',
-  'agent.prompt.section', 'agent.prompt.context',
+  'agent.messages.append',
+  'agent.steps.reject',
+  'agent.messages.transform',
+  'agent.prompt.section',
+  'agent.prompt.context',
 ])
 
-function message(key: string, fallback: string, params?: Readonly<Record<string, string | number>>): CordisXLocalizedText {
+function message(
+  key: string,
+  fallback: string,
+  params?: Readonly<Record<string, string | number>>,
+): CordisXLocalizedText {
   return Object.freeze({
     namespace: AVAILABILITY_NAMESPACE,
     key,
@@ -39,7 +53,9 @@ function frozenScope(scope: CordisXCapabilityScope): CordisXCapabilityScope {
   return Object.freeze({
     ...(scope.providers === undefined ? {} : { providers: Object.freeze([...scope.providers]) }),
     ...(scope.cwdRoots === undefined ? {} : { cwdRoots: Object.freeze([...scope.cwdRoots]) }),
-    ...(scope.sessions === undefined ? {} : { sessions: Object.freeze(scope.sessions.map(item => Object.freeze({ ...item }))) }),
+    ...(scope.sessions === undefined
+      ? {}
+      : { sessions: Object.freeze(scope.sessions.map(item => Object.freeze({ ...item }))) }),
     ...(scope.sessionIds === undefined ? {} : { sessionIds: Object.freeze([...scope.sessionIds]) }),
   })
 }
@@ -72,7 +88,10 @@ export function platformAdapterCapabilityProvider(
   const providerStatus: CordisXCapabilityAvailabilityState = status.mode === 'unavailable' ? 'unavailable' : 'supported'
   const providerReason = status.mode === 'unavailable'
     ? message('provider.current-connection.unavailable', 'The Desktop current connection is unavailable.')
-    : message('provider.current-connection.supported', 'The Desktop current connection can route supported capabilities.')
+    : message(
+      'provider.current-connection.supported',
+      'The Desktop current connection can route supported capabilities.',
+    )
   return report({
     providerId: input.providerId,
     providerName: message('provider.current-connection.name', 'Desktop current connection'),
@@ -80,14 +99,16 @@ export function platformAdapterCapabilityProvider(
     family: 'platform',
     status: providerStatus,
     reason: providerReason,
-    routes: PLATFORM_CAPABILITIES.map(capability => route(
-      capability,
-      supported.has(capability) ? 'supported' : 'unavailable',
-      supported.has(capability)
-        ? message('route.current-connection.supported', 'The current connection can route this capability.')
-        : message('route.current-connection.unavailable', 'The current connection cannot route this capability.'),
-      input.scope,
-    )),
+    routes: PLATFORM_CAPABILITIES.map(capability =>
+      route(
+        capability,
+        supported.has(capability) ? 'supported' : 'unavailable',
+        supported.has(capability)
+          ? message('route.current-connection.supported', 'The current connection can route this capability.')
+          : message('route.current-connection.unavailable', 'The current connection cannot route this capability.'),
+        input.scope,
+      )
+    ),
   })
 }
 
@@ -135,11 +156,13 @@ export function hostLocalCapabilityProviders(input: {
       family: 'agent-input',
       status: agentAvailable ? 'supported' : 'unavailable',
       reason: agentReason,
-      routes: AGENT_INPUT_CAPABILITIES.map(capability => route(
-        capability,
-        agentAvailable ? 'supported' : 'unavailable',
-        agentReason,
-      )),
+      routes: AGENT_INPUT_CAPABILITIES.map(capability =>
+        route(
+          capability,
+          agentAvailable ? 'supported' : 'unavailable',
+          agentReason,
+        )
+      ),
     }),
     report({
       providerId: 'host-configuration',
@@ -149,7 +172,10 @@ export function hostLocalCapabilityProviders(input: {
       status: input.configurationWritable ? 'supported' : 'degraded',
       reason: input.configurationWritable
         ? message('provider.configuration.supported', 'Validated configuration and the Host writer are available.')
-        : message('provider.configuration.degraded', 'Configuration descriptors are available, but the Host writer is unavailable.'),
+        : message(
+          'provider.configuration.degraded',
+          'Configuration descriptors are available, but the Host writer is unavailable.',
+        ),
       routes: [],
     }),
     report({
@@ -158,7 +184,10 @@ export function hostLocalCapabilityProviders(input: {
       kind: 'host-local',
       family: 'console',
       status: 'unavailable',
-      reason: message('provider.console.unavailable', 'The Console protocol is defined, but this Host has not published a console service.'),
+      reason: message(
+        'provider.console.unavailable',
+        'The Console protocol is defined, but this Host has not published a console service.',
+      ),
       routes: [],
     }),
     report({
@@ -168,8 +197,14 @@ export function hostLocalCapabilityProviders(input: {
       family: 'package-lifecycle',
       status: input.packageLifecycleAvailable === true ? 'supported' : 'unavailable',
       reason: input.packageLifecycleAvailable === true
-        ? message('provider.package-lifecycle.supported', 'The launcher package lifecycle and generation service is available.')
-        : message('provider.package-lifecycle.unavailable', 'Package lifecycle contracts are defined, but this Host has not published an activation service.'),
+        ? message(
+          'provider.package-lifecycle.supported',
+          'The launcher package lifecycle and generation service is available.',
+        )
+        : message(
+          'provider.package-lifecycle.unavailable',
+          'Package lifecycle contracts are defined, but this Host has not published an activation service.',
+        ),
       routes: [],
     }),
   ])
@@ -183,7 +218,9 @@ export function externalProviderCapabilityProviders(
     const providerName = message('provider.external.name', '{name}', { name: provider.displayName })
     const providerReason = available
       ? message('provider.external.supported', 'External provider {name} is ready.', { name: provider.displayName })
-      : message('provider.external.unavailable', 'External provider {name} is unavailable.', { name: provider.displayName })
+      : message('provider.external.unavailable', 'External provider {name} is unavailable.', {
+        name: provider.displayName,
+      })
     return report({
       providerId: `external:${provider.providerId}`,
       providerName,
@@ -192,12 +229,14 @@ export function externalProviderCapabilityProviders(
       status: available ? 'supported' : 'unavailable',
       reason: providerReason,
       ...(provider.generation === undefined ? {} : { generation: provider.generation }),
-      routes: PLATFORM_CAPABILITIES.map(capability => route(
-        capability,
-        available ? 'supported' : 'unavailable',
-        providerReason,
-        { providers: [provider.providerId] },
-      )),
+      routes: PLATFORM_CAPABILITIES.map(capability =>
+        route(
+          capability,
+          available ? 'supported' : 'unavailable',
+          providerReason,
+          { providers: [provider.providerId] },
+        )
+      ),
     })
   }))
 }
@@ -221,10 +260,12 @@ export interface ResolvedCapabilityAvailability {
 }
 
 function providerIds(scope: CordisXCapabilityScope): readonly string[] {
-  return Object.freeze([...new Set([
-    ...(scope.providers ?? []),
-    ...(scope.sessions ?? []).map(item => item.providerId),
-  ])].sort())
+  return Object.freeze([
+    ...new Set([
+      ...(scope.providers ?? []),
+      ...(scope.sessions ?? []).map(item => item.providerId),
+    ]),
+  ].sort())
 }
 
 function routeProviderIds(scope: CordisXCapabilityScope): ReadonlySet<string> {
@@ -236,7 +277,10 @@ function providerRouteMatches(route: CordisXCapabilityProviderRoute, providerId:
   return scoped.has(providerId)
 }
 
-function resolvedProvider(provider: CordisXCapabilityProviderReport, route: CordisXCapabilityProviderRoute): ResolvedCapabilityProvider {
+function resolvedProvider(
+  provider: CordisXCapabilityProviderReport,
+  route: CordisXCapabilityProviderRoute,
+): ResolvedCapabilityProvider {
   return Object.freeze({
     providerId: provider.providerId,
     providerName: provider.providerName,
@@ -256,7 +300,9 @@ function unavailableProvider(providerId: string): ResolvedCapabilityProvider {
     kind: 'external-provider',
     family: 'platform',
     status: 'unavailable',
-    reason: message('route.provider-scope.unavailable', 'No Host provider can route provider {providerId}.', { providerId }),
+    reason: message('route.provider-scope.unavailable', 'No Host provider can route provider {providerId}.', {
+      providerId,
+    }),
     scope: frozenScope({ providers: [providerId] }),
   })
 }
@@ -278,16 +324,20 @@ export class CapabilityAvailabilityRegistry {
   }
 
   resolve(capability: CordisXPlatformCapability, scope: CordisXCapabilityScope): ResolvedCapabilityAvailability {
-    const routes = this.providers.flatMap(provider => provider.routes
-      .filter(item => item.capability === capability)
-      .map(item => ({ provider, route: item })))
+    const routes = this.providers.flatMap(provider =>
+      provider.routes
+        .filter(item => item.capability === capability)
+        .map(item => ({ provider, route: item }))
+    )
     const requestedProviders = providerIds(scope)
     if (requestedProviders.length === 0) {
       const projected = routes.map(item => resolvedProvider(item.provider, item.route))
       const routable = projected.filter(item => item.status !== 'unavailable')
       const status: CordisXCapabilityAvailabilityState = routable.some(item => item.status === 'supported')
         ? 'supported'
-        : routable.length > 0 ? 'degraded' : 'unavailable'
+        : routable.length > 0
+        ? 'degraded'
+        : 'unavailable'
       return Object.freeze({
         capability,
         status,
@@ -306,13 +356,19 @@ export class CapabilityAvailabilityRegistry {
         continue
       }
       projected.push(...matching.map(item => resolvedProvider(item.provider, item.route)))
-      coverage.push(matching.some(item => item.route.status === 'supported')
-        ? 'supported'
-        : matching.some(item => item.route.status === 'degraded') ? 'degraded' : 'unavailable')
+      coverage.push(
+        matching.some(item => item.route.status === 'supported')
+          ? 'supported'
+          : matching.some(item => item.route.status === 'degraded')
+          ? 'degraded'
+          : 'unavailable',
+      )
     }
     const status: CordisXCapabilityAvailabilityState = coverage.every(item => item === 'supported')
       ? 'supported'
-      : coverage.some(item => item !== 'unavailable') ? 'degraded' : 'unavailable'
+      : coverage.some(item => item !== 'unavailable')
+      ? 'degraded'
+      : 'unavailable'
     return Object.freeze({
       capability,
       status,
@@ -321,15 +377,27 @@ export class CapabilityAvailabilityRegistry {
     })
   }
 
-  unavailableRequired(capabilities: readonly { readonly name: CordisXPlatformCapability; readonly required: boolean; readonly scope: CordisXCapabilityScope }[]): readonly CordisXPlatformCapability[] {
-    return Object.freeze(capabilities
-      .filter(item => item.required && this.resolve(item.name, item.scope).status === 'unavailable')
-      .map(item => item.name))
+  unavailableRequired(
+    capabilities: readonly {
+      readonly name: CordisXPlatformCapability
+      readonly required: boolean
+      readonly scope: CordisXCapabilityScope
+    }[],
+  ): readonly CordisXPlatformCapability[] {
+    return Object.freeze(
+      capabilities
+        .filter(item => item.required && this.resolve(item.name, item.scope).status === 'unavailable')
+        .map(item => item.name),
+    )
   }
 
   private summaryReason(status: CordisXCapabilityAvailabilityState): CordisXLocalizedText {
-    if (status === 'supported') return message('availability.supported', 'At least one Host provider can route this capability.')
-    if (status === 'degraded') return message('availability.degraded', 'Only part of the declared provider scope is currently routable.')
+    if (status === 'supported') {
+      return message('availability.supported', 'At least one Host provider can route this capability.')
+    }
+    if (status === 'degraded') {
+      return message('availability.degraded', 'Only part of the declared provider scope is currently routable.')
+    }
     return message('availability.unavailable', 'No Host provider can route this capability for the declared scope.')
   }
 }
@@ -359,7 +427,8 @@ const EN_MESSAGES = {
   'provider.console.unavailable': 'The Console protocol is defined, but this Host has not published a console service.',
   'provider.package-lifecycle.name': 'Host package lifecycle',
   'provider.package-lifecycle.supported': 'The launcher package lifecycle and generation service is available.',
-  'provider.package-lifecycle.unavailable': 'Package lifecycle contracts are defined, but this Host has not published an activation service.',
+  'provider.package-lifecycle.unavailable':
+    'Package lifecycle contracts are defined, but this Host has not published an activation service.',
   'provider.external.name': '{name}',
   'provider.external.supported': 'External provider {name} is ready.',
   'provider.external.unavailable': 'External provider {name} is unavailable.',
@@ -399,6 +468,11 @@ const ZH_MESSAGES = {
 }
 
 export const CORDISX_CAPABILITY_AVAILABILITY_LOCALE_CATALOGS: readonly CordisXLocaleCatalog[] = Object.freeze([
-  Object.freeze({ namespace: AVAILABILITY_NAMESPACE, locale: 'en', default: true, messages: Object.freeze(EN_MESSAGES) }),
+  Object.freeze({
+    namespace: AVAILABILITY_NAMESPACE,
+    locale: 'en',
+    default: true,
+    messages: Object.freeze(EN_MESSAGES),
+  }),
   Object.freeze({ namespace: AVAILABILITY_NAMESPACE, locale: 'zh-CN', messages: Object.freeze(ZH_MESSAGES) }),
 ])

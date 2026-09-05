@@ -1,4 +1,4 @@
-import { Service, type Context } from '@deepseek-ai/cordis'
+import { type Context, Service } from '@deepseek-ai/cordis'
 
 export const PLAYGROUND_ROOM_SIMULATION_BRIDGE_SERVICE = 'playgroundRoomSimulationBridge' as const
 export const PLAYGROUND_ROOM_SIMULATION_BINDING_CONTRACT = 'cordisx.playground-room-simulation-binding/v1' as const
@@ -17,7 +17,14 @@ export interface PlaygroundRoomSimulationBinding {
 
 export interface PlaygroundRoomSimulationUnavailable {
   readonly status: 'unavailable'
-  readonly code: 'service-unavailable' | 'owner-unavailable' | 'owner-replaced' | 'owner-retired' | 'invalid-binding' | 'owner-error' | string
+  readonly code:
+    | 'service-unavailable'
+    | 'owner-unavailable'
+    | 'owner-replaced'
+    | 'owner-retired'
+    | 'invalid-binding'
+    | 'owner-error'
+    | string
   readonly message: string
   readonly ownerGeneration?: string
 }
@@ -110,7 +117,9 @@ type MaybePromise<Value> = Value | Promise<Value>
 export interface PlaygroundRoomSimulationOwner {
   readonly ownerGeneration: string
   resolveSession(sessionId: string): MaybePromise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationBinding>>
-  inspect(binding: PlaygroundRoomSimulationBinding): MaybePromise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationInspection>>
+  inspect(
+    binding: PlaygroundRoomSimulationBinding,
+  ): MaybePromise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationInspection>>
   injectMessage(
     binding: PlaygroundRoomSimulationBinding,
     operationId: string,
@@ -142,7 +151,9 @@ export interface PlaygroundRoomSimulationOwner {
     approvalId: string,
     decision: PlaygroundRoomSimulationPermissionDecision,
   ): MaybePromise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationOperationReceipt>>
-  snapshot(binding: PlaygroundRoomSimulationBinding): MaybePromise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationSnapshot>>
+  snapshot(
+    binding: PlaygroundRoomSimulationBinding,
+  ): MaybePromise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationSnapshot>>
   subscribe(
     binding: PlaygroundRoomSimulationBinding,
     listener: (event: PlaygroundRoomSimulationResult<PlaygroundRoomSimulationEvent>) => void,
@@ -159,7 +170,9 @@ export interface PlaygroundRoomSimulationBridgeStatus {
 export interface PlaygroundRoomSimulationForwardingClient {
   status(): PlaygroundRoomSimulationBridgeStatus
   resolveSession(sessionId: string): Promise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationBinding>>
-  inspect(binding: PlaygroundRoomSimulationBinding): Promise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationInspection>>
+  inspect(
+    binding: PlaygroundRoomSimulationBinding,
+  ): Promise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationInspection>>
   injectMessage(
     binding: PlaygroundRoomSimulationBinding,
     operationId: string,
@@ -191,7 +204,9 @@ export interface PlaygroundRoomSimulationForwardingClient {
     approvalId: string,
     decision: PlaygroundRoomSimulationPermissionDecision,
   ): Promise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationOperationReceipt>>
-  snapshot(binding: PlaygroundRoomSimulationBinding): Promise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationSnapshot>>
+  snapshot(
+    binding: PlaygroundRoomSimulationBinding,
+  ): Promise<PlaygroundRoomSimulationResult<PlaygroundRoomSimulationSnapshot>>
   subscribe(
     binding: PlaygroundRoomSimulationBinding,
     listener: (event: PlaygroundRoomSimulationResult<PlaygroundRoomSimulationEvent>) => void,
@@ -229,7 +244,7 @@ export function isPlaygroundRoomSimulationBinding(value: unknown): value is Play
   const input = value as Partial<PlaygroundRoomSimulationBinding>
   const keys = Object.keys(input).sort().join(',')
   return (keys === 'bindingId,contract,generation,memberId,ownerGeneration,roomId,runId'
-      || keys === 'bindingId,contract,generation,memberId,ownerGeneration,roomId,runId,sessionId')
+    || keys === 'bindingId,contract,generation,memberId,ownerGeneration,roomId,runId,sessionId')
     && input.contract === PLAYGROUND_ROOM_SIMULATION_BINDING_CONTRACT
     && (input.sessionId === undefined || boundedHandle(input.sessionId))
     && boundedHandle(input.roomId)
@@ -245,11 +260,20 @@ function unavailable(
   message: string,
   ownerGeneration?: string,
 ): PlaygroundRoomSimulationUnavailable {
-  return Object.freeze({ status: 'unavailable', code, message, ...(ownerGeneration === undefined ? {} : { ownerGeneration }) })
+  return Object.freeze({
+    status: 'unavailable',
+    code,
+    message,
+    ...(ownerGeneration === undefined ? {} : { ownerGeneration }),
+  })
 }
 
 function ownerError(ownerGeneration: string): PlaygroundRoomSimulationUnavailable {
-  return unavailable('owner-error', 'The Playground Room simulation owner could not complete the structured request.', ownerGeneration)
+  return unavailable(
+    'owner-error',
+    'The Playground Room simulation owner could not complete the structured request.',
+    ownerGeneration,
+  )
 }
 
 export class PlaygroundRoomSimulationBridgeRegistry {
@@ -261,19 +285,39 @@ export class PlaygroundRoomSimulationBridgeRegistry {
     status: () => this.status(),
     resolveSession: (sessionId: string) => this.forwardSession(sessionId, owner => owner.resolveSession(sessionId)),
     inspect: (binding: PlaygroundRoomSimulationBinding) => this.forward(binding, owner => owner.inspect(binding)),
-    injectMessage: (binding: PlaygroundRoomSimulationBinding, operationId: string, payload: PlaygroundRoomSimulationMessageInput) => (
+    injectMessage: (
+      binding: PlaygroundRoomSimulationBinding,
+      operationId: string,
+      payload: PlaygroundRoomSimulationMessageInput,
+    ) => (
       this.forward(binding, owner => owner.injectMessage(binding, operationId, clone(payload)))
     ),
-    emitAgentReply: (binding: PlaygroundRoomSimulationBinding, operationId: string, payload: PlaygroundRoomSimulationAgentReplyInput) => (
+    emitAgentReply: (
+      binding: PlaygroundRoomSimulationBinding,
+      operationId: string,
+      payload: PlaygroundRoomSimulationAgentReplyInput,
+    ) => (
       this.forward(binding, owner => owner.emitAgentReply(binding, operationId, clone(payload)))
     ),
-    emitAgentApprovalRequest: (binding: PlaygroundRoomSimulationBinding, operationId: string, request: PlaygroundRoomSimulationAgentApprovalRequest) => (
+    emitAgentApprovalRequest: (
+      binding: PlaygroundRoomSimulationBinding,
+      operationId: string,
+      request: PlaygroundRoomSimulationAgentApprovalRequest,
+    ) => (
       this.forward(binding, owner => owner.emitAgentApprovalRequest(binding, operationId, clone(request)))
     ),
-    delegateTask: (binding: PlaygroundRoomSimulationBinding, operationId: string, request: PlaygroundRoomSimulationTaskDelegationInput) => (
+    delegateTask: (
+      binding: PlaygroundRoomSimulationBinding,
+      operationId: string,
+      request: PlaygroundRoomSimulationTaskDelegationInput,
+    ) => (
       this.forward(binding, owner => owner.delegateTask(binding, operationId, clone(request)))
     ),
-    requestPermission: (binding: PlaygroundRoomSimulationBinding, operationId: string, request: PlaygroundRoomSimulationPermissionRequest) => (
+    requestPermission: (
+      binding: PlaygroundRoomSimulationBinding,
+      operationId: string,
+      request: PlaygroundRoomSimulationPermissionRequest,
+    ) => (
       this.forward(binding, owner => owner.requestPermission(binding, operationId, clone(request)))
     ),
     decidePermission: (
@@ -304,8 +348,21 @@ export class PlaygroundRoomSimulationBridgeRegistry {
     if (owner === null || typeof owner !== 'object' || !boundedHandle(owner.ownerGeneration)) {
       throw new TypeError('Playground Room simulation ownerGeneration is invalid')
     }
-    if (['resolveSession', 'inspect', 'injectMessage', 'emitAgentReply', 'emitAgentApprovalRequest', 'delegateTask', 'requestPermission', 'decidePermission', 'snapshot', 'subscribe']
-      .some(method => typeof owner[method as keyof PlaygroundRoomSimulationOwner] !== 'function')) {
+    if (
+      [
+        'resolveSession',
+        'inspect',
+        'injectMessage',
+        'emitAgentReply',
+        'emitAgentApprovalRequest',
+        'delegateTask',
+        'requestPermission',
+        'decidePermission',
+        'snapshot',
+        'subscribe',
+      ]
+        .some(method => typeof owner[method as keyof PlaygroundRoomSimulationOwner] !== 'function')
+    ) {
       throw new TypeError('Playground Room simulation owner is incomplete')
     }
     this.retireCurrent('owner-replaced')
@@ -334,17 +391,27 @@ export class PlaygroundRoomSimulationBridgeRegistry {
     binding: PlaygroundRoomSimulationBinding,
     call: (owner: PlaygroundRoomSimulationOwner) => MaybePromise<PlaygroundRoomSimulationResult<Value>>,
   ): Promise<PlaygroundRoomSimulationResult<Value>> {
-    if (!isPlaygroundRoomSimulationBinding(binding)) return unavailable('invalid-binding', 'The Playground Room simulation binding is invalid.')
+    if (!isPlaygroundRoomSimulationBinding(binding)) {
+      return unavailable('invalid-binding', 'The Playground Room simulation binding is invalid.')
+    }
     const current = this.current
     if (this.disposed) return unavailable('service-unavailable', 'The Playground Room simulation bridge is disposed.')
     if (current?.active !== true) return unavailable('owner-unavailable', 'No Playground Chatroom owner is registered.')
     if (binding.ownerGeneration !== current.owner.ownerGeneration) {
-      return unavailable('owner-retired', 'The Playground Chatroom owner generation is no longer current.', current.owner.ownerGeneration)
+      return unavailable(
+        'owner-retired',
+        'The Playground Chatroom owner generation is no longer current.',
+        current.owner.ownerGeneration,
+      )
     }
     try {
       const result = await call(current.owner)
       if (!current.active || this.current !== current) {
-        return unavailable('owner-retired', 'The Playground Chatroom owner retired before the request completed.', current.owner.ownerGeneration)
+        return unavailable(
+          'owner-retired',
+          'The Playground Chatroom owner retired before the request completed.',
+          current.owner.ownerGeneration,
+        )
       }
       return clone(result)
     } catch {
@@ -363,7 +430,11 @@ export class PlaygroundRoomSimulationBridgeRegistry {
     try {
       const result = await call(current.owner)
       if (!current.active || this.current !== current) {
-        return unavailable('owner-retired', 'The Playground Chatroom owner retired before the request completed.', current.owner.ownerGeneration)
+        return unavailable(
+          'owner-retired',
+          'The Playground Chatroom owner retired before the request completed.',
+          current.owner.ownerGeneration,
+        )
       }
       return clone(result)
     } catch {
@@ -378,24 +449,49 @@ export class PlaygroundRoomSimulationBridgeRegistry {
     let live = true
     const emit = (event: PlaygroundRoomSimulationResult<PlaygroundRoomSimulationEvent>): void => {
       if (!live) return
-      try { listener(clone(event)) } catch { /* consumer errors do not cross the owner boundary */ }
+      try {
+        listener(clone(event))
+      } catch { /* consumer errors do not cross the owner boundary */ }
     }
     if (!isPlaygroundRoomSimulationBinding(binding)) {
       queueMicrotask(() => emit(unavailable('invalid-binding', 'The Playground Room simulation binding is invalid.')))
-      return () => { live = false }
+      return () => {
+        live = false
+      }
     }
     const current = this.current
     if (this.disposed || current?.active !== true) {
-      queueMicrotask(() => emit(unavailable(this.disposed ? 'service-unavailable' : 'owner-unavailable', this.disposed
-        ? 'The Playground Room simulation bridge is disposed.'
-        : 'No Playground Chatroom owner is registered.')))
-      return () => { live = false }
+      queueMicrotask(() =>
+        emit(unavailable(
+          this.disposed ? 'service-unavailable' : 'owner-unavailable',
+          this.disposed
+            ? 'The Playground Room simulation bridge is disposed.'
+            : 'No Playground Chatroom owner is registered.',
+        ))
+      )
+      return () => {
+        live = false
+      }
     }
     if (binding.ownerGeneration !== current.owner.ownerGeneration) {
-      queueMicrotask(() => emit(unavailable('owner-retired', 'The Playground Chatroom owner generation is no longer current.', current.owner.ownerGeneration)))
-      return () => { live = false }
+      queueMicrotask(() =>
+        emit(
+          unavailable(
+            'owner-retired',
+            'The Playground Chatroom owner generation is no longer current.',
+            current.owner.ownerGeneration,
+          ),
+        )
+      )
+      return () => {
+        live = false
+      }
     }
-    const subscription = { binding: clone(binding), listener: emit, active: true } as OwnerRegistration['subscriptions'] extends Set<infer Item> ? Item : never
+    const subscription = {
+      binding: clone(binding),
+      listener: emit,
+      active: true,
+    } as OwnerRegistration['subscriptions'] extends Set<infer Item> ? Item : never
     current.subscriptions.add(subscription)
     try {
       subscription.disposeOwner = current.owner.subscribe(clone(binding), event => {
@@ -410,7 +506,9 @@ export class PlaygroundRoomSimulationBridgeRegistry {
       live = false
       subscription.active = false
       current.subscriptions.delete(subscription)
-      try { subscription.disposeOwner?.() } catch { /* disposal is best-effort */ }
+      try {
+        subscription.disposeOwner?.()
+      } catch { /* disposal is best-effort */ }
     }
   }
 
@@ -422,55 +520,100 @@ export class PlaygroundRoomSimulationBridgeRegistry {
     if (this.current === current) this.current = undefined
     for (const subscription of current.subscriptions) {
       subscription.active = false
-      try { subscription.disposeOwner?.() } catch { /* disposal is best-effort */ }
-      queueMicrotask(() => subscription.listener(unavailable(
-        code,
-        code === 'owner-replaced'
-          ? 'The Playground Chatroom owner was replaced.'
-          : code === 'owner-retired'
+      try {
+        subscription.disposeOwner?.()
+      } catch { /* disposal is best-effort */ }
+      queueMicrotask(() =>
+        subscription.listener(unavailable(
+          code,
+          code === 'owner-replaced'
+            ? 'The Playground Chatroom owner was replaced.'
+            : code === 'owner-retired'
             ? 'The Playground Chatroom owner retired.'
             : 'The Playground Room simulation bridge was disposed.',
-        current.owner.ownerGeneration,
-      )))
+          current.owner.ownerGeneration,
+        ))
+      )
     }
     current.subscriptions.clear()
   }
 }
 
-export class CordisXPlaygroundRoomSimulationBridgeService extends Service implements PlaygroundRoomSimulationBridgeService {
+export class CordisXPlaygroundRoomSimulationBridgeService extends Service
+  implements PlaygroundRoomSimulationBridgeService
+{
   constructor(ctx: Context, private readonly registry: PlaygroundRoomSimulationBridgeRegistry) {
     super(ctx, PLAYGROUND_ROOM_SIMULATION_BRIDGE_SERVICE)
   }
 
-  status(): PlaygroundRoomSimulationBridgeStatus { return this.registry.client.status() }
-  resolveSession(sessionId: string) { return this.registry.client.resolveSession(sessionId) }
-  inspect(binding: PlaygroundRoomSimulationBinding) { return this.registry.client.inspect(binding) }
-  injectMessage(binding: PlaygroundRoomSimulationBinding, operationId: string, payload: PlaygroundRoomSimulationMessageInput) {
+  status(): PlaygroundRoomSimulationBridgeStatus {
+    return this.registry.client.status()
+  }
+  resolveSession(sessionId: string) {
+    return this.registry.client.resolveSession(sessionId)
+  }
+  inspect(binding: PlaygroundRoomSimulationBinding) {
+    return this.registry.client.inspect(binding)
+  }
+  injectMessage(
+    binding: PlaygroundRoomSimulationBinding,
+    operationId: string,
+    payload: PlaygroundRoomSimulationMessageInput,
+  ) {
     return this.registry.client.injectMessage(binding, operationId, payload)
   }
-  emitAgentReply(binding: PlaygroundRoomSimulationBinding, operationId: string, payload: PlaygroundRoomSimulationAgentReplyInput) {
+  emitAgentReply(
+    binding: PlaygroundRoomSimulationBinding,
+    operationId: string,
+    payload: PlaygroundRoomSimulationAgentReplyInput,
+  ) {
     return this.registry.client.emitAgentReply(binding, operationId, payload)
   }
-  emitAgentApprovalRequest(binding: PlaygroundRoomSimulationBinding, operationId: string, request: PlaygroundRoomSimulationAgentApprovalRequest) {
+  emitAgentApprovalRequest(
+    binding: PlaygroundRoomSimulationBinding,
+    operationId: string,
+    request: PlaygroundRoomSimulationAgentApprovalRequest,
+  ) {
     return this.registry.client.emitAgentApprovalRequest(binding, operationId, request)
   }
-  delegateTask(binding: PlaygroundRoomSimulationBinding, operationId: string, request: PlaygroundRoomSimulationTaskDelegationInput) {
+  delegateTask(
+    binding: PlaygroundRoomSimulationBinding,
+    operationId: string,
+    request: PlaygroundRoomSimulationTaskDelegationInput,
+  ) {
     return this.registry.client.delegateTask(binding, operationId, request)
   }
-  requestPermission(binding: PlaygroundRoomSimulationBinding, operationId: string, request: PlaygroundRoomSimulationPermissionRequest) {
+  requestPermission(
+    binding: PlaygroundRoomSimulationBinding,
+    operationId: string,
+    request: PlaygroundRoomSimulationPermissionRequest,
+  ) {
     return this.registry.client.requestPermission(binding, operationId, request)
   }
-  decidePermission(binding: PlaygroundRoomSimulationBinding, operationId: string, approvalId: string, decision: PlaygroundRoomSimulationPermissionDecision) {
+  decidePermission(
+    binding: PlaygroundRoomSimulationBinding,
+    operationId: string,
+    approvalId: string,
+    decision: PlaygroundRoomSimulationPermissionDecision,
+  ) {
     return this.registry.client.decidePermission(binding, operationId, approvalId, decision)
   }
-  snapshot(binding: PlaygroundRoomSimulationBinding) { return this.registry.client.snapshot(binding) }
-  subscribe(binding: PlaygroundRoomSimulationBinding, listener: (event: PlaygroundRoomSimulationResult<PlaygroundRoomSimulationEvent>) => void) {
+  snapshot(binding: PlaygroundRoomSimulationBinding) {
+    return this.registry.client.snapshot(binding)
+  }
+  subscribe(
+    binding: PlaygroundRoomSimulationBinding,
+    listener: (event: PlaygroundRoomSimulationResult<PlaygroundRoomSimulationEvent>) => void,
+  ) {
     return this.registry.client.subscribe(binding, listener)
   }
 
   register(owner: PlaygroundRoomSimulationOwner): () => void {
     const dispose = this.registry.register(owner)
-    this.ctx.effect(() => dispose, `${PLAYGROUND_ROOM_SIMULATION_BRIDGE_SERVICE}.register(${JSON.stringify(owner.ownerGeneration)})`)
+    this.ctx.effect(
+      () => dispose,
+      `${PLAYGROUND_ROOM_SIMULATION_BRIDGE_SERVICE}.register(${JSON.stringify(owner.ownerGeneration)})`,
+    )
     return dispose
   }
 }

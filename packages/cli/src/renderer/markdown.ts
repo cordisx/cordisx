@@ -50,8 +50,18 @@ function isTableDivider(line: string): boolean {
 }
 
 const SHIKI_LANGUAGES = [
-  'bash', 'css', 'html', 'javascript', 'json', 'jsx', 'markdown', 'shellscript',
-  'text', 'tsx', 'typescript', 'yaml',
+  'bash',
+  'css',
+  'html',
+  'javascript',
+  'json',
+  'jsx',
+  'markdown',
+  'shellscript',
+  'text',
+  'tsx',
+  'typescript',
+  'yaml',
 ] as const
 
 const SHIKI_LANGUAGE_SET = new Set<string>(SHIKI_LANGUAGES)
@@ -69,10 +79,12 @@ function shikiLanguage(value: string | undefined): ShikiLanguage {
 let shikiHighlighter: Promise<Awaited<ReturnType<typeof import('shiki')['createHighlighter']>>> | undefined
 
 function loadShiki() {
-  shikiHighlighter ??= import('shiki').then(({ createHighlighter }) => createHighlighter({
-    themes: ['github-dark', 'github-light'],
-    langs: [...SHIKI_LANGUAGES],
-  }))
+  shikiHighlighter ??= import('shiki').then(({ createHighlighter }) =>
+    createHighlighter({
+      themes: ['github-dark', 'github-light'],
+      langs: [...SHIKI_LANGUAGES],
+    })
+  )
   return shikiHighlighter
 }
 
@@ -157,8 +169,7 @@ export function renderSafeMarkdown(document: Document, markdown: string): HTMLEl
       if (code === undefined) {
         const language = line.slice(3).trim()
         code = language === '' ? { lines: [] } : { language, lines: [] }
-      }
-      else flushCode()
+      } else flushCode()
       continue
     }
     if (code !== undefined) {

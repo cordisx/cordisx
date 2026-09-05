@@ -27,7 +27,9 @@ async function certifiedProjectionValidator() {
   const ajv = new Ajv2020({ allErrors: true, strict: true })
   addFormats(ajv)
   for (const schema of schemas) ajv.addSchema(schema)
-  return ajv.getSchema('https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v1.schema.json')!
+  return ajv.getSchema(
+    'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v1.schema.json',
+  )!
 }
 
 function plugin(overrides: Partial<MarketplaceTrustPlugin> = {}): MarketplaceTrustPlugin {
@@ -48,7 +50,8 @@ function plugin(overrides: Partial<MarketplaceTrustPlugin> = {}): MarketplaceTru
 
 function official(status: 'active' | 'revoked' = 'active'): Record<string, unknown> {
   return {
-    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-official.v1.schema.json',
+    $schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-official.v1.schema.json',
     schemaVersion: 1,
     designation: 'cordisx-official',
     identity: {
@@ -73,7 +76,8 @@ function certification(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
-    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certification.v1.schema.json',
+    $schema:
+      'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certification.v1.schema.json',
     schemaVersion: 1,
     level: 'cordisx-certified',
     identity: { pluginId: 'example', version: '1.2.3', canonicalSource: SOURCE, integrity: DIGEST },
@@ -117,7 +121,14 @@ describe('marketplace trust evaluator', () => {
     const ordinary = evaluateMarketplaceTrust(feed([], []), [plugin()], OPTIONS)
     const thirdPartyCertified = evaluateMarketplaceTrust(
       feed([], [certification()]),
-      [plugin({ artifact: { ...plugin().artifact!, publisherIdentity: 'npm:@third-party', packageNamespace: '@third-party', packageName: '@third-party/example' } })],
+      [plugin({
+        artifact: {
+          ...plugin().artifact!,
+          publisherIdentity: 'npm:@third-party',
+          packageNamespace: '@third-party',
+          packageName: '@third-party/example',
+        },
+      })],
       OPTIONS,
     )
 
@@ -151,7 +162,8 @@ describe('marketplace trust evaluator', () => {
     }
 
     expect(projection).toEqual({
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v1.schema.json',
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/marketplace-certified-permission-projection.v1.schema.json',
       schemaVersion: 1,
       kind: 'cordisx-certified-permission-eligibility',
       status: 'active',
@@ -182,10 +194,14 @@ describe('marketplace trust evaluator', () => {
   it('lets Official continue across versions but never lets certification inherit to a new version or digest', () => {
     const nextVersion = plugin({ version: '1.2.4' })
     expect(evaluateMarketplaceTrust(feed([official()], []), [nextVersion], OPTIONS).byPluginIdentity.size).toBe(1)
-    expect(() => evaluateMarketplaceTrust(feed([], [certification()]), [nextVersion], OPTIONS)).toThrow('exact artifact 不匹配')
-    expect(() => evaluateMarketplaceTrust(feed([], [certification()]), [plugin({
-      artifact: { ...plugin().artifact!, integrity: OTHER_DIGEST },
-    })], OPTIONS)).toThrow('exact artifact 不匹配')
+    expect(() => evaluateMarketplaceTrust(feed([], [certification()]), [nextVersion], OPTIONS)).toThrow(
+      'exact artifact 不匹配',
+    )
+    expect(() =>
+      evaluateMarketplaceTrust(feed([], [certification()]), [plugin({
+        artifact: { ...plugin().artifact!, integrity: OTHER_DIGEST },
+      })], OPTIONS)
+    ).toThrow('exact artifact 不匹配')
   })
 
   it('rejects unknown authority, official publisher mismatch, missing digest, and expired active records', () => {
@@ -199,11 +215,19 @@ describe('marketplace trust evaluator', () => {
 
     const missingDigest = certification()
     delete (missingDigest.identity as Record<string, unknown>).integrity
-    expect(() => evaluateMarketplaceTrust(feed([], [missingDigest]), [plugin()], OPTIONS)).toThrow('缺少字段: integrity')
+    expect(() => evaluateMarketplaceTrust(feed([], [missingDigest]), [plugin()], OPTIONS)).toThrow(
+      '缺少字段: integrity',
+    )
 
-    expect(() => evaluateMarketplaceTrust(feed([], [certification('active', {
-      expiresAt: '2026-08-24T00:30:00Z',
-    })]), [plugin()], OPTIONS)).toThrow('不能保持 active')
+    expect(() =>
+      evaluateMarketplaceTrust(
+        feed([], [certification('active', {
+          expiresAt: '2026-08-24T00:30:00Z',
+        })]),
+        [plugin()],
+        OPTIONS,
+      )
+    ).toThrow('不能保持 active')
   })
 
   it('applies revocation on the next feed evaluation without changing the other dimension', () => {

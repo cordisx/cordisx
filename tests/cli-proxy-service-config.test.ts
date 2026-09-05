@@ -7,8 +7,8 @@ import {
   normalizeCliProxyProviderRuntimeMutation,
   parseCliProxyProviderRuntimeConfig,
   parseCliProxyProviderStartupConfig,
-  projectedModel,
   projectCliProxyProviderRuntimeConfig,
+  projectedModel,
   sourceModelId,
   validateCliProxyProviderPlanes,
 } from '../packages/cli/src/plugins/cli-proxy-api/service-config.js'
@@ -21,7 +21,11 @@ function runtimeProvider(overrides: Record<string, unknown> = {}) {
     endpoint: { baseUrl: 'https://proxy.example.com/v1/', secretRef: 'keychain:cordisx/providers/gateway-a' },
     models: {
       mappings: [{
-        sourceModelId: 'remote-coder', modelId: 'coder', displayName: 'Coder', enabled: true, isDefault: true,
+        sourceModelId: 'remote-coder',
+        modelId: 'coder',
+        displayName: 'Coder',
+        enabled: true,
+        isDefault: true,
       }],
     },
     timeoutMs: 30_000,
@@ -38,7 +42,9 @@ function runtime(providers: readonly unknown[] = [runtimeProvider()]) {
 }
 
 function startup(providers: readonly unknown[] = [{
-  id: 'gateway-a', executable: 'codex', dataDir: 'providers/gateway-a/codex-home',
+  id: 'gateway-a',
+  executable: 'codex',
+  dataDir: 'providers/gateway-a/codex-home',
 }]) {
   return {
     contract: 'cordisx.cli-proxy-provider-startup-config/v1',
@@ -71,23 +77,32 @@ describe('CLIProxy Providers service configuration contracts', () => {
       endpoint: { baseUrl: 'https://proxy.example.com/v1', secretRef: 'keychain:cordisx/providers/gateway-a' },
       models: {
         mappings: [{
-          sourceModelId: 'remote-coder', modelId: 'coder', displayName: 'Coder', enabled: true, isDefault: true,
+          sourceModelId: 'remote-coder',
+          modelId: 'coder',
+          displayName: 'Coder',
+          enabled: true,
+          isDefault: true,
         }],
       },
       timeoutMs: 30_000,
     })
     expect(sourceModelId(parsed.providers[0]!, 'coder')).toBe('remote-coder')
     expect(projectedModel(parsed.providers[0]!, {
-      modelId: 'remote-coder', displayName: 'Remote coder', isDefault: false,
+      modelId: 'remote-coder',
+      displayName: 'Remote coder',
+      isDefault: false,
     })).toEqual({ modelId: 'coder', displayName: 'Coder', isDefault: true })
   })
 
   it('redacts secret references into exact Host secret slots and preserves omitted references', () => {
     const current = parseCliProxyProviderRuntimeConfig(runtime())
-    const next = normalizeCliProxyProviderRuntimeMutation(runtime([runtimeProvider({
-      displayName: 'Renamed',
-      endpoint: { baseUrl: 'https://next.example.com/v1' },
-    })]), current)
+    const next = normalizeCliProxyProviderRuntimeMutation(
+      runtime([runtimeProvider({
+        displayName: 'Renamed',
+        endpoint: { baseUrl: 'https://next.example.com/v1' },
+      })]),
+      current,
+    )
     expect(next.providers[0]?.endpoint.secretRef).toBe('keychain:cordisx/providers/gateway-a')
     const descriptor = projectCliProxyProviderRuntimeConfig(next, ref => ref === undefined ? 'missing' : 'ready')
     expect(descriptor.secrets).toEqual([{ path: ['providers', '0', 'endpoint', 'secretRef'], set: true }])
@@ -100,30 +115,44 @@ describe('CLIProxy Providers service configuration contracts', () => {
     const startupConfig = parseCliProxyProviderStartupConfig(startup())
     expect(() => validateCliProxyProviderPlanes(runtimeConfig, startupConfig)).not.toThrow()
     const orphan = parseCliProxyProviderStartupConfig(startup([{
-      id: 'gateway-b', executable: 'codex', dataDir: 'providers/gateway-b/codex-home',
+      id: 'gateway-b',
+      executable: 'codex',
+      dataDir: 'providers/gateway-b/codex-home',
     }]))
     expect(() => validateCliProxyProviderPlanes(runtimeConfig, orphan)).toThrow('has no matching runtime provider')
   })
 
   it('fails closed on plaintext credentials, unsafe endpoints, duplicate mappings, and shared data roots', () => {
-    expect(() => parseCliProxyProviderRuntimeConfig(runtime([runtimeProvider({
-      endpoint: { baseUrl: 'https://proxy.example.com/v1', apiKey: 'plaintext' },
-    })]))).toThrow('endpoint.apiKey is not supported')
-    expect(() => parseCliProxyProviderRuntimeConfig(runtime([runtimeProvider({
-      endpoint: { baseUrl: 'http://proxy.example.com/v1', secretRef: 'host-secret:providers/gateway-a' },
-    })]))).toThrow('must use HTTPS or loopback HTTP')
-    expect(() => parseCliProxyProviderRuntimeConfig(runtime([runtimeProvider({
-      endpoint: { baseUrl: 'https://proxy.example.com/v1', secretRef: 'inline:plaintext' },
-    })]))).toThrow('endpoint.secretRef is invalid')
-    expect(() => parseCliProxyProviderRuntimeConfig(runtime([runtimeProvider({
-      models: { mappings: [
-        { sourceModelId: 'remote', modelId: 'one', enabled: true, isDefault: false },
-        { sourceModelId: 'remote', modelId: 'two', enabled: true, isDefault: false },
-      ] },
-    })]))).toThrow('duplicate sourceModelId')
-    expect(() => parseCliProxyProviderStartupConfig(startup([
-      { id: 'gateway-a', executable: 'codex', dataDir: 'providers/shared' },
-      { id: 'gateway-b', executable: 'codex', dataDir: 'providers/shared' },
-    ]))).toThrow('dataDir must be unique')
+    expect(() =>
+      parseCliProxyProviderRuntimeConfig(runtime([runtimeProvider({
+        endpoint: { baseUrl: 'https://proxy.example.com/v1', apiKey: 'plaintext' },
+      })]))
+    ).toThrow('endpoint.apiKey is not supported')
+    expect(() =>
+      parseCliProxyProviderRuntimeConfig(runtime([runtimeProvider({
+        endpoint: { baseUrl: 'http://proxy.example.com/v1', secretRef: 'host-secret:providers/gateway-a' },
+      })]))
+    ).toThrow('must use HTTPS or loopback HTTP')
+    expect(() =>
+      parseCliProxyProviderRuntimeConfig(runtime([runtimeProvider({
+        endpoint: { baseUrl: 'https://proxy.example.com/v1', secretRef: 'inline:plaintext' },
+      })]))
+    ).toThrow('endpoint.secretRef is invalid')
+    expect(() =>
+      parseCliProxyProviderRuntimeConfig(runtime([runtimeProvider({
+        models: {
+          mappings: [
+            { sourceModelId: 'remote', modelId: 'one', enabled: true, isDefault: false },
+            { sourceModelId: 'remote', modelId: 'two', enabled: true, isDefault: false },
+          ],
+        },
+      })]))
+    ).toThrow('duplicate sourceModelId')
+    expect(() =>
+      parseCliProxyProviderStartupConfig(startup([
+        { id: 'gateway-a', executable: 'codex', dataDir: 'providers/shared' },
+        { id: 'gateway-b', executable: 'codex', dataDir: 'providers/shared' },
+      ]))
+    ).toThrow('dataDir must be unique')
   })
 })

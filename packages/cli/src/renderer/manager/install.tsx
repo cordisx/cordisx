@@ -14,7 +14,11 @@ export interface ReactManagerInstallOptions {
 }
 
 /** One React root owns the complete Manager shell and every Host-owned page. */
-export function installReactCordisXManager(document: Document, model: ManagerModel, options: ReactManagerInstallOptions = {}): () => void {
+export function installReactCordisXManager(
+  document: Document,
+  model: ManagerModel,
+  options: ReactManagerInstallOptions = {},
+): () => void {
   const view = document.defaultView
   const installedAnimationFrameFallback = view !== null && typeof view.requestAnimationFrame !== 'function'
   if (installedAnimationFrameFallback) {
@@ -39,23 +43,36 @@ export function installReactCordisXManager(document: Document, model: ManagerMod
   // The Manager trigger is part of the Host bootstrap contract. Commit the
   // initial tree before returning so callers never observe a half-installed
   // renderer (and tests do not need renderer-specific timing workarounds).
-  flushSync(() => root.render(<ManagerApp
-    model={model}
-    marketplace={marketplace.model}
-    triggerSeat={triggerSeat}
-    {...(options.navigationController === undefined ? {} : { navigationController: options.navigationController })}
-  />))
+  flushSync(() =>
+    root.render(
+      <ManagerApp
+        model={model}
+        marketplace={marketplace.model}
+        triggerSeat={triggerSeat}
+        {...(options.navigationController === undefined ? {} : { navigationController: options.navigationController })}
+      />,
+    )
+  )
 
   let currentTarget: HTMLElement | undefined
   let scheduled = false
   const reconcile = () => {
     scheduled = false
     const target = options.triggerTarget?.() ?? resolveManagerTriggerTarget(document)
-    if (target === undefined) { triggerSeat.remove(); currentTarget = undefined; return }
+    if (target === undefined) {
+      triggerSeat.remove()
+      currentTarget = undefined
+      return
+    }
     if (target === currentTarget && triggerSeat.isConnected && triggerSeat.previousElementSibling === target) return
-    target.after(triggerSeat); currentTarget = target
+    target.after(triggerSeat)
+    currentTarget = target
   }
-  const schedule = () => { if (scheduled) return; scheduled = true; queueMicrotask(reconcile) }
+  const schedule = () => {
+    if (scheduled) return
+    scheduled = true
+    queueMicrotask(reconcile)
+  }
   const Observer = document.defaultView?.MutationObserver
   const observer = Observer === undefined ? undefined : new Observer(schedule)
   observer?.observe(document.documentElement, { childList: true, subtree: true })
@@ -65,8 +82,12 @@ export function installReactCordisXManager(document: Document, model: ManagerMod
     observer?.disconnect()
     root.unmount()
     marketplace.dispose()
-    detachTriggerTheme(); detachRootTheme(); theme.dispose()
-    triggerSeat.remove(); rootSeat.remove(); style.remove()
+    detachTriggerTheme()
+    detachRootTheme()
+    theme.dispose()
+    triggerSeat.remove()
+    rootSeat.remove()
+    style.remove()
     if (installedAnimationFrameFallback && view !== null) {
       Reflect.deleteProperty(view, 'requestAnimationFrame')
       Reflect.deleteProperty(view, 'cancelAnimationFrame')

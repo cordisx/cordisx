@@ -17,27 +17,43 @@ const reason: CordisXLocalizedText = Object.freeze({ key: 'fixture', fallback: '
 
 function agentStatus(mode: CordisXAgentEventStatus['mode'] = 'unavailable'): CordisXAgentEventStatus {
   return {
-    hostId: 'codex-desktop', hostName: 'Codex Desktop', mode,
-    adapterId: 'codex', adapterVersion: 'fixture', experimental: [], diagnostics: [],
-    secondConnectionCreated: false, rawBridgeExposed: false,
+    hostId: 'codex-desktop',
+    hostName: 'Codex Desktop',
+    mode,
+    adapterId: 'codex',
+    adapterVersion: 'fixture',
+    experimental: [],
+    diagnostics: [],
+    secondConnectionCreated: false,
+    rawBridgeExposed: false,
   }
 }
 
 function historyStatus(mode: CordisXAgentHistoryStatus['mode'] = 'available'): CordisXAgentHistoryStatus {
   return {
-    hostId: 'codex-desktop', hostName: 'Codex Desktop history', mode,
-    adapterId: 'codex-history', adapterVersion: 'fixture', profileId: 'work',
-    defaultPayloadPolicy: 'referenced', diagnostics: [], filesystemExposed: false, rawBridgeExposed: false,
+    hostId: 'codex-desktop',
+    hostName: 'Codex Desktop history',
+    mode,
+    adapterId: 'codex-history',
+    adapterVersion: 'fixture',
+    profileId: 'work',
+    defaultPayloadPolicy: 'referenced',
+    diagnostics: [],
+    filesystemExposed: false,
+    rawBridgeExposed: false,
   }
 }
 
 function registry(): CapabilityAvailabilityRegistry {
   return new CapabilityAvailabilityRegistry([
     platformAdapterCapabilityProvider(new UnavailablePlatformAdapter().status(), {
-      providerId: 'desktop-current-connection', kind: 'current-connection',
+      providerId: 'desktop-current-connection',
+      kind: 'current-connection',
     }),
     ...hostLocalCapabilityProviders({
-      agentStatus: agentStatus(), historyStatus: historyStatus(), configurationWritable: true,
+      agentStatus: agentStatus(),
+      historyStatus: historyStatus(),
+      configurationWritable: true,
     }),
   ])
 }
@@ -54,7 +70,8 @@ describe('capability availability registry', () => {
   it('routes external Fleet capabilities by exact provider scope', () => {
     const available = new CapabilityAvailabilityRegistry([
       platformAdapterCapabilityProvider(new UnavailablePlatformAdapter().status(), {
-        providerId: 'desktop-current-connection', kind: 'current-connection',
+        providerId: 'desktop-current-connection',
+        kind: 'current-connection',
       }),
       ...externalProviderCapabilityProviders([
         { providerId: 'alpha', displayName: 'Alpha', generation: 'generation-alpha', state: 'ready' },
@@ -65,9 +82,11 @@ describe('capability availability registry', () => {
     expect(available.resolve('tasks.catalog.read', { providers: ['alpha'] }).status).toBe('supported')
     expect(available.resolve('tasks.catalog.read', { providers: ['beta'] }).status).toBe('unavailable')
     expect(available.resolve('tasks.catalog.read', { providers: ['alpha', 'beta'] }).status).toBe('degraded')
-    expect(available.resolve('tasks.content.read', {
-      sessions: [{ providerId: 'alpha', remoteSessionId: 'session-1' }],
-    }).status).toBe('supported')
+    expect(
+      available.resolve('tasks.content.read', {
+        sessions: [{ providerId: 'alpha', remoteSessionId: 'session-1' }],
+      }).status,
+    ).toBe('supported')
   })
 
   it('does not let an unscoped current-connection route impersonate an explicit provider', () => {
@@ -100,8 +119,12 @@ describe('capability availability registry', () => {
 
   it('distinguishes true unsupported and provider-reported degraded coverage', () => {
     const provider: CordisXCapabilityProviderReport = {
-      providerId: 'projection', providerName: reason, kind: 'host-local', family: 'platform',
-      status: 'degraded', reason,
+      providerId: 'projection',
+      providerName: reason,
+      kind: 'host-local',
+      family: 'platform',
+      status: 'degraded',
+      reason,
       routes: [{ capability: 'models.read', status: 'degraded', reason, scope: {} }],
     }
     const available = new CapabilityAvailabilityRegistry([provider])
@@ -110,16 +133,20 @@ describe('capability availability registry', () => {
   })
 
   it('blocks only required capabilities with no satisfying provider', () => {
-    expect(registry().unavailableRequired([
-      { name: 'agent.events.read', required: true, scope: {} },
-      { name: 'models.read', required: true, scope: {} },
-      { name: 'tasks.catalog.read', required: false, scope: {} },
-    ])).toEqual(['models.read'])
+    expect(
+      registry().unavailableRequired([
+        { name: 'agent.events.read', required: true, scope: {} },
+        { name: 'models.read', required: true, scope: {} },
+        { name: 'tasks.catalog.read', required: false, scope: {} },
+      ]),
+    ).toEqual(['models.read'])
   })
 
   it('reports Host service families without inventing Platform permission routes', () => {
     const providers = hostLocalCapabilityProviders({
-      agentStatus: agentStatus(), historyStatus: historyStatus(), configurationWritable: false,
+      agentStatus: agentStatus(),
+      historyStatus: historyStatus(),
+      configurationWritable: false,
     })
     expect(providers.map(item => [item.family, item.status, item.routes.length])).toEqual(expect.arrayContaining([
       ['agent-events', 'supported', 1],
@@ -145,7 +172,11 @@ describe('capability availability registry', () => {
   })
 
   it('rejects duplicate provider identities', () => {
-    const [provider] = externalProviderCapabilityProviders([{ providerId: 'alpha', displayName: 'Alpha', state: 'ready' }])
+    const [provider] = externalProviderCapabilityProviders([{
+      providerId: 'alpha',
+      displayName: 'Alpha',
+      state: 'ready',
+    }])
     expect(() => new CapabilityAvailabilityRegistry([provider!, provider!])).toThrow('duplicate capability provider')
   })
 })

@@ -1,4 +1,10 @@
-import { createLarkChannel, Domain, LoggerLevel, type LarkChannel, type NormalizedMessage } from '@larksuiteoapi/node-sdk'
+import {
+  createLarkChannel,
+  Domain,
+  type LarkChannel,
+  LoggerLevel,
+  type NormalizedMessage,
+} from '@larksuiteoapi/node-sdk'
 import type {
   ChannelAdapterConnection,
   ChannelAdapterDefinition,
@@ -9,7 +15,11 @@ import type {
   ChannelTenantRef,
 } from '@cordisx/channel-runtime'
 import type { ChannelServiceConfigV1, ChannelServiceConnectionConfig } from '@cordisx/channel-runtime'
-import { LauncherSecretResolutionError, resolveLauncherSecret, type LauncherSecretResolverOptions } from './secret-resolver.js'
+import {
+  LauncherSecretResolutionError,
+  type LauncherSecretResolverOptions,
+  resolveLauncherSecret,
+} from './secret-resolver.js'
 
 type FeishuSdkChannel = Pick<LarkChannel, 'connect' | 'disconnect' | 'on' | 'send'>
 
@@ -40,21 +50,33 @@ function sameTenant(left: ChannelTenantRef, right: ChannelTenantRef): boolean {
   return left.adapterId === right.adapterId && left.accountId === right.accountId && left.tenantId === right.tenantId
 }
 
-function inboundEnvelope(message: NormalizedMessage, connection: ChannelServiceConnectionConfig): ChannelInboundEnvelope {
+function inboundEnvelope(
+  message: NormalizedMessage,
+  connection: ChannelServiceConnectionConfig,
+): ChannelInboundEnvelope {
   const threadId = message.rootId ?? message.threadId ?? message.chatId
   return {
     input: {
-      contract: 'cordisx.channel-user-input/v1', schemaVersion: 1, role: 'user',
+      contract: 'cordisx.channel-user-input/v1',
+      schemaVersion: 1,
+      role: 'user',
       content: [{ type: 'text', text: message.content }],
       source: {
         kind: 'channel',
         event: {
-          adapterId: connection.ref.adapterId, accountId: connection.ref.accountId, tenantId: connection.ref.tenantId,
-          conversationId: message.chatId, kind: message.chatType === 'p2p' ? 'direct' : 'group',
-          threadId, semantics: message.rootId === undefined && message.threadId === undefined ? 'conversation' : 'reply-chain',
-          eventId: message.messageId, messageId: message.messageId,
+          adapterId: connection.ref.adapterId,
+          accountId: connection.ref.accountId,
+          tenantId: connection.ref.tenantId,
+          conversationId: message.chatId,
+          kind: message.chatType === 'p2p' ? 'direct' : 'group',
+          threadId,
+          semantics: message.rootId === undefined && message.threadId === undefined ? 'conversation' : 'reply-chain',
+          eventId: message.messageId,
+          messageId: message.messageId,
           actor: {
-            adapterId: connection.ref.adapterId, accountId: connection.ref.accountId, tenantId: connection.ref.tenantId,
+            adapterId: connection.ref.adapterId,
+            accountId: connection.ref.accountId,
+            tenantId: connection.ref.tenantId,
             userId: message.senderId,
           },
         },
@@ -65,31 +87,44 @@ function inboundEnvelope(message: NormalizedMessage, connection: ChannelServiceC
 }
 
 function compatible(input: FeishuAdapterOptions): void {
-  if ((input.connection.adapterKind !== 'feishu' && input.connection.adapterKind !== 'lark')
-    || input.connection.transport.mode !== 'websocket') {
+  if (
+    (input.connection.adapterKind !== 'feishu' && input.connection.adapterKind !== 'lark')
+    || input.connection.transport.mode !== 'websocket'
+  ) {
     throw new FeishuAdapterError('CONNECTION_UNAVAILABLE')
   }
 }
 
 export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): ChannelAdapterDefinition {
   compatible(input)
-  const create = input.createChannel ?? (options => createLarkChannel({
-    appId: options.appId, appSecret: options.appSecret, domain: options.domain,
-    source: options.source, loggerLevel: LoggerLevel.warn,
-    transport: 'websocket', policy: { dmMode: 'open', requireMention: options.requireMention },
-  }))
+  const create = input.createChannel ?? (options =>
+    createLarkChannel({
+      appId: options.appId,
+      appSecret: options.appSecret,
+      domain: options.domain,
+      source: options.source,
+      loggerLevel: LoggerLevel.warn,
+      transport: 'websocket',
+      policy: { dmMode: 'open', requireMention: options.requireMention },
+    }))
   return {
     descriptor: {
-      ref: input.connection.ref, kind: input.connection.adapterKind,
-      implementationStatus: 'implemented', configurationRevision: input.configurationRevision,
+      ref: input.connection.ref,
+      kind: input.connection.adapterKind,
+      implementationStatus: 'implemented',
+      configurationRevision: input.configurationRevision,
       secretState: input.connection.secretRef === undefined ? 'missing' : 'ready',
     },
     start: async (host: ChannelAdapterHost): Promise<ChannelAdapterConnection> => {
-      const secret = await (input.resolveSecret ?? (async reference => await resolveLauncherSecret(reference)))(input.connection.secretRef)
+      const secret = await (input.resolveSecret ?? (async reference => await resolveLauncherSecret(reference)))(
+        input.connection.secretRef,
+      )
       const channel = create({
-        appId: input.connection.ref.accountId, appSecret: secret,
+        appId: input.connection.ref.accountId,
+        appSecret: secret,
         domain: input.connection.adapterKind === 'lark' ? Domain.Lark : Domain.Feishu,
-        source: input.source, requireMention: false,
+        source: input.source,
+        requireMention: false,
       })
       // Never retain raw event bodies; the normalized text-only envelope is all
       // that crosses into the durable Channel core.
@@ -100,15 +135,22 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
       })
       await channel.connect()
       let stopped = false
-      const interval = setInterval(() => { void host.drainOutbound(20).catch(() => undefined) }, 1_000)
+      const interval = setInterval(() => {
+        void host.drainOutbound(20).catch(() => undefined)
+      }, 1_000)
       interval.unref()
       return {
         send: async (delivery: ChannelOutboundDelivery): Promise<ChannelSendResult> => {
           if (!sameTenant(delivery.target, input.connection.ref)) throw new FeishuAdapterError('OUTBOUND_UNAVAILABLE')
           const result = await channel.send(delivery.target.conversationId, { text: delivery.text }, {
-            ...(delivery.target.semantics === 'reply-chain' ? { replyTo: delivery.target.threadId, replyInThread: true } : {}),
+            ...(delivery.target.semantics === 'reply-chain'
+              ? { replyTo: delivery.target.threadId, replyInThread: true }
+              : {}),
           })
-          return { externalMessageId: result.messageId, ...(result.messageId.length > 0 ? { recallHandle: result.messageId } : {}) }
+          return {
+            externalMessageId: result.messageId,
+            ...(result.messageId.length > 0 ? { recallHandle: result.messageId } : {}),
+          }
         },
         stop: async () => {
           if (stopped) return
@@ -125,16 +167,26 @@ export function createFeishuAdapterDefinition(input: FeishuAdapterOptions): Chan
 /** Narrow adapter constructor used by the launcher; it intentionally never accepts a secret value. */
 export function feishuDefinitionsForConfig(
   configuration: ChannelServiceConfigV1,
-  input: { readonly source: string; readonly configurationRevision: number; readonly secretResolver?: LauncherSecretResolverOptions },
+  input: {
+    readonly source: string
+    readonly configurationRevision: number
+    readonly secretResolver?: LauncherSecretResolverOptions
+  },
 ): readonly ChannelAdapterDefinition[] {
   return configuration.connections
-    .filter(connection => connection.enabled && (connection.adapterKind === 'feishu' || connection.adapterKind === 'lark'))
-    .map(connection => createFeishuAdapterDefinition({
-      connection, source: input.source, configurationRevision: input.configurationRevision,
-      ...(input.secretResolver === undefined ? {} : {
-        resolveSecret: async reference => await resolveLauncherSecret(reference, input.secretResolver),
-      }),
-    }))
+    .filter(connection =>
+      connection.enabled && (connection.adapterKind === 'feishu' || connection.adapterKind === 'lark')
+    )
+    .map(connection =>
+      createFeishuAdapterDefinition({
+        connection,
+        source: input.source,
+        configurationRevision: input.configurationRevision,
+        ...(input.secretResolver === undefined ? {} : {
+          resolveSecret: async reference => await resolveLauncherSecret(reference, input.secretResolver),
+        }),
+      })
+    )
 }
 
 export { LauncherSecretResolutionError }

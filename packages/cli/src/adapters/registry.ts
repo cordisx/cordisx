@@ -1,5 +1,5 @@
 import { codexAdapter } from './codex.js'
-import { HostAdapterError, type HostAdapter } from './contracts.js'
+import { type HostAdapter, HostAdapterError } from './contracts.js'
 
 const adapters = new Map<string, HostAdapter>([
   [codexAdapter.id, codexAdapter],

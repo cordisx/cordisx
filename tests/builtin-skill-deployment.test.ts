@@ -1,4 +1,4 @@
-import { access, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { access, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -15,7 +15,10 @@ async function createSkillSource(root: string, revision: string): Promise<string
   const source = path.join(root, 'source-skill')
   await mkdir(path.join(source, 'agents'), { recursive: true })
   await mkdir(path.join(source, 'references'), { recursive: true })
-  await writeFile(path.join(source, 'SKILL.md'), `---\nname: cordisx-plugin-development\ndescription: ${revision}\n---\n`)
+  await writeFile(
+    path.join(source, 'SKILL.md'),
+    `---\nname: cordisx-plugin-development\ndescription: ${revision}\n---\n`,
+  )
   await writeFile(path.join(source, 'agents', 'openai.yaml'), 'interface:\n  display_name: "CordisX"\n')
   await writeFile(path.join(source, 'references', 'verification.md'), `${revision}\n`)
   return source
@@ -88,8 +91,12 @@ describe('built-in CordisX Skill deployment', () => {
     expect(result.status).toBe('installed')
     expect(result.effectiveHome).toBe(home)
     await expect(readFile(path.join(result.targetDir, 'SKILL.md'), 'utf8')).resolves.toContain('revision-one')
-    await expect(readFile(path.join(result.targetDir, 'agents', 'openai.yaml'), 'utf8')).resolves.toContain('display_name')
-    await expect(readFile(path.join(result.targetDir, 'references', 'verification.md'), 'utf8')).resolves.toBe('revision-one\n')
+    await expect(readFile(path.join(result.targetDir, 'agents', 'openai.yaml'), 'utf8')).resolves.toContain(
+      'display_name',
+    )
+    await expect(readFile(path.join(result.targetDir, 'references', 'verification.md'), 'utf8')).resolves.toBe(
+      'revision-one\n',
+    )
     await expect(readFile(path.join(result.targetDir, CORDISX_SKILL_MARKER_FILE), 'utf8')).resolves.toContain('sha256:')
     await expect(readFile(otherSkill, 'utf8')).resolves.toBe('personal-sentinel\n')
     expect(process.cwd()).toBe(cwdBefore)
@@ -111,8 +118,12 @@ describe('built-in CordisX Skill deployment', () => {
     })
 
     expect(result.effectiveHome).toBe(privateHome)
-    await expect(readFile(path.join(installedSkill(privateHome), 'SKILL.md'), 'utf8')).resolves.toContain('isolated-revision')
-    await expect(access(path.join(privateHome, '.agents', 'skills', 'personal-only'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(path.join(installedSkill(privateHome), 'SKILL.md'), 'utf8')).resolves.toContain(
+      'isolated-revision',
+    )
+    await expect(access(path.join(privateHome, '.agents', 'skills', 'personal-only'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
     await expect(readFile(personalSkill, 'utf8')).resolves.toBe('do-not-copy\n')
   })
 
@@ -129,14 +140,21 @@ describe('built-in CordisX Skill deployment', () => {
     await expect(readFile(path.join(first.targetDir, CORDISX_SKILL_MARKER_FILE), 'utf8')).resolves.toBe(markerBefore)
 
     await rm(path.join(source, 'references', 'verification.md'))
-    await writeFile(path.join(source, 'SKILL.md'), '---\nname: cordisx-plugin-development\ndescription: revision-two\n---\n')
+    await writeFile(
+      path.join(source, 'SKILL.md'),
+      '---\nname: cordisx-plugin-development\ndescription: revision-two\n---\n',
+    )
     await writeFile(path.join(source, 'references', 'upgrade.md'), 'new-file\n')
     const upgraded = await deployBundledCordisXSkill(plan, { sourceDir: source })
 
     expect(upgraded.status).toBe('upgraded')
     await expect(readFile(path.join(upgraded.targetDir, 'SKILL.md'), 'utf8')).resolves.toContain('revision-two')
-    await expect(readFile(path.join(upgraded.targetDir, 'references', 'upgrade.md'), 'utf8')).resolves.toBe('new-file\n')
-    await expect(access(path.join(upgraded.targetDir, 'references', 'verification.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(path.join(upgraded.targetDir, 'references', 'upgrade.md'), 'utf8')).resolves.toBe(
+      'new-file\n',
+    )
+    await expect(access(path.join(upgraded.targetDir, 'references', 'verification.md'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
   it('serializes concurrent launch deployments before inspecting or replacing the target', async () => {
@@ -183,7 +201,10 @@ describe('built-in CordisX Skill deployment', () => {
     const source = await createSkillSource(root, 'revision-one')
     const plan = sharedPlan(home)
     await deployBundledCordisXSkill(plan, { sourceDir: source })
-    await writeFile(path.join(source, 'SKILL.md'), '---\nname: cordisx-plugin-development\ndescription: revision-two\n---\n')
+    await writeFile(
+      path.join(source, 'SKILL.md'),
+      '---\nname: cordisx-plugin-development\ndescription: revision-two\n---\n',
+    )
 
     await expect(deployBundledCordisXSkill(plan, {
       sourceDir: source,
@@ -203,7 +224,10 @@ describe('built-in CordisX Skill deployment', () => {
     const source = await createSkillSource(root, 'revision-one')
     const plan = sharedPlan(home)
     await deployBundledCordisXSkill(plan, { sourceDir: source })
-    await writeFile(path.join(source, 'SKILL.md'), '---\nname: cordisx-plugin-development\ndescription: revision-two\n---\n')
+    await writeFile(
+      path.join(source, 'SKILL.md'),
+      '---\nname: cordisx-plugin-development\ndescription: revision-two\n---\n',
+    )
     const target = installedSkill(home)
 
     const racedDeployment = deployBundledCordisXSkill(plan, {
@@ -256,7 +280,9 @@ describe('built-in CordisX Skill deployment', () => {
 
     expect(result.status).toBe('unchanged')
     await expect(readFile(path.join(target, 'SKILL.md'), 'utf8')).resolves.toBe(before)
-    await expect(readFile(path.join(target, CORDISX_SKILL_MARKER_FILE), 'utf8')).resolves.toContain(result.contentDigest)
+    await expect(readFile(path.join(target, CORDISX_SKILL_MARKER_FILE), 'utf8')).resolves.toContain(
+      result.contentDigest,
+    )
   })
 
   it('preserves a marker that replaces CordisX own marker during unmanaged adoption', async () => {
@@ -347,10 +373,14 @@ describe('built-in CordisX Skill deployment', () => {
     const isolated = isolatedPlan(path.join(root, 'cordisx-home', 'apps', 'codex', 'profiles', 'private'))
 
     expect(effectiveHomeForCordisXSkill(shared)).toBe(path.join(root, 'real-home'))
-    expect(effectiveHomeForCordisXSkill(shared)).not.toBe(shared.chromiumProfile.mode === 'independent'
-      ? shared.chromiumProfile.path
-      : '')
-    expect(effectiveHomeForCordisXSkill(shared)).not.toBe(shared.sharedDataRoots.find(item => item.name === 'CODEX_HOME')?.path)
+    expect(effectiveHomeForCordisXSkill(shared)).not.toBe(
+      shared.chromiumProfile.mode === 'independent'
+        ? shared.chromiumProfile.path
+        : '',
+    )
+    expect(effectiveHomeForCordisXSkill(shared)).not.toBe(
+      shared.sharedDataRoots.find(item => item.name === 'CODEX_HOME')?.path,
+    )
     expect(effectiveHomeForCordisXSkill(isolated)).toBe(isolated.environment.HOME)
     expect(effectiveHomeForCordisXSkill(isolated)).not.toBe(isolated.environment.CODEX_HOME)
   })

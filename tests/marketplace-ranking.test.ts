@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  rankMarketplacePlugins,
   type MarketplaceSearchCandidate,
+  rankMarketplacePlugins,
 } from '../packages/cli/src/renderer/marketplace-ranking.js'
 
 function candidate(
