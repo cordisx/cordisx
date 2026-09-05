@@ -25,6 +25,7 @@ import {
   type CordisXPermissionAuthorizationPlanV1,
 } from '../packages/cli/src/platform-contracts.js'
 import type { RollbackPlan } from '../packages/cli/src/launcher/packages/authority.js'
+import type { PluginGenerationArtifactServer } from '../packages/cli/src/launcher/plugin-generation-loader.js'
 import type { PackageActivationTuple } from '../packages/cli/src/launcher/packages/types.js'
 import {
   CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1,
@@ -90,9 +91,15 @@ class FormalRuntime implements PluginLifecycleRuntime {
   failRollback = false
   failFinalizeAttempts = 0
   readonly terminalErrors: unknown[] = []
+  adopted?: CordisXPluginActivationRecordV1
 
   terminal(error: unknown): void {
     this.terminalErrors.push(error)
+  }
+
+  async adoptRecoveredActivation(active: CordisXPluginActivationRecordV1, registryEpoch: number): Promise<void> {
+    this.adopted = active
+    this.registryEpoch = registryEpoch
   }
 
   prepare(transactionId: string) {
@@ -989,7 +996,10 @@ describe('launcher plugin lifecycle coordinator', () => {
     const { applied } = await install(coordinator, await localPackage({ root, id: 'formal-failure' }), 0)
     expect(applied).toMatchObject({ outcome: 'rolled-back', error: { code: 'readiness-failed' } })
     expect(runtime.calls).toEqual(['prepare', 'stage', 'rollback'])
-    expect(await coordinator.store.loadActive()).toMatchObject({ revision: 0, plugins: [] })
+    const restored = await coordinator.store.loadActive()
+    expect(restored).toMatchObject({ revision: 0, plugins: [] })
+    expect(runtime.adopted).toEqual(restored)
+    expect(runtime.registryEpoch).toBe(2)
   })
 
   it('reopens rollback-pending state in a fresh runtime and completes the Host-branded recovery receipt', async () => {
@@ -1091,6 +1101,86 @@ describe('launcher plugin lifecycle coordinator', () => {
     expect(after.plugins.find(item => item.id === 'base')?.moduleGeneration).not.toBe(original.get('base'))
     expect(after.plugins.find(item => item.id === 'consumer')?.moduleGeneration).not.toBe(original.get('consumer'))
     expect(after.plugins.find(item => item.id === 'unrelated')?.moduleGeneration).toBe(original.get('unrelated'))
+  })
+
+  it('leases browser modules for the complete enabled dependency closure in activation order', async () => {
+    const { root, home } = await workspace()
+    const runtime = new FormalRuntime()
+    const leasedPluginIds: string[] = []
+    const artifactServer = {
+      origin: 'http://127.0.0.1:43123',
+      lease: vi.fn(async (module, moduleGeneration) => {
+        const pluginId = module.packageIdentity.pluginId
+        leasedPluginIds.push(pluginId)
+        return {
+          leaseId: `${pluginId}:${moduleGeneration}`,
+          pluginId,
+          moduleGeneration,
+          baseUrl: `http://127.0.0.1:43123/${pluginId}/${moduleGeneration}/`,
+          entryUrl: `http://127.0.0.1:43123/${pluginId}/${moduleGeneration}/module.js`,
+          initialStyleUrls: [],
+          importSource: `Promise.resolve(globalThis.__${pluginId}Module)`,
+          publishSource: `globalThis.__${pluginId}Published = true`,
+          retireSource: `globalThis.__${pluginId}Retired = true`,
+          retire: vi.fn(),
+        }
+      }),
+      requestTrace: () => [],
+      close: async () => undefined,
+    } satisfies PluginGenerationArtifactServer
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      runtime,
+      pluginGenerationArtifactServer: artifactServer,
+    })
+    await install(coordinator, await localPackage({ root, id: 'z-base' }), 0)
+    await install(
+      coordinator,
+      await localPackage({ root, id: 'a-consumer', dependencies: [{ id: 'z-base', version: '1.0.0' }] }),
+      1,
+    )
+    await install(
+      coordinator,
+      await localPackage({
+        root,
+        id: 'b-disabled-consumer',
+        dependencies: [{ id: 'z-base', version: '1.0.0' }],
+      }),
+      2,
+    )
+    await install(coordinator, await localPackage({ root, id: 'unrelated' }), 3)
+    const disablePlan = await coordinator.handle(
+      request({ kind: 'disable', pluginId: 'b-disabled-consumer', impactToken: 'probe' }, 4),
+    )
+    await coordinator.handle(request({
+      kind: 'disable',
+      pluginId: 'b-disabled-consumer',
+      impactToken: disablePlan.impactToken!,
+    }, 4))
+    leasedPluginIds.length = 0
+    artifactServer.lease.mockClear()
+
+    const updated = await install(
+      coordinator,
+      await localPackage({ root, id: 'z-base', code: 'export const revision = 2; export function apply() {}' }),
+      5,
+    )
+
+    expect(updated.applied).toMatchObject({
+      outcome: 'applied',
+      affectedPluginIds: ['z-base', 'a-consumer', 'b-disabled-consumer'],
+    })
+    expect(leasedPluginIds).toEqual(['z-base', 'a-consumer'])
+    expect(runtime.lastStaged?.runtimeArtifactLeases?.map(lease => lease.pluginId)).toEqual([
+      'z-base',
+      'a-consumer',
+    ])
+    expect(runtime.lastStaged?.runtimeArtifactLease?.pluginId).toBe('z-base')
+    expect(leasedPluginIds).not.toContain('b-disabled-consumer')
+    expect(leasedPluginIds).not.toContain('unrelated')
   })
 
   it('keeps last-good active after permission denial or readiness failure', async () => {

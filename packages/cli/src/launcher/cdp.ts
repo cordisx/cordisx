@@ -10,6 +10,7 @@ import type {
   RuntimePublicationObservation,
   RuntimeReadinessObservation,
 } from './plugin-lifecycle.js'
+import { runPluginLifecycleRequestWithProjection } from './plugin-lifecycle-projection.js'
 import {
   handlePluginLifecycleBindingRequest,
   MAX_PLUGIN_LIFECYCLE_REQUEST_BYTES,
@@ -984,6 +985,12 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 
   async publish(transactionId: string): Promise<RuntimePublicationObservation> {
     const sessions = this.staged.get(transactionId) ?? []
+    const mutation = this.stagedMutations.get(transactionId)
+    const resourcePublication = mutation === undefined
+      ? ''
+      : mutationArtifactLeases(mutation).map(lease =>
+        `if ((${lease.publishSource}) !== true) throw new Error('plugin generation resource publication failed')`
+      ).join('\n')
     const results = await Promise.all(
       sessions.map(async session =>
         await evaluateRuntimeOperation<RuntimePublicationObservation>(
@@ -991,6 +998,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
           `(async () => { try {
       const runtime = globalThis.__cordisxRuntime
       if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
+      ${resourcePublication}
       const result = await runtime.publishPluginMutation(${JSON.stringify(transactionId)})
       return { ok: true, result }
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
@@ -1004,12 +1012,6 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         || item.registryEpoch !== first.registryEpoch
       )
     ) throw new Error('CordisX renderer publications disagree')
-    const mutation = this.stagedMutations.get(transactionId)
-    if (mutation !== undefined) {
-      for (const lease of mutationArtifactLeases(mutation)) {
-        await this.evaluateArtifactLease(sessions, lease.publishSource)
-      }
-    }
     this.registryEpoch = first.registryEpoch
     return first
   }
@@ -2460,27 +2462,22 @@ async function install(
             requestId = request.requestId
             if (lifecycleController?.signal.aborted === true) throw new Error('plugin lifecycle bridge is closed')
             await lifecycleRequests.run(
-              async () => {
-                const value = await handlePluginLifecycleBindingRequest(lifecycle.handler, request)
-                if (request.kind !== 'bundle-snapshot-v1') {
-                  try {
-                    if (request.kind === 'bundle-operation-v1') {
-                      await lifecycle.runtime.refreshBrowserGraphBootstrap(
-                        await lifecycle.handler.coordinator.store.loadActive(),
-                      )
-                    }
-                    if (lifecycle.handler.bundleCoordinator !== undefined) {
-                      await lifecycle.runtime.synchronizePluginBundles(
-                        await lifecycle.handler.bundleCoordinator.snapshot(),
-                      )
-                    }
-                  } catch (error) {
-                    lifecycle.runtime.terminal(error)
-                    throw error
-                  }
-                }
-                return value
-              },
+              async () =>
+                await runPluginLifecycleRequestWithProjection(
+                  async () => await handlePluginLifecycleBindingRequest(lifecycle.handler, request),
+                  request.kind !== 'bundle-snapshot-v1',
+                  {
+                    loadActive: async () => await lifecycle.handler.coordinator.store.loadActive(),
+                    refreshBrowserGraphBootstrap: async active =>
+                      await lifecycle.runtime.refreshBrowserGraphBootstrap(active),
+                    ...(lifecycle.handler.bundleCoordinator === undefined ? {} : {
+                      loadBundleSnapshot: async () => await lifecycle.handler.bundleCoordinator!.snapshot(),
+                      synchronizePluginBundles: async snapshot =>
+                        await lifecycle.runtime.synchronizePluginBundles(snapshot),
+                    }),
+                    terminal: error => lifecycle.runtime.terminal(error),
+                  },
+                ),
               async value => await sendPluginLifecycleBindingResponse(session, { requestId, ok: true, value }),
             )
           } catch {
@@ -2811,20 +2808,22 @@ async function uninstall(
         ? [installed.session.send('Runtime.removeBinding', { name: PUBLISHER_GRANT_BINDING })]
         : []),
     ])
-    if (strictProductionCleanup) {
+    const rendererGone = installed.session.isClosed()
+    if (strictProductionCleanup && !rendererGone) {
       cleanupFailures.push(
         ...rendererCleanup.flatMap(result => result.status === 'rejected' ? [result.reason] : []),
       )
     }
-    const scriptRemoved = rendererCleanup[0]?.status === 'fulfilled'
+    const scriptRemoved = rendererGone || rendererCleanup[0]?.status === 'fulfilled'
     if (installed.loopbackModules) {
-      const cspRestored = await attemptCleanup(installed.session.send('Page.setBypassCSP', { enabled: false }))
+      const cspRestored = rendererGone
+        || await attemptCleanup(installed.session.send('Page.setBypassCSP', { enabled: false }))
       if (viteLoopbackPermissions === undefined) {
         await attemptCleanup(restoreViteLoopbackPermission(installed.session, installed.viteLoopbackPermission))
       } else {
         await attemptCleanup(viteLoopbackPermissions.release(installed.session, installed.viteLoopbackPermission))
       }
-      if (!installed.viteDevelopment && scriptRemoved && cspRestored) {
+      if (!rendererGone && !installed.viteDevelopment && scriptRemoved && cspRestored) {
         await attemptCleanup(installed.session.send('Page.reload', {}, CDP_INJECTION_TIMEOUT_MS))
       }
     }
@@ -2916,6 +2915,8 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
     injectionTimeoutMs: CDP_INJECTION_TIMEOUT_MS,
     permissions: viteLoopbackPermissions,
     signal: options.signal,
+    mutateDocumentScript: async (session, method, params, signal) =>
+      await abortable(session.send(method, params, CDP_INJECTION_TIMEOUT_MS), signal),
     isNativeTarget: target => nativeAppTarget(target as CdpTarget),
     replace: (current, replacement) => {
       installed.set(current.target.id, { ...current, ...replacement })
@@ -3120,8 +3121,10 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
   } catch (error) {
     watcherFailure = error
   } finally {
-    const cleanup = await Promise.allSettled(
-      [...installed.values()].map(record => uninstall(record, viteLoopbackPermissions)),
+    const cleanup = await hostMutationGate.closeAndDrain(async () =>
+      await Promise.allSettled(
+        [...installed.values()].map(record => uninstall(record, viteLoopbackPermissions)),
+      )
     )
     const failures = cleanup.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
     if (failures.length > 0) {

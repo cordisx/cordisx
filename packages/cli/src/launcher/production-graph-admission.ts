@@ -47,6 +47,12 @@ export interface ProductionGraphOperations<RecordType extends ProductionGraphRec
   readonly injectionTimeoutMs: number
   readonly permissions: ProductionGraphPermissionCoordinator
   readonly signal: AbortSignal
+  mutateDocumentScript(
+    session: ProductionGraphSession,
+    method: 'Page.addScriptToEvaluateOnNewDocument' | 'Page.removeScriptToEvaluateOnNewDocument',
+    params: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<Record<string, unknown>>
   isNativeTarget(target: ProductionGraphTarget): boolean
   replace(current: RecordType, replacement: {
     readonly identifier: string
@@ -64,8 +70,15 @@ export class CdpLifecycleRequestGate {
   #owner: symbol | undefined
   #pending = 0
   #tail: Promise<void> = Promise.resolve()
+  #closed = false
+  #responding = 0
+  #lifecycleBurst: {
+    pending: number
+    readonly settled: Promise<void>
+    readonly resolve: () => void
+  } | undefined
 
-  async exclusive<Value>(task: () => Promise<Value>): Promise<Value> {
+  async #exclusive<Value>(task: () => Promise<Value>): Promise<Value> {
     if (this.#context.getStore() === this.#owner && this.#owner !== undefined) return await task()
     this.#pending += 1
     const previous = this.#tail
@@ -85,13 +98,59 @@ export class CdpLifecycleRequestGate {
     }
   }
 
+  async exclusive<Value>(task: () => Promise<Value>): Promise<Value> {
+    if (this.#context.getStore() === this.#owner && this.#owner !== undefined) return await task()
+    if (this.#closed) throw new Error('plugin lifecycle request gate is closed')
+    const burst = this.#lifecycleBurst
+    if (burst !== undefined) {
+      await burst.settled
+      return await this.exclusive(task)
+    }
+    return await this.#exclusive(task)
+  }
+
   async run<Value>(task: () => Promise<Value>, respond: (value: Value) => Promise<void>): Promise<void> {
     const reentrant = this.#owner !== undefined && this.#context.getStore() === this.#owner
-    if (this.#pending > 0 && !reentrant) {
+    let burst = this.#lifecycleBurst
+    if (burst === undefined) {
+      if (this.#closed) throw new Error('plugin lifecycle request gate is closed')
+      if (this.#pending > 0 && !reentrant) {
+        throw new Error('another plugin lifecycle request is already active')
+      }
+      let resolve!: () => void
+      burst = {
+        pending: 0,
+        settled: new Promise<void>(settle => {
+          resolve = settle
+        }),
+        resolve,
+      }
+      this.#lifecycleBurst = burst
+    } else if (!reentrant && this.#responding === 0) {
       throw new Error('another plugin lifecycle request is already active')
     }
-    const value = await this.exclusive(task)
-    await respond(value)
+    burst.pending += 1
+    try {
+      const value = await this.#exclusive(task)
+      this.#responding += 1
+      try {
+        await respond(value)
+      } finally {
+        this.#responding -= 1
+      }
+    } finally {
+      burst.pending -= 1
+      if (burst.pending === 0 && this.#lifecycleBurst === burst) {
+        this.#lifecycleBurst = undefined
+        burst.resolve()
+      }
+    }
+  }
+
+  async closeAndDrain<Value>(task: () => Promise<Value>): Promise<Value> {
+    this.#closed = true
+    await this.#lifecycleBurst?.settled
+    return await this.#exclusive(task)
   }
 }
 
@@ -139,7 +198,11 @@ async function compensateProductionGraphPromotion<RecordType extends ProductionG
     let restoredIdentifier = current.identifier
     let scriptRestored = !state.oldRemoved
     if (state.identifier !== undefined) {
-      await current.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: state.identifier })
+      await operations.mutateDocumentScript(
+        current.session,
+        'Page.removeScriptToEvaluateOnNewDocument',
+        { identifier: state.identifier },
+      )
         .catch(error => {
           state.ambiguousMutation = true
           failures.push(error)
@@ -148,9 +211,11 @@ async function compensateProductionGraphPromotion<RecordType extends ProductionG
     if (state.oldRemoved) {
       try {
         const restoreInstallId = randomUUID()
-        const restored = await current.session.send('Page.addScriptToEvaluateOnNewDocument', {
-          source: productionBootstrapSource(current.documentSource, restoreInstallId),
-        })
+        const restored = await operations.mutateDocumentScript(
+          current.session,
+          'Page.addScriptToEvaluateOnNewDocument',
+          { source: productionBootstrapSource(current.documentSource, restoreInstallId) },
+        )
         const identifier = restored.identifier
         if (typeof identifier !== 'string') {
           state.ambiguousMutation = true
@@ -230,9 +295,12 @@ export async function promoteProductionGraph<RecordType extends ProductionGraphR
       const installId = randomUUID()
       let added: Record<string, unknown>
       try {
-        added = await state.current.session.send('Page.addScriptToEvaluateOnNewDocument', {
-          source: productionBootstrapSource(bootstrap.newDocumentSource ?? bootstrap.source, installId),
-        })
+        added = await operations.mutateDocumentScript(
+          state.current.session,
+          'Page.addScriptToEvaluateOnNewDocument',
+          { source: productionBootstrapSource(bootstrap.newDocumentSource ?? bootstrap.source, installId) },
+          operations.signal,
+        )
       } catch (error) {
         state.ambiguousMutation = true
         throw error
@@ -243,9 +311,12 @@ export async function promoteProductionGraph<RecordType extends ProductionGraphR
       }
       state.identifier = added.identifier
       try {
-        await state.current.session.send('Page.removeScriptToEvaluateOnNewDocument', {
-          identifier: state.current.identifier,
-        })
+        await operations.mutateDocumentScript(
+          state.current.session,
+          'Page.removeScriptToEvaluateOnNewDocument',
+          { identifier: state.current.identifier },
+          operations.signal,
+        )
       } catch (error) {
         state.ambiguousMutation = true
         throw error
@@ -296,7 +367,7 @@ export async function promoteProductionGraph<RecordType extends ProductionGraphR
 export async function refreshProductionGraphBootstraps<RecordType extends ProductionGraphRecord>(
   records: readonly RecordType[],
   bootstrap: ProductionGraphBootstrap,
-  operations: Pick<ProductionGraphOperations<RecordType>, 'replace'>,
+  operations: Pick<ProductionGraphOperations<RecordType>, 'replace' | 'mutateDocumentScript' | 'signal'>,
 ): Promise<void> {
   const states = records.map(current => ({
     current,
@@ -312,9 +383,12 @@ export async function refreshProductionGraphBootstraps<RecordType extends Produc
       }
       let added: Record<string, unknown>
       try {
-        added = await state.current.session.send('Page.addScriptToEvaluateOnNewDocument', {
-          source: productionBootstrapSource(bootstrap.newDocumentSource ?? bootstrap.source, randomUUID()),
-        })
+        added = await operations.mutateDocumentScript(
+          state.current.session,
+          'Page.addScriptToEvaluateOnNewDocument',
+          { source: productionBootstrapSource(bootstrap.newDocumentSource ?? bootstrap.source, randomUUID()) },
+          operations.signal,
+        )
       } catch (error) {
         state.ambiguousMutation = true
         throw error
@@ -325,9 +399,12 @@ export async function refreshProductionGraphBootstraps<RecordType extends Produc
       }
       state.identifier = added.identifier
       try {
-        await state.current.session.send('Page.removeScriptToEvaluateOnNewDocument', {
-          identifier: state.current.identifier,
-        })
+        await operations.mutateDocumentScript(
+          state.current.session,
+          'Page.removeScriptToEvaluateOnNewDocument',
+          { identifier: state.current.identifier },
+          operations.signal,
+        )
       } catch (error) {
         state.ambiguousMutation = true
         throw error
@@ -341,18 +418,22 @@ export async function refreshProductionGraphBootstraps<RecordType extends Produc
     const compensationFailures: unknown[] = []
     for (const state of states) {
       if (state.identifier !== undefined) {
-        await state.current.session.send('Page.removeScriptToEvaluateOnNewDocument', {
-          identifier: state.identifier,
-        }).catch(error => {
+        await operations.mutateDocumentScript(
+          state.current.session,
+          'Page.removeScriptToEvaluateOnNewDocument',
+          { identifier: state.identifier },
+        ).catch(error => {
           state.ambiguousMutation = true
           compensationFailures.push(error)
         })
       }
       if (state.oldRemoved) {
         try {
-          const restored = await state.current.session.send('Page.addScriptToEvaluateOnNewDocument', {
-            source: productionBootstrapSource(state.current.documentSource, randomUUID()),
-          })
+          const restored = await operations.mutateDocumentScript(
+            state.current.session,
+            'Page.addScriptToEvaluateOnNewDocument',
+            { source: productionBootstrapSource(state.current.documentSource, randomUUID()) },
+          )
           if (typeof restored.identifier !== 'string') {
             state.ambiguousMutation = true
             throw new Error('CDP did not return a restored injection identifier')

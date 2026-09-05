@@ -1406,11 +1406,12 @@ export class PluginLifecycleCoordinator {
               active: runtimeObservation(restored.active, restored.registryEpoch),
               disposedAfter: runtimeObservation(restored.disposedAfter, rollback.expectedRegistryEpoch),
             })
-            await authority.completeRollback({
+            const active = await authority.completeRollback({
               ownerId: access.ownerId,
               profileId: access.profileId,
               rollbackToken: rollback.rollbackToken,
             }, rollbackReceipt)
+            await runtime.adoptRecoveredActivation?.(active, restored.registryEpoch)
           } catch (rollbackError) {
             throw new LifecycleFailure(
               'rollback-failed',

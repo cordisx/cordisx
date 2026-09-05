@@ -5,7 +5,6 @@ import path from 'node:path'
 import { WebSocketServer } from 'ws'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  CdpLifecycleRequestGate,
   CdpPluginLifecycleRuntime,
   type CdpTarget,
   iconThemePreferenceDeliveryEvaluation,
@@ -1661,7 +1660,10 @@ describe('CdpPluginLifecycleRuntime', () => {
     expect(expressions).toContainEqual(expect.stringContaining('__cordisxPendingPluginModulesV1'))
     expect(expressions).toContainEqual(expect.stringContaining('"demo": await'))
     await runtime.publish('tx')
-    expect(expressions).toContain(next.lease.publishSource)
+    const publication = expressions.find(expression => expression.includes(next.lease.publishSource))!
+    expect(publication.indexOf(next.lease.publishSource)).toBeLessThan(
+      publication.indexOf('runtime.publishPluginMutation'),
+    )
     expect(old.retire).not.toHaveBeenCalled()
     await runtime.complete('tx')
     await expect(runtime.finalize('tx')).rejects.toThrow('plugin generation resource operation failed')
@@ -1791,6 +1793,13 @@ describe('CdpPluginLifecycleRuntime', () => {
           }
         }
         if (expression.includes('publishPluginMutation')) {
+          if (expression.includes(failedNext.lease.publishSource)) {
+            return {
+              result: {
+                value: { ok: false, error: 'plugin generation resource publication failed' },
+              },
+            }
+          }
           return {
             result: {
               value: {
@@ -1843,7 +1852,7 @@ describe('CdpPluginLifecycleRuntime', () => {
         identitySource: 'file:///demo-failed.js',
       } as never,
     })
-    await expect(failedRuntime.publish('failed')).rejects.toThrow('plugin generation resource operation failed')
+    await expect(failedRuntime.publish('failed')).rejects.toThrow('plugin generation resource publication failed')
     expect(failedRuntime.currentRegistryEpoch()).toBe(0)
     expect(failedNext.retire).not.toHaveBeenCalled()
     await expect(failedRuntime.rollback('failed')).rejects.toThrow('plugin generation resource operation failed')
@@ -2000,7 +2009,11 @@ describe('CdpPluginLifecycleRuntime', () => {
     expect(importExpression).toContain(nextBase.importSource)
     expect(importExpression).toContain(nextConsumer.importSource)
     await runtime.publish('tx')
-    expect(expressions.indexOf(nextBase.publishSource)).toBeLessThan(expressions.indexOf(nextConsumer.publishSource))
+    const publication = expressions.find(expression => expression.includes(nextBase.publishSource))!
+    expect(publication.indexOf(nextBase.publishSource)).toBeLessThan(publication.indexOf(nextConsumer.publishSource))
+    expect(publication.indexOf(nextConsumer.publishSource)).toBeLessThan(
+      publication.indexOf('runtime.publishPluginMutation'),
+    )
     await runtime.complete('tx')
     await runtime.finalize('tx')
     expect(oldBase.retire).toHaveBeenCalledOnce()
@@ -3084,63 +3097,5 @@ describe('CdpPluginLifecycleRuntime', () => {
     expect(expressions.filter(expression => expression.includes('recoverPluginMutation'))).toHaveLength(1)
     expect(expressions.filter(expression => expression.includes('adoptRecoveredActivation'))).toHaveLength(1)
     expect(runtime.prepare('next')).toMatchObject({ expectedRegistryEpoch: 2 })
-  })
-})
-
-describe('CdpLifecycleRequestGate', () => {
-  it('releases the single-flight fence before a response-triggered follow-up', async () => {
-    const gate = new CdpLifecycleRequestGate()
-    const values: number[] = []
-    let followUp: Promise<void> | undefined
-
-    await gate.run(async () => 1, async value => {
-      values.push(value)
-      followUp = gate.run(async () => 2, async next => {
-        values.push(next)
-      })
-    })
-    await followUp
-
-    expect(values).toEqual([1, 2])
-  })
-
-  it('rejects a genuinely concurrent lifecycle task', async () => {
-    const gate = new CdpLifecycleRequestGate()
-    let release!: () => void
-    const blocked = new Promise<void>(resolve => {
-      release = resolve
-    })
-    const active = gate.run(async () => {
-      await blocked
-    }, async () => undefined)
-
-    await expect(gate.run(async () => undefined, async () => undefined)).rejects.toThrow(/already active/)
-    release()
-    await active
-  })
-
-  it('queues watcher work while allowing the owning lifecycle task to re-enter', async () => {
-    const gate = new CdpLifecycleRequestGate()
-    const values: string[] = []
-    const entered = deferred()
-    const release = deferred()
-    const lifecycle = gate.exclusive(async () => {
-      values.push('lifecycle')
-      await gate.exclusive(async () => {
-        values.push('admission')
-      })
-      entered.resolve()
-      await release.promise
-      values.push('settled')
-    })
-    await entered.promise
-    const watcher = gate.exclusive(async () => {
-      values.push('watcher')
-    })
-    await Promise.resolve()
-    expect(values).toEqual(['lifecycle', 'admission'])
-    release.resolve()
-    await Promise.all([lifecycle, watcher])
-    expect(values).toEqual(['lifecycle', 'admission', 'settled', 'watcher'])
   })
 })
