@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -32,18 +32,77 @@ async function json(file) {
 async function linkRepositoryDependencies(target) {
   const repositoryRoot = path.resolve(packageRoot, '../..')
   await mkdir(path.join(target, 'node_modules', '@deepseek-ai'), { recursive: true })
+  await mkdir(path.join(target, 'node_modules', '.bin'), { recursive: true })
   await symlink(path.join(repositoryRoot, 'packages', 'cli'), path.join(target, 'node_modules', 'cordisx'), 'dir')
   await symlink(
     path.join(repositoryRoot, 'node_modules', 'typescript'),
     path.join(target, 'node_modules', 'typescript'),
     'dir',
   )
+  await symlink(path.join(repositoryRoot, 'node_modules', 'vite'), path.join(target, 'node_modules', 'vite'), 'dir')
   await symlink(
     path.join(repositoryRoot, 'node_modules', '@deepseek-ai', 'cordis'),
     path.join(target, 'node_modules', '@deepseek-ai', 'cordis'),
     'dir',
   )
-  return path.join(target, 'node_modules', 'typescript', 'bin', 'tsc')
+  await symlink(
+    path.join(repositoryRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
+    path.join(target, 'node_modules', '.bin', 'tsc'),
+  )
+  await symlink(
+    path.join(repositoryRoot, 'node_modules', 'vite', 'bin', 'vite.js'),
+    path.join(target, 'node_modules', '.bin', 'vite'),
+  )
+}
+
+async function addLazyStyleAndAsset(pluginRoot, entryName) {
+  const componentPath = path.join(pluginRoot, 'src', 'overview-page.tsx')
+  const component = await text(componentPath)
+  await writeFile(
+    componentPath,
+    component
+      .replace(
+        "import { useState } from 'cordisx/react'",
+        "import './overview-page.css'\nimport { useState } from 'cordisx/react'",
+      )
+      .replace(
+        'export function OverviewPage',
+        "const lazyAsset = new URL('./overview-page.png', import.meta.url).href\n\nexport function OverviewPage",
+      )
+      .replace('<Stack gap="large">', '<Stack gap="large"><img src={lazyAsset} alt="" />'),
+    'utf8',
+  )
+  await writeFile(path.join(pluginRoot, 'src', 'overview-page.css'), '.generated-plugin-proof { color: CanvasText; }\n')
+  await writeFile(
+    path.join(pluginRoot, 'src', 'overview-page.png'),
+    Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    ),
+  )
+  const viteConfig = await text(path.join(pluginRoot, 'vite.config.ts'))
+  assert.match(viteConfig, /from 'cordisx\/vite'/)
+  assert.match(viteConfig, new RegExp(`entry:.*${entryName.replace('.', '\\.')}`))
+}
+
+async function assertProductionGraph(graphRoot, expectStaticAssets = false) {
+  const artifact = await json(path.join(graphRoot, 'artifact.json'))
+  assert.equal(artifact.contract, 'cordisx.plugin-generation-artifact/v1')
+  assert.equal(artifact.schemaVersion, 1)
+  assert.equal(artifact.format, 'browser-esm-graph')
+  assert.equal(artifact.entry, './module.js')
+  const entry = artifact.files.find(file => file.path === artifact.entry)
+  assert.equal(entry?.kind, 'module')
+  assert.ok(artifact.files.some(file => file.kind === 'module' && file.dynamicImports.length > 0))
+  assert.ok(artifact.sharedImports.includes('cordisx/react'))
+  assert.ok(artifact.sharedImports.includes('cordisx/ui'))
+  for (const file of artifact.files) await stat(path.join(graphRoot, file.path))
+  assert.ok((await readdir(path.join(graphRoot, 'chunks'))).some(file => file.endsWith('.js')))
+  if (expectStaticAssets) {
+    const assets = await readdir(path.join(graphRoot, 'assets'))
+    assert.ok(assets.some(file => file.endsWith('.css')))
+    assert.ok(assets.some(file => file.endsWith('.png')))
+  }
 }
 
 test('the legacy positional invocation still creates one standalone plugin', async t => {
@@ -56,10 +115,33 @@ test('the legacy positional invocation still creates one standalone plugin', asy
   assert.equal(manifest.name, 'my-plugin')
   assert.equal(manifest.scripts.dev, 'cordisx dev ./src/my-plugin.tsx')
   assert.doesNotMatch(manifest.scripts.check, /npm run/)
+  assert.equal(manifest.main, './dist/runtime/module.js')
+  assert.deepEqual(manifest.files, ['dist', 'README.md', 'README.zh-Hans.md'])
+  const viteConfig = await text(path.join(target, 'vite.config.ts'))
+  assert.match(viteConfig, /cordisXPluginViteConfig/)
+  assert.match(viteConfig, /entry:.*src\/my-plugin\.tsx/)
+  assert.match(viteConfig, /outDir:.*dist/)
+  assert.match(viteConfig, /entryFileName: 'module\.js'/)
+  assert.doesNotMatch(viteConfig, /rollupOptions|assetsInlineLimit|cssCodeSplit/)
   assert.match(await text(path.join(target, 'src', 'my-plugin.tsx')), /id: 'my-plugin'/)
-  assert.match(await text(path.join(target, 'src', 'my-plugin.tsx')), /defineReactPage<Messages>\(OverviewPage\)/)
+  assert.match(
+    await text(path.join(target, 'src', 'my-plugin.tsx')),
+    /defineReactPage<Messages>\(OverviewPageBoundary\)/,
+  )
+  assert.match(await text(path.join(target, 'src', 'my-plugin.tsx')), /import\('\.\/overview-page\.js'\)/)
   assert.match(await text(path.join(target, 'src', 'overview-page.tsx')), /export function OverviewPage/)
   assert.equal(await text(path.join(target, '.gitignore')), 'dist/\nnode_modules/\n')
+})
+
+test('standalone production build emits a lazy ESM graph with external CSS and assets', async t => {
+  const root = await fixture(t)
+  await run(root, 'graph-plugin')
+  const target = path.join(root, 'graph-plugin')
+  await addLazyStyleAndAsset(target, 'src/graph-plugin.tsx')
+  await linkRepositoryDependencies(target)
+
+  await execute('npm', ['run', 'check'], { cwd: target })
+  await assertProductionGraph(path.join(target, 'dist', 'runtime'), true)
 })
 
 test('the generated component is accepted as a Vite React refresh boundary', async t => {
@@ -116,7 +198,8 @@ test('workspace mode creates independently addressable plugin packages and one c
   ])
   assert.deepEqual(project.workspaces, ['plugins/*'])
   assert.equal(project.scripts.dev, 'cordisx dev --config ./cordisx.config.json')
-  assert.equal(chatroom.main, './dist/index.js')
+  assert.equal(chatroom.main, './dist/runtime/module.js')
+  assert.equal(chatroom.devDependencies.vite, '8.2.2')
   assert.match(await text(path.join(target, 'plugins', 'calendar', 'src', 'index.tsx')), /id: 'calendar'/)
   assert.match(
     await text(path.join(target, 'plugins', 'calendar', 'src', 'overview-page.tsx')),
@@ -128,9 +211,11 @@ test('workspace mode creates independently addressable plugin packages and one c
     { path: './plugins/calendar' },
   ])
 
-  const tsc = await linkRepositoryDependencies(target)
-  await execute(process.execPath, [tsc, '-b'], { cwd: target })
-  await execute(process.execPath, ['--test', 'test/plugins.mjs'], { cwd: target })
+  await addLazyStyleAndAsset(path.join(target, 'plugins', 'chatroom'), 'src/index.tsx')
+  await linkRepositoryDependencies(target)
+  await execute('npm', ['run', 'check'], { cwd: target })
+  await assertProductionGraph(path.join(target, 'plugins', 'chatroom', 'dist', 'runtime'), true)
+  await assertProductionGraph(path.join(target, 'plugins', 'calendar', 'dist', 'runtime'))
 })
 
 test('embedded isolated mode leaves the business project untouched', async t => {
@@ -158,9 +243,10 @@ test('embedded isolated mode leaves the business project untouched', async t => 
   assert.match(await text(path.join(cordisx, '.gitignore')), /node_modules\//)
   assert.match(await text(path.join(cordisx, 'plugins', 'assistant', 'src', 'index.tsx')), /id: 'assistant'/)
 
-  const tsc = await linkRepositoryDependencies(cordisx)
-  await execute(process.execPath, [tsc, '-p', 'tsconfig.json'], { cwd: cordisx })
-  await execute(process.execPath, ['--test', 'test/assistant.mjs'], { cwd: cordisx })
+  await addLazyStyleAndAsset(path.join(cordisx, 'plugins', 'assistant'), 'src/index.tsx')
+  await linkRepositoryDependencies(cordisx)
+  await execute('npm', ['run', 'check'], { cwd: cordisx })
+  await assertProductionGraph(path.join(cordisx, 'dist', 'runtime', 'assistant'), true)
 })
 
 test('embedded auto mode joins pnpm and supports non-destructive incremental plugin additions', async t => {
@@ -193,8 +279,8 @@ test('embedded auto mode joins pnpm and supports non-destructive incremental plu
   assert.equal(config.plugins[1].entry, './plugins/beta/src/index.tsx')
   assert.deepEqual(config.custom, { preserved: true })
   assert.deepEqual(await json(cordisxPackagePath), customizedPackage)
-  assert.match(await text(path.join(project, '.cordisx', 'test', 'alpha.mjs')), /dist\/alpha\/src\/index\.js/)
-  assert.match(await text(path.join(project, '.cordisx', 'test', 'beta.mjs')), /dist\/beta\/src\/index\.js/)
+  assert.match(await text(path.join(project, '.cordisx', 'test', 'alpha.mjs')), /dist\/runtime\/alpha\/module\.js/)
+  assert.match(await text(path.join(project, '.cordisx', 'test', 'beta.mjs')), /dist\/runtime\/beta\/module\.js/)
 })
 
 test('embedded auto mode adds the package to npm-style workspace declarations', async t => {

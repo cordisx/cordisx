@@ -218,13 +218,68 @@ function pluginConfig(ids: readonly string[]): string {
 }
 
 function manifestTest(ids: readonly string[], modulePath: (id: string) => string): string {
-  const imports = ids.map((id, index) => `import * as plugin${index} from '${modulePath(id)}'`).join('\n')
+  const imports = ids.map((id, index) => `const plugin${index} = await import('${modulePath(id)}')`).join('\n')
   const cases = ids.map((id, index) => `  ['${id}', plugin${index}],`).join('\n')
-  return `${imports}\nimport assert from 'node:assert/strict'\nimport test from 'node:test'\n\nconst plugins = [\n${cases}\n]\n\ntest('all configured CordisX plugins export matching manifests', () => {\n  for (const [id, plugin] of plugins) {\n    assert.equal(plugin.manifest.schemaVersion, 1)\n    assert.equal(plugin.manifest.id, id)\n    assert.equal(typeof plugin.apply, 'function')\n  }\n})\n`
+  return `import assert from 'node:assert/strict'
+import test from 'node:test'
+
+const component = () => null
+const noop = () => undefined
+const React = new Proxy({ Fragment: Symbol('Fragment'), Suspense: component, lazy: () => component }, {
+  get(target, property) { return Reflect.get(target, property) ?? noop },
+})
+globalThis.__cordisxSharedReactRuntime = {
+  React,
+  defineReactPage: page => page,
+  jsxRuntime: { Fragment: React.Fragment, jsx: component, jsxs: component },
+  jsxDevRuntime: { Fragment: React.Fragment, jsxDEV: component },
+  ui: new Proxy({}, { get: () => component }),
 }
 
-async function renderPluginSource(templateRoot: string, destination: string, id: string): Promise<void> {
-  const replacements = { packageName: id, pluginId: id }
+${imports}
+
+const plugins = [
+${cases}
+]
+
+test('all configured CordisX plugins export matching manifests', () => {
+  for (const [id, plugin] of plugins) {
+    assert.equal(plugin.manifest.schemaVersion, 1)
+    assert.equal(plugin.manifest.id, id)
+    assert.equal(typeof plugin.apply, 'function')
+  }
+})
+`
+}
+
+function projectBuildScript(configName: string): string {
+  return `import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { build } from 'vite'
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const config = JSON.parse(await readFile(path.join(root, '${configName}'), 'utf8'))
+if (config.version !== 1 || !Array.isArray(config.plugins)) throw new Error('CordisX project config must have version 1 and a plugins array')
+const ids = new Set()
+for (const plugin of config.plugins) {
+  if (plugin === null || typeof plugin !== 'object' || typeof plugin.id !== 'string'
+    || !/^[a-z0-9][a-z0-9._-]{0,95}$/.test(plugin.id) || ids.has(plugin.id)) {
+    throw new Error('CordisX project config contains an invalid or duplicated plugin id')
+  }
+  ids.add(plugin.id)
+  await build({ configFile: path.join(root, 'plugins', plugin.id, 'vite.config.ts') })
+}
+`
+}
+
+async function renderPluginSource(
+  templateRoot: string,
+  destination: string,
+  id: string,
+  outDir = 'dist/runtime',
+): Promise<void> {
+  const replacements = { packageName: id, pluginId: id, sourceEntry: 'src/index.tsx', outDir }
   const source = replaceTokens(
     await readFile(path.join(templateRoot, 'src', '{{packageName}}.tsx'), 'utf8'),
     replacements,
@@ -233,12 +288,22 @@ async function renderPluginSource(templateRoot: string, destination: string, id:
     await readFile(path.join(templateRoot, 'src', 'overview-page.tsx'), 'utf8'),
     replacements,
   )
+  const viteConfig = replaceTokens(
+    await readFile(path.join(templateRoot, 'vite.config.ts'), 'utf8'),
+    replacements,
+  )
   await mkdir(path.join(destination, 'src'), { recursive: true })
   await writeFile(path.join(destination, 'src', 'index.tsx'), source, { encoding: 'utf8', flag: 'wx' })
   await writeFile(path.join(destination, 'src', 'overview-page.tsx'), page, { encoding: 'utf8', flag: 'wx' })
+  await writeFile(path.join(destination, 'vite.config.ts'), viteConfig, { encoding: 'utf8', flag: 'wx' })
   await writeFile(
     path.join(destination, 'README.md'),
-    `# ${id}\n\nThe lifecycle entry is \`src/index.tsx\`. React page components live in component-only modules such as \`src/overview-page.tsx\` so Vite can apply React Fast Refresh.\n\nThis plugin starts private and \`UNLICENSED\`. Its generated source is Marked Template Material under the CordisX Independent Plugin Exception; choose a license before distribution.\n`,
+    `# ${id}\n\nThe local-development lifecycle entry is \`src/index.tsx\`. React page components live in component-only modules such as \`src/overview-page.tsx\` so Vite can apply React Fast Refresh. Production config calls the public \`cordisx/vite\` helper to write one immutable Vite ESM graph with \`module.js\`, content-addressed chunks, CSS, assets, and formal \`artifact.json\` under \`dist/runtime/\`. Declarations live separately under \`dist/types/\`. A portable package entry points at the adjacent \`dist/runtime/module.js\`; the Host validates and retains the indexed graph.\n\nThis plugin starts private and \`UNLICENSED\`. Its generated source is Marked Template Material under the CordisX Independent Plugin Exception; choose a license before distribution.\n`,
+    { encoding: 'utf8', flag: 'wx' },
+  )
+  await writeFile(
+    path.join(destination, 'README.zh-Hans.md'),
+    `# ${id}\n\n本地开发的生命周期入口为 \`src/index.tsx\`。React 页面组件位于 \`src/overview-page.tsx\` 等纯组件模块中，因此 Vite 可以应用 React Fast Refresh。生产配置调用公开的 \`cordisx/vite\` helper，在 \`dist/runtime/\` 下生成独立、不可变的 Vite ESM graph，包括 \`module.js\`、带内容摘要的 chunk、CSS、静态资源和正式的 \`artifact.json\`；类型声明单独写入 \`dist/types/\`。可移植 package 的入口指向相邻的 \`dist/runtime/module.js\`；Host 会验证并保留该索引 graph。\n\n此插件默认私有且使用 \`UNLICENSED\`。生成源码属于 CordisX 独立插件例外中的已标记模板材料；分发前请选择许可证。\n`,
     { encoding: 'utf8', flag: 'wx' },
   )
 }
@@ -250,16 +315,33 @@ function pluginPackage(workspaceName: string, id: string, cordisxVersion: string
     private: true,
     license: 'UNLICENSED',
     type: 'module',
-    main: './dist/index.js',
-    types: './dist/index.d.ts',
-    devDependencies: { '@deepseek-ai/cordis': '4.0.1', cordisx: cordisxVersion, typescript: '^5.9.2' },
+    files: ['dist', 'README.md', 'README.zh-Hans.md'],
+    main: './dist/runtime/module.js',
+    types: './dist/types/index.d.ts',
+    exports: {
+      '.': {
+        types: './dist/types/index.d.ts',
+        import: './dist/runtime/module.js',
+        default: './dist/runtime/module.js',
+      },
+    },
+    scripts: {
+      build: 'vite build && tsc -p tsconfig.json --emitDeclarationOnly',
+      typecheck: 'tsc -p tsconfig.json --noEmit',
+    },
+    devDependencies: {
+      '@deepseek-ai/cordis': '4.0.1',
+      cordisx: cordisxVersion,
+      typescript: '^5.9.2',
+      vite: '8.2.2',
+    },
   })
 }
 
 function pluginTsconfig(): string {
   return json({
     extends: '../../tsconfig.base.json',
-    compilerOptions: { rootDir: 'src', outDir: 'dist', composite: true },
+    compilerOptions: { rootDir: 'src', outDir: 'dist/types', composite: true },
     include: ['src/**/*.ts', 'src/**/*.tsx'],
     exclude: ['dist', 'node_modules'],
   })
@@ -288,6 +370,8 @@ async function createSingle(
       pluginId: id,
       cordisxVersion,
       packageManager: manager,
+      sourceEntry: `src/${id}.tsx`,
+      outDir: 'dist/runtime',
     })
     if (name !== id) await rename(path.join(target, 'src', `${name}.tsx`), path.join(target, 'src', `${id}.tsx`))
   } catch (error) {
@@ -325,13 +409,15 @@ async function createWorkspace(
         type: 'module',
         workspaces: ['plugins/*'],
         scripts: {
-          build: 'tsc -b',
-          check: 'tsc -b && node --test test/plugins.mjs',
+          build: 'node scripts/build-plugins.mjs && tsc -b --emitDeclarationOnly --force',
+          check:
+            'tsc -b && node scripts/build-plugins.mjs && tsc -b --emitDeclarationOnly --force && node --test test/plugins.mjs',
           dev: 'cordisx dev --config ./cordisx.config.json',
           'dev:dry-run': 'cordisx dev --config ./cordisx.config.json --dry-run',
           test: 'node --test test/plugins.mjs',
+          typecheck: 'tsc -b',
         },
-        devDependencies: { cordisx: cordisxVersion, typescript: '^5.9.2' },
+        devDependencies: { cordisx: cordisxVersion, typescript: '^5.9.2', vite: '8.2.2' },
         engines: { node: '>=22.19' },
       }),
       { encoding: 'utf8', flag: 'wx' },
@@ -349,13 +435,18 @@ async function createWorkspace(
       { encoding: 'utf8', flag: 'wx' },
     )
     await writeFile(path.join(target, 'cordisx.config.json'), pluginConfig(ids), { encoding: 'utf8', flag: 'wx' })
+    await mkdir(path.join(target, 'scripts'), { recursive: true })
+    await writeFile(path.join(target, 'scripts', 'build-plugins.mjs'), projectBuildScript('cordisx.config.json'), {
+      encoding: 'utf8',
+      flag: 'wx',
+    })
     await writeFile(path.join(target, '.gitignore'), 'node_modules/\ndist/\n*.tsbuildinfo\n', {
       encoding: 'utf8',
       flag: 'wx',
     })
     await writeFile(
       path.join(target, 'README.md'),
-      `# ${name}\n\nA dedicated CordisX multi-plugin workspace.\n\n\`\`\`bash\n${manager} install\n${manager} run check\n${manager} run dev:dry-run\n${manager} run dev\n\`\`\`\n`,
+      `# ${name}\n\nA dedicated CordisX multi-plugin workspace. Each plugin builds into its own Vite ESM graph so chunks and assets never couple independently replaceable plugin generations.\n\n\`\`\`bash\n${manager} install\n${manager} run check\n${manager} run dev:dry-run\n${manager} run dev\n\`\`\`\n`,
       { encoding: 'utf8', flag: 'wx' },
     )
     if (manager === 'pnpm') {
@@ -376,7 +467,7 @@ async function createWorkspace(
     await mkdir(path.join(target, 'test'), { recursive: true })
     await writeFile(
       path.join(target, 'test', 'plugins.mjs'),
-      manifestTest(ids, id => `../plugins/${id}/dist/index.js`),
+      manifestTest(ids, id => `../plugins/${id}/dist/runtime/module.js`),
       { encoding: 'utf8', flag: 'wx' },
     )
   } catch (error) {
@@ -537,8 +628,9 @@ function embeddedPackage(projectName: string, cordisxVersion: string, packageMan
     type: 'module',
     ...(packageManagerSpec === undefined ? {} : { packageManager: packageManagerSpec }),
     scripts: {
-      build: 'tsc -p tsconfig.json',
-      check: 'tsc -p tsconfig.json && node --test test/*.mjs',
+      build: 'node scripts/build-plugins.mjs && tsc -p tsconfig.json --emitDeclarationOnly',
+      check:
+        'tsc -p tsconfig.json --noEmit && node scripts/build-plugins.mjs && tsc -p tsconfig.json --emitDeclarationOnly && node --test test/*.mjs',
       dev: 'cordisx dev --config ./config.json',
       'dev:dry-run': 'cordisx dev --config ./config.json --dry-run',
       test: 'node --test test/*.mjs',
@@ -548,6 +640,7 @@ function embeddedPackage(projectName: string, cordisxVersion: string, packageMan
       '@deepseek-ai/cordis': '4.0.1',
       cordisx: cordisxVersion,
       typescript: '^5.9.2',
+      vite: '8.2.2',
     },
     engines: { node: '>=22.19' },
   })
@@ -555,7 +648,7 @@ function embeddedPackage(projectName: string, cordisxVersion: string, packageMan
 
 function embeddedTsconfig(): string {
   return json({
-    compilerOptions: { ...commonCompilerOptions(), rootDir: 'plugins', outDir: 'dist' },
+    compilerOptions: { ...commonCompilerOptions(), rootDir: 'plugins', outDir: 'dist/types' },
     include: ['plugins/**/*.ts', 'plugins/**/*.tsx'],
     exclude: ['dist', 'node_modules'],
   })
@@ -567,7 +660,7 @@ function embeddedReadme(manager: PackageManager, integrated: boolean): string {
     : manager === 'pnpm'
     ? 'Run `pnpm install --ignore-workspace` in this directory.'
     : `Run \`${manager} install\` in this directory.`
-  return `# Project CordisX development\n\nThis directory is an independent Node and TypeScript boundary for CordisX plugins embedded in the containing business project.\n\n${install}\n\nThen run \`${manager} run check\`, \`${manager} run dev:dry-run\`, or \`${manager} run dev\` here.\n`
+  return `# Project CordisX development\n\nThis directory is an independent Node and TypeScript boundary for CordisX plugins embedded in the containing business project. Each configured plugin builds into its own Vite ESM graph under \`dist/runtime/<plugin-id>/\`, while declarations stay in \`dist/types/\`; production chunks and assets do not cross plugin generation boundaries.\n\n${install}\n\nThen run \`${manager} run check\`, \`${manager} run dev:dry-run\`, or \`${manager} run dev\` here.\n`
 }
 
 async function existingEmbeddedConfig(file: string): Promise<{ value: Record<string, unknown>; ids: string[] }> {
@@ -655,16 +748,19 @@ async function createEmbedded(
       true,
     )
     await put(path.join(cordisxRoot, 'tsconfig.json'), embeddedTsconfig(), true)
+    await put(path.join(cordisxRoot, 'scripts', 'build-plugins.mjs'), projectBuildScript('config.json'), true)
     await put(path.join(cordisxRoot, '.gitignore'), 'node_modules/\ndist/\ncache/\n*.tsbuildinfo\n', true)
     await put(path.join(cordisxRoot, 'README.md'), embeddedReadme(manager, integrated), true)
     if (!integrated && manager === 'yarn') await put(path.join(cordisxRoot, 'yarn.lock'), '', true)
-    for (const id of ids) await renderPluginSource(templateRoot, path.join(cordisxRoot, 'plugins', id), id)
+    for (const id of ids) {
+      await renderPluginSource(templateRoot, path.join(cordisxRoot, 'plugins', id), id, `../../dist/runtime/${id}`)
+    }
     for (const id of ids) {
       await put(
         path.join(cordisxRoot, 'test', `${id}.mjs`),
         manifestTest(
           [id],
-          pluginId => `../dist/${pluginId}/src/index.js`,
+          pluginId => `../dist/runtime/${pluginId}/module.js`,
         ),
       )
     }

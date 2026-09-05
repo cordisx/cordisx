@@ -14,8 +14,8 @@ activation, upgrade, disablement, reload, and removal. The delivery order is:
 5. local fixtures plus simulated and isolated real-`app://` smoke evidence;
 6. exact merged protocol and Host pins in `cordisxmono`.
 
-The merged runtime can snapshot one explicit local directory, build an
-immutable package artifact, and drive a per-plugin generation through the
+The merged runtime can snapshot one explicit local directory, retain an
+immutable package ESM graph, and drive a per-plugin generation through the
 launcher/CDP/renderer lifecycle chain. Its current renderer staging still
 mounts candidates into live registries after disposing the previous closure.
 The generation-visibility checkpoint below closes that remaining atomicity
@@ -96,10 +96,11 @@ empty configuration document. Launcher `secretRef` accepts only `keychain:` or
 `secretState` and never the reference. Ordinary renderer plugins continue to
 use Schemastery `Config` on the separate renderer plane.
 
-The source tree is validated and bundled before it enters the store. The
-launcher computes a SHA-256 digest over the normalized manifest and built
-browser artifact, then publishes it at a content-addressed location under the
-CordisX home. Store directories are immutable after publication. Local source
+The source tree is validated and its complete production Vite graph is checked
+before it enters the store. The launcher computes a SHA-256 digest over the
+normalized manifest and every retained entry, chunk, CSS, and asset byte, then
+publishes the graph at a content-addressed location under the CordisX home.
+Store directories are immutable after publication. Local source
 paths are retained only in launcher-private operation audit; manager snapshots
 receive the digest and an optional public canonical source, never the source
 directory.
@@ -189,6 +190,12 @@ Module top-level code executes inside the current trusted renderer model and
 cannot be rolled back. Package guidance therefore requires top-level code to
 be declarative and side-effect free; effects begin in `apply()` and belong to
 the owning Cordis fiber. This requirement is lifecycle hygiene, not a sandbox.
+
+Loading a generation imports only its stable graph entry. A dynamic import may
+then request graph-relative JavaScript, CSS, and static assets. Those requests
+are cacheable for the same immutable generation, but their URL identity is not
+shared with a replacement generation. Late completion from a fenced graph
+cannot activate or publish candidate effects.
 
 ## Host-private generation visibility transaction
 

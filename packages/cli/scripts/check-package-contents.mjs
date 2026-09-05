@@ -154,6 +154,8 @@ try {
       'dist/src/cli.js',
       'dist/src/contracts.js',
       'dist/src/contracts.d.ts',
+      'dist/src/vite.js',
+      'dist/src/vite.d.ts',
       'dist/src/launcher/builtin-skill.js',
       'dist/skills/cordisx-plugin-development/SKILL.md',
       'dist/skills/cordisx-plugin-development/agents/openai.yaml',

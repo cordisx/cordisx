@@ -49,6 +49,13 @@ export interface CordisXConfigPlugin {
   /** Prebuilt lexical module body used only by the launcher local-dev bootstrap. */
   readonly moduleFactorySource?: string
   readonly development?: CordisXLocalDevelopmentSnapshot
+  /** Host-private launch-scoped browser graph; never accepted from configuration files. */
+  readonly runtimeGraph?: {
+    readonly moduleGeneration: string
+    readonly loadSource: string
+    readonly publishSource: string
+    readonly retireSource: string
+  }
 }
 
 export interface LoadConfigOptions {

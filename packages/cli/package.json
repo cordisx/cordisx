@@ -37,6 +37,10 @@
     "./ui": {
       "types": "./dist/src/ui.d.ts",
       "default": "./dist/src/ui.js"
+    },
+    "./vite": {
+      "types": "./dist/src/vite.d.ts",
+      "default": "./dist/src/vite.js"
     }
   },
   "scripts": {
@@ -78,7 +82,7 @@
     "provenance": true
   },
   "dependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#6fa9bbbad0501114bece820d574d5e79a4cb3cdb",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#3aa7d4de3d775aded3c81c72f5dae9842c6af812",
     "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
@@ -88,9 +92,11 @@
     "@types/react-dom": "19.2.5",
     "@vitejs/plugin-react": "6.1.0",
     "debug": "4.4.3",
+    "es-module-lexer": "1.7.0",
     "esbuild": "0.28.2",
     "extend": "3.0.2",
     "intl-messageformat": "11.2.14",
+    "lightningcss": "1.33.0",
     "luna-console": "1.3.6",
     "luna-data-grid": "1.6.5",
     "luna-dom-viewer": "1.8.4",
@@ -112,7 +118,7 @@
   },
   "devDependencies": {
     "@cordisx/channel-runtime": "file:../channel-runtime",
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#6fa9bbbad0501114bece820d574d5e79a4cb3cdb",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#3aa7d4de3d775aded3c81c72f5dae9842c6af812",
     "@types/node": "^22.18.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",

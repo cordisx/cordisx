@@ -32,6 +32,13 @@ then verifies explicit-local/unsigned distribution, entry and manifest paths,
 exact dependencies, compatibility schemas, canonical public source, runtime
 manifest digest, and package/runtime id equality.
 
+The public `cordisx/vite` production helper emits the formal
+`dist/runtime/artifact.json` beside the indexed browser ESM graph. Declaration
+and test output stays outside that closed directory. A portable package
+manifest points its browser entry at the adjacent prebuilt `dist/runtime/module.js`.
+Host staging validates every indexed module, stylesheet, asset, and digest
+before retaining the same formal graph in the immutable store.
+
 The resolved candidate is projected into the existing `StagedPluginPackage`
 store. Its private v3 durable envelope preserves the source runtime-manifest
 digest as provenance and separately records the digest of the normalized bytes
@@ -77,9 +84,10 @@ Generation Runtime uses the same resolver at four boundaries:
   last-good tuple, and expected/after registry epochs; the fingerprint is the
   same value returned by `prepare()` and binds private registry receipts;
 - `resolveImpact()` returns only the Host-recomputed closure and ordering;
-- `resolveRuntimeModule()` returns package identity plus Launcher-only
-  `artifactDirectory` and `./module.js`; no runtime manifest or scope reaches
-  the renderer.
+- `resolveRuntimeModule()` returns package identity plus a Launcher-only
+  immutable graph root and its `./module.js` entry. Relative chunks, CSS, and
+  static assets remain inside that same authenticated graph; no runtime
+  manifest, source directory, or permission scope reaches the renderer.
 
 The shared registry transaction remains D-owned. It gives the candidate a
 private readiness view, flips one active closure epoch atomically, and retains

@@ -93,7 +93,11 @@ import type { RollbackPlan } from '../launcher/packages/authority.js'
 import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
 import { EntityDirectoryAuthority } from '../launcher/entity-directory.js'
 import { createEntityBridgeHandler } from '../launcher/entity-rpc.js'
-import { loadStagedPluginPackage } from '../launcher/plugin-package.js'
+import { loadStagedPluginPackage, stagedPluginBrowserArtifactDirectory } from '../launcher/plugin-package.js'
+import {
+  type PluginGenerationArtifactServer,
+  startPluginGenerationArtifactServer,
+} from '../launcher/plugin-generation-loader.js'
 import { AgentLoopAuthority } from '../launcher/agent-loop-authority.js'
 import {
   CordisXSkillConflictError,
@@ -486,6 +490,7 @@ async function runInjectedHost(input: {
   }
   readonly developmentRuntime?: CdpPluginLifecycleRuntime
   readonly viteDevelopment?: boolean
+  readonly pluginArtifactOrigin?: string
   readonly publisherGrant?: PublisherGrantBridgeHandler
   readonly certifiedPermission?: Readonly<{
     authority: LauncherMarketplaceCertifiedAuthority
@@ -534,6 +539,7 @@ async function runInjectedHost(input: {
     ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
     ...(input.developmentRuntime === undefined ? {} : { developmentRuntime: input.developmentRuntime }),
     ...(input.viteDevelopment === true ? { viteDevelopment: true } : {}),
+    ...(input.pluginArtifactOrigin === undefined ? {} : { pluginArtifactOrigin: input.pluginArtifactOrigin }),
     ...(input.publisherGrant === undefined ? {} : { publisherGrant: input.publisherGrant }),
     ...(input.certifiedPermission === undefined ? {} : { certifiedPermission: input.certifiedPermission }),
     onReady: () => {
@@ -866,7 +872,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   const certifiedPermissionChannelToken = certifiedPermissionAuthority === undefined
     ? undefined
     : randomBytes(32).toString('hex')
+  let pluginGenerationArtifactServer: PluginGenerationArtifactServer | undefined
   try {
+    pluginGenerationArtifactServer = await startPluginGenerationArtifactServer()
+    const activePluginGenerationArtifactServer = pluginGenerationArtifactServer
     const configuredComposition = await loadConfig(configPath, {
       profileId: selection.profileId,
       projectRoot: rootFromConfigPath(configPath),
@@ -899,6 +908,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         (await loadHomeConfig(configPath)).permissions
           .filter(policy => policy.key.profileId === selection.profileId),
       runtime: lifecycleRuntime,
+      pluginGenerationArtifactServer: activePluginGenerationArtifactServer,
       reservedPluginIds: [...configuredIds],
       ...(certifiedPermissionAuthority === undefined ? {} : {
         certifiedPermissionForArtifact: async (
@@ -932,9 +942,46 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     const initialActivation = recoveryPlan === undefined
       ? undefined
       : recoveredActivation(recoveryPlan, lifecycleGeneration)
-    const activatedPlugins = initialActivation === undefined
+    const activatedPackagePlugins = initialActivation === undefined
       ? await loadActivatedPluginComposition(lifecycleStore)
       : await loadPluginComposition(lifecycleStore, initialActivation)
+    const activatedPlugins = await Promise.all(activatedPackagePlugins.map(async plugin => {
+      const manifest = plugin.manifest
+      const isolatedWorker = manifest?.schemaVersion === 7
+        || ((manifest?.schemaVersion === 5 || manifest?.schemaVersion === 6)
+          && manifest.capabilities.some(capability => (
+            capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
+          )))
+      if (!plugin.enabled || plugin.package === undefined || isolatedWorker) return plugin
+      const staged = await loadStagedPluginPackage(rootFromConfigPath(configPath), plugin.package.digest)
+      if (staged.browserArtifact === undefined) return plugin
+      const lease = await activePluginGenerationArtifactServer.lease(
+        {
+          packageIdentity: {
+            pluginId: plugin.id,
+            version: plugin.package.version,
+            integrity: plugin.package.digest,
+          },
+          artifactDirectory: stagedPluginBrowserArtifactDirectory(
+            rootFromConfigPath(configPath),
+            plugin.package.digest,
+          ),
+          runtimeEntry: staged.browserArtifact.manifest.entry,
+        },
+        plugin.package.moduleGeneration,
+        staged.browserArtifact.manifest,
+      )
+      lifecycleRuntime.registerActivePluginGenerationLease(lease)
+      return {
+        ...plugin,
+        runtimeGraph: {
+          moduleGeneration: lease.moduleGeneration,
+          loadSource: lease.importSource,
+          publishSource: lease.publishSource,
+          retireSource: lease.retireSource,
+        },
+      }
+    }))
     const permissionIdentities = new PluginPermissionIdentityRegistry([
       ...pluginIdentities(configuredComposition),
       ...pluginIdentities({ ...configuredComposition, plugins: activatedPlugins }),
@@ -1178,6 +1225,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       try {
         await runInjectedHost({
           source: rendererComposition.source,
+          pluginArtifactOrigin: activePluginGenerationArtifactServer.origin,
           ...(rendererComposition.newDocumentSource === undefined ? {} : {
             newDocumentSource: rendererComposition.newDocumentSource,
           }),
@@ -1270,6 +1318,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     try {
       await runInjectedHost({
         source: rendererComposition.source,
+        pluginArtifactOrigin: activePluginGenerationArtifactServer.origin,
         ...(rendererComposition.newDocumentSource === undefined ? {} : {
           newDocumentSource: rendererComposition.newDocumentSource,
         }),
@@ -1313,6 +1362,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       await providerFleet?.close()
     }
   } finally {
+    await pluginGenerationArtifactServer?.close()
     await certifiedPermissionAuthority?.dispose()
   }
 }

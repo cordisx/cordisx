@@ -90,7 +90,12 @@ import {
 } from './packages/authority.js'
 import type { PackageCandidatePlan, PackageRuntimeObservation } from './packages/types.js'
 import type { RollbackPlan } from './packages/authority.js'
-import { loadPluginGenerationArtifact } from './plugin-generation-loader.js'
+import {
+  loadPluginGenerationArtifact,
+  loadPluginGenerationArtifactForRuntime,
+  type PluginGenerationArtifactServer,
+  type PluginGenerationGraphLease,
+} from './plugin-generation-loader.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 
 export interface PluginRuntimeMutation {
@@ -117,6 +122,8 @@ export interface PluginRuntimeMutation {
   }
   /** Host-only renderer artifact compiled from the authority-resolved immutable runtime module. */
   readonly runtimeArtifactSource?: string
+  /** Host-only browser graph lease; never projected into renderer mutation data. */
+  readonly runtimeArtifactLease?: PluginGenerationGraphLease
   readonly authorizationDecision?:
     | CordisXPermissionAuthorizationDecisionV1
     | CordisXPermissionAuthorizationDecisionV2
@@ -181,6 +188,7 @@ interface CoordinatorOptions {
     }>,
   ) => Promise<CordisXCertifiedPermissionProjectionV1 | undefined>
   readonly runtime: PluginLifecycleRuntime
+  readonly pluginGenerationArtifactServer?: PluginGenerationArtifactServer
   readonly reservedPluginIds?: readonly string[]
 }
 
@@ -1158,6 +1166,7 @@ export class PluginLifecycleCoordinator {
     let access: CandidateAccess | undefined
     let activationRequested = false
     let published = false
+    let commitCompleted = false
     try {
       const authority = await this.authority
       prepared = await authority.prepare({
@@ -1196,13 +1205,33 @@ export class PluginLifecycleCoordinator {
         impactToken: prepared.impactToken,
       }, 'stage')
       let runtimeArtifactSource: string | undefined
+      let runtimeArtifactLease: PluginGenerationGraphLease | undefined
       let stageResolutionFailure: unknown
+      const targetRuntimeManifest = input.staged?.manifest.runtimeManifest
+      const targetUsesIsolatedWorker = targetRuntimeManifest !== undefined
+        && (targetRuntimeManifest.schemaVersion === 7
+          || ((targetRuntimeManifest.schemaVersion === 5 || targetRuntimeManifest.schemaVersion === 6)
+            && targetRuntimeManifest.capabilities.some(capability => (
+              capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
+            ))))
       for (const pluginId of resolvedStage.activationOrder) {
         if (resolvedStage.after.plugins.some(plugin => plugin.id === pluginId)) {
           try {
             const runtimeModule = await authority.resolveRuntimeModule(access, 'stage', pluginId)
-            if (pluginId === input.targetId && input.staged !== undefined) {
-              runtimeArtifactSource = await loadPluginGenerationArtifact(runtimeModule)
+            if (pluginId === input.targetId && input.staged !== undefined && !targetUsesIsolatedWorker) {
+              const moduleGeneration = resolvedStage.after.plugins.find(item => item.id === pluginId)?.moduleGeneration
+              if (moduleGeneration === undefined) throw new Error('Host runtime module generation is unavailable')
+              if (this.options.pluginGenerationArtifactServer === undefined) {
+                runtimeArtifactSource = await loadPluginGenerationArtifact(runtimeModule)
+              } else {
+                const loaded = await loadPluginGenerationArtifactForRuntime(
+                  runtimeModule,
+                  moduleGeneration,
+                  this.options.pluginGenerationArtifactServer,
+                )
+                runtimeArtifactSource = loaded.runtimeArtifactSource
+                if (loaded.kind === 'browser-esm-graph') runtimeArtifactLease = loaded.lease
+              }
             }
           } catch (error) {
             stageResolutionFailure = error
@@ -1225,6 +1254,7 @@ export class PluginLifecycleCoordinator {
         affectedPluginIds: resolvedStage.affectedPluginIds,
         ...(input.staged === undefined ? {} : { package: input.staged }),
         ...(runtimeArtifactSource === undefined ? {} : { runtimeArtifactSource }),
+        ...(runtimeArtifactLease === undefined ? {} : { runtimeArtifactLease }),
         authorizationDecision: input.authorizationDecision,
       })
       if (readiness === undefined) throw new Error('shared registry readiness observation is unavailable')
@@ -1281,9 +1311,30 @@ export class PluginLifecycleCoordinator {
         disposedAfter: runtimeObservation(cleanup.disposedAfter, publishPlan.expectedRegistryEpoch),
       })
       await authority.completeCommit(access, commitReceipt)
-      await runtime.finalize(transactionId)
+      commitCompleted = true
+      let finalized = false
+      let finalizeFailure: unknown
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await runtime.finalize(transactionId)
+          finalized = true
+          break
+        } catch (error) {
+          finalizeFailure = error
+        }
+      }
+      if (!finalized) throw finalizeFailure
       return committed
     } catch (error) {
+      if (commitCompleted) {
+        throw new LifecycleFailure(
+          'rollback-failed',
+          `The plugin activation was committed, but retiring generation cleanup did not complete (${
+            error instanceof Error ? error.message : String(error)
+          }). Restart CordisX before another plugin lifecycle operation.`,
+          'rollback-failed',
+        )
+      }
       if (prepared === undefined || access === undefined) {
         await runtime.abort(transactionId).catch(() => undefined)
         await this.store.abortCandidate(transactionId).catch(() => undefined)
@@ -2015,7 +2066,8 @@ export class PluginLifecycleCoordinator {
         affectedPluginIds: [item.id],
       }
     } catch (error) {
-      return this.failed(request, active, classify(error))
+      const current = await this.store.loadActive().catch(() => active)
+      return this.failed(request, current, classify(error))
     }
   }
 }

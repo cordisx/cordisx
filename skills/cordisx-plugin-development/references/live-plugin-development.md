@@ -43,6 +43,12 @@ as project config, package installation, or Node-side launcher/bridge code.
 When the running session shows a failed candidate, preserve and inspect the
 last-good plugin instead of repeatedly restarting over the diagnostic.
 
+The development graph is not the production package graph. Use the generated
+`cordisx/vite` build config for delivery; it creates one formal, indexed,
+immutable Vite graph per plugin and keeps source-level dynamic imports, CSS,
+and static assets independently loadable. Production replacement uses CordisX
+package generations, not the development HMR socket.
+
 For native behavior, verify the actual isolated `app://` App launched by
 CordisX. A Playground or browser harness is useful supporting evidence only
 when it exposes the same public capability.

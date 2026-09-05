@@ -29,9 +29,11 @@ or source tree casually. Inspect the generated diff and retain the project's
 package-manager conventions.
 
 A standalone project owns one package, tsconfig, lifecycle entry, and separate
-refresh-compatible React component module. A dedicated workspace owns one root
-config and development command, then gives every `plugins/<id>` its own package,
-tsconfig, source, and build output:
+refresh-compatible React component module. Its production Vite config writes a
+stable `dist/runtime/module.js` entry plus content-addressed chunks, CSS, assets,
+and a formal `artifact.json`; declaration output stays in `dist/types/`. A dedicated workspace owns one root config and
+development command, then gives every `plugins/<id>` its own package, tsconfig,
+source, Vite config, and build output:
 
 ```text
 plugin-suite/
@@ -43,8 +45,10 @@ plugin-suite/
     ├── chatroom/
     │   ├── package.json
     │   ├── tsconfig.json
+    │   ├── vite.config.ts
     │   └── src/...
     └── calendar/
+        ├── vite.config.ts
         ├── package.json
         ├── tsconfig.json
         └── src/...
@@ -98,6 +102,32 @@ retains its own `package.json`, tsconfig, scripts, and dependency declarations.
 Do not make the business application's tsconfig or implicit dependencies part
 of the plugin compile contract.
 
+## Production build graph
+
+`npm run build` (or the selected package manager's equivalent) is distinct from
+`cordisx dev`. The generated Vite config calls
+`cordisXPluginViteConfig()` from the public `cordisx/vite` entry with an
+absolute package root, source entry, output directory, and stable `module.js`
+entry name. This reusable author/Host pipeline owns normal Rollup-input mode,
+relative URLs, asset and CSS preservation, deterministic output names, strict
+entry signatures, the formal `artifact.json`, and the closed Host singleton
+virtual modules. Do not duplicate or override those rules in plugin projects.
+
+Every workspace or embedded plugin is built separately. Never configure one
+multi-entry production build that shares chunks across plugin ids: package
+generation replacement, rollback, caching, and cleanup are all plugin-owned.
+Source-level `import()` is the lazy boundary. Opening a route may fetch its
+chunk, CSS, and referenced assets; registration must not prefetch that graph.
+Reopening may reuse normal module and HTTP caches for the same immutable
+generation.
+
+Keep `cordisx.config.json` and `.cordisx/config.json` entries pointed at source.
+Those entries feed the development graph and must not be rewritten to `dist`.
+A portable package manifest is different: it points at the prebuilt
+`dist/runtime/module.js` so installation retains the complete adjacent output graph.
+The adjacent generated `dist/runtime/artifact.json` is the formal graph index validated
+by the Host.
+
 ## Config discovery and multiple plugins
 
 An explicit `cordisx dev --config <path>` wins. Without it, development walks
@@ -139,6 +169,9 @@ symlinked or foreign-owned cache leaf before Vite can use it.
 Normal native development also waits for the Host/plugin dependency scan and
 cache commit before it opens Electron; `--dry-run` skips that prebundle work.
 
-Production plugin delivery remains immutable package/generation activation.
-Do not describe development Fast Refresh as a production update or security
-isolation mechanism; local renderer plugins remain trusted code.
+Production plugin delivery loads the complete immutable Vite output graph for
+one package generation. It has no development HMR socket; a package upgrade
+creates a new graph URL namespace and follows normal generation activation,
+rollback, and cleanup. Do not describe development Fast Refresh as a production
+update or security isolation mechanism; local renderer plugins remain trusted
+code.

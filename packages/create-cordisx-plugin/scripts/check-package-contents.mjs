@@ -34,6 +34,7 @@ for (
     'template/src/{{packageName}}.tsx',
     'template/test/manifest.mjs',
     'template/tsconfig.json',
+    'template/vite.config.ts',
   ]
 ) {
   if (!files.includes(required)) throw new Error(`create-cordisx-plugin package is missing ${required}`)

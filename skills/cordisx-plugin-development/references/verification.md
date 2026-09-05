@@ -7,6 +7,8 @@
 - Activation, deactivation, generation replacement, abort, and disposer cleanup.
 - React component updates through a valid Fast Refresh boundary, plus state retention when that behavior is claimed.
 - Multi-plugin isolation: editing or manually reloading one entry must not recreate unrelated plugin fibers.
+- Production graph: startup loads only `module.js`; exercising the lazy feature then loads its JavaScript, CSS, and static assets, executes once, and reuses the same immutable-generation cache on the second open.
+- Replacement and unload: old-generation URLs cannot publish after replacement, and disposing a generation removes its styles and runtime ownership without disturbing another plugin graph.
 - Search, scroll ownership, card action propagation, keyboard operation, and portal cleanup when relevant.
 
 ## Development transport
@@ -16,6 +18,11 @@
 - Verify both update triggers when applicable: save a local source file and invoke **Reload plugin** in Manager for one active local-development plugin.
 - Classify the observed result correctly. A refresh-compatible React component edit may retain component state; plugin entry, manifest, or activation changes replace that plugin through the Cordis generation transaction; Host modules outside a refresh boundary restart the CordisX renderer in the current document; config and Node-side launcher changes require restarting the command.
 - A source write proves only that an update was triggered. Inspect the runtime result and verify disposer cleanup, a single active registration/root, and last-good behavior after a failed candidate.
+
+Development transport evidence does not prove production loading. Run the
+project's production build separately, inspect its formal `artifact.json` and
+package allowlist, and exercise the installed graph through the generic package
+loader. Do not add a second WebSocket or CDP source-transfer path for production.
 
 ## Real native App and Playground
 
@@ -33,5 +40,6 @@
 
 - Run the focused tests and owner-repository full gates.
 - Run typecheck, build, package/install checks, audit, and diff check when required by the repository.
+- Record real request evidence: no lazy chunk/CSS/image before the feature is opened; those resources appear after the trigger; a second open does not issue a second evaluation; and a replaced generation cannot become active later.
 - Exercise the relevant real runtime in the needed theme and layout states; these should confirm rules already encoded in components and tests, not serve as the first design review.
 - Keep any user-reviewed Playground open while starting a replacement on a new port.

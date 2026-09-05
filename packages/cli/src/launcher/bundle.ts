@@ -198,6 +198,12 @@ export async function buildRendererCompositionSource(
           artifactGeneration: bundledArtifactGeneration(plugin, ''),
         }
       }
+      if (plugin.runtimeGraph !== undefined && !usesIsolatedWorker(plugin)) {
+        return {
+          source: '',
+          artifactGeneration: plugin.runtimeGraph.moduleGeneration,
+        }
+      }
       if (plugin.moduleFactorySource !== undefined) {
         return {
           source: plugin.moduleFactorySource,
@@ -252,7 +258,12 @@ export async function buildRendererCompositionSource(
     config.plugins.map((plugin, pluginIndex) => {
       const index = enabledIndexes.get(plugin.id)
       const isolatedWorker = index !== undefined && usesIsolatedWorker(plugin)
-      const moduleField = index === undefined || isolatedWorker || sourceOptions.omitPluginModules === true
+      const graphModule = index !== undefined && !isolatedWorker && sourceOptions.omitPluginModules !== true
+        ? plugin.runtimeGraph
+        : undefined
+      const moduleField = graphModule !== undefined
+        ? `, module: __cordisxPluginGraphModules[${index}]`
+        : index === undefined || isolatedWorker || sourceOptions.omitPluginModules === true
         ? ''
         : `, moduleFactory: (console) => { ${pluginBundles[index]!.source}\nreturn __cordisxPluginModule }`
       const isolatedArtifactField = index === undefined || !isolatedWorker || sourceOptions.omitPluginModules === true
@@ -377,7 +388,30 @@ export async function buildRendererCompositionSource(
   }${options.channelManager === undefined ? '' : `, channelManager: ${JSON.stringify(options.channelManager)}`}${
     permission.bridgeToken === undefined ? '' : `, permissionBridgeToken: ${JSON.stringify(permission.bridgeToken)}`
   } }`
-  const boot = `installCordisX(${composition}, ${metadata})`
+  const runtimeGraphs = enabled.flatMap(plugin =>
+    plugin.runtimeGraph === undefined || usesIsolatedWorker(plugin)
+      ? []
+      : [plugin.runtimeGraph]
+  )
+  const graphLoads = enabled.map(plugin =>
+    plugin.runtimeGraph === undefined || usesIsolatedWorker(plugin)
+      ? 'Promise.resolve(undefined)'
+      : `(${plugin.runtimeGraph.loadSource})`
+  )
+  const graphLoadSource = runtimeGraphs.length === 0
+    ? 'const __cordisxPluginGraphModules = []'
+    : `const __cordisxPluginGraphModules = await Promise.all([${graphLoads.join(',')}])`
+  const graphPublishSource = runtimeGraphs.map(graph => `${graph.publishSource};`).join('\n')
+  const graphRetireSource = runtimeGraphs.map(graph => `try { ${graph.retireSource}; } catch {}`).join('\n')
+  const boot = `(async () => { try {
+${graphLoadSource}
+const runtime = await installCordisX(${composition}, ${metadata})
+${graphPublishSource}
+return runtime
+} catch (error) {
+${graphRetireSource}
+throw error
+} })()`
   const source = sourceOptions.awaitBoot === true
     ? `${imports.join('\n')}\nexport const runtime = await ${boot}\n`
     : `${imports.join('\n')}\nvoid ${boot}.catch(error => console.error('[cordisx] boot failed', error))\n`

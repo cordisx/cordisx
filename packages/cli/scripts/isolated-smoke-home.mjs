@@ -28,12 +28,31 @@ async function makeManagedTreeWritable(target) {
   }
 }
 
+async function copySeedTree(source, destination) {
+  const metadata = await lstat(source)
+  if (metadata.isSymbolicLink()) throw new Error('isolated smoke Home seed must not contain symbolic links')
+  if (metadata.isDirectory()) {
+    await mkdir(destination, { recursive: true })
+    for (const entry of await readdir(source)) {
+      await copySeedTree(path.join(source, entry), path.join(destination, entry))
+    }
+    return
+  }
+  if (!metadata.isFile()) throw new Error('isolated smoke Home seed must contain only regular files and directories')
+  await copyFile(source, destination)
+}
+
 /** Prepare the only temporary HOME this runner is authorized to delete. */
-export async function prepareIsolatedSmokeHome(homeConfig) {
+export async function prepareIsolatedSmokeHome(homeConfig, homeSeed) {
   const homeRoot = await mkdtemp(path.join(os.tmpdir(), TEMP_HOME_PREFIX))
   try {
-    await mkdir(path.join(homeRoot, '.cordisx'), { recursive: true })
-    const destination = path.join(homeRoot, '.cordisx', 'config.json')
+    const cordisxHome = path.join(homeRoot, '.cordisx')
+    await mkdir(cordisxHome, { recursive: true })
+    if (homeSeed !== undefined) await copySeedTree(homeSeed, cordisxHome)
+    const destination = path.join(cordisxHome, 'config.json')
+    await chmod(destination, 0o600).catch(error => {
+      if (error?.code !== 'ENOENT') throw error
+    })
     const sourceText = await readFile(homeConfig, 'utf8')
     const source = JSON.parse(sourceText)
     let changed = false

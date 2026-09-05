@@ -8,8 +8,10 @@ licenses remain with their respective copyright holders:
 | `@deepseek-ai/cordis`      | `4.0.1`                   | MIT              |
 | `@deepseek-ai/schemastery` | `3.18.1`                  | MIT              |
 | `@shikitor/core`           | `1.0.2`                   | MIT              |
+| `es-module-lexer`          | `1.7.0`                   | MIT              |
 | `esbuild`                  | `^0.25.9`                 | MIT              |
 | `intl-messageformat`       | `11.2.14`                 | BSD-3-Clause     |
+| `lightningcss`             | `1.33.0`                  | MPL-2.0          |
 | `luna-console`             | `1.3.6`                   | MIT              |
 | `luna-data-grid`           | `1.6.5`                   | MIT              |
 | `luna-dom-viewer`          | `1.8.4`                   | MIT              |
@@ -53,7 +55,7 @@ MIT terms and upstream credits are at `third_party/reicon-MIT.txt` and
 `third_party/reicon-icon-credits.txt`.
 
 The exact dependency graph in `package-lock.json` contains MIT, Apache-2.0,
-BSD-3-Clause, BlueOak-1.0.0, and ISC license identifiers for production
+BSD-3-Clause, BlueOak-1.0.0, ISC, and MPL-2.0 license identifiers for production
 dependencies in this beta. This inventory is evidence for release review, not
 legal advice.
 

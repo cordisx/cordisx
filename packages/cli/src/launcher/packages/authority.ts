@@ -7,6 +7,7 @@ import { PluginActivationStore, pluginDependentClosure, topologicalPluginOrder }
 import {
   loadStagedPluginPackage,
   removeStagedPluginPackage,
+  stagedPluginBrowserArtifactDirectory,
   stagedPluginModulePath,
   stagedPluginServiceModulePath,
 } from '../plugin-package.js'
@@ -178,7 +179,7 @@ export interface PreparedCandidate {
 export interface RuntimeModuleAccess {
   readonly packageIdentity: PackageIdentity
   readonly artifactDirectory: string
-  readonly runtimeEntry: './module.js'
+  readonly runtimeEntry: `./${string}`
 }
 
 export interface RuntimeServiceModuleAccess {
@@ -568,7 +569,14 @@ export class PackageLifecycleAuthority {
     }
     const item = plan.after.plugins.find(plugin => plugin.id === pluginId)
     if (item === undefined) throw new PackageLifecycleError('package-removed', `${pluginId} has no candidate artifact`)
-    await loadStagedPluginPackage(this.options.homeDir, item.digest)
+    const staged = await loadStagedPluginPackage(this.options.homeDir, item.digest)
+    if (staged.browserArtifact !== undefined) {
+      return {
+        packageIdentity: { pluginId: item.id, version: item.version, integrity: item.digest },
+        artifactDirectory: stagedPluginBrowserArtifactDirectory(this.options.homeDir, item.digest),
+        runtimeEntry: staged.browserArtifact.manifest.entry,
+      }
+    }
     const modulePath = stagedPluginModulePath(this.options.homeDir, item.digest)
     return {
       packageIdentity: { pluginId: item.id, version: item.version, integrity: item.digest },

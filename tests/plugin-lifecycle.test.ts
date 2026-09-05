@@ -88,6 +88,7 @@ class FormalRuntime implements PluginLifecycleRuntime {
   failStage = false
   failComplete = false
   failRollback = false
+  failFinalizeAttempts = 0
 
   prepare(transactionId: string) {
     this.calls.push('prepare')
@@ -135,6 +136,10 @@ class FormalRuntime implements PluginLifecycleRuntime {
 
   async finalize(transactionId: string): Promise<void> {
     this.calls.push('finalize')
+    if (this.failFinalizeAttempts > 0) {
+      this.failFinalizeAttempts -= 1
+      throw new Error('formal finalization interrupted')
+    }
     this.mutations.delete(transactionId)
   }
 
@@ -802,6 +807,54 @@ describe('launcher plugin lifecycle coordinator', () => {
     expect(runtime.calls).toEqual(['prepare', 'stage', 'publish', 'complete', 'finalize'])
     expect(runtime.lastStaged?.runtimeArtifactSource).toContain('globalThis.__cordisxPendingPluginModuleFactoryV1')
     expect((await coordinator.store.loadActive()).plugins.map(plugin => plugin.id)).toEqual(['formal-runtime'])
+  })
+
+  it('retries post-commit cleanup without rolling back the durable candidate', async () => {
+    const transientWorkspace = await workspace()
+    const transientRuntime = new FormalRuntime()
+    transientRuntime.failFinalizeAttempts = 1
+    const transient = new PluginLifecycleCoordinator({
+      homeDir: transientWorkspace.home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      runtime: transientRuntime,
+    })
+    const transientResult = await install(
+      transient,
+      await localPackage({ root: transientWorkspace.root, id: 'transient-finalize' }),
+      0,
+    )
+    expect(transientResult.applied).toMatchObject({ outcome: 'applied', revision: 1 })
+    expect(transientRuntime.calls).toEqual(['prepare', 'stage', 'publish', 'complete', 'finalize', 'finalize'])
+    expect((await transient.store.loadActive()).plugins.map(plugin => plugin.id)).toEqual(['transient-finalize'])
+
+    const persistentWorkspace = await workspace()
+    const persistentRuntime = new FormalRuntime()
+    persistentRuntime.failFinalizeAttempts = 2
+    const persistent = new PluginLifecycleCoordinator({
+      homeDir: persistentWorkspace.home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      runtime: persistentRuntime,
+    })
+    const persistentResult = await install(
+      persistent,
+      await localPackage({ root: persistentWorkspace.root, id: 'persistent-finalize' }),
+      0,
+    )
+    expect(persistentResult.applied).toMatchObject({
+      outcome: 'rollback-failed',
+      revision: 1,
+      error: {
+        code: 'rollback-failed',
+        message: expect.stringContaining('activation was committed'),
+      },
+    })
+    expect(persistentRuntime.calls).toEqual(['prepare', 'stage', 'publish', 'complete', 'finalize', 'finalize'])
+    expect(persistentRuntime.calls).not.toContain('rollback')
+    expect((await persistent.store.loadActive()).plugins.map(plugin => plugin.id)).toEqual(['persistent-finalize'])
   })
 
   it('durably enters rollback before restoring the formal last-good closure after readiness failure', async () => {

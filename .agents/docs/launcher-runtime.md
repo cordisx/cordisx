@@ -10,10 +10,12 @@ of release, real-App validation, or user acceptance.
 ## Launcher plane
 
 The Node launcher owns configuration, plugin entry resolution, Codex process
-startup, CDP target discovery, injection identifiers, and cleanup. Formal runs
-compose an immutable browser bundle with esbuild. Development runs serve the
-Host and all enabled plugin entries as one Vite ESM graph. Both paths preserve
-one Cordis runtime identity for plugin contexts and services.
+startup, CDP target discovery, injection identifiers, and cleanup. Legacy
+explicit-entry composition remains a single esbuild browser bundle. Installed
+package generations retain their complete immutable Vite ESM graphs, including
+lazy chunks, CSS, and static assets. Development runs serve the Host and all
+enabled plugin entries as one Vite ESM/HMR graph. All paths preserve one Cordis
+runtime identity for plugin contexts and services.
 
 Explicit-entry bundles and dynamic package generations are separate composition
 paths. Configuration live publication, owning-fiber restart, plugin dependency-
@@ -24,6 +26,13 @@ package/runtime manifests, staged registries, and atomic publication order are
 owned by [dynamic plugin lifecycle](dynamic-plugin-lifecycle.md). That reference
 records the implemented runtime and its remaining gaps; the earlier single-
 bundle feasibility path is not the status of installed dynamic packages.
+
+Each installed graph receives a version- and generation-qualified URL root.
+Relative imports and asset URLs resolve only inside that immutable graph.
+Activation loads the entry; source-level dynamic imports request their chunks,
+CSS, and assets only when reached. Replacement creates a new URL root, and an
+old graph cannot publish after its generation is fenced. This production path
+does not add a WebSocket or reuse development HMR.
 
 The explicit `cordisx dev <entry>` and `cordisx dev --config ...` paths use
 Vite as their Host-private development transport:

@@ -175,4 +175,38 @@ describe('plugin README composition', () => {
     expect(composition.source).toContain('__hostDomRendererExecutionWouldBeABug')
     expect(composition.source).not.toContain('moduleFactory: (console)')
   })
+
+  it('boots a prebuilt browser graph directly and publishes its resource lease after install', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-browser-graph-composition-'))
+    temporaryDirectories.push(root)
+    const entry = path.join(root, 'legacy-module.js')
+    await writeFile(entry, 'globalThis.__legacyGraphRebundleWouldBeABug = true; export function apply() {}\n')
+    const config: CordisXConfig = {
+      version: 1,
+      rootDir: root,
+      codex: { debugPort: 9229 },
+      providers: [],
+      plugins: [{
+        id: 'graph-plugin',
+        entry,
+        enabled: true,
+        config: {},
+        runtimeGraph: {
+          moduleGeneration: 'graph-generation-a',
+          loadSource: 'Promise.resolve(globalThis.__graphModuleFixture)',
+          publishSource: 'globalThis.__graphLeasePublished = true',
+          retireSource: 'globalThis.__graphLeaseRetired = true',
+        },
+      }],
+    }
+
+    const composition = await buildRendererCompositionSource(config)
+
+    expect(composition.source).toContain('await Promise.all')
+    expect(composition.source).toContain('Promise.resolve(globalThis.__graphModuleFixture)')
+    expect(composition.source).toContain('module: __cordisxPluginGraphModules[0]')
+    expect(composition.source).toContain('globalThis.__graphLeasePublished = true')
+    expect(composition.source).toContain('globalThis.__graphLeaseRetired = true')
+    expect(composition.source).not.toContain('__legacyGraphRebundleWouldBeABug')
+  })
 })

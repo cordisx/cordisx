@@ -5,11 +5,23 @@
   "license": "UNLICENSED",
   "description": "A CordisX plugin",
   "type": "module",
-  "main": "./dist/{{pluginId}}.js",
-  "types": "./dist/{{pluginId}}.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "README.zh-Hans.md"
+  ],
+  "main": "./dist/runtime/module.js",
+  "types": "./dist/types/{{pluginId}}.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/{{pluginId}}.d.ts",
+      "import": "./dist/runtime/module.js",
+      "default": "./dist/runtime/module.js"
+    }
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.json && node --test test/manifest.mjs",
+    "build": "vite build && tsc -p tsconfig.json --emitDeclarationOnly",
+    "check": "tsc -p tsconfig.json --noEmit && vite build && tsc -p tsconfig.json --emitDeclarationOnly && node --test test/manifest.mjs",
     "dev": "cordisx dev ./src/{{pluginId}}.tsx",
     "dev:dry-run": "cordisx dev ./src/{{pluginId}}.tsx --dry-run",
     "test": "node --test test/manifest.mjs",
@@ -18,7 +30,8 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
     "cordisx": "{{cordisxVersion}}",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "vite": "8.2.2"
   },
   "engines": {
     "node": ">=22.19"

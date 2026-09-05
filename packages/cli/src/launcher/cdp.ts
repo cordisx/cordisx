@@ -29,6 +29,7 @@ import {
 import type { CodexAgentHistoryHost } from './agent-history.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
+import type { PluginGenerationGraphLease } from './plugin-generation-loader.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../plugin-lifecycle-contracts.js'
 import type { RollbackPlan } from './packages/authority.js'
 import type { PackageActivationTuple } from './packages/types.js'
@@ -334,6 +335,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private recoveredActivation: CordisXPluginActivationRecordV1 | undefined
   private readonly recoveredSessions = new WeakSet<CdpSession>()
   private readonly developmentStates = new Map<string, CordisXLocalDevelopmentSnapshot>()
+  private readonly activeArtifactLeases = new Map<string, PluginGenerationGraphLease>()
   private developmentVersion = 0
 
   constructor(permissionIdentities?: PluginPermissionIdentityRegistry) {
@@ -365,6 +367,18 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       throw new Error('cannot replace entity authority during a generation transaction')
     }
     this.entityAuthority = { profileId, authority }
+  }
+
+  /** Register a graph already selected by the durable activation used for cold boot. */
+  registerActivePluginGenerationLease(lease: PluginGenerationGraphLease): void {
+    if (this.joining.size !== 0 || this.fences.size !== 0 || this.staged.size !== 0) {
+      throw new Error('cannot register an active browser graph during a generation transaction')
+    }
+    const current = this.activeArtifactLeases.get(lease.pluginId)
+    if (current !== undefined && current.leaseId !== lease.leaseId) {
+      throw new Error(`plugin ${lease.pluginId} already has an active browser graph lease`)
+    }
+    this.activeArtifactLeases.set(lease.pluginId, lease)
   }
 
   currentRegistryEpoch(): number {
@@ -456,6 +470,31 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     this.ownerDocumentAuthority?.leases[permission](transactionId)
   }
 
+  private async evaluateArtifactLease(
+    sessions: readonly CdpSession[],
+    source: string,
+  ): Promise<void> {
+    await Promise.all(sessions.map(async session => {
+      const result = await session.send('Runtime.evaluate', {
+        expression: source,
+        returnByValue: true,
+        allowUnsafeEvalBlockedByCSP: true,
+      })
+      const value = (result.result as { value?: unknown } | undefined)?.value
+      if (result.exceptionDetails !== undefined || value !== true) {
+        throw new Error('plugin generation resource operation failed')
+      }
+    }))
+  }
+
+  private async retireArtifactLease(
+    sessions: readonly CdpSession[],
+    lease: PluginGenerationGraphLease,
+  ): Promise<void> {
+    await this.evaluateArtifactLease(sessions, lease.retireSource)
+    lease.retire()
+  }
+
   private async projectDevelopmentState(
     session: CdpSession,
     state: CordisXLocalDevelopmentSnapshot,
@@ -502,7 +541,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     // Publish the participant snapshot before any awaited renderer work so a
     // concurrent target close can prune it, including the final participant.
     this.staged.set(mutation.transactionId, sessions)
-    const { runtimeArtifactSource, ...projectedMutation } = mutation
+    const { runtimeArtifactSource, runtimeArtifactLease, ...projectedMutation } = mutation
     const runtimePackage = mutation.package
     if (
       runtimePackage !== undefined
@@ -535,7 +574,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
             && runtimeManifest.capabilities.some(capability => (
               capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
             ))))
-      ? runtimeArtifactSource ?? runtimePackage?.artifactSource
+      ? runtimePackage?.artifactSource ?? runtimeArtifactSource
       : undefined
     const candidateLeases = mutation.candidate.plugins.flatMap(item => {
       if (!item.enabled) return []
@@ -582,7 +621,10 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
             })
             if (isolatedArtifactSource === undefined) {
               const artifact = await session.send('Runtime.evaluate', {
-                expression: runtimeArtifactSource ?? mutation.package!.artifactSource,
+                expression: runtimeArtifactLease === undefined
+                  ? runtimeArtifactSource ?? mutation.package!.artifactSource
+                  : `(async () => { globalThis.__cordisxPendingPluginModuleV1 = await (${runtimeArtifactSource}); return true })()`,
+                ...(runtimeArtifactLease === undefined ? {} : { awaitPromise: true }),
                 allowUnsafeEvalBlockedByCSP: true,
               })
               if (artifact.exceptionDetails !== undefined) {
@@ -655,6 +697,10 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         || item.registryEpoch !== first.registryEpoch
       )
     ) throw new Error('CordisX renderer publications disagree')
+    const mutation = this.stagedMutations.get(transactionId)
+    if (mutation?.runtimeArtifactLease !== undefined) {
+      await this.evaluateArtifactLease(sessions, mutation.runtimeArtifactLease.publishSource)
+    }
     this.registryEpoch = first.registryEpoch
     return first
   }
@@ -686,6 +732,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 
   async finalize(transactionId: string): Promise<void> {
     const sessions = this.staged.get(transactionId) ?? []
+    const mutation = this.stagedMutations.get(transactionId)
     await Promise.all(sessions.map(async session =>
       await evaluateRuntimeOperation(
         session,
@@ -697,6 +744,22 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
       )
     ))
+    if (mutation !== undefined) {
+      const candidateLease = mutation.runtimeArtifactLease
+      for (const pluginId of mutation.affectedPluginIds) {
+        const candidate = mutation.candidate.plugins.find(plugin => plugin.id === pluginId)
+        const previousLease = this.activeArtifactLeases.get(pluginId)
+        if (pluginId === mutation.targetId && candidate?.enabled === true && candidateLease !== undefined) {
+          if (previousLease !== undefined && previousLease.leaseId !== candidateLease.leaseId) {
+            await this.retireArtifactLease(sessions, previousLease)
+          }
+          this.activeArtifactLeases.set(pluginId, candidateLease)
+        } else if (candidate?.enabled !== true || (pluginId === mutation.targetId && mutation.package !== undefined)) {
+          if (previousLease !== undefined) await this.retireArtifactLease(sessions, previousLease)
+          this.activeArtifactLeases.delete(pluginId)
+        }
+      }
+    }
     this.releaseTransaction(transactionId, 'commit')
   }
 
@@ -709,7 +772,6 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       // No renderer can still observe the candidate. Advance the Host to the
       // monotonic rollback epoch required by the shared lifecycle authority.
       const rollbackRegistryEpoch = mutation.afterRegistryEpoch! + 1
-      this.registryEpoch = rollbackRegistryEpoch
       const restored = {
         transactionId,
         transactionEpoch: fence.transactionEpoch,
@@ -717,6 +779,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         active: mutation.previous,
         disposedAfter: mutation.candidate,
       }
+      if (mutation.runtimeArtifactLease !== undefined) mutation.runtimeArtifactLease.retire()
+      this.registryEpoch = rollbackRegistryEpoch
       this.releaseTransaction(transactionId, 'abort')
       return restored
     }
@@ -745,6 +809,10 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       )
     ) {
       throw new Error('CordisX renderer rollback observations disagree')
+    }
+    const mutation = this.stagedMutations.get(transactionId)
+    if (mutation?.runtimeArtifactLease !== undefined) {
+      await this.retireArtifactLease(sessions, mutation.runtimeArtifactLease)
     }
     this.registryEpoch = first.registryEpoch
     this.releaseTransaction(transactionId, 'abort')
@@ -848,6 +916,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 
   async abort(transactionId: string): Promise<void> {
     const sessions = this.staged.get(transactionId) ?? []
+    const mutation = this.stagedMutations.get(transactionId)
     await Promise.all(sessions.map(async session =>
       await evaluateRuntimeOperation(
         session,
@@ -859,6 +928,9 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
       )
     ))
+    if (mutation?.runtimeArtifactLease !== undefined) {
+      await this.retireArtifactLease(sessions, mutation.runtimeArtifactLease)
+    }
     this.releaseTransaction(transactionId, 'abort')
   }
 
@@ -935,6 +1007,7 @@ function nativeViteTarget(target: CdpTarget): boolean {
 
 interface InstalledScript {
   readonly viteDevelopment?: boolean
+  readonly loopbackModules?: boolean
   readonly viteLoopbackPermission?: {
     readonly name: string
     readonly origin: string
@@ -1426,6 +1499,7 @@ async function install(
   newDocumentSource?: string,
   stale?: InstalledScript,
   viteDevelopment = false,
+  loopbackModules = false,
   viteLoopbackPermissions?: ViteLoopbackPermissionCoordinator,
   signal?: AbortSignal,
 ): Promise<InstalledScript> {
@@ -1491,7 +1565,7 @@ async function install(
     }
     await session.send('Runtime.enable')
     await session.send('Page.enable')
-    if (viteDevelopment) {
+    if (loopbackModules) {
       viteLoopbackPermission = viteLoopbackPermissions === undefined
         ? await enableViteLoopbackPermission(session, target)
         : await viteLoopbackPermissions.acquire(session, target)
@@ -2128,6 +2202,7 @@ async function install(
     return {
       target,
       ...(viteDevelopment ? { viteDevelopment: true } : {}),
+      ...(loopbackModules ? { loopbackModules: true } : {}),
       ...(viteLoopbackPermission === undefined ? {} : { viteLoopbackPermission }),
       identifier,
       session,
@@ -2202,7 +2277,7 @@ async function install(
         allowUnsafeEvalBlockedByCSP: true,
       }).catch(() => undefined)
     }
-    if (viteDevelopment) await session.send('Page.setBypassCSP', { enabled: false }).catch(() => undefined)
+    if (loopbackModules) await session.send('Page.setBypassCSP', { enabled: false }).catch(() => undefined)
     if (viteLoopbackPermissions === undefined) {
       await restoreViteLoopbackPermission(session, viteLoopbackPermission).catch(() => undefined)
     } else await viteLoopbackPermissions.release(session, viteLoopbackPermission).catch(() => undefined)
@@ -2249,6 +2324,8 @@ async function uninstall(
         awaitPromise: true,
         allowUnsafeEvalBlockedByCSP: true,
       }).catch(() => undefined)
+    }
+    if (installed.loopbackModules) {
       await installed.session.send('Page.setBypassCSP', { enabled: false }).catch(() => undefined)
       if (viteLoopbackPermissions === undefined) {
         await restoreViteLoopbackPermission(installed.session, installed.viteLoopbackPermission).catch(() => undefined)
@@ -2261,7 +2338,12 @@ async function uninstall(
     await Promise.allSettled([
       installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }),
       installed.session.send('Runtime.evaluate', {
-        expression: 'void globalThis.__cordisxRuntime?.dispose?.()',
+        expression: `(async () => { try {
+          await globalThis.__cordisxRuntime?.dispose?.()
+        } finally {
+          globalThis.__cordisxPluginGenerationResourcesV1?.dispose?.()
+        } })()`,
+        awaitPromise: true,
         allowUnsafeEvalBlockedByCSP: true,
       }),
       installed.session.send('Runtime.removeBinding', { name: MARKETPLACE_BINDING }),
@@ -2307,6 +2389,8 @@ async function uninstall(
 export interface WatchInjectionOptions {
   /** Opt-in Vite development only: allow loopback modules, await boot, restore on exit. */
   readonly viteDevelopment?: boolean
+  /** Host-owned launch-scoped immutable plugin module origin. */
+  readonly pluginArtifactOrigin?: string
   readonly port: number
   /** Latest immutable bootstrap. Existing renderers are never reinjected when it changes. */
   readonly source: string | (() => string)
@@ -2346,6 +2430,15 @@ export interface WatchInjectionOptions {
 
 /** Track every current Codex page and keep one removable bootstrap installed per target. */
 export async function watchAndInject(options: WatchInjectionOptions): Promise<void> {
+  if (options.pluginArtifactOrigin !== undefined) {
+    const artifactOrigin = new URL(options.pluginArtifactOrigin)
+    if (
+      artifactOrigin.protocol !== 'http:' || artifactOrigin.hostname !== '127.0.0.1'
+      || artifactOrigin.pathname !== '/' || artifactOrigin.search !== '' || artifactOrigin.hash !== ''
+    ) {
+      throw new Error('plugin artifact origin must be an exact IPv4 loopback HTTP origin')
+    }
+  }
   const installed = new Map<string, InstalledScript>()
   const viteLoopbackPermissions = new ViteLoopbackPermissionCoordinator(options.port)
   const iconThemePreferenceBroadcast = options.iconThemePreferencePersistence === undefined
@@ -2415,6 +2508,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               : options.newDocumentSource(),
             stale,
             options.viteDevelopment,
+            options.viteDevelopment === true || options.pluginArtifactOrigin !== undefined,
             viteLoopbackPermissions,
             options.signal,
           )

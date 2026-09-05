@@ -114,6 +114,11 @@ Host 源码与所有启用的本地插件入口共享一个 Vite ESM/HMR graph�
 React 模块变更使用 Fast Refresh 并保留组件状态；入口、manifest、`apply` 或不
 安全边界的变更会替换所属插件的整个 generation。
 
+生成的生产构建与开发链路相互独立：每个插件都会得到一个不可变 Vite ESM
+graph，包括固定 `module.js` 入口、带内容摘要的 JavaScript chunk、拆分的 CSS、
+静态资源与正式的 `artifact.json`。安装后的 generation 会保留动态导入的按需加载；
+工作区和嵌入项目不会让可独立替换的插件 id 共享生产 chunk。
+
 ## 文档
 
 - [产品概览](./.agents/docs/product-overview.zh-CN.md)
