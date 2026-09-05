@@ -11,11 +11,12 @@ import {
   writeDesktopAgentSessionHarnessReport,
 } from './desktop-agent-session-harness-report.mjs'
 
-const APP_PIN = Object.freeze({
-  bundleId: 'com.openai.codex',
-  appVersion: '26.818.61809',
-  buildNumber: '7019',
-})
+// Exact revisions audited alongside the renderer transport. Never relax this
+// to a version range: this harness must refuse an unreviewed private bridge.
+const APP_PINS = Object.freeze([
+  Object.freeze({ bundleId: 'com.openai.codex', appVersion: '26.818.61809', buildNumber: '7019' }),
+  Object.freeze({ bundleId: 'com.openai.codex', appVersion: '26.901.41600', buildNumber: '7982' }),
+])
 const TEMP_PREFIX = 'cordisx-desktop-agent-session-smoke-'
 
 const parsed = parseArgs({
@@ -126,10 +127,9 @@ const installed = {
   appVersion: plistValue(appRoot, 'CFBundleShortVersionString'),
   buildNumber: plistValue(appRoot, 'CFBundleVersion'),
 }
-if (
-  installed.bundleId !== APP_PIN.bundleId || installed.appVersion !== APP_PIN.appVersion
-  || installed.buildNumber !== APP_PIN.buildNumber
-) {
+const appPin = APP_PINS.find(pin => installed.bundleId === pin.bundleId && installed.appVersion === pin.appVersion
+  && installed.buildNumber === pin.buildNumber)
+if (appPin === undefined) {
   throw new Error(`installed Desktop build does not match the audited pin: ${JSON.stringify(installed)}`)
 }
 
@@ -207,6 +207,7 @@ try {
   }
   const annotation = {
     app: installed,
+    appPin,
     appExecutable,
     rendererUrl: 'app://-/index.html',
     port,
