@@ -267,6 +267,10 @@ describe('Codex Desktop Agent/Session transport', () => {
       replacements += 1
     })
     view.message({ type: 'codex-app-server-connection-changed', hostId: 'local', state: 'connected' })
+    expect(replacements).toBe(0)
+    view.message({ type: 'codex-app-server-initialized', hostId: 'local' })
+    expect(replacements).toBe(0)
+    view.message({ type: 'codex-app-server-connection-changed', hostId: 'local', state: 'connected' })
     expect(replacements).toBe(1)
     transport.dispose()
   })
