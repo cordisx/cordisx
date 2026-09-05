@@ -7,6 +7,7 @@ import type { ApprovalService as ApprovalServiceV3 } from '@cordisx/protocol/app
 import type { AgentAdmissionReservationService } from '@cordisx/protocol/agent-admission/v2'
 import type { AgentAdmissionTargetOriginService, AgentAdmissionTargetReservationService } from '@cordisx/protocol/agent-admission/v3'
 import type { AgentAdmissionBootstrapReservationService, AgentAdmissionBootstrapTargetService } from '@cordisx/protocol/agent-admission/v4'
+import type { AgentAdmissionBootstrapRoomReservationService, AgentAdmissionBootstrapRoomTargetService } from '@cordisx/protocol/agent-admission/v5'
 import type { AgentAdmissionBootstrapRouteDeclarationService, AgentAdmissionBootstrapRouteReservationService } from '@cordisx/protocol/agent-admission/v6'
 import type { SessionId, SessionRegistry } from '@cordisx/protocol/sessions/v1'
 
@@ -75,6 +76,10 @@ declare module '@deepseek-ai/cordis' {
     agentAdmissionBootstrapTargets: AgentAdmissionBootstrapTargetService
     /** Host-owned v4 one-shot reservation for a bootstrap target; it never exposes a driver. */
     agentAdmissionBootstrapReservations: AgentAdmissionBootstrapReservationService
+    /** Host-owned v5 issuer for one exact Room target on the current Shell binding. */
+    agentAdmissionBootstrapRoomTargets: AgentAdmissionBootstrapRoomTargetService
+    /** Host-owned v5 one-shot reservation; its receipt never transfers across a binding replacement. */
+    agentAdmissionBootstrapRoomReservations: AgentAdmissionBootstrapRoomReservationService
     /** Host-owned v6 declaration for one exact Room target plus its matching future Room route. */
     agentAdmissionBootstrapRouteDeclarations: AgentAdmissionBootstrapRouteDeclarationService
     /** Host-owned v6 pre-submit reservation; Host alone may later claim its continuation. */
