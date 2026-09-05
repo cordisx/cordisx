@@ -156,6 +156,24 @@ const VITE_DISPOSE_EXPRESSION = `(async () => {
     }
   }
 })()`
+export const RENDERER_DISPOSE_EXPRESSION = `(async () => {
+  const errors = []
+  try {
+    await globalThis.__cordisxRuntime?.dispose?.()
+  } catch (error) {
+    errors.push(error instanceof Error ? error.stack ?? error.message : String(error))
+  }
+  try {
+    globalThis.__cordisxPluginGenerationResourcesV1?.dispose?.()
+  } catch (error) {
+    errors.push(error instanceof Error ? error.stack ?? error.message : String(error))
+  }
+  delete globalThis.__cordisxProductionBootstrapState
+  delete globalThis.__cordisxProductionInstallId
+  return errors.length === 0
+    ? { ok: true }
+    : { ok: false, error: errors.join('\\n') }
+})()`
 
 class CdpInstallationAbortedError extends Error {}
 
@@ -1032,7 +1050,7 @@ export function injectableTargets(targets: readonly CdpTarget[]): CdpTarget[] {
   return pages.filter(target => targetScore(target) > 0)
 }
 
-function nativeViteTarget(target: CdpTarget): boolean {
+function nativeAppTarget(target: CdpTarget): boolean {
   return target.url === 'app://-' || target.url.startsWith('app://-/')
 }
 
@@ -1118,7 +1136,7 @@ async function enableViteLoopbackPermission(
   const product = typeof version.product === 'string' ? version.product : ''
   const major = Number(/\/(\d+)/u.exec(product)?.[1])
   if (Number.isFinite(major) && major < 142) return undefined
-  throw new Error(`CordisX could not grant loopback access for Vite (${failures.join('; ')})`)
+  throw new Error(`CordisX could not grant renderer loopback access (${failures.join('; ')})`)
 }
 
 async function restoreViteLoopbackPermission(
@@ -1232,6 +1250,59 @@ async function waitForViteBootstrap(
     }
   }
   throw new Error(`CordisX Vite bootstrap timed out${lastError === undefined ? '' : `: ${lastError.message}`}`)
+}
+
+async function waitForProductionBootstrap(
+  session: CdpSession,
+  installId: string,
+  deadline: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  let lastError: Error | undefined
+  while (Date.now() < deadline) {
+    if (signal?.aborted === true) throw cdpInstallationAborted()
+    try {
+      await abortable(
+        evaluateRuntimeOperation(
+          session,
+          `(async () => { try {
+        if (globalThis.__cordisxProductionInstallId !== ${
+            JSON.stringify(installId)
+          }) return { ok: false, error: 'cordisx:production-boot-pending' }
+        const state = globalThis.__cordisxProductionBootstrapState
+        if (state?.installId !== ${
+            JSON.stringify(installId)
+          }) return { ok: false, error: 'CordisX production bootstrap state does not match its install marker' }
+        if (state.status === 'failed') return { ok: false, error: state.error }
+        if (state.status !== 'evaluated') return { ok: false, error: 'cordisx:production-boot-pending' }
+        const boot = globalThis.__cordisxCompositionBoot ?? globalThis.__cordisxBoot
+        if (!boot) return { ok: false, error: 'CordisX production bootstrap defined no boot promise' }
+        await boot
+        if (globalThis.__cordisxProductionInstallId !== ${
+            JSON.stringify(installId)
+          }) return { ok: false, error: 'CordisX production bootstrap was superseded during boot' }
+        if (globalThis.__cordisxRuntime === undefined) {
+          return { ok: false, error: 'CordisX production runtime is undefined after boot' }
+        }
+        return { ok: true }
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.stack ?? error.message : String(error) }
+      } })()`,
+          Math.max(1, deadline - Date.now()),
+        ),
+        signal,
+      )
+      return
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+      const transient = lastError.message === 'cordisx:production-boot-pending'
+        || /Execution context was destroyed|Cannot find context|Inspected target navigated|CDP request timed out: Runtime\.evaluate/i
+          .test(lastError.message)
+      if (!transient || session.isClosed()) throw lastError
+      await delay(100, signal)
+    }
+  }
+  throw new Error(`CordisX production bootstrap timed out${lastError === undefined ? '' : `: ${lastError.message}`}`)
 }
 
 function installedBindingNames(installed: InstalledScript): readonly string[] {
@@ -1587,6 +1658,7 @@ async function install(
   let certifiedPermissionChannel: CdpCertifiedPermissionChannel | undefined
   let identifier: string | undefined
   let viteLoopbackPermission: { readonly name: string; readonly origin: string } | undefined
+  let loopbackReloadStarted = false
   try {
     if (certifiedPermission !== undefined) {
       certifiedPermissionChannel = new CdpCertifiedPermissionChannel(session, {
@@ -2172,15 +2244,38 @@ async function install(
       })
     }
     const generationRuntime = lifecycle?.runtime ?? developmentRuntime
-    const viteInstallId = viteDevelopment ? randomUUID() : undefined
+    const reloadInstallId = viteDevelopment || loopbackModules ? randomUUID() : undefined
     const documentSource = newDocumentSource ?? source
+    const productionDocumentSource = reloadInstallId === undefined || viteDevelopment
+      ? undefined
+      : `globalThis.__cordisxProductionInstallId = ${JSON.stringify(reloadInstallId)};
+globalThis.__cordisxProductionBootstrapState = {
+  installId: ${JSON.stringify(reloadInstallId)},
+  status: 'evaluating',
+};
+try {
+${documentSource}
+  globalThis.__cordisxProductionBootstrapState = {
+    installId: ${JSON.stringify(reloadInstallId)},
+    status: 'evaluated',
+  };
+} catch (error) {
+  globalThis.__cordisxProductionBootstrapState = {
+    installId: ${JSON.stringify(reloadInstallId)},
+    status: 'failed',
+    error: error instanceof Error ? error.stack ?? error.message : String(error),
+  };
+  throw error;
+}`
     const added = await abortable(
       session.send(
         'Page.addScriptToEvaluateOnNewDocument',
         {
-          source: viteInstallId === undefined
+          source: reloadInstallId === undefined
             ? documentSource
-            : `globalThis.__cordisxViteInstallId = ${JSON.stringify(viteInstallId)};\n${documentSource}`,
+            : viteDevelopment
+            ? `globalThis.__cordisxViteInstallId = ${JSON.stringify(reloadInstallId)};\n${documentSource}`
+            : productionDocumentSource!,
         },
         CDP_INJECTION_TIMEOUT_MS,
       ),
@@ -2188,10 +2283,15 @@ async function install(
     )
     identifier = added.identifier as string | undefined
     if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')
-    if (viteDevelopment) {
+    if (viteDevelopment || loopbackModules) {
       const deadline = Date.now() + CDP_INJECTION_TIMEOUT_MS
-      await abortable(session.send('Page.reload', { ignoreCache: true }, CDP_INJECTION_TIMEOUT_MS), signal)
-      await waitForViteBootstrap(session, viteInstallId!, deadline, signal)
+      loopbackReloadStarted = true
+      await abortable(
+        session.send('Page.reload', viteDevelopment ? { ignoreCache: true } : {}, CDP_INJECTION_TIMEOUT_MS),
+        signal,
+      )
+      if (viteDevelopment) await waitForViteBootstrap(session, reloadInstallId!, deadline, signal)
+      else await waitForProductionBootstrap(session, reloadInstallId!, deadline, signal)
     } else {
       const evaluated = await session.send(
         'Runtime.evaluate',
@@ -2286,6 +2386,17 @@ async function install(
       ...(certifiedPermissionChannel === undefined ? {} : { certifiedPermissionChannel }),
     }
   } catch (error) {
+    const strictProductionCleanup = loopbackModules && !viteDevelopment
+    const cleanupFailures: unknown[] = []
+    const attemptCleanup = async (operation: Promise<unknown>): Promise<boolean> => {
+      try {
+        await operation
+        return true
+      } catch (cleanupError) {
+        if (strictProductionCleanup) cleanupFailures.push(cleanupError)
+        return false
+      }
+    }
     marketplaceController.abort()
     providerController?.abort()
     historyController?.abort()
@@ -2314,21 +2425,36 @@ async function install(
     unregisterLifecycleSession()
     removePublisherGrantBindingListener()
     await certifiedPermissionChannel?.dispose()
-    if (identifier !== undefined) {
-      await session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }).catch(() => undefined)
-    }
+    const scriptRemoved = identifier === undefined
+      || await attemptCleanup(session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier }))
     if (viteDevelopment) {
-      await session.send('Runtime.evaluate', {
+      await attemptCleanup(session.send('Runtime.evaluate', {
         expression: VITE_DISPOSE_EXPRESSION,
         awaitPromise: true,
         allowUnsafeEvalBlockedByCSP: true,
-      }).catch(() => undefined)
+      }))
+    } else if (loopbackModules) {
+      await attemptCleanup(
+        evaluateRuntimeOperation(session, RENDERER_DISPOSE_EXPRESSION, CDP_INJECTION_TIMEOUT_MS),
+      )
     }
-    if (loopbackModules) await session.send('Page.setBypassCSP', { enabled: false }).catch(() => undefined)
+    const cspRestored = !loopbackModules
+      || await attemptCleanup(session.send('Page.setBypassCSP', { enabled: false }))
     if (viteLoopbackPermissions === undefined) {
-      await restoreViteLoopbackPermission(session, viteLoopbackPermission).catch(() => undefined)
-    } else await viteLoopbackPermissions.release(session, viteLoopbackPermission).catch(() => undefined)
+      await attemptCleanup(restoreViteLoopbackPermission(session, viteLoopbackPermission))
+    } else await attemptCleanup(viteLoopbackPermissions.release(session, viteLoopbackPermission))
+    if (loopbackModules && !viteDevelopment && loopbackReloadStarted && scriptRemoved && cspRestored) {
+      await attemptCleanup(session.send('Page.reload', {}, CDP_INJECTION_TIMEOUT_MS))
+    }
     session.close()
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(
+        [error, ...cleanupFailures],
+        `CordisX production renderer installation failed and cleanup was incomplete: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
     throw error
   }
 }
@@ -2365,34 +2491,27 @@ async function uninstall(
   installed.removePublisherGrantBindingListener?.()
   await installed.certifiedPermissionChannel?.dispose()
   try {
+    const strictProductionCleanup = installed.loopbackModules === true && installed.viteDevelopment !== true
+    const cleanupFailures: unknown[] = []
+    const attemptCleanup = async (operation: Promise<unknown>): Promise<boolean> => {
+      try {
+        await operation
+        return true
+      } catch (error) {
+        if (strictProductionCleanup) cleanupFailures.push(error)
+        return false
+      }
+    }
     if (installed.viteDevelopment) {
-      await installed.session.send('Runtime.evaluate', {
+      await attemptCleanup(installed.session.send('Runtime.evaluate', {
         expression: VITE_DISPOSE_EXPRESSION,
         awaitPromise: true,
         allowUnsafeEvalBlockedByCSP: true,
-      }).catch(() => undefined)
+      }))
     }
-    if (installed.loopbackModules) {
-      await installed.session.send('Page.setBypassCSP', { enabled: false }).catch(() => undefined)
-      if (viteLoopbackPermissions === undefined) {
-        await restoreViteLoopbackPermission(installed.session, installed.viteLoopbackPermission).catch(() => undefined)
-      } else {
-        await viteLoopbackPermissions.release(installed.session, installed.viteLoopbackPermission).catch(() =>
-          undefined
-        )
-      }
-    }
-    await Promise.allSettled([
+    const rendererCleanup = await Promise.allSettled([
       installed.session.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: installed.identifier }),
-      installed.session.send('Runtime.evaluate', {
-        expression: `(async () => { try {
-          await globalThis.__cordisxRuntime?.dispose?.()
-        } finally {
-          globalThis.__cordisxPluginGenerationResourcesV1?.dispose?.()
-        } })()`,
-        awaitPromise: true,
-        allowUnsafeEvalBlockedByCSP: true,
-      }),
+      evaluateRuntimeOperation(installed.session, RENDERER_DISPOSE_EXPRESSION, CDP_INJECTION_TIMEOUT_MS),
       installed.session.send('Runtime.removeBinding', { name: MARKETPLACE_BINDING }),
       ...(installed.providerBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: PROVIDER_BINDING })]
@@ -2428,6 +2547,26 @@ async function uninstall(
         ? [installed.session.send('Runtime.removeBinding', { name: PUBLISHER_GRANT_BINDING })]
         : []),
     ])
+    if (strictProductionCleanup) {
+      cleanupFailures.push(
+        ...rendererCleanup.flatMap(result => result.status === 'rejected' ? [result.reason] : []),
+      )
+    }
+    const scriptRemoved = rendererCleanup[0]?.status === 'fulfilled'
+    if (installed.loopbackModules) {
+      const cspRestored = await attemptCleanup(installed.session.send('Page.setBypassCSP', { enabled: false }))
+      if (viteLoopbackPermissions === undefined) {
+        await attemptCleanup(restoreViteLoopbackPermission(installed.session, installed.viteLoopbackPermission))
+      } else {
+        await attemptCleanup(viteLoopbackPermissions.release(installed.session, installed.viteLoopbackPermission))
+      }
+      if (!installed.viteDevelopment && scriptRemoved && cspRestored) {
+        await attemptCleanup(installed.session.send('Page.reload', {}, CDP_INJECTION_TIMEOUT_MS))
+      }
+    }
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(cleanupFailures, 'CordisX production renderer cleanup was incomplete')
+    }
   } finally {
     installed.session.close()
   }
@@ -2438,6 +2577,10 @@ export interface WatchInjectionOptions {
   readonly viteDevelopment?: boolean
   /** Host-owned launch-scoped immutable plugin module origin. */
   readonly pluginArtifactOrigin?: string
+  /** Production composition contains at least one immutable loopback module graph. */
+  readonly hasLoopbackGraph?: boolean
+  /** Production compatibility reload is restricted to a Host process launched by this watcher. */
+  readonly launcherOwnedNativeTarget?: boolean
   readonly port: number
   /** Latest immutable bootstrap. Existing renderers are never reinjected when it changes. */
   readonly source: string | (() => string)
@@ -2477,6 +2620,12 @@ export interface WatchInjectionOptions {
 
 /** Track every current Codex page and keep one removable bootstrap installed per target. */
 export async function watchAndInject(options: WatchInjectionOptions): Promise<void> {
+  if (options.hasLoopbackGraph === true && options.pluginArtifactOrigin === undefined) {
+    throw new Error('production loopback graph requires its exact artifact origin')
+  }
+  if (options.hasLoopbackGraph === true && options.launcherOwnedNativeTarget !== true) {
+    throw new Error('production loopback graph compatibility requires a launcher-owned native target')
+  }
   if (options.pluginArtifactOrigin !== undefined) {
     const artifactOrigin = new URL(options.pluginArtifactOrigin)
     if (
@@ -2499,12 +2648,16 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
   }
   try {
     while (!options.signal.aborted) {
-      let attemptedViteTarget = false
+      let attemptedReloadTarget: 'Vite' | 'production' | undefined
       try {
         const candidates = injectableTargets(await listTargets(options.port))
-        const targets = options.viteDevelopment === true
-          ? candidates.filter(nativeViteTarget)
+        const targets = options.viteDevelopment === true || options.hasLoopbackGraph === true
+          ? candidates.filter(nativeAppTarget)
           : candidates
+        if (options.hasLoopbackGraph === true && candidates.length > 0 && targets.length === 0) {
+          attemptedReloadTarget = 'production'
+          throw new Error('production loopback graph requires a native app:// renderer target')
+        }
         const live = new Set(targets.map(target => target.id))
         for (const [id, record] of installed) {
           if (live.has(id)) continue
@@ -2530,7 +2683,11 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           const history = options.agentHistoryHost === undefined || options.agentHistoryBridgeToken === undefined
             ? undefined
             : { host: options.agentHistoryHost, token: options.agentHistoryBridgeToken }
-          attemptedViteTarget = options.viteDevelopment === true
+          attemptedReloadTarget = options.viteDevelopment === true
+            ? 'Vite'
+            : options.hasLoopbackGraph === true
+            ? 'production'
+            : undefined
           const record = await install(
             target,
             typeof options.source === 'string' ? options.source : options.source(),
@@ -2555,7 +2712,7 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               : options.newDocumentSource(),
             stale,
             options.viteDevelopment,
-            options.viteDevelopment === true || options.pluginArtifactOrigin !== undefined,
+            options.viteDevelopment === true || options.hasLoopbackGraph === true,
             viteLoopbackPermissions,
             options.signal,
           )
@@ -2564,10 +2721,15 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
           options.onStatus?.(`injected target ${target.id} (${target.title || target.url})`)
         }
       } catch (error) {
-        if (options.signal.aborted) break
-        if (attemptedViteTarget) {
+        if (options.signal.aborted) {
+          if (error instanceof CdpInstallationAbortedError) break
+          throw error
+        }
+        if (attemptedReloadTarget !== undefined) {
           throw new Error(
-            `CordisX Vite renderer installation failed: ${error instanceof Error ? error.message : String(error)}`,
+            `CordisX ${attemptedReloadTarget} renderer installation failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
           )
         }
         options.onStatus?.(`waiting for Codex CDP on 127.0.0.1:${options.port}: ${String(error)}`)
@@ -2575,6 +2737,10 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
       await delay(750, options.signal)
     }
   } finally {
-    await Promise.allSettled([...installed.values()].map(record => uninstall(record, viteLoopbackPermissions)))
+    const cleanup = await Promise.allSettled(
+      [...installed.values()].map(record => uninstall(record, viteLoopbackPermissions)),
+    )
+    const failures = cleanup.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+    if (failures.length > 0) throw new AggregateError(failures, 'CordisX renderer cleanup failed')
   }
 }
