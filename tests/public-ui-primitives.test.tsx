@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PublicMarkdownViewer } from '../packages/cli/src/renderer/host-ui/PublicMarkdownViewer.js'
 import { PublicSelectionRail } from '../packages/cli/src/renderer/host-ui/PublicSelectionRail.js'
+import { AttachmentPlaceholder } from '../packages/cli/src/renderer/react-runtime.js'
 
 interface TestGlobals {
   readonly document: typeof globalThis.document
@@ -63,6 +64,23 @@ function Rail({ layout = 'responsive' }: { readonly layout?: 'responsive' | 'ver
 }
 
 describe('public Host UI primitives', () => {
+  it('renders the attachment seat as disabled presentation with no command surface', async () => {
+    const dom = installDom()
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    try {
+      await act(async () => root.render(<AttachmentPlaceholder aria-label="添加附件（暂不可用）" />))
+      const button = dom.window.document.querySelector<HTMLButtonElement>('.cxr-ui-attachment-placeholder')!
+      expect(button.disabled).toBe(true)
+      expect(button.type).toBe('button')
+      expect(button.getAttribute('aria-label')).toBe('添加附件（暂不可用）')
+      expect(button.querySelector('[data-host-icon="host:new"]')).not.toBeNull()
+      expect(button.getAttribute('data-command')).toBeNull()
+    } finally {
+      await act(async () => root.unmount())
+      dom.window.close()
+    }
+  })
+
   it('selects vertical sections with Arrow, Home, and End while skipping disabled tabs', async () => {
     const dom = installDom()
     const root = createRoot(dom.window.document.getElementById('root')!)
