@@ -100,6 +100,17 @@ import type {
   AgentBootstrapCommandOrigin,
 } from '@cordisx/protocol/agent-admission/v4'
 import type {
+  AgentAdmissionBootstrapRoomReservationRequest,
+  AgentAdmissionBootstrapRoomReservationResult,
+  AgentAdmissionBootstrapRoomReservationService,
+  AgentAdmissionBootstrapRoomTarget,
+  AgentAdmissionBootstrapRoomTargetOrigin,
+  AgentAdmissionBootstrapRoomTargetReceipt,
+  AgentAdmissionBootstrapRoomTargetRequest,
+  AgentAdmissionBootstrapRoomTargetResult,
+  AgentAdmissionBootstrapRoomTargetService,
+} from '@cordisx/protocol/agent-admission/v5'
+import type {
   AgentAdmissionBootstrapRouteClaimReceipt,
   AgentAdmissionBootstrapRouteClaimRequest,
   AgentAdmissionBootstrapRouteClaimResult,
@@ -272,6 +283,22 @@ export interface CordisXAgentSessionRuntimeOptions {
     owner: PluginOwnerIdentity,
     origin: AgentBootstrapCommandOrigin,
     target: AgentAdmissionTarget,
+    sessionId: string,
+    agentGeneration: number,
+    messageId: MessageId,
+  ) => PlaygroundScenarioSubmissionCapture | undefined
+  /** Shell v9/v5 only: validates one exact same-binding Room target while its bootstrap command is live. */
+  readonly bootstrapAdmissionRoomTargetActive?: (
+    owner: PluginOwnerIdentity,
+    origin: AgentBootstrapCommandOrigin,
+    target: AgentAdmissionBootstrapRoomTarget,
+  ) => boolean
+  /** Shell v9/v5 only: retains the exact Room receipt with its current-binding source capture. */
+  readonly captureBootstrapAdmissionRoomTarget?: (
+    owner: PluginOwnerIdentity,
+    origin: AgentBootstrapCommandOrigin,
+    target: AgentAdmissionBootstrapRoomTarget,
+    receipt: AgentAdmissionBootstrapRoomTargetReceipt,
     sessionId: string,
     agentGeneration: number,
     messageId: MessageId,
@@ -471,6 +498,20 @@ export class CordisXAgentSessionRuntime {
     handleGeneration?: number
   }>>()
   private readonly issuedBootstrapAdmissionTargets = new Set<string>()
+  /** V5 captures an exact Room source on its current binding; it never transfers that source. */
+  private readonly bootstrapAdmissionRoomTargets = new Map<string, Readonly<{
+    owner: PluginOwnerIdentity
+    origin: AgentBootstrapCommandOrigin
+    target: AgentAdmissionBootstrapRoomTarget
+    receipt: AgentAdmissionBootstrapRoomTargetReceipt
+    connectionGeneration: number
+    reserved: boolean
+    handleId?: string
+    handleGeneration?: number
+    capture?: PlaygroundScenarioSubmissionCapture
+  }>>()
+  private readonly issuedBootstrapAdmissionRoomTargets = new Set<string>()
+  private readonly bootstrapAdmissionRoomRooms = new Map<string, string>()
   /** V6 continuation records outlive only the originating command's route handoff. */
   private readonly bootstrapAdmissionRouteContinuations = new Map<string, Readonly<{
     owner: PluginOwnerIdentity
@@ -988,6 +1029,27 @@ export class CordisXAgentSessionRuntime {
     return `${ownerKey(owner)}\u0000${origin.originId}\u0000${origin.executionId}\u0000${target.participantId}\u0000${target.memberId}\u0000${target.runId}`
   }
 
+  private validBootstrapRoomTarget(target: AgentAdmissionBootstrapRoomTarget | undefined): target is AgentAdmissionBootstrapRoomTarget {
+    return target !== undefined && opaque(target.roomId) && opaque(target.participantId)
+      && opaque(target.memberId) && opaque(target.runId)
+  }
+
+  private sameBootstrapRoomTarget(left: AgentAdmissionBootstrapRoomTarget, right: AgentAdmissionBootstrapRoomTarget): boolean {
+    return left.roomId === right.roomId && left.participantId === right.participantId
+      && left.memberId === right.memberId && left.runId === right.runId
+  }
+
+  private bootstrapRoomIssueKey(owner: PluginOwnerIdentity, origin: AgentBootstrapCommandOrigin, target: AgentAdmissionBootstrapRoomTarget): string {
+    return `${this.bootstrapRouteCommandKey(owner, origin)}\u0000${target.roomId}\u0000${target.participantId}\u0000${target.memberId}\u0000${target.runId}`
+  }
+
+  private validBootstrapRoomOrigin(origin: unknown): origin is AgentAdmissionBootstrapRoomTargetOrigin {
+    return plainObject(origin) && hasExactKeys(origin, ['$schema', 'contract', 'schemaVersion', 'token'])
+      && origin.$schema === 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-admission-bootstrap-room-target-origin.v5.schema.json'
+      && origin.contract === 'cordisx.agent-admission-bootstrap-room-target-origin/v5'
+      && origin.schemaVersion === 5 && opaque(origin.token)
+  }
+
   private validBootstrapRouteTarget(target: AgentAdmissionBootstrapRouteTarget | undefined): target is AgentAdmissionBootstrapRouteTarget {
     return target !== undefined && opaque(target.roomId) && opaque(target.participantId) && opaque(target.memberId) && opaque(target.runId)
       && target.route !== undefined && opaque(target.route.routeId) && target.route.param === 'roomId'
@@ -1185,6 +1247,117 @@ export class CordisXAgentSessionRuntime {
         return result
       },
       revoke: async () => { if (!revoked && !used) sourceCapture.close(); revoked = true },
+    })
+    return { status: 'reserved', reservation: reservation as never }
+  }
+
+  /**
+   * Shell v9/v5 binds a newly materialized exact Room target to the current
+   * bootstrap binding. Unlike v6, this receipt has no route continuation and
+   * can only retain a source while that same binding remains live.
+   */
+  async issueAdmissionBootstrapRoomTarget(
+    owner: PluginOwnerIdentity,
+    request: AgentAdmissionBootstrapRoomTargetRequest,
+  ): Promise<AgentAdmissionBootstrapRoomTargetResult> {
+    if (this.disposed || !this.validBootstrapAdmissionOrigin(request.origin)) {
+      return { status: 'denied', code: 'origin-denied' }
+    }
+    const target = request.target
+    if (target === undefined || !opaque(target.roomId)) return { status: 'denied', code: 'room-denied' }
+    if (!this.validBootstrapRoomTarget(target)) return { status: 'denied', code: 'target-denied' }
+    if (this.options.bootstrapAdmissionRoomTargetActive?.(owner, request.origin, target) !== true) {
+      return { status: 'denied', code: 'target-denied' }
+    }
+    const commandKey = this.bootstrapRouteCommandKey(owner, request.origin)
+    const declaredRoom = this.bootstrapAdmissionRoomRooms.get(commandKey)
+    if (declaredRoom !== undefined && declaredRoom !== target.roomId) return { status: 'denied', code: 'cross-room' }
+    const issueKey = this.bootstrapRoomIssueKey(owner, request.origin, target)
+    if (this.issuedBootstrapAdmissionRoomTargets.has(issueKey)) return { status: 'denied', code: 'duplicate-target' }
+    const token = `cx-admission-bootstrap-room-target-origin.${crypto.randomUUID()}`
+    const origin = Object.freeze({
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-admission-bootstrap-room-target-origin.v5.schema.json' as const,
+      contract: 'cordisx.agent-admission-bootstrap-room-target-origin/v5' as const,
+      schemaVersion: 5 as const,
+      token,
+    }) as AgentAdmissionBootstrapRoomTargetOrigin
+    const receipt = Object.freeze({
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-admission-bootstrap-room-target-receipt.v5.schema.json' as const,
+      contract: 'cordisx.agent-admission-bootstrap-room-target-receipt/v5' as const,
+      schemaVersion: 5 as const,
+      receiptId: `cx-admission-bootstrap-room-receipt.${crypto.randomUUID()}`,
+      target: Object.freeze(clone(target)),
+    }) as AgentAdmissionBootstrapRoomTargetReceipt
+    this.bootstrapAdmissionRoomRooms.set(commandKey, target.roomId)
+    this.issuedBootstrapAdmissionRoomTargets.add(issueKey)
+    this.bootstrapAdmissionRoomTargets.set(token, Object.freeze({
+      owner: Object.freeze(clone(owner)), origin: Object.freeze(clone(request.origin)), target: Object.freeze(clone(target)), receipt,
+      connectionGeneration: this.connectionGeneration, reserved: false,
+    }))
+    return { status: 'issued', origin, receipt }
+  }
+
+  /**
+   * V5 captures the exact acquired handle and retained Room receipt before the
+   * driver sees the one-shot submit. It never falls back to an ordinary send.
+   */
+  async reserveAdmissionBootstrapRoomTarget(
+    owner: PluginOwnerIdentity,
+    request: AgentAdmissionBootstrapRoomReservationRequest,
+  ): Promise<AgentAdmissionBootstrapRoomReservationResult> {
+    if (this.disposed || !this.validBootstrapRoomOrigin(request.origin) || request.message === undefined
+      || typeof request.message.text !== 'string' || request.message.text.length < 1 || request.message.text.length > 65_536) {
+      return { status: 'denied', code: 'origin-denied' }
+    }
+    const issued = this.bootstrapAdmissionRoomTargets.get(request.origin.token)
+    if (issued === undefined || !this.sameOwner(owner, issued.owner)) return { status: 'denied', code: 'not-owner' }
+    if (issued.reserved) return { status: 'denied', code: 'reused' }
+    if (issued.connectionGeneration !== this.connectionGeneration
+      || this.options.bootstrapAdmissionRoomTargetActive?.(owner, issued.origin, issued.target) !== true) {
+      return { status: 'denied', code: 'command-complete' }
+    }
+    const record = this.handleCapabilities.get(request.handle as object)
+    if (record === undefined || record.generation !== request.handle.agent.generation || !this.current(record)) {
+      return { status: 'denied', code: 'stale' }
+    }
+    if (!this.sameOwner(owner, record.owner)) return { status: 'denied', code: 'not-owner' }
+    const messageId = `cx-message.${crypto.randomUUID()}` as MessageId
+    const message = Object.freeze({
+      id: messageId, role: 'user' as const, content: Object.freeze([{ type: 'text' as const, text: request.message.text }]),
+      source: Object.freeze({ kind: 'plugin' as const, pluginId: owner.pluginId, generation: owner.generation }),
+    }) as UserMessage
+    const sourceCapture = this.options.captureBootstrapAdmissionRoomTarget?.(
+      owner, issued.origin, issued.target, issued.receipt, record.id, record.generation, messageId,
+    )
+    if (sourceCapture === undefined) return { status: 'denied', code: 'target-mismatch' }
+    if (!sourceCapture.active() || this.options.bootstrapAdmissionRoomTargetActive?.(owner, issued.origin, issued.target) !== true) {
+      sourceCapture.close()
+      return { status: 'denied', code: 'command-complete' }
+    }
+    this.bootstrapAdmissionRoomTargets.set(request.origin.token, Object.freeze({
+      ...issued, reserved: true, handleId: record.id, handleGeneration: record.generation, capture: sourceCapture,
+    }))
+    let used = false; let revoked = false
+    const reservation = Object.freeze({
+      reservationId: `cx-admission-bootstrap-room-reservation.${crypto.randomUUID()}`,
+      submit: async () => {
+        const current = this.bootstrapAdmissionRoomTargets.get(request.origin.token)
+        if (used || revoked || current === undefined || !current.reserved
+          || current.handleId !== record.id || current.handleGeneration !== record.generation
+          || current.connectionGeneration !== this.connectionGeneration || !this.current(record) || !sourceCapture.active()
+          || this.options.bootstrapAdmissionRoomTargetActive?.(owner, issued.origin, issued.target) !== true) {
+          throw new Error('agent-admission bootstrap Room reservation unavailable')
+        }
+        used = true
+        const result = await this.submitAdmission(owner, record, message, 'next-turn', true, sourceCapture)
+        if (result.status !== 'accepted') throw new Error('agent-admission bootstrap Room submit denied')
+        return result
+      },
+      revoke: async () => {
+        if (revoked || used) return
+        revoked = true
+        sourceCapture.close()
+      },
     })
     return { status: 'reserved', reservation: reservation as never }
   }
@@ -1929,6 +2102,11 @@ export class CordisXAgentSessionRuntime {
     for (const [token, issued] of this.bootstrapAdmissionTargets) {
       if (issued.owner.pluginId === ownerPluginId) this.bootstrapAdmissionTargets.delete(token)
     }
+    for (const [token, issued] of this.bootstrapAdmissionRoomTargets) {
+      if (issued.owner.pluginId !== ownerPluginId) continue
+      issued.capture?.close()
+      this.bootstrapAdmissionRoomTargets.delete(token)
+    }
     for (const [token, issued] of this.bootstrapAdmissionRouteContinuations) {
       if (issued.owner.pluginId !== ownerPluginId) continue
       issued.capture?.close()
@@ -1937,19 +2115,25 @@ export class CordisXAgentSessionRuntime {
     const prefix = `${ownerPluginId}\u0000`
     for (const key of this.issuedAdmissionTargets) if (key.startsWith(prefix)) this.issuedAdmissionTargets.delete(key)
     for (const key of this.issuedBootstrapAdmissionTargets) if (key.startsWith(prefix)) this.issuedBootstrapAdmissionTargets.delete(key)
+    for (const key of this.issuedBootstrapAdmissionRoomTargets) if (key.startsWith(prefix)) this.issuedBootstrapAdmissionRoomTargets.delete(key)
     for (const key of this.issuedBootstrapAdmissionRouteTargets) if (key.startsWith(prefix)) this.issuedBootstrapAdmissionRouteTargets.delete(key)
+    for (const key of this.bootstrapAdmissionRoomRooms.keys()) if (key.startsWith(prefix)) this.bootstrapAdmissionRoomRooms.delete(key)
     for (const key of this.bootstrapAdmissionRouteRooms.keys()) if (key.startsWith(prefix)) this.bootstrapAdmissionRouteRooms.delete(key)
     for (const key of this.reservedAdmissionOrigins) if (key.startsWith(prefix)) this.reservedAdmissionOrigins.delete(key)
   }
 
   private clearAdmissionCapabilities(): void {
+    for (const issued of this.bootstrapAdmissionRoomTargets.values()) issued.capture?.close()
     for (const issued of this.bootstrapAdmissionRouteContinuations.values()) issued.capture?.close()
     this.targetAdmissionOrigins.clear()
     this.bootstrapAdmissionTargets.clear()
+    this.bootstrapAdmissionRoomTargets.clear()
     this.bootstrapAdmissionRouteContinuations.clear()
     this.issuedAdmissionTargets.clear()
     this.issuedBootstrapAdmissionTargets.clear()
+    this.issuedBootstrapAdmissionRoomTargets.clear()
     this.issuedBootstrapAdmissionRouteTargets.clear()
+    this.bootstrapAdmissionRoomRooms.clear()
     this.bootstrapAdmissionRouteRooms.clear()
     this.reservedAdmissionOrigins.clear()
   }
@@ -2237,6 +2421,24 @@ export class CordisXAgentAdmissionBootstrapReservationService extends Service im
   reserve = async (request: AgentAdmissionBootstrapReservationRequest): Promise<AgentAdmissionBootstrapReservationResult> => {
     const runtime = runtimeFor(this)
     return await runtime.reserveAdmissionBootstrapTarget(runtime.ownerFromContext(this.ctx), request)
+  }
+}
+
+/** Host-owned v5 issuer for an exact Room target retained on the current binding. */
+export class CordisXAgentAdmissionBootstrapRoomTargetService extends Service implements AgentAdmissionBootstrapRoomTargetService {
+  constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) { super(ctx, 'agentAdmissionBootstrapRoomTargets'); runtimes.set(this, runtime) }
+  issue = async (request: AgentAdmissionBootstrapRoomTargetRequest): Promise<AgentAdmissionBootstrapRoomTargetResult> => {
+    const runtime = runtimeFor(this)
+    return await runtime.issueAdmissionBootstrapRoomTarget(runtime.ownerFromContext(this.ctx), request)
+  }
+}
+
+/** Host-owned v5 one-shot reservation for a same-binding Room source capture. */
+export class CordisXAgentAdmissionBootstrapRoomReservationService extends Service implements AgentAdmissionBootstrapRoomReservationService {
+  constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) { super(ctx, 'agentAdmissionBootstrapRoomReservations'); runtimes.set(this, runtime) }
+  reserve = async (request: AgentAdmissionBootstrapRoomReservationRequest): Promise<AgentAdmissionBootstrapRoomReservationResult> => {
+    const runtime = runtimeFor(this)
+    return await runtime.reserveAdmissionBootstrapRoomTarget(runtime.ownerFromContext(this.ctx), request)
   }
 }
 

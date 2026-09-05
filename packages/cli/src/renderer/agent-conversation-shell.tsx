@@ -1728,12 +1728,10 @@ class MountedConversation {
             }] : []
           ))
           const roomId = model.selection.kind === 'room' ? model.selection.roomId : undefined
-          const admissionOrigin = this.record.version !== 8 || !isComposerSubmit || roomId === undefined
-            || activeRuns.length < 1
-            ? undefined
-            : (() => {
-                // The v1 origin remains the exact command authority. v3 mints
-                // a separate opaque capability for every resolved delivery.
+          const admissionOrigin = this.record.version === 8 && isComposerSubmit && roomId !== undefined && activeRuns.length >= 1
+            ? (() => {
+                // Frozen Shell v8 behavior: keep its historical first active
+                // Room run selection exactly as-is.
                 const run = activeRuns[0]!
                 return Object.freeze({
                   $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json' as const,
@@ -1748,7 +1746,28 @@ class MountedConversation {
                   room: Object.freeze({ roomId, participantId: run.participantId, memberId: run.memberId, runId: run.runId }),
                 })
               })()
-          const bootstrapOrigin: AgentBootstrapCommandOrigin | undefined = this.record.version !== 9 || !isComposerCommand
+            : this.record.version === 9 && isComposerSubmit && roomId !== undefined && runs.length >= 1
+              ? (() => {
+                  // A mounted v9 Room already has an exact Session-backed
+                  // target. Preserve that public v1 authority so v3 can issue
+                  // one opaque capability per known delivery; bootstrap is only
+                  // for a command that has no such target yet.
+                  const run = runs[0]!
+                  return Object.freeze({
+                    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json' as const,
+                    contract: 'cordisx.agent-command-origin/v1' as const,
+                    schemaVersion: 1 as const,
+                    originId: `cx-command-origin.${crypto.randomUUID()}`,
+                    binding: Object.freeze({ bindingId: this.binding.bindingId, ownerGeneration: this.binding.ownerGeneration }),
+                    generation: this.record.effect.moduleGeneration ?? this.record.ownerGeneration,
+                    executionId: request.invocationKey,
+                    commandId: request.reference.id,
+                    scope: 'composer-submit' as const,
+                    room: Object.freeze({ roomId, participantId: run.participantId, memberId: run.memberId, runId: run.runId }),
+                  })
+                })()
+              : undefined
+          const bootstrapOrigin: AgentBootstrapCommandOrigin | undefined = this.record.version !== 9 || !isComposerCommand || admissionOrigin !== undefined
             ? undefined
             : Object.freeze({
                 $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
@@ -1776,16 +1795,14 @@ class MountedConversation {
             // context as one that has an origin.
             return await this.commands.executeConversationFor(request.ownerId, request.reference, request.invocationKey, request.context)
           }
-          // Shell v9 retains a command-scoped bootstrap authority even before
-          // a Room itself exists. A new-Room composer cannot have a Room or
-          // Session in its pre-command snapshot: the plugin materializes the
-          // exact delivery target inside this still-live command, then v6
-          // binds its declared Room-route continuation. Predecessors remain
-          // Room/session-bound.
-          const capturesBootstrapCommand = this.record.version === 9 && isComposerCommand
+          // Shell v9 uses bootstrap only when no exact Session-backed Room
+          // target exists. A mounted Room keeps v1/v3 source capture on its
+          // current binding; fresh Room replacement remains the v6 claim path.
+          const capturesBootstrapCommand = this.record.version === 9 && bootstrapOrigin !== undefined
+          const capturesExistingV9TargetCommand = this.record.version === 9 && admissionOrigin !== undefined
           const capturesPredecessorCommand = this.record.version !== 9 && isComposerSubmit
             && roomId !== undefined && runs.length > 0
-          if (this.scenarioSource === undefined || !(capturesBootstrapCommand || capturesPredecessorCommand)) return await execute()
+          if (this.scenarioSource === undefined || !(capturesBootstrapCommand || capturesExistingV9TargetCommand || capturesPredecessorCommand)) return await execute()
           const scenarioOwner = this.scenarioOwner?.(this.record.owner, this.record.effect.moduleGeneration)
           if (scenarioOwner === undefined) return await execute()
           const snapshotGeneration = model.generation
@@ -1807,7 +1824,7 @@ class MountedConversation {
               && current.runId === run.runId && current.sessionId === run.sessionId))
           }
           const scenarioOrigin = {
-            owner: scenarioOwner.pluginId,
+            owner: Object.freeze({ ...scenarioOwner }),
             bindingId: this.binding.bindingId,
             ownerGeneration: this.binding.ownerGeneration,
             snapshotGeneration,

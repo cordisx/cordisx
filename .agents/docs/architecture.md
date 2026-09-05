@@ -517,22 +517,29 @@ construct a package-local, debug-only private projection and mount this
 production renderer; production renderer and adapter modules never import
 Playground fixtures or selectors.
 
-Shell v9 extends that command boundary for a fresh Room with no Session-backed
-run, including a no-Room composer whose handler creates the Room. The Host
-mints one immutable bootstrap command origin before entering the composer
-handler and retains its authenticated command/binding/generation/execution
-authority without inferring a future Room from the pre-command snapshot. The
-plugin may declare each exact
-`{roomId, participantId, memberId, runId, route:{routeId, param:'roomId', roomId}}`
-only through `agentAdmissionBootstrapRouteDeclarations.declare`. The Host
-returns one opaque continuation per declaration; its paired reservation captures
-the newly acquired exact Agent handle before private driver submission. An
-accepted submission records the exact `{sessionId, messageId}` under that
-continuation. When the matching same-owner Room route obtains its new Host
-binding, the Host-only claim atomically moves—not copies—that source capture to
-the new binding before navigation resolves or deferred scenario work can run.
-The old binding is never retained as live authority. Continuations and claims
-are one-shot and fail closed on command completion, target/Room/owner
+Shell v9 extends that command boundary with three disjoint Host-owned
+admission paths. A mounted Room with an exact Session-backed active run receives
+the normal immutable v1 `AgentCommandOrigin`; the plugin uses v3 to issue one
+opaque target capability per known delivery, reserve its exact Agent handle, and
+capture before private driver submission. A mounted Room with no such known
+Session-backed target receives a bootstrap origin, but may use v5 only to
+declare `{roomId, participantId, memberId, runId}` through
+`agentAdmissionBootstrapRoomTargets.issue`. The clone-safe v5 receipt is
+retained with the same live binding and its paired reservation captures the
+newly acquired exact Agent handle before driver submission; it cannot transfer
+across a route or binding replacement. A fresh/no-Room composer, whose handler
+creates a Room and then navigates to it, uses v6 only: the plugin declares each
+exact `{roomId, participantId, memberId, runId, route:{routeId, param:'roomId',
+roomId}}` through `agentAdmissionBootstrapRouteDeclarations.declare`. The Host
+returns one opaque continuation per declaration; an accepted submission records
+the exact `{sessionId, messageId}` under it. When the matching same-owner Room
+route obtains its new Host binding, the Host-only claim atomically moves—not
+copies—that source capture to the new binding before navigation resolves or
+deferred scenario work can run. Every path binds the full
+`PluginOwnerIdentity`, command, binding, connection, execution, Room and exact
+target; a plugin-id match alone never spans generations. The old binding is
+never retained as live authority. Capabilities, receipts, reservations and
+claims are one-shot and fail closed on command completion, target/Room/owner
 substitution, unmatched route activation, binding/generation/connection
 replacement, revocation, or disposal. The frozen Shell v8 target-origin path
 is unchanged and has no bootstrap fallback.

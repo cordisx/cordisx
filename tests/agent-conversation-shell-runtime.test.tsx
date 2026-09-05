@@ -20,6 +20,7 @@ import type {
   AgentConversationShellSnapshot as AgentConversationShellSnapshotV7,
   AgentConversationShellSubscriptionClosed as AgentConversationShellSubscriptionClosedV7,
 } from '@cordisx/protocol/agent-conversation-shell/v7'
+import type { AgentCommandOrigin } from '@cordisx/protocol/agent-admission/v2'
 import { Context } from '@deepseek-ai/cordis'
 import { JSDOM } from 'jsdom'
 import { act } from 'react'
@@ -57,14 +58,16 @@ import {
   CordisXAgentConversationShellService,
   projectAgentConversationShellSnapshotV4,
 } from '../packages/cli/src/renderer/agent-conversation-shell.js'
-import type {
-  PlaygroundScenarioConversationOrigin,
-  PlaygroundScenarioConversationSourceAuthority,
+import {
+  PlaygroundScenarioSessionScopeAuthority,
+  type PlaygroundScenarioConversationOrigin,
+  type PlaygroundScenarioConversationSourceAuthority,
 } from '../packages/cli/src/renderer/playground-scenario-session-scope.js'
 import { CommandRegistry, CordisXCommandService } from '../packages/cli/src/renderer/commands.js'
 import { HostAgentTaskDetailsNavigator } from '../packages/cli/src/renderer/host-ui/AgentTaskDetailsNavigator.js'
 import { CordisXI18nService } from '../packages/cli/src/renderer/i18n.js'
 import { CordisXPageService } from '../packages/cli/src/renderer/navigation.js'
+import type { AgentRuntimeRouteScope } from '../packages/cli/src/renderer/platform.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID } from '../packages/cli/src/renderer/ownership.js'
 import {
   CordisXAgentSessionRuntime,
@@ -368,7 +371,7 @@ describe('Agent conversation shell public runtime', () => {
     await vi.waitFor(() => expect(dom.window.document.querySelector<HTMLButtonElement>('.cxa-send')?.disabled).toBe(false))
     dom.window.document.querySelector<HTMLButtonElement>('.cxa-send')!.click()
     await vi.waitFor(() => expect(observed).toMatchObject({
-      owner: 'file:///plugins/chatroom.ts:chatroom', bindingId, snapshotGeneration: 'snapshot-v4-capture',
+      owner: { pluginId: 'file:///plugins/chatroom.ts:chatroom', generation: 1 }, bindingId, snapshotGeneration: 'snapshot-v4-capture',
       roomId: 'room-one', routeId: 'chatroom:room', runs: [{ runId: 'room-run-lead', sessionId: 'cx-session.lead' }],
     }))
     if (typeof unmount === 'function') unmount()
@@ -928,6 +931,82 @@ describe('Agent conversation shell public runtime', () => {
     registration.dispose(); runtime.dispose(); commands.dispose(); await settle(); dom.window.close()
   })
 
+  it('keeps an existing Shell v9 Room on its exact v1 target origin through command completion', async () => {
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    const scenarioOwner = { pluginId: 'file:///fixtures/chatroom.ts:chatroom', generation: 1 } as const
+    let mounted: AgentRuntimeRouteScope | undefined
+    const authority = new PlaygroundScenarioSessionScopeAuthority({
+      hostGeneration: 'shell-v9-existing-room', connectionGeneration: () => 1,
+      currentRoute: () => undefined,
+      ownerForSession: sessionId => ['cx-session.existing-lead', 'cx-session.existing-reviewer'].includes(sessionId) ? scenarioOwner : undefined,
+      routeOwner: candidate => candidate.pluginId === scenarioOwner.pluginId && candidate.generation === scenarioOwner.generation
+        ? { source: 'file:///fixtures/chatroom.ts', pluginId: 'chatroom' } : undefined,
+      permissionRoute: () => ({ routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }),
+      authorize: async () => true,
+      mountRoute: route => { mounted = route; return () => { mounted = undefined } },
+      changed: () => {},
+    })
+    let captured = false
+    commands.register('chatroom', { id: 'send-v9-existing', title: { key: 'send-v9-existing', fallback: 'Send' } }, context => {
+      const origin = (context.hostContext as { readonly origin?: AgentCommandOrigin }).origin
+      if (origin === undefined) throw new Error('Shell v9 existing Room lost its exact target origin')
+      expect(origin.room).toEqual({ roomId: 'room-existing', participantId: 'leader', memberId: 'member-leader', runId: 'run-leader' })
+      const capture = authority.captureAdmission(scenarioOwner, origin, 'cx-session.existing-lead', 1, 'cx-message.existing-third')
+      expect(capture?.active()).toBe(true)
+      capture?.commit()
+      captured = true
+    })
+    const runtime = new AgentConversationShellRegistry(
+      commandService(commands), fakeI18n(), undefined, undefined, undefined,
+      authority.conversationSource,
+      owner => owner === 'chatroom' ? scenarioOwner : undefined,
+    )
+    const plugin = new Context().extend({ [CORDISX_PLUGIN_ID]: 'chatroom', [CORDISX_PLUGIN_GENERATION]: 'shell-v9-existing-generation' })
+    const stream = new PageStream()
+    let binding: AgentConversationShellBinding | undefined
+    const registration = runtime.register(plugin, currentBinding => {
+      binding = currentBinding
+      const snapshot: AgentConversationShellSnapshotV7 = {
+        binding: { bindingId: currentBinding.bindingId, ownerGeneration: currentBinding.ownerGeneration }, generation: 'shell-v9-existing-snapshot', snapshotSequence: 0,
+        selection: {
+          kind: 'room', roomId: 'room-existing', title: message('room.existing', 'Existing Room'), multiParticipant: false, participantPresentation: 'none',
+          participants: [{ participantId: 'leader', role: 'agent', displayName: message('leader', 'Lead') }],
+          activeRuns: [{ participantId: 'leader', memberId: 'member-leader', runId: 'run-leader', sessionId: 'cx-session.existing-lead', lifecycle: { phase: 'active' } }],
+        },
+        items: [], composer: { availability: 'available', placeholder: message('composer', 'Message'), disabled: { value: false }, shortcutPolicy: 'enter', submit: { id: 'send-v9-existing' } }, headerActions: [],
+      }
+      const subscription = { subscriptionId: 'subscription-v9-existing', binding: snapshot.binding, generation: snapshot.generation, afterSequence: 0, snapshotSequence: 0 }
+      return {
+        snapshot: async () => snapshot,
+        subscribe: async () => ({ result: { type: 'subscribe' as const, status: 'accepted' as const, code: 'allowed' as const, subscription }, handle: {
+          subscription, pages: stream, closed: new Promise<never>(() => {}), unsubscribe: async () => { stream.close() },
+        } }),
+        dispose() {},
+      }
+    }, undefined, 9)
+    registration.mount(mountContext(dom, { roomId: 'room-existing' }))
+    await vi.waitFor(() => expect(dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')).not.toBeNull())
+    const draft = dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')?.set
+    setter?.call(draft, '3')
+    draft.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    const send = dom.window.document.querySelector<HTMLButtonElement>('.cxa-send')!
+    await vi.waitFor(() => expect(send.disabled).toBe(false))
+    send.click()
+    await vi.waitFor(() => expect(captured).toBe(true))
+    const activated = await authority.client.activate({
+      runId: 'scenario-existing-room-third-message', sourceMessageId: 'cx-message.existing-third',
+      sourceSessionId: 'cx-session.existing-lead', targetSessionId: 'cx-session.existing-reviewer',
+    })
+    expect(activated.status).toBe('available')
+    expect(mounted?.params.sessionId).toBe('cx-session.existing-reviewer')
+    registration.dispose()
+    expect(binding).toBeDefined()
+    if (activated.status === 'available') await expect(activated.handle.closed).resolves.toEqual({ code: 'route-replaced' })
+    runtime.dispose(); commands.dispose(); authority.dispose(); await settle(); dom.window.close()
+  })
+
   it('Host-claims a matching v6 Room route continuation synchronously when the new binding mounts', () => {
     const dom = installDom()
     const commands = new CommandRegistry()
@@ -1024,7 +1103,7 @@ describe('Agent conversation shell public runtime', () => {
     send.click()
     await vi.waitFor(() => expect(commandContext?.hostContext).toMatchObject({ scope: 'composer-submit', origin: { commandId: 'create-v9' } }))
     await vi.waitFor(() => expect(commandOrigin).toBeDefined())
-    expect(commandOrigin).toMatchObject({ owner: 'file:///fixtures/chatroom.ts:chatroom', runs: [], bootstrapOrigin: {
+    expect(commandOrigin).toMatchObject({ owner: { pluginId: 'file:///fixtures/chatroom.ts:chatroom', generation: 1 }, runs: [], bootstrapOrigin: {
       commandId: 'create-v9', scope: 'composer-submit',
     } })
     expect(commandOrigin?.roomId).toBeUndefined()

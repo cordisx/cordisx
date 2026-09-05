@@ -295,7 +295,7 @@ describe('Host Playground Session scenario catalog', () => {
     const lead = await runtime.create(owner, { sessionId: binding.sessionId!, setup: setup('chatroom.generalist', 'Lead') })
     if (lead.status !== 'accepted') throw new Error('Lead Session create failed')
     const originatingCommand = async (messageId: string, code: string) => await scopeAuthority.conversationSource.execute({
-      owner: owner.pluginId, bindingId: `binding-${messageId}`, ownerGeneration: 'owner-generation-one',
+      owner, bindingId: `binding-${messageId}`, ownerGeneration: 'owner-generation-one',
       snapshotGeneration: 'snapshot-generation-one', roomId: 'room-one', routeId: 'chatroom:room',
       runs: [{ runId: 'room-run-lead', sessionId: binding.sessionId! }], active: () => true,
     }, async () => await lead.handle.agent.followup(message(messageId, code)))
