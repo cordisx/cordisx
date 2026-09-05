@@ -888,6 +888,7 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(shikitor).toContain('dataset.shikitorRenderMode === \'less-dom\'')
       expect(shikitor).toContain('color:var(--cx-text)!important;-webkit-text-fill-color:var(--cx-text)!important;caret-color:var(--cx-text)!important')
       expect(shikitor).toContain('::placeholder{color:var(--cx-muted)!important')
+      expect(shikitor).toContain('data-cordisx-shikitor-native-text="true"]:not([data-cordisx-shikitor-fallback]){color:CanvasText!important')
     } finally {
       await harness.close()
     }
