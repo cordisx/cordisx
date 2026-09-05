@@ -10,6 +10,8 @@ import {
   CordisXAgentAdmissionTargetReservationService,
   CordisXAgentAdmissionBootstrapTargetService,
   CordisXAgentAdmissionBootstrapReservationService,
+  CordisXAgentAdmissionBootstrapRoomTargetService,
+  CordisXAgentAdmissionBootstrapRoomReservationService,
   CordisXAgentAdmissionBootstrapRouteDeclarationService,
   CordisXAgentAdmissionBootstrapRouteReservationService,
   CordisXAgentSessionRuntime,
@@ -101,6 +103,8 @@ describe('Agent/Session Host authority v1', () => {
       captureAdmissionTarget: () => ({ active: () => true, commit: () => {}, close: () => {} }),
       bootstrapAdmissionTargetActive: () => true,
       captureBootstrapAdmissionTarget: () => ({ active: () => true, commit: () => {}, close: () => {} }),
+      bootstrapAdmissionRoomTargetActive: () => true,
+      captureBootstrapAdmissionRoomTarget: () => ({ active: () => true, commit: () => {}, close: () => {} }),
     })
     const ctx = new Context().extend({
       [CORDISX_PLUGIN_ID]: 'proxy-test',
@@ -121,6 +125,10 @@ describe('Agent/Session Host authority v1', () => {
     await bootstrapTargets
     const bootstrapReservations = ctx.plugin(CordisXAgentAdmissionBootstrapReservationService, runtime)
     await bootstrapReservations
+    const bootstrapRoomTargets = ctx.plugin(CordisXAgentAdmissionBootstrapRoomTargetService, runtime)
+    await bootstrapRoomTargets
+    const bootstrapRoomReservations = ctx.plugin(CordisXAgentAdmissionBootstrapRoomReservationService, runtime)
+    await bootstrapRoomReservations
     const bootstrapRouteDeclarations = ctx.plugin(CordisXAgentAdmissionBootstrapRouteDeclarationService, runtime)
     await bootstrapRouteDeclarations
     const bootstrapRouteReservations = ctx.plugin(CordisXAgentAdmissionBootstrapRouteReservationService, runtime)
@@ -133,6 +141,8 @@ describe('Agent/Session Host authority v1', () => {
     const { reserve } = ctx.agentAdmissionReservations
     const { issue: issueBootstrapTarget } = ctx.agentAdmissionBootstrapTargets
     const { reserve: reserveBootstrapTarget } = ctx.agentAdmissionBootstrapReservations
+    const { issue: issueBootstrapRoomTarget } = ctx.agentAdmissionBootstrapRoomTargets
+    const { reserve: reserveBootstrapRoomTarget } = ctx.agentAdmissionBootstrapRoomReservations
     const created = await create({ setup })
     expect(created).toMatchObject({ status: 'accepted', sessionIdSource: 'host' })
     if (created.status !== 'accepted') throw new Error('agent unavailable')
@@ -168,6 +178,21 @@ describe('Agent/Session Host authority v1', () => {
     expect(v4Reservation.status).toBe('reserved')
     if (v4Reservation.status !== 'reserved') throw new Error('bootstrap target reservation denied')
     await expect(v4Reservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
+    const v5Origin = await issueBootstrapRoomTarget({
+      origin: {
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json',
+        contract: 'cordisx.agent-bootstrap-command-origin/v1', schemaVersion: 1,
+        originId: 'proxy-bootstrap-room-origin', binding: { bindingId: 'proxy-binding', ownerGeneration: 'proxy-generation' },
+        generation: 'proxy-generation', executionId: 'proxy-bootstrap-room-execution', commandId: 'proxy-send', scope: 'composer-submit',
+      },
+      target: { roomId: 'proxy-room', participantId: 'reviewer', memberId: 'member-reviewer', runId: 'run-reviewer' },
+    })
+    expect(v5Origin).toMatchObject({ status: 'issued', receipt: { target: { roomId: 'proxy-room', runId: 'run-reviewer' } } })
+    if (v5Origin.status !== 'issued') throw new Error('bootstrap Room target origin denied')
+    const v5Reservation = await reserveBootstrapRoomTarget({ handle: created.handle, origin: v5Origin.origin, message: { text: 'bootstrap Room delivery' } })
+    expect(v5Reservation.status).toBe('reserved')
+    if (v5Reservation.status !== 'reserved') throw new Error('bootstrap Room target reservation denied')
+    await expect(v5Reservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
     expect(await get(created.sessionId)).toMatchObject({ id: created.sessionId, generation: created.handle.agent.generation })
     expect(await getSession(created.sessionId)).toMatchObject({ id: created.sessionId })
     await registerAnswerer(created.handle.agent, async () => 'allowed-once')
@@ -203,6 +228,8 @@ describe('Agent/Session Host authority v1', () => {
       },
     })).toMatchObject({ status: 'unavailable', code: 'binding-closed' })
 
+    await bootstrapRoomReservations.dispose()
+    await bootstrapRoomTargets.dispose()
     await bootstrapReservations.dispose()
     await bootstrapTargets.dispose()
     await admissionReservations.dispose()
@@ -817,7 +844,7 @@ describe('Agent/Session Host authority v1', () => {
     await runtime.dispose()
   })
 
-  it.each([2, 3])('issues and submits one v3 capability per exact delivery for N=%i', async count => {
+  it.each([1, 2, 3])('issues and submits one v3 capability per exact delivery for N=%i', async count => {
     const driver = new Driver()
     const captures: string[] = []
     let commandActive = true
@@ -1039,6 +1066,161 @@ describe('Agent/Session Host authority v1', () => {
     await ownerRuntime.dispose()
   })
 
+  it.each([1, 2, 3])('issues, captures, and submits one same-binding Shell v9/v5 Room target for N=%i', async count => {
+    const driver = new Driver()
+    let commandActive = true
+    const origin = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
+      originId: `bootstrap-room-origin-${count}`, binding: { bindingId: 'bootstrap-room-binding', ownerGeneration: 'bootstrap-room-owner-generation' },
+      generation: 'bootstrap-room-plugin-generation', executionId: `bootstrap-room-execution-${count}`, commandId: 'composer.submit', scope: 'composer-submit' as const,
+    }
+    const targets = Array.from({ length: count }, (_, index) => ({
+      roomId: 'room-existing', participantId: ['leader', 'reviewer', 'integrator'][index]!, memberId: `member-${index + 1}`, runId: `run-${index + 1}`,
+    }))
+    const targetSessions = new Map(targets.map((target, index) => [target.runId, `cx-session.bootstrap-room-${count}-${index}`]))
+    const captures: string[] = []
+    const runtime = new CordisXAgentSessionRuntime({
+      driver, authorize: async () => true,
+      bootstrapAdmissionRoomTargetActive: (_owner, candidate, target) => commandActive && candidate.originId === origin.originId
+        && (target.roomId === 'room-existing' || target.roomId === 'room-foreign') && targets.some(value => value.participantId === target.participantId
+          && value.memberId === target.memberId && value.runId === target.runId),
+      captureBootstrapAdmissionRoomTarget: (_owner, candidate, target, receipt, sessionId, generation, messageId) => {
+        if (!commandActive || candidate.originId !== origin.originId || targetSessions.get(target.runId) !== sessionId
+          || receipt.target.roomId !== target.roomId || receipt.target.participantId !== target.participantId
+          || receipt.target.memberId !== target.memberId || receipt.target.runId !== target.runId) return undefined
+        captures.push(`${target.roomId}:${target.participantId}:${target.memberId}:${target.runId}:${sessionId}:${generation}:${messageId}`)
+        return { active: () => commandActive, commit: () => {}, close: () => {} }
+      },
+    })
+    const issued = await Promise.all(targets.map(target => runtime.issueAdmissionBootstrapRoomTarget(owner, { origin, target })))
+    expect(issued.every(value => value.status === 'issued')).toBe(true)
+    const handles = await Promise.all(targets.map(async target => {
+      const created = await runtime.create(owner, { sessionId: targetSessions.get(target.runId)!, setup })
+      if (created.status !== 'accepted') throw new Error('bootstrap Room target was not acquired')
+      return created.handle
+    }))
+    const reservations = await Promise.all(issued.map(async (capability, index) => {
+      if (capability.status !== 'issued') throw new Error('bootstrap Room target origin denied')
+      return await runtime.reserveAdmissionBootstrapRoomTarget(owner, {
+        handle: handles[index]!, origin: capability.origin, message: { text: `bootstrap Room delivery ${index + 1}` },
+      })
+    }))
+    expect(reservations.every(value => value.status === 'reserved')).toBe(true)
+    expect(captures).toHaveLength(count)
+    expect(driver.submitted).toEqual([])
+    await Promise.all(reservations.map(async reservation => {
+      if (reservation.status !== 'reserved') throw new Error('bootstrap Room reservation denied')
+      await expect(reservation.reservation.submit()).resolves.toMatchObject({ status: 'accepted' })
+    }))
+    expect(driver.submitted).toHaveLength(count)
+    const first = issued[0]!
+    if (first.status !== 'issued') throw new Error('bootstrap Room target origin denied')
+    await expect(runtime.reserveAdmissionBootstrapRoomTarget(owner, {
+      handle: handles[0]!, origin: first.origin, message: { text: 'reused bootstrap Room target' },
+    })).resolves.toMatchObject({ status: 'denied', code: 'reused' })
+    await expect(runtime.issueAdmissionBootstrapRoomTarget(owner, { origin, target: targets[0]! }))
+      .resolves.toMatchObject({ status: 'denied', code: 'duplicate-target' })
+    await expect(runtime.issueAdmissionBootstrapRoomTarget(owner, {
+      origin, target: { ...targets[0]!, roomId: 'room-foreign' },
+    })).resolves.toMatchObject({ status: 'denied', code: 'cross-room' })
+    commandActive = false
+    await expect(runtime.issueAdmissionBootstrapRoomTarget(owner, {
+      origin: { ...origin, originId: `${origin.originId}-complete` }, target: targets[0]!,
+    })).resolves.toMatchObject({ status: 'denied', code: 'target-denied' })
+    await runtime.dispose()
+  })
+
+  it('fails closed for v5 Room cross-target, revoke, command completion, owner generation, and connection replacement', async () => {
+    const driver = new Driver()
+    let commandActive = true
+    const origin = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
+      originId: 'bootstrap-room-fences', binding: { bindingId: 'bootstrap-room-fence-binding', ownerGeneration: 'bootstrap-room-fence-owner' },
+      generation: 'bootstrap-room-fence-generation', executionId: 'bootstrap-room-fence-execution', commandId: 'composer.submit', scope: 'composer-submit' as const,
+    }
+    const leader = { roomId: 'room-fences', participantId: 'leader', memberId: 'member-leader', runId: 'run-leader' }
+    const reviewer = { roomId: 'room-fences', participantId: 'reviewer', memberId: 'member-reviewer', runId: 'run-reviewer' }
+    const sessions = new Map([[leader.runId, 'cx-session.bootstrap-room-leader'], [reviewer.runId, 'cx-session.bootstrap-room-reviewer']])
+    const runtime = new CordisXAgentSessionRuntime({
+      driver, authorize: async () => true,
+      bootstrapAdmissionRoomTargetActive: (_owner, candidate, target) => commandActive && candidate.originId.startsWith('bootstrap-room-fences')
+        && [leader, reviewer].some(value => value.roomId === target.roomId && value.participantId === target.participantId
+          && value.memberId === target.memberId && value.runId === target.runId),
+      captureBootstrapAdmissionRoomTarget: (_owner, _candidate, target, _receipt, sessionId) => sessions.get(target.runId) === sessionId
+        ? { active: () => commandActive, commit: () => {}, close: () => {} } : undefined,
+    })
+    const lead = await runtime.create(owner, { sessionId: sessions.get(leader.runId)!, setup })
+    const review = await runtime.create(owner, { sessionId: sessions.get(reviewer.runId)!, setup })
+    if (lead.status !== 'accepted' || review.status !== 'accepted') throw new Error('bootstrap Room targets unavailable')
+    const reviewerIssued = await runtime.issueAdmissionBootstrapRoomTarget(owner, { origin, target: reviewer })
+    if (reviewerIssued.status !== 'issued') throw new Error('reviewer bootstrap Room target denied')
+    await expect(runtime.reserveAdmissionBootstrapRoomTarget(owner, {
+      handle: lead.handle, origin: reviewerIssued.origin, message: { text: 'cross target' },
+    })).resolves.toMatchObject({ status: 'denied', code: 'target-mismatch' })
+    await expect(runtime.reserveAdmissionBootstrapRoomTarget({ pluginId: owner.pluginId, generation: owner.generation + 1 }, {
+      handle: review.handle, origin: reviewerIssued.origin, message: { text: 'owner replacement' },
+    })).resolves.toMatchObject({ status: 'denied', code: 'not-owner' })
+
+    const leaderIssued = await runtime.issueAdmissionBootstrapRoomTarget(owner, { origin, target: leader })
+    if (leaderIssued.status !== 'issued') throw new Error('leader bootstrap Room target denied')
+    const revoked = await runtime.reserveAdmissionBootstrapRoomTarget(owner, {
+      handle: lead.handle, origin: leaderIssued.origin, message: { text: 'revoke' },
+    })
+    if (revoked.status !== 'reserved') throw new Error('bootstrap Room revoke reservation unavailable')
+    await revoked.reservation.revoke()
+    await expect(revoked.reservation.submit()).rejects.toThrow('unavailable')
+
+    const completionIssued = await runtime.issueAdmissionBootstrapRoomTarget(owner, {
+      origin: { ...origin, originId: 'bootstrap-room-fences-complete' }, target: leader,
+    })
+    if (completionIssued.status !== 'issued') throw new Error('completion bootstrap Room target denied')
+    const completion = await runtime.reserveAdmissionBootstrapRoomTarget(owner, {
+      handle: lead.handle, origin: completionIssued.origin, message: { text: 'command completion' },
+    })
+    if (completion.status !== 'reserved') throw new Error('bootstrap Room completion reservation unavailable')
+    commandActive = false
+    await expect(completion.reservation.submit()).rejects.toThrow('unavailable')
+
+    commandActive = true
+    const connectionIssued = await runtime.issueAdmissionBootstrapRoomTarget(owner, {
+      origin: { ...origin, originId: 'bootstrap-room-fences-connection' }, target: leader,
+    })
+    if (connectionIssued.status !== 'issued') throw new Error('connection bootstrap Room target denied')
+    const connection = await runtime.reserveAdmissionBootstrapRoomTarget(owner, {
+      handle: lead.handle, origin: connectionIssued.origin, message: { text: 'connection replacement' },
+    })
+    if (connection.status !== 'reserved') throw new Error('bootstrap Room connection reservation unavailable')
+    driver.replace()
+    await expect(connection.reservation.submit()).rejects.toThrow('unavailable')
+    expect(driver.submitted).toEqual([])
+    await runtime.dispose()
+
+    const ownerDriver = new Driver()
+    const ownerRuntime = new CordisXAgentSessionRuntime({
+      driver: ownerDriver, authorize: async () => true,
+      bootstrapAdmissionRoomTargetActive: (_owner, candidate, target) => candidate.originId === 'bootstrap-room-fences-owner'
+        && target.roomId === leader.roomId && target.runId === leader.runId,
+      captureBootstrapAdmissionRoomTarget: (_owner, _candidate, target, _receipt, sessionId) => target.runId === leader.runId
+        && sessionId === 'cx-session.bootstrap-room-owner' ? { active: () => true, commit: () => {}, close: () => {} } : undefined,
+    })
+    const ownerCreated = await ownerRuntime.create(owner, { sessionId: 'cx-session.bootstrap-room-owner', setup })
+    if (ownerCreated.status !== 'accepted') throw new Error('owner bootstrap Room target unavailable')
+    const ownerIssued = await ownerRuntime.issueAdmissionBootstrapRoomTarget(owner, {
+      origin: { ...origin, originId: 'bootstrap-room-fences-owner' }, target: leader,
+    })
+    if (ownerIssued.status !== 'issued') throw new Error('owner bootstrap Room target denied')
+    const ownerReservation = await ownerRuntime.reserveAdmissionBootstrapRoomTarget(owner, {
+      handle: ownerCreated.handle, origin: ownerIssued.origin, message: { text: 'owner replacement' },
+    })
+    if (ownerReservation.status !== 'reserved') throw new Error('owner bootstrap Room reservation unavailable')
+    ownerRuntime.fenceOwner(owner.pluginId, 'plugin-generation-replaced')
+    await expect(ownerReservation.reservation.submit()).rejects.toThrow('unavailable')
+    expect(ownerDriver.submitted).toEqual([])
+    await ownerRuntime.dispose()
+  })
+
   it.each([1, 2, 3])('declares, reserves, submits, and Host-claims one v6 Room route continuation per fresh target for N=%i', async count => {
     const driver = new Driver()
     let commandActive = true
@@ -1150,7 +1332,7 @@ describe('Agent/Session Host authority v1', () => {
     })
 
     await authority.conversationSource.execute({
-      owner: owner.pluginId, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
+      owner, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
       snapshotGeneration: 'bootstrap-route-composed-snapshot', routeId: 'chatroom:new-room', runs: [],
       active: () => oldBindingActive, bootstrapOrigin: origin,
     }, async () => {

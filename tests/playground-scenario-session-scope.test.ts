@@ -36,7 +36,7 @@ function harness(input: { readonly owner?: typeof owner | undefined; readonly au
   })
   const capture = async (messageId: string): Promise<void> => {
     await authority.conversationSource.execute({
-      owner: owner.pluginId, bindingId: `binding-${messageId}`, ownerGeneration: 'owner-generation-one',
+      owner, bindingId: `binding-${messageId}`, ownerGeneration: 'owner-generation-one',
       snapshotGeneration: 'snapshot-generation-one', roomId: 'room-one', routeId: 'chatroom:room',
       runs: [{ runId: 'room-run-lead', sessionId: 'cx-session.lead' }], active: () => true,
     }, async () => { authority.captureSubmission(owner, 'cx-session.lead', messageId)?.commit() })
@@ -61,7 +61,7 @@ describe('Playground scenario exact Session scope authority', () => {
       changed: () => {},
     })
     await authority.conversationSource.execute({
-      owner: owner.pluginId, bindingId: 'binding-room-one', ownerGeneration: 'owner-generation-one',
+      owner, bindingId: 'binding-room-one', ownerGeneration: 'owner-generation-one',
       snapshotGeneration: 'snapshot-generation-one', roomId: 'room-one', routeId: 'chatroom:room',
       runs: [{ runId: 'room-run-lead', sessionId: 'cx-session.lead' }], active: () => shellActive,
     }, async () => {
@@ -108,7 +108,7 @@ describe('Playground scenario exact Session scope authority', () => {
       room: { roomId: 'room-one', participantId: 'lead', memberId: 'member-lead', runId: 'room-run-lead' },
     }
     await authority.conversationSource.execute({
-      owner: owner.pluginId, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
+      owner, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
       snapshotGeneration: 'snapshot-single-target', roomId: origin.room.roomId, routeId: 'chatroom:room',
       runs: [{ runId: origin.room.runId, sessionId: 'cx-session.lead', participantId: origin.room.participantId, memberId: origin.room.memberId }], active: () => true, admissionOrigin: origin,
     }, async () => {
@@ -147,7 +147,7 @@ describe('Playground scenario exact Session scope authority', () => {
     }
     const target = { participantId: 'lead', memberId: 'member-lead', runId: 'room-run-lead' }
     await authority.conversationSource.execute({
-      owner: owner.pluginId, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
+      owner, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
       snapshotGeneration: 'snapshot-bootstrap-fresh', routeId: 'chatroom:room',
       runs: [], active: () => true, bootstrapOrigin: origin,
     }, async () => {
@@ -163,6 +163,103 @@ describe('Playground scenario exact Session scope authority', () => {
     expect(activated.status).toBe('available')
     expect(mounted?.params.sessionId).toBe('cx-session.delegated')
     if (activated.status === 'available') activated.handle.close()
+    authority.dispose()
+  })
+
+  it('retains an existing Room v5 bootstrap receipt on its current binding after command completion', async () => {
+    let bindingActive = true
+    let mounted: AgentRuntimeRouteScope | undefined
+    let claimed = 0
+    const authority = new PlaygroundScenarioSessionScopeAuthority({
+      hostGeneration: 'playground-generation-v5', connectionGeneration: () => 5,
+      currentRoute: () => undefined,
+      ownerForSession: sessionId => ['cx-session.v5-lead', 'cx-session.v5-reviewer'].includes(sessionId) ? owner : undefined,
+      routeOwner: agentOwner => agentOwner.pluginId === owner.pluginId && agentOwner.generation === owner.generation ? plugin : undefined,
+      permissionRoute: () => ({ routeId: 'room-session-detail', path: '/main/chatroom/:roomId/run/:runId/session/:sessionId' }),
+      claimBootstrapRoute: () => { claimed += 1; return { status: 'denied', code: 'continuation-denied' } as never },
+      authorize: async () => true,
+      mountRoute: route => { mounted = route; return () => { mounted = undefined } },
+      changed: () => {},
+    })
+    const origin = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
+      originId: 'bootstrap-room-existing-origin', binding: { bindingId: 'bootstrap-room-existing-binding', ownerGeneration: 'bootstrap-room-existing-owner' },
+      generation: 'bootstrap-room-existing-generation', executionId: 'bootstrap-room-existing-execution', commandId: 'chatroom.submit', scope: 'composer-submit' as const,
+    }
+    const target = { roomId: 'room-existing', participantId: 'leader', memberId: 'member-leader', runId: 'run-leader' }
+    const receipt = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-admission-bootstrap-room-target-receipt.v5.schema.json' as const,
+      contract: 'cordisx.agent-admission-bootstrap-room-target-receipt/v5' as const, schemaVersion: 5 as const,
+      receiptId: 'bootstrap-room-existing-receipt', target,
+    } as never
+    await authority.conversationSource.execute({
+      owner, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
+      snapshotGeneration: 'snapshot-bootstrap-room-existing', roomId: target.roomId, routeId: 'chatroom:room', runs: [],
+      active: () => bindingActive, bootstrapOrigin: origin,
+    }, async () => {
+      expect(authority.bootstrapAdmissionRoomTargetActive(owner, origin, target)).toBe(true)
+      const capture = authority.captureBootstrapAdmissionRoomTarget(
+        owner, origin, target, receipt, 'cx-session.v5-lead', 1, 'cx-message.v5-existing',
+      )
+      expect(capture?.active()).toBe(true)
+      capture?.commit()
+    })
+    const activated = await authority.client.activate({
+      runId: 'scenario-v5-existing-room', sourceMessageId: 'cx-message.v5-existing',
+      sourceSessionId: 'cx-session.v5-lead', targetSessionId: 'cx-session.v5-reviewer',
+    })
+    expect(activated.status).toBe('available')
+    expect(mounted?.params.sessionId).toBe('cx-session.v5-reviewer')
+    expect(claimed).toBe(0)
+    bindingActive = false
+    authority.conversationSource.fenceBinding(origin.binding.bindingId, 'route-replaced')
+    if (activated.status === 'available') await expect(activated.handle.closed).resolves.toEqual({ code: 'route-replaced' })
+    expect(await authority.client.activate({
+      runId: 'scenario-v5-existing-room-reuse', sourceMessageId: 'cx-message.v5-existing',
+      sourceSessionId: 'cx-session.v5-lead', targetSessionId: 'cx-session.v5-reviewer',
+    })).toMatchObject({ status: 'unavailable', code: 'source-route-unavailable' })
+    authority.dispose()
+  })
+
+  it('rejects a same-plugin old-generation v1 or bootstrap origin before target admission', async () => {
+    const authority = new PlaygroundScenarioSessionScopeAuthority({
+      hostGeneration: 'playground-generation-owner-fence', connectionGeneration: () => 1,
+      currentRoute: () => undefined,
+      ownerForSession: () => owner,
+      routeOwner: () => plugin,
+      permissionRoute: () => ({ routeId: 'room-session-detail', path: '/room/:sessionId' }),
+      authorize: async () => true, mountRoute: () => () => {}, changed: () => {},
+    })
+    const bootstrap = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-bootstrap-command-origin/v1' as const, schemaVersion: 1 as const,
+      originId: 'owner-fence-bootstrap', binding: { bindingId: 'owner-fence-binding', ownerGeneration: 'owner-fence-owner' },
+      generation: 'owner-fence-module', executionId: 'owner-fence-execution', commandId: 'chatroom.submit', scope: 'composer-submit' as const,
+    }
+    const admission = {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-command-origin.v1.schema.json' as const,
+      contract: 'cordisx.agent-command-origin/v1' as const, schemaVersion: 1 as const,
+      originId: 'owner-fence-admission', binding: bootstrap.binding, generation: bootstrap.generation,
+      executionId: bootstrap.executionId, commandId: bootstrap.commandId, scope: 'composer-submit' as const,
+      room: { roomId: 'room-owner-fence', participantId: 'leader', memberId: 'member-leader', runId: 'run-leader' },
+    }
+    const target = { participantId: 'leader', memberId: 'member-leader', runId: 'run-leader' }
+    await authority.conversationSource.execute({
+      owner, bindingId: bootstrap.binding.bindingId, ownerGeneration: bootstrap.binding.ownerGeneration,
+      snapshotGeneration: 'snapshot-owner-fence', roomId: admission.room.roomId, routeId: 'chatroom:room',
+      runs: [{ ...target, sessionId: 'cx-session.owner-fence' }], active: () => true, admissionOrigin: admission, bootstrapOrigin: bootstrap,
+    }, async () => {
+      const replaced = { ...owner, generation: owner.generation + 1 }
+      expect(authority.admissionTargetActive(owner, admission, target)).toBe(true)
+      expect(authority.bootstrapAdmissionRoomTargetActive(owner, bootstrap, { roomId: admission.room.roomId, ...target })).toBe(true)
+      expect(authority.admissionTargetActive(replaced, admission, target)).toBe(false)
+      expect(authority.bootstrapAdmissionRoomTargetActive(replaced, bootstrap, { roomId: admission.room.roomId, ...target })).toBe(false)
+      expect(authority.bootstrapAdmissionRouteClaimActive(replaced, bootstrap, {
+        roomId: admission.room.roomId, ...target,
+        route: { routeId: 'room', param: 'roomId', roomId: admission.room.roomId },
+      })).toBe(false)
+    })
     authority.dispose()
   })
 
@@ -202,7 +299,7 @@ describe('Playground scenario exact Session scope authority', () => {
       contract: 'cordisx.agent-admission-bootstrap-route-continuation/v6' as const, schemaVersion: 6 as const, token: 'bootstrap-route-continuation',
     } as never
     await authority.conversationSource.execute({
-      owner: owner.pluginId, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
+      owner, bindingId: origin.binding.bindingId, ownerGeneration: origin.binding.ownerGeneration,
       snapshotGeneration: 'snapshot-bootstrap-v6', routeId: 'chatroom:new-room', runs: [], active: () => oldBindingActive, bootstrapOrigin: origin,
     }, async () => {
       expect(authority.bootstrapAdmissionRouteTargetActive(owner, origin, target)).toBe(true)
@@ -256,7 +353,7 @@ describe('Playground scenario exact Session scope authority', () => {
       sourceSessionId: 'cx-session.lead', targetSessionId: 'cx-session.reviewer',
     })).toMatchObject({ status: 'unavailable', code: 'source-route-unavailable' })
     await authority.conversationSource.execute({
-      owner: 'file:///plugins/other.ts:other', bindingId: 'binding-other', ownerGeneration: 'generation-other',
+      owner: { pluginId: 'file:///plugins/other.ts:other', generation: 1 }, bindingId: 'binding-other', ownerGeneration: 'generation-other',
       snapshotGeneration: 'snapshot-other', roomId: 'room-other', routeId: 'other:room',
       runs: [{ runId: 'room-run-other', sessionId: 'cx-session.lead' }], active: () => true,
     }, async () => {
@@ -264,7 +361,7 @@ describe('Playground scenario exact Session scope authority', () => {
     })
     let capture: ReturnType<typeof authority.captureSubmission>
     await authority.conversationSource.execute({
-      owner: owner.pluginId, bindingId: 'binding-room-one', ownerGeneration: 'owner-generation-one',
+      owner, bindingId: 'binding-room-one', ownerGeneration: 'owner-generation-one',
       snapshotGeneration: 'snapshot-generation-one', roomId: 'room-one', routeId: 'chatroom:room',
       runs: [{ runId: 'room-run-lead', sessionId: 'cx-session.lead' }], active: () => shellActive,
     }, async () => { capture = authority.captureSubmission(owner, 'cx-session.lead', 'cx-message.stale'); capture?.commit() })
@@ -276,7 +373,7 @@ describe('Playground scenario exact Session scope authority', () => {
 
     sourceOwner = owner
     await authority.conversationSource.execute({
-      owner: owner.pluginId, bindingId: 'binding-room-connection', ownerGeneration: 'owner-generation-one',
+      owner, bindingId: 'binding-room-connection', ownerGeneration: 'owner-generation-one',
       snapshotGeneration: 'snapshot-generation-connection', roomId: 'room-one', routeId: 'chatroom:room',
       runs: [{ runId: 'room-run-connection', sessionId: 'cx-session.lead' }], active: () => shellActive,
     }, async () => { capture = authority.captureSubmission(owner, 'cx-session.lead', 'cx-message.connection'); capture?.commit() })
@@ -287,7 +384,7 @@ describe('Playground scenario exact Session scope authority', () => {
     })).toMatchObject({ status: 'unavailable', code: 'stale' })
 
     await authority.conversationSource.execute({
-      owner: owner.pluginId, bindingId: 'binding-room-two', ownerGeneration: 'owner-generation-one',
+      owner, bindingId: 'binding-room-two', ownerGeneration: 'owner-generation-one',
       snapshotGeneration: 'snapshot-generation-two', roomId: 'room-two', routeId: 'chatroom:room',
       runs: [{ runId: 'room-run-two', sessionId: 'cx-session.lead' }], active: () => shellActive,
     }, async () => { capture = authority.captureSubmission(owner, 'cx-session.lead', 'cx-message.navigation'); capture?.commit() })
@@ -383,7 +480,7 @@ describe('Playground scenario exact Session scope authority', () => {
       mountRoute: () => () => {},
     })
     await authority.conversationSource.execute({
-      owner: owner.pluginId, bindingId: 'binding-pending', ownerGeneration: 'owner-generation-one',
+      owner, bindingId: 'binding-pending', ownerGeneration: 'owner-generation-one',
       snapshotGeneration: 'snapshot-generation-one', roomId: 'room-one', routeId: 'chatroom:room',
       runs: [{ runId: 'room-run-lead', sessionId: 'cx-session.lead' }], active: () => visible?.params.sessionId === 'cx-session.lead',
     }, async () => { authority.captureSubmission(owner, 'cx-session.lead', 'cx-message.pending')?.commit() })

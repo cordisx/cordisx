@@ -4,6 +4,10 @@ import type { AgentCommandOrigin } from '@cordisx/protocol/agent-admission/v2'
 import type { AgentAdmissionTarget } from '@cordisx/protocol/agent-admission/v3'
 import type { AgentBootstrapCommandOrigin } from '@cordisx/protocol/agent-admission/v4'
 import type {
+  AgentAdmissionBootstrapRoomTarget,
+  AgentAdmissionBootstrapRoomTargetReceipt,
+} from '@cordisx/protocol/agent-admission/v5'
+import type {
   AgentAdmissionBootstrapRouteBinding,
   AgentAdmissionBootstrapRouteClaimReceipt,
   AgentAdmissionBootstrapRouteClaimRequest,
@@ -51,7 +55,8 @@ export interface PlaygroundScenarioSessionScopeClient {
 }
 
 export interface PlaygroundScenarioConversationOrigin {
-  readonly owner: string
+  /** Full Host-recorded plugin identity; plugin id alone never spans generations. */
+  readonly owner: PluginOwnerIdentity
   readonly bindingId: string
   readonly ownerGeneration: string
   readonly snapshotGeneration: string
@@ -138,6 +143,8 @@ interface CapturedSourceRecord {
   readonly roomRunId: string
   readonly permissionRoute: Readonly<{ readonly routeId: string; readonly path: string }>
   readonly connectionGeneration: number
+  /** V5 is retained only for this current binding; it never enables a route transfer. */
+  readonly bootstrapRoomReceipt?: AgentAdmissionBootstrapRoomTargetReceipt
   active: boolean
   committed: boolean
   routeContinuation?: {
@@ -215,7 +222,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
   captureSubmission(owner: PluginOwnerIdentity, sessionId: string, messageId: string): PlaygroundScenarioSubmissionCapture | undefined {
     if (this.disposed || !opaque(sessionId) || !opaque(messageId)) return undefined
     const candidates = [...this.commandOrigins].filter(origin => origin.active()
-      && origin.owner === owner.pluginId
+      && sameOwner(origin.owner, owner)
       && origin.runs.some(run => run.sessionId === sessionId))
     if (candidates.length !== 1) return undefined
     const origin = candidates[0]!
@@ -262,7 +269,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
   admissionTargetActive(owner: PluginOwnerIdentity, admissionOrigin: AgentCommandOrigin, target: AgentAdmissionTarget): boolean {
     if (this.disposed || !opaque(target.participantId) || !opaque(target.memberId) || !opaque(target.runId)) return false
     const candidates = [...this.commandOrigins].filter(origin => origin.active()
-      && origin.owner === owner.pluginId && this.sameAdmissionOrigin(origin.admissionOrigin, admissionOrigin)
+      && sameOwner(origin.owner, owner) && this.sameAdmissionOrigin(origin.admissionOrigin, admissionOrigin)
       && origin.runs.some(run => run.runId === target.runId
         && run.participantId === target.participantId && run.memberId === target.memberId))
     return candidates.length === 1
@@ -299,7 +306,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
     if (this.disposed || !this.validBootstrapOrigin(bootstrapOrigin)
       || !opaque(target.participantId) || !opaque(target.memberId) || !opaque(target.runId)) return false
     const candidates = [...this.commandOrigins].filter(origin => origin.active()
-      && origin.owner === owner.pluginId && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin))
+      && sameOwner(origin.owner, owner) && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin))
     return candidates.length === 1
   }
 
@@ -313,7 +320,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
   ): PlaygroundScenarioSubmissionCapture | undefined {
     if (!this.bootstrapAdmissionTargetActive(owner, bootstrapOrigin, target)) return undefined
     const candidates = [...this.commandOrigins].filter(origin => origin.active()
-      && origin.owner === owner.pluginId && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin))
+      && sameOwner(origin.owner, owner) && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin))
     if (candidates.length !== 1) return undefined
     const origin = candidates[0]!
     if (origin.bindingId !== bootstrapOrigin.binding.bindingId || origin.ownerGeneration !== bootstrapOrigin.binding.ownerGeneration
@@ -334,7 +341,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
     if (this.disposed || !this.validBootstrapOrigin(bootstrapOrigin) || !this.validBootstrapRouteTarget(target)
       || this.options.bootstrapRouteRegistered?.(owner, target) !== true) return false
     const candidates = [...this.commandOrigins].filter(origin => origin.active()
-      && origin.owner === owner.pluginId && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin))
+      && sameOwner(origin.owner, owner) && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin))
     return candidates.length === 1
   }
 
@@ -346,7 +353,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
   ): boolean {
     if (this.disposed || !this.validBootstrapOrigin(bootstrapOrigin) || !this.validBootstrapRouteTarget(target)
     ) return false
-    return [...this.commandOrigins].filter(origin => origin.owner === owner.pluginId
+    return [...this.commandOrigins].filter(origin => sameOwner(origin.owner, owner)
       && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin)).length === 1
   }
 
@@ -368,7 +375,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
       || !this.validBootstrapRouteContinuation(continuation)
       || !opaque(sessionId) || !opaque(messageId) || !Number.isSafeInteger(agentGeneration) || agentGeneration < 1) return undefined
     const candidates = [...this.commandOrigins].filter(origin => origin.active()
-      && origin.owner === owner.pluginId && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin))
+      && sameOwner(origin.owner, owner) && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin))
     if (candidates.length !== 1) return undefined
     const origin = candidates[0]!
     if (origin.bindingId !== bootstrapOrigin.binding.bindingId || origin.ownerGeneration !== bootstrapOrigin.binding.ownerGeneration
@@ -422,7 +429,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
   ): PlaygroundScenarioSubmissionCapture | undefined {
     if (this.disposed || !opaque(sessionId) || !opaque(messageId) || !Number.isSafeInteger(agentGeneration) || agentGeneration < 1) return undefined
     const candidates = [...this.commandOrigins].filter(origin => origin.active()
-      && origin.owner === owner.pluginId
+      && sameOwner(origin.owner, owner)
       && origin.admissionOrigin?.originId === admissionOrigin.originId
       && origin.admissionOrigin.executionId === admissionOrigin.executionId
       && origin.admissionOrigin.binding.bindingId === admissionOrigin.binding.bindingId
@@ -449,6 +456,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
     sessionId: string,
     agentGeneration: number,
     messageId: string,
+    bootstrapRoomReceipt?: AgentAdmissionBootstrapRoomTargetReceipt,
   ): PlaygroundScenarioSubmissionCapture | undefined {
     if (this.disposed || !opaque(sessionId) || !opaque(messageId) || !Number.isSafeInteger(agentGeneration) || agentGeneration < 1) return undefined
     const permissionRoute = this.options.permissionRoute(owner, 'approvals.request')
@@ -459,6 +467,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
       key, origin, owner: Object.freeze({ ...owner }), sourceMessageId: messageId, sourceSessionId: sessionId,
       roomRunId: target.runId, permissionRoute: Object.freeze({ ...permissionRoute }),
       connectionGeneration: this.options.connectionGeneration(), active: true, committed: false,
+      ...(bootstrapRoomReceipt === undefined ? {} : { bootstrapRoomReceipt: Object.freeze(structuredClone(bootstrapRoomReceipt)) }),
     }
     this.sources.set(key, source)
     let open = true
@@ -506,6 +515,65 @@ export class PlaygroundScenarioSessionScopeAuthority {
     return left !== undefined && left.originId === right.originId && left.executionId === right.executionId
       && left.binding.bindingId === right.binding.bindingId && left.binding.ownerGeneration === right.binding.ownerGeneration
       && left.generation === right.generation && left.commandId === right.commandId && left.scope === right.scope
+  }
+
+  private validBootstrapRoomTarget(target: AgentAdmissionBootstrapRoomTarget | undefined): target is AgentAdmissionBootstrapRoomTarget {
+    return target !== undefined && opaque(target.roomId) && opaque(target.participantId)
+      && opaque(target.memberId) && opaque(target.runId)
+  }
+
+  private sameBootstrapRoomTarget(left: AgentAdmissionBootstrapRoomTarget, right: AgentAdmissionBootstrapRoomTarget): boolean {
+    return left.roomId === right.roomId && left.participantId === right.participantId
+      && left.memberId === right.memberId && left.runId === right.runId
+  }
+
+  private validBootstrapRoomReceipt(
+    receipt: AgentAdmissionBootstrapRoomTargetReceipt | undefined,
+    target: AgentAdmissionBootstrapRoomTarget,
+  ): receipt is AgentAdmissionBootstrapRoomTargetReceipt {
+    return receipt !== undefined
+      && receipt.$schema === 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-admission-bootstrap-room-target-receipt.v5.schema.json'
+      && receipt.contract === 'cordisx.agent-admission-bootstrap-room-target-receipt/v5'
+      && receipt.schemaVersion === 5 && opaque(receipt.receiptId)
+      && this.validBootstrapRoomTarget(receipt.target) && this.sameBootstrapRoomTarget(receipt.target, target)
+  }
+
+  /**
+   * V5 is a bootstrap declaration for a Room already mounted on this binding.
+   * It intentionally cannot turn a fresh/no-Room command into a later route
+   * transfer; that boundary belongs solely to v6.
+   */
+  bootstrapAdmissionRoomTargetActive(
+    owner: PluginOwnerIdentity,
+    bootstrapOrigin: AgentBootstrapCommandOrigin,
+    target: AgentAdmissionBootstrapRoomTarget,
+  ): boolean {
+    if (this.disposed || !this.validBootstrapOrigin(bootstrapOrigin) || !this.validBootstrapRoomTarget(target)) return false
+    const candidates = [...this.commandOrigins].filter(origin => origin.active()
+      && sameOwner(origin.owner, owner) && origin.roomId === target.roomId
+      && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin))
+    return candidates.length === 1
+  }
+
+  captureBootstrapAdmissionRoomTarget(
+    owner: PluginOwnerIdentity,
+    bootstrapOrigin: AgentBootstrapCommandOrigin,
+    target: AgentAdmissionBootstrapRoomTarget,
+    receipt: AgentAdmissionBootstrapRoomTargetReceipt,
+    sessionId: string,
+    agentGeneration: number,
+    messageId: string,
+  ): PlaygroundScenarioSubmissionCapture | undefined {
+    if (!this.bootstrapAdmissionRoomTargetActive(owner, bootstrapOrigin, target)
+      || !this.validBootstrapRoomReceipt(receipt, target)) return undefined
+    const candidates = [...this.commandOrigins].filter(origin => origin.active()
+      && sameOwner(origin.owner, owner) && origin.roomId === target.roomId
+      && this.sameBootstrapOrigin(origin.bootstrapOrigin, bootstrapOrigin))
+    if (candidates.length !== 1) return undefined
+    const origin = candidates[0]!
+    if (origin.bindingId !== bootstrapOrigin.binding.bindingId || origin.ownerGeneration !== bootstrapOrigin.binding.ownerGeneration
+      || !sameOwner(this.options.ownerForSession(sessionId), owner)) return undefined
+    return this.captureAdmissionFromConversationOrigin(owner, origin, target, sessionId, agentGeneration, messageId, receipt)
   }
 
   private validBootstrapRouteTarget(target: AgentAdmissionBootstrapRouteTarget | undefined): target is AgentAdmissionBootstrapRouteTarget {
@@ -632,7 +700,9 @@ export class PlaygroundScenarioSessionScopeAuthority {
   }
 
   private validOrigin(origin: PlaygroundScenarioConversationOrigin): boolean {
-    if (!opaque(origin.owner) || !opaque(origin.bindingId) || !opaque(origin.ownerGeneration)
+    if (typeof origin.owner !== 'object' || origin.owner === null
+      || !opaque(origin.owner.pluginId) || !Number.isSafeInteger(origin.owner.generation) || origin.owner.generation < 1
+      || !opaque(origin.bindingId) || !opaque(origin.ownerGeneration)
       || !opaque(origin.snapshotGeneration) || !opaque(origin.routeId)
       || typeof origin.active !== 'function' || !origin.active()
       || !Array.isArray(origin.runs) || origin.runs.length > 64) return false
