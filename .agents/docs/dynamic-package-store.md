@@ -32,11 +32,11 @@ then verifies explicit-local/unsigned distribution, entry and manifest paths,
 exact dependencies, compatibility schemas, canonical public source, runtime
 manifest digest, and package/runtime id equality.
 
-An author build's `dist/manifest.json` is Vite inspection and distribution
-metadata; it is not the formal CordisX `artifact.json` and is not copied to the
-immutable store root. A portable package manifest points its browser entry at
-the prebuilt `dist/module.js`. Host staging validates the complete adjacent
-graph and writes its own store-level `artifact.json` index.
+The public `cordisx/vite` production helper emits the formal
+`dist/artifact.json` beside the indexed browser ESM graph. A portable package
+manifest points its browser entry at the adjacent prebuilt `dist/module.js`.
+Host staging validates every indexed module, stylesheet, asset, and digest
+before retaining the same formal graph in the immutable store.
 
 The resolved candidate is projected into the existing `StagedPluginPackage`
 store. Its private v3 durable envelope preserves the source runtime-manifest

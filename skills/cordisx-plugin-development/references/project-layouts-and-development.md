@@ -31,9 +31,9 @@ package-manager conventions.
 A standalone project owns one package, tsconfig, lifecycle entry, and separate
 refresh-compatible React component module. Its production Vite config writes a
 stable `dist/module.js` entry plus content-addressed chunks, CSS, assets, and a
-Vite manifest. A dedicated workspace owns one root config and development
-command, then gives every `plugins/<id>` its own package, tsconfig, source,
-Vite config, and build output:
+formal `artifact.json`. A dedicated workspace owns one root config and
+development command, then gives every `plugins/<id>` its own package, tsconfig,
+source, Vite config, and build output:
 
 ```text
 plugin-suite/
@@ -105,13 +105,13 @@ of the plugin compile contract.
 ## Production build graph
 
 `npm run build` (or the selected package manager's equivalent) is distinct from
-`cordisx dev`. It uses normal Vite Rollup-input mode with a relative base, no
-public-directory copy, no inline static assets, split CSS, and deterministic
-`module.js`, `chunks/`, `assets/`, and `manifest.json` output. It deliberately
-does not use Vite library mode because library mode can inline referenced
-assets rather than preserve package-relative URLs. Strict entry signatures keep
-the plugin's exported manifest, `apply`, and source-level lazy edges in the
-entry graph.
+`cordisx dev`. The generated Vite config calls
+`cordisXPluginViteConfig()` from the public `cordisx/vite` entry with an
+absolute package root, source entry, output directory, and stable `module.js`
+entry name. This reusable author/Host pipeline owns normal Rollup-input mode,
+relative URLs, asset and CSS preservation, deterministic output names, strict
+entry signatures, the formal `artifact.json`, and the closed Host singleton
+virtual modules. Do not duplicate or override those rules in plugin projects.
 
 Every workspace or embedded plugin is built separately. Never configure one
 multi-entry production build that shares chunks across plugin ids: package
@@ -125,8 +125,8 @@ Keep `cordisx.config.json` and `.cordisx/config.json` entries pointed at source.
 Those entries feed the development graph and must not be rewritten to `dist`.
 A portable package manifest is different: it points at the prebuilt
 `dist/module.js` so installation retains the complete adjacent output graph.
-The generated `dist/manifest.json` is Vite metadata, not the formal Host
-`artifact.json`.
+The adjacent generated `dist/artifact.json` is the formal graph index validated
+by the Host.
 
 ## Config discovery and multiple plugins
 

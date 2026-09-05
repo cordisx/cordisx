@@ -65,9 +65,12 @@ async function npmViewJson(args, cwd) {
 }
 
 async function verifyGeneratedViteGraph(graphRoot, label) {
-  const manifest = JSON.parse(await readFile(path.join(graphRoot, 'manifest.json'), 'utf8'))
-  const entry = Object.values(manifest).find(item => item?.isEntry === true)
-  if (entry?.file !== 'module.js' || !Array.isArray(entry.dynamicImports) || entry.dynamicImports.length === 0) {
+  const artifact = JSON.parse(await readFile(path.join(graphRoot, 'artifact.json'), 'utf8'))
+  const entry = artifact.files?.find(file => file.path === artifact.entry)
+  const hasLazyModule = artifact.files?.some(file => file.kind === 'module' && file.dynamicImports?.length > 0)
+  if (artifact.contract !== 'cordisx.plugin-generation-artifact/v1'
+    || artifact.entry !== './module.js' || entry?.kind !== 'module'
+    || hasLazyModule !== true) {
     throw new Error(`${label} did not emit the expected lazy Vite ESM entry`)
   }
   const chunks = await readdir(path.join(graphRoot, 'chunks'))

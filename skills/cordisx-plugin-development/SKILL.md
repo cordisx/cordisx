@@ -39,7 +39,7 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 8. Add focused contract, React, and lifecycle tests before visual inspection.
 9. Run the project through `cordisx dev`. Verify automatic file updates and, when relevant, the Manager's development reload for one active local plugin.
 10. Exercise the real isolated native `app://` path for native claims; use Playground evidence only for the behavior it actually hosts.
-11. For production delivery, run the generated project build and retain its complete Vite ESM graph. Do not flatten dynamic imports, CSS, or static assets into a hand-built single file.
+11. For production delivery, use the generated `cordisx/vite` helper config and retain its complete indexed Vite ESM graph. Do not duplicate the production Rollup policy or flatten dynamic imports, CSS, or static assets into a hand-built single file.
 12. Report implementation, verification, limitations, and planned work separately.
 
 ## Product boundaries
@@ -52,4 +52,4 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 
 ## Delivery
 
-Provide exact evidence: focused tests, owner-repository gates, diff check, generated-project checks, and the relevant real runtime. A production graph check records its entry, lazy chunks, CSS, and assets separately from development transport. For Vite/native work, distinguish React Fast Refresh, plugin lifecycle replacement, CordisX renderer restart, and full Electron restart. If the user is actively reviewing a running session, keep it available while validating a replacement separately.
+Provide exact evidence: focused tests, owner-repository gates, diff check, generated-project checks, and the relevant real runtime. A production graph check validates formal `artifact.json`, its entry, lazy chunks, CSS, and assets separately from development transport. For Vite/native work, distinguish React Fast Refresh, plugin lifecycle replacement, CordisX renderer restart, and full Electron restart. If the user is actively reviewing a running session, keep it available while validating a replacement separately.

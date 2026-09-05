@@ -20,9 +20,9 @@
 - A source write proves only that an update was triggered. Inspect the runtime result and verify disposer cleanup, a single active registration/root, and last-good behavior after a failed candidate.
 
 Development transport evidence does not prove production loading. Run the
-project's production build separately, inspect its Vite manifest and package
-allowlist, and exercise the installed graph through the generic package loader.
-Do not add a second WebSocket or CDP source-transfer path for production.
+project's production build separately, inspect its formal `artifact.json` and
+package allowlist, and exercise the installed graph through the generic package
+loader. Do not add a second WebSocket or CDP source-transfer path for production.
 
 ## Real native App and Playground
 

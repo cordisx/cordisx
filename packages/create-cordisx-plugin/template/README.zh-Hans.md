@@ -15,14 +15,14 @@
 
 `{{packageManager}} run build` 会在 `dist/` 中生成生产用 Vite ESM graph。固定入口
 `module.js` 可以在 `import()` 实际触发后再加载带内容摘要的 JavaScript chunk、
-CSS 和静态资源；Vite manifest 会记录完整产物图，`package.json#files` 会将
-整个 `dist/` 纳入打包。生产 generation 仍是不可变包产物，不使用开发 HMR
-连接。
+CSS 和静态资源；正式的 `artifact.json` 会记录完整产物图，
+`package.json#files` 会将整个 `dist/` 纳入打包。生产 generation 仍是不可变包
+产物，不使用开发 HMR 连接。
 
-`dist/manifest.json` 只是作者侧构建的 Vite 元数据，并不是正式的 CordisX
-`artifact.json`，也不会复制到不可变存储根目录。可移植 CordisX package manifest
-应把浏览器入口指向预构建的 `dist/module.js`；Host 验证相邻的完整 graph 后，会在
-存储层生成自己独立的 `artifact.json`。
+生成的配置会调用公开的 `cordisx/vite` `cordisXPluginViteConfig()` helper。
+这个作者侧与 Host 共用的流水线负责产物规则，只虚拟化封闭的 Host 单例导入，并
+生成正式的 `dist/artifact.json`。可移植 CordisX package manifest 应把浏览器入口
+指向相邻的预构建 `dist/module.js`；Host 会验证并保留该完整索引 graph。
 
 这个生成项目属于 [CordisX 独立插件例外](https://github.com/cordisx/cordisx/blob/main/CORDISX-INDEPENDENT-PLUGIN-EXCEPTION.md)
 定义的“已标记模板材料”。只要它保持为独立插件，并且只使用有文档、带版本的

@@ -19,16 +19,17 @@ manifest, entry, and `apply()` changes replace the plugin generation.
 
 `{{packageManager}} run build` creates a production Vite ESM graph in `dist/`.
 Its stable `module.js` entry may load content-addressed JavaScript chunks, CSS,
-and static assets only when an `import()` reaches them. The generated Vite
-manifest records that graph for packaging; `package.json#files` includes the
-complete `dist/` tree. Production generations remain immutable package
+and static assets only when an `import()` reaches them. The generated formal
+`artifact.json` records that graph for packaging; `package.json#files` includes
+the complete `dist/` tree. Production generations remain immutable package
 artifacts and do not use the development HMR connection.
 
-`dist/manifest.json` is Vite metadata for this author build; it is not the
-formal CordisX `artifact.json` and is not copied to the immutable store root. A
-portable CordisX package manifest points its browser entry at the prebuilt
-`dist/module.js`; the Host validates the complete adjacent graph and
-synthesizes its own store-level `artifact.json`.
+The generated config calls the public `cordisx/vite`
+`cordisXPluginViteConfig()` helper. That shared author/Host pipeline owns the
+output rules, virtualizes only the closed Host singleton imports, and emits the
+formal `dist/artifact.json`. A portable CordisX package manifest points its
+browser entry at the adjacent prebuilt `dist/module.js`; the Host validates and
+retains the complete indexed graph.
 
 The template intentionally requests no platform capabilities. It contributes a
 structured toolbar route and a React page body. Import React from

@@ -330,11 +330,16 @@ plugin ids, source entries, build output, and Cordis generations.
 
 Production build output is deliberately per plugin. A normal Vite Rollup-input
 build writes `module.js`, content-addressed `chunks/` and `assets/`, and
-`manifest.json`; CSS splitting and external static assets remain enabled.
-Dedicated workspaces and embedded projects invoke each plugin's Vite config
-separately, so an immutable generation never depends on a chunk owned by
-another plugin id. Development config entries continue to point at source and
-retain the single shared Vite/HMR server described below.
+a formal `artifact.json`; CSS splitting and external static assets remain
+enabled. Dedicated workspaces and embedded projects invoke each plugin's Vite
+config separately, so an immutable generation never depends on a chunk owned
+by another plugin id. Development config entries continue to point at source
+and retain the single shared Vite/HMR server described below.
+
+Generated Vite configs call the public `cordisx/vite`
+`cordisXPluginViteConfig()` helper. That shared author/Host pipeline owns output
+shape, artifact indexing, and the closed Host-singleton virtual modules; plugin
+projects do not duplicate its Rollup rules.
 
 Embedded mode owns the following boundary without restructuring the business
 project:

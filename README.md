@@ -120,9 +120,10 @@ generation.
 
 The generated production build is separate: every plugin produces one
 immutable Vite ESM graph with a stable `module.js` entry, content-addressed
-JavaScript chunks, split CSS, static assets, and a Vite manifest. Dynamic
-imports remain lazy in installed generations; workspaces and embedded projects
-do not share production chunks across independently replaceable plugin ids.
+JavaScript chunks, split CSS, static assets, and a formal `artifact.json`.
+Dynamic imports remain lazy in installed generations; workspaces and embedded
+projects do not share production chunks across independently replaceable
+plugin ids.
 
 ## Documentation
 
