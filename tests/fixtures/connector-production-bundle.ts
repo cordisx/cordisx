@@ -8,7 +8,6 @@ import {
 import type { CordisXConfig } from '../../packages/cli/src/launcher/config.js'
 
 const fixturePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'connector-production-host-fixture.ts')
-const bootMarker = ").catch(error => console.error('[cordisx] boot failed', error))\n"
 
 /** Build a temporary-only production composition with the fixed Host fixture. */
 export async function buildConnectorProductionBundle(
@@ -16,11 +15,15 @@ export async function buildConnectorProductionBundle(
   options: BuildRendererBundleOptions = {},
 ): Promise<string> {
   const composition = await buildRendererCompositionSource(config, options)
-  const marker = composition.source.lastIndexOf(bootMarker)
-  if (marker < 0) throw new Error('production composition boot marker is unavailable')
+  const installCall = `installCordisX(${composition.pluginsSource}, ${composition.metadataSource})`
+  const marker = composition.source.indexOf(installCall)
+  if (marker < 0 || composition.source.indexOf(installCall, marker + installCall.length) >= 0) {
+    throw new Error('production composition install call is unavailable or ambiguous')
+  }
   const fixtureImport = `import { installConnectorProductionFixture } from ${JSON.stringify(fixturePath)}\n`
-  const source = `${fixtureImport}${composition.source.slice(0, marker)}, installConnectorProductionFixture${
-    composition.source.slice(marker)
+  const fixtureInstallCall = `${installCall.slice(0, -1)}, installConnectorProductionFixture)`
+  const source = `${fixtureImport}${composition.source.slice(0, marker)}${fixtureInstallCall}${
+    composition.source.slice(marker + installCall.length)
   }`
   const result = await build({
     stdin: { contents: source, resolveDir: config.rootDir, sourcefile: 'connector-production-smoke-composition.ts' },

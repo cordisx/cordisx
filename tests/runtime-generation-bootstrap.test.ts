@@ -144,12 +144,16 @@ async function disposeRuntime(): Promise<void> {
 
 afterEach(async () => {
   await disposeRuntime()
-  vi.unstubAllGlobals()
   const globals = globalThis as typeof globalThis & Record<string, unknown>
+  const sharedReactRuntime = globals.__cordisxSharedReactRuntime as { dispose(): void } | undefined
+  sharedReactRuntime?.dispose()
+  vi.unstubAllGlobals()
+  Reflect.deleteProperty(globals, '__cordisxCompositionBoot')
   Reflect.deleteProperty(globals, '__cordisxBoot')
   Reflect.deleteProperty(globals, '__cordisxBootGeneration')
   Reflect.deleteProperty(globals, '__cordisxRequestedGeneration')
   Reflect.deleteProperty(globals, '__cordisxRuntime')
+  Reflect.deleteProperty(globals, '__cordisxSharedReactRuntime')
 })
 
 describe('production renderer generation bootstrap', () => {
@@ -250,6 +254,176 @@ describe('production renderer generation bootstrap', () => {
     expect(newBootstrap).toHaveBeenCalledOnce()
 
     await disposeRuntime()
+    dom.window.close()
+  }, 60_000)
+
+  it(
+    'owns delayed graph loading, React preparation, replacement, and failure cleanup in one serialized boot',
+    async () => {
+      const { installCordisX, installCordisXComposition } = await import(
+        '../packages/cli/src/renderer/runtime.js'
+      )
+      const dom = installBrowserGlobals()
+      const globals = globalThis as typeof globalThis & Record<string, unknown>
+
+      const previousRuntime = await installCordisX([], metadata('composition-previous'))
+      const previousReactRuntime = globals.__cordisxSharedReactRuntime
+      expect(previousReactRuntime).toBeDefined()
+
+      let releaseGraph!: () => void
+      let graphLoaderEntered!: () => void
+      const graphLoaderStarted = new Promise<void>(resolve => {
+        graphLoaderEntered = resolve
+      })
+      const graphGate = new Promise<void>(resolve => {
+        releaseGraph = resolve
+      })
+      const publish = vi.fn()
+      const retire = vi.fn()
+      const loadPlugins = vi.fn(async () => {
+        graphLoaderEntered()
+        expect(globals.__cordisxRuntime).toBeUndefined()
+        expect(globals.__cordisxSharedReactRuntime).toBeDefined()
+        expect(globals.__cordisxSharedReactRuntime).not.toBe(previousReactRuntime)
+        await graphGate
+        return []
+      })
+
+      const compositionBoot = installCordisXComposition(
+        loadPlugins,
+        metadata('composition-replacement'),
+        publish,
+        retire,
+      )
+      expect(globals.__cordisxBoot).toBe(compositionBoot)
+      expect(globals.__cordisxRuntime).toBe(previousRuntime)
+      await graphLoaderStarted
+      expect(globals.__cordisxRuntime).toBeUndefined()
+      releaseGraph()
+      await expect(compositionBoot).resolves.toBeDefined()
+      expect(loadPlugins).toHaveBeenCalledOnce()
+      expect(publish).toHaveBeenCalledOnce()
+      expect(retire).not.toHaveBeenCalled()
+      expect(globals.__cordisxRuntime).toBeDefined()
+
+      let rejectGraph!: (error: Error) => void
+      let failedGraphLoaderEntered!: () => void
+      const failedGraphLoaderStarted = new Promise<void>(resolve => {
+        failedGraphLoaderEntered = resolve
+      })
+      const failedGraph = new Promise<readonly []>((_resolve, reject) => {
+        rejectGraph = reject
+      })
+      const failedPublish = vi.fn()
+      const failedRetire = vi.fn()
+      const failure = new Error('controlled graph load failed')
+      const failedBoot = installCordisXComposition(
+        async () => {
+          failedGraphLoaderEntered()
+          expect(globals.__cordisxRuntime).toBeUndefined()
+          expect(globals.__cordisxSharedReactRuntime).toBeDefined()
+          return await failedGraph
+        },
+        metadata('composition-failure'),
+        failedPublish,
+        failedRetire,
+      )
+      expect(globals.__cordisxBoot).toBe(failedBoot)
+      await failedGraphLoaderStarted
+      rejectGraph(failure)
+      await expect(failedBoot).rejects.toBe(failure)
+      await Promise.resolve()
+      expect(failedPublish).not.toHaveBeenCalled()
+      expect(failedRetire).toHaveBeenCalledOnce()
+      expect(globals.__cordisxRuntime).toBeUndefined()
+      expect(globals.__cordisxSharedReactRuntime).toBeUndefined()
+      expect(globals.__cordisxBoot).toBeUndefined()
+
+      dom.window.close()
+    },
+    60_000,
+  )
+
+  it('retires a delayed graph superseded by a newer serialized composition without deadlock', async () => {
+    const { installCordisXComposition } = await import('../packages/cli/src/renderer/runtime.js')
+    const dom = installBrowserGlobals()
+
+    let releaseStaleGraph!: () => void
+    let staleGraphLoaderEntered!: () => void
+    const staleGraphLoaderStarted = new Promise<void>(resolve => {
+      staleGraphLoaderEntered = resolve
+    })
+    const staleGraphGate = new Promise<void>(resolve => {
+      releaseStaleGraph = resolve
+    })
+    const stalePublish = vi.fn()
+    const staleRetire = vi.fn()
+    const staleBoot = installCordisXComposition(
+      async () => {
+        staleGraphLoaderEntered()
+        await staleGraphGate
+        return []
+      },
+      metadata('composition-stale'),
+      stalePublish,
+      staleRetire,
+    )
+    await staleGraphLoaderStarted
+
+    const currentPublish = vi.fn()
+    const currentRetire = vi.fn()
+    const currentLoad = vi.fn(async () => [])
+    const currentBoot = installCordisXComposition(
+      currentLoad,
+      metadata('composition-current'),
+      currentPublish,
+      currentRetire,
+    )
+    releaseStaleGraph()
+
+    await expect(staleBoot).rejects.toThrow('CordisX bootstrap generation was superseded')
+    await expect(currentBoot).resolves.toBeDefined()
+    expect(stalePublish).not.toHaveBeenCalled()
+    expect(staleRetire).toHaveBeenCalledOnce()
+    expect(currentLoad).toHaveBeenCalledOnce()
+    expect(currentPublish).toHaveBeenCalledOnce()
+    expect(currentRetire).not.toHaveBeenCalled()
+
+    await disposeRuntime()
+    dom.window.close()
+  }, 60_000)
+
+  it('cleans the composition lease when publish and runtime teardown both fail', async () => {
+    const { installCordisXComposition } = await import('../packages/cli/src/renderer/runtime.js')
+    const dom = installBrowserGlobals()
+    const globals = globalThis as typeof globalThis & Record<string, unknown>
+    const publishFailure = new Error('controlled composition publish failed')
+    const teardownFailure = new Error('controlled runtime teardown failed')
+    const retire = vi.fn()
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    const boot = installCordisXComposition(
+      async () => [],
+      metadata('composition-publish-failure'),
+      () => {
+        throw publishFailure
+      },
+      retire,
+      async () => async () => {
+        throw teardownFailure
+      },
+    )
+
+    await expect(boot).rejects.toBe(publishFailure)
+    await Promise.resolve()
+    expect(retire).toHaveBeenCalledOnce()
+    expect(globals.__cordisxRuntime).toBeUndefined()
+    expect(globals.__cordisxSharedReactRuntime).toBeUndefined()
+    expect(consoleError).toHaveBeenCalledWith(
+      '[cordisx] failed to dispose a failed composition runtime',
+      teardownFailure,
+    )
+    consoleError.mockRestore()
     dom.window.close()
   }, 60_000)
 

@@ -252,7 +252,7 @@ export async function buildRendererCompositionSource(
   }
   if (projectRuntime === undefined) throw new Error('CordisX renderer runtime could not be resolved')
   const runtimeImport = sourceOptions.runtimeImport ?? importSpecifier(config.rootDir, projectRuntime)
-  const imports = [`import { installCordisX } from ${JSON.stringify(runtimeImport)}`]
+  const imports = [`import { installCordisX, installCordisXComposition } from ${JSON.stringify(runtimeImport)}`]
   const enabledIndexes = new Map(enabled.map((plugin, index) => [plugin.id, index]))
   const composition = `[${
     config.plugins.map((plugin, pluginIndex) => {
@@ -403,18 +403,23 @@ export async function buildRendererCompositionSource(
     : `const __cordisxPluginGraphModules = await Promise.all([${graphLoads.join(',')}])`
   const graphPublishSource = runtimeGraphs.map(graph => `${graph.publishSource};`).join('\n')
   const graphRetireSource = runtimeGraphs.map(graph => `try { ${graph.retireSource}; } catch {}`).join('\n')
-  const boot = `(async () => { try {
+  const boot = runtimeGraphs.length === 0
+    ? `installCordisX(${composition}, ${metadata})`
+    : `installCordisXComposition(async () => {
 ${graphLoadSource}
-const runtime = await installCordisX(${composition}, ${metadata})
+return ${composition}
+}, ${metadata}, () => {
 ${graphPublishSource}
-return runtime
-} catch (error) {
+}, () => {
 ${graphRetireSource}
-throw error
-} })()`
+})`
+  const compositionBoot = `const __cordisxCompositionBoot = ${boot}
+globalThis.__cordisxCompositionBoot = __cordisxCompositionBoot`
   const source = sourceOptions.awaitBoot === true
-    ? `${imports.join('\n')}\nexport const runtime = await ${boot}\n`
-    : `${imports.join('\n')}\nvoid ${boot}.catch(error => console.error('[cordisx] boot failed', error))\n`
+    ? `${imports.join('\n')}\n${compositionBoot}\nexport const runtime = await __cordisxCompositionBoot\n`
+    : `${
+      imports.join('\n')
+    }\n${compositionBoot}\nvoid __cordisxCompositionBoot.catch(error => console.error('[cordisx] boot failed', error))\n`
   return {
     source,
     metadataSource: metadata,
