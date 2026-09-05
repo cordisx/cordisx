@@ -75,6 +75,13 @@ export interface MarkdownViewerProps {
   readonly 'aria-label'?: string
 }
 
+/** Presentation-only composer seat. It never accepts or exposes an attachment action. */
+export interface AttachmentPlaceholderProps {
+  readonly className?: string
+  readonly 'aria-label'?: string
+  readonly title?: string
+}
+
 function HostComponent<Props>(name: string): React.ComponentType<Props> {
   return function UnavailableHostComponent(): never {
     throw new Error(`${name} is available only inside the CordisX renderer Host`)
@@ -89,5 +96,6 @@ export const Icon = HostComponent<IconProps>('Icon')
 export const Select = HostComponent<SelectProps>('Select')
 export const SelectionRail = HostComponent<SelectionRailProps>('SelectionRail')
 export const MarkdownViewer = HostComponent<MarkdownViewerProps>('MarkdownViewer')
+export const AttachmentPlaceholder = HostComponent<AttachmentPlaceholderProps>('AttachmentPlaceholder')
 export const Stack = HostComponent<StackProps>('Stack')
 export const Text = HostComponent<TextProps>('Text')

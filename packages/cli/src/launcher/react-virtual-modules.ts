@@ -54,6 +54,7 @@ const REACT_EXPORTS = [
 ] as const
 
 const UI_EXPORTS = [
+  'AttachmentPlaceholder',
   'Button',
   'Card',
   'EmptyState',
