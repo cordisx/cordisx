@@ -40,6 +40,9 @@ const HOST_COMPOSER_OVERRIDES = `
 .cxa-composer>.shikitor--attached+textarea.cxa-draft.shikitor-input--attached:not([data-cordisx-shikitor-fallback]):focus,.cxa-composer>.shikitor--attached+textarea.cxa-draft.shikitor-input--attached:not([data-cordisx-shikitor-fallback]):focus-visible{border-color:transparent!important;outline:0!important;outline-offset:0!important;box-shadow:none!important}
 .cxa-composer>.shikitor--attached+textarea.cxa-draft.shikitor-input--attached:not([data-cordisx-shikitor-fallback])::placeholder{color:transparent;-webkit-text-fill-color:transparent}
 .cxa-composer>.shikitor--attached+textarea.cxa-draft.shikitor-input--attached:not([data-cordisx-shikitor-fallback])::selection{color:transparent;-webkit-text-fill-color:transparent;background:color-mix(in srgb,var(--cx-primary) 28%,transparent)}
+.cxa-composer>.shikitor--attached+textarea.cxa-draft.shikitor-input--attached[data-cordisx-shikitor-native-text="true"]:not([data-cordisx-shikitor-fallback]){color:var(--cx-text)!important;-webkit-text-fill-color:var(--cx-text)!important;caret-color:var(--cx-text)!important}
+.cxa-composer>.shikitor--attached+textarea.cxa-draft.shikitor-input--attached[data-cordisx-shikitor-native-text="true"]:not([data-cordisx-shikitor-fallback])::placeholder{color:var(--cx-muted)!important;-webkit-text-fill-color:var(--cx-muted)!important}
+.cxa-composer>.shikitor--attached+textarea.cxa-draft.shikitor-input--attached[data-cordisx-shikitor-native-text="true"]:not([data-cordisx-shikitor-fallback])::selection{color:var(--cx-text)!important;-webkit-text-fill-color:var(--cx-text)!important;background:color-mix(in srgb,var(--cx-primary) 28%,transparent)}
 @media (forced-colors:active){
 .cxa-composer>.shikitor.shikitor--attached{display:none!important}
 .cxa-composer>.shikitor--attached+textarea.cxa-draft.shikitor-input--attached:not([data-cordisx-shikitor-fallback]){color:CanvasText!important;-webkit-text-fill-color:CanvasText!important;caret-color:CanvasText!important;forced-color-adjust:auto}
@@ -104,6 +107,16 @@ function syncProjectionMetrics(input: HTMLTextAreaElement, editor: Shikitor): vo
   projection.setProperty('--shikitor-white-space', source.whiteSpace)
   projection.setProperty('--shikitor-word-break', source.wordBreak)
   projection.setProperty('--shikitor-overflow-wrap', source.overflowWrap)
+}
+
+/**
+ * Shikitor's less-dom backend paints through the resident textarea instead of
+ * its projection DOM. Keep the input transparent only while a projection is
+ * actually responsible for glyphs.
+ */
+export function syncNativeTextRendering(input: HTMLTextAreaElement, editor: Shikitor): void {
+  if (editor.element.dataset.shikitorRenderMode === 'less-dom') input.dataset.cordisxShikitorNativeText = 'true'
+  else delete input.dataset.cordisxShikitorNativeText
 }
 
 function syncMeasurementMetrics(input: HTMLTextAreaElement, measurement: HTMLTextAreaElement): void {
@@ -204,9 +217,11 @@ export function useHostShikitorComposer({
     const previousOverflowY = input.style.overflowY
     const previousPaddingTop = input.style.paddingTop
     const previousPaddingBottom = input.style.paddingBottom
+    const previousNativeText = input.dataset.cordisxShikitorNativeText
     let mounted: Shikitor | undefined
     let active = true
     let observer: MutationObserver | undefined
+    let renderModeObserver: MutationObserver | undefined
     let layoutObserver: ResizeObserver | undefined
     let layoutFrame: number | undefined
 
@@ -345,6 +360,7 @@ export function useHostShikitorComposer({
     const updateTheme = (): void => {
       if (mounted === undefined) return
       syncProjectionMetrics(input, mounted)
+      syncNativeTextRendering(input, mounted)
       queueLayoutMeasurement()
       void mounted.updateOptions(current => ({
         ...current,
@@ -383,6 +399,12 @@ export function useHostShikitorComposer({
       mounted = editor
       editorRef.current = editor
       syncProjectionMetrics(input, editor)
+      syncNativeTextRendering(input, editor)
+      const RenderModeObserver = input.ownerDocument.defaultView?.MutationObserver
+      if (RenderModeObserver !== undefined) {
+        renderModeObserver = new RenderModeObserver(() => syncNativeTextRendering(input, editor))
+        renderModeObserver.observe(editor.element, { attributes: true, attributeFilter: ['data-shikitor-render-mode'] })
+      }
       queueLayoutMeasurement()
       if (editor.value !== draftRef.current) editor.value = draftRef.current
       void editor.updateOptions(current => ({
@@ -403,6 +425,7 @@ export function useHostShikitorComposer({
     return () => {
       active = false
       observer?.disconnect()
+      renderModeObserver?.disconnect()
       layoutObserver?.disconnect()
       if (layoutFrame !== undefined) view?.cancelAnimationFrame(layoutFrame)
       abort.abort()
@@ -415,6 +438,8 @@ export function useHostShikitorComposer({
       input.style.overflowY = previousOverflowY
       input.style.paddingTop = previousPaddingTop
       input.style.paddingBottom = previousPaddingBottom
+      if (previousNativeText === undefined) delete input.dataset.cordisxShikitorNativeText
+      else input.dataset.cordisxShikitorNativeText = previousNativeText
       if (composer !== null) {
         if (previousLayout === undefined) delete composer.dataset.cordisxShikitorLayout
         else composer.dataset.cordisxShikitorLayout = previousLayout
