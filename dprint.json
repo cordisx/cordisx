@@ -21,6 +21,8 @@
     "**/dist/**",
     "**/build/**",
     "package-lock.json",
+    // Preserve the bytes of the versioned public Host migration schema.
+    "packages/cli/schemas/agent-session-legacy-acquire.v1.schema.json",
     // Security smoke packages pin the original runtime-manifest bytes.
     "examples/plugins/permission-v2-smoke/runtime.json",
     "examples/plugins/permission-v2-smoke/cordisx-package.json",
