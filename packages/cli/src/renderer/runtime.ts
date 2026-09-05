@@ -478,6 +478,7 @@ interface CordisXRuntimeHandle extends ManagerModel {
     mutation: RendererPluginMutation,
     module?: CordisXPluginModule,
     moduleFactory?: (console: CordisXPluginConsoleFacade) => CordisXPluginModule,
+    modules?: Readonly<Record<string, CordisXPluginModule>>,
   ): Promise<PluginGenerationReadinessReceipt>
   publishPluginMutation(transactionId: string): Promise<PluginGenerationPublication>
   completePluginMutation(transactionId: string): Promise<RendererGenerationCleanupObservation>
@@ -487,6 +488,9 @@ interface CordisXRuntimeHandle extends ManagerModel {
   abortPluginMutation(transactionId: string): Promise<void>
   reloadPluginGeneration(pluginId: string, moduleGeneration: string, runtimeGeneration: string): Promise<void>
   updateLocalDevelopmentStatus(status: CordisXLocalDevelopmentSnapshot): boolean
+  adoptPluginBundleSnapshot(
+    snapshot: CordisXPluginBundleManagerSnapshotV1,
+  ): Readonly<{ revision: number; pluginRevision: number }>
   /** Host-private debug projection. Plugins and public runtime snapshots cannot access it. */
   playgroundMockAgentLoop?(): PlaygroundMockAgentLoopSnapshot
   /** Host-private native task projection read directly from the Playground Session authority. */
@@ -2874,6 +2878,7 @@ async function start(
       pluginId: string,
       module?: CordisXPluginModule,
       moduleFactory?: (console: CordisXPluginConsoleFacade) => CordisXPluginModule,
+      modules?: Readonly<Record<string, CordisXPluginModule>>,
     ): { readonly controller: PluginController; readonly registerAuthority: boolean } => {
       const activation = mutation.candidate.plugins.find(item => item.id === pluginId)
       if (activation === undefined) throw new Error(`candidate is missing affected plugin ${pluginId}`)
@@ -2886,7 +2891,8 @@ async function start(
       if (!replacesTarget && existing === undefined) throw new Error(`affected plugin ${pluginId} is not active`)
       if (
         replacesTarget && (replacementPackage === undefined
-          || (module === undefined && moduleFactory === undefined && mutation.isolatedArtifactSource === undefined))
+          || (module === undefined && moduleFactory === undefined && modules?.[pluginId] === undefined
+            && mutation.isolatedArtifactSource === undefined))
       ) {
         throw new Error('candidate package module is unavailable')
       }
@@ -2900,8 +2906,11 @@ async function start(
       const descriptor = existing === undefined
         ? undefined
         : configuration.descriptor(pluginId, i18nService?.getSnapshot().locale ?? 'en')
-      const candidateModule = replacesTarget ? module : existing!.item.module
-      const candidateModuleFactory = replacesTarget ? moduleFactory : existing!.item.moduleFactory
+      const graphModule = modules?.[pluginId]
+      const candidateModule = graphModule ?? (replacesTarget ? module : existing!.item.module)
+      const candidateModuleFactory = graphModule === undefined
+        ? replacesTarget ? moduleFactory : existing!.item.moduleFactory
+        : undefined
       const candidateIsolatedArtifactSource = replacesTarget
         ? mutation.isolatedArtifactSource
         : existing!.item.isolatedArtifactSource
@@ -3038,6 +3047,7 @@ async function start(
       mutation: RendererPluginMutation,
       module?: CordisXPluginModule,
       moduleFactory?: (console: CordisXPluginConsoleFacade) => CordisXPluginModule,
+      modules?: Readonly<Record<string, CordisXPluginModule>>,
     ): Promise<PluginGenerationReadinessReceipt> => {
       const task = operation.then(async () => {
         if (disposed) throw new Error('CordisX runtime is disposed')
@@ -3075,6 +3085,15 @@ async function start(
           throw new Error('affected plugin set does not match the Host dependency closure')
         }
         const affected = new Set(handle.affectedPluginIds)
+        if (
+          modules !== undefined
+          && Object.keys(modules).some(id =>
+            !affected.has(id) || !mutation.candidate.plugins.some(item => item.id === id)
+          )
+        ) {
+          generationVisibility.abort(handle)
+          throw new Error('candidate browser graph modules do not match the Host dependency closure')
+        }
         ownerDocumentBroker.registerBindings(mutation.ownerDocumentBindings ?? [])
         registerEntityBindings(mutation.ownerDocumentBindings)
         const previous = activeControllers().filter(controller => affected.has(controller.item.id))
@@ -3083,7 +3102,7 @@ async function start(
         try {
           for (const id of handle.affectedPluginIds) {
             if (!mutation.candidate.plugins.some(item => item.id === id)) continue
-            const candidate = candidateController(handle, mutation, id, module, moduleFactory)
+            const candidate = candidateController(handle, mutation, id, module, moduleFactory, modules)
             registerController(candidate.controller, candidate.registerAuthority)
             controllers.push(candidate.controller)
             candidates.push(candidate.controller)
@@ -3447,6 +3466,21 @@ async function start(
       return true
     }
 
+    const adoptPluginBundleSnapshot = (
+      snapshot: CordisXPluginBundleManagerSnapshotV1,
+    ): Readonly<{ revision: number; pluginRevision: number }> => {
+      if (
+        snapshot.profileId !== metadata.profileId || snapshot.runtimeGeneration !== generation
+        || snapshot.pluginRevision !== currentActivation.revision
+      ) throw new Error('plugin bundle snapshot does not match the current renderer generation')
+      if (currentPluginBundles !== undefined && snapshot.revision < currentPluginBundles.revision) {
+        throw new Error('plugin bundle snapshot revision regressed')
+      }
+      currentPluginBundles = snapshot
+      notify('plugin-bundles')
+      return { revision: snapshot.revision, pluginRevision: snapshot.pluginRevision }
+    }
+
     const dispose = async (): Promise<void> => {
       if (disposed) return
       disposed = true
@@ -3805,6 +3839,7 @@ async function start(
       abortPluginMutation,
       reloadPluginGeneration,
       updateLocalDevelopmentStatus,
+      adoptPluginBundleSnapshot,
       ...(metadata.hostKind === 'playground'
         ? {
           playgroundAgentSessions: () => projectPlaygroundAgentSessions(agentSessionRuntime.playgroundProjection()),

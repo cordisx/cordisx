@@ -124,6 +124,8 @@ export interface PluginRuntimeMutation {
   readonly runtimeArtifactSource?: string
   /** Host-only browser graph lease; never projected into renderer mutation data. */
   readonly runtimeArtifactLease?: PluginGenerationGraphLease
+  /** Host-only browser graph leases for the complete affected dependency closure. */
+  readonly runtimeArtifactLeases?: readonly PluginGenerationGraphLease[]
   readonly authorizationDecision?:
     | CordisXPermissionAuthorizationDecisionV1
     | CordisXPermissionAuthorizationDecisionV2
@@ -133,10 +135,17 @@ export interface PluginRuntimeMutation {
 /** Stable renderer adapter. `stage` is reversible until `commit` acknowledges durable publication. */
 export interface PluginLifecycleRuntime {
   prepare?(transactionId: string): RuntimeGenerationFence
+  /** Host-private first-browser-graph admission; it returns with the normal generation fence already held. */
+  prepareBrowserGraph?(
+    transactionId: string,
+    active: CordisXPluginActivationRecordV1,
+  ): Promise<RuntimeGenerationFence>
   stage(mutation: PluginRuntimeMutation): Promise<void | RuntimeReadinessObservation>
   publish?(transactionId: string): Promise<RuntimePublicationObservation>
   complete?(transactionId: string): Promise<RuntimeCleanupObservation>
   finalize?(transactionId: string): Promise<void>
+  /** Host-private terminal latch for a post-commit renderer projection failure. */
+  terminal?(error: unknown): void
   rollback?(transactionId: string): Promise<RuntimeCleanupObservation>
   /** Reattach to a renderer transaction that survived a Launcher restart. */
   recoverRollback?(plan: RollbackPlan): Promise<RuntimeCleanupObservation>
@@ -625,6 +634,16 @@ function runtimeObservation(record: CordisXPluginActivationRecordV1, registryEpo
       dependencies: plugin.dependencies,
     }])),
   }
+}
+
+function usesIsolatedWorker(
+  manifest: StagedPluginPackage['manifest']['runtimeManifest'] | undefined,
+): boolean {
+  return manifest !== undefined && (manifest.schemaVersion === 7
+    || ((manifest.schemaVersion === 5 || manifest.schemaVersion === 6)
+      && manifest.capabilities.some(capability => (
+        capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
+      ))))
 }
 
 function changedTarget(
@@ -1156,7 +1175,19 @@ export class PluginLifecycleCoordinator {
     const runtime = this.formalRuntime()
     if (runtime === undefined) return undefined
     const transactionId = input.candidate.transactionId!
-    const fence = runtime.prepare(transactionId)
+    const runtimeManifest = input.staged?.manifest.runtimeManifest
+    const targetUsesIsolatedWorker = usesIsolatedWorker(runtimeManifest)
+    let fence: RuntimeGenerationFence
+    try {
+      fence = input.staged?.browserArtifact !== undefined
+          && !targetUsesIsolatedWorker
+          && runtime.prepareBrowserGraph !== undefined
+        ? await runtime.prepareBrowserGraph(transactionId, input.active)
+        : runtime.prepare(transactionId)
+    } catch {
+      await this.store.abortCandidate(transactionId).catch(() => undefined)
+      throw new LifecycleFailure('readiness-failed', safeError('readiness-failed'))
+    }
     this.pendingPermissionReviews.set(transactionId, {
       candidateId: transactionId,
       plan: input.authorizationPlan,
@@ -1206,32 +1237,42 @@ export class PluginLifecycleCoordinator {
       }, 'stage')
       let runtimeArtifactSource: string | undefined
       let runtimeArtifactLease: PluginGenerationGraphLease | undefined
+      const runtimeArtifactLeases: PluginGenerationGraphLease[] = []
       let stageResolutionFailure: unknown
-      const targetRuntimeManifest = input.staged?.manifest.runtimeManifest
-      const targetUsesIsolatedWorker = targetRuntimeManifest !== undefined
-        && (targetRuntimeManifest.schemaVersion === 7
-          || ((targetRuntimeManifest.schemaVersion === 5 || targetRuntimeManifest.schemaVersion === 6)
-            && targetRuntimeManifest.capabilities.some(capability => (
-              capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
-            ))))
       for (const pluginId of resolvedStage.activationOrder) {
-        if (resolvedStage.after.plugins.some(plugin => plugin.id === pluginId)) {
+        const candidatePlugin = resolvedStage.after.plugins.find(plugin => plugin.id === pluginId)
+        if (candidatePlugin?.enabled === true && resolvedStage.affectedPluginIds.includes(pluginId)) {
           try {
             const runtimeModule = await authority.resolveRuntimeModule(access, 'stage', pluginId)
-            if (pluginId === input.targetId && input.staged !== undefined && !targetUsesIsolatedWorker) {
-              const moduleGeneration = resolvedStage.after.plugins.find(item => item.id === pluginId)?.moduleGeneration
-              if (moduleGeneration === undefined) throw new Error('Host runtime module generation is unavailable')
+            const stagedPackage = pluginId === input.targetId && input.staged !== undefined
+              ? input.staged
+              : await loadStagedPluginPackage(this.options.homeDir, candidatePlugin.digest)
+            const isolatedWorker = usesIsolatedWorker(stagedPackage.manifest.runtimeManifest)
+            if (pluginId === input.targetId && !isolatedWorker) {
               if (this.options.pluginGenerationArtifactServer === undefined) {
                 runtimeArtifactSource = await loadPluginGenerationArtifact(runtimeModule)
               } else {
                 const loaded = await loadPluginGenerationArtifactForRuntime(
                   runtimeModule,
-                  moduleGeneration,
+                  candidatePlugin.moduleGeneration,
                   this.options.pluginGenerationArtifactServer,
                 )
                 runtimeArtifactSource = loaded.runtimeArtifactSource
-                if (loaded.kind === 'browser-esm-graph') runtimeArtifactLease = loaded.lease
+                if (loaded.kind === 'browser-esm-graph') {
+                  runtimeArtifactLease = loaded.lease
+                  runtimeArtifactLeases.push(loaded.lease)
+                }
               }
+            } else if (
+              !isolatedWorker && stagedPackage.browserArtifact !== undefined
+              && this.options.pluginGenerationArtifactServer !== undefined
+            ) {
+              const loaded = await loadPluginGenerationArtifactForRuntime(
+                runtimeModule,
+                candidatePlugin.moduleGeneration,
+                this.options.pluginGenerationArtifactServer,
+              )
+              if (loaded.kind === 'browser-esm-graph') runtimeArtifactLeases.push(loaded.lease)
             }
           } catch (error) {
             stageResolutionFailure = error
@@ -1255,6 +1296,7 @@ export class PluginLifecycleCoordinator {
         ...(input.staged === undefined ? {} : { package: input.staged }),
         ...(runtimeArtifactSource === undefined ? {} : { runtimeArtifactSource }),
         ...(runtimeArtifactLease === undefined ? {} : { runtimeArtifactLease }),
+        ...(runtimeArtifactLeases.length === 0 ? {} : { runtimeArtifactLeases }),
         authorizationDecision: input.authorizationDecision,
       })
       if (readiness === undefined) throw new Error('shared registry readiness observation is unavailable')
@@ -1323,7 +1365,10 @@ export class PluginLifecycleCoordinator {
           finalizeFailure = error
         }
       }
-      if (!finalized) throw finalizeFailure
+      if (!finalized) {
+        runtime.terminal?.(finalizeFailure)
+        throw finalizeFailure
+      }
       return committed
     } catch (error) {
       if (commitCompleted) {

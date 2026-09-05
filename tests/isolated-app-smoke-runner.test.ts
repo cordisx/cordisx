@@ -259,6 +259,7 @@ describe('isolated app smoke runner', () => {
     expect(source).toContain('const smokeEntry = customSmokeEntry ??')
     expect(source).toContain('prepareIsolatedSmokeHome(homeConfig, homeSeed)')
     expect(source).toContain('cleanupIsolatedSmokeHome(homeRoot)')
+    expect(source.indexOf("child.kill('SIGINT')")).toBeLessThan(source.indexOf("signal(child, 'SIGTERM')"))
     expect(source.indexOf('cleanupIsolatedSmokeHome(homeRoot)')).toBeGreaterThan(
       source.lastIndexOf('profileProcesses()'),
     )

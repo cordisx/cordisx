@@ -28,6 +28,7 @@ import {
 } from './provider-rpc.js'
 import type { CodexAgentHistoryHost } from './agent-history.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
+import type { CordisXPluginBundleManagerSnapshotV1 } from '../plugin-bundle-contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 import type { PluginGenerationGraphLease } from './plugin-generation-loader.js'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../plugin-lifecycle-contracts.js'
@@ -113,6 +114,16 @@ import {
 } from './owner-document-rpc.js'
 import { isEntityBindingRequest } from './entity-rpc.js'
 import type { EntityDirectoryAuthority } from './entity-directory.js'
+import {
+  CdpLifecycleRequestGate,
+  productionBootstrapSource,
+  type ProductionGraphBootstrap,
+  type ProductionGraphOperations,
+  promoteProductionGraph,
+  refreshProductionGraphBootstraps,
+} from './production-graph-admission.js'
+
+export { CdpLifecycleRequestGate } from './production-graph-admission.js'
 
 const MARKETPLACE_BINDING = '__cordisxMarketplaceRequestV1'
 const MARKETPLACE_RECEIVER = '__cordisxMarketplaceReceiveV1'
@@ -364,6 +375,35 @@ function activationRecord(tuple: PackageActivationTuple): CordisXPluginActivatio
   }
 }
 
+function mutationArtifactLeases(mutation: PluginRuntimeMutation): readonly PluginGenerationGraphLease[] {
+  return mutation.runtimeArtifactLeases
+    ?? (mutation.runtimeArtifactLease === undefined ? [] : [mutation.runtimeArtifactLease])
+}
+
+type GenerationOwner =
+  | { readonly kind: 'join'; readonly token: symbol; readonly session: CdpSession }
+  | {
+    readonly kind: 'browser-graph-admission'
+    readonly token: symbol
+    readonly transactionId: string
+    readonly expectedRegistryEpoch: number
+  }
+  | { readonly kind: 'transaction'; readonly transactionId: string; readonly fence: RuntimeGenerationFence }
+
+type BrowserGraphAdmission = (
+  input: Readonly<{
+    transactionId: string
+    active: CordisXPluginActivationRecordV1
+    expectedRegistryEpoch: number
+    sessions: readonly CdpSession[]
+  }>,
+) => Promise<Readonly<{ commit(): void; rollback(): Promise<void> }>>
+
+type BrowserGraphBootstrapRefresh = (
+  active: CordisXPluginActivationRecordV1,
+  registryEpoch: number,
+) => Promise<void>
+
 /** Broadcast one reversible generation transaction to every injected Codex renderer. */
 export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private readonly sessions = new Set<CdpSession>()
@@ -385,34 +425,34 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   private readonly recoveredSessions = new WeakSet<CdpSession>()
   private readonly developmentStates = new Map<string, CordisXLocalDevelopmentSnapshot>()
   private readonly activeArtifactLeases = new Map<string, PluginGenerationGraphLease>()
+  private readonly retiredTransactionArtifactLeases = new Map<string, Set<string>>()
   private developmentVersion = 0
+  private generationOwner: GenerationOwner | undefined
+  private browserGraphAdmission: BrowserGraphAdmission | undefined
+  private browserGraphBootstrapRefresh: BrowserGraphBootstrapRefresh | undefined
+  private browserGraphTerminalError: ((error: unknown) => void) | undefined
+  private browserGraphTransportReady = false
 
   constructor(permissionIdentities?: PluginPermissionIdentityRegistry) {
     this.permissionIdentities = permissionIdentities
   }
 
   setPermissionIdentities(permissionIdentities: PluginPermissionIdentityRegistry): void {
-    if (
-      this.joining.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0 || this.fences.size !== 0
-    ) {
+    if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
       throw new Error('cannot replace permission identities during a generation transaction')
     }
     this.permissionIdentities = permissionIdentities
   }
 
   setOwnerDocumentAuthority(authority: NonNullable<CdpPluginLifecycleRuntime['ownerDocumentAuthority']>): void {
-    if (
-      this.joining.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0 || this.fences.size !== 0
-    ) {
+    if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
       throw new Error('cannot replace owner document authority during a generation transaction')
     }
     this.ownerDocumentAuthority = authority
   }
 
   setEntityAuthority(profileId: string, authority: EntityDirectoryAuthority): void {
-    if (
-      this.joining.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0 || this.fences.size !== 0
-    ) {
+    if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
       throw new Error('cannot replace entity authority during a generation transaction')
     }
     this.entityAuthority = { profileId, authority }
@@ -420,7 +460,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 
   /** Register a graph already selected by the durable activation used for cold boot. */
   registerActivePluginGenerationLease(lease: PluginGenerationGraphLease): void {
-    if (this.joining.size !== 0 || this.fences.size !== 0 || this.staged.size !== 0) {
+    if (this.generationOwner !== undefined || this.staged.size !== 0) {
       throw new Error('cannot register an active browser graph during a generation transaction')
     }
     const current = this.activeArtifactLeases.get(lease.pluginId)
@@ -430,8 +470,114 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     this.activeArtifactLeases.set(lease.pluginId, lease)
   }
 
+  activeBrowserGraph(
+    pluginId: string,
+    moduleGeneration: string,
+  ):
+    | Readonly<{ moduleGeneration: string; loadSource: string; publishSource: string; retireSource: string }>
+    | undefined
+  {
+    const transaction = this.generationOwner?.kind === 'transaction'
+      ? this.stagedMutations.get(this.generationOwner.transactionId)
+      : undefined
+    const pendingLease =
+      transaction?.candidate.plugins.some(plugin =>
+          plugin.id === pluginId && plugin.enabled && plugin.moduleGeneration === moduleGeneration
+        )
+        ? mutationArtifactLeases(transaction).find(lease => lease.pluginId === pluginId)
+        : undefined
+    const lease = pendingLease ?? this.activeArtifactLeases.get(pluginId)
+    if (lease === undefined) return undefined
+    if (lease.moduleGeneration !== moduleGeneration) {
+      throw new Error(`active browser graph generation is stale for plugin ${pluginId}`)
+    }
+    return {
+      moduleGeneration: lease.moduleGeneration,
+      loadSource: lease.importSource,
+      publishSource: lease.publishSource,
+      retireSource: lease.retireSource,
+    }
+  }
+
   currentRegistryEpoch(): number {
     return this.registryEpoch
+  }
+
+  setBrowserGraphAdmission(admission: BrowserGraphAdmission | undefined): void {
+    if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
+      throw new Error('cannot replace browser graph admission during a generation transaction')
+    }
+    this.browserGraphAdmission = admission
+  }
+
+  setBrowserGraphBootstrapRefresh(refresh: BrowserGraphBootstrapRefresh | undefined): void {
+    if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
+      throw new Error('cannot replace browser graph bootstrap refresh during a generation transaction')
+    }
+    this.browserGraphBootstrapRefresh = refresh
+  }
+
+  setBrowserGraphTerminalError(handler: ((error: unknown) => void) | undefined): void {
+    this.browserGraphTerminalError = handler
+  }
+
+  terminal(error: unknown): void {
+    if (this.browserGraphTransportReady) this.browserGraphTerminalError?.(error)
+  }
+
+  async refreshBrowserGraphBootstrap(active: CordisXPluginActivationRecordV1): Promise<void> {
+    if (!this.browserGraphTransportReady) return
+    if (this.browserGraphBootstrapRefresh === undefined) {
+      throw new Error('browser graph transport has no future-document bootstrap refresh')
+    }
+    await this.browserGraphBootstrapRefresh(active, this.registryEpoch)
+  }
+
+  private async projectPluginBundles(
+    session: CdpSession,
+    snapshot: CordisXPluginBundleManagerSnapshotV1,
+  ): Promise<Readonly<{ revision: number; pluginRevision: number }>> {
+    return await evaluateRuntimeOperation(
+      session,
+      `(async () => { try {
+      const runtime = globalThis.__cordisxRuntime
+      if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
+      return { ok: true, result: runtime.adoptPluginBundleSnapshot(${JSON.stringify(snapshot)}) }
+    } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+    )
+  }
+
+  async synchronizePluginBundles(snapshot: CordisXPluginBundleManagerSnapshotV1): Promise<void> {
+    const acknowledgements = await Promise.all(
+      [...this.sessions].map(async session => await this.projectPluginBundles(session, snapshot)),
+    )
+    if (
+      acknowledgements.some(ack => (
+        ack.revision !== snapshot.revision || ack.pluginRevision !== snapshot.pluginRevision
+      ))
+    ) throw new Error('CordisX renderer plugin bundle projections disagree')
+  }
+
+  async synchronizePluginBundlesFor(
+    session: CdpSession,
+    snapshot: CordisXPluginBundleManagerSnapshotV1,
+  ): Promise<void> {
+    const acknowledgement = await this.projectPluginBundles(session, snapshot)
+    if (
+      acknowledgement.revision !== snapshot.revision
+      || acknowledgement.pluginRevision !== snapshot.pluginRevision
+    ) throw new Error('CordisX renderer plugin bundle projection is stale')
+  }
+
+  requiresBrowserGraphTransport(): boolean {
+    return this.browserGraphTransportReady
+  }
+
+  markBrowserGraphTransportReady(): void {
+    if (this.generationOwner !== undefined) {
+      throw new Error('cannot mark browser graph transport during a generation transaction')
+    }
+    this.browserGraphTransportReady = true
   }
 
   cancelPreparation(transactionId: string): void {
@@ -443,9 +589,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
 
   prepare(transactionId: string): RuntimeGenerationFence {
     if (this.fences.has(transactionId)) throw new Error('plugin generation fence already exists')
-    if (
-      this.joining.size !== 0 || this.fences.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0
-    ) {
+    if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
       throw new Error('another plugin generation transaction is unresolved')
     }
     if (this.sessions.size === 0) throw new Error('no ready CordisX renderer is available')
@@ -454,13 +598,62 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       expectedRegistryEpoch: this.registryEpoch,
     })
     this.fences.set(transactionId, fence)
+    this.generationOwner = { kind: 'transaction', transactionId, fence }
     return fence
   }
 
+  async prepareBrowserGraph(
+    transactionId: string,
+    active: CordisXPluginActivationRecordV1,
+  ): Promise<RuntimeGenerationFence> {
+    if (this.browserGraphTransportReady) return this.prepare(transactionId)
+    if (this.browserGraphAdmission === undefined) {
+      throw new Error('browser graph admission requires a launcher-owned native Host')
+    }
+    if (this.fences.has(transactionId)) throw new Error('plugin generation fence already exists')
+    if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
+      throw new Error('another plugin generation transaction is unresolved')
+    }
+    const sessions = [...this.sessions]
+    if (sessions.length === 0) throw new Error('no ready CordisX renderer is available')
+    const token = Symbol(transactionId)
+    const expectedRegistryEpoch = this.registryEpoch
+    this.generationOwner = {
+      kind: 'browser-graph-admission',
+      token,
+      transactionId,
+      expectedRegistryEpoch,
+    }
+    try {
+      const admission = await this.browserGraphAdmission({ transactionId, active, expectedRegistryEpoch, sessions })
+      const owner = this.generationOwner
+      if (
+        owner?.kind !== 'browser-graph-admission' || owner.token !== token
+        || this.registryEpoch !== expectedRegistryEpoch
+        || sessions.length !== this.sessions.size
+        || sessions.some(session => !this.sessions.has(session))
+      ) {
+        await admission.rollback()
+        throw new Error('browser graph admission reservation became stale')
+      }
+      const fence = Object.freeze({
+        transactionEpoch: `${transactionId}:${crypto.randomUUID()}`,
+        expectedRegistryEpoch,
+      })
+      this.fences.set(transactionId, fence)
+      this.browserGraphTransportReady = true
+      this.generationOwner = { kind: 'transaction', transactionId, fence }
+      admission.commit()
+      return fence
+    } catch (error) {
+      const owner = this.generationOwner
+      if (owner?.kind === 'browser-graph-admission' && owner.token === token) this.generationOwner = undefined
+      throw error
+    }
+  }
+
   register(session: CdpSession): () => void {
-    if (
-      this.joining.size !== 0 || this.fences.size !== 0 || this.staged.size !== 0 || this.stagedMutations.size !== 0
-    ) {
+    if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
       throw new Error('cannot register a CordisX renderer during a plugin generation transaction')
     }
     this.sessions.add(session)
@@ -478,12 +671,11 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     readonly commit: (developmentVersion: number) => (() => void) | undefined
     readonly abort: () => void
   } {
-    if (
-      this.joining.size !== 0 || this.fences.size !== 0
-      || this.staged.size !== 0 || this.stagedMutations.size !== 0
-    ) {
+    if (this.generationOwner !== undefined || this.staged.size !== 0 || this.stagedMutations.size !== 0) {
       throw new Error('cannot join a CordisX renderer during a plugin generation transaction')
     }
+    const token = Symbol('renderer-join')
+    this.generationOwner = { kind: 'join', token, session }
     this.joining.add(session)
     let settled = false
     return {
@@ -493,6 +685,10 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         // cannot interleave between this version check and sessions.add().
         if (developmentVersion !== this.developmentVersion) return undefined
         this.joining.delete(session)
+        if (this.generationOwner?.kind !== 'join' || this.generationOwner.token !== token) {
+          throw new Error('CordisX renderer join reservation is stale')
+        }
+        this.generationOwner = undefined
         settled = true
         this.sessions.add(session)
         return () => {
@@ -507,6 +703,9 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         if (settled) return
         settled = true
         this.joining.delete(session)
+        if (this.generationOwner?.kind === 'join' && this.generationOwner.token === token) {
+          this.generationOwner = undefined
+        }
       },
     }
   }
@@ -515,6 +714,10 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     this.staged.delete(transactionId)
     this.stagedMutations.delete(transactionId)
     this.fences.delete(transactionId)
+    this.retiredTransactionArtifactLeases.delete(transactionId)
+    if (this.generationOwner?.kind === 'transaction' && this.generationOwner.transactionId === transactionId) {
+      this.generationOwner = undefined
+    }
     this.permissionIdentities?.[permission](transactionId)
     this.ownerDocumentAuthority?.leases[permission](transactionId)
   }
@@ -542,6 +745,21 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   ): Promise<void> {
     await this.evaluateArtifactLease(sessions, lease.retireSource)
     lease.retire()
+  }
+
+  private async retireTransactionArtifactLeases(
+    transactionId: string,
+    sessions: readonly CdpSession[],
+    mutation: PluginRuntimeMutation,
+  ): Promise<void> {
+    const retired = this.retiredTransactionArtifactLeases.get(transactionId) ?? new Set<string>()
+    this.retiredTransactionArtifactLeases.set(transactionId, retired)
+    for (const lease of [...mutationArtifactLeases(mutation)].reverse()) {
+      if (retired.has(lease.leaseId)) continue
+      if (sessions.length === 0) lease.retire()
+      else await this.retireArtifactLease(sessions, lease)
+      retired.add(lease.leaseId)
+    }
   }
 
   private async projectDevelopmentState(
@@ -590,7 +808,28 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     // Publish the participant snapshot before any awaited renderer work so a
     // concurrent target close can prune it, including the final participant.
     this.staged.set(mutation.transactionId, sessions)
-    const { runtimeArtifactSource, runtimeArtifactLease, ...projectedMutation } = mutation
+    const { runtimeArtifactSource, runtimeArtifactLease, runtimeArtifactLeases, ...projectedMutation } = mutation
+    void runtimeArtifactLease
+    void runtimeArtifactLeases
+    const browserArtifactLeases = mutationArtifactLeases(mutation)
+    const leasedPluginIds = new Set(browserArtifactLeases.map(lease => lease.pluginId))
+    if (
+      leasedPluginIds.size !== browserArtifactLeases.length
+      || browserArtifactLeases.some(lease => {
+        const candidate = mutation.candidate.plugins.find(plugin => plugin.id === lease.pluginId)
+        return candidate?.enabled !== true || candidate.moduleGeneration !== lease.moduleGeneration
+          || !mutation.affectedPluginIds.includes(lease.pluginId)
+      })
+      || mutation.affectedPluginIds.some(pluginId => {
+        const activeLease = this.activeArtifactLeases.get(pluginId)
+        const candidate = mutation.candidate.plugins.find(plugin => plugin.id === pluginId)
+        return activeLease !== undefined && candidate?.enabled === true
+          && candidate.moduleGeneration !== activeLease.moduleGeneration
+          && pluginId !== mutation.targetId && !leasedPluginIds.has(pluginId)
+      })
+    ) {
+      throw new Error('candidate browser graph leases do not match the affected dependency closure')
+    }
     const runtimePackage = mutation.package
     if (
       runtimePackage !== undefined
@@ -665,15 +904,31 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
           try {
             await session.send('Runtime.evaluate', {
               expression:
-                'delete globalThis.__cordisxPendingPluginModuleV1; delete globalThis.__cordisxPendingPluginModuleFactoryV1',
+                'delete globalThis.__cordisxPendingPluginModuleV1; delete globalThis.__cordisxPendingPluginModuleFactoryV1; delete globalThis.__cordisxPendingPluginModulesV1',
               allowUnsafeEvalBlockedByCSP: true,
             })
-            if (isolatedArtifactSource === undefined) {
+            if (browserArtifactLeases.length > 0) {
+              const imports = browserArtifactLeases.map(lease => (
+                `${JSON.stringify(lease.pluginId)}: await (${lease.importSource})`
+              )).join(',\n')
               const artifact = await session.send('Runtime.evaluate', {
-                expression: runtimeArtifactLease === undefined
-                  ? runtimeArtifactSource ?? mutation.package!.artifactSource
-                  : `(async () => { globalThis.__cordisxPendingPluginModuleV1 = await (${runtimeArtifactSource}); return true })()`,
-                ...(runtimeArtifactLease === undefined ? {} : { awaitPromise: true }),
+                expression: `(async () => {
+                  globalThis.__cordisxPendingPluginModulesV1 = { ${imports} }
+                  return true
+                })()`,
+                awaitPromise: true,
+                allowUnsafeEvalBlockedByCSP: true,
+              })
+              if (artifact.exceptionDetails !== undefined) {
+                artifactFailure = new Error('plugin artifact evaluation failed')
+              }
+            }
+            if (
+              !browserArtifactLeases.some(lease => lease.pluginId === mutation.targetId)
+              && isolatedArtifactSource === undefined
+            ) {
+              const artifact = await session.send('Runtime.evaluate', {
+                expression: runtimeArtifactSource ?? mutation.package!.artifactSource,
                 allowUnsafeEvalBlockedByCSP: true,
               })
               if (artifact.exceptionDetails !== undefined) {
@@ -690,15 +945,18 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
           `(async () => { try {
           const module = globalThis.__cordisxPendingPluginModuleV1
           const moduleFactory = globalThis.__cordisxPendingPluginModuleFactoryV1
+          const modules = globalThis.__cordisxPendingPluginModulesV1
           delete globalThis.__cordisxPendingPluginModuleV1
           delete globalThis.__cordisxPendingPluginModuleFactoryV1
+          delete globalThis.__cordisxPendingPluginModulesV1
           const runtime = globalThis.__cordisxRuntime
           if (runtime === undefined) throw new Error('CordisX renderer runtime is unavailable')
-          const result = await runtime.stagePluginMutation(${serialized}, module, moduleFactory)
+          const result = await runtime.stagePluginMutation(${serialized}, module, moduleFactory, modules)
           return { ok: true, result }
         } catch (error) {
           delete globalThis.__cordisxPendingPluginModuleV1
           delete globalThis.__cordisxPendingPluginModuleFactoryV1
+          delete globalThis.__cordisxPendingPluginModulesV1
           return { ok: false, error: error instanceof Error ? error.message : String(error) }
         } })()`,
         )
@@ -747,8 +1005,10 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       )
     ) throw new Error('CordisX renderer publications disagree')
     const mutation = this.stagedMutations.get(transactionId)
-    if (mutation?.runtimeArtifactLease !== undefined) {
-      await this.evaluateArtifactLease(sessions, mutation.runtimeArtifactLease.publishSource)
+    if (mutation !== undefined) {
+      for (const lease of mutationArtifactLeases(mutation)) {
+        await this.evaluateArtifactLease(sessions, lease.publishSource)
+      }
     }
     this.registryEpoch = first.registryEpoch
     return first
@@ -793,12 +1053,19 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
       )
     ))
+    if (mutation !== undefined && this.browserGraphTransportReady) {
+      if (this.browserGraphBootstrapRefresh === undefined) {
+        throw new Error('browser graph transport has no future-document bootstrap refresh')
+      }
+      await this.refreshBrowserGraphBootstrap(mutation.candidate)
+    }
     if (mutation !== undefined) {
-      const candidateLease = mutation.runtimeArtifactLease
+      const candidateLeases = new Map(mutationArtifactLeases(mutation).map(lease => [lease.pluginId, lease]))
       for (const pluginId of mutation.affectedPluginIds) {
         const candidate = mutation.candidate.plugins.find(plugin => plugin.id === pluginId)
         const previousLease = this.activeArtifactLeases.get(pluginId)
-        if (pluginId === mutation.targetId && candidate?.enabled === true && candidateLease !== undefined) {
+        const candidateLease = candidateLeases.get(pluginId)
+        if (candidate?.enabled === true && candidateLease !== undefined) {
           if (previousLease !== undefined && previousLease.leaseId !== candidateLease.leaseId) {
             await this.retireArtifactLease(sessions, previousLease)
           }
@@ -828,7 +1095,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         active: mutation.previous,
         disposedAfter: mutation.candidate,
       }
-      if (mutation.runtimeArtifactLease !== undefined) mutation.runtimeArtifactLease.retire()
+      await this.retireTransactionArtifactLeases(transactionId, sessions, mutation)
       this.registryEpoch = rollbackRegistryEpoch
       this.releaseTransaction(transactionId, 'abort')
       return restored
@@ -860,8 +1127,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       throw new Error('CordisX renderer rollback observations disagree')
     }
     const mutation = this.stagedMutations.get(transactionId)
-    if (mutation?.runtimeArtifactLease !== undefined) {
-      await this.retireArtifactLease(sessions, mutation.runtimeArtifactLease)
+    if (mutation !== undefined) {
+      await this.retireTransactionArtifactLeases(transactionId, sessions, mutation)
     }
     this.registryEpoch = first.registryEpoch
     this.releaseTransaction(transactionId, 'abort')
@@ -977,8 +1244,8 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
       )
     ))
-    if (mutation?.runtimeArtifactLease !== undefined) {
-      await this.retireArtifactLease(sessions, mutation.runtimeArtifactLease)
+    if (mutation !== undefined) {
+      await this.retireTransactionArtifactLeases(transactionId, sessions, mutation)
     }
     this.releaseTransaction(transactionId, 'abort')
   }
@@ -1063,6 +1330,8 @@ interface InstalledScript {
   }
   readonly target: CdpTarget
   readonly identifier: string
+  /** Exact bootstrap registered for a future document; retained for compensating a failed promotion. */
+  readonly documentSource: string
   readonly session: CdpSession
   readonly marketplaceController: AbortController
   readonly removeBindingListener: () => void
@@ -1559,23 +1828,6 @@ async function sendPluginLifecycleBindingResponse(
   })
 }
 
-/** Keep lifecycle mutations single-flight while allowing a response-triggered follow-up request. */
-export class CdpLifecycleRequestGate {
-  #active = false
-
-  async run<Value>(task: () => Promise<Value>, respond: (value: Value) => Promise<void>): Promise<void> {
-    if (this.#active) throw new Error('another plugin lifecycle request is already active')
-    this.#active = true
-    let value: Value
-    try {
-      value = await task()
-    } finally {
-      this.#active = false
-    }
-    await respond(value)
-  }
-}
-
 async function install(
   target: CdpTarget,
   source: string,
@@ -1604,6 +1856,7 @@ async function install(
   loopbackModules = false,
   viteLoopbackPermissions?: ViteLoopbackPermissionCoordinator,
   signal?: AbortSignal,
+  hostMutationGate?: CdpLifecycleRequestGate,
 ): Promise<InstalledScript> {
   if (iconThemePreferenceBroadcast !== undefined) {
     if (iconThemePreference === undefined) {
@@ -1626,6 +1879,7 @@ async function install(
   const iconThemePreferenceController = iconThemePreference === undefined ? undefined : new AbortController()
   const lifecycleController = lifecycle === undefined ? undefined : new AbortController()
   const publisherGrantController = publisherGrant === undefined ? undefined : new AbortController()
+  const lifecycleRequests = hostMutationGate ?? new CdpLifecycleRequestGate()
   let removeBindingListener = (): void => {}
   let removeProviderBindingListener = (): void => {}
   let removeHistoryBindingListener = (): void => {}
@@ -1823,7 +2077,7 @@ async function install(
             activeConfigRequests += 1
             let value: unknown
             try {
-              value = await config.handle(request)
+              value = await lifecycleRequests.exclusive(async () => await config.handle(request))
             } finally {
               activeConfigRequests -= 1
             }
@@ -1918,7 +2172,7 @@ async function install(
             activeServiceConfigRequests += 1
             let value: unknown
             try {
-              value = await serviceConfig.handle(request)
+              value = await lifecycleRequests.exclusive(async () => await serviceConfig.handle(request))
             } finally {
               activeServiceConfigRequests -= 1
             }
@@ -1950,7 +2204,7 @@ async function install(
             const raw = JSON.parse(payload) as { requestId?: unknown }
             requestId = typeof raw.requestId === 'string' ? raw.requestId : requestId
             if (credentialController?.signal.aborted === true) throw new Error('channel credential bridge is closed')
-            const value = await credential.handle(raw)
+            const value = await lifecycleRequests.exclusive(async () => await credential.handle(raw))
             await sendChannelCredentialBindingResponse(session, { requestId, ok: true, value })
           } catch {
             await sendChannelCredentialBindingResponse(session, {
@@ -1972,7 +2226,7 @@ async function install(
             const raw = JSON.parse(payload) as { requestId?: unknown }
             requestId = typeof raw.requestId === 'string' ? raw.requestId : requestId
             if (actionsController?.signal.aborted === true) throw new Error('channel action bridge is closed')
-            const value = await actions.handle(raw)
+            const value = await lifecycleRequests.exclusive(async () => await actions.handle(raw))
             await sendChannelActionsBindingResponse(session, { requestId, ok: true, value })
           } catch {
             await sendChannelActionsBindingResponse(session, {
@@ -2005,7 +2259,9 @@ async function install(
             }
             activePermissionRequests += 1
             try {
-              const value = await persistPermissionPolicies(permission, request.records)
+              const value = await lifecycleRequests.exclusive(
+                async () => await persistPermissionPolicies(permission, request.records),
+              )
               await sendPermissionBindingResponse(session, { requestId, ok: true, value })
             } finally {
               activePermissionRequests -= 1
@@ -2190,7 +2446,6 @@ async function install(
         })()
       })
     }
-    const lifecycleRequests = new CdpLifecycleRequestGate()
     if (lifecycle !== undefined) {
       removeLifecycleBindingListener = session.onEvent('Runtime.bindingCalled', params => {
         if (params.name !== PLUGIN_LIFECYCLE_BINDING || typeof params.payload !== 'string') return
@@ -2205,7 +2460,27 @@ async function install(
             requestId = request.requestId
             if (lifecycleController?.signal.aborted === true) throw new Error('plugin lifecycle bridge is closed')
             await lifecycleRequests.run(
-              async () => await handlePluginLifecycleBindingRequest(lifecycle.handler, request),
+              async () => {
+                const value = await handlePluginLifecycleBindingRequest(lifecycle.handler, request)
+                if (request.kind !== 'bundle-snapshot-v1') {
+                  try {
+                    if (request.kind === 'bundle-operation-v1') {
+                      await lifecycle.runtime.refreshBrowserGraphBootstrap(
+                        await lifecycle.handler.coordinator.store.loadActive(),
+                      )
+                    }
+                    if (lifecycle.handler.bundleCoordinator !== undefined) {
+                      await lifecycle.runtime.synchronizePluginBundles(
+                        await lifecycle.handler.bundleCoordinator.snapshot(),
+                      )
+                    }
+                  } catch (error) {
+                    lifecycle.runtime.terminal(error)
+                    throw error
+                  }
+                }
+                return value
+              },
               async value => await sendPluginLifecycleBindingResponse(session, { requestId, ok: true, value }),
             )
           } catch {
@@ -2248,25 +2523,7 @@ async function install(
     const documentSource = newDocumentSource ?? source
     const productionDocumentSource = reloadInstallId === undefined || viteDevelopment
       ? undefined
-      : `globalThis.__cordisxProductionInstallId = ${JSON.stringify(reloadInstallId)};
-globalThis.__cordisxProductionBootstrapState = {
-  installId: ${JSON.stringify(reloadInstallId)},
-  status: 'evaluating',
-};
-try {
-${documentSource}
-  globalThis.__cordisxProductionBootstrapState = {
-    installId: ${JSON.stringify(reloadInstallId)},
-    status: 'evaluated',
-  };
-} catch (error) {
-  globalThis.__cordisxProductionBootstrapState = {
-    installId: ${JSON.stringify(reloadInstallId)},
-    status: 'failed',
-    error: error instanceof Error ? error.stack ?? error.message : String(error),
-  };
-  throw error;
-}`
+      : productionBootstrapSource(documentSource, reloadInstallId)
     const added = await abortable(
       session.send(
         'Page.addScriptToEvaluateOnNewDocument',
@@ -2333,6 +2590,12 @@ ${documentSource}
       if (lifecycle !== undefined) {
         await lifecycle.handler.coordinator.recover()
         await generationRuntime.synchronizeRecoveredActivation(session)
+        if (lifecycle.handler.bundleCoordinator !== undefined) {
+          await generationRuntime.synchronizePluginBundlesFor(
+            session,
+            await lifecycle.handler.bundleCoordinator.snapshot(),
+          )
+        }
       }
       // It becomes a normal generation participant only after its bootstrap
       // and recovered/private projections are ready. Committing the reserved
@@ -2352,6 +2615,7 @@ ${documentSource}
       ...(loopbackModules ? { loopbackModules: true } : {}),
       ...(viteLoopbackPermission === undefined ? {} : { viteLoopbackPermission }),
       identifier,
+      documentSource,
       session,
       marketplaceController,
       removeBindingListener,
@@ -2581,6 +2845,11 @@ export interface WatchInjectionOptions {
   readonly hasLoopbackGraph?: boolean
   /** Production compatibility reload is restricted to a Host process launched by this watcher. */
   readonly launcherOwnedNativeTarget?: boolean
+  /** Rebuild the exact current last-good renderer before the first production browser graph is admitted. */
+  readonly productionGraphBootstrap?: (
+    active: CordisXPluginActivationRecordV1,
+    registryEpoch: number,
+  ) => Promise<ProductionGraphBootstrap>
   readonly port: number
   /** Latest immutable bootstrap. Existing renderers are never reinjected when it changes. */
   readonly source: string | (() => string)
@@ -2637,6 +2906,27 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
   }
   const installed = new Map<string, InstalledScript>()
   const viteLoopbackPermissions = new ViteLoopbackPermissionCoordinator(options.port)
+  const hostMutationGate = new CdpLifecycleRequestGate()
+  let fatalProductionGraphError: unknown
+  let latestProductionBootstrap: ProductionGraphBootstrap | undefined
+  const latchProductionGraphError = (error: unknown): void => {
+    fatalProductionGraphError ??= error
+  }
+  const productionGraphOperations: ProductionGraphOperations<InstalledScript> = {
+    injectionTimeoutMs: CDP_INJECTION_TIMEOUT_MS,
+    permissions: viteLoopbackPermissions,
+    signal: options.signal,
+    isNativeTarget: target => nativeAppTarget(target as CdpTarget),
+    replace: (current, replacement) => {
+      installed.set(current.target.id, { ...current, ...replacement })
+    },
+    disposeRenderer: async record => {
+      await evaluateRuntimeOperation(record.session, RENDERER_DISPOSE_EXPRESSION, CDP_INJECTION_TIMEOUT_MS)
+    },
+    waitForBootstrap: async (record, installId, deadline, signal) => {
+      await waitForProductionBootstrap(record.session, installId, deadline, signal)
+    },
+  }
   const iconThemePreferenceBroadcast = options.iconThemePreferencePersistence === undefined
     ? undefined
     : options.iconThemePreferenceBroadcastHub ?? new IconThemePreferenceBroadcastHub(
@@ -2646,87 +2936,178 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
   if (iconThemePreferenceBroadcast !== undefined && options.iconThemePreferencePersistence !== undefined) {
     iconThemePreferenceBroadcast.assertScope(options.iconThemePreferencePersistence)
   }
+  if (options.pluginLifecycle !== undefined) {
+    if (options.hasLoopbackGraph === true) options.pluginLifecycle.runtime.markBrowserGraphTransportReady()
+    options.pluginLifecycle.runtime.setBrowserGraphTerminalError(latchProductionGraphError)
+    options.pluginLifecycle.runtime.setBrowserGraphAdmission(
+      options.launcherOwnedNativeTarget !== true
+        || options.pluginArtifactOrigin === undefined
+        || options.productionGraphBootstrap === undefined
+        ? undefined
+        : async input =>
+          await hostMutationGate.exclusive(async () => {
+            const records = input.sessions.map(session =>
+              [...installed.values()].find(record => record.session === session)
+            )
+            if (records.some(record => record === undefined)) {
+              throw new Error('browser graph admission renderer set is stale')
+            }
+            const bootstrap = await options.productionGraphBootstrap!(input.active, input.expectedRegistryEpoch)
+            try {
+              const promotion = await promoteProductionGraph(
+                records as InstalledScript[],
+                bootstrap,
+                productionGraphOperations,
+              )
+              return {
+                commit: () => {
+                  latestProductionBootstrap = bootstrap
+                },
+                rollback: async () => {
+                  try {
+                    await promotion.rollback()
+                  } catch (error) {
+                    latchProductionGraphError(error)
+                    throw error
+                  }
+                },
+              }
+            } catch (error) {
+              if (
+                error instanceof AggregateError
+                && error.message.includes('compensation was incomplete')
+              ) latchProductionGraphError(error)
+              throw error
+            }
+          }),
+    )
+    options.pluginLifecycle.runtime.setBrowserGraphBootstrapRefresh(
+      options.launcherOwnedNativeTarget !== true
+        || options.pluginArtifactOrigin === undefined
+        || options.productionGraphBootstrap === undefined
+        ? undefined
+        : async (active, registryEpoch) =>
+          await hostMutationGate.exclusive(async () => {
+            const bootstrap = await options.productionGraphBootstrap!(active, registryEpoch)
+            try {
+              await refreshProductionGraphBootstraps(
+                [...installed.values()],
+                bootstrap,
+                productionGraphOperations,
+              )
+              latestProductionBootstrap = bootstrap
+            } catch (error) {
+              if (
+                error instanceof AggregateError
+                && error.message.includes('compensation was incomplete')
+              ) latchProductionGraphError(error)
+              throw error
+            }
+          }),
+    )
+  }
+  let watcherFailure: unknown
   try {
     while (!options.signal.aborted) {
       let attemptedReloadTarget: 'Vite' | 'production' | undefined
       try {
-        const candidates = injectableTargets(await listTargets(options.port))
-        const targets = options.viteDevelopment === true || options.hasLoopbackGraph === true
-          ? candidates.filter(nativeAppTarget)
-          : candidates
-        if (options.hasLoopbackGraph === true && candidates.length > 0 && targets.length === 0) {
-          attemptedReloadTarget = 'production'
-          throw new Error('production loopback graph requires a native app:// renderer target')
-        }
-        const live = new Set(targets.map(target => target.id))
-        for (const [id, record] of installed) {
-          if (live.has(id)) continue
-          await uninstall(record, viteLoopbackPermissions).catch(() => undefined)
-          installed.delete(id)
-        }
-        for (const target of targets) {
-          const current = installed.get(target.id)
-          if (
-            current !== undefined
-            && current.target.webSocketDebuggerUrl === target.webSocketDebuggerUrl
-            && !current.session.isClosed()
-          ) continue
-          let stale: InstalledScript | undefined
-          if (current !== undefined) {
-            await uninstall(current, viteLoopbackPermissions).catch(() => undefined)
-            installed.delete(target.id)
-            stale = current
+        await hostMutationGate.exclusive(async () => {
+          if (fatalProductionGraphError !== undefined) {
+            attemptedReloadTarget = 'production'
+            throw fatalProductionGraphError
           }
-          const provider = options.providerFleet === undefined || options.providerBridgeToken === undefined
-            ? undefined
-            : { fleet: options.providerFleet, token: options.providerBridgeToken }
-          const history = options.agentHistoryHost === undefined || options.agentHistoryBridgeToken === undefined
-            ? undefined
-            : { host: options.agentHistoryHost, token: options.agentHistoryBridgeToken }
-          attemptedReloadTarget = options.viteDevelopment === true
-            ? 'Vite'
-            : options.hasLoopbackGraph === true
-            ? 'production'
-            : undefined
-          const record = await install(
-            target,
-            typeof options.source === 'string' ? options.source : options.source(),
-            provider,
-            history,
-            options.configBridge,
-            options.ownerDocuments,
-            options.serviceConfigBridge,
-            options.channelCredentialBridge,
-            options.channelActionsBridge,
-            options.permissionPersistence,
-            options.iconThemePreferencePersistence,
-            iconThemePreferenceBroadcast,
-            options.pluginLifecycle,
-            options.developmentRuntime,
-            options.publisherGrant,
-            options.certifiedPermission,
-            options.newDocumentSource === undefined
+          const candidates = injectableTargets(await listTargets(options.port))
+          const browserGraphTransport = options.hasLoopbackGraph === true
+            || options.pluginLifecycle?.runtime.requiresBrowserGraphTransport() === true
+          const targets = options.viteDevelopment === true || browserGraphTransport
+            ? candidates.filter(nativeAppTarget)
+            : candidates
+          if (browserGraphTransport && candidates.length > 0 && targets.length === 0) {
+            attemptedReloadTarget = 'production'
+            throw new Error('production loopback graph requires a native app:// renderer target')
+          }
+          const live = new Set(targets.map(target => target.id))
+          for (const [id, record] of installed) {
+            if (live.has(id)) continue
+            await uninstall(record, viteLoopbackPermissions)
+            installed.delete(id)
+          }
+          for (const target of targets) {
+            const current = installed.get(target.id)
+            if (
+              current !== undefined
+              && current.target.webSocketDebuggerUrl === target.webSocketDebuggerUrl
+              && !current.session.isClosed()
+            ) continue
+            let stale: InstalledScript | undefined
+            if (current !== undefined) {
+              await uninstall(current, viteLoopbackPermissions)
+              installed.delete(target.id)
+              stale = current
+            }
+            const provider = options.providerFleet === undefined || options.providerBridgeToken === undefined
               ? undefined
-              : typeof options.newDocumentSource === 'string'
-              ? options.newDocumentSource
-              : options.newDocumentSource(),
-            stale,
-            options.viteDevelopment,
-            options.viteDevelopment === true || options.hasLoopbackGraph === true,
-            viteLoopbackPermissions,
-            options.signal,
-          )
-          installed.set(target.id, record)
-          options.onReady?.()
-          options.onStatus?.(`injected target ${target.id} (${target.title || target.url})`)
-        }
+              : { fleet: options.providerFleet, token: options.providerBridgeToken }
+            const history = options.agentHistoryHost === undefined || options.agentHistoryBridgeToken === undefined
+              ? undefined
+              : { host: options.agentHistoryHost, token: options.agentHistoryBridgeToken }
+            const selectedSource = latestProductionBootstrap?.source
+              ?? (typeof options.source === 'string'
+                ? options.source
+                : options.source())
+            const selectedNewDocumentSource = latestProductionBootstrap === undefined
+              ? options.newDocumentSource === undefined
+                ? undefined
+                : typeof options.newDocumentSource === 'string'
+                ? options.newDocumentSource
+                : options.newDocumentSource()
+              : latestProductionBootstrap.newDocumentSource
+            if (selectedSource === undefined) {
+              throw new Error('current production browser graph bootstrap is unavailable')
+            }
+            attemptedReloadTarget = options.viteDevelopment === true
+              ? 'Vite'
+              : browserGraphTransport
+              ? 'production'
+              : undefined
+            const record = await install(
+              target,
+              selectedSource,
+              provider,
+              history,
+              options.configBridge,
+              options.ownerDocuments,
+              options.serviceConfigBridge,
+              options.channelCredentialBridge,
+              options.channelActionsBridge,
+              options.permissionPersistence,
+              options.iconThemePreferencePersistence,
+              iconThemePreferenceBroadcast,
+              options.pluginLifecycle,
+              options.developmentRuntime,
+              options.publisherGrant,
+              options.certifiedPermission,
+              selectedNewDocumentSource,
+              stale,
+              options.viteDevelopment,
+              options.viteDevelopment === true || browserGraphTransport,
+              viteLoopbackPermissions,
+              options.signal,
+              hostMutationGate,
+            )
+            installed.set(target.id, record)
+            options.onReady?.()
+            options.onStatus?.(`injected target ${target.id} (${target.title || target.url})`)
+          }
+        })
       } catch (error) {
         if (options.signal.aborted) {
           if (error instanceof CdpInstallationAbortedError) break
           throw error
         }
         if (attemptedReloadTarget !== undefined) {
-          throw new Error(
+          throw new AggregateError(
+            [error],
             `CordisX ${attemptedReloadTarget} renderer installation failed: ${
               error instanceof Error ? error.message : String(error)
             }`,
@@ -2736,11 +3117,21 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
       }
       await delay(750, options.signal)
     }
+  } catch (error) {
+    watcherFailure = error
   } finally {
     const cleanup = await Promise.allSettled(
       [...installed.values()].map(record => uninstall(record, viteLoopbackPermissions)),
     )
     const failures = cleanup.flatMap(result => result.status === 'rejected' ? [result.reason] : [])
-    if (failures.length > 0) throw new AggregateError(failures, 'CordisX renderer cleanup failed')
+    if (failures.length > 0) {
+      throw new AggregateError(
+        watcherFailure === undefined ? failures : [watcherFailure, ...failures],
+        `CordisX renderer cleanup failed: ${
+          failures.map(error => error instanceof Error ? error.message : String(error)).join('; ')
+        }`,
+      )
+    }
   }
+  if (watcherFailure !== undefined) throw watcherFailure
 }

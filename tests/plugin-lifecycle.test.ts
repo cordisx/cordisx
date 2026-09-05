@@ -89,6 +89,11 @@ class FormalRuntime implements PluginLifecycleRuntime {
   failComplete = false
   failRollback = false
   failFinalizeAttempts = 0
+  readonly terminalErrors: unknown[] = []
+
+  terminal(error: unknown): void {
+    this.terminalErrors.push(error)
+  }
 
   prepare(transactionId: string) {
     this.calls.push('prepare')
@@ -485,6 +490,115 @@ async function install(
 }
 
 describe('launcher plugin lifecycle coordinator', () => {
+  it('rejects first browser graph admission before authority prepare and preserves durable last-good', async () => {
+    const { root, home } = await workspace()
+    class AdmissionRejectingRuntime extends FormalRuntime {
+      async prepareBrowserGraph(): Promise<never> {
+        this.calls.push('prepareBrowserGraph')
+        throw new Error('fixture browser graph admission failed')
+      }
+    }
+    const runtime = new AdmissionRejectingRuntime()
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      runtime,
+    })
+    const sourceDirectory = await localPackage({ root, id: 'admission-fixture' })
+    const planned = await coordinator.handle(request({ kind: 'inspect-local', sourceDirectory }))
+    expect(planned).toMatchObject({ outcome: 'planned', operation: 'install' })
+    const before = await coordinator.store.loadActive()
+    const applied = await coordinator.handle(request({
+      kind: 'install',
+      candidateId: planned.candidateId!,
+      authorizationDecision: decision(planned.authorizationPlan!),
+    }))
+    expect(applied).toMatchObject({
+      outcome: 'rejected',
+      revision: 0,
+      error: { code: 'readiness-failed' },
+    })
+    expect(runtime.calls).toEqual(['prepareBrowserGraph'])
+    expect(await coordinator.store.loadActive()).toEqual(before)
+    await expect(coordinator.store.loadCandidate(planned.candidateId!)).rejects.toThrow()
+    await expect(coordinator.prepareRecovery()).resolves.toEqual([])
+  })
+
+  it('routes browser graph update and enable through pre-authority admission', async () => {
+    for (const operation of ['update', 'enable'] as const) {
+      const { root, home } = await workspace()
+      class AdmissionRuntime extends FormalRuntime {
+        rejectAdmission = false
+        async prepareBrowserGraph(transactionId: string) {
+          this.calls.push('prepareBrowserGraph')
+          if (this.rejectAdmission) throw new Error('fixture browser graph admission failed')
+          return super.prepare(transactionId)
+        }
+      }
+      const runtime = new AdmissionRuntime()
+      const coordinator = new PluginLifecycleCoordinator({
+        homeDir: home,
+        profileId: 'work',
+        runtimeGeneration: 'runtime-1',
+        permissionPolicies: [],
+        runtime,
+      })
+      const first = await install(
+        coordinator,
+        await localPackage({ root, id: `admission-${operation}`, version: '1.0.0' }),
+        0,
+      )
+      expect(first.applied.outcome).toBe('applied')
+      let expectedRevision = 1
+      if (operation === 'enable') {
+        const disablePlan = await coordinator.handle(
+          request({ kind: 'disable', pluginId: `admission-${operation}`, impactToken: 'probe' }, expectedRevision),
+        )
+        const disabled = await coordinator.handle(request({
+          kind: 'disable',
+          pluginId: `admission-${operation}`,
+          impactToken: disablePlan.impactToken!,
+        }, expectedRevision))
+        expect(disabled.outcome).toBe('applied')
+        expectedRevision = 2
+      }
+      runtime.calls.length = 0
+      const before = await coordinator.store.loadActive()
+      const planned = operation === 'update'
+        ? await coordinator.handle(request({
+          kind: 'inspect-local',
+          sourceDirectory: await localPackage({ root, id: 'admission-update', version: '2.0.0' }),
+        }, expectedRevision))
+        : await coordinator.handle(request({ kind: 'enable', pluginId: 'admission-enable' }, expectedRevision))
+      expect(planned).toMatchObject({ outcome: 'planned', operation })
+      runtime.rejectAdmission = true
+      const applied = await coordinator.handle(request(
+        operation === 'update'
+          ? {
+            kind: 'update',
+            candidateId: planned.candidateId!,
+            authorizationDecision: decision(planned.authorizationPlan!),
+          }
+          : {
+            kind: 'enable',
+            pluginId: 'admission-enable',
+            authorizationDecision: decision(planned.authorizationPlan!),
+          },
+        expectedRevision,
+      ))
+      expect(applied).toMatchObject({
+        outcome: 'rejected',
+        revision: expectedRevision,
+        error: { code: 'readiness-failed' },
+      })
+      expect(runtime.calls).toEqual(['prepareBrowserGraph'])
+      expect(await coordinator.store.loadActive()).toEqual(before)
+      await expect(coordinator.prepareRecovery()).resolves.toEqual([])
+    }
+  })
+
   it('reviews package-v4/manifest-v5 through V4 on the same lifecycle authority and consumes Host-owned exact certification', async () => {
     const { root, home } = await workspace()
     const runtime = new FormalRuntime()
@@ -827,6 +941,7 @@ describe('launcher plugin lifecycle coordinator', () => {
     )
     expect(transientResult.applied).toMatchObject({ outcome: 'applied', revision: 1 })
     expect(transientRuntime.calls).toEqual(['prepare', 'stage', 'publish', 'complete', 'finalize', 'finalize'])
+    expect(transientRuntime.terminalErrors).toEqual([])
     expect((await transient.store.loadActive()).plugins.map(plugin => plugin.id)).toEqual(['transient-finalize'])
 
     const persistentWorkspace = await workspace()
@@ -854,6 +969,9 @@ describe('launcher plugin lifecycle coordinator', () => {
     })
     expect(persistentRuntime.calls).toEqual(['prepare', 'stage', 'publish', 'complete', 'finalize', 'finalize'])
     expect(persistentRuntime.calls).not.toContain('rollback')
+    expect(persistentRuntime.terminalErrors).toEqual([
+      expect.objectContaining({ message: 'formal finalization interrupted' }),
+    ])
     expect((await persistent.store.loadActive()).plugins.map(plugin => plugin.id)).toEqual(['persistent-finalize'])
   })
 

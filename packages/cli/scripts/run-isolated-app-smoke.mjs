@@ -124,7 +124,9 @@ async function waitForExit(child, milliseconds) {
 
 async function stop(child) {
   if (exited(child)) return
-  signal(child, 'SIGINT')
+  // Give the launcher a bounded chance to dispose renderer bindings, restore
+  // browser policy, and stop its owned App before escalating to the process group.
+  child.kill('SIGINT')
   if (await waitForExit(child, 5_000)) return
   signal(child, 'SIGTERM')
   if (await waitForExit(child, 5_000)) return
