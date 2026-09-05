@@ -4,11 +4,6 @@ import { createRoot } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@oneworks/avatar-react/style.css', () => ({ default: '' }))
-vi.mock('@oneworks/avatar-react', () => ({
-  Avatar: ({ className }: { readonly className?: string }) => <span className={className} data-avatar-renderer="true" />,
-}))
-
 import type { ManagerModel } from '../packages/cli/src/renderer/manager.js'
 import type { ManagerContentPresentation, ManagedManagerPageMount } from '../packages/cli/src/renderer/navigation.js'
 import { ManagerContentPage } from '../packages/cli/src/renderer/manager/pages/ManagerContentPage.js'
@@ -28,7 +23,7 @@ const previous = {
 afterEach(() => Object.assign(globalThis, previous))
 
 describe('Host Manager entity record summary', () => {
-  it('renders avatar summary before tabs and keeps plugin body in the scroll panel', async () => {
+  it('renders a semantic summary icon before tabs and keeps plugin body in the scroll panel', async () => {
     const dom = new JSDOM('<!doctype html><html data-cordisx-app-theme="dark"><body><div id="root"></div></body></html>')
     Object.assign(globalThis, {
       window: dom.window, document: dom.window.document,
@@ -86,6 +81,7 @@ describe('Host Manager entity record summary', () => {
       expect(summary.textContent).not.toContain('lead@')
       expect(summary.querySelector('[role="status"]')).toBeNull()
       expect(summary.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Lead')
+      expect(summary.querySelector('[data-host-icon]')).not.toBeNull()
       expect(panel.querySelector('[data-entity-business-body]')?.textContent).toBe('Plugin prompt content')
 
       const first = tabs.querySelector<HTMLButtonElement>('[data-manager-content-tab="overview"]')!

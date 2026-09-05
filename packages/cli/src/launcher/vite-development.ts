@@ -27,6 +27,27 @@ const SHARED_MODULES = new Set([
   'cordisx/react/jsx-dev-runtime',
   'cordisx/ui',
 ])
+const COMMONJS_INTEROP_LEAVES = [
+  'classnames',
+  'dayjs',
+  'debug',
+  'extend',
+  'hoist-non-react-statics',
+  'prop-types',
+  'raf',
+  'react-fast-compare',
+  'react-is',
+  'style-to-js',
+  'use-sync-external-store/shim',
+  'use-sync-external-store/shim/index.js',
+] as const
+const SHARED_REACT_INTEROP_LEAVES = [
+  'react',
+  'react/jsx-runtime',
+  'react/jsx-dev-runtime',
+  'react-dom',
+  'react-dom/client',
+] as const
 const sourceMode = import.meta.url.endsWith('.ts')
 const extension = sourceMode ? 'ts' : 'js'
 const rendererPath = fileURLToPath(new URL(`../renderer/runtime.${extension}`, import.meta.url))
@@ -195,6 +216,16 @@ export async function startNativeViteServer(
   const cliRoot = cliPackage.root
   const workspaceRoot = await realpath(initialConfig.projectRoot ?? initialConfig.rootDir)
     .catch(() => path.resolve(initialConfig.projectRoot ?? initialConfig.rootDir))
+  const workspaceRequire = createRequire(path.join(workspaceRoot, 'package.json'))
+  const commonJsInteropLeaves = serverOptions.prebundleHostDependencies === true
+    ? COMMONJS_INTEROP_LEAVES.flatMap(specifier => {
+        for (const resolver of [workspaceRequire, require]) {
+          try { return [{ specifier, entry: resolver.resolve(specifier) }] }
+          catch { /* Try the other package boundary. */ }
+        }
+        return []
+      })
+    : []
   const generatedRoot = path.join(cliRoot, 'dist') + path.sep
   const port = await findFreeLoopbackPort()
   const cacheKey = createHash('sha256')
@@ -281,9 +312,9 @@ export async function startNativeViteServer(
     const current = generations.get(plugin.id)
     if (current !== undefined) return current
     const info = await localDevelopmentPackageInfo(plugin.entry)
-    const isolatedBuild = info.manifest === undefined
-      ? undefined
-      : await buildLocalDevelopmentPlugin(plugin.entry, { sourcemap: false })
+    const isolatedBuild = info.manifest?.schemaVersion === 7
+      ? await buildLocalDevelopmentPlugin(plugin.entry, { sourcemap: false })
+      : undefined
     if (isolatedBuild !== undefined && isolatedBuild.id !== plugin.id) {
       throw new Error(`isolated development plugin id ${isolatedBuild.id} does not match config id ${plugin.id}`)
     }
@@ -313,9 +344,9 @@ export async function startNativeViteServer(
   const bumpGeneration = async (plugin: CordisXConfigPlugin): Promise<DevelopmentGeneration> => {
     const previous = await ensureGeneration(plugin)
     const info = await localDevelopmentPackageInfo(plugin.entry)
-    const isolatedBuild = info.manifest === undefined
-      ? undefined
-      : await buildLocalDevelopmentPlugin(plugin.entry, { sourcemap: false })
+    const isolatedBuild = info.manifest?.schemaVersion === 7
+      ? await buildLocalDevelopmentPlugin(plugin.entry, { sourcemap: false })
+      : undefined
     if (isolatedBuild !== undefined && isolatedBuild.id !== plugin.id) {
       throw new Error(`isolated development plugin id ${isolatedBuild.id} does not match config id ${plugin.id}`)
     }
@@ -807,13 +838,29 @@ if (import.meta.hot) {
       appType: 'custom',
       plugins: [integration, react()],
       ...(serverOptions.prebundleHostDependencies === true ? {
-        optimizeDeps: { entries: [rendererPath, ...initialGenerations
-          .filter(item => item.isolatedArtifactSource === undefined)
-          .map(item => item.realEntry)] },
+        optimizeDeps: {
+          entries: [rendererPath, ...initialGenerations
+            .filter(item => item.isolatedArtifactSource === undefined)
+            .map(item => item.realEntry)],
+          // Host and plugin ESM graphs can reach these CommonJS leaves after
+          // Vite's static scan. Resolve only installed leaves at their owning
+          // boundary so fixtures need not install unrelated product peers.
+          // Shared React is reached through Host virtual modules. Prebundle
+          // every CommonJS entry before injection so Vite never invalidates a
+          // loaded React DOM graph during an on-demand dependency restart.
+          include: [
+            ...SHARED_REACT_INTEROP_LEAVES,
+            ...commonJsInteropLeaves.map(item => item.specifier),
+          ],
+        },
       } : {}),
       resolve: {
         dedupe: ['react', 'react-dom'],
         alias: [
+          ...commonJsInteropLeaves.map(item => ({
+            find: new RegExp(`^${item.specifier.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}$`, 'u'),
+            replacement: item.entry,
+          })),
           { find: /^react$/, replacement: path.join(reactPackageRoot, 'index.js') },
           { find: /^react\/(.+)$/, replacement: `${normalizePath(reactPackageRoot)}/$1` },
           { find: /^react-dom$/, replacement: path.join(reactDomPackageRoot, 'index.js') },

@@ -73,8 +73,11 @@ renderer generation replacement, and App restart remain distinct operations.
 
 One Host runtime owns plugin fibers and the shared React singleton. Reload and
 replacement retire registrations and pending operations through that lifecycle.
-The conversation renderer consumes validated immutable state; commands and
-route activation retain exact owner, Session, binding, and generation fences.
+Product pages may own their complete internal renderer inside a controlled page
+body, while the Host retains routing, outlet, lifecycle, and authority fences.
+Commands and route activation retain exact owner, Session, binding, and
+generation coordinates; product visuals cross into Host-owned rows only as
+validated generic snapshots.
 
 See [renderer and conversation composition](renderer-runtime.md#renderer-plane),
 [the public React authoring boundary](plugin-react-runtime.md), and

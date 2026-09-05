@@ -290,16 +290,15 @@ share one `:roomId` route without becoming selected together. The Host does not
 persist this collection: a plugin or provider that needs reload continuity
 rehydrates its source before registration.
 
-One collection item may replace its icon with the additive structured
-`leadingVisual: { kind: 'room-composite-avatar', participants }` projection.
-Participants are an ordered, duplicate-free list of at most 16 stable opaque
-participant ids and optional controlled `AgentAvatarRef` values. The Host
-validates, detaches, freezes, and renders the exact row snapshot as the common
-0/1/2/3/4+ Room composite; it never derives participants from the current
-route, Room title, conversation selection, or another row. Invalid refs, raw
-URLs/paths/data, oversized lists, duplicate ids, and `icon` plus
-`leadingVisual` fail closed without replacing the prior revision. Ordinary
-navigation entries such as New room keep their semantic Host icon. Native
+Navigation Collection v3 may replace its icon with
+`leadingVisual: { kind: 'image', image }`. The image is a closed, immutable
+`RasterImageSnapshotV1`: a bounded canonical base64 PNG whose signature,
+dimensions, RGBA8 IHDR, chunks, CRCs, terminal IEND, critical chunks, and APNG
+exclusion are validated before publication. The Host creates only a decorative
+image element inside its fixed 16-pixel seat. It never receives product
+identity, participant, room, renderer, URL, SVG, DOM, or callback semantics.
+Invalid images and `icon` plus `leadingVisual` fail closed without replacing
+the prior accepted revision. V1 and v2 collections remain icon-only. Native
 Recent tasks remain outside this collection contract and renderer.
 
 Environment sections and rows use snapshot/update handles for dynamic values.
@@ -463,10 +462,12 @@ Page metadata v2 adds only `chrome: standard | body-only`. `standard` preserves
 the complete host chrome projection. `body-only` mounts the page body directly,
 without creating the chrome, breadcrumb, tab, or header-action rows; the host
 still uses the localized title for accessible naming and diagnostics. This is
-a general contract gated by outlet policy: the current host accepts it only in
-`session.content`, where the native session header remains present and provides
-an external control seat. `app` and `main` reject it instead of leaving an
-unclosable page. Plugins cannot provide substitute DOM/CSS/selectors.
+a general contract gated by outlet policy: the current Host accepts it in
+`session.content`, `manager.settings.content`, and `main`. A product using
+`main` owns its complete page-internal chrome while the persistent sidebar and
+Host routing retain the external navigation boundary. `app` and
+`manager.content` reject it. Plugins still cannot provide Host selectors or
+mount outside the page body.
 
 Surface contribution v3 route actions may declare
 `routeBehavior: navigate | toggle`. Toggle state is derived from the exact

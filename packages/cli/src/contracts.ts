@@ -1,21 +1,5 @@
 import type { Context, Disposable, Effect } from '@deepseek-ai/cordis'
-import type {
-  AgentConversationShellBinding,
-  AgentConversationShellSource,
-} from '@cordisx/protocol/agent-conversation-shell/v1'
-import type {
-  AgentConversationShellBinding as AgentConversationShellBindingV2,
-  AgentConversationShellSource as AgentConversationShellSourceV2,
-} from '@cordisx/protocol/agent-conversation-shell/v2'
-import type {
-  AgentConversationShellCommandContext,
-  AgentConversationShellBinding as AgentConversationShellBindingV3,
-  AgentConversationShellSource as AgentConversationShellSourceV3,
-} from '@cordisx/protocol/agent-conversation-shell/v3'
-import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV7 } from '@cordisx/protocol/agent-conversation-shell/v7'
-import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV8 } from '@cordisx/protocol/agent-conversation-shell/v8'
-import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV9 } from '@cordisx/protocol/agent-conversation-shell/v9'
-import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
+import type { RasterImageSnapshotV1 } from '@cordisx/protocol/raster-image/v1'
 import type { ManagerCollectionRegistryV1 } from '@cordisx/protocol/manager-collection/v1'
 import type { ManagerContentNavigationDeclarationV2 } from '@cordisx/protocol/manager-content-navigation/v2'
 import type {
@@ -70,34 +54,7 @@ export type {
   CordisXConnectorSubscribeRuntimeResult,
   CordisXConnectorSubscription,
 } from './renderer/connectors.js'
-export type {
-  AgentConversationAction,
-  AgentConversationApprovalAction,
-  AgentConversationApprovalItem,
-  AgentConversationItem,
-  AgentConversationMessageItem,
-  AgentConversationMessageSemantic,
-  AgentConversationParticipant,
-  AgentConversationRoomCollectionLeadingVisual,
-  AgentConversationRoomDescription,
-  AgentConversationRoomSettingsPatch,
-  AgentConversationRoomSettingsUpdateRequest,
-  AgentConversationRoomSettingsUpdateResult,
-  AgentConversationSelection,
-  AgentConversationShellBinding,
-  AgentConversationShellBindRequest,
-  AgentConversationShellBindResult,
-  AgentConversationShellCommandContext,
-  AgentConversationShellHost,
-  AgentConversationShellPage,
-  AgentConversationShellResult,
-  AgentConversationShellSnapshot,
-  AgentConversationShellSource,
-  AgentConversationShellSubscribeRuntimeResult,
-  AgentConversationShellSubscription,
-  AgentConversationShellSubscriptionHandle,
-  AgentConversationShellUpdate,
-} from '@cordisx/protocol/agent-conversation-shell/v3'
+export type { RasterImageSnapshotV1 } from '@cordisx/protocol/raster-image/v1'
 export type {
   ManagerCollectionAction,
   ManagerCollectionActionResultStatus,
@@ -697,8 +654,6 @@ export interface CordisXNavigationCollectionItem {
   readonly label: CordisXLocalizedText
   readonly description?: CordisXLocalizedText
   readonly icon?: CordisXIconToken
-  /** Host-rendered structured visual. It is mutually exclusive with icon. */
-  readonly leadingVisual?: CordisXNavigationCollectionLeadingVisual
   readonly route: CordisXRouteReference
   /** Lower values render first. A Room provider uses this for latest-first ordering. */
   readonly order: number
@@ -713,26 +668,19 @@ export interface CordisXNavigationCollectionItemV2 extends CordisXNavigationColl
   readonly actions?: CordisXNavigationCollectionActions
 }
 
-/** Maximum participant identities retained by one Room collection row. */
-export const CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS = 16
-
-export interface CordisXRoomCompositeAvatarParticipant {
-  /** Stable opaque identity used only inside this exact collection row. */
-  readonly participantId: string
-  /** Controlled Agent Avatar reference; raw URLs, paths and binary data are invalid. */
-  readonly avatar?: AgentAvatarRef
+/** Generic, fully computed image. The Host receives no product semantics. */
+export interface CordisXNavigationCollectionImageLeadingVisual {
+  readonly kind: 'image'
+  readonly image: RasterImageSnapshotV1
 }
 
-/**
- * Ordered Room participant projection rendered by the Host as 0, 1, 2, 3,
- * or 4+ participants. The Host never derives it from selection or title.
- */
-export interface CordisXRoomCompositeAvatarLeadingVisual {
-  readonly kind: 'room-composite-avatar'
-  readonly participants: readonly CordisXRoomCompositeAvatarParticipant[]
-}
+export type CordisXNavigationCollectionLeadingVisual = CordisXNavigationCollectionImageLeadingVisual
 
-export type CordisXNavigationCollectionLeadingVisual = CordisXRoomCompositeAvatarLeadingVisual
+/** Generic-image successor. Frozen v1/v2 collections remain icon-only. */
+export interface CordisXNavigationCollectionItemV3 extends CordisXNavigationCollectionItemV2 {
+  /** Decorative image inside the Host-owned row; mutually exclusive with icon. */
+  readonly leadingVisual?: CordisXNavigationCollectionLeadingVisual
+}
 
 /** Atomic, monotonically revised replacement for one sidebar collection. */
 export interface CordisXNavigationCollectionSnapshot {
@@ -762,6 +710,17 @@ export interface CordisXNavigationCollectionSourceV2 {
   dispose?(): void
 }
 
+export interface CordisXNavigationCollectionSnapshotV3 {
+  readonly revision: number
+  readonly items: readonly CordisXNavigationCollectionItemV3[]
+}
+
+export interface CordisXNavigationCollectionSourceV3 {
+  snapshot(): CordisXNavigationCollectionSnapshotV3
+  subscribe(listener: () => void): () => void
+  dispose?(): void
+}
+
 export interface CordisXNavigationCollectionOptions {
   readonly name: 'sidebar.navigation.items'
   readonly id: string
@@ -775,6 +734,11 @@ export interface CordisXNavigationCollectionOptions {
 /** Explicit action-capable sidebar collection registration. */
 export interface CordisXNavigationCollectionOptionsV2 extends CordisXNavigationCollectionOptions {
   readonly contract: 'cordisx.navigation-collection/v2'
+}
+
+/** Explicit generic-image collection registration. */
+export interface CordisXNavigationCollectionOptionsV3 extends CordisXNavigationCollectionOptions {
+  readonly contract: 'cordisx.navigation-collection/v3'
 }
 
 export interface CordisXNavigationCollectionRegistration {
@@ -1054,6 +1018,10 @@ export interface CordisXSlots {
     item: CordisXSurfaceMap[Name],
   ): CordisXContributionHandle<CordisXSurfaceMap[Name]>
   registerCollection(
+    options: CordisXNavigationCollectionOptionsV3,
+    source: CordisXNavigationCollectionSourceV3,
+  ): CordisXNavigationCollectionRegistration
+  registerCollection(
     options: CordisXNavigationCollectionOptionsV2,
     source: CordisXNavigationCollectionSourceV2,
   ): CordisXNavigationCollectionRegistration
@@ -1077,7 +1045,7 @@ export interface CordisXCommandContext {
   readonly arguments: CordisXJsonValue | undefined
   readonly signal: AbortSignal
   readonly invocationKey: string
-  readonly hostContext?: CordisXSurfaceInvocationContextV1 | AgentConversationShellCommandContext | AgentConversationShellCommandContextV7 | AgentConversationShellCommandContextV8 | AgentConversationShellCommandContextV9
+  readonly hostContext?: CordisXSurfaceInvocationContextV1
 }
 
 export interface CordisXSurfaceInvocationContextV1 {
@@ -1372,80 +1340,6 @@ export interface CordisXPages {
   ): Disposable<void | Promise<void>>
 }
 
-/**
- * A plugin-owned source factory invoked only after the Host issues a fresh,
- * route-scoped Protocol binding. The returned source remains data-only and is
- * disposed by the Host when its page mount, registration, or owner generation
- * ends.
- */
-export type CordisXAgentConversationShellSourceFactory = (
-  binding: Readonly<AgentConversationShellBinding>,
-) => AgentConversationShellSource | Promise<AgentConversationShellSource>
-
-export type CordisXAgentConversationShellSourceFactoryV2 = (
-  binding: Readonly<AgentConversationShellBindingV2>,
-) => AgentConversationShellSourceV2 | Promise<AgentConversationShellSourceV2>
-
-export type CordisXAgentConversationShellSourceFactoryV3 = (
-  binding: Readonly<AgentConversationShellBindingV3>,
-) => AgentConversationShellSourceV3 | Promise<AgentConversationShellSourceV3>
-
-export type CordisXAgentConversationShellSourceFactoryV4 = (
-  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellSource
-  | Promise<import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellSource>
-
-export type CordisXAgentConversationShellSourceFactoryV5 = (
-  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellSource
-  | Promise<import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellSource>
-
-export type CordisXAgentConversationShellSourceFactoryV6 = (
-  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellSource
-  | Promise<import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellSource>
-
-export type CordisXAgentConversationShellSourceFactoryV7 = (
-  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellSource
-  | Promise<import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellSource>
-
-export type CordisXAgentConversationShellSourceFactoryV8 = (
-  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellSource
-  | Promise<import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellSource>
-
-/** Shell v9 gives composer handlers a Host-issued bootstrap origin before a Room run exists. */
-export type CordisXAgentConversationShellSourceFactoryV9 = (
-  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellSource
-  | Promise<import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellSource>
-
-/** Host-owned page mount paired with one fiber-owned source registration. */
-export interface CordisXAgentConversationShellRegistration {
-  readonly mount: CordisXPageMount
-  dispose(): void
-}
-
-/** Production Agent Desktop conversation shell service. */
-export interface CordisXAgentConversationShell {
-  registerSource(factory: CordisXAgentConversationShellSourceFactory): CordisXAgentConversationShellRegistration
-  registerSource(factory: CordisXAgentConversationShellSourceFactoryV2): CordisXAgentConversationShellRegistration
-  registerSource(factory: CordisXAgentConversationShellSourceFactoryV3): CordisXAgentConversationShellRegistration
-  /** Explicit Session-runtime shell seam; it never reinterprets v4 facts as AgentLoop v3. */
-  registerSourceV4(factory: CordisXAgentConversationShellSourceFactoryV4): CordisXAgentConversationShellRegistration
-  /** Shell v5 adds only the explicit Host-owned composer shortcut policy. */
-  registerSourceV5(factory: CordisXAgentConversationShellSourceFactoryV5): CordisXAgentConversationShellRegistration
-  /** Shell v6 adds immutable actionless terminal approval replay. */
-  registerSourceV6(factory: CordisXAgentConversationShellSourceFactoryV6): CordisXAgentConversationShellRegistration
-  /** Shell v7 binds requester-authored approvals to one exact live authority. */
-  registerSourceV7(factory: CordisXAgentConversationShellSourceFactoryV7): CordisXAgentConversationShellRegistration
-  /** Shell v8 attaches a Host-generated command origin only to composer submit. */
-  registerSourceV8(factory: CordisXAgentConversationShellSourceFactoryV8): CordisXAgentConversationShellRegistration
-  /** Shell v9 always gives composer submit a Host-issued bootstrap command origin. */
-  registerSourceV9(factory: CordisXAgentConversationShellSourceFactoryV9): CordisXAgentConversationShellRegistration
-}
-
 export interface CordisXRouteDefinition<Outlet extends CordisXOutletName = CordisXOutletName> {
   /** Omitted only for the pre-versioned third-party compatibility path. */
   readonly $schema?: typeof CORDISX_ROUTE_SCHEMA_V1 | typeof CORDISX_ROUTE_SCHEMA_V2
@@ -1642,8 +1536,6 @@ declare module '@deepseek-ai/cordis' {
     slots: CordisXSlots
     commands: CordisXCommands
     pages: CordisXPages
-    /** Host-owned Agent Desktop renderer backed by a plugin data source. */
-    agentConversationShell: CordisXAgentConversationShell
     routes: CordisXRoutes
     /** Data-only Manager subroute declarations; the Host renders chrome and controls history. */
     managerContent: CordisXManagerContentNavigation

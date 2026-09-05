@@ -18,7 +18,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const protocolCommit = '6fa9bbbad0501114bece820d574d5e79a4cb3cdb'
 const protocolSource = `github:cordisx/cordisx-protocol#${protocolCommit}`
 const protocolResolvedSource = `git+ssh://git@github.com/cordisx/cordisx-protocol.git#${protocolCommit}`
-const staleProtocolCommit = 'fe449688c0ac320ed7e5cf63bffc07e71ad8b664'
+const staleProtocolCommit = 'e5f374e20a0169ef8f264e9c1878fc70ae0b5363'
 
 interface PackageManifest {
   readonly dependencies?: Readonly<Record<string, string>>

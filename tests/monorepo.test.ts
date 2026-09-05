@@ -21,9 +21,24 @@ describe('npm workspace boundary', () => {
 
     expect(root).toMatchObject({
       name: 'cordisx-monorepo',
+      version: '0.1.0-beta.2',
       private: true,
       workspaces: ['packages/*'],
+      files: expect.arrayContaining(['packages/cli/dist', 'packages/cli/package.json']),
+      bin: { cordisx: 'packages/cli/dist/src/cli.js' },
+      bundledDependencies: ['@cordisx/schemastery-ui'],
     })
+    expect(root.exports).toEqual(Object.fromEntries(Object.entries(cli.exports as Record<string, {
+      readonly types: string
+      readonly default: string
+    }>).map(([name, value]) => [name, {
+      types: `./packages/cli/${value.types.slice(2)}`,
+      default: `./packages/cli/${value.default.slice(2)}`,
+    }])))
+    expect(root.dependencies).toEqual(Object.fromEntries(
+      Object.entries(cli.dependencies as Record<string, unknown>)
+        .filter(([name]) => name !== '@vitejs/plugin-react' && name !== 'vite'),
+    ))
     expect(cli).toMatchObject({
       name: 'cordisx',
       version: '0.1.0-beta.2',

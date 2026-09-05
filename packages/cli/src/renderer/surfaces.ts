@@ -1,7 +1,5 @@
 import { Context, Service, type Effect } from '@deepseek-ai/cordis'
-import { cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import {
-  CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS,
   CORDISX_IMPLEMENTED_SURFACE_NAMES,
   CORDISX_SURFACE_NAMES,
   type CordisXCommandReference,
@@ -24,14 +22,18 @@ import {
   type CordisXNavigationItem,
   type CordisXNavigationCollectionItem,
   type CordisXNavigationCollectionItemV2,
+  type CordisXNavigationCollectionItemV3,
   type CordisXNavigationCollectionLeadingVisual,
   type CordisXNavigationCollectionOptions,
   type CordisXNavigationCollectionOptionsV2,
+  type CordisXNavigationCollectionOptionsV3,
   type CordisXNavigationCollectionRegistration,
   type CordisXNavigationCollectionSnapshot,
   type CordisXNavigationCollectionSnapshotV2,
+  type CordisXNavigationCollectionSnapshotV3,
   type CordisXNavigationCollectionSource,
   type CordisXNavigationCollectionSourceV2,
+  type CordisXNavigationCollectionSourceV3,
   type CordisXNavigationCollectionAction,
   type CordisXManagerSettingsContentTabItem,
   type CordisXManagerSettingsNavigationItem,
@@ -48,6 +50,7 @@ import {
   type CordisXToolbarItem,
   type CordisXWhen,
 } from '../contracts.js'
+import { cloneRasterImageSnapshot } from './raster-image.js'
 import { generationFromContext, ownerFromContext, qualifyOwnedId, sourceFromContext } from './ownership.js'
 import {
   ControlledSurfaceCoordinator,
@@ -214,8 +217,6 @@ function assertRoute(reference: { readonly id: string; readonly params?: Readonl
   assertKeys(reference, ['id', 'params'], `${label} route`)
 }
 
-const NAVIGATION_COLLECTION_PARTICIPANT_ID_PATTERN = /^[A-Za-z0-9._~-]{1,512}$/u
-
 function cloneNavigationCollectionLeadingVisual(
   input: CordisXNavigationCollectionLeadingVisual | undefined,
   label: string,
@@ -224,31 +225,9 @@ function cloneNavigationCollectionLeadingVisual(
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error(`${label} must be an object`)
   }
-  assertKeys(input, ['kind', 'participants'], label)
-  if (input.kind !== 'room-composite-avatar') throw new Error(`${label}.kind is invalid`)
-  if (!Array.isArray(input.participants)
-    || input.participants.length > CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS) {
-    throw new Error(`${label}.participants is invalid`)
-  }
-  const ids = new Set<string>()
-  const participants = input.participants.map((participant, index) => {
-    const participantLabel = `${label}.participants[${index}]`
-    if (participant === null || typeof participant !== 'object' || Array.isArray(participant)) {
-      throw new Error(`${participantLabel} must be an object`)
-    }
-    assertKeys(participant, ['participantId', 'avatar'], participantLabel)
-    if (!NAVIGATION_COLLECTION_PARTICIPANT_ID_PATTERN.test(participant.participantId)) {
-      throw new Error(`${participantLabel}.participantId must be an opaque identifier`)
-    }
-    if (ids.has(participant.participantId)) throw new Error(`${label}.participants has a duplicate participantId`)
-    ids.add(participant.participantId)
-    const avatar = participant.avatar === undefined ? undefined : cloneAgentAvatarRef(participant.avatar)
-    return Object.freeze({
-      participantId: participant.participantId,
-      ...(avatar === undefined ? {} : { avatar }),
-    })
-  })
-  return Object.freeze({ kind: 'room-composite-avatar', participants: Object.freeze(participants) })
+  assertKeys(input, ['kind', 'image'], label)
+  if (input.kind !== 'image') throw new Error(`${label}.kind is invalid`)
+  return Object.freeze({ kind: 'image', image: cloneRasterImageSnapshot(input.image, `${label}.image`) })
 }
 
 function assertAction(action: CordisXStructuredAction, label: string): void {
@@ -399,7 +378,7 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
     assertAction(snapshot as CordisXStructuredAction, surface)
   } else if (surface === 'sidebar.navigation.items') {
     const navigation = snapshot as Omit<CordisXNavigationItem, 'actions'> & {
-      readonly collectionContract?: 'cordisx.navigation-collection/v2'
+      readonly collectionContract?: 'cordisx.navigation-collection/v2' | 'cordisx.navigation-collection/v3'
       readonly actions?: readonly (CordisXNavigationCollectionAction | CordisXNavigationAction)[]
     }
     assertKeys(snapshot, ['label', 'description', 'icon', 'command', 'route', 'actions', 'collectionContract'], 'navigation item')
@@ -414,7 +393,8 @@ function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
       assertKeys(navigation.route, ['id', 'params'], 'navigation route')
       assertReference(navigation.route.id, 'navigation route id')
     }
-    if (navigation.collectionContract === 'cordisx.navigation-collection/v2') {
+    if (navigation.collectionContract === 'cordisx.navigation-collection/v2'
+      || navigation.collectionContract === 'cordisx.navigation-collection/v3') {
       cloneNavigationCollectionActions(navigation.actions as readonly CordisXNavigationCollectionAction[] | undefined, 'navigation collection actions')
     } else {
       for (const action of navigation.actions ?? []) {
@@ -1158,6 +1138,10 @@ export class CordisXSlotService extends Service implements CordisXSlots {
   }
 
   registerCollection(
+    options: CordisXNavigationCollectionOptionsV3,
+    source: CordisXNavigationCollectionSourceV3,
+  ): CordisXNavigationCollectionRegistration
+  registerCollection(
     options: CordisXNavigationCollectionOptionsV2,
     source: CordisXNavigationCollectionSourceV2,
   ): CordisXNavigationCollectionRegistration
@@ -1166,10 +1150,12 @@ export class CordisXSlotService extends Service implements CordisXSlots {
     source: CordisXNavigationCollectionSource,
   ): CordisXNavigationCollectionRegistration
   registerCollection(
-    options: CordisXNavigationCollectionOptions | CordisXNavigationCollectionOptionsV2,
-    source: CordisXNavigationCollectionSource | CordisXNavigationCollectionSourceV2,
+    options: CordisXNavigationCollectionOptions | CordisXNavigationCollectionOptionsV2 | CordisXNavigationCollectionOptionsV3,
+    source: CordisXNavigationCollectionSource | CordisXNavigationCollectionSourceV2 | CordisXNavigationCollectionSourceV3,
   ): CordisXNavigationCollectionRegistration {
-    const actionCapable = 'contract' in options && options.contract === 'cordisx.navigation-collection/v2'
+    const contract = 'contract' in options ? options.contract : undefined
+    const actionCapable = contract === 'cordisx.navigation-collection/v2' || contract === 'cordisx.navigation-collection/v3'
+    const imageCapable = contract === 'cordisx.navigation-collection/v3'
     assertKeys(options, actionCapable ? ['contract', 'name', 'id', 'group'] : ['name', 'id', 'group'], 'navigation collection options')
     if (options.name !== 'sidebar.navigation.items') throw new Error('navigation collection requires sidebar.navigation.items')
     assertLocalId(options.id, 'navigation collection id')
@@ -1201,14 +1187,14 @@ export class CordisXSlotService extends Service implements CordisXSlots {
       surfaceGroup,
     })
     let active = true
-    let current: CordisXNavigationCollectionSnapshot | CordisXNavigationCollectionSnapshotV2 | undefined
+    let current: CordisXNavigationCollectionSnapshot | CordisXNavigationCollectionSnapshotV2 | CordisXNavigationCollectionSnapshotV3 | undefined
     let unsubscribe: (() => void) | undefined
     let nextItemSequence = 1
     const stableIds = new Map<string, string>()
     let handles: CordisXContributionHandle<CordisXNavigationItem>[] = []
     let leadingVisualIds = new Set<string>()
 
-    const read = (): CordisXNavigationCollectionSnapshot | CordisXNavigationCollectionSnapshotV2 => {
+    const read = (): CordisXNavigationCollectionSnapshot | CordisXNavigationCollectionSnapshotV2 | CordisXNavigationCollectionSnapshotV3 => {
       const input = source.snapshot()
       if (input === null || typeof input !== 'object' || Array.isArray(input)) {
         throw new Error('navigation collection snapshot must be an object')
@@ -1221,24 +1207,27 @@ export class CordisXSlotService extends Service implements CordisXSlots {
         throw new Error('navigation collection snapshot items are invalid')
       }
       const ids = new Set<string>()
-      const items = input.items.map((candidate, index): CordisXNavigationCollectionItem | CordisXNavigationCollectionItemV2 => {
+      const items = input.items.map((candidate, index): CordisXNavigationCollectionItem | CordisXNavigationCollectionItemV2 | CordisXNavigationCollectionItemV3 => {
         if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
           throw new Error(`navigation collection item ${index} must be an object`)
         }
-        assertKeys(candidate, actionCapable
+        assertKeys(candidate, imageCapable
           ? ['id', 'label', 'description', 'icon', 'leadingVisual', 'route', 'order', 'disabled', 'actions']
-          : ['id', 'label', 'description', 'icon', 'leadingVisual', 'route', 'order', 'disabled'], `navigation collection item ${index}`)
+          : actionCapable
+            ? ['id', 'label', 'description', 'icon', 'route', 'order', 'disabled', 'actions']
+            : ['id', 'label', 'description', 'icon', 'route', 'order', 'disabled'], `navigation collection item ${index}`)
         assertLocalId(candidate.id, `navigation collection item ${index} id`)
         if (ids.has(candidate.id)) throw new Error(`navigation collection has duplicate item ${candidate.id}`)
         ids.add(candidate.id)
         assertLocalizedText(candidate.label, `navigation collection item ${index} label`)
         if (candidate.description !== undefined) assertLocalizedText(candidate.description, `navigation collection item ${index} description`)
         assertIcon(candidate.icon, `navigation collection item ${index}`)
-        if (candidate.icon !== undefined && candidate.leadingVisual !== undefined) {
+        const candidateVisual = imageCapable ? (candidate as CordisXNavigationCollectionItemV3).leadingVisual : undefined
+        if (candidate.icon !== undefined && candidateVisual !== undefined) {
           throw new Error(`navigation collection item ${index} cannot combine icon and leadingVisual`)
         }
         const leadingVisual = cloneNavigationCollectionLeadingVisual(
-          candidate.leadingVisual,
+          candidateVisual,
           `navigation collection item ${index} leadingVisual`,
         )
         assertRoute(candidate.route, `navigation collection item ${index}`)
@@ -1258,7 +1247,7 @@ export class CordisXSlotService extends Service implements CordisXSlots {
       return immutableSnapshot({ revision: input.revision, items })
     }
 
-    const replace = (next: CordisXNavigationCollectionSnapshot | CordisXNavigationCollectionSnapshotV2): void => {
+    const replace = (next: CordisXNavigationCollectionSnapshot | CordisXNavigationCollectionSnapshotV2 | CordisXNavigationCollectionSnapshotV3): void => {
       if (!active) return
       if (current !== undefined && next.revision < current.revision) {
         throw new Error('navigation collection snapshot revision moved backwards')
@@ -1295,10 +1284,11 @@ export class CordisXSlotService extends Service implements CordisXSlots {
             ...(!actionCapable || (item as CordisXNavigationCollectionItemV2).actions === undefined
               ? {}
               : { actions: (item as CordisXNavigationCollectionItemV2).actions }),
-            ...(actionCapable ? { collectionContract: 'cordisx.navigation-collection/v2' as const } : {}),
+            ...(contract === undefined ? {} : { collectionContract: contract }),
           } as unknown as CordisXNavigationItem))
-          if (item.leadingVisual !== undefined) {
-            nextLeadingVisuals.set(qualifyOwnedId(owner, syntheticId), item.leadingVisual)
+          const leadingVisual = imageCapable ? (item as CordisXNavigationCollectionItemV3).leadingVisual : undefined
+          if (leadingVisual !== undefined) {
+            nextLeadingVisuals.set(qualifyOwnedId(owner, syntheticId), leadingVisual)
           }
         }
         for (const [qualifiedItemId, leadingVisual] of nextLeadingVisuals) {

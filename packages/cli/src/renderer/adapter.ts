@@ -28,10 +28,7 @@ import {
   mountNavigationCollectionActions,
   type HostNavigationCollectionAction,
 } from './host-ui/NavigationCollectionActions.js'
-import {
-  HOST_ROOM_COMPOSITE_AVATAR_STYLES,
-  mountHostRoomCompositeAvatar,
-} from './host-ui/RoomCompositeAvatar.js'
+import { rasterImageDataUrl } from './raster-image.js'
 import { HostTooltipController, type HostTooltipPlacement } from './tooltips.js'
 import { evaluateWhen } from './validation.js'
 import {
@@ -1820,7 +1817,7 @@ class StructuredSurfaceRenderer {
           icon?: string
           command?: { id: string; arguments?: never }
           route?: CordisXRouteReference
-          collectionContract?: 'cordisx.navigation-collection/v2'
+          collectionContract?: 'cordisx.navigation-collection/v2' | 'cordisx.navigation-collection/v3'
           actions?: readonly (CordisXNavigationAction | CordisXNavigationCollectionAction)[]
         }
         const label = this.text(snapshot, item.label, 'label', sites)
@@ -1862,7 +1859,8 @@ class StructuredSurfaceRenderer {
           project()
         }
         const actions = control.actions
-        if (item.collectionContract !== 'cordisx.navigation-collection/v2') {
+        if (item.collectionContract !== 'cordisx.navigation-collection/v2'
+          && item.collectionContract !== 'cordisx.navigation-collection/v3') {
           for (const [index, action] of ((item.actions as readonly CordisXNavigationAction[] | undefined) ?? []).entries()) {
             actions.append(this.button(snapshot, action, `actions.${index}`, sites, 'shortcut'))
           }
@@ -1958,7 +1956,7 @@ class StructuredSurfaceRenderer {
     qualifiedItemId: string,
     visual: CordisXNavigationCollectionLeadingVisual,
   ): HTMLElement {
-    const semanticKey = JSON.stringify(visual)
+    const semanticKey = `${visual.image.width}x${visual.image.height}:${visual.image.data}`
     const current = this.navigationLeadingVisualMounts.get(qualifiedItemId)
     if (current?.semanticKey === semanticKey) return current.element
     if (current !== undefined) {
@@ -1966,11 +1964,22 @@ class StructuredSurfaceRenderer {
       current.element.remove()
     }
     const element = this.document.createElement('span')
-    element.className = 'cordisx-room-composite-seat'
+    element.className = 'cordisx-navigation-image-seat'
+    const image = this.document.createElement('img')
+    image.alt = ''
+    image.setAttribute('aria-hidden', 'true')
+    image.draggable = false
+    image.width = visual.image.width
+    image.height = visual.image.height
+    image.src = rasterImageDataUrl(visual.image)
+    element.append(image)
     this.navigationLeadingVisualMounts.set(qualifiedItemId, {
       element,
       semanticKey,
-      dispose: mountHostRoomCompositeAvatar(element, visual),
+      dispose: () => {
+        image.removeAttribute('src')
+        image.remove()
+      },
     })
     return element
   }
@@ -2221,7 +2230,8 @@ function installStyles(document: Document): () => void {
   const style = document.createElement('style')
   style.id = 'cordisx-structured-styles'
   style.textContent = `
-    ${HOST_ROOM_COMPOSITE_AVATAR_STYLES}
+    .cordisx-nav-primary > .cordisx-navigation-image-seat.cxsi-icon { position:relative; display:block; box-sizing:border-box; flex:0 0 16px; width:16px; min-width:16px; max-width:16px; height:16px; min-height:16px; max-height:16px; margin:0; padding:0; overflow:hidden; border:0; border-radius:50%; background:transparent; pointer-events:none; }
+    .cordisx-navigation-image-seat > img { display:block; width:100%; height:100%; object-fit:cover; pointer-events:none; }
     [data-cordisx-no-drag="true"], [data-cordisx-no-drag="true"] * { -webkit-app-region: no-drag !important; }
     .cordisx-native-seat { box-sizing: border-box; color: inherit; font: inherit; pointer-events: auto; -webkit-app-region: no-drag; }
     .cordisx-native-seat[hidden] { display: none !important; }

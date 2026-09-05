@@ -66,6 +66,7 @@ interface RuntimeHandle {
   setExtensionPointPolicy(source: string, pluginId: string, pointId: string, policy: 'allow' | 'deny' | 'inherit'): Promise<void>
   activePluginGeneration(): Record<string, unknown> & { readonly plugins: readonly unknown[]; readonly revision: number }
   stagePluginMutation(mutation: unknown): Promise<unknown>
+  abortPluginMutation(transactionId: string): Promise<void>
   publishPluginMutation(transactionId: string): Promise<unknown>
   completePluginMutation(transactionId: string): Promise<unknown>
   finalizePluginMutation(transactionId: string): Promise<void>
@@ -211,8 +212,76 @@ describe('Host DOM worker production runtime composition', () => {
       },
     })
 
+    const previous = runtime.activePluginGeneration()
+    const nextDigest = `sha256:${'b'.repeat(64)}`
+    const nextArtifactSource = artifactSource.replace('apply() {}', 'apply() { this.updated = true }')
+    const candidate = {
+      ...previous,
+      recordKind: 'candidate',
+      transactionId: 'local-isolated-update-without-manifest',
+      revision: previous.revision + 1,
+      lastGoodRevision: previous.revision,
+      plugins: previous.plugins.map(value => {
+        const item = value as { readonly id: string }
+        return item.id === plugin.id
+          ? { ...item, digest: nextDigest, moduleGeneration: 'isolated-host-dom-generation-2' }
+          : item
+      }),
+    }
+    const developmentPackage = {
+      id: plugin.id,
+      version: plugin.package.version,
+      digest: nextDigest,
+      identitySource: 'file:///cordisx-local-dev/isolated-host-dom/index.js',
+      development: {
+        origin: 'local-dev',
+        pluginId: plugin.id,
+        sourcePath: '/workspace/isolated-host-dom/index.js',
+        state: 'ready',
+        lastSuccessfulAt: '2026-09-04T00:00:00.000Z',
+      },
+    } as const
+    await expect(runtime.stagePluginMutation({
+      transactionId: candidate.transactionId,
+      operation: 'update',
+      previous,
+      candidate,
+      targetId: plugin.id,
+      affectedPluginIds: [plugin.id],
+      developmentPackage,
+      isolatedArtifactSource: nextArtifactSource,
+    })).rejects.toThrow('isolated artifact requires an authoritative isolated-worker manifest')
+    expect(worker.options).toHaveLength(1)
+    expect(runtime.activePluginGeneration()).toEqual(previous)
+    await runtime.abortPluginMutation(candidate.transactionId)
+
+    const validCandidate = { ...candidate, transactionId: 'local-isolated-update-with-manifest' }
+    await runtime.stagePluginMutation({
+      transactionId: validCandidate.transactionId,
+      operation: 'update',
+      previous,
+      candidate: validCandidate,
+      targetId: plugin.id,
+      affectedPluginIds: [plugin.id],
+      developmentPackage: { ...developmentPackage, manifest: plugin.manifest },
+      isolatedArtifactSource: nextArtifactSource,
+    })
+    expect(worker.options).toHaveLength(2)
+    expect(worker.options[1]?.artifactSource).toBe(nextArtifactSource)
+    await runtime.publishPluginMutation(validCandidate.transactionId)
+    await runtime.completePluginMutation(validCandidate.transactionId)
+    await runtime.finalizePluginMutation(validCandidate.transactionId)
+    expect(runtime.activePluginGeneration()).toMatchObject({
+      revision: validCandidate.revision,
+      plugins: [expect.objectContaining({
+        id: plugin.id,
+        digest: nextDigest,
+        moduleGeneration: 'isolated-host-dom-generation-2',
+      })],
+    })
+
     await runtime.dispose()
-    expect(worker.dispose).toHaveBeenCalledOnce()
+    expect(worker.dispose).toHaveBeenCalledTimes(2)
     expect(dom.window.document.documentElement.dataset.cordisxReady).toBeUndefined()
     dom.window.close()
   }, 60_000)

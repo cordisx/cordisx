@@ -94,12 +94,9 @@ import {
 import { installReactCordisXManager } from './manager/install.js'
 import {
   HostManagerNavigationController,
-  resolveHostManagerAgentDefinitionOpenRequest,
 } from './manager/navigation-controller.js'
 import { selectPluginReadme } from './readme.js'
 import { CordisXCommandService } from './commands.js'
-import { CordisXAgentConversationShellService } from './agent-conversation-shell.js'
-import { HostAgentTaskDetailsNavigator, navigateHostTaskDetailsSameDocument } from './host-ui/AgentTaskDetailsNavigator.js'
 import { CordisXI18nService } from './i18n.js'
 import { CordisXVisualService } from './visuals.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
@@ -414,6 +411,8 @@ export interface RendererPluginMutation {
     readonly digest: `sha256:${string}`
     readonly identitySource: string
     readonly readme?: string
+    /** Launcher-authoritative manifest captured with this exact local build. */
+    readonly manifest?: CordisXBrowserPlugin['manifest']
     readonly development: CordisXLocalDevelopmentSnapshot
   }
   /** Host-only source held as data and executed solely in the isolated Host DOM worker. */
@@ -1324,7 +1323,6 @@ async function start(
   let platformFiber: Fiber | undefined
   let systemPromptFiber: Fiber | undefined
   let commandFiber: Fiber | undefined
-  let agentConversationShellFiber: Fiber | undefined
   let pageFiber: Fiber | undefined
   let routeFiber: Fiber | undefined
   let managerContentFiber: Fiber | undefined
@@ -2541,7 +2539,9 @@ async function start(
     const candidateIsolatedArtifactSource = replacesTarget
       ? mutation.isolatedArtifactSource
       : existing!.item.isolatedArtifactSource
-    const candidateManifest = replacesTarget ? mutation.package?.manifest.runtimeManifest : existing!.item.manifest
+    const candidateManifest = replacesTarget
+      ? mutation.package?.manifest.runtimeManifest ?? mutation.developmentPackage?.manifest
+      : existing!.item.manifest
     const item: RuntimeBrowserPlugin = {
       id: pluginId,
       source: replacesTarget ? replacementPackage!.identitySource : existing!.item.source,
@@ -3129,8 +3129,6 @@ async function start(
     routeHistory.dispose()
     await pageFiber?.dispose()
     pageFiber = undefined
-    await agentConversationShellFiber?.dispose()
-    agentConversationShellFiber = undefined
     if (ownsSharedReactRuntime) sharedReactRuntime?.dispose()
     sharedReactRuntime = undefined
     ownsSharedReactRuntime = false
@@ -3439,52 +3437,6 @@ async function start(
     commandFiber = ctx.plugin(CordisXCommandService, { console: pluginConsole })
     await commandFiber
     commandService = ctx.commands as CordisXCommandService
-    const taskDetailsNavigator = new HostAgentTaskDetailsNavigator({
-      navigateHost: value => navigateHostTaskDetailsSameDocument(window, value),
-      navigateExternal: value => {
-        const opened = window.open(value, '_blank', 'noopener,noreferrer')
-        if (opened === null) throw new Error('External task navigation is unavailable')
-      },
-    })
-    agentConversationShellFiber = ctx.plugin(CordisXAgentConversationShellService, {
-      console: pluginConsole,
-      identity: {
-        // Resolve Session-native Shell v4 identities from the live AgentSetup
-        // generation, then retain the accepted AgentLoop v4 catalog for the
-        // byte-preserved v3 path. Never infer presentation from labels.
-        resolve: value => agentSessionRuntime.definitionPresentation(value)
-          ?? agentLoopBrokerV4.definitionPresentation(value),
-        resolveSettings: value => {
-          const request = resolveHostManagerAgentDefinitionOpenRequest(
-            routeService?.managerContentAgentDefinitionTarget(value),
-            managerModel.snapshot().settingsNavigationItems ?? [],
-          )
-          return request === undefined
-            ? { available: false, reason: 'Manager entity detail is unavailable for this exact Agent revision.' }
-            : { available: true }
-        },
-        navigator: taskDetailsNavigator,
-        onSettings: value => {
-          const request = resolveHostManagerAgentDefinitionOpenRequest(
-            routeService?.managerContentAgentDefinitionTarget(value),
-            managerModel.snapshot().settingsNavigationItems ?? [],
-          )
-          if (request === undefined) throw new Error('Manager entity detail is unavailable for this exact Agent revision.')
-          managerNavigationController.openManagerContent(request)
-        },
-      },
-      ...(scenarioSessionScopeAuthority === undefined ? {} : {
-        scenarioSource: scenarioSessionScopeAuthority.conversationSource,
-        scenarioOwner: (owner: string, moduleGeneration: string | undefined) => {
-          if (moduleGeneration === undefined) return undefined
-          const matches = controllers.filter(controller => controller.item.id === owner
-            && controller.principalLive
-            && moduleGenerationOf(controller) === moduleGeneration)
-          return matches.length === 1 ? agentOwnerForController(matches[0]!) : undefined
-        },
-      }),
-    })
-    await agentConversationShellFiber
     pageFiber = ctx.plugin(CordisXPageService, pluginConsole)
     await pageFiber
     pageService = ctx.pages as CordisXPageService

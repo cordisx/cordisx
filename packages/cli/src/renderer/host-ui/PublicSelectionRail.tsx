@@ -1,3 +1,4 @@
+/** @jsxImportSource react */
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 
 export interface PublicSelectionRailOption {

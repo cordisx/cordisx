@@ -7,7 +7,6 @@ import {
   type CordisXLocalizationSeat,
 } from '../packages/cli/src/contracts.js'
 import { CommandRegistry } from '../packages/cli/src/renderer/commands.js'
-import { markAgentConversationPageMount } from '../packages/cli/src/renderer/agent-conversation-page.js'
 import { BrowserRouteHistoryAdapter } from '../packages/cli/src/renderer/codex-router-history.js'
 import type { CordisXI18nService, LocalizationEffectOwner } from '../packages/cli/src/renderer/i18n.js'
 import { GenerationVisibilityCoordinator } from '../packages/cli/src/renderer/generation-visibility.js'
@@ -179,7 +178,7 @@ describe('NavigationRegistry', () => {
     outlets.dispose()
   })
 
-  it('mounts Host-identified conversation pages in main with one dynamic chrome and one scroll owner', async () => {
+  it('mounts generic body-only pages in main with plugin-owned chrome and one scroll owner', async () => {
     const dom = new JSDOM('<body><main id="main"></main><main id="app"></main></body>')
     const pages = new PageRegistry()
     const outlets = new OutletRegistry()
@@ -190,20 +189,21 @@ describe('NavigationRegistry', () => {
       schemaVersion: 1, id: 'app', authority: 'host-adapter', scope: 'renderer', preferredPlacement: 'fixed', contextPolicy: 'generation', presentationGroup: 'primary',
     }, new FakeOutlet(dom.window.document.getElementById('app')!, 'renderer'), path => !path.startsWith('/main/'))
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
-    const mount = markAgentConversationPageMount(({ container }: { container: HTMLElement }) => {
+    const mount = ({ container }: { container: HTMLElement }) => {
       const chrome = container.ownerDocument.createElement('header')
-      chrome.className = 'cxa-chrome'
+      chrome.className = 'product-chrome'
       chrome.textContent = 'Dynamic room title'
       const timeline = container.ownerDocument.createElement('div')
       timeline.dataset.agentConversationScrollOwner = 'timeline'
       container.append(chrome, timeline)
-    })
+    }
     pages.register('chatroom', {
       $schema: CORDISX_PAGE_SCHEMA_V3,
       schemaVersion: 3,
       id: 'room',
       title: { key: 'page.room.title', fallback: 'New room' },
-      description: { key: 'page.room.description', fallback: 'Host-rendered conversation.' },
+      description: { key: 'page.room.description', fallback: 'Product-owned page.' },
+      chrome: 'body-only',
     }, mount)
     navigation.register('chatroom', {
       $schema: CORDISX_ROUTE_SCHEMA_V2,
@@ -219,18 +219,19 @@ describe('NavigationRegistry', () => {
     expect(() => pages.register('chatroom', {
       id: 'room-with-plugin-chrome',
       title: { key: 'page.room-with-plugin-chrome.title', fallback: 'Room' },
+      chrome: 'body-only',
       headerActions: [{
         id: 'duplicate', label: { key: 'action.duplicate', fallback: 'Duplicate action' },
         command: { id: 'duplicate' },
       }],
-    }, markAgentConversationPageMount(() => undefined))).toThrow(/cannot declare breadcrumbs, tabs, or header actions/)
-    await expect(navigation.navigate('chatroom', { id: 'room-app' })).rejects.toThrow(/requires the main outlet/)
+    }, () => undefined)).toThrow(/body-only page room-with-plugin-chrome cannot declare/)
+    await expect(navigation.navigate('chatroom', { id: 'room-app' })).rejects.toThrow(/persistent external chrome/)
 
     await navigation.navigate('chatroom', { id: 'room' })
     const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page="chatroom:room"]')!
-    expect(page.dataset.cordisxPageChromePolicy).toBe('agent-conversation')
+    expect(page.dataset.cordisxPageChromePolicy).toBe('body-only')
     expect(page.querySelectorAll('[data-cordisx-page-chrome]')).toHaveLength(0)
-    expect(page.querySelectorAll('.cxa-chrome')).toHaveLength(1)
+    expect(page.querySelectorAll('.product-chrome')).toHaveLength(1)
     expect(page.querySelectorAll('[data-agent-conversation-scroll-owner="timeline"]')).toHaveLength(1)
     expect(page.querySelector<HTMLElement>('[data-cordisx-page-body]')?.style.overflow).toBe('hidden')
 

@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto'
 import { getEventListeners, once } from 'node:events'
-import { access, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import WebSocket, { WebSocketServer } from 'ws'
@@ -13,6 +14,8 @@ import { NativeViteDevelopmentClient } from '../packages/cli/src/renderer/vite-d
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 
 const PACKAGE_SCHEMA_V5 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v5.schema.json'
+const PACKAGE_SCHEMA_V8 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v8.schema.json'
+const RUNTIME_SCHEMA_V8 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v8.schema.json'
 const ENTITY_SCHEMA_V1 = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-file.v1.schema.json'
 
 const viteCacheDirectories: string[] = []
@@ -53,7 +56,18 @@ describe('native Vite development transport', () => {
     }
     const first = await startNativeViteServer(config, { cacheRoot, prebundleHostDependencies: true })
     viteCacheDirectories.push(first.cacheDir)
-    await expect(access(path.join(first.cacheDir, 'deps', '_metadata.json'))).resolves.toBeUndefined()
+    const metadataPath = path.join(first.cacheDir, 'deps', '_metadata.json')
+    await expect(access(metadataPath)).resolves.toBeUndefined()
+    const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as {
+      readonly optimized?: Readonly<Record<string, unknown>>
+    }
+    expect(Object.keys(metadata.optimized ?? {})).toEqual(expect.arrayContaining([
+      'react',
+      'react/jsx-runtime',
+      'react/jsx-dev-runtime',
+      'react-dom',
+      'react-dom/client',
+    ]))
     await first.close()
 
     const second = await startNativeViteServer(config, { cacheRoot, prebundleHostDependencies: true })
@@ -395,6 +409,89 @@ describe('native Vite development transport', () => {
       expect(pluginSource).not.toContain('/send-confetti.ts?cordisx-plugin-generation=')
     } finally {
       await vite.close()
+    }
+  }, 30_000)
+
+  it('keeps a structured v8 package in the renderer graph across consecutive replacements', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-vite-structured-v8-'))
+    const entry = path.join(root, 'structured-v8.ts')
+    const runtimeManifest = JSON.stringify({
+      $schema: RUNTIME_SCHEMA_V8,
+      schemaVersion: 8,
+      id: 'structured-v8',
+      name: 'Structured v8',
+      capabilities: [],
+      services: [],
+    }, null, 2) + '\n'
+    const runtimeDigest = `sha256:${createHash('sha256').update(runtimeManifest).digest('hex')}`
+    await Promise.all([
+      writeFile(path.join(root, 'package.json'), '{"name":"structured-v8","version":"1.0.0","type":"module"}'),
+      writeFile(path.join(root, 'runtime-manifest.json'), runtimeManifest),
+      writeFile(path.join(root, 'cordisx-package.json'), JSON.stringify({
+        $schema: PACKAGE_SCHEMA_V8,
+        schemaVersion: 8,
+        id: 'structured-v8',
+        version: '1.0.0',
+        entry: './dist/structured-v8.js',
+        distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
+        compatibility: { runtimeAbi: 1, protocolSchemas: [RUNTIME_SCHEMA_V8] },
+        dependencies: [],
+        runtimeManifest: { path: './runtime-manifest.json', schema: RUNTIME_SCHEMA_V8, digest: runtimeDigest },
+      })),
+      writeFile(entry, "export const revision = 'one'; export function apply() {}\n"),
+    ])
+    const config = {
+      version: 1 as const, rootDir: root, codex: { debugPort: 9229 }, providers: [],
+      plugins: [{ id: 'structured-v8', entry, enabled: true, config: {} }],
+    }
+    const vite = await startTestViteServer(config)
+    let socket: WebSocket | undefined
+    try {
+      await buildRendererComposition(config, () => {}, {
+        developmentBuild: (value, options) => vite.buildBootstrap(value, options ?? {}),
+      })
+      const request = async (pathname: string): Promise<string> => await fetch(vite.url + pathname, {
+        headers: { Origin: 'null' }, signal: AbortSignal.timeout(5000),
+      }).then(async response => {
+        expect(response.status).toBe(200)
+        return await response.text()
+      })
+      const pluginPath = '@id/__x00__virtual:cordisx-native-plugin/structured-v8'
+      const assertStructuredWrapper = (source: string): string => {
+        expect(source).toContain('module: pluginModule')
+        expect(source).toContain('"schemaVersion":8')
+        expect(source).not.toContain('isolatedArtifactSource')
+        expect(source).toContain('/structured-v8.ts?cordisx-plugin-generation=')
+        const digest = source.match(/sha256:[a-f0-9]{64}/)?.[0]
+        expect(digest).toBeDefined()
+        return digest!
+      }
+      let digest = assertStructuredWrapper(await request(pluginPath))
+      const client = await request('@vite/client')
+      const token = client.match(/const wsToken = "([^"]+)"/)?.[1]
+      expect(token).toBeDefined()
+      socket = new WebSocket(vite.url.replace('http:', 'ws:') + '?token=' + token, 'vite-hmr', { handshakeTimeout: 5000 })
+      await once(socket, 'open')
+      const messages: Record<string, any>[] = []
+      socket.on('message', data => messages.push(JSON.parse(String(data))))
+
+      for (const revision of ['two', 'three']) {
+        messages.length = 0
+        await writeFile(entry, `export const revision = '${revision}'; export function apply() {}\n`)
+        await vi.waitFor(() => expect(messages.some(message => message.type === 'custom'
+          && message.event === 'cordisx:replace-plugin'
+          && message.data?.pluginId === 'structured-v8')).toBe(true), { timeout: 10_000 })
+        const replacement = messages.find(message => message.type === 'custom'
+          && message.event === 'cordisx:replace-plugin'
+          && message.data?.pluginId === 'structured-v8')
+        const nextDigest = assertStructuredWrapper(await request(pluginPath + '?t=' + replacement.data.timestamp))
+        expect(nextDigest).not.toBe(digest)
+        digest = nextDigest
+      }
+    } finally {
+      socket?.close()
+      await vite.close()
+      await rm(root, { recursive: true, force: true })
     }
   }, 30_000)
 
