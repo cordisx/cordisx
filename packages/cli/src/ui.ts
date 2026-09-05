@@ -80,6 +80,8 @@ export interface AttachmentPlaceholderProps {
   readonly className?: string
   readonly 'aria-label'?: string
   readonly title?: string
+  /** Bounded Host geometry; plugins cannot supply arbitrary dimensions. */
+  readonly size?: 30 | 32
 }
 
 function HostComponent<Props>(name: string): React.ComponentType<Props> {

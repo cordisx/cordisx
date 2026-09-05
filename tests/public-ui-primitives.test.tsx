@@ -68,11 +68,12 @@ describe('public Host UI primitives', () => {
     const dom = installDom()
     const root = createRoot(dom.window.document.getElementById('root')!)
     try {
-      await act(async () => root.render(<AttachmentPlaceholder aria-label="添加附件（暂不可用）" />))
+      await act(async () => root.render(<AttachmentPlaceholder aria-label="添加附件（暂不可用）" size={32} />))
       const button = dom.window.document.querySelector<HTMLButtonElement>('.cxr-ui-attachment-placeholder')!
       expect(button.disabled).toBe(true)
       expect(button.type).toBe('button')
       expect(button.getAttribute('aria-label')).toBe('添加附件（暂不可用）')
+      expect(button.dataset.size).toBe('32')
       expect(button.querySelector('[data-host-icon="host:new"]')).not.toBeNull()
       expect(button.getAttribute('data-command')).toBeNull()
     } finally {
