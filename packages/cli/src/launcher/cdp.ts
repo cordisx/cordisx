@@ -733,24 +733,6 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   async finalize(transactionId: string): Promise<void> {
     const sessions = this.staged.get(transactionId) ?? []
     const mutation = this.stagedMutations.get(transactionId)
-    const retiringLeases: PluginGenerationGraphLease[] = []
-    if (mutation !== undefined) {
-      const candidateLease = mutation.runtimeArtifactLease
-      for (const pluginId of mutation.affectedPluginIds) {
-        const candidate = mutation.candidate.plugins.find(plugin => plugin.id === pluginId)
-        const previousLease = this.activeArtifactLeases.get(pluginId)
-        if (pluginId === mutation.targetId && candidate?.enabled === true && candidateLease !== undefined) {
-          if (previousLease !== undefined && previousLease.leaseId !== candidateLease.leaseId) {
-            retiringLeases.push(previousLease)
-          }
-        } else if (candidate?.enabled !== true || (pluginId === mutation.targetId && mutation.package !== undefined)) {
-          if (previousLease !== undefined) retiringLeases.push(previousLease)
-        }
-      }
-    }
-    // Keep the renderer transaction retryable until every retiring generation
-    // has positively acknowledged stylesheet cleanup.
-    for (const lease of retiringLeases) await this.retireArtifactLease(sessions, lease)
     await Promise.all(sessions.map(async session =>
       await evaluateRuntimeOperation(
         session,
@@ -766,9 +748,14 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       const candidateLease = mutation.runtimeArtifactLease
       for (const pluginId of mutation.affectedPluginIds) {
         const candidate = mutation.candidate.plugins.find(plugin => plugin.id === pluginId)
+        const previousLease = this.activeArtifactLeases.get(pluginId)
         if (pluginId === mutation.targetId && candidate?.enabled === true && candidateLease !== undefined) {
+          if (previousLease !== undefined && previousLease.leaseId !== candidateLease.leaseId) {
+            await this.retireArtifactLease(sessions, previousLease)
+          }
           this.activeArtifactLeases.set(pluginId, candidateLease)
         } else if (candidate?.enabled !== true || (pluginId === mutation.targetId && mutation.package !== undefined)) {
+          if (previousLease !== undefined) await this.retireArtifactLease(sessions, previousLease)
           this.activeArtifactLeases.delete(pluginId)
         }
       }

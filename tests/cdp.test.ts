@@ -1528,11 +1528,11 @@ describe('CdpPluginLifecycleRuntime', () => {
     expect(old.retire).not.toHaveBeenCalled()
     await runtime.complete('tx')
     await expect(runtime.finalize('tx')).rejects.toThrow('plugin generation resource operation failed')
-    expect(finalizeCalls).toBe(0)
+    expect(finalizeCalls).toBe(1)
     expect(old.retire).not.toHaveBeenCalled()
     oldRetirementAcknowledged = true
     await runtime.finalize('tx')
-    expect(finalizeCalls).toBe(1)
+    expect(finalizeCalls).toBe(2)
     expect(expressions).toContain(old.lease.retireSource)
     expect(old.retire).toHaveBeenCalledOnce()
     expect(next.retire).not.toHaveBeenCalled()

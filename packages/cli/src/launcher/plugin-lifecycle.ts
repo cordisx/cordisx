@@ -1166,6 +1166,7 @@ export class PluginLifecycleCoordinator {
     let access: CandidateAccess | undefined
     let activationRequested = false
     let published = false
+    let commitCompleted = false
     try {
       const authority = await this.authority
       prepared = await authority.prepare({
@@ -1310,9 +1311,30 @@ export class PluginLifecycleCoordinator {
         disposedAfter: runtimeObservation(cleanup.disposedAfter, publishPlan.expectedRegistryEpoch),
       })
       await authority.completeCommit(access, commitReceipt)
-      await runtime.finalize(transactionId)
+      commitCompleted = true
+      let finalized = false
+      let finalizeFailure: unknown
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await runtime.finalize(transactionId)
+          finalized = true
+          break
+        } catch (error) {
+          finalizeFailure = error
+        }
+      }
+      if (!finalized) throw finalizeFailure
       return committed
     } catch (error) {
+      if (commitCompleted) {
+        throw new LifecycleFailure(
+          'rollback-failed',
+          `The plugin activation was committed, but retiring generation cleanup did not complete (${
+            error instanceof Error ? error.message : String(error)
+          }). Restart CordisX before another plugin lifecycle operation.`,
+          'rollback-failed',
+        )
+      }
       if (prepared === undefined || access === undefined) {
         await runtime.abort(transactionId).catch(() => undefined)
         await this.store.abortCandidate(transactionId).catch(() => undefined)
@@ -2044,7 +2066,8 @@ export class PluginLifecycleCoordinator {
         affectedPluginIds: [item.id],
       }
     } catch (error) {
-      return this.failed(request, active, classify(error))
+      const current = await this.store.loadActive().catch(() => active)
+      return this.failed(request, current, classify(error))
     }
   }
 }
