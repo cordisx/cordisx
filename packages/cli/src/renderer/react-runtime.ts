@@ -475,11 +475,21 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
   globalThis.__cordisxSharedReactRuntime = runtime
   return runtime
 }
-export function AttachmentPlaceholder({ className, 'aria-label': ariaLabel, title, size = 30 }: AttachmentPlaceholderProps) {
+export function AttachmentPlaceholder(
+  { className, 'aria-label': ariaLabel, title, size = 30 }: AttachmentPlaceholderProps,
+) {
   const label = ariaLabel ?? 'Add attachment (unavailable)'
   return React.createElement(
     'button',
-    { type: 'button', disabled: true, 'aria-disabled': true, className: ['cxr-ui-attachment-placeholder', className].filter(Boolean).join(' '), 'aria-label': label, title: title ?? label, 'data-size': size },
+    {
+      type: 'button',
+      disabled: true,
+      'aria-disabled': true,
+      className: ['cxr-ui-attachment-placeholder', className].filter(Boolean).join(' '),
+      'aria-label': label,
+      title: title ?? label,
+      'data-size': size,
+    },
     React.createElement(HostIcon, { token: 'action.add', surfaceToken: 'host:new' }),
   )
 }
