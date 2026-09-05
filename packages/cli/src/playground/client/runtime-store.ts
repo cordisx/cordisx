@@ -14,6 +14,7 @@ import {
   isPlaygroundPreviewResetEpoch,
   playgroundPreviewResetEpochMatches,
   PLAYGROUND_PREVIEW_RESET_RESULT_KEY,
+  reconcilePlaygroundPreviewBootstrapEpoch,
   readPlaygroundPreviewResetApplied,
   readPlaygroundPreviewResetMarker,
   writePlaygroundPreviewResetApplied,
@@ -192,6 +193,11 @@ async function readServerResetEpoch(): Promise<PlaygroundPreviewResetEpoch> {
 
 async function synchronizePlaygroundPreviewResetEpoch(): Promise<boolean> {
   const server = await readServerResetEpoch()
+  if (reconcilePlaygroundPreviewBootstrapEpoch(browserSessionStorage(), server) === 'bootstrap') {
+    previewResetBlocked = false
+    publishResetEpoch(server)
+    return true
+  }
   publishResetEpoch(server)
   return !applyPlaygroundPreviewResetEpoch(server, true)
 }
