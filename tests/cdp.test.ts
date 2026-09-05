@@ -11,6 +11,7 @@ import {
   iconThemePreferenceDeliveryEvaluation,
   injectableTargets,
   resolveCdpInjectionTimeoutMs,
+  runtimeEvaluationException,
   serviceConfigResponseEvaluation,
   watchAndInject,
 } from '../packages/cli/src/launcher/cdp.js'
@@ -103,6 +104,24 @@ describe('CDP injection timeout configuration', () => {
     expect(registration).toContain('CDP_INJECTION_TIMEOUT_MS')
     expect(registration).toMatch(/CDP_INJECTION_TIMEOUT_MS,\s*\),\s*signal,\s*\)/u)
     expect(registration).not.toContain('CDP_REQUEST_TIMEOUT_MS')
+  })
+
+  it('preserves Runtime.evaluate exceptions and awaits the outer composition boot', async () => {
+    expect(runtimeEvaluationException({
+      exceptionDetails: {
+        text: 'Uncaught',
+        lineNumber: 8,
+        columnNumber: 2,
+        exception: { description: 'SyntaxError: fixture graph bootstrap failed' },
+      },
+    })).toBe('SyntaxError: fixture graph bootstrap failed (line 9, column 3)')
+
+    const source = await readFile(new URL('../packages/cli/src/launcher/cdp.ts', import.meta.url), 'utf8')
+    expect(source).toContain('CordisX renderer injection evaluation failed:')
+    expect(source).toContain('globalThis.__cordisxCompositionBoot ?? globalThis.__cordisxBoot')
+    expect(source).toContain('CordisX renderer composition and runtime boot promises are undefined after injection')
+    expect(source).toContain('CordisX renderer runtime is undefined after boot')
+    expect(source).toContain('error.stack ?? error.message')
   })
 })
 
@@ -423,7 +442,7 @@ describe('icon theme preference document delivery', () => {
           return
         }
         const expression = request.params?.expression ?? ''
-        if (expression.includes('await globalThis.__cordisxBoot')) {
+        if (expression.includes('globalThis.__cordisxCompositionBoot ?? globalThis.__cordisxBoot')) {
           bootRequestId = request.id
           sendReady(41)
           return
@@ -868,7 +887,7 @@ describe('icon theme preference document delivery', () => {
             return
           }
           const expression = request.params?.expression ?? ''
-          if (expression.includes('await globalThis.__cordisxBoot')) {
+          if (expression.includes('globalThis.__cordisxCompositionBoot ?? globalThis.__cordisxBoot')) {
             respond({ result: { value: { ok: true } } })
             installed[index]!.resolve()
             return
@@ -1243,7 +1262,7 @@ describe('icon theme preference document delivery', () => {
           return
         }
         const expression = request.params?.expression ?? ''
-        if (expression.includes('await globalThis.__cordisxBoot')) {
+        if (expression.includes('globalThis.__cordisxCompositionBoot ?? globalThis.__cordisxBoot')) {
           respond({ result: { value: { ok: true } } })
           installed.resolve()
           return
@@ -1963,7 +1982,9 @@ describe('CdpPluginLifecycleRuntime', () => {
           const request = JSON.parse(String(data)) as { id: number; method: string; params?: { expression?: string } }
           if (
             request.method === 'Runtime.evaluate'
-            && request.params?.expression?.includes('await globalThis.__cordisxBoot') === true
+            && request.params?.expression?.includes(
+                'globalThis.__cordisxCompositionBoot ?? globalThis.__cordisxBoot',
+              ) === true
             && bootBlocked
           ) await bootGate
           const result = request.method === 'Page.addScriptToEvaluateOnNewDocument'

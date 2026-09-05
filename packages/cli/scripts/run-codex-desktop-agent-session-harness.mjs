@@ -109,7 +109,11 @@ function run(command, args, environment, onStage) {
     child.once('exit', (code, signal) => {
       if (code === 0) resolve(outputTail)
       else {
-        const failure = new Error(`isolated Desktop harness exited with ${signal ?? `status ${String(code)}`}; tail=${JSON.stringify(outputTail)}`)
+        const failure = new Error(
+          `isolated Desktop harness exited with ${signal ?? `status ${String(code)}`}; tail=${
+            JSON.stringify(outputTail)
+          }`,
+        )
         failure.outputTail = outputTail
         reject(failure)
       }
@@ -136,8 +140,10 @@ const installed = {
   appVersion: plistValue(appRoot, 'CFBundleShortVersionString'),
   buildNumber: plistValue(appRoot, 'CFBundleVersion'),
 }
-const appPin = APP_PINS.find(pin => installed.bundleId === pin.bundleId && installed.appVersion === pin.appVersion
-  && installed.buildNumber === pin.buildNumber)
+const appPin = APP_PINS.find(pin =>
+  installed.bundleId === pin.bundleId && installed.appVersion === pin.appVersion
+  && installed.buildNumber === pin.buildNumber
+)
 if (appPin === undefined) {
   throw new Error(`installed Desktop build does not match the audited pin: ${JSON.stringify(installed)}`)
 }

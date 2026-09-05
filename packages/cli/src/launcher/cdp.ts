@@ -121,6 +121,7 @@ const CDP_REQUEST_TIMEOUT_MS = 5_000
 const DEFAULT_CDP_INJECTION_TIMEOUT_MS = 60_000
 const MIN_CDP_INJECTION_TIMEOUT_MS = 5_000
 const MAX_CDP_INJECTION_TIMEOUT_MS = 600_000
+const MAX_RENDERER_DIAGNOSTIC_BYTES = 8_192
 
 export function resolveCdpInjectionTimeoutMs(value: string | undefined): number {
   if (value === undefined || value === '') return DEFAULT_CDP_INJECTION_TIMEOUT_MS
@@ -291,15 +292,45 @@ async function evaluateRuntimeOperation<Value = void>(
     returnByValue: true,
     allowUnsafeEvalBlockedByCSP: true,
   }, timeoutMs)
+  const exception = runtimeEvaluationException(response)
+  if (exception !== undefined) throw new Error(`renderer lifecycle evaluation failed: ${exception}`)
   const value = (response.result as { value?: unknown } | undefined)?.value as {
     ok?: unknown
     error?: unknown
     result?: Value
   } | undefined
   if (value?.ok !== true) {
-    throw new Error(typeof value?.error === 'string' ? value.error : 'renderer lifecycle operation failed')
+    throw new Error(
+      typeof value?.error === 'string'
+        ? value.error.slice(0, MAX_RENDERER_DIAGNOSTIC_BYTES)
+        : 'renderer lifecycle operation returned ok=false without an error',
+    )
   }
   return value.result as Value
+}
+
+/** Preserve a bounded renderer exception for launcher diagnostics. */
+export function runtimeEvaluationException(response: Record<string, unknown>): string | undefined {
+  const details = response.exceptionDetails
+  if (details === undefined) return undefined
+  if (details === null || typeof details !== 'object') {
+    return String(details).slice(0, MAX_RENDERER_DIAGNOSTIC_BYTES)
+  }
+  const record = details as {
+    readonly text?: unknown
+    readonly lineNumber?: unknown
+    readonly columnNumber?: unknown
+    readonly exception?: { readonly description?: unknown }
+  }
+  const description = typeof record.exception?.description === 'string'
+    ? record.exception.description
+    : typeof record.text === 'string'
+    ? record.text
+    : 'unknown Runtime.evaluate exception'
+  const line = typeof record.lineNumber === 'number' ? record.lineNumber + 1 : undefined
+  const column = typeof record.columnNumber === 'number' ? record.columnNumber + 1 : undefined
+  const location = line === undefined ? '' : ` (line ${line}${column === undefined ? '' : `, column ${column}`})`
+  return `${description}${location}`.slice(0, MAX_RENDERER_DIAGNOSTIC_BYTES)
 }
 
 function activationRecord(tuple: PackageActivationTuple): CordisXPluginActivationRecordV1 {
@@ -2162,7 +2193,7 @@ async function install(
       await abortable(session.send('Page.reload', { ignoreCache: true }, CDP_INJECTION_TIMEOUT_MS), signal)
       await waitForViteBootstrap(session, viteInstallId!, deadline, signal)
     } else {
-      await session.send(
+      const evaluated = await session.send(
         'Runtime.evaluate',
         {
           expression: source,
@@ -2170,14 +2201,27 @@ async function install(
         },
         CDP_INJECTION_TIMEOUT_MS,
       )
+      const exception = runtimeEvaluationException(evaluated)
+      if (exception !== undefined) {
+        throw new Error(`CordisX renderer injection evaluation failed: ${exception}`)
+      }
     }
     if (generationRuntime !== undefined || iconThemePreferenceBroadcast !== undefined) {
       await evaluateRuntimeOperation(
         session,
         `(async () => { try {
-        await globalThis.__cordisxBoot
-        return { ok: globalThis.__cordisxRuntime !== undefined }
-      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+        const boot = globalThis.__cordisxCompositionBoot ?? globalThis.__cordisxBoot
+        if (boot === undefined) {
+          throw new Error('CordisX renderer composition and runtime boot promises are undefined after injection')
+        }
+        await boot
+        if (globalThis.__cordisxRuntime === undefined) {
+          throw new Error('CordisX renderer runtime is undefined after boot')
+        }
+        return { ok: true }
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.stack ?? error.message : String(error) }
+      } })()`,
         CDP_INJECTION_TIMEOUT_MS,
       )
     }

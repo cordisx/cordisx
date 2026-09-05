@@ -13,14 +13,22 @@ import type {
  * unknown version/build/flavor triples remain unavailable rather than guessing
  * that a private Electron bridge is compatible.
  */
-export const CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS = Object.freeze([
-  Object.freeze({
-    appVersion: '26.818.61809', buildNumber: '7019', buildFlavor: 'prod', hostId: 'local',
-  }),
-  Object.freeze({
-    appVersion: '26.901.41600', buildNumber: '7982', buildFlavor: 'prod', hostId: 'local',
-  }),
-] as const)
+export const CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS = Object.freeze(
+  [
+    Object.freeze({
+      appVersion: '26.818.61809',
+      buildNumber: '7019',
+      buildFlavor: 'prod',
+      hostId: 'local',
+    }),
+    Object.freeze({
+      appVersion: '26.901.41600',
+      buildNumber: '7982',
+      buildFlavor: 'prod',
+      hostId: 'local',
+    }),
+  ] as const,
+)
 /** Historical first audited pin, retained for existing callers and fixtures. */
 export const CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN = CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[0]
 type CodexDesktopAgentSessionTransportPin = typeof CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[number]

@@ -12,6 +12,8 @@ import {
   type PluginGenerationArtifactServer,
   startPluginGenerationArtifactServer,
 } from '../packages/cli/src/launcher/plugin-generation-artifact-server.js'
+import { buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
+import type { CordisXConfig } from '../packages/cli/src/launcher/config.js'
 import { cordisXPluginViteConfig } from '../packages/cli/src/vite.js'
 
 interface ArtifactFile {
@@ -28,7 +30,11 @@ interface ArtifactManifest {
 const temporary = new Set<string>()
 
 afterEach(async () => {
-  await Promise.all([...temporary].map(async directory => await rm(directory, { recursive: true, force: true })))
+  await Promise.all(
+    [...temporary].map(async directory =>
+      await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    ),
+  )
   temporary.clear()
 })
 
@@ -205,7 +211,238 @@ async function stopChrome(process: ChildProcess): Promise<void> {
 const chrome = chromeExecutable()
 const nativeIt = chrome === undefined ? it.skip : it
 
+function javascriptModuleUrl(source: string): string {
+  return `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
+}
+
 describe('plugin generation native browser graph', () => {
+  nativeIt('exposes composition boot before a delayed production graph settles', async () => {
+    if (chrome === undefined) throw new Error('Chrome executable disappeared after test discovery')
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-composition-boot-'))
+    temporary.add(root)
+    const profile = path.join(root, 'chrome-profile')
+    const entry = path.join(root, 'plugin.js')
+    await writeFile(entry, 'export const fixture = true\n')
+    const runtimeImport = javascriptModuleUrl(`
+      export async function installCordisX(plugins) {
+        globalThis.__controlledInstallCalls = (globalThis.__controlledInstallCalls ?? 0) + 1
+        const runtime = {
+          kind: 'installed-runtime',
+          graphMarker: plugins[0].module.marker,
+        }
+        globalThis.__cordisxRuntime = runtime
+        globalThis.__cordisxBoot = Promise.resolve(runtime)
+        return runtime
+      }
+      export function installCordisXComposition(loadPlugins, _metadata, publish, retire) {
+        const boot = Promise.resolve().then(async () => {
+          globalThis.__cordisxSharedReactRuntime = { kind: 'prepared-react' }
+          try {
+            const plugins = await loadPlugins()
+            const runtime = await installCordisX(plugins)
+            publish()
+            return runtime
+          } catch (error) {
+            retire()
+            delete globalThis.__cordisxRuntime
+            delete globalThis.__cordisxSharedReactRuntime
+            throw error
+          }
+        })
+        globalThis.__cordisxBoot = boot
+        return boot
+      }
+    `)
+    const config = (loadSource: string, publishSource: string, retireSource: string): CordisXConfig => ({
+      version: 1,
+      rootDir: root,
+      codex: { debugPort: 9229 },
+      providers: [],
+      plugins: [{
+        id: 'controlled-graph',
+        entry,
+        enabled: true,
+        config: {},
+        runtimeGraph: {
+          moduleGeneration: 'controlled-generation',
+          loadSource,
+          publishSource,
+          retireSource,
+        },
+      }],
+    })
+    const successful = await buildRendererCompositionSource(
+      config(
+        `(() => {
+          globalThis.__controlledCompositionVisibleAtGraphLoad =
+            typeof globalThis.__cordisxCompositionBoot?.then === 'function'
+          globalThis.__controlledReactAtGraphLoad = globalThis.__cordisxSharedReactRuntime?.kind === 'prepared-react'
+          return globalThis.__controlledGraphPromise
+        })()`,
+        'globalThis.__controlledGraphPublished = true',
+        'globalThis.__controlledGraphRetired = true',
+      ),
+      {},
+      { runtimeImport },
+    )
+    const rejected = await buildRendererCompositionSource(
+      config(
+        `(() => {
+          globalThis.__rejectedCompositionVisibleAtGraphLoad =
+            typeof globalThis.__cordisxCompositionBoot?.then === 'function'
+          globalThis.__rejectedReactAtGraphLoad = globalThis.__cordisxSharedReactRuntime?.kind === 'prepared-react'
+          return globalThis.__rejectedGraphPromise
+        })()`,
+        'globalThis.__rejectedGraphPublished = true',
+        'globalThis.__rejectedGraphRetired = true',
+      ),
+      {},
+      { runtimeImport },
+    )
+
+    let browser: ChildProcess | undefined
+    let cdp: CdpClient | undefined
+    let browserStderr = ''
+    try {
+      const port = await unusedPort()
+      browser = spawn(chrome, [
+        '--headless=new',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-background-networking',
+        '--disable-component-update',
+        '--disable-sync',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--no-sandbox',
+        '--remote-allow-origins=*',
+        '--remote-debugging-address=127.0.0.1',
+        `--remote-debugging-port=${port}`,
+        `--user-data-dir=${profile}`,
+        'about:blank',
+      ], { stdio: ['ignore', 'ignore', 'pipe'] })
+      browser.stderr?.on('data', data => {
+        browserStderr = `${browserStderr}${data.toString()}`.slice(-8_192)
+      })
+      const target = await waitForChromeTarget(port, browser, () => browserStderr)
+      cdp = await CdpClient.connect(target)
+      await cdp.send('Runtime.enable')
+
+      await cdp.evaluate(`(() => {
+        delete globalThis.__cordisxBoot
+        delete globalThis.__cordisxRuntime
+        delete globalThis.__cordisxSharedReactRuntime
+        globalThis.__controlledInstallCalls = 0
+        globalThis.__controlledGraphPromise = new Promise((resolve, reject) => {
+          globalThis.__resolveControlledGraph = resolve
+          globalThis.__rejectControlledGraph = reject
+        })
+        globalThis.__controlledCompositionImport = import(${JSON.stringify(javascriptModuleUrl(successful.source))})
+        return true
+      })()`)
+      const pending = await cdp.evaluate<{
+        readonly compositionBoot: boolean
+        readonly serializedBoot: boolean
+        readonly runtimeMissing: boolean
+        readonly compositionVisibleAtGraphLoad: boolean
+        readonly reactReadyAtGraphLoad: boolean
+        readonly installCalls: number
+      }>(`(async () => {
+        await globalThis.__controlledCompositionImport
+        return {
+          compositionBoot: typeof globalThis.__cordisxCompositionBoot?.then === 'function',
+          serializedBoot: globalThis.__cordisxCompositionBoot === globalThis.__cordisxBoot,
+          runtimeMissing: globalThis.__cordisxRuntime === undefined,
+          compositionVisibleAtGraphLoad: globalThis.__controlledCompositionVisibleAtGraphLoad === true,
+          reactReadyAtGraphLoad: globalThis.__controlledReactAtGraphLoad === true,
+          installCalls: globalThis.__controlledInstallCalls,
+        }
+      })()`)
+      expect(pending).toEqual({
+        compositionBoot: true,
+        serializedBoot: true,
+        runtimeMissing: true,
+        compositionVisibleAtGraphLoad: true,
+        reactReadyAtGraphLoad: true,
+        installCalls: 0,
+      })
+
+      await cdp.evaluate(`(() => {
+        globalThis.__resolveControlledGraph({ marker: 'controlled-module' })
+        return true
+      })()`)
+      expect(
+        await cdp.evaluate(`(async () => {
+          const runtime = await globalThis.__cordisxCompositionBoot
+          const bootRuntime = await globalThis.__cordisxBoot
+          return {
+            kind: runtime.kind,
+            graphMarker: runtime.graphMarker,
+            installedRuntime: runtime === globalThis.__cordisxRuntime,
+            bootRuntime: runtime === bootRuntime,
+            published: globalThis.__controlledGraphPublished === true,
+            installCalls: globalThis.__controlledInstallCalls,
+          }
+        })()`),
+      ).toEqual({
+        kind: 'installed-runtime',
+        graphMarker: 'controlled-module',
+        installedRuntime: true,
+        bootRuntime: true,
+        published: true,
+        installCalls: 1,
+      })
+
+      await cdp.evaluate(`(() => {
+        delete globalThis.__cordisxBoot
+        delete globalThis.__cordisxRuntime
+        delete globalThis.__cordisxSharedReactRuntime
+        globalThis.__controlledInstallCalls = 0
+        globalThis.__rejectedGraphPromise = new Promise((resolve, reject) => {
+          globalThis.__resolveRejectedGraph = resolve
+          globalThis.__rejectRejectedGraph = reject
+        })
+        globalThis.__rejectedCompositionImport = import(${JSON.stringify(javascriptModuleUrl(rejected.source))})
+        return true
+      })()`)
+      expect(
+        await cdp.evaluate(`(async () => {
+          await globalThis.__rejectedCompositionImport
+          return {
+            compositionBoot: typeof globalThis.__cordisxCompositionBoot?.then === 'function',
+            serializedBoot: globalThis.__cordisxCompositionBoot === globalThis.__cordisxBoot,
+            runtimeMissing: globalThis.__cordisxRuntime === undefined,
+            compositionVisibleAtGraphLoad: globalThis.__rejectedCompositionVisibleAtGraphLoad === true,
+            reactReadyAtGraphLoad: globalThis.__rejectedReactAtGraphLoad === true,
+          }
+        })()`),
+      ).toEqual({
+        compositionBoot: true,
+        serializedBoot: true,
+        runtimeMissing: true,
+        compositionVisibleAtGraphLoad: true,
+        reactReadyAtGraphLoad: true,
+      })
+      await cdp.evaluate(`(() => {
+        globalThis.__rejectRejectedGraph(new Error('controlled graph load failed'))
+        return true
+      })()`)
+      await expect(cdp.evaluate(`(async () => await globalThis.__cordisxCompositionBoot)()`))
+        .rejects.toThrow('controlled graph load failed')
+      expect(
+        await cdp.evaluate(`({
+          retired: globalThis.__rejectedGraphRetired === true,
+          published: globalThis.__rejectedGraphPublished === true,
+          sharedReactCleaned: globalThis.__cordisxSharedReactRuntime === undefined,
+          installCalls: globalThis.__controlledInstallCalls,
+        })`),
+      ).toEqual({ retired: true, published: false, sharedReactCleaned: true, installCalls: 0 })
+    } finally {
+      if (cdp !== undefined) await cdp.close().catch(() => undefined)
+      if (browser !== undefined) await stopChrome(browser)
+    }
+  }, 30_000)
+
   nativeIt('uses native ESM and HTTP caches while retiring generation CSS and routes', async () => {
     if (chrome === undefined) throw new Error('Chrome executable disappeared after test discovery')
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-native-browser-'))

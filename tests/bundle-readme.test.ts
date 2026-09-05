@@ -207,6 +207,10 @@ describe('plugin README composition', () => {
     expect(composition.source).toContain('module: __cordisxPluginGraphModules[0]')
     expect(composition.source).toContain('globalThis.__graphLeasePublished = true')
     expect(composition.source).toContain('globalThis.__graphLeaseRetired = true')
+    expect(composition.source).toContain('globalThis.__cordisxCompositionBoot = __cordisxCompositionBoot')
+    expect(composition.source.indexOf('globalThis.__cordisxCompositionBoot = __cordisxCompositionBoot')).toBeLessThan(
+      composition.source.indexOf('void __cordisxCompositionBoot.catch'),
+    )
     expect(composition.source).not.toContain('__legacyGraphRebundleWouldBeABug')
   })
 })

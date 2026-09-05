@@ -518,6 +518,10 @@ export interface RendererGenerationCleanupObservation {
 declare global {
   // eslint-disable-next-line no-var
   var __cordisxRuntime: CordisXRuntimeHandle | undefined
+  // The production composition aliases its outer handshake to the serialized
+  // runtime boot while its graph modules load.
+  // eslint-disable-next-line no-var
+  var __cordisxCompositionBoot: Promise<CordisXRuntimeHandle> | undefined
   // eslint-disable-next-line no-var
   var __cordisxBoot: Promise<CordisXRuntimeHandle> | undefined
   // eslint-disable-next-line no-var
@@ -705,15 +709,22 @@ function writeBlockedPlugins(ids: ReadonlySet<string>): void {
   }
 }
 
+interface CordisXStartOptions {
+  readonly previousRuntimeDisposed?: boolean
+  readonly disposePreparedSharedReactRuntime?: () => void
+}
+
 async function start(
   plugins: readonly RuntimeBrowserPlugin[],
   metadata: CordisXRuntimeMetadata,
   internalBootstrap?: CordisXInternalRendererBootstrap,
+  options: CordisXStartOptions = {},
 ): Promise<CordisXRuntimeHandle> {
-  await globalThis.__cordisxRuntime?.dispose()
+  if (options.previousRuntimeDisposed !== true) await globalThis.__cordisxRuntime?.dispose()
 
   let ctx = new Context()
   let disposeInternalBootstrap: (() => void | Promise<void>) | undefined
+  let disposePreparedSharedReactRuntime = options.disposePreparedSharedReactRuntime
   let sharedReactRuntime: ReturnType<typeof installSharedReactRuntime> | undefined
   const blockedPlugins = readBlockedPlugins()
   const agentAdapter = new UnavailableCodexHostAdapter()
@@ -3548,6 +3559,8 @@ async function start(
       await pageFiber?.dispose()
       pageFiber = undefined
       if (ownsSharedReactRuntime) sharedReactRuntime?.dispose()
+      else disposePreparedSharedReactRuntime?.()
+      disposePreparedSharedReactRuntime = undefined
       sharedReactRuntime = undefined
       ownsSharedReactRuntime = false
       await commandFiber?.dispose()
@@ -4113,6 +4126,8 @@ async function start(
     certifiedPermissionChannel = undefined
     routeHistory.dispose()
     if (ownsSharedReactRuntime) sharedReactRuntime?.dispose()
+    else disposePreparedSharedReactRuntime?.()
+    disposePreparedSharedReactRuntime = undefined
     sharedReactRuntime = undefined
     ownsSharedReactRuntime = false
     throw error
@@ -4130,11 +4145,18 @@ export function prepareCordisXViteReactRuntime(document: Document): () => void {
   }
 }
 
-/** Serialize repeated CDP injections so a newer generation disposes the previous one first. */
-export function installCordisX(
-  plugins: readonly RuntimeBrowserPlugin[],
+function assertRequestedGeneration(metadata: CordisXRuntimeMetadata): void {
+  if (
+    metadata.generation !== undefined
+    && globalThis.__cordisxRequestedGeneration !== metadata.generation
+  ) {
+    throw new Error('CordisX bootstrap generation was superseded')
+  }
+}
+
+function serializeCordisXBoot(
   metadata: CordisXRuntimeMetadata,
-  internalBootstrap?: CordisXInternalRendererBootstrap,
+  operation: () => Promise<CordisXRuntimeHandle>,
 ): Promise<CordisXRuntimeHandle> {
   if (
     metadata.generation !== undefined
@@ -4148,13 +4170,8 @@ export function installCordisX(
     // their requested generation. A stale CDP registration therefore cannot
     // activate old plugin code before the newest registration supersedes it.
     await new Promise<void>(resolve => setTimeout(resolve, 0))
-    if (
-      metadata.generation !== undefined
-      && globalThis.__cordisxRequestedGeneration !== metadata.generation
-    ) {
-      throw new Error('CordisX bootstrap generation was superseded')
-    }
-    return await start(plugins, metadata, internalBootstrap)
+    assertRequestedGeneration(metadata)
+    return await operation()
   })
   globalThis.__cordisxBootGeneration = metadata.generation
   globalThis.__cordisxBoot = next
@@ -4167,4 +4184,61 @@ export function installCordisX(
     }
   })
   return next
+}
+
+/** Serialize repeated CDP injections so a newer generation disposes the previous one first. */
+export function installCordisX(
+  plugins: readonly RuntimeBrowserPlugin[],
+  metadata: CordisXRuntimeMetadata,
+  internalBootstrap?: CordisXInternalRendererBootstrap,
+): Promise<CordisXRuntimeHandle> {
+  return serializeCordisXBoot(
+    metadata,
+    async () => await start(plugins, metadata, internalBootstrap),
+  )
+}
+
+/**
+ * Load a production browser graph inside the serialized runtime boot. The old
+ * runtime is disposed before the next Host-owned React singleton is published,
+ * so a new graph can never capture the previous generation's React lease.
+ */
+export function installCordisXComposition(
+  loadPlugins: () => Promise<readonly RuntimeBrowserPlugin[]>,
+  metadata: CordisXRuntimeMetadata,
+  publish: () => void,
+  retire: () => void,
+  internalBootstrap?: CordisXInternalRendererBootstrap,
+): Promise<CordisXRuntimeHandle> {
+  return serializeCordisXBoot(metadata, async () => {
+    let disposeSharedReactRuntime: (() => void) | undefined
+    let runtime: CordisXRuntimeHandle | undefined
+    try {
+      await globalThis.__cordisxRuntime?.dispose()
+      const preparedSharedReactRuntimeDisposer = prepareCordisXViteReactRuntime(document)
+      disposeSharedReactRuntime = preparedSharedReactRuntimeDisposer
+      const plugins = await loadPlugins()
+      assertRequestedGeneration(metadata)
+      runtime = await start(plugins, metadata, internalBootstrap, {
+        previousRuntimeDisposed: true,
+        disposePreparedSharedReactRuntime: preparedSharedReactRuntimeDisposer,
+      })
+      publish()
+      return runtime
+    } catch (error) {
+      try {
+        retire()
+      } catch (cleanupError) {
+        console.error('[cordisx] failed to retire a failed composition graph', cleanupError)
+      }
+      if (runtime !== undefined) {
+        await runtime.dispose().catch(cleanupError => {
+          console.error('[cordisx] failed to dispose a failed composition runtime', cleanupError)
+        })
+        if (globalThis.__cordisxRuntime === runtime) globalThis.__cordisxRuntime = undefined
+      }
+      disposeSharedReactRuntime?.()
+      throw error
+    }
+  })
 }
