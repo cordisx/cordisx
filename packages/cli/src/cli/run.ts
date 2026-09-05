@@ -211,6 +211,7 @@ function providerConfigs(config: CordisXConfig, environment: NodeJS.ProcessEnv):
 interface RendererComposition {
   readonly source: string
   readonly newDocumentSource?: string
+  readonly hasLoopbackGraph: boolean
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken: string
   readonly configBridgeToken?: string
@@ -225,6 +226,12 @@ interface RendererComposition {
     pluginActivation: CordisXPluginActivationRecordV1,
     initialRegistryEpoch: number,
   ) => Promise<string>
+}
+
+export function assertProductionGraphLaunchOwnership(attach: boolean, hasLoopbackGraph: boolean): void {
+  if (attach && hasLoopbackGraph) {
+    throw new Error('production browser graphs require a launcher-owned native Host; --attach is unsupported')
+  }
 }
 
 type ChannelManagerBundleProjection = NonNullable<Parameters<typeof buildRendererBundle>[1]>['channelManager']
@@ -322,6 +329,7 @@ export async function buildRendererComposition(
       certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
     })
   const enabled = config.plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id)
+  const hasLoopbackGraph = config.plugins.some(plugin => plugin.enabled && plugin.runtimeGraph !== undefined)
   stdout(
     `[cordisx] ${
       options.developmentBuild === undefined ? 'bundle' : 'Vite entry'
@@ -330,6 +338,7 @@ export async function buildRendererComposition(
   return {
     source,
     ...(newDocumentSource === undefined ? {} : { newDocumentSource }),
+    hasLoopbackGraph,
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
@@ -490,6 +499,7 @@ async function runInjectedHost(input: {
   }
   readonly developmentRuntime?: CdpPluginLifecycleRuntime
   readonly viteDevelopment?: boolean
+  readonly hasLoopbackGraph: boolean
   readonly pluginArtifactOrigin?: string
   readonly publisherGrant?: PublisherGrantBridgeHandler
   readonly certifiedPermission?: Readonly<{
@@ -539,6 +549,8 @@ async function runInjectedHost(input: {
     ...(input.pluginLifecycle === undefined ? {} : { pluginLifecycle: input.pluginLifecycle }),
     ...(input.developmentRuntime === undefined ? {} : { developmentRuntime: input.developmentRuntime }),
     ...(input.viteDevelopment === true ? { viteDevelopment: true } : {}),
+    hasLoopbackGraph: input.hasLoopbackGraph,
+    ...(input.hasLoopbackGraph ? { launcherOwnedNativeTarget: !input.launcher.attach } : {}),
     ...(input.pluginArtifactOrigin === undefined ? {} : { pluginArtifactOrigin: input.pluginArtifactOrigin }),
     ...(input.publisherGrant === undefined ? {} : { publisherGrant: input.publisherGrant }),
     ...(input.certifiedPermission === undefined ? {} : { certifiedPermission: input.certifiedPermission }),
@@ -739,6 +751,7 @@ async function runDevelopment(
       await runInjectedHost({
         source: composition.source,
         viteDevelopment: true,
+        hasLoopbackGraph: false,
         agentHistoryHost: historyHost,
         agentHistoryBridgeToken: composition.agentHistoryBridgeToken,
         ownerDocuments,
@@ -1214,6 +1227,13 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       ? undefined
       : createChannelActionsBridgeHandler({ token: channelActionsBridgeToken, api: channelService.manager })
     if (invocation.options.attach) {
+      try {
+        assertProductionGraphLaunchOwnership(true, rendererComposition.hasLoopbackGraph)
+      } catch (error) {
+        await channelService?.dispose()
+        await providerFleet?.close()
+        throw error
+      }
       const debugPort = invocation.options.debugPort ?? composition.codex.debugPort
       if (invocation.options.dryRun) {
         stdout(JSON.stringify({ status: 'ready', mode: 'attach', appId, debugPort }, null, 2))
@@ -1225,7 +1245,12 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       try {
         await runInjectedHost({
           source: rendererComposition.source,
-          pluginArtifactOrigin: activePluginGenerationArtifactServer.origin,
+          hasLoopbackGraph: rendererComposition.hasLoopbackGraph,
+          ...(rendererComposition.hasLoopbackGraph
+            ? {
+              pluginArtifactOrigin: activePluginGenerationArtifactServer.origin,
+            }
+            : {}),
           ...(rendererComposition.newDocumentSource === undefined ? {} : {
             newDocumentSource: rendererComposition.newDocumentSource,
           }),
@@ -1318,7 +1343,12 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     try {
       await runInjectedHost({
         source: rendererComposition.source,
-        pluginArtifactOrigin: activePluginGenerationArtifactServer.origin,
+        hasLoopbackGraph: rendererComposition.hasLoopbackGraph,
+        ...(rendererComposition.hasLoopbackGraph
+          ? {
+            pluginArtifactOrigin: activePluginGenerationArtifactServer.origin,
+          }
+          : {}),
         ...(rendererComposition.newDocumentSource === undefined ? {} : {
           newDocumentSource: rendererComposition.newDocumentSource,
         }),

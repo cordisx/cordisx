@@ -238,6 +238,12 @@ npm run dev -- codex --executable /Applications/Codex.app/Contents/MacOS/Codex
 npm run dev -- codex --executable /Applications/ChatGPT.app/Contents/MacOS/ChatGPT
 ```
 
+`--attach` supports graph-free production composition and plugins whose
+renderer code is a single injected module. It does not support an enabled
+production browser-ESM graph. Those graphs require an ordinary launcher-owned
+native Host so CordisX can establish the strict-CSP policy before reloading and
+installing the graph; the CLI rejects that combination before attachment.
+
 `--profile-dir <path>` overrides the selected profile's independent Chromium
 path without changing `HOME` or `CODEX_HOME`. `--system` is the only mode that
 uses the normal Host Chromium profile. The old `--isolated` flag remains

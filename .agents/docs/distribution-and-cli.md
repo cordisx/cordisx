@@ -146,6 +146,13 @@ unmarked, invalid, or locally edited target remains untouched and emits a
 non-blocking diagnostic. Structural package or filesystem deployment errors
 remain launch failures. Dry runs never create or update a Skill directory.
 
+Attach mode remains available for graph-free production composition and
+plugins whose renderer code is one injected module. An enabled production
+browser-ESM graph instead requires a launcher-owned native Host: the launcher
+must establish the strict-CSP policy before reloading and installing that
+graph. The CLI therefore rejects a production graph combined with `--attach`
+before it connects to the existing process.
+
 ## Independent CordisX launches and explicit Host-root isolation
 
 `dataMode` has two values with deliberately different scopes:

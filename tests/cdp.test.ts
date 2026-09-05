@@ -10,6 +10,7 @@ import {
   type CdpTarget,
   iconThemePreferenceDeliveryEvaluation,
   injectableTargets,
+  RENDERER_DISPOSE_EXPRESSION,
   resolveCdpInjectionTimeoutMs,
   runtimeEvaluationException,
   serviceConfigResponseEvaluation,
@@ -122,6 +123,35 @@ describe('CDP injection timeout configuration', () => {
     expect(source).toContain('CordisX renderer composition and runtime boot promises are undefined after injection')
     expect(source).toContain('CordisX renderer runtime is undefined after boot')
     expect(source).toContain('error.stack ?? error.message')
+  })
+
+  it('emits an executable renderer cleanup that reports failures after clearing production markers', async () => {
+    const calls: string[] = []
+    const cleanupGlobal: Record<string, unknown> = {
+      __cordisxRuntime: {
+        dispose: async () => {
+          calls.push('runtime')
+          throw new Error('runtime cleanup failed')
+        },
+      },
+      __cordisxPluginGenerationResourcesV1: {
+        dispose: () => {
+          calls.push('resources')
+          throw new Error('resource cleanup failed')
+        },
+      },
+      __cordisxProductionBootstrapState: { status: 'evaluated' },
+      __cordisxProductionInstallId: 'fixture-install',
+    }
+    const result = await Function('globalThis', `return ${RENDERER_DISPOSE_EXPRESSION}`)(cleanupGlobal)
+    expect(result).toEqual({
+      ok: false,
+      error: expect.stringContaining('runtime cleanup failed\n'),
+    })
+    expect(String(result.error)).toContain('resource cleanup failed')
+    expect(calls).toEqual(['runtime', 'resources'])
+    expect(cleanupGlobal).not.toHaveProperty('__cordisxProductionBootstrapState')
+    expect(cleanupGlobal).not.toHaveProperty('__cordisxProductionInstallId')
   })
 })
 

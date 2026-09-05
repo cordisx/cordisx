@@ -1104,6 +1104,346 @@ describe('native Vite development transport', () => {
     expect(connections).toBe(1)
   }, 30_000)
 
+  it('reloads only the native production renderer and awaits its exact graph bootstrap acknowledgement', async () => {
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const port = (server.address() as { port: number }).port
+    const requests: { path: string; method: string; params: Record<string, unknown> }[] = []
+    let acknowledge: (() => void) | undefined
+    let bootChecks = 0
+    server.on('connection', (socket, request) => {
+      const socketPath = request.url ?? ''
+      socket.on('message', data => {
+        const item = JSON.parse(String(data)) as { id: number; method: string; params?: Record<string, unknown> }
+        const params = item.params ?? {}
+        requests.push({ path: socketPath, method: item.method, params })
+        const reply = (value: Record<string, unknown> = { ok: true }): void => {
+          socket.send(JSON.stringify({
+            id: item.id,
+            result: item.method === 'Page.addScriptToEvaluateOnNewDocument'
+              ? { identifier: 'production-bootstrap' }
+              : { result: { value } },
+          }))
+        }
+        const bootCheck = item.method === 'Runtime.evaluate'
+          && String(params.expression).includes('cordisx:production-boot-pending')
+        if (!bootCheck) {
+          reply()
+          return
+        }
+        bootChecks += 1
+        if (bootChecks === 1) reply({ ok: false, error: 'cordisx:production-boot-pending' })
+        else acknowledge = () => reply()
+      })
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify([
+        {
+          id: 'native-production',
+          title: 'Codex',
+          type: 'page',
+          url: 'app://-/index.html',
+          webSocketDebuggerUrl: `ws://127.0.0.1:${port}/native`,
+        },
+        {
+          id: 'web-production',
+          title: 'ChatGPT',
+          type: 'page',
+          url: 'https://chatgpt.com/',
+          webSocketDebuggerUrl: `ws://127.0.0.1:${port}/web`,
+        },
+      ]))
+    ) as typeof fetch
+    const source = `globalThis.__cordisxCompositionBoot = Promise.resolve(
+      globalThis.__cordisxRuntime = { kind: 'production-graph' }
+    )`
+    const ready = vi.fn()
+    const controller = new AbortController()
+    const watching = watchAndInject({
+      port,
+      source,
+      hasLoopbackGraph: true,
+      launcherOwnedNativeTarget: true,
+      pluginArtifactOrigin: 'http://127.0.0.1:47123',
+      signal: controller.signal,
+      onReady: ready,
+    })
+    try {
+      await vi.waitFor(() => expect(acknowledge).toBeTypeOf('function'))
+      expect(ready).not.toHaveBeenCalled()
+      expect(requests.some(item => item.path === '/web')).toBe(false)
+      const methods = requests.map(item => item.method)
+      const grantIndex = requests.findIndex(item =>
+        item.method === 'Browser.setPermission' && item.params.setting === 'granted'
+      )
+      const bypassIndex = requests.findIndex(item =>
+        item.method === 'Page.setBypassCSP' && item.params.enabled === true
+      )
+      const registrationIndex = methods.indexOf('Page.addScriptToEvaluateOnNewDocument')
+      const reloadIndex = methods.indexOf('Page.reload')
+      const acknowledgementIndex = requests.findIndex(item =>
+        item.method === 'Runtime.evaluate'
+        && String(item.params.expression).includes('cordisx:production-boot-pending')
+      )
+      expect(grantIndex).toBeGreaterThanOrEqual(0)
+      expect(grantIndex).toBeLessThan(bypassIndex)
+      expect(bypassIndex).toBeLessThan(registrationIndex)
+      expect(registrationIndex).toBeLessThan(reloadIndex)
+      expect(reloadIndex).toBeLessThan(acknowledgementIndex)
+      expect(requests.find(item => item.method === 'Page.reload')?.params).toEqual({})
+
+      const installedSource = String(requests[registrationIndex]?.params.source)
+      const installId = installedSource.match(/__cordisxProductionInstallId = "([^"]+)"/)?.[1]
+      expect(installId).toBeDefined()
+      expect(installedSource).toContain(`installId: "${installId}"`)
+      expect(installedSource).toContain(source)
+      const acknowledgementSource = String(requests[acknowledgementIndex]?.params.expression)
+      expect(acknowledgementSource.match(new RegExp(`__cordisxProductionInstallId !== "${installId}"`, 'g')))
+        .toHaveLength(2)
+      expect(acknowledgementSource).toContain('__cordisxProductionBootstrapState')
+      expect(acknowledgementSource).toContain('CordisX production runtime is undefined after boot')
+      expect(requests.some(item => item.method === 'Runtime.evaluate' && item.params.expression === source)).toBe(
+        false,
+      )
+
+      acknowledge!()
+      await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce())
+    } finally {
+      controller.abort()
+      await watching
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
+    expect(requests.some(item => item.method === 'Page.removeScriptToEvaluateOnNewDocument')).toBe(true)
+    expect(requests.filter(item => item.method === 'Page.setBypassCSP').map(item => item.params.enabled)).toEqual([
+      true,
+      false,
+    ])
+    expect(requests.filter(item => item.method === 'Browser.setPermission').map(item => item.params.setting)).toEqual([
+      'granted',
+      'prompt',
+    ])
+    const removalIndex = requests.findIndex(item => item.method === 'Page.removeScriptToEvaluateOnNewDocument')
+    const disposeIndex = requests.findIndex(item =>
+      item.method === 'Runtime.evaluate'
+      && String(item.params.expression).includes('delete globalThis.__cordisxProductionBootstrapState')
+    )
+    const cspRestoreIndex = requests.findIndex(item =>
+      item.method === 'Page.setBypassCSP' && item.params.enabled === false
+    )
+    const permissionRestoreIndex = requests.findIndex(item =>
+      item.method === 'Browser.setPermission' && item.params.setting === 'prompt'
+    )
+    const cleanReloadIndex = requests.findLastIndex(item => item.method === 'Page.reload')
+    expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(2)
+    expect(disposeIndex).toBeLessThan(cspRestoreIndex)
+    expect(removalIndex).toBeLessThan(cleanReloadIndex)
+    expect(removalIndex).toBeLessThan(cspRestoreIndex)
+    expect(cspRestoreIndex).toBeLessThan(permissionRestoreIndex)
+    expect(permissionRestoreIndex).toBeLessThan(cleanReloadIndex)
+  }, 30_000)
+
+  it('does not reload or relax CSP when an artifact origin has no cold production graph', async () => {
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const port = (server.address() as { port: number }).port
+    const requests: { method: string; params: Record<string, unknown> }[] = []
+    server.on('connection', socket =>
+      socket.on('message', data => {
+        const request = JSON.parse(String(data)) as { id: number; method: string; params?: Record<string, unknown> }
+        const params = request.params ?? {}
+        requests.push({ method: request.method, params })
+        socket.send(JSON.stringify({
+          id: request.id,
+          result: request.method === 'Page.addScriptToEvaluateOnNewDocument'
+            ? { identifier: 'production-without-graph' }
+            : { result: { value: { ok: true } } },
+        }))
+      }))
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify([{
+        id: 'native-production-without-graph',
+        title: 'Codex',
+        type: 'page',
+        url: 'app://-/index.html',
+        webSocketDebuggerUrl: `ws://127.0.0.1:${port}`,
+      }]))
+    ) as typeof fetch
+    const controller = new AbortController()
+    const ready = vi.fn()
+    const watching = watchAndInject({
+      port,
+      source: 'globalThis.__cordisxRuntime = {}',
+      pluginArtifactOrigin: 'http://127.0.0.1:47123',
+      signal: controller.signal,
+      onReady: ready,
+    })
+    try {
+      await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce())
+      expect(requests.some(item => item.method === 'Page.reload')).toBe(false)
+      expect(requests.some(item => item.method === 'Page.setBypassCSP')).toBe(false)
+      expect(requests.some(item => item.method === 'Browser.setPermission')).toBe(false)
+    } finally {
+      controller.abort()
+      await watching
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
+  })
+
+  it('rejects the production compatibility reload for a target the launcher does not own', async () => {
+    await expect(watchAndInject({
+      port: 9229,
+      source: 'globalThis.__cordisxRuntime = {}',
+      hasLoopbackGraph: true,
+      pluginArtifactOrigin: 'http://127.0.0.1:47123',
+      signal: new AbortController().signal,
+    })).rejects.toThrow('production loopback graph compatibility requires a launcher-owned native target')
+  })
+
+  it('surfaces production cleanup failure after attempting policy restoration and a clean reload', async () => {
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const port = (server.address() as { port: number }).port
+    const requests: { method: string; params: Record<string, unknown> }[] = []
+    server.on('connection', socket =>
+      socket.on('message', data => {
+        const request = JSON.parse(String(data)) as { id: number; method: string; params?: Record<string, unknown> }
+        const params = request.params ?? {}
+        requests.push({ method: request.method, params })
+        const cleanupEvaluation = request.method === 'Runtime.evaluate'
+          && String(params.expression).includes('delete globalThis.__cordisxProductionBootstrapState')
+        socket.send(JSON.stringify({
+          id: request.id,
+          result: request.method === 'Page.addScriptToEvaluateOnNewDocument'
+            ? { identifier: 'cleanup-failure-production-bootstrap' }
+            : {
+              result: {
+                value: cleanupEvaluation
+                  ? { ok: false, error: 'fixture production dispose failed' }
+                  : { ok: true },
+              },
+            },
+        }))
+      }))
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify([{
+        id: 'native-production-cleanup-failure',
+        title: 'Codex',
+        type: 'page',
+        url: 'app://-/index.html',
+        webSocketDebuggerUrl: `ws://127.0.0.1:${port}`,
+      }]))
+    ) as typeof fetch
+    const controller = new AbortController()
+    const ready = vi.fn()
+    const watching = watchAndInject({
+      port,
+      source: 'globalThis.__cordisxCompositionBoot = Promise.resolve(globalThis.__cordisxRuntime = {})',
+      hasLoopbackGraph: true,
+      launcherOwnedNativeTarget: true,
+      pluginArtifactOrigin: 'http://127.0.0.1:47123',
+      signal: controller.signal,
+      onReady: ready,
+    })
+    try {
+      await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce())
+      controller.abort()
+      await expect(watching).rejects.toThrow('CordisX renderer cleanup failed')
+    } finally {
+      controller.abort()
+      await watching.catch(() => undefined)
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
+    expect(requests.some(item =>
+      item.method === 'Runtime.evaluate'
+      && String(item.params.expression).includes('delete globalThis.__cordisxProductionBootstrapState')
+    )).toBe(true)
+    expect(requests.filter(item => item.method === 'Page.setBypassCSP').map(item => item.params.enabled)).toEqual([
+      true,
+      false,
+    ])
+    expect(requests.filter(item => item.method === 'Browser.setPermission').map(item => item.params.setting)).toEqual([
+      'granted',
+      'prompt',
+    ])
+    expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(2)
+  })
+
+  it('fails a rejected production graph acknowledgement without entering the CDP retry loop', async () => {
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const port = (server.address() as { port: number }).port
+    const requests: { method: string; params: Record<string, unknown> }[] = []
+    let connections = 0
+    server.on('connection', socket => {
+      connections += 1
+      socket.on('message', data => {
+        const request = JSON.parse(String(data)) as { id: number; method: string; params?: Record<string, unknown> }
+        const params = request.params ?? {}
+        requests.push({ method: request.method, params })
+        const failedBoot = request.method === 'Runtime.evaluate'
+          && String(params.expression).includes('cordisx:production-boot-pending')
+        socket.send(JSON.stringify({
+          id: request.id,
+          result: request.method === 'Page.addScriptToEvaluateOnNewDocument'
+            ? { identifier: 'failed-production-bootstrap' }
+            : {
+              result: {
+                value: failedBoot
+                  ? { ok: false, error: 'fixture production graph failed' }
+                  : { ok: true },
+              },
+            },
+        }))
+      })
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify([{
+        id: 'native-production-failure',
+        title: 'Codex',
+        type: 'page',
+        url: 'app://-/index.html',
+        webSocketDebuggerUrl: `ws://127.0.0.1:${port}`,
+      }]))
+    ) as typeof fetch
+    const controller = new AbortController()
+    try {
+      await expect(watchAndInject({
+        port,
+        source: 'globalThis.__cordisxCompositionBoot = Promise.reject(new Error("fixture"))',
+        hasLoopbackGraph: true,
+        launcherOwnedNativeTarget: true,
+        pluginArtifactOrigin: 'http://127.0.0.1:47123',
+        signal: controller.signal,
+      })).rejects.toThrow('CordisX production renderer installation failed: fixture production graph failed')
+    } finally {
+      controller.abort()
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
+    expect(connections).toBe(1)
+    expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(2)
+    expect(requests.some(item => item.method === 'Page.removeScriptToEvaluateOnNewDocument')).toBe(true)
+    expect(requests.filter(item => item.method === 'Page.setBypassCSP').map(item => item.params.enabled)).toEqual([
+      true,
+      false,
+    ])
+    expect(requests.filter(item => item.method === 'Browser.setPermission').map(item => item.params.setting)).toEqual([
+      'granted',
+      'prompt',
+    ])
+  })
+
   it('restores a loopback grant through the browser endpoint after the native target disconnects', async () => {
     const server = new WebSocketServer({ port: 0 })
     await once(server, 'listening')

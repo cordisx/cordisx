@@ -1,5 +1,7 @@
+import { createHash, randomUUID } from 'node:crypto'
 import { accessSync, constants, statSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createServer as createHttpServer, type Server as HttpServer } from 'node:http'
 import { createServer } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
@@ -216,6 +218,171 @@ function javascriptModuleUrl(source: string): string {
 }
 
 describe('plugin generation native browser graph', () => {
+  nativeIt('requires a new strict-CSP document before a loopback graph can load', async () => {
+    if (chrome === undefined) throw new Error('Chrome executable disappeared after test discovery')
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-strict-csp-reload-'))
+    temporary.add(root)
+    const profile = path.join(root, 'chrome-profile')
+    const moduleSource = 'export const marker = "strict-csp-graph-loaded"\n'
+    await writeFile(path.join(root, 'module.js'), moduleSource)
+    const artifact = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-generation-artifact.v1.schema.json',
+      contract: 'cordisx.plugin-generation-artifact/v1',
+      schemaVersion: 1,
+      format: 'browser-esm-graph',
+      entry: './module.js',
+      initialStyles: [],
+      sharedImports: [],
+      files: [{
+        path: './module.js',
+        kind: 'module',
+        mediaType: 'text/javascript',
+        digest: `sha256:${createHash('sha256').update(moduleSource).digest('hex')}`,
+        byteLength: Buffer.byteLength(moduleSource),
+        imports: [],
+        dynamicImports: [],
+        styles: [],
+        assets: [],
+      }],
+    } as const
+
+    let artifactServer: PluginGenerationArtifactServer | undefined
+    let documentServer: HttpServer | undefined
+    let browser: ChildProcess | undefined
+    let cdp: CdpClient | undefined
+    let browserStderr = ''
+    try {
+      artifactServer = await startPluginGenerationArtifactServer()
+      const lease = await artifactServer.lease(
+        {
+          packageIdentity: {
+            pluginId: 'strict-csp-fixture',
+            version: '1.0.0',
+            integrity: `sha256:${'b'.repeat(64)}`,
+          },
+          artifactDirectory: root,
+          runtimeEntry: './module.js',
+        },
+        'strict-csp-generation',
+        artifact,
+      )
+      documentServer = createHttpServer((_request, response) => {
+        response.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          'content-security-policy': "default-src 'none'; script-src 'self'; connect-src 'none'",
+        })
+        response.end('<!doctype html><title>strict CSP fixture</title>')
+      })
+      await new Promise<void>((resolve, reject) => {
+        documentServer!.once('error', reject)
+        documentServer!.listen(0, '127.0.0.1', () => resolve())
+      })
+      const address = documentServer.address()
+      if (address === null || typeof address === 'string') throw new Error('strict CSP fixture did not bind')
+      const documentUrl = `http://127.0.0.1:${address.port}/`
+
+      const port = await unusedPort()
+      browser = spawn(chrome, [
+        '--headless=new',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-background-networking',
+        '--disable-component-update',
+        '--disable-sync',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--no-sandbox',
+        '--remote-allow-origins=*',
+        '--remote-debugging-address=127.0.0.1',
+        `--remote-debugging-port=${port}`,
+        `--user-data-dir=${profile}`,
+        'about:blank',
+      ], { stdio: ['ignore', 'ignore', 'pipe'] })
+      browser.stderr?.on('data', data => {
+        browserStderr = `${browserStderr}${data.toString()}`.slice(-8_192)
+      })
+      const target = await waitForChromeTarget(port, browser, () => browserStderr)
+      cdp = await CdpClient.connect(target)
+      await cdp.send('Runtime.enable')
+      await cdp.send('Page.enable')
+      await cdp.send('Page.navigate', { url: documentUrl })
+      await expect.poll(
+        async () => await cdp!.evaluate(`location.href === ${JSON.stringify(documentUrl)} && document.readyState`),
+        { timeout: 5_000 },
+      ).toBe('complete')
+
+      // Enabling bypass after this document's policy was initialized is too late.
+      await cdp.send('Page.setBypassCSP', { enabled: true })
+      expect(
+        await cdp.evaluate(`(async () => {
+        const [module, diagnostic] = await Promise.allSettled([
+          import(${JSON.stringify(lease.entryUrl)}),
+          fetch(${JSON.stringify(lease.entryUrl)}),
+        ])
+        return { module: module.status, diagnostic: diagnostic.status }
+      })()`),
+      ).toEqual({ module: 'rejected', diagnostic: 'rejected' })
+      expect(artifactServer.requestTrace()).toEqual([])
+
+      const installId = randomUUID()
+      const registration = await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+        source: `globalThis.__cordisxStrictCspInstallId = ${JSON.stringify(installId)};
+globalThis.__cordisxStrictCspBoot = import(${JSON.stringify(lease.entryUrl)}).then(module => {
+  globalThis.__cordisxRuntime = { marker: module.marker };
+  return globalThis.__cordisxRuntime;
+});`,
+      }) as { readonly identifier?: string }
+      expect(registration.identifier).toBeTypeOf('string')
+      await cdp.send('Page.reload')
+      await expect.poll(async () => {
+        try {
+          return await cdp!.evaluate(`(async () => {
+            if (globalThis.__cordisxStrictCspInstallId !== ${JSON.stringify(installId)}) return 'pending'
+            const runtime = await globalThis.__cordisxStrictCspBoot
+            return runtime?.marker ?? 'missing'
+          })()`)
+        } catch {
+          return 'pending'
+        }
+      }, { timeout: 5_000 }).toBe('strict-csp-graph-loaded')
+      expect(
+        artifactServer.requestTrace().filter(request => request.method === 'GET' && request.status === 200),
+      ).toEqual([expect.objectContaining({ artifactPath: './module.js' })])
+      const loadedTrace = artifactServer.requestTrace()
+      await cdp.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: registration.identifier })
+      await cdp.send('Page.setBypassCSP', { enabled: false })
+      await cdp.send('Page.reload')
+      await expect.poll(async () => {
+        try {
+          return await cdp!.evaluate(`document.readyState === 'complete'
+            && globalThis.__cordisxStrictCspInstallId === undefined`)
+        } catch {
+          return false
+        }
+      }, { timeout: 5_000 }).toBe(true)
+      expect(
+        await cdp.evaluate(`(async () => {
+          const [module, diagnostic] = await Promise.allSettled([
+            import(${JSON.stringify(lease.entryUrl)}),
+            fetch(${JSON.stringify(lease.entryUrl)}),
+          ])
+          return { module: module.status, diagnostic: diagnostic.status }
+        })()`),
+      ).toEqual({ module: 'rejected', diagnostic: 'rejected' })
+      expect(artifactServer.requestTrace()).toEqual(loadedTrace)
+    } finally {
+      if (cdp !== undefined) await cdp.close().catch(() => undefined)
+      if (browser !== undefined) await stopChrome(browser)
+      if (documentServer !== undefined) {
+        await new Promise<void>((resolve, reject) =>
+          documentServer!.close(error => error === undefined ? resolve() : reject(error))
+        )
+      }
+      if (artifactServer !== undefined) await artifactServer.close()
+    }
+  }, 30_000)
+
   nativeIt('exposes composition boot before a delayed production graph settles', async () => {
     if (chrome === undefined) throw new Error('Chrome executable disappeared after test discovery')
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-composition-boot-'))
