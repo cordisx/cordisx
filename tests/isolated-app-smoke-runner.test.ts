@@ -242,6 +242,25 @@ describe('isolated app smoke runner', () => {
     }
   })
 
+  it('reserves visible native windows for an explicit custom smoke entry', async () => {
+    const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-isolated-smoke-test-'))
+    try {
+      await expect(execute(process.execPath, [
+        runner,
+        '--port',
+        '43123',
+        '--profile-dir',
+        path.join(fixtureRoot, 'profile'),
+        '--show-window',
+        '--',
+      ], { cwd: root })).rejects.toMatchObject({
+        stderr: expect.stringContaining('--show-window requires --smoke-entry'),
+      })
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true })
+    }
+  })
+
   it('keeps the product-mode invocation explicit', async () => {
     const source = await readFile(path.join(root, 'packages/cli/scripts/run-isolated-app-smoke.mjs'), 'utf8')
     const homeHelperSource = await readFile(path.join(root, 'packages/cli/scripts/isolated-smoke-home.mjs'), 'utf8')
@@ -250,15 +269,19 @@ describe('isolated app smoke runner', () => {
     expect(source).toContain("const homeSeedInput = optionalValue('--home-seed')")
     expect(source).toContain("const smokeEntryInput = optionalValue('--smoke-entry')")
     expect(source).toContain("const rendererTimeoutInput = optionalValue('--renderer-timeout-ms')")
+    expect(source).toContain("const showWindow = process.argv.includes('--show-window')")
     expect(source).toContain("'--home-seed requires --home-config'")
     expect(source).toContain("'--smoke-entry must be a real .mjs file'")
     expect(source).toContain("'--smoke-entry cannot override a built-in smoke harness'")
     expect(source).toContain("'--renderer-timeout-ms requires --smoke-entry'")
+    expect(source).toContain("'--show-window requires --smoke-entry'")
+    expect(source).toContain("...(showWindow ? [] : ['--start-minimized'])")
     expect(source.indexOf('lstat(homeSeedInput)')).toBeLessThan(source.indexOf('realpath(homeSeedInput)'))
     expect(source.indexOf('lstat(smokeEntryInput)')).toBeLessThan(source.indexOf('realpath(smokeEntryInput)'))
     expect(source).toContain('const smokeEntry = customSmokeEntry ??')
     expect(source).toContain('prepareIsolatedSmokeHome(homeConfig, homeSeed)')
     expect(source).toContain('cleanupIsolatedSmokeHome(homeRoot)')
+    expect(source.indexOf("child.kill('SIGINT')")).toBeLessThan(source.indexOf("signal(child, 'SIGTERM')"))
     expect(source.indexOf('cleanupIsolatedSmokeHome(homeRoot)')).toBeGreaterThan(
       source.lastIndexOf('profileProcesses()'),
     )

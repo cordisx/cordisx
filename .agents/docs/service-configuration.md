@@ -27,6 +27,15 @@ Its `runnerCleanup` report record and `[cordisx-smoke-cleanup]` line require
 `homeRootRemoved=true` and `homeRootExists=false` alongside the port, profile,
 and Crashpad checks.
 
+A new isolated profile does not inherit the daily App login state. Before a
+visible semantic smoke, confirm both the public route/outlet and the visible
+login state. A logged-out run can still prove bootstrap and cold-graph network
+behavior, but acceptance of the real main outlet, page, or avatar UI requires a
+logged-in profile. If login UI replaces those semantic anchors, classify the
+result as an authentication precondition rather than an adapter regression.
+Use `--show-window` only with an explicit custom `--smoke-entry`; the built-in
+harnesses remain minimized and automation-owned.
+
 ## Boundary
 
 Launcher service configuration is not renderer `Config`. It is stored under

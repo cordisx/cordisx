@@ -81,8 +81,14 @@ interface RuntimeHandle {
     plugins: readonly { id: string; status: string; package?: { moduleGeneration: string } }[]
     registrations: readonly { owner: string }[]
     navigation: { routes: readonly { owner: string }[]; pages: readonly { owner: string }[] }
+    pluginBundles?: { revision: number; pluginRevision: number }
   }
-  stagePluginMutation(mutation: unknown, module?: CordisXPluginModule): Promise<unknown>
+  stagePluginMutation(
+    mutation: unknown,
+    module?: CordisXPluginModule,
+    moduleFactory?: undefined,
+    modules?: Readonly<Record<string, CordisXPluginModule>>,
+  ): Promise<unknown>
   publishPluginMutation(transactionId: string): Promise<unknown>
   completePluginMutation(transactionId: string): Promise<unknown>
   rollbackPluginMutation(transactionId: string): Promise<unknown>
@@ -92,6 +98,7 @@ interface RuntimeHandle {
   subscribe(listener: () => void): () => void
   generationNotificationTrace(): readonly { source: string; registryEpoch: number; suppressed: boolean }[]
   settleRegistryProjection(): Promise<void>
+  adoptPluginBundleSnapshot(snapshot: unknown): Readonly<{ revision: number; pluginRevision: number }>
   dispose(): Promise<void>
 }
 
@@ -299,6 +306,25 @@ describe('renderer plugin generation transactions', () => {
     expect(globals.__cordisxGenerationBase).toEqual({ apply: 1, dispose: 0 })
     expect(globals.__cordisxGenerationConsumer).toEqual({ apply: 1, dispose: 0 })
     expect(globals.__cordisxGenerationUnrelated).toEqual({ apply: 1, dispose: 0 })
+    const bundleSnapshot = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-bundle-manager-snapshot.v1.schema.json',
+      schemaVersion: 1,
+      profileId: 'work',
+      revision: 2,
+      pluginRevision: 1,
+      runtimeGeneration: generation,
+      operationsAvailable: true,
+      bundles: [],
+    }
+    expect(runtime.adoptPluginBundleSnapshot(bundleSnapshot)).toEqual({ revision: 2, pluginRevision: 1 })
+    expect(runtime.snapshot().pluginBundles).toMatchObject({ revision: 2, pluginRevision: 1 })
+    expect(() => runtime.adoptPluginBundleSnapshot({ ...bundleSnapshot, revision: 1 })).toThrow(
+      'plugin bundle snapshot revision regressed',
+    )
+    expect(() => runtime.adoptPluginBundleSnapshot({ ...bundleSnapshot, pluginRevision: 0 })).toThrow(
+      'plugin bundle snapshot does not match the current renderer generation',
+    )
     runtime.snapshot()
     await runtime.settleRegistryProjection()
     const beforeStage = runtime.snapshot()
@@ -312,6 +338,11 @@ describe('renderer plugin generation transactions', () => {
       const state = globalThis.__cordisxGenerationBase
       state.apply += 1
       ctx.effect(() => () => { state.dispose += 1 }, 'updated base cleanup')
+    } })`) as CordisXPluginModule
+    const nextConsumer = dom.window.eval(`({ apply(ctx) {
+      const state = globalThis.__cordisxCandidateGenerationConsumer ??= { apply: 0, dispose: 0 }
+      state.apply += 1
+      ctx.effect(() => () => { state.dispose += 1 }, 'updated consumer cleanup')
     } })`) as CordisXPluginModule
     const candidate: CordisXPluginActivationRecordV1 = {
       ...active,
@@ -336,28 +367,38 @@ describe('renderer plugin generation transactions', () => {
       identity: { source: source('generation-base', 'd'), pluginId: 'generation-base' },
       decisions: [],
     }
-    await runtime.stagePluginMutation({
-      transactionId: 'update-base',
-      operation: 'update',
-      previous: active,
-      candidate,
-      targetId: 'generation-base',
-      affectedPluginIds: ['generation-base', 'generation-consumer'],
-      package: {
-        manifest: packageManifest('generation-base'),
-        digest: digest('d'),
-        identitySource: source('generation-base', 'd'),
+    await runtime.stagePluginMutation(
+      {
+        transactionId: 'update-base',
+        operation: 'update',
+        previous: active,
+        candidate,
+        targetId: 'generation-base',
+        affectedPluginIds: ['generation-base', 'generation-consumer'],
+        package: {
+          manifest: packageManifest('generation-base'),
+          digest: digest('d'),
+          identitySource: source('generation-base', 'd'),
+        },
+        authorizationDecision: decision,
       },
-      authorizationDecision: decision,
-    }, nextBase)
+      undefined,
+      undefined,
+      {
+        'generation-base': nextBase,
+        'generation-consumer': nextConsumer,
+      },
+    )
     expect(globals.__cordisxGenerationBase).toEqual({ apply: 2, dispose: 0 })
-    expect(globals.__cordisxGenerationConsumer).toEqual({ apply: 2, dispose: 0 })
+    expect(globals.__cordisxGenerationConsumer).toEqual({ apply: 1, dispose: 0 })
+    expect(globals.__cordisxCandidateGenerationConsumer).toEqual({ apply: 1, dispose: 0 })
     expect(globals.__cordisxGenerationUnrelated).toEqual({ apply: 1, dispose: 0 })
     expect(runtime.snapshot()).toEqual(beforeStage)
     expect(notifications).toBe(0)
     await runtime.abortPluginMutation('update-base')
     expect(globals.__cordisxGenerationBase).toEqual({ apply: 2, dispose: 1 })
-    expect(globals.__cordisxGenerationConsumer).toEqual({ apply: 2, dispose: 1 })
+    expect(globals.__cordisxGenerationConsumer).toEqual({ apply: 1, dispose: 0 })
+    expect(globals.__cordisxCandidateGenerationConsumer).toEqual({ apply: 1, dispose: 1 })
     expect(globals.__cordisxGenerationUnrelated).toEqual({ apply: 1, dispose: 0 })
     expect(runtime.snapshot()).toEqual(beforeStage)
     expect(notifications).toBe(0)
@@ -403,7 +444,7 @@ describe('renderer plugin generation transactions', () => {
     }, failing)).rejects.toThrow('readiness rejected')
     await runtime.abortPluginMutation('update-fail')
     expect(globals.__cordisxGenerationBase.apply).toBe(3)
-    expect(globals.__cordisxGenerationConsumer.apply).toBe(3)
+    expect(globals.__cordisxGenerationConsumer.apply).toBe(2)
     expect(globals.__cordisxGenerationUnrelated).toEqual({ apply: 1, dispose: 0 })
     expect(runtime.snapshot().plugins.map(item => [item.id, item.package?.moduleGeneration, item.status])).toEqual(
       beforeStage.plugins.map(item => [item.id, item.package?.moduleGeneration, item.status]),
@@ -415,7 +456,7 @@ describe('renderer plugin generation transactions', () => {
     )
     await runtime.reloadPluginGeneration('generation-base', 'generation-base-a', generation)
     expect(globals.__cordisxGenerationBase.apply).toBe(4)
-    expect(globals.__cordisxGenerationConsumer.apply).toBe(3)
+    expect(globals.__cordisxGenerationConsumer.apply).toBe(2)
     expect(globals.__cordisxGenerationUnrelated).toEqual({ apply: 1, dispose: 0 })
     notifications = 0
 

@@ -15,7 +15,7 @@ import {
   resolveHomeConfigPath,
 } from '../config/home-config.js'
 import { buildRendererBundle, type BuildRendererBundleOptions } from '../launcher/bundle.js'
-import { CdpPluginLifecycleRuntime, watchAndInject } from '../launcher/cdp.js'
+import { CdpPluginLifecycleRuntime, watchAndInject, type WatchInjectionOptions } from '../launcher/cdp.js'
 import { localDevelopmentPluginIdentity } from '../launcher/development.js'
 import { createNativeViteEntityGenerationHandler, startNativeViteServer } from '../launcher/vite-development.js'
 import {
@@ -225,7 +225,12 @@ interface RendererComposition {
     config: CordisXConfig,
     pluginActivation: CordisXPluginActivationRecordV1,
     initialRegistryEpoch: number,
-  ) => Promise<string>
+    current?: Readonly<{
+      permissionPolicies: readonly CordisXPersistedPermissionPolicyRecord[]
+      pluginBundles: CordisXPluginBundleManagerSnapshotV1
+      channelManager?: ChannelManagerBundleProjection
+    }>,
+  ) => Promise<Readonly<{ source: string; newDocumentSource?: string }>>
 }
 
 export function assertProductionGraphLaunchOwnership(attach: boolean, hasLoopbackGraph: boolean): void {
@@ -284,7 +289,7 @@ export async function buildRendererComposition(
     : undefined
   const generation = options.generation ?? randomBytes(16).toString('hex')
   const profileId = options.permission?.profileId ?? options.profileId ?? 'development'
-  const bundleOptions = {
+  const bundleOptions: BuildRendererBundleOptions = {
     ...(providerBridgeToken === undefined ? {} : { providerBridgeToken }),
     agentHistoryBridgeToken,
     ...(configBridgeToken === undefined ? {} : { configBridgeToken }),
@@ -319,7 +324,7 @@ export async function buildRendererComposition(
       ? {}
       : { initialRegistryEpoch: options.initialRegistryEpoch ?? options.pluginLifecycle!.registryEpoch }),
     ...(options.channelManager === undefined ? {} : { channelManager: options.channelManager }),
-  } satisfies NonNullable<Parameters<typeof buildRendererBundle>[1]>
+  }
   const buildBundle = options.developmentBuild ?? options.internalBuildRendererBundle ?? buildRendererBundle
   const source = await buildBundle(config, bundleOptions)
   const newDocumentSource = options.certifiedPermissionChannelToken === undefined
@@ -348,13 +353,43 @@ export async function buildRendererComposition(
     ...(permissionBridgeToken === undefined ? {} : { permissionBridgeToken }),
     ...(iconThemePreferenceBridgeToken === undefined ? {} : { iconThemePreferenceBridgeToken }),
     ...(options.pluginLifecycle === undefined ? {} : { pluginLifecycleBridgeToken: options.pluginLifecycle.token }),
-    rebuild: async (nextConfig, pluginActivation, initialRegistryEpoch) =>
-      await buildBundle(nextConfig, {
-        ...bundleOptions,
+    rebuild: async (nextConfig, pluginActivation, initialRegistryEpoch, current) => {
+      const currentBundleOptions: BuildRendererBundleOptions = current === undefined
+        ? bundleOptions
+        : (() => {
+          const { channelManager: _channelManager, pluginBundleSnapshot: _pluginBundleSnapshot, ...stable } =
+            bundleOptions
+          void _channelManager
+          void _pluginBundleSnapshot
+          return {
+            ...stable,
+            pluginBundleSnapshot: current.pluginBundles,
+            ...(current.channelManager === undefined ? {} : { channelManager: current.channelManager }),
+          }
+        })()
+      const rebuildOptions: BuildRendererBundleOptions = {
+        ...currentBundleOptions,
+        ...(
+          current === undefined || bundleOptions.permission === undefined
+            ? {}
+            : { permission: { ...bundleOptions.permission, policies: current.permissionPolicies } }
+        ),
         ownerDocumentAuthority: { secret: ownerDocumentSecret, profileId, generation },
         pluginActivation,
         initialRegistryEpoch,
-      }),
+      }
+      const rebuiltSource = await buildBundle(nextConfig, rebuildOptions)
+      const rebuiltNewDocumentSource = options.certifiedPermissionChannelToken === undefined
+        ? undefined
+        : await buildBundle(nextConfig, {
+          ...rebuildOptions,
+          certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
+        })
+      return {
+        source: rebuiltSource,
+        ...(rebuiltNewDocumentSource === undefined ? {} : { newDocumentSource: rebuiltNewDocumentSource }),
+      }
+    },
   }
 }
 
@@ -379,6 +414,24 @@ function agentHistoryHost(
 
 function pluginIdentities(config: CordisXConfig): readonly CordisXPluginIdentity[] {
   return config.plugins.map(plugin => ({ source: plugin.source ?? pathToFileURL(plugin.entry).href, id: plugin.id }))
+}
+
+function configuredPluginTopology(config: CordisXConfig): string {
+  return JSON.stringify(config.plugins.map(plugin => ({
+    id: plugin.id,
+    entry: plugin.entry,
+    source: plugin.source,
+    enabled: plugin.enabled,
+  })))
+}
+
+function usesIsolatedPackageWorker(plugin: CordisXConfig['plugins'][number]): boolean {
+  const manifest = plugin.manifest
+  return manifest?.schemaVersion === 7
+    || ((manifest?.schemaVersion === 5 || manifest?.schemaVersion === 6)
+      && manifest.capabilities.some(capability => (
+        capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
+      )))
 }
 
 function cliProxyServiceConfigApis(input: {
@@ -501,6 +554,7 @@ async function runInjectedHost(input: {
   readonly viteDevelopment?: boolean
   readonly hasLoopbackGraph: boolean
   readonly pluginArtifactOrigin?: string
+  readonly productionGraphBootstrap?: WatchInjectionOptions['productionGraphBootstrap']
   readonly publisherGrant?: PublisherGrantBridgeHandler
   readonly certifiedPermission?: Readonly<{
     authority: LauncherMarketplaceCertifiedAuthority
@@ -550,8 +604,11 @@ async function runInjectedHost(input: {
     ...(input.developmentRuntime === undefined ? {} : { developmentRuntime: input.developmentRuntime }),
     ...(input.viteDevelopment === true ? { viteDevelopment: true } : {}),
     hasLoopbackGraph: input.hasLoopbackGraph,
-    ...(input.hasLoopbackGraph ? { launcherOwnedNativeTarget: !input.launcher.attach } : {}),
+    launcherOwnedNativeTarget: !input.launcher.attach,
     ...(input.pluginArtifactOrigin === undefined ? {} : { pluginArtifactOrigin: input.pluginArtifactOrigin }),
+    ...(input.productionGraphBootstrap === undefined
+      ? {}
+      : { productionGraphBootstrap: input.productionGraphBootstrap }),
     ...(input.publisherGrant === undefined ? {} : { publisherGrant: input.publisherGrant }),
     ...(input.certifiedPermission === undefined ? {} : { certifiedPermission: input.certifiedPermission }),
     onReady: () => {
@@ -1011,6 +1068,25 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     const channelActionsBridgeToken = channelPlugin === undefined ? undefined : randomBytes(32).toString('hex')
     let channelService: LocalChannelService | undefined
     let channelManager: ChannelManagerBundleProjection | undefined
+    const loadChannelManagerProjection = async (): Promise<ChannelManagerBundleProjection | undefined> => {
+      if (channelPlugin === undefined || channelService === undefined) return undefined
+      const state = await readServiceConfigState({
+        profileId: selection.profileId,
+        pluginId: 'channel',
+        serviceId: 'runtime',
+        initialConfig: CHANNEL_SERVICE_CONFIG_INITIAL as unknown as Parameters<
+          typeof readServiceConfigState
+        >[0]['initialConfig'],
+      }, configPath)
+      return projectLocalChannelManager({
+        configuration: state.config,
+        revision: state.revision,
+        lastGoodRevision: state.lastGoodRevision,
+        writable: true,
+        ...(channelService.snapshot() === undefined ? {} : { runtime: channelService.snapshot()! }),
+        audit: channelService.auditSnapshot(),
+      })
+    }
     if (channelPlugin !== undefined) {
       const state = await readServiceConfigState({
         profileId: selection.profileId,
@@ -1027,14 +1103,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         environment: runtime.env ?? process.env,
       })
       await channelService.start(state.config)
-      channelManager = projectLocalChannelManager({
-        configuration: state.config,
-        revision: state.revision,
-        lastGoodRevision: state.lastGoodRevision,
-        writable: true,
-        ...(channelService.snapshot() === undefined ? {} : { runtime: channelService.snapshot()! }),
-        audit: channelService.auditSnapshot(),
-      })
+      channelManager = await loadChannelManagerProjection()
     }
     const pluginLifecycleBridgeToken = randomBytes(32).toString('hex')
     const pluginBundleCoordinator = new PluginBundleCoordinator({
@@ -1081,6 +1150,85 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         ? {}
         : { internalBuildRendererBundle: runtime.internalBuildRendererBundle }),
     })
+    const initialConfiguredTopology = configuredPluginTopology(configuredComposition)
+    const loadCurrentProductionProjection = async () => {
+      const active = await lifecycleStore.loadActive()
+      const registryEpoch = lifecycleRuntime.currentRegistryEpoch()
+      const [freshConfigured, packagePlugins, freshHomeConfig, pluginBundles, freshChannelManager] = await Promise.all([
+        loadConfig(configPath, {
+          profileId: selection.profileId,
+          projectRoot: rootFromConfigPath(configPath),
+        }),
+        loadPluginComposition(lifecycleStore, active),
+        loadHomeConfig(configPath),
+        pluginBundleCoordinator.snapshot(),
+        loadChannelManagerProjection(),
+      ])
+      if (configuredPluginTopology(freshConfigured) !== initialConfiguredTopology) {
+        throw new Error('launcher-configured plugin topology changed during browser graph admission')
+      }
+      if (pluginBundles.pluginRevision !== active.revision) {
+        throw new Error('plugin bundle projection does not match the active plugin revision')
+      }
+      const currentPackagePlugins = await Promise.all(packagePlugins.map(async plugin => {
+        if (!plugin.enabled || plugin.package === undefined || usesIsolatedPackageWorker(plugin)) return plugin
+        const staged = await loadStagedPluginPackage(rootFromConfigPath(configPath), plugin.package.digest)
+        if (staged.browserArtifact === undefined) return plugin
+        const runtimeGraph = lifecycleRuntime.activeBrowserGraph(plugin.id, plugin.package.moduleGeneration)
+        if (runtimeGraph === undefined) {
+          throw new Error(`active browser graph lease is unavailable for plugin ${plugin.id}`)
+        }
+        return { ...plugin, runtimeGraph }
+      }))
+      const permissionPolicies = freshHomeConfig.permissions.filter(policy =>
+        policy.key.profileId === selection.profileId
+      )
+      const currentComposition: CordisXConfig = {
+        ...freshConfigured,
+        plugins: [...freshConfigured.plugins, ...currentPackagePlugins],
+      }
+      return {
+        active,
+        registryEpoch,
+        currentComposition,
+        permissionPolicies,
+        pluginBundles,
+        freshChannelManager,
+        fingerprint: JSON.stringify({
+          active,
+          registryEpoch,
+          currentComposition,
+          permissionPolicies,
+          pluginBundles,
+          freshChannelManager,
+        }),
+      }
+    }
+    const productionGraphBootstrap: NonNullable<WatchInjectionOptions['productionGraphBootstrap']> = async (
+      expectedActive,
+      expectedRegistryEpoch,
+    ) => {
+      const before = await loadCurrentProductionProjection()
+      if (
+        JSON.stringify(before.active) !== JSON.stringify(expectedActive)
+        || before.registryEpoch !== expectedRegistryEpoch
+      ) throw new Error('browser graph admission activation snapshot is stale')
+      const rebuilt = await rendererComposition.rebuild(
+        before.currentComposition,
+        before.active,
+        expectedRegistryEpoch,
+        {
+          permissionPolicies: before.permissionPolicies,
+          pluginBundles: before.pluginBundles,
+          ...(before.freshChannelManager === undefined ? {} : { channelManager: before.freshChannelManager }),
+        },
+      )
+      const after = await loadCurrentProductionProjection()
+      if (after.fingerprint !== before.fingerprint) {
+        throw new Error('browser graph admission projection changed during source rebuild')
+      }
+      return rebuilt
+    }
     const documentLeases = new OwnerDocumentLeaseRegistry({
       stable: pluginIdentities(configuredComposition).map(identity => ({
         source: identity.source,
@@ -1246,11 +1394,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         await runInjectedHost({
           source: rendererComposition.source,
           hasLoopbackGraph: rendererComposition.hasLoopbackGraph,
-          ...(rendererComposition.hasLoopbackGraph
-            ? {
-              pluginArtifactOrigin: activePluginGenerationArtifactServer.origin,
-            }
-            : {}),
+          pluginArtifactOrigin: activePluginGenerationArtifactServer.origin,
+          productionGraphBootstrap,
           ...(rendererComposition.newDocumentSource === undefined ? {} : {
             newDocumentSource: rendererComposition.newDocumentSource,
           }),
@@ -1344,11 +1489,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       await runInjectedHost({
         source: rendererComposition.source,
         hasLoopbackGraph: rendererComposition.hasLoopbackGraph,
-        ...(rendererComposition.hasLoopbackGraph
-          ? {
-            pluginArtifactOrigin: activePluginGenerationArtifactServer.origin,
-          }
-          : {}),
+        pluginArtifactOrigin: activePluginGenerationArtifactServer.origin,
+        productionGraphBootstrap,
         ...(rendererComposition.newDocumentSource === undefined ? {} : {
           newDocumentSource: rendererComposition.newDocumentSource,
         }),

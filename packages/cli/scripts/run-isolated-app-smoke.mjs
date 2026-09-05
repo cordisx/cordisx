@@ -33,6 +33,7 @@ const rendererTimeoutInput = optionalValue('--renderer-timeout-ms')
 const connectorHarness = process.argv.includes('--connector-harness')
 const desktopAgentSessionHarness = process.argv.includes('--desktop-agent-session-harness')
 const pluginBundleHarness = process.argv.includes('--plugin-bundle-harness')
+const showWindow = process.argv.includes('--show-window')
 const connectorHarnessPolicy = optionalValue('--connector-harness-policy') ?? 'allow'
 const connectorHarnessScenario = optionalValue('--connector-harness-scenario') ?? 'flow'
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('--port must be an unprivileged TCP port')
@@ -61,6 +62,7 @@ if (smokeEntryInput !== undefined && (connectorHarness || pluginBundleHarness ||
 if (rendererTimeoutInput !== undefined && smokeEntryInput === undefined) {
   throw new Error('--renderer-timeout-ms requires --smoke-entry')
 }
+if (showWindow && smokeEntryInput === undefined) throw new Error('--show-window requires --smoke-entry')
 if (connectorHarness && pluginBundleHarness) {
   throw new Error('--connector-harness and --plugin-bundle-harness are mutually exclusive')
 }
@@ -124,7 +126,9 @@ async function waitForExit(child, milliseconds) {
 
 async function stop(child) {
   if (exited(child)) return
-  signal(child, 'SIGINT')
+  // Give the launcher a bounded chance to dispose renderer bindings, restore
+  // browser policy, and stop its owned App before escalating to the process group.
+  child.kill('SIGINT')
   if (await waitForExit(child, 5_000)) return
   signal(child, 'SIGTERM')
   if (await waitForExit(child, 5_000)) return
@@ -323,7 +327,7 @@ const launcher = spawn(process.execPath, [
   '--profile-dir',
   profileDir,
   '--',
-  '--start-minimized',
+  ...(showWindow ? [] : ['--start-minimized']),
 ], {
   stdio: ['ignore', 'pipe', 'pipe'],
   env: launcherEnvironment,

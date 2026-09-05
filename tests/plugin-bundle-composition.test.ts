@@ -64,6 +64,62 @@ describe('production plugin bundle composition', () => {
     })
   })
 
+  it('rebuilds current production metadata with the stable certified document channel', async () => {
+    const generation = 'current-production-generation'
+    const activation: CordisXPluginActivationRecordV1 = {
+      $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+      schemaVersion: 1,
+      recordKind: 'active',
+      profileId: 'work',
+      revision: 7,
+      lastGoodRevision: 7,
+      runtimeGeneration: generation,
+      plugins: [],
+    }
+    const config: CordisXConfig = {
+      version: 1,
+      rootDir: process.cwd(),
+      codex: { debugPort: 9229 },
+      providers: [],
+      plugins: [],
+    }
+    const calls: BuildRendererBundleOptions[] = []
+    const composition = await buildRendererComposition(config, () => undefined, {
+      profileId: 'work',
+      generation,
+      permission: { profileId: 'work', policies: [], persistent: true },
+      pluginLifecycle: { token: 'lifecycle-token', activation },
+      pluginBundles: { ...playgroundPluginBundleSnapshot(generation), profileId: 'work' },
+      channelManager: { revision: 1, marker: 'cold-channel-projection' } as never,
+      certifiedPermissionChannelToken: 'certified-document-token',
+      internalBuildRendererBundle: async (_config, options) => {
+        calls.push(options)
+        return `bundle-${calls.length}`
+      },
+    })
+    expect(calls).toHaveLength(2)
+    const currentBundles = { ...playgroundPluginBundleSnapshot(generation), profileId: 'work', revision: 3 }
+    const rebuilt = await composition.rebuild(config, activation, 11, {
+      permissionPolicies: [],
+      pluginBundles: currentBundles,
+    })
+    expect(rebuilt).toEqual({ source: 'bundle-3', newDocumentSource: 'bundle-4' })
+    expect(calls[2]).toMatchObject({
+      pluginActivation: { revision: 7 },
+      initialRegistryEpoch: 11,
+      pluginBundleSnapshot: { revision: 3 },
+      permission: { profileId: 'work', policies: [] },
+    })
+    expect(calls[2]?.certifiedPermissionChannelToken).toBeUndefined()
+    expect(calls[2]?.channelManager).toBeUndefined()
+    expect(calls[3]).toMatchObject({
+      pluginActivation: { revision: 7 },
+      initialRegistryEpoch: 11,
+      pluginBundleSnapshot: { revision: 3 },
+      certifiedPermissionChannelToken: 'certified-document-token',
+    })
+  })
+
   it('reports whether the cold composition contains an enabled loopback graph', async () => {
     const baseConfig: CordisXConfig = {
       version: 1,

@@ -5,7 +5,6 @@ import path from 'node:path'
 import { WebSocketServer } from 'ws'
 import { describe, expect, it, vi } from 'vitest'
 import {
-  CdpLifecycleRequestGate,
   CdpPluginLifecycleRuntime,
   type CdpTarget,
   iconThemePreferenceDeliveryEvaluation,
@@ -1465,6 +1464,74 @@ function activation(revision: number, generation: string): CordisXPluginActivati
 }
 
 describe('CdpPluginLifecycleRuntime', () => {
+  it('atomically hands first-browser-graph admission into the shared generation fence', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const current = activation(0, 'demo-old')
+    const existing = { send: async () => ({}) } as never
+    const unregister = runtime.register(existing)
+    let releaseAdmission!: () => void
+    let admissionStarted!: () => void
+    const admissionGate = new Promise<void>(resolve => {
+      releaseAdmission = resolve
+    })
+    const started = new Promise<void>(resolve => {
+      admissionStarted = resolve
+    })
+    const admissions: unknown[] = []
+    runtime.setBrowserGraphAdmission(async input => {
+      admissions.push(input)
+      admissionStarted()
+      await admissionGate
+      return { commit: () => undefined, rollback: async () => undefined }
+    })
+
+    const pending = runtime.prepareBrowserGraph('first-graph', current)
+    await started
+    expect(() => runtime.prepare('overlap')).toThrow('another plugin generation transaction is unresolved')
+    expect(() => runtime.beginJoin({ send: async () => ({}) } as never)).toThrow(
+      'cannot join a CordisX renderer during a plugin generation transaction',
+    )
+    releaseAdmission()
+    const fence = await pending
+    expect(fence.expectedRegistryEpoch).toBe(0)
+    expect(runtime.requiresBrowserGraphTransport()).toBe(true)
+    expect(admissions).toEqual([expect.objectContaining({
+      transactionId: 'first-graph',
+      active: current,
+      expectedRegistryEpoch: 0,
+      sessions: [existing],
+    })])
+    expect(() => runtime.beginJoin({ send: async () => ({}) } as never)).toThrow(
+      'cannot join a CordisX renderer during a plugin generation transaction',
+    )
+    runtime.cancelPreparation('first-graph')
+
+    const join = runtime.beginJoin({ send: async () => ({}) } as never)
+    await expect(runtime.prepareBrowserGraph('blocked-by-join', current)).rejects.toThrow(
+      'another plugin generation transaction is unresolved',
+    )
+    join.abort()
+    unregister()
+
+    const staleRuntime = new CdpPluginLifecycleRuntime()
+    const unregisterStale = staleRuntime.register({ send: async () => ({}) } as never)
+    let releaseStale!: () => void
+    const staleGate = new Promise<void>(resolve => {
+      releaseStale = resolve
+    })
+    const rollback = vi.fn(async () => undefined)
+    staleRuntime.setBrowserGraphAdmission(async () => {
+      await staleGate
+      return { commit: () => undefined, rollback }
+    })
+    const staleAdmission = staleRuntime.prepareBrowserGraph('stale-admission', current)
+    unregisterStale()
+    releaseStale()
+    await expect(staleAdmission).rejects.toThrow('browser graph admission reservation became stale')
+    expect(rollback).toHaveBeenCalledOnce()
+    expect(staleRuntime.requiresBrowserGraphTransport()).toBe(false)
+  })
+
   it('publishes candidate graph resources transactionally and retires only the losing generation', async () => {
     const previous = activation(0, 'demo-old')
     const candidateBase = activation(1, 'demo-new')
@@ -1495,6 +1562,14 @@ describe('CdpPluginLifecycleRuntime', () => {
     let finalizeCalls = 0
     const runtime = new CdpPluginLifecycleRuntime()
     runtime.registerActivePluginGenerationLease(old.lease)
+    const bootstrapRefresh = vi.fn(async (active: CordisXPluginActivationRecordV1, registryEpoch: number) => {
+      expect(active).toEqual(candidate)
+      expect(registryEpoch).toBe(1)
+      expect(runtime.activeBrowserGraph('demo', 'demo-new')?.loadSource).toBe(next.lease.importSource)
+      expect(old.retire).not.toHaveBeenCalled()
+    })
+    runtime.markBrowserGraphTransportReady()
+    runtime.setBrowserGraphBootstrapRefresh(bootstrapRefresh)
     const unregister = runtime.register({
       async send(_method: string, params: Record<string, unknown>) {
         const expression = String(params.expression ?? '')
@@ -1582,9 +1657,13 @@ describe('CdpPluginLifecycleRuntime', () => {
       runtimeArtifactSource: next.lease.importSource,
       runtimeArtifactLease: next.lease,
     })
-    expect(expressions).toContainEqual(expect.stringContaining('__cordisxPendingPluginModuleV1 = await'))
+    expect(expressions).toContainEqual(expect.stringContaining('__cordisxPendingPluginModulesV1'))
+    expect(expressions).toContainEqual(expect.stringContaining('"demo": await'))
     await runtime.publish('tx')
-    expect(expressions).toContain(next.lease.publishSource)
+    const publication = expressions.find(expression => expression.includes(next.lease.publishSource))!
+    expect(publication.indexOf(next.lease.publishSource)).toBeLessThan(
+      publication.indexOf('runtime.publishPluginMutation'),
+    )
     expect(old.retire).not.toHaveBeenCalled()
     await runtime.complete('tx')
     await expect(runtime.finalize('tx')).rejects.toThrow('plugin generation resource operation failed')
@@ -1593,6 +1672,7 @@ describe('CdpPluginLifecycleRuntime', () => {
     oldRetirementAcknowledged = true
     await runtime.finalize('tx')
     expect(finalizeCalls).toBe(2)
+    expect(bootstrapRefresh).toHaveBeenCalledTimes(2)
     expect(expressions).toContain(old.lease.retireSource)
     expect(old.retire).toHaveBeenCalledOnce()
     expect(next.retire).not.toHaveBeenCalled()
@@ -1713,6 +1793,13 @@ describe('CdpPluginLifecycleRuntime', () => {
           }
         }
         if (expression.includes('publishPluginMutation')) {
+          if (expression.includes(failedNext.lease.publishSource)) {
+            return {
+              result: {
+                value: { ok: false, error: 'plugin generation resource publication failed' },
+              },
+            }
+          }
           return {
             result: {
               value: {
@@ -1765,7 +1852,7 @@ describe('CdpPluginLifecycleRuntime', () => {
         identitySource: 'file:///demo-failed.js',
       } as never,
     })
-    await expect(failedRuntime.publish('failed')).rejects.toThrow('plugin generation resource operation failed')
+    await expect(failedRuntime.publish('failed')).rejects.toThrow('plugin generation resource publication failed')
     expect(failedRuntime.currentRegistryEpoch()).toBe(0)
     expect(failedNext.retire).not.toHaveBeenCalled()
     await expect(failedRuntime.rollback('failed')).rejects.toThrow('plugin generation resource operation failed')
@@ -1778,6 +1865,250 @@ describe('CdpPluginLifecycleRuntime', () => {
     expect(failedRuntime.currentRegistryEpoch()).toBe(2)
     expect(failedNext.retire).toHaveBeenCalledOnce()
     unregisterFailed()
+  })
+
+  it('imports and promotes browser graph leases for the complete dependency closure', async () => {
+    const activationItem = (
+      id: string,
+      moduleGeneration: string,
+      dependencies: readonly { id: string; version: string }[] = [],
+    ) => ({
+      id,
+      version: '1.0.0',
+      digest: `sha256:${'a'.repeat(64)}` as const,
+      moduleGeneration,
+      enabled: true,
+      dependencies,
+    })
+    const previous: CordisXPluginActivationRecordV1 = {
+      ...activation(0, 'unused'),
+      plugins: [
+        activationItem('base', 'base-old'),
+        activationItem('consumer', 'consumer-old', [{ id: 'base', version: '1.0.0' }]),
+      ],
+    }
+    const candidate: CordisXPluginActivationRecordV1 = {
+      ...activation(1, 'unused'),
+      plugins: [
+        activationItem('base', 'base-new'),
+        activationItem('consumer', 'consumer-new', [{ id: 'base', version: '1.0.0' }]),
+      ],
+    }
+    const lease = (pluginId: string, moduleGeneration: string, name: string): PluginGenerationGraphLease => ({
+      leaseId: name,
+      pluginId,
+      moduleGeneration,
+      baseUrl: `http://127.0.0.1/${name}/`,
+      entryUrl: `http://127.0.0.1/${name}/module.js`,
+      initialStyleUrls: [],
+      importSource: `Promise.resolve(globalThis.__${name}Module)`,
+      publishSource: `globalThis.__${name}Published = true`,
+      retireSource: `globalThis.__${name}Retired = true`,
+      retire: vi.fn(),
+    })
+    const oldBase = lease('base', 'base-old', 'oldBase')
+    const oldConsumer = lease('consumer', 'consumer-old', 'oldConsumer')
+    const nextBase = lease('base', 'base-new', 'nextBase')
+    const nextConsumer = lease('consumer', 'consumer-new', 'nextConsumer')
+    const expressions: string[] = []
+    let transactionEpoch = ''
+    const runtime = new CdpPluginLifecycleRuntime()
+    runtime.registerActivePluginGenerationLease(oldBase)
+    runtime.registerActivePluginGenerationLease(oldConsumer)
+    runtime.markBrowserGraphTransportReady()
+    runtime.setBrowserGraphBootstrapRefresh(async () => {
+      expect(runtime.activeBrowserGraph('base', 'base-new')?.loadSource).toBe(nextBase.importSource)
+      expect(runtime.activeBrowserGraph('consumer', 'consumer-new')?.loadSource).toBe(nextConsumer.importSource)
+      expect(oldBase.retire).not.toHaveBeenCalled()
+      expect(oldConsumer.retire).not.toHaveBeenCalled()
+    })
+    runtime.register({
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        expressions.push(expression)
+        if (
+          expression === nextBase.publishSource || expression === nextConsumer.publishSource
+          || expression === oldBase.retireSource || expression === oldConsumer.retireSource
+        ) {
+          return { result: { value: true } }
+        }
+        if (expression.includes('stagePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('publishPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  registryEpoch: 1,
+                  active: candidate,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('completePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  registryEpoch: 1,
+                  active: candidate,
+                  disposedAfter: previous,
+                },
+              },
+            },
+          }
+        }
+        return { result: { value: { ok: true, result: true } } }
+      },
+    } as never)
+    const fence = runtime.prepare('tx')
+    transactionEpoch = fence.transactionEpoch
+    await runtime.stage({
+      transactionId: 'tx',
+      ...fence,
+      afterRegistryEpoch: 1,
+      operation: 'update',
+      previous,
+      candidate,
+      targetId: 'base',
+      affectedPluginIds: ['base', 'consumer'],
+      package: {
+        manifest: { id: 'base', runtimeManifest: { schemaVersion: 1, capabilities: [] } },
+        digest: `sha256:${'b'.repeat(64)}`,
+        moduleSource: '',
+        artifactSource: 'void 0',
+        serviceModules: [],
+        identitySource: 'file:///base-next.js',
+      } as never,
+      runtimeArtifactSource: nextBase.importSource,
+      runtimeArtifactLease: nextBase,
+      runtimeArtifactLeases: [nextBase, nextConsumer],
+    })
+    const importExpression = expressions.find(expression => expression.includes(nextBase.importSource))!
+    expect(importExpression.indexOf('"base": await')).toBeLessThan(importExpression.indexOf('"consumer": await'))
+    expect(importExpression).toContain(nextBase.importSource)
+    expect(importExpression).toContain(nextConsumer.importSource)
+    await runtime.publish('tx')
+    const publication = expressions.find(expression => expression.includes(nextBase.publishSource))!
+    expect(publication.indexOf(nextBase.publishSource)).toBeLessThan(publication.indexOf(nextConsumer.publishSource))
+    expect(publication.indexOf(nextConsumer.publishSource)).toBeLessThan(
+      publication.indexOf('runtime.publishPluginMutation'),
+    )
+    await runtime.complete('tx')
+    await runtime.finalize('tx')
+    expect(oldBase.retire).toHaveBeenCalledOnce()
+    expect(oldConsumer.retire).toHaveBeenCalledOnce()
+    expect(runtime.activeBrowserGraph('base', 'base-new')?.loadSource).toBe(nextBase.importSource)
+    expect(runtime.activeBrowserGraph('consumer', 'consumer-new')?.loadSource).toBe(nextConsumer.importSource)
+
+    const rollbackRuntime = new CdpPluginLifecycleRuntime()
+    const rollbackBase = lease('base', 'base-new', 'rollbackBase')
+    const rollbackConsumer = lease('consumer', 'consumer-new', 'rollbackConsumer')
+    let rollbackEpoch = ''
+    let baseRetirementAttempts = 0
+    let consumerRetirementAttempts = 0
+    rollbackRuntime.register({
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        if (expression.includes('stagePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'rollback-closure',
+                  transactionEpoch: rollbackEpoch,
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('rollbackPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'rollback-closure',
+                  transactionEpoch: rollbackEpoch,
+                  registryEpoch: 2,
+                  active: previous,
+                  disposedAfter: candidate,
+                },
+              },
+            },
+          }
+        }
+        if (expression === rollbackConsumer.retireSource) {
+          consumerRetirementAttempts += 1
+          return { result: { value: true } }
+        }
+        if (expression === rollbackBase.retireSource) {
+          baseRetirementAttempts += 1
+          return { result: { value: baseRetirementAttempts > 1 } }
+        }
+        return { result: { value: { ok: true, result: true } } }
+      },
+    } as never)
+    const rollbackFence = rollbackRuntime.prepare('rollback-closure')
+    rollbackEpoch = rollbackFence.transactionEpoch
+    await rollbackRuntime.stage({
+      transactionId: 'rollback-closure',
+      ...rollbackFence,
+      afterRegistryEpoch: 1,
+      operation: 'update',
+      previous,
+      candidate,
+      targetId: 'base',
+      affectedPluginIds: ['base', 'consumer'],
+      package: {
+        manifest: { id: 'base', runtimeManifest: { schemaVersion: 1, capabilities: [] } },
+        digest: `sha256:${'b'.repeat(64)}`,
+        moduleSource: '',
+        artifactSource: 'void 0',
+        serviceModules: [],
+        identitySource: 'file:///base-next.js',
+      } as never,
+      runtimeArtifactSource: rollbackBase.importSource,
+      runtimeArtifactLease: rollbackBase,
+      runtimeArtifactLeases: [rollbackBase, rollbackConsumer],
+    })
+    await expect(rollbackRuntime.rollback('rollback-closure')).rejects.toThrow(
+      'plugin generation resource operation failed',
+    )
+    expect(consumerRetirementAttempts).toBe(1)
+    expect(rollbackConsumer.retire).toHaveBeenCalledOnce()
+    expect(baseRetirementAttempts).toBe(1)
+    expect(rollbackBase.retire).not.toHaveBeenCalled()
+    await expect(rollbackRuntime.rollback('rollback-closure')).resolves.toMatchObject({
+      transactionId: 'rollback-closure',
+    })
+    expect(consumerRetirementAttempts).toBe(1)
+    expect(rollbackConsumer.retire).toHaveBeenCalledOnce()
+    expect(baseRetirementAttempts).toBe(2)
+    expect(rollbackBase.retire).toHaveBeenCalledOnce()
   })
 
   it('keeps Host DOM package artifacts as renderer data and never evaluates their code in the main realm', async () => {
@@ -2766,38 +3097,5 @@ describe('CdpPluginLifecycleRuntime', () => {
     expect(expressions.filter(expression => expression.includes('recoverPluginMutation'))).toHaveLength(1)
     expect(expressions.filter(expression => expression.includes('adoptRecoveredActivation'))).toHaveLength(1)
     expect(runtime.prepare('next')).toMatchObject({ expectedRegistryEpoch: 2 })
-  })
-})
-
-describe('CdpLifecycleRequestGate', () => {
-  it('releases the single-flight fence before a response-triggered follow-up', async () => {
-    const gate = new CdpLifecycleRequestGate()
-    const values: number[] = []
-    let followUp: Promise<void> | undefined
-
-    await gate.run(async () => 1, async value => {
-      values.push(value)
-      followUp = gate.run(async () => 2, async next => {
-        values.push(next)
-      })
-    })
-    await followUp
-
-    expect(values).toEqual([1, 2])
-  })
-
-  it('rejects a genuinely concurrent lifecycle task', async () => {
-    const gate = new CdpLifecycleRequestGate()
-    let release!: () => void
-    const blocked = new Promise<void>(resolve => {
-      release = resolve
-    })
-    const active = gate.run(async () => {
-      await blocked
-    }, async () => undefined)
-
-    await expect(gate.run(async () => undefined, async () => undefined)).rejects.toThrow(/already active/)
-    release()
-    await active
   })
 })

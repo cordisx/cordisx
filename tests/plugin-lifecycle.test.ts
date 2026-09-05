@@ -25,6 +25,7 @@ import {
   type CordisXPermissionAuthorizationPlanV1,
 } from '../packages/cli/src/platform-contracts.js'
 import type { RollbackPlan } from '../packages/cli/src/launcher/packages/authority.js'
+import type { PluginGenerationArtifactServer } from '../packages/cli/src/launcher/plugin-generation-loader.js'
 import type { PackageActivationTuple } from '../packages/cli/src/launcher/packages/types.js'
 import {
   CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1,
@@ -89,6 +90,17 @@ class FormalRuntime implements PluginLifecycleRuntime {
   failComplete = false
   failRollback = false
   failFinalizeAttempts = 0
+  readonly terminalErrors: unknown[] = []
+  adopted?: CordisXPluginActivationRecordV1
+
+  terminal(error: unknown): void {
+    this.terminalErrors.push(error)
+  }
+
+  async adoptRecoveredActivation(active: CordisXPluginActivationRecordV1, registryEpoch: number): Promise<void> {
+    this.adopted = active
+    this.registryEpoch = registryEpoch
+  }
 
   prepare(transactionId: string) {
     this.calls.push('prepare')
@@ -485,6 +497,115 @@ async function install(
 }
 
 describe('launcher plugin lifecycle coordinator', () => {
+  it('rejects first browser graph admission before authority prepare and preserves durable last-good', async () => {
+    const { root, home } = await workspace()
+    class AdmissionRejectingRuntime extends FormalRuntime {
+      async prepareBrowserGraph(): Promise<never> {
+        this.calls.push('prepareBrowserGraph')
+        throw new Error('fixture browser graph admission failed')
+      }
+    }
+    const runtime = new AdmissionRejectingRuntime()
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      runtime,
+    })
+    const sourceDirectory = await localPackage({ root, id: 'admission-fixture' })
+    const planned = await coordinator.handle(request({ kind: 'inspect-local', sourceDirectory }))
+    expect(planned).toMatchObject({ outcome: 'planned', operation: 'install' })
+    const before = await coordinator.store.loadActive()
+    const applied = await coordinator.handle(request({
+      kind: 'install',
+      candidateId: planned.candidateId!,
+      authorizationDecision: decision(planned.authorizationPlan!),
+    }))
+    expect(applied).toMatchObject({
+      outcome: 'rejected',
+      revision: 0,
+      error: { code: 'readiness-failed' },
+    })
+    expect(runtime.calls).toEqual(['prepareBrowserGraph'])
+    expect(await coordinator.store.loadActive()).toEqual(before)
+    await expect(coordinator.store.loadCandidate(planned.candidateId!)).rejects.toThrow()
+    await expect(coordinator.prepareRecovery()).resolves.toEqual([])
+  })
+
+  it('routes browser graph update and enable through pre-authority admission', async () => {
+    for (const operation of ['update', 'enable'] as const) {
+      const { root, home } = await workspace()
+      class AdmissionRuntime extends FormalRuntime {
+        rejectAdmission = false
+        async prepareBrowserGraph(transactionId: string) {
+          this.calls.push('prepareBrowserGraph')
+          if (this.rejectAdmission) throw new Error('fixture browser graph admission failed')
+          return super.prepare(transactionId)
+        }
+      }
+      const runtime = new AdmissionRuntime()
+      const coordinator = new PluginLifecycleCoordinator({
+        homeDir: home,
+        profileId: 'work',
+        runtimeGeneration: 'runtime-1',
+        permissionPolicies: [],
+        runtime,
+      })
+      const first = await install(
+        coordinator,
+        await localPackage({ root, id: `admission-${operation}`, version: '1.0.0' }),
+        0,
+      )
+      expect(first.applied.outcome).toBe('applied')
+      let expectedRevision = 1
+      if (operation === 'enable') {
+        const disablePlan = await coordinator.handle(
+          request({ kind: 'disable', pluginId: `admission-${operation}`, impactToken: 'probe' }, expectedRevision),
+        )
+        const disabled = await coordinator.handle(request({
+          kind: 'disable',
+          pluginId: `admission-${operation}`,
+          impactToken: disablePlan.impactToken!,
+        }, expectedRevision))
+        expect(disabled.outcome).toBe('applied')
+        expectedRevision = 2
+      }
+      runtime.calls.length = 0
+      const before = await coordinator.store.loadActive()
+      const planned = operation === 'update'
+        ? await coordinator.handle(request({
+          kind: 'inspect-local',
+          sourceDirectory: await localPackage({ root, id: 'admission-update', version: '2.0.0' }),
+        }, expectedRevision))
+        : await coordinator.handle(request({ kind: 'enable', pluginId: 'admission-enable' }, expectedRevision))
+      expect(planned).toMatchObject({ outcome: 'planned', operation })
+      runtime.rejectAdmission = true
+      const applied = await coordinator.handle(request(
+        operation === 'update'
+          ? {
+            kind: 'update',
+            candidateId: planned.candidateId!,
+            authorizationDecision: decision(planned.authorizationPlan!),
+          }
+          : {
+            kind: 'enable',
+            pluginId: 'admission-enable',
+            authorizationDecision: decision(planned.authorizationPlan!),
+          },
+        expectedRevision,
+      ))
+      expect(applied).toMatchObject({
+        outcome: 'rejected',
+        revision: expectedRevision,
+        error: { code: 'readiness-failed' },
+      })
+      expect(runtime.calls).toEqual(['prepareBrowserGraph'])
+      expect(await coordinator.store.loadActive()).toEqual(before)
+      await expect(coordinator.prepareRecovery()).resolves.toEqual([])
+    }
+  })
+
   it('reviews package-v4/manifest-v5 through V4 on the same lifecycle authority and consumes Host-owned exact certification', async () => {
     const { root, home } = await workspace()
     const runtime = new FormalRuntime()
@@ -827,6 +948,7 @@ describe('launcher plugin lifecycle coordinator', () => {
     )
     expect(transientResult.applied).toMatchObject({ outcome: 'applied', revision: 1 })
     expect(transientRuntime.calls).toEqual(['prepare', 'stage', 'publish', 'complete', 'finalize', 'finalize'])
+    expect(transientRuntime.terminalErrors).toEqual([])
     expect((await transient.store.loadActive()).plugins.map(plugin => plugin.id)).toEqual(['transient-finalize'])
 
     const persistentWorkspace = await workspace()
@@ -854,6 +976,9 @@ describe('launcher plugin lifecycle coordinator', () => {
     })
     expect(persistentRuntime.calls).toEqual(['prepare', 'stage', 'publish', 'complete', 'finalize', 'finalize'])
     expect(persistentRuntime.calls).not.toContain('rollback')
+    expect(persistentRuntime.terminalErrors).toEqual([
+      expect.objectContaining({ message: 'formal finalization interrupted' }),
+    ])
     expect((await persistent.store.loadActive()).plugins.map(plugin => plugin.id)).toEqual(['persistent-finalize'])
   })
 
@@ -871,7 +996,10 @@ describe('launcher plugin lifecycle coordinator', () => {
     const { applied } = await install(coordinator, await localPackage({ root, id: 'formal-failure' }), 0)
     expect(applied).toMatchObject({ outcome: 'rolled-back', error: { code: 'readiness-failed' } })
     expect(runtime.calls).toEqual(['prepare', 'stage', 'rollback'])
-    expect(await coordinator.store.loadActive()).toMatchObject({ revision: 0, plugins: [] })
+    const restored = await coordinator.store.loadActive()
+    expect(restored).toMatchObject({ revision: 0, plugins: [] })
+    expect(runtime.adopted).toEqual(restored)
+    expect(runtime.registryEpoch).toBe(2)
   })
 
   it('reopens rollback-pending state in a fresh runtime and completes the Host-branded recovery receipt', async () => {
@@ -973,6 +1101,86 @@ describe('launcher plugin lifecycle coordinator', () => {
     expect(after.plugins.find(item => item.id === 'base')?.moduleGeneration).not.toBe(original.get('base'))
     expect(after.plugins.find(item => item.id === 'consumer')?.moduleGeneration).not.toBe(original.get('consumer'))
     expect(after.plugins.find(item => item.id === 'unrelated')?.moduleGeneration).toBe(original.get('unrelated'))
+  })
+
+  it('leases browser modules for the complete enabled dependency closure in activation order', async () => {
+    const { root, home } = await workspace()
+    const runtime = new FormalRuntime()
+    const leasedPluginIds: string[] = []
+    const artifactServer = {
+      origin: 'http://127.0.0.1:43123',
+      lease: vi.fn(async (module, moduleGeneration) => {
+        const pluginId = module.packageIdentity.pluginId
+        leasedPluginIds.push(pluginId)
+        return {
+          leaseId: `${pluginId}:${moduleGeneration}`,
+          pluginId,
+          moduleGeneration,
+          baseUrl: `http://127.0.0.1:43123/${pluginId}/${moduleGeneration}/`,
+          entryUrl: `http://127.0.0.1:43123/${pluginId}/${moduleGeneration}/module.js`,
+          initialStyleUrls: [],
+          importSource: `Promise.resolve(globalThis.__${pluginId}Module)`,
+          publishSource: `globalThis.__${pluginId}Published = true`,
+          retireSource: `globalThis.__${pluginId}Retired = true`,
+          retire: vi.fn(),
+        }
+      }),
+      requestTrace: () => [],
+      close: async () => undefined,
+    } satisfies PluginGenerationArtifactServer
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      runtime,
+      pluginGenerationArtifactServer: artifactServer,
+    })
+    await install(coordinator, await localPackage({ root, id: 'z-base' }), 0)
+    await install(
+      coordinator,
+      await localPackage({ root, id: 'a-consumer', dependencies: [{ id: 'z-base', version: '1.0.0' }] }),
+      1,
+    )
+    await install(
+      coordinator,
+      await localPackage({
+        root,
+        id: 'b-disabled-consumer',
+        dependencies: [{ id: 'z-base', version: '1.0.0' }],
+      }),
+      2,
+    )
+    await install(coordinator, await localPackage({ root, id: 'unrelated' }), 3)
+    const disablePlan = await coordinator.handle(
+      request({ kind: 'disable', pluginId: 'b-disabled-consumer', impactToken: 'probe' }, 4),
+    )
+    await coordinator.handle(request({
+      kind: 'disable',
+      pluginId: 'b-disabled-consumer',
+      impactToken: disablePlan.impactToken!,
+    }, 4))
+    leasedPluginIds.length = 0
+    artifactServer.lease.mockClear()
+
+    const updated = await install(
+      coordinator,
+      await localPackage({ root, id: 'z-base', code: 'export const revision = 2; export function apply() {}' }),
+      5,
+    )
+
+    expect(updated.applied).toMatchObject({
+      outcome: 'applied',
+      affectedPluginIds: ['z-base', 'a-consumer', 'b-disabled-consumer'],
+    })
+    expect(leasedPluginIds).toEqual(['z-base', 'a-consumer'])
+    expect(runtime.lastStaged?.runtimeArtifactLeases?.map(lease => lease.pluginId)).toEqual([
+      'z-base',
+      'a-consumer',
+    ])
+    expect(runtime.lastStaged?.runtimeArtifactLease?.pluginId).toBe('z-base')
+    expect(leasedPluginIds).not.toContain('b-disabled-consumer')
+    expect(leasedPluginIds).not.toContain('unrelated')
   })
 
   it('keeps last-good active after permission denial or readiness failure', async () => {
