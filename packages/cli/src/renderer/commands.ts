@@ -6,6 +6,7 @@ import type {
   CordisXCommands,
   CordisXSurfaceInvocationContextV1,
 } from '../contracts.js'
+import type { AgentPageComposerCommandContext } from '@cordisx/protocol/agent-page-admission/v2'
 import { ownerFromContext, qualifyOwnedId } from './ownership.js'
 import {
   type GenerationVisibilityCoordinator,
@@ -50,6 +51,15 @@ export interface SurfaceCommandOrigin {
   readonly contributionId: string
   readonly context?: CordisXSurfaceInvocationContextV1
 }
+
+/** Host-only origin for one already-authenticated page composer execution. */
+export interface PageCommandOrigin {
+  readonly pageContext: AgentPageComposerCommandContext
+}
+
+type CommandInvocationOrigin = SurfaceCommandOrigin | PageCommandOrigin
+
+const isPageCommandOrigin = (origin: CommandInvocationOrigin): origin is PageCommandOrigin => 'pageContext' in origin
 
 export class CommandRegistry {
   private readonly records = new Map<string, CommandRecord>()
@@ -136,7 +146,7 @@ export class CommandRegistry {
     requestingOwnerOrContext: string | Context,
     reference: CordisXCommandReference,
     invocationKey = 'default',
-    origin?: SurfaceCommandOrigin,
+    origin?: CommandInvocationOrigin,
     requestingPrincipal?: PluginPrincipalToken,
   ): Promise<unknown> {
     if (this.disposed) throw new Error('CordisX command registry is disposed')
@@ -155,7 +165,7 @@ export class CommandRegistry {
     if (record.owner !== requestingOwner && record.metadata.public !== true) {
       throw new Error(`command ${qualifiedId} is private to plugin ${record.owner}`)
     }
-    if (origin !== undefined) {
+    if (origin !== undefined && !isPageCommandOrigin(origin)) {
       const decision = this.access?.authorizeSurfaceCommand(
         requestingOwner,
         origin.pointId,
@@ -190,7 +200,13 @@ export class CommandRegistry {
           arguments: reference.arguments === undefined ? undefined : immutableSnapshot(reference.arguments),
           signal: abort.signal,
           invocationKey,
-          ...(origin?.context === undefined ? {} : { hostContext: immutableSnapshot(origin.context) }),
+          ...(origin === undefined
+            ? {}
+            : isPageCommandOrigin(origin)
+            ? { hostContext: immutableSnapshot(origin.pageContext) }
+            : origin.context === undefined
+            ? {}
+            : { hostContext: immutableSnapshot(origin.context) }),
         })
       return record.principal === undefined || this.console === undefined
         ? await executeHandler()
@@ -318,9 +334,18 @@ export class CordisXCommandService extends Service implements CordisXCommands {
     owner: string,
     reference: CordisXCommandReference,
     invocationKey?: string,
-    origin?: SurfaceCommandOrigin,
+    origin?: CommandInvocationOrigin,
   ): Promise<unknown> {
     return this.registry.execute(owner, reference, invocationKey, origin)
+  }
+
+  executeForPage(
+    owner: string,
+    reference: CordisXCommandReference,
+    invocationKey: string,
+    pageContext: AgentPageComposerCommandContext,
+  ): Promise<unknown> {
+    return this.registry.execute(owner, reference, invocationKey, { pageContext })
   }
 
   hasFor(owner: string, reference: CordisXCommandReference, view?: PluginGenerationView): boolean {

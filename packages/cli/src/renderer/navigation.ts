@@ -1,6 +1,7 @@
 import { Context, type Disposable, Service } from '@deepseek-ai/cordis'
 import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity } from '@cordisx/protocol/agents/v1'
+import type { AgentPageComposerCommandAdapter } from '@cordisx/protocol/agent-page-admission/v2'
 import {
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V2,
@@ -51,7 +52,11 @@ import {
   type PluginGenerationEffectIdentity,
   type PluginGenerationView,
 } from './generation-visibility.js'
-import { PageAdmissionBindingRegistry, type PageAdmissionBinding } from './page-admission-lifecycle.js'
+import {
+  type PageAdmissionBinding,
+  PageAdmissionBindingRegistry,
+  type PageAdmissionRoute,
+} from './page-admission-lifecycle.js'
 import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
 import { dismissHostTooltips, HostTooltipController } from './tooltips.js'
 import { HostPageControls } from './page-controls.js'
@@ -359,6 +364,18 @@ export interface ManagedManagerPageMount {
   readonly signal: AbortSignal
   abort(): void
   dispose(): Promise<void>
+}
+
+/** Host-private factory for a public adapter bound to one currently mounted page. */
+export interface PageComposerAdapterFactory {
+  create(input: {
+    readonly owner: string
+    readonly source?: string
+    readonly moduleGeneration: string
+    readonly binding: PageAdmissionBinding
+    readonly route: PageAdmissionRoute
+    readonly signal: AbortSignal
+  }): AgentPageComposerCommandAdapter | undefined
 }
 
 function assertHostIcon(icon: string | undefined, label: string): void {
@@ -1246,7 +1263,9 @@ export class NavigationRegistry {
   private readonly listeners = new Set<() => void>()
   readonly managerContent: ManagerContentNavigationRegistry
   /** Host-private page mount lifecycle; no plugin receives this registry directly. */
-  readonly pageAdmissionBindings = new PageAdmissionBindingRegistry()
+  /** Host-private page mount lifecycle; no plugin receives this registry directly. */
+  readonly pageAdmissionBindings: PageAdmissionBindingRegistry
+  private pageComposerAdapterFactory: PageComposerAdapterFactory | undefined
   private metadataProjectionSites = new Map<string, string>()
   private presentationOrder: string[] = []
   private managerSettingsMount: ManagedSettingsPageMountRecord | undefined
@@ -1268,7 +1287,9 @@ export class NavigationRegistry {
     readonly contexts: HostContextStore = new HostContextStore(),
     private access?: ExtensionPointAccessResolver,
     private readonly commands?: Pick<CordisXCommandService, 'hasFor' | 'executeFor' | 'subscribeInternal'>,
+    pageAdmissionBindings: PageAdmissionBindingRegistry = new PageAdmissionBindingRegistry(),
   ) {
+    this.pageAdmissionBindings = pageAdmissionBindings
     this.managerContent = new ManagerContentNavigationRegistry(pages.visibility)
     this.unsubscribePages = pages.subscribe(() => {
       void this.enqueue(() => this.reconcileDependencies())
@@ -1291,6 +1312,14 @@ export class NavigationRegistry {
   startHistoryProjection(): Promise<void> {
     this.historyProjectionStarted = true
     return this.enqueue(() => this.applyHistorySnapshot(this.history.snapshot()))
+  }
+
+  /** Install once by the Host runtime after Agent admission services are ready. */
+  setPageComposerAdapterFactory(factory: PageComposerAdapterFactory): void {
+    if (this.pageComposerAdapterFactory !== undefined) {
+      throw new Error('page composer adapter factory is already installed')
+    }
+    this.pageComposerAdapterFactory = factory
   }
 
   managerContentPresentation(
@@ -2688,7 +2717,19 @@ export class NavigationRegistry {
       connectionGeneration: 'renderer',
       route: {
         outlet: name,
-        routeId: entry.record.definition.id,
+        routeDefinitionId: entry.record.definition.id,
+        ...(typeof entry.params.roomId === 'string' ? { roomId: entry.params.roomId } : {}),
+      },
+      signal: abort.signal,
+    })
+    const pageComposer = this.pageComposerAdapterFactory?.create({
+      owner: page.owner,
+      ...(entry.record.source === undefined ? {} : { source: entry.record.source }),
+      moduleGeneration: page.generation.moduleGeneration ?? 'host',
+      binding: pageAdmissionBinding,
+      route: {
+        outlet: name,
+        routeDefinitionId: entry.record.definition.id,
         ...(typeof entry.params.roomId === 'string' ? { roomId: entry.params.roomId } : {}),
       },
       signal: abort.signal,
@@ -2704,6 +2745,10 @@ export class NavigationRegistry {
     state.mount = mount
     delete state.error
     try {
+      // A future page-admission route claim must finish at this Host-only
+      // activation boundary, before the page body mounts and before the
+      // navigation promise that led here can resolve.
+      await this.pageAdmissionBindings.activate(pageAdmissionBinding)
       const bodyOnly = page.metadata.chrome === 'body-only'
       content.dataset.cordisxPageChromePolicy = bodyOnly ? 'body-only' : 'standard'
       if (!bodyOnly) {
@@ -2881,6 +2926,7 @@ export class NavigationRegistry {
           back: outletName => this.back(page.owner, outletName),
           close: outletName => this.close(page.owner, outletName),
         },
+        ...(pageComposer === undefined ? {} : { pageComposer }),
         controls,
         localeNamespace: localization.namespace,
         t: localization.t,
@@ -3154,7 +3200,11 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
 
   constructor(
     ctx: Context,
-    options: { readonly history: CodexRouteHistoryAdapter; readonly console?: PluginConsoleAspect },
+    options: {
+      readonly history: CodexRouteHistoryAdapter
+      readonly console?: PluginConsoleAspect
+      readonly pageAdmissionBindings?: PageAdmissionBindingRegistry
+    },
   ) {
     super(ctx, 'routes')
     this.console = options.console
@@ -3172,6 +3222,7 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
       this.contexts,
       undefined,
       commands,
+      options.pageAdmissionBindings,
     )
     ctx.effect(() => async () => {
       await this.registry.dispose()

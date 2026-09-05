@@ -1,5 +1,9 @@
 import type { Context, Disposable, Effect } from '@deepseek-ai/cordis'
 import type { RasterImageSnapshotV1 } from '@cordisx/protocol/raster-image/v1'
+import type {
+  AgentPageComposerCommandAdapter,
+  AgentPageComposerCommandContext,
+} from '@cordisx/protocol/agent-page-admission/v2'
 import type { ManagerCollectionRegistryV1 } from '@cordisx/protocol/manager-collection/v1'
 import type { ManagerContentNavigationDeclarationV2 } from '@cordisx/protocol/manager-content-navigation/v2'
 import type {
@@ -1085,7 +1089,8 @@ export interface CordisXCommandContext {
   readonly arguments: CordisXJsonValue | undefined
   readonly signal: AbortSignal
   readonly invocationKey: string
-  readonly hostContext?: CordisXSurfaceInvocationContextV1
+  /** Host-injected source context; page composer authority is never plugin-authored. */
+  readonly hostContext?: CordisXSurfaceInvocationContextV1 | AgentPageComposerCommandContext
 }
 
 export interface CordisXSurfaceInvocationContextV1 {
@@ -1354,6 +1359,8 @@ export interface CordisXPageMountContext<
   readonly outlet: CordisXOutletName
   readonly params: Readonly<Record<string, CordisXJsonScalar>>
   readonly navigation: CordisXPageNavigation
+  /** Present only while the Host has authenticated this mounted page for a page composer command. */
+  readonly pageComposer?: AgentPageComposerCommandAdapter
   /** Host-owned semantic controls available to contributed page bodies. */
   readonly controls: CordisXPageControls
   /** Present only for the active authorized manager.content page mount. */
