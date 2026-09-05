@@ -34,6 +34,9 @@ This directory is the public, aggregatable source for CordisX product and archit
 - `plugin-react-runtime.md` defines the direct shared-React authoring API,
   Host component surface, private-React rejection, page-body ownership, and
   root lifecycle/verification contract.
+- `plugin-visuals.md` defines owner-scoped bounded visual providers, opaque
+  immutable data, theme projection, generation visibility, and failure
+  containment.
 - `service-configuration.md` defines plugin-owned launcher service schemas,
   Host CAS/permission/secret boundaries, and explicit service/app restart
   planes used by CLIProxy Providers.

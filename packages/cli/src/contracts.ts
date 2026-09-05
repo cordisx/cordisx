@@ -50,6 +50,7 @@ export * from './agent-session-migration-contracts.js'
 export * from './durable-document-contracts.js'
 export * from './plugin-lifecycle-contracts.js'
 export * from './plugin-bundle-contracts.js'
+export * from './visual-contracts.js'
 
 export type {
   TransientCanvasPluginContextV1,
@@ -1654,6 +1655,8 @@ declare module '@deepseek-ai/cordis' {
     configRenderers: CordisXConfigRenderers
     /** Data-only semantic icon descriptors; Host derives identity and owns rendering. */
     iconThemes: import('./icon-theme-contracts.js').CordisXIconThemes
+    /** Owner-scoped, fiber-owned renderers for bounded Host visual seats. */
+    visuals: import('./visual-contracts.js').CordisXVisuals
   }
 }
 
