@@ -10,6 +10,7 @@ import {
   CORDISX_UI_MODULE,
   cordisXSharedModuleSource,
 } from './react-virtual-modules.js'
+import { assertPluginGenerationArtifactFileReferences } from './plugin-generation-artifact-validation.js'
 
 export const CORDISX_PLUGIN_GENERATION_ARTIFACT_CONTRACT = 'cordisx.plugin-generation-artifact/v1' as const
 export const CORDISX_PLUGIN_GENERATION_ARTIFACT_SCHEMA =
@@ -311,8 +312,9 @@ function artifactManifestPlugin(sharedImports: Set<PluginGenerationSharedImportV
     enforce: 'post',
     generateBundle: {
       order: 'post',
-      handler(_options, bundle) {
+      async handler(_options, bundle) {
         const projected = artifactProjection(Object.values(bundle), sharedImports)
+        await assertPluginGenerationArtifactFileReferences(projected.manifest, projected.files)
         this.emitFile({
           type: 'asset',
           fileName: 'artifact.json',
@@ -378,5 +380,7 @@ export function cordisXPluginViteConfig(options: CordisXPluginViteConfigOptions)
 export async function buildProductionPluginGraph(root: string, entry: string): Promise<BuiltPluginGenerationArtifact> {
   const created = pluginViteBuild({ root, entry, write: false })
   const result = outputOf(await viteBuild({ ...created.config, configFile: false }))
-  return artifactProjection(result.output, created.sharedImports)
+  const projected = artifactProjection(result.output, created.sharedImports)
+  await assertPluginGenerationArtifactFileReferences(projected.manifest, projected.files)
+  return projected
 }

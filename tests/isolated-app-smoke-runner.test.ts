@@ -1,10 +1,14 @@
-import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const execute = promisify(execFile)
+const runner = path.join(root, 'packages/cli/scripts/run-isolated-app-smoke.mjs')
 const homeHelper = await import(pathToFileURL(path.join(root, 'packages/cli/scripts/isolated-smoke-home.mjs')).href)
 
 describe('isolated app smoke runner', () => {
@@ -78,12 +82,142 @@ describe('isolated app smoke runner', () => {
     }
   })
 
+  it('copies a seed into the managed .cordisx directory before overriding its config', async () => {
+    const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-isolated-smoke-test-'))
+    try {
+      const homeConfig = path.join(fixtureRoot, 'config.json')
+      const homeSeed = path.join(fixtureRoot, 'seed')
+      const seededPackage = path.join(homeSeed, 'packages', 'sha256', 'fixture')
+      await mkdir(seededPackage, { recursive: true })
+      await writeFile(path.join(homeSeed, 'config.json'), '{"source":"seed"}\n')
+      await writeFile(path.join(seededPackage, 'artifact.js'), 'void 0\n')
+      await writeFile(homeConfig, '{"source":"override","plugins":[]}\n')
+
+      const homeRoot = await homeHelper.prepareIsolatedSmokeHome(homeConfig, homeSeed)
+      await expect(readFile(path.join(homeRoot, '.cordisx', 'config.json'), 'utf8')).resolves.toBe(
+        '{"source":"override","plugins":[]}\n',
+      )
+      await expect(
+        readFile(path.join(homeRoot, '.cordisx', 'packages', 'sha256', 'fixture', 'artifact.js'), 'utf8'),
+      ).resolves.toBe('void 0\n')
+      await expect(readFile(path.join(homeSeed, 'config.json'), 'utf8')).resolves.toBe('{"source":"seed"}\n')
+      await homeHelper.cleanupIsolatedSmokeHome(homeRoot)
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('rejects symbolic links anywhere in a Home seed', async () => {
+    const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-isolated-smoke-test-'))
+    try {
+      const homeConfig = path.join(fixtureRoot, 'config.json')
+      const homeSeed = path.join(fixtureRoot, 'seed')
+      await mkdir(homeSeed)
+      await writeFile(homeConfig, '{"plugins":[]}\n')
+      await writeFile(path.join(fixtureRoot, 'outside.json'), '{}\n')
+      await symlink(path.join(fixtureRoot, 'outside.json'), path.join(homeSeed, 'linked.json'))
+
+      await expect(homeHelper.prepareIsolatedSmokeHome(homeConfig, homeSeed)).rejects.toThrow(
+        'isolated smoke Home seed must not contain symbolic links',
+      )
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'rejects symlinked Home-seed roots and smoke entries before launch',
+    async () => {
+      const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-isolated-smoke-test-'))
+      try {
+        const homeConfig = path.join(fixtureRoot, 'config.json')
+        const homeSeed = path.join(fixtureRoot, 'seed')
+        const homeSeedLink = path.join(fixtureRoot, 'seed-link')
+        const smokeEntry = path.join(fixtureRoot, 'smoke.mjs')
+        const smokeEntryLink = path.join(fixtureRoot, 'smoke-link.mjs')
+        await mkdir(homeSeed)
+        await writeFile(homeConfig, '{"plugins":[]}\n')
+        await writeFile(smokeEntry, 'void 0\n')
+        await symlink(homeSeed, homeSeedLink)
+        await symlink(smokeEntry, smokeEntryLink)
+
+        await expect(execute(process.execPath, [
+          runner,
+          '--port',
+          '43123',
+          '--profile-dir',
+          path.join(fixtureRoot, 'profile'),
+          '--home-config',
+          homeConfig,
+          '--home-seed',
+          homeSeedLink,
+          '--',
+        ], { cwd: root })).rejects.toMatchObject({
+          stderr: expect.stringContaining('--home-seed must be a real directory'),
+        })
+        await expect(execute(process.execPath, [
+          runner,
+          '--port',
+          '43123',
+          '--profile-dir',
+          path.join(fixtureRoot, 'profile'),
+          '--smoke-entry',
+          smokeEntryLink,
+          '--',
+        ], { cwd: root })).rejects.toMatchObject({
+          stderr: expect.stringContaining('--smoke-entry must be a real .mjs file'),
+        })
+      } finally {
+        await rm(fixtureRoot, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it('keeps fixed smoke children owned by their built-in harnesses', async () => {
+    const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-isolated-smoke-test-'))
+    try {
+      const smokeEntry = path.join(fixtureRoot, 'smoke.mjs')
+      await writeFile(smokeEntry, 'void 0\n')
+      for (
+        const harness of [
+          '--connector-harness',
+          '--plugin-bundle-harness',
+          '--desktop-agent-session-harness',
+        ]
+      ) {
+        await expect(execute(process.execPath, [
+          runner,
+          '--port',
+          '43123',
+          '--profile-dir',
+          path.join(fixtureRoot, 'profile'),
+          harness,
+          '--smoke-entry',
+          smokeEntry,
+          '--',
+        ], { cwd: root })).rejects.toMatchObject({
+          stderr: expect.stringContaining('--smoke-entry cannot override a built-in smoke harness'),
+        })
+      }
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true })
+    }
+  })
+
   it('keeps the product-mode invocation explicit', async () => {
     const source = await readFile(path.join(root, 'packages/cli/scripts/run-isolated-app-smoke.mjs'), 'utf8')
     const homeHelperSource = await readFile(path.join(root, 'packages/cli/scripts/isolated-smoke-home.mjs'), 'utf8')
     expect(source).toContain("const homeConfig = optionalValue('--home-config')")
     expect(source).toContain("'--dev-config and --home-config are mutually exclusive'")
-    expect(source).toContain('prepareIsolatedSmokeHome(homeConfig)')
+    expect(source).toContain("const homeSeedInput = optionalValue('--home-seed')")
+    expect(source).toContain("const smokeEntryInput = optionalValue('--smoke-entry')")
+    expect(source).toContain("'--home-seed requires --home-config'")
+    expect(source).toContain("'--smoke-entry must be a real .mjs file'")
+    expect(source).toContain("'--smoke-entry cannot override a built-in smoke harness'")
+    expect(source.indexOf('lstat(homeSeedInput)')).toBeLessThan(source.indexOf('realpath(homeSeedInput)'))
+    expect(source.indexOf('lstat(smokeEntryInput)')).toBeLessThan(source.indexOf('realpath(smokeEntryInput)'))
+    expect(source).toContain('const smokeEntry = customSmokeEntry ??')
+    expect(source).toContain('prepareIsolatedSmokeHome(homeConfig, homeSeed)')
     expect(source).toContain('cleanupIsolatedSmokeHome(homeRoot)')
     expect(source.indexOf('cleanupIsolatedSmokeHome(homeRoot)')).toBeGreaterThan(
       source.lastIndexOf('profileProcesses()'),

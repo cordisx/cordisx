@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, truncate, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, truncate, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -235,17 +235,21 @@ describe('plugin generation loader', () => {
     const registry = (dom.window as unknown as {
       __cordisxPluginGenerationResourcesV1: {
         stage(input: { id: string; baseUrl: string; initialStyles: readonly string[] }): unknown
-        publish(id: string): void
-        retire(id: string): void
+        publish(id: string): boolean
+        retire(id: string): boolean
+        dispose(): void
       }
     }).__cordisxPluginGenerationResourcesV1
     const initial = dom.window.document.querySelector<HTMLLinkElement>(
       `link[data-cordisx-plugin-generation="${loaded.lease.leaseId}"]`,
     )
     expect(initial?.media).toBe('not all')
+    expect(dom.window.eval(loaded.lease.publishSource)).toBe(true)
+    expect(initial?.hasAttribute('media')).toBe(false)
     initial?.dispatchEvent(new dom.window.Event('load'))
     await pending.catch(() => undefined)
     expect(initial?.isConnected).toBe(false)
+    expect(dom.window.eval(loaded.lease.retireSource)).toBe(true)
     const id = 'style-lifecycle'
     const styleBaseUrl = 'https://assets.example/style-lifecycle/'
     registry.stage({ id, baseUrl: styleBaseUrl, initialStyles: [] })
@@ -255,9 +259,22 @@ describe('plugin generation loader', () => {
     dom.window.document.head.append(staged)
     await new Promise(resolve => dom.window.queueMicrotask(resolve))
     expect(staged.media).toBe('not all')
-    registry.publish(id)
+    expect(registry.publish(id)).toBe(true)
     expect(staged.hasAttribute('media')).toBe(false)
-    registry.retire(id)
+    const sibling = dom.window.document.createElement('link')
+    sibling.rel = 'stylesheet'
+    sibling.href = new URL('assets/sibling.css', styleBaseUrl).href
+    dom.window.document.head.append(sibling)
+    await new Promise(resolve => dom.window.queueMicrotask(resolve))
+    const remove = staged.remove.bind(staged)
+    Object.defineProperty(staged, 'remove', { configurable: true, value: () => undefined })
+    expect(() => registry.retire(id)).toThrow('stylesheet retirement failed')
+    expect(staged.isConnected).toBe(true)
+    expect(staged.disabled).toBe(true)
+    expect(staged.media).toBe('not all')
+    expect(sibling.isConnected).toBe(false)
+    Object.defineProperty(staged, 'remove', { configurable: true, value: remove })
+    expect(registry.retire(id)).toBe(true)
     expect(staged.isConnected).toBe(false)
     const late = dom.window.document.createElement('link')
     late.rel = 'stylesheet'
@@ -265,11 +282,38 @@ describe('plugin generation loader', () => {
     dom.window.document.head.append(late)
     await new Promise(resolve => dom.window.queueMicrotask(resolve))
     expect(late.isConnected).toBe(false)
+    expect(late.disabled).toBe(true)
+    expect(late.media).toBe('not all')
+    registry.dispose()
+    expect(() => dom.window.eval(loaded.lease.retireSource)).toThrow('plugin generation resource retirement failed')
     dom.window.close()
   })
 })
 
 describe('plugin generation artifact HTTP server', () => {
+  it('rejects source references that disagree with an otherwise integrity-valid graph', async () => {
+    const graph = await graphArtifact([])
+    const source = 'export const load = () => import(globalThis.__untrustedPluginUrl)\n'
+    const artifactPath = path.join(graph.directory, 'artifact.json')
+    const artifact = JSON.parse(await readFile(artifactPath, 'utf8')) as {
+      files: Array<{ path: string; digest: string; byteLength: number }>
+    }
+    const entry = artifact.files.find(file => file.path === './module.js')
+    if (entry === undefined) throw new Error('graph fixture entry is missing')
+    entry.digest = sha256(source)
+    entry.byteLength = Buffer.byteLength(source)
+    await Promise.all([
+      writeFile(path.join(graph.directory, 'module.js'), source),
+      writeFile(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`),
+    ])
+    const server = await startPluginGenerationArtifactServer()
+    servers.add(server)
+
+    await expect(server.lease(accessFor(graph.directory), 'computed-reference'))
+      .rejects.toThrow('contains a computed module import')
+    expect(server.requestTrace()).toEqual([])
+  })
+
   it('records entry-only startup, first-trigger lazy resources, and a cached second trigger', async () => {
     const graph = await graphArtifact([])
     const server = await startPluginGenerationArtifactServer()

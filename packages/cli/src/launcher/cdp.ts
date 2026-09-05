@@ -477,9 +477,13 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     await Promise.all(sessions.map(async session => {
       const result = await session.send('Runtime.evaluate', {
         expression: source,
+        returnByValue: true,
         allowUnsafeEvalBlockedByCSP: true,
       })
-      if (result.exceptionDetails !== undefined) throw new Error('plugin generation resource operation failed')
+      const value = (result.result as { value?: unknown } | undefined)?.value
+      if (result.exceptionDetails !== undefined || value !== true) {
+        throw new Error('plugin generation resource operation failed')
+      }
     }))
   }
 
@@ -487,7 +491,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     sessions: readonly CdpSession[],
     lease: PluginGenerationGraphLease,
   ): Promise<void> {
-    await this.evaluateArtifactLease(sessions, lease.retireSource).catch(() => undefined)
+    await this.evaluateArtifactLease(sessions, lease.retireSource)
     lease.retire()
   }
 
@@ -729,6 +733,24 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
   async finalize(transactionId: string): Promise<void> {
     const sessions = this.staged.get(transactionId) ?? []
     const mutation = this.stagedMutations.get(transactionId)
+    const retiringLeases: PluginGenerationGraphLease[] = []
+    if (mutation !== undefined) {
+      const candidateLease = mutation.runtimeArtifactLease
+      for (const pluginId of mutation.affectedPluginIds) {
+        const candidate = mutation.candidate.plugins.find(plugin => plugin.id === pluginId)
+        const previousLease = this.activeArtifactLeases.get(pluginId)
+        if (pluginId === mutation.targetId && candidate?.enabled === true && candidateLease !== undefined) {
+          if (previousLease !== undefined && previousLease.leaseId !== candidateLease.leaseId) {
+            retiringLeases.push(previousLease)
+          }
+        } else if (candidate?.enabled !== true || (pluginId === mutation.targetId && mutation.package !== undefined)) {
+          if (previousLease !== undefined) retiringLeases.push(previousLease)
+        }
+      }
+    }
+    // Keep the renderer transaction retryable until every retiring generation
+    // has positively acknowledged stylesheet cleanup.
+    for (const lease of retiringLeases) await this.retireArtifactLease(sessions, lease)
     await Promise.all(sessions.map(async session =>
       await evaluateRuntimeOperation(
         session,
@@ -744,14 +766,9 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       const candidateLease = mutation.runtimeArtifactLease
       for (const pluginId of mutation.affectedPluginIds) {
         const candidate = mutation.candidate.plugins.find(plugin => plugin.id === pluginId)
-        const previousLease = this.activeArtifactLeases.get(pluginId)
         if (pluginId === mutation.targetId && candidate?.enabled === true && candidateLease !== undefined) {
-          if (previousLease !== undefined && previousLease.leaseId !== candidateLease.leaseId) {
-            await this.retireArtifactLease(sessions, previousLease)
-          }
           this.activeArtifactLeases.set(pluginId, candidateLease)
         } else if (candidate?.enabled !== true || (pluginId === mutation.targetId && mutation.package !== undefined)) {
-          if (previousLease !== undefined) await this.retireArtifactLease(sessions, previousLease)
           this.activeArtifactLeases.delete(pluginId)
         }
       }
@@ -768,7 +785,6 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
       // No renderer can still observe the candidate. Advance the Host to the
       // monotonic rollback epoch required by the shared lifecycle authority.
       const rollbackRegistryEpoch = mutation.afterRegistryEpoch! + 1
-      this.registryEpoch = rollbackRegistryEpoch
       const restored = {
         transactionId,
         transactionEpoch: fence.transactionEpoch,
@@ -777,6 +793,7 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
         disposedAfter: mutation.candidate,
       }
       if (mutation.runtimeArtifactLease !== undefined) mutation.runtimeArtifactLease.retire()
+      this.registryEpoch = rollbackRegistryEpoch
       this.releaseTransaction(transactionId, 'abort')
       return restored
     }
@@ -806,11 +823,11 @@ export class CdpPluginLifecycleRuntime implements PluginLifecycleRuntime {
     ) {
       throw new Error('CordisX renderer rollback observations disagree')
     }
-    this.registryEpoch = first.registryEpoch
     const mutation = this.stagedMutations.get(transactionId)
     if (mutation?.runtimeArtifactLease !== undefined) {
       await this.retireArtifactLease(sessions, mutation.runtimeArtifactLease)
     }
+    this.registryEpoch = first.registryEpoch
     this.releaseTransaction(transactionId, 'abort')
     return first
   }

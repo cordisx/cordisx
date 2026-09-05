@@ -1431,6 +1431,8 @@ describe('CdpPluginLifecycleRuntime', () => {
     const next = graphLease('nextGraph', 'demo-new')
     const expressions: string[] = []
     let transactionEpoch = ''
+    let oldRetirementAcknowledged = false
+    let finalizeCalls = 0
     const runtime = new CdpPluginLifecycleRuntime()
     runtime.registerActivePluginGenerationLease(old.lease)
     const unregister = runtime.register({
@@ -1483,6 +1485,18 @@ describe('CdpPluginLifecycleRuntime', () => {
             },
           }
         }
+        if (expression.includes('finalizePluginMutation')) {
+          finalizeCalls += 1
+          return { result: { value: { ok: true, result: true } } }
+        }
+        if (expression === next.lease.publishSource) {
+          expect(params.returnByValue).toBe(true)
+          return { result: { value: true } }
+        }
+        if (expression === old.lease.retireSource) {
+          expect(params.returnByValue).toBe(true)
+          return { result: { value: oldRetirementAcknowledged } }
+        }
         return { result: { value: { ok: true, result: true } } }
       },
     } as never)
@@ -1513,7 +1527,12 @@ describe('CdpPluginLifecycleRuntime', () => {
     expect(expressions).toContain(next.lease.publishSource)
     expect(old.retire).not.toHaveBeenCalled()
     await runtime.complete('tx')
+    await expect(runtime.finalize('tx')).rejects.toThrow('plugin generation resource operation failed')
+    expect(finalizeCalls).toBe(0)
+    expect(old.retire).not.toHaveBeenCalled()
+    oldRetirementAcknowledged = true
     await runtime.finalize('tx')
+    expect(finalizeCalls).toBe(1)
     expect(expressions).toContain(old.lease.retireSource)
     expect(old.retire).toHaveBeenCalledOnce()
     expect(next.retire).not.toHaveBeenCalled()
@@ -1560,6 +1579,10 @@ describe('CdpPluginLifecycleRuntime', () => {
             },
           }
         }
+        if (expression === rollbackNext.lease.retireSource) {
+          expect(params.returnByValue).toBe(true)
+          return { result: { value: true } }
+        }
         return { result: { value: { ok: true, result: true } } }
       },
     } as never)
@@ -1590,6 +1613,111 @@ describe('CdpPluginLifecycleRuntime', () => {
     expect(rollbackNext.retire).toHaveBeenCalledOnce()
     expect(rollbackOld.retire).not.toHaveBeenCalled()
     unregisterRollback()
+
+    const failedRuntime = new CdpPluginLifecycleRuntime()
+    const failedNext = graphLease('failedNext', 'demo-new')
+    let failedEpoch = ''
+    let failedRetirementAttempts = 0
+    const unregisterFailed = failedRuntime.register({
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        if (expression.includes('stagePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'failed',
+                  transactionEpoch: failedEpoch,
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('rollbackPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'failed',
+                  transactionEpoch: failedEpoch,
+                  registryEpoch: 2,
+                  active: previous,
+                  disposedAfter: candidate,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('publishPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'failed',
+                  transactionEpoch: failedEpoch,
+                  registryEpoch: 1,
+                  active: candidate,
+                },
+              },
+            },
+          }
+        }
+        if (expression === failedNext.lease.publishSource) {
+          expect(params.returnByValue).toBe(true)
+          return { result: { value: false } }
+        }
+        if (expression === failedNext.lease.retireSource) {
+          expect(params.returnByValue).toBe(true)
+          failedRetirementAttempts += 1
+          if (failedRetirementAttempts === 1) return { result: { value: false } }
+          if (failedRetirementAttempts === 2) {
+            return { result: { value: true }, exceptionDetails: { text: 'retirement failed' } }
+          }
+          return { result: { value: true } }
+        }
+        return { result: { value: { ok: true, result: true } } }
+      },
+    } as never)
+    const failedFence = failedRuntime.prepare('failed')
+    failedEpoch = failedFence.transactionEpoch
+    await failedRuntime.stage({
+      transactionId: 'failed',
+      ...failedFence,
+      afterRegistryEpoch: 1,
+      operation: 'update',
+      previous,
+      candidate,
+      targetId: 'demo',
+      affectedPluginIds: ['demo'],
+      runtimeArtifactSource: failedNext.lease.importSource,
+      runtimeArtifactLease: failedNext.lease,
+      package: {
+        manifest: { id: 'demo', runtimeManifest: { schemaVersion: 1, capabilities: [] } },
+        digest: `sha256:${'d'.repeat(64)}`,
+        moduleSource: '',
+        artifactSource: 'void 0',
+        serviceModules: [],
+        identitySource: 'file:///demo-failed.js',
+      } as never,
+    })
+    await expect(failedRuntime.publish('failed')).rejects.toThrow('plugin generation resource operation failed')
+    expect(failedRuntime.currentRegistryEpoch()).toBe(0)
+    expect(failedNext.retire).not.toHaveBeenCalled()
+    await expect(failedRuntime.rollback('failed')).rejects.toThrow('plugin generation resource operation failed')
+    expect(failedRuntime.currentRegistryEpoch()).toBe(0)
+    expect(failedNext.retire).not.toHaveBeenCalled()
+    await expect(failedRuntime.rollback('failed')).rejects.toThrow('plugin generation resource operation failed')
+    expect(failedRuntime.currentRegistryEpoch()).toBe(0)
+    expect(failedNext.retire).not.toHaveBeenCalled()
+    await expect(failedRuntime.rollback('failed')).resolves.toMatchObject({ transactionId: 'failed' })
+    expect(failedRuntime.currentRegistryEpoch()).toBe(2)
+    expect(failedNext.retire).toHaveBeenCalledOnce()
+    unregisterFailed()
   })
 
   it('keeps Host DOM package artifacts as renderer data and never evaluates their code in the main realm', async () => {

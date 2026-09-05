@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -26,6 +26,8 @@ const port = Number(value('--port'))
 const profileDir = value('--profile-dir')
 const devConfig = optionalValue('--dev-config')
 const homeConfig = optionalValue('--home-config')
+const homeSeedInput = optionalValue('--home-seed')
+const smokeEntryInput = optionalValue('--smoke-entry')
 const connectorHarness = process.argv.includes('--connector-harness')
 const desktopAgentSessionHarness = process.argv.includes('--desktop-agent-session-harness')
 const pluginBundleHarness = process.argv.includes('--plugin-bundle-harness')
@@ -38,8 +40,21 @@ if (devConfig !== undefined && homeConfig !== undefined) {
 if (homeConfig !== undefined && !path.isAbsolute(homeConfig)) {
   throw new Error('--home-config must be an absolute config path')
 }
+if (homeSeedInput !== undefined && !path.isAbsolute(homeSeedInput)) {
+  throw new Error('--home-seed must be an absolute directory path')
+}
+if (homeSeedInput !== undefined && homeConfig === undefined) throw new Error('--home-seed requires --home-config')
+if (smokeEntryInput !== undefined && !path.isAbsolute(smokeEntryInput)) {
+  throw new Error('--smoke-entry must be an absolute module path')
+}
 if (connectorHarness && (devConfig !== undefined || homeConfig !== undefined)) {
   throw new Error('--connector-harness owns its fixed temporary Home composition')
+}
+if (connectorHarness && homeSeedInput !== undefined) {
+  throw new Error('--connector-harness owns its temporary Home composition')
+}
+if (smokeEntryInput !== undefined && (connectorHarness || pluginBundleHarness || desktopAgentSessionHarness)) {
+  throw new Error('--smoke-entry cannot override a built-in smoke harness')
 }
 if (connectorHarness && pluginBundleHarness) {
   throw new Error('--connector-harness and --plugin-bundle-harness are mutually exclusive')
@@ -62,6 +77,22 @@ if (!['flow', 'unsubscribe', 'owner-replay', 'owner-live'].includes(connectorHar
 const smokeArgs = process.argv.slice(separator + 1)
 const reportIndex = smokeArgs.indexOf('--report')
 const reportPath = reportIndex >= 0 ? smokeArgs[reportIndex + 1] : undefined
+let homeSeed
+if (homeSeedInput !== undefined) {
+  const metadata = await lstat(homeSeedInput)
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    throw new Error('--home-seed must be a real directory')
+  }
+  homeSeed = await realpath(homeSeedInput)
+}
+let customSmokeEntry
+if (smokeEntryInput !== undefined) {
+  const metadata = await lstat(smokeEntryInput)
+  if (!metadata.isFile() || metadata.isSymbolicLink() || path.extname(smokeEntryInput) !== '.mjs') {
+    throw new Error('--smoke-entry must be a real .mjs file')
+  }
+  customSmokeEntry = await realpath(smokeEntryInput)
+}
 
 function exited(child) {
   return child.exitCode !== null || child.signalCode !== null
@@ -249,7 +280,7 @@ const homeRoot = connectorHarness
   ? await prepareIsolatedSmokeHome(effectiveHomeConfig)
   : homeConfig === undefined
   ? undefined
-  : await prepareIsolatedSmokeHome(homeConfig)
+  : await prepareIsolatedSmokeHome(homeConfig, homeSeed)
 const invocation = connectorHarness
   ? ['codex', 'smoke', '--data', 'shared']
   : pluginBundleHarness
@@ -258,13 +289,13 @@ const invocation = connectorHarness
   ? ['codex', 'smoke', '--data', 'host-isolated']
   : ['dev', '--config', devConfig]
 const cliEntry = connectorHarness ? 'tests/fixtures/connector-production-smoke-cli.ts' : 'packages/cli/src/cli.ts'
-const smokeEntry = connectorHarness
+const smokeEntry = customSmokeEntry ?? (connectorHarness
   ? 'tests/fixtures/connector-production-smoke.mjs'
   : pluginBundleHarness
   ? 'tests/fixtures/plugin-bundle-production-smoke.mjs'
   : desktopAgentSessionHarness
   ? 'packages/cli/scripts/codex-desktop-agent-session-smoke.mjs'
-  : 'packages/cli/scripts/live-smoke.mjs'
+  : 'packages/cli/scripts/live-smoke.mjs')
 const launcherEnvironment = connectorHarness
   ? { ...process.env, CORDISX_HOME: path.join(homeRoot, '.cordisx') }
   : pluginBundleHarness

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -199,6 +200,59 @@ describe('local plugin package store', () => {
     expect(Buffer.from(staged.browserArtifact?.files.get('./chatroom.js') ?? []).toString('utf8')).toBe(authorEntry)
     expect(staged.browserArtifact?.manifest.files.some(file => file.kind === 'stylesheet')).toBe(true)
     expect(staged.browserArtifact?.manifest.files.some(file => file.kind === 'asset')).toBe(true)
+
+    const artifactRoot = path.join(source, 'dist/runtime')
+    const manifestPath = path.join(artifactRoot, 'artifact.json')
+    const digest = (value: string): string => `sha256:${createHash('sha256').update(value).digest('hex')}`
+    const externalEntry = `${authorEntry}\nimport 'https://modules.example/escape.js'\n`
+    const externalModuleManifest = structuredClone(authorManifest)
+    const entryDescriptor = externalModuleManifest.files.find(
+      (file: { readonly path: string }) => file.path === externalModuleManifest.entry,
+    )
+    entryDescriptor.byteLength = Buffer.byteLength(externalEntry)
+    entryDescriptor.digest = digest(externalEntry)
+    await Promise.all([
+      writeFile(path.join(artifactRoot, externalModuleManifest.entry.slice(2)), externalEntry),
+      writeFile(manifestPath, `${JSON.stringify(externalModuleManifest, null, 2)}\n`),
+    ])
+    await expect(stageLocalPluginPackage(home, source)).rejects.toThrow('undeclared bare or external module import')
+
+    const computedEntry = `${authorEntry}\nconst escapeModule = './escape.js'; void import(escapeModule)\n`
+    const computedModuleManifest = structuredClone(authorManifest)
+    const computedEntryDescriptor = computedModuleManifest.files.find(
+      (file: { readonly path: string }) => file.path === computedModuleManifest.entry,
+    )
+    computedEntryDescriptor.byteLength = Buffer.byteLength(computedEntry)
+    computedEntryDescriptor.digest = digest(computedEntry)
+    await Promise.all([
+      writeFile(path.join(artifactRoot, computedModuleManifest.entry.slice(2)), computedEntry),
+      writeFile(manifestPath, `${JSON.stringify(computedModuleManifest, null, 2)}\n`),
+    ])
+    await expect(stageLocalPluginPackage(home, source)).rejects.toThrow('computed module import')
+
+    const stylesheetDescriptor = authorManifest.files.find(
+      (file: { readonly kind: string }) => file.kind === 'stylesheet',
+    )
+    const stylesheetPath = path.join(artifactRoot, stylesheetDescriptor.path.slice(2))
+    const stylesheet = await readFile(stylesheetPath, 'utf8')
+    const externalStylesheet = `${stylesheet}\n.escape{background:url(https://assets.example/escape.png)}\n`
+    const externalStylesheetManifest = structuredClone(authorManifest)
+    const changedStylesheet = externalStylesheetManifest.files.find(
+      (file: { readonly path: string }) => file.path === stylesheetDescriptor.path,
+    )
+    changedStylesheet.byteLength = Buffer.byteLength(externalStylesheet)
+    changedStylesheet.digest = digest(externalStylesheet)
+    await Promise.all([
+      writeFile(path.join(artifactRoot, authorManifest.entry.slice(2)), authorEntry),
+      writeFile(stylesheetPath, externalStylesheet),
+      writeFile(manifestPath, `${JSON.stringify(externalStylesheetManifest, null, 2)}\n`),
+    ])
+    await expect(stageLocalPluginPackage(home, source)).rejects.toThrow('not an artifact-relative reference')
+
+    await Promise.all([
+      writeFile(stylesheetPath, stylesheet),
+      writeFile(manifestPath, `${JSON.stringify(authorManifest, null, 2)}\n`),
+    ])
 
     await writeFile(path.join(source, 'dist/runtime/undeclared.js'), 'export const undeclared = true\n')
     await expect(stageLocalPluginPackage(home, source)).rejects.toThrow('undeclared files or directories')

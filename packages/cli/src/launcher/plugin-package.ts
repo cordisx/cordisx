@@ -45,6 +45,7 @@ import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-
 import { type EntityTemplatePayload, readEntityTemplatePayload } from './entity-directory.js'
 import { buildProductionPluginGraph, type BuiltPluginGenerationArtifact } from './production-plugin-build.js'
 import { readPluginGenerationArtifactV1 } from './plugin-generation-artifact-server.js'
+import { assertPluginGenerationArtifactFileReferences } from './plugin-generation-artifact-validation.js'
 
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const SEMANTIC_VERSION =
@@ -637,6 +638,7 @@ async function readStoredBrowserArtifact(directory: string): Promise<BuiltPlugin
     }
     files.set(descriptor.path, contents)
   }
+  await assertPluginGenerationArtifactFileReferences(manifest, files)
   const moduleBytes = files.get(manifest.entry)
   if (moduleBytes === undefined) throw new Error('stored browser artifact entry is missing')
   return Object.freeze({ manifest, files, moduleSource: Buffer.from(moduleBytes).toString('utf8'), inputModules: [] })

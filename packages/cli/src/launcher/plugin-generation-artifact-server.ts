@@ -5,6 +5,7 @@ import { createServer, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import type { RuntimeModuleAccess } from './packages/authority.js'
+import { assertPluginGenerationArtifactFileReferences } from './plugin-generation-artifact-validation.js'
 
 const ARTIFACT_SCHEMA =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-generation-artifact.v1.schema.json'
@@ -502,7 +503,19 @@ function resourceRegistryInstallSource(): string {
     if (!styleLink(link)) return;
     const record = matching(link.href);
     if (record === undefined) return;
-    if (record.state === 'retired') { link.remove(); return; }
+    if (record.state === 'retired') {
+      if (!links.has(link)) links.set(link, { record, media: link.getAttribute('media') });
+      record.links.add(link);
+      link.dataset.cordisxPluginGeneration = record.id;
+      link.media = 'not all';
+      link.disabled = true;
+      try { link.remove(); } catch {}
+      if (!link.isConnected) {
+        links.delete(link);
+        record.links.delete(link);
+      }
+      return;
+    }
     if (!links.has(link)) links.set(link, { record, media: link.getAttribute('media') });
     record.links.add(link);
     link.dataset.cordisxPluginGeneration = record.id;
@@ -549,20 +562,34 @@ function resourceRegistryInstallSource(): string {
     publish(id) {
       const record = records.get(id);
       if (record === undefined || record.state === 'retired') throw new Error('plugin generation resource lease is stale');
+      for (const link of document.querySelectorAll('link[rel~="stylesheet"]')) remember(link);
       record.state = 'published';
       for (const link of record.links) {
         const tracked = links.get(link);
         if (tracked?.media === null) link.removeAttribute('media');
         else if (tracked !== undefined) link.setAttribute('media', tracked.media);
       }
+      return true;
     },
     retire(id) {
       const record = records.get(id);
-      if (record === undefined) return;
+      if (record === undefined) return false;
+      for (const link of document.querySelectorAll('link[rel~="stylesheet"]')) remember(link);
       record.state = 'retired';
       record.rejectReady(new Error('plugin generation resource lease was retired'));
-      for (const link of record.links) { links.delete(link); link.remove(); }
-      record.links.clear();
+      let removed = true;
+      for (const link of [...record.links]) {
+        link.media = 'not all';
+        link.disabled = true;
+        try { link.remove(); } catch { removed = false; }
+        if (link.isConnected) removed = false;
+        else {
+          links.delete(link);
+          record.links.delete(link);
+        }
+      }
+      if (!removed) throw new Error('plugin generation stylesheet retirement failed');
+      return true;
     },
     dispose() {
       observer.disconnect();
@@ -713,7 +740,9 @@ export async function startPluginGenerationArtifactServer(): Promise<PluginGener
       if (module.runtimeEntry !== artifact.entry) throw new Error('runtime module projection entry is invalid')
       // Keep descriptor-count concurrency from turning into thousands of open
       // files while still binding every route to verified bytes before exposure.
-      for (const file of artifact.files) await readVerifiedFile(root, file)
+      const verifiedFiles = new Map<`./${string}`, Uint8Array>()
+      for (const file of artifact.files) verifiedFiles.set(file.path, await readVerifiedFile(root, file))
+      await assertPluginGenerationArtifactFileReferences(artifact, verifiedFiles)
       const leaseId = createHash('sha256')
         .update(randomBytes(32))
         .update('\0')
@@ -744,8 +773,14 @@ export async function startPluginGenerationArtifactServer(): Promise<PluginGener
         entryUrl,
         initialStyleUrls: Object.freeze(initialStyleUrls),
         importSource,
-        publishSource: `globalThis.${registry}?.publish(${JSON.stringify(leaseId)})`,
-        retireSource: `globalThis.${registry}?.retire(${JSON.stringify(leaseId)})`,
+        publishSource:
+          `(() => { const registry = globalThis.${registry}; if (registry === undefined || registry.publish(${
+            JSON.stringify(leaseId)
+          }) !== true) throw new Error('plugin generation resource publication failed'); return true })()`,
+        retireSource:
+          `(() => { const registry = globalThis.${registry}; if (registry === undefined || registry.retire(${
+            JSON.stringify(leaseId)
+          }) !== true) throw new Error('plugin generation resource retirement failed'); return true })()`,
         retire(): void {
           if (retired) return
           retired = true
