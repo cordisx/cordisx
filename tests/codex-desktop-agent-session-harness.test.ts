@@ -24,6 +24,7 @@ describe('Codex Desktop Agent Session live harness', () => {
     expect(wrapper).toContain("buildNumber: '7982'")
     expect(wrapper).toContain("CORDISX_HOME: cordisxHome")
     expect(wrapper).toContain('writeDesktopAgentSessionHarnessReport')
+    expect(wrapper).toContain('launcherOutputTail')
     expect(wrapper).toContain('waitForOwnedProfileQuiescence')
     expect(wrapper).toContain('sharedHome: process.env.HOME')
     expect(wrapper).toContain('sharedCodexHome: process.env.CODEX_HOME')

@@ -81,6 +81,7 @@ function profileProcesses(profileDir) {
 function run(command, args, environment, onStage) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], env: environment })
+    const outputTail = []
     const observe = (stream, output) => {
       let pending = ''
       stream.on('data', chunk => {
@@ -90,6 +91,10 @@ function run(command, args, environment, onStage) {
         const lines = pending.split('\n')
         pending = lines.pop() ?? ''
         for (const line of lines) {
+          if (line.trim() !== '') {
+            outputTail.push(line.slice(0, 1_000))
+            if (outputTail.length > 40) outputTail.shift()
+          }
           const prefix = '[cordisx-desktop-agent-session-stage] '
           if (!line.startsWith(prefix)) continue
           try {
@@ -102,8 +107,12 @@ function run(command, args, environment, onStage) {
     observe(child.stderr, process.stderr)
     child.once('error', reject)
     child.once('exit', (code, signal) => {
-      if (code === 0) resolve()
-      else reject(new Error(`isolated Desktop harness exited with ${signal ?? `status ${String(code)}`}`))
+      if (code === 0) resolve(outputTail)
+      else {
+        const failure = new Error(`isolated Desktop harness exited with ${signal ?? `status ${String(code)}`}; tail=${JSON.stringify(outputTail)}`)
+        failure.outputTail = outputTail
+        reject(failure)
+      }
     })
   })
 }
@@ -185,8 +194,9 @@ const args = [
 const startedAt = Date.now()
 const stages = []
 let error
+let launcherOutputTail = []
 try {
-  await run(process.execPath, args, {
+  launcherOutputTail = await run(process.execPath, args, {
     ...process.env,
     // Isolate CordisX test state while deliberately retaining the user's
     // authenticated HOME/CODEX_HOME for the installed Desktop connection.
@@ -194,6 +204,7 @@ try {
   }, stage => stages.push(stage))
 } catch (cause) {
   error = cause
+  if (Array.isArray(cause?.outputTail)) launcherOutputTail = cause.outputTail
 } finally {
   const active = await waitForOwnedProfileQuiescence(() => profileProcesses(profileDir))
   const isPortClosed = await portClosed(port)
@@ -219,6 +230,7 @@ try {
     secondProviderStarted: false,
     appAsarPatched: false,
     stages,
+    launcherOutputTail,
     elapsedMs: Date.now() - startedAt,
     portClosed: isPortClosed,
     profileProcessesAfterRunner: active.length,
