@@ -100,6 +100,8 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
   private readonly approvalListeners = new Set<(request: CordisXDriverApprovalRequest) => Promise<ApprovalOutcome>>()
   private disposed = false
   private connectionReplaced = false
+  /** The first connected/initialized pair belongs to this renderer's bootstrap. */
+  private connectionBootstrapped = false
 
   private constructor(
     private readonly bridge: Required<ElectronBridge>,
@@ -376,6 +378,17 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     if (text(envelope?.hostId) !== this.pin.hostId) return
     const type = text(envelope?.type)
     if (type === 'codex-app-server-connection-changed' || type === 'codex-app-server-initialized') {
+      const state = text(envelope?.state)
+      // Desktop 7982 can publish connected/initialized after the first
+      // thread/start response. They establish the connection backing this
+      // renderer, not a replacement of it. Once initialized, every later
+      // lifecycle event remains an exact first-terminal replacement fence.
+      if (!this.connectionBootstrapped) {
+        if (type === 'codex-app-server-initialized') this.connectionBootstrapped = true
+        else if (state === 'connected') return
+        else this.connectionBootstrapped = true
+        return
+      }
       if (this.sessions.size > 0 || this.pending.size > 0) {
         this.connectionReplaced = true
         for (const pending of this.pending.values()) {
