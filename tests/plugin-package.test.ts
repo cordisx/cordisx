@@ -1,6 +1,7 @@
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { build as viteBuild } from 'vite'
 import {
   loadStagedPluginPackage,
   normalizePluginPackageManifest,
@@ -9,6 +10,7 @@ import {
 } from '../packages/cli/src/launcher/plugin-package.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../packages/cli/src/platform-contracts.js'
 import { CORDISX_PLUGIN_PACKAGE_SCHEMA_V1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
+import { cordisXPluginViteConfig } from '../packages/cli/src/vite.js'
 
 const temporary = new Set<string>()
 
@@ -109,6 +111,78 @@ describe('local plugin package store', () => {
     expect(staged.moduleSource).toContain('__cordisxSharedReactRuntime')
     expect(staged.moduleSource).not.toContain('react.production.js')
     expect(staged.moduleSource).not.toContain('react.development.js')
+  })
+
+  it('publishes a browser-native graph while keeping lazy chunks, CSS, and assets out of the entry', async () => {
+    const { home, source } = await fixture(`
+      export function apply() {}
+      export async function showAvatar() { return await import('./avatar') }
+    `)
+    await Promise.all([
+      writeFile(path.join(source, 'src/avatar.ts'), `
+        import './avatar.css'
+        import avatarUrl from './avatar.svg'
+        globalThis.__fixtureLazyExecuted = true
+        export { avatarUrl }
+      `),
+      writeFile(path.join(source, 'src/avatar.css'), '.fixture-avatar { background-image: url(./avatar.svg) }\n'),
+      writeFile(path.join(source, 'src/avatar.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><circle cx="4" cy="4" r="4"/></svg>\n'),
+    ])
+
+    const staged = await stageLocalPluginPackage(home, source)
+    const graph = staged.browserArtifact
+    expect(graph).toBeDefined()
+    expect(graph?.manifest.entry).toBe('./module.js')
+    expect(graph?.manifest.initialStyles).toEqual([])
+    expect(graph?.manifest.files.some(file => file.path.startsWith('./chunks/') && file.kind === 'module')).toBe(true)
+    expect(graph?.manifest.files.some(file => file.path.startsWith('./assets/') && file.kind === 'stylesheet')).toBe(true)
+    expect(graph?.manifest.files.some(file => file.path.startsWith('./assets/') && file.mediaType === 'image/svg+xml')).toBe(true)
+    expect(Buffer.from(graph?.files.get(graph.manifest.entry) ?? []).toString('utf8')).not.toContain('__fixtureLazyExecuted')
+
+    const storedRoot = path.join(home, 'packages', 'sha256', staged.digest.slice(7))
+    expect(JSON.parse(await readFile(path.join(storedRoot, 'browser', 'artifact.json'), 'utf8'))).toEqual(graph?.manifest)
+    const loaded = await loadStagedPluginPackage(home, staged.digest)
+    expect(loaded.browserArtifact?.manifest).toEqual(graph?.manifest)
+  })
+
+  it('ingests an adjacent author-built graph exactly without recompiling away lazy CSS', async () => {
+    const { home, source } = await fixture(`
+      export function apply() {}
+      export async function showPanel() { return await import('./panel') }
+    `)
+    const packageManifest = { ...manifest(), entry: './dist/runtime/chatroom.js' }
+    await Promise.all([
+      writeFile(path.join(source, 'cordisx.plugin.json'), `${JSON.stringify(packageManifest, null, 2)}\n`),
+      writeFile(path.join(source, 'src/panel.ts'), `
+        import './panel.css'
+        import iconUrl from './panel.svg'
+        globalThis.__fixturePanelExecuted = true
+        export { iconUrl }
+      `),
+      writeFile(path.join(source, 'src/panel.css'), '.fixture-panel { background-image: url(./panel.svg) }\n'),
+      writeFile(path.join(source, 'src/panel.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><path d="M0 0h8v8H0z"/></svg>\n'),
+    ])
+    await viteBuild({
+      ...cordisXPluginViteConfig({
+        root: source,
+        entry: './src/index.ts',
+        outDir: './dist/runtime',
+        entryFileName: 'chatroom.js',
+      }),
+      configFile: false,
+    })
+    const authorManifest = JSON.parse(await readFile(path.join(source, 'dist/runtime/artifact.json'), 'utf8'))
+    const authorEntry = await readFile(path.join(source, 'dist/runtime/chatroom.js'), 'utf8')
+    expect(authorManifest.files.some((file: { readonly kind: string }) => file.kind === 'stylesheet')).toBe(true)
+
+    const staged = await stageLocalPluginPackage(home, source)
+    expect(staged.browserArtifact?.manifest).toEqual(authorManifest)
+    expect(Buffer.from(staged.browserArtifact?.files.get('./chatroom.js') ?? []).toString('utf8')).toBe(authorEntry)
+    expect(staged.browserArtifact?.manifest.files.some(file => file.kind === 'stylesheet')).toBe(true)
+    expect(staged.browserArtifact?.manifest.files.some(file => file.kind === 'asset')).toBe(true)
+
+    await writeFile(path.join(source, 'dist/runtime/undeclared.js'), 'export const undeclared = true\n')
+    await expect(stageLocalPluginPackage(home, source)).rejects.toThrow('undeclared files or directories')
   })
 
   it('rejects escaping symlinks and a second bundled Cordis runtime', async () => {

@@ -367,7 +367,7 @@ existing business files, CordisX package fields, TypeScript settings, or plugin
 directories. A collision fails before mutation.
 
 Each embedded plugin also owns a `vite.config.ts`. Its graph is emitted under
-`.cordisx/dist/<plugin-id>/`; the build driver reads the project config and
+`.cordisx/dist/runtime/<plugin-id>/`; declarations stay in `.cordisx/dist/types/`, and the build driver reads the project config and
 builds every id separately.
 
 `--integration auto` joins an existing supported workspace and otherwise

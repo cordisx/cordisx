@@ -33,8 +33,9 @@ exact dependencies, compatibility schemas, canonical public source, runtime
 manifest digest, and package/runtime id equality.
 
 The public `cordisx/vite` production helper emits the formal
-`dist/artifact.json` beside the indexed browser ESM graph. A portable package
-manifest points its browser entry at the adjacent prebuilt `dist/module.js`.
+`dist/runtime/artifact.json` beside the indexed browser ESM graph. Declaration
+and test output stays outside that closed directory. A portable package
+manifest points its browser entry at the adjacent prebuilt `dist/runtime/module.js`.
 Host staging validates every indexed module, stylesheet, asset, and digest
 before retaining the same formal graph in the immutable store.
 

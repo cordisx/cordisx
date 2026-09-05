@@ -17,18 +17,19 @@ launching Codex Desktop. `{{packageManager}} run dev` launches the separate
 CordisX development host. Component-only modules use React Fast Refresh;
 manifest, entry, and `apply()` changes replace the plugin generation.
 
-`{{packageManager}} run build` creates a production Vite ESM graph in `dist/`.
+`{{packageManager}} run build` creates a production Vite ESM graph in `dist/runtime/`.
 Its stable `module.js` entry may load content-addressed JavaScript chunks, CSS,
 and static assets only when an `import()` reaches them. The generated formal
-`artifact.json` records that graph for packaging; `package.json#files` includes
-the complete `dist/` tree. Production generations remain immutable package
+`artifact.json` records that graph for packaging; declarations are kept outside
+the closed graph in `dist/types/`, and `package.json#files` includes the complete
+`dist/` tree. Production generations remain immutable package
 artifacts and do not use the development HMR connection.
 
 The generated config calls the public `cordisx/vite`
 `cordisXPluginViteConfig()` helper. That shared author/Host pipeline owns the
 output rules, virtualizes only the closed Host singleton imports, and emits the
-formal `dist/artifact.json`. A portable CordisX package manifest points its
-browser entry at the adjacent prebuilt `dist/module.js`; the Host validates and
+formal `dist/runtime/artifact.json`. A portable CordisX package manifest points its
+browser entry at the adjacent prebuilt `dist/runtime/module.js`; the Host validates and
 retains the complete indexed graph.
 
 The template intentionally requests no platform capabilities. It contributes a

@@ -1,37 +1,30 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from 'node:fs/promises'
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+} from 'node:fs/promises'
 import path from 'node:path'
 import { build } from 'esbuild'
 import {
-  CORDISX_PLATFORM_CAPABILITIES,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
+  CORDISX_PLATFORM_CAPABILITIES,
   type CordisXCapabilityDeclaration,
   type CordisXPluginManifestV1,
 } from '../platform-contracts.js'
-import type {
-  CordisXPluginManifestV4,
-  CordisXPluginManifestV5,
-  CordisXPluginManifestV6,
-  CordisXPluginManifestV7,
-  CordisXPluginManifestV8,
-} from '../permission-contracts.js'
+import type { CordisXPluginManifestV4, CordisXPluginManifestV5, CordisXPluginManifestV6, CordisXPluginManifestV7, CordisXPluginManifestV8 } from '../permission-contracts.js'
 import type { CordisXPluginServiceDeclarationV4 } from '../permission-contracts.js'
-import {
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
-} from '../permission-contracts.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V4, CORDISX_PLUGIN_MANIFEST_SCHEMA_V5, CORDISX_PLUGIN_MANIFEST_SCHEMA_V6, CORDISX_PLUGIN_MANIFEST_SCHEMA_V7, CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 } from '../permission-contracts.js'
 import { CapabilityRiskCatalog } from '../capability-risk-catalog.js'
 import { normalizePluginManifestV4 } from '../permission-model-v2.js'
-import {
-  normalizePluginManifestV5,
-  normalizePluginManifestV6,
-  normalizePluginManifestV7,
-  normalizePluginManifestV8,
-} from '../permission-model-v4.js'
+import { normalizePluginManifestV5, normalizePluginManifestV6, normalizePluginManifestV7, normalizePluginManifestV8 } from '../permission-model-v4.js'
 import {
   CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
   CORDISX_PLUGIN_PROTOCOL_V1,
@@ -41,29 +34,32 @@ import {
 } from '../plugin-lifecycle-contracts.js'
 import { normalizePermissionScope } from '../permissions.js'
 import type { ResolvedPackageCandidate } from './packages/types.js'
-import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
-import { type EntityTemplatePayload, readEntityTemplatePayload } from './entity-directory.js'
+import {
+  assertNoPrivateReactBundle,
+  cordisXReactVirtualModules,
+} from './react-virtual-modules.js'
+import { readEntityTemplatePayload, type EntityTemplatePayload } from './entity-directory.js'
+import {
+  buildProductionPluginGraph,
+  type BuiltPluginGenerationArtifact,
+} from './production-plugin-build.js'
+import { readPluginGenerationArtifactV1 } from './plugin-generation-artifact-server.js'
 
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
-const SEMANTIC_VERSION =
-  /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+const SEMANTIC_VERSION = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
 const ENTRY = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:mjs|js|ts)$/
 const README = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:md|markdown)$/
 const DIGEST = /^sha256:([a-f0-9]{64})$/
 
 export interface StagedPluginPackage {
   readonly manifest: Omit<CordisXPluginPackageManifestV1, 'runtimeManifest'> & {
-    readonly runtimeManifest:
-      | CordisXPluginManifestV1
-      | CordisXPluginManifestV4
-      | CordisXPluginManifestV5
-      | CordisXPluginManifestV6
-      | CordisXPluginManifestV7
-      | CordisXPluginManifestV8
+    readonly runtimeManifest: CordisXPluginManifestV1 | CordisXPluginManifestV4 | CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV7 | CordisXPluginManifestV8
   }
   readonly digest: `sha256:${string}`
   readonly moduleSource: string
   readonly artifactSource: string
+  /** Browser-native immutable ESM graph. Absent only for legacy store objects. */
+  readonly browserArtifact?: BuiltPluginGenerationArtifact
   readonly serviceModules: readonly StagedPluginServiceModule[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
   readonly readme?: string
@@ -96,9 +92,7 @@ function string(value: unknown, label: string, maximum = 2048): string {
 
 function localId(value: unknown, label: string): string {
   const id = string(value, label, 96)
-  if (!PLUGIN_ID.test(id) || id === 'host' || id.startsWith('cordisx.')) {
-    throw new Error(`${label} is invalid or reserved`)
-  }
+  if (!PLUGIN_ID.test(id) || id === 'host' || id.startsWith('cordisx.')) throw new Error(`${label} is invalid or reserved`)
   return id
 }
 
@@ -112,16 +106,9 @@ function localizedReason(value: unknown, label: string): CordisXCapabilityDeclar
   const reason = object(value, label)
   exactKeys(reason, ['namespace', 'key', 'params', 'fallback'], label)
   const key = string(reason.key, `${label}.key`, 256)
-  if (reason.namespace !== undefined && typeof reason.namespace !== 'string') {
-    throw new Error(`${label}.namespace must be a string`)
-  }
-  if (reason.fallback !== undefined && typeof reason.fallback !== 'string') {
-    throw new Error(`${label}.fallback must be a string`)
-  }
-  if (
-    reason.params !== undefined
-    && (reason.params === null || typeof reason.params !== 'object' || Array.isArray(reason.params))
-  ) {
+  if (reason.namespace !== undefined && typeof reason.namespace !== 'string') throw new Error(`${label}.namespace must be a string`)
+  if (reason.fallback !== undefined && typeof reason.fallback !== 'string') throw new Error(`${label}.fallback must be a string`)
+  if (reason.params !== undefined && (reason.params === null || typeof reason.params !== 'object' || Array.isArray(reason.params))) {
     throw new Error(`${label}.params must be an object`)
   }
   return {
@@ -149,25 +136,16 @@ export function runtimeManifestV1(value: unknown, packageId: string): CordisXPlu
   const capabilities = manifest.capabilities.map((raw, index): CordisXCapabilityDeclaration => {
     const declaration = object(raw, `package.runtimeManifest.capabilities[${index}]`)
     exactKeys(declaration, ['name', 'required', 'reason', 'scope'], `package.runtimeManifest.capabilities[${index}]`)
-    if (
-      typeof declaration.name !== 'string'
-      || !(CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(declaration.name)
-    ) {
+    if (typeof declaration.name !== 'string' || !(CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(declaration.name)) {
       throw new Error(`package.runtimeManifest.capabilities[${index}].name is unsupported`)
     }
     if (seen.has(declaration.name)) throw new Error(`duplicate capability declaration: ${declaration.name}`)
     seen.add(declaration.name)
-    if (typeof declaration.required !== 'boolean') {
-      throw new Error(`package.runtimeManifest.capabilities[${index}].required must be a boolean`)
-    }
+    if (typeof declaration.required !== 'boolean') throw new Error(`package.runtimeManifest.capabilities[${index}].required must be a boolean`)
     const name = declaration.name as CordisXCapabilityDeclaration['name']
     const scope = normalizePermissionScope(declaration.scope, `package.runtimeManifest.capabilities[${index}].scope`)
-    if (name.startsWith('agent.') && scope.sessions !== undefined) {
-      throw new Error(`${name} cannot use Platform sessions`)
-    }
-    if (!name.startsWith('agent.') && scope.sessionIds !== undefined) {
-      throw new Error(`${name} cannot use Agent sessionIds`)
-    }
+    if (name.startsWith('agent.') && scope.sessions !== undefined) throw new Error(`${name} cannot use Platform sessions`)
+    if (!name.startsWith('agent.') && scope.sessionIds !== undefined) throw new Error(`${name} cannot use Agent sessionIds`)
     return {
       name,
       required: declaration.required,
@@ -188,16 +166,8 @@ export function runtimeManifestV1(value: unknown, packageId: string): CordisXPlu
 export function normalizePluginPackageManifest(value: unknown): CordisXPluginPackageManifestV1 {
   const manifest = object(value, 'package')
   exactKeys(manifest, [
-    '$schema',
-    'schemaVersion',
-    'id',
-    'version',
-    'entry',
-    'readme',
-    'canonicalSource',
-    'compatibility',
-    'dependencies',
-    'runtimeManifest',
+    '$schema', 'schemaVersion', 'id', 'version', 'entry', 'readme', 'canonicalSource',
+    'compatibility', 'dependencies', 'runtimeManifest',
   ], 'package')
   if (manifest.$schema !== CORDISX_PLUGIN_PACKAGE_SCHEMA_V1 || manifest.schemaVersion !== 1) {
     throw new Error('package schema is unsupported')
@@ -266,11 +236,17 @@ async function regularContainedFile(root: string, relative: string, label: strin
   return resolved
 }
 
-async function buildArtifact(
-  root: string,
-  entry: string,
-): Promise<{ readonly moduleSource: string; readonly artifactSource: string }> {
+async function buildArtifact(root: string, entry: string): Promise<{
+  readonly moduleSource: string
+  readonly artifactSource: string
+  readonly browserArtifact: BuiltPluginGenerationArtifact
+}> {
   const specifier = `./${path.relative(root, entry).replaceAll(path.sep, '/')}`
+  const packagedBrowserArtifact = await readStoredBrowserArtifact(path.dirname(entry))
+  if (packagedBrowserArtifact !== undefined) {
+    const declaredEntry = await realpath(path.resolve(path.dirname(entry), packagedBrowserArtifact.manifest.entry))
+    if (declaredEntry !== entry) throw new Error('package entry must equal the adjacent browser artifact entry')
+  }
   const common = {
     bundle: true,
     platform: 'browser' as const,
@@ -284,7 +260,8 @@ async function buildArtifact(
     write: false,
     logLevel: 'silent' as const,
   }
-  const [moduleResult, artifactResult] = await Promise.all([
+  const [browserArtifact, moduleResult, artifactResult] = await Promise.all([
+    packagedBrowserArtifact ?? buildProductionPluginGraph(root, entry),
     build({
       absWorkingDir: root,
       entryPoints: [specifier],
@@ -292,39 +269,38 @@ async function buildArtifact(
       ...common,
     }),
     build({
-      stdin: {
-        contents: `import * as pluginModule from ${
-          JSON.stringify(specifier)
-        }\nglobalThis.__cordisxPendingPluginModuleV1 = pluginModule\n`,
-        resolveDir: root,
-        sourcefile: 'cordisx-plugin-generation.ts',
-      },
-      format: 'iife',
-      // esbuild's readable IIFE output annotates bundled modules with paths that
-      // are relative to the process cwd, so the same package staged in two
-      // directories would otherwise acquire different bytes and digests. Let
-      // esbuild remove only syntactic whitespace/comments; unlike a text
-      // post-processor this cannot rewrite strings, regexes, or source content.
-      minifyWhitespace: true,
-      ...common,
-    }),
-  ])
+    stdin: {
+      contents: `import * as pluginModule from ${JSON.stringify(specifier)}\nglobalThis.__cordisxPendingPluginModuleV1 = pluginModule\n`,
+      resolveDir: root,
+      sourcefile: 'cordisx-plugin-generation.ts',
+    },
+    format: 'iife',
+    // esbuild's readable IIFE output annotates bundled modules with paths that
+    // are relative to the process cwd, so the same package staged in two
+    // directories would otherwise acquire different bytes and digests. Let
+    // esbuild remove only syntactic whitespace/comments; unlike a text
+    // post-processor this cannot rewrite strings, regexes, or source content.
+    minifyWhitespace: true,
+    ...common,
+  })])
   if (moduleResult.metafile === undefined || artifactResult.metafile === undefined) {
     throw new Error('plugin build produced no dependency metadata')
   }
   assertNoPrivateReactBundle(moduleResult.metafile, 'plugin artifact')
   assertNoPrivateReactBundle(artifactResult.metafile, 'plugin artifact')
-  const inputs = [...Object.keys(moduleResult.metafile.inputs), ...Object.keys(artifactResult.metafile.inputs)]
+  const inputs = [
+    ...browserArtifact.inputModules,
+    ...Object.keys(moduleResult.metafile.inputs),
+    ...Object.keys(artifactResult.metafile.inputs),
+  ]
     .map(input => input.replaceAll('\\', '/'))
   if (inputs.some(input => input.includes('node_modules/@deepseek-ai/cordis/'))) {
     throw new Error('plugin artifact must not bundle a second @deepseek-ai/cordis runtime')
   }
   const moduleOutput = moduleResult.outputFiles?.[0]
   const artifactOutput = artifactResult.outputFiles?.[0]
-  if (moduleOutput === undefined || artifactOutput === undefined) {
-    throw new Error('plugin build produced no browser artifact')
-  }
-  return { moduleSource: moduleOutput.text, artifactSource: artifactOutput.text }
+  if (moduleOutput === undefined || artifactOutput === undefined) throw new Error('plugin build produced no browser artifact')
+  return { moduleSource: moduleOutput.text, artifactSource: artifactOutput.text, browserArtifact }
 }
 
 async function buildServiceArtifact(
@@ -360,6 +336,7 @@ function artifactDigest(
   artifactSource: string,
   serviceModules: readonly StagedPluginServiceModule[] = [],
   entityTemplatesText?: string,
+  browserArtifact?: BuiltPluginGenerationArtifact,
 ): `sha256:${string}` {
   const digest = createHash('sha256')
     .update(manifestText)
@@ -367,15 +344,19 @@ function artifactDigest(
     .update(moduleSource)
     .update('\0')
     .update(artifactSource)
-  for (
-    const service of [...serviceModules].sort((left, right) => left.declaration.id.localeCompare(right.declaration.id))
-  ) {
+  for (const service of [...serviceModules].sort((left, right) => left.declaration.id.localeCompare(right.declaration.id))) {
     digest.update('\0service\0')
       .update(JSON.stringify(service.declaration))
       .update('\0')
       .update(service.moduleSource)
   }
   if (entityTemplatesText !== undefined) digest.update('\0entity-templates\0').update(entityTemplatesText)
+  if (browserArtifact !== undefined) {
+    digest.update('\0browser-artifact\0').update(`${JSON.stringify(browserArtifact.manifest, null, 2)}\n`)
+    for (const [file, contents] of [...browserArtifact.files].sort(([left], [right]) => left.localeCompare(right))) {
+      digest.update('\0browser-file\0').update(file).update('\0').update(contents)
+    }
+  }
   const value = digest.digest('hex')
   return `sha256:${value}`
 }
@@ -391,6 +372,11 @@ export function stagedPluginModulePath(homeDir: string, digest: `sha256:${string
   return path.join(packageDirectory(homeDir, digest), 'module.js')
 }
 
+/** Launcher-private browser graph root; renderer URLs are issued by the artifact server. */
+export function stagedPluginBrowserArtifactDirectory(homeDir: string, digest: `sha256:${string}`): string {
+  return path.join(packageDirectory(homeDir, digest), 'browser')
+}
+
 /** Host-private Node entry for one manifest-declared service in the immutable package object. */
 export function stagedPluginServiceModulePath(
   homeDir: string,
@@ -401,10 +387,11 @@ export function stagedPluginServiceModulePath(
   return path.join(packageDirectory(homeDir, digest), 'services', `${serviceId}.mjs`)
 }
 
-async function writeFileSynced(filePath: string, contents: string): Promise<void> {
+async function writeFileSynced(filePath: string, contents: string | Uint8Array): Promise<void> {
   const handle = await open(filePath, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
   try {
-    await handle.writeFile(contents, 'utf8')
+    if (typeof contents === 'string') await handle.writeFile(contents, 'utf8')
+    else await handle.writeFile(contents)
     await handle.sync()
   } finally {
     await handle.close()
@@ -421,6 +408,7 @@ async function publishPackage(
   runtimeManifestText?: string,
   serviceModules: readonly StagedPluginServiceModule[] = [],
   entityTemplatesText?: string,
+  browserArtifact?: BuiltPluginGenerationArtifact,
 ): Promise<void> {
   const parent = path.join(homeDir, 'packages', 'sha256')
   await mkdir(parent, { recursive: true, mode: 0o700 })
@@ -428,19 +416,16 @@ async function publishPackage(
   const destination = packageDirectory(homeDir, digest)
   try {
     const metadata = await lstat(destination)
-    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-      throw new Error('existing plugin package target is not a real directory')
-    }
-    const [storedManifest, storedModule, storedArtifact, storedServices, storedEntityTemplates] = await Promise.all([
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error('existing plugin package target is not a real directory')
+    const [storedManifest, storedModule, storedArtifact, storedServices, storedEntityTemplates, storedBrowserArtifact] = await Promise.all([
       readFile(path.join(destination, 'manifest.json'), 'utf8'),
       readFile(path.join(destination, 'module.js'), 'utf8'),
       readFile(path.join(destination, 'artifact.js'), 'utf8'),
       readStoredServiceModules(destination),
       readOptionalFile(path.join(destination, 'entity-templates.json')),
+      readStoredBrowserArtifact(path.join(destination, 'browser')),
     ])
-    if (
-      artifactDigest(storedManifest, storedModule, storedArtifact, storedServices, storedEntityTemplates) !== digest
-    ) {
+    if (artifactDigest(storedManifest, storedModule, storedArtifact, storedServices, storedEntityTemplates, storedBrowserArtifact) !== digest) {
       throw new Error('existing plugin package failed integrity readback')
     }
     return
@@ -452,28 +437,42 @@ async function publishPackage(
   let published = false
   try {
     if (serviceModules.length > 0) await mkdir(path.join(temporary, 'services'), { mode: 0o700 })
+    const browserDirectories = new Set<string>()
+    if (browserArtifact !== undefined) {
+      await mkdir(path.join(temporary, 'browser'), { mode: 0o700 })
+      for (const file of browserArtifact.files.keys()) {
+        let directory = path.posix.dirname(file.slice(2))
+        while (directory !== '.') {
+          browserDirectories.add(directory)
+          directory = path.posix.dirname(directory)
+        }
+      }
+      for (const directory of [...browserDirectories].sort((left, right) => left.length - right.length)) {
+        await mkdir(path.join(temporary, 'browser', directory), { mode: 0o700 })
+      }
+    }
     await Promise.all([
       writeFileSynced(path.join(temporary, 'manifest.json'), manifestText),
       writeFileSynced(path.join(temporary, 'module.js'), moduleSource),
+      ...(browserArtifact === undefined ? [] : [
+            writeFileSynced(path.join(temporary, 'browser', 'artifact.json'), `${JSON.stringify(browserArtifact.manifest, null, 2)}\n`),
+            ...[...browserArtifact.files].map(([file, contents]) => writeFileSynced(
+              path.join(temporary, 'browser', file.slice(2)), contents,
+            )),
+          ]),
       writeFileSynced(path.join(temporary, 'artifact.js'), artifactSource),
-      ...(runtimeManifestText === undefined
-        ? []
-        : [writeFileSynced(path.join(temporary, 'runtime-manifest.json'), runtimeManifestText)]),
+      ...(runtimeManifestText === undefined ? [] : [writeFileSynced(path.join(temporary, 'runtime-manifest.json'), runtimeManifestText)]),
       ...(readme === undefined ? [] : [writeFileSynced(path.join(temporary, 'README.md'), readme)]),
-      ...(entityTemplatesText === undefined
-        ? []
-        : [writeFileSynced(path.join(temporary, 'entity-templates.json'), entityTemplatesText)]),
+      ...(entityTemplatesText === undefined ? [] : [writeFileSynced(path.join(temporary, 'entity-templates.json'), entityTemplatesText)]),
       ...(serviceModules.length === 0 ? [] : [
         writeFileSynced(
           path.join(temporary, 'services.json'),
           `${JSON.stringify(serviceModules.map(service => service.declaration), null, 2)}\n`,
         ),
-        ...serviceModules.map(service =>
-          writeFileSynced(
-            path.join(temporary, 'services', `${service.declaration.id}.mjs`),
-            service.moduleSource,
-          )
-        ),
+        ...serviceModules.map(service => writeFileSynced(
+          path.join(temporary, 'services', `${service.declaration.id}.mjs`),
+          service.moduleSource,
+        )),
       ]),
     ])
     await rename(temporary, destination)
@@ -483,17 +482,24 @@ async function publishPackage(
         chmod(path.join(destination, 'manifest.json'), 0o444),
         chmod(path.join(destination, 'module.js'), 0o444),
         chmod(path.join(destination, 'artifact.js'), 0o444),
+        ...(browserArtifact === undefined ? [] : [
+          chmod(path.join(destination, 'browser', 'artifact.json'), 0o444),
+          ...[...browserArtifact.files.keys()]
+            .map(file => chmod(path.join(destination, 'browser', file.slice(2)), 0o444)),
+          ...[...browserDirectories]
+            .sort((left, right) => right.length - left.length)
+            .map(directory => chmod(path.join(destination, 'browser', directory), 0o555)),
+          chmod(path.join(destination, 'browser'), 0o555),
+        ]),
         ...(runtimeManifestText === undefined ? [] : [chmod(path.join(destination, 'runtime-manifest.json'), 0o444)]),
         ...(readme === undefined ? [] : [chmod(path.join(destination, 'README.md'), 0o444)]),
         ...(entityTemplatesText === undefined ? [] : [chmod(path.join(destination, 'entity-templates.json'), 0o444)]),
         ...(serviceModules.length === 0 ? [] : [
           chmod(path.join(destination, 'services.json'), 0o444),
-          ...serviceModules.map(service =>
-            chmod(
-              path.join(destination, 'services', `${service.declaration.id}.mjs`),
-              0o444,
-            )
-          ),
+          ...serviceModules.map(service => chmod(
+            path.join(destination, 'services', `${service.declaration.id}.mjs`),
+            0o444,
+          )),
           chmod(path.join(destination, 'services'), 0o555),
         ]),
       ])
@@ -502,6 +508,65 @@ async function publishPackage(
   } finally {
     if (!published) await rm(temporary, { recursive: true, force: true })
   }
+}
+
+async function readStoredBrowserArtifact(directory: string): Promise<BuiltPluginGenerationArtifact | undefined> {
+  const metadata = await lstat(directory).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  })
+  if (metadata === undefined) return undefined
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    throw new Error('stored browser artifact root must be a real directory')
+  }
+  const root = await realpath(directory)
+  const manifest = await readPluginGenerationArtifactV1(root)
+  if (manifest === undefined) return undefined
+  const actualFiles = new Set<string>()
+  const actualDirectories = new Set<string>()
+  const visit = async (relativeDirectory: string): Promise<void> => {
+    const entries = await readdir(path.join(root, relativeDirectory), { withFileTypes: true })
+    for (const entry of entries) {
+      const relative = path.posix.join(relativeDirectory.replaceAll(path.sep, '/'), entry.name)
+      if (entry.isSymbolicLink()) throw new Error('stored browser artifact contains a symbolic link')
+      if (entry.isDirectory()) {
+        actualDirectories.add(relative)
+        await visit(relative)
+      } else if (entry.isFile()) actualFiles.add(`./${relative}`)
+      else throw new Error('stored browser artifact contains a non-regular entry')
+    }
+  }
+  await visit('')
+  const expectedFiles = new Set(['./artifact.json', ...manifest.files.map(file => file.path)])
+  const expectedDirectories = new Set<string>()
+  for (const file of manifest.files) {
+    let parent = path.posix.dirname(file.path.slice(2))
+    while (parent !== '.') {
+      expectedDirectories.add(parent)
+      parent = path.posix.dirname(parent)
+    }
+  }
+  if (actualFiles.size !== expectedFiles.size || [...actualFiles].some(file => !expectedFiles.has(file))
+    || actualDirectories.size !== expectedDirectories.size
+    || [...actualDirectories].some(item => !expectedDirectories.has(item))) {
+    throw new Error('stored browser artifact contains undeclared files or directories')
+  }
+  const files = new Map<`./${string}`, Uint8Array>()
+  for (const descriptor of manifest.files) {
+    const file = path.resolve(root, descriptor.path.slice(2))
+    if (!within(root, file)) throw new Error('stored browser artifact path escapes its immutable directory')
+    const metadata = await lstat(file)
+    if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('stored browser artifact contains a non-regular file')
+    const contents = await readFile(file)
+    if (contents.byteLength !== descriptor.byteLength
+      || `sha256:${createHash('sha256').update(contents).digest('hex')}` !== descriptor.digest) {
+      throw new Error(`stored browser artifact file failed integrity readback: ${descriptor.path}`)
+    }
+    files.set(descriptor.path, contents)
+  }
+  const moduleBytes = files.get(manifest.entry)
+  if (moduleBytes === undefined) throw new Error('stored browser artifact entry is missing')
+  return Object.freeze({ manifest, files, moduleSource: Buffer.from(moduleBytes).toString('utf8'), inputModules: [] })
 }
 
 async function readOptionalFile(file: string): Promise<string | undefined> {
@@ -544,8 +609,7 @@ function serviceDeclarationFromStored(value: unknown, label: string): CordisXPlu
     return Object.freeze({ id, kind: 'channel-adapter', entry, configuration: Object.freeze({ kind: 'none' }) })
   }
   exactKeys(configuration, ['kind', 'schema', 'configApplies'], `${label}.configuration`)
-  const schema =
-    'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json'
+  const schema = 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json'
   if (configuration.kind !== 'host' || configuration.schema !== schema || configuration.configApplies !== 'restart') {
     throw new Error(`${label}.configuration is unsupported`)
   }
@@ -597,21 +661,17 @@ export async function stageResolvedPluginPackage(
   const runtimeManifest = runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 && runtime.schemaVersion === 1
     ? runtimeManifestV1(runtime, resolved.packageManifest.pluginId)
     : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 && runtime.schemaVersion === 4
-    ? normalizePluginManifestV4(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
-    : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 && runtime.schemaVersion === 5
-    ? normalizePluginManifestV5(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
-    : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V6 && runtime.schemaVersion === 6
-    ? normalizePluginManifestV6(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
-    : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 && runtime.schemaVersion === 7
-    ? normalizePluginManifestV7(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
-    : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 && runtime.schemaVersion === 8
-    ? normalizePluginManifestV8(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
-    : undefined
-  if (runtimeManifest === undefined) {
-    throw new Error(
-      'the current renderer generation ABI accepts runtime plugin manifest v1, v4, v5, v6, v7, or v8 only',
-    )
-  }
+      ? normalizePluginManifestV4(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
+      : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 && runtime.schemaVersion === 5
+        ? normalizePluginManifestV5(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
+        : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V6 && runtime.schemaVersion === 6
+          ? normalizePluginManifestV6(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
+          : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 && runtime.schemaVersion === 7
+            ? normalizePluginManifestV7(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
+            : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 && runtime.schemaVersion === 8
+              ? normalizePluginManifestV8(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
+        : undefined
+  if (runtimeManifest === undefined) throw new Error('the current renderer generation ABI accepts runtime plugin manifest v1, v4, v5, v6, v7, or v8 only')
   const entry = await regularContainedFile(root, resolved.packageManifest.entry, 'package entry')
   const readmePath = resolved.packageManifest.readme === undefined
     ? undefined
@@ -620,11 +680,9 @@ export async function stageResolvedPluginPackage(
     buildArtifact(root, entry),
     readmePath === undefined ? Promise.resolve(undefined) : readFile(readmePath, 'utf8'),
   ])
-  const serviceModules =
-    runtimeManifest.schemaVersion === 4 || runtimeManifest.schemaVersion === 5 || runtimeManifest.schemaVersion === 6
-      || runtimeManifest.schemaVersion === 7 || runtimeManifest.schemaVersion === 8
-      ? await Promise.all(runtimeManifest.services.map(service => buildServiceArtifact(root, service)))
-      : []
+  const serviceModules = runtimeManifest.schemaVersion === 4 || runtimeManifest.schemaVersion === 5 || runtimeManifest.schemaVersion === 6 || runtimeManifest.schemaVersion === 7 || runtimeManifest.schemaVersion === 8
+    ? await Promise.all(runtimeManifest.services.map(service => buildServiceArtifact(root, service)))
+    : []
   const entityTemplates = await Promise.all((resolved.packageManifest.entityTemplates ?? []).map(async declaration => (
     await readEntityTemplatePayload(root, declaration)
   )))
@@ -646,6 +704,7 @@ export async function stageResolvedPluginPackage(
     built.artifactSource,
     serviceModules,
     entityTemplatesText,
+    built.browserArtifact,
   )
   await publishPackage(
     homeDir,
@@ -657,6 +716,7 @@ export async function stageResolvedPluginPackage(
     runtimeManifestText,
     serviceModules,
     entityTemplatesText,
+    built.browserArtifact,
   )
   return await loadStagedPluginPackage(homeDir, digest)
 }
@@ -666,9 +726,7 @@ export async function stageLocalPluginPackage(homeDir: string, sourceDirectory: 
   if (!path.isAbsolute(sourceDirectory)) throw new Error('local plugin source directory must be absolute')
   const root = await realpath(sourceDirectory)
   const rootMetadata = await lstat(root)
-  if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
-    throw new Error('local plugin source must be a real directory')
-  }
+  if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) throw new Error('local plugin source must be a real directory')
   const manifestPath = await regularContainedFile(root, './cordisx.plugin.json', 'package manifest')
   let parsed: unknown
   try {
@@ -678,22 +736,32 @@ export async function stageLocalPluginPackage(homeDir: string, sourceDirectory: 
   }
   const manifest = normalizePluginPackageManifest(parsed)
   const entry = await regularContainedFile(root, manifest.entry, 'package entry')
-  const readmePath = manifest.readme === undefined
-    ? undefined
-    : await regularContainedFile(root, manifest.readme, 'package README')
+  const readmePath = manifest.readme === undefined ? undefined : await regularContainedFile(root, manifest.readme, 'package README')
   const [built, readme] = await Promise.all([
     buildArtifact(root, entry),
     readmePath === undefined ? Promise.resolve(undefined) : readFile(readmePath, 'utf8'),
   ])
   const manifestText = `${JSON.stringify(manifest, null, 2)}\n`
-  const digest = artifactDigest(manifestText, built.moduleSource, built.artifactSource)
-  await publishPackage(homeDir, digest, manifestText, built.moduleSource, built.artifactSource, readme)
+  const digest = artifactDigest(manifestText, built.moduleSource, built.artifactSource, [], undefined, built.browserArtifact)
+  await publishPackage(
+    homeDir,
+    digest,
+    manifestText,
+    built.moduleSource,
+    built.artifactSource,
+    readme,
+    undefined,
+    [],
+    undefined,
+    built.browserArtifact,
+  )
   const hex = digest.slice('sha256:'.length)
   return {
     manifest,
     digest,
     moduleSource: built.moduleSource,
     artifactSource: built.artifactSource,
+    browserArtifact: built.browserArtifact,
     serviceModules: [],
     entityTemplates: [],
     ...(readme === undefined ? {} : { readme }),
@@ -702,12 +770,9 @@ export async function stageLocalPluginPackage(homeDir: string, sourceDirectory: 
 }
 
 /** Read and integrity-check one immutable package without exposing its store path. */
-export async function loadStagedPluginPackage(
-  homeDir: string,
-  digest: `sha256:${string}`,
-): Promise<StagedPluginPackage> {
+export async function loadStagedPluginPackage(homeDir: string, digest: `sha256:${string}`): Promise<StagedPluginPackage> {
   const directory = packageDirectory(homeDir, digest)
-  const [manifestText, moduleSource, artifactSource, readme, serviceModules, entityTemplatesText] = await Promise.all([
+  const [manifestText, moduleSource, artifactSource, readme, serviceModules, entityTemplatesText, browserArtifact] = await Promise.all([
     readFile(path.join(directory, 'manifest.json'), 'utf8'),
     readFile(path.join(directory, 'module.js'), 'utf8'),
     readFile(path.join(directory, 'artifact.js'), 'utf8'),
@@ -717,14 +782,13 @@ export async function loadStagedPluginPackage(
     }),
     readStoredServiceModules(directory),
     readOptionalFile(path.join(directory, 'entity-templates.json')),
+    readStoredBrowserArtifact(path.join(directory, 'browser')),
   ])
-  if (artifactDigest(manifestText, moduleSource, artifactSource, serviceModules, entityTemplatesText) !== digest) {
+  if (artifactDigest(manifestText, moduleSource, artifactSource, serviceModules, entityTemplatesText, browserArtifact) !== digest) {
     throw new Error('plugin package failed integrity readback')
   }
   const parsed = JSON.parse(manifestText) as unknown
-  const entityTemplates = entityTemplatesText === undefined
-    ? []
-    : JSON.parse(entityTemplatesText) as EntityTemplatePayload[]
+  const entityTemplates = entityTemplatesText === undefined ? [] : JSON.parse(entityTemplatesText) as EntityTemplatePayload[]
   let manifest: StagedPluginPackage['manifest']
   if (separatedPackage(parsed)) {
     const runtimeBytes = await readFile(path.join(directory, 'runtime-manifest.json'))
@@ -732,10 +796,8 @@ export async function loadStagedPluginPackage(
     const expectedRuntimeDigest = parsed.contract === 'cordisx.launcher-staged-package/v3'
       ? parsed.runtimeObject.storedDigest
       : parsed.package.runtimeManifest.digest
-    if (
-      parsed.contract === 'cordisx.launcher-staged-package/v3'
-      && parsed.runtimeObject.sourceDigest !== parsed.package.runtimeManifest.digest
-    ) {
+    if (parsed.contract === 'cordisx.launcher-staged-package/v3'
+      && parsed.runtimeObject.sourceDigest !== parsed.package.runtimeManifest.digest) {
       throw new Error('runtime manifest source provenance failed integrity readback')
     }
     if (actualRuntimeDigest !== expectedRuntimeDigest) throw new Error('runtime manifest failed integrity readback')
@@ -744,16 +806,16 @@ export async function loadStagedPluginPackage(
     const runtime = candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 && candidate.schemaVersion === 1
       ? runtimeManifestV1(rawRuntime, parsed.package.pluginId)
       : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 && candidate.schemaVersion === 4
-      ? normalizePluginManifestV4(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
-      : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 && candidate.schemaVersion === 5
-      ? normalizePluginManifestV5(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
-      : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V6 && candidate.schemaVersion === 6
-      ? normalizePluginManifestV6(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
-      : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 && candidate.schemaVersion === 7
-      ? normalizePluginManifestV7(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
-      : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 && candidate.schemaVersion === 8
-      ? normalizePluginManifestV8(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
-      : undefined
+        ? normalizePluginManifestV4(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
+        : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 && candidate.schemaVersion === 5
+          ? normalizePluginManifestV5(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
+          : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V6 && candidate.schemaVersion === 6
+            ? normalizePluginManifestV6(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
+            : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 && candidate.schemaVersion === 7
+              ? normalizePluginManifestV7(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
+              : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 && candidate.schemaVersion === 8
+                ? normalizePluginManifestV8(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
+          : undefined
     if (runtime === undefined) throw new Error('stored runtime manifest schema is unsupported')
     manifest = {
       $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
@@ -776,6 +838,7 @@ export async function loadStagedPluginPackage(
     digest,
     moduleSource,
     artifactSource,
+    ...(browserArtifact === undefined ? {} : { browserArtifact }),
     serviceModules,
     entityTemplates: immutableEntityTemplates(entityTemplates),
     ...(readme === undefined ? {} : { readme }),

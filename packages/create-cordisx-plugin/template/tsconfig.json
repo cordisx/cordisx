@@ -7,7 +7,7 @@
     "jsxImportSource": "cordisx/react",
     "lib": ["ES2023", "DOM"],
     "rootDir": "src",
-    "outDir": "dist",
+    "outDir": "dist/types",
     "strict": true,
     "declaration": true,
     "forceConsistentCasingInFileNames": true,

@@ -88,7 +88,7 @@ test('the legacy positional invocation still creates one standalone plugin', asy
   assert.equal(manifest.name, 'my-plugin')
   assert.equal(manifest.scripts.dev, 'cordisx dev ./src/my-plugin.tsx')
   assert.doesNotMatch(manifest.scripts.check, /npm run/)
-  assert.equal(manifest.main, './dist/module.js')
+  assert.equal(manifest.main, './dist/runtime/module.js')
   assert.deepEqual(manifest.files, ['dist', 'README.md', 'README.zh-Hans.md'])
   const viteConfig = await text(path.join(target, 'vite.config.ts'))
   assert.match(viteConfig, /cordisXPluginViteConfig/)
@@ -111,7 +111,7 @@ test('standalone production build emits a lazy ESM graph with external CSS and a
   await linkRepositoryDependencies(target)
 
   await execute('npm', ['run', 'check'], { cwd: target })
-  await assertProductionGraph(path.join(target, 'dist'), true)
+  await assertProductionGraph(path.join(target, 'dist', 'runtime'), true)
 })
 
 test('the generated component is accepted as a Vite React refresh boundary', async t => {
@@ -158,7 +158,7 @@ test('workspace mode creates independently addressable plugin packages and one c
   ])
   assert.deepEqual(project.workspaces, ['plugins/*'])
   assert.equal(project.scripts.dev, 'cordisx dev --config ./cordisx.config.json')
-  assert.equal(chatroom.main, './dist/module.js')
+  assert.equal(chatroom.main, './dist/runtime/module.js')
   assert.equal(chatroom.devDependencies.vite, '8.2.2')
   assert.match(await text(path.join(target, 'plugins', 'calendar', 'src', 'index.tsx')), /id: 'calendar'/)
   assert.match(await text(path.join(target, 'plugins', 'calendar', 'src', 'overview-page.tsx')), /export function OverviewPage/)
@@ -170,8 +170,8 @@ test('workspace mode creates independently addressable plugin packages and one c
   await addLazyStyleAndAsset(path.join(target, 'plugins', 'chatroom'), 'src/index.tsx')
   await linkRepositoryDependencies(target)
   await execute('npm', ['run', 'check'], { cwd: target })
-  await assertProductionGraph(path.join(target, 'plugins', 'chatroom', 'dist'), true)
-  await assertProductionGraph(path.join(target, 'plugins', 'calendar', 'dist'))
+  await assertProductionGraph(path.join(target, 'plugins', 'chatroom', 'dist', 'runtime'), true)
+  await assertProductionGraph(path.join(target, 'plugins', 'calendar', 'dist', 'runtime'))
 })
 
 test('embedded isolated mode leaves the business project untouched', async t => {
@@ -199,7 +199,7 @@ test('embedded isolated mode leaves the business project untouched', async t => 
   await addLazyStyleAndAsset(path.join(cordisx, 'plugins', 'assistant'), 'src/index.tsx')
   await linkRepositoryDependencies(cordisx)
   await execute('npm', ['run', 'check'], { cwd: cordisx })
-  await assertProductionGraph(path.join(cordisx, 'dist', 'assistant'), true)
+  await assertProductionGraph(path.join(cordisx, 'dist', 'runtime', 'assistant'), true)
 })
 
 test('embedded auto mode joins pnpm and supports non-destructive incremental plugin additions', async t => {
@@ -226,8 +226,8 @@ test('embedded auto mode joins pnpm and supports non-destructive incremental plu
   assert.equal(config.plugins[1].entry, './plugins/beta/src/index.tsx')
   assert.deepEqual(config.custom, { preserved: true })
   assert.deepEqual(await json(cordisxPackagePath), customizedPackage)
-  assert.match(await text(path.join(project, '.cordisx', 'test', 'alpha.mjs')), /dist\/alpha\/module\.js/)
-  assert.match(await text(path.join(project, '.cordisx', 'test', 'beta.mjs')), /dist\/beta\/module\.js/)
+  assert.match(await text(path.join(project, '.cordisx', 'test', 'alpha.mjs')), /dist\/runtime\/alpha\/module\.js/)
+  assert.match(await text(path.join(project, '.cordisx', 'test', 'beta.mjs')), /dist\/runtime\/beta\/module\.js/)
 })
 
 test('embedded auto mode adds the package to npm-style workspace declarations', async t => {

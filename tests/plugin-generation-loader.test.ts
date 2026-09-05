@@ -40,6 +40,7 @@ async function graphArtifact(initialStyles: readonly string[] = ['./assets/base.
   readonly module: string
   readonly chunk: string
   readonly style: string
+  readonly asset: string
 }> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-generation-graph-'))
   temporary.add(root)
@@ -47,19 +48,20 @@ async function graphArtifact(initialStyles: readonly string[] = ['./assets/base.
   await mkdir(path.join(directory, 'chunks'), { recursive: true })
   await mkdir(path.join(directory, 'assets'), { recursive: true })
   const module = "export const value = 1\nexport const load = () => import('./chunks/lazy-a1.js')\n"
-  const chunk = 'export const lazy = 2\n'
-  const style = '.fixture { color: red }\n'
+  const chunk = 'globalThis.__fixtureLazyExecutions = (globalThis.__fixtureLazyExecutions ?? 0) + 1\nexport const lazy = 2\n'
+  const style = '.fixture { background-image: url(./pixel.svg); color: red }\n'
+  const asset = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>\n'
   const files = [
-    ...(initialStyles.includes('./assets/base.css')
-      ? [{ path: './assets/base.css', kind: 'stylesheet', mediaType: 'text/css', digest: sha256(style), byteLength: Buffer.byteLength(style), assets: [] }]
-      : []),
-    { path: './chunks/lazy-a1.js', kind: 'module', mediaType: 'text/javascript', digest: sha256(chunk), byteLength: Buffer.byteLength(chunk), imports: [], dynamicImports: [], styles: [], assets: [] },
+    { path: './assets/base.css', kind: 'stylesheet', mediaType: 'text/css', digest: sha256(style), byteLength: Buffer.byteLength(style), assets: ['./assets/pixel.svg'] },
+    { path: './assets/pixel.svg', kind: 'asset', mediaType: 'image/svg+xml', digest: sha256(asset), byteLength: Buffer.byteLength(asset) },
+    { path: './chunks/lazy-a1.js', kind: 'module', mediaType: 'text/javascript', digest: sha256(chunk), byteLength: Buffer.byteLength(chunk), imports: [], dynamicImports: [], styles: ['./assets/base.css'], assets: [] },
     { path: './module.js', kind: 'module', mediaType: 'text/javascript', digest: sha256(module), byteLength: Buffer.byteLength(module), imports: [], dynamicImports: ['./chunks/lazy-a1.js'], styles: [...initialStyles], assets: [] },
   ]
   await Promise.all([
     writeFile(path.join(directory, 'module.js'), module),
     writeFile(path.join(directory, 'chunks/lazy-a1.js'), chunk),
     writeFile(path.join(directory, 'assets/base.css'), style),
+    writeFile(path.join(directory, 'assets/pixel.svg'), asset),
     writeFile(path.join(directory, 'artifact.json'), `${JSON.stringify({
       $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-generation-artifact.v1.schema.json',
       contract: 'cordisx.plugin-generation-artifact/v1',
@@ -71,7 +73,7 @@ async function graphArtifact(initialStyles: readonly string[] = ['./assets/base.
       files,
     }, null, 2)}\n`),
   ])
-  return { directory, module, chunk, style }
+  return { directory, module, chunk, style, asset }
 }
 
 function accessFor(directory: string) {
@@ -209,6 +211,47 @@ describe('plugin generation loader', () => {
 })
 
 describe('plugin generation artifact HTTP server', () => {
+  it('records entry-only startup, first-trigger lazy resources, and a cached second trigger', async () => {
+    const graph = await graphArtifact([])
+    const server = await startPluginGenerationArtifactServer()
+    servers.add(server)
+    const lease = await server.lease(accessFor(graph.directory), 'lazy-evidence')
+    expect(server.requestTrace()).toEqual([])
+
+    await expect(fetch(lease.entryUrl).then(response => response.text())).resolves.toBe(graph.module)
+    expect(server.requestTrace().map(request => request.artifactPath)).toEqual(['./module.js'])
+
+    const moduleCache = new Map<string, unknown>()
+    const trigger = async (): Promise<unknown> => {
+      const cached = moduleCache.get('./chunks/lazy-a1.js')
+      if (cached !== undefined) return cached
+      const chunkResponse = await fetch(new URL('chunks/lazy-a1.js', lease.baseUrl))
+      const chunkSource = await chunkResponse.text()
+      const styleResponse = await fetch(new URL('assets/base.css', lease.baseUrl))
+      await styleResponse.text()
+      await fetch(new URL('assets/pixel.svg', lease.baseUrl)).then(response => response.arrayBuffer())
+      Function(chunkSource.replace('export const lazy = 2', 'return 2'))()
+      const loaded = { lazy: 2 }
+      moduleCache.set('./chunks/lazy-a1.js', loaded)
+      return loaded
+    }
+    delete (globalThis as { __fixtureLazyExecutions?: number }).__fixtureLazyExecutions
+    await expect(trigger()).resolves.toEqual({ lazy: 2 })
+    expect((globalThis as { __fixtureLazyExecutions?: number }).__fixtureLazyExecutions).toBe(1)
+    const firstTriggerTrace = server.requestTrace().map(request => request.artifactPath)
+    expect(firstTriggerTrace).toEqual([
+      './module.js', './chunks/lazy-a1.js', './assets/base.css', './assets/pixel.svg',
+    ])
+
+    await expect(trigger()).resolves.toEqual({ lazy: 2 })
+    expect((globalThis as { __fixtureLazyExecutions?: number }).__fixtureLazyExecutions).toBe(1)
+    expect(server.requestTrace().map(request => request.artifactPath)).toEqual(firstTriggerTrace)
+    delete (globalThis as { __fixtureLazyExecutions?: number }).__fixtureLazyExecutions
+
+    lease.retire()
+    await expect(fetch(new URL('chunks/lazy-a1.js', lease.baseUrl)).then(response => response.status)).resolves.toBe(404)
+  })
+
   it('serves only verified allowlisted files and retires a generation route', async () => {
     const graph = await graphArtifact()
     const server = await startPluginGenerationArtifactServer()

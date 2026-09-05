@@ -10,13 +10,13 @@
     "README.md",
     "README.zh-Hans.md"
   ],
-  "main": "./dist/module.js",
-  "types": "./dist/{{pluginId}}.d.ts",
+  "main": "./dist/runtime/module.js",
+  "types": "./dist/types/{{pluginId}}.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/{{pluginId}}.d.ts",
-      "import": "./dist/module.js",
-      "default": "./dist/module.js"
+      "types": "./dist/types/{{pluginId}}.d.ts",
+      "import": "./dist/runtime/module.js",
+      "default": "./dist/runtime/module.js"
     }
   },
   "scripts": {

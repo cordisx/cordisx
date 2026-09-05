@@ -30,8 +30,8 @@ package-manager conventions.
 
 A standalone project owns one package, tsconfig, lifecycle entry, and separate
 refresh-compatible React component module. Its production Vite config writes a
-stable `dist/module.js` entry plus content-addressed chunks, CSS, assets, and a
-formal `artifact.json`. A dedicated workspace owns one root config and
+stable `dist/runtime/module.js` entry plus content-addressed chunks, CSS, assets,
+and a formal `artifact.json`; declaration output stays in `dist/types/`. A dedicated workspace owns one root config and
 development command, then gives every `plugins/<id>` its own package, tsconfig,
 source, Vite config, and build output:
 
@@ -124,8 +124,8 @@ generation.
 Keep `cordisx.config.json` and `.cordisx/config.json` entries pointed at source.
 Those entries feed the development graph and must not be rewritten to `dist`.
 A portable package manifest is different: it points at the prebuilt
-`dist/module.js` so installation retains the complete adjacent output graph.
-The adjacent generated `dist/artifact.json` is the formal graph index validated
+`dist/runtime/module.js` so installation retains the complete adjacent output graph.
+The adjacent generated `dist/runtime/artifact.json` is the formal graph index validated
 by the Host.
 
 ## Config discovery and multiple plugins

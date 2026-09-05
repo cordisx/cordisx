@@ -51,8 +51,9 @@ Every generated plugin includes a version-1 manifest, a structured toolbar
 route, and a component-only React page module. Its standalone, workspace, or
 embedded environment supplies typecheck, production Vite build, manifest test,
 and `cordisx dev --dry-run` commands. Production output uses a stable
-`dist/module.js` entry plus content-addressed `chunks/`, `assets/`, and formal
-`artifact.json`. CSS and static assets remain external files, and dynamic
+`dist/runtime/module.js` entry plus content-addressed `chunks/`, `assets/`, and formal
+`artifact.json`. Declarations remain outside that closed graph in `dist/types/`.
+CSS and static assets remain external files, and dynamic
 imports load their graph only when reached. Workspaces and embedded projects
 build each plugin separately so independently replaceable generations never
 share output chunks.
@@ -60,9 +61,9 @@ share output chunks.
 Every generated production config calls the public
 `cordisx/vite` `cordisXPluginViteConfig()` helper. That reusable author/Host
 pipeline owns the deterministic output rules, virtualizes only the closed Host
-singleton imports, and emits the formal `dist/artifact.json`. A portable
+singleton imports, and emits the formal `dist/runtime/artifact.json`. A portable
 CordisX package manifest points its browser entry at the adjacent prebuilt
-`dist/module.js`; the Host validates and retains that complete indexed graph.
+`dist/runtime/module.js`; the Host validates and retains that complete indexed graph.
 
 Development remains one CordisX-owned Vite server and HMR graph using the
 original source entries. The environment installs no private React runtime:

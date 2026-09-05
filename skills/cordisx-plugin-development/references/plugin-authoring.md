@@ -7,8 +7,8 @@
 - Do not copy development fixtures as production packages without auditing every field.
 - Keep plugin id, display name, descriptions, permissions, contributions, package files, runtime localization, and both `README.md` and `README.zh-Hans.md` explicit.
 - Include build, focused tests, package inspection, and install/dry-run checks appropriate to the owner repository.
-- Preserve the complete generated `dist/` Vite graph. The package allowlist must include its formal `artifact.json`, entry, chunks, CSS, and assets; do not copy only `module.js`.
-- Point a portable package manifest at the prebuilt `dist/module.js`; keep local development config entries pointed at source for Vite/HMR.
+- Preserve the complete generated `dist/runtime/` Vite graph. The package allowlist must include its formal `artifact.json`, entry, chunks, CSS, and assets; do not copy only `module.js`, and keep declarations or test output outside the graph root.
+- Point a portable package manifest at the prebuilt `dist/runtime/module.js`; keep local development config entries pointed at source for Vite/HMR.
 - Use `cordisXPluginViteConfig()` from the public `cordisx/vite` entry instead of copying its Rollup, singleton virtualization, or artifact-index rules into a plugin project.
 - Declare license and distribution metadata intentionally.
 - Keep a newly created plugin private and `UNLICENSED` by default. Ask only for missing publication metadata when the user requests sharing or publication; an explicit publication request is already authorization and must not trigger redundant confirmation.

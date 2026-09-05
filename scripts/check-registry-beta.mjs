@@ -99,7 +99,7 @@ async function verifyGeneratedProject(project) {
     `--registry=${registry}`,
   ], { cwd: project })
   await run('npm', ['run', 'check'], { cwd: project })
-  await verifyGeneratedViteGraph(path.join(project, 'dist'), 'registry-generated standalone plugin')
+  await verifyGeneratedViteGraph(path.join(project, 'dist', 'runtime'), 'registry-generated standalone plugin')
   const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project })
   if (
     !dryRun.stdout.includes('[cordisx] Vite entry ready:')
@@ -138,7 +138,7 @@ async function verifyGeneratedWorkspace(project, pluginIds) {
   })
   await run('npm', ['run', 'check'], { cwd: project })
   for (const id of pluginIds) {
-    await verifyGeneratedViteGraph(path.join(project, 'plugins', id, 'dist'), `registry-generated workspace plugin ${id}`)
+    await verifyGeneratedViteGraph(path.join(project, 'plugins', id, 'dist', 'runtime'), `registry-generated workspace plugin ${id}`)
   }
   const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project })
   assertViteProjectDryRun(dryRun.stdout, pluginIds)
@@ -162,7 +162,7 @@ async function verifyGeneratedEmbedded(project, pluginIds, integrated) {
   })
   await run('npm', ['run', 'check'], { cwd: cordisxRoot })
   for (const id of pluginIds) {
-    await verifyGeneratedViteGraph(path.join(cordisxRoot, 'dist', id), `registry-generated embedded plugin ${id}`)
+    await verifyGeneratedViteGraph(path.join(cordisxRoot, 'dist', 'runtime', id), `registry-generated embedded plugin ${id}`)
   }
   const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: cordisxRoot })
   assertViteProjectDryRun(dryRun.stdout, pluginIds)

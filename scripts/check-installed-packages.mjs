@@ -99,7 +99,7 @@ async function verifyGeneratedProject(project, cordisxTarball, expectedVersion) 
     env: process.env,
   })
   await run('npm', ['run', 'check'], { cwd: project, env: process.env })
-  await verifyGeneratedViteGraph(path.join(project, 'dist'), 'generated standalone plugin')
+  await verifyGeneratedViteGraph(path.join(project, 'dist', 'runtime'), 'generated standalone plugin')
   const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project, env: process.env })
   if (
     !dryRun.stdout.includes('[cordisx] Vite entry ready:')
@@ -142,7 +142,7 @@ async function verifyGeneratedWorkspace(project, cordisxTarball, expectedVersion
   await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: project, env: process.env })
   await run('npm', ['run', 'check'], { cwd: project, env: process.env })
   for (const id of pluginIds) {
-    await verifyGeneratedViteGraph(path.join(project, 'plugins', id, 'dist'), `generated workspace plugin ${id}`)
+    await verifyGeneratedViteGraph(path.join(project, 'plugins', id, 'dist', 'runtime'), `generated workspace plugin ${id}`)
   }
   const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project, env: process.env })
   assertViteProjectDryRun(dryRun.stdout, pluginIds)
@@ -167,7 +167,7 @@ async function verifyGeneratedEmbedded(project, cordisxTarball, expectedVersion,
   })
   await run('npm', ['run', 'check'], { cwd: cordisxRoot, env: process.env })
   for (const id of pluginIds) {
-    await verifyGeneratedViteGraph(path.join(cordisxRoot, 'dist', id), `generated embedded plugin ${id}`)
+    await verifyGeneratedViteGraph(path.join(cordisxRoot, 'dist', 'runtime', id), `generated embedded plugin ${id}`)
   }
   const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: cordisxRoot, env: process.env })
   assertViteProjectDryRun(dryRun.stdout, pluginIds)

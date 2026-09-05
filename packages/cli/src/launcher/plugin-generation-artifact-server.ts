@@ -81,7 +81,7 @@ export interface PluginGenerationArtifactV1 {
   readonly contract: typeof ARTIFACT_CONTRACT
   readonly schemaVersion: 1
   readonly format: typeof ARTIFACT_FORMAT
-  readonly entry: './module.js'
+  readonly entry: `./${string}`
   readonly initialStyles: readonly `./${string}`[]
   readonly sharedImports: readonly PluginGenerationSharedImportV1[]
   readonly files: readonly PluginGenerationArtifactFileV1[]
@@ -266,7 +266,7 @@ export function parsePluginGenerationArtifactV1(value: unknown): PluginGeneratio
     || manifest.schemaVersion !== 1 || manifest.format !== ARTIFACT_FORMAT) {
     throw new Error('plugin generation artifact contract is unsupported')
   }
-  if (manifest.entry !== './module.js') throw new Error('plugin generation artifact entry must be ./module.js')
+  const declaredEntry = logicalPath(manifest.entry, MODULE_PATH, 'plugin generation artifact entry')
   if (!Array.isArray(manifest.initialStyles) || !Array.isArray(manifest.files)
     || manifest.files.length < 1 || manifest.files.length > MAX_PLUGIN_GENERATION_GRAPH_FILES) {
     throw new Error('plugin generation artifact file lists are invalid')
@@ -336,7 +336,7 @@ export function parsePluginGenerationArtifactV1(value: unknown): PluginGeneratio
   if (!sorted(files.map(file => file.path))) {
     throw new Error('plugin generation artifact files must be path-sorted')
   }
-  const entry = files.find(file => file.path === './module.js')
+  const entry = files.find(file => file.path === declaredEntry)
   if (entry?.kind !== 'module') throw new Error('plugin generation artifact entry must name a declared JavaScript module')
   const initialStyles = closedPaths(manifest.initialStyles, STYLESHEET_PATH, 'plugin generation artifact initialStyles', 256)
   const artifact = freezeArtifact({
@@ -344,7 +344,7 @@ export function parsePluginGenerationArtifactV1(value: unknown): PluginGeneratio
     contract: ARTIFACT_CONTRACT,
     schemaVersion: 1,
     format: ARTIFACT_FORMAT,
-    entry: './module.js',
+    entry: declaredEntry,
     initialStyles,
     sharedImports: manifest.sharedImports as PluginGenerationSharedImportV1[],
     files,
@@ -583,7 +583,7 @@ export async function startPluginGenerationArtifactServer(): Promise<PluginGener
     origin,
     async lease(module, moduleGeneration, suppliedArtifact) {
       if (closed) throw new Error('plugin generation artifact server is closed')
-      if (module.runtimeEntry !== './module.js' || !path.isAbsolute(module.artifactDirectory)) {
+      if (!path.isAbsolute(module.artifactDirectory)) {
         throw new Error('runtime module projection is invalid')
       }
       if (!GENERATION.test(moduleGeneration)) throw new Error('plugin module generation is invalid')
@@ -592,6 +592,7 @@ export async function startPluginGenerationArtifactServer(): Promise<PluginGener
         ? await readPluginGenerationArtifactV1(root)
         : parsePluginGenerationArtifactV1(suppliedArtifact)
       if (artifact === undefined) throw new Error('plugin generation artifact graph is unavailable')
+      if (module.runtimeEntry !== artifact.entry) throw new Error('runtime module projection entry is invalid')
       // Keep descriptor-count concurrency from turning into thousands of open
       // files while still binding every route to verified bytes before exposure.
       for (const file of artifact.files) await readVerifiedFile(root, file)
