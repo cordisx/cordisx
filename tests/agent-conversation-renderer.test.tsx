@@ -884,6 +884,10 @@ describe('AgentConversationRenderer production DOM', () => {
       expect(shikitor).toContain('[data-cordisx-shikitor-layout="expanded"]>.cxa-composer-footer{grid-column:1;grid-row:2}')
       expect(shikitor).toContain('>.shikitor.shikitor--attached{inset:8px 46px auto;width:auto;height:30px}')
       expect(shikitor).toContain('COMPACT_COLUMN_GAP * 2 - attachmentWidth - sendWidth')
+      expect(shikitor).toContain('data-cordisx-shikitor-native-text="true"')
+      expect(shikitor).toContain('dataset.shikitorRenderMode === \'less-dom\'')
+      expect(shikitor).toContain('color:var(--cx-text)!important;-webkit-text-fill-color:var(--cx-text)!important;caret-color:var(--cx-text)!important')
+      expect(shikitor).toContain('::placeholder{color:var(--cx-muted)!important')
     } finally {
       await harness.close()
     }
