@@ -4154,6 +4154,28 @@ function assertRequestedGeneration(metadata: CordisXRuntimeMetadata): void {
   }
 }
 
+async function waitForRendererDocument(document: Document): Promise<void> {
+  if (document.documentElement !== null && document.head !== null && document.body !== null) return
+  await new Promise<void>(resolve => {
+    let observer: MutationObserver | undefined
+    const ready = (): void => {
+      if (document.documentElement === null || document.head === null || document.body === null) return
+      document.removeEventListener('readystatechange', ready)
+      document.removeEventListener('DOMContentLoaded', ready)
+      observer?.disconnect()
+      resolve()
+    }
+    document.addEventListener('readystatechange', ready)
+    document.addEventListener('DOMContentLoaded', ready)
+    const Observer = document.defaultView?.MutationObserver
+    if (Observer !== undefined) {
+      observer = new Observer(ready)
+      observer.observe(document, { childList: true, subtree: true })
+    }
+    queueMicrotask(ready)
+  })
+}
+
 function serializeCordisXBoot(
   metadata: CordisXRuntimeMetadata,
   operation: () => Promise<CordisXRuntimeHandle>,
@@ -4170,6 +4192,7 @@ function serializeCordisXBoot(
     // their requested generation. A stale CDP registration therefore cannot
     // activate old plugin code before the newest registration supersedes it.
     await new Promise<void>(resolve => setTimeout(resolve, 0))
+    await waitForRendererDocument(document)
     assertRequestedGeneration(metadata)
     return await operation()
   })

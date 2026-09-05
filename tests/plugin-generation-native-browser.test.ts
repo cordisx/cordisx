@@ -14,7 +14,7 @@ import {
   type PluginGenerationArtifactServer,
   startPluginGenerationArtifactServer,
 } from '../packages/cli/src/launcher/plugin-generation-artifact-server.js'
-import { buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
+import { buildRendererBundle, buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
 import type { CordisXConfig } from '../packages/cli/src/launcher/config.js'
 import { cordisXPluginViteConfig } from '../packages/cli/src/vite.js'
 
@@ -138,14 +138,14 @@ class CdpClient {
     return new CdpClient(socket)
   }
 
-  async send(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+  async send(method: string, params: Record<string, unknown> = {}, timeoutMs = 5_000): Promise<unknown> {
     const id = this.#nextId
     this.#nextId += 1
     return await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id)
         reject(new Error(`Chrome CDP request timed out: ${method}`))
-      }, 5_000)
+      }, timeoutMs)
       const succeed = (value: unknown): void => {
         clearTimeout(timer)
         resolve(value)
@@ -218,6 +218,128 @@ function javascriptModuleUrl(source: string): string {
 }
 
 describe('plugin generation native browser graph', () => {
+  nativeIt('boots the real generated composition only after a fresh strict-CSP document has DOM roots', async () => {
+    if (chrome === undefined) throw new Error('Chrome executable disappeared after test discovery')
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-document-ready-composition-'))
+    temporary.add(root)
+    const profile = path.join(root, 'chrome-profile')
+    const entry = path.join(root, 'plugin.js')
+    await writeFile(entry, 'export const fixture = true\n')
+    const generation = 'document-ready-composition'
+    const source = await buildRendererBundle({
+      version: 1,
+      rootDir: path.resolve(import.meta.dirname, '..'),
+      codex: { debugPort: 9229 },
+      providers: [],
+      plugins: [{
+        id: 'document-ready-graph',
+        entry,
+        enabled: true,
+        config: {},
+        runtimeGraph: {
+          moduleGeneration: 'document-ready-graph-generation',
+          loadSource: 'Promise.resolve({ apply() {} })',
+          publishSource: 'globalThis.__documentReadyGraphPublished = true',
+          retireSource: 'globalThis.__documentReadyGraphRetired = true',
+        },
+      }],
+    }, { generation, profileId: 'document-ready-profile' })
+
+    let documentServer: HttpServer | undefined
+    let browser: ChildProcess | undefined
+    let cdp: CdpClient | undefined
+    let browserStderr = ''
+    try {
+      documentServer = createHttpServer((_request, response) => {
+        response.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          'content-security-policy': "default-src 'none'; script-src 'self'; connect-src 'none'",
+        })
+        response.end(
+          '<!doctype html><html><head><title>composition</title></head><body><main>ready</main></body></html>',
+        )
+      })
+      await new Promise<void>((resolve, reject) => {
+        documentServer!.once('error', reject)
+        documentServer!.listen(0, '127.0.0.1', () => resolve())
+      })
+      const address = documentServer.address()
+      if (address === null || typeof address === 'string') throw new Error('strict CSP fixture did not bind')
+      const documentUrl = `http://127.0.0.1:${address.port}/`
+      const port = await unusedPort()
+      browser = spawn(chrome, [
+        '--headless=new',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-background-networking',
+        '--disable-component-update',
+        '--disable-sync',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--no-sandbox',
+        '--remote-allow-origins=*',
+        '--remote-debugging-address=127.0.0.1',
+        `--remote-debugging-port=${port}`,
+        `--user-data-dir=${profile}`,
+        'about:blank',
+      ], { stdio: ['ignore', 'ignore', 'pipe'] })
+      browser.stderr?.on('data', data => {
+        browserStderr = `${browserStderr}${data.toString()}`.slice(-8_192)
+      })
+      const target = await waitForChromeTarget(port, browser, () => browserStderr)
+      cdp = await CdpClient.connect(target)
+      await cdp.send('Runtime.enable')
+      await cdp.send('Page.enable')
+      await cdp.send('Page.setBypassCSP', { enabled: true })
+      const registration = await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+        source: `globalThis.__cordisxDocumentAtBootstrap = {
+  documentElement: document.documentElement !== null,
+  head: document.head !== null,
+  body: document.body !== null,
+};\n${source}`,
+      }, 30_000) as { readonly identifier?: string }
+      expect(registration.identifier).toBeTypeOf('string')
+      await cdp.send('Page.navigate', { url: documentUrl })
+      await expect.poll(async () => {
+        try {
+          return await cdp!.evaluate(`(async () => {
+            const runtime = await globalThis.__cordisxCompositionBoot
+            return runtime === globalThis.__cordisxRuntime
+              && globalThis.__documentReadyGraphPublished === true
+          })()`)
+        } catch {
+          return false
+        }
+      }, { timeout: 30_000 }).toBe(true)
+      expect(
+        await cdp.evaluate(`({
+        initial: globalThis.__cordisxDocumentAtBootstrap,
+        readyState: document.readyState,
+        hasDocumentElement: document.documentElement !== null,
+        hasHead: document.head !== null,
+        hasBody: document.body !== null,
+        sharedReactStyleMounted: document.querySelector('style[data-cordisx-shared-react="true"]')?.parentNode
+          === document.head,
+      })`),
+      ).toEqual({
+        initial: { documentElement: false, head: false, body: false },
+        readyState: 'complete',
+        hasDocumentElement: true,
+        hasHead: true,
+        hasBody: true,
+        sharedReactStyleMounted: true,
+      })
+    } finally {
+      if (cdp !== undefined) await cdp.close().catch(() => undefined)
+      if (browser !== undefined) await stopChrome(browser)
+      if (documentServer !== undefined) {
+        await new Promise<void>((resolve, reject) =>
+          documentServer!.close(error => error === undefined ? resolve() : reject(error))
+        )
+      }
+    }
+  }, 60_000)
+
   nativeIt('requires a new strict-CSP document before a loopback graph can load', async () => {
     if (chrome === undefined) throw new Error('Chrome executable disappeared after test discovery')
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-strict-csp-reload-'))
