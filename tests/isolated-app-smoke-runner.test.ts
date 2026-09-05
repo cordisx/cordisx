@@ -10,8 +10,26 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const execute = promisify(execFile)
 const runner = path.join(root, 'packages/cli/scripts/run-isolated-app-smoke.mjs')
 const homeHelper = await import(pathToFileURL(path.join(root, 'packages/cli/scripts/isolated-smoke-home.mjs')).href)
+const timeoutHelper = await import(
+  pathToFileURL(path.join(root, 'packages/cli/scripts/isolated-smoke-timeout.mjs')).href
+)
 
 describe('isolated app smoke runner', () => {
+  it('keeps existing renderer defaults and bounds an explicit custom-smoke timeout', () => {
+    expect(timeoutHelper.resolveIsolatedSmokeRendererTimeoutMs(undefined, 30_000)).toBe(30_000)
+    expect(timeoutHelper.resolveIsolatedSmokeRendererTimeoutMs(undefined, 300_000)).toBe(300_000)
+    expect(timeoutHelper.resolveIsolatedSmokeRendererTimeoutMs('300000', 30_000)).toBe(300_000)
+    expect(() => timeoutHelper.resolveIsolatedSmokeRendererTimeoutMs('slow', 30_000)).toThrow(
+      '--renderer-timeout-ms must be an integer',
+    )
+    expect(() => timeoutHelper.resolveIsolatedSmokeRendererTimeoutMs('29999', 30_000)).toThrow(
+      '--renderer-timeout-ms must be between 30000 and 600000',
+    )
+    expect(() => timeoutHelper.resolveIsolatedSmokeRendererTimeoutMs('600001', 30_000)).toThrow(
+      '--renderer-timeout-ms must be between 30000 and 600000',
+    )
+  })
+
   it('removes exactly the runner-created product-mode HOME after a successful smoke', async () => {
     const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-isolated-smoke-test-'))
     try {
@@ -204,6 +222,26 @@ describe('isolated app smoke runner', () => {
     }
   })
 
+  it('rejects a custom renderer timeout without a custom smoke before launch', async () => {
+    const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-isolated-smoke-test-'))
+    try {
+      await expect(execute(process.execPath, [
+        runner,
+        '--port',
+        '43123',
+        '--profile-dir',
+        path.join(fixtureRoot, 'profile'),
+        '--renderer-timeout-ms',
+        '300000',
+        '--',
+      ], { cwd: root })).rejects.toMatchObject({
+        stderr: expect.stringContaining('--renderer-timeout-ms requires --smoke-entry'),
+      })
+    } finally {
+      await rm(fixtureRoot, { recursive: true, force: true })
+    }
+  })
+
   it('keeps the product-mode invocation explicit', async () => {
     const source = await readFile(path.join(root, 'packages/cli/scripts/run-isolated-app-smoke.mjs'), 'utf8')
     const homeHelperSource = await readFile(path.join(root, 'packages/cli/scripts/isolated-smoke-home.mjs'), 'utf8')
@@ -211,9 +249,11 @@ describe('isolated app smoke runner', () => {
     expect(source).toContain("'--dev-config and --home-config are mutually exclusive'")
     expect(source).toContain("const homeSeedInput = optionalValue('--home-seed')")
     expect(source).toContain("const smokeEntryInput = optionalValue('--smoke-entry')")
+    expect(source).toContain("const rendererTimeoutInput = optionalValue('--renderer-timeout-ms')")
     expect(source).toContain("'--home-seed requires --home-config'")
     expect(source).toContain("'--smoke-entry must be a real .mjs file'")
     expect(source).toContain("'--smoke-entry cannot override a built-in smoke harness'")
+    expect(source).toContain("'--renderer-timeout-ms requires --smoke-entry'")
     expect(source.indexOf('lstat(homeSeedInput)')).toBeLessThan(source.indexOf('realpath(homeSeedInput)'))
     expect(source.indexOf('lstat(smokeEntryInput)')).toBeLessThan(source.indexOf('realpath(smokeEntryInput)'))
     expect(source).toContain('const smokeEntry = customSmokeEntry ??')

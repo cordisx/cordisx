@@ -2143,14 +2143,17 @@ async function install(
     const generationRuntime = lifecycle?.runtime ?? developmentRuntime
     const viteInstallId = viteDevelopment ? randomUUID() : undefined
     const documentSource = newDocumentSource ?? source
-    const added = await session.send(
-      'Page.addScriptToEvaluateOnNewDocument',
-      {
-        source: viteInstallId === undefined
-          ? documentSource
-          : `globalThis.__cordisxViteInstallId = ${JSON.stringify(viteInstallId)};\n${documentSource}`,
-      },
-      CDP_REQUEST_TIMEOUT_MS,
+    const added = await abortable(
+      session.send(
+        'Page.addScriptToEvaluateOnNewDocument',
+        {
+          source: viteInstallId === undefined
+            ? documentSource
+            : `globalThis.__cordisxViteInstallId = ${JSON.stringify(viteInstallId)};\n${documentSource}`,
+        },
+        CDP_INJECTION_TIMEOUT_MS,
+      ),
+      signal,
     )
     identifier = added.identifier as string | undefined
     if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')

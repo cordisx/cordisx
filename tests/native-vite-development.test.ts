@@ -1301,11 +1301,11 @@ describe('native Vite development transport', () => {
         } else {
           await vi.waitFor(() => expect(bootChecks).toBeGreaterThanOrEqual(5))
         }
-        expect(getEventListeners(controller.signal, 'abort')).toHaveLength(pendingPhase === 'add-script' ? 0 : 1)
+        expect(getEventListeners(controller.signal, 'abort')).toHaveLength(1)
         const startedAt = Date.now()
         controller.abort()
         await expect(watching).resolves.toBeUndefined()
-        expect(Date.now() - startedAt).toBeLessThan(pendingPhase === 'add-script' ? 6_000 : 1_000)
+        expect(Date.now() - startedAt).toBeLessThan(1_000)
         expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0)
       } finally {
         controller.abort()

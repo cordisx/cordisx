@@ -1,5 +1,5 @@
 import { once } from 'node:events'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, readFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { WebSocketServer } from 'ws'
@@ -92,6 +92,17 @@ describe('CDP injection timeout configuration', () => {
     expect(() => resolveCdpInjectionTimeoutMs('slow')).toThrow(/integer number of milliseconds/)
     expect(() => resolveCdpInjectionTimeoutMs('4999')).toThrow(/between 5000 and 600000/)
     expect(() => resolveCdpInjectionTimeoutMs('600001')).toThrow(/between 5000 and 600000/)
+  })
+
+  it('uses the injection budget and abort boundary for the large future-document bootstrap', async () => {
+    const source = await readFile(new URL('../packages/cli/src/launcher/cdp.ts', import.meta.url), 'utf8')
+    const registration = source.slice(
+      source.indexOf("'Page.addScriptToEvaluateOnNewDocument'"),
+      source.indexOf('identifier = added.identifier'),
+    )
+    expect(registration).toContain('CDP_INJECTION_TIMEOUT_MS')
+    expect(registration).toMatch(/CDP_INJECTION_TIMEOUT_MS,\s*\),\s*signal,\s*\)/u)
+    expect(registration).not.toContain('CDP_REQUEST_TIMEOUT_MS')
   })
 })
 
