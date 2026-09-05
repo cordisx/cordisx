@@ -99,7 +99,12 @@ const installBridgeTrace = await evaluate(`(() => {
     if (value === null || typeof value !== 'object' || value.hostId !== 'local') return
     if (value.type === 'mcp-notification' && typeof value.message?.method === 'string') trace.inboundMethods.push(value.message.method)
     if ((value.type === 'codex-app-server-connection-changed' || value.type === 'codex-app-server-initialized')) {
-      trace.connectionEvents.push({ type: value.type, state: typeof value.state === 'string' ? value.state : undefined })
+      const identity = {}
+      for (const key of ['state', 'connectionId', 'connectionGeneration', 'generation', 'id']) {
+        const candidate = value[key]
+        if (typeof candidate === 'string' || typeof candidate === 'number') identity[key] = candidate
+      }
+      trace.connectionEvents.push({ type: value.type, keys: Object.keys(value).sort().slice(0, 16), identity })
     }
   }
   try {

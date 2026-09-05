@@ -17,6 +17,7 @@ describe('Codex Desktop Agent Session live harness', () => {
       'utf8',
     )
     const runner = await readFile(path.join(root, 'packages/cli/scripts/run-isolated-app-smoke.mjs'), 'utf8')
+    const smoke = await readFile(path.join(root, 'packages/cli/scripts/codex-desktop-agent-session-smoke.mjs'), 'utf8')
     expect(wrapper).toContain("bundleId: 'com.openai.codex'")
     expect(wrapper).toContain("appVersion: '26.818.61809'")
     expect(wrapper).toContain("buildNumber: '7019'")
@@ -34,6 +35,7 @@ describe('Codex Desktop Agent Session live harness', () => {
     expect(runner).toContain("'packages/cli/scripts/codex-desktop-agent-session-smoke.mjs'")
     expect(runner).toContain("'--desktop-agent-session-harness requires --dev-config")
     expect(runner).toContain('desktopAgentSessionRendererTimeoutMs(desktopAgentSessionHarness)')
+    expect(smoke).toContain("'connectionGeneration'")
   })
 
   it('declares every public Agent Session capability exercised by the fixture', () => {
