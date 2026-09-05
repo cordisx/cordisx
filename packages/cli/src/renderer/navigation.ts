@@ -51,6 +51,7 @@ import {
   type PluginGenerationEffectIdentity,
   type PluginGenerationView,
 } from './generation-visibility.js'
+import { PageAdmissionBindingRegistry, type PageAdmissionBinding } from './page-admission-lifecycle.js'
 import { CORDISX_HOST_ICON_TOKENS } from './surfaces.js'
 import { dismissHostTooltips, HostTooltipController } from './tooltips.js'
 import { HostPageControls } from './page-controls.js'
@@ -575,6 +576,7 @@ interface MountedPage {
   readonly contextKey: string
   readonly content: HTMLElement
   readonly abort: AbortController
+  readonly pageAdmissionBinding: PageAdmissionBinding
   readonly effects: Disposable<void>[]
   dispose?: Disposable<void>
   error?: string
@@ -1243,6 +1245,8 @@ export class NavigationRegistry {
   private readonly states = new Map<string, OutletNavigationState>()
   private readonly listeners = new Set<() => void>()
   readonly managerContent: ManagerContentNavigationRegistry
+  /** Host-private page mount lifecycle; no plugin receives this registry directly. */
+  readonly pageAdmissionBindings = new PageAdmissionBindingRegistry()
   private metadataProjectionSites = new Map<string, string>()
   private presentationOrder: string[] = []
   private managerSettingsMount: ManagedSettingsPageMountRecord | undefined
@@ -2322,6 +2326,7 @@ export class NavigationRegistry {
     for (const [name] of this.states) await this.closeNow(name)
     this.records.clear()
     this.managerContent.dispose()
+    this.pageAdmissionBindings.dispose()
     this.states.clear()
     this.presentationOrder = []
     this.listeners.clear()
@@ -2676,7 +2681,26 @@ export class NavigationRegistry {
     const localization = this.i18n.seatFor(page.owner, namespace, own)
     const tooltips = new HostTooltipController(content.ownerDocument)
     effects.push(() => tooltips.dispose())
-    const mount: MountedPage = { entry, contextKey: host.contextKey, content, abort, effects }
+    const pageAdmissionBinding = this.pageAdmissionBindings.mount({
+      owner: page.owner,
+      ...(entry.record.source === undefined ? {} : { source: entry.record.source }),
+      moduleGeneration: page.generation.moduleGeneration ?? 'host',
+      connectionGeneration: 'renderer',
+      route: {
+        outlet: name,
+        routeId: entry.record.definition.id,
+        ...(typeof entry.params.roomId === 'string' ? { roomId: entry.params.roomId } : {}),
+      },
+      signal: abort.signal,
+    })
+    const mount: MountedPage = {
+      entry,
+      contextKey: host.contextKey,
+      content,
+      abort,
+      pageAdmissionBinding,
+      effects,
+    }
     state.mount = mount
     delete state.error
     try {
@@ -2884,6 +2908,7 @@ export class NavigationRegistry {
     const mount = state.mount
     if (mount === undefined) return
     delete state.mount
+    this.pageAdmissionBindings.release(mount.pageAdmissionBinding)
     mount.abort.abort()
     try {
       await mount.dispose?.()
