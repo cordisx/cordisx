@@ -64,7 +64,9 @@
     "smoke:desktop-agents": "node packages/cli/scripts/run-codex-desktop-agent-session-harness.mjs",
     "smoke:isolated-app": "node packages/cli/scripts/run-isolated-app-smoke.mjs",
     "test": "npm run build --workspace=@cordisx/schemastery-ui && vitest run --maxWorkers=1 --no-file-parallelism --testTimeout=30000 --hookTimeout=30000",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "format": "dprint fmt",
+    "format:check": "dprint check"
   },
   "engines": {
     "node": ">=22.19"
@@ -101,6 +103,10 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#6fa9bbbad0501114bece820d574d5e79a4cb3cdb"
-  }
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#6fa9bbbad0501114bece820d574d5e79a4cb3cdb",
+    "dprint": "0.57.1"
+  },
+  "bundleDependencies": [
+    "@cordisx/schemastery-ui"
+  ]
 }
