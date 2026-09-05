@@ -5,6 +5,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import process from 'node:process'
 import { appendRunnerCleanup, cleanupIsolatedSmokeHome, prepareIsolatedSmokeHome } from './isolated-smoke-home.mjs'
+import { resolveIsolatedSmokeRendererTimeoutMs } from './isolated-smoke-timeout.mjs'
 import { desktopAgentSessionRendererTimeoutMs } from './desktop-agent-session-harness-report.mjs'
 
 function value(name) {
@@ -28,6 +29,7 @@ const devConfig = optionalValue('--dev-config')
 const homeConfig = optionalValue('--home-config')
 const homeSeedInput = optionalValue('--home-seed')
 const smokeEntryInput = optionalValue('--smoke-entry')
+const rendererTimeoutInput = optionalValue('--renderer-timeout-ms')
 const connectorHarness = process.argv.includes('--connector-harness')
 const desktopAgentSessionHarness = process.argv.includes('--desktop-agent-session-harness')
 const pluginBundleHarness = process.argv.includes('--plugin-bundle-harness')
@@ -56,6 +58,9 @@ if (connectorHarness && homeSeedInput !== undefined) {
 if (smokeEntryInput !== undefined && (connectorHarness || pluginBundleHarness || desktopAgentSessionHarness)) {
   throw new Error('--smoke-entry cannot override a built-in smoke harness')
 }
+if (rendererTimeoutInput !== undefined && smokeEntryInput === undefined) {
+  throw new Error('--renderer-timeout-ms requires --smoke-entry')
+}
 if (connectorHarness && pluginBundleHarness) {
   throw new Error('--connector-harness and --plugin-bundle-harness are mutually exclusive')
 }
@@ -75,6 +80,10 @@ if (!['flow', 'unsubscribe', 'owner-replay', 'owner-live'].includes(connectorHar
   throw new Error('--connector-harness-scenario is invalid')
 }
 const smokeArgs = process.argv.slice(separator + 1)
+const rendererTimeoutMs = resolveIsolatedSmokeRendererTimeoutMs(
+  rendererTimeoutInput,
+  pluginBundleHarness ? 300_000 : desktopAgentSessionRendererTimeoutMs(desktopAgentSessionHarness),
+)
 const reportIndex = smokeArgs.indexOf('--report')
 const reportPath = reportIndex >= 0 ? smokeArgs[reportIndex + 1] : undefined
 let homeSeed
@@ -186,15 +195,14 @@ async function cordisxReady(target) {
 
 async function waitForRenderer() {
   const startedAt = Date.now()
-  const timeoutMs = pluginBundleHarness ? 300_000 : desktopAgentSessionRendererTimeoutMs(desktopAgentSessionHarness)
   let targetObserved = false
-  while (Date.now() - startedAt < timeoutMs) {
+  while (Date.now() - startedAt < rendererTimeoutMs) {
     if (exited(launcher)) {
       throw new Error(`isolated launcher exited before renderer readiness (status ${String(launcher.exitCode)})`)
     }
     try {
       const response = await fetch(`http://127.0.0.1:${port}/json/list`, {
-        signal: AbortSignal.timeout(Math.min(500, Math.max(1, timeoutMs - (Date.now() - startedAt)))),
+        signal: AbortSignal.timeout(Math.min(500, Math.max(1, rendererTimeoutMs - (Date.now() - startedAt)))),
       })
       if (response.ok) {
         const target = (await response.json()).find(item => item.url === 'app://-/index.html')
@@ -208,10 +216,12 @@ async function waitForRenderer() {
         }
       }
     } catch {}
-    const remaining = timeoutMs - (Date.now() - startedAt)
+    const remaining = rendererTimeoutMs - (Date.now() - startedAt)
     if (remaining > 0) await new Promise(resolve => setTimeout(resolve, Math.min(250, remaining)))
   }
-  throw new Error(`isolated app:// renderer did not become available within ${Math.round(timeoutMs / 1_000)} seconds`)
+  throw new Error(
+    `isolated app:// renderer did not become available within ${Math.round(rendererTimeoutMs / 1_000)} seconds`,
+  )
 }
 
 function harnessStage(stage, startedAt) {

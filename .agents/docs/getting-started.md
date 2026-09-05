@@ -301,6 +301,11 @@ npm run smoke:isolated-app -- \
 The template contains no credentials or external provider endpoints. Its
 profile-scoped plugin revisions make the Host configuration writer available,
 so edits can be verified instead of showing a read-only developer projection.
+An explicit custom `--smoke-entry` may also set the runner-only
+`--renderer-timeout-ms` from `30000` through `600000` before the separator for
+a cold production-sized bootstrap. Ordinary and built-in harness defaults stay
+unchanged; use `CORDISX_CDP_INJECTION_TIMEOUT_MS` separately when the injection
+operation itself needs the documented process-local capture budget.
 
 ### Local-development checkpoint gate
 
