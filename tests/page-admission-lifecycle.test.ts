@@ -83,8 +83,6 @@ describe('page admission binding lifecycle', () => {
         })).toBe(true)
         return declaration
       })
-      registry.complete(command)
-
       const wrong = mount(registry, { outlet: 'main', routeId: 'room', roomId: 'room-wrong' })
       fresh.abort.abort()
       expect(registry.claim(wrong.binding)).toEqual([])
@@ -97,6 +95,7 @@ describe('page admission binding lifecycle', () => {
         source: { sessionId: `session-fresh-${index}`, messageId: `message-fresh-${index}` },
       })))
       expect(registry.captures(destinationBinding.binding)).toHaveLength(count)
+      registry.complete(command)
       expect(registry.claim(destinationBinding.binding)).toEqual([])
       destinationBinding.abort.abort()
       expect(registry.captures(destinationBinding.binding)).toEqual([])
@@ -111,7 +110,6 @@ describe('page admission binding lifecycle', () => {
     expect(registry.declare(command, target('room-fresh', 0), destination('room-fresh'))).toBeUndefined()
     expect(registry.reserve(declared)).toBe(true)
     expect(registry.accept(declared, { sessionId: 'session-fresh', messageId: 'message-fresh' })).toBe(true)
-    registry.complete(command)
     registry.fenceConnection('connection-replaced')
     fresh.abort.abort()
 
@@ -119,5 +117,30 @@ describe('page admission binding lifecycle', () => {
     expect(registry.claim(destinationBinding.binding)).toEqual([])
     registry.fenceOwner(owner, source, generation)
     expect(registry.captures(destinationBinding.binding)).toEqual([])
+  })
+
+  it('requires the fresh claim before command completion and rejects partial fresh submissions on source release', () => {
+    const registry = new PageAdmissionBindingRegistry()
+    const fresh = mount(registry, { outlet: 'main', routeId: 'new-room' })
+    const command = registry.begin(fresh.binding, 'chatroom:room-submit')!
+    const first = registry.declare(command, target('room-fresh', 0), destination('room-fresh'))!
+    const second = registry.declare(command, target('room-fresh', 1), destination('room-fresh'))!
+    expect(registry.reserve(first)).toBe(true)
+    expect(registry.accept(first, { sessionId: 'session-first', messageId: 'message-first' })).toBe(true)
+    fresh.abort.abort()
+
+    const destinationBinding = mount(registry, { outlet: 'main', routeId: 'room', roomId: 'room-fresh' })
+    expect(registry.claim(destinationBinding.binding)).toEqual([])
+    expect(registry.reserve(second)).toBe(false)
+
+    const secondRun = mount(registry, { outlet: 'main', routeId: 'new-room' })
+    const secondCommand = registry.begin(secondRun.binding, 'chatroom:room-submit')!
+    const declared = registry.declare(secondCommand, target('room-second', 0), destination('room-second'))!
+    expect(registry.reserve(declared)).toBe(true)
+    expect(registry.accept(declared, { sessionId: 'session-second', messageId: 'message-second' })).toBe(true)
+    registry.complete(secondCommand)
+    secondRun.abort.abort()
+    const secondDestination = mount(registry, { outlet: 'main', routeId: 'room', roomId: 'room-second' })
+    expect(registry.claim(secondDestination.binding)).toEqual([])
   })
 })

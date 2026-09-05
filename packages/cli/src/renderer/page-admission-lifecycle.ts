@@ -208,7 +208,12 @@ export class PageAdmissionBindingRegistry {
 
   complete(command: PageAdmissionCommand): void {
     const record = this.command(command)
-    if (record !== undefined) record.closed = true
+    if (record === undefined || record.closed) return
+    record.closed = true
+    for (const declaration of this.declarations.values()) {
+      if (declaration.executionId === command.executionId
+        && declaration.destination !== undefined && !declaration.claimed) declaration.revoked = true
+    }
   }
 
   /** Exact accepted captures usable on the given still-live binding. */
@@ -232,7 +237,9 @@ export class PageAdmissionBindingRegistry {
     const claimed: PageAdmissionClaim[] = []
     for (const record of this.declarations.values()) {
       const origin = this.bindings.get(record.bindingId)
+      const command = this.commands.get(record.executionId)
       if (record.destination === undefined || record.accepted === undefined || record.claimed || record.revoked
+        || command === undefined || command.closed
         || origin === undefined || origin.active || !sameOwner(origin, destination)
         || !sameRoute(record.destination, destination.route)) continue
       record.claimed = true
@@ -247,7 +254,11 @@ export class PageAdmissionBindingRegistry {
     if (record === undefined || !record.active) return
     record.active = false
     for (const command of this.commands.values()) {
-      if (command.command.binding.bindingId === binding.bindingId) command.closed = true
+      if (command.command.binding.bindingId !== binding.bindingId) continue
+      const declarations = [...this.declarations.values()].filter(candidate => candidate.executionId === command.command.executionId)
+      const transferable = declarations.length > 0 && declarations.every(candidate =>
+        candidate.destination !== undefined && candidate.accepted !== undefined && !candidate.revoked && !candidate.claimed)
+      if (!transferable) this.complete(command.command)
     }
     for (const declaration of this.declarations.values()) {
       if (declaration.bindingId !== binding.bindingId) continue
