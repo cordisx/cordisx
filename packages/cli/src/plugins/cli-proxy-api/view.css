@@ -1,0 +1,117 @@
+.cxp-fleet {
+  display: grid;
+  grid-template-columns: minmax(300px, 42%) minmax(360px, 1fr);
+  min-height: calc(100vh - 86px);
+  margin: -16px;
+}
+
+.cxp-catalog, .cxp-detail {
+  min-width: 0;
+  padding: 18px;
+  overflow: auto;
+}
+
+.cxp-catalog {
+  border-inline-end: 1px solid var(--cx-border);
+}
+
+.cxp-toolbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--cx-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--cx-surface-raised);
+}
+
+.cxp-toolbar input, .cxp-toolbar select {
+  min-width: 0;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 0;
+  border-inline-end: 1px solid var(--cx-border);
+  border-block-end: 1px solid var(--cx-border);
+  background: transparent;
+  color: var(--cx-text);
+  font: inherit;
+}
+
+.cxp-toolbar .cxr-ui-button {
+  border: 0;
+  border-radius: 0;
+  border-inline-end: 1px solid var(--cx-border);
+}
+
+.cxp-sessions {
+  display: grid;
+  margin-top: 10px;
+}
+
+.cxp-session {
+  display: grid;
+  gap: 3px;
+  padding: 11px 4px;
+  border: 0;
+  border-block-end: 1px solid var(--cx-border);
+  background: transparent;
+  color: var(--cx-text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.cxp-session:hover {
+  background: var(--cx-hover);
+}
+
+.cxp-meta {
+  color: var(--cx-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cxp-turns {
+  display: grid;
+  gap: 14px;
+}
+
+.cxp-turn {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+}
+
+.cxp-composer {
+  width: 100%;
+  min-height: 86px;
+  padding: 9px;
+  border: 1px solid var(--cx-border);
+  border-radius: 9px;
+  background: var(--cx-surface-raised);
+  color: var(--cx-text);
+  font: inherit;
+  resize: vertical;
+}
+
+.cxp-note {
+  min-height: 20px;
+  color: var(--cx-muted);
+  font-size: 12px;
+}
+
+@media (width <= 760px) {
+  .cxp-fleet {
+    grid-template-columns: 1fr;
+    margin: 0;
+  }
+
+  .cxp-catalog {
+    border-inline-end: 0;
+    border-block-end: 1px solid var(--cx-border);
+  }
+
+  .cxp-toolbar {
+    grid-template-columns: 1fr;
+  }
+}
