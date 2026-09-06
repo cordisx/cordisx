@@ -61,6 +61,7 @@ const UI_EXPORTS = [
   'EmptyState',
   'Heading',
   'HorizontalSplitPane',
+  'HoverCard',
   'Icon',
   'MarkdownViewer',
   'Select',

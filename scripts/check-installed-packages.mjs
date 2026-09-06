@@ -492,6 +492,10 @@ createElement(AgentAvatar, props)
     path.join(repositoryRoot, 'tests', 'fixtures', 'ide-ui-primitives-consumer.tsx'),
     path.join(runnerDirectory, 'ide-ui-primitives-consumer.tsx'),
   )
+  await copyFile(
+    path.join(repositoryRoot, 'tests', 'fixtures', 'hover-card-consumer.tsx'),
+    path.join(runnerDirectory, 'hover-card-consumer.tsx'),
+  )
   await writeFile(
     path.join(runnerDirectory, 'tsconfig.json'),
     `${
@@ -510,6 +514,7 @@ createElement(AgentAvatar, props)
             'connector-consumer.ts',
             'agent-avatar-ui-consumer.ts',
             'ide-ui-primitives-consumer.tsx',
+            'hover-card-consumer.tsx',
             'manager-navigation-v9-consumer.ts',
             'agent-session-consumer.ts',
             'agent-loop-collection-consumer.ts',

@@ -48,6 +48,25 @@ export interface HorizontalSplitPaneProps extends Omit<React.HTMLAttributes<HTML
   readonly separatorLabel: string
 }
 
+export interface HoverCardProps extends
+  Omit<
+    React.HTMLAttributes<HTMLElement>,
+    | 'children'
+    | 'content'
+    | 'onBlur'
+    | 'onClick'
+    | 'onFocus'
+    | 'onKeyDown'
+    | 'onPointerDown'
+    | 'onPointerEnter'
+    | 'onPointerLeave'
+  >
+{
+  readonly trigger: React.ReactElement
+  readonly content: React.ReactNode
+  readonly placement?: 'top' | 'bottom'
+}
+
 export interface SelectOption {
   readonly value: string
   readonly label: string
@@ -111,6 +130,7 @@ export const EmptyState = HostComponent<EmptyStateProps>('EmptyState')
 export const Heading = HostComponent<HeadingProps>('Heading')
 export const Icon = HostComponent<IconProps>('Icon')
 export const HorizontalSplitPane = HostComponent<HorizontalSplitPaneProps>('HorizontalSplitPane')
+export const HoverCard = HostComponent<HoverCardProps>('HoverCard')
 export const Select = HostComponent<SelectProps>('Select')
 export const SelectionRail = HostComponent<SelectionRailProps>('SelectionRail')
 export const MarkdownViewer = HostComponent<MarkdownViewerProps>('MarkdownViewer')
