@@ -9,13 +9,286 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  scope:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.scope.outputs.docs_only }}
+      style_only: ${{ steps.scope.outputs.style_only }}
+      full: ${{ steps.scope.outputs.full }}
+      cli_only: ${{ steps.scope.outputs.cli_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - id: scope
+        name: Classify the base/head diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git diff --name-only --diff-filter=ACMRT "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
+          docs_only=true
+          style_only=true
+          full=false
+          cli_only=true
+          while IFS= read -r file; do
+            case "$file" in
+              *.md|*.markdown) ;;
+              *) docs_only=false ;;
+            esac
+            case "$file" in
+              *.css|*.md|*.markdown) ;;
+              *) style_only=false ;;
+            esac
+            case "$file" in
+              packages/cli/src/*|tests/*|*.md|*.markdown) ;;
+              *) cli_only=false ;;
+            esac
+            case "$file" in
+              AGENTS.md|CONTRIBUTING.md|.agents/*|package.json|package-lock.json|.npmrc|.github/*|scripts/*|config/*|cordisx.config.*|packages/*/package.json|packages/channel-runtime/*|packages/cli/scripts/*|packages/cli/src/adapters/*|packages/cli/src/cli/*|packages/cli/src/config/*|packages/cli/src/launcher/*|packages/cli/src/providers/*|packages/cli/src/renderer/adapter*|packages/cli/src/contracts.ts|packages/cli/src/react.ts|packages/cli/src/react-jsx-*|packages/cli/src/ui.ts|packages/cli/src/vite.ts|packages/cli/src/*contract*|packages/cli/src/*permission*|packages/cli/src/*document*|packages/cli/src/*store*|packages/cli/src/*lifecycle*|packages/cli/src/*session*|packages/cli/src/*transport*|packages/cli/src/*connector*|packages/cli/src/*channel*)
+                full=true
+                ;;
+            esac
+          done < "$RUNNER_TEMP/changed-files"
+          test -s "$RUNNER_TEMP/changed-files" || full=true
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "style_only=$style_only" >> "$GITHUB_OUTPUT"
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "cli_only=$cli_only" >> "$GITHUB_OUTPUT"
+          {
+            echo '### Host pull-request scope'
+            echo
+            echo "- base: \`$BASE_SHA\`"
+            echo "- head: \`$HEAD_SHA\`"
+            echo "- docs-only: \`$docs_only\`"
+            echo "- style-only: \`$style_only\`"
+            echo "- full gate: \`$full\`"
+            echo "- CLI dependency closure only: \`$cli_only\`"
+            echo '- changed files:'
+            sed 's/^/  - `/' "$RUNNER_TEMP/changed-files" | sed 's/$/`/'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  full:
+    if: always() && (github.event_name == 'push' || needs.scope.outputs.full == 'true')
+    needs: scope
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run check
+      - name: Run the complete owner gate
+        run: |
+          start=$SECONDS
+          npm run check
+          elapsed=$((SECONDS - start))
+          echo "Full owner gate: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+  changed-quality:
+    if: github.event_name == 'pull_request'
+    needs: scope
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - id: result-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-results/quality.json
+          key: host-pr-quality-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v7
+        if: steps.result-cache.outputs.cache-hit != 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install without lifecycle builds
+        if: steps.result-cache.outputs.cache-hit != 'true'
+        run: npm ci --ignore-scripts
+      - name: Check changed formatting and source lint
+        if: steps.result-cache.outputs.cache-hit != 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          start=$SECONDS
+          mapfile -d '' files < <(git diff --name-only -z --diff-filter=ACMRT "$BASE_SHA...$HEAD_SHA" -- '*.cjs' '*.css' '*.html' '*.js' '*.json' '*.jsonc' '*.jsx' '*.md' '*.mjs' '*.scss' '*.ts' '*.tsx' '*.yaml' '*.yml')
+          if (( ${#files[@]} )); then
+            npx dprint check --allow-no-files -- "${files[@]}"
+          fi
+          npm run lint:staged -- --diff "$BASE_SHA...$HEAD_SHA"
+          elapsed=$((SECONDS - start))
+          mkdir -p .ci-results
+          printf '{"base":"%s","head":"%s","phase":"quality","seconds":%s,"cache":false}\n' "$BASE_SHA" "$HEAD_SHA" "$elapsed" > .ci-results/quality.json
+      - uses: actions/cache/save@v4
+        if: steps.result-cache.outputs.cache-hit != 'true'
+        with:
+          path: .ci-results/quality.json
+          key: host-pr-quality-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
+      - name: Report result metadata
+        run: |
+          echo '### Changed quality gate' >> "$GITHUB_STEP_SUMMARY"
+          if [[ '${{ steps.result-cache.outputs.cache-hit }}' == 'true' ]]; then
+            echo '- exact-SHA cache: `hit`' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- exact-SHA cache: `miss`' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '- result:' >> "$GITHUB_STEP_SUMMARY"
+          sed 's/^/  `/' .ci-results/quality.json | sed 's/$/`/' >> "$GITHUB_STEP_SUMMARY"
+
+  changed-typecheck:
+    if: github.event_name == 'pull_request' && needs.scope.outputs.full != 'true' && needs.scope.outputs.docs_only != 'true'
+    needs: scope
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - id: result-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-results/typecheck.json
+          key: host-pr-typecheck-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v7
+        if: steps.result-cache.outputs.cache-hit != 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.result-cache.outputs.cache-hit != 'true'
+        run: npm ci --ignore-scripts
+      - name: Typecheck the workspace graph
+        if: steps.result-cache.outputs.cache-hit != 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CLI_ONLY: ${{ needs.scope.outputs.cli_only }}
+        run: |
+          start=$SECONDS
+          if [[ "$CLI_ONLY" == 'true' ]]; then
+            npm run typecheck --workspace=cordisx
+          else
+            npm run typecheck
+          fi
+          elapsed=$((SECONDS - start))
+          mkdir -p .ci-results
+          printf '{"base":"%s","head":"%s","phase":"typecheck","seconds":%s,"cache":false}\n' "$BASE_SHA" "$HEAD_SHA" "$elapsed" > .ci-results/typecheck.json
+      - uses: actions/cache/save@v4
+        if: steps.result-cache.outputs.cache-hit != 'true'
+        with:
+          path: .ci-results/typecheck.json
+          key: host-pr-typecheck-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
+      - name: Report result metadata
+        run: |
+          echo '### Workspace typecheck' >> "$GITHUB_STEP_SUMMARY"
+          if [[ '${{ steps.result-cache.outputs.cache-hit }}' == 'true' ]]; then
+            echo '- exact-SHA cache: `hit`' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- exact-SHA cache: `miss`' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          sed 's/^/  `/' .ci-results/typecheck.json | sed 's/$/`/' >> "$GITHUB_STEP_SUMMARY"
+
+  changed-build:
+    if: github.event_name == 'pull_request' && needs.scope.outputs.full != 'true' && needs.scope.outputs.docs_only != 'true'
+    needs: scope
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - id: result-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-results/build.json
+          key: host-pr-build-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v7
+        if: steps.result-cache.outputs.cache-hit != 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.result-cache.outputs.cache-hit != 'true'
+        run: npm ci --ignore-scripts
+      - name: Build all affected workspaces
+        if: steps.result-cache.outputs.cache-hit != 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CLI_ONLY: ${{ needs.scope.outputs.cli_only }}
+        run: |
+          start=$SECONDS
+          if [[ "$CLI_ONLY" == 'true' ]]; then
+            npm run build --workspace=cordisx
+          else
+            npm run build
+          fi
+          elapsed=$((SECONDS - start))
+          mkdir -p .ci-results
+          printf '{"base":"%s","head":"%s","phase":"build","seconds":%s,"cache":false}\n' "$BASE_SHA" "$HEAD_SHA" "$elapsed" > .ci-results/build.json
+      - uses: actions/cache/save@v4
+        if: steps.result-cache.outputs.cache-hit != 'true'
+        with:
+          path: .ci-results/build.json
+          key: host-pr-build-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
+      - name: Report result metadata
+        run: |
+          echo '### Workspace build' >> "$GITHUB_STEP_SUMMARY"
+          if [[ '${{ steps.result-cache.outputs.cache-hit }}' == 'true' ]]; then
+            echo '- exact-SHA cache: `hit`' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- exact-SHA cache: `miss`' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          sed 's/^/  `/' .ci-results/build.json | sed 's/$/`/' >> "$GITHUB_STEP_SUMMARY"
+
+  changed-tests:
+    if: github.event_name == 'pull_request' && needs.scope.outputs.full != 'true' && needs.scope.outputs.docs_only != 'true'
+    needs: scope
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - id: result-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-results/tests.json
+          key: host-pr-tests-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v7
+        if: steps.result-cache.outputs.cache-hit != 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.result-cache.outputs.cache-hit != 'true'
+        run: npm ci --ignore-scripts
+      - name: Run Vitest dependency-affected tests
+        if: steps.result-cache.outputs.cache-hit != 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          start=$SECONDS
+          npm run build --workspace=@cordisx/schemastery-ui
+          npx vitest run --changed "$BASE_SHA" --passWithNoTests --maxWorkers=1 --no-file-parallelism --testTimeout=30000 --hookTimeout=30000
+          elapsed=$((SECONDS - start))
+          mkdir -p .ci-results
+          printf '{"base":"%s","head":"%s","phase":"tests","seconds":%s,"cache":false}\n' "$BASE_SHA" "$HEAD_SHA" "$elapsed" > .ci-results/tests.json
+      - uses: actions/cache/save@v4
+        if: steps.result-cache.outputs.cache-hit != 'true'
+        with:
+          path: .ci-results/tests.json
+          key: host-pr-tests-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
+      - name: Report result metadata
+        run: |
+          echo '### Dependency-affected tests' >> "$GITHUB_STEP_SUMMARY"
+          if [[ '${{ steps.result-cache.outputs.cache-hit }}' == 'true' ]]; then
+            echo '- exact-SHA cache: `hit`' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- exact-SHA cache: `miss`' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          sed 's/^/  `/' .ci-results/tests.json | sed 's/$/`/' >> "$GITHUB_STEP_SUMMARY"
