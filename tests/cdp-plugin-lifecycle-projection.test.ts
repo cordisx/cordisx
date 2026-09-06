@@ -1,0 +1,671 @@
+import { once } from 'node:events'
+import { mkdtemp, readFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
+import { WebSocketServer } from 'ws'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  CdpPluginLifecycleRuntime,
+  type CdpTarget,
+  iconThemePreferenceDeliveryEvaluation,
+  injectableTargets,
+  RENDERER_DISPOSE_EXPRESSION,
+  resolveCdpInjectionTimeoutMs,
+  runtimeEvaluationException,
+  serviceConfigResponseEvaluation,
+  watchAndInject,
+} from '../packages/cli/src/launcher/cdp.js'
+import type { PluginRuntimeMutation } from '../packages/cli/src/launcher/plugin-lifecycle.js'
+import { PluginPermissionIdentityRegistry } from '../packages/cli/src/launcher/permission-rpc.js'
+import {
+  CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+  type CordisXPluginActivationRecordV1,
+} from '../packages/cli/src/plugin-lifecycle-contracts.js'
+import type { RollbackPlan } from '../packages/cli/src/launcher/packages/authority.js'
+import { ensureHomeConfig, loadHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
+import {
+  ICON_THEME_PREFERENCE_BINDING,
+  IconThemePreferenceBroadcastHub,
+} from '../packages/cli/src/launcher/icon-theme-rpc.js'
+import { BrowserIconThemePreferenceBridge } from '../packages/cli/src/renderer/icon-theme-preference-binding.js'
+import { OwnerDocumentLeaseRegistry } from '../packages/cli/src/launcher/owner-document-rpc.js'
+import type { PluginGenerationGraphLease } from '../packages/cli/src/launcher/plugin-generation-loader.js'
+
+function target(id: string, title: string, url = 'https://example.test/'): CdpTarget {
+  return { id, title, url, type: 'page', webSocketDebuggerUrl: `ws://127.0.0.1/${id}` }
+}
+
+function deferred<Value = void>(): {
+  readonly promise: Promise<Value>
+  readonly resolve: (value: Value) => void
+} {
+  let resolve!: (value: Value) => void
+  const promise = new Promise<Value>(done => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
+function iconThemeReceiverPayload(expression: string): Record<string, unknown> | undefined {
+  const encoded = expression.match(/receiver\(((?:"(?:\\.|[^"\\])*")|(?:'(?:\\.|[^'\\])*'))\)/u)?.[1]
+  if (encoded === undefined) return undefined
+  try {
+    return JSON.parse(JSON.parse(encoded) as string) as Record<string, unknown>
+  } catch {
+    return undefined
+  }
+}
+
+function readyLeaseEcho(payload: Record<string, unknown> | undefined): Record<string, unknown> {
+  return payload?.kind === 'document-ready'
+    ? { readyLeaseToken: payload.readyLeaseToken, readyLeaseRevision: payload.readyLeaseRevision }
+    : {}
+}
+
+function activation(revision: number, generation: string): CordisXPluginActivationRecordV1 {
+  return {
+    $schema: CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1,
+    schemaVersion: 1,
+    recordKind: revision === 0 ? 'active' : 'candidate',
+    ...(revision === 0 ? {} : { transactionId: 'tx' }),
+    profileId: 'work',
+    revision,
+    lastGoodRevision: 0,
+    runtimeGeneration: 'runtime-1',
+    plugins: [{
+      id: 'demo',
+      version: '1.0.0',
+      digest: `sha256:${'a'.repeat(64)}`,
+      moduleGeneration: generation,
+      enabled: revision === 0,
+      dependencies: [],
+    }],
+  }
+}
+
+describe('CdpPluginLifecycleRuntime projection', () => {
+  it('keeps Host DOM package artifacts as renderer data and never evaluates their code in the main realm', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const expressions: string[] = []
+    const session = {
+      async send(method: string, params: Record<string, unknown>) {
+        if (method !== 'Runtime.evaluate') return {}
+        const expression = String(params.expression ?? '')
+        expressions.push(expression)
+        if (expression.includes('stagePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
+        }
+        return { result: { value: { ok: true, result: true } } }
+      },
+    }
+    const unregister = runtime.register(session as never)
+    const previous = activation(0, 'demo-old')
+    const candidate = activation(1, 'demo-new')
+    const fence = runtime.prepare('tx')
+    const transactionEpoch = fence.transactionEpoch
+    const artifactSource = 'globalThis.__mainRealmHostDomExecutionWouldBeABug = true'
+    await runtime.stage({
+      transactionId: 'tx',
+      ...fence,
+      afterRegistryEpoch: 1,
+      operation: 'update',
+      previous,
+      candidate,
+      targetId: 'demo',
+      affectedPluginIds: ['demo'],
+      package: {
+        manifest: {
+          id: 'demo',
+          version: '1.0.0',
+          runtimeManifest: {
+            schemaVersion: 5,
+            capabilities: [{ name: 'ui.host-dom.read' }],
+          },
+        },
+        digest: `sha256:${'a'.repeat(64)}`,
+        moduleSource: '',
+        artifactSource,
+        serviceModules: [],
+        identitySource: 'file:///demo-host-dom.js',
+      } as never,
+    })
+
+    expect(expressions).toHaveLength(2)
+    expect(expressions).not.toContain(artifactSource)
+    expect(expressions[0]).toContain('delete globalThis.__cordisxPendingPluginModuleV1')
+    expect(expressions[1]).toContain('stagePluginMutation')
+    expect(expressions[1]).toContain('isolatedArtifactSource')
+    expect(expressions[1]).toContain('__mainRealmHostDomExecutionWouldBeABug')
+
+    await runtime.commit('tx')
+    unregister()
+  })
+
+  it('projects exact document lease tokens with package generation stage and restores them on rollback', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const leases = new OwnerDocumentLeaseRegistry({
+      active: [{ source: 'file:///demo-old.js', pluginId: 'demo', moduleGeneration: 'demo-old' }],
+    })
+    runtime.setOwnerDocumentAuthority({
+      leases,
+      issue: (identity, moduleGeneration) => ({ ...identity, moduleGeneration, token: `signed-${moduleGeneration}` }),
+    })
+    const previous = activation(0, 'demo-old')
+    const candidateBase = activation(1, 'demo-new')
+    const candidate = { ...candidateBase, plugins: candidateBase.plugins.map(item => ({ ...item, enabled: true })) }
+    let transactionEpoch = ''
+    let stagedExpression = ''
+    const unregister = runtime.register({
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        if (expression.includes('stagePluginMutation')) {
+          stagedExpression = expression
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: { transactionId: 'tx', transactionEpoch, expectedRegistryEpoch: 0, afterRegistryEpoch: 1 },
+              },
+            },
+          }
+        }
+        if (expression.includes('rollbackPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  registryEpoch: 2,
+                  active: previous,
+                  disposedAfter: candidate,
+                },
+              },
+            },
+          }
+        }
+        return { result: { value: undefined } }
+      },
+    } as never)
+    const fence = runtime.prepare('tx')
+    transactionEpoch = fence.transactionEpoch
+    await runtime.stage({
+      transactionId: 'tx',
+      ...fence,
+      afterRegistryEpoch: 1,
+      operation: 'update',
+      previous,
+      candidate,
+      targetId: 'demo',
+      affectedPluginIds: ['demo'],
+      package: {
+        manifest: { id: 'demo' },
+        digest: `sha256:${'b'.repeat(64)}`,
+        moduleSource: '',
+        artifactSource: 'void 0',
+        serviceModules: [],
+        identitySource: 'file:///demo-new.js',
+      } as never,
+    })
+    expect(stagedExpression).toContain('signed-demo-new')
+    expect(
+      leases.allowed({
+        profileId: 'work',
+        generation: 'runtime-1',
+        moduleGeneration: 'demo-new',
+        identity: { source: 'file:///demo-new.js', pluginId: 'demo' },
+      }),
+    ).toBe(true)
+    expect(
+      leases.allowed({
+        profileId: 'work',
+        generation: 'runtime-1',
+        moduleGeneration: 'demo-old',
+        identity: { source: 'file:///demo-old.js', pluginId: 'demo' },
+      }),
+    ).toBe(false)
+    await runtime.rollback('tx')
+    expect(
+      leases.allowed({
+        profileId: 'work',
+        generation: 'runtime-1',
+        moduleGeneration: 'demo-old',
+        identity: { source: 'file:///demo-old.js', pluginId: 'demo' },
+      }),
+    ).toBe(true)
+    unregister()
+  })
+
+  it('replays a newer local-development state before atomically committing a joining renderer', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const sourcePath = '/absolute/plugin/join-state.ts'
+    await runtime.updateDevelopmentStatus({
+      origin: 'local-dev',
+      pluginId: 'join-state',
+      sourcePath,
+      state: 'ready',
+    })
+    let releaseReady!: () => void
+    let readyStarted!: () => void
+    const readyGate = new Promise<void>(resolve => {
+      releaseReady = resolve
+    })
+    const readyObserved = new Promise<void>(resolve => {
+      readyStarted = resolve
+    })
+    const expressions: string[] = []
+    const session = {
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        expressions.push(expression)
+        if (expression.includes('"state":"ready"')) {
+          readyStarted()
+          await readyGate
+        }
+        return { result: { value: { ok: true, result: true } } }
+      },
+    }
+    const join = runtime.beginJoin(session as never)
+    const synchronizing = runtime.synchronizeDevelopmentStatus(session as never)
+    await readyObserved
+    await runtime.updateDevelopmentStatus({
+      origin: 'local-dev',
+      pluginId: 'join-state',
+      sourcePath,
+      state: 'failed',
+      error: 'new failure',
+    })
+    releaseReady()
+    const version = await synchronizing
+    const unregister = join.commit(version)
+    expect(unregister).toBeTypeOf('function')
+    expect(expressions.filter(expression => expression.includes('updateLocalDevelopmentStatus'))).toHaveLength(2)
+    expect(expressions.at(-1)).toContain('"state":"failed"')
+    expect(expressions.at(-1)).toContain('new failure')
+    unregister?.()
+  })
+
+  it('joins a booting renderer only after readiness and retries when a generation fence wins the race', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const unregisterExisting = runtime.register({ send: async () => ({}) } as never)
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const address = server.address()
+    if (typeof address === 'string') throw new Error('fixture websocket did not bind a TCP port')
+    let releaseBoot!: () => void
+    let bootBlocked = true
+    const bootGate = new Promise<void>(resolve => {
+      releaseBoot = resolve
+    })
+    server.on('connection', socket => {
+      socket.on('message', data => {
+        void (async () => {
+          const request = JSON.parse(String(data)) as { id: number; method: string; params?: { expression?: string } }
+          if (
+            request.method === 'Runtime.evaluate'
+            && request.params?.expression?.includes(
+                'globalThis.__cordisxCompositionBoot ?? globalThis.__cordisxBoot',
+              ) === true
+            && bootBlocked
+          ) await bootGate
+          const result = request.method === 'Page.addScriptToEvaluateOnNewDocument'
+            ? { identifier: `fixture-${request.id}` }
+            : request.method === 'Runtime.evaluate'
+            ? { result: { value: { ok: true, result: true } } }
+            : {}
+          socket.send(JSON.stringify({ id: request.id, result }))
+        })()
+      })
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify([{
+          id: 'joining-renderer',
+          title: 'Codex',
+          url: 'app://-/index.html',
+          type: 'page',
+          webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
+        }]),
+        { status: 200 },
+      )
+    ) as typeof fetch
+    const statuses: string[] = []
+    const abort = new AbortController()
+    const watching = watchAndInject({
+      port: address.port,
+      source: 'void 0',
+      signal: abort.signal,
+      developmentRuntime: runtime,
+      onStatus: message => {
+        statuses.push(message)
+      },
+    })
+    try {
+      await new Promise(resolve => setTimeout(resolve, 30))
+      const fence = runtime.prepare('join-race')
+      expect(fence.expectedRegistryEpoch).toBe(0)
+      releaseBoot()
+      bootBlocked = false
+      for (
+        let attempt = 0;
+        attempt < 50 && !statuses.some(item => item.includes('during a plugin generation transaction'));
+        attempt += 1
+      ) {
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      expect(statuses).toContainEqual(expect.stringContaining('during a plugin generation transaction'))
+      runtime.cancelPreparation('join-race')
+      for (
+        let attempt = 0;
+        attempt < 80 && !statuses.some(item => item.includes('injected target joining-renderer'));
+        attempt += 1
+      ) {
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      expect(statuses).toContainEqual(expect.stringContaining('injected target joining-renderer'))
+    } finally {
+      abort.abort()
+      await watching
+      unregisterExisting()
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
+  })
+
+  it('uses a join reservation to recover a durable rollback on the first cold-start renderer', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const previous = activation(0, 'demo-old')
+    const candidate = activation(1, 'demo-new')
+    const tuple = (record: CordisXPluginActivationRecordV1) => ({
+      profileId: record.profileId,
+      revision: record.revision,
+      lastGoodRevision: record.lastGoodRevision,
+      runtimeGeneration: record.runtimeGeneration,
+      plugins: record.plugins,
+    })
+    const plan: RollbackPlan = {
+      transactionId: 'cold-recovery',
+      transactionEpoch: 'cold-recovery:formal',
+      rollbackToken: 'rollback:cold-recovery' as RollbackPlan['rollbackToken'],
+      candidateFingerprint: 'cold-recovery-fingerprint',
+      expectedPublished: tuple(candidate),
+      rollbackTarget: tuple(previous),
+      expectedRegistryEpoch: 0,
+      rollbackRegistryEpoch: 2,
+    }
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const address = server.address()
+    if (typeof address === 'string') throw new Error('fixture websocket did not bind a TCP port')
+    server.on('connection', socket => {
+      socket.on('message', data => {
+        void (async () => {
+          const request = JSON.parse(String(data)) as { id: number; method: string; params?: { expression?: string } }
+          const expression = request.params?.expression ?? ''
+          const result = request.method === 'Page.addScriptToEvaluateOnNewDocument'
+            ? { identifier: `cold-${request.id}` }
+            : request.method !== 'Runtime.evaluate'
+            ? {}
+            : expression.includes('recoverPluginMutation')
+            ? {
+              result: {
+                value: {
+                  ok: true,
+                  result: {
+                    transactionId: plan.transactionId,
+                    transactionEpoch: plan.transactionEpoch,
+                    registryEpoch: plan.rollbackRegistryEpoch,
+                    active: previous,
+                    disposedAfter: candidate,
+                  },
+                },
+              },
+            }
+            : { result: { value: { ok: true, result: true } } }
+          socket.send(JSON.stringify({ id: request.id, result }))
+        })()
+      })
+    })
+    let recovered = false
+    const handler = {
+      coordinator: {
+        recover: async () => {
+          const observation = await runtime.recoverRollback(plan)
+          const restored = { ...observation.active, recordKind: 'active' as const, revision: 2 }
+          await runtime.adoptRecoveredActivation(restored, observation.registryEpoch)
+          recovered = true
+          return [plan.transactionId]
+        },
+      },
+    }
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(
+        JSON.stringify([{
+          id: 'cold-renderer',
+          title: 'Codex',
+          url: 'app://-/index.html',
+          type: 'page',
+          webSocketDebuggerUrl: `ws://127.0.0.1:${address.port}`,
+        }]),
+        { status: 200 },
+      )
+    ) as typeof fetch
+    const statuses: string[] = []
+    const abort = new AbortController()
+    const watching = watchAndInject({
+      port: address.port,
+      source: 'void 0',
+      signal: abort.signal,
+      pluginLifecycle: { handler: handler as never, runtime },
+      onStatus: message => {
+        statuses.push(message)
+      },
+    })
+    try {
+      for (
+        let attempt = 0;
+        attempt < 80 && !statuses.some(item => item.includes('injected target cold-renderer'));
+        attempt += 1
+      ) {
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      expect(recovered).toBe(true)
+      expect(statuses).toContainEqual(expect.stringContaining('injected target cold-renderer'))
+      expect(runtime.prepare('after-cold-recovery')).toMatchObject({ expectedRegistryEpoch: 2 })
+      runtime.cancelPreparation('after-cold-recovery')
+    } finally {
+      abort.abort()
+      await watching
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
+  })
+
+  it('removes a closed development renderer and refuses a replacement until the generation fence clears', () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const first = { send: async () => ({}) } as never
+    const second = { send: async () => ({}) } as never
+    const unregisterFirst = runtime.register(first)
+    const fence = runtime.prepare('in-flight')
+    expect(fence.expectedRegistryEpoch).toBe(0)
+    expect(() => runtime.register(second)).toThrow(
+      'cannot register a CordisX renderer during a plugin generation transaction',
+    )
+    runtime.cancelPreparation('in-flight')
+    const unregisterSecond = runtime.register(second)
+    unregisterSecond()
+    unregisterFirst()
+    expect(() => runtime.prepare('after-target-close')).toThrow('no ready CordisX renderer is available')
+  })
+
+  it('projects first-build local diagnostics without requiring a formal lifecycle bridge', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const expressions: string[] = []
+    runtime.register({
+      async send(_method: string, params: Record<string, unknown>) {
+        expressions.push(String(params.expression ?? ''))
+        return { result: { value: { ok: true, result: true } } }
+      },
+    } as never)
+    await runtime.updateDevelopmentStatus({
+      origin: 'local-dev',
+      pluginId: 'broken',
+      sourcePath: '/absolute/plugin/broken.ts',
+      state: 'failed',
+      error: 'fixture build failed',
+    })
+    expect(expressions).toHaveLength(1)
+    expect(expressions[0]).toContain('updateLocalDevelopmentStatus')
+    expect(expressions[0]).toContain('/absolute/plugin/broken.ts')
+  })
+
+  it('stages every renderer before reporting one failure so the closure can roll back everywhere', async () => {
+    const runtime = new CdpPluginLifecycleRuntime()
+    const previous = activation(0, 'demo-old')
+    const candidate = activation(1, 'demo-new')
+    const stageCalls = [0, 0]
+    const session = (index: number, fail: boolean) => ({
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        if (expression.includes('stagePluginMutation')) {
+          stageCalls[index]! += 1
+          return {
+            result: {
+              value: fail ? { ok: false, error: 'fixture readiness failure' } : {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch: 'tx:formal',
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
+        }
+        if (expression.includes('rollbackPluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch: 'tx:formal',
+                  registryEpoch: 2,
+                  active: previous,
+                  disposedAfter: candidate,
+                },
+              },
+            },
+          }
+        }
+        return {}
+      },
+    })
+    runtime.register(session(0, false) as never)
+    runtime.register(session(1, true) as never)
+    const fence = runtime.prepare('tx')
+    const mutation: PluginRuntimeMutation = {
+      transactionId: 'tx',
+      ...fence,
+      afterRegistryEpoch: 1,
+      operation: 'disable',
+      previous,
+      candidate,
+      targetId: 'demo',
+      affectedPluginIds: ['demo'],
+    }
+    await expect(runtime.stage(mutation)).rejects.toThrow('fixture readiness failure')
+    expect(stageCalls).toEqual([1, 1])
+    await expect(runtime.rollback('tx')).resolves.toMatchObject({
+      registryEpoch: 2,
+      active: previous,
+      disposedAfter: candidate,
+    })
+    expect(runtime.prepare('tx-after-rollback')).toMatchObject({ expectedRegistryEpoch: 2 })
+  })
+
+  it('releases an empty staged transaction when its last renderer closes before rollback', async () => {
+    const permissions = new PluginPermissionIdentityRegistry([{ id: 'demo', source: 'file:///demo-old.js' }])
+    const runtime = new CdpPluginLifecycleRuntime(permissions)
+    const previous = activation(0, 'demo-old')
+    const candidate = activation(1, 'demo-new')
+    let transactionEpoch = ''
+    const unregister = runtime.register({
+      async send(_method: string, params: Record<string, unknown>) {
+        const expression = String(params.expression ?? '')
+        if (expression.includes('stagePluginMutation')) {
+          return {
+            result: {
+              value: {
+                ok: true,
+                result: {
+                  transactionId: 'tx',
+                  transactionEpoch,
+                  expectedRegistryEpoch: 0,
+                  afterRegistryEpoch: 1,
+                },
+              },
+            },
+          }
+        }
+        return { result: { value: undefined } }
+      },
+    } as never)
+    const fence = runtime.prepare('tx')
+    transactionEpoch = fence.transactionEpoch
+    const mutation: PluginRuntimeMutation = {
+      transactionId: 'tx',
+      ...fence,
+      afterRegistryEpoch: 1,
+      operation: 'update',
+      previous,
+      candidate,
+      targetId: 'demo',
+      affectedPluginIds: ['demo'],
+      package: {
+        manifest: { id: 'demo' },
+        digest: `sha256:${'b'.repeat(64)}`,
+        moduleSource: '',
+        artifactSource: 'void 0',
+        serviceModules: [],
+        identitySource: 'file:///demo-new.js',
+      } as never,
+    }
+    await runtime.stage(mutation)
+    expect(permissions.allowed({ id: 'demo', source: 'file:///demo-new.js' })).toBe(true)
+
+    unregister()
+    await expect(runtime.rollback('tx')).resolves.toEqual({
+      transactionId: 'tx',
+      transactionEpoch,
+      registryEpoch: 2,
+      active: previous,
+      disposedAfter: candidate,
+    })
+    expect(permissions.allowed({ id: 'demo', source: 'file:///demo-old.js' })).toBe(true)
+    expect(permissions.allowed({ id: 'demo', source: 'file:///demo-new.js' })).toBe(false)
+
+    const unregisterReplacement = runtime.register({ send: async () => ({}) } as never)
+    expect(runtime.prepare('replacement')).toMatchObject({ expectedRegistryEpoch: 2 })
+    runtime.cancelPreparation('replacement')
+    unregisterReplacement()
+  })
+})
