@@ -20,6 +20,16 @@ Do not close the ledger because a partial PR merged, CI passed, a simulator
 worked, or a screenshot looked better. Re-read the complete ledger after every
 dependency merge and before announcing an experience build.
 
+Before changing a page renderer, Host/plugin UI ownership, information
+architecture, Host chrome, Composer, persistent panel, or navigation/back
+behavior, follow the organization
+[product baseline checkpoint](https://github.com/cordisx/cordisxmono/blob/main/.agents/docs/work-manager.md#product-baseline-checkpoint).
+Classify the work as product-impacting, reference the accepted last-good
+structure, and obtain explicit acceptance on the declared replacement preview
+before switching the visible product. Technical implementation and tests may
+proceed before that decision, but cannot replace the last-good experience by
+themselves.
+
 ## Preserve Host and plugin ownership
 
 The Host owns Manager routing, history, breadcrumb, page header, local tabs,
