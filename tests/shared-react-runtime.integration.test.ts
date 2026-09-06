@@ -4,11 +4,13 @@ import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
+import { CORDISX_UI_MODULE, cordisXSharedModuleSource } from '../packages/cli/src/launcher/react-virtual-modules.js'
 import type { CordisXConfig } from '../packages/cli/src/launcher/config.js'
 import type { CordisXPluginActivationRecordV1 } from '../packages/cli/src/plugin-lifecycle-contracts.js'
 
 interface SharedRuntime {
   readonly React: unknown
+  readonly ui: Readonly<{ readonly HorizontalSplitPane?: unknown }>
 }
 
 interface RuntimeHandle {
@@ -64,6 +66,10 @@ describe('shared React plugin runtime', () => {
     await waitFor(() => dom.window.document.documentElement.dataset.cordisxReady === 'true')
     const window = dom.window as unknown as TestWindow
     expect(window.__sharedReactPluginReact).toBe(window.__cordisxSharedReactRuntime?.React)
+    expect(typeof window.__cordisxSharedReactRuntime?.ui.HorizontalSplitPane).toBe('function')
+    expect(cordisXSharedModuleSource(CORDISX_UI_MODULE)).toContain(
+      'export const HorizontalSplitPane = runtime.ui.HorizontalSplitPane;',
+    )
 
     let navigationSettled = false
     const navigation = window.__cordisxRuntime!.navigate('shared-react', { id: 'overview' })
@@ -94,7 +100,11 @@ describe('shared React plugin runtime', () => {
     expect(dom.window.document.querySelector('.cxr-ui-card')).not.toBeNull()
     expect(dom.window.document.querySelector('.cxr-ui-selection-rail')).not.toBeNull()
     expect(dom.window.document.querySelector('.cxr-ui-markdown')?.textContent).toContain('Safe Markdown')
-    expect(dom.window.document.querySelector('[data-cordisx-shared-react="true"]')).not.toBeNull()
+    const sharedStyles = dom.window.document.querySelector<HTMLStyleElement>('[data-cordisx-shared-react="true"]')
+    expect(sharedStyles?.textContent).toContain(
+      '.cxr-ui-horizontal-split-pane{display:grid;width:100%;height:100%;min-width:0;min-height:0;overflow:hidden}',
+    )
+    expect(sharedStyles?.textContent).toContain('@media (pointer:coarse)')
 
     dom.window.document.documentElement.lang = 'zh-CN'
     await waitFor(() => dom.window.document.querySelector('.cxr-ui-heading')?.textContent === '共享 React')

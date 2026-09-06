@@ -60,6 +60,7 @@ const UI_EXPORTS = [
   'Card',
   'EmptyState',
   'Heading',
+  'HorizontalSplitPane',
   'Icon',
   'MarkdownViewer',
   'Select',

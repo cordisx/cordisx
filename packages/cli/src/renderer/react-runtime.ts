@@ -14,6 +14,7 @@ import type {
   CordisXReactPageComponent,
 } from '../contracts.js'
 import { HostThemeProjection } from './host-theme.js'
+import { HorizontalSplitPane } from './host-ui/HorizontalSplitPane.js'
 import { PublicMarkdownViewer } from './host-ui/PublicMarkdownViewer.js'
 import { PublicSelectionRail } from './host-ui/PublicSelectionRail.js'
 import { HostAgentAvatar } from './host-ui/conversation/AgentAvatar.js'
@@ -53,7 +54,7 @@ interface EmptyStateProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'ti
   readonly action?: React.ReactNode
 }
 
-type IconName = CordisXConfigFormIcon | 'search' | 'create' | 'success'
+type IconName = CordisXConfigFormIcon | 'search' | 'create' | 'success' | 'folder' | 'folder-open' | 'file'
 
 interface IconProps extends React.HTMLAttributes<HTMLSpanElement> {
   readonly name: IconName
@@ -106,6 +107,12 @@ const SHARED_REACT_STYLES = `
 .cxr-ui-button[data-variant="ghost"]{background:transparent;color:var(--cx-text)}
 .cxr-ui-button[data-variant="danger"]{border-color:color-mix(in srgb,var(--cx-danger) 48%,transparent);background:color-mix(in srgb,var(--cx-danger) 14%,transparent);color:var(--cx-danger)}
 .cxr-ui-button:not(:disabled):hover{background-image:linear-gradient(var(--cx-hover),var(--cx-hover))}
+.cxr-ui-horizontal-split-pane{display:grid;width:100%;height:100%;min-width:0;min-height:0;overflow:hidden}
+.cxr-ui-horizontal-split-pane__pane{min-width:0;min-height:0;overflow:hidden}
+.cxr-ui-horizontal-split-pane__separator{position:relative;z-index:1;min-width:9px;min-height:0;cursor:col-resize;touch-action:none;outline:none}
+.cxr-ui-horizontal-split-pane__separator::before{position:absolute;inset-block:0;left:50%;width:1px;background:var(--cx-border);content:"";transform:translateX(-50%);transition:background-color .14s ease,width .14s ease}
+.cxr-ui-horizontal-split-pane__separator:hover::before,.cxr-ui-horizontal-split-pane__separator:focus-visible::before{width:2px;background:var(--cx-focus)}
+@media (pointer:coarse){.cxr-ui-horizontal-split-pane__separator::after{position:absolute;inset-block:0;left:50%;width:15px;content:"";transform:translateX(-50%)}}
 .cxr-ui-select{position:relative;min-width:0}.cxr-ui-select-trigger{display:flex;width:100%;min-height:38px;align-items:center;gap:8px;border:1px solid var(--cx-border);border-radius:8px;padding:7px 10px;background:var(--cx-surface-raised);color:var(--cx-text);font:inherit;text-align:left;cursor:pointer}.cxr-ui-select-trigger>span:last-child{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cxr-ui-select-trigger::after{content:"⌄";margin-inline-start:auto;color:var(--cx-muted)}.cxr-ui-select-list{position:absolute;z-index:20;top:calc(100% + 5px);left:0;right:0;display:grid;gap:2px;border:1px solid var(--cx-border);border-radius:8px;padding:4px;background:var(--cx-surface-raised);box-shadow:0 12px 30px var(--cx-shadow)}.cxr-ui-select-option{display:flex;min-height:34px;align-items:center;gap:8px;border:0;border-radius:6px;padding:6px 8px;background:transparent;color:var(--cx-text);font:inherit;text-align:left;cursor:pointer}.cxr-ui-select-option:hover,.cxr-ui-select-option[aria-selected="true"]{background:var(--cx-hover)}
 .cxr-ui-empty{display:flex;min-height:180px;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:24px;text-align:center;color:var(--cx-muted)}
 .cxr-ui-empty-title{color:var(--cx-text);font-size:16px;font-weight:650}
@@ -197,7 +204,21 @@ function EmptyState({ title, description, action, className, ...props }: EmptySt
   )
 }
 
-function Icon({ name, className, ...props }: IconProps): React.ReactElement {
+export function Icon({ name, className, ...props }: IconProps): React.ReactElement {
+  const hostSurfaceToken = name === 'folder'
+    ? 'host:folder'
+    : name === 'folder-open'
+    ? 'host:folder-open'
+    : name === 'file'
+    ? 'host:file'
+    : undefined
+  if (hostSurfaceToken !== undefined) {
+    return React.createElement('span', {
+      ...props,
+      className: joinClassName('cxr-ui-icon', className),
+      'aria-hidden': props['aria-label'] === undefined,
+    }, React.createElement(HostIcon, { token: name, surfaceToken: hostSurfaceToken }))
+  }
   const paths: Readonly<Record<string, string>> = {
     search:
       'M10.5 4a6.5 6.5 0 1 0 4.05 11.58L19 20l1-1-4.42-4.45A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z',
@@ -368,6 +389,7 @@ export interface SharedReactRuntime {
     Card: typeof Card
     EmptyState: typeof EmptyState
     Heading: typeof Heading
+    HorizontalSplitPane: typeof HorizontalSplitPane
     Icon: typeof Icon
     MarkdownViewer: typeof PublicMarkdownViewer
     Select: typeof Select
@@ -458,6 +480,7 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
       Card,
       EmptyState,
       Heading,
+      HorizontalSplitPane,
       Icon,
       MarkdownViewer: PublicMarkdownViewer,
       Select,

@@ -488,6 +488,10 @@ createElement(AgentAvatar, props)
     path.join(repositoryRoot, 'tests', 'fixtures', 'manager-navigation-v9-consumer.ts'),
     path.join(runnerDirectory, 'manager-navigation-v9-consumer.ts'),
   )
+  await copyFile(
+    path.join(repositoryRoot, 'tests', 'fixtures', 'ide-ui-primitives-consumer.tsx'),
+    path.join(runnerDirectory, 'ide-ui-primitives-consumer.tsx'),
+  )
   await writeFile(
     path.join(runnerDirectory, 'tsconfig.json'),
     `${
@@ -505,6 +509,7 @@ createElement(AgentAvatar, props)
           include: [
             'connector-consumer.ts',
             'agent-avatar-ui-consumer.ts',
+            'ide-ui-primitives-consumer.tsx',
             'manager-navigation-v9-consumer.ts',
             'agent-session-consumer.ts',
             'agent-loop-collection-consumer.ts',
