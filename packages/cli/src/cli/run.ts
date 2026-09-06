@@ -40,6 +40,7 @@ import {
   resolveCodexExecutable,
   terminateIsolatedCodex,
 } from '../launcher/process.js'
+import { settleInjectedHostCleanup } from './injected-host-cleanup.js'
 import { type CordisXDevInvocation, type CordisXLauncherOptions, parseCordisXCli } from './parse.js'
 import { resolveProfileSelection } from './profiles.js'
 import { ProviderFleet } from '../providers/fleet.js'
@@ -650,12 +651,17 @@ async function runInjectedHost(input: {
     throw error
   } finally {
     controller.abort()
-    const cleanup = await Promise.allSettled([
-      watcher,
-      ...(input.providerFleet === undefined ? [] : [input.providerFleet.close()]),
-      Promise.resolve(input.agentHistoryHost.dispose()),
-      ...(launched === undefined ? [] : [terminateIsolatedCodex(launched, input.profile)]),
-    ])
+    const launchedHost = launched
+    const cleanup = await settleInjectedHostCleanup({
+      beforeHostTermination: [
+        watcher,
+        ...(input.providerFleet === undefined ? [] : [input.providerFleet.close()]),
+        Promise.resolve(input.agentHistoryHost.dispose()),
+      ],
+      ...(launchedHost === undefined
+        ? {}
+        : { terminateHost: async () => await terminateIsolatedCodex(launchedHost, input.profile) }),
+    })
     process.removeListener('SIGINT', stop)
     process.removeListener('SIGTERM', stop)
     if (primaryError === undefined) {
