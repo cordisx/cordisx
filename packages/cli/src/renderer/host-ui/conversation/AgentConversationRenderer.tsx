@@ -30,18 +30,8 @@ import {
 } from '../NavigationCollectionActions.js'
 import { HostRoomCompositeAvatar } from './RoomCompositeAvatar.js'
 import { useHostShikitorComposer } from './ShikitorComposerAdapter.js'
-import type { HostSchemaFormProps } from '../HostSchemaForm.js'
-import type { CordisXConfigFieldSnapshot } from '../../../contracts.js'
 import { PLAYGROUND_ROOM_SIMULATION_BINDING_CONTRACT } from '../../playground-room-simulation-bridge.js'
 import { HostThemeProjection } from '../../host-theme.js'
-
-// The schema renderer is loaded only when the Host-owned settings inspector
-// opens. This preserves the same Schemastery/TDesign form path while allowing
-// the conversation shell itself to remain a lightweight structured surface.
-const HostSchemaForm = React.lazy(async () => {
-  const module = await import('../HostSchemaForm.js')
-  return { default: module.HostSchemaForm }
-})
 
 export interface AgentConversationRendererCopy {
   readonly locale: string
@@ -1289,57 +1279,63 @@ function RoomSettingsEditor({ title, description, chinese, settings, onError, on
   readonly onError: (error: unknown) => void
   readonly onDone: () => void
 }) {
-  const fields = React.useMemo<readonly CordisXConfigFieldSnapshot[]>(() => [
-    {
-      namespace: 'host.agent-conversation.room-settings/v1',
-      path: ['name'],
-      type: 'string',
-      label: chinese ? '群聊名称' : 'Room name',
-      description: chinese ? '显示在群聊标题中。' : 'Shown in the room header.',
-      value: title,
-      disabled: false,
-      required: true,
-      min: 1,
-      max: 256,
-    },
-    {
-      namespace: 'host.agent-conversation.room-settings/v1',
-      path: ['description'],
-      type: 'string',
-      role: 'textarea',
-      label: chinese ? '群聊介绍' : 'Description',
-      description: chinese ? '可选，显示在群聊标题下方。' : 'Optional. Shown below the room title.',
-      value: description ?? '',
-      disabled: false,
-      required: false,
-      max: 4_000,
-    },
-  ], [chinese, description, title])
-  const props: HostSchemaFormProps = {
-    id: 'agent-conversation-room-settings',
-    fields,
-    locale: chinese ? 'zh-CN' : 'en',
-    resetKey: `${title}\u0000${description ?? ''}`,
-    submitLabel: chinese ? '保存' : 'Save',
-    savingLabel: chinese ? '保存中…' : 'Saving…',
-    onSubmit: async values => {
-      const name = typeof values.name === 'string' ? values.name.trim() : ''
-      const details = typeof values.description === 'string' ? values.description.trim() : ''
-      if (name === '') throw new Error(chinese ? '群聊名称不能为空。' : 'Room name is required.')
+  const [name, setName] = React.useState(title)
+  const [details, setDetails] = React.useState(description ?? '')
+  const [saving, setSaving] = React.useState(false)
+  React.useEffect(() => {
+    setName(title)
+    setDetails(description ?? '')
+  }, [description, title])
+  const submit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault()
+    const normalizedName = name.trim()
+    const normalizedDetails = details.trim()
+    if (normalizedName === '') {
+      onError(new Error(chinese ? '群聊名称不能为空。' : 'Room name is required.'))
+      return
+    }
+    setSaving(true)
+    try {
       await settings.update({
-        name,
-        description: details === '' ? { state: 'empty' } : { state: 'present', text: details },
+        name: normalizedName,
+        description: normalizedDetails === ''
+          ? { state: 'empty' }
+          : { state: 'present', text: normalizedDetails },
       })
-    },
-    onSubmitted: onDone,
-    onError,
+      onDone()
+    } catch (error) {
+      onError(error)
+    } finally {
+      setSaving(false)
+    }
   }
   return (
-    <React.Suspense
-      fallback={<p className="cxa-inspector-note" role="status">{chinese ? '正在载入设置…' : 'Loading settings…'}</p>}
-    >
-      <HostSchemaForm {...props} />
-    </React.Suspense>
+    <form className="cxa-room-settings-form" onSubmit={event => void submit(event)}>
+      <label>
+        <span>{chinese ? '群聊名称' : 'Room name'}</span>
+        <input
+          name="name"
+          value={name}
+          required
+          maxLength={256}
+          disabled={saving}
+          onChange={event => setName(event.currentTarget.value)}
+        />
+      </label>
+      <label>
+        <span>{chinese ? '群聊介绍' : 'Description'}</span>
+        <textarea
+          name="description"
+          value={details}
+          maxLength={4_000}
+          disabled={saving}
+          onChange={event => setDetails(event.currentTarget.value)}
+        />
+      </label>
+      <button type="submit" className="cxa-action" disabled={saving || name.trim() === ''}>
+        {saving ? (chinese ? '保存中…' : 'Saving…') : (chinese ? '保存' : 'Save')}
+      </button>
+    </form>
   )
 }
 
