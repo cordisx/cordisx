@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type {
   PlatformProviderBrokerPolicyV1,
-  PlatformProviderFactoryConfigurationV1,
   PlatformProviderOwnerV1,
   PlatformProviderWorkspaceRefV1,
 } from '@cordisx/protocol/platform-provider/v1'
+import type { PlatformProviderFactoryConfiguration } from './platform-provider-service-types.js'
 import type {
   HostPlatformProviderBrokerCatalogV1,
   HostPlatformProviderBrokerTransportV1,
@@ -33,9 +33,10 @@ export class PlatformProviderWorkspaceAuthority {
 }
 
 export interface HostPlatformProviderConfigurationContractV1 {
+  readonly protocolVersion: 1 | 2
   readonly schema: string
   readonly applicationMode: 'service-restart' | 'app-restart'
-  project(value: unknown): readonly PlatformProviderFactoryConfigurationV1[]
+  project(value: unknown): readonly PlatformProviderFactoryConfiguration[]
 }
 
 export class HostPlatformProviderConfigurationRegistryV1 {
@@ -64,7 +65,7 @@ export interface HostPlatformProviderBrokerAuthorityV1 {
   catalog(schema: string): HostPlatformProviderBrokerCatalogV1
   open(input: {
     readonly owner: PlatformProviderOwnerV1
-    readonly configuration: PlatformProviderFactoryConfigurationV1
+    readonly configuration: PlatformProviderFactoryConfiguration
     readonly rawConfiguration: unknown
     readonly policy: PlatformProviderBrokerPolicyV1
     readonly workspaces: PlatformProviderWorkspaceAuthority

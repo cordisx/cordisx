@@ -123,3 +123,18 @@ to edit top-level providers, and prove the plugin-detail flow in an isolated
 `app://` renderer before legacy write guidance can be removed. The bridge
 projects only `providers` and configured-secret state; it never sends a secret
 reference value or credential value to the renderer.
+
+## Platform provider factory v2
+
+The Host adopts the formal Protocol v2 factory and registration projections at
+`cordisx-protocol@cbfd15ef4d2f51bcffa659f393cd65730bbe5f0d`. V2 adds only the
+safe model mapping derived from the validated service document. The Host
+normalizes that mapping, passes it to the factory, and requires the plugin's
+definition to repeat the exact same mapping before opening a broker or adapter.
+Endpoint, credential, process, path, transport, and Provider Fleet authority
+remain absent from the projection.
+
+V1 services remain accepted without a configuration-derived mapping. The Host
+never erases a v2 mapping or silently invokes a v2 service through v1. This
+adoption does not select or activate a concrete provider plugin by itself; the
+owner package consumer remains a separate integration change.
