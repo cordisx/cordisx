@@ -188,6 +188,8 @@ export interface ManagerSettingsNavigationItemSnapshot {
   readonly id: string
   readonly owner: string
   readonly group: 'before-settings' | 'after-settings'
+  /** Host-resolved visual section; legacy/unassigned contributions use other. */
+  readonly navigationGroup: 'resources' | 'development' | 'collaboration' | 'other'
   readonly order: number
   readonly disabled: boolean
   readonly disabledReason?: string

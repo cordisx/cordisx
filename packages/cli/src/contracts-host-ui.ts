@@ -7,6 +7,11 @@ import type {
 
 import type { ManagerCollectionRegistryV1 } from '@cordisx/protocol/manager-collection/v1'
 
+import type {
+  ManagerSettingsNavigationGroupReferenceV1,
+  ManagerSettingsNavigationRuntimeIdentityV2,
+} from '@cordisx/protocol/manager-settings-navigation/v2'
+
 import type { ManagerContentNavigationDeclarationV2 } from '@cordisx/protocol/manager-content-navigation/v2'
 
 import type {
@@ -83,7 +88,11 @@ export type CordisXManagerSettingsTabItem = CordisXManagerSettingsContentTabItem
 
 export interface CordisXManagerSettingsNavigationItem {
   readonly route: CordisXRouteReference
+  readonly navigationGroup?: ManagerSettingsNavigationGroupReferenceV1
 }
+
+export const CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/surface-contribution.v9.schema.json' as const
 
 export interface CordisXPresenterItem {
   readonly kind: 'banner' | 'status' | 'chip' | 'progress'
@@ -275,9 +284,15 @@ export interface CordisXContributionOptionsBase<Name extends CordisXSurfaceName>
 
 export type CordisXManagerSettingsNavigationGroup = 'before-settings' | 'after-settings'
 
+export type CordisXManagerSettingsNavigationContributionOptions =
+  & CordisXContributionOptionsBase<'manager.settings.navigation-items'>
+  & { readonly group: CordisXManagerSettingsNavigationGroup }
+  & ManagerSettingsNavigationRuntimeIdentityV2
+
 export type CordisXContributionOptions<Name extends CordisXSurfaceName = CordisXSurfaceName> =
   & CordisXContributionOptionsBase<Name>
-  & (Name extends 'manager.settings.navigation-items' ? { readonly group: CordisXManagerSettingsNavigationGroup }
+  & (Name extends 'manager.settings.navigation-items'
+    ? Omit<CordisXManagerSettingsNavigationContributionOptions, keyof CordisXContributionOptionsBase<Name>>
     : Name extends 'manager.settings.tabs' | 'composer.reasoning-intensity' | 'composer.submit.effects'
       ? { readonly group?: never }
     : { readonly group?: string })

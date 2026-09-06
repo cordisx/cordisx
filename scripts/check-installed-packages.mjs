@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -484,6 +484,10 @@ createElement(AgentAvatar, props)
 `,
     'utf8',
   )
+  await copyFile(
+    path.join(repositoryRoot, 'tests', 'fixtures', 'manager-navigation-v9-consumer.ts'),
+    path.join(runnerDirectory, 'manager-navigation-v9-consumer.ts'),
+  )
   await writeFile(
     path.join(runnerDirectory, 'tsconfig.json'),
     `${
@@ -501,6 +505,7 @@ createElement(AgentAvatar, props)
           include: [
             'connector-consumer.ts',
             'agent-avatar-ui-consumer.ts',
+            'manager-navigation-v9-consumer.ts',
             'agent-session-consumer.ts',
             'agent-loop-collection-consumer.ts',
           ],
@@ -968,7 +973,7 @@ createElement(AgentAvatar, props)
   console.log(
     `[cordisx] installed tarballs verified: licenses, pinned Host-owned AgentAvatar runtime, combined multi-binding AgentLoop, executable v4 create/send concurrent replay/approval/introduction/cancel/subscription, owner documents, and generic raster navigation collection${
       protocolTarball === undefined ? '' : ', exact local Protocol'
-    }, durable outbox reload, local AgentLoop provider composition, Connector consumer types, CLI, built-in README, both creator commands, standalone/workspace/embedded-isolated/embedded-workspace generated checks, Vite dev dry-run`,
+    }, durable outbox reload, local AgentLoop provider composition, Connector and Manager navigation v9 consumer types, CLI, built-in README, both creator commands, standalone/workspace/embedded-isolated/embedded-workspace generated checks, Vite dev dry-run`,
   )
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })

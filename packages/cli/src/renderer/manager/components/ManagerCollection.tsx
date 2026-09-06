@@ -53,18 +53,21 @@ function OverflowMenu({
   registry,
   busy,
   rememberTrigger,
+  open,
+  onOpenChange,
 }: {
   readonly actions: readonly ManagerCollectionAction[]
   readonly item: ManagerCollectionItem
   readonly registry: HostManagerCollectionPageRegistry
   readonly busy: boolean
   readonly rememberTrigger: (element: HTMLElement | null) => void
+  readonly open: boolean
+  readonly onOpenChange: (open: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const menu = useRef<HTMLDivElement>(null)
   const close = (restore: boolean) => {
-    setOpen(false)
+    onOpenChange(false)
     if (restore) queueMicrotask(() => trigger.current?.focus({ preventScroll: true }))
   }
   useLayoutEffect(() => {
@@ -121,7 +124,7 @@ function OverflowMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={busy}
-        onClick={() => setOpen(value => !value)}
+        onClick={() => onOpenChange(!open)}
       >
         <HostIcon token="more" />
       </button>
@@ -170,6 +173,7 @@ function Row(
     readonly rememberTrigger: (element: HTMLElement | null) => void
   },
 ) {
+  const [menuOpen, setMenuOpen] = useState(false)
   const direct = item.actions.filter(action => action.placement === 'direct')
   const overflow = item.actions.filter(action => action.placement === 'overflow')
   const title = registry.localized(item.title, `item:${item.id}:title`)
@@ -183,6 +187,7 @@ function Row(
       role="listitem"
       data-manager-collection-item={item.id}
       data-disabled={item.disabled.value || undefined}
+      data-actions-open={menuOpen || undefined}
     >
       <button
         type="button"
@@ -238,6 +243,8 @@ function Row(
                   registry={registry}
                   busy={busy}
                   rememberTrigger={rememberTrigger}
+                  open={menuOpen}
+                  onOpenChange={setMenuOpen}
                 />
               )}
           </span>
@@ -486,6 +493,7 @@ function ManagerCollectionHost({ registry }: { readonly registry: HostManagerCol
           )}
       </div>
       <div
+        className="cxr-manager-collection-panel"
         id={panelId}
         role={multipleViews ? 'tabpanel' : undefined}
         aria-labelledby={multipleViews ? `${panelId}-${snapshot.view}` : undefined}

@@ -20,12 +20,15 @@ import type {
   CordisXHostExtensionPointCatalogV6,
   CordisXHostExtensionPointCatalogV7,
   CordisXHostExtensionPointCatalogV8,
+  CordisXHostExtensionPointCatalogV9,
   CordisXHostExtensionPointDescriptor,
   CordisXHostExtensionPointDescriptorV3,
   CordisXHostExtensionPointDescriptorV5,
+  CordisXHostExtensionPointDescriptorV9,
   CordisXLocaleCatalog,
   CordisXLocalizedProjection,
   CordisXLocalizedText,
+  CordisXManagerSettingsNavigationDescriptorV9,
   CordisXPluginIdentity,
   CordisXPointPolicy,
 } from '../contracts.js'
@@ -40,6 +43,7 @@ import {
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V6,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V7,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V8,
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V9,
 } from '../contracts.js'
 import type { CordisXI18nService } from './i18n.js'
 import type { CommandSnapshot } from './commands.js'
@@ -81,6 +85,7 @@ export interface HostExtensionPointAnchorProjection extends CordisXHostExtension
 }
 
 export interface HostExtensionPointProjection extends CordisXHostExtensionPointDescriptorV5 {
+  readonly navigationGroups?: CordisXManagerSettingsNavigationDescriptorV9['navigationGroups']
   readonly titleProjection: CordisXLocalizedProjection
   readonly descriptionProjection: CordisXLocalizedProjection
   readonly diagnosticProjection?: CordisXLocalizedProjection
@@ -99,7 +104,7 @@ export interface ExtensionPointCatalogTextProjection {
 }
 
 interface DescriptorRegistration {
-  readonly descriptors: readonly CordisXHostExtensionPointDescriptorV5[]
+  readonly descriptors: readonly CordisXHostExtensionPointDescriptorV9[]
   readonly diagnostics: readonly ExtensionPointDescriptorDiagnostic[]
 }
 
@@ -147,6 +152,10 @@ const V8_PAYLOAD_FAMILIES = new Set<CordisXExtensionPointPayloadFamily>([
   ...V7_PAYLOAD_FAMILIES,
   'transient-canvas-presentation',
 ])
+const V9_PAYLOAD_FAMILIES = new Set<CordisXExtensionPointPayloadFamily>([
+  ...V8_PAYLOAD_FAMILIES,
+  'manager-settings-navigation-item-v2',
+])
 const AVAILABILITIES = new Set<CordisXExtensionPointAvailability>(['available', 'pending', 'unavailable'])
 const MATURITIES = new Set<CordisXExtensionPointMaturity>(['stable', 'experimental', 'reserved'])
 const ADAPTER_SUPPORT = new Set<CordisXExtensionPointAdapterSupport>(['supported', 'unsupported', 'unverified'])
@@ -156,18 +165,19 @@ function messageNamespace(message: CordisXLocalizedText): string {
   return message.namespace ?? 'host'
 }
 
-function descriptorMessages(descriptor: CordisXHostExtensionPointDescriptorV5): readonly CordisXLocalizedText[] {
+function descriptorMessages(descriptor: CordisXHostExtensionPointDescriptorV9): readonly CordisXLocalizedText[] {
   return [
     descriptor.title,
     descriptor.description,
     ...(descriptor.diagnostic === undefined ? [] : [descriptor.diagnostic]),
     ...(descriptor.anchors ?? []).flatMap(anchor => anchor.diagnostic === undefined ? [] : [anchor.diagnostic]),
+    ...('navigationGroups' in descriptor ? descriptor.navigationGroups.groups.map(group => group.label) : []),
   ]
 }
 
 /** Fail closed when public descriptor text cannot be projected in every required Host locale. */
 export function assertExtensionPointDescriptorLocalization(
-  descriptor: CordisXHostExtensionPointDescriptorV5,
+  descriptor: CordisXHostExtensionPointDescriptorV9,
   catalogs: readonly CordisXLocaleCatalog[],
 ): void {
   for (const message of descriptorMessages(descriptor)) {
@@ -191,7 +201,7 @@ function legacyAdapterSupport(availability: CordisXExtensionPointAvailability): 
 function normalizeAnchor(
   value: unknown,
   pointId: string,
-  schemaVersion: 1 | 2 | 3 | 5 | 6 | 7 | 8,
+  schemaVersion: 1 | 2 | 3 | 5 | 6 | 7 | 8 | 9,
 ): CordisXHostExtensionPointAnchorDescriptorV5 {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`extension point ${pointId} anchor must be an object`)
@@ -237,10 +247,51 @@ function normalizeAnchor(
   } as CordisXHostExtensionPointAnchorDescriptorV5)
 }
 
+function normalizeManagerSettingsNavigationGroups(
+  value: unknown,
+): CordisXManagerSettingsNavigationDescriptorV9['navigationGroups'] {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('manager.settings.navigation-items requires a navigation group catalog')
+  }
+  exactKeys(value, ['$schema', 'contract', 'schemaVersion', 'groups', 'fallbackGroup'], 'navigation group catalog')
+  const catalog = value as Partial<CordisXManagerSettingsNavigationDescriptorV9['navigationGroups']>
+  if (
+    catalog.$schema
+      !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-settings-navigation-groups.v1.schema.json'
+    || catalog.contract !== 'cordisx.manager-settings-navigation-groups/v1'
+    || catalog.schemaVersion !== 1
+    || catalog.fallbackGroup !== 'other'
+  ) throw new Error('manager settings navigation group catalog identity is invalid')
+  if (!Array.isArray(catalog.groups) || catalog.groups.length !== 4) {
+    throw new Error('manager settings navigation group catalog requires four exact groups')
+  }
+  const expected = [
+    ['resources', 100],
+    ['development', 200],
+    ['collaboration', 300],
+    ['other', 1000],
+  ] as const
+  for (const [index, [id, order]] of expected.entries()) {
+    const group = catalog.groups[index]
+    if (group === null || typeof group !== 'object' || Array.isArray(group)) {
+      throw new Error(`manager settings navigation group ${id} must be an object`)
+    }
+    exactKeys(group, ['id', 'label', 'order'], `manager settings navigation group ${id}`)
+    if (group.id !== id || group.order !== order) {
+      throw new Error(`manager settings navigation group ${id} identity/order is invalid`)
+    }
+    assertLocalizedText(group.label, `manager settings navigation group ${id} label`)
+    if (group.label.fallback === undefined) {
+      throw new Error(`manager settings navigation group ${id} label requires fallback`)
+    }
+  }
+  return immutableSnapshot(catalog as CordisXManagerSettingsNavigationDescriptorV9['navigationGroups'])
+}
+
 function normalizeDescriptor(
   value: unknown,
-  schemaVersion: 1 | 2 | 3 | 5 | 6 | 7 | 8,
-): CordisXHostExtensionPointDescriptorV5 {
+  schemaVersion: 1 | 2 | 3 | 5 | 6 | 7 | 8 | 9,
+): CordisXHostExtensionPointDescriptorV9 {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('descriptor must be an object')
   }
@@ -291,10 +342,15 @@ function normalizeDescriptor(
         'pageChrome',
         'presentationGroup',
         'routePathFamily',
+        ...(schemaVersion === 9 ? ['navigationGroups'] : []),
       ],
     'descriptor',
   )
-  const descriptor = value as Partial<CordisXHostExtensionPointDescriptorV3 & CordisXHostExtensionPointDescriptorV5>
+  const descriptor = value as Partial<
+    & CordisXHostExtensionPointDescriptorV3
+    & CordisXHostExtensionPointDescriptorV5
+    & CordisXManagerSettingsNavigationDescriptorV9
+  >
   if (typeof descriptor.id !== 'string') throw new Error('descriptor id is required')
   assertLocalId(descriptor.id, 'extension point id')
   if (descriptor.kind !== 'surface' && descriptor.kind !== 'outlet') {
@@ -317,7 +373,9 @@ function normalizeDescriptor(
   const payloadFamily = schemaVersion === 1
     ? descriptor.kind === 'outlet' ? 'outlet' : 'action'
     : descriptor.payloadFamily
-  const payloadFamilies = schemaVersion === 8
+  const payloadFamilies = schemaVersion === 9
+    ? V9_PAYLOAD_FAMILIES
+    : schemaVersion === 8
     ? V8_PAYLOAD_FAMILIES
     : schemaVersion === 7
     ? V7_PAYLOAD_FAMILIES
@@ -400,6 +458,18 @@ function normalizeDescriptor(
     presentationGroup: schemaVersion === 1 || schemaVersion === 2 ? 'legacy' : descriptor.presentationGroup,
     routePathFamily: schemaVersion === 1 || schemaVersion === 2 ? 'host-defined' as const : descriptor.routePathFamily,
   }
+  const navigationGroups = schemaVersion === 9 && descriptor.id === 'manager.settings.navigation-items'
+    ? normalizeManagerSettingsNavigationGroups(descriptor.navigationGroups)
+    : undefined
+  if (schemaVersion === 9) {
+    if (descriptor.id === 'manager.settings.navigation-items') {
+      if (payloadFamily !== 'manager-settings-navigation-item-v2') {
+        throw new Error('manager.settings.navigation-items v9 requires manager-settings-navigation-item-v2')
+      }
+    } else if (descriptor.navigationGroups !== undefined) {
+      throw new Error(`extension point ${descriptor.id} cannot declare manager navigation groups`)
+    }
+  }
   return immutableSnapshot({
     id: descriptor.id,
     kind: descriptor.kind,
@@ -411,8 +481,9 @@ function normalizeDescriptor(
     adapterSupport,
     ...(descriptor.diagnostic === undefined ? {} : { diagnostic: descriptor.diagnostic }),
     ...(anchors === undefined ? {} : { anchors }),
+    ...(navigationGroups === undefined ? {} : { navigationGroups }),
     ...outletCompatibility,
-  } as CordisXHostExtensionPointDescriptorV5)
+  } as CordisXHostExtensionPointDescriptorV9)
 }
 
 /** Runtime ledger for host/adapter-owned descriptors. Invalid declarations remain diagnostic-only. */
@@ -437,10 +508,11 @@ export class ExtensionPointDescriptorRegistry {
       | CordisXHostExtensionPointCatalogV6
       | CordisXHostExtensionPointCatalogV7
       | CordisXHostExtensionPointCatalogV8
+      | CordisXHostExtensionPointCatalogV9
       | unknown,
   ): () => void {
     if (this.disposed) throw new Error('CordisX extension point descriptor registry is disposed')
-    const descriptors: CordisXHostExtensionPointDescriptorV5[] = []
+    const descriptors: CordisXHostExtensionPointDescriptorV9[] = []
     const diagnostics: ExtensionPointDescriptorDiagnostic[] = []
     try {
       if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -455,6 +527,7 @@ export class ExtensionPointDescriptorRegistry {
         | CordisXHostExtensionPointCatalogV6
         | CordisXHostExtensionPointCatalogV7
         | CordisXHostExtensionPointCatalogV8
+        | CordisXHostExtensionPointCatalogV9
       >
       const schemaVersion =
         catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1 && catalog.schemaVersion === 1
@@ -471,6 +544,8 @@ export class ExtensionPointDescriptorRegistry {
           ? 7
           : catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V8 && catalog.schemaVersion === 8
           ? 8
+          : catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V9 && catalog.schemaVersion === 9
+          ? 9
           : undefined
       if (schemaVersion === undefined) {
         throw new Error('extension point catalog schema/version is unsupported')
@@ -531,11 +606,11 @@ export class ExtensionPointDescriptorRegistry {
     }
   }
 
-  descriptors(): readonly CordisXHostExtensionPointDescriptorV5[] {
+  descriptors(): readonly CordisXHostExtensionPointDescriptorV9[] {
     return this.registrations.flatMap(item => item.descriptors).sort((left, right) => left.id.localeCompare(right.id))
   }
 
-  descriptor(id: string): CordisXHostExtensionPointDescriptorV5 | undefined {
+  descriptor(id: string): CordisXHostExtensionPointDescriptorV9 | undefined {
     return this.descriptors().find(item => item.id === id)
   }
 

@@ -33,12 +33,32 @@ export interface ManagerRouter {
   readonly back: () => void
 }
 
+/**
+ * The old bundle and Marketplace primary routes remain readable so persisted
+ * Manager history and callers from an older renderer can return safely. They
+ * are aliases only: Plugins is the single primary product destination.
+ */
+export function normalizeManagerRoute(route: ManagerRoute): ManagerRoute {
+  if (
+    route.kind === 'primary'
+    && (route.page === 'plugin-bundles' || route.page === 'marketplace')
+  ) return { kind: 'primary', page: 'plugins' }
+  return route
+}
+
+export function normalizeManagerHistory(history: readonly ManagerRoute[]): readonly ManagerRoute[] {
+  const normalized = history.map(normalizeManagerRoute).filter((route, index, routes) => (
+    index === 0 || JSON.stringify(routes[index - 1]) !== JSON.stringify(route)
+  ))
+  return normalized.length > 0 ? normalized : [{ kind: 'primary', page: 'plugins' }]
+}
+
 export function primaryFor(route: ManagerRoute): ManagerPrimaryPage {
-  if (route.kind === 'primary') return route.page
+  if (route.kind === 'primary') {
+    return route.page === 'plugin-bundles' || route.page === 'marketplace' ? 'plugins' : route.page
+  }
   if (route.kind === 'extension-point') return 'extension-points'
   if (route.kind === 'route' || route.kind === 'page') return 'routes'
-  if (route.kind === 'marketplace-plugin' || route.kind === 'marketplace-sources') return 'marketplace'
-  if (route.kind === 'plugin-bundle') return 'plugin-bundles'
   if (route.kind === 'about-acknowledgements') return 'about'
   return 'plugins'
 }

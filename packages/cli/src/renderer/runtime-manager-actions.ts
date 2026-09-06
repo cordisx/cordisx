@@ -370,6 +370,7 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
           id: registration.qualifiedId,
           owner: registration.owner,
           group: registration.group as 'before-settings' | 'after-settings',
+          navigationGroup: item.navigationGroup?.id ?? 'other',
           order: registration.order,
           title,
           description,

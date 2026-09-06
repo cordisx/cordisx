@@ -165,7 +165,6 @@ describe('React Manager plugin bundle pages', () => {
         root.render(<ManagerApp model={model} marketplace={{} as MarketplaceModel} triggerSeat={seat} />)
       )
       await click(dom.window.document, '[data-cordisx-manager-trigger]')
-      await click(dom.window.document, '[data-tab="plugin-bundles"]')
       expect(dom.window.document.querySelector('[data-plugin-bundles-page]')).not.toBeNull()
       await click(dom.window.document, '[data-plugin-bundle-id="team-workflow"]')
 

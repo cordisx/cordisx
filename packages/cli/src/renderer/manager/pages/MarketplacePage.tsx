@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { Input } from 'tdesign-react'
 import type { MarketplaceModel } from '../../marketplace.js'
 import { searchMarketplaceCatalog } from '../../marketplace.js'
 import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
@@ -7,23 +6,12 @@ import { useMarketplaceSnapshot } from '../model/marketplace-store.js'
 import type { ManagerRouter } from '../model/routes.js'
 import { IconButton } from '../../host-ui/IconButton.js'
 import { MoreMenu } from '../../host-ui/MoreMenu.js'
-import { HostIcon } from '../../host-ui/HostIcon.js'
 import { readMarketplaceFavorites, writeMarketplaceFavorites } from '../model/marketplace-favorites.js'
 import { MarketplaceTrustBadges, marketplaceTrustLabels } from '../components/MarketplaceTrustBadges.js'
 import { productLocale } from '../../ui-copy.js'
 
 const COPY = {
   'zh-CN': {
-    tools: '搜索和筛选商店插件',
-    search: '搜索插件…',
-    officialOnly: '仅官方',
-    officialOn: '已启用官方插件筛选',
-    officialOff: '仅显示官方插件',
-    certifiedOnly: '仅认证',
-    certifiedOn: '已启用认证插件筛选',
-    certifiedOff: '仅显示认证插件',
-    sources: '管理来源',
-    sourcesDescription: '配置插件商店来源',
     open: '打开商店插件详情',
     install: '安装',
     installUnavailable: '当前 Host 尚未发布商店安装服务',
@@ -36,16 +24,6 @@ const COPY = {
     empty: '没有匹配的插件',
   },
   en: {
-    tools: 'Search and filter Marketplace plugins',
-    search: 'Search plugins…',
-    officialOnly: 'Official only',
-    officialOn: 'Official-only filter is enabled',
-    officialOff: 'Show Official plugins only',
-    certifiedOnly: 'Certified only',
-    certifiedOn: 'Certified-only filter is enabled',
-    certifiedOff: 'Show Certified plugins only',
-    sources: 'Manage sources',
-    sourcesDescription: 'Configure Marketplace sources',
     open: 'Open Marketplace plugin details',
     install: 'Install',
     installUnavailable: 'This Host has not published Marketplace installation yet',
@@ -60,33 +38,36 @@ const COPY = {
 } as const
 
 export function MarketplacePage(
-  { marketplace, manager, snapshot, router }: {
+  { marketplace, manager, snapshot, router, query, officialOnly, certifiedOnly }: {
     readonly marketplace: MarketplaceModel
     readonly manager: ManagerModel
     readonly snapshot: ManagerSnapshot
     readonly router: ManagerRouter
+    readonly query: string
+    readonly officialOnly: boolean
+    readonly certifiedOnly: boolean
   },
 ) {
   const copy = COPY[productLocale(snapshot.localization.locale)]
   const catalog = useMarketplaceSnapshot(marketplace)
-  const [query, setQuery] = useState('')
-  const [officialOnly, setOfficialOnly] = useState(false)
-  const [certifiedOnly, setCertifiedOnly] = useState(false)
   const [favorites, setFavorites] = useState(readMarketplaceFavorites)
-  const results = useMemo(() =>
-    searchMarketplaceCatalog(catalog.plugins, {
+  const results = useMemo(() => {
+    const installed = new Set(snapshot.plugins.map(plugin => `${plugin.source}\0${plugin.id}`))
+    return searchMarketplaceCatalog(catalog.plugins, {
       query,
       currentLocale: snapshot.localization.locale,
       officialOnly,
       certifiedOnly,
       ...(manager.marketplaceEligibility === undefined ? {} : { eligibility: manager.marketplaceEligibility }),
-    }), [
+    }).filter(result => !installed.has(`${result.plugin.source}\0${result.plugin.id}`))
+  }, [
     catalog.plugins,
     certifiedOnly,
     manager.marketplaceEligibility,
     officialOnly,
     query,
     snapshot.localization.locale,
+    snapshot.plugins,
   ])
   const toggleFavorite = (identity: string) => {
     setFavorites(current => {
@@ -102,48 +83,25 @@ export function MarketplacePage(
     else await navigator.clipboard.writeText(href)
   }
   return (
-    <section className="cxr-page cxr-marketplace" data-marketplace-discovery-page="true">
-      <div className="cxr-marketplace-tools" role="search" aria-label={copy.tools}>
-        <Input
-          className="cxr-marketplace-search"
-          value={query}
-          placeholder={copy.search}
-          clearable
-          prefixIcon={<HostIcon token="search" />}
-          onChange={setQuery}
-        />
-        <span className="cxr-marketplace-tool-actions">
-          <IconButton
-            className="cxr-marketplace-filter"
-            icon="marketplace-official"
-            label={copy.officialOnly}
-            description={officialOnly ? copy.officialOn : copy.officialOff}
-            aria-pressed={officialOnly}
-            onClick={() => setOfficialOnly(value => !value)}
-          />
-          <IconButton
-            className="cxr-marketplace-filter"
-            icon="marketplace-certified"
-            label={copy.certifiedOnly}
-            description={certifiedOnly ? copy.certifiedOn : copy.certifiedOff}
-            aria-pressed={certifiedOnly}
-            onClick={() => setCertifiedOnly(value => !value)}
-          />
-          <IconButton
-            icon="marketplace-source-edit"
-            label={copy.sources}
-            description={copy.sourcesDescription}
-            onClick={() => router.navigate({ kind: 'marketplace-sources' })}
-          />
-        </span>
-      </div>
-      <div className="cxr-marketplace-grid">
+    <section
+      className="cxr-marketplace"
+      data-marketplace-discovery-page="true"
+      data-unified-plugin-results="marketplace"
+    >
+      <div className="cxr-marketplace-grid" role="list">
         {results.map(result => {
           const href = result.plugin.homepage ?? result.plugin.source
           const favorite = favorites.has(result.plugin.identity)
           const trustLabels = marketplaceTrustLabels(result.plugin, snapshot.localization.locale)
           return (
-            <div className="cxr-marketplace-card" key={result.plugin.identity}>
+            <div
+              className="cxr-marketplace-card"
+              key={result.plugin.identity}
+              role="listitem"
+              data-plugin-result-type="plugin"
+              data-plugin-result-source="marketplace"
+              data-marketplace-plugin={result.plugin.id}
+            >
               <button
                 type="button"
                 className="cxr-marketplace-primary"

@@ -153,12 +153,27 @@ export class PluginBundleCoordinatorCore {
       `bundle-${randomUUID()}`,
     )
     try {
-      const manifestFile = await contained(
-        snapshot.payloadDirectory,
-        './cordisx-bundle.json',
-        /^\.\/cordisx-bundle\.json$/,
-        'bundle manifest',
-      )
+      let manifestFile: string
+      try {
+        manifestFile = await contained(
+          snapshot.payloadDirectory,
+          './cordisx-bundle.json',
+          /^\.\/cordisx-bundle\.json$/,
+          'bundle manifest',
+        )
+      } catch (error) {
+        if (error instanceof Error && error.message === 'bundle manifest does not exist') {
+          return this.failure(
+            request,
+            state,
+            active,
+            'invalid-bundle',
+            'The local source does not contain cordisx-bundle.json.',
+            'rejected',
+          )
+        }
+        throw error
+      }
       const manifest = parseManifest(JSON.parse(await readFile(manifestFile, 'utf8')))
       const readmeFile = await contained(snapshot.payloadDirectory, manifest.readme, SAFE_README, 'bundle readme')
       const readme = await readFile(readmeFile, 'utf8')
