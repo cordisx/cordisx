@@ -1733,16 +1733,17 @@ describe('AgentConversationRenderer production DOM', () => {
   })
 
   it('keeps production source independent from Playground and mounts only through the debug fixture direction', async () => {
-    const [renderer, seats, fixture, styles] = await Promise.all([
+    const [renderer, entries, seats, fixture, styles] = await Promise.all([
       readFile(path.resolve('packages/cli/src/renderer/host-ui/conversation/AgentConversationRenderer.tsx'), 'utf8'),
+      readFile(path.resolve('packages/cli/src/renderer/host-ui/conversation/AgentConversationEntries.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/components/HostSeats.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/fixtures/agent-conversation.ts'), 'utf8'),
       readFile(path.resolve('packages/cli/src/renderer/host-ui/conversation/styles.ts'), 'utf8'),
     ])
     expect(renderer).not.toMatch(/playground\/client|HostSeats|\.pg-/i)
     expect(renderer).not.toContain('EmptyRoom')
-    expect(renderer).toContain("event.key !== 'Enter' || event.nativeEvent.isComposing")
-    expect(renderer).toContain('event.preventDefault()')
+    expect(entries).toContain("event.key !== 'Enter' || event.nativeEvent.isComposing")
+    expect(entries).toContain('event.preventDefault()')
     expect(styles).not.toContain('.pg-')
     expect(styles).not.toContain('.cxa-empty')
     expect(seats).toContain('renderer/host-ui/conversation/AgentConversationRenderer')
