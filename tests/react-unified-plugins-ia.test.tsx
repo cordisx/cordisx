@@ -408,7 +408,16 @@ describe('unified Plugins information architecture', () => {
 
   it('renders installed plugins with bundle provenance and one global empty state', async () => {
     const fixture = reactManagerFixture()
-    const state = managerSnapshot()
+    const state = {
+      ...managerSnapshot(),
+      localDevelopment: [{
+        origin: 'local-dev',
+        pluginId: 'not-installed',
+        sourcePath: '/plugins/not-installed.ts',
+        state: 'failed',
+        error: 'build failed',
+      }],
+    } as const satisfies ManagerSnapshot
     const manager: ManagerModel = {
       snapshot: () => state,
       setPluginBlocked: async () => {},
@@ -437,6 +446,8 @@ describe('unified Plugins information architecture', () => {
       expect(page?.querySelector('[data-plugin-source-filter]')).toBeNull()
       expect(page?.querySelector('[data-plugin-type-filter]')).toBeNull()
       expect(page?.querySelector('[data-unified-local-install]')).toBeNull()
+      expect(page?.textContent).not.toContain('not-installed')
+      expect(page?.textContent).not.toContain('/plugins/not-installed.ts')
       expect(page?.querySelector('.cxr-plugins-toolbar .cxr-search')).not.toBeNull()
       expect(page?.querySelector('.cxr-plugins-results')).not.toBeNull()
 

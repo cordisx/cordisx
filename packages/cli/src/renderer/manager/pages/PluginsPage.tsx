@@ -44,14 +44,8 @@ export function PluginsPage(
       }),
     [normalized, provenance, snapshot.plugins],
   )
-  const pendingDevelopment = useMemo(() =>
-    (snapshot.localDevelopment ?? []).filter(item => (
-      !snapshot.plugins.some(plugin => plugin.id === item.pluginId)
-      && (normalized === ''
-        || `${item.pluginId} ${item.sourcePath} ${item.error ?? ''}`.toLocaleLowerCase().includes(normalized))
-    )), [normalized, snapshot.localDevelopment, snapshot.plugins])
   const packageLifecycleAvailable = snapshot.pluginLifecycle?.operationsAvailable === true
-  const empty = pendingDevelopment.length === 0 && plugins.length === 0
+  const empty = plugins.length === 0
 
   const run = async (plugin: ManagerPluginSnapshot, operation: CordisXPluginLifecycleOperationV1) => {
     if (model.requestPluginLifecycle === undefined) return
@@ -97,29 +91,6 @@ export function PluginsPage(
       </div>
 
       <div className="cxr-list cxr-plugins-results" role="list" data-installed-plugin-results="true">
-        {pendingDevelopment.map(item => (
-          <div
-            key={item.sourcePath}
-            className="cxr-local-development-source"
-            role="listitem"
-            data-plugin-origin="local-dev"
-            data-development-state={item.state}
-          >
-            <span className="cxr-card-body">
-              <span className="cxr-card-title">
-                {item.pluginId}
-                <span className="cxr-badge">
-                  {managerCopy(snapshot.localization.locale, 'plugins.local-development')}
-                </span>
-              </span>
-              <code className="cxr-card-code">{item.sourcePath}</code>
-              {item.error === undefined
-                ? null
-                : <span className="cxr-local-development-error" role="alert">{item.error}</span>}
-            </span>
-            <strong>{item.state}</strong>
-          </div>
-        ))}
         {plugins.map(plugin => {
           const bundleNames = provenance.get(plugin.id) ?? []
           return (
