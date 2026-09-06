@@ -86,6 +86,7 @@ import {
   assertControlOptions,
   assertKeys,
   assertPresentationOptions,
+  managerSettingsNavigationSurfaceProvenance,
   type SurfaceContributionSnapshot,
   type SurfaceCurrentContextSnapshot,
   type SurfaceRecord,
@@ -284,7 +285,11 @@ export class SurfaceRegistry {
         ? undefined
         : this.visibility?.view(ownerOrContext))
     assertLocalId(owner, 'surface owner')
-    assertKeys(options, ['name', 'id', 'group', 'order', 'when', 'disabled', 'control'], 'surface contribution options')
+    assertKeys(
+      options,
+      ['name', 'id', 'group', 'order', 'when', 'disabled', 'control', '$schema', 'schemaVersion'],
+      'surface contribution options',
+    )
     assertLocalId(options.id, 'surface contribution id')
     assertPresentationOptions(options.name, {
       ...(options.group === undefined ? {} : { group: options.group }),
@@ -293,6 +298,7 @@ export class SurfaceRegistry {
       ...(options.disabled === undefined ? {} : { disabled: options.disabled }),
     })
     assertControlOptions(options.control)
+    const navigationSurfaceProvenance = managerSettingsNavigationSurfaceProvenance(options, item)
     if (options.control !== undefined && (this.controls === undefined || !this.controls.hasPoint(options.name))) {
       throw new Error(`controlled surface runtime is unavailable for ${options.name}`)
     }
@@ -375,6 +381,9 @@ export class SurfaceRegistry {
       ...(controlLease === undefined ? {} : { controlLease }),
       options: immutableSnapshot(options),
       item: snapshot,
+      ...(navigationSurfaceProvenance === undefined
+        ? {}
+        : { managerSettingsNavigationSurfaceProvenance: navigationSurfaceProvenance }),
       ...(validationError === undefined ? {} : { validationError }),
       rendered: false,
     }
@@ -395,6 +404,7 @@ export class SurfaceRegistry {
       if (!active) throw new Error(`surface contribution ${qualifiedId} is disposed`)
       this.visibility?.assertCallable(generation, candidateView)
       try {
+        managerSettingsNavigationSurfaceProvenance(record.options, next)
         record.item = validateItem(options.name, next)
         record.controlHandle?.updatePresenter(record.item)
         delete record.validationError
@@ -411,6 +421,7 @@ export class SurfaceRegistry {
       record.options = immutableSnapshot({
         name: options.name,
         id: options.id,
+        ...('$schema' in options ? { $schema: options.$schema, schemaVersion: options.schemaVersion } : {}),
         ...(options.control === undefined ? {} : { control: options.control }),
         ...next,
       })
@@ -596,6 +607,9 @@ export class SurfaceRegistry {
           group: record.options.group ?? 'default',
           order: record.options.order ?? 0,
           item: record.item,
+          ...(record.managerSettingsNavigationSurfaceProvenance === undefined
+            ? {}
+            : { managerSettingsNavigationSurfaceProvenance: record.managerSettingsNavigationSurfaceProvenance }),
           visible: error === undefined && evaluateWhen(record.options.when, contexts),
           authorized,
           pointPolicy: pointAccess.policy,

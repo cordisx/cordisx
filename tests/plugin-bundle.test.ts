@@ -255,6 +255,30 @@ async function inspectAndInstall(coordinator: PluginBundleCoordinator, directory
 }
 
 describe('Host plugin bundle coordinator', () => {
+  it('classifies a single-plugin directory as not a bundle without hiding malformed bundles', async () => {
+    const { root, coordinator } = await harness()
+    const directory = path.join(root, 'single-plugin')
+    await pluginPackage(directory, 'single-plugin')
+    const inspected = await request(coordinator, {
+      kind: 'inspect-source',
+      source: { kind: 'local-directory', location: pathToFileURL(directory).href },
+    })
+    expect(inspected).toMatchObject({
+      outcome: 'rejected',
+      error: { code: 'invalid-bundle' },
+    })
+
+    await writeFile(path.join(directory, 'cordisx-bundle.json'), '{ malformed')
+    const malformed = await request(coordinator, {
+      kind: 'inspect-source',
+      source: { kind: 'local-directory', location: pathToFileURL(directory).href },
+    })
+    expect(malformed).toMatchObject({
+      outcome: 'rejected',
+      error: { code: 'apply-failed' },
+    })
+  })
+
   it('keeps manifest-v6 Agent Session capabilities on their dedicated runtime permission plane', async () => {
     const { root, coordinator } = await harness()
     const directory = await bundleFixture({ root, id: 'agent-workflow' })

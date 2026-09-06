@@ -29,6 +29,7 @@ import type {
   CordisXPluginIdentity,
   CordisXPointPolicy,
 } from '../contracts.js'
+import type { ManagerSettingsNavigationProjectionV2 } from '@cordisx/protocol/manager-settings-navigation/v2'
 import {
   CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2,
   CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1,
@@ -46,6 +47,7 @@ import type { CommandSnapshot } from './commands.js'
 import type { NavigationSnapshot, RouteSnapshot } from './navigation.js'
 import type { SurfaceContributionSnapshot, SurfaceCurrentContextSnapshot } from './surfaces.js'
 import { qualifyOwnedId } from './ownership.js'
+import { projectManagerSettingsNavigation } from './manager-settings-navigation.js'
 import type {
   GenerationVisibilityCoordinator,
   PluginGenerationEffectIdentity,
@@ -304,6 +306,7 @@ export interface ExtensionPointRuntimeSnapshot {
   readonly descriptorDiagnostics: readonly ExtensionPointDescriptorDiagnostic[]
   readonly policyDiagnostics: readonly ExtensionPointPolicyDiagnostic[]
   readonly accessDiagnostics: readonly ExtensionPointAccessDiagnostic[]
+  readonly managerSettingsNavigation: ManagerSettingsNavigationProjectionV2
 }
 
 interface ExtensionPointSnapshotPlugin {
@@ -516,6 +519,32 @@ export function buildExtensionPointRuntimeSnapshot(input: {
       plugins: pluginUsages,
     }
   })
+  const managerSettingsNavigation = projectManagerSettingsNavigation(
+    input.registrations.flatMap(registration => {
+      if (
+        registration.surface !== 'manager.settings.navigation-items'
+        || registration.managerSettingsNavigationSurfaceProvenance === undefined
+        || registration.item === null || typeof registration.item !== 'object' || Array.isArray(registration.item)
+        || (registration.group !== 'before-settings' && registration.group !== 'after-settings')
+      ) return []
+      const item = registration.item as { readonly navigationGroup?: { readonly id?: unknown } }
+      const navigationGroup = item.navigationGroup?.id
+      if (
+        navigationGroup !== undefined
+        && !['resources', 'development', 'collaboration', 'other'].includes(String(navigationGroup))
+      ) return []
+      return [{
+        owner: registration.owner,
+        id: registration.id,
+        group: registration.group,
+        order: registration.order,
+        ...(navigationGroup === undefined ? {} : {
+          navigationGroup: navigationGroup as 'resources' | 'development' | 'collaboration' | 'other',
+        }),
+        surfaceProvenance: registration.managerSettingsNavigationSurfaceProvenance,
+      }]
+    }),
+  )
   return {
     schemaVersion: 1,
     currentContext: Object.freeze({
@@ -553,6 +582,7 @@ export function buildExtensionPointRuntimeSnapshot(input: {
     descriptorDiagnostics: input.descriptors.diagnostics(),
     policyDiagnostics: input.broker.policyDiagnostics(),
     accessDiagnostics: input.broker.accessDiagnostics(),
+    managerSettingsNavigation,
   }
 }
 

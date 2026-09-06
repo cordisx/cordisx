@@ -20,9 +20,11 @@ import type {
   CordisXHostExtensionPointCatalogV6,
   CordisXHostExtensionPointCatalogV7,
   CordisXHostExtensionPointCatalogV8,
+  CordisXHostExtensionPointCatalogV9,
   CordisXHostExtensionPointDescriptor,
   CordisXHostExtensionPointDescriptorV3,
   CordisXHostExtensionPointDescriptorV5,
+  CordisXHostExtensionPointDescriptorV9,
   CordisXLocaleCatalog,
   CordisXLocalizedProjection,
   CordisXLocalizedText,
@@ -40,6 +42,7 @@ import {
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V6,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V7,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V8,
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V9,
 } from '../contracts.js'
 import type { CordisXI18nService } from './i18n.js'
 import type { CommandSnapshot } from './commands.js'
@@ -54,6 +57,7 @@ import type {
 import { assertLocalId, assertLocalizedText, ICON_TOKEN_PATTERN, immutableSnapshot } from './validation.js'
 
 import { CATALOG_TEXT, DESCRIPTOR_NAMESPACE } from './extension-point-descriptors.js'
+import { CORDISX_MANAGER_SETTINGS_NAVIGATION_GROUP_CATALOG } from './manager-settings-navigation.js'
 
 function descriptor(
   id: string,
@@ -554,8 +558,8 @@ export const CORDISX_BUILTIN_EXTENSION_POINT_CATALOG = Object.freeze({
 }) satisfies CordisXHostExtensionPointCatalogV8
 
 export const CORDISX_MANAGER_EXTENSION_POINT_CATALOG = Object.freeze({
-  $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
-  schemaVersion: 5,
+  $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V9,
+  schemaVersion: 9,
   points: Object.freeze([
     Object.freeze({
       id: 'manager.settings.tabs',
@@ -612,9 +616,10 @@ export const CORDISX_MANAGER_EXTENSION_POINT_CATALOG = Object.freeze({
         fallback: 'Adds an independent Host-rendered plugin destination across the Manager settings extension seam.',
       }),
       icon: 'host:layers',
-      payloadFamily: 'manager-settings-navigation-item',
+      payloadFamily: 'manager-settings-navigation-item-v2',
       maturity: 'stable',
       adapterSupport: 'supported',
+      navigationGroups: CORDISX_MANAGER_SETTINGS_NAVIGATION_GROUP_CATALOG,
     }),
     Object.freeze({
       id: 'manager.content',
@@ -638,9 +643,9 @@ export const CORDISX_MANAGER_EXTENSION_POINT_CATALOG = Object.freeze({
       routePathFamily: 'manager',
     }),
   ]),
-}) satisfies CordisXHostExtensionPointCatalogV5
+}) satisfies CordisXHostExtensionPointCatalogV9
 
-const ALL_EXTENSION_POINT_DESCRIPTORS: readonly CordisXHostExtensionPointDescriptorV5[] = [
+const ALL_EXTENSION_POINT_DESCRIPTORS: readonly CordisXHostExtensionPointDescriptorV9[] = [
   ...CORDISX_BUILTIN_EXTENSION_POINT_CATALOG.points,
   ...CORDISX_MANAGER_EXTENSION_POINT_CATALOG.points,
 ] as const
@@ -736,6 +741,10 @@ const ZH_MESSAGES: Readonly<Record<string, string>> = {
   'manager.settings.content.description': '兼容已挂载的配置内容标签页；当前管理器布局未挂载此出口。',
   'manager.settings.navigation-items.title': '管理器配置导航条目',
   'manager.settings.navigation-items.description': '跨越管理器配置扩展缝隙添加由宿主渲染的独立插件页面入口。',
+  'manager.settings.navigation-group.resources': '资源',
+  'manager.settings.navigation-group.development': '开发',
+  'manager.settings.navigation-group.collaboration': '协作',
+  'manager.settings.navigation-group.other': '其他',
   'manager.content.title': '管理器内容',
   'manager.content.description': '在宿主拥有的标准管理器页面标题下挂载受控的可信本地插件正文。',
   'diagnostic.anchor': '当前未定位到原生宿主点位。',

@@ -75,9 +75,20 @@ export const PLUGIN_SHARING_DEMO_COPY = {
   'plugins.uninstall': { en: 'Uninstall', 'zh-CN': '卸载' },
   'plugins.uninstall-unavailable': { en: 'Uninstall (unavailable)', 'zh-CN': '卸载（不可用）' },
   'plugins.local-description': { en: 'Local CordisX plugin', 'zh-CN': '本地 CordisX 插件' },
-  'plugins.collection-label': { en: 'Current bundle plugins', 'zh-CN': '当前 bundle 插件' },
   'plugins.search-label': { en: 'Search plugins', 'zh-CN': '搜索 CordisX 插件' },
   'plugins.search-placeholder': { en: 'Search plugins or extension points', 'zh-CN': '搜索插件或扩展点' },
+  'plugins.collection-label': {
+    en: 'Plugins, plugin bundles, and Marketplace catalog',
+    'zh-CN': '插件、插件包与插件商店目录',
+  },
+  'plugins.collection-search-label': {
+    en: 'Search the unified plugin collection',
+    'zh-CN': '搜索统一插件集合',
+  },
+  'plugins.collection-search-placeholder': {
+    en: 'Search installed plugins, bundles, or Marketplace…',
+    'zh-CN': '搜索已安装插件、插件包或插件商店…',
+  },
   'plugins.search-clear': { en: 'Clear plugin search', 'zh-CN': '清除插件搜索' },
   'plugins.empty': { en: 'No plugins available', 'zh-CN': '暂无可用插件' },
   'plugins.no-matches': { en: 'No matching plugins', 'zh-CN': '没有匹配的插件' },

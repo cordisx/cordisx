@@ -1,5 +1,7 @@
 import { Context, type Effect, Service } from '@deepseek-ai/cordis'
+import type { ManagerSettingsNavigationSurfaceProvenanceV2 } from '@cordisx/protocol/manager-settings-navigation/v2'
 import {
+  CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9,
   CORDISX_IMPLEMENTED_SURFACE_NAMES,
   CORDISX_SURFACE_NAMES,
   type CordisXCommandReference,
@@ -124,6 +126,7 @@ export interface SurfaceRecord {
   readonly controlLease?: CordisXExtensionPointControlLease & { dispose(): void }
   options: CordisXContributionOptions
   item: unknown
+  readonly managerSettingsNavigationSurfaceProvenance?: ManagerSettingsNavigationSurfaceProvenanceV2
   validationError?: string
   rendered: boolean
 }
@@ -136,6 +139,7 @@ export interface SurfaceContributionSnapshot {
   readonly group: string
   readonly order: number
   readonly item: unknown
+  readonly managerSettingsNavigationSurfaceProvenance?: ManagerSettingsNavigationSurfaceProvenanceV2
   readonly visible: boolean
   readonly authorized: boolean
   readonly pointPolicy: 'inherit' | 'allow' | 'deny'
@@ -386,6 +390,39 @@ export function assertControlOptions(control: CordisXExtensionPointControlClaimO
   }
 }
 
+export function managerSettingsNavigationSurfaceProvenance(
+  options: Readonly<{
+    readonly name: CordisXSurfaceName
+    readonly $schema?: unknown
+    readonly schemaVersion?: unknown
+  }>,
+  item: unknown,
+): ManagerSettingsNavigationSurfaceProvenanceV2 | undefined {
+  if (options.name !== 'manager.settings.navigation-items') return undefined
+  const hasSchema = options.$schema !== undefined
+  const hasVersion = options.schemaVersion !== undefined
+  if (hasSchema !== hasVersion) {
+    throw new Error('manager.settings.navigation-items requires $schema and schemaVersion together')
+  }
+  const navigationGroup = item !== null && typeof item === 'object' && !Array.isArray(item)
+    ? (item as { readonly navigationGroup?: unknown }).navigationGroup
+    : undefined
+  if (!hasSchema) {
+    if (navigationGroup !== undefined) {
+      throw new Error('manager settings navigationGroup requires the exact surface-contribution.v9 identity')
+    }
+    return Object.freeze({ kind: 'legacy-unversioned' })
+  }
+  if (options.$schema !== CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9 || options.schemaVersion !== 9) {
+    throw new Error('manager.settings.navigation-items requires the exact surface-contribution.v9 identity')
+  }
+  return Object.freeze({
+    kind: 'versioned',
+    $schema: CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9,
+    schemaVersion: 9,
+  })
+}
+
 export function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
   const snapshot = immutableSnapshot(item)
   if (snapshot === null || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
@@ -596,12 +633,22 @@ export function validateItem(surface: CordisXSurfaceName, item: unknown): unknow
     assertLocalId(tab.route.id, 'manager settings content tab route id')
   } else if (surface === 'manager.settings.navigation-items') {
     const navigation = snapshot as CordisXManagerSettingsNavigationItem
-    assertKeys(snapshot, ['route'], 'manager settings navigation item')
+    assertKeys(snapshot, ['route', 'navigationGroup'], 'manager settings navigation item')
     if (navigation.route === null || typeof navigation.route !== 'object') {
       throw new Error('manager settings navigation item requires a route reference')
     }
     assertKeys(navigation.route, ['id', 'params'], 'manager settings navigation item route')
     assertLocalId(navigation.route.id, 'manager settings navigation item route id')
+    if (navigation.navigationGroup !== undefined) {
+      if (
+        navigation.navigationGroup === null || typeof navigation.navigationGroup !== 'object'
+        || Array.isArray(navigation.navigationGroup)
+      ) throw new Error('manager settings navigationGroup must be an object')
+      assertKeys(navigation.navigationGroup, ['id'], 'manager settings navigationGroup')
+      if (!['resources', 'development', 'collaboration', 'other'].includes(navigation.navigationGroup.id)) {
+        throw new Error(`manager settings navigationGroup ${String(navigation.navigationGroup.id)} is unknown`)
+      }
+    }
   } else if (surface === 'environment.panel.sections') {
     const section = snapshot as CordisXEnvironmentSection
     assertKeys(snapshot, ['sectionId', 'title', 'description', 'icon'], 'environment section')

@@ -5,6 +5,47 @@ import { type ManagerTab, ManagerTabs } from '../components/ManagerTabs.js'
 import type { ManagerRouter } from '../model/routes.js'
 
 type ExtensionPointTab = 'usage' | 'information' | 'diagnostics'
+type NavigationGroupId = 'resources' | 'development' | 'collaboration' | 'other'
+type NavigationAssignment = 'declared' | 'legacy-fallback' | 'unassigned-fallback'
+
+interface NavigationDiagnosticsProjection {
+  readonly contract: 'cordisx.manager-settings-navigation-projection/v2'
+  readonly schemaVersion: 2
+  readonly catalog: {
+    readonly contract: 'cordisx.manager-settings-navigation-groups/v1'
+    readonly schemaVersion: 1
+    readonly fallbackGroup: 'other'
+    readonly groups: readonly {
+      readonly id: NavigationGroupId
+      readonly label: { readonly fallback: string }
+      readonly order: number
+    }[]
+  }
+  readonly contributions: readonly {
+    readonly id: string
+    readonly owner: string
+    readonly surfaceProvenance:
+      | { readonly kind: 'versioned'; readonly schemaVersion: 9; readonly $schema: string }
+      | { readonly kind: 'legacy-unversioned' }
+    readonly insertionGroup: 'before-settings' | 'after-settings'
+    readonly declaredGroup?: NavigationGroupId
+    readonly effectiveGroup: NavigationGroupId
+    readonly assignment: NavigationAssignment
+  }[]
+}
+
+function navigationProjection(snapshot: ManagerSnapshot): NavigationDiagnosticsProjection | undefined {
+  const extensionPoints = snapshot.extensionPoints as unknown as {
+    readonly managerSettingsNavigation?: NavigationDiagnosticsProjection
+  } | undefined
+  return extensionPoints?.managerSettingsNavigation
+}
+
+const assignmentCopy: Readonly<Record<NavigationAssignment, string>> = {
+  declared: '使用声明的视觉分组',
+  'legacy-fallback': '旧版注册未声明视觉分组，归入兜底分组',
+  'unassigned-fallback': 'v9 注册未声明视觉分组，归入兜底分组',
+}
 const tabs: readonly ManagerTab<ExtensionPointTab>[] = [
   { id: 'usage', label: '使用情况', icon: 'plugins' },
   { id: 'information', label: '信息', icon: 'point-info' },
@@ -50,6 +91,7 @@ export function ExtensionPointDetailPage(
   }]
   const controlSnapshot = snapshot.extensionPointControls
   const control = controlSnapshot?.points.find(item => item.id === pointId)
+  const navigation = pointId === 'manager.settings.navigation-items' ? navigationProjection(snapshot) : undefined
   return (
     <section className="cxr-page">
       <ManagerTabs label="扩展点详情" tabs={tabs} value={tab} onChange={setTab} />
@@ -187,6 +229,28 @@ export function ExtensionPointDetailPage(
             <p>{point.descriptionProjection.text}</p>
             <code>{point.id}</code>
           </section>
+          {navigation === undefined ? null : (
+            <section className="cxr-section" data-manager-navigation-contract>
+              <h3>导航分组契约</h3>
+              <p>
+                Surface contribution v9 · manager-settings-navigation-item-v2 · projection v2
+              </p>
+              <p>插入位置用于确定扩展入口的相对顺序；视觉分组用于组织 Manager 左侧导航，两者互不替代。</p>
+              <dl>
+                {navigation.catalog.groups.map(group => (
+                  <div data-manager-navigation-group={group.id} key={group.id}>
+                    <dt>{group.label.fallback}</dt>
+                    <dd>
+                      <code>{group.id}</code> · 顺序 {group.order}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              <p>
+                未声明的入口归入 <code>{navigation.catalog.fallbackGroup}</code>。
+              </p>
+            </section>
+          )}
         </div>
       )}
       {tab === 'diagnostics' && (
@@ -211,6 +275,61 @@ export function ExtensionPointDetailPage(
               <p>{item.message}</p>
             </section>
           ))}
+          {navigation?.contributions.map(item => {
+            const versioned = item.surfaceProvenance.kind === 'versioned'
+            return (
+              <section
+                className="cxr-section"
+                data-manager-navigation-contribution={item.id}
+                data-manager-navigation-assignment={item.assignment}
+                key={item.id}
+              >
+                <h3>{item.id}</h3>
+                <dl>
+                  <div>
+                    <dt>Qualified contribution ID</dt>
+                    <dd>
+                      <code>{item.id}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Owner</dt>
+                    <dd>
+                      <code>{item.owner}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Surface schema version</dt>
+                    <dd>{versioned ? item.surfaceProvenance.schemaVersion : '未声明（legacy v5-v8）'}</dd>
+                  </div>
+                  <div>
+                    <dt>Insertion group</dt>
+                    <dd>
+                      <code>{item.insertionGroup}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Declared visual group</dt>
+                    <dd>
+                      <code>{item.declaredGroup ?? '未声明'}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Effective visual group</dt>
+                    <dd>
+                      <code>{item.effectiveGroup}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Assignment</dt>
+                    <dd>
+                      <code>{item.assignment}</code> · {assignmentCopy[item.assignment]}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+            )
+          })}
         </>
       )}
     </section>

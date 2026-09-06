@@ -1,22 +1,26 @@
+import { useRef } from 'react'
 import type { ManagerSettingsNavigationItemSnapshot, ManagerSnapshot } from '../../manager.js'
 import { managerCopy } from '../../ui-copy.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { BrandMark } from '../../host-ui/BrandMark.js'
 import { HostSurfaceIcon } from '../../host-ui/HostSurfaceIcon.js'
 import type { ManagerIconToken } from '../../icons.js'
-import { sortManagerSettingsNavigationItems } from '../../manager-settings-navigation.js'
+import {
+  CORDISX_MANAGER_SETTINGS_NAVIGATION_GROUP_CATALOG,
+  type ManagerNavigationVisualGroup,
+  sortManagerSettingsNavigationItems,
+} from '../../manager-settings-navigation.js'
 import { type ManagerPrimaryPage, type ManagerRouter, primaryFor } from '../model/routes.js'
 
 const core: readonly {
   readonly page: ManagerPrimaryPage
   readonly icon: ManagerIconToken
   readonly copy: Parameters<typeof managerCopy>[1]
+  readonly group: ManagerNavigationVisualGroup
 }[] = [
-  { page: 'plugins', icon: 'plugins', copy: 'manager.nav.plugins' },
-  { page: 'plugin-bundles', icon: 'plugins', copy: 'manager.nav.plugin-bundles' },
-  { page: 'extension-points', icon: 'outlets', copy: 'manager.nav.extension-points' },
-  { page: 'routes', icon: 'routes', copy: 'manager.nav.routes' },
-  { page: 'marketplace', icon: 'marketplace', copy: 'manager.nav.marketplace' },
+  { page: 'plugins', icon: 'plugins', copy: 'manager.nav.plugins', group: 'resources' },
+  { page: 'extension-points', icon: 'outlets', copy: 'manager.nav.extension-points', group: 'development' },
+  { page: 'routes', icon: 'routes', copy: 'manager.nav.routes', group: 'development' },
 ]
 
 export interface NavigationProps {
@@ -42,26 +46,72 @@ function contributed(item: ManagerSettingsNavigationItemSnapshot, router: Manage
   )
 }
 
+function groupLabel(locale: string, group: ManagerNavigationVisualGroup): string {
+  return managerCopy(locale, `manager.nav.group.${group}`)
+}
+
 export function Navigation({ snapshot, router }: NavigationProps) {
+  const navigation = useRef<HTMLElement>(null)
   const locale = snapshot.localization.locale
   const primary = router.route.kind === 'manager-content' ? undefined : primaryFor(router.route)
   const contributions = sortManagerSettingsNavigationItems(snapshot.settingsNavigationItems ?? [])
+  const groups = CORDISX_MANAGER_SETTINGS_NAVIGATION_GROUP_CATALOG.groups.flatMap(group => {
+    const coreItems = core.filter(item => item.group === group.id)
+    const contributedItems = contributions.filter(item => (item.navigationGroup ?? 'other') === group.id)
+    return coreItems.length === 0 && contributedItems.length === 0 ? [] : [{ group, coreItems, contributedItems }]
+  })
   return (
-    <nav className="cxr-nav" aria-label={managerCopy(locale, 'manager.navigation')}>
-      {core.map(item => (
-        <button
-          key={item.page}
-          type="button"
-          data-tab={item.page}
-          {...(primary === item.page ? { 'aria-current': 'page' as const } : {})}
-          onClick={() => router.navigate({ kind: 'primary', page: item.page })}
-        >
-          <HostIcon token={item.icon} state={primary === item.page ? 'active' : 'default'} />
-          <span>{managerCopy(locale, item.copy)}</span>
-        </button>
-      ))}
-      {contributions.filter(item => item.group === 'before-settings').map(item => contributed(item, router))}
-      {contributions.filter(item => item.group === 'after-settings').map(item => contributed(item, router))}
+    <nav
+      ref={navigation}
+      className="cxr-nav"
+      aria-label={managerCopy(locale, 'manager.navigation')}
+      onKeyDown={event => {
+        if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+        const buttons = [...(navigation.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
+        const current = buttons.indexOf(event.target as HTMLButtonElement)
+        if (current < 0 || buttons.length === 0) return
+        event.preventDefault()
+        const next = event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+          ? buttons.length - 1
+          : event.key === 'ArrowUp'
+          ? (current - 1 + buttons.length) % buttons.length
+          : (current + 1) % buttons.length
+        buttons[next]?.focus()
+      }}
+    >
+      {groups.map(({ group, coreItems, contributedItems }) => {
+        const before = contributedItems.filter(item => item.group === 'before-settings')
+        const after = contributedItems.filter(item => item.group === 'after-settings')
+        const label = groupLabel(locale, group.id)
+        const headingId = `cxr-navigation-group-${group.id}`
+        return (
+          <section
+            className="cxr-nav-group"
+            data-navigation-group={group.id}
+            role="group"
+            aria-labelledby={headingId}
+            key={group.id}
+          >
+            <span id={headingId} className="cxr-nav-group-label" role="heading" aria-level={2}>{label}</span>
+            {before.map(item => contributed(item, router))}
+            {coreItems.map(item => (
+              <button
+                key={item.page}
+                type="button"
+                data-tab={item.page}
+                {...(primary === item.page ? { 'aria-current': 'page' as const } : {})}
+                onClick={() => router.navigate({ kind: 'primary', page: item.page })}
+              >
+                <HostIcon token={item.icon} state={primary === item.page ? 'active' : 'default'} />
+                <span>{managerCopy(locale, item.copy)}</span>
+              </button>
+            ))}
+            {after.map(item => contributed(item, router))}
+          </section>
+        )
+      })}
       <span className="cxr-nav-spacer" />
       <button
         type="button"

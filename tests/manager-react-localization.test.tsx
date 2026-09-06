@@ -139,7 +139,9 @@ describe('React Manager localization', () => {
       expect(dialog.getAttribute('aria-label')).toBe('CordisX Plugin Manager')
       expect(dialog.querySelector('.cxr-header [aria-label="Close CordisX Manager"]')).not.toBeNull()
       expect(dialog.querySelector('[data-tab="plugins"]')?.textContent).toBe('Plugins')
-      expect(dialog.querySelector('[data-tab="plugin-bundles"]')?.textContent).toBe('Plugin bundles')
+      expect(dialog.querySelector('[data-tab="plugin-bundles"]')).toBeNull()
+      expect(dialog.querySelector('[data-tab="marketplace"]')).toBeNull()
+      expect(dialog.querySelector('[data-unified-plugins-page="true"]')).not.toBeNull()
       expect(dialog.querySelector('.cxr-heading')?.textContent).toBe('Plugins')
       expect(dialog.querySelector('[data-plugin-origin="local-dev"]')?.textContent).toContain('Local development')
       expect(dialog.querySelector('[data-plugin-id="demo"]')?.getAttribute('aria-label')).toBe(
