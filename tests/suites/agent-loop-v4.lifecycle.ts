@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises'
 import { expect, it } from 'vitest'
 import { type AgentLoopV4Transport, CordisXAgentLoopBrokerV4 } from '../../packages/cli/src/renderer/agent-loop-v4.js'
 import {
@@ -7,6 +6,7 @@ import {
   type PlaygroundMockCliExecutor,
 } from '../../packages/cli/src/renderer/playground-mock-agent-loop.js'
 import { base, definition, options } from './agent-loop-v4.fixtures.js'
+import { readOwnedSourceGraph } from '../source-module-graph.js'
 
 export function registerLifecycleTests() {
   it('emits retryable introduction failure and permits a new operation to retry the exact member run', async () => {
@@ -521,8 +521,7 @@ export function registerLifecycleTests() {
     expect(disposedRegistrations).toBe(1)
     second.dispose()
     expect(disposedRegistrations).toBe(1)
-    expect(await readFile(new URL('../../packages/cli/src/renderer/runtime.ts', import.meta.url), 'utf8')).toContain(
-      'agentLoopBrokerV4.dispose()',
-    )
+    const runtime = await readOwnedSourceGraph(new URL('../../packages/cli/src/renderer/runtime.ts', import.meta.url))
+    expect(runtime.executableSource).toMatch(/agentLoopBrokerV4\(\)!\.dispose\(\)/u)
   })
 }
