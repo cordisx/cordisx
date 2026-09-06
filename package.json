@@ -70,7 +70,10 @@
     "test": "npm run build --workspace=@cordisx/schemastery-ui && vitest run --maxWorkers=1 --no-file-parallelism --testTimeout=30000 --hookTimeout=30000",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "format": "dprint fmt",
-    "format:check": "dprint check"
+    "format:check": "dprint check",
+    "lint:source": "eslint .",
+    "lint": "eslint .",
+    "lint:staged": "lint-staged --config .lintstagedrc.mjs"
   },
   "engines": {
     "node": ">=22.19"
@@ -110,7 +113,11 @@
   },
   "devDependencies": {
     "@cordisx/protocol": "github:cordisx/cordisx-protocol#3aa7d4de3d775aded3c81c72f5dae9842c6af812",
-    "dprint": "0.57.1"
+    "dprint": "0.57.1",
+    "@cordisx/eslint-config": "github:cordisx/cordisxmono#c63c2e8c2ba7e11502934a52ad2ce3734e804cdc",
+    "eslint": "9.39.4",
+    "@typescript-eslint/parser": "8.69.0",
+    "lint-staged": "16.2.7"
   },
   "bundleDependencies": [
     "@cordisx/schemastery-ui"
