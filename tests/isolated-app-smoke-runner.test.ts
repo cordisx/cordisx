@@ -84,7 +84,7 @@ describe('isolated app smoke runner', () => {
         JSON.stringify({
           plugins: [
             { id: 'local', entry: './plugins/local.ts' },
-            { id: 'builtin', entry: 'cordisx:channel' },
+            { id: 'channel', entry: 'cordisx:channel' },
           ],
         }),
       )
@@ -92,7 +92,7 @@ describe('isolated app smoke runner', () => {
       const copied = JSON.parse(await readFile(path.join(homeRoot, '.cordisx', 'config.json'), 'utf8'))
       expect(copied.plugins).toEqual([
         { id: 'local', entry: path.join(fixtureRoot, 'plugins/local.ts') },
-        { id: 'builtin', entry: 'cordisx:channel' },
+        { id: 'channel', entry: 'cordisx:channel' },
       ])
       await homeHelper.cleanupIsolatedSmokeHome(homeRoot)
     } finally {

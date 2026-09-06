@@ -1,6 +1,7 @@
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { resolveProviderConfigs } from '../providers/config.js'
 import type { CliProxyProviderConfig } from '../providers/contracts.js'
@@ -190,8 +191,7 @@ function pluginEntry(value: unknown, label: string, rootDir: string): string {
     return fileURLToPath(new URL(`../plugins/cli-proxy-api/index.${extension}`, import.meta.url))
   }
   if (entry === 'cordisx:channel') {
-    const extension = import.meta.url.endsWith('.ts') ? 'ts' : 'js'
-    return fileURLToPath(new URL(`../plugins/channel/index.${extension}`, import.meta.url))
+    return createRequire(import.meta.url).resolve('@cordisx/channel')
   }
   if (entry.startsWith('cordisx:')) throw new Error(`${label} uses an unknown built-in plugin`)
   return path.resolve(rootDir, entry)

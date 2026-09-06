@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process'
-import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { npmPackItem } from './npm-pack-report.mjs'
+import { enableInstalledChannel, verifyInstalledChannel } from './check-installed-channel.mjs'
+import { verifyGeneratedViteGraph } from './check-installed-vite-graph.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -61,21 +63,6 @@ async function expectMissing(target, label) {
     throw error
   }
   throw new Error(`${label} must not be created by --dry-run: ${target}`)
-}
-
-async function verifyGeneratedViteGraph(graphRoot, label) {
-  const artifact = JSON.parse(await readFile(path.join(graphRoot, 'artifact.json'), 'utf8'))
-  const entry = artifact.files?.find(file => file.path === artifact.entry)
-  const hasLazyModule = artifact.files?.some(file => file.kind === 'module' && file.dynamicImports?.length > 0)
-  if (
-    artifact.contract !== 'cordisx.plugin-generation-artifact/v1'
-    || artifact.entry !== './module.js' || entry?.kind !== 'module'
-    || hasLazyModule !== true
-  ) {
-    throw new Error(`${label} did not emit the expected lazy Vite ESM entry`)
-  }
-  const chunks = await readdir(path.join(graphRoot, 'chunks'))
-  if (!chunks.some(file => file.endsWith('.js'))) throw new Error(`${label} did not emit a lazy JavaScript chunk`)
 }
 
 async function verifyGeneratedProject(project, cordisxTarball, expectedVersion) {
@@ -199,7 +186,6 @@ try {
   if (protocolTarball !== undefined) await access(protocolTarball)
   await run('npm', [
     'install',
-    '--ignore-scripts',
     '--no-audit',
     '--no-fund',
     '--loglevel=error',
@@ -562,6 +548,7 @@ createElement(AgentAvatar, props)
     enabled: true,
     config: {},
   })
+  enableInstalledChannel(initialConfig)
   await writeFile(configPath, `${JSON.stringify(initialConfig, null, 2)}\n`, 'utf8')
   const installedSchemasteryUiRoot = path.join(installedCordisXRoot, 'node_modules', '@cordisx', 'schemastery-ui')
   await access(path.join(installedSchemasteryUiRoot, 'dist', 'index.js'))
@@ -703,12 +690,18 @@ createElement(AgentAvatar, props)
   ) {
     throw new Error('installed public ctx.documents bridge did not survive launcher store reload')
   }
-  const installedBundle = await buildRendererBundle(await loadConfig(configPath))
+  const installedConfig = await verifyInstalledChannel({
+    cordisxManifest: installedCordisXManifest,
+    loadConfig,
+    configPath,
+  })
+  const installedBundle = await buildRendererBundle(installedConfig)
   if (
     !installedBundle.includes('# CLIProxy Providers')
     || !installedBundle.includes('External providers and the native connection')
+    || !installedBundle.includes('/manager/extensions/channels')
   ) {
-    throw new Error('installed built-in CLIProxy plugin bundle is missing its product README')
+    throw new Error('installed external plugin composition is incomplete')
   }
   const localAgentLoopConfigPath = path.join(runnerDirectory, 'local-agent-loop.config.json')
   await writeFile(

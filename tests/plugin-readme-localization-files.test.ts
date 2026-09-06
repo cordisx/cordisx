@@ -15,7 +15,6 @@ const pluginRoots = [
   'examples/plugins/lifecycle-smoke',
   'examples/plugins/permission-v2-smoke',
   'examples/plugins/permission-v2-smoke-expanded',
-  'packages/cli/src/plugins/channel',
   'packages/cli/src/plugins/cli-proxy-api',
   'packages/agent-trace-showcase',
 ] as const
