@@ -22,6 +22,7 @@ import type { CordisXPluginManifestV7, CordisXPluginManifestV8 } from '../permis
 import { normalizePluginManifestV7, normalizePluginManifestV8 } from '../permission-model-v4.js'
 import { CapabilityRiskCatalog } from '../capability-risk-catalog.js'
 import { assertNoPrivateReactBundle, cordisXReactVirtualModules } from './react-virtual-modules.js'
+import { buildProductionPluginGraph, type BuiltPluginGenerationArtifact } from './production-plugin-build.js'
 
 const WATCH_INTERVAL_MS = 200
 const DEBOUNCE_MS = 120
@@ -46,8 +47,9 @@ export interface LocalDevelopmentBuild {
   readonly sourceRoot: string
   readonly identitySource: string
   readonly digest: `sha256:${string}`
-  readonly moduleFactorySource: string
-  readonly runtimeArtifactSource: string
+  readonly moduleFactorySource?: string
+  readonly runtimeArtifactSource?: string
+  readonly browserArtifact?: BuiltPluginGenerationArtifact
   readonly watchFiles: readonly string[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
   readonly readme?: string
@@ -58,6 +60,8 @@ export interface LocalDevelopmentBuild {
 interface LocalDevelopmentBuildOptions {
   /** Inline by default for ordinary local development and real-App diagnostics. */
   readonly sourcemap?: 'inline' | false
+  /** Playground dev:ui uses the same browser ESM graph as production. */
+  readonly browserGraphOnly?: boolean
 }
 
 interface LocalDevelopmentEntry {
@@ -313,6 +317,10 @@ function absoluteInputs(root: string, inputs: Readonly<Record<string, unknown>>)
   )
 }
 
+function absoluteGraphInputs(inputs: readonly string[]): readonly string[] {
+  return inputs.filter(input => path.isAbsolute(input) && !input.includes('\0'))
+}
+
 /** Build one immutable local-dev candidate and return its complete esbuild input graph. */
 export async function buildLocalDevelopmentPlugin(
   rawEntry: string,
@@ -336,44 +344,54 @@ export async function buildLocalDevelopmentPlugin(
     write: false,
     logLevel: 'silent' as const,
   }
-  const [moduleResult, readmes] = await Promise.all([
-    build({ entryPoints: [entry], format: 'iife', globalName: '__cordisxPluginModule', ...common }),
+  const [moduleResult, browserArtifact, readmes] = await Promise.all([
+    options.browserGraphOnly === true
+      ? undefined
+      : build({ entryPoints: [entry], format: 'iife', globalName: '__cordisxPluginModule', ...common }),
+    options.browserGraphOnly === true ? buildProductionPluginGraph(root, entry) : undefined,
     readReadmes(root),
   ])
   const packageSource = { files: packageFiles, entityTemplates, ...(manifest === undefined ? {} : { manifest }) }
   if (packageSource.manifest !== undefined && packageSource.manifest.id !== id) {
     throw new Error('local development runtime manifest id does not match the selected entry')
   }
-  if (moduleResult.metafile === undefined) {
+  if (moduleResult !== undefined && moduleResult.metafile === undefined) {
     throw new Error('local development build produced no dependency metadata')
   }
-  assertNoPrivateReactBundle(moduleResult.metafile, `local development plugin ${id}`)
-  const moduleOutput = moduleResult.outputFiles?.[0]
-  if (moduleOutput === undefined) {
+  if (moduleResult?.metafile !== undefined) {
+    assertNoPrivateReactBundle(moduleResult.metafile, `local development plugin ${id}`)
+  }
+  const moduleOutput = moduleResult?.outputFiles?.[0]
+  if (moduleOutput === undefined && browserArtifact === undefined) {
     throw new Error('local development build produced no browser artifact')
   }
   // Both an existing renderer and a future bootstrap must instantiate the
   // exact same module factory with the Host-issued Plugin Console facade.  Do
   // not evaluate a module object eagerly in the CDP global console.
-  const runtimeArtifactSource =
-    `globalThis.__cordisxPendingPluginModuleFactoryV1 = (console) => {\n${moduleOutput.text}\nreturn __cordisxPluginModule;\n};\n`
-  const digest = `sha256:${
-    createHash('sha256')
-      .update(moduleOutput.text)
-      .update('\0')
-      .update(runtimeArtifactSource)
-      .update('\0')
-      .update(version)
-      .update('\0')
-      .update(readmes.default ?? '')
-      .update('\0')
-      .update(JSON.stringify(readmes.localized))
-      .update('\0')
-      .update(JSON.stringify(packageSource.entityTemplates))
-      .update('\0')
-      .update(JSON.stringify(packageSource.manifest ?? null))
-      .digest('hex')
-  }` as const
+  const runtimeArtifactSource = moduleOutput === undefined
+    ? undefined
+    : `globalThis.__cordisxPendingPluginModuleFactoryV1 = (console) => {\n${moduleOutput.text}\nreturn __cordisxPluginModule;\n};\n`
+  const digestHash = createHash('sha256')
+    .update(moduleOutput?.text ?? '')
+    .update('\0')
+    .update(runtimeArtifactSource ?? '')
+    .update('\0')
+    .update(version)
+    .update('\0')
+    .update(readmes.default ?? '')
+    .update('\0')
+    .update(JSON.stringify(readmes.localized))
+    .update('\0')
+    .update(JSON.stringify(packageSource.entityTemplates))
+    .update('\0')
+    .update(JSON.stringify(packageSource.manifest ?? null))
+  if (browserArtifact !== undefined) {
+    digestHash.update('\0browser-artifact\0').update(JSON.stringify(browserArtifact.manifest))
+    for (const [file, contents] of [...browserArtifact.files].sort(([left], [right]) => left.localeCompare(right))) {
+      digestHash.update('\0browser-file\0').update(file).update('\0').update(contents)
+    }
+  }
+  const digest = `sha256:${digestHash.digest('hex')}` as const
   const sourceKey = createHash('sha256').update(entry).digest('hex').slice(0, 24)
   return {
     id,
@@ -382,15 +400,17 @@ export async function buildLocalDevelopmentPlugin(
     sourceRoot: root,
     identitySource: `file:///cordisx-local-dev/${sourceKey}/${id}.js`,
     digest,
-    moduleFactorySource: moduleOutput.text,
-    runtimeArtifactSource,
+    ...(moduleOutput === undefined ? {} : { moduleFactorySource: moduleOutput.text }),
+    ...(runtimeArtifactSource === undefined ? {} : { runtimeArtifactSource }),
+    ...(browserArtifact === undefined ? {} : { browserArtifact }),
     watchFiles: [
       ...new Set([
         entry,
         path.join(root, 'package.json'),
         ...packageSource.files,
         ...readmes.files,
-        ...absoluteInputs(root, moduleResult.metafile.inputs),
+        ...absoluteInputs(root, moduleResult?.metafile?.inputs ?? {}),
+        ...absoluteGraphInputs(browserArtifact?.inputModules ?? []),
       ]),
     ].sort(),
     entityTemplates: packageSource.entityTemplates,
@@ -748,7 +768,7 @@ export class LocalDevelopmentController {
           moduleGeneration,
           dependencies: [],
         },
-        moduleFactorySource: build.moduleFactorySource,
+        ...(build.moduleFactorySource === undefined ? {} : { moduleFactorySource: build.moduleFactorySource }),
         ...(build.manifest === undefined ? {} : { manifest: build.manifest }),
         development: readyState,
         ...(build.readme === undefined ? {} : { readme: build.readme }),
@@ -797,7 +817,7 @@ export class LocalDevelopmentController {
         candidate,
         targetId: build.id,
         affectedPluginIds: [build.id],
-        runtimeArtifactSource: build.runtimeArtifactSource,
+        ...(build.runtimeArtifactSource === undefined ? {} : { runtimeArtifactSource: build.runtimeArtifactSource }),
         developmentPackage: {
           id: build.id,
           version: build.version,

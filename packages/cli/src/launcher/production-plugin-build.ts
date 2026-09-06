@@ -129,7 +129,7 @@ function cordisXProductionSharedModules(
       }
       if (SHARED_MODULES.has(source as PluginGenerationSharedImportV1)) {
         sharedImports.add(source as PluginGenerationSharedImportV1)
-        return `${SHARED_PREFIX}${source}`
+        return { id: `${SHARED_PREFIX}${source}`, external: false, moduleSideEffects: true }
       }
       if (!PEER_MODULES.has(source as PluginGenerationSharedImportV1) || importer === undefined) return
       const normalized = normalizePath(importer)
@@ -139,7 +139,11 @@ function cordisXProductionSharedModules(
         && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
       ) return
       sharedImports.add(source as PluginGenerationSharedImportV1)
-      return `${SHARED_PREFIX}${sharedModuleId(source as PluginGenerationSharedImportV1)}`
+      return {
+        id: `${SHARED_PREFIX}${sharedModuleId(source as PluginGenerationSharedImportV1)}`,
+        external: false,
+        moduleSideEffects: true,
+      }
     },
     load(id) {
       if (!id.startsWith(SHARED_PREFIX)) return

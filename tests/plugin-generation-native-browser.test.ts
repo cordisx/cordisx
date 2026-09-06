@@ -17,6 +17,7 @@ import {
 import { buildRendererBundle, buildRendererCompositionSource } from '../packages/cli/src/launcher/bundle.js'
 import type { CordisXConfig } from '../packages/cli/src/launcher/config.js'
 import { cordisXPluginViteConfig } from '../packages/cli/src/vite.js'
+import { startVitePlayground } from '../packages/cli/src/playground/vite/server.js'
 
 interface ArtifactFile {
   readonly path: `./${string}`
@@ -82,7 +83,12 @@ async function unusedPort(): Promise<number> {
   return address.port
 }
 
-async function waitForChromeTarget(port: number, process: ChildProcess, stderr: () => string): Promise<string> {
+async function waitForChromeTarget(
+  port: number,
+  process: ChildProcess,
+  stderr: () => string,
+  expectedUrl?: string,
+): Promise<string> {
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {
     if (process.exitCode !== null) throw new Error(`Chrome exited before CDP was ready: ${stderr()}`)
@@ -90,9 +96,12 @@ async function waitForChromeTarget(port: number, process: ChildProcess, stderr: 
       const response = await fetch(`http://127.0.0.1:${port}/json/list`)
       if (response.ok) {
         const targets = await response.json() as Array<
-          { readonly type?: string; readonly webSocketDebuggerUrl?: string }
+          { readonly type?: string; readonly url?: string; readonly webSocketDebuggerUrl?: string }
         >
-        const target = targets.find(item => item.type === 'page' && item.webSocketDebuggerUrl !== undefined)
+        const target = targets.find(item =>
+          item.type === 'page' && item.webSocketDebuggerUrl !== undefined
+          && (expectedUrl === undefined || item.url?.startsWith(expectedUrl))
+        )
         if (target?.webSocketDebuggerUrl !== undefined) return target.webSocketDebuggerUrl
       }
     } catch {
@@ -218,6 +227,79 @@ function javascriptModuleUrl(source: string): string {
 }
 
 describe('plugin generation native browser graph', () => {
+  it('loads nested lazy CSS through the real Playground Vite composition in a fresh browser', async () => {
+    const chrome = chromeExecutable()
+    if (chrome === undefined) return
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-playground-lazy-css-'))
+    temporary.add(root)
+    const entry = path.join(root, 'lazy-css.ts')
+    await Promise.all([
+      writeFile(
+        entry,
+        `import { createElement } from 'cordisx/react'; export async function apply(){ await import('./page'); globalThis.__lazyCssReady = typeof createElement === 'function' }`,
+      ),
+      writeFile(path.join(root, 'page.ts'), `import './page.css'; await import('./avatar');`),
+      writeFile(
+        path.join(root, 'avatar.ts'),
+        `import './avatar.css'; globalThis.__lazyAvatarReady=true; export const avatar=true;`,
+      ),
+      writeFile(path.join(root, 'page.css'), `.lazy-page{display:grid}`),
+      writeFile(path.join(root, 'avatar.css'), `.lazy-avatar{display:flex}`),
+      writeFile(
+        path.join(root, 'package.json'),
+        JSON.stringify({ name: 'lazy-css', version: '1.0.0', type: 'module' }),
+      ),
+      writeFile(
+        path.join(root, 'config.json'),
+        JSON.stringify({
+          version: 1,
+          playground: { name: 'Lazy CSS' },
+          codex: { agentLoopBackend: 'mock' },
+          providers: [],
+          plugins: [{ id: 'lazy-css', entry, enabled: true, config: {} }],
+        }),
+      ),
+    ])
+    const server = await startVitePlayground({ configPath: path.join(root, 'config.json') })
+    const port = await unusedPort()
+    const profile = path.join(root, 'chrome')
+    let browser: ChildProcess | undefined
+    let cdp: CdpClient | undefined
+    try {
+      browser = spawn(chrome, [
+        '--headless=new',
+        '--no-first-run',
+        '--no-default-browser-check',
+        `--remote-debugging-port=${port}`,
+        `--user-data-dir=${profile}`,
+        server.url,
+      ], { stdio: ['ignore', 'ignore', 'pipe'] })
+      const target = await waitForChromeTarget(port, browser, () => '', server.url)
+      cdp = await CdpClient.connect(target)
+      await cdp.send('Runtime.enable')
+      try {
+        await expect.poll(async () => await cdp!.evaluate('globalThis.__lazyCssReady === true'), { timeout: 15_000 })
+          .toBe(true)
+      } catch (error) {
+        const diagnostic = await cdp.evaluate(
+          `({ href: location.href, readyState: document.readyState, cordisxReady: document.documentElement.dataset.cordisxReady, runtimeError: document.querySelector('[data-playground-runtime-error]')?.getAttribute('data-playground-runtime-error'), runtimeErrorText: document.querySelector('[data-playground-runtime-error]')?.textContent, links: [...document.querySelectorAll('link[data-cordisx-plugin-generation]')].map(link => link.href), text: document.body.innerText.slice(0, 500) })`,
+        )
+        throw new Error(`Playground lazy CSS fixture did not become ready: ${JSON.stringify(diagnostic)}`, {
+          cause: error,
+        })
+      }
+      const result = await cdp.evaluate<{ links: string[]; page: string; avatar: string }>(
+        `(() => { const p=document.createElement('div'); p.className='lazy-page'; const a=document.createElement('div'); a.className='lazy-avatar'; document.body.append(p,a); return { links:[...document.querySelectorAll('link[data-cordisx-plugin-generation]')].map(x=>x.href), page:getComputedStyle(p).display, avatar:getComputedStyle(a).display } })()`,
+      )
+      expect(result.links.some(href => href.includes('/assets/page-'))).toBe(true)
+      expect(result.links.some(href => href.includes('/assets/avatar-'))).toBe(true)
+      expect(result).toMatchObject({ page: 'grid', avatar: 'flex' })
+    } finally {
+      await cdp?.close().catch(() => undefined)
+      if (browser !== undefined) await stopChrome(browser)
+      await server.close()
+    }
+  }, 30_000)
   nativeIt('boots the real generated composition only after a fresh strict-CSP document has DOM roots', async () => {
     if (chrome === undefined) throw new Error('Chrome executable disappeared after test discovery')
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-document-ready-composition-'))

@@ -107,6 +107,27 @@ class FixtureGenerationRuntime {
 }
 
 describe('local development generations', () => {
+  it('keeps production graph virtual ids out of the outer Playground watcher', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-dev-graph-watch-'))
+    try {
+      const entry = path.join(root, 'graph-watch.ts')
+      await writeFile(
+        path.join(root, 'package.json'),
+        JSON.stringify({ name: 'graph-watch', version: '1.0.0', type: 'module' }),
+      )
+      await writeFile(
+        entry,
+        `import { createElement } from 'cordisx/react'; export function apply(){ return createElement('div') }`,
+      )
+      const build = await buildLocalDevelopmentPlugin(entry, { browserGraphOnly: true, sourcemap: false })
+      expect(build.browserArtifact?.inputModules.some(input => input.includes('\0'))).toBe(true)
+      expect(build.watchFiles).toContain(entry)
+      expect(build.watchFiles.some(file => file.includes('\0'))).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it(
     'uses the transitive graph, retains last-good across build/activation failures, recovers, and stops cleanly',
     async () => {
