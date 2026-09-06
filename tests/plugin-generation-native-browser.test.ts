@@ -864,7 +864,10 @@ globalThis.__cordisxStrictCspBoot = import(${JSON.stringify(lease.entryUrl)}).th
           .filter(link => link.href.startsWith(${JSON.stringify(lease.baseUrl)}))
           .map(link => ({ href: link.href, media: link.media }))
       `),
-      ).toEqual([expect.objectContaining({ media: 'not all' })])
+      ).toEqual([
+        expect.objectContaining({ media: 'not all' }),
+        expect.objectContaining({ media: 'not all' }),
+      ])
 
       await cdp.evaluate(lease.publishSource)
       expect(
@@ -873,7 +876,7 @@ globalThis.__cordisxStrictCspBoot = import(${JSON.stringify(lease.entryUrl)}).th
           .filter(link => link.href.startsWith(${JSON.stringify(lease.baseUrl)}))
           .map(link => link.media)
       `),
-      ).toEqual([''])
+      ).toEqual(['', ''])
 
       const second = await cdp.evaluate<{ readonly executions: number }>(`(async () =>
         await globalThis.__cordisxNativeGraphModule.trigger()
