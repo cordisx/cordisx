@@ -133,69 +133,6 @@ export function parseLiveSmokeOptions(args = process.argv.slice(2)) {
     throw new Error('--plugin-console-expanded-screenshot requires --plugin-console-exercise')
   }
 
-  function pluginConsoleSmokeAssertions(report, owner) {
-    const nonEmptyText = value => typeof value === 'string' && value.trim().length > 0
-    const positiveRect = value =>
-      value !== null
-      && typeof value === 'object'
-      && typeof value.width === 'number' && value.width > 0
-      && typeof value.height === 'number' && value.height > 0
-    const expectedMethods = ['debug', 'log', 'info', 'warn', 'error']
-    return {
-      owner: report.owner === owner,
-      'before.entries': report.before.entries > 0,
-      'before.methods': expectedMethods.every(method => report.before.methods.includes(method)),
-      'before.sources': report.before.sources.length > 0,
-      'before.permissionDenied': report.before.permissionDenied,
-      'before.success': report.before.success,
-      'before.failure': report.before.failure,
-      'silent.entries': report.silent.entries > 0,
-      'silent.automaticWithoutConsole': report.silent.automaticWithoutConsole,
-      'ui.paused': report.ui.paused,
-      'ui.detailOpened': report.ui.detailOpened,
-      'ui.inspectorMetadataOnly': report.ui.inspectorMetadataOnly,
-      'ui.scopedFiltered': report.ui.scopedFiltered,
-      'ui.cleared': report.ui.cleared,
-      'ui.lunaOnly': report.ui.lunaOnly,
-      'ui.nativePayloads': report.ui.nativePayloads,
-      'ui.firstLineAtTop': report.ui.firstLineAtTop,
-      'ui.fillsRemainingHeight': report.ui.fillsRemainingHeight,
-      'ui.logsOnlyConsoleTools': report.ui.logsOnlyConsoleTools,
-      'ui.independentEntries': report.ui.independentEntries,
-      'ui.independentEntryCount': report.ui.independentEntryCount > 0,
-      'ui.mountedEntryCount': report.ui.mountedEntryCount === report.ui.independentEntryCount,
-      'ui.levelVisuals': report.ui.levelVisuals,
-      'ui.objectExpanded': report.ui.objectExpanded,
-      'ui.coverageRemoved': report.ui.coverageRemoved,
-      'ui.iconToolbar': report.ui.iconToolbar,
-      'ui.runtimeConsoleSummary': report.ui.runtimeConsoleSummary,
-      'ui.pointerPaused': report.ui.pointerPaused,
-      'ui.pointerPauseDetail.label': nonEmptyText(report.ui.pointerPauseDetail?.label),
-      'ui.pointerPauseDetail.rect': positiveRect(report.ui.pointerPauseDetail?.rect),
-      'ui.keyboardFocused': report.ui.keyboardFocused,
-      'ui.keyboardResumed': report.ui.keyboardResumed,
-      'ui.keyboardResumeDetail.label': nonEmptyText(report.ui.keyboardResumeDetail?.label),
-      'ui.toolbarTooltip.text': nonEmptyText(report.ui.toolbarTooltip?.text),
-      'ui.toolbarTooltip.describedBy': nonEmptyText(report.ui.toolbarTooltip?.describedBy),
-      'ui.returnLatestVisible': report.ui.returnLatestVisible,
-      'ui.returnedToLatest': report.ui.returnedToLatest,
-      'ui.lightTheme': report.ui.lightTheme,
-      'ui.darkTheme': report.ui.darkTheme,
-      'ui.screenshotPreparedAtTop': report.ui.screenshotPreparedAtTop,
-      'ui.runtimeChrome.runtimeDetailsAbsent': report.ui.runtimeChrome.runtimeDetailsAbsent,
-      'ui.runtimeChrome.diagnosticsCollapsed': report.ui.runtimeChrome.diagnosticsCollapsed,
-      'ui.runtimeChrome.runtimeStatusOnly': report.ui.runtimeChrome.runtimeStatusOnly,
-      'ui.runtimeChrome.diagnosticsExpanded': report.ui.runtimeChrome.diagnosticsExpanded,
-      'ui.runtimeChrome.diagnosticsLocalized': report.ui.runtimeChrome.diagnosticsLocalized,
-      'ui.runtimeChrome.diagnosticsNoCjk': report.ui.runtimeChrome.diagnosticsNoCjk,
-      'reload.entries': report.reload.entries > 0,
-      'reload.lifecycle': report.reload.lifecycle,
-      'reload.terminalCount': report.reload.terminalCount > 0,
-      'privacy.structuredOnly': report.privacy.structuredOnly,
-      'privacy.partialObservability': report.privacy.partialObservability,
-    }
-  }
-
   if (parsed.values['generation-transaction-exercise'] && parsed.values['manager-lifecycle-source'] === undefined) {
     throw new Error('--generation-transaction-exercise requires --manager-lifecycle-source')
   }
