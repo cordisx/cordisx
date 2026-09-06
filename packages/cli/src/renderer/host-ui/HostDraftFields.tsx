@@ -11,7 +11,16 @@ export interface HostDraftFieldDefinition {
   readonly forceFullWidth?: boolean
   readonly controlId?: string
   readonly transientSecret?: boolean
+  readonly fieldActions?: 'menu' | 'static'
   readonly onChange: (value: unknown) => void
+}
+
+export interface HostDraftFieldsProps {
+  readonly definitions: readonly HostDraftFieldDefinition[]
+  readonly locale: string
+  readonly errors?: ReadonlyMap<string, string>
+  readonly resetVersions?: ReadonlyMap<string, number>
+  readonly onClearError?: (id: string) => void
 }
 
 export interface HostDraftFieldsMount {
@@ -48,18 +57,49 @@ function DraftField({ definition, error, resetVersion, locale, onClearError }: {
       {...(definition.controlId === undefined ? {} : { controlId: definition.controlId })}
       {...(definition.transientSecret === undefined ? {} : { transientSecret: definition.transientSecret })}
       onChange={commit}
-      onUseDefault={() => {
-        if (definition.field.hasDefault === true) commit(definition.field.defaultValue)
-      }}
-      onRollback={() => commit(definition.initialValue)}
-      onCopyPath={() => {
-        const clipboard = window.navigator.clipboard
-        if (typeof clipboard?.writeText === 'function') {
-          void clipboard.writeText(definition.field.path.join('.'))
-            .catch(() => undefined)
-        }
-      }}
+      {...(definition.fieldActions === 'static'
+        ? { fieldActions: 'static' as const }
+        : {
+          onUseDefault: () => {
+            if (definition.field.hasDefault === true) commit(definition.field.defaultValue)
+          },
+          onRollback: () => commit(definition.initialValue),
+          onCopyPath: () => {
+            const clipboard = window.navigator.clipboard
+            if (typeof clipboard?.writeText === 'function') {
+              void clipboard.writeText(definition.field.path.join('.'))
+                .catch(() => undefined)
+            }
+          },
+        })}
     />
+  )
+}
+
+/** Shared React field rows for small Host-owned structured draft surfaces. */
+export function HostDraftFields({
+  definitions,
+  locale,
+  errors = new Map(),
+  resetVersions = new Map(),
+  onClearError = () => {},
+}: HostDraftFieldsProps) {
+  return (
+    <div className="cxf-form-grid" data-host-draft-fields="true">
+      {definitions.map(definition => {
+        const error = errors.get(definition.id)
+        return (
+          <DraftField
+            key={definition.id}
+            definition={definition}
+            locale={locale}
+            resetVersion={resetVersions.get(definition.id) ?? 0}
+            {...(error === undefined ? {} : { error })}
+            onClearError={() => onClearError(definition.id)}
+          />
+        )
+      })}
+    </div>
   )
 }
 
@@ -78,24 +118,16 @@ export function mountHostDraftFields(
     const attach = () => container
     root.render(
       <ConfigProvider globalConfig={{ attach }}>
-        <div className="cxf-form-grid">
-          {definitions.map(definition => {
-            const error = errors.get(definition.id)
-            return (
-              <DraftField
-                key={definition.id}
-                definition={definition}
-                locale={locale}
-                resetVersion={resets.get(definition.id) ?? 0}
-                {...(error === undefined ? {} : { error })}
-                onClearError={() => {
-                  if (!errors.delete(definition.id)) return
-                  render()
-                }}
-              />
-            )
-          })}
-        </div>
+        <HostDraftFields
+          definitions={definitions}
+          locale={locale}
+          errors={errors}
+          resetVersions={resets}
+          onClearError={id => {
+            if (!errors.delete(id)) return
+            render()
+          }}
+        />
       </ConfigProvider>,
     )
   }

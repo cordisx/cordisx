@@ -686,6 +686,202 @@ describe('AgentConversationRenderer production DOM', () => {
     }
   })
 
+  it('renders v7 approvals as full-width standard cards outside ordinary message bubble geometry', async () => {
+    const base = createPlaygroundConversationFixture('conversation', 'en')
+    const reviewerIdentity = { agentId: 'reviewer', revision: 'reviewer-v1' }
+    const leadIdentity = { agentId: 'lead', revision: 'lead-v1' }
+    const selection = {
+      kind: 'room' as const,
+      roomId: 'approval-room',
+      title: 'Approval review',
+      multiParticipant: true,
+      participantPresentation: 'host-initials' as const,
+      participants: [
+        {
+          id: 'reviewer',
+          role: 'agent' as const,
+          name: 'Reviewer',
+          agentIdentity: reviewerIdentity,
+        },
+        {
+          id: 'lead',
+          role: 'agent' as const,
+          name: 'Lead',
+          agentIdentity: leadIdentity,
+        },
+      ],
+    }
+    const pending = {
+      kind: 'approval' as const,
+      itemId: 'approval-card',
+      sequence: 1,
+      participantId: 'reviewer',
+      memberId: 'reviewer',
+      runId: 'reviewer-run',
+      sessionId: 'cx-session.reviewer',
+      agentGeneration: 2,
+      approvalId: 'approval-card',
+      approvalKind: 'external-action' as const,
+      requester: reviewerIdentity,
+      authority: { participantId: 'lead', memberId: 'lead', identity: leadIdentity },
+      reason: {
+        kind: 'plain-text' as const,
+        text:
+          'Review this deliberately long approval reason so the dedicated card stretches and wraps without inheriting a chat bubble corner.',
+      },
+      authorityBinding: {
+        agentId: 'cx-session.lead',
+        sessionId: 'cx-session.lead',
+        agentGeneration: 3,
+        definition: leadIdentity,
+      },
+      state: 'pending' as const,
+      actions: [
+        { decision: 'approve' as const, command: { id: 'approval.answer' } },
+        { decision: 'reject' as const, command: { id: 'approval.answer' } },
+      ],
+    }
+    const states = ['pending', 'approved', 'denied', 'cancelled', 'failed'] as const
+    const {
+      actions: _pendingActions,
+      agentGeneration: _agentGeneration,
+      authorityBinding: _authorityBinding,
+      ...terminal
+    } = pending
+    for (const state of states) {
+      const entry = state === 'pending'
+        ? pending
+        : {
+          ...terminal,
+          state,
+          actions: [],
+        }
+      const model = createAgentConversationModel({
+        ...base,
+        selection,
+        entries: [entry],
+        snapshotSequence: 1,
+      })
+      const harness = await render(
+        model,
+        new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model),
+      )
+      try {
+        const document = harness.dom.window.document
+        const article = document.querySelector<HTMLElement>('.cxa-approval-message')!
+        const card = document.querySelector<HTMLElement>('.cxa-approval-card')!
+        expect(article.classList.contains('cxa-message')).toBe(false)
+        expect(article.dataset.state).toBe(state)
+        expect(card).not.toBeNull()
+        expect(card.classList.contains('cxa-message-surface')).toBe(false)
+        expect(document.querySelector('.cxa-message-bubble-shell')).toBeNull()
+        expect(document.querySelector('.cxa-message-bubble-anchor')).toBeNull()
+        expect(document.querySelector('.cxa-approval-avatar-seat .cxa-avatar')).not.toBeNull()
+        expect(document.querySelector('.cxa-message-meta')?.textContent).toContain('Reviewer')
+        expect(document.querySelector('.cxa-approval-target')?.textContent).toBe('由 Lead 审批')
+        expect(document.querySelector('.cxa-approval-reason')?.textContent).toContain('deliberately long')
+        if (state === 'pending') {
+          expect(document.querySelectorAll('.cxa-approval-card-actions .cxa-approval-action')).toHaveLength(2)
+          expect(document.querySelector('.cxa-approval-outcome')).toBeNull()
+          const writeText = vi.fn(async () => undefined)
+          Object.defineProperty(harness.dom.window.navigator, 'clipboard', {
+            configurable: true,
+            value: { writeText },
+          })
+          await act(async () => {
+            card.dispatchEvent(
+              new harness.dom.window.MouseEvent('contextmenu', {
+                bubbles: true,
+                cancelable: true,
+                clientX: 32,
+                clientY: 48,
+              }),
+            )
+          })
+          const menu = document.querySelector<HTMLElement>('.cxa-context-menu')!
+          expect([...menu.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual([
+            '复制消息',
+            '@提及 Reviewer',
+            '查看 Reviewer',
+          ])
+          document.activeElement?.dispatchEvent(
+            new harness.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+          )
+          await act(async () => Promise.resolve())
+          expect(document.activeElement).toBe(card)
+          await act(async () => {
+            card.dispatchEvent(
+              new harness.dom.window.KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true }),
+            )
+          })
+          expect(document.querySelector('.cxa-context-menu [role="menuitem"]')).toBe(document.activeElement)
+          document.activeElement?.dispatchEvent(
+            new harness.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+          )
+          await act(async () => Promise.resolve())
+          expect(document.activeElement).toBe(card)
+          const hoverCopy = document.querySelector<HTMLButtonElement>(
+            '.cxa-approval-hover-actions [aria-label="复制审批理由"]',
+          )!
+          await act(async () => hoverCopy.click())
+          await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(pending.reason.text))
+        } else {
+          expect(document.querySelector('.cxa-approval-card-actions')).toBeNull()
+          expect(document.querySelector('.cxa-approval-outcome')?.getAttribute('data-state')).toBe(state)
+        }
+        const styles = document.querySelector<HTMLStyleElement>('style[data-agent-conversation-styles]')!.textContent!
+        expect(styles).toContain(
+          '.cxa-approval-message-content{display:grid;width:min(100%,calc(720px + var(--cxa-message-avatar-size) + var(--cxa-message-avatar-gap)))',
+        )
+        expect(styles).toContain('.cxa-approval-card{display:grid;width:100%;min-width:0;')
+        expect(styles).toContain('border-radius:12px')
+        expect(styles).toContain('@container cxa-conversation (max-width:560px){.cxa-approval-card{')
+        expect(styles).not.toContain('.cxa-approval-card{width:fit-content')
+        expect(styles).not.toContain('.cxa-approval-card{border-radius:15px 15px 15px 4px')
+      } finally {
+        await harness.close()
+      }
+    }
+  })
+
+  it('keeps Agent message timestamps beside the author and copies the exact full timestamp', async () => {
+    const model = createPlaygroundConversationFixture('conversation', 'en')
+    const harness = await render(
+      model,
+      new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model),
+    )
+    try {
+      const document = harness.dom.window.document
+      const writeText = vi.fn(async () => undefined)
+      Object.defineProperty(harness.dom.window.navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText },
+      })
+      const entry = model.entries.find(candidate =>
+        candidate.kind === 'message' && candidate.authorId === 'agent-alpha'
+      )
+      const message = [...document.querySelectorAll<HTMLElement>('.cxa-message[data-role="agent"]')]
+        .find(candidate => candidate.dataset.entryId === entry?.itemId)!
+      const timestamp = message.querySelector<HTMLButtonElement>('.cxa-message-meta>.cxa-message-time')!
+      expect(timestamp.tagName).toBe('BUTTON')
+      expect(timestamp.type).toBe('button')
+      expect(timestamp.querySelector('time')?.getAttribute('datetime')).toBe(
+        entry?.kind === 'message' ? entry.timestamp : undefined,
+      )
+      expect(timestamp.title).not.toBe('')
+      expect(timestamp.getAttribute('aria-label')).toContain('复制时间')
+      await act(async () => timestamp.click())
+      await vi.waitFor(() =>
+        expect(writeText).toHaveBeenCalledWith(entry?.kind === 'message' ? entry.timestamp : undefined)
+      )
+      const styles = document.querySelector<HTMLStyleElement>('style[data-agent-conversation-styles]')!.textContent!
+      expect(styles).toContain('.cxa-message-meta:hover>.cxa-message-time')
+      expect(styles).toContain('.cxa-message-time:focus-visible{outline:2px solid var(--cx-focus)')
+    } finally {
+      await harness.close()
+    }
+  })
+
   it('keeps outgoing user bubbles free of author/state copy while reserving the hidden accessible timestamp beside the bubble', async () => {
     const model = createPlaygroundConversationFixture('conversation', 'en')
     const harness = await render(
@@ -705,155 +901,6 @@ describe('AgentConversationRenderer production DOM', () => {
         .toBe(true)
       expect(human.querySelector('.cxa-message-time')?.nextElementSibling?.classList.contains('cxa-message-surface'))
         .toBe(true)
-    } finally {
-      await harness.close()
-    }
-  })
-
-  it('groups adjacent Agent messages by exact participant identity: first name, last avatar, and accessible bubble time', async () => {
-    const base = createPlaygroundConversationFixture('conversation', 'en')
-    const room = base.selection as Extract<AgentConversationModel['selection'], { kind: 'room' }>
-    const lead = {
-      id: 'lead',
-      role: 'agent' as const,
-      name: 'Lead',
-      avatar: createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'lead' }),
-      agentIdentity: { agentId: 'lead', revision: 'r1' },
-    }
-    const reviewer = {
-      id: 'reviewer',
-      role: 'agent' as const,
-      name: 'Reviewer',
-      avatar: createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'reviewer' }),
-      agentIdentity: { agentId: 'reviewer', revision: 'r1' },
-    }
-    const human = { id: 'human', role: 'human' as const, name: 'You' }
-    const system = { id: 'system', role: 'system' as const, name: 'System' }
-    const entry = (
-      itemId: string,
-      authorId: string,
-      sequence: number,
-      text: string,
-      semantic?: AgentConversationMessage['semantic'],
-    ) => ({
-      kind: 'message' as const,
-      itemId,
-      messageId: `message-${itemId}`,
-      sequence,
-      authorId,
-      body: [text],
-      timestamp: `2026-08-31T00:00:0${sequence}.000Z`,
-      deliveryState: 'delivered' as const,
-      runState: 'idle' as const,
-      ariaLive: 'off' as const,
-      actions: [],
-      source: 'agent-loop' as const,
-      reactions: [],
-      ...(semantic === undefined ? {} : { semantic }),
-    })
-    const model = createAgentConversationModel({
-      ...base,
-      selection: { ...room, roomId: 'grouped', participants: [lead, reviewer, human, system] },
-      entries: [
-        entry('lead-introduction', 'lead', 1, 'I am Lead.', {
-          purpose: 'member-self-introduction',
-          causation: { operationId: 'intro' },
-          participantId: 'lead',
-          memberId: 'lead',
-          runId: 'lead-run',
-          binding: { bindingId: 'lead-binding', generation: 1 },
-          turn: 'lead-turn',
-        }),
-        entry('lead-reply', 'lead', 2, 'I will continue.', { purpose: 'conversation' }),
-        entry('human-break', 'human', 3, 'Please continue.', { purpose: 'conversation' }),
-        entry('lead-after-human', 'lead', 4, 'Continuing.', { purpose: 'conversation' }),
-        entry('system-break', 'system', 5, 'System event.', { purpose: 'conversation' }),
-        entry('reviewer-reply', 'reviewer', 6, 'Reviewing.', { purpose: 'conversation' }),
-      ],
-      headerActions: [],
-    })
-    const harness = await render(
-      model,
-      new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model),
-      false,
-      {
-        identity: {
-          resolve: identity => ({
-            identity,
-            name: identity.agentId === 'lead' ? 'Lead' : 'Reviewer',
-            introduction: 'Exact identity presentation.',
-          }),
-          navigator: new HostAgentTaskDetailsNavigator({ navigateHost: vi.fn(), navigateExternal: vi.fn() }),
-          onSettings: vi.fn(),
-        },
-      },
-    )
-    try {
-      const document = harness.dom.window.document
-      const intro = document.querySelector<HTMLElement>('[data-entry-id="lead-introduction"]')!
-      const followup = document.querySelector<HTMLElement>('[data-entry-id="lead-reply"]')!
-      const afterHuman = document.querySelector<HTMLElement>('[data-entry-id="lead-after-human"]')!
-      const reviewerReply = document.querySelector<HTMLElement>('[data-entry-id="reviewer-reply"]')!
-      expect([intro, followup, afterHuman, reviewerReply].map(node => [node.dataset.groupStart, node.dataset.groupEnd]))
-        .toEqual([
-          ['true', 'false'],
-          ['false', 'true'],
-          ['true', 'true'],
-          ['true', 'true'],
-        ])
-      expect(intro.querySelector('.cx-agent-identity-avatar-button')).toBeNull()
-      expect(followup.querySelector('.cx-agent-identity-avatar-button')).not.toBeNull()
-      expect(afterHuman.querySelector('.cx-agent-identity-avatar-button')).not.toBeNull()
-      expect(reviewerReply.querySelector('.cx-agent-identity-avatar-button')).not.toBeNull()
-      expect(intro.querySelector('.cxa-message-meta')?.textContent).toContain('Lead')
-      expect(followup.querySelector('.cxa-message-meta')).not.toBeNull()
-      expect(followup.querySelector('.cxa-author')).toBeNull()
-      expect(afterHuman.querySelector('.cxa-message-meta')?.textContent).toContain('Lead')
-      expect(reviewerReply.querySelector('.cxa-message-meta')?.textContent).toContain('Reviewer')
-      const introSeat = intro.querySelector<HTMLElement>('.cxa-message-avatar-seat')!
-      const followupSeat = followup.querySelector<HTMLElement>('.cxa-message-avatar-seat')!
-      expect(introSeat.dataset.avatarSeat).toBe('placeholder')
-      expect(introSeat.getAttribute('aria-hidden')).toBe('true')
-      expect(introSeat.hasAttribute('inert')).toBe(true)
-      expect(followupSeat.dataset.avatarSeat).toBe('visible')
-      expect(followupSeat.hasAttribute('aria-hidden')).toBe(false)
-      expect(
-        intro.querySelector(
-          '.cxa-message-bubble-row > .cxa-message-avatar-seat + .cxa-message-bubble-shell .cxa-message-surface',
-        ),
-      ).not.toBeNull()
-      expect(
-        followup.querySelector(
-          '.cxa-message-bubble-row > .cxa-message-avatar-seat + .cxa-message-bubble-shell .cxa-message-surface',
-        ),
-      ).not.toBeNull()
-      for (const message of [intro, followup, afterHuman, reviewerReply]) {
-        const time = message.querySelector<HTMLTimeElement>('.cxa-message-time')!
-        expect(time.closest('.cxa-message-meta')).not.toBeNull()
-        expect(time.closest('.cxa-message-surface')).toBeNull()
-        expect(time.tabIndex).toBe(-1)
-        expect(message.getAttribute('aria-label')).toContain(message === reviewerReply ? 'Reviewer' : 'Lead')
-      }
-      const styles = document.querySelector<HTMLStyleElement>('style[data-agent-conversation-styles]')!.textContent!
-      expect(styles).toContain(
-        '.cxa-message-bubble-row{display:flex;min-width:0;max-width:100%;align-items:stretch;gap:var(--cxa-message-avatar-gap)}',
-      )
-      expect(styles).toContain(
-        '.cxa-message-avatar-seat{display:grid;width:var(--cxa-message-avatar-size);min-height:var(--cxa-message-avatar-size);height:auto;flex:0 0 var(--cxa-message-avatar-size)',
-      )
-      expect(styles).toContain(
-        '.cxa-message[data-role="agent"] .cxa-message-meta{max-width:calc(100% - var(--cxa-message-avatar-size) - var(--cxa-message-avatar-gap));margin-inline-start:calc(var(--cxa-message-avatar-size) + var(--cxa-message-avatar-gap));padding-inline:0}',
-      )
-      expect(styles).toContain(
-        '--cxa-message-avatar-size:calc(var(--cxa-message-line-height) + var(--cxa-message-bubble-padding-block) + var(--cxa-message-bubble-padding-block) + var(--cxa-message-bubble-border-width) + var(--cxa-message-bubble-border-width))',
-      )
-      expect(styles).toContain(
-        '.cxa-message[data-role="agent"] .cxa-message-content:has(>.cxa-message-bubble-row>.cxa-message-bubble-shell>.cxa-message-bubble-anchor:hover)>.cxa-message-meta>.cxa-message-time',
-      )
-      expect(styles).toContain(
-        '.cxa-message-time{display:inline-flex;flex:none;align-items:center;padding:0;border:0;opacity:0',
-      )
-      expect(styles).not.toContain('.cxa-message:hover .cxa-message-time')
     } finally {
       await harness.close()
     }

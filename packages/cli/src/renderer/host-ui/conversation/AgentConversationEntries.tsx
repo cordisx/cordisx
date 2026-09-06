@@ -1,6 +1,10 @@
 import * as React from 'react'
+import { Button, Form } from 'tdesign-react'
+import type { CordisXConfigFieldSnapshot } from '../../../contracts.js'
 import { HostSurfaceIcon } from '../HostSurfaceIcon.js'
 import { useAutoFollow } from '../useAutoFollow.js'
+import { type HostDraftFieldDefinition, HostDraftFields } from '../HostDraftFields.js'
+import { HOST_FORM_REACT_STYLES, hostFormValidationIssueText } from '../HostForm.js'
 import { HostAgentAvatar } from './AgentAvatar.js'
 import type { AgentConversationCommandController } from './commands.js'
 import type { AgentConversationRendererCopy, AgentConversationRendererProps } from './AgentConversationRenderer.js'
@@ -67,8 +71,36 @@ export function MessageEntry({
   const state = stateCopy(entry, copy)
   const outgoing = participant.role === 'human'
   const time = new Date(entry.timestamp).toLocaleTimeString(copy.locale, { hour: '2-digit', minute: '2-digit' })
+  const fullTime = new Date(entry.timestamp).toLocaleString(copy.locale, {
+    dateStyle: 'medium',
+    timeStyle: 'long',
+  })
   const accessibleLabel = `${participant.name}, ${time}`
-  const timestamp = <time className="cxa-message-time" dateTime={entry.timestamp} aria-label={time}>{time}</time>
+  const copyTimestamp = (event: React.MouseEvent<HTMLButtonElement>): void => {
+    const clipboard = event.currentTarget.ownerDocument.defaultView?.navigator.clipboard
+    if (clipboard === undefined) {
+      onCommandError(
+        new Error(
+          copy.locale.toLowerCase().startsWith('zh')
+            ? '当前环境不支持复制。'
+            : 'Copy is unavailable in this environment.',
+        ),
+      )
+      return
+    }
+    void clipboard.writeText(entry.timestamp).catch(onCommandError)
+  }
+  const timestamp = (
+    <button
+      type="button"
+      className="cxa-message-time"
+      aria-label={copy.locale.toLowerCase().startsWith('zh') ? `复制时间：${fullTime}` : `Copy timestamp: ${fullTime}`}
+      title={fullTime}
+      onClick={copyTimestamp}
+    >
+      <time dateTime={entry.timestamp}>{time}</time>
+    </button>
+  )
   const contextTarget = (
     kind: ConversationContextTarget['kind'],
     x: number,
@@ -484,19 +516,83 @@ export function RoomSettingsEditor({ title, description, chinese, settings, onEr
   const [name, setName] = React.useState(title)
   const [details, setDetails] = React.useState(description ?? '')
   const [saving, setSaving] = React.useState(false)
+  const [issues, setIssues] = React.useState<ReadonlyMap<string, string>>(() => new Map())
+  const [message, setMessage] = React.useState<string>()
   React.useEffect(() => {
     setName(title)
     setDetails(description ?? '')
+    setIssues(new Map())
+    setMessage(undefined)
   }, [description, title])
-  const submit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
-    event.preventDefault()
+  const locale = chinese ? 'zh-CN' : 'en'
+  const values = React.useMemo(() => ({ name, description: details }), [details, name])
+  const fields = React.useMemo<readonly CordisXConfigFieldSnapshot[]>(() => [
+    {
+      namespace: 'host.agent-conversation.room-settings/v1',
+      path: ['name'],
+      type: 'string',
+      label: chinese ? '群聊名称' : 'Room name',
+      description: chinese ? '显示在群聊标题中。' : 'Shown in the room header.',
+      value: title,
+      disabled: saving,
+      required: true,
+      min: 1,
+      max: 256,
+    },
+    {
+      namespace: 'host.agent-conversation.room-settings/v1',
+      path: ['description'],
+      type: 'string',
+      role: 'textarea',
+      label: chinese ? '群聊介绍' : 'Description',
+      description: chinese ? '可选，显示在群聊标题下方。' : 'Optional. Shown below the room title.',
+      value: description ?? '',
+      disabled: saving,
+      required: false,
+      max: 4_000,
+    },
+  ], [chinese, description, saving, title])
+  const definitions = React.useMemo<readonly HostDraftFieldDefinition[]>(() =>
+    fields.map(field => {
+      const id = field.path[0]!
+      return {
+        id,
+        field,
+        initialValue: id === 'name' ? title : description ?? '',
+        forceFullWidth: id === 'description',
+        controlId: `cxa-room-settings-${id}`,
+        fieldActions: 'static',
+        onChange: value => {
+          if (id === 'name') setName(typeof value === 'string' ? value : '')
+          else setDetails(typeof value === 'string' ? value : '')
+          setIssues(current => {
+            if (!current.has(id)) return current
+            const next = new Map(current)
+            next.delete(id)
+            return next
+          })
+          setMessage(undefined)
+        },
+      }
+    }), [description, fields, title])
+  const dirty = name !== title || details !== (description ?? '')
+  const submit = async (): Promise<void> => {
     const normalizedName = name.trim()
     const normalizedDetails = details.trim()
-    if (normalizedName === '') {
-      onError(new Error(chinese ? '群聊名称不能为空。' : 'Room name is required.'))
+    const nextIssues = new Map<string, string>()
+    for (const field of fields) {
+      const id = field.path[0]!
+      const issue = hostFormValidationIssueText(field, values[id as keyof typeof values], locale)
+      if (issue !== undefined) nextIssues.set(id, issue)
+    }
+    if (normalizedName === '') nextIssues.set('name', chinese ? '群聊名称不能为空。' : 'Room name is required.')
+    if (nextIssues.size > 0) {
+      setIssues(nextIssues)
+      setMessage(nextIssues.values().next().value)
       return
     }
     setSaving(true)
+    setMessage(undefined)
     try {
       await settings.update({
         name: normalizedName,
@@ -506,38 +602,52 @@ export function RoomSettingsEditor({ title, description, chinese, settings, onEr
       })
       onDone()
     } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
       onError(error)
     } finally {
       setSaving(false)
     }
   }
   return (
-    <form className="cxa-room-settings-form" onSubmit={event => void submit(event)}>
-      <label>
-        <span>{chinese ? '群聊名称' : 'Room name'}</span>
-        <input
-          name="name"
-          value={name}
-          required
-          maxLength={256}
-          disabled={saving}
-          onInput={event => setName(event.currentTarget.value)}
+    <Form
+      className="cxf-react-form cxa-room-settings-form"
+      onSubmit={event => {
+        event.e?.preventDefault()
+        void submit()
+      }}
+    >
+      <style data-host-room-settings-form-styles="shared">{HOST_FORM_REACT_STYLES}</style>
+      <div className="cxf-form-body">
+        <HostDraftFields
+          definitions={definitions}
+          locale={locale}
+          errors={issues}
+          onClearError={id => {
+            setIssues(current => {
+              if (!current.has(id)) return current
+              const next = new Map(current)
+              next.delete(id)
+              return next
+            })
+          }}
         />
-      </label>
-      <label>
-        <span>{chinese ? '群聊介绍' : 'Description'}</span>
-        <textarea
-          name="description"
-          value={details}
-          maxLength={4_000}
-          disabled={saving}
-          onInput={event => setDetails(event.currentTarget.value)}
-        />
-      </label>
-      <button type="submit" className="cxa-action" disabled={saving || name.trim() === ''}>
-        {saving ? (chinese ? '保存中…' : 'Saving…') : (chinese ? '保存' : 'Save')}
-      </button>
-    </form>
+        {message === undefined ? null : <div className="cxr-notice cxf-alert" role="status">{message}</div>}
+      </div>
+      <div className="cxf-form-actions">
+        <span className="cxf-status" role="status">{saving ? (chinese ? '保存中…' : 'Saving…') : ''}</span>
+        <div className="cxf-form-action-buttons">
+          <Button
+            type="button"
+            theme="primary"
+            loading={saving}
+            disabled={!dirty || saving || name.trim() === ''}
+            onClick={() => void submit()}
+          >
+            {chinese ? '保存' : 'Save'}
+          </Button>
+        </div>
+      </div>
+    </Form>
   )
 }
 

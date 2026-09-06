@@ -81,10 +81,48 @@ export function ApprovalEntry(
         restoreFocus: event.currentTarget,
       })
     }
+    const approvalContextTarget = (
+      x: number,
+      y: number,
+      restoreFocus: HTMLElement,
+    ): ConversationContextTarget => ({
+      kind: 'message',
+      x,
+      y,
+      participantId: participant.id,
+      participantName: participant.name,
+      participantRole: participant.role,
+      restoreFocus,
+      messageText: entry.reason.text,
+    })
+    const openApprovalContext = (event: React.MouseEvent<HTMLElement>): void => {
+      event.preventDefault()
+      event.stopPropagation()
+      onOpenContextMenu(approvalContextTarget(event.clientX, event.clientY, event.currentTarget))
+    }
+    const keyboardApprovalContext = (event: React.KeyboardEvent<HTMLElement>): void => {
+      if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return
+      event.preventDefault()
+      event.stopPropagation()
+      const rect = event.currentTarget.getBoundingClientRect()
+      onOpenContextMenu(approvalContextTarget(
+        rect.left + Math.min(24, rect.width / 2),
+        rect.top + Math.min(24, rect.height / 2),
+        event.currentTarget,
+      ))
+    }
+    const copyApprovalReason = (event: React.MouseEvent<HTMLButtonElement>): void => {
+      const clipboard = event.currentTarget.ownerDocument.defaultView?.navigator.clipboard
+      if (clipboard === undefined) {
+        onCommandError(new Error(chinese ? '当前环境不支持复制。' : 'Copy is unavailable in this environment.'))
+        return
+      }
+      void clipboard.writeText(entry.reason.text).catch(onCommandError)
+    }
     return (
       <article
         ref={articleRef}
-        className="cxa-entry cxa-message cxa-approval-message"
+        className="cxa-entry cxa-approval-message"
         data-entry-id={entry.itemId}
         data-role="agent"
         data-state={entry.state}
@@ -93,7 +131,7 @@ export function ApprovalEntry(
         tabIndex={-1}
         aria-label={`${participant.name}: ${target}, ${outcome}`}
       >
-        <div className="cxa-message-content">
+        <div className="cxa-approval-message-content">
           <div className="cxa-message-meta">
             <button
               type="button"
@@ -104,8 +142,8 @@ export function ApprovalEntry(
               {participant.name}
             </button>
           </div>
-          <div className="cxa-message-bubble-row">
-            <span className="cxa-message-avatar-seat" data-avatar-seat="visible">
+          <div className="cxa-approval-card-row">
+            <span className="cxa-approval-avatar-seat" data-avatar-seat="visible">
               <button
                 type="button"
                 className="cx-agent-identity-avatar-button"
@@ -117,10 +155,15 @@ export function ApprovalEntry(
                 <HostAgentAvatar participant={participant} />
               </button>
             </span>
-            <div className="cxa-message-bubble-shell">
-              <div className="cxa-message-bubble-anchor">
-                <div className="cxa-message-surface cxa-approval-bubble">
-                  <div className="cxa-approval-bubble-copy">
+            <div className="cxa-approval-card-shell">
+              <div className="cxa-approval-card-anchor">
+                <div
+                  className="cxa-approval-card"
+                  tabIndex={0}
+                  onContextMenu={openApprovalContext}
+                  onKeyDown={keyboardApprovalContext}
+                >
+                  <div className="cxa-approval-card-copy">
                     <span className="cxa-approval-target">{target}</span>
                     <p className="cxa-approval-reason">{entry.reason.text}</p>
                     {entry.diagnostic === undefined
@@ -130,7 +173,7 @@ export function ApprovalEntry(
                   {entry.state === 'pending'
                     ? (
                       <div
-                        className="cxa-approval-bubble-actions"
+                        className="cxa-approval-card-actions"
                         role="group"
                         aria-label={chinese ? `${authorityName} 的审批操作` : `${authorityName} approval actions`}
                       >
@@ -175,6 +218,20 @@ export function ApprovalEntry(
                         <span>{outcome}</span>
                       </span>
                     )}
+                </div>
+                <div
+                  className="cxa-message-hover-actions cxa-approval-hover-actions"
+                  role="toolbar"
+                  aria-label={chinese ? '审批卡片操作' : 'Approval card actions'}
+                >
+                  <button
+                    type="button"
+                    className="cxa-message-hover-action"
+                    aria-label={chinese ? '复制审批理由' : 'Copy approval reason'}
+                    onClick={copyApprovalReason}
+                  >
+                    <HostIcon token="action.copy" />
+                  </button>
                 </div>
               </div>
             </div>

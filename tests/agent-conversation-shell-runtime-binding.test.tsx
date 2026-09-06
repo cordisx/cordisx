@@ -386,11 +386,20 @@ describe('Agent conversation shell public runtime', () => {
       () => expect(dom.window.document.querySelector('.cxa-room-settings-form')).not.toBeNull(),
       { timeout: 1_000, interval: 10 },
     )
+    const form = dom.window.document.querySelector<HTMLFormElement>('.cxa-room-settings-form')!
+    expect(form.classList.contains('cxf-react-form')).toBe(true)
+    expect(form.querySelector('[data-host-draft-fields="true"]')).not.toBeNull()
+    expect(form.querySelector('[data-config-path="name"][data-host-form-primitive]')).not.toBeNull()
+    expect(form.querySelector('[data-config-path="description"][data-host-form-primitive]')).not.toBeNull()
+    expect(form.querySelectorAll(':scope > label')).toHaveLength(0)
+    expect(
+      dom.window.document.querySelector<HTMLStyleElement>('style[data-agent-conversation-styles]')?.textContent,
+    ).not.toContain('.cxa-room-settings-form{')
     const nameField = dom.window.document.querySelector<HTMLInputElement>(
-      '.cxa-room-settings-form input[name="name"]',
+      '#cxa-room-settings-name',
     )!
     const descriptionField = dom.window.document.querySelector<HTMLTextAreaElement>(
-      '.cxa-room-settings-form textarea[name="description"]',
+      '#cxa-room-settings-description',
     )!
     const inputSetter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')?.set
     const textAreaSetter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')?.set
@@ -406,7 +415,7 @@ describe('Agent conversation shell public runtime', () => {
     await vi.waitFor(
       () =>
         expect(
-          (dom.window.document.querySelector('.cxa-room-settings-form button[type="submit"]') as
+          (dom.window.document.querySelector('.cxa-room-settings-form .cxf-form-action-buttons button') as
             | HTMLButtonElement
             | null)?.disabled,
         ).toBe(false),
@@ -414,7 +423,7 @@ describe('Agent conversation shell public runtime', () => {
     )
     await act(async () =>
       dom.window.document.querySelector<HTMLButtonElement>(
-        '.cxa-room-settings-form button[type="submit"]',
+        '.cxa-room-settings-form .cxf-form-action-buttons button',
       )!.click()
     )
     await vi.waitFor(() => expect(requests).toHaveLength(1), { timeout: 1_000, interval: 10 })

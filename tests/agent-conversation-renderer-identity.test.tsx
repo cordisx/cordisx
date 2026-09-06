@@ -543,4 +543,153 @@ describe('AgentConversation renderer model', () => {
       await harness.close()
     }
   })
+  it('groups adjacent Agent messages by exact participant identity: first name, last avatar, and accessible bubble time', async () => {
+    const base = createPlaygroundConversationFixture('conversation', 'en')
+    const room = base.selection as Extract<AgentConversationModel['selection'], { kind: 'room' }>
+    const lead = {
+      id: 'lead',
+      role: 'agent' as const,
+      name: 'Lead',
+      avatar: createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'lead' }),
+      agentIdentity: { agentId: 'lead', revision: 'r1' },
+    }
+    const reviewer = {
+      id: 'reviewer',
+      role: 'agent' as const,
+      name: 'Reviewer',
+      avatar: createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'reviewer' }),
+      agentIdentity: { agentId: 'reviewer', revision: 'r1' },
+    }
+    const human = { id: 'human', role: 'human' as const, name: 'You' }
+    const system = { id: 'system', role: 'system' as const, name: 'System' }
+    const entry = (
+      itemId: string,
+      authorId: string,
+      sequence: number,
+      text: string,
+      semantic?: AgentConversationMessage['semantic'],
+    ) => ({
+      kind: 'message' as const,
+      itemId,
+      messageId: `message-${itemId}`,
+      sequence,
+      authorId,
+      body: [text],
+      timestamp: `2026-08-31T00:00:0${sequence}.000Z`,
+      deliveryState: 'delivered' as const,
+      runState: 'idle' as const,
+      ariaLive: 'off' as const,
+      actions: [],
+      source: 'agent-loop' as const,
+      reactions: [],
+      ...(semantic === undefined ? {} : { semantic }),
+    })
+    const model = createAgentConversationModel({
+      ...base,
+      selection: { ...room, roomId: 'grouped', participants: [lead, reviewer, human, system] },
+      entries: [
+        entry('lead-introduction', 'lead', 1, 'I am Lead.', {
+          purpose: 'member-self-introduction',
+          causation: { operationId: 'intro' },
+          participantId: 'lead',
+          memberId: 'lead',
+          runId: 'lead-run',
+          binding: { bindingId: 'lead-binding', generation: 1 },
+          turn: 'lead-turn',
+        }),
+        entry('lead-reply', 'lead', 2, 'I will continue.', { purpose: 'conversation' }),
+        entry('human-break', 'human', 3, 'Please continue.', { purpose: 'conversation' }),
+        entry('lead-after-human', 'lead', 4, 'Continuing.', { purpose: 'conversation' }),
+        entry('system-break', 'system', 5, 'System event.', { purpose: 'conversation' }),
+        entry('reviewer-reply', 'reviewer', 6, 'Reviewing.', { purpose: 'conversation' }),
+      ],
+      headerActions: [],
+    })
+    const harness = await render(
+      model,
+      new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model),
+      false,
+      {
+        identity: {
+          resolve: identity => ({
+            identity,
+            name: identity.agentId === 'lead' ? 'Lead' : 'Reviewer',
+            introduction: 'Exact identity presentation.',
+          }),
+          navigator: new HostAgentTaskDetailsNavigator({ navigateHost: vi.fn(), navigateExternal: vi.fn() }),
+          onSettings: vi.fn(),
+        },
+      },
+    )
+    try {
+      const document = harness.dom.window.document
+      const intro = document.querySelector<HTMLElement>('[data-entry-id="lead-introduction"]')!
+      const followup = document.querySelector<HTMLElement>('[data-entry-id="lead-reply"]')!
+      const afterHuman = document.querySelector<HTMLElement>('[data-entry-id="lead-after-human"]')!
+      const reviewerReply = document.querySelector<HTMLElement>('[data-entry-id="reviewer-reply"]')!
+      expect([intro, followup, afterHuman, reviewerReply].map(node => [node.dataset.groupStart, node.dataset.groupEnd]))
+        .toEqual([
+          ['true', 'false'],
+          ['false', 'true'],
+          ['true', 'true'],
+          ['true', 'true'],
+        ])
+      expect(intro.querySelector('.cx-agent-identity-avatar-button')).toBeNull()
+      expect(followup.querySelector('.cx-agent-identity-avatar-button')).not.toBeNull()
+      expect(afterHuman.querySelector('.cx-agent-identity-avatar-button')).not.toBeNull()
+      expect(reviewerReply.querySelector('.cx-agent-identity-avatar-button')).not.toBeNull()
+      expect(intro.querySelector('.cxa-message-meta')?.textContent).toContain('Lead')
+      expect(followup.querySelector('.cxa-message-meta')).not.toBeNull()
+      expect(followup.querySelector('.cxa-author')).toBeNull()
+      expect(afterHuman.querySelector('.cxa-message-meta')?.textContent).toContain('Lead')
+      expect(reviewerReply.querySelector('.cxa-message-meta')?.textContent).toContain('Reviewer')
+      const introSeat = intro.querySelector<HTMLElement>('.cxa-message-avatar-seat')!
+      const followupSeat = followup.querySelector<HTMLElement>('.cxa-message-avatar-seat')!
+      expect(introSeat.dataset.avatarSeat).toBe('placeholder')
+      expect(introSeat.getAttribute('aria-hidden')).toBe('true')
+      expect(introSeat.hasAttribute('inert')).toBe(true)
+      expect(followupSeat.dataset.avatarSeat).toBe('visible')
+      expect(followupSeat.hasAttribute('aria-hidden')).toBe(false)
+      expect(
+        intro.querySelector(
+          '.cxa-message-bubble-row > .cxa-message-avatar-seat + .cxa-message-bubble-shell .cxa-message-surface',
+        ),
+      ).not.toBeNull()
+      expect(
+        followup.querySelector(
+          '.cxa-message-bubble-row > .cxa-message-avatar-seat + .cxa-message-bubble-shell .cxa-message-surface',
+        ),
+      ).not.toBeNull()
+      for (const message of [intro, followup, afterHuman, reviewerReply]) {
+        const time = message.querySelector<HTMLButtonElement>('.cxa-message-time')!
+        expect(time.closest('.cxa-message-meta')).not.toBeNull()
+        expect(time.closest('.cxa-message-surface')).toBeNull()
+        expect(time.tabIndex).toBe(0)
+        expect(time.querySelector('time')).not.toBeNull()
+        expect(message.getAttribute('aria-label')).toContain(message === reviewerReply ? 'Reviewer' : 'Lead')
+      }
+      const styles = document.querySelector<HTMLStyleElement>('style[data-agent-conversation-styles]')!.textContent!
+      expect(styles).toContain(
+        '.cxa-message-bubble-row{display:flex;min-width:0;max-width:100%;align-items:stretch;gap:var(--cxa-message-avatar-gap)}',
+      )
+      expect(styles).toContain(
+        '.cxa-message-avatar-seat{display:grid;width:var(--cxa-message-avatar-size);min-height:var(--cxa-message-avatar-size);height:auto;flex:0 0 var(--cxa-message-avatar-size)',
+      )
+      expect(styles).toContain(
+        '.cxa-message[data-role="agent"] .cxa-message-meta{max-width:calc(100% - var(--cxa-message-avatar-size) - var(--cxa-message-avatar-gap));margin-inline-start:calc(var(--cxa-message-avatar-size) + var(--cxa-message-avatar-gap));padding-inline:0}',
+      )
+      expect(styles).toContain(
+        '--cxa-message-avatar-size:calc(var(--cxa-message-line-height) + var(--cxa-message-bubble-padding-block) + var(--cxa-message-bubble-padding-block) + var(--cxa-message-bubble-border-width) + var(--cxa-message-bubble-border-width))',
+      )
+      expect(styles).toContain(
+        '.cxa-message[data-role="agent"] .cxa-message-content:has(>.cxa-message-bubble-row>.cxa-message-bubble-shell>.cxa-message-bubble-anchor:hover)>.cxa-message-meta>.cxa-message-time',
+      )
+      expect(styles).toContain(
+        '.cxa-message-time{display:inline-flex;flex:none;align-items:center;padding:0;border:0;opacity:0',
+      )
+      expect(styles).not.toContain('.cxa-message:hover .cxa-message-time')
+    } finally {
+      await harness.close()
+    }
+  })
 })
