@@ -19,7 +19,19 @@ function section(source: string, start: string, end: string): string {
 async function managerModule(name: string, factory?: string): Promise<string> {
   const manager = await readFile(managerPath, 'utf8')
   expect(manager).toContain(`from './manager-legacy/${name}.js'`)
-  if (factory !== undefined) expect(manager).toContain(`= ${factory}({`)
+  if (factory !== undefined) {
+    const tree = ts.createSourceFile('manager.ts', manager, ts.ScriptTarget.Latest, true)
+    const installation = tree.statements.find((node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) && node.name?.text === 'installCordisXManager'
+    )
+    const calls: string[] = []
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) calls.push(node.expression.text)
+      ts.forEachChild(node, visit)
+    }
+    if (installation !== undefined) visit(installation)
+    expect(calls).toContain(factory)
+  }
   if (name === 'styles') expect(manager).toContain('${MANAGER_STYLES}')
   return readFile(new URL(`../packages/cli/src/renderer/manager-legacy/${name}.ts`, import.meta.url), 'utf8')
 }
