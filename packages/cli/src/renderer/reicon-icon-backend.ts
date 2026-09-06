@@ -7,7 +7,6 @@ import type { IconFunction, IconWeight } from 'reicon/createIcon'
 import Activity from 'reicon/icons/Activity'
 import Add from 'reicon/icons/Add'
 import ArrangeSquare2 from 'reicon/icons/ArrangeSquare2'
-import ArrowDown from 'reicon/icons/ArrowDown'
 import ArrowDownSquare from 'reicon/icons/ArrowDownSquare'
 import ArrowLeft from 'reicon/icons/ArrowLeft'
 import ArrowRight from 'reicon/icons/ArrowRight'
@@ -21,6 +20,7 @@ import Chat from 'reicon/icons/Chat'
 import Chart from 'reicon/icons/Chart'
 import Check from 'reicon/icons/Check'
 import CheckCircle from 'reicon/icons/CheckCircle'
+import ChevronDown from 'reicon/icons/ChevronDown'
 import Clock2 from 'reicon/icons/Clock2'
 import Component from 'reicon/icons/Component'
 import CommandSquare from 'reicon/icons/CommandSquare'
@@ -34,6 +34,7 @@ import File from 'reicon/icons/File'
 import Floppy from 'reicon/icons/Floppy'
 import Folder from 'reicon/icons/Folder'
 import FolderOpen from 'reicon/icons/FolderOpen'
+import Frame from 'reicon/icons/Frame'
 import History from 'reicon/icons/History'
 import HandHeart from 'reicon/icons/HandHeart'
 import InfoCircle from 'reicon/icons/InfoCircle'
@@ -119,7 +120,7 @@ const REICON_GLYPHS = Object.freeze(
     'content.panel': Component,
     'content.tags': Tag,
     'control.check': Check,
-    'control.chevron-down': ArrowDown,
+    'control.chevron-down': ChevronDown,
     'control.chevron-left': ArrowLeft,
     'control.chevron-right': ArrowRight,
     'control.chevron-up': ArrowUp,
@@ -151,6 +152,7 @@ export const BUILTIN_HOST_SURFACE_ICON_KEYS = [
   'host:archive',
   'host:chat',
   'host:file',
+  'host:fit',
   'host:folder-open',
   'host:hierarchy',
   'host:link',
@@ -169,6 +171,7 @@ const HOST_SURFACE_GLYPHS = Object.freeze(
     'host:archive': ArchiveBox,
     'host:chat': Chat,
     'host:file': File,
+    'host:fit': Frame,
     'host:folder-open': FolderOpen,
     'host:hierarchy': DiagramTree,
     'host:link': Link,
@@ -348,6 +351,29 @@ function compileFragment(fragment: string): NormalizedVectorDescriptor {
         })
       }
     }
+  }
+  for (const match of fragment.matchAll(/<polyline\b([^>]*)\/?>(?:<\/polyline>)?/g)) {
+    const attrs = attributes(match[1] ?? '')
+    const values = (attrs.points ?? '').trim().split(/[\s,]+/).filter(Boolean).map(Number)
+    if (values.length < 4 || values.length % 2 !== 0 || values.some(value => !Number.isFinite(value))) {
+      throw new Error('Reicon polyline lacks valid geometry')
+    }
+    const commands: NormalizedVectorCommand[] = []
+    for (let index = 0; index < values.length; index += 2) {
+      commands.push({
+        op: index === 0 ? 'move' : 'line',
+        x: values[index]!,
+        y: values[index + 1]!,
+      })
+    }
+    paths.push({
+      paint: 'stroke',
+      strokeWidth: Number(attrs['stroke-width'] ?? 1.5),
+      lineCap: (attrs['stroke-linecap'] ?? 'butt') as 'butt' | 'round' | 'square',
+      lineJoin: (attrs['stroke-linejoin'] ?? 'miter') as 'miter' | 'round' | 'bevel',
+      ...(attrs.opacity === undefined ? {} : { opacity: Number(attrs.opacity) }),
+      commands,
+    })
   }
   const descriptor: NormalizedVectorDescriptor = {
     format: 'cordisx.normalized-vector',

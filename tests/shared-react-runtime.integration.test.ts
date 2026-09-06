@@ -14,6 +14,8 @@ interface SharedRuntime {
     readonly HorizontalSplitPane?: unknown
     readonly HoverCard?: unknown
     readonly PanZoomCanvas?: unknown
+    readonly FilterToolbar?: unknown
+    readonly SearchField?: unknown
   }>
 }
 
@@ -73,6 +75,8 @@ describe('shared React plugin runtime', () => {
     expect(typeof window.__cordisxSharedReactRuntime?.ui.HorizontalSplitPane).toBe('function')
     expect(typeof window.__cordisxSharedReactRuntime?.ui.HoverCard).toBe('function')
     expect(typeof window.__cordisxSharedReactRuntime?.ui.PanZoomCanvas).toBe('function')
+    expect(typeof window.__cordisxSharedReactRuntime?.ui.FilterToolbar).toBe('function')
+    expect(typeof window.__cordisxSharedReactRuntime?.ui.SearchField).toBe('function')
     expect(cordisXSharedModuleSource(CORDISX_UI_MODULE)).toContain(
       'export const HorizontalSplitPane = runtime.ui.HorizontalSplitPane;',
     )
@@ -81,6 +85,12 @@ describe('shared React plugin runtime', () => {
     )
     expect(cordisXSharedModuleSource(CORDISX_UI_MODULE)).toContain(
       'export const PanZoomCanvas = runtime.ui.PanZoomCanvas;',
+    )
+    expect(cordisXSharedModuleSource(CORDISX_UI_MODULE)).toContain(
+      'export const FilterToolbar = runtime.ui.FilterToolbar;',
+    )
+    expect(cordisXSharedModuleSource(CORDISX_UI_MODULE)).toContain(
+      'export const SearchField = runtime.ui.SearchField;',
     )
 
     let navigationSettled = false

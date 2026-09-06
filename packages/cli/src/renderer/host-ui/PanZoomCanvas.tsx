@@ -1,5 +1,6 @@
 import * as React from 'react'
 import type { PanZoomCanvasHandle, PanZoomCanvasProps } from '../../ui.js'
+import { HostIcon } from './HostIcon.js'
 
 interface ViewTransform {
   readonly x: number
@@ -19,9 +20,18 @@ interface PointerPoint {
   readonly clientY: number
 }
 
+interface DragOrigin {
+  readonly x: number
+  readonly y: number
+  readonly transform: ViewTransform
+  readonly active: boolean
+}
+
 const DEFAULT_MIN_SCALE = 0.25
 const DEFAULT_MAX_SCALE = 2.5
 const KEYBOARD_PAN_STEP = 48
+const DRAG_THRESHOLD = 4
+const WHEEL_ZOOM_LIMIT = 0.12
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value))
@@ -41,6 +51,7 @@ export function PanZoomCanvas({
   minScale = DEFAULT_MIN_SCALE,
   maxScale = DEFAULT_MAX_SCALE,
   initialScale = 1,
+  controls,
   controllerRef,
   onScaleChange,
   className,
@@ -54,10 +65,12 @@ export function PanZoomCanvas({
   const viewport = React.useRef<HTMLDivElement>(null)
   const content = React.useRef<HTMLDivElement>(null)
   const pointers = React.useRef(new Map<number, PointerPoint>())
-  const dragOrigin = React.useRef<Readonly<{ x: number; y: number; transform: ViewTransform }> | undefined>(undefined)
+  const dragOrigin = React.useRef<DragOrigin | undefined>(undefined)
   const pinch = React.useRef<PinchState | undefined>(undefined)
+  const suppressClick = React.useRef(false)
   const transformRef = React.useRef<ViewTransform>({ x: 0, y: 0, scale: boundedInitial })
   const [transform, setTransformState] = React.useState<ViewTransform>(transformRef.current)
+  const [dragging, setDragging] = React.useState(false)
   const instructionsId = React.useId()
 
   const publish = React.useCallback((next: ViewTransform) => {
@@ -114,7 +127,7 @@ export function PanZoomCanvas({
     pointers.current.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY })
     const active = [...pointers.current.values()]
     if (active.length !== 2) return
-    const [first, second] = active as [React.PointerEvent, React.PointerEvent]
+    const [first, second] = active as [PointerPoint, PointerPoint]
     const nextMidpoint = midpoint(first, second)
     if (pinch.current === undefined) {
       pinch.current = {
@@ -143,6 +156,7 @@ export function PanZoomCanvas({
   const releasePointer = (event: React.PointerEvent<HTMLDivElement>): void => {
     pointers.current.delete(event.pointerId)
     dragOrigin.current = undefined
+    setDragging(false)
     if (pointers.current.size < 2) pinch.current = undefined
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
@@ -162,10 +176,12 @@ export function PanZoomCanvas({
       aria-keyshortcuts="+ - 0 ArrowUp ArrowDown ArrowLeft ArrowRight"
       data-scale={transform.scale.toFixed(3)}
       data-fill={fill}
+      data-dragging={dragging}
       onWheel={event => {
         event.preventDefault()
         event.stopPropagation()
-        scaleAround(transformRef.current.scale * Math.exp(-event.deltaY * 0.0015), event.clientX, event.clientY)
+        const delta = clamp(-event.deltaY * 0.0015, -WHEEL_ZOOM_LIMIT, WHEEL_ZOOM_LIMIT)
+        scaleAround(transformRef.current.scale * Math.exp(delta), event.clientX, event.clientY)
       }}
       onPointerDown={event => {
         if (event.button !== 0) return
@@ -174,7 +190,7 @@ export function PanZoomCanvas({
         event.currentTarget.setPointerCapture(event.pointerId)
         pointers.current.set(event.pointerId, { clientX: event.clientX, clientY: event.clientY })
         if (pointers.current.size === 1) {
-          dragOrigin.current = { x: event.clientX, y: event.clientY, transform: transformRef.current }
+          dragOrigin.current = { x: event.clientX, y: event.clientY, transform: transformRef.current, active: false }
         } else {
           updatePinch(event)
         }
@@ -188,14 +204,29 @@ export function PanZoomCanvas({
         }
         const origin = dragOrigin.current
         if (origin === undefined) return
+        const offsetX = event.clientX - origin.x
+        const offsetY = event.clientY - origin.y
+        if (!origin.active && Math.hypot(offsetX, offsetY) < DRAG_THRESHOLD) return
+        if (!origin.active) {
+          dragOrigin.current = { ...origin, active: true }
+          suppressClick.current = true
+          setDragging(true)
+        }
         publish({
           ...origin.transform,
-          x: origin.transform.x + event.clientX - origin.x,
-          y: origin.transform.y + event.clientY - origin.y,
+          x: origin.transform.x + offsetX,
+          y: origin.transform.y + offsetY,
         })
       }}
       onPointerUp={releasePointer}
       onPointerCancel={releasePointer}
+      onClickCapture={event => {
+        if (!suppressClick.current) return
+        suppressClick.current = false
+        event.preventDefault()
+        event.stopPropagation()
+      }}
+      onDragStart={event => event.preventDefault()}
       onKeyDown={event => {
         const frame = viewport.current?.getBoundingClientRect()
         if (frame === undefined) return
@@ -234,6 +265,42 @@ export function PanZoomCanvas({
       >
         {children}
       </div>
+      {controls === undefined
+        ? null
+        : (
+          <div className="cxr-ui-action-toolbar cxr-ui-pan-zoom-canvas__controls" role="toolbar">
+            <button
+              type="button"
+              className="cxr-ui-icon-action"
+              disabled={controls.disabled}
+              aria-label={controls.fitLabel}
+              title={controls.fitLabel}
+              onClick={() => {
+                fitToView()
+                controls.onFit?.()
+              }}
+            >
+              <HostCanvasIcon token="host:fit" label={controls.fitLabel} />
+            </button>
+            <button
+              type="button"
+              className="cxr-ui-icon-action"
+              disabled={controls.disabled}
+              aria-label={controls.resetLabel}
+              title={controls.resetLabel}
+              onClick={() => {
+                reset()
+                controls.onReset?.()
+              }}
+            >
+              <HostCanvasIcon token="host:reset" label={controls.resetLabel} />
+            </button>
+          </div>
+        )}
     </div>
   )
+}
+
+function HostCanvasIcon({ token, label }: { readonly token: 'host:fit' | 'host:reset'; readonly label: string }) {
+  return <HostIcon token={label} surfaceToken={token} className="cxr-ui-canvas-control-icon" size={16} />
 }
