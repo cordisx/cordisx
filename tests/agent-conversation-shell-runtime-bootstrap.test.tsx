@@ -324,74 +324,485 @@ afterEach(() => {
 })
 
 describe('Agent conversation shell public runtime', () => {
-  it('accepts a Shell v4 message author whose exact participant fields use a different property order', () => {
-    const displayName = message('participant.agent-one', 'Agent One')
-    const avatar = createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'agent-one' })
-    const agentIdentity = { agentId: 'agent-one', revision: 'revision-one' }
-    const participant = { participantId: 'agent-one', role: 'agent' as const, displayName, avatar, agentIdentity }
-    const author = { agentIdentity, avatar, displayName, role: 'agent' as const, participantId: 'agent-one' }
-    const snapshot: AgentConversationShellSnapshotV4 = {
-      binding: { bindingId: 'binding-v4', ownerGeneration: 'owner-v4' },
-      generation: 'snapshot-v4',
-      snapshotSequence: 1,
-      selection: {
-        kind: 'room',
-        roomId: 'room-v4',
-        title: message('room.v4', 'Room'),
-        multiParticipant: false,
-        participantPresentation: 'none',
-        participants: [participant],
-      },
-      items: [{
-        kind: 'message',
-        itemId: 'item-v4',
-        messageId: 'message-v4',
-        sequence: 1,
-        author,
-        source: { kind: 'session-event', sessionId: 'session-v4', eventSeq: 1 },
-        semantic: { purpose: 'conversation' },
-        body: [{ kind: 'text', text: message('message.v4', 'Ready.') }],
-        reactions: [],
-        timestamp: '2026-09-03T00:00:00.000Z',
-        deliveryState: 'delivered',
-        runState: 'idle',
-        ariaLive: 'off',
-        actions: [],
-      }],
-      composer: {
-        availability: 'unavailable',
-        placeholder: message('composer.v4', 'Message'),
-        disabled: { value: true },
-        submit: { id: 'send' },
-      },
-      headerActions: [],
-    }
-
-    expect(
-      projectAgentConversationShellSnapshotV4('chatroom', snapshot, {
-        resolve: value => value.fallback,
-      }).entries,
-    ).toMatchObject([{ kind: 'message', authorId: 'agent-one' }])
-  })
-
-  it('captures the exact Shell v4 Room run while its composer command is accepted', async () => {
+  it('always gives a fresh Shell v9 Room composer a frozen bootstrap origin before a run exists', async () => {
     const dom = installDom()
     const commands = new CommandRegistry()
-    let observed: unknown
-    let bindingId: string | undefined
-    const fences: string[] = []
-    const sourceAuthority = {
-      execute: async <Value,>(origin: unknown, operation: () => Promise<Value>) => {
-        observed = origin
+    let commandContext: CordisXCommandContext | undefined
+    commands.register('chatroom', { id: 'send-v9', title: { key: 'send-v9', fallback: 'Send' } }, context => {
+      commandContext = context
+    })
+    const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
+    const plugin = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'chatroom',
+      [CORDISX_PLUGIN_GENERATION]: 'generation-v9',
+    })
+    const stream = new PageStream()
+    let binding: AgentConversationShellBinding | undefined
+    const registration = runtime.register(
+      plugin,
+      currentBinding => {
+        binding = currentBinding
+        const snapshot: AgentConversationShellSnapshotV7 = {
+          binding: { bindingId: currentBinding.bindingId, ownerGeneration: currentBinding.ownerGeneration },
+          generation: 'snapshot-v9',
+          snapshotSequence: 0,
+          selection: {
+            kind: 'room',
+            roomId: 'room-v9-fresh',
+            title: message('room.v9', 'Fresh v9 room'),
+            multiParticipant: false,
+            participantPresentation: 'none',
+            participants: [{ participantId: 'lead', role: 'agent', displayName: message('lead', 'Lead') }],
+            activeRuns: [],
+          },
+          items: [],
+          composer: {
+            availability: 'available',
+            placeholder: message('composer', 'Message'),
+            disabled: { value: false },
+            shortcutPolicy: 'enter',
+            submit: { id: 'send-v9' },
+          },
+          headerActions: [],
+        }
+        const subscription = {
+          subscriptionId: 'subscription-v9',
+          binding: snapshot.binding,
+          generation: snapshot.generation,
+          afterSequence: 0,
+          snapshotSequence: 0,
+        }
+        return {
+          snapshot: async () => snapshot,
+          subscribe: async () => ({
+            result: { type: 'subscribe' as const, status: 'accepted' as const, code: 'allowed' as const, subscription },
+            handle: {
+              subscription,
+              pages: stream,
+              closed: new Promise<never>(() => {}),
+              unsubscribe: async () => {
+                stream.close()
+              },
+            },
+          }),
+          dispose() {},
+        }
+      },
+      undefined,
+      9,
+    )
+    registration.mount(mountContext(dom, { roomId: 'room-v9-fresh' }))
+    await vi.waitFor(() => expect(dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')).not.toBeNull())
+    const draft = dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')?.set
+    setter?.call(draft, 'bootstrap first delivery')
+    draft.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    const send = dom.window.document.querySelector<HTMLButtonElement>('.cxa-send')!
+    await vi.waitFor(() => expect(send.disabled).toBe(false))
+    send.click()
+    await vi.waitFor(() =>
+      expect(commandContext?.hostContext).toMatchObject({
+        scope: 'composer-submit',
+        origin: {
+          $schema:
+            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-bootstrap-command-origin.v1.schema.json',
+          binding: { bindingId: binding!.bindingId, ownerGeneration: binding!.ownerGeneration },
+          generation: binding!.ownerGeneration,
+          commandId: 'send-v9',
+          scope: 'composer-submit',
+        },
+      })
+    )
+    const origin = (commandContext?.hostContext as { readonly origin?: Record<string, unknown> }).origin
+    expect(origin).toBeDefined()
+    expect(origin).not.toHaveProperty('room')
+    expect(Object.isFrozen(origin)).toBe(true)
+    expect(Object.isFrozen(origin?.binding)).toBe(true)
+    registration.dispose()
+    runtime.dispose()
+    commands.dispose()
+    await settle()
+    dom.window.close()
+  })
+
+  it('routes an opted-in Shell v9 composer through the mounted page-admission v2 adapter', async () => {
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    const legacyHandler = vi.fn()
+    commands.register(
+      'chatroom',
+      { id: 'send-v9-page', title: { key: 'send-v9-page', fallback: 'Send' } },
+      legacyHandler,
+    )
+    const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
+    const plugin = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'chatroom',
+      [CORDISX_PLUGIN_GENERATION]: 'generation-v9-page',
+    })
+    const stream = new PageStream()
+    const registration = runtime.register(
+      plugin,
+      currentBinding => {
+        const snapshot: AgentConversationShellSnapshotV7 = {
+          binding: {
+            bindingId: currentBinding.bindingId,
+            ownerGeneration: currentBinding.ownerGeneration,
+          },
+          generation: 'snapshot-v9-page',
+          snapshotSequence: 0,
+          selection: { kind: 'no-room' },
+          items: [],
+          composer: {
+            availability: 'available',
+            placeholder: message('composer', 'Message'),
+            disabled: { value: false },
+            shortcutPolicy: 'enter',
+            submit: { id: 'send-v9-page' },
+          },
+          headerActions: [],
+        }
+        const subscription = {
+          subscriptionId: 'subscription-v9-page',
+          binding: snapshot.binding,
+          generation: snapshot.generation,
+          afterSequence: 0,
+          snapshotSequence: 0,
+        }
+        return {
+          snapshot: async () => snapshot,
+          subscribe: async () => ({
+            result: {
+              type: 'subscribe' as const,
+              status: 'accepted' as const,
+              code: 'allowed' as const,
+              subscription,
+            },
+            handle: {
+              subscription,
+              pages: stream,
+              closed: new Promise<never>(() => {}),
+              unsubscribe: async () => {
+                stream.close()
+              },
+            },
+          }),
+          dispose() {},
+        }
+      },
+      undefined,
+      9,
+      { composer: { mode: 'page-composer-v2' } },
+    )
+    const execute = vi.fn(async () => ({ status: 'accepted' as const, code: 'completed' as const }))
+    registration.mount({
+      ...mountContext(dom),
+      pageComposer: { execute },
+    })
+    await vi.waitFor(() => expect(dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')).not.toBeNull())
+    const draft = dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')?.set
+    setter?.call(draft, 'page admission delivery')
+    draft.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    const send = dom.window.document.querySelector<HTMLButtonElement>('.cxa-send')!
+    await vi.waitFor(() => expect(send.disabled).toBe(false))
+    send.click()
+    await vi.waitFor(() =>
+      expect(execute).toHaveBeenCalledWith({
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-page-composer-command-request.v1.schema.json',
+        contract: 'cordisx.agent-page-composer-command-request/v1',
+        schemaVersion: 1,
+        command: { id: 'send-v9-page' },
+        submitPayload: 'page admission delivery',
+      })
+    )
+    expect(legacyHandler).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(draft.value).toBe(''))
+    registration.dispose()
+    runtime.dispose()
+    commands.dispose()
+    await settle()
+    dom.window.close()
+  })
+
+  it('keeps an existing Shell v9 Room on its exact v1 target origin through command completion', async () => {
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    const scenarioOwner = { pluginId: 'file:///fixtures/chatroom.ts:chatroom', generation: 1 } as const
+    let mounted: AgentRuntimeRouteScope | undefined
+    const authority = new PlaygroundScenarioSessionScopeAuthority({
+      hostGeneration: 'shell-v9-existing-room',
+      connectionGeneration: () => 1,
+      currentRoute: () => undefined,
+      ownerForSession: sessionId =>
+        ['cx-session.existing-lead', 'cx-session.existing-reviewer'].includes(sessionId) ? scenarioOwner : undefined,
+      routeOwner: candidate =>
+        candidate.pluginId === scenarioOwner.pluginId && candidate.generation === scenarioOwner.generation
+          ? { source: 'file:///fixtures/chatroom.ts', pluginId: 'chatroom' }
+          : undefined,
+      permissionRoute: () => ({
+        routeId: 'room-session-detail',
+        path: '/main/chatroom/:roomId/run/:runId/session/:sessionId',
+      }),
+      authorize: async () => true,
+      mountRoute: route => {
+        mounted = route
+        return () => {
+          mounted = undefined
+        }
+      },
+      changed: () => {},
+    })
+    let captured = false
+    commands.register(
+      'chatroom',
+      { id: 'send-v9-existing', title: { key: 'send-v9-existing', fallback: 'Send' } },
+      context => {
+        const origin = (context.hostContext as { readonly origin?: AgentCommandOrigin }).origin
+        if (origin === undefined) throw new Error('Shell v9 existing Room lost its exact target origin')
+        expect(origin.room).toEqual({
+          roomId: 'room-existing',
+          participantId: 'leader',
+          memberId: 'member-leader',
+          runId: 'run-leader',
+        })
+        const capture = authority.captureAdmission(
+          scenarioOwner,
+          origin,
+          'cx-session.existing-lead',
+          1,
+          'cx-message.existing-third',
+        )
+        expect(capture?.active()).toBe(true)
+        capture?.commit()
+        captured = true
+      },
+    )
+    const runtime = new AgentConversationShellRegistry(
+      commandService(commands),
+      fakeI18n(),
+      undefined,
+      undefined,
+      undefined,
+      authority.conversationSource,
+      owner => owner === 'chatroom' ? scenarioOwner : undefined,
+    )
+    const plugin = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'chatroom',
+      [CORDISX_PLUGIN_GENERATION]: 'shell-v9-existing-generation',
+    })
+    const stream = new PageStream()
+    let binding: AgentConversationShellBinding | undefined
+    const registration = runtime.register(
+      plugin,
+      currentBinding => {
+        binding = currentBinding
+        const snapshot: AgentConversationShellSnapshotV7 = {
+          binding: { bindingId: currentBinding.bindingId, ownerGeneration: currentBinding.ownerGeneration },
+          generation: 'shell-v9-existing-snapshot',
+          snapshotSequence: 0,
+          selection: {
+            kind: 'room',
+            roomId: 'room-existing',
+            title: message('room.existing', 'Existing Room'),
+            multiParticipant: false,
+            participantPresentation: 'none',
+            participants: [{ participantId: 'leader', role: 'agent', displayName: message('leader', 'Lead') }],
+            activeRuns: [{
+              participantId: 'leader',
+              memberId: 'member-leader',
+              runId: 'run-leader',
+              sessionId: 'cx-session.existing-lead',
+              lifecycle: { phase: 'active' },
+            }],
+          },
+          items: [],
+          composer: {
+            availability: 'available',
+            placeholder: message('composer', 'Message'),
+            disabled: { value: false },
+            shortcutPolicy: 'enter',
+            submit: { id: 'send-v9-existing' },
+          },
+          headerActions: [],
+        }
+        const subscription = {
+          subscriptionId: 'subscription-v9-existing',
+          binding: snapshot.binding,
+          generation: snapshot.generation,
+          afterSequence: 0,
+          snapshotSequence: 0,
+        }
+        return {
+          snapshot: async () => snapshot,
+          subscribe: async () => ({
+            result: { type: 'subscribe' as const, status: 'accepted' as const, code: 'allowed' as const, subscription },
+            handle: {
+              subscription,
+              pages: stream,
+              closed: new Promise<never>(() => {}),
+              unsubscribe: async () => {
+                stream.close()
+              },
+            },
+          }),
+          dispose() {},
+        }
+      },
+      undefined,
+      9,
+    )
+    registration.mount(mountContext(dom, { roomId: 'room-existing' }))
+    await vi.waitFor(() => expect(dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')).not.toBeNull())
+    const draft = dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')?.set
+    setter?.call(draft, '3')
+    draft.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    const send = dom.window.document.querySelector<HTMLButtonElement>('.cxa-send')!
+    await vi.waitFor(() => expect(send.disabled).toBe(false))
+    send.click()
+    await vi.waitFor(() => expect(captured).toBe(true))
+    const activated = await authority.client.activate({
+      runId: 'scenario-existing-room-third-message',
+      sourceMessageId: 'cx-message.existing-third',
+      sourceSessionId: 'cx-session.existing-lead',
+      targetSessionId: 'cx-session.existing-reviewer',
+    })
+    expect(activated.status).toBe('available')
+    expect(mounted?.params.sessionId).toBe('cx-session.existing-reviewer')
+    registration.dispose()
+    expect(binding).toBeDefined()
+    if (activated.status === 'available') {
+      await expect(activated.handle.closed).resolves.toEqual({ code: 'route-replaced' })
+    }
+    runtime.dispose()
+    commands.dispose()
+    authority.dispose()
+    await settle()
+    dom.window.close()
+  })
+
+  it('Host-claims a matching v6 Room route continuation synchronously when the new binding mounts', () => {
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    let mountReturned = false
+    const claims: Array<
+      { readonly owner: string; readonly routeId: string; readonly roomId: string; readonly bindingId: string }
+    > = []
+    const sourceAuthority: PlaygroundScenarioConversationSourceAuthority = {
+      execute: async (_origin, operation) => await operation(),
+      fenceBinding: () => {},
+      claimBootstrapRoute: input => {
+        expect(mountReturned).toBe(false)
+        claims.push({
+          owner: input.owner.pluginId,
+          routeId: input.binding.route.routeId,
+          roomId: input.binding.route.roomId,
+          bindingId: input.binding.binding.bindingId,
+        })
+      },
+    }
+    const runtime = new AgentConversationShellRegistry(
+      commandService(commands),
+      fakeI18n(),
+      undefined,
+      undefined,
+      undefined,
+      sourceAuthority,
+      owner => owner === 'chatroom' ? { pluginId: 'file:///fixtures/chatroom.ts:chatroom', generation: 1 } : undefined,
+    )
+    const plugin = new Context().extend({
+      [CORDISX_PLUGIN_ID]: 'chatroom',
+      [CORDISX_PLUGIN_GENERATION]: 'generation-v9-route-claim',
+    })
+    const registration = runtime.register(
+      plugin,
+      binding => {
+        const snapshot: AgentConversationShellSnapshotV7 = {
+          binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration },
+          generation: 'snapshot-v9-route-claim',
+          snapshotSequence: 0,
+          selection: {
+            kind: 'room',
+            roomId: 'room-after-submit',
+            title: message('room.route', 'Route claim room'),
+            multiParticipant: false,
+            participantPresentation: 'none',
+            participants: [],
+            activeRuns: [],
+          },
+          items: [],
+          composer: {
+            availability: 'available',
+            placeholder: message('composer', 'Message'),
+            disabled: { value: false },
+            shortcutPolicy: 'enter',
+            submit: { id: 'send-v9-route-claim' },
+          },
+          headerActions: [],
+        }
+        const subscription = {
+          subscriptionId: 'subscription-v9-route-claim',
+          binding: snapshot.binding,
+          generation: snapshot.generation,
+          afterSequence: 0,
+          snapshotSequence: 0,
+        }
+        return {
+          snapshot: async () => snapshot,
+          subscribe: async () => ({
+            result: { type: 'subscribe' as const, status: 'accepted' as const, code: 'allowed' as const, subscription },
+            handle: {
+              subscription,
+              pages: {
+                async *[Symbol.asyncIterator]() {
+                  await new Promise<void>(() => {})
+                },
+              },
+              closed: new Promise<never>(() => {}),
+              unsubscribe: async () => {},
+            },
+          }),
+          dispose() {},
+        }
+      },
+      undefined,
+      9,
+    )
+    const unmount = registration.mount({
+      ...mountContext(dom, { roomId: 'room-after-submit' }),
+      routeDefinitionId: 'room',
+    })
+    mountReturned = true
+    expect(claims).toHaveLength(1)
+    expect(claims[0]).toMatchObject({
+      owner: 'file:///fixtures/chatroom.ts:chatroom',
+      routeId: 'room',
+      roomId: 'room-after-submit',
+      bindingId: expect.any(String),
+    })
+    unmount?.()
+    registration.dispose()
+    runtime.dispose()
+    commands.dispose()
+    dom.window.close()
+  })
+
+  it('keeps a fresh no-room Shell v9 composer command live for its first bootstrap target declaration', async () => {
+    const dom = installDom()
+    const commands = new CommandRegistry()
+    let commandContext: CordisXCommandContext | undefined
+    let commandOrigin: PlaygroundScenarioConversationOrigin | undefined
+    const sourceAuthority: PlaygroundScenarioConversationSourceAuthority = {
+      execute: async (origin, operation) => {
+        commandOrigin = origin
         return await operation()
       },
-      fenceBinding: (value: string) => {
-        fences.push(value)
-      },
+      fenceBinding: () => {},
       claimBootstrapRoute: () => {},
     }
-    commands.register('chatroom', { id: 'send', title: { key: 'send', fallback: 'Send' } }, () => {
-      expect((observed as { active(): boolean }).active()).toBe(true)
+    commands.register('chatroom', { id: 'create-v9', title: { key: 'create-v9', fallback: 'Create' } }, context => {
+      commandContext = context
     })
     const runtime = new AgentConversationShellRegistry(
       commandService(commands),
@@ -402,419 +813,39 @@ describe('Agent conversation shell public runtime', () => {
       sourceAuthority,
       owner =>
         owner === 'chatroom'
-          ? { pluginId: 'file:///plugins/chatroom.ts:chatroom', generation: 1 }
+          ? { pluginId: 'file:///fixtures/chatroom.ts:chatroom', generation: 1 }
           : undefined,
     )
     const plugin = new Context().extend({
       [CORDISX_PLUGIN_ID]: 'chatroom',
-      [CORDISX_PLUGIN_GENERATION]: 'generation-v4-capture',
+      [CORDISX_PLUGIN_GENERATION]: 'generation-v9-no-room',
     })
-    const participant = {
-      participantId: 'participant-lead',
-      role: 'agent' as const,
-      displayName: message('participant.lead', 'Lead'),
-      agentIdentity: { agentId: 'lead', revision: 'revision-one' },
-    }
+    const stream = new PageStream()
     const registration = runtime.register(
       plugin,
       binding => {
-        bindingId = binding.bindingId
-        const snapshot: AgentConversationShellSnapshotV4 = {
+        const snapshot: AgentConversationShellSnapshotV7 = {
           binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration },
-          generation: 'snapshot-v4-capture',
+          generation: 'snapshot-v9-no-room',
           snapshotSequence: 0,
-          selection: {
-            kind: 'room',
-            roomId: 'room-one',
-            title: message('room.one', 'Room One'),
-            multiParticipant: false,
-            participantPresentation: 'none',
-            participants: [participant],
-            activeRuns: [{
-              participantId: participant.participantId,
-              memberId: 'member-lead',
-              runId: 'room-run-lead',
-              sessionId: 'cx-session.lead',
-              lifecycle: { phase: 'running' },
-              details: { kind: 'host', ref: 'deterministic-agent-session:cx-session.lead' },
-            }],
-          },
+          selection: { kind: 'no-room' },
           items: [],
           composer: {
             availability: 'available',
             placeholder: message('composer', 'Message'),
             disabled: { value: false },
-            submit: { id: 'send' },
-          },
-          headerActions: [],
-        }
-        const subscription = {
-          subscriptionId: 'subscription-v4-capture',
-          binding: snapshot.binding,
-          generation: snapshot.generation,
-          afterSequence: 0,
-          snapshotSequence: 0,
-        }
-        return {
-          snapshot: async () => snapshot,
-          subscribe: async () => ({
-            result: { type: 'subscribe' as const, status: 'accepted' as const, code: 'allowed' as const, subscription },
-            handle: {
-              subscription,
-              pages: {
-                async *[Symbol.asyncIterator]() {
-                  await new Promise<void>(() => {})
-                },
-              },
-              closed: new Promise<never>(() => {}),
-              unsubscribe: async () => ({
-                $schema:
-                  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-conversation-shell-subscription-close.v4.schema.json' as const,
-                contract: 'cordisx.agent-conversation-shell-subscription-close/v4' as const,
-                schemaVersion: 4 as const,
-                subscriptionId: subscription.subscriptionId,
-                binding: subscription.binding,
-                generation: subscription.generation,
-                status: 'closed' as const,
-                code: 'unsubscribed' as const,
-              }),
-            },
-          }),
-          dispose() {},
-        }
-      },
-      undefined,
-      4,
-    )
-    const unmount = registration.mount(mountContext(dom, { roomId: 'room-one' }))
-    await vi.waitFor(() => expect(dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')).not.toBeNull())
-    const draft = dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
-    const valueSetter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')?.set
-    valueSetter?.call(draft, '3')
-    draft.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
-    await vi.waitFor(() =>
-      expect(dom.window.document.querySelector<HTMLButtonElement>('.cxa-send')?.disabled).toBe(false)
-    )
-    dom.window.document.querySelector<HTMLButtonElement>('.cxa-send')!.click()
-    await vi.waitFor(() =>
-      expect(observed).toMatchObject({
-        owner: { pluginId: 'file:///plugins/chatroom.ts:chatroom', generation: 1 },
-        bindingId,
-        snapshotGeneration: 'snapshot-v4-capture',
-        roomId: 'room-one',
-        routeId: 'chatroom:room',
-        runs: [{ runId: 'room-run-lead', sessionId: 'cx-session.lead' }],
-      })
-    )
-    if (typeof unmount === 'function') unmount()
-    expect(fences).toEqual([bindingId])
-    registration.dispose()
-    runtime.dispose()
-    commands.dispose()
-    await settle()
-    dom.window.close()
-  })
-
-  it('settles a Shell v4 close once and releases its source with an idempotent async unsubscribe', async () => {
-    const dom = installDom()
-    const commands = new CommandRegistry()
-    const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
-    const plugin = new Context().extend({
-      [CORDISX_PLUGIN_ID]: 'chatroom',
-      [CORDISX_PLUGIN_GENERATION]: 'generation-v4',
-    })
-    let resolveClosed: ((value: AgentConversationShellSubscriptionClosedV4) => void) | undefined
-    const closed = new Promise<AgentConversationShellSubscriptionClosedV4>(resolve => {
-      resolveClosed = resolve
-    })
-    let connectionClose: AgentConversationShellSubscriptionClosedV4 | undefined
-    let subscribed = false
-    let unsubscribed = 0
-    let disposed = 0
-    const registration = runtime.register(
-      plugin,
-      binding => {
-        const snapshot: AgentConversationShellSnapshotV4 = {
-          binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration },
-          generation: 'session-generation-v4',
-          snapshotSequence: 0,
-          selection: { kind: 'no-room' },
-          items: [],
-          composer: {
-            availability: 'available',
-            placeholder: { key: 'composer', fallback: 'Message' },
-            disabled: { value: false },
-            submit: { id: 'send' },
-          },
-          headerActions: [],
-        }
-        const subscription = {
-          subscriptionId: 'subscription-v4',
-          binding: snapshot.binding,
-          generation: snapshot.generation,
-          afterSequence: 0,
-          snapshotSequence: 0,
-        }
-        const close = (
-          code: AgentConversationShellSubscriptionClosedV4['code'],
-        ): AgentConversationShellSubscriptionClosedV4 => ({
-          $schema:
-            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-conversation-shell-subscription-close.v4.schema.json',
-          contract: 'cordisx.agent-conversation-shell-subscription-close/v4',
-          schemaVersion: 4,
-          subscriptionId: subscription.subscriptionId,
-          binding: subscription.binding,
-          generation: subscription.generation,
-          status: 'closed',
-          code,
-        })
-        connectionClose = close('connection-replaced')
-        return {
-          snapshot: async () => snapshot,
-          subscribe: async () => {
-            subscribed = true
-            return {
-              result: { type: 'subscribe', status: 'accepted', code: 'allowed', subscription },
-              handle: {
-                subscription,
-                pages: {
-                  async *[Symbol.asyncIterator]() {
-                    await new Promise<void>(() => {})
-                  },
-                },
-                closed,
-                unsubscribe: async () => {
-                  unsubscribed += 1
-                  return close('unsubscribed')
-                },
-              },
-            }
-          },
-          updateRoomSettings: async request => ({
-            type: 'update-room-settings',
-            requestId: request.requestId,
-            binding: request.binding,
-            generation: request.generation,
-            roomId: request.roomId,
-            expectedSnapshotSequence: request.expectedSnapshotSequence,
-            status: 'unavailable',
-            code: 'settings-unavailable',
-          }),
-          dispose: () => {
-            disposed += 1
-          },
-        }
-      },
-      undefined,
-      4,
-    )
-    registration.mount(mountContext(dom))
-    await vi.waitFor(() => expect(subscribed).toBe(true))
-    resolveClosed!(connectionClose!)
-    await waitForRuntimeState(dom, 'unavailable')
-    expect(unsubscribed).toBe(1)
-    expect(disposed).toBe(1)
-    registration.dispose()
-    runtime.dispose()
-    expect(unsubscribed).toBe(1)
-    expect(disposed).toBe(1)
-    commands.dispose()
-    await settle()
-    dom.window.close()
-  })
-
-  it('accepts Shell v5 and fails closed when its terminal schema identity is not exactly v5', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const dom = installDom()
-    const commands = new CommandRegistry()
-    const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
-    const plugin = new Context().extend({
-      [CORDISX_PLUGIN_ID]: 'chatroom',
-      [CORDISX_PLUGIN_GENERATION]: 'generation-v5',
-    })
-    let resolveClosed: ((value: AgentConversationShellSubscriptionClosedV5) => void) | undefined
-    const closed = new Promise<AgentConversationShellSubscriptionClosedV5>(resolve => {
-      resolveClosed = resolve
-    })
-    let connectionClose: AgentConversationShellSubscriptionClosedV5 | undefined
-    let unsubscribed = 0
-    const registration = runtime.register(
-      plugin,
-      binding => {
-        const snapshot: AgentConversationShellSnapshotV5 = {
-          binding: { bindingId: binding.bindingId, ownerGeneration: binding.ownerGeneration },
-          generation: 'session-generation-v5',
-          snapshotSequence: 0,
-          selection: { kind: 'no-room' },
-          items: [],
-          composer: {
-            availability: 'available',
-            placeholder: message('composer.v5', 'Message'),
-            disabled: { value: false },
-            shortcutPolicy: 'mod-enter',
-            submit: { id: 'send' },
-          },
-          headerActions: [],
-        }
-        const subscription = {
-          subscriptionId: 'subscription-v5',
-          binding: snapshot.binding,
-          generation: snapshot.generation,
-          afterSequence: 0,
-          snapshotSequence: 0,
-        }
-        const close = (
-          code: AgentConversationShellSubscriptionClosedV5['code'],
-        ): AgentConversationShellSubscriptionClosedV5 => ({
-          $schema:
-            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-conversation-shell-subscription-close.v5.schema.json',
-          contract: 'cordisx.agent-conversation-shell-subscription-close/v5',
-          schemaVersion: 5,
-          subscriptionId: subscription.subscriptionId,
-          binding: subscription.binding,
-          generation: subscription.generation,
-          status: 'closed',
-          code,
-        })
-        connectionClose = close('connection-replaced')
-        return {
-          snapshot: async () => snapshot,
-          subscribe: async () => ({
-            result: { type: 'subscribe', status: 'accepted', code: 'allowed', subscription },
-            handle: {
-              subscription,
-              pages: {
-                async *[Symbol.asyncIterator]() {
-                  await new Promise<void>(() => {})
-                },
-              },
-              closed,
-              unsubscribe: async () => {
-                unsubscribed += 1
-                return close('unsubscribed')
-              },
-            },
-          }),
-          updateRoomSettings: async request => ({
-            type: 'update-room-settings',
-            requestId: request.requestId,
-            binding: request.binding,
-            generation: request.generation,
-            roomId: request.roomId,
-            expectedSnapshotSequence: request.expectedSnapshotSequence,
-            status: 'unavailable',
-            code: 'settings-unavailable',
-          }),
-          dispose() {},
-        }
-      },
-      undefined,
-      5,
-    )
-    registration.mount(mountContext(dom))
-    await vi.waitFor(() =>
-      expect(dom.window.document.querySelector('[data-agent-conversation-renderer="production"]')).not.toBeNull()
-    )
-    resolveClosed!({
-      ...connectionClose!,
-      $schema:
-        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-conversation-shell-subscription-close.v4.schema.json',
-      contract: 'cordisx.agent-conversation-shell-subscription-close/v4',
-      schemaVersion: 4,
-    } as unknown as AgentConversationShellSubscriptionClosedV5)
-    await waitForRuntimeState(dom, 'error')
-    expect(unsubscribed).toBe(1)
-    registration.dispose()
-    runtime.dispose()
-    commands.dispose()
-    await settle()
-    dom.window.close()
-  })
-
-  it('accepts a v6 pending-to-actionless-terminal page and rejects a later terminal rewrite', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    const dom = installDom()
-    const commands = new CommandRegistry()
-    const runtime = new AgentConversationShellRegistry(commandService(commands), fakeI18n())
-    const plugin = new Context().extend({
-      [CORDISX_PLUGIN_ID]: 'chatroom',
-      [CORDISX_PLUGIN_GENERATION]: 'generation-v6',
-    })
-    const stream = new PageStream()
-    let unsubscribed = 0
-    let binding: AgentConversationShellBinding | undefined
-    const registration = runtime.register(
-      plugin,
-      currentBinding => {
-        binding = currentBinding
-        const participant = {
-          participantId: 'agent-reviewer',
-          role: 'agent' as const,
-          displayName: message('reviewer', 'Reviewer'),
-        }
-        const pending = {
-          kind: 'approval' as const,
-          itemId: 'approval-v6',
-          sequence: 1,
-          participantId: participant.participantId,
-          memberId: 'member-reviewer',
-          runId: 'run-reviewer',
-          sessionId: 'cx-session.v6-reviewer',
-          agentGeneration: 9,
-          approvalId: 'cx-approval.v6-review',
-          approvalKind: 'command' as const,
-          state: 'pending' as const,
-          actions: [{ decision: 'approve' as const, command: { id: 'approval.answer' } }] as const,
-        }
-        const snapshot: AgentConversationShellSnapshotV6 = {
-          binding: { bindingId: currentBinding.bindingId, ownerGeneration: currentBinding.ownerGeneration },
-          generation: 'snapshot-v6',
-          snapshotSequence: 1,
-          selection: {
-            kind: 'room',
-            roomId: 'room-v6',
-            title: message('room.v6', 'V6 room'),
-            multiParticipant: false,
-            participantPresentation: 'none',
-            participants: [participant],
-            activeRuns: [{
-              participantId: participant.participantId,
-              memberId: pending.memberId,
-              runId: pending.runId,
-              sessionId: pending.sessionId,
-              lifecycle: { phase: 'attention' },
-            }],
-          },
-          items: [pending],
-          composer: {
-            availability: 'unavailable',
-            placeholder: message('composer.v6', 'Message'),
-            disabled: { value: true },
             shortcutPolicy: 'enter',
-            submit: { id: 'send' },
+            submit: { id: 'create-v9' },
           },
           headerActions: [],
         }
         const subscription = {
-          subscriptionId: 'subscription-v6',
+          subscriptionId: 'subscription-v9-no-room',
           binding: snapshot.binding,
           generation: snapshot.generation,
-          afterSequence: 1,
-          snapshotSequence: 1,
+          afterSequence: 0,
+          snapshotSequence: 0,
         }
-        const close = (
-          code: AgentConversationShellSubscriptionClosedV6['code'],
-        ): AgentConversationShellSubscriptionClosedV6 => ({
-          $schema:
-            'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-conversation-shell-subscription-close.v6.schema.json',
-          contract: 'cordisx.agent-conversation-shell-subscription-close/v6',
-          schemaVersion: 6,
-          subscriptionId: subscription.subscriptionId,
-          binding: subscription.binding,
-          generation: subscription.generation,
-          status: 'closed',
-          code,
-        })
         return {
           snapshot: async () => snapshot,
           subscribe: async () => ({
@@ -824,72 +855,41 @@ describe('Agent conversation shell public runtime', () => {
               pages: stream,
               closed: new Promise<never>(() => {}),
               unsubscribe: async () => {
-                unsubscribed += 1
                 stream.close()
-                return close('unsubscribed')
               },
             },
-          }),
-          updateRoomSettings: async request => ({
-            type: 'update-room-settings' as const,
-            requestId: request.requestId,
-            binding: request.binding,
-            generation: request.generation,
-            roomId: request.roomId,
-            expectedSnapshotSequence: request.expectedSnapshotSequence,
-            status: 'unavailable' as const,
-            code: 'settings-unavailable' as const,
           }),
           dispose() {},
         }
       },
       undefined,
-      6,
+      9,
     )
     registration.mount(mountContext(dom))
-    await vi.waitFor(() => expect(dom.window.document.querySelectorAll('.cxa-approval-actions button')).toHaveLength(1))
-    const subscription = {
-      subscriptionId: 'subscription-v6',
-      binding: { bindingId: binding!.bindingId, ownerGeneration: binding!.ownerGeneration },
-      generation: 'snapshot-v6',
-      afterSequence: 1,
-      snapshotSequence: 1,
-    }
-    const terminal = {
-      kind: 'approval' as const,
-      itemId: 'approval-v6',
-      sequence: 1,
-      participantId: 'agent-reviewer',
-      memberId: 'member-reviewer',
-      runId: 'run-reviewer',
-      sessionId: 'cx-session.v6-reviewer',
-      approvalId: 'cx-approval.v6-review',
-      approvalKind: 'command' as const,
-      state: 'approved' as const,
-      actions: [] as const,
-    }
-    stream.push({
-      subscription,
-      afterSequence: 1,
-      phase: 'live',
-      updates: [{ kind: 'item-updated', sequence: 2, item: terminal }],
-      nextAfterSequence: 2,
-      hasMore: false,
-    } as never)
+    await vi.waitFor(() => expect(dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')).not.toBeNull())
+    const draft = dom.window.document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+    const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')?.set
+    setter?.call(draft, 'first delivery creates the Room')
+    draft.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    const send = dom.window.document.querySelector<HTMLButtonElement>('.cxa-send')!
+    await vi.waitFor(() => expect(send.disabled).toBe(false))
+    send.click()
     await vi.waitFor(() =>
-      expect(dom.window.document.querySelector('.cxa-approval')?.getAttribute('data-state')).toBe('approved')
+      expect(commandContext?.hostContext).toMatchObject({
+        scope: 'composer-submit',
+        origin: { commandId: 'create-v9' },
+      })
     )
-    expect(dom.window.document.querySelector('.cxa-approval-actions')).toBeNull()
-    stream.push({
-      subscription,
-      afterSequence: 2,
-      phase: 'live',
-      updates: [{ kind: 'item-updated', sequence: 3, item: { ...terminal, state: 'denied' } }],
-      nextAfterSequence: 3,
-      hasMore: false,
-    } as never)
-    await waitForRuntimeState(dom, 'error')
-    expect(unsubscribed).toBe(1)
+    await vi.waitFor(() => expect(commandOrigin).toBeDefined())
+    expect(commandOrigin).toMatchObject({
+      owner: { pluginId: 'file:///fixtures/chatroom.ts:chatroom', generation: 1 },
+      runs: [],
+      bootstrapOrigin: {
+        commandId: 'create-v9',
+        scope: 'composer-submit',
+      },
+    })
+    expect(commandOrigin?.roomId).toBeUndefined()
     registration.dispose()
     runtime.dispose()
     commands.dispose()
