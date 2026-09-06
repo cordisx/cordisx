@@ -76,6 +76,9 @@ describe('public Select and PanZoomCanvas', () => {
       )
       expect(dom.window.document.querySelector('[data-host-icon="host:people"]')).not.toBeNull()
       expect(dom.window.document.querySelector('[data-host-icon-key="control.chevron-down"]')).not.toBeNull()
+      const caret = dom.window.document.querySelector('[data-host-icon-key="control.chevron-down"] svg')!
+      expect(caret.querySelector('path')?.getAttribute('d')).toBe('M20.3333 8.6666 L12 17 L3.6667 8.6666')
+      expect(caret.innerHTML).not.toContain('L12.75 18.1893')
       expect(dom.window.document.querySelector('.cxr-ui-select')?.getAttribute('data-density')).toBe('compact')
       expect(dom.window.document.querySelector('.cxr-ui-select')?.classList.contains('cxr-ui-filter-control')).toBe(
         true,
@@ -127,20 +130,35 @@ describe('public Select and PanZoomCanvas', () => {
       await act(async () => void viewport.dispatchEvent(zoomIn))
       expect(bubbled).toBe(false)
       expect(zoomIn.defaultPrevented).toBe(true)
-      expect(controller.current?.getScale()).toBe(1.5)
-      expect(viewport.dataset.scale).toBe('1.500')
-      expect(content.style.transform).toContain('scale(1.5)')
-      await act(async () =>
-        void viewport.dispatchEvent(
-          new dom.window.WheelEvent('wheel', {
-            bubbles: true,
-            cancelable: true,
-            deltaY: 10000,
-            clientX: 200,
-            clientY: 100,
-          }),
+      expect(controller.current?.getScale()).toBeCloseTo(Math.exp(0.12))
+      expect(viewport.dataset.scale).toBe('1.127')
+      for (let index = 0; index < 20; index += 1) {
+        await act(async () =>
+          void viewport.dispatchEvent(
+            new dom.window.WheelEvent('wheel', {
+              bubbles: true,
+              cancelable: true,
+              deltaY: -10000,
+              clientX: 200,
+              clientY: 100,
+            }),
+          )
         )
-      )
+      }
+      expect(controller.current?.getScale()).toBe(1.5)
+      for (let index = 0; index < 30; index += 1) {
+        await act(async () =>
+          void viewport.dispatchEvent(
+            new dom.window.WheelEvent('wheel', {
+              bubbles: true,
+              cancelable: true,
+              deltaY: 10000,
+              clientX: 200,
+              clientY: 100,
+            }),
+          )
+        )
+      }
       expect(controller.current?.getScale()).toBe(0.5)
     } finally {
       await act(async () => root.unmount())
@@ -164,17 +182,34 @@ describe('public Select and PanZoomCanvas', () => {
       const content = dom.window.document.querySelector<HTMLElement>('.cxr-ui-pan-zoom-canvas__content')!
       defineGeometry(viewport, content)
       let captured: number | undefined
+      let clicks = 0
+      viewport.addEventListener('click', () => clicks += 1)
       Object.assign(viewport, {
         setPointerCapture: (value: number) => captured = value,
         hasPointerCapture: (value: number) => captured === value,
         releasePointerCapture: () => captured = undefined,
       })
+      await act(async () => viewport.dispatchEvent(pointer(dom, 'pointerdown', 6, 100, 100)))
+      await act(async () => viewport.dispatchEvent(pointer(dom, 'pointermove', 6, 102, 102)))
+      expect(content.style.transform).toContain('translate(0px,0px)')
+      await act(async () => viewport.dispatchEvent(pointer(dom, 'pointerup', 6, 102, 102)))
+      const retainedClick = new dom.window.MouseEvent('click', { bubbles: true, cancelable: true })
+      await act(async () => void viewport.dispatchEvent(retainedClick))
+      expect(retainedClick.defaultPrevented).toBe(false)
+      expect(clicks).toBe(1)
+
       await act(async () => viewport.dispatchEvent(pointer(dom, 'pointerdown', 7, 100, 100)))
       await act(async () => viewport.dispatchEvent(pointer(dom, 'pointermove', 7, 160, 140)))
       expect(captured).toBe(7)
+      expect(viewport.dataset.dragging).toBe('true')
       expect(content.style.transform).toContain('translate(60px,40px)')
       await act(async () => viewport.dispatchEvent(pointer(dom, 'pointerup', 7, 160, 140)))
       expect(captured).toBeUndefined()
+      const suppressed = new dom.window.MouseEvent('click', { bubbles: true, cancelable: true })
+      await act(async () => void viewport.dispatchEvent(suppressed))
+      expect(suppressed.defaultPrevented).toBe(true)
+      expect(clicks).toBe(1)
+      expect(viewport.dataset.dragging).toBe('false')
 
       viewport.focus()
       await act(async () =>
@@ -227,6 +262,84 @@ describe('public Select and PanZoomCanvas', () => {
         '.cxr-react-root:has(.cxr-ui-pan-zoom-canvas[data-fill="true"]){height:100%;min-height:0;overflow:hidden}',
       )
       expect(style).toContain('.cxr-ui-pan-zoom-canvas{position:relative;width:100%;height:100%')
+    } finally {
+      await act(async () => root.unmount())
+      runtime.dispose()
+      dom.window.close()
+    }
+  })
+
+  it('renders fixed standard canvas controls outside transformed content', async () => {
+    const dom = installDom()
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    let fitted = 0
+    let reset = 0
+    try {
+      await act(async () =>
+        root.render(
+          <PanZoomCanvas
+            aria-label="Team canvas"
+            controls={{
+              fitLabel: 'Fit team',
+              resetLabel: 'Reset view',
+              onFit: () => fitted += 1,
+              onReset: () => reset += 1,
+            }}
+          >
+            <div>Tree</div>
+          </PanZoomCanvas>,
+        )
+      )
+      const viewport = dom.window.document.querySelector<HTMLElement>('.cxr-ui-pan-zoom-canvas')!
+      const toolbar = viewport.querySelector<HTMLElement>(':scope > .cxr-ui-action-toolbar')!
+      expect(toolbar.closest('.cxr-ui-pan-zoom-canvas__content')).toBeNull()
+      expect(toolbar.querySelectorAll('.cxr-ui-icon-action')).toHaveLength(2)
+      expect(toolbar.querySelector('[data-host-icon="host:fit"]')).not.toBeNull()
+      expect(toolbar.querySelector('[data-host-icon="host:reset"]')).not.toBeNull()
+      await act(async () => (toolbar.querySelector('[aria-label="Fit team"]') as HTMLButtonElement).click())
+      await act(async () => (toolbar.querySelector('[aria-label="Reset view"]') as HTMLButtonElement).click())
+      expect(fitted).toBe(1)
+      expect(reset).toBe(1)
+    } finally {
+      await act(async () => root.unmount())
+      dom.window.close()
+    }
+  })
+
+  it('renders a connected search and compact filter group with Host icons', async () => {
+    const dom = installDom()
+    const runtime = installSharedReactRuntime(dom.window.document)
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    try {
+      await act(async () =>
+        root.render(
+          <runtime.ui.FilterToolbar
+            aria-label="Team filters"
+            search={<runtime.ui.SearchField aria-label="Search team" value="" onChange={() => {}} />}
+            filters={[
+              <runtime.ui.Select
+                key="role"
+                aria-label="Role"
+                density="compact"
+                prefixIcon={<runtime.ui.Icon name="role" />}
+                value="all"
+                options={[{ value: 'all', label: 'All roles' }]}
+                onChange={() => {}}
+              />,
+            ]}
+          />,
+        )
+      )
+      const toolbar = dom.window.document.querySelector<HTMLElement>('.cxr-ui-filter-toolbar')!
+      expect(toolbar.getAttribute('role')).toBe('toolbar')
+      expect(toolbar.querySelector('.cxr-ui-filter-toolbar__search input[type="search"]')).not.toBeNull()
+      expect(toolbar.querySelector('[data-host-icon-key="search"]')).not.toBeNull()
+      expect(toolbar.querySelector('.cxr-ui-filter-toolbar__filters > .cxr-ui-select')).not.toBeNull()
+      expect(toolbar.querySelector('[data-host-icon="host:people"]')).not.toBeNull()
+      expect(toolbar.querySelector('[data-host-icon-key="control.chevron-down"]')).not.toBeNull()
+      const style = dom.window.document.querySelector('style[data-cordisx-shared-react]')?.textContent ?? ''
+      expect(style).toContain('border-inline-start:1px solid var(--cx-border)')
+      expect(style).toContain('.cxr-ui-filter-search__icon{display:grid;inline-size:16px')
     } finally {
       await act(async () => root.unmount())
       runtime.dispose()

@@ -21,7 +21,7 @@ export const IconButton = forwardRef<HTMLElement, IconButtonProps>(function Icon
       type="button"
       shape="square"
       variant="text"
-      className={['cxm-manager-icon-action', className].filter(Boolean).join(' ')}
+      className={['cxm-manager-icon-action', 'cxr-ui-icon-action', className].filter(Boolean).join(' ')}
       aria-label={label}
       aria-description={description}
       title={description === undefined ? label : `${label} · ${description}`}
