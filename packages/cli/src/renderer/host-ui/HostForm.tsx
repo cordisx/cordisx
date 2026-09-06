@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import {
   Button,
@@ -18,13 +18,7 @@ import {
   Textarea,
   TimePicker,
 } from 'tdesign-react'
-import {
-  type FormDescriptor,
-  FormDraft,
-  type FormPrimitive,
-  resolveFormPresenter,
-  validateFormValue,
-} from '@cordisx/schemastery-ui'
+import { type FormDescriptor, FormDraft, type FormPrimitive, resolveFormPresenter } from '@cordisx/schemastery-ui'
 import type { CordisXConfigFieldSnapshot, CordisXJsonValue } from '../../contracts.js'
 import type { ManagerModel, ManagerPluginSnapshot } from '../manager.js'
 import type { ConfigMutationOperation } from '../configuration.js'
@@ -32,6 +26,9 @@ import { managerCopy } from '../ui-copy.js'
 import { ArrayEditor, type ArrayEditorFieldRowRenderProps } from './ArrayEditor.js'
 import { HostFormPageStack } from './HostFormPages.js'
 import { HostSurfaceIcon } from './HostSurfaceIcon.js'
+import { hostFormTagValues, hostFormValidationIssueText } from './HostFormValidation.js'
+
+export { hostFormValidationIssueText } from './HostFormValidation.js'
 
 export const HOST_FORM_REACT_STYLES = String.raw`
   .cxf-react-form { --cxf-number-input-width: 116px; display: flex; width: 100%; min-width: 0; min-height: 0; flex-direction: column; margin: 0; }
@@ -164,23 +161,6 @@ function numericProps(field: Pick<CordisXConfigFieldSnapshot, 'min' | 'max' | 's
   }
 }
 
-/** Shared validation copy for schema-driven Host-owned forms. */
-export function hostFormValidationIssueText(
-  field: CordisXConfigFieldSnapshot,
-  value: unknown,
-  locale: string,
-): string | undefined {
-  const issue = validateFormValue(descriptor(field), value)[0]
-  if (issue?.code === 'required') return managerCopy(locale, 'form.required')
-  if (issue?.code === 'choice') return managerCopy(locale, 'form.choice-invalid')
-  if (issue?.code === 'length') return managerCopy(locale, 'form.string-length-invalid')
-  if (issue?.code === 'array') return managerCopy(locale, 'form.array-invalid')
-  if (issue?.code === 'number' || issue?.code === 'range' || issue?.code === 'step') {
-    return managerCopy(locale, field.type === 'natural' ? 'form.natural-invalid' : 'form.number-invalid')
-  }
-  return undefined
-}
-
 function Control({ field, resolved, value, onChange, controlId, locale, transientSecret }: {
   readonly field: CordisXConfigFieldSnapshot
   readonly resolved: ReturnType<typeof primitive>
@@ -190,12 +170,18 @@ function Control({ field, resolved, value, onChange, controlId, locale, transien
   readonly locale: string
   readonly transientSecret?: boolean
 }) {
-  const choices =
-    field.choices?.flatMap(choice => choice.value === null ? [] : [{ label: choice.label, value: choice.value }]) ?? []
+  // TDesign values exclude null. Stable option keys preserve every JSON scalar,
+  // including null and distinct boolean, numeric and string schema choices.
+  const choices = field.choices?.map((choice, index) => ({ label: choice.label, value: String(index) })) ?? []
+  const choiceKey = (candidate: unknown) => {
+    const index = field.choices?.findIndex(choice => Object.is(choice.value, candidate)) ?? -1
+    return index < 0 ? '' : String(index)
+  }
+  const choiceValue = (key: unknown) => field.choices?.[Number(key)]?.value
   if (resolved === 'sensitive-unavailable') {
     return <div className="cxr-notice cxf-alert" role="note">{managerCopy(locale, 'form.sensitive-unavailable')}</div>
   }
-  if (resolved === 'unsupported') return <div className="cxr-notice">当前 Schemastery 字段无法安全编辑</div>
+  if (resolved === 'unsupported') return <div className="cxr-notice">{managerCopy(locale, 'form.unsupported')}</div>
   if (resolved === 'object-array') {
     return (
       <ArrayEditor
@@ -229,7 +215,9 @@ function Control({ field, resolved, value, onChange, controlId, locale, transien
         onChange={text => {
           try {
             onChange(JSON.parse(text))
-          } catch { /* retain the last valid value */ }
+          } catch {
+            onChange(text)
+          }
         }}
       />
     )
@@ -248,10 +236,10 @@ function Control({ field, resolved, value, onChange, controlId, locale, transien
           onChange={onChange}
         />
         <InputNumber
-          {...(typeof value === 'number' ? { value } : {})}
+          value={typeof value === 'number' ? value : ''}
           {...numericProps(field)}
           disabled={field.disabled}
-          onChange={onChange}
+          onChange={next => onChange(next === '' ? undefined : next)}
         />
       </div>
     )
@@ -259,10 +247,10 @@ function Control({ field, resolved, value, onChange, controlId, locale, transien
   if (resolved === 'number-input') {
     return (
       <InputNumber
-        {...(typeof value === 'number' ? { value } : {})}
+        value={typeof value === 'number' ? value : ''}
         {...numericProps(field)}
         disabled={field.disabled}
-        onChange={onChange}
+        onChange={next => onChange(next === '' ? undefined : next)}
       />
     )
   }
@@ -271,21 +259,21 @@ function Control({ field, resolved, value, onChange, controlId, locale, transien
       <RadioGroup
         {...(field.presenter?.kind === 'choice.segmented' ? { className: 'cxf-segmented' } : {})}
         variant={field.presenter?.kind === 'choice.segmented' ? 'primary-filled' : 'default-filled'}
-        value={value as string | number | boolean}
+        value={choiceKey(value)}
         options={choices}
         disabled={field.disabled}
-        onChange={onChange}
+        onChange={next => onChange(choiceValue(next))}
       />
     )
   }
   if (resolved === 'select') {
     return (
       <Select
-        {...(typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? { value } : {})}
+        value={choiceKey(value)}
         options={choices}
         disabled={field.disabled}
         clearable={!field.required}
-        onChange={onChange}
+        onChange={(next, context) => onChange(context.trigger === 'clear' ? undefined : choiceValue(next))}
       />
     )
   }
@@ -293,16 +281,21 @@ function Control({ field, resolved, value, onChange, controlId, locale, transien
     return (
       <Select
         multiple
-        value={Array.isArray(value) ? value as (string | number)[] : []}
+        clearable
+        value={Array.isArray(value) ? value.map(choiceKey) : []}
         options={choices}
         disabled={field.disabled}
-        onChange={onChange}
+        onChange={next => onChange(Array.isArray(next) ? next.map(choiceValue) : [])}
       />
     )
   }
   if (resolved === 'tag-input') {
     return (
-      <TagInput value={Array.isArray(value) ? value.map(String) : []} disabled={field.disabled} onChange={onChange} />
+      <TagInput
+        value={Array.isArray(value) ? value.map(String) : []}
+        disabled={field.disabled}
+        onChange={next => onChange(hostFormTagValues(field.arrayItemType, next))}
+      />
     )
   }
   if (resolved === 'date-picker') {
@@ -317,10 +310,25 @@ function Control({ field, resolved, value, onChange, controlId, locale, transien
     )
   }
   if (resolved === 'time-picker') {
-    return <TimePicker value={typeof value === 'string' ? value : ''} disabled={field.disabled} onChange={onChange} />
+    return (
+      <TimePicker
+        format="HH:mm"
+        value={typeof value === 'string' ? value : ''}
+        disabled={field.disabled}
+        onChange={onChange}
+      />
+    )
   }
   if (resolved === 'color-picker') {
-    return <ColorPicker value={typeof value === 'string' ? value : ''} disabled={field.disabled} onChange={onChange} />
+    return (
+      <ColorPicker
+        format="HEX"
+        enableAlpha={false}
+        value={typeof value === 'string' ? value : ''}
+        disabled={field.disabled}
+        onChange={onChange}
+      />
+    )
   }
   return (
     <Input
@@ -353,10 +361,11 @@ function ArrayItemFieldRow(
   )
 }
 
-function ConfigControl({ model, pluginId, field, value, resolved, onChange, controlId, locale }: {
+function ConfigControl({ model, pluginId, field, blocked, value, resolved, onChange, controlId, locale }: {
   readonly model: ManagerModel
   readonly pluginId: string
   readonly field: CordisXConfigFieldSnapshot
+  readonly blocked: boolean
   readonly value: unknown
   readonly resolved: ReturnType<typeof primitive>
   readonly onChange: (value: unknown) => void
@@ -365,9 +374,12 @@ function ConfigControl({ model, pluginId, field, value, resolved, onChange, cont
 }) {
   const custom = useRef<HTMLDivElement>(null)
   const latestChange = useRef(onChange)
-  latestChange.current = onChange
+  latestChange.current = next => {
+    if (!blocked) onChange(next)
+  }
   const [customMounted, setCustomMounted] = useState(false)
   useEffect(() => {
+    setCustomMounted(false)
     if (model.mountConfigRenderer === undefined || custom.current === null || field.disabled) return
     let disposed = false
     let mount: Awaited<ReturnType<NonNullable<ManagerModel['mountConfigRenderer']>>> | undefined
@@ -379,13 +391,6 @@ function ConfigControl({ model, pluginId, field, value, resolved, onChange, cont
         }
         mount = next
         if (!next.mounted) return
-        const focusable = custom.current?.querySelector<HTMLElement>('input,select,textarea,button,[tabindex]')
-        if (focusable !== null && focusable !== undefined) {
-          if (focusable.id === '') focusable.id = controlId
-          focusable.dataset.hostFormPrimitive = 'custom'
-          focusable.setAttribute('aria-describedby', `${controlId}-error`)
-          if (field.required) focusable.setAttribute('aria-required', 'true')
-        }
         setCustomMounted(true)
       }).catch(() => undefined)
     return () => {
@@ -395,25 +400,48 @@ function ConfigControl({ model, pluginId, field, value, resolved, onChange, cont
     // The plugin renderer owns its draft after mounting; draft changes must not
     // tear down and recreate that renderer.
   }, [controlId, field.disabled, field.path, field.required, model, pluginId])
+  useLayoutEffect(() => {
+    if (!customMounted) return
+    const focusable = custom.current?.querySelector<HTMLElement>('input,select,textarea,button,[tabindex]')
+    if (focusable !== null && focusable !== undefined) {
+      focusable.id = controlId
+      focusable.dataset.hostFormPrimitive = 'custom'
+      const labelId = custom.current?.closest('.cxf-control-seat')?.getAttribute('aria-labelledby')
+      if (labelId) focusable.setAttribute('aria-labelledby', `${labelId}-text`)
+      focusable.setAttribute(
+        'aria-describedby',
+        `${field.description === undefined ? '' : `${controlId}-help `}${controlId}-error`,
+      )
+      if (field.required) focusable.setAttribute('aria-required', 'true')
+    }
+  }, [customMounted, controlId, field.description, field.required])
   return (
     <>
-      <div hidden={customMounted}>
-        <Control
-          field={field}
-          resolved={resolved}
-          value={value}
-          onChange={onChange}
-          controlId={controlId}
-          locale={locale}
-        />
-      </div>
-      <div ref={custom} className="cxm-config-renderer cxf-custom-seat" hidden={!customMounted} />
+      {customMounted ? null : (
+        <div>
+          <Control
+            field={blocked && !field.disabled ? { ...field, disabled: true } : field}
+            resolved={resolved}
+            value={value}
+            onChange={onChange}
+            controlId={controlId}
+            locale={locale}
+          />
+        </div>
+      )}
+      <div
+        ref={custom}
+        className="cxm-config-renderer cxf-custom-seat"
+        hidden={!customMounted}
+        inert={blocked}
+        aria-disabled={blocked}
+      />
     </>
   )
 }
 
 type FieldLabelProps =
-  & { readonly field: CordisXConfigFieldSnapshot }
+  & { readonly field: CordisXConfigFieldSnapshot; readonly labelId: string }
   & (
     | { readonly mode: 'static' }
     | {
@@ -436,7 +464,9 @@ function FieldLabel(props: FieldLabelProps) {
             <HostSurfaceIcon token={field.icon} />
           </span>
         )}
-        <span className="cxf-field-label-text cxf-label">{field.label ?? humanizeFieldName(field.path.at(-1))}</span>
+        <span id={props.labelId} className="cxf-field-label-text cxf-label">
+          {field.label ?? humanizeFieldName(field.path.at(-1))}
+        </span>
       </span>
     )
   }
@@ -447,13 +477,13 @@ function FieldLabel(props: FieldLabelProps) {
       value: 'default',
       content: managerCopy(locale, 'form.use-default'),
       prefixIcon: <HostSurfaceIcon token="host:reset" />,
-      disabled: field.hasDefault !== true,
+      disabled: field.disabled || field.hasDefault !== true,
     },
     {
       value: 'rollback',
       content: managerCopy(locale, 'form.rollback-field'),
       prefixIcon: <HostSurfaceIcon token="host:reset" />,
-      disabled: !changed,
+      disabled: field.disabled || !changed,
     },
     {
       value: 'copy',
@@ -475,6 +505,7 @@ function FieldLabel(props: FieldLabelProps) {
         }}
       >
         <Button
+          tag="button"
           type="button"
           shape="square"
           variant="text"
@@ -486,7 +517,9 @@ function FieldLabel(props: FieldLabelProps) {
           icon={icon}
         />
       </Dropdown>
-      <span className="cxf-field-label-text cxf-label">{field.label ?? humanizeFieldName(field.path.at(-1))}</span>
+      <span id={props.labelId} className="cxf-field-label-text cxf-label">
+        {field.label ?? humanizeFieldName(field.path.at(-1))}
+      </span>
     </span>
   )
 }
@@ -501,6 +534,7 @@ interface HostFieldRowBaseProps {
   readonly forceFullWidth?: boolean
   readonly controlId?: string
   readonly transientSecret?: boolean
+  readonly disabled?: boolean
   readonly customControl?: { readonly model: ManagerModel; readonly pluginId: string }
   readonly onChange: (value: unknown) => void
 }
@@ -531,10 +565,28 @@ export function HostFieldRow(props: HostFieldRowProps) {
     customControl,
     onChange,
   } = props
+  const disabled = field.disabled || props.disabled === true
+  const controlField = disabled && !field.disabled ? { ...field, disabled: true } : field
+  const controlSeat = useRef<HTMLDivElement>(null)
   const resolved = primitive(field)
   const resolution = resolveFormPresenter(descriptor(field))
   const labelId = `cxf-label-${encodeURIComponent(idPrefix)}-${field.path.map(encodeURIComponent).join('-')}`
   const resolvedControlId = controlId ?? `cxm-config-${idPrefix}-${field.path.join('-')}`
+  useLayoutEffect(() => {
+    const controls = controlSeat.current?.querySelectorAll<HTMLElement>(
+      'input,textarea,[role="switch"],[role="slider"]',
+    )
+    controls?.forEach((control, index) => {
+      control.id = index === 0 ? resolvedControlId : `${resolvedControlId}-${index}`
+      control.setAttribute('aria-labelledby', `${labelId}-text`)
+      control.setAttribute(
+        'aria-describedby',
+        `${field.description === undefined ? '' : `${resolvedControlId}-help `}${resolvedControlId}-error`,
+      )
+      control.setAttribute('aria-required', String(field.required))
+      control.setAttribute('aria-invalid', String(issueText !== undefined))
+    })
+  }, [field.description, field.required, issueText, labelId, resolvedControlId, resolved, value])
   return (
     <div
       className="cxf-item"
@@ -548,15 +600,20 @@ export function HostFieldRow(props: HostFieldRowProps) {
     >
       <div className="cxf-label-row" id={labelId}>
         {props.fieldActions === 'static'
-          ? <FieldLabel field={field} mode="static" />
+          ? <FieldLabel field={controlField} labelId={`${labelId}-text`} mode="static" />
           : (
             <FieldLabel
-              field={field}
+              field={controlField}
+              labelId={`${labelId}-text`}
               mode="menu"
               changed={changed}
               locale={locale}
-              onUseDefault={props.onUseDefault}
-              onRollback={props.onRollback}
+              onUseDefault={() => {
+                if (!disabled) props.onUseDefault()
+              }}
+              onRollback={() => {
+                if (!disabled) props.onRollback()
+              }}
               onCopyPath={props.onCopyPath}
             />
           )}
@@ -564,11 +621,11 @@ export function HostFieldRow(props: HostFieldRowProps) {
           ? <span className="cxf-required" aria-label={managerCopy(locale, 'form.required')}>*</span>
           : null}
       </div>
-      <div className="cxf-control-seat" role="group" aria-labelledby={labelId}>
+      <div ref={controlSeat} className="cxf-control-seat" role="group" aria-labelledby={labelId}>
         {customControl === undefined || resolved === 'sensitive-unavailable'
           ? (
             <Control
-              field={field}
+              field={controlField}
               resolved={resolved}
               value={value}
               onChange={onChange}
@@ -581,6 +638,7 @@ export function HostFieldRow(props: HostFieldRowProps) {
             <ConfigControl
               {...customControl}
               field={field}
+              blocked={disabled}
               value={value}
               resolved={resolved}
               onChange={onChange}
@@ -589,7 +647,9 @@ export function HostFieldRow(props: HostFieldRowProps) {
             />
           )}
       </div>
-      {field.description === undefined ? null : <p className="cxf-help">{field.description}</p>}
+      {field.description === undefined
+        ? null
+        : <p id={`${resolvedControlId}-help`} className="cxf-help">{field.description}</p>}
       {issueText === undefined
         ? <p className="cxf-error" id={`${resolvedControlId}-error`} role="alert" hidden />
         : <p className="cxf-error" id={`${resolvedControlId}-error`} role="alert">{issueText}</p>}
@@ -598,7 +658,14 @@ export function HostFieldRow(props: HostFieldRowProps) {
 }
 
 export function HostForm({ model, plugin }: { readonly model: ManagerModel; readonly plugin: ManagerPluginSnapshot }) {
-  const fields = plugin.configuration.fields
+  const shell = useRef<HTMLDivElement>(null)
+  const [committedValues, setCommittedValues] = useState<ReadonlyMap<string, unknown>>(() => new Map())
+  const fields = useMemo(() =>
+    plugin.configuration.fields.map(field =>
+      committedValues.has(pathKey(field))
+        ? { ...field, value: committedValues.get(pathKey(field)) as CordisXJsonValue }
+        : field
+    ), [committedValues, plugin.configuration.fields])
   const [draftOperations, setDraftOperations] = useState<ReadonlyMap<string, ConfigMutationOperation>>(() => new Map())
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string>()
@@ -606,11 +673,20 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
     'pristine',
   )
   const locale = model.snapshot().localization.locale
+  const submission = useRef(0)
+  const submitting = useRef(false)
   useEffect(() => {
+    submission.current += 1
+    submitting.current = false
+    setSaving(false)
+    setCommittedValues(new Map())
     setDraftOperations(new Map())
     setFormState('pristine')
     setMessage(undefined)
-  }, [plugin.configuration.revision])
+    return () => {
+      submission.current += 1
+    }
+  }, [plugin.id, plugin.configuration.revision])
   const groups = useMemo(() => {
     const result = new Map<string, { title?: string; description?: string; fields: CordisXConfigFieldSnapshot[] }>()
     for (const field of fields) {
@@ -652,27 +728,52 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
       return next
     })
   return (
-    <div className="cxf-react-form-shell" data-plugin-config-form={plugin.id} data-state={formState}>
+    <div ref={shell} className="cxf-react-form-shell" data-plugin-config-form={plugin.id} data-state={formState}>
       <Form
         className="cxf-react-form"
         onSubmit={event => {
           event.e?.preventDefault()
-          if (model.updatePluginConfig === undefined || operations.length === 0) return
+          if (
+            model.updatePluginConfig === undefined || !plugin.configuration.writable || operations.length === 0
+            || submitting.current || formState === 'saved'
+          ) return
+          const invalid = fields.find(field =>
+            !field.disabled && primitive(field) !== 'sensitive-unavailable'
+            && hostFormValidationIssueText(field, formDraft.value(field.path, field.defaultValue), locale) !== undefined
+          )
+          if (invalid !== undefined) {
+            setFormState('error')
+            setMessage(managerCopy(locale, 'form.fix-invalid-fields'))
+            shell.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+            return
+          }
+          const currentSubmission = ++submission.current
+          submitting.current = true
           setSaving(true)
           setFormState('saving')
           setMessage(undefined)
           void model.updatePluginConfig(plugin.id, plugin.configuration.revision, operations)
             .then(() => {
+              if (submission.current !== currentSubmission) return
+              setCommittedValues(
+                new Map(fields.map(field => [pathKey(field), formDraft.value(field.path, field.defaultValue)])),
+              )
+              setDraftOperations(new Map())
               setFormState('saved')
               setMessage(managerCopy(locale, 'form.configuration-saved'))
             })
             .catch(error => {
+              if (submission.current !== currentSubmission) return
               const text = error instanceof Error ? error.message : String(error)
               const conflict = /conflict|revision/iu.test(text)
               setFormState(conflict ? 'conflict' : 'error')
               setMessage(conflict ? managerCopy(locale, 'form.conflict-retained') : text)
             })
-            .finally(() => setSaving(false))
+            .finally(() => {
+              if (submission.current !== currentSubmission) return
+              submitting.current = false
+              setSaving(false)
+            })
         }}
       >
         <HostFormPageStack
@@ -691,7 +792,7 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
                     </header>
                   )}
                 <div className="cxf-form-grid">
-                  {group.fields.map((field, fieldIndex) => {
+                  {group.fields.map(field => {
                     const value = formDraft.value(field.path, field.defaultValue)
                     const changed = formDraft.isDirty(field.path)
                     const issueText = hostFormValidationIssueText(field, value, locale)
@@ -699,11 +800,12 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
                       <HostFieldRow
                         key={pathKey(field)}
                         field={field}
+                        disabled={saving}
                         value={value}
                         changed={changed}
                         locale={locale}
                         idPrefix={plugin.id}
-                        controlId={`cxm-config-${plugin.id}-${fieldIndex}`}
+                        controlId={`cxm-config-${plugin.id}-${fields.indexOf(field)}`}
                         customControl={{ model, pluginId: plugin.id }}
                         {...(issueText === undefined ? {} : { issueText })}
                         onUseDefault={() => {
@@ -747,7 +849,7 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
           </div>
           <div className="cxf-form-actions">
             <div className="cxf-status" data-state={formState} role="status">
-              {operations.length === 0
+              {operations.length === 0 || formState === 'saved'
                 ? ''
                 : formState === 'saving'
                 ? managerCopy(locale, 'form.saving')
@@ -755,26 +857,28 @@ export function HostForm({ model, plugin }: { readonly model: ManagerModel; read
             </div>
             <div className="cxf-form-action-buttons">
               <Button
+                tag="button"
                 type="reset"
                 variant="outline"
                 icon={<HostSurfaceIcon token="host:reset" />}
-                disabled={saving || operations.length === 0}
+                disabled={saving || operations.length === 0 || formState === 'saved'}
                 onClick={() => {
                   setDraftOperations(new Map())
                   setFormState('pristine')
                   setMessage(undefined)
                 }}
               >
-                重置
+                {managerCopy(locale, 'form.undo-changes')}
               </Button>
               <Button
+                tag="button"
                 type="submit"
                 theme="primary"
                 icon={<HostSurfaceIcon token="host:save" />}
                 loading={saving}
-                disabled={!plugin.configuration.writable || operations.length === 0}
+                disabled={saving || !plugin.configuration.writable || operations.length === 0 || formState === 'saved'}
               >
-                保存
+                {managerCopy(locale, 'form.save-configuration')}
               </Button>
             </div>
           </div>

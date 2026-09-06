@@ -1,5 +1,8 @@
+import { build } from 'esbuild'
+import { transform } from 'lightningcss'
+import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildPermissionAuthorizationPlanV2 } from '../packages/cli/src/capability-risk-catalog.js'
 import { PermissionAuthorizationViewModel } from '../packages/cli/src/permission-authorization-view-model.js'
 import { CORDISX_PERMISSION_LOCALE_CATALOGS } from '../packages/cli/src/permission-locales.js'
@@ -118,6 +121,12 @@ function dom(theme: 'light' | 'dark', systemDark = theme === 'dark') {
       removeEventListener: () => {},
     }),
   })
+  for (const key of ['window', 'document', 'HTMLElement', 'Element', 'Node', 'MutationObserver']) {
+    vi.stubGlobal(key, Reflect.get(instance.window, key))
+  }
+  vi.stubGlobal('getComputedStyle', instance.window.getComputedStyle.bind(instance.window))
+  vi.stubGlobal('requestAnimationFrame', instance.window.requestAnimationFrame.bind(instance.window))
+  vi.stubGlobal('cancelAnimationFrame', instance.window.cancelAnimationFrame.bind(instance.window))
   return instance
 }
 
@@ -129,6 +138,11 @@ async function mounted(): Promise<void> {
 async function settle(): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, 0))
 }
+
+afterEach(async () => {
+  await new Promise(resolve => setImmediate(resolve))
+  vi.unstubAllGlobals()
+})
 
 describe('Host-owned permission authorization dialog', () => {
   it('uses a single heading, flat permission list, radio lifetimes, and Cancel/Confirm decisions', async () => {
@@ -150,22 +164,27 @@ describe('Host-owned permission authorization dialog', () => {
     expect(panel.querySelectorAll('[data-permission-action="cancel"], [data-permission-action="confirm"]'))
       .toHaveLength(2)
     expect(panel.querySelectorAll('button[data-permission-decision]')).toHaveLength(0)
-    expect(panel.querySelectorAll('[data-host-form-primitive="radio"]')).not.toHaveLength(0)
-    expect(panel.querySelector('[data-permission-action="confirm"]')?.classList.contains('cxf-button')).toBe(true)
-    expect(panel.querySelector('[data-permission-action="confirm"]')?.getAttribute('data-variant')).toBe('primary')
+    expect(panel.querySelectorAll('label.t-radio > input[type="radio"]')).not.toHaveLength(0)
+    expect(panel.querySelector('[data-permission-action="confirm"]')?.classList.contains('t-button')).toBe(true)
+    expect(panel.querySelector('[data-permission-action="confirm"]')?.classList.contains('t-button--theme-primary'))
+      .toBe(true)
     expect(panel.textContent).toContain('Plugin-provided explanation')
 
     const low = panel.querySelector<HTMLElement>('[data-permission-capability="models.read"]')!
     expect(low.querySelector('[data-permission-review-mode="batch-eligible"]')?.textContent).toBe('Batch review')
-    expect(low.querySelector<HTMLInputElement>('[data-permission-decision="allow-persistent"]')?.checked).toBe(true)
+    expect(low.querySelector<HTMLInputElement>('[data-permission-decision="allow-persistent"] input')?.checked).toBe(
+      true,
+    )
     const sensitive = panel.querySelector<HTMLElement>('[data-permission-capability="agent.events.read"]')!
     expect(sensitive.textContent).toContain('Unavailable now')
     expect(sensitive.querySelectorAll('[data-permission-decision]')).toHaveLength(4)
-    expect(sensitive.querySelector<HTMLInputElement>('[data-permission-decision="allow-once"]')?.checked).toBe(true)
+    expect(sensitive.querySelector<HTMLInputElement>('[data-permission-decision="allow-once"] input')?.checked).toBe(
+      true,
+    )
     const high = panel.querySelector<HTMLElement>('[data-permission-capability="tasks.control"]')!
     expect(high.querySelector('[data-permission-review-mode="explicit"]')?.textContent).toBe('Explicit review')
     expect(high.querySelector('[data-permission-decision="allow-persistent"]')).toBeNull()
-    expect(high.querySelector<HTMLInputElement>('[data-permission-decision="deny-once"]')?.checked).toBe(true)
+    expect(high.querySelector<HTMLInputElement>('[data-permission-decision="deny-once"] input')?.checked).toBe(true)
     expect(high.querySelector<HTMLElement>('.cxp-denial')?.hidden).toBe(false)
 
     panel.querySelector<HTMLButtonElement>('[data-permission-action="confirm"]')?.click()
@@ -191,6 +210,10 @@ describe('Host-owned permission authorization dialog', () => {
     expect(overlay.dataset.cordisxAppTheme).toBe('dark')
     expect(overlay.dataset.cordisxThemeSource).toBe('renderer-attribute')
     expect(overlay.style.getPropertyValue('--cx-surface')).toBe('#17191d')
+    expect(overlay.style.getPropertyValue('--cx-primary')).toBe('#c7ccd4')
+    expect(instance.window.getComputedStyle(overlay).getPropertyValue('--td-brand-color')).toBe('var(--cx-primary)')
+    expect(instance.window.getComputedStyle(overlay).getPropertyValue('--td-text-color-primary')).toBe('var(--cx-text)')
+    expect(instance.window.getComputedStyle(overlay).colorScheme).toBe('dark')
     const deny = overlay.querySelector<HTMLInputElement>(
       '[data-permission-capability="agent.events.read"] [data-permission-decision="deny-persistent"]',
     )!
@@ -205,14 +228,20 @@ describe('Host-owned permission authorization dialog', () => {
       '读取 Agent 事件',
     )
     expect(instance.window.document.activeElement).toBe(identity)
-    expect(identity.checked).toBe(true)
+    expect(identity.querySelector<HTMLInputElement>('input')?.checked).toBe(true)
 
     instance.window.document.documentElement.className = 'electron-light'
     await settle()
     expect(overlay.dataset.cordisxAppTheme).toBe('light')
     expect(overlay.style.getPropertyValue('--cx-surface')).toBe('#f8fafc')
+    expect(overlay.style.getPropertyValue('--cx-primary')).toBe('#3d4755')
+    expect(instance.window.getComputedStyle(overlay).getPropertyValue('--td-brand-color')).toBe('var(--cx-primary)')
+    expect(instance.window.getComputedStyle(overlay).getPropertyValue('--td-bg-color-container')).toBe(
+      'var(--cx-surface)',
+    )
+    expect(instance.window.getComputedStyle(overlay).colorScheme).toBe('light')
     expect(instance.window.document.activeElement).toBe(identity)
-    expect(identity.checked).toBe(true)
+    expect(identity.querySelector<HTMLInputElement>('input')?.checked).toBe(true)
     expect(model.selection('agent.events.read')).toBe('deny-persistent')
     expect(instance.window.document.querySelector('#native')?.getAttribute('data-stable')).toBe('true')
     expect(instance.window.document.querySelector('#native')?.attributes).toHaveLength(2)
@@ -305,7 +334,7 @@ describe('Host-owned permission authorization dialog', () => {
     await settle()
     expect(overlay.dataset.cordisxAppTheme).toBe('dark')
     expect(instance.window.document.activeElement).toBe(once)
-    expect(once.checked).toBe(true)
+    expect(once.querySelector<HTMLInputElement>('input')?.checked).toBe(true)
     expect(model.selection('agent.events.read')).toBe('allow-once')
     overlay.querySelector<HTMLButtonElement>('[data-permission-action="cancel"]')?.click()
     await pending
@@ -325,15 +354,247 @@ describe('Host-owned permission authorization dialog', () => {
     expect(css).toContain('var(--cx-focus)')
     expect(css).toContain('var(--cx-danger)')
     expect(css).toContain('-webkit-app-region: no-drag')
-    expect(css).toContain('.cxf-button')
+    expect(css).toContain('.cxp-button')
     const permissionCss = css.slice(css.indexOf('.cxp-overlay'))
     expect(permissionCss).not.toMatch(/#[a-f0-9]{3,8}|rgb\(|Canvas|prefers-color-scheme/iu)
     expect([...permissionCss.matchAll(/\.([a-z][\w-]*)/g)].every(match => (
-      match[1]?.startsWith('cxp-') === true || match[1]?.startsWith('cxf-') === true
+      match[1]?.startsWith('cxp-') === true || match[1]?.startsWith('t-radio') === true
     ))).toBe(true)
     instance.window.document.querySelector<HTMLButtonElement>('[data-permission-action="cancel"]')?.click()
     await pending
     dialog.dispose()
     instance.window.close()
+  })
+
+  it('commits actual React input changes once and retains open technical details through locale changes', async () => {
+    const instance = dom('light')
+    const dialog = new BrowserPermissionAuthorizationDialog(instance.window.document)
+    const model = viewModel()
+    const select = vi.spyOn(model, 'select')
+    const locale = localizedRequest()
+    const pending = dialog.show(model, locale.request)
+    const panel = instance.window.document.querySelector<HTMLElement>('[role="dialog"]')!
+    const item = panel.querySelector<HTMLElement>('[data-permission-capability="agent.events.read"]')!
+    const denial = item.querySelector<HTMLElement>('.cxp-denial')!
+    const details = item.querySelector<HTMLDetailsElement>('details')!
+    details.open = true
+    const input = item.querySelector<HTMLInputElement>('[data-permission-decision="deny-persistent"] input')!
+    expect(input.classList.contains('t-radio__former')).toBe(true)
+    input.click()
+    expect(select).toHaveBeenCalledExactlyOnceWith('agent.events.read', 'deny-persistent')
+    expect(denial.hidden).toBe(false)
+    locale.setLocale('zh-CN')
+    expect(item.querySelector('details')).toBe(details)
+    expect(details.open).toBe(true)
+    expect(item.querySelector('[data-permission-decision="deny-persistent"] input')).toBe(input)
+    expect(input.checked).toBe(true)
+    panel.querySelector<HTMLButtonElement>('[data-permission-action="confirm"]')!.click()
+    await expect(pending).resolves.toMatchObject({
+      status: 'confirmed',
+      decision: {
+        decisions: expect.arrayContaining([
+          expect.objectContaining({ capability: 'agent.events.read', decision: 'deny-persistent' }),
+        ]),
+      },
+    })
+    expect(locale.subscribed()).toBe(false)
+    input.click()
+    expect(select).toHaveBeenCalledTimes(1)
+    dialog.dispose()
+    instance.window.close()
+  })
+
+  it('keeps one radio tab stop per capability, supports keyboard choices, and traps both Tab directions', async () => {
+    const instance = dom('dark')
+    const before = instance.window.document.querySelector<HTMLButtonElement>('#before')!
+    before.focus()
+    const dialog = new BrowserPermissionAuthorizationDialog(instance.window.document)
+    const model = viewModel()
+    const pending = dialog.show(model, localizedRequest().request)
+    const panel = instance.window.document.querySelector<HTMLElement>('[role="dialog"]')!
+    const groups = [...panel.querySelectorAll('[role="radiogroup"]')]
+    for (const group of groups) expect(group.querySelectorAll('[tabindex="0"]')).toHaveLength(1)
+    const group = groups[1]!
+    const choices = [...group.querySelectorAll<HTMLElement>('[role="radio"]')]
+    choices[0]!.focus()
+    const press = (target: HTMLElement, key: string, shiftKey = false): KeyboardEvent => {
+      const event = new instance.window.KeyboardEvent('keydown', { key, shiftKey, bubbles: true, cancelable: true })
+      target.dispatchEvent(event)
+      return event
+    }
+    expect(press(choices[0]!, 'ArrowRight').defaultPrevented).toBe(true)
+    expect(instance.window.document.activeElement).toBe(choices[1])
+    expect(model.selection('agent.events.read')).toBe(choices[1]!.dataset.permissionDecision)
+    press(choices[1]!, 'ArrowUp')
+    expect(instance.window.document.activeElement).toBe(choices[0])
+    choices[2]!.focus()
+    press(choices[2]!, ' ')
+    expect(model.selection('agent.events.read')).toBe(choices[2]!.dataset.permissionDecision)
+    choices[3]!.focus()
+    press(choices[3]!, 'Enter')
+    expect(model.selection('agent.events.read')).toBe(choices[3]!.dataset.permissionDecision)
+    expect(group.querySelectorAll('[tabindex="0"]')).toHaveLength(1)
+    const first = panel.querySelector<HTMLElement>('[role="radio"][tabindex="0"]')!
+    const confirm = panel.querySelector<HTMLButtonElement>('[data-permission-action="confirm"]')!
+    confirm.focus()
+    expect(press(confirm, 'Tab').defaultPrevented).toBe(true)
+    expect(instance.window.document.activeElement).toBe(first)
+    expect(press(first, 'Tab', true).defaultPrevented).toBe(true)
+    expect(instance.window.document.activeElement).toBe(confirm)
+    press(confirm, 'Escape')
+    await expect(pending).resolves.toEqual({ status: 'cancelled' })
+    expect(instance.window.document.activeElement).toBe(before)
+    dialog.dispose()
+    instance.window.close()
+  })
+
+  it('hands off Manage permissions and removes component styles and event handlers on disposal', async () => {
+    const instance = dom('light')
+    const dialog = new BrowserPermissionAuthorizationDialog(instance.window.document)
+    const first = dialog.show(viewModel(), localizedRequest().request)
+    const manage = instance.window.document.querySelector<HTMLButtonElement>('[data-permission-action="manage"]')!
+    expect(manage.tagName).toBe('BUTTON')
+    expect(manage.classList.contains('t-button')).toBe(true)
+    manage.click()
+    await expect(first).resolves.toEqual({ status: 'manage-permissions' })
+    await mounted()
+    const request = localizedRequest()
+    const second = dialog.show(viewModel('runtime'), request.request)
+    expect(instance.window.document.querySelector('[data-permission-authorization-components]')).not.toBeNull()
+    dialog.dispose()
+    await expect(second).resolves.toEqual({ status: 'cancelled' })
+    expect(request.subscribed()).toBe(false)
+    expect(instance.window.document.querySelector('[data-permission-authorization-components]')).toBeNull()
+    await expect(dialog.show(viewModel(), localizedRequest().request)).resolves.toEqual({ status: 'cancelled' })
+    instance.window.close()
+  })
+
+  it('cleans a failing initial render and admits the next request without a leaked active root', async () => {
+    const instance = dom('dark')
+    const before = instance.window.document.querySelector<HTMLButtonElement>('#before')!
+    before.focus()
+    const dialog = new BrowserPermissionAuthorizationDialog(instance.window.document)
+    const locale = localizedRequest()
+    let count = 0
+    const failed = dialog.show(viewModel(), {
+      ...locale.request,
+      project() {
+        count += 1
+        if (count === 2) throw new Error('Projection failed during mount')
+        return locale.request.project()
+      },
+    })
+    await expect(failed).rejects.toThrow('Projection failed during mount')
+    expect(locale.subscribed()).toBe(false)
+    expect(instance.window.document.querySelector('.cxh-tdesign-root')).toBeNull()
+    expect(instance.window.document.activeElement).toBe(before)
+    const survivor = dialog.show(viewModel('runtime', 'survivor'), localizedRequest().request)
+    const overlay = instance.window.document.querySelector<HTMLElement>('[data-permission-authorization]')!
+    expect(overlay.dataset.permissionAuthorization).toBe('runtime-permission-plan-survivor')
+    overlay.querySelector<HTMLButtonElement>('[data-permission-action="confirm"]')!.click()
+    await expect(survivor).resolves.toMatchObject({ status: 'confirmed' })
+    dialog.dispose()
+    instance.window.close()
+  })
+
+  it.each(['throws', 'shape', 'identity', 'decisions'] as const)(
+    'fails closed on locale projection %s and releases the queued review',
+    async failure => {
+      const instance = dom('dark')
+      const dialog = new BrowserPermissionAuthorizationDialog(instance.window.document)
+      const model = viewModel()
+      const locale = localizedRequest()
+      const failed = dialog.show(model, locale.request)
+      const survivor = dialog.show(viewModel('runtime', 'survivor'), localizedRequest().request)
+      const oldRoot = instance.window.document.querySelector<HTMLElement>('[data-permission-authorization]')!
+      const original = model.project.bind(model)
+      vi.spyOn(model, 'project').mockImplementation(input => {
+        if (failure === 'throws') throw new Error('Locale projection failed')
+        const value = original(input)
+        if (failure === 'shape') return { ...value, items: [] }
+        if (failure === 'identity') return { ...value, items: [...value.items].reverse() }
+        return {
+          ...value,
+          items: value.items.map(item => ({ ...item, authorizationOptions: item.authorizationOptions.slice(1) })),
+        }
+      })
+      locale.setLocale('zh-CN')
+      await expect(failed).rejects.toThrow(/projection|permission decisions/u)
+      await mounted()
+      expect(locale.subscribed()).toBe(false)
+      expect(oldRoot.isConnected).toBe(false)
+      expect(oldRoot.childElementCount).toBe(0)
+      expect(oldRoot.style.getPropertyValue('--cx-primary')).toBe('')
+      expect(oldRoot.hasAttribute('data-cordisx-app-theme')).toBe(false)
+      const roots = [...instance.window.document.querySelectorAll<HTMLElement>('[data-permission-authorization]')]
+      expect(roots).toHaveLength(1)
+      expect(roots[0]!.dataset.permissionAuthorization).toBe('runtime-permission-plan-survivor')
+      roots[0]!.querySelector<HTMLButtonElement>('[data-permission-action="cancel"]')!.click()
+      await expect(survivor).resolves.toEqual({ status: 'cancelled' })
+      expect(instance.window.document.querySelector('.cxh-tdesign-root')).toBeNull()
+      dialog.dispose()
+      instance.window.close()
+    },
+  )
+
+  it('bundles the real TDesign stylesheet and parses all component rules under the removable Host scope', async () => {
+    const bundle = await build({
+      entryPoints: [fileURLToPath(new URL('../packages/cli/src/renderer/host-ui/tdesign-styles.ts', import.meta.url))],
+      bundle: true,
+      write: false,
+      format: 'esm',
+      loader: { '.css': 'text' },
+    })
+    const module = await import(
+      `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0]!.text).toString('base64')}`
+    )
+    let inspected = false
+    const parsed = transform({
+      filename: 'host-tdesign.css',
+      code: Buffer.from(module.HOST_TDESIGN_REACT_STYLES),
+      errorRecovery: false,
+      visitor: {
+        StyleSheet(sheet) {
+          expect(sheet.rules).toHaveLength(3)
+          const tokens = sheet.rules[1]!
+          expect(tokens.type).toBe('style')
+          if (tokens.type !== 'style') throw new Error('Expected Host theme tokens')
+          expect(tokens.value.selectors[0]).toMatchObject([
+            { type: 'class', name: 'cxh-tdesign-root' },
+            { type: 'attribute', name: 'data-cordisx-app-theme' },
+            { type: 'attribute', name: 'data-cordisx-theme-source' },
+          ])
+          const declarations = tokens.value.declarations.declarations.filter(item => item.property === 'custom')
+          for (
+            const [tdesign, host] of [
+              ['--td-brand-color', '--cx-primary'],
+              ['--td-text-color-primary', '--cx-text'],
+              ['--td-bg-color-container', '--cx-surface'],
+              ['--td-border-level-2-color', '--cx-border'],
+              ['--td-error-color', '--cx-danger'],
+            ]
+          ) {
+            expect(declarations.find(item => item.value.name === tdesign)?.value.value).toEqual([
+              { type: 'var', value: { name: { ident: host, from: null }, fallback: null } },
+            ])
+          }
+          expect(declarations.some(item => item.value.name === '--td-bg-color-component-disabled')).toBe(true)
+          expect(declarations.some(item => item.value.name === '--td-brand-color-disabled')).toBe(true)
+          const scope = sheet.rules[0]!
+          expect(scope.type).toBe('scope')
+          if (scope.type !== 'scope') throw new Error('Expected a Host component scope')
+          expect(scope.value.scopeStart).toEqual([[{ type: 'class', name: 'cxh-tdesign-root' }]])
+          const styles = scope.value.rules.filter(rule => rule.type === 'style')
+          const classes = styles.flatMap(rule =>
+            rule.value.selectors.flat().filter(selector => selector.type === 'class').map(selector => selector.name)
+          )
+          expect(classes).toContain('t-radio')
+          expect(classes).toContain('t-button')
+          inspected = true
+        },
+      },
+    })
+    expect(parsed.warnings).toHaveLength(0)
+    expect(inspected).toBe(true)
   })
 })

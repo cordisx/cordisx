@@ -150,7 +150,6 @@ try {
       'THIRD_PARTY_NOTICES.md',
       'third_party/reicon-MIT.txt',
       'third_party/reicon-icon-credits.txt',
-      'third_party/tdesign-web-components-subset-MIT.txt',
       'dist/src/cli.js',
       'dist/src/contracts.js',
       'dist/src/contracts.d.ts',

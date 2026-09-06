@@ -26,7 +26,6 @@ describe('plugin Console live smoke gate', () => {
     expect(source).toContain("kindSelect: 'API / type'")
     expect(source).toContain('[data-plugin-console="\' + CSS.escape(owner) + \'"]')
     expect(source).not.toContain('[role="tabpanel"][aria-label="运行状态"]')
-    expect(source).not.toContain('t-select[aria-label="API / 类型"]')
     expect(source).toContain('for (let attempt = 0; attempt < 3; attempt += 1)')
     expect(source).toContain("await pressKey('ArrowDown', 'ArrowDown', 40)")
     expect(source).toContain('globalThis.__cordisxRestoreSmokeTheme?.()')

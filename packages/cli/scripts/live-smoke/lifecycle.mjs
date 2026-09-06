@@ -52,7 +52,7 @@ export async function runLifecycleExercises({
       const runtime = globalThis.__cordisxRuntime
       if (runtime === undefined) throw new Error('CordisX runtime is unavailable')
       document.querySelector('[data-permission-authorization] [data-authorization-decision="cancel"]')?.click()
-      document.querySelector('[data-host-form="local-package-directory"] .cxf-actions t-button:first-child')?.click()
+      document.querySelector('[data-host-form="local-package-directory"] .cxf-actions button.t-button:first-child')?.click()
       const modal = document.querySelector('[data-cordisx-manager-modal]')
       const trigger = document.querySelector('[data-cordisx-manager-trigger]')
       if (modal?.hidden !== false) {
@@ -69,7 +69,7 @@ export async function runLifecycleExercises({
         if (!(uninstall instanceof HTMLButtonElement) || uninstall.disabled) throw new Error('existing package uninstall is unavailable')
         uninstall.click()
         const confirmation = await waitFor(() => document.querySelector('.cxm-lifecycle-overlay'), 'existing package uninstall confirmation')
-        confirmation.querySelector('.cxm-lifecycle-actions t-button:last-child')?.click()
+        confirmation.querySelector('.cxm-lifecycle-actions button.t-button:last-child')?.click()
         await waitFor(() => !runtime.snapshot().plugins.some(item => item.id === 'lifecycle-smoke'), 'existing package cleanup')
         preImportCleanup = true
       }
@@ -424,7 +424,7 @@ export async function runLifecycleExercises({
       document.querySelector('[data-plugin-card="lifecycle-smoke"] [data-plugin-action="disable"]')?.click()
       const disableDialog = await waitFor(() => document.querySelector('.cxm-lifecycle-overlay'), 'disable impact confirmation')
       const disableImpact = disableDialog.querySelector('.cxm-lifecycle-impact')?.textContent ?? ''
-      disableDialog.querySelector('.cxm-lifecycle-actions t-button:last-child')?.click()
+      disableDialog.querySelector('.cxm-lifecycle-actions button.t-button:last-child')?.click()
       await waitFor(() => runtime.snapshot().plugins.find(item => item.id === 'lifecycle-smoke')?.status === 'configured-disabled', 'disabled plugin')
       await waitFor(() => document.querySelector('[data-plugin-card="lifecycle-smoke"] [data-plugin-action="enable"]:not(:disabled)'), 'disabled plugin actions')
       const afterDisable = { ...counters, revision: runtime.snapshot().pluginLifecycle?.revision ?? null }
@@ -618,7 +618,7 @@ export async function runLifecycleExercises({
       const counters = globalThis.__cordisxLifecycleSmoke
       const beforeRevision = runtime.snapshot().pluginLifecycle?.revision ?? null
       const expectedDispose = counters.dispose + 1
-      document.querySelector('.cxm-lifecycle-overlay .cxm-lifecycle-actions t-button:last-child')?.click()
+      document.querySelector('.cxm-lifecycle-overlay .cxm-lifecycle-actions button.t-button:last-child')?.click()
       for (let attempt = 0; attempt < 160; attempt += 1) {
         if (!runtime.snapshot().plugins.some(item => item.id === 'lifecycle-smoke') && counters.dispose >= expectedDispose) break
         await wait(50)

@@ -93,12 +93,12 @@ export async function finalizeLiveSmoke({
               if (permissionCapability !== undefined) document.querySelector('[data-permission-open="' + CSS.escape(permissionCapability) + '"]')?.click()
               await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
             }
-            const select = [...document.querySelectorAll('t-select[data-tdesign-component="select"]')]
+            const select = [...document.querySelectorAll('.t-select input')]
               .find(item => item.getClientRects().length > 0)
             if (!(select instanceof HTMLElement)) throw new Error('visible TDesign Select is unavailable after theme projection')
-            if (select.getAttribute('aria-expanded') !== 'true') {
+            if (![...document.querySelectorAll('.cxr-root .t-select__dropdown')].some(popup => popup.getClientRects().length > 0)) {
               select.focus()
-              select.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+              select.click()
               await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
             }
           }
@@ -106,10 +106,8 @@ export async function finalizeLiveSmoke({
           const marks = [...modal.querySelectorAll('img[data-cordisx-brand-mark][data-brand-rendering="direct-host"]')]
           const navIcon = document.querySelector('[data-tab="plugins"] .cxm-nav-icon')
           const headingIcon = document.querySelector('.cxm-heading-leading')
-          const popup = [...document.querySelectorAll('[data-cxf-tdesign-portal-host]')]
-            .map(host => host.shadowRoot?.querySelector('.cxf-tdesign-listbox:not([hidden])'))
-            .find(item => item instanceof HTMLElement)
-          const visibleSelect = [...document.querySelectorAll('t-select[data-tdesign-component="select"]')]
+          const popup = [...document.querySelectorAll('.cxr-root .t-select__dropdown')].find(item => item.getClientRects().length > 0)
+          const visibleSelect = [...document.querySelectorAll('.t-select input')]
             .find(item => item.getClientRects().length > 0)
           return {
             rect: dialog === null ? null : (() => {
@@ -124,7 +122,7 @@ export async function finalizeLiveSmoke({
             headingIconColor: headingIcon === null ? null : getComputedStyle(headingIcon).color,
             selectControl: visibleSelect instanceof HTMLElement ? (() => {
               const tokens = getComputedStyle(visibleSelect)
-              const shadowSurfaces = visibleSelect.shadowRoot === null ? [] : [...visibleSelect.shadowRoot.querySelectorAll('*')]
+              const controlSurfaces = [...visibleSelect.closest('.t-select').querySelectorAll('*')]
                 .map(item => ({
                   tag: item.tagName.toLowerCase(), className: item.className,
                   background: getComputedStyle(item).backgroundColor, color: getComputedStyle(item).color,
@@ -136,16 +134,16 @@ export async function finalizeLiveSmoke({
                 specialToken: tokens.getPropertyValue('--td-bg-color-specialcomponent').trim(),
                 selectedToken: tokens.getPropertyValue('--td-bg-color-container-select').trim(),
                 colorScheme: tokens.colorScheme,
-                shadowSurfaces,
+                controlSurfaces,
               }
             })() : null,
             selectPopup: popup instanceof HTMLElement ? {
               background: getComputedStyle(popup).backgroundColor,
               color: getComputedStyle(popup).color,
-              optionCount: popup.querySelectorAll('t-option[data-tdesign-version="1.2.10"]').length,
+              optionCount: popup.querySelectorAll('.t-select-option').length,
               activeOption: (() => {
-                const option = popup.querySelector('t-option[data-active="true"]')
-                const surface = option?.shadowRoot?.querySelector('.t-select-option, [part], div') ?? option
+                const option = popup.querySelector('.t-select-option.t-is-selected, .t-select-option.t-select-option__hover')
+                const surface = option
                 const style = surface instanceof Element ? getComputedStyle(surface) : null
                 const tokens = option instanceof Element ? getComputedStyle(option) : null
                 return option === null ? null : {

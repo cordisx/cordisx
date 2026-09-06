@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react'
 import { Select } from 'tdesign-react'
 import { HostIcon } from './HostIcon.js'
 import type { ManagerIconToken } from '../icons.js'
@@ -16,14 +17,20 @@ export interface SelectFieldProps {
 }
 
 export function SelectField({ label, icon, options, value, className, onChange }: SelectFieldProps) {
+  const root = useRef<HTMLSpanElement>(null)
+  useLayoutEffect(() => {
+    // Keep the accessible name on the official control's real focus target.
+    root.current?.querySelector('input')?.setAttribute('aria-label', label)
+  })
   return (
-    <Select
-      className={['cxh-select-field', className].filter(Boolean).join(' ')}
-      aria-label={label}
-      value={value}
-      options={[...options]}
-      prefixIcon={<HostIcon token={icon} />}
-      onChange={next => onChange(String(next))}
-    />
+    <span ref={root} style={{ display: 'contents' }}>
+      <Select
+        className={['cxh-select-field', className].filter(Boolean).join(' ')}
+        value={value}
+        options={[...options]}
+        prefixIcon={<HostIcon token={icon} />}
+        onChange={next => onChange(String(next))}
+      />
+    </span>
   )
 }

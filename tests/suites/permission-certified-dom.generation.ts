@@ -1,5 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
-import { JSDOM } from 'jsdom'
+import { act } from 'react'
+import { reactManagerFixture } from '../helpers/react-manager.js'
 import { expect, it } from 'vitest'
 import { CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1 } from '../../packages/cli/src/contracts.js'
 import {
@@ -376,13 +377,9 @@ export function registerGenerationTests() {
   })
 
   it('removes the exact Host DOM review overlay immediately when its generation unloads', async () => {
-    const instance = new JSDOM('<!doctype html><html class="electron-light"><body></body></html>', {
-      pretendToBeVisual: true,
-    })
-    Object.defineProperty(instance.window, 'matchMedia', {
-      configurable: true,
-      value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
-    })
+    const fixture = reactManagerFixture()
+    const instance = fixture.dom
+    instance.window.document.documentElement.className = 'electron-light'
     const prompt = new BrowserPermissionAuthorizationPromptV2(instance.window.document)
     const value = new PermissionBroker(
       new MemoryPermissionPolicyStore(),
@@ -405,20 +402,27 @@ export function registerGenerationTests() {
       undefined,
       { version: '1.2.3', integrity: digest },
     )
-    const pending = value.requestDomAccess(identity, 'main')
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(instance.window.document.querySelector('[data-permission-authorization]')).not.toBeNull()
-
-    unregister()
-    expect(instance.window.document.querySelector('[data-permission-authorization]')).toBeNull()
-    await expect(pending).resolves.toMatchObject({
-      authorized: false,
-      state: 'denied',
-      reason: 'permission.generation-invalidated',
-    })
-    value.dispose()
-    instance.window.close()
+    try {
+      let pending!: ReturnType<PermissionBroker['requestDomAccess']>
+      await act(async () => {
+        pending = value.requestDomAccess(identity, 'main')
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(instance.window.document.querySelector('[data-permission-authorization]')).not.toBeNull()
+      await act(async () => {
+        unregister()
+        expect(instance.window.document.querySelector('[data-permission-authorization]')).toBeNull()
+      })
+      await expect(pending).resolves.toMatchObject({
+        authorized: false,
+        state: 'denied',
+        reason: 'permission.generation-invalidated',
+      })
+    } finally {
+      await act(async () => value.dispose())
+      await fixture.dispose()
+    }
   })
 
   it('expires a certified lease and falls back to explicit review', async () => {
