@@ -1286,6 +1286,19 @@ async function start(
             generation,
             messageId,
           ),
+        capturePageAdmission: (owner, origin, target, sessionId, generation, messageId, commandActive, originActive) =>
+          scenarioSessionScopeAuthority.capturePageAdmission(
+            owner,
+            origin,
+            target,
+            sessionId,
+            generation,
+            messageId,
+            commandActive,
+            originActive,
+          ),
+        claimPageAdmission: (owner, receipt, bindingActive) =>
+          scenarioSessionScopeAuthority.claimPageAdmission(owner, receipt, bindingActive),
       }),
       ...(playgroundAgentSessionPersistence === undefined ? {} : {
         persistence: playgroundAgentSessionPersistence,

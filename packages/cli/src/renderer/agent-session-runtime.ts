@@ -456,7 +456,17 @@ export interface CordisXAgentSessionRuntimeOptions {
     sessionId: string,
     agentGeneration: number,
     messageId: MessageId,
+    /** Host-derived command liveness; never exposed to a plugin. */
+    commandActive: () => boolean,
+    /** Host-derived origin-binding liveness after a successful submit. */
+    originActive: () => boolean,
   ) => PlaygroundScenarioSubmissionCapture | undefined
+  /** Host-only scenario-source transfer after the page lifecycle has claimed a destination binding. */
+  readonly claimPageAdmission?: (
+    owner: PluginOwnerIdentity,
+    receipt: AgentPageAdmissionRouteClaimReceipt,
+    bindingActive: () => boolean,
+  ) => boolean
   readonly navigatePageAdmission?: (
     owner: PluginOwnerIdentity,
     command: PageAdmissionCommand,
@@ -1438,6 +1448,9 @@ export class CordisXAgentSessionRuntime {
       content: Object.freeze([{ type: 'text' as const, text: requestMessage.text }]),
       source: Object.freeze({ kind: 'plugin' as const, pluginId: owner.pluginId, generation: owner.generation }),
     }) as UserMessage
+    if (!lifecycle.capture(issued.declaration, { sessionId: record.id, messageId })) {
+      return { status: 'denied', code: 'page-replaced' }
+    }
     const capture = this.options.capturePageAdmission?.(
       owner,
       issued.origin,
@@ -1445,7 +1458,13 @@ export class CordisXAgentSessionRuntime {
       record.id,
       record.generation,
       messageId,
+      () => lifecycle.commandLive(issued.command) && !issued.revoked,
+      () => lifecycle.bindingActive(issued.command.binding) && !issued.revoked,
     )
+    if (this.options.capturePageAdmission !== undefined && capture === undefined) {
+      lifecycle.deny(issued.declaration, 'target-mismatch')
+      return { status: 'denied', code: 'target-mismatch' }
+    }
     if (capture !== undefined && !capture.active()) {
       capture.close()
       lifecycle.deny(issued.declaration, 'page-replaced')
@@ -1465,7 +1484,8 @@ export class CordisXAgentSessionRuntime {
         if (
           used || revoked || issued.revoked || !issued.reserved || issued.submitted
           || issued.handleId !== record.id || issued.handleGeneration !== record.generation
-          || !this.current(record) || (issued.capture !== undefined && !issued.capture.active())
+          || !this.current(record) || !lifecycle.active(issued.command)
+          || (issued.capture !== undefined && !issued.capture.active())
         ) {
           throw new Error('page admission reservation unavailable')
         }
@@ -1542,6 +1562,15 @@ export class CordisXAgentSessionRuntime {
       routeDefinitionId: route.routeDefinitionId,
       param: 'roomId',
       roomId: route.roomId,
+    }
+  }
+
+  /** A failed Host route claim must retire every pre-submit page source capture. */
+  private closePageAdmissionCaptures(command: PageAdmissionCommand): void {
+    for (const record of this.pageAdmissionTargets.values()) {
+      if (record.command.executionId !== command.executionId) continue
+      record.revoked = true
+      record.capture?.close()
     }
   }
 
@@ -2436,6 +2465,7 @@ export class CordisXAgentSessionRuntime {
           : never,
       }
     }
+    this.closePageAdmissionCaptures(issued.command)
     return {
       status: 'failed',
       code: completion.code,
@@ -2570,11 +2600,13 @@ export class CordisXAgentSessionRuntime {
     const navigated = await this.options.navigatePageAdmission?.(owner, command.command, request.route)
     if (navigated !== 'accepted') {
       lifecycle.fail(command.command, 'navigation-failed')
+      this.closePageAdmissionCaptures(command.command)
       command.navigation = { status: 'unavailable', code: 'navigation-failed' }
       return command.navigation
     }
     if (command.navigation?.status === 'accepted') return command.navigation
     lifecycle.fail(command.command, 'claim-failed')
+    this.closePageAdmissionCaptures(command.command)
     command.navigation = { status: 'unavailable', code: 'claim-failed' }
     return command.navigation
   }
@@ -2609,6 +2641,19 @@ export class CordisXAgentSessionRuntime {
         }),
         source: Object.freeze({ sessionId: claim.source.sessionId, messageId: claim.source.messageId }),
       }) as AgentPageAdmissionRouteClaimReceipt
+      if (
+        record.capture !== undefined
+        && this.options.claimPageAdmission?.(
+            record.owner,
+            receipt,
+            () => lifecycle.bindingActive(binding),
+          ) !== true
+      ) {
+        record.revoked = true
+        record.capture.close()
+        lifecycle.fail(command.command, 'claim-failed')
+        continue
+      }
       command.navigation = { status: 'accepted', code: 'claimed', roomId: route.roomId }
       receipts.push(receipt)
     }
@@ -3521,6 +3566,15 @@ export class CordisXAgentSessionRuntime {
       issued.capture?.close()
       this.bootstrapAdmissionRouteContinuations.delete(token)
     }
+    for (const [token, issued] of this.pageAdmissionTargets) {
+      if (issued.owner.pluginId !== ownerPluginId) continue
+      issued.revoked = true
+      issued.capture?.close()
+      this.pageAdmissionTargets.delete(token)
+    }
+    for (const [originId, issued] of this.pageAdmissionCommands) {
+      if (issued.owner.pluginId === ownerPluginId) this.pageAdmissionCommands.delete(originId)
+    }
     const prefix = `${ownerPluginId}\u0000`
     for (const key of this.issuedAdmissionTargets) if (key.startsWith(prefix)) this.issuedAdmissionTargets.delete(key)
     for (const key of this.issuedBootstrapAdmissionTargets) {
@@ -3546,6 +3600,7 @@ export class CordisXAgentSessionRuntime {
   private clearAdmissionCapabilities(): void {
     for (const issued of this.bootstrapAdmissionRoomTargets.values()) issued.capture?.close()
     for (const issued of this.bootstrapAdmissionRouteContinuations.values()) issued.capture?.close()
+    for (const issued of this.pageAdmissionTargets.values()) issued.capture?.close()
     this.targetAdmissionOrigins.clear()
     this.bootstrapAdmissionTargets.clear()
     this.bootstrapAdmissionRoomTargets.clear()
@@ -3557,6 +3612,8 @@ export class CordisXAgentSessionRuntime {
     this.bootstrapAdmissionRoomRooms.clear()
     this.bootstrapAdmissionRouteRooms.clear()
     this.reservedAdmissionOrigins.clear()
+    this.pageAdmissionTargets.clear()
+    this.pageAdmissionCommands.clear()
   }
 
   private async deliver(subscriber: SessionSubscriber, page: Parameters<SessionEventObserver>[0]): Promise<void> {

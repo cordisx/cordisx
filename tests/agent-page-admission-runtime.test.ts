@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentOptions } from '@cordisx/protocol/agents/v1'
+import type { AgentRuntimeRouteScope } from '../packages/cli/src/renderer/platform.js'
 
 import { CordisXAgentSessionRuntime } from '../packages/cli/src/renderer/agent-session-runtime.js'
 import { PageAdmissionBindingRegistry } from '../packages/cli/src/renderer/page-admission-lifecycle.js'
+import { PlaygroundScenarioSessionScopeAuthority } from '../packages/cli/src/renderer/playground-scenario-session-scope.js'
 
 const source = 'file:///plugins/chatroom/index.ts'
 const pluginId = 'chatroom'
@@ -141,6 +143,54 @@ describe('page admission runtime', () => {
     })
   })
 
+  it('fences a reserved page delivery before driver submit when its source page is replaced', async () => {
+    const lifecycle = new PageAdmissionBindingRegistry()
+    const current = pageBinding(lifecycle, { routeDefinitionId: 'new-room' })
+    let submits = 0
+    const agentRuntime = new CordisXAgentSessionRuntime({
+      driver: {
+        create: async () => ({ status: 'accepted' }),
+        resume: async () => ({ status: 'accepted' }),
+        submit: async () => {
+          submits += 1
+          return 'accepted'
+        },
+        discard: async () => 'accepted',
+        cancel: async () => 'accepted',
+        onReplacement: () => () => {},
+        dispose: () => {},
+      },
+      authorize: async () => true,
+      pageAdmissionBindings: lifecycle,
+    })
+    const owner = agentRuntime.ownerForPlugin(source, pluginId, generation)
+    const context = agentRuntime.beginPageComposerCommand(owner, {
+      binding: current.binding,
+      route: { outlet: 'main', routeDefinitionId: 'new-room' },
+      generation,
+      commandId: 'room-submit',
+      submitPayload: 'fenced before submit',
+    })!
+    const declaration = await agentRuntime.declarePageAdmissionRoute(owner, {
+      origin: context.origin,
+      target: {
+        ...target('room-replaced', 0),
+        route: { outlet: 'main', routeDefinitionId: 'room', param: 'roomId', roomId: 'room-replaced' },
+      },
+    })
+    if (declaration.status !== 'declared') throw new Error('fresh page declaration failed')
+    const handle = await createHandle(agentRuntime, owner, 'session-replaced-before-submit')
+    const reserved = await agentRuntime.reservePageAdmissionRoute(owner, {
+      handle,
+      continuation: declaration.continuation,
+      message: { text: context.submitPayload },
+    })
+    if (reserved.status !== 'reserved') throw new Error('fresh page reservation failed')
+    current.abort.abort()
+    await expect(reserved.reservation.submit()).rejects.toThrow('page admission reservation unavailable')
+    expect(submits).toBe(0)
+  })
+
   it('claims a fully submitted fresh Room before returning its navigation completion', async () => {
     const lifecycle = new PageAdmissionBindingRegistry()
     const current = pageBinding(lifecycle, { routeDefinitionId: 'new-room' })
@@ -189,5 +239,140 @@ describe('page admission runtime', () => {
       roomId: 'room-fresh',
       disposition: 'fresh-room',
     })
+  })
+
+  it('captures a fresh page source before submit, claims it at route activation, then activates its exact scenario Session scope', async () => {
+    const lifecycle = new PageAdmissionBindingRegistry()
+    const sourcePage = pageBinding(lifecycle, { routeDefinitionId: 'new-room' })
+    const sourceSessionId = 'cx-session.page-fresh-lead'
+    const targetSessionId = 'cx-session.page-fresh-reviewer'
+    let mounted: AgentRuntimeRouteScope | undefined
+    let pageOwner: ReturnType<CordisXAgentSessionRuntime['ownerForPlugin']> | undefined
+    let destination: ReturnType<typeof pageBinding> | undefined
+    let agentRuntime!: CordisXAgentSessionRuntime
+    const order: string[] = []
+    const authority = new PlaygroundScenarioSessionScopeAuthority({
+      hostGeneration: 'page-admission-scenario-host',
+      connectionGeneration: () => 1,
+      currentRoute: () => undefined,
+      ownerForSession: sessionId =>
+        pageOwner !== undefined && [sourceSessionId, targetSessionId].includes(sessionId) ? pageOwner : undefined,
+      routeOwner: owner =>
+        pageOwner !== undefined && owner.pluginId === pageOwner.pluginId && owner.generation === pageOwner.generation
+          ? { source, pluginId }
+          : undefined,
+      permissionRoute: () => ({
+        routeId: 'room-session-detail',
+        path: '/main/chatroom/:roomId/run/:runId/session/:sessionId',
+      }),
+      authorize: async () => true,
+      mountRoute: route => {
+        mounted = route
+        return () => {
+          mounted = undefined
+        }
+      },
+      changed: () => {},
+    })
+    agentRuntime = new CordisXAgentSessionRuntime({
+      driver: {
+        create: async () => ({ status: 'accepted' }),
+        resume: async () => ({ status: 'accepted' }),
+        submit: async () => 'accepted',
+        discard: async () => 'accepted',
+        cancel: async () => 'accepted',
+        onReplacement: () => () => {},
+        dispose: () => {},
+      },
+      authorize: async () => true,
+      pageAdmissionBindings: lifecycle,
+      capturePageAdmission: (
+        owner,
+        origin,
+        target,
+        sessionId,
+        agentGeneration,
+        messageId,
+        commandActive,
+        originActive,
+      ) =>
+        authority.capturePageAdmission(
+          owner,
+          origin,
+          target,
+          sessionId,
+          agentGeneration,
+          messageId,
+          commandActive,
+          originActive,
+        ),
+      claimPageAdmission: (owner, receipt, bindingActive) => {
+        order.push('scope-claim')
+        return authority.claimPageAdmission(owner, receipt, bindingActive)
+      },
+      navigatePageAdmission: async () => {
+        sourcePage.abort.abort()
+        destination = pageBinding(lifecycle, { routeDefinitionId: 'room', roomId: 'room-page-fresh' })
+        const claims = agentRuntime.claimPageAdmissionBinding(destination.binding)
+        expect(order).toEqual(['submitted', 'scope-claim'])
+        expect(claims).toHaveLength(1)
+        order.push('navigation-resolve')
+        return 'accepted'
+      },
+    })
+    const owner = agentRuntime.ownerForPlugin(source, pluginId, generation)
+    pageOwner = owner
+    const sourceHandle = await createHandle(agentRuntime, owner, sourceSessionId)
+    await createHandle(agentRuntime, owner, targetSessionId)
+    const context = agentRuntime.beginPageComposerCommand(owner, {
+      binding: sourcePage.binding,
+      route: { outlet: 'main', routeDefinitionId: 'new-room' },
+      generation,
+      commandId: 'room-submit',
+      submitPayload: 'fresh page scenario source',
+    })!
+    const declared = await agentRuntime.declarePageAdmissionRoute(owner, {
+      origin: context.origin,
+      target: {
+        ...target('room-page-fresh', 0),
+        route: { outlet: 'main', routeDefinitionId: 'room', param: 'roomId', roomId: 'room-page-fresh' },
+      },
+    })
+    if (declared.status !== 'declared') throw new Error('fresh page declaration was denied')
+    const reserved = await agentRuntime.reservePageAdmissionRoute(owner, {
+      handle: sourceHandle,
+      continuation: declared.continuation,
+      message: { text: context.submitPayload },
+    })
+    if (reserved.status !== 'reserved') throw new Error('fresh page reservation was denied')
+    const submitted = await reserved.reservation.submit()
+    order.push('submitted')
+    if (context.freshRoomNavigation === undefined) throw new Error('fresh page navigation is absent')
+    await expect(agentRuntime.navigatePageAdmission(owner, {
+      navigation: context.freshRoomNavigation,
+      route: { outlet: 'main', routeDefinitionId: 'room', param: 'roomId', roomId: 'room-page-fresh' },
+    })).resolves.toMatchObject({ status: 'accepted', code: 'claimed' })
+    expect(agentRuntime.finishPageComposerCommand(owner, context)).toMatchObject({
+      status: 'accepted',
+      disposition: 'fresh-room',
+      roomId: 'room-page-fresh',
+    })
+    const activated = await authority.client.activate({
+      runId: 'scenario-page-fresh',
+      sourceSessionId,
+      sourceMessageId: submitted.messageId,
+      targetSessionId,
+    })
+    order.push('scenario-activate')
+    expect(activated.status).toBe('available')
+    expect(order).toEqual(['submitted', 'scope-claim', 'navigation-resolve', 'scenario-activate'])
+    expect(mounted?.params).toEqual({ sessionId: targetSessionId })
+    destination?.abort.abort()
+    if (activated.status === 'available') {
+      authority.reconcileVisibleRoute()
+      await expect(activated.handle.closed).resolves.toEqual({ code: 'route-replaced' })
+    }
+    await agentRuntime.dispose()
+    authority.dispose()
   })
 })

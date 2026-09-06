@@ -113,6 +113,8 @@ interface DeclarationRecord {
   readonly connectionGeneration: string
   readonly destination?: PageAdmissionDestinationRoute
   reserved: boolean
+  /** Exact source captured before driver submission; never a completed admission by itself. */
+  captured?: PageAdmissionSourceCapture
   accepted?: PageAdmissionSourceCapture
   deniedCode?: string
   claimed: boolean
@@ -218,6 +220,11 @@ export class PageAdmissionBindingRegistry {
     return record !== undefined && !record.closed && binding?.active === true
   }
 
+  /** Host-only liveness check for an already mounted destination binding. */
+  bindingActive(binding: PageAdmissionBinding): boolean {
+    return this.binding(binding)?.active === true
+  }
+
   /** A fully accepted fresh continuation may outlive its released source page until claim/complete. */
   commandLive(command: PageAdmissionCommand): boolean {
     const record = this.command(command)
@@ -285,16 +292,34 @@ export class PageAdmissionBindingRegistry {
     return true
   }
 
-  /** Call only after the future Host reservation has captured exact accepted Session/message identities. */
+  /**
+   * Host-only pre-submit capture. It binds the exact future Session/message
+   * identity before the driver runs, but cannot make a command successful.
+   */
+  capture(declaration: PageAdmissionDeclaration, source: PageAdmissionSourceCapture): boolean {
+    const record = this.declaration(declaration)
+    const binding = record === undefined ? undefined : this.bindings.get(record.bindingId)
+    if (
+      record === undefined || record.revoked || !record.reserved || record.captured !== undefined
+      || record.accepted !== undefined || record.deniedCode !== undefined || record.claimed
+      || binding === undefined || !binding.active || !opaque(source.sessionId) || !opaque(source.messageId)
+    ) return false
+    record.captured = Object.freeze({ ...source })
+    return true
+  }
+
+  /** Marks only the same pre-captured source as accepted after driver submission succeeds. */
   accept(declaration: PageAdmissionDeclaration, source: PageAdmissionSourceCapture): boolean {
     const record = this.declaration(declaration)
     const binding = record === undefined ? undefined : this.bindings.get(record.bindingId)
     if (
-      record === undefined || record.revoked || !record.reserved || record.accepted !== undefined
+      record === undefined || record.revoked || !record.reserved || record.captured === undefined
+      || record.accepted !== undefined
       || record.deniedCode !== undefined || record.claimed
       || binding === undefined || !binding.active || !opaque(source.sessionId) || !opaque(source.messageId)
     ) return false
-    record.accepted = Object.freeze({ ...source })
+    if (record.captured.sessionId !== source.sessionId || record.captured.messageId !== source.messageId) return false
+    record.accepted = record.captured
     return true
   }
 

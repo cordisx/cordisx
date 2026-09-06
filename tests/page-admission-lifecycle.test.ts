@@ -42,7 +42,32 @@ function destination(roomId: string): PageAdmissionDestinationRoute {
   return { outlet: 'main', routeDefinitionId: 'room', param: 'roomId', roomId }
 }
 
+function captureAccepted(
+  registry: PageAdmissionBindingRegistry,
+  declaration: ReturnType<PageAdmissionBindingRegistry['declare']> extends infer Value ? Exclude<Value, undefined>
+    : never,
+  source: { readonly sessionId: string; readonly messageId: string },
+): void {
+  expect(registry.capture(declaration, source)).toBe(true)
+  expect(registry.accept(declaration, source)).toBe(true)
+}
+
 describe('page admission binding lifecycle', () => {
+  it('requires one exact pre-submit capture before it can mark a delivery accepted', () => {
+    const registry = new PageAdmissionBindingRegistry()
+    const current = mount(registry, { outlet: 'main', routeDefinitionId: 'room', roomId: 'room-existing' })
+    const command = registry.begin(current.binding, 'chatroom:room-submit')!
+    const declaration = registry.declare(command, target('room-existing', 0))!
+    const source = { sessionId: 'session-captured', messageId: 'message-captured' }
+    expect(registry.reserve(declaration)).toBe(true)
+    expect(registry.accept(declaration, source)).toBe(false)
+    expect(registry.capture(declaration, source)).toBe(true)
+    expect(registry.capture(declaration, source)).toBe(false)
+    expect(registry.accept(declaration, { sessionId: source.sessionId, messageId: 'message-other' })).toBe(false)
+    expect(registry.accept(declaration, source)).toBe(true)
+    expect(registry.completion(command)).toMatchObject({ status: 'accepted', roomId: 'room-existing' })
+  })
+
   it('keeps N=1/2/3 exact existing-Room captures only on the still-live page binding', () => {
     for (const count of [1, 2, 3]) {
       const registry = new PageAdmissionBindingRegistry()
@@ -51,10 +76,10 @@ describe('page admission binding lifecycle', () => {
       const declarations = Array.from({ length: count }, (_, index) => {
         const declaration = registry.declare(command, target('room-existing', index))!
         expect(registry.reserve(declaration)).toBe(true)
-        expect(registry.accept(declaration, {
+        captureAccepted(registry, declaration, {
           sessionId: `session-${index}`,
           messageId: `message-${index}`,
-        })).toBe(true)
+        })
         return declaration
       })
       registry.complete(command)
@@ -84,10 +109,10 @@ describe('page admission binding lifecycle', () => {
       const declarations = Array.from({ length: count }, (_, index) => {
         const declaration = registry.declare(command, target('room-fresh', index), destination('room-fresh'))!
         expect(registry.reserve(declaration)).toBe(true)
-        expect(registry.accept(declaration, {
+        captureAccepted(registry, declaration, {
           sessionId: `session-fresh-${index}`,
           messageId: `message-fresh-${index}`,
-        })).toBe(true)
+        })
         return declaration
       })
       const wrong = mount(registry, { outlet: 'main', routeDefinitionId: 'room', roomId: 'room-wrong' })
@@ -123,7 +148,7 @@ describe('page admission binding lifecycle', () => {
     const declared = registry.declare(command, target('room-fresh', 0), destination('room-fresh'))!
     expect(registry.declare(command, target('room-fresh', 0), destination('room-fresh'))).toBeUndefined()
     expect(registry.reserve(declared)).toBe(true)
-    expect(registry.accept(declared, { sessionId: 'session-fresh', messageId: 'message-fresh' })).toBe(true)
+    captureAccepted(registry, declared, { sessionId: 'session-fresh', messageId: 'message-fresh' })
     registry.fenceConnection('connection-replaced')
     fresh.abort.abort()
 
@@ -140,7 +165,7 @@ describe('page admission binding lifecycle', () => {
     const first = registry.declare(command, target('room-fresh', 0), destination('room-fresh'))!
     const second = registry.declare(command, target('room-fresh', 1), destination('room-fresh'))!
     expect(registry.reserve(first)).toBe(true)
-    expect(registry.accept(first, { sessionId: 'session-first', messageId: 'message-first' })).toBe(true)
+    captureAccepted(registry, first, { sessionId: 'session-first', messageId: 'message-first' })
     fresh.abort.abort()
 
     const destinationBinding = mount(registry, { outlet: 'main', routeDefinitionId: 'room', roomId: 'room-fresh' })
@@ -152,7 +177,7 @@ describe('page admission binding lifecycle', () => {
     const secondCommand = registry.begin(secondRun.binding, 'chatroom:room-submit')!
     const declared = registry.declare(secondCommand, target('room-second', 0), destination('room-second'))!
     expect(registry.reserve(declared)).toBe(true)
-    expect(registry.accept(declared, { sessionId: 'session-second', messageId: 'message-second' })).toBe(true)
+    captureAccepted(registry, declared, { sessionId: 'session-second', messageId: 'message-second' })
     registry.complete(secondCommand)
     secondRun.abort.abort()
     const secondDestination = mount(registry, { outlet: 'main', routeDefinitionId: 'room', roomId: 'room-second' })
@@ -166,7 +191,7 @@ describe('page admission binding lifecycle', () => {
     const command = registry.begin(fresh.binding, 'chatroom:room-submit')!
     const declared = registry.declare(command, target('room-fresh', 0), destination('room-fresh'))!
     expect(registry.reserve(declared)).toBe(true)
-    expect(registry.accept(declared, { sessionId: 'session-fresh', messageId: 'message-fresh' })).toBe(true)
+    captureAccepted(registry, declared, { sessionId: 'session-fresh', messageId: 'message-fresh' })
     const phases: string[] = []
     registry.subscribeActivation(binding => {
       phases.push('claim')
