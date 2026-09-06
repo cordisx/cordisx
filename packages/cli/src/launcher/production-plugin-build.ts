@@ -207,13 +207,33 @@ function stylesForChunk(chunk: Rollup.OutputChunk): readonly `./${string}`[] {
     (chunk as typeof chunk & { readonly viteMetadata?: { readonly importedCss?: ReadonlySet<string> } }).viteMetadata
   return [...metadata?.importedCss ?? []].map(artifactPath).sort()
 }
-function wrapLazyChunkStyles(chunk: Rollup.OutputChunk): void {
-  const styles = stylesForChunk(chunk)
-  if (chunk.isEntry || styles.length === 0 || chunk.code.startsWith(LAZY_STYLE_BOOTSTRAP_MARKER)) return
-  chunk.code =
-    `${LAZY_STYLE_BOOTSTRAP_MARKER}\nawait globalThis.__cordisxPluginGenerationResourcesV1.loadLazyStyles(import.meta.url,${
-      JSON.stringify(styles)
-    });\n${chunk.code}`
+function wrapLazyChunkImports(bundle: Rollup.OutputBundle): void {
+  const chunks = new Map(Object.values(bundle).flatMap(item => item.type === 'chunk' ? [[item.fileName, item]] : []))
+  for (const chunk of chunks.values()) {
+    if (chunk.code.startsWith(LAZY_STYLE_BOOTSTRAP_MARKER)) continue
+    let code = chunk.code
+    let wrapped = false
+    for (const imported of chunk.dynamicImports) {
+      const target = chunks.get(imported)
+      const styles = target === undefined ? [] : stylesForChunk(target)
+      if (styles.length === 0) continue
+      const specifier = JSON.stringify(
+        path.posix.relative(path.posix.dirname(chunk.fileName), imported).replace(/^(?!\.)/u, './'),
+      )
+      const original = `import(${specifier})`
+      if (!code.includes(original)) {
+        throw new Error(`plugin production lazy import expression is unavailable: ${imported}`)
+      }
+      code = code.replaceAll(
+        original,
+        `globalThis.__cordisxPluginGenerationResourcesV1.loadLazyStyles(import.meta.url,${
+          JSON.stringify(styles)
+        }).then(()=>import(${specifier}))`,
+      )
+      wrapped = true
+    }
+    if (wrapped) chunk.code = `${LAZY_STYLE_BOOTSTRAP_MARKER}\n${code}`
+  }
 }
 
 function artifactProjection(
@@ -323,7 +343,7 @@ function artifactManifestPlugin(sharedImports: Set<PluginGenerationSharedImportV
     generateBundle: {
       order: 'post',
       async handler(_options, bundle) {
-        for (const item of Object.values(bundle)) if (item.type === 'chunk') wrapLazyChunkStyles(item)
+        wrapLazyChunkImports(bundle)
         const projected = artifactProjection(Object.values(bundle), sharedImports)
         await assertPluginGenerationArtifactFileReferences(projected.manifest, projected.files)
         this.emitFile({
