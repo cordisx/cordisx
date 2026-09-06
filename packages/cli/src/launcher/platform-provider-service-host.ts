@@ -63,18 +63,19 @@ export class PlatformProviderServiceHostV1 {
           access.packageIdentity.integrity,
           access.pluginIdentity.pluginId,
           access.serviceId,
+          access.hostGeneration,
           access.pluginIdentity.generation,
         ].join('\0')).digest('hex')
       }`,
       pluginId: access.pluginIdentity.pluginId,
       serviceId: access.serviceId,
       sourceDigest: access.packageIdentity.integrity,
-      hostGeneration: access.pluginIdentity.generation,
+      hostGeneration: access.hostGeneration,
       pluginGeneration: access.pluginIdentity.generation,
     })
     const controller = new AbortController()
     const workspaces = new PlatformProviderWorkspaceAuthority()
-    let publication: Awaited<ReturnType<ProviderFleet['publishConnections']>> | undefined
+    let publicationPromise: Promise<Awaited<ReturnType<ProviderFleet['publishConnections']>> | undefined> | undefined
     const prepared: Array<{
       readonly projection: PlatformProviderRegistrationProjectionV1
       readonly connection: ProviderConnection
@@ -97,7 +98,8 @@ export class PlatformProviderServiceHostV1 {
           if (prepared.some(item => item.projection.descriptor.providerId === normalized.descriptor.providerId)) {
             throw new Error(`Provider ${normalized.descriptor.providerId} is registered twice`)
           }
-          const providerGeneration = `${access.pluginIdentity.generation}:${normalized.descriptor.providerId}`
+          const providerGeneration =
+            `${access.hostGeneration}:${access.pluginIdentity.generation}:${normalized.descriptor.providerId}`
           const policy = issuePlatformProviderBrokerPolicy({
             owner,
             providerId: normalized.descriptor.providerId,
@@ -158,7 +160,13 @@ export class PlatformProviderServiceHostV1 {
           })
           const record = {
             projection,
-            connection: providerConnection({ descriptor: normalized.descriptor, adapter, broker, workspaces }),
+            connection: providerConnection({
+              descriptor: normalized.descriptor,
+              mapping: normalized.mapping,
+              adapter,
+              broker,
+              workspaces,
+            }),
             broker,
             disposed: false,
           }
@@ -168,8 +176,12 @@ export class PlatformProviderServiceHostV1 {
             dispose: async () => {
               if (record.disposed) return
               record.disposed = true
-              if (publication === undefined) await record.connection.close()
-              else await publication.disposeProvider(record.connection.providerId)
+              if (publicationPromise === undefined) await record.connection.close()
+              else {
+                const activePublication = await publicationPromise
+                if (activePublication === undefined) await record.connection.close()
+                else await activePublication.disposeProvider(record.connection.providerId)
+              }
             },
           })
         },
@@ -193,21 +205,42 @@ export class PlatformProviderServiceHostV1 {
         configuration.enabled && !activeIds.has(configuration.providerId)
       )
       if (missing !== undefined) throw new Error(`Enabled provider ${missing.providerId} was not registered`)
-      const activePublication = await this.options.fleet.publishConnections(active.map(item => ({
-        connection: item.connection,
-        displayName: item.projection.descriptor.displayName,
-      })))
-      publication = activePublication
+      let resolvePublication = (
+        _value: Awaited<ReturnType<ProviderFleet['publishConnections']>> | undefined,
+      ): void => {}
+      publicationPromise = new Promise(resolve => {
+        resolvePublication = resolve
+      })
+      let activePublication: Awaited<ReturnType<ProviderFleet['publishConnections']>>
+      try {
+        activePublication = await this.options.fleet.publishConnections(active.map(item => ({
+          connection: item.connection,
+          displayName: item.projection.descriptor.displayName,
+        })))
+        resolvePublication(activePublication)
+      } catch (error) {
+        resolvePublication(undefined)
+        throw error
+      }
+      await Promise.all(
+        active.filter(item => item.disposed).map(async item => {
+          await activePublication.disposeProvider(item.connection.providerId)
+        }),
+      )
+      const published = active.filter(item => !item.disposed)
       let disposed = false
       return {
         owner,
-        registrations: active.map(item => immutable({ ...item.projection, state: 'active' as const })),
+        registrations: published.map(item => immutable({ ...item.projection, state: 'active' as const })),
         dispose: async () => {
           if (disposed) return
           disposed = true
           controller.abort()
-          await activePublication.dispose()
-          workspaces.dispose()
+          try {
+            await activePublication.dispose()
+          } finally {
+            workspaces.dispose()
+          }
         },
       }
     } catch (error) {

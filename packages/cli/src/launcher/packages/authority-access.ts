@@ -46,6 +46,7 @@ export interface PlatformProviderRuntimeServiceModuleAccess {
     readonly generation: string
   }
   readonly serviceId: string
+  readonly hostGeneration: string
   readonly serviceKind: 'platform-provider'
   readonly owner: 'host'
   readonly schema: string

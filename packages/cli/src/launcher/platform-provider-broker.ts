@@ -12,7 +12,7 @@ import type {
   PlatformProviderOperationV1,
   PlatformProviderOwnerV1,
 } from '@cordisx/protocol/platform-provider/v1'
-import { immutable, METHOD, safeValue } from './platform-provider-validation.js'
+import { exact, immutable, METHOD, record, safeValue } from './platform-provider-validation.js'
 
 function bindingTuple(binding: PlatformProviderBrokerBindingV1): readonly string[] {
   return binding.direction === 'request'
@@ -31,6 +31,55 @@ function exactBinding(
   right: PlatformProviderBrokerBindingV1,
 ): boolean {
   return JSON.stringify(bindingTuple(left)) === JSON.stringify(bindingTuple(right))
+}
+
+function brokerRequest(value: unknown): PlatformProviderBrokerRequestV1 {
+  const request = record(value, 'Platform provider broker request')
+  exact(request, [
+    '$schema',
+    'contract',
+    'schemaVersion',
+    'requestId',
+    'operation',
+    'method',
+    'requestSchema',
+    'params',
+  ], 'Platform provider broker request')
+  if (
+    request.$schema
+      !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-broker-request.v1.schema.json'
+    || request.contract !== 'cordisx.platform-provider-broker-request/v1' || request.schemaVersion !== 1
+    || typeof request.requestId !== 'string' || request.requestId.length < 1 || request.requestId.length > 128
+    || typeof request.operation !== 'string' || typeof request.method !== 'string' || !METHOD.test(request.method)
+    || request.requestSchema
+      !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-broker-value.v1.schema.json'
+  ) throw new Error('Platform provider broker request is invalid')
+  return request as unknown as PlatformProviderBrokerRequestV1
+}
+
+function brokerResponse(value: unknown): PlatformProviderBrokerResponseV1 {
+  const response = record(value, 'Platform provider broker response')
+  exact(response, [
+    '$schema',
+    'contract',
+    'schemaVersion',
+    'eventId',
+    'operation',
+    'method',
+    'responseSchema',
+    'value',
+  ], 'Platform provider broker response')
+  if (
+    response.$schema
+      !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-broker-response.v1.schema.json'
+    || response.contract !== 'cordisx.platform-provider-broker-response/v1' || response.schemaVersion !== 1
+    || typeof response.eventId !== 'string' || response.eventId.length < 1 || response.eventId.length > 128
+    || typeof response.operation !== 'string' || typeof response.method !== 'string' || !METHOD.test(response.method)
+    || response.responseSchema
+      !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-broker-value.v1.schema.json'
+  ) throw new Error('Platform provider broker response is invalid')
+  safeValue(response.value)
+  return response as unknown as PlatformProviderBrokerResponseV1
 }
 
 export interface HostPlatformProviderBrokerCatalogV1 {
@@ -110,14 +159,15 @@ export class HostBoundPlatformProviderBrokerV1 implements PlatformProviderBroker
     request: PlatformProviderBrokerRequestV1,
     signal?: AbortSignal,
   ): Promise<PlatformProviderBrokerResultV1> {
+    const normalized = brokerRequest(request)
     const base = {
       $schema:
         'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-broker-result.v1.schema.json' as const,
       contract: 'cordisx.platform-provider-broker-result/v1' as const,
       schemaVersion: 1 as const,
-      requestId: request.requestId,
-      operation: request.operation,
-      method: request.method,
+      requestId: normalized.requestId,
+      operation: normalized.operation,
+      method: normalized.method,
     }
     if (this.disposed) return { ...base, status: 'unavailable', code: 'disposed' }
     const binding = this.policy.bindings.find((candidate): candidate is Extract<
@@ -125,15 +175,15 @@ export class HostBoundPlatformProviderBrokerV1 implements PlatformProviderBroker
       { direction: 'request' }
     > =>
       candidate.direction === 'request'
-      && candidate.operation === request.operation
-      && candidate.method === request.method
+      && candidate.operation === normalized.operation
+      && candidate.method === normalized.method
     )
     if (binding === undefined) return { ...base, status: 'rejected', code: 'method-not-declared' }
-    if (request.requestSchema !== binding.requestSchema) {
+    if (normalized.requestSchema !== binding.requestSchema) {
       return { ...base, status: 'rejected', code: 'schema-mismatch' }
     }
     try {
-      const value = safeValue(await this.#transport.exchange(request.method, safeValue(request.params), signal))
+      const value = safeValue(await this.#transport.exchange(normalized.method, safeValue(normalized.params), signal))
       return immutable({ ...base, status: 'accepted', resultSchema: binding.resultSchema, value })
     } catch (error) {
       return {
@@ -194,19 +244,20 @@ export class HostBoundPlatformProviderBrokerV1 implements PlatformProviderBroker
   }
 
   async respond(response: PlatformProviderBrokerResponseV1): Promise<'accepted' | 'stale' | 'rejected'> {
+    const normalized = brokerResponse(response)
     if (this.disposed) return 'stale'
-    const event = this.pending.get(response.eventId)
+    const event = this.pending.get(normalized.eventId)
     if (event === undefined) return 'stale'
     const binding = this.policy.bindings.find((item): item is Extract<
       PlatformProviderBrokerBindingV1,
       { direction: 'event' }
-    > => item.direction === 'event' && item.operation === response.operation && item.method === response.method)
+    > => item.direction === 'event' && item.operation === normalized.operation && item.method === normalized.method)
     if (
-      binding === undefined || event.operation !== response.operation || event.method !== response.method
-      || binding.responseSchema !== response.responseSchema
+      binding === undefined || event.operation !== normalized.operation || event.method !== normalized.method
+      || binding.responseSchema !== normalized.responseSchema
     ) return 'rejected'
-    this.pending.delete(response.eventId)
-    await this.#transport.respond(response.eventId, response.method, safeValue(response.value))
+    this.pending.delete(normalized.eventId)
+    await this.#transport.respond(normalized.eventId, normalized.method, safeValue(normalized.value))
     return 'accepted'
   }
 

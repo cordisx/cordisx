@@ -12,6 +12,7 @@ export async function platformProviderRuntimeServiceAccess(
     readonly moduleGeneration: string
   },
   serviceId: string,
+  hostGeneration: string,
 ): Promise<PlatformProviderRuntimeServiceModuleAccess> {
   const staged = await loadStagedPluginPackage(homeDir, item.digest)
   const service = staged.serviceModules.find(module => module.declaration.id === serviceId)
@@ -30,6 +31,7 @@ export async function platformProviderRuntimeServiceAccess(
       generation: item.moduleGeneration,
     },
     serviceId,
+    hostGeneration,
     serviceKind: 'platform-provider',
     owner: service.declaration.owner,
     schema: service.declaration.schema,

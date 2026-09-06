@@ -1,4 +1,4 @@
-import type { ProviderAdapterRegistry } from '../renderer/provider-registry.js'
+import type { ProviderAdapterRegistration, ProviderAdapterRegistry } from '../renderer/provider-registry.js'
 import type { ProviderConnection, ProviderLifecycleSignal } from './contracts.js'
 
 export interface ProviderFleetPublication {
@@ -14,48 +14,66 @@ export async function publishProviderConnections(input: {
   readonly lifecycleDisposers: Map<string, () => void>
   readonly observeLifecycle: (generation: string, event: ProviderLifecycleSignal) => void
 }): Promise<ProviderFleetPublication> {
-  const existing = new Set(input.registry.snapshots().map(item => item.providerId))
+  const existing = new Map(
+    input.registry.snapshots()
+      .filter(item => item.state === 'active')
+      .map(item => [item.providerId, item.generation]),
+  )
   const incoming = new Set<string>()
-  for (const entry of input.entries) {
-    if (existing.has(entry.connection.providerId) || incoming.has(entry.connection.providerId)) {
-      throw new Error(`provider ${entry.connection.providerId} is already registered`)
-    }
-    incoming.add(entry.connection.providerId)
-  }
-  const removers: Array<() => Promise<void>> = []
+  const registrations: ProviderAdapterRegistration<ProviderConnection>[] = []
+  const nextLifecycleDisposers = new Map<string, () => void>()
   try {
     for (const entry of input.entries) {
       const connection = entry.connection
-      input.names.set(connection.providerId, entry.displayName)
-      removers.push(input.registry.register({
+      if (incoming.has(connection.providerId)) throw new Error(`provider ${connection.providerId} is registered twice`)
+      if (existing.get(connection.providerId) === connection.generation) {
+        throw new Error(`provider ${connection.providerId} generation did not change`)
+      }
+      incoming.add(connection.providerId)
+      const disposeLifecycle = connection.subscribeLifecycle?.(event =>
+        input.observeLifecycle(connection.generation, event)
+      )
+      if (disposeLifecycle !== undefined) nextLifecycleDisposers.set(connection.providerId, disposeLifecycle)
+      registrations.push({
         providerId: connection.providerId,
         generation: connection.generation,
         adapter: connection,
         dispose: async () => await connection.close(),
-      }))
-      const disposeLifecycle = connection.subscribeLifecycle?.(event =>
-        input.observeLifecycle(connection.generation, event)
-      )
-      if (disposeLifecycle !== undefined) input.lifecycleDisposers.set(connection.providerId, disposeLifecycle)
+      })
     }
   } catch (error) {
-    await Promise.all(removers.reverse().map(async remove => await remove().catch(() => undefined)))
-    for (const providerId of incoming) {
-      input.lifecycleDisposers.get(providerId)?.()
-      input.lifecycleDisposers.delete(providerId)
-      input.names.delete(providerId)
-    }
+    for (const dispose of nextLifecycleDisposers.values()) dispose()
     throw error
   }
-  const removeByProviderId = new Map([...incoming].map((providerId, index) => [providerId, removers[index]!]))
+
+  await input.registry.replaceBatch(registrations)
+  for (const entry of input.entries) {
+    const providerId = entry.connection.providerId
+    input.lifecycleDisposers.get(providerId)?.()
+    const disposeLifecycle = nextLifecycleDisposers.get(providerId)
+    if (disposeLifecycle === undefined) input.lifecycleDisposers.delete(providerId)
+    else input.lifecycleDisposers.set(providerId, disposeLifecycle)
+    input.names.set(providerId, entry.displayName)
+  }
+
+  const removeByProviderId = new Map(input.entries.map(entry => [
+    entry.connection.providerId,
+    async () => await input.registry.removeProvider(entry.connection.providerId, entry.connection.generation),
+  ]))
   let disposed = false
   const disposeProvider = async (providerId: string): Promise<boolean> => {
     const remove = removeByProviderId.get(providerId)
     if (remove === undefined) return false
     removeByProviderId.delete(providerId)
+    const generation = input.entries.find(entry => entry.connection.providerId === providerId)?.connection.generation
+    const current = input.registry.snapshots().some(item =>
+      item.state === 'active' && item.providerId === providerId && item.generation === generation
+    )
+    if (!current) return false
     input.lifecycleDisposers.get(providerId)?.()
     input.lifecycleDisposers.delete(providerId)
-    await remove()
+    const removed = await remove()
+    if (!removed) return false
     input.names.delete(providerId)
     return true
   }

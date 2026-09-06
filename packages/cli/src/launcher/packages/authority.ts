@@ -614,7 +614,12 @@ export class PackageLifecycleAuthority {
     }
     const item = plan.after.plugins.find(plugin => plugin.id === pluginId)
     if (item === undefined) throw new PackageLifecycleError('package-removed', `${pluginId} has no candidate artifact`)
-    return await platformProviderRuntimeServiceAccess(this.options.homeDir, item, serviceId)
+    return await platformProviderRuntimeServiceAccess(
+      this.options.homeDir,
+      item,
+      serviceId,
+      this.options.runtimeGeneration,
+    )
   }
 
   async requestActivation(access: CandidateAccess): Promise<PackageCandidatePlan> {

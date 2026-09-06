@@ -26,12 +26,12 @@ const OPERATIONS = new Set<PlatformProviderOperationV1>([
   'approvals.decide',
 ])
 
-function record(value: unknown, label: string): Record<string, unknown> {
+export function record(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
   return value as Record<string, unknown>
 }
 
-function exact(value: Record<string, unknown>, fields: readonly string[], label: string): void {
+export function exact(value: Record<string, unknown>, fields: readonly string[], label: string): void {
   const allowed = new Set(fields)
   const unknown = Object.keys(value).find(key => !allowed.has(key))
   if (unknown !== undefined) throw new Error(`${label}.${unknown} is unsupported`)
@@ -50,7 +50,11 @@ export function immutable<Value>(value: Value): Value {
 
 export function safeValue(value: unknown, label = 'broker value', depth = 0): PlatformProviderJsonValue {
   if (depth > 32) throw new Error(`${label} is too deeply nested`)
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') return value
+  if (value === null || typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    if (value.length > 4_096) throw new Error(`${label} exceeds the string limit`)
+    return value
+  }
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (Array.isArray(value)) {
     if (value.length > 512) throw new Error(`${label} exceeds the item limit`)
@@ -178,30 +182,78 @@ export function assertAdapter(value: PlatformProviderAdapterV1): void {
 }
 
 export function validLifecycleEvent(
-  event: PlatformProviderLifecycleEventV1,
+  value: unknown,
   providerId: string,
   providerGeneration: string,
-): boolean {
-  if (
-    event.$schema
-      !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-lifecycle-event.v1.schema.json'
-    || event.contract !== 'cordisx.platform-provider-lifecycle-event/v1' || event.schemaVersion !== 1
-    || event.providerId !== providerId || event.providerGeneration !== providerGeneration
-    || event.session.providerId !== providerId || event.turnId.length === 0
-  ) return false
-  if (event.type === 'turn.completed') {
-    return event.terminal && event.failure === undefined && event.approval === undefined
+): value is PlatformProviderLifecycleEventV1 {
+  try {
+    const event = record(value, 'Platform provider lifecycle event')
+    exact(event, [
+      '$schema',
+      'contract',
+      'schemaVersion',
+      'eventId',
+      'sequence',
+      'providerId',
+      'providerGeneration',
+      'session',
+      'turnId',
+      'type',
+      'terminal',
+      'output',
+      'failure',
+      'approval',
+    ], 'Platform provider lifecycle event')
+    const session = record(event.session, 'Platform provider lifecycle event.session')
+    exact(session, ['providerId', 'remoteSessionId'], 'Platform provider lifecycle event.session')
+    if (
+      event.$schema
+        !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-lifecycle-event.v1.schema.json'
+      || event.contract !== 'cordisx.platform-provider-lifecycle-event/v1' || event.schemaVersion !== 1
+      || typeof event.eventId !== 'string' || event.eventId.length < 1 || event.eventId.length > 128
+      || !Number.isInteger(event.sequence) || (event.sequence as number) < 1
+      || event.providerId !== providerId || event.providerGeneration !== providerGeneration
+      || session.providerId !== providerId || typeof session.remoteSessionId !== 'string'
+      || session.remoteSessionId.length < 1 || session.remoteSessionId.length > 512
+      || typeof event.turnId !== 'string' || event.turnId.length < 1 || event.turnId.length > 512
+    ) return false
+    if (
+      event.output !== undefined && (
+        !Array.isArray(event.output) || event.output.length > 64
+        || event.output.some(item => {
+          const output = record(item, 'Platform provider lifecycle event.output')
+          exact(output, ['type', 'text'], 'Platform provider lifecycle event.output')
+          return output.type !== 'text' || typeof output.text !== 'string' || output.text.length > 1_000_000
+        })
+      )
+    ) return false
+    if (event.type === 'turn.completed') {
+      return event.terminal === true && event.failure === undefined && event.approval === undefined
+    }
+    if (event.type === 'turn.failed') {
+      const failure = record(event.failure, 'Platform provider lifecycle event.failure')
+      exact(failure, ['code', 'retryable'], 'Platform provider lifecycle event.failure')
+      return event.terminal === true && event.approval === undefined
+        && typeof failure.code === 'string' && failure.code.length >= 1 && failure.code.length <= 128
+        && typeof failure.retryable === 'boolean'
+    }
+    if (event.type === 'turn.started') {
+      return event.terminal === false && event.output === undefined && event.failure === undefined
+        && event.approval === undefined
+    }
+    if (event.type !== 'approval.required' && event.type !== 'approval.resolved') return false
+    const approval = record(event.approval, 'Platform provider lifecycle event.approval')
+    exact(approval, ['approvalId', 'kind', 'state', 'outcome'], 'Platform provider lifecycle event.approval')
+    if (
+      event.terminal !== false || event.output !== undefined || event.failure !== undefined
+      || typeof approval.approvalId !== 'string' || approval.approvalId.length < 1 || approval.approvalId.length > 512
+      || !['command', 'file-change', 'external-action', 'other'].includes(String(approval.kind))
+    ) return false
+    return event.type === 'approval.required'
+      ? approval.state === 'pending' && approval.outcome === undefined
+      : approval.state === 'resolved'
+        && ['approved', 'denied', 'expired', 'cancelled'].includes(String(approval.outcome))
+  } catch {
+    return false
   }
-  if (event.type === 'turn.failed') {
-    return event.terminal && event.failure !== undefined && event.approval === undefined
-  }
-  if (event.type === 'turn.started') {
-    return !event.terminal && event.output === undefined && event.failure === undefined && event.approval === undefined
-  }
-  if (event.type === 'approval.required') {
-    return !event.terminal && event.output === undefined && event.failure === undefined
-      && event.approval.state === 'pending' && event.approval.outcome === undefined
-  }
-  return !event.terminal && event.output === undefined && event.failure === undefined
-    && event.approval.state === 'resolved' && event.approval.outcome !== undefined
 }

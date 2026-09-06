@@ -208,12 +208,18 @@ async function readRendererOnlyPackage(root: string): Promise<{
   }
   let runtimeManifest: CordisXPluginManifestV7 | CordisXPluginManifestV8 | CordisXPluginManifestV9 | undefined
   let runtimeManifestFile: string | undefined
+  const declaredRuntimeSchema = manifest.runtimeManifest !== null && typeof manifest.runtimeManifest === 'object'
+      && !Array.isArray(manifest.runtimeManifest)
+    ? (manifest.runtimeManifest as Record<string, unknown>).schema
+    : undefined
   const runtimeManifestSchema = manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 && manifest.schemaVersion === 7
     ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7
     : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 && manifest.schemaVersion === 8
     ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8
     : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V9 && manifest.schemaVersion === 9
-    ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V9
+    ? declaredRuntimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8
+      ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8
+      : PLUGIN_RUNTIME_MANIFEST_SCHEMA_V9
     : undefined
   const declaresV7OrV8 = manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 || manifest.schemaVersion === 7
     || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 || manifest.schemaVersion === 8
