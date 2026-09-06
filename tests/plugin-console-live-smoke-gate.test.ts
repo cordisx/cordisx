@@ -6,8 +6,20 @@ import { describe, expect, it } from 'vitest'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 describe('plugin Console live smoke gate', () => {
-  it('uses stable Console anchors and fails for every reported invariant', async () => {
+  it('connects the executable Console exercise module from the live-smoke entry', async () => {
     const source = await readFile(path.join(root, 'packages/cli/scripts/live-smoke.mjs'), 'utf8')
+
+    expect(source).toContain(
+      "import { runPluginConsoleExercise } from './live-smoke/plugin-console.mjs'",
+    )
+    expect(source).toContain("import { finalizeLiveSmoke } from './live-smoke/finalize.mjs'")
+    expect(source).toContain('const pluginConsole = await runPluginConsoleExercise({')
+    expect(source).toContain('await finalizeLiveSmoke({')
+    expect(source).toContain('pluginConsoleAssertions: pluginConsole.pluginConsoleAssertions')
+  })
+
+  it('uses stable Console anchors and computes every invariant in the invoked module', async () => {
+    const source = await readFile(path.join(root, 'packages/cli/scripts/live-smoke/plugin-console.mjs'), 'utf8')
 
     expect(source).toContain("const pluginConsoleLocale = locale === 'zh-CN'")
     expect(source).toContain("kindSelect: 'API / 类型'")
@@ -20,8 +32,6 @@ describe('plugin Console live smoke gate', () => {
     expect(source).toContain('globalThis.__cordisxRestoreSmokeTheme?.()')
     expect(source).toContain('if (toolbarTooltip.text !== null && toolbarTooltip.describedBy !== null) break')
     expect(source).toContain('document.querySelector(\'[data-console-action="pause"]\')?.focus()')
-    expect(source).toContain("'plugin-console-expanded-screenshot': { type: 'string' }")
-    expect(source).toContain("'--plugin-console-expanded-screenshot requires --plugin-console-exercise'")
     expect(source).toContain("document.documentElement.setAttribute('data-theme', 'light')")
 
     for (
@@ -79,7 +89,20 @@ describe('plugin Console live smoke gate', () => {
       ]
     ) expect(source).toContain(`'${assertion}'`)
 
+    expect(source).toContain('function pluginConsoleSmokeAssertions(report, owner)')
+    expect(source).toContain('pluginConsoleAssertions = pluginConsoleSmokeAssertions(pluginConsoleReport, owner)')
     expect(source).toContain('pluginConsoleReport = { ...pluginConsoleReport, assertions: pluginConsoleAssertions }')
-    expect(source).toContain("plugin Console smoke assertions failed: ${failures.join(', ')}")
+  })
+
+  it('keeps Console option validation and terminal failure handling in their executing modules', async () => {
+    const [options, finalize] = await Promise.all([
+      readFile(path.join(root, 'packages/cli/scripts/live-smoke/options.mjs'), 'utf8'),
+      readFile(path.join(root, 'packages/cli/scripts/live-smoke/finalize.mjs'), 'utf8'),
+    ])
+
+    expect(options).toContain("'plugin-console-expanded-screenshot': { type: 'string' }")
+    expect(options).toContain("'--plugin-console-expanded-screenshot requires --plugin-console-exercise'")
+    expect(options).not.toContain('function pluginConsoleSmokeAssertions')
+    expect(finalize).toContain("plugin Console smoke assertions failed: ${failures.join(', ')}")
   })
 })

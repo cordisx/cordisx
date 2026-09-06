@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
+import { readLiveSmokeSourceGraph } from './live-smoke-source.js'
+
 const root = path.resolve(import.meta.dirname, '..')
 
 describe('development checkpoint regressions', () => {
@@ -21,10 +23,10 @@ describe('development checkpoint regressions', () => {
   })
 
   it('opens the on-demand React Manager before collecting live-smoke state', async () => {
-    const source = await readFile(path.join(root, 'packages/cli/scripts/live-smoke.mjs'), 'utf8')
+    const source = await readLiveSmokeSourceGraph(root)
     const managerSmoke = source.slice(
-      source.indexOf("if (parsed.values['manager-screenshot'] !== undefined)"),
-      source.indexOf('let managerThemeReport'),
+      source.indexOf('export async function runManagerScreenshot'),
+      source.indexOf('export const managerStateExpression'),
     )
 
     expect(source).toContain('async function ensureManagerVisible()')
