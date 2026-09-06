@@ -165,6 +165,7 @@ export function createLocalChannelService(input: {
         serviceId: 'runtime',
         serviceKind: 'channel-adapter',
         configuration: { kind: 'host', schema: CHANNEL_SERVICE_CONFIG_SCHEMA_V1, configApplies: 'restart' },
+        configurationRevision: sequence,
         artifactDirectory,
         runtimeEntry: './service.mjs',
       }, configuration)

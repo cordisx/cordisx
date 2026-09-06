@@ -6,6 +6,13 @@ declare const ctx: Context
 export async function inspectPublicChannelServices(): Promise<void> {
   const accounts = await ctx.channel.connections.list()
   void accounts[0]?.ref.tenantId
+  ctx.channel.configuration.revision satisfies number
+  // @ts-expect-error The Host-stamped revision is read-only.
+  ctx.channel.configuration.revision = 2
+  // @ts-expect-error The public configuration projection cannot be replaced by a caller.
+  ctx.channel.configuration = { revision: 2 }
+  // @ts-expect-error No source or generation authority is projected with the revision.
+  void ctx.channel.configuration.generation
 
   const snapshot = ctx.channelManager.snapshot()
   const account = snapshot.accounts[0]

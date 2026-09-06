@@ -19,6 +19,8 @@ export interface LauncherChannelServiceModuleAccess {
   readonly serviceId: string
   readonly serviceKind: 'channel-adapter'
   readonly configuration: ChannelServiceConfigurationDeclaration
+  /** Host-owned service configuration revision stamped into the child Context. */
+  readonly configurationRevision: number
   readonly artifactDirectory: string
   /** Authority-projected bounded module path; built-ins may live at package root. */
   readonly runtimeEntry: `./${string}.mjs`
@@ -76,6 +78,7 @@ export async function loadLauncherChannelServiceModule(
 ): Promise<LauncherChannelServiceModule> {
   if (
     access.serviceKind !== 'channel-adapter'
+    || !Number.isInteger(access.configurationRevision) || access.configurationRevision < 1
     || !/^\.\/(?:services\/)?[a-z0-9][a-z0-9._-]{0,95}\.mjs$/.test(access.runtimeEntry)
     || !path.isAbsolute(access.artifactDirectory)
   ) {
@@ -127,7 +130,7 @@ export class LauncherChannelServiceHost {
       throw new Error('Channel service Host configuration is required')
     }
     const module = await loadLauncherChannelServiceModule(access)
-    const context = bindChannelPluginContext(this.#root, access.pluginIdentity)
+    const context = bindChannelPluginContext(this.#root, access.pluginIdentity, access.configurationRevision)
     const fiber = context.plugin(module as Plugin.Object, configuration)
     await fiber
     this.#active.add(fiber)

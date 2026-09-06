@@ -11,14 +11,14 @@ function validateConfig(value) {
   }
   return value
 }
-function simulatorDefinition(connection) {
+function simulatorDefinition(connection, configurationRevision) {
   const sent = new Map()
   return {
     descriptor: {
       ref: connection.ref,
       kind: 'simulator',
       implementationStatus: 'verified',
-      configurationRevision: 1,
+      configurationRevision,
       secretState: 'unavailable',
     },
     start: async () => ({
@@ -44,7 +44,7 @@ export async function apply(ctx, input) {
   for (const connection of config.connections) {
     if (!connection.enabled) continue
     if (connection.adapterKind === 'simulator' && connection.transport?.mode === 'simulator') {
-      await ctx.channel.adapters.register(simulatorDefinition(connection))
+      await ctx.channel.adapters.register(simulatorDefinition(connection, ctx.channel.configuration.revision))
     }
   }
 }
