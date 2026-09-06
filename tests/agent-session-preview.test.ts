@@ -20,7 +20,7 @@ describe('Agent/Session development composition', () => {
         entry,
         `
 import { createElement } from 'cordisx/react'
-import { Button } from 'cordisx/ui'
+import { AgentAvatar, Button } from 'cordisx/ui'
 
 export const manifest = ${
           JSON.stringify({
@@ -38,6 +38,7 @@ export const manifest = ${
 export const inject = ['sessions', 'agents', 'entities']
 export async function apply(ctx) {
   const explicitElement = createElement(Button, null, 'Chatroom')
+  const avatarElement = createElement(AgentAvatar, { participant: { id: 'reviewer', name: 'Reviewer' } })
   const automaticElement = <Button>Chatroom JSX</Button>
   await ctx.sessions.get('cx-session.playground-local-artifact')
   const acquired = await ctx.agents.create({ sessionId: 'cx-session.playground-local-artifact' })
@@ -48,6 +49,7 @@ export async function apply(ctx) {
       correlation: { namespace: 'chatroom.room-run', id: 'fixture-room/fixture-run' } },
   })
   globalThis.__playgroundLocalSessionGetApplied = explicitElement.type === Button && automaticElement.type === Button
+    && avatarElement.type === AgentAvatar
     && acquired.status === 'accepted' && entities.binding.profileId === 'playground'
     && entities.binding.pluginId === 'chatroom' && entities.entities.length === 0
 }
