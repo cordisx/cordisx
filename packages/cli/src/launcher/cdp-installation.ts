@@ -725,6 +725,7 @@ export async function install(
         viteDevelopment
           ? async () => await support.waitForViteBootstrap(session, reloadInstallId!, deadline, signal)
           : async () => await support.waitForProductionBootstrap(session, reloadInstallId!, deadline, signal),
+        signal,
       )
     } else {
       const evaluated = await session.send(

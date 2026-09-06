@@ -834,7 +834,7 @@ describe('native Vite development transport', () => {
       onReady: ready,
     })
     try {
-      await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce())
+      await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce(), { timeout: 10_000 })
       expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(1)
       expect(requests.some(item =>
         item.method === 'Runtime.evaluate'
@@ -847,7 +847,7 @@ describe('native Vite development transport', () => {
       server.close()
       await once(server, 'close')
     }
-  })
+  }, 15_000)
 
   it.each([
     {

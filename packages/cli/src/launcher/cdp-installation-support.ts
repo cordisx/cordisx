@@ -391,17 +391,15 @@ export async function reloadAndWaitForBootstrap(
   session: CdpSession,
   params: Record<string, unknown>,
   waitForBootstrap: () => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<void> {
-  let rejectReloadFailure!: (error: Error) => void
-  const reloadFailure = new Promise<never>((_resolve, reject) => {
-    rejectReloadFailure = reject
-  })
-  void session.send('Page.reload', params).catch(error => {
+  try {
+    await abortable(session.send('Page.reload', params), signal)
+  } catch (error) {
     const failure = error instanceof Error ? error : new Error(String(error))
-    if (failure.message === 'CDP request timed out: Page.reload' && !session.isClosed()) return
-    rejectReloadFailure(failure)
-  })
-  await Promise.race([waitForBootstrap(), reloadFailure])
+    if (failure.message !== 'CDP request timed out: Page.reload' || session.isClosed()) throw failure
+  }
+  await waitForBootstrap()
 }
 
 export async function waitForProductionBootstrap(
