@@ -6,7 +6,7 @@
 - Preserve the [documented trust boundary](../docs/architecture.md#trust-and-security): legacy structured and local-development plugins are trusted renderer code; the bounded Host DOM worker does not make the general runtime a sandbox.
 - Follow [documentation maintenance](documentation-maintenance.md) for this repository's entry points, public reference material, guides, and historical records. Keep implementation-specific tests beside the code.
 - Follow the organization [file-size rule](https://github.com/cordisx/cordisxmono/blob/main/.agents/rules/file-size.md)
-  for dprint formatting and responsibility-based splitting guidance. Shared source-lint enforcement is a subsequent rollout.
+  for dprint formatting and responsibility-based splitting guidance.
 - Land externally observable contract changes in `cordisx-protocol` before or alongside compatible implementation changes.
 - Require `npm run check` for behavior changes and focused live smoke tests for launcher or DOM-adapter changes.
 - Follow [long-running-task-recovery.md](long-running-task-recovery.md) when a long-running coordination task is interrupted or its visible history disagrees with durable task evidence.
@@ -21,3 +21,17 @@
   [AI-first plugin demo capture workflow](https://github.com/cordisx/cordisx.github.io/blob/main/.agents/docs/ai-plugin-demo-capture.md).
   Keep the recorder and generated media in `cordisx/cordisx.github.io`; do not
   copy or recreate them in this repository.
+
+## Shared quality configuration
+
+The local dprint and ESLint entry points consume an exact formal
+[Mono quality configuration](https://github.com/cordisx/cordisxmono/blob/c63c2e8c2ba7e11502934a52ad2ce3734e804cdc/.agents/docs/quality-tooling.md).
+The Shared quality configuration CI job checks the installed configuration and
+tracked-file coverage; inspect its report for excluded paths.
+PR CI uses standard lint-staged with `--diff-filter=A` to enforce the source
+limit on newly added files. Edits or renames of existing files are outside this
+initial gate; follow the organization splitting guidance when expanding them.
+`npm run lint:source` runs the full source policy and reports existing violations;
+its initial CI report is nonblocking while that debt is handled separately.
+A passing configuration job is not a passing full-source lint result.
+Update the dependency, lock, formatter reference and CI provider SHA together.
