@@ -64,6 +64,7 @@ const UI_EXPORTS = [
   'HoverCard',
   'Icon',
   'MarkdownViewer',
+  'PanZoomCanvas',
   'Select',
   'SelectionRail',
   'Stack',

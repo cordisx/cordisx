@@ -1,5 +1,13 @@
-import { createElement } from 'cordisx/react'
-import { HorizontalSplitPane, type HorizontalSplitPaneProps, Icon, type IconName } from 'cordisx/ui'
+import { createElement, createRef } from 'cordisx/react'
+import {
+  HorizontalSplitPane,
+  type HorizontalSplitPaneProps,
+  Icon,
+  type IconName,
+  PanZoomCanvas,
+  type PanZoomCanvasHandle,
+  Select,
+} from 'cordisx/ui'
 
 declare const expanded: boolean
 
@@ -17,3 +25,27 @@ const split = {
 } satisfies HorizontalSplitPaneProps
 
 createElement(HorizontalSplitPane, split)
+
+const canvas = createRef<PanZoomCanvasHandle>()
+createElement(PanZoomCanvas, {
+  'aria-label': 'Team structure',
+  fill: true,
+  controllerRef: canvas,
+  minScale: 0.4,
+  maxScale: 2,
+  children: createElement('div', undefined, 'Tree'),
+})
+canvas.current?.fitToView()
+canvas.current?.reset()
+canvas.current?.getScale()
+
+createElement(Select, {
+  'aria-label': 'Role',
+  value: 'all',
+  density: 'compact',
+  prefixIcon: createElement(Icon, { name: 'role' }),
+  options: [{ value: 'all', label: 'All roles' }],
+  onChange: () => {},
+})
+const semanticIcons: readonly IconName[] = ['role', 'session', 'relationship']
+semanticIcons.map(name => createElement(Icon, { name }))

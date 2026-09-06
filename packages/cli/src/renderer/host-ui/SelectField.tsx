@@ -25,7 +25,7 @@ export function SelectField({ label, icon, options, value, className, onChange }
   return (
     <span ref={root} style={{ display: 'contents' }}>
       <Select
-        className={['cxh-select-field', className].filter(Boolean).join(' ')}
+        className={['cxh-select-field', 'cxr-ui-filter-control', className].filter(Boolean).join(' ')}
         value={value}
         options={[...options]}
         prefixIcon={<HostIcon token={icon} />}
