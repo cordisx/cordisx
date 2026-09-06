@@ -201,6 +201,21 @@ function outputOf(result: Awaited<ReturnType<typeof viteBuild>>): Rollup.RollupO
   throw new Error('plugin production build did not produce a Rollup output graph')
 }
 
+const LAZY_STYLE_BOOTSTRAP_MARKER = '/* cordisx-lazy-module-styles/v1 */'
+function stylesForChunk(chunk: Rollup.OutputChunk): readonly `./${string}`[] {
+  const metadata =
+    (chunk as typeof chunk & { readonly viteMetadata?: { readonly importedCss?: ReadonlySet<string> } }).viteMetadata
+  return [...metadata?.importedCss ?? []].map(artifactPath).sort()
+}
+function wrapLazyChunkStyles(chunk: Rollup.OutputChunk): void {
+  const styles = stylesForChunk(chunk)
+  if (chunk.isEntry || styles.length === 0 || chunk.code.startsWith(LAZY_STYLE_BOOTSTRAP_MARKER)) return
+  chunk.code =
+    `${LAZY_STYLE_BOOTSTRAP_MARKER}\nawait globalThis.__cordisxPluginGenerationResourcesV1.loadLazyStyles(import.meta.url,${
+      JSON.stringify(styles)
+    });\n${chunk.code}`
+}
+
 function artifactProjection(
   output: readonly (Rollup.OutputAsset | Rollup.OutputChunk)[],
   sharedImports: ReadonlySet<PluginGenerationSharedImportV1>,
@@ -227,11 +242,6 @@ function artifactProjection(
   assertNoPrivateReactModules([...inputModules], 'plugin production graph')
   if ([...inputModules].some(input => input.includes('/node_modules/@deepseek-ai/cordis/'))) {
     throw new Error('plugin production graph must not bundle a second @deepseek-ai/cordis runtime')
-  }
-  const stylesFor = (chunk: Rollup.OutputChunk): readonly `./${string}`[] => {
-    const metadata =
-      (chunk as typeof chunk & { readonly viteMetadata?: { readonly importedCss?: ReadonlySet<string> } }).viteMetadata
-    return [...metadata?.importedCss ?? []].map(artifactPath).sort()
   }
   const assetsFor = (chunk: Rollup.OutputChunk): readonly `./${string}`[] => {
     const metadata =
@@ -264,7 +274,7 @@ function artifactProjection(
         mediaType: 'text/javascript',
         imports: chunk.imports.map(artifactPath).sort(),
         dynamicImports: chunk.dynamicImports.map(artifactPath).sort(),
-        styles: stylesFor(chunk),
+        styles: stylesForChunk(chunk),
         assets: assetsFor(chunk),
       }
     }
@@ -313,6 +323,7 @@ function artifactManifestPlugin(sharedImports: Set<PluginGenerationSharedImportV
     generateBundle: {
       order: 'post',
       async handler(_options, bundle) {
+        for (const item of Object.values(bundle)) if (item.type === 'chunk') wrapLazyChunkStyles(item)
         const projected = artifactProjection(Object.values(bundle), sharedImports)
         await assertPluginGenerationArtifactFileReferences(projected.manifest, projected.files)
         this.emitFile({

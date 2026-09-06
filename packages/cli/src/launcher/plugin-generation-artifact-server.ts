@@ -539,8 +539,11 @@ function resourceRegistryInstallSource(): string {
       }
       let rejectReady;
       const retired = new Promise((_, reject) => { rejectReady = reject; });
-      const record = { id: input.id, baseUrl: input.baseUrl, state: 'staged', links: new Set(), publicLease: undefined, rejectReady };
-      const loading = input.initialStyles.map(href => new Promise((resolve, reject) => {
+      const record = { id: input.id, baseUrl: input.baseUrl, state: 'staged', links: new Set(), loads: new Map(), publicLease: undefined, rejectReady };
+      const loading = input.initialStyles.map(href => {
+        let settleReject;
+        const promise = new Promise((resolve, reject) => {
+        settleReject = reject;
         const link = document.createElement('link');
         link.rel = 'stylesheet';
         link.href = href;
@@ -551,7 +554,10 @@ function resourceRegistryInstallSource(): string {
         record.links.add(link);
         link.dataset.cordisxPluginGeneration = record.id;
         (document.head || document.documentElement).append(link);
-      }));
+        });
+        record.loads.set(href, { promise, reject: settleReject });
+        return promise;
+      });
       const ready = Promise.race([Promise.all(loading).then(() => undefined), retired]);
       ready.catch(() => undefined);
       record.publicLease = Object.freeze({ id: record.id, ready });
@@ -571,12 +577,33 @@ function resourceRegistryInstallSource(): string {
       }
       return true;
     },
+    loadLazyStyles(moduleUrl, styles) {
+      const record = [...records.values()].find(candidate => typeof moduleUrl === 'string' && moduleUrl.startsWith(candidate.baseUrl));
+      if (record === undefined || record.state === 'retired' || !Array.isArray(styles)) throw new Error('plugin generation lazy stylesheet lease is stale');
+      return Promise.all(styles.map(style => {
+        if (typeof style !== 'string') return Promise.reject(new Error('plugin generation lazy stylesheet path is invalid'));
+        const href = new URL(style.slice(2), record.baseUrl).href;
+        const existing = record.loads.get(href);
+        if (existing !== undefined) return existing.promise;
+        let settleReject;
+        const promise = new Promise((resolve, reject) => {
+          settleReject = reject;
+        const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = href;
+        link.addEventListener('load', resolve, { once: true }); link.addEventListener('error', () => reject(new Error('plugin generation stylesheet failed to load')), { once: true });
+        links.set(link, { record, media: null }); record.links.add(link); link.dataset.cordisxPluginGeneration = record.id;
+        if (record.state === 'staged') link.media = 'not all'; (document.head || document.documentElement).append(link);
+        });
+        record.loads.set(href, { promise, reject: settleReject });
+        return promise;
+      }));
+    },
     retire(id) {
       const record = records.get(id);
       if (record === undefined) return false;
       for (const link of document.querySelectorAll('link[rel~="stylesheet"]')) remember(link);
       record.state = 'retired';
       record.rejectReady(new Error('plugin generation resource lease was retired'));
+      for (const load of record.loads.values()) load.reject(new Error('plugin generation resource lease was retired'));
       let removed = true;
       for (const link of [...record.links]) {
         link.media = 'not all';
