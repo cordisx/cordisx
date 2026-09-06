@@ -1,4 +1,4 @@
-import type { CordisXLocalizedText } from './contracts.js'
+import type { CordisXLocalizedText } from './contracts-extension-navigation.js'
 import type { CordisXPlatformSessionRef } from './platform-contracts.js'
 import type { HostDomOperation } from '@cordisx/protocol/host-dom/v1'
 import type { AgentRuntimeCapability } from '@cordisx/protocol/agents/v1'

@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type { CordisXLocalizedText } from './contracts.js'
+import type { CordisXLocalizedText } from './contracts-extension-navigation.js'
 
 export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v1.schema.json'

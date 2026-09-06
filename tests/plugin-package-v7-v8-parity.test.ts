@@ -21,6 +21,7 @@ import {
   parseConfigDocument,
   resolveCordisXProjectConfig,
 } from '../packages/cli/src/launcher/config.js'
+import { readOwnedSourceGraph } from './source-module-graph.js'
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 
@@ -69,6 +70,21 @@ function importedCalls(filename: string, declarationFile: string): Set<string> {
   return names
 }
 
+function ownedCalls(filenames: readonly string[]): Set<string> {
+  const owned = new Set(filenames.map(filename => path.resolve(filename)))
+  const names = new Set<string>()
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isIdentifier(node.expression)
+      && owned.has(path.resolve(symbolSource(node.expression) ?? ''))
+    ) names.add(node.expression.text)
+    ts.forEachChild(node, visit)
+  }
+  for (const filename of filenames) visit(sourceFile(filename))
+  return names
+}
+
 function typeReferences(filename: string, declarationFile: string): Set<string> {
   const names = new Set<string>()
   const visit = (node: ts.Node): void => {
@@ -83,10 +99,9 @@ function typeReferences(filename: string, declarationFile: string): Set<string> 
   return names
 }
 
-function schemaVersions(filename: string, functionName: string): Set<number> {
+function schemaVersions(filenames: readonly string[], functionName: string): Set<number> {
   const versions = new Set<number>()
-  const source = sourceFile(filename)
-  const declaration = source.statements.find(statement => (
+  const declaration = filenames.flatMap(filename => sourceFile(filename).statements).find(statement => (
     ts.isFunctionDeclaration(statement) && statement.name?.text === functionName
   ))
   if (declaration === undefined || !ts.isFunctionDeclaration(declaration)) {
@@ -162,10 +177,11 @@ describe('plugin package v7/v8 predecessor and successor parity', () => {
     expect(viteTypes).toContain('CordisXPluginManifestV7')
     expect(viteTypes).toContain('CordisXPluginManifestV8')
 
-    const runtimeCalls = importedCalls(routeFiles.runtime, '/runtime.ts')
+    const runtimeFiles = (await readOwnedSourceGraph(routeFiles.runtime)).files
+    const runtimeCalls = ownedCalls(runtimeFiles)
     expect(runtimeCalls).toContain('prepareCordisXViteReactRuntime')
     expect(runtimeCalls).toContain('manifestUsesTransientCanvas')
-    expect(schemaVersions(routeFiles.runtime, 'manifestUsesHostDom')).toContain(8)
-    expect(schemaVersions(routeFiles.runtime, 'manifestUsesTransientCanvas')).toContain(7)
+    expect(schemaVersions(runtimeFiles, 'manifestUsesHostDom')).toContain(8)
+    expect(schemaVersions(runtimeFiles, 'manifestUsesTransientCanvas')).toContain(7)
   })
 })

@@ -12,6 +12,7 @@ export type {
   CordisXSessionEventPersistence,
 } from './agent-session-runtime-types.js'
 export { CordisXAgentSessionRuntime } from './agent-session-runtime-results.js'
+export type { CordisXApprovalService } from './agent-session-runtime-services.js'
 export {
   CordisXAgentAdmissionBootstrapReservationService,
   CordisXAgentAdmissionBootstrapRoomReservationService,
@@ -30,7 +31,6 @@ export {
   CordisXAgentPageFreshRoomNavigationService,
   CordisXAgentRegistryServiceV1,
   CordisXAgentSessionDetailReferenceService,
-  CordisXApprovalService,
   CordisXApprovalServiceV1,
   CordisXSessionRegistryServiceV1,
 } from './agent-session-runtime-services.js'

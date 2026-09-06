@@ -1,29 +1,7 @@
-import type { Context, Disposable, Effect } from '@deepseek-ai/cordis'
-import type { RasterImageSnapshotV1 } from '@cordisx/protocol/raster-image/v1'
-import type {
-  AgentPageComposerCommandAdapter,
-  AgentPageComposerCommandContext,
-} from '@cordisx/protocol/agent-page-admission/v2'
-import type { ManagerCollectionRegistryV1 } from '@cordisx/protocol/manager-collection/v1'
-import type { ManagerContentNavigationDeclarationV2 } from '@cordisx/protocol/manager-content-navigation/v2'
-import type {
-  ManagerContentNavigationDeclarationV3,
-  ManagerContentProjectionV2,
-} from '@cordisx/protocol/manager-content-navigation/v3'
-import type {
-  ManagerContentNavigationDeclarationV4,
-  ManagerContentProjectionV3,
-} from '@cordisx/protocol/manager-content-navigation/v4'
-import type {
-  ManagerContentNavigationDeclarationV5,
-  ManagerContentProjectionV4,
-} from '@cordisx/protocol/manager-content-navigation/v5'
-import type {
-  NavigationCollectionAction,
-  NavigationCollectionActions,
-} from '@cordisx/protocol/navigation-collection-actions/v1'
-import type { ComponentType } from 'react'
+import type { Context, Disposable } from '@deepseek-ai/cordis'
+
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
+
 import type {
   CordisXPluginManifestV4,
   CordisXPluginManifestV5,
@@ -31,9 +9,10 @@ import type {
   CordisXPluginManifestV7,
   CordisXPluginManifestV8,
 } from './permission-contracts.js'
+
 import type { CordisXPluginDependencyV1 } from './plugin-lifecycle-contracts.js'
-import type { CordisXExtensionPointControlMode, CordisXExtensionPointControlResultV1 } from './control-contracts.js'
-import {
+
+import type {
   CordisXCommands,
   CordisXConfigAppliesInput,
   CordisXManagerContentNavigation,
@@ -41,7 +20,8 @@ import {
   CordisXRoutes,
   CordisXSlots,
 } from './contracts-host-ui.js'
-import {
+
+import type {
   CordisXI18n,
   CordisXJsonScalar,
   CordisXJsonValue,

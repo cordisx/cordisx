@@ -1,6 +1,6 @@
 import type { Context, Disposable } from '@deepseek-ai/cordis'
 
-import type { CordisXJsonValue } from './contracts.js'
+import type { CordisXJsonValue } from './contracts-extension-navigation.js'
 
 export const CORDISX_OWNER_DOCUMENT_SERVICE_V1 = 'cordisx.owner-documents/v1' as const
 
