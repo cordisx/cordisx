@@ -45,6 +45,7 @@ import MinusCircle from 'reicon/icons/MinusCircle'
 import MoreH from 'reicon/icons/MoreH'
 import Palette from 'reicon/icons/Palette'
 import Pause from 'reicon/icons/Pause'
+import People from 'reicon/icons/People'
 import PinTack from 'reicon/icons/PinTack'
 import Play from 'reicon/icons/Play'
 import Plug from 'reicon/icons/Plug'
@@ -154,6 +155,7 @@ export const BUILTIN_HOST_SURFACE_ICON_KEYS = [
   'host:hierarchy',
   'host:link',
   'host:marketplace',
+  'host:people',
   'host:pin',
   'host:pinned',
   'host:people-search',
@@ -171,6 +173,7 @@ const HOST_SURFACE_GLYPHS = Object.freeze(
     'host:hierarchy': DiagramTree,
     'host:link': Link,
     'host:marketplace': Shop,
+    'host:people': People,
     'host:pin': PinTack,
     'host:pinned': PinTack,
     'host:people-search': UserSearch,
