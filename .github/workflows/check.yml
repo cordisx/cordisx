@@ -8,10 +8,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   scope:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       docs_only: ${{ steps.scope.outputs.docs_only }}
       style_only: ${{ steps.scope.outputs.style_only }}
@@ -74,221 +79,298 @@ jobs:
     if: always() && (github.event_name == 'push' || needs.scope.outputs.full == 'true')
     needs: scope
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
+      - id: clock
+        run: |
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "started_epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/setup-node@v7
+      - id: node
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci
       - name: Run the complete owner gate
+        run: npm run check
+      - name: Record job evidence
+        if: always()
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CLASSIFICATION: ${{ github.event_name == 'pull_request' && 'full' || 'main' }}
+          STARTED_AT: ${{ steps.clock.outputs.started_at }}
+          STARTED_EPOCH: ${{ steps.clock.outputs.started_epoch }}
+          CACHE_HIT: ${{ steps.node.outputs.cache-hit }}
+          RESULT: ${{ job.status }}
         run: |
-          start=$SECONDS
-          npm run check
-          elapsed=$((SECONDS - start))
-          echo "Full owner gate: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p .ci-results
+          completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          duration=$(($(date +%s) - STARTED_EPOCH))
+          cache=$([[ "$CACHE_HIT" == 'true' ]] && echo hit || echo miss)
+          evidence="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          jq -n --arg schema 'cordisx/ci-job-result/v1' --arg repo "$GITHUB_REPOSITORY" \
+            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v2' \
+            --arg classification "$CLASSIFICATION" --arg job "$GITHUB_JOB" --arg startedAt "$STARTED_AT" \
+            --arg completedAt "$completed_at" --arg cache "$cache" --arg result "$RESULT" \
+            --arg environment 'github-hosted/ubuntu-latest/node22' \
+            --arg evidenceUrl "$evidence" --argjson durationSeconds "$duration" \
+            '{schema:$schema,repo:$repo,head:$head,base:$base,gateVersion:$gateVersion,classification:$classification,job:$job,environment:$environment,startedAt:$startedAt,completedAt:$completedAt,durationSeconds:$durationSeconds,cache:$cache,result:$result,evidenceUrl:$evidenceUrl}' \
+            > .ci-results/full.json
+          echo '### CI job result' >> "$GITHUB_STEP_SUMMARY"
+          jq -c . .ci-results/full.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-result-${{ github.run_id }}-${{ github.job }}
+          path: .ci-results/full.json
+          if-no-files-found: warn
 
   changed-quality:
     if: github.event_name == 'pull_request'
     needs: scope
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
+      - id: clock
+        run: |
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "started_epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - id: result-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .ci-results/quality.json
-          key: host-pr-quality-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
-      - uses: actions/setup-node@v7
-        if: steps.result-cache.outputs.cache-hit != 'true'
+      - id: node
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
       - name: Install without lifecycle builds
-        if: steps.result-cache.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts
       - name: Check changed formatting and source lint
-        if: steps.result-cache.outputs.cache-hit != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          start=$SECONDS
           mapfile -d '' files < <(git diff --name-only -z --diff-filter=ACMRT "$BASE_SHA...$HEAD_SHA" -- '*.cjs' '*.css' '*.html' '*.js' '*.json' '*.jsonc' '*.jsx' '*.md' '*.mjs' '*.scss' '*.ts' '*.tsx' '*.yaml' '*.yml')
           if (( ${#files[@]} )); then
             npx dprint check --allow-no-files -- "${files[@]}"
           fi
           npm run lint:staged -- --diff "$BASE_SHA...$HEAD_SHA"
-          elapsed=$((SECONDS - start))
-          mkdir -p .ci-results
-          printf '{"base":"%s","head":"%s","phase":"quality","seconds":%s,"cache":false}\n' "$BASE_SHA" "$HEAD_SHA" "$elapsed" > .ci-results/quality.json
-      - uses: actions/cache/save@v4
-        if: steps.result-cache.outputs.cache-hit != 'true'
-        with:
-          path: .ci-results/quality.json
-          key: host-pr-quality-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
-      - name: Report result metadata
+      - name: Record job evidence
+        if: always()
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          STARTED_AT: ${{ steps.clock.outputs.started_at }}
+          STARTED_EPOCH: ${{ steps.clock.outputs.started_epoch }}
+          CACHE_HIT: ${{ steps.node.outputs.cache-hit }}
+          RESULT: ${{ job.status }}
         run: |
-          echo '### Changed quality gate' >> "$GITHUB_STEP_SUMMARY"
-          if [[ '${{ steps.result-cache.outputs.cache-hit }}' == 'true' ]]; then
-            echo '- exact-SHA cache: `hit`' >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo '- exact-SHA cache: `miss`' >> "$GITHUB_STEP_SUMMARY"
-          fi
-          echo '- result:' >> "$GITHUB_STEP_SUMMARY"
-          sed 's/^/  `/' .ci-results/quality.json | sed 's/$/`/' >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p .ci-results
+          completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          duration=$(($(date +%s) - STARTED_EPOCH))
+          cache=$([[ "$CACHE_HIT" == 'true' ]] && echo hit || echo miss)
+          evidence="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          jq -n --arg schema 'cordisx/ci-job-result/v1' --arg repo "$GITHUB_REPOSITORY" \
+            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v2' \
+            --arg classification 'changed-quality' --arg job "$GITHUB_JOB" --arg startedAt "$STARTED_AT" \
+            --arg completedAt "$completed_at" --arg cache "$cache" --arg result "$RESULT" \
+            --arg environment 'github-hosted/ubuntu-latest/node22' \
+            --arg evidenceUrl "$evidence" --argjson durationSeconds "$duration" \
+            '{schema:$schema,repo:$repo,head:$head,base:$base,gateVersion:$gateVersion,classification:$classification,job:$job,environment:$environment,startedAt:$startedAt,completedAt:$completedAt,durationSeconds:$durationSeconds,cache:$cache,result:$result,evidenceUrl:$evidenceUrl}' \
+            > .ci-results/quality.json
+          echo '### CI job result' >> "$GITHUB_STEP_SUMMARY"
+          jq -c . .ci-results/quality.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-result-${{ github.run_id }}-${{ github.job }}
+          path: .ci-results/quality.json
+          if-no-files-found: warn
 
   changed-typecheck:
     if: github.event_name == 'pull_request' && needs.scope.outputs.full != 'true' && needs.scope.outputs.docs_only != 'true'
     needs: scope
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
+      - id: clock
+        run: |
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "started_epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - id: result-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .ci-results/typecheck.json
-          key: host-pr-typecheck-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
-      - uses: actions/setup-node@v7
-        if: steps.result-cache.outputs.cache-hit != 'true'
+      - id: node
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-      - if: steps.result-cache.outputs.cache-hit != 'true'
-        run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts
       - name: Typecheck the workspace graph
-        if: steps.result-cache.outputs.cache-hit != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           CLI_ONLY: ${{ needs.scope.outputs.cli_only }}
         run: |
-          start=$SECONDS
           if [[ "$CLI_ONLY" == 'true' ]]; then
             npm run typecheck --workspace=cordisx
           else
             npm run typecheck
           fi
-          elapsed=$((SECONDS - start))
-          mkdir -p .ci-results
-          printf '{"base":"%s","head":"%s","phase":"typecheck","seconds":%s,"cache":false}\n' "$BASE_SHA" "$HEAD_SHA" "$elapsed" > .ci-results/typecheck.json
-      - uses: actions/cache/save@v4
-        if: steps.result-cache.outputs.cache-hit != 'true'
-        with:
-          path: .ci-results/typecheck.json
-          key: host-pr-typecheck-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
-      - name: Report result metadata
+      - name: Record job evidence
+        if: always()
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          STARTED_AT: ${{ steps.clock.outputs.started_at }}
+          STARTED_EPOCH: ${{ steps.clock.outputs.started_epoch }}
+          CACHE_HIT: ${{ steps.node.outputs.cache-hit }}
+          RESULT: ${{ job.status }}
         run: |
-          echo '### Workspace typecheck' >> "$GITHUB_STEP_SUMMARY"
-          if [[ '${{ steps.result-cache.outputs.cache-hit }}' == 'true' ]]; then
-            echo '- exact-SHA cache: `hit`' >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo '- exact-SHA cache: `miss`' >> "$GITHUB_STEP_SUMMARY"
-          fi
-          sed 's/^/  `/' .ci-results/typecheck.json | sed 's/$/`/' >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p .ci-results
+          completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          duration=$(($(date +%s) - STARTED_EPOCH))
+          cache=$([[ "$CACHE_HIT" == 'true' ]] && echo hit || echo miss)
+          evidence="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          jq -n --arg schema 'cordisx/ci-job-result/v1' --arg repo "$GITHUB_REPOSITORY" \
+            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v2' \
+            --arg classification 'changed-typecheck' --arg job "$GITHUB_JOB" --arg startedAt "$STARTED_AT" \
+            --arg completedAt "$completed_at" --arg cache "$cache" --arg result "$RESULT" \
+            --arg environment 'github-hosted/ubuntu-latest/node22' \
+            --arg evidenceUrl "$evidence" --argjson durationSeconds "$duration" \
+            '{schema:$schema,repo:$repo,head:$head,base:$base,gateVersion:$gateVersion,classification:$classification,job:$job,environment:$environment,startedAt:$startedAt,completedAt:$completedAt,durationSeconds:$durationSeconds,cache:$cache,result:$result,evidenceUrl:$evidenceUrl}' \
+            > .ci-results/typecheck.json
+          echo '### CI job result' >> "$GITHUB_STEP_SUMMARY"
+          jq -c . .ci-results/typecheck.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-result-${{ github.run_id }}-${{ github.job }}
+          path: .ci-results/typecheck.json
+          if-no-files-found: warn
 
   changed-build:
     if: github.event_name == 'pull_request' && needs.scope.outputs.full != 'true' && needs.scope.outputs.docs_only != 'true'
     needs: scope
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
+      - id: clock
+        run: |
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "started_epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - id: result-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .ci-results/build.json
-          key: host-pr-build-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
-      - uses: actions/setup-node@v7
-        if: steps.result-cache.outputs.cache-hit != 'true'
+      - id: node
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-      - if: steps.result-cache.outputs.cache-hit != 'true'
-        run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts
       - name: Build all affected workspaces
-        if: steps.result-cache.outputs.cache-hit != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           CLI_ONLY: ${{ needs.scope.outputs.cli_only }}
         run: |
-          start=$SECONDS
           if [[ "$CLI_ONLY" == 'true' ]]; then
             npm run build --workspace=cordisx
           else
             npm run build
           fi
-          elapsed=$((SECONDS - start))
-          mkdir -p .ci-results
-          printf '{"base":"%s","head":"%s","phase":"build","seconds":%s,"cache":false}\n' "$BASE_SHA" "$HEAD_SHA" "$elapsed" > .ci-results/build.json
-      - uses: actions/cache/save@v4
-        if: steps.result-cache.outputs.cache-hit != 'true'
-        with:
-          path: .ci-results/build.json
-          key: host-pr-build-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
-      - name: Report result metadata
+      - name: Record job evidence
+        if: always()
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          STARTED_AT: ${{ steps.clock.outputs.started_at }}
+          STARTED_EPOCH: ${{ steps.clock.outputs.started_epoch }}
+          CACHE_HIT: ${{ steps.node.outputs.cache-hit }}
+          RESULT: ${{ job.status }}
         run: |
-          echo '### Workspace build' >> "$GITHUB_STEP_SUMMARY"
-          if [[ '${{ steps.result-cache.outputs.cache-hit }}' == 'true' ]]; then
-            echo '- exact-SHA cache: `hit`' >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo '- exact-SHA cache: `miss`' >> "$GITHUB_STEP_SUMMARY"
-          fi
-          sed 's/^/  `/' .ci-results/build.json | sed 's/$/`/' >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p .ci-results
+          completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          duration=$(($(date +%s) - STARTED_EPOCH))
+          cache=$([[ "$CACHE_HIT" == 'true' ]] && echo hit || echo miss)
+          evidence="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          jq -n --arg schema 'cordisx/ci-job-result/v1' --arg repo "$GITHUB_REPOSITORY" \
+            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v2' \
+            --arg classification 'changed-build' --arg job "$GITHUB_JOB" --arg startedAt "$STARTED_AT" \
+            --arg completedAt "$completed_at" --arg cache "$cache" --arg result "$RESULT" \
+            --arg environment 'github-hosted/ubuntu-latest/node22' \
+            --arg evidenceUrl "$evidence" --argjson durationSeconds "$duration" \
+            '{schema:$schema,repo:$repo,head:$head,base:$base,gateVersion:$gateVersion,classification:$classification,job:$job,environment:$environment,startedAt:$startedAt,completedAt:$completedAt,durationSeconds:$durationSeconds,cache:$cache,result:$result,evidenceUrl:$evidenceUrl}' \
+            > .ci-results/build.json
+          echo '### CI job result' >> "$GITHUB_STEP_SUMMARY"
+          jq -c . .ci-results/build.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-result-${{ github.run_id }}-${{ github.job }}
+          path: .ci-results/build.json
+          if-no-files-found: warn
 
   changed-tests:
     if: github.event_name == 'pull_request' && needs.scope.outputs.full != 'true' && needs.scope.outputs.docs_only != 'true'
     needs: scope
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
+      - id: clock
+        run: |
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "started_epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - id: result-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .ci-results/tests.json
-          key: host-pr-tests-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
-      - uses: actions/setup-node@v7
-        if: steps.result-cache.outputs.cache-hit != 'true'
+      - id: node
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-      - if: steps.result-cache.outputs.cache-hit != 'true'
-        run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts
       - name: Run Vitest dependency-affected tests
-        if: steps.result-cache.outputs.cache-hit != 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          start=$SECONDS
           npm run build --workspace=@cordisx/schemastery-ui
           npx vitest run --changed "$BASE_SHA" --passWithNoTests --maxWorkers=1 --no-file-parallelism --testTimeout=30000 --hookTimeout=30000
-          elapsed=$((SECONDS - start))
-          mkdir -p .ci-results
-          printf '{"base":"%s","head":"%s","phase":"tests","seconds":%s,"cache":false}\n' "$BASE_SHA" "$HEAD_SHA" "$elapsed" > .ci-results/tests.json
-      - uses: actions/cache/save@v4
-        if: steps.result-cache.outputs.cache-hit != 'true'
-        with:
-          path: .ci-results/tests.json
-          key: host-pr-tests-v1-${{ github.event.pull_request.base.sha }}-${{ github.event.pull_request.head.sha }}
-      - name: Report result metadata
+      - name: Record job evidence
+        if: always()
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          STARTED_AT: ${{ steps.clock.outputs.started_at }}
+          STARTED_EPOCH: ${{ steps.clock.outputs.started_epoch }}
+          CACHE_HIT: ${{ steps.node.outputs.cache-hit }}
+          RESULT: ${{ job.status }}
         run: |
-          echo '### Dependency-affected tests' >> "$GITHUB_STEP_SUMMARY"
-          if [[ '${{ steps.result-cache.outputs.cache-hit }}' == 'true' ]]; then
-            echo '- exact-SHA cache: `hit`' >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo '- exact-SHA cache: `miss`' >> "$GITHUB_STEP_SUMMARY"
-          fi
-          sed 's/^/  `/' .ci-results/tests.json | sed 's/$/`/' >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p .ci-results
+          completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          duration=$(($(date +%s) - STARTED_EPOCH))
+          cache=$([[ "$CACHE_HIT" == 'true' ]] && echo hit || echo miss)
+          evidence="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          jq -n --arg schema 'cordisx/ci-job-result/v1' --arg repo "$GITHUB_REPOSITORY" \
+            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v2' \
+            --arg classification 'changed-tests' --arg job "$GITHUB_JOB" --arg startedAt "$STARTED_AT" \
+            --arg completedAt "$completed_at" --arg cache "$cache" --arg result "$RESULT" \
+            --arg environment 'github-hosted/ubuntu-latest/node22' \
+            --arg evidenceUrl "$evidence" --argjson durationSeconds "$duration" \
+            '{schema:$schema,repo:$repo,head:$head,base:$base,gateVersion:$gateVersion,classification:$classification,job:$job,environment:$environment,startedAt:$startedAt,completedAt:$completedAt,durationSeconds:$durationSeconds,cache:$cache,result:$result,evidenceUrl:$evidenceUrl}' \
+            > .ci-results/tests.json
+          echo '### CI job result' >> "$GITHUB_STEP_SUMMARY"
+          jq -c . .ci-results/tests.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-result-${{ github.run_id }}-${{ github.job }}
+          path: .ci-results/tests.json
+          if-no-files-found: warn
