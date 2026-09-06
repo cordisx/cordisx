@@ -24,6 +24,26 @@ import {
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 
+async function readOwnedSourceRoute(relative: string): Promise<string> {
+  const pending = [path.join(root, relative)]
+  const visited = new Set<string>()
+  const sources: string[] = []
+  const stem = path.basename(relative, '.ts')
+  while (pending.length > 0) {
+    const filename = pending.pop()!
+    if (visited.has(filename)) continue
+    visited.add(filename)
+    const source = await readFile(filename, 'utf8')
+    sources.push(source)
+    for (const match of source.matchAll(/from\s+['"](\.\/[^'"]+)['"]/gu)) {
+      const specifier = match[1]!
+      if (!path.basename(specifier).startsWith(stem)) continue
+      pending.push(path.resolve(path.dirname(filename), specifier.replace(/\.js$/u, '.ts')))
+    }
+  }
+  return sources.join('\n')
+}
+
 describe('plugin package v7/v8 predecessor and successor parity', () => {
   it('keeps both public package and runtime schema exports available', () => {
     expect(PLUGIN_PACKAGE_SCHEMA_V7).toBe(CORDISX_PLUGIN_PACKAGE_SCHEMA_V7)
@@ -80,7 +100,7 @@ describe('plugin package v7/v8 predecessor and successor parity', () => {
         'packages/cli/src/renderer/runtime.ts',
       ]
     ) {
-      const source = await readFile(path.join(root, relative), 'utf8')
+      const source = await readOwnedSourceRoute(relative)
       expect(source).toContain('V7')
       expect(source).toContain('V8')
     }

@@ -1,4 +1,3 @@
-// V7 and V8 package manifests share this single lifecycle coordinator entry.
 export { PluginLifecycleCoordinator } from './plugin-lifecycle-operations.js'
 export type {
   HostPermissionLifecycleApplyV2Request,
