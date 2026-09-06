@@ -387,6 +387,23 @@ export async function waitForViteBootstrap(
   throw new Error(`CordisX Vite bootstrap timed out${lastError === undefined ? '' : `: ${lastError.message}`}`)
 }
 
+export async function reloadAndWaitForBootstrap(
+  session: CdpSession,
+  params: Record<string, unknown>,
+  waitForBootstrap: () => Promise<void>,
+): Promise<void> {
+  let rejectReloadFailure!: (error: Error) => void
+  const reloadFailure = new Promise<never>((_resolve, reject) => {
+    rejectReloadFailure = reject
+  })
+  void session.send('Page.reload', params).catch(error => {
+    const failure = error instanceof Error ? error : new Error(String(error))
+    if (failure.message === 'CDP request timed out: Page.reload' && !session.isClosed()) return
+    rejectReloadFailure(failure)
+  })
+  await Promise.race([waitForBootstrap(), reloadFailure])
+}
+
 export async function waitForProductionBootstrap(
   session: CdpSession,
   installId: string,
