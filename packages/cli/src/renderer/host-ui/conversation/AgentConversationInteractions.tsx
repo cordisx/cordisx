@@ -84,7 +84,7 @@ export function ApprovalEntry(
     return (
       <article
         ref={articleRef}
-        className="cxa-entry cxa-message cxa-approval-message"
+        className="cxa-entry cxa-approval-message"
         data-entry-id={entry.itemId}
         data-role="agent"
         data-state={entry.state}
@@ -93,7 +93,7 @@ export function ApprovalEntry(
         tabIndex={-1}
         aria-label={`${participant.name}: ${target}, ${outcome}`}
       >
-        <div className="cxa-message-content">
+        <div className="cxa-approval-message-content">
           <div className="cxa-message-meta">
             <button
               type="button"
@@ -104,8 +104,8 @@ export function ApprovalEntry(
               {participant.name}
             </button>
           </div>
-          <div className="cxa-message-bubble-row">
-            <span className="cxa-message-avatar-seat" data-avatar-seat="visible">
+          <div className="cxa-approval-card-row">
+            <span className="cxa-approval-avatar-seat" data-avatar-seat="visible">
               <button
                 type="button"
                 className="cx-agent-identity-avatar-button"
@@ -117,10 +117,10 @@ export function ApprovalEntry(
                 <HostAgentAvatar participant={participant} />
               </button>
             </span>
-            <div className="cxa-message-bubble-shell">
-              <div className="cxa-message-bubble-anchor">
-                <div className="cxa-message-surface cxa-approval-bubble">
-                  <div className="cxa-approval-bubble-copy">
+            <div className="cxa-approval-card-shell">
+              <div className="cxa-approval-card-anchor">
+                <div className="cxa-approval-card">
+                  <div className="cxa-approval-card-copy">
                     <span className="cxa-approval-target">{target}</span>
                     <p className="cxa-approval-reason">{entry.reason.text}</p>
                     {entry.diagnostic === undefined
@@ -130,7 +130,7 @@ export function ApprovalEntry(
                   {entry.state === 'pending'
                     ? (
                       <div
-                        className="cxa-approval-bubble-actions"
+                        className="cxa-approval-card-actions"
                         role="group"
                         aria-label={chinese ? `${authorityName} 的审批操作` : `${authorityName} approval actions`}
                       >

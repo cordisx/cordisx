@@ -686,6 +686,122 @@ describe('AgentConversationRenderer production DOM', () => {
     }
   })
 
+  it('renders v7 approvals as full-width standard cards outside ordinary message bubble geometry', async () => {
+    const base = createPlaygroundConversationFixture('conversation', 'en')
+    const reviewerIdentity = { agentId: 'reviewer', revision: 'reviewer-v1' }
+    const leadIdentity = { agentId: 'lead', revision: 'lead-v1' }
+    const selection = {
+      kind: 'room' as const,
+      roomId: 'approval-room',
+      title: 'Approval review',
+      multiParticipant: true,
+      participantPresentation: 'host-initials' as const,
+      participants: [
+        {
+          id: 'reviewer',
+          role: 'agent' as const,
+          name: 'Reviewer',
+          agentIdentity: reviewerIdentity,
+        },
+        {
+          id: 'lead',
+          role: 'agent' as const,
+          name: 'Lead',
+          agentIdentity: leadIdentity,
+        },
+      ],
+    }
+    const pending = {
+      kind: 'approval' as const,
+      itemId: 'approval-card',
+      sequence: 1,
+      participantId: 'reviewer',
+      memberId: 'reviewer',
+      runId: 'reviewer-run',
+      sessionId: 'cx-session.reviewer',
+      agentGeneration: 2,
+      approvalId: 'approval-card',
+      approvalKind: 'external-action' as const,
+      requester: reviewerIdentity,
+      authority: { participantId: 'lead', memberId: 'lead', identity: leadIdentity },
+      reason: {
+        kind: 'plain-text' as const,
+        text:
+          'Review this deliberately long approval reason so the dedicated card stretches and wraps without inheriting a chat bubble corner.',
+      },
+      authorityBinding: {
+        agentId: 'cx-session.lead',
+        sessionId: 'cx-session.lead',
+        agentGeneration: 3,
+        definition: leadIdentity,
+      },
+      state: 'pending' as const,
+      actions: [
+        { decision: 'approve' as const, command: { id: 'approval.answer' } },
+        { decision: 'reject' as const, command: { id: 'approval.answer' } },
+      ],
+    }
+    const states = ['pending', 'approved', 'denied', 'cancelled', 'failed'] as const
+    const {
+      actions: _pendingActions,
+      agentGeneration: _agentGeneration,
+      authorityBinding: _authorityBinding,
+      ...terminal
+    } = pending
+    for (const state of states) {
+      const entry = state === 'pending'
+        ? pending
+        : {
+          ...terminal,
+          state,
+          actions: [],
+        }
+      const model = createAgentConversationModel({
+        ...base,
+        selection,
+        entries: [entry],
+        snapshotSequence: 1,
+      })
+      const harness = await render(
+        model,
+        new AgentConversationCommandController({ execute: vi.fn(async () => undefined) }, model),
+      )
+      try {
+        const document = harness.dom.window.document
+        const article = document.querySelector<HTMLElement>('.cxa-approval-message')!
+        const card = document.querySelector<HTMLElement>('.cxa-approval-card')!
+        expect(article.classList.contains('cxa-message')).toBe(false)
+        expect(article.dataset.state).toBe(state)
+        expect(card).not.toBeNull()
+        expect(card.classList.contains('cxa-message-surface')).toBe(false)
+        expect(document.querySelector('.cxa-message-bubble-shell')).toBeNull()
+        expect(document.querySelector('.cxa-message-bubble-anchor')).toBeNull()
+        expect(document.querySelector('.cxa-approval-avatar-seat .cxa-avatar')).not.toBeNull()
+        expect(document.querySelector('.cxa-message-meta')?.textContent).toContain('Reviewer')
+        expect(document.querySelector('.cxa-approval-target')?.textContent).toBe('由 Lead 审批')
+        expect(document.querySelector('.cxa-approval-reason')?.textContent).toContain('deliberately long')
+        if (state === 'pending') {
+          expect(document.querySelectorAll('.cxa-approval-card-actions .cxa-approval-action')).toHaveLength(2)
+          expect(document.querySelector('.cxa-approval-outcome')).toBeNull()
+        } else {
+          expect(document.querySelector('.cxa-approval-card-actions')).toBeNull()
+          expect(document.querySelector('.cxa-approval-outcome')?.getAttribute('data-state')).toBe(state)
+        }
+        const styles = document.querySelector<HTMLStyleElement>('style[data-agent-conversation-styles]')!.textContent!
+        expect(styles).toContain(
+          '.cxa-approval-message-content{display:grid;width:min(100%,calc(720px + var(--cxa-message-avatar-size) + var(--cxa-message-avatar-gap)))',
+        )
+        expect(styles).toContain('.cxa-approval-card{display:grid;width:100%;min-width:0;')
+        expect(styles).toContain('border-radius:12px')
+        expect(styles).toContain('@container cxa-conversation (max-width:560px){.cxa-approval-card{')
+        expect(styles).not.toContain('.cxa-approval-card{width:fit-content')
+        expect(styles).not.toContain('.cxa-approval-card{border-radius:15px 15px 15px 4px')
+      } finally {
+        await harness.close()
+      }
+    }
+  })
+
   it('keeps outgoing user bubbles free of author/state copy while reserving the hidden accessible timestamp beside the bubble', async () => {
     const model = createPlaygroundConversationFixture('conversation', 'en')
     const harness = await render(
