@@ -16,6 +16,10 @@ import {
 } from '../config/home-config.js'
 import { createLauncherConfigBridgeHandler } from '../launcher/launcher-plugin-config.js'
 import { buildLocalDevelopmentPlugin } from '../launcher/development.js'
+import {
+  type PluginGenerationGraphLease,
+  startPluginGenerationArtifactServer,
+} from '../launcher/plugin-generation-artifact-server.js'
 import { PlaygroundAgentSessionStore, type PlaygroundAgentSessionStoreRequest } from './agent-session-store.js'
 import { configBridgeError, type ConfigBridgeHandler, parseConfigBindingRequest } from '../launcher/config-rpc.js'
 import {
@@ -85,6 +89,7 @@ interface PlaygroundGeneration {
   readonly providerFleet?: ProviderFleet
   readonly providerToken?: string
   readonly sessionScenarios?: PlaygroundSessionScenarioCatalogV1
+  readonly graphLeases: readonly PluginGenerationGraphLease[]
 }
 
 export interface PreparedPlaygroundComposition extends RendererCompositionSource {
@@ -333,8 +338,35 @@ export async function createPlaygroundSession(
       ? [path.resolve(path.dirname(configPath), plugin.entry)]
       : []
   }))
+  const graphRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-playground-browser-graphs-'))
+  const graphServer = await startPluginGenerationArtifactServer()
+  const materializeGraph = async (
+    pluginId: string,
+    generation: string,
+    build: Awaited<ReturnType<typeof buildLocalDevelopmentPlugin>>,
+  ) => {
+    const graph = build.browserArtifact
+    if (graph === undefined) throw new Error(`local development browser graph is unavailable: ${pluginId}`)
+    const root = path.join(graphRoot, generation, pluginId)
+    for (const [file, contents] of graph.files) {
+      const target = path.join(root, file.slice(2))
+      await mkdir(path.dirname(target), { recursive: true, mode: 0o700 })
+      await writeFile(target, contents, { mode: 0o600 })
+    }
+    await writeFile(path.join(root, 'artifact.json'), `${JSON.stringify(graph.manifest, null, 2)}\n`, { mode: 0o600 })
+    return await graphServer.lease(
+      {
+        packageIdentity: { pluginId, version: build.version, integrity: build.digest },
+        artifactDirectory: root,
+        runtimeEntry: graph.manifest.entry,
+      },
+      generation,
+      graph.manifest,
+    )
+  }
 
   let active: PlaygroundGeneration | undefined
+  let pendingGraphLeases: PluginGenerationGraphLease[] = []
   let activeProviderRequests = 0
   const publishedConfigRevisions = new Map<string, number>()
   let compositionOperation: Promise<void> = Promise.resolve()
@@ -347,7 +379,9 @@ export async function createPlaygroundSession(
   const ownerDocumentStore = new OwnerDocumentStore(homeDir)
   const entityAuthority = new EntityDirectoryAuthority(homeDir, 'playground')
   const agentSessionStore = new PlaygroundAgentSessionStore(homeDir)
-  const nextGeneration = async (): Promise<PlaygroundGeneration> => {
+  const nextGeneration = async (browserGraphOnly: boolean): Promise<PlaygroundGeneration> => {
+    for (const lease of pendingGraphLeases) lease.retire()
+    pendingGraphLeases = []
     active?.channelConfig?.dispose()
     await active?.providerFleet?.close()
     const generation = `playground-${randomBytes(12).toString('hex')}`
@@ -361,8 +395,19 @@ export async function createPlaygroundSession(
       // This candidate is embedded again inside Vite's virtual composition.
       // A nested inline map makes its virtual React/UI sources look like real
       // filesystem imports during Vite import analysis.
-      return { plugin, build: await buildLocalDevelopmentPlugin(plugin.entry, { sourcemap: false }) }
+      return {
+        plugin,
+        build: await buildLocalDevelopmentPlugin(plugin.entry, { sourcemap: false, browserGraphOnly }),
+      }
     }))
+    const graphLeases: PluginGenerationGraphLease[] = []
+    for (const item of localDevelopmentBuilds) {
+      if (item === undefined || item.build.browserArtifact === undefined) continue
+      const lease = await materializeGraph(item.plugin.id, generation, item.build)
+      graphLeases.push(lease)
+      pendingGraphLeases.push(lease)
+    }
+    const graphLeaseByPlugin = new Map(graphLeases.map(lease => [lease.pluginId, lease]))
     const successfulAt = new Date().toISOString()
     const localDevelopmentByPlugin = new Map(
       localDevelopmentBuilds.flatMap(item => item === undefined ? [] : [[item.plugin.id, item] as const]),
@@ -376,7 +421,19 @@ export async function createPlaygroundSession(
         return {
           ...plugin,
           source: `${identityPrefix}${plugin.id}.js`,
-          moduleFactorySource: local.build.moduleFactorySource,
+          ...(local.build.browserArtifact === undefined
+            ? { moduleFactorySource: local.build.moduleFactorySource! }
+            : {
+              runtimeGraph: (() => {
+                const lease = graphLeaseByPlugin.get(plugin.id)!
+                return {
+                  moduleGeneration: lease.moduleGeneration,
+                  loadSource: lease.importSource,
+                  publishSource: lease.publishSource,
+                  retireSource: lease.retireSource,
+                }
+              })(),
+            }),
           development: {
             origin: 'local-dev',
             pluginId: plugin.id,
@@ -520,8 +577,11 @@ export async function createPlaygroundSession(
       ...(providerFleet === undefined ? {} : { providerFleet }),
       ...(providerToken === undefined ? {} : { providerToken }),
       ...(sessionScenarios === undefined ? {} : { sessionScenarios }),
+      graphLeases,
     }
+    for (const lease of active?.graphLeases ?? []) lease.retire()
     active = next
+    pendingGraphLeases = []
     return next
   }
   const rendererOptions = (generation: PlaygroundGeneration) => ({
@@ -552,7 +612,7 @@ export async function createPlaygroundSession(
     homeDir,
     async buildBundle() {
       return await runCompositionOperation(async () => {
-        const generation = await nextGeneration()
+        const generation = await nextGeneration(false)
         return {
           generation: generation.generation,
           source: await buildRendererBundle(generation.config, rendererOptions(generation)),
@@ -561,7 +621,7 @@ export async function createPlaygroundSession(
     },
     async buildComposition(runtimeImport) {
       return await runCompositionOperation(async () => {
-        const generation = await nextGeneration()
+        const generation = await nextGeneration(true)
         const composition = await buildRendererCompositionSource(
           generation.config,
           rendererOptions(generation),
@@ -718,6 +778,9 @@ export async function createPlaygroundSession(
         await rm(stateRoot, { recursive: true, force: true })
         await mkdir(stateRoot, { recursive: true, mode: 0o700 })
         publishedConfigRevisions.clear()
+        for (const lease of active?.graphLeases ?? []) lease.retire()
+        for (const lease of pendingGraphLeases) lease.retire()
+        pendingGraphLeases = []
         active = undefined
       })
     },
@@ -727,7 +790,12 @@ export async function createPlaygroundSession(
         await active?.providerFleet?.close()
         credentialBackend.clear()
         publishedConfigRevisions.clear()
+        for (const lease of active?.graphLeases ?? []) lease.retire()
+        for (const lease of pendingGraphLeases) lease.retire()
+        pendingGraphLeases = []
         active = undefined
+        await graphServer.close()
+        await rm(graphRoot, { recursive: true, force: true })
         if (ownsHome) await rm(homeDir, { recursive: true, force: true })
       })
     },
