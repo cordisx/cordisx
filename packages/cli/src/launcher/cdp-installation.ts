@@ -719,12 +719,13 @@ export async function install(
     if (viteDevelopment || loopbackModules) {
       const deadline = Date.now() + support.CDP_INJECTION_TIMEOUT_MS
       loopbackReloadStarted = true
-      await support.abortable(
-        session.send('Page.reload', viteDevelopment ? { ignoreCache: true } : {}, support.CDP_INJECTION_TIMEOUT_MS),
-        signal,
+      await support.reloadAndWaitForBootstrap(
+        session,
+        viteDevelopment ? { ignoreCache: true } : {},
+        viteDevelopment
+          ? async () => await support.waitForViteBootstrap(session, reloadInstallId!, deadline, signal)
+          : async () => await support.waitForProductionBootstrap(session, reloadInstallId!, deadline, signal),
       )
-      if (viteDevelopment) await support.waitForViteBootstrap(session, reloadInstallId!, deadline, signal)
-      else await support.waitForProductionBootstrap(session, reloadInstallId!, deadline, signal)
     } else {
       const evaluated = await session.send(
         'Runtime.evaluate',
