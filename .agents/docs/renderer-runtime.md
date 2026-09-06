@@ -389,14 +389,11 @@ Channel forms share the scoped primitive, theme, validation, and state model in
 schema data and bounded custom field content only; they never receive a UI
 library instance, form root, selector, CSS, or portal authority.
 
-The Host bundles a reproducible subset of the official
-`tdesign-web-components@1.2.10` Web Components implementation. It imports only
-the supported controls, keeps component CSS in their open Shadow roots, scopes
-base tokens to `.cxf-scope`, and attaches dropdowns to a CordisX-owned Shadow
-portal. The full npm graph and global stylesheet are not installed. A thin
-Host adapter supplies the missing accessibility/theme seams without a React
-root or second schema registry. This is an implementation boundary, not a new
-plugin contract.
+The Host imports official `tdesign-react@1.18.2` controls from its pinned npm
+dependency. The same Host-owned React field renderer serves Manager and
+structured schema forms; permission requests have a separately owned React
+surface with its own theme and disposal lifetime. Popups attach beneath the
+owning Host surface. This implementation changes no public plugin contract.
 
 ## Built-in manager plane
 

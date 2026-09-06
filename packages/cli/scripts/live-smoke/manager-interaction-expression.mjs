@@ -331,7 +331,7 @@ export function managerInteractionExpression({
           await new Promise(resolve => setTimeout(resolve, 25))
         }
         const form = document.querySelector('[data-channel-configuration-form]')
-        const channelSwitch = form?.querySelector('t-switch')
+        const channelSwitch = form?.querySelector('.t-switch')
         const activateHostTab = async (id, marker) => {
           const deadline = Date.now() + 5_000
           while (Date.now() < deadline) {
@@ -466,11 +466,11 @@ export function managerInteractionExpression({
         await nextPaint()
       }
       if (${JSON.stringify(managerOpenSelect)}) {
-        const select = [...document.querySelectorAll('t-select[data-tdesign-component="select"]')]
+        const select = [...document.querySelectorAll('.t-select input')]
           .find(item => item.getClientRects().length > 0)
         if (!(select instanceof HTMLElement)) throw new Error('visible TDesign Select is unavailable')
         select.focus()
-        select.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+        select.click()
         await nextPaint()
         await new Promise(resolve => setTimeout(resolve, 500))
       }

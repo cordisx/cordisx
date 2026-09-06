@@ -37,7 +37,7 @@ export const FORM_COPY = {
   'form.copy-path': { en: 'Copy configuration path', 'zh-CN': '复制配置路径' },
   'form.path-copied': { en: 'Path copied', 'zh-CN': '已复制路径' },
   'form.path-copy-unavailable': { en: 'Clipboard unavailable', 'zh-CN': '剪贴板不可用' },
-  'form.undo-changes': { en: 'Undo changes', 'zh-CN': '撤销更改' },
+  'form.undo-changes': { en: 'Undo changes', 'zh-CN': '重置' },
   'form.save-configuration': { en: 'Save configuration', 'zh-CN': '保存配置' },
   'form.configuration-saved': { en: 'Configuration saved', 'zh-CN': '配置已保存' },
   'form.configuration-save-failed': {

@@ -469,7 +469,7 @@ export async function runManagerScreenshot({
     // old (and possibly negative) rect for a physical pointer event.
     const formControl = await evaluateByValue(
       `(async () => {
-        const control = [...document.querySelectorAll('t-input[id], t-textarea[id], t-select[id], input[id], textarea[id], select[id]')]
+        const control = [...document.querySelectorAll('input.t-input__inner[id], textarea.t-textarea__inner[id], .t-select input[id], input[id], textarea[id], select[id]')]
           .find(item => item instanceof HTMLElement && item.getClientRects().length > 0
             && !item.matches(':disabled,[aria-disabled="true"]'))
         if (!(control instanceof HTMLElement)) return null
@@ -558,7 +558,7 @@ export async function runManagerScreenshot({
     const target = await evaluateByValue(
       `(async () => {
         const field = document.querySelector('[data-plugin-config-form="${galleryId}"] [data-config-path="workspaceName"]')
-        const control = field?.querySelector('t-input[data-host-form-primitive="input"]')
+        const control = field?.querySelector('input.t-input__inner')
         if (!(field instanceof HTMLElement) || !(control instanceof HTMLElement)) return null
         control.scrollIntoView({ block: 'center', inline: 'nearest' })
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
@@ -568,13 +568,13 @@ export async function runManagerScreenshot({
       true,
     )
     if (target?.inViewport !== true) {
-      throw new Error('gallery workspace input is unavailable for real Web Component exercise')
+      throw new Error('gallery workspace input is unavailable for React input exercise')
     }
     await send('Page.bringToFront')
     await pointerClick(target.rect)
     const focused = await evaluateByValue(
       `(() => {
-        const input = document.querySelector('[data-plugin-config-form="${galleryId}"] [data-config-path="workspaceName"] t-input')?.shadowRoot?.querySelector('input')
+        const input = document.querySelector('[data-plugin-config-form="${galleryId}"] [data-config-path="workspaceName"] input.t-input__inner')
         if (!(input instanceof HTMLInputElement)) return null
         input.focus()
         input.select()
@@ -582,24 +582,24 @@ export async function runManagerScreenshot({
       })()`,
       true,
     )
-    if (focused?.active !== 't-input' || focused.selected !== true) {
-      throw new Error('official TDesign shadow input did not accept keyboard focus')
+    if (focused?.active !== 'input' || focused.selected !== true) {
+      throw new Error('official TDesign React input did not accept keyboard focus')
     }
-    // This is a trusted CDP text delivery to the actual focused Shadow input;
+    // This is a trusted CDP text delivery to the actual focused React input;
     // do not paper over a delivery failure with a synthetic event or callback.
     await send('Input.insertText', { text: expected })
     const draft = await evaluateByValue(
       `(async () => {
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
         const form = document.querySelector('[data-plugin-config-form="${galleryId}"]')
-        const control = form?.querySelector('[data-config-path="workspaceName"] t-input')
-        const shadowInput = control?.shadowRoot?.querySelector('input')
-        return { state: form?.getAttribute('data-state') ?? null, value: control?.value ?? null, shadowValue: shadowInput?.value ?? null }
+        const control = form?.querySelector('[data-config-path="workspaceName"] input.t-input__inner')
+        const input = control
+        return { state: form?.getAttribute('data-state') ?? null, value: control?.value ?? null, inputValue: input?.value ?? null }
       })()`,
       true,
     )
     if (
-      draft?.state !== 'dirty' || draft.shadowValue !== expected || String(draft.value).includes('[object CustomEvent]')
+      draft?.state !== 'dirty' || draft.inputValue !== expected || String(draft.value).includes('[object CustomEvent]')
     ) {
       throw new Error(
         'official TDesign input did not deliver its typed value to the Host draft: ' + JSON.stringify({ draft }),
@@ -607,7 +607,7 @@ export async function runManagerScreenshot({
     }
     const saveTarget = await evaluateByValue(
       `(() => {
-        const save = document.querySelector('[data-plugin-config-form="${galleryId}"] [data-host-form-action="save"]')
+        const save = document.querySelector('[data-plugin-config-form="${galleryId}"] button[type="submit"]')
         const rect = save?.getBoundingClientRect()
         return rect === undefined ? null : { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
       })()`,
@@ -634,8 +634,14 @@ export async function runManagerScreenshot({
     }
     const reopened = await evaluateByValue(
       `(async () => {
-        document.querySelector('.cxm-close')?.click()
+        const previousForm = document.querySelector('[data-plugin-config-form="${galleryId}"]')
+        const close = document.querySelector('.cxr-header [aria-label="Close CordisX Manager"], .cxr-header [aria-label="关闭 CordisX 管理器"]')
+        if (!(close instanceof HTMLButtonElement)) throw new Error('Manager close action is unavailable')
+        close.click()
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        if (previousForm?.isConnected) throw new Error('Manager did not dispose its closed form')
         document.querySelector('[data-cordisx-manager-trigger]')?.click()
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
         document.querySelector('[data-tab="plugins"]')?.click()
         for (let attempt = 0; attempt < 80; attempt += 1) {
           const row = document.querySelector('[data-plugin-id="${galleryId}"]')
@@ -648,10 +654,10 @@ export async function runManagerScreenshot({
           await new Promise(resolve => setTimeout(resolve, 25))
         }
         for (let attempt = 0; attempt < 80; attempt += 1) {
-          const control = document.querySelector('[data-plugin-config-form="${galleryId}"] [data-config-path="workspaceName"] t-input')
+          const control = document.querySelector('[data-plugin-config-form="${galleryId}"] [data-config-path="workspaceName"] input.t-input__inner')
           if (control instanceof HTMLElement) {
-            const shadowValue = control.shadowRoot?.querySelector('input')?.value ?? null
-            if (shadowValue === '${expected}' && String(control.value).includes('[object CustomEvent]') === false) return { value: control.value, shadowValue }
+            const inputValue = control.value ?? null
+            if (control.closest('[data-plugin-config-form]') !== previousForm && inputValue === '${expected}' && String(control.value).includes('[object CustomEvent]') === false) return { value: control.value, inputValue }
           }
           await new Promise(resolve => setTimeout(resolve, 25))
         }
@@ -669,7 +675,7 @@ export async function runManagerScreenshot({
   } finally {
     if (values['manager-open-local-path-form']) {
       await send('Runtime.evaluate', {
-        expression: `document.querySelector('.cxm-lifecycle-dialog .cxf-actions t-button:first-child')?.click()`,
+        expression: `document.querySelector('.cxm-lifecycle-dialog .cxf-actions button.t-button:first-child')?.click()`,
         returnByValue: true,
       })
     }

@@ -11,14 +11,14 @@ export const managerStateExpression = `      return rect === undefined ? null : 
           },
           triggerExpanded: trigger?.getAttribute('aria-expanded'),
           externalDefaultPrevented,
-          hostForms: [...document.querySelectorAll('[data-host-form]')].filter(form => form.getClientRects().length > 0).map(form => {
+          hostForms: [...document.querySelectorAll('[data-plugin-config-form]')].filter(form => form.getClientRects().length > 0).map(form => {
             const grid = form.querySelector('.cxf-form-grid')
-            const firstControl = [...form.querySelectorAll('t-input[id], t-textarea[id], t-select[id], input[id], textarea[id], select[id]')]
+            const firstControl = [...form.querySelectorAll('input.t-input__inner[id], textarea.t-textarea__inner[id], .t-select input[id], input[id], textarea[id], select[id]')]
               .find(control => control instanceof HTMLElement && control.getClientRects().length > 0
                 && !control.matches(':disabled,[aria-disabled="true"]'))
             const firstRect = firstControl?.getBoundingClientRect()
             return {
-              id: form.getAttribute('data-host-form'),
+              id: form.getAttribute('data-plugin-config-form'),
               state: form.getAttribute('data-state'),
               direction: getComputedStyle(form).direction,
               gridColumns: grid === null ? null : getComputedStyle(grid).gridTemplateColumns,
@@ -27,13 +27,13 @@ export const managerStateExpression = `      return rect === undefined ? null : 
               items: [...form.querySelectorAll('.cxf-item')].map(item => ({
                 path: item.getAttribute('data-config-path'),
                 primitive: item.getAttribute('data-host-form-primitive'),
-                label: item.querySelector('.cxf-label')?.textContent?.trim() ?? null,
+                label: item.querySelector('.cxf-field-label')?.textContent?.trim() ?? null,
                 help: item.querySelector('.cxf-help')?.textContent?.trim() ?? null,
                 error: item.querySelector('.cxf-error:not([hidden])')?.textContent?.trim() ?? null,
                 invalid: item.getAttribute('data-invalid'),
                 customSeatVisible: item.querySelector('.cxf-custom-seat:not([hidden])') !== null,
                 sensitiveControlCount: item.getAttribute('data-host-form-primitive') === 'sensitive-unavailable'
-                  ? item.querySelectorAll('input,textarea,select,t-input,t-textarea,t-select').length : null,
+                  ? item.querySelectorAll('input,textarea,select,input.t-input__inner,textarea.t-textarea__inner,.t-select input').length : null,
               })),
               controls: [...form.querySelectorAll('[data-host-form-primitive],input,textarea')].filter((control, index, all) => all.indexOf(control) === index).map(control => ({
                 primitive: control.getAttribute('data-host-form-primitive'), tag: control.tagName.toLowerCase(),
@@ -41,18 +41,7 @@ export const managerStateExpression = `      return rect === undefined ? null : 
                 required: control.getAttribute('aria-required'), invalid: control.getAttribute('aria-invalid'),
                 describedBy: control.getAttribute('aria-describedby'), disabled: control.matches(':disabled,[aria-disabled="true"]'),
                 placeholder: control.getAttribute('placeholder'),
-                shadowPlaceholder: (() => {
-                  const roots = control.shadowRoot === null ? [] : [control.shadowRoot]
-                  while (roots.length > 0) {
-                    const root = roots.shift()
-                    const textControl = root?.querySelector('input,textarea')
-                    if (textControl !== null && textControl !== undefined) return textControl.getAttribute('placeholder')
-                    for (const child of root?.querySelectorAll('*') ?? []) {
-                      if (child.shadowRoot !== null) roots.push(child.shadowRoot)
-                    }
-                  }
-                  return null
-                })(),
+
               })),
               firstControlRect: firstRect === undefined ? null : { x: firstRect.x, y: firstRect.y, width: firstRect.width, height: firstRect.height },
             }
@@ -159,7 +148,7 @@ export const managerStateExpression = `      return rect === undefined ? null : 
           permissions: [...document.querySelectorAll('[data-permission-item]')].map(item => ({
             capability: item.getAttribute('data-permission-item'),
             availability: item.querySelector('[data-permission-availability]')?.getAttribute('data-availability-state') ?? null,
-            policyEditable: item.querySelector('t-select[data-permission-capability][data-tdesign-version="1.2.10"]') !== null,
+            policyEditable: item.querySelector('.t-select input[data-permission-capability]') !== null,
             nestedList: item.querySelector('[role="listitem"]') !== null,
           })),
           permissionDetail: document.querySelector('[data-permission-detail]') === null ? null : {
@@ -168,7 +157,7 @@ export const managerStateExpression = `      return rect === undefined ? null : 
               id: item.getAttribute('data-permission-provider'),
               text: item.textContent?.trim() ?? '',
             })),
-            policyEditable: document.querySelector('[data-permission-detail] t-select[data-permission-capability][data-tdesign-version="1.2.10"]') !== null,
+            policyEditable: document.querySelector('[data-permission-detail] .t-select input[data-permission-capability]') !== null,
             headings: [...document.querySelectorAll('[data-permission-detail] h1, [data-permission-detail] h2, [data-permission-detail] h3')].map(item => item.textContent?.trim() ?? ''),
           },
           marketplace: (() => {
@@ -256,62 +245,39 @@ export const managerStateExpression = `      return rect === undefined ? null : 
             }
           })(),
           tdesign: {
-            version: document.querySelector('[data-tdesign-version]')?.getAttribute('data-tdesign-version') ?? null,
-            hostOwnedControlCount: document.querySelectorAll('[data-host-form-primitive][data-tdesign-version="1.2.10"]').length,
-            selectCount: document.querySelectorAll('t-select[data-tdesign-component="select"]').length,
+            hostOwnedControlCount: document.querySelectorAll('.cxr-root .cxf-control-seat .t-input, .cxr-root .cxf-control-seat .t-checkbox, .cxr-root .cxf-control-seat .t-switch').length,
+            selectCount: document.querySelectorAll('.cxr-root .t-select').length,
             nativeHostSelectCount: document.querySelectorAll('[data-cordisx-manager-modal] select').length,
-            groupCardCount: document.querySelectorAll('.cxf-form-grid, .cxm-settings-group').length,
-            portalCount: document.querySelectorAll('[data-cxf-tdesign-portal-host]').length,
-            popupVisible: [...document.querySelectorAll('[data-cxf-tdesign-portal-host]')].some(host => host.shadowRoot?.querySelector('.cxf-tdesign-listbox:not([hidden])') !== null),
-            popupOptionCount: [...document.querySelectorAll('[data-cxf-tdesign-portal-host]')].reduce((count, host) => count + (host.shadowRoot?.querySelector('.cxf-tdesign-listbox:not([hidden])')?.querySelectorAll('t-option').length ?? 0), 0),
+            groupCardCount: document.querySelectorAll('.cxf-form-grid').length,
+            portalCount: document.querySelectorAll('.cxr-root .t-popup').length,
+            popupVisible: [...document.querySelectorAll('.cxr-root .t-select__dropdown')].some(popup => popup.getClientRects().length > 0),
+            popupOptionCount: [...document.querySelectorAll('.cxr-root .t-select__dropdown')].filter(popup => popup.getClientRects().length > 0).reduce((count, popup) => count + popup.querySelectorAll('.t-select-option').length, 0),
             popupTheme: (() => {
-              const listbox = [...document.querySelectorAll('[data-cxf-tdesign-portal-host]')]
-                .map(host => host.shadowRoot?.querySelector('.cxf-tdesign-listbox:not([hidden])'))
-                .find(item => item instanceof HTMLElement)
+              const listbox = [...document.querySelectorAll('.cxr-root .t-select__dropdown')].find(item => item.getClientRects().length > 0)
               if (!(listbox instanceof HTMLElement)) return null
               const style = getComputedStyle(listbox)
               const rect = listbox.getBoundingClientRect()
-              const activeOption = listbox.querySelector('t-option[data-active="true"]')
-              const activeSurface = activeOption?.shadowRoot?.querySelector('.t-select-option, [part], div') ?? activeOption
-              const activeStyle = activeSurface instanceof Element ? getComputedStyle(activeSurface) : null
-              const optionStyle = activeOption instanceof Element ? getComputedStyle(activeOption) : null
-              return { background: style.backgroundColor, color: style.color, placement: listbox.dataset.placement ?? null,
+              const activeOption = listbox.querySelector('.t-select-option.t-is-selected, .t-select-option.t-select-option__hover')
+              const activeStyle = activeOption instanceof Element ? getComputedStyle(activeOption) : null
+              return { background: style.backgroundColor, color: style.color,
                 rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
                 activeOption: activeOption === null ? null : {
-                  selected: activeOption.getAttribute('aria-selected'),
+                  selected: activeOption.classList.contains('t-is-selected'),
                   background: activeStyle?.backgroundColor ?? null,
                   color: activeStyle?.color ?? null,
-                  selectedToken: optionStyle?.getPropertyValue('--td-bg-color-container-select').trim() ?? null,
-                  activeToken: optionStyle?.getPropertyValue('--td-bg-color-container-active').trim() ?? null,
-                  hoverToken: optionStyle?.getPropertyValue('--td-bg-color-container-hover').trim() ?? null,
-                  disabledToken: optionStyle?.getPropertyValue('--td-bg-color-component-disabled').trim() ?? null,
                 } }
             })(),
             activeElement: document.activeElement?.tagName.toLowerCase() ?? null,
             selectState: (() => {
-              const select = [...document.querySelectorAll('t-select[data-tdesign-component="select"]')]
-                .find(item => item.getClientRects().length > 0 && item.getAttribute('aria-expanded') === 'true')
-                ?? [...document.querySelectorAll('t-select[data-tdesign-component="select"]')].find(item => item.getClientRects().length > 0)
+              const select = [...document.querySelectorAll('.cxr-root .t-select input')].find(item => item.getClientRects().length > 0)
               if (select === undefined) return null
               const tokens = getComputedStyle(select)
-              const shadowSurfaces = select.shadowRoot === null ? [] : [...select.shadowRoot.querySelectorAll('*')]
-                .map(item => ({
-                  tag: item.tagName.toLowerCase(), className: item.className,
-                  background: getComputedStyle(item).backgroundColor, color: getComputedStyle(item).color,
-                }))
-                .filter(item => item.background !== 'rgba(0, 0, 0, 0)' && item.background !== 'transparent')
-                .slice(0, 8)
               return {
                 tabIndex: select.tabIndex,
-                ariaExpanded: select.getAttribute('aria-expanded'),
-                adapterExpanded: select.getAttribute('data-popup-visible'),
-                officialPopupVisible: select.popupVisible ?? null,
-                shadowText: select.shadowRoot?.textContent?.trim().slice(0, 120) ?? null,
+                value: select.value,
                 containerToken: tokens.getPropertyValue('--td-bg-color-container').trim(),
-                specialToken: tokens.getPropertyValue('--td-bg-color-specialcomponent').trim(),
                 selectedToken: tokens.getPropertyValue('--td-bg-color-container-select').trim(),
                 colorScheme: tokens.colorScheme,
-                shadowSurfaces,
               }
             })(),
           },

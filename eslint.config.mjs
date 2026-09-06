@@ -10,7 +10,6 @@ export default defineConfig([
     '**/build/**',
     '**/coverage/**',
     '**/.cache/**',
-    'packages/cli/src/renderer/vendor/tdesign-web-components-1.2.10.ts',
     'packages/cli/src/renderer/manager-collection-unicode-17.generated.ts',
     'packages/cli/src/renderer/manager/data/contributors.generated.ts',
   ]),

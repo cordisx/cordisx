@@ -209,10 +209,15 @@ export async function runPluginConsoleExercise({
       const paused = pause !== null && pausedPanel?.querySelector('[data-console-action="pause"]')?.getAttribute('aria-pressed') === 'true'
       const detailOpened = document.querySelector('[data-console-detail]') !== null
       const inspectorText = document.querySelector('[data-console-detail]')?.textContent ?? ''
-      const kind = pausedPanel?.querySelector('t-select[aria-label=' + JSON.stringify(${
+      const kind = pausedPanel?.querySelector('.t-select input[aria-label=' + JSON.stringify(${
         JSON.stringify(pluginConsoleLocale.kindSelect)
       }) + ']')
-      kind?.setSelectedValue?.('console', true)
+      if (!(kind instanceof HTMLInputElement)) throw new Error('Console filter input is unavailable')
+      kind.click()
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const option = [...document.querySelectorAll('.cxr-root .t-select-option')].find(item => item.getClientRects().length > 0 && item.textContent?.trim() === 'console')
+      if (!(option instanceof HTMLElement)) throw new Error('Console filter option is unavailable')
+      option.click()
       let lunaFrame
       for (let attempt = 0; attempt < 40; attempt += 1) {
         lunaFrame = document.querySelector('[data-plugin-console="' + CSS.escape(owner) + '"]')

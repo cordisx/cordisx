@@ -341,7 +341,8 @@ describe('plugin config runtime', () => {
     const range = dom.window.document.querySelector<HTMLInputElement>('input[type="range"]')
     let save = dom.window.document.querySelector<HTMLButtonElement>('.cxr-plugin-config-panel button[type="submit"]')
     expect(range).not.toBeNull()
-    expect(save).toBeNull()
+    expect(save).not.toBeNull()
+    expect(save?.disabled).toBe(true)
     range!.value = '45'
     range!.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
     save = dom.window.document.querySelector<HTMLButtonElement>('.cxr-plugin-config-panel button[type="submit"]')

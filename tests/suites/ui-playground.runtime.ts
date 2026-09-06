@@ -443,6 +443,8 @@ export function registerRuntimeTests() {
         await runtime.__cordisxRuntime?.dispose()
         await new Promise(resolve => setTimeout(resolve, 200))
       } finally {
+        await (dom.window as unknown as { __cordisxRuntime?: { dispose(): Promise<void> } }).__cordisxRuntime?.dispose()
+        await new Promise(resolve => setTimeout(resolve, 0))
         dom.window.close()
       }
     },

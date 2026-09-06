@@ -1,9 +1,3 @@
-export type TestTDesignSelect = HTMLElement & {
-  disabled: boolean
-  options: readonly { readonly value: string; readonly label: string }[]
-  setSelectedValue(value: string | undefined, notify?: boolean): void
-}
-
 export interface RuntimeSnapshot {
   plugins: readonly {
     id: string
