@@ -297,7 +297,7 @@ export function PluginsPage(
           )
           : null}
         {sections.bundles ? <PluginBundlesPage snapshot={snapshot} router={router} query={query} /> : null}
-        {sections.marketplace && typeof marketplace.snapshot === 'function'
+        {sections.marketplace && marketplace !== undefined && typeof marketplace.snapshot === 'function'
           ? (
             <MarketplacePage
               marketplace={marketplace}

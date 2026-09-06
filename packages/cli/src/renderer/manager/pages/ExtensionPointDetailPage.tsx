@@ -1,51 +1,65 @@
 import { useEffect, useState } from 'react'
 import { Select } from 'tdesign-react'
+import type { ManagerSettingsNavigationProjectionV2 } from '@cordisx/protocol/manager-settings-navigation/v2'
 import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
+import { productLocale } from '../../ui-copy.js'
 import { type ManagerTab, ManagerTabs } from '../components/ManagerTabs.js'
 import type { ManagerRouter } from '../model/routes.js'
 
 type ExtensionPointTab = 'usage' | 'information' | 'diagnostics'
-type NavigationGroupId = 'resources' | 'development' | 'collaboration' | 'other'
-type NavigationAssignment = 'declared' | 'legacy-fallback' | 'unassigned-fallback'
+type DiagnosticsLocale = 'zh-CN' | 'en'
 
-interface NavigationDiagnosticsProjection {
-  readonly contract: 'cordisx.manager-settings-navigation-projection/v2'
-  readonly schemaVersion: 2
-  readonly catalog: {
-    readonly contract: 'cordisx.manager-settings-navigation-groups/v1'
-    readonly schemaVersion: 1
-    readonly fallbackGroup: 'other'
-    readonly groups: readonly {
-      readonly id: NavigationGroupId
-      readonly label: { readonly fallback: string }
-      readonly order: number
-    }[]
-  }
-  readonly contributions: readonly {
-    readonly id: string
-    readonly owner: string
-    readonly surfaceProvenance:
-      | { readonly kind: 'versioned'; readonly schemaVersion: 9; readonly $schema: string }
-      | { readonly kind: 'legacy-unversioned' }
-    readonly insertionGroup: 'before-settings' | 'after-settings'
-    readonly declaredGroup?: NavigationGroupId
-    readonly effectiveGroup: NavigationGroupId
-    readonly assignment: NavigationAssignment
-  }[]
-}
-
-function navigationProjection(snapshot: ManagerSnapshot): NavigationDiagnosticsProjection | undefined {
-  const extensionPoints = snapshot.extensionPoints as unknown as {
-    readonly managerSettingsNavigation?: NavigationDiagnosticsProjection
-  } | undefined
-  return extensionPoints?.managerSettingsNavigation
-}
-
-const assignmentCopy: Readonly<Record<NavigationAssignment, string>> = {
-  declared: '使用声明的视觉分组',
-  'legacy-fallback': '旧版注册未声明视觉分组，归入兜底分组',
-  'unassigned-fallback': 'v9 注册未声明视觉分组，归入兜底分组',
-}
+const diagnosticsCopy = {
+  'zh-CN': {
+    title: '导航分组契约',
+    contract: '支持 Surface contribution v9、manager-settings-navigation-item-v2 和 projection v2。',
+    distinction: '插入位置用于确定扩展入口的相对顺序；视觉分组用于组织 Manager 左侧导航，两者互不替代。',
+    order: '顺序',
+    fallback: '未声明的入口归入',
+    owner: '所有者',
+    localId: '本地 contribution ID',
+    qualifiedId: 'Qualified contribution ID',
+    provenance: 'Surface provenance',
+    insertionGroup: '插入位置',
+    declaredGroup: '声明的视觉分组',
+    effectiveGroup: '生效的视觉分组',
+    assignment: '分组结果',
+    undeclared: '未声明',
+    versioned: 'versioned（精确 v9）',
+    legacy: 'legacy-unversioned（运行时未声明 schema 版本）',
+    assignmentCopy: {
+      declared: '使用声明的视觉分组',
+      'legacy-fallback': 'legacy-unversioned 注册未声明视觉分组，归入兜底分组',
+      'unassigned-fallback': 'v9 注册未声明视觉分组，归入兜底分组',
+    },
+    groupLabels: { resources: '资源', development: '开发', collaboration: '协作', other: '其他' },
+  },
+  en: {
+    title: 'Navigation grouping contract',
+    contract: 'Supports surface contribution v9, manager-settings-navigation-item-v2, and projection v2.',
+    distinction:
+      'Insertion groups order extension entries. Visual navigation groups organize the Manager sidebar. They are independent fields.',
+    order: 'Order',
+    fallback: 'Entries without a visual group use',
+    owner: 'Owner',
+    localId: 'Local contribution ID',
+    qualifiedId: 'Qualified contribution ID',
+    provenance: 'Surface provenance',
+    insertionGroup: 'Insertion group',
+    declaredGroup: 'Declared visual group',
+    effectiveGroup: 'Effective visual group',
+    assignment: 'Assignment',
+    undeclared: 'Undeclared',
+    versioned: 'versioned (exact v9)',
+    legacy: 'legacy-unversioned (runtime schema version undeclared)',
+    assignmentCopy: {
+      declared: 'Uses the declared visual group',
+      'legacy-fallback': 'Legacy-unversioned registration uses the fallback group',
+      'unassigned-fallback': 'Ungrouped v9 registration uses the fallback group',
+    },
+    groupLabels: { resources: 'Resources', development: 'Development', collaboration: 'Collaboration', other: 'Other' },
+  },
+} as const
 const tabs: readonly ManagerTab<ExtensionPointTab>[] = [
   { id: 'usage', label: '使用情况', icon: 'plugins' },
   { id: 'information', label: '信息', icon: 'point-info' },
@@ -91,7 +105,14 @@ export function ExtensionPointDetailPage(
   }]
   const controlSnapshot = snapshot.extensionPointControls
   const control = controlSnapshot?.points.find(item => item.id === pointId)
-  const navigation = pointId === 'manager.settings.navigation-items' ? navigationProjection(snapshot) : undefined
+  const navigation: ManagerSettingsNavigationProjectionV2 | undefined = pointId === 'manager.settings.navigation-items'
+    ? snapshot.extensionPoints?.managerSettingsNavigation
+    : undefined
+  const diagnosticsLocale: DiagnosticsLocale = navigation !== undefined
+      && productLocale(snapshot.localization.locale) !== 'zh-CN'
+    ? 'en'
+    : 'zh-CN'
+  const copy = diagnosticsCopy[diagnosticsLocale]
   return (
     <section className="cxr-page">
       <ManagerTabs label="扩展点详情" tabs={tabs} value={tab} onChange={setTab} />
@@ -231,23 +252,21 @@ export function ExtensionPointDetailPage(
           </section>
           {navigation === undefined ? null : (
             <section className="cxr-section" data-manager-navigation-contract>
-              <h3>导航分组契约</h3>
-              <p>
-                Surface contribution v9 · manager-settings-navigation-item-v2 · projection v2
-              </p>
-              <p>插入位置用于确定扩展入口的相对顺序；视觉分组用于组织 Manager 左侧导航，两者互不替代。</p>
+              <h3>{copy.title}</h3>
+              <p>{copy.contract}</p>
+              <p>{copy.distinction}</p>
               <dl>
                 {navigation.catalog.groups.map(group => (
                   <div data-manager-navigation-group={group.id} key={group.id}>
-                    <dt>{group.label.fallback}</dt>
+                    <dt>{copy.groupLabels[group.id]}</dt>
                     <dd>
-                      <code>{group.id}</code> · 顺序 {group.order}
+                      <code>{group.id}</code> · {copy.order} {group.order}
                     </dd>
                   </div>
                 ))}
               </dl>
               <p>
-                未声明的入口归入 <code>{navigation.catalog.fallbackGroup}</code>。
+                {copy.fallback} <code>{navigation.catalog.fallbackGroup}</code>.
               </p>
             </section>
           )}
@@ -277,54 +296,77 @@ export function ExtensionPointDetailPage(
           ))}
           {navigation?.contributions.map(item => {
             const versioned = item.surfaceProvenance.kind === 'versioned'
+            const qualifiedId = `${item.owner}:${item.id}`
             return (
               <section
                 className="cxr-section"
-                data-manager-navigation-contribution={item.id}
+                data-manager-navigation-contribution={qualifiedId}
                 data-manager-navigation-assignment={item.assignment}
-                key={item.id}
+                key={qualifiedId}
               >
-                <h3>{item.id}</h3>
+                <h3>{qualifiedId}</h3>
                 <dl>
                   <div>
-                    <dt>Qualified contribution ID</dt>
+                    <dt>{copy.qualifiedId}</dt>
                     <dd>
-                      <code>{item.id}</code>
+                      <code>{qualifiedId}</code>
                     </dd>
                   </div>
                   <div>
-                    <dt>Owner</dt>
+                    <dt>{copy.owner}</dt>
                     <dd>
                       <code>{item.owner}</code>
                     </dd>
                   </div>
                   <div>
-                    <dt>Surface schema version</dt>
-                    <dd>{versioned ? item.surfaceProvenance.schemaVersion : '未声明（legacy v5-v8）'}</dd>
+                    <dt>{copy.localId}</dt>
+                    <dd>
+                      <code>{item.id}</code>
+                    </dd>
                   </div>
                   <div>
-                    <dt>Insertion group</dt>
+                    <dt>{copy.provenance}</dt>
+                    <dd>
+                      {versioned
+                        ? `${copy.versioned} · schemaVersion ${item.surfaceProvenance.schemaVersion}`
+                        : copy.legacy}
+                      {versioned
+                        ? (
+                          <>
+                            <br />
+                            <code>{item.surfaceProvenance.$schema}</code>
+                          </>
+                        )
+                        : null}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>{copy.insertionGroup}</dt>
                     <dd>
                       <code>{item.insertionGroup}</code>
                     </dd>
                   </div>
                   <div>
-                    <dt>Declared visual group</dt>
+                    <dt>{copy.declaredGroup}</dt>
                     <dd>
-                      <code>{item.declaredGroup ?? '未声明'}</code>
+                      <code>{item.declaredGroup ?? copy.undeclared}</code>
                     </dd>
                   </div>
                   <div>
-                    <dt>Effective visual group</dt>
+                    <dt>{copy.effectiveGroup}</dt>
                     <dd>
                       <code>{item.effectiveGroup}</code>
                     </dd>
                   </div>
                   <div>
-                    <dt>Assignment</dt>
+                    <dt>{copy.assignment}</dt>
                     <dd>
-                      <code>{item.assignment}</code> · {assignmentCopy[item.assignment]}
+                      <code>{item.assignment}</code> · {copy.assignmentCopy[item.assignment]}
                     </dd>
+                  </div>
+                  <div>
+                    <dt>{copy.order}</dt>
+                    <dd>{item.order}</dd>
                   </div>
                 </dl>
               </section>

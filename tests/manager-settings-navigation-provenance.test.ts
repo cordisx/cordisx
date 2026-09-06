@@ -34,10 +34,12 @@ describe('Manager Settings navigation provenance', () => {
       group: 'after-settings',
     }, { route: { id: 'grouped' }, navigationGroup: { id: 'collaboration' } })
 
-    expect(Object.fromEntries(surfaces.snapshot().map(item => [
-      item.id,
-      item.managerSettingsNavigationSurfaceProvenance,
-    ]))).toEqual({
+    expect(Object.fromEntries(
+      surfaces.snapshot().map(item => [
+        item.id,
+        item.managerSettingsNavigationSurfaceProvenance,
+      ]),
+    )).toEqual({
       legacy: { kind: 'legacy-unversioned' },
       grouped: {
         kind: 'versioned',
@@ -50,17 +52,21 @@ describe('Manager Settings navigation provenance', () => {
 
   it('fails closed on half-versioned or unversioned navigationGroup registrations', () => {
     const surfaces = registry()
-    expect(() => surfaces.register('demo', {
-      $schema: CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9,
-      name: 'manager.settings.navigation-items',
-      id: 'half',
-      group: 'before-settings',
-    } as never, { route: { id: 'half' } })).toThrow(/\$schema and schemaVersion together/u)
-    expect(() => surfaces.register('demo', {
-      name: 'manager.settings.navigation-items',
-      id: 'unversioned-group',
-      group: 'before-settings',
-    }, { route: { id: 'unversioned-group' }, navigationGroup: { id: 'resources' } })).toThrow(
+    expect(() =>
+      surfaces.register('demo', {
+        $schema: CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9,
+        name: 'manager.settings.navigation-items',
+        id: 'half',
+        group: 'before-settings',
+      } as never, { route: { id: 'half' } })
+    ).toThrow(/\$schema and schemaVersion together/u)
+    expect(() =>
+      surfaces.register('demo', {
+        name: 'manager.settings.navigation-items',
+        id: 'unversioned-group',
+        group: 'before-settings',
+      }, { route: { id: 'unversioned-group' }, navigationGroup: { id: 'resources' } })
+    ).toThrow(
       /requires the exact surface-contribution\.v9 identity/u,
     )
     surfaces.dispose()

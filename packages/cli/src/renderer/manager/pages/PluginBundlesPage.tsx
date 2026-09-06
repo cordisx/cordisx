@@ -6,14 +6,10 @@ import type {
   CordisXPluginBundlePolicy,
 } from '../../../plugin-bundle-contracts.js'
 import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
-import {
-  requestPluginAuthorization,
-  requestPluginAuthorizationV2,
-  requestPluginAuthorizationV4,
-} from '../../manager-legacy/authorization.js'
 import { HostIcon } from '../../host-ui/HostIcon.js'
 import { productLocale } from '../../ui-copy.js'
 import type { ManagerRouter } from '../model/routes.js'
+import { requestPluginAuthorizationV2, requestPluginAuthorizationV4 } from '../permission-review.js'
 
 export type UnifiedLocalInspection =
   | { readonly kind: 'bundle'; readonly result: CordisXPluginBundleLifecycleResultV1 }
@@ -148,24 +144,13 @@ export function LocalPluginInstallSection({ model, snapshot }: {
           snapshot.permissions.filter(item => item.identity.id === inspection.package!.id),
         )
         if (decision !== undefined) result = await model.applyPermissionLifecycleReviewV2(decision)
-      } else if (inspection.authorizationPlan !== undefined) {
-        const decision = await requestPluginAuthorization(
-          document,
-          { id: inspection.package.id, name: inspection.package.name ?? inspection.package.id },
-          inspection.authorizationPlan,
-          snapshot.permissions.filter(item => item.identity.id === inspection.package!.id),
-          () => snapshot.localization.locale,
+      } else {
+        throw new Error(
+          zh
+            ? '当前插件只提供旧版权限计划；Host 不会绕过现代权限审查安装。'
+            : 'This plugin exposes only a legacy permission plan; the Host will not bypass modern review.',
         )
-        if (decision !== undefined) {
-          result = await model.requestPluginLifecycle({
-            kind: inspection.operation,
-            candidateId: inspection.candidateId,
-            authorizationDecision: decision,
-          })
-        }
-      } else {throw new Error(
-          zh ? '权限审查计划尚未就绪，插件未安装。' : 'Permission review is not ready; the plugin was not installed.',
-        )}
+      }
       if (result === undefined) return
       setMessage(result.error?.message ?? (zh ? `操作结果：${result.outcome}` : `Result: ${result.outcome}`))
       if (result.outcome === 'applied') {

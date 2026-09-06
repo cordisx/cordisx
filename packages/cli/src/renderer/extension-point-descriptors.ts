@@ -25,10 +25,10 @@ import type {
   CordisXHostExtensionPointDescriptorV3,
   CordisXHostExtensionPointDescriptorV5,
   CordisXHostExtensionPointDescriptorV9,
-  CordisXManagerSettingsNavigationDescriptorV9,
   CordisXLocaleCatalog,
   CordisXLocalizedProjection,
   CordisXLocalizedText,
+  CordisXManagerSettingsNavigationDescriptorV9,
   CordisXPluginIdentity,
   CordisXPointPolicy,
 } from '../contracts.js'
@@ -347,8 +347,9 @@ function normalizeDescriptor(
     'descriptor',
   )
   const descriptor = value as Partial<
-    CordisXHostExtensionPointDescriptorV3 & CordisXHostExtensionPointDescriptorV5 &
-      CordisXManagerSettingsNavigationDescriptorV9
+    & CordisXHostExtensionPointDescriptorV3
+    & CordisXHostExtensionPointDescriptorV5
+    & CordisXManagerSettingsNavigationDescriptorV9
   >
   if (typeof descriptor.id !== 'string') throw new Error('descriptor id is required')
   assertLocalId(descriptor.id, 'extension point id')

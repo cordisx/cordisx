@@ -1,8 +1,8 @@
 import { Context, type Effect, Service } from '@deepseek-ai/cordis'
 import type { ManagerSettingsNavigationSurfaceProvenanceV2 } from '@cordisx/protocol/manager-settings-navigation/v2'
 import {
-  CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9,
   CORDISX_IMPLEMENTED_SURFACE_NAMES,
+  CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9,
   CORDISX_SURFACE_NAMES,
   type CordisXCommandReference,
   type CordisXContributionHandle,

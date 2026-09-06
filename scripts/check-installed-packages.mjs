@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -484,6 +484,10 @@ createElement(AgentAvatar, props)
 `,
     'utf8',
   )
+  await copyFile(
+    path.join(repositoryRoot, 'tests', 'fixtures', 'manager-navigation-v9-consumer.ts'),
+    path.join(runnerDirectory, 'manager-navigation-v9-consumer.ts'),
+  )
   await writeFile(
     path.join(runnerDirectory, 'tsconfig.json'),
     `${
@@ -501,6 +505,7 @@ createElement(AgentAvatar, props)
           include: [
             'connector-consumer.ts',
             'agent-avatar-ui-consumer.ts',
+            'manager-navigation-v9-consumer.ts',
             'agent-session-consumer.ts',
             'agent-loop-collection-consumer.ts',
           ],

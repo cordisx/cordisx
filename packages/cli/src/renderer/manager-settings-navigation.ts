@@ -20,44 +20,46 @@ export const CORDISX_MANAGER_SETTINGS_NAVIGATION_GROUP_CATALOG = Object.freeze({
   $schema: CORDISX_MANAGER_SETTINGS_NAVIGATION_GROUPS_SCHEMA_V1,
   contract: 'cordisx.manager-settings-navigation-groups/v1',
   schemaVersion: 1,
-  groups: Object.freeze([
-    Object.freeze({
-      id: 'resources',
-      label: Object.freeze({
-        namespace: 'cordisx.manager.extension-points',
-        key: 'manager.settings.navigation-group.resources',
-        fallback: 'Resources',
+  groups: Object.freeze(
+    [
+      Object.freeze({
+        id: 'resources',
+        label: Object.freeze({
+          namespace: 'cordisx.manager.extension-points',
+          key: 'manager.settings.navigation-group.resources',
+          fallback: 'Resources',
+        }),
+        order: 100,
       }),
-      order: 100,
-    }),
-    Object.freeze({
-      id: 'development',
-      label: Object.freeze({
-        namespace: 'cordisx.manager.extension-points',
-        key: 'manager.settings.navigation-group.development',
-        fallback: 'Development',
+      Object.freeze({
+        id: 'development',
+        label: Object.freeze({
+          namespace: 'cordisx.manager.extension-points',
+          key: 'manager.settings.navigation-group.development',
+          fallback: 'Development',
+        }),
+        order: 200,
       }),
-      order: 200,
-    }),
-    Object.freeze({
-      id: 'collaboration',
-      label: Object.freeze({
-        namespace: 'cordisx.manager.extension-points',
-        key: 'manager.settings.navigation-group.collaboration',
-        fallback: 'Collaboration',
+      Object.freeze({
+        id: 'collaboration',
+        label: Object.freeze({
+          namespace: 'cordisx.manager.extension-points',
+          key: 'manager.settings.navigation-group.collaboration',
+          fallback: 'Collaboration',
+        }),
+        order: 300,
       }),
-      order: 300,
-    }),
-    Object.freeze({
-      id: 'other',
-      label: Object.freeze({
-        namespace: 'cordisx.manager.extension-points',
-        key: 'manager.settings.navigation-group.other',
-        fallback: 'Other',
+      Object.freeze({
+        id: 'other',
+        label: Object.freeze({
+          namespace: 'cordisx.manager.extension-points',
+          key: 'manager.settings.navigation-group.other',
+          fallback: 'Other',
+        }),
+        order: 1000,
       }),
-      order: 1000,
-    }),
-  ] as const),
+    ] as const,
+  ),
   fallbackGroup: 'other',
 }) satisfies ManagerSettingsNavigationGroupCatalogV1
 

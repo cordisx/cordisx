@@ -154,7 +154,7 @@ const trustedFeed = {
 describe('React Manager Marketplace', () => {
   it('preserves eligibility, independent Official and Certified filters, exact text tiers, and accessible provenance', async () => {
     const fixture = reactManagerFixture()
-    const { MarketplacePage } = await import('../packages/cli/src/renderer/manager/pages/MarketplacePage.js')
+    const { PluginsPage } = await import('../packages/cli/src/renderer/manager/pages/PluginsPage.js')
     fixture.dom.window.localStorage.setItem(MARKETPLACE_SOURCES_KEY, JSON.stringify([OFFICIAL_MARKETPLACE_SOURCE]))
     const marketplace = new BrowserMarketplaceModel(
       fixture.dom.window.localStorage,
@@ -165,32 +165,33 @@ describe('React Manager Marketplace', () => {
     const model = managerModel(state, {
       marketplaceEligibility: plugin => plugin.id === 'blocked' ? { policyBlocked: true } : {},
     })
-    const router = managerRouter({ kind: 'primary', page: 'marketplace' })
-    const titles = () => [...fixture.document.querySelectorAll('.cxr-card-title')].map(item => item.textContent)
+    const router = managerRouter({ kind: 'primary', page: 'plugins' })
+    const titles = () =>
+      [...fixture.document.querySelectorAll('.cxr-marketplace .cxr-card-title')].map(item => item.textContent)
     try {
       await fixture.render(
-        <MarketplacePage marketplace={marketplace} manager={model} snapshot={state} router={router} />,
+        <PluginsPage marketplace={marketplace} model={model} snapshot={state} router={router} />,
       )
       expect(titles()).toEqual(['Official Only', 'Trusted Booster', 'Community Certified', 'Exact Match'])
       expect(fixture.document.body.textContent).not.toContain('Blocked By Policy')
       const trusted = fixture.document.querySelectorAll('.cxr-marketplace-primary')[1]!
       expect(trusted.getAttribute('aria-label')).toContain('Official')
       expect(trusted.getAttribute('aria-label')).toContain('Certified')
-      await fixture.click('[aria-label="Official only"]')
+      await fixture.click('[aria-label="Marketplace: Official only"]')
       expect(titles()).toEqual(['Official Only', 'Trusted Booster'])
-      await fixture.click('[aria-label="Certified only"]')
+      await fixture.click('[aria-label="Marketplace: Certified only"]')
       expect(titles()).toEqual(['Trusted Booster'])
-      await fixture.click('[aria-label="Official only"]')
+      await fixture.click('[aria-label="Marketplace: Official only"]')
       expect(titles()).toEqual(['Trusted Booster', 'Community Certified'])
-      await fixture.click('[aria-label="Certified only"]')
-      await fixture.type('input', 'exact-match')
+      await fixture.click('[aria-label="Marketplace: Certified only"]')
+      await fixture.type('input[type="search"]', 'exact-match')
       expect(titles()[0]).toBe('Exact Match')
       await fixture.click('.cxr-marketplace-primary')
       expect(router.navigate).toHaveBeenCalledWith({
         kind: 'marketplace-plugin',
         identity: marketplace.snapshot().plugins.find(plugin => plugin.id === 'exact-match')!.identity,
       })
-      await fixture.type('input', 'nothing-matches')
+      await fixture.type('input[type="search"]', 'nothing-matches')
       expect(titles()).toHaveLength(0)
       expect(fixture.document.querySelector('[role="search"] input')).not.toBeNull()
       await fixture.click('[aria-label="Manage sources"]')
@@ -203,7 +204,7 @@ describe('React Manager Marketplace', () => {
 
   it('projects localized feed metadata and persists favorites without enabling unavailable install', async () => {
     const fixture = reactManagerFixture()
-    const { MarketplacePage } = await import('../packages/cli/src/renderer/manager/pages/MarketplacePage.js')
+    const { PluginsPage } = await import('../packages/cli/src/renderer/manager/pages/PluginsPage.js')
     fixture.dom.window.localStorage.setItem(MARKETPLACE_SOURCES_KEY, JSON.stringify([SOURCE]))
     const marketplace = new BrowserMarketplaceModel(
       fixture.dom.window.localStorage,
@@ -213,9 +214,9 @@ describe('React Manager Marketplace', () => {
     const state = managerSnapshot({ localization: { locale: 'zh-CN', direction: 'ltr', version: 1 } })
     try {
       await fixture.render(
-        <MarketplacePage
+        <PluginsPage
           marketplace={marketplace}
-          manager={managerModel(state)}
+          model={managerModel(state)}
           snapshot={state}
           router={managerRouter()}
         />,
@@ -226,9 +227,9 @@ describe('React Manager Marketplace', () => {
       expect(fixture.document.querySelector('[aria-label="取消收藏"]')).not.toBeNull()
       await fixture.render(null)
       await fixture.render(
-        <MarketplacePage
+        <PluginsPage
           marketplace={marketplace}
-          manager={managerModel(state)}
+          model={managerModel(state)}
           snapshot={state}
           router={managerRouter()}
         />,
