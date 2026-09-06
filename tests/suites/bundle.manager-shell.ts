@@ -34,7 +34,7 @@ export async function verifyManagerShell(context: Awaited<ReturnType<typeof veri
   expect(managerModal?.querySelector('.cxr-dialog')).not.toBeNull()
   expect(managerModal?.querySelector('.cxr-nav')?.getAttribute('aria-label')).toBe('CordisX 管理器页面')
   expect([...managerModal!.querySelectorAll<HTMLElement>('.cxr-nav [data-tab]')].map(item => item.dataset.tab))
-    .toEqual(['plugins', 'extension-points', 'routes', 'about'])
+    .toEqual(['plugins', 'marketplace', 'extension-points', 'routes', 'about'])
   const pluginRow = managerModal?.querySelector<HTMLButtonElement>('[data-plugin-id="slot-showcase"]')
   expect(pluginRow?.querySelector('[data-icon-kind="derived"]')).not.toBeNull()
   expect(pluginRow?.textContent).toContain('点位展示')

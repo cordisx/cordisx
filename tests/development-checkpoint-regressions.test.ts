@@ -22,6 +22,18 @@ describe('development checkpoint regressions', () => {
     expect(cliManifest.scripts.build).toContain('tsc -p tsconfig.json')
   })
 
+  it('builds both runtime workspace dependencies before dependency-affected tests', async () => {
+    const workflow = await readFile(path.join(root, '.github/workflows/check.yml'), 'utf8')
+    const changedTests = workflow.slice(workflow.indexOf('  changed-tests:'))
+    const channelBuild = changedTests.indexOf('npm run build --workspace=@cordisx/channel-runtime')
+    const schemasteryBuild = changedTests.indexOf('npm run build --workspace=@cordisx/schemastery-ui')
+    const affectedTests = changedTests.indexOf('npx vitest run --changed "$BASE_SHA"')
+
+    expect(channelBuild).toBeGreaterThan(-1)
+    expect(schemasteryBuild).toBeGreaterThan(channelBuild)
+    expect(affectedTests).toBeGreaterThan(schemasteryBuild)
+  })
+
   it('opens the on-demand React Manager before collecting live-smoke state', async () => {
     const source = await readLiveSmokeSourceGraph(root)
     const managerSmoke = source.slice(
