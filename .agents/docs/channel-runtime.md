@@ -648,6 +648,31 @@ capability or bypasses the native approval policy.
 
 ## Manager and session UI
 
+The renderer installs one public `ctx.channelManager` provider implementing
+`@cordisx/protocol/channel-manager/v2`. Its v3 snapshot exposes only Host-issued
+opaque connection, binding, session, and route tokens with exact profile,
+Host-generation, and revision fences. Existing connection and binding actions
+resolve those tokens inside the Host before reaching the single launcher
+authority. Binding incarnations rotate their opaque token and advance their
+exact binding revision. The public service exposes no raw Channel identity,
+Platform session, service configuration, credential material, or legacy
+facade.
+
+When the launcher supplies safe logs, each account advertises `logs.query`.
+The Host applies the bounded level/event filters and returns ordered pages. An
+opaque next cursor is bound to the connection token, snapshot revision, filter
+digest, and offset. Each cursor is consumed once; replayed, forged, cross-query,
+cross-connection, and stale cursors fail closed.
+
+Credential capture, connection creation, and local export handoff are not advertised
+until their Host-owned interaction and handoff paths implement the complete
+target lineage. Requests for those operations fail closed as unavailable; a
+plugin must present that state and must not collect a secret or create a prompt
+as a fallback. The bundled pre-migration Channel consumer temporarily uses a
+separate internal facade over the same service state. That facade is absent
+from `cordisx/contracts` and the public `ctx.channelManager` type and is removed
+when the standalone consumer completes its v2 migration.
+
 Channel management uses the distinct B pair
 `manager.settings.navigation-items` and `manager.content`. The built-in
 `cordisx:channel` renderer bundle contributes one structured navigation record,

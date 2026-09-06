@@ -20,7 +20,7 @@ import type { CordisXChannelManager } from '../../renderer/channel-manager.js'
 import { createChannelPage } from './view.js'
 
 export const name = 'channel'
-export const inject = ['i18n', 'slots', 'pages', 'routes', 'managerContent', 'channelManager']
+export const inject = ['i18n', 'slots', 'pages', 'routes', 'managerContent', 'channelManagerLegacy']
 
 const capabilityNames = [
   'channel.accounts.read',
@@ -251,11 +251,14 @@ function declarationId(prefix: string, accountId: string): string {
   return `${prefix}-${normalized}-${hash.toString(36)}`
 }
 
-type ChannelManagerContext = Context & { readonly channelManager: CordisXChannelManager }
+type ChannelManagerContext = Context & {
+  readonly channelManagerLegacy: CordisXChannelManager
+}
 
 /** Structured Channel Settings contribution; every rendered node remains Host-owned. */
 export function apply(ctx: Context): void {
   const channelContext = ctx as ChannelManagerContext
+  const channelManager = channelContext.channelManagerLegacy
   ctx.i18n.define<Messages>({
     namespace: 'channel',
     locale: 'en',
@@ -325,7 +328,7 @@ export function apply(ctx: Context): void {
       'page.record.title': '{name}',
     },
   })
-  const mountPage = defineReactPage<Messages>(createChannelPage(channelContext.channelManager))
+  const mountPage = defineReactPage<Messages>(createChannelPage(channelManager))
   ctx.pages.register<Messages>(settingsPage, mountPage)
   ctx.pages.register<Messages>(createPage, mountPage)
   ctx.pages.register<Messages>(configurationPage, mountPage)
@@ -355,7 +358,7 @@ export function apply(ctx: Context): void {
         parentRoute: { id: 'settings' },
         header: { title: { kind: 'route' } },
       }]
-      const snapshot = channelContext.channelManager.snapshot()
+      const snapshot = channelManager.snapshot()
       const records = [...snapshot.connections, ...snapshot.accounts]
       const unique = new Map(records.map(record => [channelRef(record), record]))
       const recordTitles = [...unique].map(([id, record]) => ({
@@ -386,7 +389,7 @@ export function apply(ctx: Context): void {
       disposeProjection = ctx.managerContent.replaceProjection({ declarations, recordTitles })
     }
     refreshNavigation()
-    const unsubscribe = channelContext.channelManager.subscribe(refreshNavigation)
+    const unsubscribe = channelManager.subscribe(refreshNavigation)
     return () => {
       unsubscribe()
       void disposeProjection()

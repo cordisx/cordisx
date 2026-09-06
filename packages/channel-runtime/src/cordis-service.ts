@@ -1,4 +1,5 @@
 import { Context, Service } from '@deepseek-ai/cordis'
+import type { ChannelRuntimeV1 } from '@cordisx/protocol/channel-runtime/v1'
 import { ChannelRuntime } from './runtime.js'
 import type {
   ChannelAdapterDefinition,
@@ -29,11 +30,7 @@ export interface CordisXChannelMessages {
   subscribe(filter: ChannelSubscriptionFilter, listener: ChannelMessageListener): Promise<() => void>
 }
 
-export interface CordisXChannel {
-  readonly connections: CordisXChannelConnections
-  readonly adapters: CordisXChannelAdapters
-  readonly messages: CordisXChannelMessages
-}
+export type CordisXChannel = ChannelRuntimeV1
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

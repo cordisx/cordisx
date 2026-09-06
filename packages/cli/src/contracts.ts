@@ -8,6 +8,8 @@ export * from './durable-document-contracts.js'
 export * from './plugin-lifecycle-contracts.js'
 export * from './plugin-bundle-contracts.js'
 export * from './visual-contracts.js'
+export type * from '@cordisx/protocol/channel-runtime/v1'
+export type * from '@cordisx/protocol/channel-manager/v2'
 export type {
   TransientCanvasPluginContextV1,
   TransientCanvasPresenterV1,
