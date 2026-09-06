@@ -710,6 +710,18 @@ export async function runDevelopment(
       prebundleHostDependencies: !invocation.options.dryRun,
     })
     const activeVite = vite
+    const entityAuthority = invocation.options.dryRun
+      ? undefined
+      : new EntityDirectoryAuthority(cordisxHomeDir, 'development')
+    if (entityAuthority !== undefined) {
+      // A fresh home can materialize entity templates while synchronizing the
+      // initial plugin generation. Complete that transaction before building
+      // the renderer composition so its entity principal carries the committed
+      // module generation instead of the pre-materialization value.
+      await activeVite.synchronizePluginGenerations(
+        createNativeViteEntityGenerationHandler(entityAuthority, 'development'),
+      )
+    }
     const composition = await buildRendererComposition(config, stdout, {
       profileId: 'development',
       permission: { profileId: 'development', policies: [], persistent: false },
@@ -752,6 +764,7 @@ export async function runDevelopment(
         stdout,
       )
     }
+    if (entityAuthority === undefined) throw new Error('development entity authority was not initialized')
     const debugPort = invocation.options.debugPort ?? (
       invocation.options.attach || invocation.options.system ? config.codex.debugPort : await findFreeLoopbackPort()
     )
@@ -778,10 +791,6 @@ export async function runDevelopment(
       store: new OwnerDocumentStore(cordisxHomeDir),
       principalAllowed: principal => documentLeases.allowed(principal),
     })
-    const entityAuthority = new EntityDirectoryAuthority(cordisxHomeDir, 'development')
-    await activeVite.synchronizePluginGenerations(
-      createNativeViteEntityGenerationHandler(entityAuthority, 'development'),
-    )
     const ownerDocuments = Object.assign(ownerDocumentHandler, {
       entities: createEntityBridgeHandler({
         secret: composition.ownerDocumentSecret,
