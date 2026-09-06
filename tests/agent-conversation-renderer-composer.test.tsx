@@ -493,6 +493,8 @@ describe('AgentConversation renderer model', () => {
     )
     try {
       const document = harness.dom.window.document
+      expect(document.querySelector('.cxa-root')?.parentElement?.id).toBe('root')
+      expect(document.querySelector('.cxr-react-root')).toBeNull()
       expect(document.querySelector('.cxa-chrome > .cxa-chrome-inner')).not.toBeNull()
       expect(document.querySelector('.cxa-timeline > .cxa-timeline-list')).not.toBeNull()
       expect(document.querySelector('.cxa-composer-region > .cxa-composer')).not.toBeNull()

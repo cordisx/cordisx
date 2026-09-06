@@ -67,8 +67,36 @@ export function MessageEntry({
   const state = stateCopy(entry, copy)
   const outgoing = participant.role === 'human'
   const time = new Date(entry.timestamp).toLocaleTimeString(copy.locale, { hour: '2-digit', minute: '2-digit' })
+  const fullTime = new Date(entry.timestamp).toLocaleString(copy.locale, {
+    dateStyle: 'medium',
+    timeStyle: 'long',
+  })
   const accessibleLabel = `${participant.name}, ${time}`
-  const timestamp = <time className="cxa-message-time" dateTime={entry.timestamp} aria-label={time}>{time}</time>
+  const copyTimestamp = (event: React.MouseEvent<HTMLButtonElement>): void => {
+    const clipboard = event.currentTarget.ownerDocument.defaultView?.navigator.clipboard
+    if (clipboard === undefined) {
+      onCommandError(
+        new Error(
+          copy.locale.toLowerCase().startsWith('zh')
+            ? '当前环境不支持复制。'
+            : 'Copy is unavailable in this environment.',
+        ),
+      )
+      return
+    }
+    void clipboard.writeText(entry.timestamp).catch(onCommandError)
+  }
+  const timestamp = (
+    <button
+      type="button"
+      className="cxa-message-time"
+      aria-label={copy.locale.toLowerCase().startsWith('zh') ? `复制时间：${fullTime}` : `Copy timestamp: ${fullTime}`}
+      title={fullTime}
+      onClick={copyTimestamp}
+    >
+      <time dateTime={entry.timestamp}>{time}</time>
+    </button>
+  )
   const contextTarget = (
     kind: ConversationContextTarget['kind'],
     x: number,
