@@ -21,7 +21,7 @@ interface DevelopmentRuntimeHandle {
 }
 
 describe('local development Manager projection', () => {
-  it('shows first-build diagnostics without fabricating an active plugin', async () => {
+  it('keeps first-build diagnostics private without fabricating an active plugin', async () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const generation = 'local-development-manager-fixture'
     const config: CordisXConfig = {
@@ -85,12 +85,13 @@ describe('local development Manager projection', () => {
     expect(publicJson).not.toContain('ancestor-ownership')
     dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
     await new Promise(resolve => setTimeout(resolve, 0))
-    const privateProjection = dom.window.document.querySelector<HTMLElement>('.cxr-local-development-source')
-    expect(privateProjection?.textContent).toContain(sourcePath)
-    expect(privateProjection?.textContent).toContain('fixture build failed')
-    expect(privateProjection?.textContent).toContain('Local development')
-    expect(privateProjection?.textContent).not.toMatch(/[\u3400-\u9fff]/u)
-    expect(privateProjection?.dataset.developmentState).toBe('failed')
+    const pluginsPage = dom.window.document.querySelector<HTMLElement>('[data-unified-plugins-page]')
+    expect(pluginsPage).not.toBeNull()
+    expect(pluginsPage?.querySelector('[data-installed-plugin-results]')).not.toBeNull()
+    expect(pluginsPage?.textContent).toContain('No matching plugins')
+    expect(pluginsPage?.textContent).not.toContain(sourcePath)
+    expect(pluginsPage?.textContent).not.toContain('fixture build failed')
+    expect(pluginsPage?.querySelector('[data-plugin-development]')).toBeNull()
 
     const candidate = {
       ...activation,
