@@ -110,6 +110,7 @@ import {
   createOwnerDocumentBridgeHandler,
   entityInstallationId,
   type OwnerDocumentBridgeHandler,
+  type OwnerDocumentLease,
   OwnerDocumentLeaseRegistry,
 } from '../launcher/owner-document-rpc.js'
 
@@ -699,6 +700,11 @@ export async function runDevelopment(
       ...localDevelopmentHostConfig(cwd),
       plugins: [{ id: localIdentity!.id, source: localIdentity!.source, entry, enabled: true, config: {} }],
     }
+  const identities = pluginIdentities(config)
+  const documentLeases = new OwnerDocumentLeaseRegistry({
+    stable: identities.map(identity => ({ source: identity.source, pluginId: identity.id })),
+  })
+  let developmentLeases = new Map<string, OwnerDocumentLease>()
   if (!invocation.options.dryRun) await ensureCordisXHomeDirectory(homeConfigOptions)
   const dryRunCacheRoot = invocation.options.dryRun
     ? await mkdtemp(path.join(os.tmpdir(), 'cordisx-vite-dry-run-'))
@@ -713,20 +719,50 @@ export async function runDevelopment(
     const entityAuthority = invocation.options.dryRun
       ? undefined
       : new EntityDirectoryAuthority(cordisxHomeDir, 'development')
-    if (entityAuthority !== undefined) {
-      // A fresh home can materialize entity templates while synchronizing the
-      // initial plugin generation. Complete that transaction before building
-      // the renderer composition so its entity principal carries the committed
-      // module generation instead of the pre-materialization value.
-      await activeVite.synchronizePluginGenerations(
-        createNativeViteEntityGenerationHandler(entityAuthority, 'development'),
-      )
-    }
-    const composition = await buildRendererComposition(config, stdout, {
+    const compositionOptions = {
       profileId: 'development',
       permission: { profileId: 'development', policies: [], persistent: false },
-      developmentBuild: (nextConfig, options = {}) => activeVite.buildBootstrap(nextConfig, options),
-    })
+      developmentBuild: (nextConfig: CordisXConfig, options: BuildRendererBundleOptions = {}) =>
+        activeVite.buildBootstrap(nextConfig, options),
+    } as const
+    let composition = await buildRendererComposition(config, stdout, compositionOptions)
+    if (entityAuthority !== undefined) {
+      // Building the initial Vite graph can discover dependencies and advance
+      // its plugin generation. Materialize that final generation, then rebuild
+      // the only composition that will be installed in the renderer so its
+      // entity principal and the committed authority binding agree.
+      const synchronizeEntities = createNativeViteEntityGenerationHandler(entityAuthority, 'development')
+      await activeVite.synchronizePluginGenerations(async generation => {
+        const entityTransaction = await synchronizeEntities(generation)
+        const previous = new Map(developmentLeases)
+        const next = new Map(previous)
+        next.set(generation.pluginId, {
+          source: generation.source,
+          pluginId: generation.pluginId,
+          moduleGeneration: generation.moduleGeneration,
+        })
+        const transactionId = `development:${generation.pluginId}:${generation.moduleGeneration}`
+        documentLeases.stage(transactionId, [...next.values()])
+        let settled = false
+        return {
+          async commit() {
+            if (settled) return
+            settled = true
+            await entityTransaction.commit()
+            developmentLeases = next
+            documentLeases.commit(transactionId)
+          },
+          async rollback() {
+            if (settled) return
+            settled = true
+            await entityTransaction.rollback()
+            developmentLeases = previous
+            documentLeases.abort(transactionId)
+          },
+        }
+      })
+      composition = await buildRendererComposition(config, stdout, compositionOptions)
+    }
     if (invocation.options.dryRun) {
       stdout(JSON.stringify(
         {
@@ -780,10 +816,6 @@ export async function runDevelopment(
         cordisxHomeDir,
         ...(invocation.options.profileDir === undefined ? {} : { explicitProfileDir: invocation.options.profileDir }),
       })
-    const identities = pluginIdentities(config)
-    const documentLeases = new OwnerDocumentLeaseRegistry({
-      stable: identities.map(identity => ({ source: identity.source, pluginId: identity.id })),
-    })
     const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
       secret: composition.ownerDocumentSecret,
       profileId: 'development',

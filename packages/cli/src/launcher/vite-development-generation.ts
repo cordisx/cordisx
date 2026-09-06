@@ -3,6 +3,7 @@ import { entityInstallationId, entityPluginGeneration } from './owner-document-r
 
 export interface NativeVitePluginGeneration {
   readonly pluginId: string
+  readonly source: string
   readonly version: string
   readonly digest: `sha256:${string}`
   readonly moduleGeneration: string

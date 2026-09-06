@@ -47,6 +47,9 @@ const extension = sourceMode ? 'ts' : 'js'
 const rendererPath = fileURLToPath(new URL(`../renderer/runtime.${extension}`, import.meta.url))
 const clientPath = fileURLToPath(new URL(`../renderer/vite-development-client.${extension}`, import.meta.url))
 const reactRuntimePath = fileURLToPath(new URL(`../renderer/react-runtime.${extension}`, import.meta.url))
+const reactRuntimeBootstrapPath = fileURLToPath(
+  new URL(`../renderer/react-runtime-bootstrap.${extension}`, import.meta.url),
+)
 const require = createRequire(import.meta.url)
 const reactPackageRoot = path.dirname(require.resolve('react/package.json'))
 const reactDomPackageRoot = path.dirname(require.resolve('react-dom/package.json'))
@@ -230,6 +233,7 @@ export async function startNativeViteServer(
 
   const generationSnapshot = (pluginId: string, generation: DevelopmentGeneration): NativeVitePluginGeneration => ({
     pluginId,
+    source: generation.source,
     version: generation.version,
     digest: generation.digest,
     moduleGeneration: generation.moduleGeneration,
@@ -622,9 +626,9 @@ if (import.meta.hot) {
         return `import RefreshRuntime from '/@react-refresh';\nRefreshRuntime.injectIntoGlobalHook(window);\nwindow.$RefreshReg$ = () => {};\nwindow.$RefreshSig$ = () => type => type;\nwindow.__vite_plugin_react_preamble_installed__ = true;\n`
       }
       if (id === '\0' + REACT_PREPARE) {
-        return `import { installSharedReactRuntime } from ${
-          JSON.stringify(`/@fs/${normalizePath(reactRuntimePath)}`)
-        };\nif (!globalThis.__cordisxSharedReactRuntime) installSharedReactRuntime(document);\n`
+        return `import { prepareReactModules } from ${
+          JSON.stringify(`/@fs/${normalizePath(reactRuntimeBootstrapPath)}`)
+        };\nprepareReactModules();\n`
       }
       if (id === '\0' + ENTRY) return await entryModule()
       if (id.startsWith('\0' + SHARED_PREFIX)) return cordisXSharedModuleSource(id.slice(SHARED_PREFIX.length + 1))
@@ -954,9 +958,20 @@ if (import.meta.hot) {
     async buildBootstrap(nextConfig, nextOptions) {
       config = nextConfig
       options = nextOptions
-      await Promise.all(config.plugins.filter(plugin => plugin.enabled).map(ensureGeneration))
+      const enabledGenerations = await Promise.all(
+        config.plugins.filter(plugin => plugin.enabled).map(ensureGeneration),
+      )
       await compiledConfig()
       await Promise.all(config.plugins.filter(plugin => plugin.enabled).map(validatePlugin))
+      if (serverOptions.prebundleHostDependencies === true) {
+        await Promise.all([
+          server.environments.client.warmupRequest(`/@fs/${normalizePath(rendererPath)}`),
+          ...enabledGenerations
+            .filter(generation => generation.isolatedArtifactSource === undefined)
+            .map(generation => server.environments.client.warmupRequest(`/@fs/${normalizePath(generation.realEntry)}`)),
+        ])
+        await waitForDependencyOptimization()
+      }
       // CDP installs only this stable entry. Source modules and updates use Vite.
       return `if (!globalThis.__cordisxViteBoot) { globalThis.__cordisxViteBoot = (async () => { await import(${
         JSON.stringify(url(PREAMBLE))
