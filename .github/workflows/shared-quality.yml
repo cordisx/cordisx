@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: '23 18 * * *'
 
 permissions:
   contents: read
@@ -42,7 +44,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: npm run lint:staged -- --diff "$BASE_SHA...$HEAD_SHA" --diff-filter=A
-      - name: Report full-source lint separately from configuration coverage
+      - name: Report the periodic full-source baseline separately
+        if: github.event_name != 'pull_request'
         continue-on-error: true
         run: npm run --silent lint:source -- --format json --output-file "$RUNNER_TEMP/source-lint.json"
       - uses: actions/upload-artifact@v4
