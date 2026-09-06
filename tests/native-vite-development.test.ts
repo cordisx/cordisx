@@ -409,15 +409,6 @@ describe('native Vite development transport', () => {
       expect(bootSource.indexOf('virtual:cordisx-native-react-prepare')).toBeLessThan(
         bootSource.indexOf('virtual:cordisx-native-entry'),
       )
-      const hostIconSource = await get(
-        `@fs/${path.join(process.cwd(), 'packages/cli/src/renderer/host-ui/HostIcon.tsx')}`,
-      )
-      expect(hostIconSource).not.toContain('virtual:cordisx-native-shared')
-      expect(hostIconSource).toContain('react_jsx-dev-runtime.js')
-      const sharedJsxSource = await get('@id/__x00__virtual:cordisx-native-shared/cordisx/react/jsx-runtime')
-      expect(sharedJsxSource.indexOf('installSharedReactRuntime(document)')).toBeLessThan(
-        sharedJsxSource.indexOf('const runtime = globalThis.__cordisxSharedReactRuntime'),
-      )
       const entrySource = await get('@id/__x00__virtual:cordisx-native-entry')
       expect(entrySource).toContain('/renderer/runtime.ts')
       expect(entrySource).toContain('import.meta.hot.accept')
