@@ -23,6 +23,7 @@ import {
   type HostAgentIdentityPresentation,
 } from './AgentIdentityPanel.js'
 import { HostConversationRightInspector } from './RightInspector.js'
+import { HOST_ROOM_COMPOSITE_AVATAR_STYLES } from '../RoomCompositeAvatar.js'
 import { HostRoomCompositeAvatar } from './RoomCompositeAvatar.js'
 import { useHostShikitorComposer } from './ShikitorComposerAdapter.js'
 import type { HostSchemaFormProps } from '../HostSchemaForm.js'
@@ -1461,7 +1462,9 @@ export function AgentConversationRenderer(
       {...(debugFixture ? { 'data-agent-conversation-fixture': 'debug-only' } : {})}
       aria-labelledby={titleId}
     >
-      <style data-agent-conversation-styles="production">{AGENT_CONVERSATION_STYLES}</style>
+      <style data-agent-conversation-styles="production">
+        {`${AGENT_CONVERSATION_STYLES}\n${HOST_ROOM_COMPOSITE_AVATAR_STYLES}`}
+      </style>
       <header className="cxa-chrome" data-agent-conversation-chrome="true">
         <div className="cxa-chrome-inner">
           {model.selection.kind === 'room'
