@@ -295,7 +295,42 @@ describe('bundled route/page product metadata gate', () => {
   })
 
   it('confines missing metadata behavior to the explicit third-party legacy compatibility test', async () => {
-    const source = await readFile(path.join(projectRoot, 'tests/navigation.test.ts'), 'utf8')
+    const entryPath = path.join(projectRoot, 'tests/navigation.test.ts')
+    const entry = ts.createSourceFile(entryPath, await readFile(entryPath, 'utf8'), ts.ScriptTarget.Latest, true)
+    const historyImport = entry.statements.find((statement): statement is ts.ImportDeclaration =>
+      ts.isImportDeclaration(statement)
+      && ts.isStringLiteral(statement.moduleSpecifier)
+      && statement.moduleSpecifier.text === './suites/navigation.history.js'
+    )
+    expect(historyImport).toBeDefined()
+    const bindings = historyImport?.importClause?.namedBindings
+    const registration = bindings !== undefined && ts.isNamedImports(bindings)
+      ? bindings.elements.find(binding => (binding.propertyName ?? binding.name).text === 'registerHistoryTests')
+      : undefined
+    expect(registration).toBeDefined()
+    const describeCall = entry.statements.find((statement): statement is ts.ExpressionStatement =>
+      ts.isExpressionStatement(statement)
+      && ts.isCallExpression(statement.expression)
+      && statement.expression.expression.getText(entry) === 'describe'
+      && statement.expression.arguments[0]?.getText(entry) === "'NavigationRegistry'"
+    )?.expression
+    const callback = describeCall !== undefined && ts.isCallExpression(describeCall)
+      ? describeCall.arguments[1]
+      : undefined
+    expect(
+      callback !== undefined && ts.isArrowFunction(callback) && ts.isBlock(callback.body)
+        && callback.body.statements.some(statement =>
+          ts.isExpressionStatement(statement)
+          && ts.isCallExpression(statement.expression)
+          && ts.isIdentifier(statement.expression.expression)
+          && statement.expression.expression.text === registration?.name.text
+        ),
+    ).toBe(true)
+    if (historyImport === undefined || !ts.isStringLiteral(historyImport.moduleSpecifier)) {
+      throw new Error('Navigation legacy suite import is missing')
+    }
+    const suitePath = path.resolve(path.dirname(entryPath), historyImport.moduleSpecifier.text.replace(/\.js$/, '.ts'))
+    const source = await readFile(suitePath, 'utf8')
     expect(source).toContain('diagnoses legacy omissions without inventing purpose')
     expect(source).toContain("pages.register('legacy'")
     expect(source).toContain("navigation.register('legacy'")

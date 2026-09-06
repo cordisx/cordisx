@@ -16,6 +16,15 @@ function section(source: string, start: string, end: string): string {
 }
 
 describe('UI copy principles', () => {
+  it('assembles every feature catalog key exactly once', () => {
+    const modules = import.meta.glob('../packages/cli/src/renderer/ui-copy/*.ts', { eager: true })
+    const featureKeys = Object.values(modules).flatMap(module =>
+      Object.values(module as Record<string, Record<string, unknown>>).flatMap(catalog => Object.keys(catalog))
+    )
+    expect(new Set(featureKeys).size).toBe(featureKeys.length)
+    expect(Object.keys(MANAGER_PRODUCT_COPY).sort()).toEqual(featureKeys.sort())
+  })
+
   it('keeps configuration out of retired global placeholder pages', async () => {
     const manager = await readFile(managerPath, 'utf8')
     const primaryNavigation = section(manager, 'const tabs: readonly', 'let routeState')
