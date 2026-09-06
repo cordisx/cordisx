@@ -1,4 +1,5 @@
 import type * as React from 'react'
+import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { CordisXConfigFormIcon } from './contracts.js'
 
 export interface ButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'color'> {
@@ -84,6 +85,11 @@ export interface AttachmentPlaceholderProps {
   readonly size?: 30 | 32
 }
 
+export interface AgentAvatarProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'children'> {
+  readonly participant: Readonly<{ readonly id: string; readonly name: string; readonly avatar?: AgentAvatarRef }>
+  readonly fallback?: 'initials' | 'neutral'
+}
+
 function HostComponent<Props>(name: string): React.ComponentType<Props> {
   return function UnavailableHostComponent(): never {
     throw new Error(`${name} is available only inside the CordisX renderer Host`)
@@ -99,5 +105,6 @@ export const Select = HostComponent<SelectProps>('Select')
 export const SelectionRail = HostComponent<SelectionRailProps>('SelectionRail')
 export const MarkdownViewer = HostComponent<MarkdownViewerProps>('MarkdownViewer')
 export const AttachmentPlaceholder = HostComponent<AttachmentPlaceholderProps>('AttachmentPlaceholder')
+export const AgentAvatar = HostComponent<AgentAvatarProps>('AgentAvatar')
 export const Stack = HostComponent<StackProps>('Stack')
 export const Text = HostComponent<TextProps>('Text')

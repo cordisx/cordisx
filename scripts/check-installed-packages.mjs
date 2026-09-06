@@ -210,10 +210,10 @@ try {
   const installedCordisXRoot = path.join(runnerDirectory, 'node_modules', 'cordisx')
   const installedCordisXManifest = JSON.parse(await readFile(path.join(installedCordisXRoot, 'package.json'), 'utf8'))
   if (
-    installedCordisXManifest.dependencies?.['@oneworks/avatar'] !== undefined
-    || installedCordisXManifest.dependencies?.['@oneworks/avatar-react'] !== undefined
+    installedCordisXManifest.dependencies?.['@oneworks/avatar'] !== '1.0.0-rc.8'
+    || installedCordisXManifest.dependencies?.['@oneworks/avatar-react'] !== '1.0.0-rc.8'
   ) {
-    throw new Error('installed cordisx must not include product-owned avatar renderers')
+    throw new Error('installed cordisx must pin the Host-owned AgentAvatar renderer')
   }
 
   for (const packageName of ['cordisx', 'create-cordisx-plugin']) {
@@ -468,6 +468,23 @@ ctx.slots.registerCollection({
     'utf8',
   )
   await writeFile(
+    path.join(runnerDirectory, 'agent-avatar-ui-consumer.ts'),
+    `
+import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
+import { createElement } from 'cordisx/react'
+import { AgentAvatar, type AgentAvatarProps } from 'cordisx/ui'
+
+declare const avatar: AgentAvatarRef
+const props = {
+  participant: { id: 'reviewer', name: 'Reviewer', avatar },
+  fallback: 'initials',
+  'aria-label': 'Reviewer',
+} as const satisfies AgentAvatarProps
+createElement(AgentAvatar, props)
+`,
+    'utf8',
+  )
+  await writeFile(
     path.join(runnerDirectory, 'tsconfig.json'),
     `${
       JSON.stringify(
@@ -481,7 +498,12 @@ ctx.slots.registerCollection({
             noEmit: true,
             skipLibCheck: false,
           },
-          include: ['connector-consumer.ts', 'agent-session-consumer.ts', 'agent-loop-collection-consumer.ts'],
+          include: [
+            'connector-consumer.ts',
+            'agent-avatar-ui-consumer.ts',
+            'agent-session-consumer.ts',
+            'agent-loop-collection-consumer.ts',
+          ],
         },
         null,
         2,
@@ -944,7 +966,7 @@ ctx.slots.registerCollection({
   await verifyGeneratedEmbedded(embeddedIsolatedTarget, cordisxTarball, creatorManifest.version, ['solo'], false)
 
   console.log(
-    `[cordisx] installed tarballs verified: licenses, no OneWorks Avatar runtime dependency, combined multi-binding AgentLoop, executable v4 create/send concurrent replay/approval/introduction/cancel/subscription, owner documents, and generic raster navigation collection${
+    `[cordisx] installed tarballs verified: licenses, pinned Host-owned AgentAvatar runtime, combined multi-binding AgentLoop, executable v4 create/send concurrent replay/approval/introduction/cancel/subscription, owner documents, and generic raster navigation collection${
       protocolTarball === undefined ? '' : ', exact local Protocol'
     }, durable outbox reload, local AgentLoop provider composition, Connector consumer types, CLI, built-in README, both creator commands, standalone/workspace/embedded-isolated/embedded-workspace generated checks, Vite dev dry-run`,
   )

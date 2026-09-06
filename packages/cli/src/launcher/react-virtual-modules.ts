@@ -55,6 +55,7 @@ const REACT_EXPORTS = [
 
 const UI_EXPORTS = [
   'AttachmentPlaceholder',
+  'AgentAvatar',
   'Button',
   'Card',
   'EmptyState',

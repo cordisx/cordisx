@@ -1,4 +1,5 @@
 import * as React from 'react'
+import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import * as ReactDOM from 'react-dom'
 import * as ReactDOMClient from 'react-dom/client'
 import { createRoot, type Root } from 'react-dom/client'
@@ -15,6 +16,7 @@ import type {
 import { HostThemeProjection } from './host-theme.js'
 import { PublicMarkdownViewer } from './host-ui/PublicMarkdownViewer.js'
 import { PublicSelectionRail } from './host-ui/PublicSelectionRail.js'
+import { HostAgentAvatar } from './host-ui/conversation/AgentAvatar.js'
 import { HostIcon } from './host-ui/HostIcon.js'
 
 type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost'
@@ -78,6 +80,11 @@ interface AttachmentPlaceholderProps {
   readonly size?: 30 | 32
 }
 
+interface AgentAvatarProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, 'children'> {
+  readonly participant: Readonly<{ readonly id: string; readonly name: string; readonly avatar?: AgentAvatarRef }>
+  readonly fallback?: 'initials' | 'neutral'
+}
+
 const SHARED_REACT_STYLES = `
 .cxr-react-root{box-sizing:border-box;min-height:100%;padding:16px;color:var(--cx-text);font:14px/1.5 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .cxr-react-root *,.cxr-react-root *::before,.cxr-react-root *::after{box-sizing:border-box}
@@ -85,6 +92,7 @@ const SHARED_REACT_STYLES = `
 .cxr-ui-attachment-placeholder{display:inline-grid;inline-size:30px;block-size:30px;flex:0 0 30px;place-items:center;padding:0;border:1px solid var(--cx-border);border-radius:50%;background:transparent;color:var(--cx-muted);opacity:var(--cx-disabled,.5);cursor:not-allowed}
 .cxr-ui-attachment-placeholder[data-size="32"]{inline-size:32px;block-size:32px;flex-basis:32px}
 .cxr-ui-attachment-placeholder .cordisx-host-icon,.cxr-ui-attachment-placeholder .cordisx-host-icon>svg{inline-size:16px;block-size:16px}
+.cxr-ui-agent-avatar{display:inline-grid;width:32px;height:32px;place-items:center;overflow:hidden;border-radius:50%}.cxr-ui-agent-avatar>.cxa-avatar{width:100%;height:100%}
 .cxr-ui-card{min-width:0;padding:16px;border:1px solid var(--cx-border);border-radius:12px;background:var(--cx-surface-raised);color:var(--cx-text)}
 .cxr-ui-text{margin:0;color:var(--cx-text)}
 .cxr-ui-text[data-tone="muted"]{color:var(--cx-muted)}
@@ -355,6 +363,7 @@ export interface SharedReactRuntime {
   readonly jsxDevRuntime: typeof jsxDevRuntime
   readonly ui: Readonly<{
     AttachmentPlaceholder: typeof AttachmentPlaceholder
+    AgentAvatar: typeof AgentAvatar
     Button: typeof Button
     Card: typeof Card
     EmptyState: typeof EmptyState
@@ -444,6 +453,7 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
     jsxDevRuntime,
     ui: Object.freeze({
       AttachmentPlaceholder,
+      AgentAvatar,
       Button,
       Card,
       EmptyState,
@@ -491,5 +501,23 @@ export function AttachmentPlaceholder(
       'data-size': size,
     },
     React.createElement(HostIcon, { token: 'action.add', surfaceToken: 'host:new' }),
+  )
+}
+
+export function AgentAvatar(
+  { participant, fallback = 'initials', className, ...props }: AgentAvatarProps,
+) {
+  return React.createElement(
+    'span',
+    { ...props, className: ['cxr-ui-agent-avatar', className].filter(Boolean).join(' ') },
+    React.createElement(HostAgentAvatar, {
+      participant: {
+        id: participant.id,
+        role: 'agent',
+        name: participant.name,
+        ...(participant.avatar === undefined ? {} : { avatar: participant.avatar }),
+      },
+      fallback,
+    }),
   )
 }

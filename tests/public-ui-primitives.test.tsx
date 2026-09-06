@@ -1,10 +1,13 @@
+import { createGeneratedAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import React, { act, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { renderToString } from 'react-dom/server'
 import { JSDOM } from 'jsdom'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PublicMarkdownViewer } from '../packages/cli/src/renderer/host-ui/PublicMarkdownViewer.js'
 import { PublicSelectionRail } from '../packages/cli/src/renderer/host-ui/PublicSelectionRail.js'
-import { AttachmentPlaceholder } from '../packages/cli/src/renderer/react-runtime.js'
+import { AgentAvatar, AttachmentPlaceholder } from '../packages/cli/src/renderer/react-runtime.js'
+import { AgentAvatar as UnavailableAgentAvatar } from '../packages/cli/src/ui.js'
 
 interface TestGlobals {
   readonly document: typeof globalThis.document
@@ -33,6 +36,14 @@ function installDom(narrow = false): JSDOM {
       addEventListener() {},
       removeEventListener() {},
     }),
+  })
+  Object.defineProperty(dom.window, 'requestAnimationFrame', {
+    configurable: true,
+    value: (callback: FrameRequestCallback) => dom.window.setTimeout(() => callback(Date.now()), 0),
+  })
+  Object.defineProperty(dom.window, 'cancelAnimationFrame', {
+    configurable: true,
+    value: (handle: number) => dom.window.clearTimeout(handle),
   })
   Object.assign(globalThis, {
     document: dom.window.document,
@@ -64,6 +75,57 @@ function Rail({ layout = 'responsive' }: { readonly layout?: 'responsive' | 'ver
 }
 
 describe('public Host UI primitives', () => {
+  it('renders the public AgentAvatar through the Host resolver with unavailable and initials fallback boundaries', async () => {
+    expect(() =>
+      renderToString(
+        <UnavailableAgentAvatar participant={{ id: 'outside', name: 'Outside' }} />,
+      )
+    ).toThrow('AgentAvatar is available only inside the CordisX renderer Host')
+
+    const dom = installDom()
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    const generated = createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: 'reviewer' })
+    try {
+      await act(async () =>
+        root.render(
+          <AgentAvatar
+            data-public-agent-avatar="true"
+            participant={{ id: 'reviewer', name: 'Reviewer', avatar: generated }}
+          />,
+        )
+      )
+      await vi.waitFor(() =>
+        expect(
+          dom.window.document.querySelector('[data-avatar-kind="generated"]')?.getAttribute('data-avatar-state'),
+        ).toBe('resolved')
+      )
+      expect(dom.window.document.querySelector('.cxr-ui-agent-avatar>.cxa-avatar')).not.toBeNull()
+
+      await act(async () =>
+        root.render(
+          <AgentAvatar
+            participant={{
+              id: 'reviewer',
+              name: 'Reviewer',
+              avatar: {
+                kind: 'platform',
+                provider: 'codex',
+                identityRef: 'codex:agent.reviewer',
+              } as never,
+            }}
+          />,
+        )
+      )
+      const fallback = dom.window.document.querySelector<HTMLElement>('[data-avatar-kind="platform"]')!
+      expect(fallback.dataset.avatarCode).toBe('unsupported-provider')
+      expect(fallback.dataset.avatarState).toBe('fallback')
+      expect(fallback.textContent).toBe('RE')
+    } finally {
+      await act(async () => root.unmount())
+      dom.window.close()
+    }
+  })
+
   it('renders the attachment seat as disabled presentation with no command surface', async () => {
     const dom = installDom()
     const root = createRoot(dom.window.document.getElementById('root')!)
