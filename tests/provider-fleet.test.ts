@@ -149,6 +149,32 @@ describe('Provider Fleet', () => {
     await fleet.close()
   })
 
+  it('routes pagination through the current registry across replacement and rollback', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-fleet-pagination-'))
+    const calls: { provider: string; method: string; params: unknown }[] = []
+    let generation = 0
+    const fleet = await ProviderFleet.create([config(root, 'alpha')], {
+      startServer: async () => server(`alpha-${++generation}`, calls),
+    })
+    const first = await fleet.listTasks({ limit: 1 })
+    if (!first.ok || first.value.nextCursor === undefined) throw new Error('missing cursor')
+    const replacement = await fleet.reconfigure([config(root, 'alpha')])
+    expect(await fleet.listTasks({ limit: 1, cursor: first.value.nextCursor })).toMatchObject({
+      ok: false,
+      error: { code: 'adapter-unavailable' },
+    })
+    expect(await fleet.listTasks({ limit: 1 })).toMatchObject({ ok: true })
+    expect(calls.at(-1)?.provider).toBe('alpha-2')
+    await replacement.rollback()
+    expect(await fleet.listTasks({ limit: 1 })).toMatchObject({ ok: true })
+    expect(calls.at(-1)?.provider).toBe('alpha-1')
+    const next = await fleet.reconfigure([config(root, 'alpha')])
+    await next.finalize()
+    expect(await fleet.listTasks({ limit: 1 })).toMatchObject({ ok: true })
+    expect(calls.at(-1)?.provider).toBe('alpha-3')
+    await fleet.close()
+  })
+
   it('normalizes id-less provider lifecycle notifications into replayable launcher events without retaining raw frames', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-fleet-'))
     let notify: ((method: string, params: unknown) => void) | undefined
