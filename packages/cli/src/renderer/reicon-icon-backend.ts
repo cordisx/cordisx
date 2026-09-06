@@ -33,6 +33,7 @@ import Export from 'reicon/icons/Export'
 import File from 'reicon/icons/File'
 import Floppy from 'reicon/icons/Floppy'
 import Folder from 'reicon/icons/Folder'
+import FolderOpen from 'reicon/icons/FolderOpen'
 import History from 'reicon/icons/History'
 import HandHeart from 'reicon/icons/HandHeart'
 import InfoCircle from 'reicon/icons/InfoCircle'
@@ -148,6 +149,8 @@ const REICON_GLYPHS = Object.freeze(
 export const BUILTIN_HOST_SURFACE_ICON_KEYS = [
   'host:archive',
   'host:chat',
+  'host:file',
+  'host:folder-open',
   'host:hierarchy',
   'host:link',
   'host:marketplace',
@@ -163,6 +166,8 @@ const HOST_SURFACE_GLYPHS = Object.freeze(
   {
     'host:archive': ArchiveBox,
     'host:chat': Chat,
+    'host:file': File,
+    'host:folder-open': FolderOpen,
     'host:hierarchy': DiagramTree,
     'host:link': Link,
     'host:marketplace': Shop,

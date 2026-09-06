@@ -5,8 +5,9 @@ import { renderToString } from 'react-dom/server'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PublicMarkdownViewer } from '../packages/cli/src/renderer/host-ui/PublicMarkdownViewer.js'
+import { HorizontalSplitPane } from '../packages/cli/src/renderer/host-ui/HorizontalSplitPane.js'
 import { PublicSelectionRail } from '../packages/cli/src/renderer/host-ui/PublicSelectionRail.js'
-import { AgentAvatar, AttachmentPlaceholder } from '../packages/cli/src/renderer/react-runtime.js'
+import { AgentAvatar, AttachmentPlaceholder, Icon } from '../packages/cli/src/renderer/react-runtime.js'
 import { AgentAvatar as UnavailableAgentAvatar } from '../packages/cli/src/ui.js'
 
 interface TestGlobals {
@@ -75,6 +76,146 @@ function Rail({ layout = 'responsive' }: { readonly layout?: 'responsive' | 'ver
 }
 
 describe('public Host UI primitives', () => {
+  it('renders canonical Reicon folder state and file semantics without a disclosure glyph', async () => {
+    const dom = installDom()
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    const TreeIcon = ({ expanded }: { readonly expanded: boolean }) => (
+      <div role="treeitem" aria-expanded={expanded}>
+        <Icon name={expanded ? 'folder-open' : 'folder'} />
+        <span>src</span>
+      </div>
+    )
+    try {
+      await act(async () => root.render(<TreeIcon expanded={false} />))
+      const folder = dom.window.document.querySelector('[data-host-icon="host:folder"]')!
+      expect(folder.querySelector('svg')?.getAttribute('data-host-icon-provider')).toBe('builtin:reicon')
+      const closedGlyph = folder.querySelector('svg')?.innerHTML
+      expect(dom.window.document.querySelectorAll('.cordisx-host-icon')).toHaveLength(1)
+
+      await act(async () => root.render(<TreeIcon expanded />))
+      const openFolder = dom.window.document.querySelector('[data-host-icon="host:folder-open"]')!
+      expect(openFolder.querySelector('svg')?.getAttribute('data-host-icon-provider')).toBe('builtin:reicon')
+      expect(openFolder.querySelector('svg')?.innerHTML).not.toBe(closedGlyph)
+      expect(dom.window.document.querySelector('[role="treeitem"]')?.getAttribute('aria-expanded')).toBe('true')
+      expect(dom.window.document.querySelectorAll('.cordisx-host-icon')).toHaveLength(1)
+
+      await act(async () => root.render(<Icon name="file" />))
+      expect(
+        dom.window.document.querySelector('[data-host-icon="host:file"] svg')?.getAttribute('data-host-icon-provider'),
+      ).toBe('builtin:reicon')
+    } finally {
+      await act(async () => root.unmount())
+      dom.window.close()
+    }
+  })
+
+  it('owns split-pane clamping, separator keyboard controls, focus, and pane overflow boundaries', async () => {
+    const dom = installDom()
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ width: 640, height: 480, x: 0, y: 0, top: 0, right: 640, bottom: 480, left: 0 }),
+    })
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    try {
+      await act(async () =>
+        root.render(
+          <HorizontalSplitPane
+            initialLeftSize={270}
+            minLeftSize={220}
+            maxLeftSize={360}
+            separatorLabel="Prompts"
+            left={<nav>Tree</nav>}
+            right={<div role="tabpanel">Prompt</div>}
+          />,
+        )
+      )
+      const split = dom.window.document.querySelector<HTMLElement>('.cxr-ui-horizontal-split-pane')!
+      const separator = dom.window.document.querySelector<HTMLElement>('[role="separator"]')!
+      expect(split.style.gridTemplateColumns).toBe('270px 9px minmax(0,1fr)')
+      expect(separator.getAttribute('aria-orientation')).toBe('vertical')
+      expect(separator.getAttribute('aria-valuemin')).toBe('220')
+      expect(separator.getAttribute('aria-valuemax')).toBe('360')
+      expect(separator.tabIndex).toBe(0)
+      expect(dom.window.document.querySelectorAll('.cxr-ui-horizontal-split-pane__pane')).toHaveLength(2)
+
+      separator.focus()
+      await act(async () =>
+        separator.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+      )
+      expect(separator.getAttribute('aria-valuenow')).toBe('278')
+      await act(async () =>
+        separator.dispatchEvent(
+          new dom.window.KeyboardEvent('keydown', {
+            key: 'ArrowRight',
+            shiftKey: true,
+            bubbles: true,
+          }),
+        )
+      )
+      expect(separator.getAttribute('aria-valuenow')).toBe('310')
+      await act(async () =>
+        separator.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+      )
+      expect(separator.getAttribute('aria-valuenow')).toBe('360')
+      await act(async () =>
+        separator.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
+      )
+      expect(separator.getAttribute('aria-valuenow')).toBe('220')
+      expect(dom.window.document.activeElement).toBe(separator)
+    } finally {
+      await act(async () => root.unmount())
+      dom.window.close()
+    }
+  })
+
+  it('captures pointer drag authority and clamps movement to configured bounds', async () => {
+    const dom = installDom()
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ width: 640, height: 480, x: 0, y: 0, top: 0, right: 640, bottom: 480, left: 0 }),
+    })
+    const root = createRoot(dom.window.document.getElementById('root')!)
+    try {
+      await act(async () =>
+        root.render(
+          <HorizontalSplitPane
+            initialLeftSize={270}
+            minLeftSize={220}
+            maxLeftSize={360}
+            separatorLabel="Prompts"
+            left={<nav>Tree</nav>}
+            right={<div>Prompt</div>}
+          />,
+        )
+      )
+      const separator = dom.window.document.querySelector<HTMLElement>('[role="separator"]')!
+      let captured: number | undefined
+      Object.assign(separator, {
+        setPointerCapture: (pointerId: number) => {
+          captured = pointerId
+        },
+        hasPointerCapture: (pointerId: number) => captured === pointerId,
+        releasePointerCapture: () => {
+          captured = undefined
+        },
+      })
+      const pointer = (type: string, clientX: number): Event => {
+        const event = new dom.window.MouseEvent(type, { bubbles: true, button: 0, clientX })
+        Object.defineProperty(event, 'pointerId', { value: 7 })
+        return event
+      }
+      await act(async () => separator.dispatchEvent(pointer('pointerdown', 270)))
+      expect(captured).toBe(7)
+      await act(async () => separator.dispatchEvent(pointer('pointermove', 500)))
+      expect(separator.getAttribute('aria-valuenow')).toBe('360')
+      await act(async () => separator.dispatchEvent(pointer('pointerup', 500)))
+      expect(captured).toBeUndefined()
+    } finally {
+      await act(async () => root.unmount())
+      dom.window.close()
+    }
+  })
+
   it('renders the public AgentAvatar through the Host resolver with unavailable and initials fallback boundaries', async () => {
     expect(() =>
       renderToString(

@@ -33,10 +33,19 @@ export interface EmptyStateProps extends Omit<React.HTMLAttributes<HTMLDivElemen
   readonly action?: React.ReactNode
 }
 
-export type IconName = CordisXConfigFormIcon | 'search' | 'create' | 'success'
+export type IconName = CordisXConfigFormIcon | 'search' | 'create' | 'success' | 'folder' | 'folder-open' | 'file'
 
 export interface IconProps extends React.HTMLAttributes<HTMLSpanElement> {
   readonly name: IconName
+}
+
+export interface HorizontalSplitPaneProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'children'> {
+  readonly left: React.ReactNode
+  readonly right: React.ReactNode
+  readonly initialLeftSize: number
+  readonly minLeftSize: number
+  readonly maxLeftSize?: number
+  readonly separatorLabel: string
 }
 
 export interface SelectOption {
@@ -101,6 +110,7 @@ export const Card = HostComponent<CardProps>('Card')
 export const EmptyState = HostComponent<EmptyStateProps>('EmptyState')
 export const Heading = HostComponent<HeadingProps>('Heading')
 export const Icon = HostComponent<IconProps>('Icon')
+export const HorizontalSplitPane = HostComponent<HorizontalSplitPaneProps>('HorizontalSplitPane')
 export const Select = HostComponent<SelectProps>('Select')
 export const SelectionRail = HostComponent<SelectionRailProps>('SelectionRail')
 export const MarkdownViewer = HostComponent<MarkdownViewerProps>('MarkdownViewer')
