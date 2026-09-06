@@ -379,7 +379,9 @@ describe('plugin generation native browser graph', () => {
   head: document.head !== null,
   body: document.body !== null,
 };\n${source}`,
-      }, 30_000) as { readonly identifier?: string }
+        // Chrome parses the complete Host renderer bundle before acknowledging
+        // this registration. Keep it bounded above the default CDP request budget.
+      }, 60_000) as { readonly identifier?: string }
       expect(registration.identifier).toBeTypeOf('string')
       await cdp.send('Page.navigate', { url: documentUrl })
       await expect.poll(async () => {
@@ -420,7 +422,7 @@ describe('plugin generation native browser graph', () => {
         )
       }
     }
-  }, 60_000)
+  }, 90_000)
 
   nativeIt('requires a new strict-CSP document before a loopback graph can load', async () => {
     if (chrome === undefined) throw new Error('Chrome executable disappeared after test discovery')
