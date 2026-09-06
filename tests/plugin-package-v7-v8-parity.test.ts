@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
@@ -24,24 +25,53 @@ import {
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 
-async function readOwnedSourceRoute(relative: string): Promise<string> {
+async function readOwnedSourceRoute(relative: string): Promise<ts.SourceFile[]> {
   const pending = [path.join(root, relative)]
   const visited = new Set<string>()
-  const sources: string[] = []
+  const sources: ts.SourceFile[] = []
   const stem = path.basename(relative, '.ts')
   while (pending.length > 0) {
     const filename = pending.pop()!
     if (visited.has(filename)) continue
     visited.add(filename)
     const source = await readFile(filename, 'utf8')
-    sources.push(source)
+    sources.push(ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS))
     for (const match of source.matchAll(/from\s+['"](\.\/[^'"]+)['"]/gu)) {
       const specifier = match[1]!
       if (!path.basename(specifier).startsWith(stem)) continue
       pending.push(path.resolve(path.dirname(filename), specifier.replace(/\.js$/u, '.ts')))
     }
   }
-  return sources.join('\n')
+  return sources
+}
+
+function calledIdentifiers(sources: readonly ts.SourceFile[]): Set<string> {
+  const names = new Set<string>()
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) names.add(node.expression.text)
+    ts.forEachChild(node, visit)
+  }
+  for (const source of sources) visit(source)
+  return names
+}
+
+function typeReferences(sources: readonly ts.SourceFile[]): Set<string> {
+  const names = new Set<string>()
+  const visit = (node: ts.Node): void => {
+    if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName)) names.add(node.typeName.text)
+    ts.forEachChild(node, visit)
+  }
+  for (const source of sources) visit(source)
+  return names
+}
+
+function declaredFunction(sources: readonly ts.SourceFile[], name: string): ts.FunctionDeclaration {
+  for (const source of sources) {
+    for (const statement of source.statements) {
+      if (ts.isFunctionDeclaration(statement) && statement.name?.text === name) return statement
+    }
+  }
+  throw new Error(`missing function ${name}`)
 }
 
 describe('plugin package v7/v8 predecessor and successor parity', () => {
@@ -96,16 +126,21 @@ describe('plugin package v7/v8 predecessor and successor parity', () => {
         'packages/cli/src/launcher/development.ts',
         'packages/cli/src/launcher/plugin-package.ts',
         'packages/cli/src/launcher/plugin-lifecycle.ts',
-        'packages/cli/src/launcher/vite-development.ts',
-        'packages/cli/src/renderer/runtime.ts',
       ]
     ) {
-      const source = await readOwnedSourceRoute(relative)
-      expect(source).toContain('V7')
-      expect(source).toContain('V8')
+      const calls = calledIdentifiers(await readOwnedSourceRoute(relative))
+      expect(calls).toContain('normalizePluginManifestV7')
+      expect(calls).toContain('normalizePluginManifestV8')
     }
-    const runtime = await readFile(path.join(root, 'packages/cli/src/renderer/runtime.ts'), 'utf8')
-    expect(runtime).toContain('prepareCordisXViteReactRuntime')
-    expect(runtime).toContain('manifestUsesTransientCanvas')
+    const viteTypes = typeReferences(await readOwnedSourceRoute('packages/cli/src/launcher/vite-development.ts'))
+    expect(viteTypes).toContain('CordisXPluginManifestV7')
+    expect(viteTypes).toContain('CordisXPluginManifestV8')
+
+    const runtime = await readOwnedSourceRoute('packages/cli/src/renderer/runtime.ts')
+    const runtimeCalls = calledIdentifiers(runtime)
+    expect(runtimeCalls).toContain('prepareCordisXViteReactRuntime')
+    expect(runtimeCalls).toContain('manifestUsesTransientCanvas')
+    expect(declaredFunction(runtime, 'manifestUsesHostDom').body?.getText()).toMatch(/schemaVersion\s*===\s*8/u)
+    expect(declaredFunction(runtime, 'manifestUsesTransientCanvas').body?.getText()).toMatch(/schemaVersion\s*===\s*7/u)
   })
 })
