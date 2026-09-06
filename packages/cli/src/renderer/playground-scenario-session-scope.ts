@@ -15,6 +15,12 @@ import type {
   AgentAdmissionBootstrapRouteContinuation,
   AgentAdmissionBootstrapRouteTarget,
 } from '@cordisx/protocol/agent-admission/v6'
+import type {
+  AgentPageAdmissionRouteClaimReceipt,
+  AgentPageAdmissionRouteTarget,
+  AgentPageAdmissionTarget,
+  AgentPageComposerOrigin,
+} from '@cordisx/protocol/agent-page-admission/v2'
 import type { AgentRuntimeRouteScope } from './platform.js'
 
 export type PlaygroundScenarioSessionScopeClosedCode =
@@ -150,6 +156,7 @@ interface ConversationOriginRecord extends PlaygroundScenarioConversationOrigin 
 }
 
 interface CapturedSourceRecord {
+  readonly kind: 'conversation'
   readonly key: string
   readonly origin: ConversationOriginRecord
   readonly owner: PluginOwnerIdentity
@@ -173,9 +180,39 @@ interface CapturedSourceRecord {
   scenarioRunId?: string
 }
 
+/**
+ * Host-only page-composer source. It is separate from Shell command origins:
+ * a plugin can never invoke a claim or supply this liveness callback.
+ */
+interface PageCapturedSourceRecord {
+  readonly kind: 'page'
+  readonly key: string
+  readonly owner: PluginOwnerIdentity
+  readonly origin: AgentPageComposerOrigin
+  readonly target: AgentPageAdmissionTarget | AgentPageAdmissionRouteTarget
+  /** Mount liveness after the command settles; distinct from pre-submit command liveness. */
+  readonly originActive: () => boolean
+  readonly commandActive: () => boolean
+  readonly sourceMessageId: string
+  readonly sourceSessionId: string
+  readonly roomRunId: string
+  readonly permissionRoute: Readonly<{ readonly routeId: string; readonly path: string }>
+  readonly connectionGeneration: number
+  readonly fresh: boolean
+  claimed?: {
+    readonly receipt: AgentPageAdmissionRouteClaimReceipt
+    readonly active: () => boolean
+  }
+  active: boolean
+  committed: boolean
+  scenarioRunId?: string
+}
+
+type CapturedScenarioSource = CapturedSourceRecord | PageCapturedSourceRecord
+
 interface ActivationRecord {
   readonly runId: string
-  readonly source: CapturedSourceRecord | undefined
+  readonly source: CapturedScenarioSource | undefined
   readonly sourceSessionId: string
   readonly targetSessionId: string
   readonly route: AgentRuntimeRouteScope
@@ -206,6 +243,7 @@ function sourceKey(sessionId: string, messageId: string): string {
 export class PlaygroundScenarioSessionScopeAuthority {
   private readonly commandOrigins = new Set<ConversationOriginRecord>()
   private readonly sources = new Map<string, CapturedSourceRecord>()
+  private readonly pageSources = new Map<string, PageCapturedSourceRecord>()
   private current?: ActivationRecord
   private disposed = false
 
@@ -267,8 +305,9 @@ export class PlaygroundScenarioSessionScopeAuthority {
       return undefined
     }
     const key = sourceKey(sessionId, messageId)
-    if (this.sources.has(key)) return undefined
+    if (this.sourceFor(key) !== undefined) return undefined
     const source: CapturedSourceRecord = {
+      kind: 'conversation',
       key,
       origin,
       owner: Object.freeze({ ...owner }),
@@ -358,6 +397,118 @@ export class PlaygroundScenarioSessionScopeAuthority {
       agentGeneration,
       messageId,
     )
+  }
+
+  /**
+   * Host-only page-admission capture. A fresh page target is deliberately not
+   * usable by scenario work until the page lifecycle has atomically claimed
+   * its exact destination binding.
+   */
+  capturePageAdmission(
+    owner: PluginOwnerIdentity,
+    origin: AgentPageComposerOrigin,
+    target: AgentPageAdmissionTarget | AgentPageAdmissionRouteTarget,
+    sessionId: string,
+    agentGeneration: number,
+    messageId: string,
+    commandActive: () => boolean,
+    originActive: () => boolean,
+  ): PlaygroundScenarioSubmissionCapture | undefined {
+    if (
+      this.disposed || !this.validPageOrigin(origin) || !this.validPageTarget(target)
+      || !opaque(sessionId) || !opaque(messageId) || !Number.isSafeInteger(agentGeneration)
+      || agentGeneration < 1 || typeof commandActive !== 'function' || typeof originActive !== 'function'
+      || !commandActive() || !originActive()
+      || !sameOwner(this.options.ownerForSession(sessionId), owner)
+    ) return undefined
+    const fresh = this.pageRouteTarget(target)
+    if (
+      fresh
+        ? origin.page.roomId !== undefined
+          || target.route.outlet !== origin.page.outlet
+          || target.route.routeDefinitionId === origin.page.routeDefinitionId
+        : origin.page.roomId !== target.roomId
+    ) return undefined
+    const permissionRoute = this.options.permissionRoute(owner, 'approvals.request')
+    if (permissionRoute === undefined || !opaque(permissionRoute.routeId) || !opaque(permissionRoute.path)) {
+      return undefined
+    }
+    const key = sourceKey(sessionId, messageId)
+    if (this.sourceFor(key) !== undefined) return undefined
+    const source: PageCapturedSourceRecord = {
+      kind: 'page',
+      key,
+      owner: Object.freeze({ ...owner }),
+      origin: Object.freeze(structuredClone(origin)),
+      target: Object.freeze(structuredClone(target)),
+      originActive,
+      commandActive,
+      sourceMessageId: messageId,
+      sourceSessionId: sessionId,
+      roomRunId: target.runId,
+      permissionRoute: Object.freeze({ ...permissionRoute }),
+      connectionGeneration: this.options.connectionGeneration(),
+      fresh,
+      active: true,
+      committed: false,
+    }
+    this.pageSources.set(key, source)
+    let open = true
+    let closed = false
+    return Object.freeze({
+      active: () =>
+        open && !closed && this.pageSources.get(key) === source && source.active && !this.disposed
+        && commandActive() && source.connectionGeneration === this.options.connectionGeneration()
+        && sameOwner(this.options.ownerForSession(sessionId), owner),
+      commit: () => {
+        if (!open || closed) return
+        open = false
+        if (this.pageSources.get(key) !== source || !source.active) return
+        if (
+          !commandActive() || this.disposed || !sameOwner(this.options.ownerForSession(sessionId), owner)
+          || source.connectionGeneration !== this.options.connectionGeneration()
+        ) {
+          this.retireSource(source, 'stale')
+          return
+        }
+        source.committed = true
+      },
+      close: () => {
+        if (closed) return
+        closed = true
+        open = false
+        this.retireSource(source, 'completed')
+      },
+    })
+  }
+
+  /**
+   * Host-only page destination claim. The receipt is created by the admitted
+   * page lifecycle; plugins have neither this method nor the binding callback.
+   */
+  claimPageAdmission(
+    owner: PluginOwnerIdentity,
+    receipt: AgentPageAdmissionRouteClaimReceipt,
+    bindingActive: () => boolean,
+  ): boolean {
+    if (
+      this.disposed || !this.validPageClaimReceipt(receipt) || typeof bindingActive !== 'function' || !bindingActive()
+      || !sameOwner(receipt.owner, owner)
+    ) return false
+    const source = this.pageSources.get(sourceKey(receipt.source.sessionId, receipt.source.messageId))
+    if (
+      source === undefined || !source.active || !source.committed || !source.fresh || source.claimed !== undefined
+      || !sameOwner(source.owner, owner) || !this.samePageOrigin(source.origin, receipt.origin)
+      || !this.samePageTarget(source.target, receipt.target)
+      || receipt.binding.binding.bindingId === source.origin.binding.bindingId
+      || receipt.binding.generation !== source.origin.generation
+      || !this.pageRouteTarget(source.target)
+      || !this.samePageRoute(source.target.route, receipt.binding.route)
+      || !sameOwner(this.options.ownerForSession(source.sourceSessionId), source.owner)
+      || source.connectionGeneration !== this.options.connectionGeneration()
+    ) return false
+    source.claimed = Object.freeze({ receipt: Object.freeze(structuredClone(receipt)), active: bindingActive })
+    return true
   }
 
   /** Shell v9/v4 declares a newly materialized target while its bootstrap command is live. */
@@ -471,8 +622,9 @@ export class PlaygroundScenarioSessionScopeAuthority {
       return undefined
     }
     const key = sourceKey(sessionId, messageId)
-    if (this.sources.has(key)) return undefined
+    if (this.sourceFor(key) !== undefined) return undefined
     const source: CapturedSourceRecord = {
+      kind: 'conversation',
       key,
       origin,
       owner: Object.freeze({ ...owner }),
@@ -578,8 +730,9 @@ export class PlaygroundScenarioSessionScopeAuthority {
       return undefined
     }
     const key = sourceKey(sessionId, messageId)
-    if (this.sources.has(key)) return undefined
+    if (this.sourceFor(key) !== undefined) return undefined
     const source: CapturedSourceRecord = {
+      kind: 'conversation',
       key,
       origin,
       owner: Object.freeze({ ...owner }),
@@ -754,9 +907,102 @@ export class PlaygroundScenarioSessionScopeAuthority {
       && value.schemaVersion === 6 && opaque(value.token)
   }
 
-  private sourceLive(source: CapturedSourceRecord): boolean {
+  private validPageOrigin(origin: AgentPageComposerOrigin | undefined): origin is AgentPageComposerOrigin {
+    return origin !== undefined
+      && origin.$schema
+        === 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-page-composer-origin.v1.schema.json'
+      && origin.contract === 'cordisx.agent-page-composer-origin/v1' && origin.schemaVersion === 1
+      && opaque(origin.originId) && opaque(origin.binding.bindingId) && opaque(origin.binding.ownerGeneration)
+      && opaque(origin.generation) && opaque(origin.executionId) && opaque(origin.commandId)
+      && origin.scope === 'page-composer-submit' && opaque(origin.page.outlet)
+      && opaque(origin.page.routeDefinitionId)
+      && (origin.page.roomId === undefined || opaque(origin.page.roomId))
+  }
+
+  private samePageOrigin(left: AgentPageComposerOrigin, right: AgentPageComposerOrigin): boolean {
+    return left.originId === right.originId && left.binding.bindingId === right.binding.bindingId
+      && left.binding.ownerGeneration === right.binding.ownerGeneration && left.generation === right.generation
+      && left.executionId === right.executionId && left.commandId === right.commandId && left.scope === right.scope
+      && left.page.outlet === right.page.outlet && left.page.routeDefinitionId === right.page.routeDefinitionId
+      && left.page.roomId === right.page.roomId
+  }
+
+  private validPageTarget(
+    target: AgentPageAdmissionTarget | AgentPageAdmissionRouteTarget | undefined,
+  ): target is AgentPageAdmissionTarget | AgentPageAdmissionRouteTarget {
+    return target !== undefined && opaque(target.roomId) && opaque(target.participantId)
+      && opaque(target.memberId) && opaque(target.runId)
+      && (!this.pageRouteTarget(target)
+        || opaque(target.route.outlet) && opaque(target.route.routeDefinitionId) && target.route.param === 'roomId'
+          && opaque(target.route.roomId) && target.route.roomId === target.roomId)
+  }
+
+  private pageRouteTarget(
+    target: AgentPageAdmissionTarget | AgentPageAdmissionRouteTarget,
+  ): target is AgentPageAdmissionRouteTarget {
+    return 'route' in target
+  }
+
+  private samePageTarget(
+    left: AgentPageAdmissionTarget | AgentPageAdmissionRouteTarget,
+    right: AgentPageAdmissionTarget | AgentPageAdmissionRouteTarget,
+  ): boolean {
+    if (
+      left.roomId !== right.roomId || left.participantId !== right.participantId
+      || left.memberId !== right.memberId || left.runId !== right.runId
+      || this.pageRouteTarget(left) !== this.pageRouteTarget(right)
+    ) return false
+    return !this.pageRouteTarget(left) || !this.pageRouteTarget(right)
+      || this.samePageRoute(left.route, right.route)
+  }
+
+  private samePageRoute(
+    left: AgentPageAdmissionRouteTarget['route'],
+    right: AgentPageAdmissionRouteTarget['route'],
+  ): boolean {
+    return left.outlet === right.outlet && left.routeDefinitionId === right.routeDefinitionId
+      && left.param === right.param && left.roomId === right.roomId
+  }
+
+  private validPageClaimReceipt(
+    receipt: AgentPageAdmissionRouteClaimReceipt | undefined,
+  ): receipt is AgentPageAdmissionRouteClaimReceipt {
+    return receipt !== undefined
+      && receipt.$schema
+        === 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-page-admission-route-claim-receipt.v1.schema.json'
+      && receipt.contract === 'cordisx.agent-page-admission-route-claim-receipt/v1'
+      && receipt.schemaVersion === 1 && opaque(receipt.receiptId)
+      && opaque(receipt.owner.pluginId) && Number.isSafeInteger(receipt.owner.generation)
+      && receipt.owner.generation >= 1
+      && this.validPageOrigin(receipt.origin) && this.validPageTarget(receipt.target)
+      && this.pageRouteTarget(receipt.target)
+      && opaque(receipt.binding.binding.bindingId) && opaque(receipt.binding.binding.ownerGeneration)
+      && opaque(receipt.binding.generation) && this.samePageRoute(receipt.target.route, receipt.binding.route)
+      && opaque(receipt.source.sessionId) && opaque(receipt.source.messageId)
+  }
+
+  private allSources(): readonly CapturedScenarioSource[] {
+    return [...this.sources.values(), ...this.pageSources.values()]
+  }
+
+  private sourceFor(key: string): CapturedScenarioSource | undefined {
+    return this.sources.get(key) ?? this.pageSources.get(key)
+  }
+
+  private sourceAwaitingRouteClaim(source: CapturedScenarioSource): boolean {
+    return source.kind === 'conversation'
+      ? source.routeContinuation?.state === 'pending-route-claim'
+      : source.fresh && source.claimed === undefined
+  }
+
+  private sourceLive(source: CapturedScenarioSource): boolean {
     if (!source.active || this.disposed || source.connectionGeneration !== this.options.connectionGeneration()) {
       return false
+    }
+    if (source.kind === 'page') {
+      if (!sameOwner(this.options.ownerForSession(source.sourceSessionId), source.owner)) return false
+      if (!source.fresh) return source.originActive()
+      return source.claimed !== undefined && source.claimed.active()
     }
     const route = source.routeContinuation
     if (route?.state === 'pending-route-claim') return false
@@ -829,7 +1075,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
     const source = this.current?.source
     if (
       source !== undefined
-      && (!source.active || source.routeContinuation?.state !== 'pending-route-claim' && !this.sourceLive(source))
+      && (!source.active || !this.sourceAwaitingRouteClaim(source) && !this.sourceLive(source))
     ) {
       this.retireSource(source, 'route-replaced')
     }
@@ -839,7 +1085,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
     sessionId: string,
     code: Exclude<PlaygroundScenarioSessionScopeClosedCode, 'completed' | 'authorization-unavailable' | 'disposed'>,
   ): void {
-    for (const source of [...this.sources.values()]) {
+    for (const source of this.allSources()) {
       if (source.active && source.sourceSessionId === sessionId) this.retireSource(source, code)
     }
     const current = this.current
@@ -849,7 +1095,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
   closeRun(runId: string): void {
     const current = this.current
     if (current?.active === true && current.runId === runId) this.retire(current, 'completed')
-    for (const source of [...this.sources.values()]) {
+    for (const source of this.allSources()) {
       if (source.scenarioRunId === runId) this.retireSource(source, 'completed')
     }
   }
@@ -859,7 +1105,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
     this.disposed = true
     const current = this.current
     if (current?.active === true) this.retire(current, 'disposed')
-    for (const source of [...this.sources.values()]) this.retireSource(source, 'disposed')
+    for (const source of this.allSources()) this.retireSource(source, 'disposed')
     this.commandOrigins.clear()
   }
 
@@ -932,6 +1178,17 @@ export class PlaygroundScenarioSessionScopeAuthority {
       if (route?.state === 'claimed') continue
       this.retireSource(source, code)
     }
+    for (const source of [...this.pageSources.values()]) {
+      const claimed = source.claimed
+      if (claimed?.receipt.binding.binding.bindingId === bindingId) {
+        this.retireSource(source, code)
+        continue
+      }
+      if (source.origin.binding.bindingId !== bindingId) continue
+      // Only a committed fresh-page source may await its exact Host claim.
+      if (code === 'route-replaced' && source.fresh && source.committed && claimed === undefined) continue
+      this.retireSource(source, code)
+    }
   }
 
   private async activate(
@@ -963,7 +1220,7 @@ export class PlaygroundScenarioSessionScopeAuthority {
       ) return Object.freeze({ status: 'available', handle: prior.handle })
       return this.unavailable('activation-conflict', 'Another Playground scenario Session scope is already active.')
     }
-    const source = this.sources.get(sourceKey(input.sourceSessionId, input.sourceMessageId))
+    const source = this.sourceFor(sourceKey(input.sourceSessionId, input.sourceMessageId))
     if (source === undefined) {
       return this.unavailable(
         'source-route-unavailable',
@@ -1062,16 +1319,20 @@ export class PlaygroundScenarioSessionScopeAuthority {
 
   private release(input: Readonly<{ sourceMessageId: string; sourceSessionId: string; runId: string }>): void {
     if (!opaque(input.sourceMessageId) || !opaque(input.sourceSessionId) || !opaque(input.runId)) return
-    const source = this.sources.get(sourceKey(input.sourceSessionId, input.sourceMessageId))
+    const source = this.sourceFor(sourceKey(input.sourceSessionId, input.sourceMessageId))
     if (source === undefined || source.scenarioRunId !== undefined && source.scenarioRunId !== input.runId) return
     if (this.current?.source === source && this.current.active) this.retire(this.current, 'completed')
     this.retireSource(source, 'completed')
   }
 
-  private retireSource(source: CapturedSourceRecord, code: PlaygroundScenarioSessionScopeClosedCode | 'stale'): void {
+  private retireSource(source: CapturedScenarioSource, code: PlaygroundScenarioSessionScopeClosedCode | 'stale'): void {
     if (!source.active) return
     source.active = false
-    if (this.sources.get(source.key) === source) this.sources.delete(source.key)
+    if (source.kind === 'conversation') {
+      if (this.sources.get(source.key) === source) this.sources.delete(source.key)
+    } else if (this.pageSources.get(source.key) === source) {
+      this.pageSources.delete(source.key)
+    }
     const current = this.current
     if (current?.source === source && current.active) this.retire(current, code === 'stale' ? 'route-replaced' : code)
   }

@@ -51,6 +51,8 @@ import { type CodexAdapterHandle, installCodexAdapter, installPlaygroundAdapter 
 import { UnavailableCodexHostAdapter } from '../adapters/codex-agent.js'
 import { createCodexAgentConnector } from '../adapters/codex-agent-connector.js'
 import { CordisXHostAgentRuntime, CordisXSystemPromptService } from './agent.js'
+import { PageAdmissionBindingRegistry } from './page-admission-lifecycle.js'
+import { createPageComposerAdapter } from './page-admission-adapter.js'
 import {
   CordisXAgentAdmissionBootstrapReservationService,
   CordisXAgentAdmissionBootstrapRoomReservationService,
@@ -61,6 +63,11 @@ import {
   CordisXAgentAdmissionReservationService,
   CordisXAgentAdmissionTargetOriginService,
   CordisXAgentAdmissionTargetReservationService,
+  CordisXAgentPageAdmissionReservationService,
+  CordisXAgentPageAdmissionRouteDeclarationService,
+  CordisXAgentPageAdmissionRouteReservationService,
+  CordisXAgentPageAdmissionTargetService,
+  CordisXAgentPageFreshRoomNavigationService,
   CordisXAgentRegistryServiceV1,
   CordisXAgentSessionRuntime,
   CordisXApprovalServiceV1,
@@ -343,6 +350,11 @@ interface PluginController {
   agentAdmissionBootstrapRoomReservationFiber?: Fiber
   agentAdmissionBootstrapRouteDeclarationFiber?: Fiber
   agentAdmissionBootstrapRouteReservationFiber?: Fiber
+  agentPageAdmissionTargetFiber?: Fiber
+  agentPageAdmissionReservationFiber?: Fiber
+  agentPageAdmissionRouteDeclarationFiber?: Fiber
+  agentPageAdmissionRouteReservationFiber?: Fiber
+  agentPageFreshRoomNavigationFiber?: Fiber
   unregisterAgentSessionMigration?: () => void
   fiber?: Fiber
   status: ManagerPluginStatus
@@ -920,6 +932,7 @@ async function start(
     const configRenderers = new ConfigRendererRegistry(generationVisibility)
     const agentRuntime = new CordisXHostAgentRuntime({ adapter: agentAdapter, broker, generation })
     let routeService: CordisXRouteService | undefined
+    let disposePageAdmissionActivation = () => {}
     if (metadata.agentLoopBackend === 'mock' && metadata.hostKind !== 'playground') {
       throw new Error('The deterministic AgentLoop Simulator is available only in the explicit Playground host')
     }
@@ -1033,6 +1046,7 @@ async function start(
     let reconcilingAgentRuntimeRoute = false
     let agentRuntimeRouteDisposed = false
     let agentSessionRuntime!: CordisXAgentSessionRuntime
+    const pageAdmissionBindings = new PageAdmissionBindingRegistry()
     const agentOwnerControllers = new Map<string, PluginController>()
     const agentOwnerKey = (owner: AgentActiveRoute['owner']): string => `${owner.pluginId}\u0000${owner.generation}`
     const agentOwnerForController = (controller: PluginController): AgentActiveRoute['owner'] => {
@@ -1272,11 +1286,38 @@ async function start(
             generation,
             messageId,
           ),
+        capturePageAdmission: (owner, origin, target, sessionId, generation, messageId, commandActive, originActive) =>
+          scenarioSessionScopeAuthority.capturePageAdmission(
+            owner,
+            origin,
+            target,
+            sessionId,
+            generation,
+            messageId,
+            commandActive,
+            originActive,
+          ),
+        claimPageAdmission: (owner, receipt, bindingActive) =>
+          scenarioSessionScopeAuthority.claimPageAdmission(owner, receipt, bindingActive),
       }),
       ...(playgroundAgentSessionPersistence === undefined ? {} : {
         persistence: playgroundAgentSessionPersistence,
         initialSessions: recoveredPlaygroundSessions,
       }),
+      pageAdmissionBindings,
+      navigatePageAdmission: async (owner, _command, route) => {
+        const controller = controllerForAgentOwner(owner)
+        if (controller === undefined || routeService === undefined) return 'navigation-failed'
+        try {
+          await routeService.navigateFor(controller.item.id, {
+            id: route.routeDefinitionId,
+            params: { roomId: route.roomId },
+          })
+          return 'accepted'
+        } catch {
+          return 'navigation-failed'
+        }
+      },
     })
     scenarioSessionOwner = sessionId => agentSessionRuntime.ownerForSession(sessionId)
     const disposeAgentRouteFences = agentRouteScopes.subscribe((owner, sessionId, code) => {
@@ -1665,6 +1706,16 @@ async function start(
         const owner = `${controller.item.source}:${controller.item.id}`
         agentRouteScopes.revoke(owner, 'plugin-generation-replaced')
         agentSessionRuntime.fenceOwner(owner, 'plugin-generation-replaced')
+        await controller.agentPageFreshRoomNavigationFiber?.dispose()
+        delete controller.agentPageFreshRoomNavigationFiber
+        await controller.agentPageAdmissionRouteReservationFiber?.dispose()
+        delete controller.agentPageAdmissionRouteReservationFiber
+        await controller.agentPageAdmissionRouteDeclarationFiber?.dispose()
+        delete controller.agentPageAdmissionRouteDeclarationFiber
+        await controller.agentPageAdmissionReservationFiber?.dispose()
+        delete controller.agentPageAdmissionReservationFiber
+        await controller.agentPageAdmissionTargetFiber?.dispose()
+        delete controller.agentPageAdmissionTargetFiber
         await controller.agentAdmissionBootstrapRouteReservationFiber?.dispose()
         delete controller.agentAdmissionBootstrapRouteReservationFiber
         await controller.agentAdmissionBootstrapRouteDeclarationFiber?.dispose()
@@ -1998,6 +2049,9 @@ async function start(
         .isolate('agentAdmissionBootstrapTargets').isolate('agentAdmissionBootstrapReservations')
         .isolate('agentAdmissionBootstrapRoomTargets').isolate('agentAdmissionBootstrapRoomReservations')
         .isolate('agentAdmissionBootstrapRouteDeclarations').isolate('agentAdmissionBootstrapRouteReservations')
+        .isolate('agentPageAdmissionTargets').isolate('agentPageAdmissionReservations')
+        .isolate('agentPageAdmissionRouteDeclarations').isolate('agentPageAdmissionRouteReservations')
+        .isolate('agentPageFreshRoomNavigation')
         .isolate('entities').isolate('documents').extend({
           [CORDISX_PLUGIN_ID]: controller.item.id,
           [CORDISX_PLUGIN_SOURCE]: controller.item.source,
@@ -2084,6 +2138,31 @@ async function start(
           agentSessionRuntime,
         )
         await controller.agentAdmissionBootstrapRouteReservationFiber
+        controller.agentPageAdmissionTargetFiber = pluginContext.plugin(
+          CordisXAgentPageAdmissionTargetService,
+          agentSessionRuntime,
+        )
+        await controller.agentPageAdmissionTargetFiber
+        controller.agentPageAdmissionReservationFiber = pluginContext.plugin(
+          CordisXAgentPageAdmissionReservationService,
+          agentSessionRuntime,
+        )
+        await controller.agentPageAdmissionReservationFiber
+        controller.agentPageAdmissionRouteDeclarationFiber = pluginContext.plugin(
+          CordisXAgentPageAdmissionRouteDeclarationService,
+          agentSessionRuntime,
+        )
+        await controller.agentPageAdmissionRouteDeclarationFiber
+        controller.agentPageAdmissionRouteReservationFiber = pluginContext.plugin(
+          CordisXAgentPageAdmissionRouteReservationService,
+          agentSessionRuntime,
+        )
+        await controller.agentPageAdmissionRouteReservationFiber
+        controller.agentPageFreshRoomNavigationFiber = pluginContext.plugin(
+          CordisXAgentPageFreshRoomNavigationService,
+          agentSessionRuntime,
+        )
+        await controller.agentPageFreshRoomNavigationFiber
         pluginConsole.lifecycle(
           controller.principal,
           controller.activation === 1 ? 'activate' : 'reload',
@@ -2110,6 +2189,16 @@ async function start(
         pluginConsole.diagnostic(controller.principal, 'plugin.activation', 'Plugin activation failed', error)
         await controller.fiber?.dispose()
         delete controller.fiber
+        await controller.agentPageFreshRoomNavigationFiber?.dispose()
+        delete controller.agentPageFreshRoomNavigationFiber
+        await controller.agentPageAdmissionRouteReservationFiber?.dispose()
+        delete controller.agentPageAdmissionRouteReservationFiber
+        await controller.agentPageAdmissionRouteDeclarationFiber?.dispose()
+        delete controller.agentPageAdmissionRouteDeclarationFiber
+        await controller.agentPageAdmissionReservationFiber?.dispose()
+        delete controller.agentPageAdmissionReservationFiber
+        await controller.agentPageAdmissionTargetFiber?.dispose()
+        delete controller.agentPageAdmissionTargetFiber
         await controller.agentAdmissionBootstrapRouteReservationFiber?.dispose()
         delete controller.agentAdmissionBootstrapRouteReservationFiber
         await controller.agentAdmissionBootstrapRouteDeclarationFiber?.dispose()
@@ -3511,6 +3600,16 @@ async function start(
         delete controller.agentLoopClient
         await controller.unregisterAgentLoop?.()
         delete controller.unregisterAgentLoop
+        await controller.agentPageFreshRoomNavigationFiber?.dispose()
+        delete controller.agentPageFreshRoomNavigationFiber
+        await controller.agentPageAdmissionRouteReservationFiber?.dispose()
+        delete controller.agentPageAdmissionRouteReservationFiber
+        await controller.agentPageAdmissionRouteDeclarationFiber?.dispose()
+        delete controller.agentPageAdmissionRouteDeclarationFiber
+        await controller.agentPageAdmissionReservationFiber?.dispose()
+        delete controller.agentPageAdmissionReservationFiber
+        await controller.agentPageAdmissionTargetFiber?.dispose()
+        delete controller.agentPageAdmissionTargetFiber
         await controller.agentAdmissionBootstrapRouteReservationFiber?.dispose()
         delete controller.agentAdmissionBootstrapRouteReservationFiber
         await controller.agentAdmissionBootstrapRouteDeclarationFiber?.dispose()
@@ -3608,6 +3707,7 @@ async function start(
       agentLoopBrokerV2.dispose()
       agentLoopBrokerV4.dispose()
       disposeAgentRouteHistory()
+      disposePageAdmissionActivation()
       disposeAgentRouteFences()
       await agentSessionRuntime.dispose()
       playgroundAgentSessionPersistence?.dispose()
@@ -3960,9 +4060,33 @@ async function start(
       pageFiber = ctx.plugin(CordisXPageService, pluginConsole)
       await pageFiber
       pageService = ctx.pages as CordisXPageService
-      routeFiber = ctx.plugin(CordisXRouteService, { history: routeHistory, console: pluginConsole })
+      routeFiber = ctx.plugin(CordisXRouteService, {
+        history: routeHistory,
+        console: pluginConsole,
+        pageAdmissionBindings,
+      })
       await routeFiber
       routeService = ctx.routes as CordisXRouteService
+      disposePageAdmissionActivation = pageAdmissionBindings.subscribeActivation(binding => {
+        agentSessionRuntime.claimPageAdmissionBinding(binding)
+      })
+      routeService.registry.setPageComposerAdapterFactory({
+        create: input => {
+          const commands = commandService
+          if (input.source === undefined || commands === undefined) return undefined
+          const owner = agentSessionRuntime.ownerForPlugin(input.source, input.owner, input.moduleGeneration)
+          return createPageComposerAdapter({
+            ownerId: input.owner,
+            owner,
+            binding: input.binding,
+            route: input.route,
+            generation: input.moduleGeneration,
+            signal: input.signal,
+            runtime: agentSessionRuntime,
+            commands,
+          })
+        },
+      })
       managerContentConfigAuthority = new ManagerContentConfigAuthority({
         configuration,
         profileId: metadata.profileId,

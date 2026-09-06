@@ -21,6 +21,13 @@ import type {
   AgentAdmissionBootstrapRouteDeclarationService,
   AgentAdmissionBootstrapRouteReservationService,
 } from '@cordisx/protocol/agent-admission/v6'
+import type {
+  AgentPageAdmissionReservationService,
+  AgentPageAdmissionRouteDeclarationService,
+  AgentPageAdmissionRouteReservationService,
+  AgentPageAdmissionTargetService,
+  AgentPageFreshRoomNavigationService,
+} from '@cordisx/protocol/agent-page-admission/v2'
 import type { SessionId, SessionRegistry } from '@cordisx/protocol/sessions/v1'
 
 export const CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1 =
@@ -103,6 +110,16 @@ declare module '@deepseek-ai/cordis' {
     agentAdmissionBootstrapRouteDeclarations: AgentAdmissionBootstrapRouteDeclarationService
     /** Host-owned v6 pre-submit reservation; Host alone may later claim its continuation. */
     agentAdmissionBootstrapRouteReservations: AgentAdmissionBootstrapRouteReservationService
+    /** Host-owned page-scoped issuer for one exact existing Room target. */
+    agentPageAdmissionTargets: AgentPageAdmissionTargetService
+    /** Host-owned page-scoped reservation; only submit() may reach the driver. */
+    agentPageAdmissionReservations: AgentPageAdmissionReservationService
+    /** Host-owned fresh-Room route declaration; plugins never claim destination bindings. */
+    agentPageAdmissionRouteDeclarations: AgentPageAdmissionRouteDeclarationService
+    /** Host-owned fresh-Room reservation; every continuation is one-shot. */
+    agentPageAdmissionRouteReservations: AgentPageAdmissionRouteReservationService
+    /** Host-bound fresh-Room navigation permit, present only in a v2 page command context. */
+    agentPageFreshRoomNavigation: AgentPageFreshRoomNavigationService
     entities: EntityRegistry
   }
 }
