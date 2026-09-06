@@ -125,6 +125,10 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-dialog-form { display: grid; gap: 12px; }
   .cxr-dialog-form label { display: grid; gap: 5px; }
   .cxr-marketplace-tools { display: flex; min-width: 0; align-items: center; overflow: hidden; border: 1px solid var(--cx-border,#353a42); border-radius: 9px; background: var(--cx-surface-raised,#20242b); }
+  .cxr-plugins-toolbar { display: flex; width: 100%; min-width: 0; align-items: center; }
+  .cxr-plugins-toolbar .cxr-search { min-width: 180px; flex: 1; }
+  .cxr-plugins-results { grid-template-columns: repeat(auto-fill,minmax(min(100%,300px),1fr)); }
+  .cxr-plugins-results .cxr-plugin-primary { min-width: 0; }
   .cxr-marketplace-search { min-width: 0; flex: 1; }
   .cxr-marketplace-search .t-input { border: 0; border-radius: 0; box-shadow: none; }
   .cxr-marketplace-tool-actions { display: flex; flex: none; align-items: center; gap: 1px; border-left: 1px solid var(--cx-border,#353a42); padding: 2px; }
@@ -193,6 +197,9 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-bundle-permissions { display: grid; gap: 8px; }
   .cxr-bundle-permission-editor { display: grid; grid-template-columns: minmax(0,1fr) 130px 150px; align-items: center; gap: 10px; }
   .cxr-bundle-permission-editor > label { display: grid; gap: 4px; color: var(--cx-muted,#9ca5b5); font-size: 10px; }
+  @media (max-width: 700px) {
+    .cxr-plugins-results { grid-template-columns: minmax(0,1fr); }
+  }
   .cxr-marketplace-identity .cxr-card-icon img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
   .cxr-marketplace-trust-details { display: grid; gap: 10px; margin: 0 0 14px; border-top: 1px solid var(--cx-border,#353a42); border-bottom: 1px solid var(--cx-border,#353a42); padding: 12px 0; }
   .cxr-marketplace-trust-details > div { min-width: 0; }

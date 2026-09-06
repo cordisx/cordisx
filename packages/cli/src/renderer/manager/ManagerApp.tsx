@@ -24,6 +24,7 @@ import { ExtensionPointDetailPage } from './pages/ExtensionPointDetailPage.js'
 import { ExtensionPointsPage } from './pages/ExtensionPointsPage.js'
 import { ManagerContentPage } from './pages/ManagerContentPage.js'
 import { MarketplacePluginPage } from './pages/MarketplacePluginPage.js'
+import { MarketplacePage } from './pages/MarketplacePage.js'
 import { MarketplaceSourcesPage } from './pages/MarketplaceSourcesPage.js'
 import { NavigationDetailPage } from './pages/NavigationDetailPage.js'
 import { PermissionDetailPage } from './pages/PermissionDetailPage.js'
@@ -59,7 +60,7 @@ function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
     'plugin-bundles': 'manager.nav.plugins',
     'extension-points': 'manager.nav.extension-points',
     routes: 'manager.nav.routes',
-    marketplace: 'manager.nav.plugins',
+    marketplace: 'manager.nav.marketplace',
     about: 'manager.nav.about',
   } as const
   return managerCopy(locale, keys[route.page])
@@ -71,7 +72,7 @@ function primaryIcon(route: ManagerRoute) {
   if (route.page === 'plugin-bundles') return 'plugins' as const
   if (route.page === 'extension-points') return 'outlets' as const
   if (route.page === 'routes') return 'routes' as const
-  if (route.page === 'marketplace') return 'plugins' as const
+  if (route.page === 'marketplace') return 'marketplace' as const
   return 'point-info' as const
 }
 
@@ -197,7 +198,7 @@ function ManagerBreadcrumbs({ route, navigate, heading, model, snapshot }: {
     : route.kind === 'route' || route.kind === 'page'
     ? { label: managerCopy(snapshot.localization.locale, 'manager.nav.routes'), page: 'routes' as const }
     : route.kind === 'marketplace-plugin' || route.kind === 'marketplace-sources'
-    ? { label: managerCopy(snapshot.localization.locale, 'manager.nav.plugins'), page: 'plugins' as const }
+    ? { label: managerCopy(snapshot.localization.locale, 'manager.nav.marketplace'), page: 'marketplace' as const }
     : { label: managerCopy(snapshot.localization.locale, 'manager.nav.plugins'), page: 'plugins' as const }
   return (
     <HostBreadcrumbs
@@ -239,8 +240,11 @@ function Content(
   if (current.kind === 'manager-content') {
     return <ManagerContentPage model={model} router={route} locale={snapshot.localization.locale} />
   }
-  if (current.page === 'plugins' || current.page === 'plugin-bundles' || current.page === 'marketplace') {
-    return <PluginsPage model={model} marketplace={marketplace} snapshot={snapshot} router={route} />
+  if (current.page === 'plugins' || current.page === 'plugin-bundles') {
+    return <PluginsPage model={model} snapshot={snapshot} router={route} />
+  }
+  if (current.page === 'marketplace') {
+    return <MarketplacePage marketplace={marketplace} manager={model} snapshot={snapshot} router={route} />
   }
   if (current.page === 'extension-points') return <ExtensionPointsPage snapshot={snapshot} router={route} />
   if (current.page === 'routes') return <RoutesPage snapshot={snapshot} router={route} />

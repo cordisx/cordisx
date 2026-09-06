@@ -97,6 +97,7 @@ describe('Host UI catalog and production React composition', () => {
         'PluginDetailPage',
         'PermissionDetailPage',
         'PluginsPage',
+        'MarketplacePage',
         'MarketplaceSourcesPage',
         'RoutesPage',
         'ExtensionPointsPage',
@@ -105,8 +106,6 @@ describe('Host UI catalog and production React composition', () => {
     ) {
       expectRenderedImport('manager/ManagerApp.tsx', `./pages/${page}.js`, page)
     }
-    expectRenderedImport('manager/pages/PluginsPage.tsx', './MarketplacePage.js', 'MarketplacePage')
-    expectRenderedImport('manager/pages/PluginsPage.tsx', './PluginBundlesPage.js', 'PluginBundlesPage')
     expectRenderedImport('manager/pages/PluginDetailPage.tsx', '../../host-ui/HostForm.js', 'HostForm')
     expectRenderedImport('manager-content-config-form.tsx', './host-ui/HostForm.js', 'HostForm')
     for (

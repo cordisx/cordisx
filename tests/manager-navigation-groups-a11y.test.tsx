@@ -119,7 +119,7 @@ describe('Manager grouped navigation', () => {
       expect(groups.at(2)?.querySelector('[data-settings-navigation-item="chatroom:team"]')).not.toBeNull()
       expect(groups.at(3)?.querySelector('[data-settings-navigation-item="legacy:page"]')).not.toBeNull()
       expect(dom.window.document.querySelector('[data-tab="plugin-bundles"]')).toBeNull()
-      expect(dom.window.document.querySelector('[data-tab="marketplace"]')).toBeNull()
+      expect(groups.at(0)?.querySelector('[data-tab="marketplace"]')).not.toBeNull()
       const about = dom.window.document.querySelector('[data-tab="about"]')
       expect(about?.parentElement?.classList.contains('cxr-nav')).toBe(true)
       expect(about?.closest('[data-navigation-group]')).toBeNull()
