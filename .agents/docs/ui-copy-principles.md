@@ -50,7 +50,9 @@ error text may remain unchanged.
 
 Host-owned Manager states and actions are cataloged in
 `packages/cli/src/renderer/ui-copy.ts` before their owner integrates them. Add
-a pair to that catalog before using it in a primary surface. Resolve the
+a pair to the matching feature catalog under `renderer/ui-copy/` before using
+it in a primary surface; the entry derives its key type from those catalogs.
+Resolve the
 catalog from the current UI locale; use English only when the locale has no
 Chinese language subtag. Do not use a translated label to replace a machine
 id, URL, diagnostic code, or raw error.

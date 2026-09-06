@@ -11,6 +11,19 @@ Each key carries both `en` and `zh-CN`. The resolver selects `zh-CN` for a
 Chinese language locale and `en` otherwise, so a primary surface never joins
 two languages merely because its locale contains a region subtag.
 
+## Module ownership
+
+Feature catalogs under `renderer/ui-copy/` own Channel, Marketplace, plugins,
+runtime, Console, Manager chrome and forms. Each entry carries both locales and
+is checked against the shared locale type. Add or change a key in its owning
+feature catalog; do not maintain a second handwritten key union.
+
+`renderer/ui-copy.ts` remains the stable resolver entry. It assembles the
+catalogs in their established enumeration order and derives the accepted key
+type from that data. The copy gate discovers all feature modules and rejects
+duplicate keys or a catalog omitted from composition. It separately verifies
+that every assembled key has both non-empty baseline translations.
+
 ## Semantic inventory
 
 | Semantic group               | Required primary text                                      | Next action                           | Integration owner            |
