@@ -176,4 +176,47 @@ actual Vite bootstrap acknowledgement instead of depending on
 `Page.loadEventFired`, which Electron did not emit consistently across
 immediate launches.
 
+## Native startup failure discipline
+
+Treat a user-operable native window as the delivery boundary. A source change,
+focused test, pull request, or pre-ready launch stage is not an experience
+result.
+
+Codex Desktop `26.901.41600` (build `7982`) has a last-known-good run on Host
+commit `87a521fc67e63d6d38680c1a25cd7a28e505ac1d`. The local evidence file
+`/private/tmp/cordisx-desktop-agent-session-live-20260905-2102-7982-bootstrap.json`
+records `Page.addScriptToEvaluateOnNewDocument` followed by
+`Page.reload({ ignoreCache: true })` and `waitForViteBootstrap`; it reached
+renderer ready in 5809 ms and exercised real Agent operations. Build 7982 and
+the new-document reload bootstrap are therefore proven viable. A later single
+`CDP connection closed` observation is not enough to replace that architecture:
+first compare the last-known-good source, launch arguments, target identity,
+and stage timings.
+
+One rejected experiment replaced the reload with current-document
+`Runtime.evaluate`, whose dynamic import of the virtual native preamble failed.
+Do not present that experiment as a solution. If a reload response is absent,
+preserve sequential navigation and bootstrap ordering; do not race a runtime
+evaluation against the document transition.
+
+Stable-home and fresh-home launches exercise different setup paths. A fresh
+home may materialize entity templates and thereby commit a new plugin module
+generation. The final renderer composition and its entity principal must be
+issued after that initial synchronization commits. Issuing them before
+materialization correctly fails closed later with `entity principal is stale`.
+Moving initial synchronization before final composition is a proposed ordering
+fix until a real fresh-home native launch reaches a user-operable window.
+
+Diagnose native startup one boundary at a time and retain the first failure:
+
+```text
+app target -> reload/new document -> Vite preamble/boot -> shared React
+  -> final composition -> entity hydration -> Host/Chatroom ready
+```
+
+Use focused build or transport checks to test that boundary; full CI is not a
+diagnostic for a renderer that has not reached ready. Never relax stale-principal
+checks, guess a generation identity, patch `app.asar`, or treat internal progress
+as user experience.
+
 For a release claim, also run the owner repository's full gates.
