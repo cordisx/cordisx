@@ -35,31 +35,31 @@ empty decorative seat. The complete runtime boundary is specified in
 
 ### Product-owned pages and admission
 
-Product pages own their complete internal renderer. In particular, Chatroom
-owns its title, messages, member panel, composer, identity interactions,
-avatar mapping, vendor renderer, styles, caches, and fallbacks. CordisX does
-not inject an Agent Conversation Shell and does not render Agent avatars.
-Products consume the public Agent, Session, approval, command, page, route,
-localization, and navigation services directly.
+Product pages normally own their complete internal renderer. Agent
+conversation products may instead register a versioned data-only source with
+`ctx.agentConversationShell`. The Host then owns the conversation title,
+header actions, timeline DOM, Shikitor composer, Agent avatars, on-demand
+member inspector, keyboard and focus behavior, styles, and cleanup. The plugin
+continues to own ordered snapshots, subscriptions, command references, Room
+settings updates, and durable Agent/Session facts.
 
 A page with `chrome: "body-only"` may mount in the generic `main` outlet. The
 plugin then owns all page-internal chrome and the Host supplies only the outlet,
 abort/dispose ordering, accessible page label, focus boundary, and navigation
-lifecycle. This is a generic page policy; the Host has no Chatroom marker or
-conversation-specific exception.
+lifecycle. An Agent conversation mount is marked separately: it requires the
+`main` outlet and suppresses the generic page chrome because the restored
+Host shell supplies its single chrome owner.
 
-The Agent/Session runtime retains three disjoint Host-owned admission authorities
-for plugin product pages. A Room with an existing Session-backed target uses
-the v3 target-origin path. A Room whose member has no Session-backed target
-uses the v5 Room-target path, whose clone-safe receipt remains bound to the
-same live owner and cannot cross a route or generation replacement. A newly
-created Room that navigates after submission uses the v6 route-declaration
-path and transfers its exact captured Session/message authority into the
-matching same-owner route. Each capability binds the complete
-`PluginOwnerIdentity`, command, connection, execution, Room and target;
-reservations and route claims remain one-shot and fail closed on substitution,
-replacement, revocation, or disposal. These are generic public services and do
-not require a Host-owned conversation renderer.
+The restored Shell v6-v9 registrations preserve their versioned snapshot and
+non-composer command contexts. Shell v9 may opt into
+`{ composer: { mode: "page-composer-v2" } }`; only that Host-owned composer
+submission uses the mounted page-admission v2 adapter. The Host derives the
+page origin, exact N-target authorities and fresh-Room navigation claim, waits
+for the adapter's completion, and clears the draft only after an accepted
+result. Omitting the option preserves the frozen Shell v9 command-origin path.
+Every path remains bound to the complete `PluginOwnerIdentity`, connection,
+generation, command execution, page or Shell binding, Room and target, and
+fails closed on substitution, replacement, revocation, or disposal.
 
 Product-specific composition is completed before a visual crosses into a
 Host-owned row. Navigation Collection v3 accepts only a generic validated PNG
