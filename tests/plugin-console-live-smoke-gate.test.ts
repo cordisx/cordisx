@@ -1,13 +1,14 @@
-import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+
+import { readLiveSmokeSourceGraph } from './live-smoke-source.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 describe('plugin Console live smoke gate', () => {
   it('uses stable Console anchors and fails for every reported invariant', async () => {
-    const source = await readFile(path.join(root, 'packages/cli/scripts/live-smoke.mjs'), 'utf8')
+    const source = await readLiveSmokeSourceGraph(root)
 
     expect(source).toContain("const pluginConsoleLocale = locale === 'zh-CN'")
     expect(source).toContain("kindSelect: 'API / 类型'")

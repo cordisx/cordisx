@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
+import { readLiveSmokeSourceGraph } from './live-smoke-source.js'
+
 type RegistrationKind = 'page' | 'route'
 
 interface Registration {
@@ -212,7 +214,9 @@ async function bundledRegistrations(): Promise<
   const sources = new Map<string, string>()
   const items: Registration[] = []
   for (const file of files) {
-    const source = await readFile(path.join(projectRoot, file), 'utf8')
+    const source = file === 'packages/cli/scripts/live-smoke.mjs'
+      ? await readLiveSmokeSourceGraph(projectRoot)
+      : await readFile(path.join(projectRoot, file), 'utf8')
     sources.set(file, source)
     items.push(...registrations(file, source))
     if (file === 'packages/cli/scripts/live-smoke.mjs') {
