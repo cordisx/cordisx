@@ -317,16 +317,23 @@ export function registerNavigationTests() {
   })
 
   it('uses one Host sidebar primitive and one accessible sidebar environment menu', async () => {
-    const [app, seats, styles, adapter, menu, environment] = await Promise.all([
+    const [app, seats, styles, adapter, rendererLayout, rendererInteractions, menu, environment] = await Promise.all([
       readFile(path.resolve('packages/cli/src/playground/client/App.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/components/HostSeats.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/styles.css'), 'utf8'),
       readFile(path.resolve('packages/cli/src/renderer/adapter.ts'), 'utf8'),
+      readFile(path.resolve('packages/cli/src/renderer/adapter/renderer-layout.ts'), 'utf8'),
+      readFile(path.resolve('packages/cli/src/renderer/adapter/renderer-interactions.ts'), 'utf8'),
       readFile(path.resolve('packages/cli/src/renderer/host-ui/HostMenu.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/environment.ts'), 'utf8'),
     ])
     expect(app).toContain('createSidebarItem(document')
-    expect(adapter).toContain('createSidebarItem(this.document')
+    expect(adapter).toContain("from './adapter/renderer-layout.js'")
+    expect(adapter).toContain('new StructuredSurfaceRenderer(')
+    expect(rendererLayout).toContain('extends StructuredSurfaceInteractions')
+    expect(rendererLayout).toContain("from './renderer-interactions.js'")
+    expect(rendererLayout).toContain('this.renderNavigation(')
+    expect(rendererInteractions).toContain('createSidebarItem(this.document')
     expect(app).toContain('id="action.new"')
     expect(app).toContain('data-cordisx-playground-surface="sidebar.navigation.items"')
     expect(app).toContain('secondary={en ?')
