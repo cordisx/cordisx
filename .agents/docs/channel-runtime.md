@@ -620,6 +620,16 @@ The durable store owns:
 - runtime/adapter generation and shutdown reason; and
 - bounded audit and health state.
 
+The launcher stamps the exact service configuration revision into each Node
+plugin child context through a private binding. Public adapter code can read
+only `ctx.channel.configuration.revision` and copies it into the adapter
+descriptor. It cannot replace that projection or provide a revision to the
+Host service constructor. The Channel service rejects registration when the
+descriptor revision differs from the stamp, in either direction. Local service
+activation uses the same monotonically increasing sequence for the context
+stamp and official Host-owned definitions, so replacement and stale-revision
+checks share one fence.
+
 Replacement activates a staged generation, completes its validation, then
 atomically publishes the adapter/runtime/config tuple. The previous generation
 drains in-flight claims and cannot acquire new work. Stale callbacks, cursors,

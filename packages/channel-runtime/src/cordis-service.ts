@@ -15,6 +15,7 @@ import type {
 const CORDISX_NODE_PLUGIN_ID = Symbol('cordisx.nodePluginId')
 const CORDISX_NODE_PLUGIN_SOURCE = Symbol('cordisx.nodePluginSource')
 const CORDISX_NODE_PLUGIN_GENERATION = Symbol('cordisx.nodePluginGeneration')
+const CORDISX_NODE_CONFIGURATION_REVISION = Symbol('cordisx.nodeConfigurationRevision')
 const CORDIS_ORIGINAL = Symbol.for('cordis.original')
 
 export interface CordisXChannelConnections {
@@ -71,12 +72,30 @@ function identityFrom(ctx: Context): ChannelPluginIdentity {
   return Object.freeze({ source, pluginId, generation })
 }
 
+function configurationRevisionFrom(ctx: Context): number {
+  const revision = (ctx as Context & { [CORDISX_NODE_CONFIGURATION_REVISION]?: number })[
+    CORDISX_NODE_CONFIGURATION_REVISION
+  ]
+  if (!Number.isInteger(revision) || revision === undefined || revision < 1) {
+    throw new Error('Channel calls require a launcher-stamped service configuration revision')
+  }
+  return revision
+}
+
 /** Launcher-only helper used while constructing a Node plugin child context. */
-export function bindChannelPluginContext(ctx: Context, identity: ChannelPluginIdentity): Context {
+export function bindChannelPluginContext(
+  ctx: Context,
+  identity: ChannelPluginIdentity,
+  configurationRevision: number,
+): Context {
+  if (!Number.isInteger(configurationRevision) || configurationRevision < 1) {
+    throw new Error('Channel service configuration revision is invalid')
+  }
   return ctx.extend({
     [CORDISX_NODE_PLUGIN_ID]: identity.pluginId,
     [CORDISX_NODE_PLUGIN_SOURCE]: identity.source,
     [CORDISX_NODE_PLUGIN_GENERATION]: identity.generation,
+    [CORDISX_NODE_CONFIGURATION_REVISION]: configurationRevision,
   })
 }
 
@@ -90,6 +109,10 @@ export class CordisXChannelService extends Service implements CordisXChannel {
     runtimes.set(this, runtime)
   }
 
+  get configuration(): CordisXChannel['configuration'] {
+    return Object.freeze({ revision: configurationRevisionFrom(this.ctx) })
+  }
+
   get connections(): CordisXChannelConnections {
     return Object.freeze({
       list: async () => await runtimeFor(this).connections(identityFrom(this.ctx)),
@@ -99,6 +122,10 @@ export class CordisXChannelService extends Service implements CordisXChannel {
   get adapters(): CordisXChannelAdapters {
     return Object.freeze({
       register: async (definition: ChannelAdapterDefinition) => {
+        const configurationRevision = configurationRevisionFrom(this.ctx)
+        if (definition.descriptor.configurationRevision !== configurationRevision) {
+          throw new Error('Channel adapter configuration revision does not match the Host stamp')
+        }
         const handle = await runtimeFor(this).activate(definition, identityFrom(this.ctx))
         this.ctx.effect(
           () => async () => await handle.dispose(),

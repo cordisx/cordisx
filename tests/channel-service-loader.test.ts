@@ -59,7 +59,7 @@ export async function apply(ctx, config) {
       ref: connection.ref,
       kind: 'simulator',
       implementationStatus: 'verified',
-      configurationRevision: 1,
+      configurationRevision: ctx.channel.configuration.revision,
       secretState: 'unavailable',
     },
     async start() {
@@ -218,17 +218,41 @@ describe('launcher Channel service module loading', () => {
     const host = new LauncherChannelServiceHost(runtime)
     await expect(host.activate({
       ...serviceAccess,
+      configurationRevision: 7,
       pluginIdentity: { ...serviceAccess.pluginIdentity, pluginId: 'forged-plugin' },
     }, SIMULATOR_CHANNEL_SERVICE_CONFIG)).rejects.toThrow('identity is not bound')
-    const active = await host.activate(serviceAccess, SIMULATOR_CHANNEL_SERVICE_CONFIG)
+    await expect(host.activate({
+      ...serviceAccess,
+      configurationRevision: 0,
+    }, SIMULATOR_CHANNEL_SERVICE_CONFIG)).rejects.toThrow('module projection is invalid')
+    const active = await host.activate({
+      ...serviceAccess,
+      configurationRevision: 7,
+    }, SIMULATOR_CHANNEL_SERVICE_CONFIG)
     expect(runtime.snapshot().accounts).toEqual([
       expect.objectContaining({
         adapterKind: 'simulator',
         connectionState: 'ready',
         generation: 1,
+        lastGoodRevision: 7,
       }),
     ])
 
+    const replacement = await host.activate({
+      ...serviceAccess,
+      configurationRevision: 8,
+      pluginIdentity: { ...serviceAccess.pluginIdentity, generation: 'channel-simulator-generation-2' },
+    }, SIMULATOR_CHANNEL_SERVICE_CONFIG)
+    expect(runtime.snapshot().accounts).toEqual([
+      expect.objectContaining({ generation: 2, lastGoodRevision: 8 }),
+    ])
+    await expect(host.activate({
+      ...serviceAccess,
+      configurationRevision: 7,
+      pluginIdentity: { ...serviceAccess.pluginIdentity, generation: 'channel-simulator-generation-stale' },
+    }, SIMULATOR_CHANNEL_SERVICE_CONFIG)).rejects.toThrow('older than last-good')
+
+    await replacement.dispose()
     await active.dispose()
     expect(runtime.snapshot().accounts[0]).toMatchObject({ connectionState: 'stopped' })
     await host.dispose()
