@@ -111,6 +111,7 @@ import { CordisXI18nService } from './i18n.js'
 import { CordisXVisualService } from './visuals.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
 import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter } from './codex-router-history.js'
+import type { SelectedNavigationActionRegistry } from './selected-navigation-actions.js'
 import {
   HostAgentTaskDetailsNavigator,
   navigateHostTaskDetailsSameDocument,
@@ -274,6 +275,7 @@ export interface RuntimeClosureScope {
     | Readonly<{ readonly scope: AgentRuntimeRouteScope; readonly owner: AgentActiveRoute['owner'] }>
     | undefined
   adapterHandle: CodexAdapterHandle | undefined
+  agentConversationShellFiber: Fiber | undefined
   readonly adoptPluginBundleSnapshot: () => (
     snapshot: CordisXPluginBundleManagerSnapshotV1,
   ) => Readonly<{ revision: number; pluginRevision: number }>
@@ -416,6 +418,7 @@ export interface RuntimeClosureScope {
   readonly ownerDocumentBroker: () => CordisXOwnerDocumentBroker
   ownsSharedReactRuntime: boolean
   readonly pageAdmissionBindings: () => PageAdmissionBindingRegistry
+  readonly selectedNavigationActions: () => SelectedNavigationActionRegistry
   pageFiber: Fiber | undefined
   pageService: CordisXPageService | undefined
   pendingAgentDetailReturn:

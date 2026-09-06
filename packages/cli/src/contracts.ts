@@ -104,6 +104,7 @@ export type {
   SemanticIconKey as CordisXSemanticIconKey,
 } from './icon-theme-contracts.js'
 export {
+  CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS,
   CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V1,
   CORDISX_EXTENSION_POINT_ACCESS_SCHEMA_V2,
   CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1,
@@ -121,6 +122,18 @@ export {
   CORDISX_SURFACE_INVOCATION_CONTEXT_SCHEMA_V1,
 } from './contracts-extension-navigation.js'
 export type {
+  CordisXAgentConversationShell,
+  CordisXAgentConversationShellRegistration,
+  CordisXAgentConversationShellSourceFactory,
+  CordisXAgentConversationShellSourceFactoryV2,
+  CordisXAgentConversationShellSourceFactoryV3,
+  CordisXAgentConversationShellSourceFactoryV4,
+  CordisXAgentConversationShellSourceFactoryV5,
+  CordisXAgentConversationShellSourceFactoryV6,
+  CordisXAgentConversationShellSourceFactoryV7,
+  CordisXAgentConversationShellSourceFactoryV8,
+  CordisXAgentConversationShellSourceFactoryV9,
+  CordisXAgentConversationShellSourceOptionsV9,
   CordisXCommandReference,
   CordisXDisabledState,
   CordisXEffectivePointPolicy,
@@ -292,6 +305,8 @@ export type {
   CordisXReasoningIntensityMaterial,
   CordisXReasoningIntensityPresentation,
   CordisXReasoningIntensityStage,
+  CordisXRoomCompositeAvatarLeadingVisual,
+  CordisXRoomCompositeAvatarParticipant,
   CordisXRouteDefinition,
   CordisXRouteDefinitionV2,
   CordisXRoutes,

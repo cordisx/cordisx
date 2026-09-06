@@ -1,5 +1,27 @@
 import type { Disposable, Effect } from '@deepseek-ai/cordis'
 
+import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
+
+import type {
+  AgentConversationShellBinding,
+  AgentConversationShellSource,
+} from '@cordisx/protocol/agent-conversation-shell/v1'
+
+import type {
+  AgentConversationShellBinding as AgentConversationShellBindingV2,
+  AgentConversationShellSource as AgentConversationShellSourceV2,
+} from '@cordisx/protocol/agent-conversation-shell/v2'
+
+import type {
+  AgentConversationShellBinding as AgentConversationShellBindingV3,
+  AgentConversationShellCommandContext as AgentConversationShellCommandContextV3,
+  AgentConversationShellSource as AgentConversationShellSourceV3,
+} from '@cordisx/protocol/agent-conversation-shell/v3'
+
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV7 } from '@cordisx/protocol/agent-conversation-shell/v7'
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV8 } from '@cordisx/protocol/agent-conversation-shell/v8'
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV9 } from '@cordisx/protocol/agent-conversation-shell/v9'
+
 import type {
   AgentPageComposerCommandAdapter,
   AgentPageComposerCommandContext,
@@ -61,6 +83,20 @@ import type {
 
 export interface CordisXNavigationCollectionRegistration {
   dispose(): void
+}
+
+/** Maximum exact Avatar references rendered by one Host Room composition. */
+export const CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS = 16
+
+export interface CordisXRoomCompositeAvatarParticipant {
+  readonly participantId: string
+  readonly avatar?: AgentAvatarRef
+}
+
+/** Host-private Room avatar input shared by the conversation shell components. */
+export interface CordisXRoomCompositeAvatarLeadingVisual {
+  readonly kind: 'room-composite-avatar'
+  readonly participants: readonly CordisXRoomCompositeAvatarParticipant[]
 }
 
 export interface CordisXToolbarItem extends CordisXStructuredAction {
@@ -368,7 +404,13 @@ export interface CordisXCommandContext {
   readonly signal: AbortSignal
   readonly invocationKey: string
   /** Host-injected source context; page composer authority is never plugin-authored. */
-  readonly hostContext?: CordisXSurfaceInvocationContextV1 | AgentPageComposerCommandContext
+  readonly hostContext?:
+    | CordisXSurfaceInvocationContextV1
+    | AgentPageComposerCommandContext
+    | AgentConversationShellCommandContextV3
+    | AgentConversationShellCommandContextV7
+    | AgentConversationShellCommandContextV8
+    | AgentConversationShellCommandContextV9
 }
 
 export interface CordisXSurfaceInvocationContextV1 {
@@ -656,6 +698,72 @@ export interface CordisXPages {
     metadata: CordisXPageMetadata,
     mount: CordisXPageMount<Messages>,
   ): Disposable<void | Promise<void>>
+}
+
+export type CordisXAgentConversationShellSourceFactory = (
+  binding: Readonly<AgentConversationShellBinding>,
+) => AgentConversationShellSource | Promise<AgentConversationShellSource>
+
+export type CordisXAgentConversationShellSourceFactoryV2 = (
+  binding: Readonly<AgentConversationShellBindingV2>,
+) => AgentConversationShellSourceV2 | Promise<AgentConversationShellSourceV2>
+
+export type CordisXAgentConversationShellSourceFactoryV3 = (
+  binding: Readonly<AgentConversationShellBindingV3>,
+) => AgentConversationShellSourceV3 | Promise<AgentConversationShellSourceV3>
+
+export type CordisXAgentConversationShellSourceFactoryV4 = (
+  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellBinding>,
+) => import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellSource
+  | Promise<import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellSource>
+
+export type CordisXAgentConversationShellSourceFactoryV5 = (
+  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellBinding>,
+) => import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellSource
+  | Promise<import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellSource>
+
+export type CordisXAgentConversationShellSourceFactoryV6 = (
+  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellBinding>,
+) => import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellSource
+  | Promise<import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellSource>
+
+export type CordisXAgentConversationShellSourceFactoryV7 = (
+  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellBinding>,
+) => import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellSource
+  | Promise<import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellSource>
+
+export type CordisXAgentConversationShellSourceFactoryV8 = (
+  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellBinding>,
+) => import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellSource
+  | Promise<import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellSource>
+
+export type CordisXAgentConversationShellSourceFactoryV9 = (
+  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellBinding>,
+) => import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellSource
+  | Promise<import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellSource>
+
+export interface CordisXAgentConversationShellRegistration {
+  readonly mount: CordisXPageMount
+  dispose(): void
+}
+
+export interface CordisXAgentConversationShellSourceOptionsV9 {
+  readonly composer?: Readonly<{ readonly mode: 'page-composer-v2' }>
+}
+
+export interface CordisXAgentConversationShell {
+  registerSource(factory: CordisXAgentConversationShellSourceFactory): CordisXAgentConversationShellRegistration
+  registerSource(factory: CordisXAgentConversationShellSourceFactoryV2): CordisXAgentConversationShellRegistration
+  registerSource(factory: CordisXAgentConversationShellSourceFactoryV3): CordisXAgentConversationShellRegistration
+  registerSourceV4(factory: CordisXAgentConversationShellSourceFactoryV4): CordisXAgentConversationShellRegistration
+  registerSourceV5(factory: CordisXAgentConversationShellSourceFactoryV5): CordisXAgentConversationShellRegistration
+  registerSourceV6(factory: CordisXAgentConversationShellSourceFactoryV6): CordisXAgentConversationShellRegistration
+  registerSourceV7(factory: CordisXAgentConversationShellSourceFactoryV7): CordisXAgentConversationShellRegistration
+  registerSourceV8(factory: CordisXAgentConversationShellSourceFactoryV8): CordisXAgentConversationShellRegistration
+  registerSourceV9(
+    factory: CordisXAgentConversationShellSourceFactoryV9,
+    options?: CordisXAgentConversationShellSourceOptionsV9,
+  ): CordisXAgentConversationShellRegistration
 }
 
 export interface CordisXRouteDefinition<Outlet extends CordisXOutletName = CordisXOutletName> {

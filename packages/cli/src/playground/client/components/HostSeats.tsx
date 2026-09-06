@@ -5,8 +5,10 @@ export interface HostSeatsProps {
   readonly locale: 'zh-CN' | 'en'
 }
 
-/** Generic Playground outlets. Product pages are supplied only by plugins. */
-export function HostSeats({ mode }: HostSeatsProps) {
+/** Playground placement only; all conversation DOM and interaction are production-owned. */
+export function HostSeats({ mode, locale }: HostSeatsProps) {
+  const model = useMemo(() => createPlaygroundConversationFixture(mode, locale), [mode, locale])
+  const commands = useMemo(() => createPlaygroundConversationCommands(model), [model])
   return (
     <main
       className="pg-main"
@@ -14,6 +16,23 @@ export function HostSeats({ mode }: HostSeatsProps) {
     >
       <div className="pg-page-seat pg-app-seat" data-cordisx-playground-seat="app" />
       <div className="pg-page-seat pg-main-seat" data-cordisx-playground-seat="main" />
+      {mode === 'review' ? null : (
+        <div className="pg-conversation-shell">
+          <AgentConversationRenderer
+            model={model}
+            commands={commands}
+            copy={playgroundConversationCopy(locale)}
+            debugFixture
+          />
+        </div>
+      )}
     </main>
   )
 }
+import { useMemo } from 'react'
+import { AgentConversationRenderer } from '../../../renderer/host-ui/conversation/AgentConversationRenderer.js'
+import {
+  createPlaygroundConversationCommands,
+  createPlaygroundConversationFixture,
+  playgroundConversationCopy,
+} from '../fixtures/agent-conversation.js'

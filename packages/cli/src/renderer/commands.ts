@@ -1,4 +1,8 @@
 import { Context, Service } from '@deepseek-ai/cordis'
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV3 } from '@cordisx/protocol/agent-conversation-shell/v3'
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV7 } from '@cordisx/protocol/agent-conversation-shell/v7'
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV8 } from '@cordisx/protocol/agent-conversation-shell/v8'
+import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV9 } from '@cordisx/protocol/agent-conversation-shell/v9'
 import type {
   CordisXCommandHandler,
   CordisXCommandMetadata,
@@ -24,6 +28,12 @@ import {
   immutableSnapshot,
 } from './validation.js'
 import type { PluginConsoleAspect, PluginPrincipalToken } from './plugin-console.js'
+
+type AgentConversationShellCommandContext =
+  | AgentConversationShellCommandContextV3
+  | AgentConversationShellCommandContextV7
+  | AgentConversationShellCommandContextV8
+  | AgentConversationShellCommandContextV9
 
 interface CommandRecord {
   readonly owner: string
@@ -148,6 +158,7 @@ export class CommandRegistry {
     invocationKey = 'default',
     origin?: CommandInvocationOrigin,
     requestingPrincipal?: PluginPrincipalToken,
+    conversationContext?: AgentConversationShellCommandContext,
   ): Promise<unknown> {
     if (this.disposed) throw new Error('CordisX command registry is disposed')
     assertReference(reference.id, 'command reference')
@@ -184,6 +195,19 @@ export class CommandRegistry {
         )
       ) throw new Error('host invocation context does not match its surface origin')
     }
+    if (origin !== undefined && conversationContext !== undefined) {
+      throw new Error('command cannot have both a page or surface origin and a conversation origin')
+    }
+    if (conversationContext !== undefined) {
+      const context = immutableSnapshot(conversationContext)
+      if (
+        context.command.id !== reference.id
+        || JSON.stringify(context.command.arguments) !== JSON.stringify(reference.arguments)
+      ) {
+        throw new Error('host conversation command context does not match its command reference')
+      }
+      conversationContext = context
+    }
     const executionId = `${qualifiedId}\u0000${invocationKey}`
     if (record.running.has(executionId)) {
       throw new Error(`command ${qualifiedId} is already running for ${invocationKey}`)
@@ -200,7 +224,9 @@ export class CommandRegistry {
           arguments: reference.arguments === undefined ? undefined : immutableSnapshot(reference.arguments),
           signal: abort.signal,
           invocationKey,
-          ...(origin === undefined
+          ...(conversationContext !== undefined
+            ? { hostContext: conversationContext }
+            : origin === undefined
             ? {}
             : isPageCommandOrigin(origin)
             ? { hostContext: immutableSnapshot(origin.pageContext) }
@@ -346,6 +372,15 @@ export class CordisXCommandService extends Service implements CordisXCommands {
     pageContext: AgentPageComposerCommandContext,
   ): Promise<unknown> {
     return this.registry.execute(owner, reference, invocationKey, { pageContext })
+  }
+
+  executeConversationFor(
+    owner: string,
+    reference: CordisXCommandReference,
+    invocationKey: string,
+    context: AgentConversationShellCommandContext,
+  ): Promise<unknown> {
+    return this.registry.execute(owner, reference, invocationKey, undefined, undefined, context)
   }
 
   hasFor(owner: string, reference: CordisXCommandReference, view?: PluginGenerationView): boolean {
