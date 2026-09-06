@@ -19,6 +19,7 @@ const core: readonly {
   readonly group: ManagerNavigationVisualGroup
 }[] = [
   { page: 'plugins', icon: 'plugins', copy: 'manager.nav.plugins', group: 'resources' },
+  { page: 'marketplace', icon: 'marketplace', copy: 'manager.nav.marketplace', group: 'resources' },
   { page: 'extension-points', icon: 'outlets', copy: 'manager.nav.extension-points', group: 'development' },
   { page: 'routes', icon: 'routes', copy: 'manager.nav.routes', group: 'development' },
 ]

@@ -17,15 +17,27 @@ import {
   primaryFor,
 } from '../packages/cli/src/renderer/manager/model/routes.js'
 import { inspectUnifiedLocalPluginSource } from '../packages/cli/src/renderer/manager/pages/PluginBundlesPage.js'
+import { Navigation } from '../packages/cli/src/renderer/manager/components/Navigation.js'
 import { MarketplacePage } from '../packages/cli/src/renderer/manager/pages/MarketplacePage.js'
-import { PluginsPage, unifiedPluginSections } from '../packages/cli/src/renderer/manager/pages/PluginsPage.js'
+import { PluginsPage } from '../packages/cli/src/renderer/manager/pages/PluginsPage.js'
 import type { MarketplaceModel, MarketplaceSnapshot } from '../packages/cli/src/renderer/marketplace.js'
 import type { ManagerModel, ManagerSnapshot } from '../packages/cli/src/renderer/manager.js'
+import { reactManagerFixture } from './helpers/react-manager.js'
 
 vi.mock('tdesign-react', () => ({
   Button: ({ children, loading: _loading, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
     readonly loading?: boolean
   }) => <button {...props}>{children}</button>,
+  Input: ({ prefixIcon, clearable: _clearable, onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement> & {
+    readonly prefixIcon?: React.ReactNode
+    readonly clearable?: boolean
+    readonly onChange?: (value: string) => void
+  }) => (
+    <label>
+      {prefixIcon}
+      <input {...props} onChange={event => onChange?.(event.currentTarget.value)} />
+    </label>
+  ),
 }))
 
 vi.mock('../packages/cli/src/renderer/host-ui/IconButton.js', () => ({
@@ -39,6 +51,10 @@ vi.mock('../packages/cli/src/renderer/host-ui/IconButton.js', () => ({
 
 vi.mock('../packages/cli/src/renderer/host-ui/MoreMenu.js', () => ({
   MoreMenu: ({ label }: { readonly label: string }) => <button type="button">{label}</button>,
+}))
+
+vi.mock('../packages/cli/src/renderer/host-ui/BrandMark.js', () => ({
+  BrandMark: () => <span aria-hidden="true">CordisX</span>,
 }))
 
 function pluginResult(
@@ -214,33 +230,120 @@ function marketplaceSnapshot(): MarketplaceSnapshot {
   }
 }
 
+async function renderFixture() {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
+    url: 'https://codex.local/',
+    pretendToBeVisual: true,
+  })
+  const previous = {
+    document: globalThis.document,
+    window: globalThis.window,
+    HTMLElement: globalThis.HTMLElement,
+    Element: globalThis.Element,
+    Node: globalThis.Node,
+    MutationObserver: globalThis.MutationObserver,
+    getComputedStyle: globalThis.getComputedStyle,
+    requestAnimationFrame: globalThis.requestAnimationFrame,
+    cancelAnimationFrame: globalThis.cancelAnimationFrame,
+    IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT,
+  }
+  Object.assign(globalThis, {
+    document: dom.window.document,
+    window: dom.window,
+    HTMLElement: dom.window.HTMLElement,
+    Element: dom.window.Element,
+    Node: dom.window.Node,
+    MutationObserver: dom.window.MutationObserver,
+    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+    requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
+    cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
+    IS_REACT_ACT_ENVIRONMENT: true,
+  })
+  Object.defineProperty(dom.window, 'matchMedia', {
+    value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
+  })
+  Object.defineProperties(dom.window.HTMLElement.prototype, {
+    attachEvent: { configurable: true, value() {} },
+    detachEvent: { configurable: true, value() {} },
+    scrollIntoView: { configurable: true, value() {} },
+  })
+  const router = {
+    route: { kind: 'primary', page: 'plugins' } as const,
+    navigate: vi.fn(),
+    replace: vi.fn(),
+    openDetail: vi.fn(),
+    back: vi.fn(),
+  }
+  const root = createRoot(dom.window.document.getElementById('root')!)
+  return {
+    document: dom.window.document,
+    router,
+    manager: (state: ManagerSnapshot): ManagerModel => ({
+      snapshot: () => state,
+      setPluginBlocked: async () => {},
+      setPermissionPolicy: async () => {},
+      subscribe: () => () => {},
+    }),
+    marketplace: (state: MarketplaceSnapshot): MarketplaceModel => ({
+      snapshot: () => state,
+      setSources: async () => {},
+      setSourceRecords: async () => {},
+      upsertSource: async () => {},
+      removeSource: async () => {},
+      setSourceEnabled: async () => {},
+      moveSource: async () => {},
+      importSource: async () => {
+        throw new Error('not used')
+      },
+      reload: async () => {},
+      subscribe: () => () => {},
+      dispose: () => {},
+    }),
+    render: async (element: React.ReactNode) =>
+      act(async () => {
+        root.render(element)
+        await new Promise(resolve => dom.window.setTimeout(resolve, 0))
+      }),
+    type: async (selector: string, value: string) =>
+      act(async () => {
+        const input = dom.window.document.querySelector<HTMLInputElement>(selector)!
+        const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!
+        setter.call(input, value)
+        input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+        await new Promise(resolve => dom.window.setTimeout(resolve, 0))
+      }),
+    dispose: async () => {
+      await act(async () => root.unmount())
+      Object.assign(globalThis, previous)
+      dom.window.close()
+    },
+  }
+}
+
 describe('unified Plugins information architecture', () => {
-  it('normalizes all legacy primary aliases while retaining detail routes under Plugins', () => {
+  it('keeps Plugins and Plugin Store as separate primary routes while redirecting only plugin bundles', () => {
     expect(normalizeManagerRoute({ kind: 'primary', page: 'plugin-bundles' })).toEqual({
       kind: 'primary',
       page: 'plugins',
     })
     expect(normalizeManagerRoute({ kind: 'primary', page: 'marketplace' })).toEqual({
       kind: 'primary',
-      page: 'plugins',
+      page: 'marketplace',
     })
-    expect(normalizeManagerHistory([
-      { kind: 'primary', page: 'marketplace' },
-      { kind: 'marketplace-plugin', identity: 'plugin' },
-    ])).toEqual([
-      { kind: 'primary', page: 'plugins' },
-      { kind: 'marketplace-plugin', identity: 'plugin' },
-    ])
     expect(normalizeManagerHistory([
       { kind: 'primary', page: 'plugins' },
       { kind: 'primary', page: 'marketplace' },
       { kind: 'primary', page: 'plugin-bundles' },
-    ])).toEqual([{ kind: 'primary', page: 'plugins' }])
+    ])).toEqual([
+      { kind: 'primary', page: 'plugins' },
+      { kind: 'primary', page: 'marketplace' },
+      { kind: 'primary', page: 'plugins' },
+    ])
     expect(primaryFor({ kind: 'plugin-bundle', bundleId: 'workflow', page: 'readme' })).toBe('plugins')
-    expect(primaryFor({ kind: 'marketplace-sources' })).toBe('plugins')
+    expect(primaryFor({ kind: 'marketplace-sources' })).toBe('marketplace')
   })
 
-  it('normalizes persisted, navigate, replace, and restore history before exposing it', async () => {
+  it('normalizes the legacy bundle route without collapsing the Plugin Store route', async () => {
     const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
       url: 'https://codex.local/',
     })
@@ -268,11 +371,11 @@ describe('unified Plugins information architecture', () => {
       await act(async () => root.render(<Harness />))
       expect(router?.route).toEqual({ kind: 'primary', page: 'plugins' })
       await act(async () => router?.navigate({ kind: 'primary', page: 'marketplace' }))
-      expect(router?.route).toEqual({ kind: 'primary', page: 'plugins' })
+      expect(router?.route).toEqual({ kind: 'primary', page: 'marketplace' })
       await act(async () => router?.replace({ kind: 'primary', page: 'plugin-bundles' }))
       expect(router?.route).toEqual({ kind: 'primary', page: 'plugins' })
       await act(async () => router?.restore([{ kind: 'primary', page: 'marketplace' }]))
-      expect(router?.capture()).toEqual([{ kind: 'primary', page: 'plugins' }])
+      expect(router?.capture()).toEqual([{ kind: 'primary', page: 'marketplace' }])
     } finally {
       await act(async () => root.unmount())
       Object.assign(globalThis, previous)
@@ -288,8 +391,7 @@ describe('unified Plugins information architecture', () => {
         { requestPluginBundleLifecycle: bundle, requestPluginLifecycle: plugin },
         '/tmp/plugin',
       ),
-    )
-      .toMatchObject({ kind: 'plugin' })
+    ).toMatchObject({ kind: 'plugin' })
     expect(bundle).toHaveBeenCalledTimes(1)
     expect(plugin).toHaveBeenCalledTimes(1)
 
@@ -300,54 +402,27 @@ describe('unified Plugins information architecture', () => {
         { requestPluginBundleLifecycle: bundle, requestPluginLifecycle: plugin },
         '/tmp/plugin',
       ),
-    )
-      .toMatchObject({ kind: 'bundle', result: { error: { code: 'operation-unavailable' } } })
+    ).toMatchObject({ kind: 'bundle', result: { error: { code: 'operation-unavailable' } } })
     expect(plugin).not.toHaveBeenCalled()
   })
 
-  it('renders installed, bundle-carrier, and Marketplace results from one query and filter state', async () => {
-    const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
-      url: 'https://codex.local/',
-    })
-    const previous = {
-      document: globalThis.document,
-      window: globalThis.window,
-      HTMLElement: globalThis.HTMLElement,
-      MutationObserver: globalThis.MutationObserver,
-      IS_REACT_ACT_ENVIRONMENT: globalThis.IS_REACT_ACT_ENVIRONMENT,
-    }
-    Object.assign(globalThis, {
-      document: dom.window.document,
-      window: dom.window,
-      HTMLElement: dom.window.HTMLElement,
-      MutationObserver: dom.window.MutationObserver,
-      IS_REACT_ACT_ENVIRONMENT: true,
-    })
-    Object.defineProperty(dom.window, 'matchMedia', {
-      value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
-    })
-    const state = managerSnapshot()
-    const marketState = marketplaceSnapshot()
+  it('renders installed plugins with bundle provenance and one global empty state', async () => {
+    const fixture = reactManagerFixture()
+    const state = {
+      ...managerSnapshot(),
+      localDevelopment: [{
+        origin: 'local-dev',
+        pluginId: 'not-installed',
+        sourcePath: '/plugins/not-installed.ts',
+        state: 'failed',
+        error: 'build failed',
+      }],
+    } as const satisfies ManagerSnapshot
     const manager: ManagerModel = {
       snapshot: () => state,
       setPluginBlocked: async () => {},
       setPermissionPolicy: async () => {},
       subscribe: () => () => {},
-    }
-    const marketplace: MarketplaceModel = {
-      snapshot: () => marketState,
-      setSources: async () => {},
-      setSourceRecords: async () => {},
-      upsertSource: async () => {},
-      removeSource: async () => {},
-      setSourceEnabled: async () => {},
-      moveSource: async () => {},
-      importSource: async () => {
-        throw new Error('not used')
-      },
-      reload: async () => {},
-      subscribe: () => () => {},
-      dispose: () => {},
     }
     const router = {
       route: { kind: 'primary', page: 'plugins' } as const,
@@ -356,65 +431,69 @@ describe('unified Plugins information architecture', () => {
       openDetail: vi.fn(),
       back: vi.fn(),
     }
-    const root = createRoot(dom.window.document.getElementById('root')!)
     try {
-      await act(async () =>
-        root.render(
-          <PluginsPage model={manager} marketplace={marketplace} snapshot={state} router={router} />,
-        )
+      await fixture.render(<PluginsPage model={manager} snapshot={state} router={router} />)
+      const page = fixture.document.querySelector('[data-unified-plugins-page]')
+      expect(page?.getAttribute('aria-label')).toBe('Installed plugins')
+      expect(page?.querySelector('[data-plugin-id="notes"]')).not.toBeNull()
+      expect(page?.querySelector('[data-plugin-bundle-provenance="Workflow Pack"]')?.textContent).toContain(
+        'From bundle',
       )
-      expect(dom.window.document.querySelector('[data-unified-plugins-page]')).not.toBeNull()
-      expect(dom.window.document.querySelector('[data-unified-plugins-page]')?.getAttribute('aria-label')).toBe(
-        'Plugins, plugin bundles, and Marketplace catalog',
-      )
-      expect(dom.window.document.querySelector('[data-plugin-id="notes"]')).not.toBeNull()
-      expect(dom.window.document.querySelector('[data-plugin-bundle-id="workflow"]')).not.toBeNull()
-      expect(dom.window.document.querySelectorAll('[data-plugin-result-source="marketplace"]')).toHaveLength(1)
-      expect(dom.window.document.querySelector('[data-marketplace-plugin="remote-notes"]')).not.toBeNull()
-      expect(dom.window.document.querySelector('[data-marketplace-plugin="notes"]')).toBeNull()
-      expect(dom.window.document.querySelector('[data-plugin-bundle-provenance="Workflow Pack"]')?.textContent)
-        .toContain('From bundle')
+      expect(page?.querySelector('[data-plugin-type-badge="plugin"]')).not.toBeNull()
+      expect(page?.querySelector('[data-plugin-status-badge="active"]')).not.toBeNull()
+      expect(page?.querySelector('[data-plugin-bundle-id]')).toBeNull()
+      expect(page?.textContent).not.toContain('No matching plugin bundles')
+      expect(page?.querySelector('[data-plugin-source-filter]')).toBeNull()
+      expect(page?.querySelector('[data-plugin-type-filter]')).toBeNull()
+      expect(page?.querySelector('[data-unified-local-install]')).toBeNull()
+      expect(page?.textContent).not.toContain('not-installed')
+      expect(page?.textContent).not.toContain('/plugins/not-installed.ts')
+      expect(page?.querySelector('.cxr-plugins-toolbar .cxr-search')).not.toBeNull()
+      expect(page?.querySelector('.cxr-plugins-results')).not.toBeNull()
 
-      expect(dom.window.document.querySelector('input[type="search"]')?.getAttribute('placeholder')).toBe(
-        'Search installed plugins, bundles, or Marketplace…',
-      )
-      expect(dom.window.document.querySelector('[data-plugin-source-filter]')).not.toBeNull()
-      expect(dom.window.document.querySelector('[data-plugin-type-filter]')).not.toBeNull()
-      expect(unifiedPluginSections('marketplace', 'all')).toEqual({
-        plugins: false,
-        bundles: false,
-        marketplace: true,
-      })
-      expect(unifiedPluginSections('all', 'bundle')).toEqual({
-        plugins: false,
-        bundles: true,
-        marketplace: false,
-      })
-
-      const official = dom.window.document.querySelector<HTMLButtonElement>('[data-marketplace-official-filter]')!
-      expect(official.textContent).toBe('Marketplace: Official only')
-      await act(async () => official.click())
-      expect(dom.window.document.querySelector('[data-plugin-id="notes"]')).not.toBeNull()
-      expect(dom.window.document.querySelector('[data-plugin-result-source="marketplace"]')).toBeNull()
-
-      await act(async () =>
-        root.render(
-          <MarketplacePage
-            marketplace={marketplace}
-            manager={manager}
-            snapshot={state}
-            router={router}
-            query="Workflow Pack"
-            officialOnly={false}
-            certifiedOnly={false}
-          />,
-        )
-      )
-      expect(dom.window.document.querySelector('[data-plugin-result-source="marketplace"]')).toBeNull()
+      await fixture.type('input[type="search"]', 'nothing-matches')
+      expect(page?.querySelectorAll('.cxr-empty')).toHaveLength(1)
+      expect(page?.textContent).toContain('No matching plugins')
     } finally {
-      await act(async () => root.unmount())
-      Object.assign(globalThis, previous)
-      dom.window.close()
+      await fixture.dispose()
+    }
+  })
+
+  it('keeps Plugin Store discovery independent and overlays exact installed identity', async () => {
+    const fixture = await renderFixture()
+    const state = managerSnapshot()
+    const marketplace = fixture.marketplace(marketplaceSnapshot())
+    try {
+      await fixture.render(
+        <MarketplacePage
+          marketplace={marketplace}
+          manager={fixture.manager(state)}
+          snapshot={state}
+          router={fixture.router}
+        />,
+      )
+      expect(fixture.document.querySelector('[data-marketplace-discovery-page] input')).not.toBeNull()
+      expect(fixture.document.querySelector('[data-marketplace-plugin="remote-notes"]')).not.toBeNull()
+      expect(fixture.document.querySelector('[data-marketplace-installed="true"]')?.textContent).toBe('Installed')
+      expect(fixture.document.querySelector('[data-unified-plugins-page]')).toBeNull()
+    } finally {
+      await fixture.dispose()
+    }
+  })
+
+  it('renders exactly Plugins and Plugin Store as core resource destinations', async () => {
+    const fixture = await renderFixture()
+    const state = managerSnapshot()
+    try {
+      await fixture.render(<Navigation snapshot={state} router={fixture.router} />)
+      const resources = fixture.document.querySelector('[data-navigation-group="resources"]')!
+      expect([...resources.querySelectorAll('[data-tab]')].map(item => item.getAttribute('data-tab'))).toEqual([
+        'plugins',
+        'marketplace',
+      ])
+      expect(resources.querySelector('[data-tab="plugin-bundles"]')).toBeNull()
+    } finally {
+      await fixture.dispose()
     }
   })
 })

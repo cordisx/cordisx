@@ -43,6 +43,7 @@ implementation of those contracts, not a second public specification.
 | [renderer-runtime](renderer-runtime.md)                         | Reference | Renderer, conversation, adapter, routing, Manager, and trust integration          |
 | [distribution-and-cli](distribution-and-cli.md)                 | Reference | CLI grammar, launch profiles, package ownership, and release contract             |
 | [dynamic-plugin-lifecycle](dynamic-plugin-lifecycle.md)         | Reference | Dynamic package generations, activation, rollback, and cleanup                    |
+| [local-plugin-paths](local-plugin-paths.md)                     | Proposal  | Future secondary view over configured local plugin entry paths                    |
 | [dynamic-package-store](dynamic-package-store.md)               | Reference | Source intake, private transactions, permissions, and leases                      |
 | [plugin-bundles](plugin-bundles.md)                             | Reference | Bundle claims, lifecycle coordination, permission merging, and Manager projection |
 | [showcase-capture-integration](showcase-capture-integration.md) | Guide     | Host support for website-owned capture workflows and artifacts                    |
