@@ -43,6 +43,8 @@ const extension = sourceMode ? 'ts' : 'js'
 const rendererPath = fileURLToPath(new URL(`../renderer/runtime.${extension}`, import.meta.url))
 const clientPath = fileURLToPath(new URL(`../renderer/vite-development-client.${extension}`, import.meta.url))
 const reactRuntimePath = fileURLToPath(new URL(`../renderer/react-runtime.${extension}`, import.meta.url))
+const hostRendererRoot = normalizePath(path.dirname(rendererPath)).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+const HOST_RENDERER_REACT_SOURCE = new RegExp(`^${hostRendererRoot}/.*\\.[cm]?[jt]sx?(?:\\?|$)`, 'u')
 const require = createRequire(import.meta.url)
 const reactPackageRoot = path.dirname(require.resolve('react/package.json'))
 const reactDomPackageRoot = path.dirname(require.resolve('react-dom/package.json'))
@@ -876,7 +878,11 @@ if (import.meta.hot) {
       base,
       publicDir: false,
       appType: 'custom',
-      plugins: [integration, react()],
+      plugins: [
+        integration,
+        react({ include: HOST_RENDERER_REACT_SOURCE, jsxImportSource: 'react' }),
+        react({ exclude: HOST_RENDERER_REACT_SOURCE }),
+      ],
       ...(serverOptions.prebundleHostDependencies === true
         ? {
           optimizeDeps: {
