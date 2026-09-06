@@ -338,10 +338,26 @@ describe('Playground Scenario Lab Phase 1', () => {
 
   it('keeps the entry developer-only and outside product navigation and Recent tasks', async () => {
     const [{ readFile }, path] = await Promise.all([import('node:fs/promises'), import('node:path')])
+    const readScenarioLabModuleGraph = async (entry: string): Promise<string> => {
+      const pending = [entry]
+      const visited = new Set<string>()
+      const sources: string[] = []
+      while (pending.length > 0) {
+        const filename = pending.pop()!
+        if (visited.has(filename)) continue
+        visited.add(filename)
+        const source = await readFile(filename, 'utf8')
+        sources.push(source)
+        for (const match of source.matchAll(/from\s+['"](\.\/scenario-lab[^'"]+\.js)['"]/gu)) {
+          pending.push(path.resolve(path.dirname(filename), match[1]!.replace(/\.js$/u, '.ts')))
+        }
+      }
+      return sources.join('\n')
+    }
     const [app, component, controllerSource, backend] = await Promise.all([
       readFile(path.resolve('packages/cli/src/playground/client/App.tsx'), 'utf8'),
       readFile(path.resolve('packages/cli/src/playground/client/components/ScenarioLabPage.tsx'), 'utf8'),
-      readFile(path.resolve('packages/cli/src/playground/scenario-lab.ts'), 'utf8'),
+      readScenarioLabModuleGraph(path.resolve('packages/cli/src/playground/scenario-lab.ts')),
       readFile(path.resolve('packages/cli/src/renderer/playground-mock-agent-loop.ts'), 'utf8'),
     ])
     expect(app).toContain("id: 'scenario-lab'")
