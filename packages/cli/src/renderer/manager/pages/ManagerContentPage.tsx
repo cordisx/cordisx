@@ -142,7 +142,12 @@ export function ManagerContentPage(
         {state === 'error'
           ? <div className="cxr-notice" role="alert">{managerCopy(locale, 'manager.content.failed')}</div>
           : null}
-        <div ref={seat} hidden={state === 'error'} />
+        <div
+          ref={seat}
+          className="cxr-manager-content-seat"
+          data-cordisx-manager-content-seat="true"
+          hidden={state === 'error'}
+        />
       </div>
     </section>
   )
