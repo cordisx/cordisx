@@ -63,12 +63,14 @@ import {
   CordisXAgentAdmissionReservationService,
   CordisXAgentAdmissionTargetOriginService,
   CordisXAgentAdmissionTargetReservationService,
+  CordisXAgentDetailNavigationService,
   CordisXAgentPageAdmissionReservationService,
   CordisXAgentPageAdmissionRouteDeclarationService,
   CordisXAgentPageAdmissionRouteReservationService,
   CordisXAgentPageAdmissionTargetService,
   CordisXAgentPageFreshRoomNavigationService,
   CordisXAgentRegistryServiceV1,
+  CordisXAgentSessionDetailReferenceService,
   CordisXAgentSessionRuntime,
   CordisXApprovalServiceV1,
   type CordisXPrivateAgentDriver,
@@ -109,6 +111,10 @@ import { CordisXI18nService } from './i18n.js'
 import { CordisXVisualService } from './visuals.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
 import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter } from './codex-router-history.js'
+import {
+  HostAgentTaskDetailsNavigator,
+  navigateHostTaskDetailsSameDocument,
+} from './host-ui/AgentTaskDetailsNavigator.js'
 import {
   type AgentRuntimeConnection,
   type AgentRuntimeRouteScope,
@@ -340,6 +346,8 @@ interface PluginController {
   entityRegistryFiber?: Fiber
   agentRegistryFiber?: Fiber
   sessionRegistryFiber?: Fiber
+  agentSessionDetailReferenceFiber?: Fiber
+  agentDetailNavigationFiber?: Fiber
   approvalServiceFiber?: Fiber
   agentAdmissionReservationFiber?: Fiber
   agentAdmissionTargetOriginFiber?: Fiber
@@ -757,6 +765,7 @@ async function start(
   const routeHistory = browserHostedPlayground
     ? new BrowserRouteHistoryAdapter(window, true)
     : new CodexRouterHistoryAdapter(window)
+  let disposeAgentDetailHistoryReturn: () => void = () => {}
   const playgroundRoomSimulationBridgeRegistry = metadata.hostKind === 'playground'
       && window.location.protocol === 'http:'
       && ['127.0.0.1', 'localhost', '[::1]'].includes(window.location.hostname)
@@ -1047,6 +1056,7 @@ async function start(
     let agentRuntimeRouteDisposed = false
     let agentSessionRuntime!: CordisXAgentSessionRuntime
     const pageAdmissionBindings = new PageAdmissionBindingRegistry()
+    const managerNavigationController = new HostManagerNavigationController()
     const agentOwnerControllers = new Map<string, PluginController>()
     const agentOwnerKey = (owner: AgentActiveRoute['owner']): string => `${owner.pluginId}\u0000${owner.generation}`
     const agentOwnerForController = (controller: PluginController): AgentActiveRoute['owner'] => {
@@ -1230,8 +1240,59 @@ async function start(
           : { scenarioSessionScope: scenarioSessionScopeAuthority.client }),
       })
       : desktopAgentSessionTransport ?? new UnavailableAgentSessionTransport()
+    const agentDetailNavigator = new HostAgentTaskDetailsNavigator({
+      navigateHost: url => navigateHostTaskDetailsSameDocument(window, url),
+      navigateExternal: () => {
+        throw new Error('Agent detail references never expose external navigation')
+      },
+    })
+    const agentDetailHistoryIdentity = () => {
+      const state = window.history.state
+      const key = state !== null && typeof state === 'object' && typeof (state as { key?: unknown }).key === 'string'
+        ? (state as { readonly key: string }).key
+        : undefined
+      const index =
+        state !== null && typeof state === 'object' && Number.isSafeInteger((state as { idx?: unknown }).idx)
+          ? (state as { readonly idx: number }).idx
+          : undefined
+      return Object.freeze({
+        path: window.location.pathname,
+        ...(key === undefined ? {} : { key }),
+        ...(index === undefined ? {} : { index }),
+      })
+    }
+    let pendingAgentDetailReturn:
+      | Readonly<{ readonly identity: ReturnType<typeof agentDetailHistoryIdentity>; readonly restore: () => void }>
+      | undefined
+    const restoreAgentDetailReturn = () => {
+      const pending = pendingAgentDetailReturn
+      const current = agentDetailHistoryIdentity()
+      const sameEntry = pending !== undefined
+        && pending.identity.key !== undefined && pending.identity.index !== undefined
+        && pending.identity.key === current.key && pending.identity.index === current.index
+      if (pending === undefined || sameEntry || current.path === pending.identity.path && current.key === undefined) {
+        return
+      }
+      pendingAgentDetailReturn = undefined
+      pending.restore()
+    }
+    const onAgentDetailHistoryPop = () => restoreAgentDetailReturn()
+    window.addEventListener('popstate', onAgentDetailHistoryPop, { capture: true })
+    const unsubscribeAgentDetailRouteReturn = routeHistory.subscribe(restoreAgentDetailReturn)
+    disposeAgentDetailHistoryReturn = () => {
+      pendingAgentDetailReturn = undefined
+      window.removeEventListener('popstate', onAgentDetailHistoryPop, { capture: true })
+      unsubscribeAgentDetailRouteReturn()
+    }
     agentSessionRuntime = new CordisXAgentSessionRuntime({
       driver: agentSessionTransport,
+      navigateAgentDetail: async (detail, sessionId) => {
+        const restore = managerNavigationController.captureReturn()
+        await agentDetailNavigator.navigateAgentDetail(detail, sessionId)
+        if (restore !== undefined) {
+          pendingAgentDetailReturn = Object.freeze({ identity: agentDetailHistoryIdentity(), restore })
+        }
+      },
       authorize: async (owner, capability, sessionId) => await agentRouteScopes.authorize(owner, capability, sessionId),
       mintApprovalAuthorityLease: async (owner, input) =>
         await agentRouteScopes.mintApprovalAuthorityLease(owner, input),
@@ -1736,6 +1797,10 @@ async function start(
         delete controller.agentAdmissionReservationFiber
         await controller.approvalServiceFiber?.dispose()
         delete controller.approvalServiceFiber
+        await controller.agentDetailNavigationFiber?.dispose()
+        delete controller.agentDetailNavigationFiber
+        await controller.agentSessionDetailReferenceFiber?.dispose()
+        delete controller.agentSessionDetailReferenceFiber
         await controller.sessionRegistryFiber?.dispose()
         delete controller.sessionRegistryFiber
         await controller.agentRegistryFiber?.dispose()
@@ -2042,9 +2107,8 @@ async function start(
           }
         },
       })
-      pluginContext = ctx.isolate('connectors').isolate('agentLoop').isolate('agents').isolate('sessions').isolate(
-        'approvals',
-      )
+      pluginContext = ctx.isolate('connectors').isolate('agentLoop').isolate('agents').isolate('sessions')
+        .isolate('agentSessionDetailReferences').isolate('agentDetailNavigation').isolate('approvals')
         .isolate('agentAdmission').isolate('agentAdmissionOrigins').isolate('agentAdmissionReservations')
         .isolate('agentAdmissionBootstrapTargets').isolate('agentAdmissionBootstrapReservations')
         .isolate('agentAdmissionBootstrapRoomTargets').isolate('agentAdmissionBootstrapRoomReservations')
@@ -2091,6 +2155,16 @@ async function start(
         await controller.agentRegistryFiber
         controller.sessionRegistryFiber = pluginContext.plugin(CordisXSessionRegistryServiceV1, agentSessionRuntime)
         await controller.sessionRegistryFiber
+        controller.agentSessionDetailReferenceFiber = pluginContext.plugin(
+          CordisXAgentSessionDetailReferenceService,
+          agentSessionRuntime,
+        )
+        await controller.agentSessionDetailReferenceFiber
+        controller.agentDetailNavigationFiber = pluginContext.plugin(
+          CordisXAgentDetailNavigationService,
+          agentSessionRuntime,
+        )
+        await controller.agentDetailNavigationFiber
         controller.approvalServiceFiber = pluginContext.plugin(CordisXApprovalServiceV1, agentSessionRuntime)
         await controller.approvalServiceFiber
         controller.agentAdmissionReservationFiber = pluginContext.plugin(
@@ -2219,6 +2293,10 @@ async function start(
         delete controller.agentAdmissionReservationFiber
         await controller.approvalServiceFiber?.dispose()
         delete controller.approvalServiceFiber
+        await controller.agentDetailNavigationFiber?.dispose()
+        delete controller.agentDetailNavigationFiber
+        await controller.agentSessionDetailReferenceFiber?.dispose()
+        delete controller.agentSessionDetailReferenceFiber
         await controller.sessionRegistryFiber?.dispose()
         delete controller.sessionRegistryFiber
         await controller.agentRegistryFiber?.dispose()
@@ -3630,6 +3708,10 @@ async function start(
         delete controller.agentAdmissionReservationFiber
         await controller.approvalServiceFiber?.dispose()
         delete controller.approvalServiceFiber
+        await controller.agentDetailNavigationFiber?.dispose()
+        delete controller.agentDetailNavigationFiber
+        await controller.agentSessionDetailReferenceFiber?.dispose()
+        delete controller.agentSessionDetailReferenceFiber
         await controller.sessionRegistryFiber?.dispose()
         delete controller.sessionRegistryFiber
         await controller.agentRegistryFiber?.dispose()
@@ -3706,6 +3788,7 @@ async function start(
       agentLoopBroker.dispose()
       agentLoopBrokerV2.dispose()
       agentLoopBrokerV4.dispose()
+      disposeAgentDetailHistoryReturn()
       disposeAgentRouteHistory()
       disposePageAdmissionActivation()
       disposeAgentRouteFences()
@@ -3991,8 +4074,6 @@ async function start(
           candidate,
         ),
     }
-    const managerNavigationController = new HostManagerNavigationController()
-
     try {
       i18nFiber = ctx.plugin(CordisXI18nService)
       await i18nFiber
@@ -4283,6 +4364,7 @@ async function start(
   } catch (error) {
     certifiedPermissionChannel?.dispose()
     certifiedPermissionChannel = undefined
+    disposeAgentDetailHistoryReturn()
     routeHistory.dispose()
     if (ownsSharedReactRuntime) sharedReactRuntime?.dispose()
     else disposePreparedSharedReactRuntime?.()

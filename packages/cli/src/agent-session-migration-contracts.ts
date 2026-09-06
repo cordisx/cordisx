@@ -28,6 +28,10 @@ import type {
   AgentPageAdmissionTargetService,
   AgentPageFreshRoomNavigationService,
 } from '@cordisx/protocol/agent-page-admission/v2'
+import type {
+  AgentDetailNavigationService,
+  AgentSessionDetailReferenceService,
+} from '@cordisx/protocol/agent-detail-navigation/v1'
 import type { SessionId, SessionRegistry } from '@cordisx/protocol/sessions/v1'
 
 export const CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1 =
@@ -120,6 +124,10 @@ declare module '@deepseek-ai/cordis' {
     agentPageAdmissionRouteReservations: AgentPageAdmissionRouteReservationService
     /** Host-bound fresh-Room navigation permit, present only in a v2 page command context. */
     agentPageFreshRoomNavigation: AgentPageFreshRoomNavigationService
+    /** Read-only current same-owner Agent detail reference for an exact Session. */
+    agentSessionDetailReferences: AgentSessionDetailReferenceService
+    /** Host-owned navigation for one current same-owner opaque detail reference. */
+    agentDetailNavigation: AgentDetailNavigationService
     entities: EntityRegistry
   }
 }

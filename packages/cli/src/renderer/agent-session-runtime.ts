@@ -159,6 +159,14 @@ import type {
   AgentPageFreshRoomNavigationService,
   AgentPageRoomRoute,
 } from '@cordisx/protocol/agent-page-admission/v2'
+import type {
+  AgentDetailNavigationRequest,
+  AgentDetailNavigationResult,
+  AgentDetailNavigationService,
+  AgentSessionDetailReferenceRequest,
+  AgentSessionDetailReferenceResult,
+  AgentSessionDetailReferenceService,
+} from '@cordisx/protocol/agent-detail-navigation/v1'
 import type { PluginApprovalAuthorityLeaseV8 } from '@cordisx/protocol/plugin-manifest/v8'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from './service.js'
 import { generationFromContext } from './ownership.js'
@@ -472,6 +480,8 @@ export interface CordisXAgentSessionRuntimeOptions {
     command: PageAdmissionCommand,
     route: AgentPageRoomRoute,
   ) => Promise<'accepted' | 'navigation-failed'>
+  /** Host-owned only; resolves a current ref through the private navigator. */
+  readonly navigateAgentDetail?: (detail: AgentDetailReference, sessionId: SessionId) => Promise<void> | void
 }
 
 export interface CordisXPersistedSession {
@@ -1601,6 +1611,15 @@ export class CordisXAgentSessionRuntime {
       : 'reservation-denied' as never
   }
 
+  private validAgentDetailReference(value: AgentDetailReference | undefined): value is AgentDetailReference {
+    return value !== undefined && plainObject(value) && hasExactKeys(value, ['kind', 'ref'])
+      && value.kind === 'host' && opaque(value.ref) && value.ref !== '*'
+  }
+
+  private sameAgentDetailReference(left: AgentDetailReference, right: AgentDetailReference): boolean {
+    return left.kind === right.kind && left.ref === right.ref
+  }
+
   private validAdmissionOrigin(origin: AgentCommandOrigin | undefined): origin is AgentCommandOrigin {
     return origin !== undefined && origin.scope === 'composer-submit' && opaque(origin.originId)
       && opaque(origin.executionId) && opaque(origin.binding.bindingId)
@@ -2363,6 +2382,61 @@ export class CordisXAgentSessionRuntime {
       Object.freeze({ ...issued, claimed: true }),
     )
     return { status: 'claimed', code: 'claimed', receipt }
+  }
+
+  /** Read-only current same-owner projection; it never acquires an Agent. */
+  async getAgentSessionDetailReference(
+    owner: PluginOwnerIdentity,
+    request: AgentSessionDetailReferenceRequest,
+  ): Promise<AgentSessionDetailReferenceResult> {
+    if (this.disposed) return { status: 'unavailable', code: 'host-unavailable' }
+    if (
+      !plainObject(request) || !hasExactKeys(request, ['sessionId'])
+      || typeof request.sessionId !== 'string'
+    ) return { status: 'unavailable', code: 'session-unavailable' }
+    if (!opaque(request.sessionId)) return { status: 'unavailable', code: 'session-unavailable' }
+    const record = this.agents.get(request.sessionId)
+    if (record === undefined) return { status: 'unavailable', code: 'session-unavailable' }
+    if (!this.sameOwner(owner, record.owner)) return { status: 'denied', code: 'permission-denied' }
+    if (!this.current(record)) {
+      return {
+        status: 'unavailable',
+        code: record.disposed === 'connection-replaced' ? 'connection-replaced' : 'generation-replaced',
+      }
+    }
+    if (record.detail === undefined || !this.validAgentDetailReference(record.detail)) {
+      return { status: 'unavailable', code: 'detail-unavailable' }
+    }
+    return { status: 'accepted', sessionId: record.id, target: Object.freeze(clone(record.detail)) }
+  }
+
+  /** Host-owned navigation accepts only one exact current same-owner stored reference. */
+  async openAgentDetail(
+    owner: PluginOwnerIdentity,
+    request: AgentDetailNavigationRequest,
+  ): Promise<AgentDetailNavigationResult> {
+    if (this.disposed) return { status: 'unavailable', code: 'host-unavailable' }
+    if (!plainObject(request) || !hasExactKeys(request, ['target'])) {
+      return { status: 'unavailable', code: 'unknown-detail' }
+    }
+    if (!this.validAgentDetailReference(request.target)) return { status: 'unavailable', code: 'unknown-detail' }
+    const candidates = [...this.agents.values()].filter(record =>
+      this.sameOwner(owner, record.owner) && this.current(record) && record.detail !== undefined
+      && this.sameAgentDetailReference(record.detail, request.target)
+    )
+    if (candidates.length > 1) return { status: 'denied', code: 'ambiguous-detail' }
+    const record = candidates[0]
+    if (record === undefined) return { status: 'unavailable', code: 'unknown-detail' }
+    if (this.options.navigateAgentDetail === undefined) return { status: 'unavailable', code: 'unsupported' }
+    try {
+      await this.options.navigateAgentDetail(Object.freeze(clone(record.detail!)), record.id)
+    } catch {
+      return { status: 'unavailable', code: 'stale-reference' }
+    }
+    if (!this.current(record) || !this.sameOwner(owner, record.owner)) {
+      return { status: 'unavailable', code: 'generation-replaced' }
+    }
+    return { status: 'accepted', code: 'opened' }
   }
 
   /** Host-only mint for a page-bound generic command execution. */
@@ -4363,5 +4437,29 @@ export class CordisXAgentPageFreshRoomNavigationService extends Service implemen
   navigate = async (request: AgentPageFreshRoomNavigationRequest): Promise<AgentPageFreshRoomNavigationResult> => {
     const runtime = runtimeFor(this)
     return await runtime.navigatePageAdmission(runtime.ownerFromContext(this.ctx), request)
+  }
+}
+
+/** Public read-only current detail reference projection for one exact Session. */
+export class CordisXAgentSessionDetailReferenceService extends Service implements AgentSessionDetailReferenceService {
+  constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) {
+    super(ctx, 'agentSessionDetailReferences')
+    runtimes.set(this, runtime)
+  }
+  get = async (request: AgentSessionDetailReferenceRequest): Promise<AgentSessionDetailReferenceResult> => {
+    const runtime = runtimeFor(this)
+    return await runtime.getAgentSessionDetailReference(runtime.ownerFromContext(this.ctx), request)
+  }
+}
+
+/** Public Host-owned detail opener; it accepts no URL, Room, or Agent handle. */
+export class CordisXAgentDetailNavigationService extends Service implements AgentDetailNavigationService {
+  constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) {
+    super(ctx, 'agentDetailNavigation')
+    runtimes.set(this, runtime)
+  }
+  open = async (request: AgentDetailNavigationRequest): Promise<AgentDetailNavigationResult> => {
+    const runtime = runtimeFor(this)
+    return await runtime.openAgentDetail(runtime.ownerFromContext(this.ctx), request)
   }
 }
