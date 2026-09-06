@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
@@ -25,53 +24,86 @@ import {
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 
-async function readOwnedSourceRoute(relative: string): Promise<ts.SourceFile[]> {
-  const pending = [path.join(root, relative)]
-  const visited = new Set<string>()
-  const sources: ts.SourceFile[] = []
-  const stem = path.basename(relative, '.ts')
-  while (pending.length > 0) {
-    const filename = pending.pop()!
-    if (visited.has(filename)) continue
-    visited.add(filename)
-    const source = await readFile(filename, 'utf8')
-    sources.push(ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS))
-    for (const match of source.matchAll(/from\s+['"](\.\/[^'"]+)['"]/gu)) {
-      const specifier = match[1]!
-      if (!path.basename(specifier).startsWith(stem)) continue
-      pending.push(path.resolve(path.dirname(filename), specifier.replace(/\.js$/u, '.ts')))
-    }
-  }
-  return sources
+const routeFiles = {
+  development: path.join(root, 'packages/cli/src/launcher/development.ts'),
+  package: path.join(root, 'packages/cli/src/launcher/plugin-package.ts'),
+  lifecycle: path.join(root, 'packages/cli/src/launcher/plugin-lifecycle-core.ts'),
+  vite: path.join(root, 'packages/cli/src/launcher/vite-development.ts'),
+  runtime: path.join(root, 'packages/cli/src/renderer/runtime.ts'),
+} as const
+
+const routeProgram = ts.createProgram(Object.values(routeFiles), {
+  target: ts.ScriptTarget.ES2022,
+  module: ts.ModuleKind.NodeNext,
+  moduleResolution: ts.ModuleResolutionKind.NodeNext,
+  skipLibCheck: true,
+  noEmit: true,
+})
+const routeChecker = routeProgram.getTypeChecker()
+
+function sourceFile(filename: string): ts.SourceFile {
+  const source = routeProgram.getSourceFile(filename)
+  if (source === undefined) throw new Error(`missing source route ${filename}`)
+  return source
 }
 
-function calledIdentifiers(sources: readonly ts.SourceFile[]): Set<string> {
+function symbolSource(node: ts.Identifier): string | undefined {
+  let symbol = routeChecker.getSymbolAtLocation(node)
+  if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+    symbol = routeChecker.getAliasedSymbol(symbol)
+  }
+  return symbol?.declarations?.[0]?.getSourceFile().fileName
+}
+
+function importedCalls(filename: string, declarationFile: string): Set<string> {
   const names = new Set<string>()
   const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) names.add(node.expression.text)
+    if (
+      ts.isCallExpression(node)
+      && ts.isIdentifier(node.expression)
+      && symbolSource(node.expression)?.endsWith(declarationFile) === true
+    ) names.add(node.expression.text)
     ts.forEachChild(node, visit)
   }
-  for (const source of sources) visit(source)
+  visit(sourceFile(filename))
   return names
 }
 
-function typeReferences(sources: readonly ts.SourceFile[]): Set<string> {
+function typeReferences(filename: string, declarationFile: string): Set<string> {
   const names = new Set<string>()
   const visit = (node: ts.Node): void => {
-    if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName)) names.add(node.typeName.text)
+    if (
+      ts.isTypeReferenceNode(node)
+      && ts.isIdentifier(node.typeName)
+      && symbolSource(node.typeName)?.endsWith(declarationFile) === true
+    ) names.add(node.typeName.text)
     ts.forEachChild(node, visit)
   }
-  for (const source of sources) visit(source)
+  visit(sourceFile(filename))
   return names
 }
 
-function declaredFunction(sources: readonly ts.SourceFile[], name: string): ts.FunctionDeclaration {
-  for (const source of sources) {
-    for (const statement of source.statements) {
-      if (ts.isFunctionDeclaration(statement) && statement.name?.text === name) return statement
-    }
+function schemaVersions(filename: string, functionName: string): Set<number> {
+  const versions = new Set<number>()
+  const source = sourceFile(filename)
+  const declaration = source.statements.find(statement => (
+    ts.isFunctionDeclaration(statement) && statement.name?.text === functionName
+  ))
+  if (declaration === undefined || !ts.isFunctionDeclaration(declaration)) {
+    throw new Error(`missing function ${functionName}`)
   }
-  throw new Error(`missing function ${name}`)
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isBinaryExpression(node)
+      && node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken
+      && ts.isPropertyAccessExpression(node.left)
+      && node.left.name.text === 'schemaVersion'
+      && ts.isNumericLiteral(node.right)
+    ) versions.add(Number(node.right.text))
+    ts.forEachChild(node, visit)
+  }
+  visit(declaration)
+  return versions
 }
 
 describe('plugin package v7/v8 predecessor and successor parity', () => {
@@ -121,26 +153,19 @@ describe('plugin package v7/v8 predecessor and successor parity', () => {
     const config = parseConfigDocument({ version: 1, plugins: [] }, location.configPath)
     expect(cordisXProjectRoot(config)).toBe(location.projectRoot)
     expect(cordisXConfigRoot(config)).toBe(location.configRoot)
-    for (
-      const relative of [
-        'packages/cli/src/launcher/development.ts',
-        'packages/cli/src/launcher/plugin-package.ts',
-        'packages/cli/src/launcher/plugin-lifecycle.ts',
-      ]
-    ) {
-      const calls = calledIdentifiers(await readOwnedSourceRoute(relative))
+    for (const filename of [routeFiles.development, routeFiles.package, routeFiles.lifecycle]) {
+      const calls = importedCalls(filename, '/permission-model-v4.ts')
       expect(calls).toContain('normalizePluginManifestV7')
       expect(calls).toContain('normalizePluginManifestV8')
     }
-    const viteTypes = typeReferences(await readOwnedSourceRoute('packages/cli/src/launcher/vite-development.ts'))
+    const viteTypes = typeReferences(routeFiles.vite, '/permission-contracts.ts')
     expect(viteTypes).toContain('CordisXPluginManifestV7')
     expect(viteTypes).toContain('CordisXPluginManifestV8')
 
-    const runtime = await readOwnedSourceRoute('packages/cli/src/renderer/runtime.ts')
-    const runtimeCalls = calledIdentifiers(runtime)
+    const runtimeCalls = importedCalls(routeFiles.runtime, '/runtime.ts')
     expect(runtimeCalls).toContain('prepareCordisXViteReactRuntime')
     expect(runtimeCalls).toContain('manifestUsesTransientCanvas')
-    expect(declaredFunction(runtime, 'manifestUsesHostDom').body?.getText()).toMatch(/schemaVersion\s*===\s*8/u)
-    expect(declaredFunction(runtime, 'manifestUsesTransientCanvas').body?.getText()).toMatch(/schemaVersion\s*===\s*7/u)
+    expect(schemaVersions(routeFiles.runtime, 'manifestUsesHostDom')).toContain(8)
+    expect(schemaVersions(routeFiles.runtime, 'manifestUsesTransientCanvas')).toContain(7)
   })
 })
