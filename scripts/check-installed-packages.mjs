@@ -973,7 +973,7 @@ createElement(AgentAvatar, props)
   console.log(
     `[cordisx] installed tarballs verified: licenses, pinned Host-owned AgentAvatar runtime, combined multi-binding AgentLoop, executable v4 create/send concurrent replay/approval/introduction/cancel/subscription, owner documents, and generic raster navigation collection${
       protocolTarball === undefined ? '' : ', exact local Protocol'
-    }, durable outbox reload, local AgentLoop provider composition, Connector consumer types, CLI, built-in README, both creator commands, standalone/workspace/embedded-isolated/embedded-workspace generated checks, Vite dev dry-run`,
+    }, durable outbox reload, local AgentLoop provider composition, Connector and Manager navigation v9 consumer types, CLI, built-in README, both creator commands, standalone/workspace/embedded-isolated/embedded-workspace generated checks, Vite dev dry-run`,
   )
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true })
