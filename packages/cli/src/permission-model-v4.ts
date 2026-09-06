@@ -7,6 +7,7 @@ import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V9,
   type CordisXCapabilityDeclarationV4,
   type CordisXCapabilityDeclarationV5,
   type CordisXCertifiedPermissionProjectionV1,
@@ -22,8 +23,10 @@ import {
   type CordisXPluginManifestV6,
   type CordisXPluginManifestV7,
   type CordisXPluginManifestV8,
+  type CordisXPluginManifestV9,
   type CordisXPluginServiceConfigurationV4,
   type CordisXPluginServiceDeclarationV4,
+  type CordisXPluginServiceDeclarationV9,
 } from './permission-contracts.js'
 import type { AgentRuntimeCapability } from '@cordisx/protocol/agents/v1'
 import {
@@ -40,6 +43,8 @@ const LOCAL_ID = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u
 const SERVICE_ENTRY = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:mjs|js)$/u
 const CHANNEL_SERVICE_CONFIG_SCHEMA =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/channel-service-config.v1.schema.json'
+const PROTOCOL_SCHEMA =
+  /^https:\/\/raw\.githubusercontent\.com\/cordisx\/cordisx-protocol\/main\/schemas\/[a-z0-9][a-z0-9.-]*\.v[1-9][0-9]*\.schema\.json$/u
 const AGENT_RUNTIME_CAPABILITIES = new Set<AgentRuntimeCapability>([
   'agents.create',
   'agents.resume',
@@ -666,6 +671,67 @@ export function normalizePluginManifestV8(
     capabilities,
     services,
   }) as CordisXPluginManifestV8
+}
+
+function serviceDeclarationV9(value: unknown, label: string): CordisXPluginServiceDeclarationV9 {
+  const service = object(value, label)
+  if (service.kind !== 'platform-provider') return serviceDeclaration(value, label)
+  exact(service, ['id', 'kind', 'owner', 'schema', 'applicationMode', 'entry'], label)
+  const id = nonEmpty(service.id, `${label}.id`, 96)
+  const entry = nonEmpty(service.entry, `${label}.entry`, 512)
+  const schema = nonEmpty(service.schema, `${label}.schema`, 512)
+  if (
+    !LOCAL_ID.test(id) || !SERVICE_ENTRY.test(entry) || entry.includes('..') || service.owner !== 'host'
+    || !PROTOCOL_SCHEMA.test(schema)
+    || (service.applicationMode !== 'service-restart' && service.applicationMode !== 'app-restart')
+  ) throw new Error(`${label} is unsupported`)
+  return Object.freeze({
+    id,
+    kind: 'platform-provider',
+    owner: 'host',
+    schema:
+      schema as `https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/${string}.v${number}.schema.json`,
+    applicationMode: service.applicationMode,
+    entry,
+  })
+}
+
+/** Additive v9: v8 capabilities plus Host-owned Platform provider services. */
+export function normalizePluginManifestV9(
+  value: unknown,
+  expectedId: string,
+  catalog: PermissionCapabilityCatalogBoundaryV4,
+): CordisXPluginManifestV9 {
+  const manifest = object(value, 'plugin manifest')
+  exact(manifest, ['$schema', 'schemaVersion', 'id', 'name', 'capabilities', 'services'], 'plugin manifest')
+  if (manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V9 || manifest.schemaVersion !== 9) {
+    throw new Error('plugin manifest schema is unsupported')
+  }
+  if (!Array.isArray(manifest.services) || manifest.services.length > 16) {
+    throw new Error('plugin manifest.services must be an array of at most 16 items')
+  }
+  const compatible = normalizePluginManifestV8(
+    {
+      ...manifest,
+      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
+      schemaVersion: 8,
+      services: [],
+    },
+    expectedId,
+    catalog,
+  )
+  const services = Object.freeze(
+    manifest.services.map((candidate, index) => serviceDeclarationV9(candidate, `plugin manifest.services[${index}]`)),
+  )
+  if (new Set(services.map(item => item.id)).size !== services.length) throw new Error('duplicate service declaration')
+  return Object.freeze({
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V9,
+    schemaVersion: 9,
+    id: compatible.id,
+    ...(compatible.name === undefined ? {} : { name: compatible.name }),
+    capabilities: compatible.capabilities,
+    services,
+  })
 }
 
 function normalizedForFingerprint(value: unknown): unknown {

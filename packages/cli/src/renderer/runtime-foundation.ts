@@ -765,7 +765,7 @@ export const createRuntimeRequiredBlockReason = (
     return `Required capability unavailable: ${unavailable.join(', ')}`
   }
   const requiredHostDom = controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6
-      || controller.manifest.schemaVersion === 8
+      || controller.manifest.schemaVersion === 8 || controller.manifest.schemaVersion === 9
     ? controller.manifest.capabilities.find(
       item => (item.required && (item.name === 'ui.host-dom.read' || item.name === 'ui.host-dom.modify')),
     )
@@ -811,7 +811,12 @@ export const createRuntimeRegisterController = (
     const agentRuntimeManifestVersion =
       controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6
         || controller.manifest.schemaVersion === 7 || controller.manifest.schemaVersion === 8
-        ? controller.manifest.schemaVersion === 7 ? 6 : controller.manifest.schemaVersion
+        || controller.manifest.schemaVersion === 9
+        ? controller.manifest.schemaVersion === 7
+          ? 6
+          : controller.manifest.schemaVersion === 9
+          ? 8
+          : controller.manifest.schemaVersion
         : undefined
     const agentRuntimeDeclarations = agentRuntimeManifestVersion !== undefined
       ? controller.manifest.capabilities

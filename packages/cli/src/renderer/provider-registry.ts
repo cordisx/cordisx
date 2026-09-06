@@ -82,6 +82,39 @@ export class ProviderAdapterRegistry<Adapter> {
     return current.drained
   }
 
+  async replaceBatch(registrations: readonly ProviderAdapterRegistration<Adapter>[]): Promise<void> {
+    this.assertOpen()
+    const replacements = registrations.map(recordFor)
+    const ids = new Set<string>()
+    for (const replacement of replacements) {
+      if (ids.has(replacement.providerId)) throw new Error(`provider ${replacement.providerId} is registered twice`)
+      ids.add(replacement.providerId)
+      const current = this.active.get(replacement.providerId)
+      if (current?.generation === replacement.generation) {
+        throw new Error(`provider ${replacement.providerId} generation did not change`)
+      }
+    }
+    const retired: RecordState<Adapter>[] = []
+    for (const replacement of replacements) {
+      const current = this.active.get(replacement.providerId)
+      if (current !== undefined) {
+        current.state = 'draining'
+        this.draining.add(current)
+        retired.push(current)
+      }
+      this.active.set(replacement.providerId, replacement)
+    }
+    for (const current of retired) void this.finalizeIfIdle(current).catch(() => undefined)
+    await Promise.all(retired.map(current => current.drained))
+  }
+
+  async removeProvider(providerId: string, generation: string): Promise<boolean> {
+    const record = this.active.get(providerId)
+    if (record === undefined || record.generation !== generation) return false
+    await this.remove(record)
+    return true
+  }
+
   acquire(providerId: string, expectedGeneration?: string): ProviderAdapterLease<Adapter> {
     if (!PROVIDER_ID.test(providerId)) {
       throw new ProviderRegistryError('invalid-provider', 'Provider identity is invalid')

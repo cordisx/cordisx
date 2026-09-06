@@ -795,7 +795,7 @@ export const createRuntimeSetPermissionPolicy = (
     } else if (
       controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5
       || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7
-      || controller.manifest.schemaVersion === 8
+      || controller.manifest.schemaVersion === 8 || controller.manifest.schemaVersion === 9
     ) {
       await runtimeScope.broker()!.setPolicyV2(
         controller.identity,

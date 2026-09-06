@@ -25,6 +25,7 @@ import type {
   PackageRuntimeObservation,
 } from './types.js'
 import { PackageLifecycleError } from './types.js'
+import { platformProviderRuntimeServiceAccess } from './platform-provider-service-access.js'
 
 type Operation = 'install' | 'update' | 'enable' | 'disable' | 'uninstall'
 type Status =
@@ -166,35 +167,18 @@ export function createHostRegistryReceiptAuthority(): HostRegistryReceiptAuthori
   }
 }
 
-export interface PreparedCandidate {
-  readonly transactionId: string
-  readonly candidateFingerprint: string
-  readonly candidateToken: PackageCandidateToken
-  readonly impactToken: PackageImpactToken
-  readonly permissionReviewId: HostPermissionReviewId
-  readonly permissionReviewToken: HostPermissionReviewToken
-  readonly plan: PackageCandidatePlan
-}
-
-export interface RuntimeModuleAccess {
-  readonly packageIdentity: PackageIdentity
-  readonly artifactDirectory: string
-  readonly runtimeEntry: `./${string}`
-}
-
-export interface RuntimeServiceModuleAccess {
-  readonly packageIdentity: PackageIdentity
-  readonly pluginIdentity: {
-    readonly source: string
-    readonly pluginId: string
-    readonly generation: string
-  }
-  readonly serviceId: string
-  readonly serviceKind: 'channel-adapter'
-  readonly configuration: HostServiceConfigurationDeclaration
-  readonly artifactDirectory: string
-  readonly runtimeEntry: `./services/${string}.mjs`
-}
+export type {
+  PlatformProviderRuntimeServiceModuleAccess,
+  PreparedCandidate,
+  RuntimeModuleAccess,
+  RuntimeServiceModuleAccess,
+} from './authority-access.js'
+import type {
+  PlatformProviderRuntimeServiceModuleAccess,
+  PreparedCandidate,
+  RuntimeModuleAccess,
+  RuntimeServiceModuleAccess,
+} from './authority-access.js'
 
 export interface RollbackPlan {
   readonly transactionId: string
@@ -599,7 +583,7 @@ export class PackageLifecycleAuthority {
     if (item === undefined) throw new PackageLifecycleError('package-removed', `${pluginId} has no candidate artifact`)
     const staged = await loadStagedPluginPackage(this.options.homeDir, item.digest)
     const service = staged.serviceModules.find(module => module.declaration.id === serviceId)
-    if (service === undefined) {
+    if (service === undefined || service.declaration.kind !== 'channel-adapter') {
       throw new PackageLifecycleError('service-not-found', `${pluginId}:${serviceId} is not a staged service`)
     }
     const servicePath = stagedPluginServiceModulePath(this.options.homeDir, item.digest, serviceId)
@@ -616,6 +600,26 @@ export class PackageLifecycleAuthority {
       artifactDirectory: path.dirname(path.dirname(servicePath)),
       runtimeEntry: `./services/${serviceId}.mjs`,
     }
+  }
+
+  async resolvePlatformProviderRuntimeService(
+    access: CandidateAccess,
+    boundary: PackageResolutionBoundary,
+    pluginId: string,
+    serviceId: string,
+  ): Promise<PlatformProviderRuntimeServiceModuleAccess> {
+    const plan = await this.resolveCandidate(access, boundary)
+    if (!plan.affectedPluginIds.includes(pluginId)) {
+      throw new PackageLifecycleError('plugin-outside-closure', `${pluginId} is outside the Host closure`)
+    }
+    const item = plan.after.plugins.find(plugin => plugin.id === pluginId)
+    if (item === undefined) throw new PackageLifecycleError('package-removed', `${pluginId} has no candidate artifact`)
+    return await platformProviderRuntimeServiceAccess(
+      this.options.homeDir,
+      item,
+      serviceId,
+      this.options.runtimeGeneration,
+    )
   }
 
   async requestActivation(access: CandidateAccess): Promise<PackageCandidatePlan> {

@@ -21,6 +21,7 @@ import type {
   CordisXPluginManifestV6,
   CordisXPluginManifestV7,
   CordisXPluginManifestV8,
+  CordisXPluginManifestV9,
 } from '../permission-contracts.js'
 
 export interface CordisXConfigPlugin {
@@ -37,6 +38,7 @@ export interface CordisXConfigPlugin {
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
+    | CordisXPluginManifestV9
   readonly package?: {
     readonly version: string
     readonly digest: `sha256:${string}`

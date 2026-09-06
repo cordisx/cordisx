@@ -9,6 +9,11 @@ import type {
 } from '@cordisx/protocol/plugin-manifest/v6'
 import type { PluginRuntimeManifestV7 } from '@cordisx/protocol/plugin-manifest/v7'
 import type { PluginRuntimeManifestV8 } from '@cordisx/protocol/plugin-manifest/v8'
+import type {
+  PluginManifestPlatformProviderServiceV9,
+  PluginManifestServiceV9,
+  PluginRuntimeManifestV9,
+} from '@cordisx/protocol/plugin-manifest/v9'
 
 export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v4.schema.json'
@@ -48,6 +53,10 @@ export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v8.schema.json'
 export const CORDISX_PLUGIN_PACKAGE_SCHEMA_V8 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v8.schema.json'
+export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V9 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v9.schema.json'
+export const CORDISX_PLUGIN_PACKAGE_SCHEMA_V9 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v9.schema.json'
 export const CORDISX_PERMISSION_POLICY_SCHEMA_V4 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/permission-policy.v4.schema.json'
 export const CORDISX_PERMISSION_AUTHORIZATION_PLAN_SCHEMA_V4 =
@@ -224,6 +233,9 @@ export type CordisXCapabilityDeclarationV8 =
   | PluginManifestCapabilityDeclarationV6
   | PluginRuntimeManifestV8['capabilities'][number]
 export type CordisXPluginManifestV8 = PluginRuntimeManifestV8
+export type CordisXPluginManifestV9 = PluginRuntimeManifestV9
+export type CordisXPluginServiceDeclarationV9 = PluginManifestServiceV9
+export type CordisXPlatformProviderServiceDeclarationV9 = PluginManifestPlatformProviderServiceV9
 
 export interface CordisXPermissionIdentityV2 {
   readonly source: string
