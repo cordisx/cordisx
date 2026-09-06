@@ -24,6 +24,7 @@ import type {
   CordisXPluginManifestV6,
   CordisXPluginManifestV7,
   CordisXPluginManifestV8,
+  CordisXPluginManifestV9,
 } from '../../permission-contracts.js'
 import { isHostDomPermissionCapability } from '../../permission-model-v4.js'
 
@@ -91,6 +92,7 @@ export interface Registration {
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
+    | CordisXPluginManifestV9
   readonly declarations: ReadonlyMap<CordisXPlatformCapability, CordisXCapabilityDeclaration>
   readonly declarationsV2: ReadonlyMap<CordisXPermissionCapabilityV2, CordisXCapabilityDeclarationV2>
   readonly declarationsV4: ReadonlyMap<'ui.host-dom.read' | 'ui.host-dom.modify', CordisXCapabilityDeclarationV4>
@@ -129,12 +131,13 @@ export function manifestDeclarationsV2(
     | CordisXPluginManifestV5
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
-    | CordisXPluginManifestV8,
+    | CordisXPluginManifestV8
+    | CordisXPluginManifestV9,
 ): readonly CordisXCapabilityDeclarationV2[] {
   if (manifest.schemaVersion === 4) return manifest.capabilities
   if (
     manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7
-    || manifest.schemaVersion === 8
+    || manifest.schemaVersion === 8 || manifest.schemaVersion === 9
   ) {
     return manifest.capabilities.filter(item => (
       !isHostDomPermissionCapability(item.name) && !isAgentRuntimePermission(item.name)
@@ -156,10 +159,11 @@ export function manifestHostDomDeclarationsV4(
     | CordisXPluginManifestV5
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
-    | CordisXPluginManifestV8,
+    | CordisXPluginManifestV8
+    | CordisXPluginManifestV9,
 ): readonly CordisXCapabilityDeclarationV4[] {
   return manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7
-      || manifest.schemaVersion === 8
+      || manifest.schemaVersion === 8 || manifest.schemaVersion === 9
     ? manifest.capabilities.filter(item =>
       isHostDomPermissionCapability(item.name)
     ) as readonly CordisXCapabilityDeclarationV4[]
@@ -179,10 +183,11 @@ function permissionPlanDeclarations(
     | CordisXPluginManifestV5
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
-    | CordisXPluginManifestV8,
+    | CordisXPluginManifestV8
+    | CordisXPluginManifestV9,
 ): readonly CordisXCapabilityDeclarationV4[] {
   return (manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7
-      || manifest.schemaVersion === 8
+      || manifest.schemaVersion === 8 || manifest.schemaVersion === 9
     ? manifest.capabilities.filter(item => !isAgentRuntimePermission(item.name))
     : manifest.capabilities) as readonly CordisXCapabilityDeclarationV4[]
 }

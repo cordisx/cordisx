@@ -8,6 +8,7 @@ import type {
   CordisXPluginManifestV6,
   CordisXPluginManifestV7,
   CordisXPluginManifestV8,
+  CordisXPluginManifestV9,
 } from './permission-contracts.js'
 
 import type { CordisXPluginDependencyV1 } from './plugin-lifecycle-contracts.js'
@@ -225,6 +226,7 @@ export interface CordisXPluginModule {
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
+    | CordisXPluginManifestV9
   readonly inject?: readonly string[] | Record<string, unknown>
   readonly Config?: CordisXStandardSchema
   readonly configApplies?: CordisXConfigAppliesInput
@@ -255,6 +257,7 @@ export interface CordisXBrowserPlugin {
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
+    | CordisXPluginManifestV9
   /** Immutable package and module generation metadata owned by the launcher. */
   readonly package?: {
     readonly version: string

@@ -60,13 +60,22 @@ export interface HostRuntimeServiceDeclaration {
   readonly configuration?: HostServiceConfigurationDeclaration
 }
 
+export interface HostPlatformProviderServiceDeclaration {
+  readonly id: string
+  readonly kind: 'platform-provider'
+  readonly owner: 'host'
+  readonly schema: string
+  readonly applicationMode: 'service-restart' | 'app-restart'
+  readonly entry: string
+}
+
 export interface HostResolvedRuntimeManifest {
   readonly $schema: string
-  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
+  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
   readonly id: string
   readonly name?: string
   readonly capabilities: readonly unknown[]
-  readonly services?: readonly HostRuntimeServiceDeclaration[]
+  readonly services?: readonly (HostRuntimeServiceDeclaration | HostPlatformProviderServiceDeclaration)[]
   readonly execution?: Readonly<
     { readonly realm: 'isolated-worker'; readonly interfaces: readonly ['ui.transient-canvas/v1'] }
   >

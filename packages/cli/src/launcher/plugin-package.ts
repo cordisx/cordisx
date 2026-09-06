@@ -15,14 +15,16 @@ import type {
   CordisXPluginManifestV6,
   CordisXPluginManifestV7,
   CordisXPluginManifestV8,
+  CordisXPluginManifestV9,
 } from '../permission-contracts.js'
-import type { CordisXPluginServiceDeclarationV4 } from '../permission-contracts.js'
+import type { CordisXPluginServiceDeclarationV9 } from '../permission-contracts.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V5,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V9,
 } from '../permission-contracts.js'
 import { CapabilityRiskCatalog } from '../capability-risk-catalog.js'
 import { normalizePluginManifestV4 } from '../permission-model-v2.js'
@@ -31,6 +33,7 @@ import {
   normalizePluginManifestV6,
   normalizePluginManifestV7,
   normalizePluginManifestV8,
+  normalizePluginManifestV9,
 } from '../permission-model-v4.js'
 import {
   CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,
@@ -54,32 +57,8 @@ const ENTRY = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:mjs|js|ts)$/
 const README = /^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:md|markdown)$/
 const DIGEST = /^sha256:([a-f0-9]{64})$/
 
-export interface StagedPluginPackage {
-  readonly manifest: Omit<CordisXPluginPackageManifestV1, 'runtimeManifest'> & {
-    readonly runtimeManifest:
-      | CordisXPluginManifestV1
-      | CordisXPluginManifestV4
-      | CordisXPluginManifestV5
-      | CordisXPluginManifestV6
-      | CordisXPluginManifestV7
-      | CordisXPluginManifestV8
-  }
-  readonly digest: `sha256:${string}`
-  readonly moduleSource: string
-  readonly artifactSource: string
-  /** Browser-native immutable ESM graph. Absent only for legacy store objects. */
-  readonly browserArtifact?: BuiltPluginGenerationArtifact
-  readonly serviceModules: readonly StagedPluginServiceModule[]
-  readonly entityTemplates: readonly EntityTemplatePayload[]
-  readonly readme?: string
-  /** Stable launcher-issued identity; this is not a real filesystem path. */
-  readonly identitySource: string
-}
-
-export interface StagedPluginServiceModule {
-  readonly declaration: CordisXPluginServiceDeclarationV4
-  readonly moduleSource: string
-}
+export type { StagedPluginPackage, StagedPluginServiceModule } from './plugin-package-types.js'
+import type { StagedPluginPackage, StagedPluginServiceModule } from './plugin-package-types.js'
 
 function object(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
@@ -345,7 +324,7 @@ async function buildArtifact(root: string, entry: string): Promise<{
 
 async function buildServiceArtifact(
   root: string,
-  declaration: CordisXPluginServiceDeclarationV4,
+  declaration: CordisXPluginServiceDeclarationV9,
 ): Promise<StagedPluginServiceModule> {
   const entry = await regularContainedFile(root, declaration.entry, `service ${declaration.id} entry`)
   const result = await build({
@@ -669,15 +648,34 @@ async function readStoredServiceModules(directory: string): Promise<readonly Sta
   }))
 }
 
-function serviceDeclarationFromStored(value: unknown, label: string): CordisXPluginServiceDeclarationV4 {
+function serviceDeclarationFromStored(value: unknown, label: string): CordisXPluginServiceDeclarationV9 {
   const service = object(value, label)
-  exactKeys(service, ['id', 'kind', 'entry', 'configuration'], label)
   const id = localId(service.id, `${label}.id`)
-  if (service.kind !== 'channel-adapter') throw new Error(`${label}.kind is unsupported`)
   const entry = string(service.entry, `${label}.entry`, 512)
   if (!/^\.\/[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*\.(?:cjs|mjs|js)$/.test(entry) || entry.includes('..')) {
     throw new Error(`${label}.entry is invalid`)
   }
+  if (service.kind === 'platform-provider') {
+    exactKeys(service, ['id', 'kind', 'owner', 'schema', 'applicationMode', 'entry'], label)
+    const schema = string(service.schema, `${label}.schema`, 512)
+    if (
+      service.owner !== 'host'
+      || !/^https:\/\/raw\.githubusercontent\.com\/cordisx\/cordisx-protocol\/main\/schemas\/[a-z0-9][a-z0-9.-]*\.v[1-9][0-9]*\.schema\.json$/
+        .test(schema)
+      || (service.applicationMode !== 'service-restart' && service.applicationMode !== 'app-restart')
+    ) throw new Error(`${label} is unsupported`)
+    return Object.freeze({
+      id,
+      kind: 'platform-provider',
+      owner: 'host',
+      schema:
+        schema as `https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/${string}.v${number}.schema.json`,
+      applicationMode: service.applicationMode,
+      entry,
+    })
+  }
+  exactKeys(service, ['id', 'kind', 'entry', 'configuration'], label)
+  if (service.kind !== 'channel-adapter') throw new Error(`${label}.kind is unsupported`)
   const configuration = object(service.configuration, `${label}.configuration`)
   if (configuration.kind === 'none') {
     exactKeys(configuration, ['kind'], `${label}.configuration`)
@@ -746,10 +744,12 @@ export async function stageResolvedPluginPackage(
     ? normalizePluginManifestV7(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
     : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 && runtime.schemaVersion === 8
     ? normalizePluginManifestV8(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
+    : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V9 && runtime.schemaVersion === 9
+    ? normalizePluginManifestV9(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
     : undefined
   if (runtimeManifest === undefined) {
     throw new Error(
-      'the current renderer generation ABI accepts runtime plugin manifest v1, v4, v5, v6, v7, or v8 only',
+      'the current renderer generation ABI accepts runtime plugin manifest v1, v4, v5, v6, v7, v8, or v9 only',
     )
   }
   const entry = await regularContainedFile(root, resolved.packageManifest.entry, 'package entry')
@@ -763,6 +763,7 @@ export async function stageResolvedPluginPackage(
   const serviceModules =
     runtimeManifest.schemaVersion === 4 || runtimeManifest.schemaVersion === 5 || runtimeManifest.schemaVersion === 6
       || runtimeManifest.schemaVersion === 7 || runtimeManifest.schemaVersion === 8
+      || runtimeManifest.schemaVersion === 9
       ? await Promise.all(runtimeManifest.services.map(service => buildServiceArtifact(root, service)))
       : []
   const entityTemplates = await Promise.all((resolved.packageManifest.entityTemplates ?? []).map(async declaration => (
@@ -919,6 +920,8 @@ export async function loadStagedPluginPackage(
       ? normalizePluginManifestV7(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
       : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 && candidate.schemaVersion === 8
       ? normalizePluginManifestV8(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
+      : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V9 && candidate.schemaVersion === 9
+      ? normalizePluginManifestV9(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
       : undefined
     if (runtime === undefined) throw new Error('stored runtime manifest schema is unsupported')
     manifest = {

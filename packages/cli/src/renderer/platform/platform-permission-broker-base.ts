@@ -26,6 +26,7 @@ import type {
   CordisXPluginManifestV6,
   CordisXPluginManifestV7,
   CordisXPluginManifestV8,
+  CordisXPluginManifestV9,
 } from '../../permission-contracts.js'
 import { CapabilityRiskCatalog } from '../../capability-risk-catalog.js'
 import { PermissionOnceGrantLedger } from '../../permission-model-v2.js'
@@ -194,7 +195,8 @@ export abstract class PlatformPermissionBrokerBase {
       | CordisXPluginManifestV5
       | CordisXPluginManifestV6
       | CordisXPluginManifestV7
-      | CordisXPluginManifestV8,
+      | CordisXPluginManifestV8
+      | CordisXPluginManifestV9,
     generation: PluginGenerationEffectIdentity = Object.freeze({ pluginId: identity.id }),
     candidateView?: PluginGenerationView,
     artifact?: PermissionArtifactBindingV3,
@@ -202,7 +204,7 @@ export abstract class PlatformPermissionBrokerBase {
     const key = `${platformIdentityKey(identity)}\u0000${generation.moduleGeneration ?? 'host'}`
     const declarations = new Map<CordisXPlatformCapability, CordisXCapabilityDeclaration>(
       manifest.schemaVersion === 4 || manifest.schemaVersion === 5 || manifest.schemaVersion === 6
-        || manifest.schemaVersion === 7 || manifest.schemaVersion === 8
+        || manifest.schemaVersion === 7 || manifest.schemaVersion === 8 || manifest.schemaVersion === 9
         ? manifest.capabilities.flatMap(item => (
           (CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
             ? [

@@ -26,6 +26,7 @@ import type {
   CordisXPluginManifestV6,
   CordisXPluginManifestV7,
   CordisXPluginManifestV8,
+  CordisXPluginManifestV9,
   CordisXPluginModule,
   CordisXPluginPackageManifestV1,
   CordisXPointPolicy,
@@ -328,6 +329,7 @@ export interface PluginController {
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
+    | CordisXPluginManifestV9
   principal: PluginPrincipalToken
   activation: number
   principalLive: boolean
@@ -632,9 +634,13 @@ export function manifestUsesHostDom(
     | CordisXPluginManifestV5
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
-    | CordisXPluginManifestV8,
-): manifest is CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV8 {
-  return (manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 8)
+    | CordisXPluginManifestV8
+    | CordisXPluginManifestV9,
+): manifest is CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV8 | CordisXPluginManifestV9 {
+  return (
+    manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 8
+    || manifest.schemaVersion === 9
+  )
     && manifest.capabilities.some(capability => (
       capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
     ))
@@ -647,7 +653,8 @@ export function manifestUsesTransientCanvas(
     | CordisXPluginManifestV5
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
-    | CordisXPluginManifestV8,
+    | CordisXPluginManifestV8
+    | CordisXPluginManifestV9,
 ): manifest is CordisXPluginManifestV7 {
   return manifest.schemaVersion === 7
     && manifest.execution.realm === 'isolated-worker'

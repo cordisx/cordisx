@@ -15,6 +15,7 @@ import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V9,
 } from '../../permission-contracts.js'
 import type {
   CordisXPluginManifestV4,
@@ -22,6 +23,7 @@ import type {
   CordisXPluginManifestV6,
   CordisXPluginManifestV7,
   CordisXPluginManifestV8,
+  CordisXPluginManifestV9,
 } from '../../permission-contracts.js'
 import { CapabilityRiskCatalog } from '../../capability-risk-catalog.js'
 import { normalizePluginManifestV4 } from '../../permission-model-v2.js'
@@ -30,6 +32,7 @@ import {
   normalizePluginManifestV6,
   normalizePluginManifestV7,
   normalizePluginManifestV8,
+  normalizePluginManifestV9,
 } from '../../permission-model-v4.js'
 
 export const ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,95}$/
@@ -104,6 +107,7 @@ export function normalizePluginManifest(
   | CordisXPluginManifestV6
   | CordisXPluginManifestV7
   | CordisXPluginManifestV8
+  | CordisXPluginManifestV9
 {
   if (!ID_PATTERN.test(expectedId)) throw new Error(`launcher plugin id ${expectedId} is invalid`)
   if (value === undefined) {
@@ -115,6 +119,9 @@ export function normalizePluginManifest(
     })
   }
   const manifest = object(value, `plugin ${expectedId} manifest`)
+  if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V9 || manifest.schemaVersion === 9) {
+    return normalizePluginManifestV9(manifest, expectedId, new CapabilityRiskCatalog())
+  }
   if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 || manifest.schemaVersion === 8) {
     return normalizePluginManifestV8(manifest, expectedId, new CapabilityRiskCatalog())
   }

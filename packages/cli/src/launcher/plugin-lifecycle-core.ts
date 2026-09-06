@@ -35,6 +35,7 @@ import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V6,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V8,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V9,
   type CordisXCapabilityDeclarationV4,
   type CordisXCertifiedPermissionProjectionV1,
   type CordisXPermissionAuthorizationDecisionV2,
@@ -46,6 +47,7 @@ import {
   type CordisXPermissionPolicyRecordV4,
   type CordisXPluginManifestV7,
   type CordisXPluginManifestV8,
+  type CordisXPluginManifestV9,
 } from '../permission-contracts.js'
 import {
   type CordisXPersistedPermissionPolicyRecord,
@@ -65,6 +67,7 @@ import {
   normalizePluginManifestV6,
   normalizePluginManifestV7,
   normalizePluginManifestV8,
+  normalizePluginManifestV9,
 } from '../permission-model-v4.js'
 import {
   PluginActivationStore,
@@ -277,6 +280,11 @@ export class PluginLifecycleCoordinatorCore {
           const id = (value as { readonly id?: unknown })?.id
           if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
           return normalizePluginManifestV8(value, id, new CapabilityRiskCatalog())
+        },
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V9]: value => {
+          const id = (value as { readonly id?: unknown })?.id
+          if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
+          return normalizePluginManifestV9(value, id, new CapabilityRiskCatalog())
         },
       },
     })
