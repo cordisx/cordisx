@@ -13,6 +13,16 @@ import type {
   HostDomStructuredChild,
   LocalizedText,
 } from '@cordisx/protocol/host-dom/v1'
+import {
+  attributeValue,
+  boundedText,
+  elementKind,
+  MAX_WRITE_TEXT,
+  normalizeAttributeValue,
+  privateElement,
+  PROHIBITED_ELEMENT_TAGS,
+  redactedSubtree,
+} from './host-dom-projection.js'
 import type { HostDomPermissionAccessDecision } from './platform.js'
 
 const REQUEST_SCHEMA =
@@ -23,15 +33,11 @@ const CATALOG_SCHEMA =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-dom-root-catalog.v1.schema.json'
 const CONTRACT = 'cordisx.bound-host-dom/v1'
 const MAX_REQUEST_BYTES = 64 * 1024
-const MAX_TEXT = 16 * 1024
-const MAX_TEXT_VISITED_NODES = 4096
-const MAX_WRITE_TEXT = 4 * 1024
 const MAX_STRUCTURE_NODES = 200
 const MAX_STRUCTURE_DEPTH = 8
 const MAX_HANDLES_PER_CLIENT = 32
 const MAX_NODE_REFS_PER_CLIENT = 512
 const MAX_MODIFY_HANDLE_LIFETIME_MS = 60_000
-const PROHIBITED_ELEMENT_TAGS = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT'])
 const READ_ATTRIBUTES = Object.freeze(
   [
     'aria-label',
@@ -225,94 +231,6 @@ function stateUnavailable(
     : state === 'uninstalled'
     ? 'plugin-uninstalled'
     : 'generation-replaced'
-}
-
-function elementKind(element: Element): Extract<HostDomReadProjection, { kind: 'structure' }>['nodes'][number]['kind'] {
-  const role = element.getAttribute('role')
-  if (role === 'status') return 'status'
-  if (role === 'list') return 'list'
-  if (role === 'listitem') return 'list-item'
-  if (role === 'region') return 'region'
-  if (role === 'group') return 'group'
-  if (['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'].includes(element.tagName) || role === 'button') return 'control'
-  return element.children.length === 0 ? 'text' : 'group'
-}
-
-function privateElement(element: Element): boolean {
-  return element.matches('input[type="password"], [data-cordisx-private="true"], [data-cordisx-sensitive="true"]')
-    || element.closest('[data-cordisx-private="true"], [data-cordisx-sensitive="true"]') !== null
-}
-
-function hiddenElement(element: Element): boolean {
-  for (let candidate: Element | null = element; candidate !== null; candidate = candidate.parentElement) {
-    if (candidate.hasAttribute('hidden') || candidate.getAttribute('aria-hidden') === 'true') return true
-    try {
-      const style = candidate.ownerDocument.defaultView?.getComputedStyle(candidate)
-      if (style?.display === 'none' || style?.visibility === 'hidden') return true
-    } catch {
-      return true
-    }
-  }
-  return false
-}
-
-function redactedSubtree(element: Element): boolean {
-  return privateElement(element) || hiddenElement(element)
-    || [...PROHIBITED_ELEMENT_TAGS].some(tag => element.closest(tag.toLowerCase()) !== null)
-}
-
-function boundedText(element: Element): Extract<HostDomReadProjection, { kind: 'text' }> {
-  if (redactedSubtree(element)) return { kind: 'text', text: '', truncated: false, redacted: true }
-  let text = ''
-  let truncated = false
-  let redacted = false
-  let visited = 0
-  const visit = (node: Node): void => {
-    visited += 1
-    if (visited > MAX_TEXT_VISITED_NODES) {
-      truncated = true
-      return
-    }
-    if (node.nodeType === 3) {
-      const value = node.nodeValue ?? ''
-      const remaining = MAX_TEXT - text.length
-      if (value.length > remaining) {
-        text += value.slice(0, Math.max(remaining, 0))
-        truncated = true
-      } else text += value
-      return
-    }
-    if (node.nodeType !== 1) return
-    const child = node as Element
-    if (child !== element && redactedSubtree(child)) {
-      redacted = true
-      return
-    }
-    for (const entry of child.childNodes) {
-      if (truncated) return
-      visit(entry)
-    }
-  }
-  visit(element)
-  return { kind: 'text', text, truncated, redacted }
-}
-
-function attributeValue(element: Element, attribute: HostDomReadableAttribute): HostDomAttributeValue {
-  if (attribute === 'checked' || attribute === 'disabled' || attribute === 'hidden') {
-    return element.hasAttribute(attribute)
-  }
-  if (attribute === 'tabindex') {
-    const value = element.getAttribute(attribute)
-    if (value === null) return null
-    const parsed = Number.parseInt(value, 10)
-    return Number.isFinite(parsed) ? parsed : value.slice(0, MAX_WRITE_TEXT)
-  }
-  return element.getAttribute(attribute)?.slice(0, MAX_WRITE_TEXT) ?? null
-}
-
-function normalizeAttributeValue(value: HostDomAttributeValue): string | null {
-  if (value === null || value === false) return null
-  return value === true ? '' : String(value)
 }
 
 function localized(value: LocalizedText, resolve?: (input: LocalizedText) => string): string {
