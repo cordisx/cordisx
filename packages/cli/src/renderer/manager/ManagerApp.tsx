@@ -318,6 +318,14 @@ export function ManagerApp({ model, marketplace, triggerSeat, navigationControll
       )
       setOpen(true)
     }), [navigationController, router.openDetail])
+  useLayoutEffect(() =>
+    navigationController?.bindReturnPort({
+      capture: router.capture,
+      restore: captured => {
+        router.restore(captured)
+        setOpen(true)
+      },
+    }), [navigationController, router.capture, router.restore])
   useEffect(() => {
     if (!open) return
     const onKey = (event: KeyboardEvent) => {

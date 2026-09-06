@@ -65,4 +65,23 @@ describe('Host Manager exact Agent-definition navigation', () => {
     dispose()
     expect(() => controller.openManagerContent(request)).toThrow(/unavailable/)
   })
+
+  it('captures one Host-owned return callback without exposing a plugin route or URL', () => {
+    const controller = new HostManagerNavigationController()
+    const restore = vi.fn()
+    const dispose = controller.bindReturnPort({
+      capture: () => [{ kind: 'manager-content', id: 'chatroom:team', reference: { id: 'sessions' } }],
+      restore,
+    })
+    const captured = controller.captureReturn()
+    expect(captured).toBeTypeOf('function')
+    captured?.()
+    expect(restore).toHaveBeenCalledWith([{
+      kind: 'manager-content',
+      id: 'chatroom:team',
+      reference: { id: 'sessions' },
+    }])
+    dispose()
+    expect(controller.captureReturn()).toBeUndefined()
+  })
 })

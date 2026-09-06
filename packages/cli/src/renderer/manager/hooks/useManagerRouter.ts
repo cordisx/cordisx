@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { ManagerRoute, ManagerRouter } from '../model/routes.js'
+import type { ManagerRoute } from '../model/routes.js'
 
 const PLAYGROUND_ROUTE_KEY = 'cordisx.playground.manager.history.v1'
 
@@ -15,7 +15,7 @@ function initialHistory(storage?: Storage): readonly ManagerRoute[] {
   }
 }
 
-export function useManagerRouter(storage?: Storage): ManagerRouter {
+export function useManagerRouter(storage?: Storage) {
   const [history, setHistory] = useState<readonly ManagerRoute[]>(() => initialHistory(storage))
   const route = history.at(-1) ?? { kind: 'primary' as const, page: 'plugins' as const }
   useEffect(() => {
@@ -33,5 +33,12 @@ export function useManagerRouter(storage?: Storage): ManagerRouter {
   const back = useCallback(() => {
     setHistory(current => current.length > 1 ? current.slice(0, -1) : current)
   }, [])
-  return useMemo(() => ({ route, navigate, replace, openDetail, back }), [back, navigate, openDetail, replace, route])
+  const capture = useCallback(() => history, [history])
+  const restore = useCallback((next: readonly ManagerRoute[]) => {
+    setHistory(next.length > 0 ? next : [{ kind: 'primary', page: 'plugins' }])
+  }, [])
+  return useMemo(
+    () => ({ route, navigate, replace, openDetail, back, capture, restore }),
+    [back, capture, navigate, openDetail, replace, restore, route],
+  )
 }

@@ -133,11 +133,20 @@ describe('programmatic Manager identity detail navigation', () => {
       expect(dom.window.document.querySelectorAll('[data-cordisx-manager-modal="true"]')).toHaveLength(1)
       expect(dom.window.document.querySelector('[data-manager-route="entity-overview"]')).not.toBeNull()
 
+      const restoreDetail = controller.captureReturn()
+      expect(restoreDetail).toBeTypeOf('function')
+
       await act(async () => {
         dom.window.document.querySelector<HTMLButtonElement>('.cxr-header [aria-label="Back"]')!.click()
         await Promise.resolve()
       })
       expect(dom.window.document.querySelector('[data-manager-route="team"]')).not.toBeNull()
+
+      await act(async () => {
+        restoreDetail?.()
+        await Promise.resolve()
+      })
+      expect(dom.window.document.querySelector('[data-manager-route="entity-overview"]')).not.toBeNull()
       await act(async () =>
         dom.window.document.querySelector<HTMLButtonElement>('.cxr-header [aria-label="Close CordisX Manager"]')!
           .click()
