@@ -1,6 +1,7 @@
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
 import type { ManagerModel } from '../../manager.js'
 import { HostSurfaceIcon } from '../../host-ui/HostSurfaceIcon.js'
+import { HostAgentAvatar } from '../../host-ui/conversation/AgentAvatar.js'
 import { managerCopy } from '../../ui-copy.js'
 import type { ManagerRouter } from '../model/routes.js'
 
@@ -79,8 +80,20 @@ export function ManagerContentPage(
           data-manager-content-record-summary="true"
           aria-label={presentation.recordSummary.title}
         >
-          <span className="cxr-manager-record-avatar" role="img" aria-label={presentation.recordSummary.title}>
-            <HostSurfaceIcon token="host:chat" />
+          <span
+            className="cxr-manager-record-avatar"
+            role="img"
+            aria-label={presentation.recordSummary.title}
+            data-manager-content-record-avatar-kind={presentation.recordSummary.leadingVisual.kind}
+          >
+            <HostAgentAvatar
+              participant={{
+                id: 'manager-record-summary',
+                role: 'agent',
+                name: presentation.recordSummary.title,
+                avatar: presentation.recordSummary.leadingVisual.avatar,
+              }}
+            />
           </span>
           <span className="cxr-manager-record-copy">
             <strong>{presentation.recordSummary.title}</strong>

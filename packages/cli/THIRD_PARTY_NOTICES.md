@@ -7,6 +7,8 @@ licenses remain with their respective copyright holders:
 | -------------------------- | ------------------------- | ---------------- |
 | `@deepseek-ai/cordis`      | `4.0.1`                   | MIT              |
 | `@deepseek-ai/schemastery` | `3.18.1`                  | MIT              |
+| `@oneworks/avatar`         | `1.0.0-rc.8`              | MIT              |
+| `@oneworks/avatar-react`   | `1.0.0-rc.8`              | MIT              |
 | `@shikitor/core`           | `1.0.2`                   | MIT              |
 | `es-module-lexer`          | `1.7.0`                   | MIT              |
 | `esbuild`                  | `^0.25.9`                 | MIT              |

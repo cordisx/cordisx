@@ -27,6 +27,22 @@ describe('Host Manager entity record summary', () => {
     const dom = new JSDOM(
       '<!doctype html><html data-cordisx-app-theme="dark"><body><div id="root"></div></body></html>',
     )
+    Object.defineProperty(dom.window, 'matchMedia', {
+      configurable: true,
+      value: () => ({
+        matches: false,
+        addEventListener() {},
+        removeEventListener() {},
+      }),
+    })
+    Object.defineProperty(dom.window, 'requestAnimationFrame', {
+      configurable: true,
+      value: (callback: FrameRequestCallback) => dom.window.setTimeout(() => callback(Date.now()), 0),
+    })
+    Object.defineProperty(dom.window, 'cancelAnimationFrame', {
+      configurable: true,
+      value: (handle: number) => dom.window.clearTimeout(handle),
+    })
     Object.assign(globalThis, {
       window: dom.window,
       document: dom.window.document,
@@ -66,8 +82,9 @@ describe('Host Manager entity record summary', () => {
       openDetail: vi.fn(),
       back: vi.fn(),
     }
+    let currentPresentation = presentation
     const model = {
-      managerContentPresentation: () => presentation,
+      managerContentPresentation: () => currentPresentation,
       mountManagerContent: async (
         _id: string,
         _reference: unknown,
@@ -101,12 +118,39 @@ describe('Host Manager entity record summary', () => {
       const tabs = page.querySelector<HTMLElement>('[data-manager-content-tabs]')!
       const panel = page.querySelector<HTMLElement>('.cxr-manager-content-panel')!
       expect([...page.children]).toEqual([summary, tabs, panel])
-      expect(summary.textContent).toBe('LeadCoordinates the team.')
-      expect(summary.textContent).not.toContain('lead@')
+      expect(summary.querySelector('.cxr-manager-record-copy')?.textContent).toBe('LeadCoordinates the team.')
+      expect(summary.querySelector('.cxr-manager-record-copy')?.textContent).not.toContain('lead@')
       expect(summary.querySelector('[role="status"]')).toBeNull()
       expect(summary.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Lead')
-      expect(summary.querySelector('[data-host-icon]')).not.toBeNull()
+      await vi.waitFor(() =>
+        expect(summary.querySelector('[data-avatar-kind="generated"]')?.getAttribute('data-avatar-state')).toBe(
+          'resolved',
+        )
+      )
+      expect(summary.querySelector('.oneworks-avatar')).not.toBeNull()
+      expect(summary.querySelector('[data-host-icon]')).toBeNull()
       expect(panel.querySelector('[data-entity-business-body]')?.textContent).toBe('Plugin prompt content')
+
+      currentPresentation = {
+        ...presentation,
+        recordSummary: {
+          ...presentation.recordSummary!,
+          leadingVisual: {
+            kind: 'agent-avatar',
+            avatar: {
+              kind: 'platform',
+              provider: 'codex',
+              identityRef: 'codex:agent.lead',
+            } as never,
+          },
+        },
+      }
+      await act(async () => root.render(<ManagerContentPage model={model} router={router} locale="en" />))
+      const fallback = dom.window.document.querySelector<HTMLElement>('.cxr-manager-record-avatar .cxa-avatar')!
+      expect(fallback.dataset.avatarKind).toBe('platform')
+      expect(fallback.dataset.avatarCode).toBe('unsupported-provider')
+      expect(fallback.dataset.avatarState).toBe('fallback')
+      expect(fallback.textContent).toBe('LE')
 
       const first = tabs.querySelector<HTMLButtonElement>('[data-manager-content-tab="overview"]')!
       first.dispatchEvent(
