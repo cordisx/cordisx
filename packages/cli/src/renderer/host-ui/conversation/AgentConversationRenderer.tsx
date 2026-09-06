@@ -24,6 +24,10 @@ import {
 } from './AgentIdentityPanel.js'
 import { HostConversationRightInspector } from './RightInspector.js'
 import { HOST_ROOM_COMPOSITE_AVATAR_STYLES } from '../RoomCompositeAvatar.js'
+import {
+  type HostNavigationCollectionAction,
+  HostNavigationCollectionActionController,
+} from '../NavigationCollectionActions.js'
 import { HostRoomCompositeAvatar } from './RoomCompositeAvatar.js'
 import { useHostShikitorComposer } from './ShikitorComposerAdapter.js'
 import type { HostSchemaFormProps } from '../HostSchemaForm.js'
@@ -265,6 +269,7 @@ export interface AgentConversationRendererProps {
   readonly commands: AgentConversationCommandController
   readonly copy: AgentConversationRendererCopy
   readonly debugFixture?: boolean
+  readonly navigationActions?: readonly HostNavigationCollectionAction[]
   readonly identity?: {
     readonly resolve: (
       identity: { readonly agentId: string; readonly revision: string },
@@ -394,12 +399,14 @@ function MessageHoverActions({
 
 function HeaderMoreMenu({
   actions,
+  navigationActions,
   model,
   commands,
   copy,
   onCommandError,
 }: {
   readonly actions: readonly AgentConversationAction[]
+  readonly navigationActions: readonly HostNavigationCollectionAction[]
   readonly model: AgentConversationModel
   readonly commands: AgentConversationCommandController
   readonly copy: AgentConversationRendererCopy
@@ -408,11 +415,23 @@ function HeaderMoreMenu({
   const [open, setOpen] = React.useState(false)
   const triggerRef = React.useRef<HTMLButtonElement>(null)
   const menuRef = React.useRef<HTMLDivElement>(null)
+  const navigationControllerRef = React.useRef<HostNavigationCollectionActionController | undefined>(undefined)
   const menuId = React.useId()
   const chinese = copy.locale.toLowerCase().startsWith('zh')
   const closeAndRestoreFocus = React.useCallback(() => {
     setOpen(false)
     triggerRef.current?.focus()
+  }, [])
+
+  React.useEffect(() => {
+    const document = triggerRef.current?.ownerDocument
+    if (document === undefined) return
+    const controller = new HostNavigationCollectionActionController(document)
+    navigationControllerRef.current = controller
+    return () => {
+      if (navigationControllerRef.current === controller) navigationControllerRef.current = undefined
+      controller.dispose()
+    }
   }, [])
 
   React.useEffect(() => {
@@ -429,9 +448,25 @@ function HeaderMoreMenu({
       setOpen(false)
     }
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeAndRestoreFocus()
+        return
+      }
+      const items = [...menu.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)')]
+      const current = items.indexOf(document.activeElement as HTMLButtonElement)
+      const next = event.key === 'ArrowDown'
+        ? current < 0 || current === items.length - 1 ? 0 : current + 1
+        : event.key === 'ArrowUp'
+        ? current <= 0 ? items.length - 1 : current - 1
+        : event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+        ? items.length - 1
+        : undefined
+      if (next === undefined) return
       event.preventDefault()
-      closeAndRestoreFocus()
+      items[next]?.focus()
     }
     document.addEventListener('pointerdown', onPointerDown, true)
     document.addEventListener('keydown', onKeyDown, true)
@@ -445,6 +480,14 @@ function HeaderMoreMenu({
     closeAndRestoreFocus()
     void commands.runHeader(model, action).catch(onCommandError)
   }
+  const selectNavigation = (action: HostNavigationCollectionAction): void => {
+    const trigger = triggerRef.current
+    const controller = navigationControllerRef.current
+    closeAndRestoreFocus()
+    if (trigger === null || controller === undefined) return
+    void controller.invoke(action, trigger)
+  }
+  const itemCount = actions.length + navigationActions.length
   return (
     <span className="cxa-header-more-anchor">
       <button
@@ -474,27 +517,50 @@ function HeaderMoreMenu({
           tabIndex={-1}
           data-host-conversation-header-action-overflow="v1"
         >
-          {actions.length === 0
+          {itemCount === 0
             ? (
               <span className="cxa-header-more-empty" role="status">
                 {chinese ? '暂无更多操作' : 'No more actions'}
               </span>
             )
-            : actions.map(action => (
-              <button
-                key={action.id}
-                type="button"
-                className="cxa-header-more-item"
-                role="menuitem"
-                disabled={action.disabled}
-                title={action.disabledReason}
-                data-host-conversation-header-action-id={action.id}
-                onClick={() => select(action)}
-              >
-                {action.icon === undefined ? null : <HostSurfaceIcon token={action.icon} />}
-                <span>{action.label}</span>
-              </button>
-            ))}
+            : (
+              <>
+                {actions.map(action => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    className="cxa-header-more-item"
+                    role="menuitem"
+                    disabled={action.disabled}
+                    title={action.disabledReason}
+                    data-host-conversation-header-action-id={action.id}
+                    onClick={() => select(action)}
+                  >
+                    {action.icon === undefined ? null : <HostSurfaceIcon token={action.icon} />}
+                    <span>{action.label}</span>
+                  </button>
+                ))}
+                {navigationActions.map(action => (
+                  <button
+                    key={`navigation:${action.id}`}
+                    type="button"
+                    className="cxa-header-more-item"
+                    role="menuitem"
+                    disabled={action.disabled}
+                    title={action.disabledReason}
+                    data-tone={action.tone}
+                    data-pressed={String(action.pressed)}
+                    data-host-navigation-action-id={action.id}
+                    onClick={() => selectNavigation(action)}
+                  >
+                    {action.icon === undefined
+                      ? null
+                      : <HostSurfaceIcon token={action.icon} state={action.pressed ? 'active' : 'default'} />}
+                    <span>{action.label}</span>
+                  </button>
+                ))}
+              </>
+            )}
         </div>
       )}
     </span>
@@ -1279,7 +1345,15 @@ function RoomSettingsEditor({ title, description, chinese, settings, onError, on
 
 /** Production Host-owned conversation shell. It has no fixture dependency. */
 export function AgentConversationRenderer(
-  { model, commands, copy, debugFixture = false, identity, roomSettings }: AgentConversationRendererProps,
+  {
+    model,
+    commands,
+    copy,
+    debugFixture = false,
+    navigationActions = [],
+    identity,
+    roomSettings,
+  }: AgentConversationRendererProps,
 ) {
   const titleId = React.useId()
   const identityContentId = React.useId()
@@ -1555,6 +1629,7 @@ export function AgentConversationRenderer(
               </span>
               <HeaderMoreMenu
                 actions={overflowHeaderActions}
+                navigationActions={navigationActions}
                 model={model}
                 commands={commands}
                 copy={copy}

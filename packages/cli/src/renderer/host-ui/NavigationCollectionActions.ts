@@ -1,10 +1,11 @@
+import type { CordisXIconToken } from '../../contracts.js'
 import { createHostSurfaceIcon } from '../icons.js'
 
 export interface HostNavigationCollectionAction {
   readonly id: string
   readonly label: string
   readonly ariaLabel: string
-  readonly icon?: string
+  readonly icon?: CordisXIconToken
   readonly placement: 'direct' | 'overflow'
   readonly tone: 'neutral' | 'danger'
   readonly pressed: boolean
@@ -172,6 +173,22 @@ async function invoke(
   }
   if (!owner.active) return
   showFeedback(document, owner, failed ? action.failure : action.success, failed)
+}
+
+/** Host-owned lifecycle shared by sidebar and conversation-header action surfaces. */
+export class HostNavigationCollectionActionController {
+  private readonly owner: MountOwner = { active: true, cleanups: new Set() }
+
+  constructor(private readonly document: Document) {}
+
+  invoke(action: HostNavigationCollectionAction, returnFocus: HTMLElement): Promise<void> {
+    if (action.disabled) return Promise.resolve()
+    return invoke(this.document, action, returnFocus, this.owner)
+  }
+
+  dispose(): void {
+    disposeOwner(this.owner)
+  }
 }
 
 function actionButton(

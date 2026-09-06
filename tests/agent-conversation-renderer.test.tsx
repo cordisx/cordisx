@@ -12,6 +12,7 @@ import {
 } from '../packages/cli/src/renderer/host-ui/conversation/AgentConversationRenderer.js'
 import { HostAgentTaskDetailsNavigator } from '../packages/cli/src/renderer/host-ui/AgentTaskDetailsNavigator.js'
 import { createHostRoomCompositeAvatarProjection } from '../packages/cli/src/renderer/host-ui/RoomCompositeAvatar.js'
+import type { HostNavigationCollectionAction } from '../packages/cli/src/renderer/host-ui/NavigationCollectionActions.js'
 import { HostRoomCompositeAvatar } from '../packages/cli/src/renderer/host-ui/conversation/RoomCompositeAvatar.js'
 import {
   AgentConversationCommandController,
@@ -39,7 +40,7 @@ async function render(
   model: AgentConversationModel,
   commands: AgentConversationCommandController,
   debugFixture = false,
-  options: Pick<AgentConversationRendererProps, 'identity' | 'roomSettings'> = {},
+  options: Pick<AgentConversationRendererProps, 'identity' | 'navigationActions' | 'roomSettings'> = {},
 ): Promise<RenderHarness> {
   const dom = new JSDOM(
     '<!doctype html><html lang="zh-CN" data-theme="dark"><body><div id="root"></div></body></html>',
@@ -1499,6 +1500,94 @@ describe('AgentConversationRenderer production DOM', () => {
         'cxa-draft shikitor-input--attached',
         'cxa-send',
       ])
+    } finally {
+      await harness.close()
+    }
+  })
+
+  it('merges selected Room navigation actions into header More with shared confirmation and live replacement', async () => {
+    const model = createAgentConversationModel(createPlaygroundConversationFixture('conversation', 'en'))
+    const controller = new AgentConversationCommandController({
+      execute: vi.fn(async () => undefined),
+    }, model)
+    const pinInvoke = vi.fn(async () => undefined)
+    const deleteInvoke = vi.fn(async () => undefined)
+    const actions: readonly HostNavigationCollectionAction[] = [
+      {
+        id: 'pin',
+        label: 'Pin',
+        ariaLabel: 'Pin room',
+        icon: 'host:pin',
+        placement: 'direct',
+        tone: 'neutral',
+        pressed: true,
+        disabled: false,
+        success: 'Pinned',
+        failure: 'Pin failed',
+        invoke: pinInvoke,
+      },
+      {
+        id: 'delete',
+        label: 'Delete',
+        ariaLabel: 'Delete room',
+        icon: 'host:delete',
+        placement: 'overflow',
+        tone: 'danger',
+        pressed: false,
+        disabled: false,
+        success: 'Deleted',
+        failure: 'Delete failed',
+        confirmation: {
+          title: 'Delete room?',
+          description: 'This cannot be undone.',
+          confirmLabel: 'Delete',
+        },
+        invoke: deleteInvoke,
+      },
+    ]
+    const harness = await render(model, controller, false, { navigationActions: actions })
+    try {
+      const document = harness.dom.window.document
+      const trigger = document.querySelector<HTMLButtonElement>('.cxa-header-more-anchor > button')!
+      await act(async () => trigger.click())
+      const navigationItems =
+        () => [...document.querySelectorAll<HTMLButtonElement>('[data-host-navigation-action-id]')]
+      expect(navigationItems().map(item => item.dataset.hostNavigationActionId)).toEqual(['pin', 'delete'])
+      expect(navigationItems()[0]?.dataset.pressed).toBe('true')
+      expect(navigationItems()[1]?.dataset.tone).toBe('danger')
+      document.dispatchEvent(new harness.dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }))
+      expect(document.activeElement).toBe(
+        [...document.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not(:disabled)')].at(-1),
+      )
+      navigationItems()[1]!.click()
+      const dialog = document.querySelector<HTMLElement>('.cordisx-navigation-confirm')!
+      expect(dialog.textContent).toContain('Delete room?')
+      ;[...dialog.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Delete')!
+        .click()
+      await vi.waitFor(() => expect(deleteInvoke).toHaveBeenCalledTimes(1))
+      expect(document.querySelector('.cordisx-navigation-feedback')?.textContent).toBe('Deleted')
+      expect(pinInvoke).not.toHaveBeenCalled()
+
+      const restore: HostNavigationCollectionAction = {
+        ...actions[0]!,
+        id: 'restore',
+        label: 'Restore',
+        ariaLabel: 'Restore room',
+        icon: 'host:refresh',
+        pressed: false,
+      }
+      await act(async () =>
+        harness.root.render(
+          <AgentConversationRenderer
+            model={model}
+            commands={controller}
+            copy={playgroundConversationCopy('zh-CN')}
+            navigationActions={[restore]}
+          />,
+        )
+      )
+      await act(async () => trigger.click())
+      expect(navigationItems().map(item => item.dataset.hostNavigationActionId)).toEqual(['restore'])
     } finally {
       await harness.close()
     }

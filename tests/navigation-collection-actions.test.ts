@@ -2,6 +2,7 @@ import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
 import {
   type HostNavigationCollectionAction,
+  HostNavigationCollectionActionController,
   mountNavigationCollectionActions,
 } from '../packages/cli/src/renderer/host-ui/NavigationCollectionActions.js'
 
@@ -22,6 +23,27 @@ function action(overrides: Partial<HostNavigationCollectionAction> = {}): HostNa
 }
 
 describe('NavigationCollectionActions mount lifecycle', () => {
+  it('shares confirmation and feedback ownership with a Host header controller and disposes it atomically', async () => {
+    const dom = new JSDOM('<body><button id="return">More</button></body>')
+    const document = dom.window.document
+    const invoke = vi.fn(async () => undefined)
+    const controller = new HostNavigationCollectionActionController(document)
+    const pending = controller.invoke(
+      action({
+        confirmation: { title: 'Delete?', description: 'Confirm delete.', confirmLabel: 'Delete' },
+        invoke,
+      }),
+      document.getElementById('return')!,
+    )
+    expect(document.querySelector('.cordisx-navigation-confirm-backdrop')).not.toBeNull()
+    controller.dispose()
+    await pending
+    expect(document.querySelector('.cordisx-navigation-confirm-backdrop')).toBeNull()
+    expect(document.querySelector('.cordisx-navigation-feedback')).toBeNull()
+    expect(invoke).not.toHaveBeenCalled()
+    dom.window.close()
+  })
+
   it('returns direct confirmation focus to the action button itself', async () => {
     const dom = new JSDOM('<body><div id="actions"></div></body>')
     const document = dom.window.document

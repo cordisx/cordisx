@@ -121,6 +121,7 @@ import { HostThemeProjection } from './host-theme.js'
 import { ownerFromContext } from './ownership.js'
 import type { PluginConsoleAspect, PluginPrincipalToken } from './plugin-console.js'
 import type { PlaygroundScenarioConversationSourceAuthority } from './playground-scenario-session-scope.js'
+import type { SelectedNavigationActionRegistry } from './selected-navigation-actions.js'
 import { immutableSnapshot, LOCAL_ID_PATTERN, REFERENCE_PATTERN } from './validation.js'
 
 type ProtocolAction = ProtocolActionV3
@@ -2005,6 +2006,7 @@ class MountedConversation {
   private readonly root: Root
   private readonly diagnosticSites = new Set<string>()
   private readonly disconnectLocale: () => void
+  private readonly disconnectNavigationActions: () => void
   private readonly detachTheme: () => void
   private readonly previousOverflow: string
   private readonly previousMinHeight: string
@@ -2017,6 +2019,7 @@ class MountedConversation {
     private readonly i18n: CordisXI18nService,
     private readonly console: PluginConsoleAspect | undefined,
     private readonly identity: AgentConversationRendererProps['identity'],
+    private readonly selectedNavigationActions: SelectedNavigationActionRegistry | undefined,
     private readonly scenarioSource: PlaygroundScenarioConversationSourceAuthority | undefined,
     private readonly scenarioOwner: PlaygroundScenarioConversationOwnerResolver | undefined,
   ) {
@@ -2027,6 +2030,7 @@ class MountedConversation {
     mountContext.container.style.overflow = 'hidden'
     mountContext.container.style.minHeight = '0'
     this.disconnectLocale = i18n.subscribeInternal(() => this.render())
+    this.disconnectNavigationActions = selectedNavigationActions?.subscribe(() => this.render()) ?? (() => {})
     this.renderStatus('loading')
   }
 
@@ -2039,6 +2043,7 @@ class MountedConversation {
     this.disposed = true
     this.scenarioSource?.fenceBinding(this.binding.bindingId, 'route-replaced')
     this.disconnectLocale()
+    this.disconnectNavigationActions()
     this.releaseSource()
     for (const site of this.diagnosticSites) this.i18n.clearDiagnosticSite(this.record.owner, site)
     this.diagnosticSites.clear()
@@ -2909,11 +2914,19 @@ class MountedConversation {
           )
         },
       }, model)
+      const navigationActions = model.selection.kind !== 'room'
+          || this.mountContext.routeDefinitionId === undefined
+        ? undefined
+        : this.selectedNavigationActions?.selected(this.record.owner, {
+          id: this.mountContext.routeDefinitionId,
+          params: this.mountContext.params,
+        })?.actions
       this.root.render(
         <AgentConversationRenderer
           model={model}
           commands={controller}
           copy={rendererCopy(this.i18n.getSnapshot().locale)}
+          {...(navigationActions === undefined ? {} : { navigationActions })}
           {...(typeof this.source?.updateRoomSettings !== 'function' || model.selection.kind !== 'room' ? {} : {
             roomSettings: {
               update: async (patch: AgentConversationRoomSettingsPatch) => await this.updateRoomSettings(patch),
@@ -3130,6 +3143,7 @@ export class AgentConversationShellRegistry {
     private readonly identity?: AgentConversationRendererProps['identity'],
     private readonly scenarioSource?: PlaygroundScenarioConversationSourceAuthority,
     private readonly scenarioOwner?: PlaygroundScenarioConversationOwnerResolver,
+    private readonly selectedNavigationActions?: SelectedNavigationActionRegistry,
   ) {
     this.disconnectVisibility = visibility?.connect({
       notify: () => {
@@ -3229,6 +3243,7 @@ export class AgentConversationShellRegistry {
           this.i18n,
           this.console,
           this.identity,
+          this.selectedNavigationActions,
           this.scenarioSource,
           this.scenarioOwner,
         )
@@ -3270,6 +3285,7 @@ export interface CordisXAgentConversationShellServiceOptions {
   readonly registry?: AgentConversationShellRegistry
   readonly console?: PluginConsoleAspect
   readonly identity?: AgentConversationRendererProps['identity']
+  readonly selectedNavigationActions?: SelectedNavigationActionRegistry
   readonly scenarioSource?: PlaygroundScenarioConversationSourceAuthority
   readonly scenarioOwner?: PlaygroundScenarioConversationOwnerResolver
 }
@@ -3291,6 +3307,7 @@ export class CordisXAgentConversationShellService extends Service implements Cor
       options.identity,
       options.scenarioSource,
       options.scenarioOwner,
+      options.selectedNavigationActions,
     )
     ctx.effect(() => () => this.registry.dispose(), 'cordisx: Agent conversation shell registry')
   }
