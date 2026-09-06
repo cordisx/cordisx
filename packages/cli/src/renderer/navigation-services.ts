@@ -117,6 +117,7 @@ import type {
 } from './navigation-pages.js'
 
 import { NavigationRegistry } from './navigation-registry.js'
+import { isAgentConversationPageMount, markAgentConversationPageMount } from './agent-conversation-page.js'
 export class CordisXPageService extends Service implements CordisXPages {
   readonly registry: PageRegistry
   private readonly console: PluginConsoleAspect | undefined
@@ -142,6 +143,7 @@ export class CordisXPageService extends Service implements CordisXPages {
           { trigger: { kind: 'registration', registrationId: `page:${owner}:${metadata.id}` } },
           () => mount(context),
         ) as ReturnType<CordisXPageMount<Messages>>
+    if (isAgentConversationPageMount(mount)) markAgentConversationPageMount(scopedMount)
     const register = (): ReturnType<CordisXPages['register']> =>
       this.ctx.effect(
         () => this.registry.register(this.ctx, metadata, scopedMount),

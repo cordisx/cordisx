@@ -104,9 +104,13 @@ import {
   type ManagerSnapshot,
 } from './manager.js'
 import { installReactCordisXManager } from './manager/install.js'
-import { HostManagerNavigationController } from './manager/navigation-controller.js'
+import {
+  HostManagerNavigationController,
+  resolveHostManagerAgentDefinitionOpenRequest,
+} from './manager/navigation-controller.js'
 import { selectPluginReadme } from './readme.js'
 import { CordisXCommandService } from './commands.js'
+import { CordisXAgentConversationShellService } from './agent-conversation-shell.js'
 import { CordisXI18nService } from './i18n.js'
 import { CordisXVisualService } from './visuals.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
@@ -493,6 +497,47 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
     })
     await runtimeScope.commandFiber
     runtimeScope.commandService = runtimeScope.ctx.commands as CordisXCommandService
+    runtimeScope.agentConversationShellFiber = runtimeScope.ctx.plugin(CordisXAgentConversationShellService, {
+      console: runtimeScope.pluginConsole()!,
+      selectedNavigationActions: runtimeScope.selectedNavigationActions()!,
+      identity: {
+        resolve: value => runtimeScope.agentSessionRuntime.definitionPresentation(value)
+          ?? runtimeScope.agentLoopBrokerV4()!.definitionPresentation(value),
+        resolveSettings: value => {
+          const request = resolveHostManagerAgentDefinitionOpenRequest(
+            runtimeScope.routeService?.managerContentAgentDefinitionTarget(value),
+            runtimeScope.managerModel()!.snapshot().settingsNavigationItems ?? [],
+          )
+          return request === undefined
+            ? { available: false, reason: 'Manager entity detail is unavailable for this exact Agent revision.' }
+            : { available: true }
+        },
+        navigator: runtimeScope.agentDetailNavigator()!,
+        onSettings: value => {
+          const request = resolveHostManagerAgentDefinitionOpenRequest(
+            runtimeScope.routeService?.managerContentAgentDefinitionTarget(value),
+            runtimeScope.managerModel()!.snapshot().settingsNavigationItems ?? [],
+          )
+          if (request === undefined) {
+            throw new Error('Manager entity detail is unavailable for this exact Agent revision.')
+          }
+          runtimeScope.managerNavigationController()!.openManagerContent(request)
+        },
+      },
+      ...(runtimeScope.scenarioSessionScopeAuthority! === undefined ? {} : {
+        scenarioSource: runtimeScope.scenarioSessionScopeAuthority!.conversationSource,
+        scenarioOwner: (owner: string, moduleGeneration: string | undefined) => {
+          if (moduleGeneration === undefined) return undefined
+          const matches = runtimeScope.controllers()!.filter(controller =>
+            controller.item.id === owner
+            && controller.principalLive
+            && runtimeScope.moduleGenerationOf()!(controller) === moduleGeneration
+          )
+          return matches.length === 1 ? runtimeScope.agentOwnerForController()!(matches[0]!) : undefined
+        },
+      }),
+    })
+    await runtimeScope.agentConversationShellFiber
     runtimeScope.pageFiber = runtimeScope.ctx.plugin(CordisXPageService, runtimeScope.pluginConsole()!)
     await runtimeScope.pageFiber
     runtimeScope.pageService = runtimeScope.ctx.pages as CordisXPageService
@@ -622,6 +667,7 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
         {
           profileId: runtimeScope.metadata()!.profileId,
           transientCanvas: runtimeScope.transientCanvasCoordinator,
+          selectedNavigationActions: runtimeScope.selectedNavigationActions()!,
         },
       )
       : installCodexAdapter(
@@ -636,6 +682,7 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
           adapterVersion: runtimeScope.metadata()!.version,
           profileId: runtimeScope.metadata()!.profileId,
           transientCanvas: runtimeScope.transientCanvasCoordinator,
+          selectedNavigationActions: runtimeScope.selectedNavigationActions()!,
         },
       )
     const legacyAuthorizationGroups = new Map<string, {

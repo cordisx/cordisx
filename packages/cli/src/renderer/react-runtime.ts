@@ -89,6 +89,7 @@ interface AgentAvatarProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, '
 
 const SHARED_REACT_STYLES = `
 .cxr-react-root{box-sizing:border-box;min-height:100%;padding:16px;color:var(--cx-text);font:14px/1.5 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.cxr-react-root[data-cordisx-page-chrome-policy="agent-conversation"]{padding:0}
 .cxr-react-root *,.cxr-react-root *::before,.cxr-react-root *::after{box-sizing:border-box}
 .cxr-ui-stack{display:flex;min-width:0}
 .cxr-ui-attachment-placeholder{display:inline-grid;inline-size:30px;block-size:30px;flex:0 0 30px;place-items:center;padding:0;border:1px solid var(--cx-border);border-radius:50%;background:transparent;color:var(--cx-muted);opacity:var(--cx-disabled,.5);cursor:not-allowed}

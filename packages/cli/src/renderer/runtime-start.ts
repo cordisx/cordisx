@@ -40,6 +40,7 @@ import { HostManagerNavigationController } from './manager/navigation-controller
 import { CordisXCommandService } from './commands.js'
 import { CordisXI18nService } from './i18n.js'
 import { CordisXPageService, CordisXRouteService } from './navigation.js'
+import { SelectedNavigationActionRegistry } from './selected-navigation-actions.js'
 import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter } from './codex-router-history.js'
 import {
   type AgentRuntimeConnection,
@@ -269,6 +270,10 @@ export async function start(
       agentRuntimeRouteDisposed: [() => agentRuntimeRouteDisposed, (value: any) => agentRuntimeRouteDisposed = value],
       agentSessionRuntime: [() => agentSessionRuntime, (value: any) => agentSessionRuntime = value],
       agentSessionTransport: () => agentSessionTransport,
+      agentConversationShellFiber: [
+        () => agentConversationShellFiber,
+        (value: any) => agentConversationShellFiber = value,
+      ],
       applyRestartCandidate: () => applyRestartCandidate,
       authorizePlugin: () => authorizePlugin,
       authorizePluginV2: () => authorizePluginV2,
@@ -394,6 +399,7 @@ export async function start(
       ownerDocumentBroker: () => ownerDocumentBroker,
       ownsSharedReactRuntime: [() => ownsSharedReactRuntime, (value: any) => ownsSharedReactRuntime = value],
       pageAdmissionBindings: () => pageAdmissionBindings,
+      selectedNavigationActions: () => selectedNavigationActions,
       pageFiber: [() => pageFiber, (value: any) => pageFiber = value],
       pageService: [() => pageService, (value: any) => pageService = value],
       pendingAgentDetailReturn: [() => pendingAgentDetailReturn, (value: any) => pendingAgentDetailReturn = value],
@@ -579,6 +585,7 @@ export async function start(
     let agentRuntimeRouteDisposed = false
     let agentSessionRuntime!: CordisXAgentSessionRuntime
     const pageAdmissionBindings = new PageAdmissionBindingRegistry()
+    const selectedNavigationActions = new SelectedNavigationActionRegistry()
     const managerNavigationController = new HostManagerNavigationController()
     const agentOwnerControllers = new Map<string, PluginController>()
     const agentOwnerKey = (owner: AgentActiveRoute['owner']): string => `${owner.pluginId}\u0000${owner.generation}`
@@ -680,6 +687,7 @@ export async function start(
     let platformFiber: Fiber | undefined
     let systemPromptFiber: Fiber | undefined
     let commandFiber: Fiber | undefined
+    let agentConversationShellFiber: Fiber | undefined
     let pageFiber: Fiber | undefined
     let routeFiber: Fiber | undefined
     let managerContentFiber: Fiber | undefined

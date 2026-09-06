@@ -241,6 +241,9 @@ export class NavigationRegistryBase {
     }
     const page = this.pages.get(record.owner, record.definition.page, view)
     if (page === undefined) return `page ${record.definition.page} is not registered by plugin ${record.owner}`
+    if (page.presentation === 'agent-conversation' && record.definition.outlet !== 'main') {
+      return `agent conversation page ${page.qualifiedId} requires the main outlet`
+    }
     if (record.definition.outlet === 'manager.content') {
       if (
         record.definition.path === '/manager/extensions'
@@ -269,7 +272,8 @@ export class NavigationRegistryBase {
       return `page ${page.qualifiedId} must use body-only chrome for manager.settings.content`
     }
     if (
-      page.metadata.chrome === 'body-only'
+      page.presentation !== 'agent-conversation'
+      && page.metadata.chrome === 'body-only'
       && record.definition.outlet !== 'main'
       && record.definition.outlet !== 'session.content'
       && record.definition.outlet !== 'manager.settings.content'
@@ -549,9 +553,12 @@ export class NavigationRegistryBase {
       // activation boundary, before the page body mounts and before the
       // navigation promise that led here can resolve.
       await this.pageAdmissionBindings.activate(pageAdmissionBinding)
+      const agentConversation = page.presentation === 'agent-conversation'
       const bodyOnly = page.metadata.chrome === 'body-only'
-      content.dataset.cordisxPageChromePolicy = bodyOnly ? 'body-only' : 'standard'
-      if (!bodyOnly) {
+      content.dataset.cordisxPageChromePolicy = agentConversation
+        ? 'agent-conversation'
+        : bodyOnly ? 'body-only' : 'standard'
+      if (!bodyOnly && !agentConversation) {
         const chrome = content.ownerDocument.createElement('header')
         chrome.dataset.cordisxPageChrome = 'true'
         chrome.dataset.cordisxDrag = 'true'
@@ -700,7 +707,7 @@ export class NavigationRegistryBase {
           }
           content.append(tabs)
         }
-      } else if (bodyOnly) {
+      } else if (bodyOnly && !agentConversation) {
         const titleSite = `page:${page.qualifiedId}:body.accessible-title`
         localization.effect(() => {
           content.setAttribute('aria-label', this.i18n.resolveFor(page.owner, page.metadata.title, titleSite).text)
@@ -709,7 +716,8 @@ export class NavigationRegistryBase {
       }
       const body = content.ownerDocument.createElement('div')
       body.dataset.cordisxPageBody = 'true'
-      body.style.cssText = `position:relative;flex:1;min-height:0;overflow:${bodyOnly ? 'hidden' : 'auto'}`
+      body.style.cssText =
+        `position:relative;flex:1;min-height:0;overflow:${agentConversation || bodyOnly ? 'hidden' : 'auto'}`
       content.append(body)
       const controls = new HostPageControls(content.ownerDocument, content)
       effects.push(() => controls.dispose())

@@ -5,7 +5,7 @@ export interface HostSeatsProps {
   readonly locale: 'zh-CN' | 'en'
 }
 
-/** Generic Playground outlets. Product pages are supplied only by plugins. */
+/** Product pages are supplied only by plugins through the production Host runtime. */
 export function HostSeats({ mode }: HostSeatsProps) {
   return (
     <main

@@ -321,6 +321,7 @@ abstract class StructuredSurfaceInteractions extends StructuredSurfaceRendererBa
           onActivate: activate,
         })
         const { element: row, primary } = control
+        let actionCandidate: import('./renderer-base.js').NavigationActionCandidate | undefined
         if (description !== undefined) primary.dataset.cordisxTooltip = description
         if (item.route !== undefined) {
           const project = (): void => {
@@ -328,6 +329,7 @@ abstract class StructuredSurfaceInteractions extends StructuredSurfaceRendererBa
             const presentation = projection.presented ? 'presented' : projection.active ? 'active' : 'inactive'
             row.dataset.cordisxRouteState = presentation
             control.setSelected(presentation === 'presented', true)
+            if (actionCandidate !== undefined) actionCandidate.presented = presentation === 'presented'
           }
           this.routeProjectors.set(primary, project)
           project()
@@ -426,6 +428,17 @@ abstract class StructuredSurfaceInteractions extends StructuredSurfaceRendererBa
               }
             },
           )
+          if (item.route !== undefined) {
+            actionCandidate = {
+              owner: snapshot.owner,
+              itemId: snapshot.qualifiedId,
+              route: item.route,
+              actions: actionViews,
+              actionContainer: actions,
+              presented: false,
+            }
+            this.navigationActionCandidates.push(actionCandidate)
+          }
           if (actionViews.length > 0) {
             this.navigationActionDisposers.push(mountNavigationCollectionActions(this.document, actions, actionViews))
           }
@@ -527,6 +540,20 @@ abstract class StructuredSurfaceInteractions extends StructuredSurfaceRendererBa
 
   protected disposeNavigationActions(): void {
     for (const dispose of this.navigationActionDisposers.splice(0)) dispose()
+    this.navigationActionCandidates = []
+    this.selectedNavigationActions?.replace([])
+  }
+
+  protected publishSelectedNavigationActions(): void {
+    const presented = this.navigationActionCandidates.filter(candidate => candidate.presented)
+    this.selectedNavigationActions?.replace(presented)
+    for (const candidate of this.navigationActionCandidates) {
+      candidate.actionContainer.hidden = this.selectedNavigationActions?.isSelected(
+        candidate.owner,
+        candidate.itemId,
+        candidate.route,
+      ) === true
+    }
   }
 
   protected renderActions(
