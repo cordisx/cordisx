@@ -1102,11 +1102,9 @@ function Composer({
   model,
   commands,
   copy,
-  commandError,
   setCommandError,
   mentionRequest,
 }: Pick<AgentConversationRendererProps, 'model' | 'commands' | 'copy'> & {
-  readonly commandError: string | undefined
   readonly setCommandError: (value: string | undefined) => void
   readonly mentionRequest: ComposerMentionRequest | undefined
 }) {
@@ -1121,7 +1119,7 @@ function Composer({
     setCommandError(undefined)
   }, [model.binding.bindingId, model.generation, setCommandError])
   const unavailable = model.composer.availability !== 'available'
-  const reason = commandError ?? model.composer.disabledReason ?? (unavailable ? copy.unavailable : undefined)
+  const reason = model.composer.disabledReason ?? (unavailable ? copy.unavailable : undefined)
   const disabled = unavailable || model.composer.disabled || submitting || draft.trim() === ''
   const inputRef = useHostShikitorComposer({
     draft,
@@ -1201,9 +1199,7 @@ function Composer({
           >
             <HostSurfaceIcon token="host:new" />
           </button>
-          <p id={noticeId} className="cxa-composer-notice" data-error={String(commandError !== undefined)}>
-            {reason ?? ''}
-          </p>
+          <p id={noticeId} className="cxa-composer-notice">{reason ?? ''}</p>
           <button
             type="submit"
             className="cxa-send"
@@ -1296,7 +1292,26 @@ export function AgentConversationRenderer(
   const [mentionRequest, setMentionRequest] = React.useState<ComposerMentionRequest | undefined>()
   const mentionSequence = React.useRef(0)
   const memberSearchRef = React.useRef<HTMLInputElement>(null)
-  const setCommandError = React.useCallback((value: string | undefined) => setCommandErrorState(value), [])
+  const commandErrorTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const setCommandError = React.useCallback((value: string | undefined) => {
+    if (commandErrorTimer.current !== undefined) {
+      clearTimeout(commandErrorTimer.current)
+      commandErrorTimer.current = undefined
+    }
+    setCommandErrorState(value)
+    if (value !== undefined) {
+      commandErrorTimer.current = setTimeout(() => {
+        commandErrorTimer.current = undefined
+        setCommandErrorState(undefined)
+      }, 6_000)
+    }
+  }, [])
+  React.useEffect(() => () => {
+    if (commandErrorTimer.current !== undefined) clearTimeout(commandErrorTimer.current)
+  }, [])
+  React.useEffect(() => {
+    setCommandError(undefined)
+  }, [model.binding.bindingId, model.generation, setCommandError])
   const title = model.selection.kind === 'room' ? model.selection.title : copy.newRoomTitle
   const description = model.selection.kind === 'room' && model.selection.description?.state === 'present'
     ? model.selection.description.text
@@ -1564,7 +1579,6 @@ export function AgentConversationRenderer(
           model={model}
           commands={commands}
           copy={copy}
-          commandError={commandError}
           setCommandError={setCommandError}
           mentionRequest={mentionRequest}
         />
@@ -1779,7 +1793,21 @@ export function AgentConversationRenderer(
             )}
         </HostConversationRightInspector>
       )}
-      <div className="cxa-live-region" role="status" aria-live="polite">{commandError ?? ''}</div>
+      {commandError === undefined
+        ? null
+        : (
+          <div className="cxa-command-notification" role="alert" aria-live="assertive">
+            <span>{commandError}</span>
+            <button
+              type="button"
+              aria-label={chinese ? '关闭通知' : 'Dismiss notification'}
+              title={chinese ? '关闭通知' : 'Dismiss notification'}
+              onClick={() => setCommandError(undefined)}
+            >
+              <HostSurfaceIcon token="host:close" />
+            </button>
+          </div>
+        )}
     </section>
   )
 }

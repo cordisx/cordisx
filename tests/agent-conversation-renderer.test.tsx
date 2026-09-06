@@ -1504,6 +1504,69 @@ describe('AgentConversationRenderer production DOM', () => {
     }
   })
 
+  it('routes command failures to a dismissible expiring alert while preserving the failed composer draft', async () => {
+    const model = createAgentConversationModel({
+      ...createPlaygroundConversationFixture('conversation', 'en'),
+      composer: {
+        availability: 'available',
+        placeholder: 'Write a message',
+        disabled: false,
+        shortcutPolicy: 'enter',
+        submit: { id: 'room.send' },
+      },
+    })
+    const controller = new AgentConversationCommandController({
+      execute: async () => {
+        throw new Error('Agent details are unavailable')
+      },
+    }, model)
+    const harness = await render(model, controller)
+    try {
+      const document = harness.dom.window.document
+      const draft = document.querySelector<HTMLTextAreaElement>('.cxa-draft')!
+      const send = document.querySelector<HTMLButtonElement>('.cxa-send')!
+      const valueSetter = Object.getOwnPropertyDescriptor(harness.dom.window.HTMLTextAreaElement.prototype, 'value')
+        ?.set
+      vi.useFakeTimers()
+      await act(async () => {
+        valueSetter?.call(draft, 'keep this failed draft')
+        draft.dispatchEvent(new harness.dom.window.Event('input', { bubbles: true }))
+        await Promise.resolve()
+      })
+      expect(send.disabled).toBe(false)
+      await act(async () => {
+        send.click()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      const notice = document.querySelector<HTMLElement>('.cxa-composer-notice')!
+      const alert = document.querySelector<HTMLElement>('.cxa-command-notification[role="alert"]')!
+      expect(notice.textContent).not.toContain('Agent details are unavailable')
+      expect(alert.textContent).toContain('Agent details are unavailable')
+      expect(draft.value).toBe('keep this failed draft')
+      const dismiss = alert.querySelector<HTMLButtonElement>('button')!
+      expect(dismiss.getAttribute('aria-label')).toBe('关闭通知')
+      expect(dismiss.title).toBe('关闭通知')
+      await act(async () => dismiss.click())
+      expect(document.querySelector('.cxa-command-notification')).toBeNull()
+
+      await act(async () => {
+        send.click()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(document.querySelector('.cxa-command-notification')).not.toBeNull()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(6_000)
+      })
+      expect(document.querySelector('.cxa-command-notification')).toBeNull()
+      expect(draft.value).toBe('keep this failed draft')
+    } finally {
+      vi.useRealTimers()
+      await harness.close()
+    }
+  })
+
   it('shares one content bound and spacing token across header, timeline, entries, and fixed composer', async () => {
     const model = createPlaygroundConversationFixture('conversation', 'en')
     const harness = await render(
