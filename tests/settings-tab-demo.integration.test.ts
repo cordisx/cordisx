@@ -190,7 +190,7 @@ describe('settings navigation demo bundle', () => {
       ])
 
     expect(item()?.tabIndex).toBe(0)
-    expect(dom.window.document.querySelector<HTMLButtonElement>('[data-tab="marketplace"]')?.tabIndex).toBe(0)
+    expect(dom.window.document.querySelector<HTMLButtonElement>('[data-tab="routes"]')?.tabIndex).toBe(0)
 
     await runtime.setExtensionPointPolicy(
       initial.plugins[0]!.source,

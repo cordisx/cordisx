@@ -658,6 +658,9 @@ const EN_MESSAGES = Object.fromEntries([
     ...(point.anchors ?? []).flatMap(anchor =>
       anchor.diagnostic === undefined ? [] : [[anchor.diagnostic.key, anchor.diagnostic.fallback!]]
     ),
+    ...('navigationGroups' in point
+      ? point.navigationGroups.groups.map(group => [group.label.key, group.label.fallback] as const)
+      : []),
   ]),
   ...Object.values(CATALOG_TEXT).map(message => [message.key, message.fallback!]),
 ])

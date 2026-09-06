@@ -20,6 +20,7 @@ import {
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V6,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V8,
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V9,
   type CordisXExtensionPointPolicyRecordV1,
 } from '../packages/cli/src/contracts.js'
 import type { CordisXI18nService } from '../packages/cli/src/renderer/i18n.js'
@@ -316,12 +317,12 @@ describe('extension point runtime contract', () => {
     registry.dispose()
   })
 
-  it('registers distinct Manager content-tab and first-level navigation points in the v5 catalog', () => {
+  it('registers Manager navigation groups through the v9 catalog while retaining compatibility points', () => {
     const registry = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     const remove = registry.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
     expect(CORDISX_MANAGER_EXTENSION_POINT_CATALOG).toMatchObject({
-      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
-      schemaVersion: 5,
+      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V9,
+      schemaVersion: 9,
     })
     expect(registry.descriptors()).toHaveLength(4)
     expect(registry.descriptor('manager.settings.tabs')).toMatchObject({
@@ -342,10 +343,19 @@ describe('extension point runtime contract', () => {
     })
     expect(registry.descriptor('manager.settings.navigation-items')).toMatchObject({
       kind: 'surface',
-      payloadFamily: 'manager-settings-navigation-item',
+      payloadFamily: 'manager-settings-navigation-item-v2',
       title: { fallback: 'Manager settings navigation items' },
       maturity: 'stable',
       adapterSupport: 'supported',
+      navigationGroups: {
+        fallbackGroup: 'other',
+        groups: [
+          expect.objectContaining({ id: 'resources', order: 100 }),
+          expect.objectContaining({ id: 'development', order: 200 }),
+          expect.objectContaining({ id: 'collaboration', order: 300 }),
+          expect.objectContaining({ id: 'other', order: 1000 }),
+        ],
+      },
     })
     expect(registry.descriptor('manager.content')).toMatchObject({
       kind: 'outlet',
