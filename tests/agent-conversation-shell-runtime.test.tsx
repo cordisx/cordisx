@@ -2548,23 +2548,14 @@ describe('Agent conversation shell public runtime', () => {
     )
     dom.window.document.querySelector<HTMLButtonElement>('.cxa-description-action')!.click()
     await vi.waitFor(
-      () =>
-        expect(dom.window.document.querySelector('[data-host-schema-form="agent-conversation-room-settings"]')).not
-          .toBeNull(),
-      { timeout: 1_000, interval: 10 },
-    )
-    await vi.waitFor(
-      () =>
-        expect(
-          dom.window.document.querySelectorAll('[data-host-schema-form="agent-conversation-room-settings"] .cxf-item'),
-        ).toHaveLength(2),
+      () => expect(dom.window.document.querySelector('.cxa-room-settings-form')).not.toBeNull(),
       { timeout: 1_000, interval: 10 },
     )
     const nameField = dom.window.document.querySelector<HTMLInputElement>(
-      'input#cx-schema-agent-conversation-room-settings-0',
+      '.cxa-room-settings-form input[name="name"]',
     )!
     const descriptionField = dom.window.document.querySelector<HTMLTextAreaElement>(
-      '[data-host-schema-form="agent-conversation-room-settings"] textarea',
+      '.cxa-room-settings-form textarea[name="description"]',
     )!
     const inputSetter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')?.set
     const textAreaSetter = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')?.set
@@ -2580,7 +2571,7 @@ describe('Agent conversation shell public runtime', () => {
     await vi.waitFor(
       () =>
         expect(
-          (dom.window.document.querySelector('[data-host-schema-form="agent-conversation-room-settings"] button') as
+          (dom.window.document.querySelector('.cxa-room-settings-form button[type="submit"]') as
             | HTMLButtonElement
             | null)?.disabled,
         ).toBe(false),
@@ -2588,7 +2579,7 @@ describe('Agent conversation shell public runtime', () => {
     )
     await act(async () =>
       dom.window.document.querySelector<HTMLButtonElement>(
-        '[data-host-schema-form="agent-conversation-room-settings"] button',
+        '.cxa-room-settings-form button[type="submit"]',
       )!.click()
     )
     await vi.waitFor(() => expect(requests).toHaveLength(1), { timeout: 1_000, interval: 10 })

@@ -1319,7 +1319,7 @@ function RoomSettingsEditor({ title, description, chinese, settings, onError, on
           required
           maxLength={256}
           disabled={saving}
-          onChange={event => setName(event.currentTarget.value)}
+          onInput={event => setName(event.currentTarget.value)}
         />
       </label>
       <label>
@@ -1329,7 +1329,7 @@ function RoomSettingsEditor({ title, description, chinese, settings, onError, on
           value={details}
           maxLength={4_000}
           disabled={saving}
-          onChange={event => setDetails(event.currentTarget.value)}
+          onInput={event => setDetails(event.currentTarget.value)}
         />
       </label>
       <button type="submit" className="cxa-action" disabled={saving || name.trim() === ''}>
