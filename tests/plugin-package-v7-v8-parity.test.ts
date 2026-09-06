@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V7,
@@ -23,6 +23,88 @@ import {
 } from '../packages/cli/src/launcher/config.js'
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
+
+const routeFiles = {
+  development: path.join(root, 'packages/cli/src/launcher/development.ts'),
+  package: path.join(root, 'packages/cli/src/launcher/plugin-package.ts'),
+  lifecycle: path.join(root, 'packages/cli/src/launcher/plugin-lifecycle-core.ts'),
+  vite: path.join(root, 'packages/cli/src/launcher/vite-development.ts'),
+  runtime: path.join(root, 'packages/cli/src/renderer/runtime.ts'),
+} as const
+
+const routeProgram = ts.createProgram(Object.values(routeFiles), {
+  target: ts.ScriptTarget.ES2022,
+  module: ts.ModuleKind.NodeNext,
+  moduleResolution: ts.ModuleResolutionKind.NodeNext,
+  skipLibCheck: true,
+  noEmit: true,
+})
+const routeChecker = routeProgram.getTypeChecker()
+
+function sourceFile(filename: string): ts.SourceFile {
+  const source = routeProgram.getSourceFile(filename)
+  if (source === undefined) throw new Error(`missing source route ${filename}`)
+  return source
+}
+
+function symbolSource(node: ts.Identifier): string | undefined {
+  let symbol = routeChecker.getSymbolAtLocation(node)
+  if (symbol !== undefined && (symbol.flags & ts.SymbolFlags.Alias) !== 0) {
+    symbol = routeChecker.getAliasedSymbol(symbol)
+  }
+  return symbol?.declarations?.[0]?.getSourceFile().fileName
+}
+
+function importedCalls(filename: string, declarationFile: string): Set<string> {
+  const names = new Set<string>()
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node)
+      && ts.isIdentifier(node.expression)
+      && symbolSource(node.expression)?.endsWith(declarationFile) === true
+    ) names.add(node.expression.text)
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile(filename))
+  return names
+}
+
+function typeReferences(filename: string, declarationFile: string): Set<string> {
+  const names = new Set<string>()
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isTypeReferenceNode(node)
+      && ts.isIdentifier(node.typeName)
+      && symbolSource(node.typeName)?.endsWith(declarationFile) === true
+    ) names.add(node.typeName.text)
+    ts.forEachChild(node, visit)
+  }
+  visit(sourceFile(filename))
+  return names
+}
+
+function schemaVersions(filename: string, functionName: string): Set<number> {
+  const versions = new Set<number>()
+  const source = sourceFile(filename)
+  const declaration = source.statements.find(statement => (
+    ts.isFunctionDeclaration(statement) && statement.name?.text === functionName
+  ))
+  if (declaration === undefined || !ts.isFunctionDeclaration(declaration)) {
+    throw new Error(`missing function ${functionName}`)
+  }
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isBinaryExpression(node)
+      && node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken
+      && ts.isPropertyAccessExpression(node.left)
+      && node.left.name.text === 'schemaVersion'
+      && ts.isNumericLiteral(node.right)
+    ) versions.add(Number(node.right.text))
+    ts.forEachChild(node, visit)
+  }
+  visit(declaration)
+  return versions
+}
 
 describe('plugin package v7/v8 predecessor and successor parity', () => {
   it('keeps both public package and runtime schema exports available', () => {
@@ -71,21 +153,19 @@ describe('plugin package v7/v8 predecessor and successor parity', () => {
     const config = parseConfigDocument({ version: 1, plugins: [] }, location.configPath)
     expect(cordisXProjectRoot(config)).toBe(location.projectRoot)
     expect(cordisXConfigRoot(config)).toBe(location.configRoot)
-    for (
-      const relative of [
-        'packages/cli/src/launcher/development.ts',
-        'packages/cli/src/launcher/plugin-package.ts',
-        'packages/cli/src/launcher/plugin-lifecycle.ts',
-        'packages/cli/src/launcher/vite-development.ts',
-        'packages/cli/src/renderer/runtime.ts',
-      ]
-    ) {
-      const source = await readFile(path.join(root, relative), 'utf8')
-      expect(source).toContain('V7')
-      expect(source).toContain('V8')
+    for (const filename of [routeFiles.development, routeFiles.package, routeFiles.lifecycle]) {
+      const calls = importedCalls(filename, '/permission-model-v4.ts')
+      expect(calls).toContain('normalizePluginManifestV7')
+      expect(calls).toContain('normalizePluginManifestV8')
     }
-    const runtime = await readFile(path.join(root, 'packages/cli/src/renderer/runtime.ts'), 'utf8')
-    expect(runtime).toContain('prepareCordisXViteReactRuntime')
-    expect(runtime).toContain('manifestUsesTransientCanvas')
+    const viteTypes = typeReferences(routeFiles.vite, '/permission-contracts.ts')
+    expect(viteTypes).toContain('CordisXPluginManifestV7')
+    expect(viteTypes).toContain('CordisXPluginManifestV8')
+
+    const runtimeCalls = importedCalls(routeFiles.runtime, '/runtime.ts')
+    expect(runtimeCalls).toContain('prepareCordisXViteReactRuntime')
+    expect(runtimeCalls).toContain('manifestUsesTransientCanvas')
+    expect(schemaVersions(routeFiles.runtime, 'manifestUsesHostDom')).toContain(8)
+    expect(schemaVersions(routeFiles.runtime, 'manifestUsesTransientCanvas')).toContain(7)
   })
 })

@@ -11,9 +11,26 @@ import type { CordisXConfig, CordisXConfigPlugin } from './config.js'
 import { findFreeLoopbackPort } from './process.js'
 import { buildLocalDevelopmentPlugin, localDevelopmentPackageInfo } from './development.js'
 import type { CordisXPluginManifestV7, CordisXPluginManifestV8 } from '../permission-contracts.js'
-import { EntityDirectoryAuthority, type EntityTemplatePayload } from './entity-directory.js'
+import type { EntityTemplatePayload } from './entity-directory.js'
 import { CONTRACTS_MODULE_PATH, cordisXSharedModuleSource } from './react-virtual-modules.js'
 import { entityInstallationId, entityPluginGeneration, issueOwnerDocumentPrincipalToken } from './owner-document-rpc.js'
+import {
+  type NativeVitePluginGeneration,
+  type NativeVitePluginGenerationHandler,
+  type NativeVitePluginGenerationTransaction,
+} from './vite-development-generation.js'
+export { createNativeViteEntityGenerationHandler } from './vite-development-generation.js'
+export type {
+  NativeVitePluginGeneration,
+  NativeVitePluginGenerationHandler,
+  NativeVitePluginGenerationTransaction,
+} from './vite-development-generation.js'
+import {
+  COMMONJS_INTEROP_LEAVES,
+  SHARED_MODULES,
+  SHARED_REACT_INTEROP_LEAVES,
+  VITE_CLIENT_DISPOSER_SOURCE,
+} from './vite-development-graph.js'
 
 const ENTRY = 'virtual:cordisx-native-entry'
 const BOOT = 'virtual:cordisx-native-boot'
@@ -21,33 +38,6 @@ const PREAMBLE = 'virtual:cordisx-native-preamble'
 const REACT_PREPARE = 'virtual:cordisx-native-react-prepare'
 const PLUGIN_PREFIX = 'virtual:cordisx-native-plugin/'
 const SHARED_PREFIX = 'virtual:cordisx-native-shared/'
-const SHARED_MODULES = new Set([
-  'cordisx/react',
-  'cordisx/react/jsx-runtime',
-  'cordisx/react/jsx-dev-runtime',
-  'cordisx/ui',
-])
-const COMMONJS_INTEROP_LEAVES = [
-  'classnames',
-  'dayjs',
-  'debug',
-  'extend',
-  'hoist-non-react-statics',
-  'prop-types',
-  'raf',
-  'react-fast-compare',
-  'react-is',
-  'style-to-js',
-  'use-sync-external-store/shim',
-  'use-sync-external-store/shim/index.js',
-] as const
-const SHARED_REACT_INTEROP_LEAVES = [
-  'react',
-  'react/jsx-runtime',
-  'react/jsx-dev-runtime',
-  'react-dom',
-  'react-dom/client',
-] as const
 const sourceMode = import.meta.url.endsWith('.ts')
 const extension = sourceMode ? 'ts' : 'js'
 const rendererPath = fileURLToPath(new URL(`../renderer/runtime.${extension}`, import.meta.url))
@@ -65,17 +55,6 @@ const reactVersion = packageVersion('react/package.json')
 const reactDomVersion = packageVersion('react-dom/package.json')
 const virtualUrl = (id: string): string => `/@id/__x00__${id}`
 const README_FILE = /^README(?:\.[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)?\.(?:md|markdown)$/iu
-const VITE_CLIENT_DISPOSER_SOURCE = `
-const __cordisxDisposeViteHmr = async () => {
-  for (const id of new Set([...sheetsMap.keys(), ...linkSheetsMap.keys()])) removeStyle(id);
-  willUnload = true;
-  await transport.connect().catch(() => undefined);
-  await transport.disconnect();
-  if (globalThis.__cordisxViteHmrDispose === __cordisxDisposeViteHmr) delete globalThis.__cordisxViteHmrDispose;
-};
-globalThis.__cordisxViteHmrDispose = __cordisxDisposeViteHmr;
-`
-
 interface DevelopmentGeneration {
   readonly root: string
   readonly realRoot: string
@@ -93,76 +72,6 @@ interface DevelopmentGeneration {
   readonly isolatedArtifactSource?: string
   /** Complete esbuild input graph for isolated-worker HMR ownership. */
   readonly watchFiles: readonly string[]
-}
-
-export interface NativeVitePluginGeneration {
-  readonly pluginId: string
-  readonly version: string
-  readonly digest: `sha256:${string}`
-  readonly moduleGeneration: string
-  readonly entityTemplates: readonly EntityTemplatePayload[]
-}
-
-export interface NativeVitePluginGenerationTransaction {
-  commit(): Promise<void>
-  rollback(): Promise<void>
-}
-
-export type NativeVitePluginGenerationHandler = (
-  generation: NativeVitePluginGeneration,
-) => Promise<NativeVitePluginGenerationTransaction>
-
-/** Keep Host entity declarations aligned with generations acknowledged by the renderer. */
-export function createNativeViteEntityGenerationHandler(
-  authority: EntityDirectoryAuthority,
-  profileId: string,
-): NativeVitePluginGenerationHandler {
-  const committed = new Map<string, readonly EntityTemplatePayload['declaration'][]>()
-  const staging = new Set<string>()
-  return async generation => {
-    if (staging.has(generation.pluginId)) {
-      throw new Error(`plugin ${generation.pluginId} already has a staged entity generation`)
-    }
-    staging.add(generation.pluginId)
-    const binding = {
-      profileId,
-      installationId: entityInstallationId(profileId, generation.pluginId),
-      pluginId: generation.pluginId,
-      pluginGeneration: entityPluginGeneration(generation.moduleGeneration),
-    }
-    const declarations = generation.entityTemplates.map(template => template.declaration)
-    const previous = committed.get(generation.pluginId)
-    authority.register(binding, declarations)
-    try {
-      const materialized = await authority.materialize(
-        binding,
-        generation.version,
-        generation.digest,
-        generation.entityTemplates,
-      )
-      const rejected = materialized.find(result => result.status === 'rejected')
-      if (rejected !== undefined) throw new Error(`entity template ${rejected.agentId} was rejected: ${rejected.code}`)
-    } catch (error) {
-      authority.register(binding, previous ?? [])
-      staging.delete(generation.pluginId)
-      throw error
-    }
-    let settled = false
-    return {
-      async commit() {
-        if (settled) return
-        settled = true
-        committed.set(generation.pluginId, declarations)
-        staging.delete(generation.pluginId)
-      },
-      async rollback() {
-        if (settled) return
-        settled = true
-        authority.register(binding, previous ?? [])
-        staging.delete(generation.pluginId)
-      },
-    }
-  }
 }
 
 interface ReloadPluginRequest {
