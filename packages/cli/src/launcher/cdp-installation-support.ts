@@ -1,6 +1,11 @@
-import type { CdpTarget } from './cdp.js'
 import { CdpCertifiedPermissionChannel } from './certified-permission-cdp.js'
-import { abortable, cdpInstallationAborted, CdpSession, evaluateRuntimeOperation } from './cdp-session.js'
+import {
+  abortable,
+  cdpInstallationAborted,
+  CdpSession,
+  type CdpTarget,
+  evaluateRuntimeOperation,
+} from './cdp-session.js'
 import { AGENT_HISTORY_BINDING, AGENT_HISTORY_RECEIVER } from './agent-history-rpc.js'
 import { CHANNEL_ACTIONS_BINDING, CHANNEL_ACTIONS_RECEIVER } from './channel-actions-rpc.js'
 import { CHANNEL_CREDENTIAL_BINDING, CHANNEL_CREDENTIAL_RECEIVER } from './channel-credential-rpc.js'
@@ -14,7 +19,7 @@ import { PUBLISHER_GRANT_BINDING, PUBLISHER_GRANT_RECEIVER } from './publisher-g
 import { SERVICE_CONFIG_BINDING, SERVICE_CONFIG_RECEIVER } from './service-config-rpc.js'
 
 export type { ProviderFleet } from '../providers/fleet.js'
-export type { CdpTarget } from './cdp.js'
+export type { CdpTarget } from './cdp-session.js'
 export { CdpPluginLifecycleRuntime } from './cdp-plugin-lifecycle-runtime.js'
 export type { CodexAgentHistoryHost } from './agent-history.js'
 export {

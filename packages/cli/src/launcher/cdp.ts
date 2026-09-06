@@ -2,6 +2,7 @@ import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contra
 import { CdpPluginLifecycleRuntime } from './cdp-plugin-lifecycle-runtime.js'
 import { install } from './cdp-installation.js'
 import * as support from './cdp-installation-support.js'
+import type { CdpTarget } from './cdp-session.js'
 import {
   type ProductionGraphBootstrap,
   type ProductionGraphOperations,
@@ -18,14 +19,7 @@ export {
   serviceConfigResponseEvaluation,
 } from './cdp-installation-support.js'
 export { runtimeEvaluationException } from './cdp-session.js'
-
-export interface CdpTarget {
-  readonly id: string
-  readonly type: string
-  readonly title: string
-  readonly url: string
-  readonly webSocketDebuggerUrl?: string
-}
+export type { CdpTarget } from './cdp-session.js'
 
 async function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted === true) return
