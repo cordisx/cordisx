@@ -204,7 +204,11 @@ import {
   type PluginGenerationTransitionHandle,
   type PluginGenerationView,
 } from './generation-visibility.js'
-import { type ChannelManagerProjectionV1, CordisXChannelManagerService } from './channel-manager.js'
+import {
+  type ChannelManagerProjectionV1,
+  type ChannelManagerServiceInput,
+  CordisXChannelManagerService,
+} from './channel-manager.js'
 import { installSharedReactRuntime } from './react-runtime.js'
 import { IconThemeRegistry } from './icon-theme-registry.js'
 import { CordisXIconThemeService } from './icon-theme-service.js'
@@ -238,10 +242,12 @@ export const createRuntimeAgentSessionRuntime = (runtimeScope: RuntimeClosureSco
       const restore = runtimeScope.managerNavigationController()!.captureReturn()
       await runtimeScope.agentDetailNavigator()!.navigateAgentDetail(detail, sessionId)
       if (restore !== undefined) {
-        runtimeScope.pendingAgentDetailReturn = Object.freeze({
-          identity: runtimeScope.agentDetailHistoryIdentity()!(),
-          restore,
-        })
+        runtimeScope.pendingAgentDetailReturn = Object.freeze(
+          {
+            identity: runtimeScope.agentDetailHistoryIdentity()!(),
+            restore,
+          },
+        )
       }
     },
     authorize: async (owner, capability, sessionId) =>
@@ -444,23 +450,29 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
     runtimeScope.channelManagerFiber =
       runtimeScope.metadata()!.channelManager === undefined && runtimeScope.serviceConfigBridge()! === undefined
         ? runtimeScope.ctx.plugin(CordisXChannelManagerService)
-        : runtimeScope.ctx.plugin(CordisXChannelManagerService, {
-          ...(runtimeScope.metadata()!.channelManager === undefined
-            ? {}
-            : { projection: runtimeScope.metadata()!.channelManager }),
-          ...(runtimeScope.serviceConfigBridge()! === undefined ? {} : {
-            serviceConfig: {
-              list: async () => await runtimeScope.serviceConfigBridge()!.list('channel'),
-              mutate: async (mutation) => await runtimeScope.serviceConfigBridge()!.mutate(mutation),
-            },
-          }),
-          ...(runtimeScope.channelCredentialBridge()! === undefined ? {} : {
-            createCredentialedConnection: async (input) => await runtimeScope.channelCredentialBridge()!.create(input),
-          }),
-          ...(runtimeScope.channelActionsBridge()! === undefined ? {} : {
-            actions: { run: async (action, input) => await runtimeScope.channelActionsBridge()!.run(action, input) },
-          }),
-        })
+        : runtimeScope.ctx.plugin(
+          CordisXChannelManagerService,
+          {
+            profileId: runtimeScope.metadata()!.profileId,
+            hostGeneration: runtimeScope.metadata()!.generation ?? runtimeScope.metadata()!.version,
+            ...(runtimeScope.metadata()!.channelManager === undefined
+              ? {}
+              : { projection: runtimeScope.metadata()!.channelManager }),
+            ...(runtimeScope.serviceConfigBridge()! === undefined ? {} : {
+              serviceConfig: {
+                list: async () => await runtimeScope.serviceConfigBridge()!.list('channel'),
+                mutate: async (mutation) => await runtimeScope.serviceConfigBridge()!.mutate(mutation),
+              },
+            }),
+            ...(runtimeScope.channelCredentialBridge()! === undefined ? {} : {
+              createCredentialedConnection: async (input) =>
+                await runtimeScope.channelCredentialBridge()!.create(input),
+            }),
+            ...(runtimeScope.channelActionsBridge()! === undefined ? {} : {
+              actions: { run: async (action, input) => await runtimeScope.channelActionsBridge()!.run(action, input) },
+            }),
+          } satisfies ChannelManagerServiceInput,
+        )
     await runtimeScope.channelManagerFiber
     runtimeScope.registrySubscriptions()!.push(
       runtimeScope.configuration()!.subscribe(runtimeScope.notifyFrom()!('configuration')),

@@ -15,10 +15,10 @@ import type {
 } from '@cordisx/protocol/connector-service/v1'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const protocolCommit = '703a3d03f1b533c4d54bf51e5c8818b53bdda4f5'
+const protocolCommit = '9654023d1b1077d6fd0d43a2d294459bab63216b'
 const protocolSource = `github:cordisx/cordisx-protocol#${protocolCommit}`
 const protocolResolvedSource = `git+ssh://git@github.com/cordisx/cordisx-protocol.git#${protocolCommit}`
-const staleProtocolCommit = '9b86aff6a4840695544c9d4fa3b8c4b53a1edbf3'
+const staleProtocolCommit = '703a3d03f1b533c4d54bf51e5c8818b53bdda4f5'
 
 interface PackageManifest {
   readonly dependencies?: Readonly<Record<string, string>>
@@ -32,20 +32,29 @@ interface PackageLock {
 interface ProtocolPinDocuments {
   readonly rootManifest: PackageManifest
   readonly cliManifest: PackageManifest
+  readonly channelRuntimeManifest: PackageManifest
   readonly lockfile: PackageLock
 }
 
 function protocolEdges(documents: ProtocolPinDocuments): ReadonlyArray<readonly [string, string | undefined]> {
   const rootLock = documents.lockfile.packages['']
   const cliLock = documents.lockfile.packages['packages/cli']
+  const channelRuntimeLock = documents.lockfile.packages['packages/channel-runtime']
   const installed = documents.lockfile.packages['node_modules/@cordisx/protocol']
   return [
+    ['package.json dependencies', documents.rootManifest.dependencies?.['@cordisx/protocol']],
     ['package.json devDependencies', documents.rootManifest.devDependencies?.['@cordisx/protocol']],
     ['packages/cli/package.json dependencies', documents.cliManifest.dependencies?.['@cordisx/protocol']],
     ['packages/cli/package.json devDependencies', documents.cliManifest.devDependencies?.['@cordisx/protocol']],
+    [
+      'packages/channel-runtime/package.json dependencies',
+      documents.channelRuntimeManifest.dependencies?.['@cordisx/protocol'],
+    ],
+    ['package-lock root dependencies', rootLock?.dependencies?.['@cordisx/protocol']],
     ['package-lock root devDependencies', rootLock?.devDependencies?.['@cordisx/protocol']],
     ['package-lock CLI dependencies', cliLock?.dependencies?.['@cordisx/protocol']],
     ['package-lock CLI devDependencies', cliLock?.devDependencies?.['@cordisx/protocol']],
+    ['package-lock Channel runtime dependencies', channelRuntimeLock?.dependencies?.['@cordisx/protocol']],
     ['package-lock installed resolution', installed?.resolved],
   ]
 }
@@ -76,17 +85,19 @@ const formalConnectorConsumerSurface = null as unknown as FormalConnectorConsume
 
 describe('formal Connector Protocol public type import', () => {
   it('pins every root, publishable CLI, and lock edge to one merged source dependency', async () => {
-    const [rootManifestText, cliManifestText, lockfileText] = await Promise.all([
+    const [rootManifestText, cliManifestText, channelRuntimeManifestText, lockfileText] = await Promise.all([
       readFile(path.join(root, 'package.json'), 'utf8'),
       readFile(path.join(root, 'packages/cli/package.json'), 'utf8'),
+      readFile(path.join(root, 'packages/channel-runtime/package.json'), 'utf8'),
       readFile(path.join(root, 'package-lock.json'), 'utf8'),
     ])
     const documents: ProtocolPinDocuments = {
       rootManifest: JSON.parse(rootManifestText) as PackageManifest,
       cliManifest: JSON.parse(cliManifestText) as PackageManifest,
+      channelRuntimeManifest: JSON.parse(channelRuntimeManifestText) as PackageManifest,
       lockfile: JSON.parse(lockfileText) as PackageLock,
     }
-    expect(protocolEdges(documents)).toHaveLength(7)
+    expect(protocolEdges(documents)).toHaveLength(11)
     expect(protocolPinViolations(documents)).toEqual([])
     expect(`${rootManifestText}\n${cliManifestText}\n${lockfileText}`).not.toContain(staleProtocolCommit)
     expect(formalConnectorConsumerSurface).toBeNull()
@@ -98,12 +109,14 @@ describe('formal Connector Protocol public type import', () => {
       devDependencies: { '@cordisx/protocol': protocolSource },
     }
     const current: ProtocolPinDocuments = {
-      rootManifest: { devDependencies: { '@cordisx/protocol': protocolSource } },
+      rootManifest: currentManifest,
       cliManifest: currentManifest,
+      channelRuntimeManifest: { dependencies: { '@cordisx/protocol': protocolSource } },
       lockfile: {
         packages: {
-          '': { devDependencies: { '@cordisx/protocol': protocolSource } },
+          '': currentManifest,
           'packages/cli': currentManifest,
+          'packages/channel-runtime': { dependencies: { '@cordisx/protocol': protocolSource } },
           'node_modules/@cordisx/protocol': { resolved: protocolResolvedSource },
         },
       },

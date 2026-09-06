@@ -56,7 +56,7 @@ export interface ChannelUserInput {
   readonly contract: 'cordisx.channel-user-input/v1'
   readonly schemaVersion: 1
   readonly role: 'user'
-  readonly content: readonly ChannelContentBlock[]
+  readonly content: readonly [ChannelContentBlock, ...ChannelContentBlock[]]
   readonly source: {
     readonly kind: 'channel'
     readonly event: ChannelEventRef

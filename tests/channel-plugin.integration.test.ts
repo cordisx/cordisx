@@ -11,6 +11,7 @@ import { CORDISX_PERMISSION_POLICY_SCHEMA_V3 } from '../packages/cli/src/permiss
 import { domPermissionAuthorizationKeyV3 } from '../packages/cli/src/permission-model-v3.js'
 import {
   type ChannelManagerProjectionV1,
+  type CordisXChannelManager,
   CordisXChannelManagerService,
 } from '../packages/cli/src/renderer/channel-manager.js'
 
@@ -121,6 +122,10 @@ const projection: ChannelManagerProjectionV1 = {
     status: 'verified',
     message: 'Local simulator verified without an external account.',
   }],
+}
+
+function legacyManager(ctx: Context): CordisXChannelManager {
+  return (ctx as Context & { readonly channelManagerLegacy: CordisXChannelManager }).channelManagerLegacy
 }
 
 function channelDomPolicies(entry: string) {
@@ -566,14 +571,16 @@ describe('built-in Channel product bundle', () => {
   }, 25_000)
 
   it('exposes a stable React store snapshot and reprojects local candidates without leaking secrets', () => {
-    const manager = new CordisXChannelManagerService(new Context(), projection)
-    const first = manager.snapshot()
-    expect(manager.snapshot()).toBe(first)
+    const ctx = new Context()
+    const manager = new CordisXChannelManagerService(ctx, projection)
+    const legacy = legacyManager(ctx)
+    const first = legacy.snapshot()
+    expect(legacy.snapshot()).toBe(first)
     let updates = 0
-    const dispose = manager.subscribe(() => {
+    const dispose = legacy.subscribe(() => {
       updates += 1
     })
-    manager.rememberLocalCandidate({
+    legacy.rememberLocalCandidate({
       ref: { adapterId: 'simulator', accountId: 'local-smoke', tenantId: 'local' },
       displayName: 'Local smoke',
       adapterKind: 'simulator',
@@ -581,7 +588,7 @@ describe('built-in Channel product bundle', () => {
       transportMode: 'simulator',
       secretState: 'unavailable',
     })
-    const next = manager.snapshot()
+    const next = legacy.snapshot()
     expect(next).not.toBe(first)
     expect(next.connections).toContainEqual(expect.objectContaining({
       displayName: 'Local smoke',
@@ -619,7 +626,8 @@ describe('built-in Channel product bundle', () => {
       configApplies: 'service-restart',
       serviceGeneration: 'next',
     } as const
-    const manager = new CordisXChannelManagerService(new Context(), {
+    const ctx = new Context()
+    const manager = new CordisXChannelManagerService(ctx, {
       projection,
       serviceConfig: {
         list: async () => [descriptor] as never,
@@ -633,7 +641,8 @@ describe('built-in Channel product bundle', () => {
         return result
       },
     })
-    expect(await manager.serviceConfiguration()).toEqual(descriptor)
+    const legacy = legacyManager(ctx)
+    expect(await legacy.serviceConfiguration()).toEqual(descriptor)
     const mutation = {
       contract: 'cordisx.service-config-mutation/v1',
       schemaVersion: 1,
@@ -642,8 +651,8 @@ describe('built-in Channel product bundle', () => {
       expectedRevision: 4,
       configuration: { connections: [], routes: [] },
     } as const
-    await manager.mutateServiceConfiguration(mutation as never)
-    await manager.createConnection({
+    await legacy.mutateServiceConfiguration(mutation as never)
+    await legacy.createConnection({
       account: { adapterId: 'feishu', accountId: 'cli_smoke', tenantId: 'default' },
       secret: 'test-only-credential',
       mutation: mutation as never,
@@ -653,12 +662,13 @@ describe('built-in Channel product bundle', () => {
       secret: 'test-only-credential',
       account: { adapterId: 'feishu', accountId: 'cli_smoke', tenantId: 'default' },
     }))
-    expect(JSON.stringify(manager.snapshot())).not.toContain('test-only-credential')
+    expect(JSON.stringify(legacy.snapshot())).not.toContain('test-only-credential')
   })
 
   it('forwards only allowlisted runtime and binding actions through the Host action bridge', async () => {
     const requests: Array<{ action: string; input: Record<string, unknown> }> = []
-    const manager = new CordisXChannelManagerService(new Context(), {
+    const ctx = new Context()
+    const manager = new CordisXChannelManagerService(ctx, {
       projection,
       actions: {
         run: async (action, input) => {
@@ -667,12 +677,280 @@ describe('built-in Channel product bundle', () => {
         },
       },
     })
-    expect(manager.actionsAvailable()).toBe(true)
-    await manager.runAction('reconnect', { ref: projection.connections[0]!.ref })
-    await manager.runAction('archive', { bindingId: 'binding-1' })
+    const legacy = legacyManager(ctx)
+    expect(legacy.actionsAvailable()).toBe(true)
+    await legacy.runAction('reconnect', { ref: projection.connections[0]!.ref })
+    await legacy.runAction('archive', { bindingId: 'binding-1' })
     expect(requests).toEqual([
       { action: 'reconnect', input: { ref: projection.connections[0]!.ref } },
       { action: 'archive', input: { bindingId: 'binding-1' } },
     ])
+  })
+
+  it('publishes one opaque fenced Channel Manager service while retaining the internal legacy facade', async () => {
+    const requests: Array<{ action: string; input: Record<string, unknown> }> = []
+    const ctx = new Context()
+    const manager = new CordisXChannelManagerService(ctx, {
+      profileId: 'work',
+      hostGeneration: 'host-1',
+      projection: {
+        ...projection,
+        connections: [...projection.connections, {
+          ref: { adapterId: 'simulator', accountId: 'secondary', tenantId: 'test' },
+          displayName: 'Secondary',
+          adapterKind: 'simulator',
+          enabled: true,
+          transportMode: 'simulator',
+          secretState: 'unavailable',
+        }],
+        logs: [
+          {
+            id: 'entry-1',
+            account: projection.connections[0]!.ref,
+            recordedAt: '2026-09-07T00:00:01.000Z',
+            action: 'reconnect',
+            outcome: 'success',
+          },
+          {
+            id: 'entry-2',
+            account: projection.connections[0]!.ref,
+            recordedAt: '2026-09-07T00:00:02.000Z',
+            action: 'retry',
+            outcome: 'warning',
+          },
+          {
+            id: 'entry-3',
+            account: projection.connections[0]!.ref,
+            recordedAt: '2026-09-07T00:00:03.000Z',
+            action: 'disable',
+            outcome: 'failed',
+          },
+          {
+            id: 'entry-4',
+            account: projection.connections[0]!.ref,
+            recordedAt: '2026-09-07T00:00:04.000Z',
+            action: 'binding-created',
+            outcome: 'success',
+          },
+          {
+            id: 'secondary-entry',
+            account: { adapterId: 'simulator', accountId: 'secondary', tenantId: 'test' },
+            recordedAt: '2026-09-07T00:00:05.000Z',
+            action: 'reconnect',
+            outcome: 'success',
+          },
+        ],
+      },
+      actions: {
+        run: async (action, input) => {
+          requests.push({ action, input })
+          return action === 'archive'
+            ? {
+              status: 'applied',
+              projection: {
+                contract: 'cordisx.channel-manager-runtime/v1',
+                schemaVersion: 1,
+                observedAt: '2026-09-07T00:01:00.000Z',
+                accounts: [],
+                bindings: [{ ...projection.bindings[0]!, state: 'archived' }],
+              },
+            }
+            : { status: 'applied' }
+        },
+      },
+    })
+    const snapshot = manager.snapshot()
+    expect('legacy' in manager).toBe(false)
+    expect(snapshot).toMatchObject({
+      contract: 'cordisx.channel-runtime-snapshot/v3',
+      schemaVersion: 3,
+      profileId: 'work',
+      hostGeneration: 'host-1',
+      revision: 4,
+      availableOperations: [],
+    })
+    expect(snapshot.accounts[0]?.connectionToken).toMatch(/^chm1_[A-Za-z0-9_-]{43}$/)
+    expect(snapshot.bindings[0]).toMatchObject({ bindingRevision: 1, state: 'active' })
+    const serialized = JSON.stringify(snapshot)
+    expect(serialized).not.toMatch(/same-id-safe-by-provider|direct-alice|binding-1|workspaceAlias|secretRef/)
+
+    let updates = 0
+    const subscription = manager.subscribe(() => updates += 1)
+    const connectionToken = snapshot.accounts[0]!.connectionToken
+    const reconnect = {
+      contract: 'cordisx.channel-manager-request/v2',
+      schemaVersion: 2,
+      requestId: 'reconnect-1',
+      expectedRevision: snapshot.revision,
+      profileId: snapshot.profileId,
+      hostGeneration: snapshot.hostGeneration,
+      operation: 'connection.reconnect',
+      target: { kind: 'connection', connectionToken },
+    } as const
+    expect(await manager.execute(reconnect)).toMatchObject({ status: 'applied', revision: 5 })
+    expect(requests).toEqual([{ action: 'reconnect', input: { ref: projection.connections[0]!.ref } }])
+    expect(updates).toBe(1)
+
+    expect(await manager.execute({ ...reconnect, requestId: 'stale-1' })).toMatchObject({
+      status: 'conflict',
+      code: 'REVISION_CONFLICT',
+    })
+    const current = manager.snapshot()
+    expect(
+      await manager.execute({
+        ...reconnect,
+        requestId: 'forged-1',
+        expectedRevision: current.revision,
+        target: { kind: 'connection', connectionToken: `chm1_${'A'.repeat(43)}` },
+      }),
+    ).toMatchObject({ status: 'rejected', code: 'TARGET_UNAVAILABLE' })
+
+    const originalBinding = current.bindings[0]!
+    expect(
+      await manager.execute({
+        contract: 'cordisx.channel-manager-request/v2',
+        schemaVersion: 2,
+        requestId: 'archive-1',
+        expectedRevision: current.revision,
+        profileId: current.profileId,
+        hostGeneration: current.hostGeneration,
+        operation: 'binding.archive',
+        target: {
+          kind: 'binding',
+          bindingToken: originalBinding.bindingToken,
+          bindingRevision: originalBinding.bindingRevision,
+        },
+      }),
+    ).toMatchObject({ status: 'applied', revision: 6 })
+    const replaced = manager.snapshot()
+    expect(replaced.bindings[0]).toMatchObject({ state: 'archived', bindingRevision: 2 })
+    expect(replaced.bindings[0]!.bindingToken).not.toBe(originalBinding.bindingToken)
+    expect(
+      await manager.execute({
+        contract: 'cordisx.channel-manager-request/v2',
+        schemaVersion: 2,
+        requestId: 'wrong-binding-revision-1',
+        expectedRevision: replaced.revision,
+        profileId: replaced.profileId,
+        hostGeneration: replaced.hostGeneration,
+        operation: 'binding.unbind',
+        target: {
+          kind: 'binding',
+          bindingToken: replaced.bindings[0]!.bindingToken,
+          bindingRevision: 1,
+        },
+      }),
+    ).toMatchObject({ status: 'rejected', code: 'TARGET_UNAVAILABLE' })
+    expect(
+      await manager.execute({
+        contract: 'cordisx.channel-manager-request/v2',
+        schemaVersion: 2,
+        requestId: 'stale-binding-1',
+        expectedRevision: replaced.revision,
+        profileId: replaced.profileId,
+        hostGeneration: replaced.hostGeneration,
+        operation: 'binding.unbind',
+        target: {
+          kind: 'binding',
+          bindingToken: originalBinding.bindingToken,
+          bindingRevision: originalBinding.bindingRevision,
+        },
+      }),
+    ).toMatchObject({ status: 'rejected', code: 'TARGET_UNAVAILABLE' })
+
+    const logRequest = {
+      contract: 'cordisx.channel-manager-request/v2',
+      schemaVersion: 2,
+      requestId: 'logs-1',
+      expectedRevision: replaced.revision,
+      profileId: replaced.profileId,
+      hostGeneration: replaced.hostGeneration,
+      operation: 'logs.query',
+      target: { kind: 'log', connectionToken },
+      query: { limit: 2 },
+    } as const
+    expect(replaced.accounts[0]!.availableOperations).toContain('logs.query')
+    await expect(manager.execute(logRequest)).resolves.toMatchObject({
+      status: 'applied',
+      code: 'APPLIED',
+    })
+    const firstPage = await manager.queryLogs(logRequest)
+    expect(firstPage.entries.map(entry => entry.entryId)).toEqual(['entry-4', 'entry-3'])
+    expect(firstPage.nextCursor).toMatch(/^chmc1_[A-Za-z0-9_-]{43}$/)
+    const secondPage = await manager.queryLogs({
+      ...logRequest,
+      requestId: 'logs-2',
+      query: { limit: 2, cursor: firstPage.nextCursor },
+    })
+    expect(secondPage.entries.map(entry => entry.entryId)).toEqual(['entry-2', 'entry-1'])
+    expect(secondPage.nextCursor).toBeUndefined()
+    await expect(manager.queryLogs({
+      ...logRequest,
+      requestId: 'logs-replay',
+      query: { limit: 2, cursor: firstPage.nextCursor },
+    })).rejects.toThrow('INVALID_CURSOR')
+    const warnings = await manager.queryLogs({
+      ...logRequest,
+      requestId: 'logs-warn',
+      query: { limit: 10, filter: { levels: ['warn'] } },
+    })
+    expect(warnings.entries.map(entry => entry.entryId)).toEqual(['entry-2'])
+    const bindings = await manager.queryLogs({
+      ...logRequest,
+      requestId: 'logs-bindings',
+      query: { limit: 10, filter: { events: ['binding.created'] } },
+    })
+    expect(bindings.entries.map(entry => entry.entryId)).toEqual(['entry-4'])
+    await expect(manager.queryLogs({
+      ...logRequest,
+      requestId: 'logs-forged',
+      query: { limit: 2, cursor: 'chmc1_forged' },
+    })).rejects.toThrow('INVALID_CURSOR')
+    const crossFilterPage = await manager.queryLogs({ ...logRequest, requestId: 'logs-cross-filter-start' })
+    await expect(manager.queryLogs({
+      ...logRequest,
+      requestId: 'logs-cross-filter',
+      query: { limit: 2, cursor: crossFilterPage.nextCursor, filter: { levels: ['info'] } },
+    })).rejects.toThrow('INVALID_CURSOR')
+    const crossConnectionPage = await manager.queryLogs({ ...logRequest, requestId: 'logs-cross-connection-start' })
+    const secondaryToken = replaced.accounts.find(account => account.displayName === 'Secondary')!.connectionToken
+    await expect(manager.queryLogs({
+      ...logRequest,
+      requestId: 'logs-cross-connection',
+      target: { kind: 'log', connectionToken: secondaryToken },
+      query: { limit: 2, cursor: crossConnectionPage.nextCursor },
+    })).rejects.toThrow('INVALID_CURSOR')
+    const stalePage = await manager.queryLogs({ ...logRequest, requestId: 'logs-stale-start' })
+
+    const capture = await manager.issue({
+      contract: 'cordisx.channel-manager-target-request/v1',
+      schemaVersion: 1,
+      requestId: 'capture-1',
+      expectedRevision: replaced.revision,
+      profileId: replaced.profileId,
+      hostGeneration: replaced.hostGeneration,
+      operation: 'target.credential.capture.create',
+      purpose: 'create',
+      adapterKind: 'feishu',
+      target: { kind: 'root' },
+    })
+    expect(capture).toMatchObject({ status: 'unavailable', code: 'OPERATION_UNAVAILABLE' })
+    subscription.dispose()
+    legacyManager(ctx).rememberLocalCandidate({
+      ref: { adapterId: 'simulator', accountId: 'after-dispose', tenantId: 'local' },
+      adapterKind: 'simulator',
+      enabled: true,
+      transportMode: 'simulator',
+      secretState: 'unavailable',
+    })
+    expect(updates).toBe(2)
+    const afterCandidate = manager.snapshot()
+    expect(afterCandidate).toMatchObject({ revision: 7 })
+    await expect(manager.queryLogs({
+      ...logRequest,
+      requestId: 'logs-stale',
+      expectedRevision: afterCandidate.revision,
+      query: { limit: 2, cursor: stalePage.nextCursor },
+    })).rejects.toThrow('STALE_CURSOR')
   })
 })
