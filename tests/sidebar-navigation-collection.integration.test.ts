@@ -313,7 +313,9 @@ describe('sidebar navigation collections', () => {
       const latestPrimary = currentLatestRow.querySelector<HTMLButtonElement>('.cordisx-nav-primary')!
       latestPrimary.click()
       await vi.waitFor(() => expect(currentLatestRow.dataset.selected).toBe('true'))
-      expect(currentLatestRow.querySelector<HTMLElement>('.cxsi-actions')?.hidden).toBe(true)
+      const selectedActions = currentLatestRow.querySelector<HTMLElement>('.cxsi-actions')!
+      expect(selectedActions.hidden).toBe(true)
+      expect(dom.window.getComputedStyle(selectedActions).display).toBe('none')
 
       const older = [...document.querySelectorAll<HTMLButtonElement>('[data-navigation-group] .cordisx-nav-primary')]
         .find(button => button.querySelector('.cxsi-title')?.textContent === 'Older room')!
@@ -337,6 +339,13 @@ describe('sidebar navigation collections', () => {
           .find(row => row.querySelector('.cxsi-title')?.textContent === 'Latest room')
           ?.querySelector<HTMLElement>('.cxsi-actions')?.hidden,
       ).toBe(false)
+      expect(
+        dom.window.getComputedStyle(
+          [...document.querySelectorAll<HTMLElement>('.cordisx-nav-row')]
+            .find(row => row.querySelector('.cxsi-title')?.textContent === 'Latest room')
+            ?.querySelector<HTMLElement>('.cxsi-actions')!,
+        ).display,
+      ).toBe('flex')
 
       const fixture = (dom.window as unknown as {
         __cordisxNavigationCollectionFixture: {
