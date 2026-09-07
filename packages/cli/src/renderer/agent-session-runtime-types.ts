@@ -343,6 +343,7 @@ export interface CordisXDriverMessageClaimed {
 export interface CordisXPrivateAgentDriver {
   create(
     input: {
+      readonly requiredTaskOperationId?: string
       readonly executionContext?: AgentTaskResolvedContext
       readonly sessionId: string
       readonly owner: PluginOwnerIdentity

@@ -119,6 +119,7 @@ test.each(['/resolved/task', '/wrong/task', undefined])(
         sessionId: 'one',
         options: { model: 'model' },
         executionContext: { cwd: '/resolved/task' },
+        requiredTaskOperationId: 'required-operation',
       })
       if (returnedCwd === '/resolved/task') await expect(result).resolves.toMatchObject({ status: 'accepted' })
       else await expect(result).rejects.toBeInstanceOf(AgentTaskContextMismatch)
@@ -129,6 +130,7 @@ test.each(['/resolved/task', '/wrong/task', undefined])(
         expect.objectContaining({
           sessionId: 'one',
           threadId: 'native-task',
+          requiredTaskOperationId: 'required-operation',
           context: { cwd: returnedCwd ?? '' },
         }),
       )

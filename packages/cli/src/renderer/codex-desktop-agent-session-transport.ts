@@ -166,6 +166,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
 
   async create(
     input: {
+      readonly requiredTaskOperationId?: string
       readonly executionContext?: AgentTaskResolvedContext
       readonly sessionId: string
       readonly owner: PluginOwnerIdentity
@@ -203,6 +204,9 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
         sessionId: input.sessionId,
         threadId,
         completedTurns: 0,
+        ...(input.requiredTaskOperationId === undefined
+          ? {}
+          : { requiredTaskOperationId: input.requiredTaskOperationId }),
         ...(input.executionContext === undefined
           ? {}
           : { context: { ...input.executionContext, cwd: String(object(result?.thread)?.cwd ?? '') } }),

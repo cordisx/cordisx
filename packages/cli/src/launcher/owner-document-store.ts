@@ -347,6 +347,19 @@ export class OwnerDocumentStore {
     })
   }
 
+  /** Host-only read of existing owner documents; not exposed by the plugin document RPC. */
+  async readDocuments(
+    scope: OwnerDocumentStoreScope,
+    prefix: string,
+  ): Promise<Readonly<Record<string, StoredDocument>>> {
+    assertDocumentId(prefix)
+    return await this.serialized(async () => {
+      const read = await this.read(scope)
+      if (read.status === 'unavailable') throw new Error(read.result.diagnostic)
+      return Object.fromEntries(Object.entries(read.value.documents).filter(([key]) => key.startsWith(prefix)))
+    })
+  }
+
   async replace(input: {
     readonly scope: OwnerDocumentStoreScope
     readonly documentId: string

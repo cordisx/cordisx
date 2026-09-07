@@ -86,9 +86,9 @@ export function installAgentTasks(ctx: Context, input: {
         },
         input.entities,
         record.context,
+        record.bindingPolicy === 'required' ? record.operationId : undefined,
       )
       if (acquired.status !== 'accepted') return undefined
-      if (record.bindingPolicy === 'required') await client.requireTask(record.operationId, record.sessionId)
       handles.set(acquired.sessionId, acquired.handle)
       return acquired.handle.agent
     },

@@ -1,4 +1,5 @@
-import { handleAgentTaskStore } from './agent-task-store.js'
+import { type AgentTaskRecord, canonicalTaskJson } from '../agent-task-record.js'
+import { agentTaskStoreKey, handleAgentTaskStore } from './agent-task-store.js'
 import type { AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import type { AgentSetup } from '@cordisx/protocol/agents/v1'
@@ -139,21 +140,35 @@ export class NativeAgentSessionBridge {
       return await handleAgentTaskStore(request, {
         load,
         write,
-        requireTask: async (sessionId, operationId) => {
-          const documentId = key(id(sessionId))
-          const saved = await load(documentId)
-          if (saved === undefined) throw new Error('Native task Session missing')
-          const record = parsed(saved.value, sessionId)
-          if (record.requiredTaskOperationId !== undefined && record.requiredTaskOperationId !== operationId) {
-            throw new Error('Native task provenance immutable')
-          }
-          await write(documentId, saved.revision, { ...record, requiredTaskOperationId: operationId })
-        },
         context: async sessionId => {
           const saved = await load(key(id(sessionId)))
           return saved === undefined ? undefined : parsed(saved.value, sessionId).context
         },
       })
+    }
+    // Older interrupted creates may have committed the binding before its required
+    // marker. Read the existing Host-owned intents to restore only that restriction.
+    // No permission source, resolver or authority lease is recovered from these facts.
+    const requiredTasks = new Map<string, string>()
+    for (const [documentId, snapshot] of Object.entries(await this.input.store.readDocuments(scope, 'native-task.'))) {
+      const task = record(snapshot.value)
+      if (task.bindingPolicy !== 'required') continue
+      const operationId = id(task.operationId)
+      const taskSessionId = id(task.sessionId)
+      if (documentId !== agentTaskStoreKey(operationId) || requiredTasks.has(taskSessionId)) {
+        throw new Error('Required task provenance is ambiguous')
+      }
+      requiredTasks.set(taskSessionId, operationId)
+    }
+    const withTaskRestriction = (binding: NativeAgentSessionRecord): NativeAgentSessionRecord => {
+      const requiredTaskOperationId = requiredTasks.get(binding.sessionId)
+      if (requiredTaskOperationId === undefined) return binding
+      if (
+        binding.requiredTaskOperationId !== undefined && binding.requiredTaskOperationId !== requiredTaskOperationId
+      ) {
+        throw new Error('Required task provenance conflicts with native binding')
+      }
+      return { ...binding, requiredTaskOperationId }
     }
     if (request.operation === 'native-session-list') {
       const index = await load(INDEX)
@@ -162,14 +177,14 @@ export class NativeAgentSessionBridge {
       const records = []
       for (const sessionId of entries) {
         const snapshot = await load(key(id(sessionId)))
-        if (snapshot !== undefined) records.push(parsed(snapshot.value, sessionId))
+        if (snapshot !== undefined) records.push(withTaskRestriction(parsed(snapshot.value, sessionId)))
       }
       return records
     }
     const sessionId = id(request.sessionId)
     const documentId = key(sessionId)
     const snapshot = await load(documentId)
-    const existing = snapshot === undefined ? undefined : parsed(snapshot.value, sessionId)
+    const existing = snapshot === undefined ? undefined : withTaskRestriction(parsed(snapshot.value, sessionId))
     if (request.operation === 'native-session-detail') {
       if (!this.input.principalAllowed(principal)) throw new Error('native Session principal replaced')
       return existing === undefined ? null : { threadId: existing.threadId, revision: snapshot!.revision }
@@ -182,6 +197,24 @@ export class NativeAgentSessionBridge {
       return { threadId: existing.threadId, completedTurns: existing.completedTurns, setupDigest: existing.setupDigest }
     }
     if (request.operation === 'native-session-save-binding') {
+      const requiredTaskOperationId = request.requiredTaskOperationId === undefined
+        ? existing?.requiredTaskOperationId
+        : id(request.requiredTaskOperationId)
+      if (
+        existing?.requiredTaskOperationId !== undefined && requiredTaskOperationId !== existing.requiredTaskOperationId
+      ) throw new Error('Native task provenance immutable')
+      if (requiredTaskOperationId !== undefined) {
+        const task = (await load(agentTaskStoreKey(requiredTaskOperationId)))?.value as AgentTaskRecord | undefined
+        if (
+          task?.bindingPolicy !== 'required' || task.operationId !== requiredTaskOperationId
+          || task.sessionId !== sessionId
+        ) throw new Error('Required task intent does not match native binding')
+        const definition = (JSON.parse(task.fingerprint) as { definition?: unknown }).definition
+        if (
+          canonicalTaskJson(definition)
+            !== canonicalTaskJson((request.setup as AgentSetup | undefined)?.definition ?? existing?.setup?.definition)
+        ) throw new Error('Required task definition does not match native binding')
+      }
       if (
         existing?.context !== undefined && request.context !== undefined
         && JSON.stringify(existing.context) !== JSON.stringify(request.context)
@@ -210,6 +243,7 @@ export class NativeAgentSessionBridge {
         setupDigest,
         ...(setup === undefined ? {} : { setup }),
         completedTurns,
+        ...(requiredTaskOperationId === undefined ? {} : { requiredTaskOperationId }),
         ...(request.context === undefined ? {} : { context: request.context }),
       })
       return null

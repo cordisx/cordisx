@@ -20,6 +20,7 @@ export interface NativeSessionRecoveryStore {
       setup?: AgentSetup
       completedTurns: number
       context?: AgentTaskResolvedContext
+      requiredTaskOperationId?: string
     },
   ): Promise<void>
   resolveBinding(
@@ -100,10 +101,12 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
       setup?: AgentSetup
       completedTurns: number
       context?: AgentTaskResolvedContext
+      requiredTaskOperationId?: string
     },
   ): Promise<void> {
     const client = this.owner(owner)
     await this.call(client.principal, 'native-session-save-binding', input)
+    if (input.requiredTaskOperationId !== undefined) this.requiredTasks.add(input.sessionId)
     this.sessions.set(input.sessionId, client.principal)
   }
   async resolveBinding(
@@ -129,9 +132,6 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
     const client = this.owners.get(ownerKey(owner))
     return client !== undefined && client.active() && this.sessions.get(sessionId)?.source === client.principal.source
       && this.sessions.get(sessionId)?.pluginId === client.principal.pluginId
-  }
-  markRequiredTask(sessionId: string): void {
-    this.requiredTasks.add(sessionId)
   }
   private principal(sessionId: string): OwnerDocumentPrincipalBinding {
     const principal = this.sessions.get(sessionId)
@@ -188,10 +188,6 @@ export function nativeAgentTaskClient(owner: PluginOwnerIdentity) {
     return await current.taskCall(owner, operation, input)
   }
   return {
-    requireTask: async (operationId: string, sessionId: string): Promise<void> => {
-      await call('associate', { operationId, sessionId })
-      current?.markRequiredTask(sessionId)
-    },
     store: {
       recover: async (operationId: string): Promise<{ claimed: boolean; record: AgentTaskRecord }> =>
         await call('recover', { operationId }) as { claimed: boolean; record: AgentTaskRecord },

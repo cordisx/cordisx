@@ -89,7 +89,11 @@ as a required task. Foreign, replaced or disposed bindings fail closed. A late
 human result must still pass registration, connection, durable-source and
 permission-lease checks. Installation never answers a question automatically.
 
-The original native Session owner record retains its required operation id.
+The first native Session binding commit includes its required operation id,
+validated against the original task intent and definition. There is no separate
+post-create association write. For older interrupted creates whose binding lacks
+that marker, cold loading reads the existing Host-owned task intents and restores
+the required restriction for the matching Session without rewriting stored data.
 Restart readback uses that marker only to keep the task source mandatory; it
 restores neither a callback nor an approval lease. Explicit recovery still
 requires the existing live Agent and a valid current registration. Concurrent

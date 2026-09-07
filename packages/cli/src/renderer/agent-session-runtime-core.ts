@@ -462,6 +462,7 @@ export abstract class AgentSessionRuntimeCore {
     input: EntityAgentCreateOptions,
     registry: EntityRegistry,
     executionContext?: AgentTaskResolvedContext,
+    requiredTaskOperationId?: string,
   ): Promise<EntityAgentAcquireResult> {
     const sessionId = input.sessionId ?? `cx-session.${crypto.randomUUID()}`
     const envelope = {
@@ -531,6 +532,7 @@ export abstract class AgentSessionRuntimeCore {
       false,
       binding,
       executionContext,
+      requiredTaskOperationId,
     )
     const result = this.entityAcquireResult(envelope, acquired, {
       identity: clone(target.entity.identity),
@@ -883,6 +885,7 @@ export abstract class AgentSessionRuntimeCore {
     resolvedLegacy?: boolean,
     entityBinding?: EntitySessionDefinitionBinding,
     executionContext?: AgentTaskResolvedContext,
+    requiredTaskOperationId?: string,
   ): Promise<AgentAcquireResult>
 
   protected abstract replayEntityMutation(

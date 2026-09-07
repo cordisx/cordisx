@@ -2,7 +2,7 @@ import type { PermissionPromptRequest } from '../packages/cli/src/renderer/platf
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentSetup } from '@cordisx/protocol/agents/v1'
-import type { ApprovalAgentBinding } from '@cordisx/protocol/approval/v2'
+import type { ApprovalAgentBinding, ApprovalQuestion } from '@cordisx/protocol/approval/v2'
 import type { ApprovalOutcome } from '@cordisx/protocol/sessions/v1'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
@@ -134,7 +134,13 @@ async function fixture() {
       return saved?.bindingPolicy === 'required' && saved.sessionId === record.sessionId
     },
   )
-  const human = vi.fn(async () => {
+  const signals: { sessionId: string; signal: AbortSignal | undefined }[] = []
+  const installations = new Map<string, () => Promise<void>>()
+  const human = vi.fn(async (question: ApprovalQuestion, bindingOrSignal?: unknown, taskSignal?: AbortSignal) => {
+    signals.push({
+      sessionId: question.requester.sessionId,
+      signal: taskSignal ?? (bindingOrSignal instanceof AbortSignal ? bindingOrSignal : undefined),
+    })
     await answerWait
     return humanOutcome
   })
@@ -163,7 +169,7 @@ async function fixture() {
     })
     if (result.status !== 'accepted') throw new Error('Agent creation failed')
     durable.set(sessionId, { sessionId, bindingPolicy: 'required' })
-    await registry.capture('send')!.install(result.handle.agent, {
+    const close = await registry.capture('send')!.install(result.handle.agent, {
       operationId: sessionId,
       text: 'Task',
       definition: definition.identity,
@@ -177,6 +183,7 @@ async function fixture() {
       bindingPolicy: 'required',
       context: { cwd: '/task' },
     })
+    installations.set(sessionId, close)
     return result.handle
   }
   const existingLeader = async (foreign = false) => {
@@ -222,6 +229,8 @@ async function fixture() {
     scopes,
     runtime,
     human,
+    signals,
+    closeInstallation: async (sessionId: string) => await installations.get(sessionId)?.(),
     prompt,
     install,
     unregister,
@@ -414,6 +423,61 @@ describe('production task manifest through actual broker and runtime resolver', 
       }
     },
   )
+
+  it('immediately aborts a routed ordinary Leader callback when the required registration closes', async () => {
+    const f = await fixture()
+    let release!: () => void
+    try {
+      await f.existingLeader()
+      await f.install('child')
+      f.waitAnswer(
+        new Promise<void>(resolve => {
+          release = resolve
+        }),
+      )
+      let settled: ApprovalOutcome | undefined
+      const pending = f.approve('child').then(value => {
+        settled = value
+        return value
+      })
+      await vi.waitFor(() => expect(f.human).toHaveBeenCalledOnce())
+      f.unregister()
+      await vi.waitFor(() => expect(settled).toBeDefined())
+      expect(f.signals[0]?.signal?.aborted).toBe(true)
+      expect(await pending).not.toBe('allowed-once')
+    } finally {
+      release?.()
+      await f.close()
+    }
+  })
+
+  it('closes only the selected requester routing while an ordinary Leader and sibling remain live', async () => {
+    const f = await fixture()
+    let release!: () => void
+    try {
+      const leader = await f.existingLeader()
+      await f.install('child')
+      await f.install('sibling')
+      f.waitAnswer(
+        new Promise<void>(resolve => {
+          release = resolve
+        }),
+      )
+      const child = f.approve('child')
+      const sibling = f.approve('sibling')
+      await vi.waitFor(() => expect(f.human).toHaveBeenCalledTimes(2))
+      await f.closeInstallation('child')
+      expect(await child).not.toBe('allowed-once')
+      expect(f.signals.find(item => item.sessionId === 'child')?.signal?.aborted).toBe(true)
+      expect(f.signals.find(item => item.sessionId === 'sibling')?.signal?.aborted).toBe(false)
+      expect(await f.runtime.get(owner, leader.agent.id)).toBeDefined()
+      release()
+      expect(await sibling).toBe('allowed-once')
+    } finally {
+      release?.()
+      await f.close()
+    }
+  })
 
   it.each(['connection', 'registration', 'dispose', 'durable', 'owner', 'permission'] as const)(
     'rejects a late human answer after %s closure',

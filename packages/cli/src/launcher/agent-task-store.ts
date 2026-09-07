@@ -9,7 +9,6 @@ export async function handleAgentTaskStore(
   storage: {
     load(id: string): Promise<Snapshot | undefined>
     write(id: string, revision: number, value: unknown): Promise<void>
-    requireTask?(sessionId: string, operationId: string): Promise<void>
     context(sessionId: string): Promise<AgentTaskResolvedContext | undefined>
   },
 ): Promise<unknown> {
@@ -20,7 +19,7 @@ export async function handleAgentTaskStore(
   if (typeof operationId !== 'string' || !operationId.length || operationId.length > 512) {
     throw new Error('Invalid task operation')
   }
-  const key = `native-task.${createHash('sha256').update(operationId).digest('hex').slice(0, 40)}`
+  const key = agentTaskStoreKey(operationId)
   const snapshot = await storage.load(key)
   const existing = snapshot?.value as AgentTaskRecord | undefined
   if (existing !== undefined && existing.operationId !== operationId) throw new Error('Task operation scope mismatch')
@@ -37,14 +36,6 @@ export async function handleAgentTaskStore(
         sessionId: existing.sessionId,
       },
     }
-  }
-  if (request.operation === 'native-session-task-associate') {
-    if (
-      existing?.bindingPolicy !== 'required' || existing.sessionId !== request.sessionId
-      || storage.requireTask === undefined
-    ) throw new Error('Required task provenance unavailable')
-    await storage.requireTask(existing.sessionId, existing.operationId)
-    return null
   }
   if (request.operation === 'native-session-task-recover') {
     if (existing === undefined) throw new Error('Task intent unavailable')
@@ -116,3 +107,6 @@ export async function handleAgentTaskStore(
   await storage.write(key, snapshot!.revision, record)
   return null
 }
+
+export const agentTaskStoreKey = (operationId: string): string =>
+  `native-task.${createHash('sha256').update(operationId).digest('hex').slice(0, 40)}`

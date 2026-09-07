@@ -219,6 +219,7 @@ export abstract class AgentSessionRuntimeOperations extends AgentSessionRuntimeP
     resolvedLegacy = false,
     entityBinding?: EntitySessionDefinitionBinding,
     executionContext?: AgentTaskResolvedContext,
+    requiredTaskOperationId?: string,
   ): Promise<AgentAcquireResult> {
     if (this.disposed) return this.acquireUnavailable(operation, input.mutationId, 'runtime-unavailable')
     const mutationId = input.mutationId
@@ -276,6 +277,7 @@ export abstract class AgentSessionRuntimeOperations extends AgentSessionRuntimeP
       : operation === 'create'
       ? await this.options.driver.create({
         ...(executionContext === undefined ? {} : { executionContext }),
+        ...(requiredTaskOperationId === undefined ? {} : { requiredTaskOperationId }),
         sessionId,
         owner: clone(owner),
         options: input.options ?? {},

@@ -275,6 +275,25 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
     ) return 'unavailable'
     const controller = new AbortController()
     resolver.controllers.add(controller)
+    try {
+      const outcome = await this.resolveDriverApproval(
+        requester,
+        resolver,
+        { ...request, reason: request.reason },
+        controller,
+      )
+      return this.requestResolverCurrent(requester, resolver) ? outcome : 'unavailable'
+    } finally {
+      resolver.controllers.delete(controller)
+    }
+  }
+
+  private async resolveDriverApproval(
+    requester: AgentRecord,
+    resolver: RequestResolverRecord,
+    request: CordisXDriverApprovalRequest & { readonly reason: string },
+    controller: AbortController,
+  ): Promise<ApprovalOutcome> {
     const question: ApprovalRequestRoutingQuestion = Object.freeze({
       $schema: ROUTING_QUESTION_SCHEMA,
       contract: 'cordisx.approval-request-routing-question/v1',
@@ -296,8 +315,6 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
       )
     } catch {
       return 'unavailable'
-    } finally {
-      resolver.controllers.delete(controller)
     }
     if (
       controller.signal.aborted || request.signal?.aborted || !this.requestResolverCurrent(requester, resolver)
@@ -330,7 +347,7 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
         toolName: request.toolName,
         ...(request.callId === undefined ? {} : { callId: request.callId }),
         reason: clone(question.reason),
-        ...(request.signal === undefined ? {} : { signal: request.signal }),
+        signal: request.signal === undefined ? controller.signal : AbortSignal.any([controller.signal, request.signal]),
       }, authorityLease)
       return decision.outcome
     } finally {
