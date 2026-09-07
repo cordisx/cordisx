@@ -259,9 +259,7 @@
   display: none;
 }
 .cordisx-nav-row:hover > .cordisx-nav-actions,
-.cordisx-nav-row:focus-within > .cordisx-nav-actions,
-.cordisx-nav-row[data-selected="true"] > .cordisx-nav-actions,
-.cordisx-nav-row[data-cordisx-route-state="presented"] > .cordisx-nav-actions {
+.cordisx-nav-row:focus-within > .cordisx-nav-actions {
   opacity: 1;
   pointer-events: auto;
 }
