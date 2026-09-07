@@ -10,7 +10,7 @@ import { verifyGeneratedViteGraph } from './check-installed-vite-graph.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#7ab6861b943989d71781ada94d28704fbbc9f793'
+const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#5d38948025c2ac48e0b184a9d63c5bf595c762d8'
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
   ? undefined
   : path.resolve(process.env.CORDISX_PROTOCOL_TARBALL)
