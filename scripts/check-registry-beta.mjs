@@ -3,6 +3,8 @@ import { access, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:f
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
+import { pathToFileURL } from 'node:url'
+import { enableInstalledChannel, verifyInstalledChannel } from './check-installed-channel.mjs'
 import { isNpmRegistryPropagationError, npmViewItem } from './npm-pack-report.mjs'
 import { betaReleasePackages } from './beta-release-scope.mjs'
 
@@ -202,7 +204,6 @@ try {
     await rm(path.join(runner, 'package-lock.json'), { force: true })
     await run('npm', [
       'install',
-      '--ignore-scripts',
       '--no-audit',
       '--no-fund',
       '--loglevel=error',
@@ -227,6 +228,18 @@ try {
   if (!Array.isArray(homeConfig.plugins) || homeConfig.plugins.length !== 0) {
     throw new Error('registry cordisx setup must create plugins: []')
   }
+  const installedCordisXRoot = path.join(runner, 'node_modules', 'cordisx')
+  const channelConfigPath = path.join(runner, 'channel.config.json')
+  enableInstalledChannel(homeConfig)
+  await writeFile(channelConfigPath, `${JSON.stringify(homeConfig, null, 2)}\n`, 'utf8')
+  const { loadConfig } = await import(
+    pathToFileURL(path.join(installedCordisXRoot, 'dist/src/launcher/config.js')).href
+  )
+  await verifyInstalledChannel({
+    cordisxManifest: JSON.parse(await readFile(path.join(installedCordisXRoot, 'package.json'), 'utf8')),
+    loadConfig,
+    configPath: channelConfigPath,
+  })
   await run(bin, ['codex', 'work', '--dry-run', '--executable', process.execPath], {
     cwd: runner,
     env: cliEnvironment,
@@ -338,6 +351,7 @@ try {
   console.log(JSON.stringify({
     status: 'verified',
     source: 'registry',
+    channelEntry: 'verified',
     version,
     license: 'AGPL-3.0-or-later',
     pluginException: true,

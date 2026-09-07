@@ -544,6 +544,11 @@ publisher. The workflow carries no npm token. It pins npm `11.11.0`, which
 supports OIDC and the repository's exact Git dependencies. npm 12 defaults to
 rejecting Git dependencies (`EALLOWGIT`); adoption requires explicit validation
 of clean installs and installed consumers before changing this toolchain.
+Release and registry installs retain normal lifecycle preparation, matching
+ordinary `npm ci` / `npx` behavior. In particular, the exact Channel Git
+dependency builds its distribution in `prepare`; `--ignore-scripts` leaves its
+public entry missing. The registry gate resolves and checks that installed
+entry as well as the CLI smoke.
 It validates the requested
 version against the selected package manifests, the clean pack allowlists,
 install smokes, repository metadata, registry owner, version absence, and the
