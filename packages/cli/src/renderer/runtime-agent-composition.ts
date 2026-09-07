@@ -503,8 +503,9 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
       console: runtimeScope.pluginConsole()!,
       selectedNavigationActions: runtimeScope.selectedNavigationActions()!,
       identity: {
-        resolve: value => runtimeScope.agentSessionRuntime.definitionPresentation(value)
-          ?? runtimeScope.agentLoopBrokerV4()!.definitionPresentation(value),
+        resolve: value =>
+          runtimeScope.agentSessionRuntime.definitionPresentation(value)
+            ?? runtimeScope.agentLoopBrokerV4()!.definitionPresentation(value),
         resolveSettings: value => {
           const request = resolveHostManagerAgentDefinitionOpenRequest(
             runtimeScope.routeService?.managerContentAgentDefinitionTarget(value),
