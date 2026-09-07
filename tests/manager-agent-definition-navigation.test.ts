@@ -3,6 +3,7 @@ import type { ManagerSettingsNavigationItemSnapshot } from '../packages/cli/src/
 import {
   HostManagerNavigationController,
   resolveHostManagerAgentDefinitionOpenRequest,
+  resolveHostManagerRouteOpenRequest,
 } from '../packages/cli/src/renderer/manager/navigation-controller.js'
 import type { ManagerContentAgentDefinitionTarget } from '../packages/cli/src/renderer/navigation.js'
 
@@ -84,4 +85,33 @@ describe('Host Manager exact Agent-definition navigation', () => {
     dispose()
     expect(controller.captureReturn()).toBeUndefined()
   })
+})
+
+it('resolves same-owner public Manager roots and parent routes without foreign or disabled fallbacks', () => {
+  const root = item({ route: { id: 'shop' } })
+  expect(resolveHostManagerRouteOpenRequest('chatroom', { id: 'shop' }, [root], () => undefined))
+    .toEqual({ contributionId: root.id, root: { id: 'shop' }, target: { id: 'shop' } })
+  expect(resolveHostManagerRouteOpenRequest('chatroom', { id: 'detail' }, [root], () => ({ id: 'shop' })))
+    .toMatchObject({ root: { id: 'shop' }, target: { id: 'detail' } })
+  expect(resolveHostManagerRouteOpenRequest('foreign', { id: 'shop' }, [root], () => undefined)).toBeUndefined()
+  expect(resolveHostManagerRouteOpenRequest('chatroom', { id: 'shop' }, [{ ...root, disabled: true }], value => value))
+    .toBeUndefined()
+})
+
+it('resolves an exact same-owner root tab without inventing a parent route', () => {
+  const root = item({ route: { id: 'pet.pets' } })
+  const target = { id: 'pet.shop' }
+  const tabs = () => [{ id: 'pet.pets' }, target]
+  expect(resolveHostManagerRouteOpenRequest('chatroom', target, [root], () => undefined, tabs))
+    .toEqual({ contributionId: root.id, root: root.route, target })
+  expect(
+    resolveHostManagerRouteOpenRequest(
+      'chatroom',
+      target,
+      [root, item({ id: 'another', route: { id: 'other-root' } })],
+      () => undefined,
+      tabs,
+    ),
+  ).toBeUndefined()
+  expect(resolveHostManagerRouteOpenRequest('foreign', target, [root], () => undefined, tabs)).toBeUndefined()
 })

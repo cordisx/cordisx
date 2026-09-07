@@ -1,3 +1,4 @@
+import type { CordisXPluginManifestV11 } from '../../usage-permissions.js'
 import type { CordisXPluginManifestV10 } from '../../extension-point-interaction-permissions.js'
 import type { AgentRuntimeCapability } from '@cordisx/protocol/agents/v1'
 import type {
@@ -44,7 +45,7 @@ export interface AuditRecord {
 
 export interface PlatformPermissionSnapshot {
   readonly identity: CordisXPluginIdentity
-  readonly capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact'
+  readonly capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact' | 'usage.read'
   readonly required: boolean
   readonly reason: CordisXLocalizedText
   readonly scope: CordisXPermissionScopeV4
@@ -95,6 +96,7 @@ export interface Registration {
     | CordisXPluginManifestV8
     | CordisXPluginManifestV9
     | CordisXPluginManifestV10
+    | CordisXPluginManifestV11
   readonly declarations: ReadonlyMap<CordisXPlatformCapability, CordisXCapabilityDeclaration>
   readonly declarationsV2: ReadonlyMap<CordisXPermissionCapabilityV2, CordisXCapabilityDeclarationV2>
   readonly declarationsV4: ReadonlyMap<'ui.host-dom.read' | 'ui.host-dom.modify', CordisXCapabilityDeclarationV4>
@@ -135,16 +137,19 @@ export function manifestDeclarationsV2(
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
     | CordisXPluginManifestV9
-    | CordisXPluginManifestV10,
+    | CordisXPluginManifestV10
+    | CordisXPluginManifestV11,
 ): readonly CordisXCapabilityDeclarationV2[] {
   if (manifest.schemaVersion === 4) return manifest.capabilities
   if (
     manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7
-    || manifest.schemaVersion === 8 || manifest.schemaVersion === 9 || manifest.schemaVersion === 10
+    || manifest.schemaVersion === 8 || manifest.schemaVersion === 9
+    || (manifest.schemaVersion === 10 || manifest.schemaVersion === 11)
   ) {
     return manifest.capabilities.filter(item => (
       !isHostDomPermissionCapability(item.name) && !isAgentRuntimePermission(item.name)
-      && item.name !== 'ui.extension-points.interact' && item.name !== 'ui.extension-points.render'
+      && item.name !== 'usage.read' && item.name !== 'ui.extension-points.interact'
+      && item.name !== 'ui.extension-points.render'
     )) as readonly CordisXCapabilityDeclarationV2[]
   }
   return Object.freeze(manifest.capabilities.map(declaration =>
@@ -165,10 +170,12 @@ export function manifestHostDomDeclarationsV4(
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
     | CordisXPluginManifestV9
-    | CordisXPluginManifestV10,
+    | CordisXPluginManifestV10
+    | CordisXPluginManifestV11,
 ): readonly CordisXCapabilityDeclarationV4[] {
   return manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7
-      || manifest.schemaVersion === 8 || manifest.schemaVersion === 9 || manifest.schemaVersion === 10
+      || manifest.schemaVersion === 8 || manifest.schemaVersion === 9
+      || (manifest.schemaVersion === 10 || manifest.schemaVersion === 11)
     ? manifest.capabilities.filter(item =>
       isHostDomPermissionCapability(item.name)
     ) as readonly CordisXCapabilityDeclarationV4[]
@@ -190,13 +197,16 @@ function permissionPlanDeclarations(
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
     | CordisXPluginManifestV9
-    | CordisXPluginManifestV10,
+    | CordisXPluginManifestV10
+    | CordisXPluginManifestV11,
 ): readonly CordisXCapabilityDeclarationV4[] {
   return (manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 7
-      || manifest.schemaVersion === 8 || manifest.schemaVersion === 9 || manifest.schemaVersion === 10
+      || manifest.schemaVersion === 8 || manifest.schemaVersion === 9
+      || (manifest.schemaVersion === 10 || manifest.schemaVersion === 11)
     ? manifest.capabilities.filter(item =>
       !isAgentRuntimePermission(item.name)
-      && item.name !== 'ui.extension-points.interact' && item.name !== 'ui.extension-points.render'
+      && item.name !== 'usage.read' && item.name !== 'ui.extension-points.interact'
+      && item.name !== 'ui.extension-points.render'
     )
     : manifest.capabilities) as readonly CordisXCapabilityDeclarationV4[]
 }

@@ -1,4 +1,4 @@
-import { PlatformVisualPermissionBroker } from './platform-visual-permission.js'
+import { PlatformUsagePermissionBroker } from './platform-usage-permission.js'
 import type { CordisXPlatformCapability } from '../../contracts.js'
 import {
   createPermissionPolicyRecord,
@@ -14,7 +14,7 @@ import { isPermissionPolicyRecordV3, isPermissionPolicyRecordV4 } from '../../pe
 import { declarationFingerprint, object, platformIdentityKey } from './platform-manifest.js'
 import { PlatformPermissionSnapshot, Registration } from './platform-permission-types.js'
 
-export class PermissionBroker extends PlatformVisualPermissionBroker {
+export class PermissionBroker extends PlatformUsagePermissionBroker {
   snapshots(): readonly PlatformPermissionSnapshot[] {
     const platform = [...this.registrations.values()]
       .filter(registration => this.visibility?.visible(registration.generation) ?? true)
@@ -154,7 +154,13 @@ export class PermissionBroker extends PlatformVisualPermissionBroker {
         })
       })
     })
-    return Object.freeze([...platform, ...dom, ...hostDom, ...this.visualPermissionSnapshots()])
+    return Object.freeze([
+      ...platform,
+      ...dom,
+      ...hostDom,
+      ...this.visualPermissionSnapshots(),
+      ...this.usagePermissionSnapshots(),
+    ])
   }
 
   subscribe(listener: () => void): () => void {
@@ -163,6 +169,7 @@ export class PermissionBroker extends PlatformVisualPermissionBroker {
   }
 
   dispose(): void {
+    this.disposeUsagePermissions()
     this.disposeVisualInteractions()
     this.clearAgentRuntimeConnection()
     this.registrations.clear()

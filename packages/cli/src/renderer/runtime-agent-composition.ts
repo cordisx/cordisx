@@ -1,3 +1,5 @@
+import { resolveHostManagerRouteOpenRequest } from './manager/navigation-controller.js'
+import { installUsageService } from './usage.js'
 import { CordisXExtensionPointVisualService } from './composer-visual-service.js'
 import { COMPOSER_VISUAL_CATALOG } from './composer-visual-catalog.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
@@ -496,6 +498,11 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
       console: runtimeScope.pluginConsole()!,
     })
     await runtimeScope.platformFiber
+    await installUsageService(
+      runtimeScope.ctx,
+      runtimeScope.broker()!,
+      runtimeScope.metadata()!.agentHistoryBridgeToken,
+    )
     runtimeScope.systemPromptFiber = runtimeScope.ctx.plugin(CordisXSystemPromptService, {
       runtime: runtimeScope.agentRuntime()!,
       console: runtimeScope.pluginConsole()!,
@@ -558,6 +565,20 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
     })
     await runtimeScope.routeFiber
     runtimeScope.routeService = runtimeScope.ctx.routes as CordisXRouteService
+    runtimeScope.routeService.registry.setManagerNavigator((owner, reference) => {
+      const request = resolveHostManagerRouteOpenRequest(
+        owner,
+        reference,
+        runtimeScope.managerModel()!.snapshot().settingsNavigationItems ?? [],
+        current => runtimeScope.routeService!.registry.managerContent.resolve(owner, current)?.declaration.parentRoute,
+        root =>
+          runtimeScope.routeService!.registry.managerContent.resolve(owner, root)?.declaration.tabs?.map(tab =>
+            tab.route
+          ) ?? [],
+      )
+      if (!request) throw new Error('No visible Manager navigation root owns this route')
+      runtimeScope.managerNavigationController()!.openManagerContent(request)
+    })
     runtimeScope.disposePageAdmissionActivation = runtimeScope.pageAdmissionBindings()!.subscribeActivation(binding => {
       runtimeScope.agentSessionRuntime.claimPageAdmissionBinding(binding)
     })
