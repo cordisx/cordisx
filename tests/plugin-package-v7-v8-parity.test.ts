@@ -28,6 +28,7 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const routeFiles = {
   development: path.join(root, 'packages/cli/src/launcher/development.ts'),
   package: path.join(root, 'packages/cli/src/launcher/plugin-package.ts'),
+  packageNormalizer: path.join(root, 'packages/cli/src/launcher/modern-plugin-manifest.ts'),
   lifecycle: path.join(root, 'packages/cli/src/launcher/plugin-lifecycle-core.ts'),
   vite: path.join(root, 'packages/cli/src/launcher/vite-development.ts'),
   runtime: path.join(root, 'packages/cli/src/renderer/runtime.ts'),
@@ -170,6 +171,12 @@ describe('plugin package v7/v8 predecessor and successor parity', () => {
     expect(cordisXConfigRoot(config)).toBe(location.configRoot)
     for (const filename of [routeFiles.development, routeFiles.package, routeFiles.lifecycle]) {
       const calls = importedCalls(filename, '/permission-model-v4.ts')
+      if (filename === routeFiles.package) {
+        // The package route must actually invoke its extracted normalizer; merely
+        // having an unrelated helper in the source tree cannot establish parity.
+        expect(importedCalls(filename, '/modern-plugin-manifest.ts')).toContain('normalizeModernPluginManifest')
+        for (const call of importedCalls(routeFiles.packageNormalizer, '/permission-model-v4.ts')) calls.add(call)
+      }
       expect(calls).toContain('normalizePluginManifestV7')
       expect(calls).toContain('normalizePluginManifestV8')
     }
