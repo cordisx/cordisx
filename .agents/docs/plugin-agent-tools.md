@@ -75,3 +75,44 @@ command message. Body, timestamp and menu behavior stay in the existing Shell.
 
 The source is a projection of the plugin's persisted fact, not proof of authority
 on its own. The true write remains the authenticated command handler's Room CAS.
+
+## Real CDP validation and fixture pitfalls
+
+The 2026-09-07 integration checkpoint used Host
+`cb6e1b420102c5323a798656f664eb4e2d0fc178`, Protocol
+`7b8c81104c2ab6b301ebe6a7414d45dc2cc8f724`, and Chatroom
+`2bca745adedead5a91ee9d0ba6b3d07988c9ede8`. A separate headless Chrome
+profile ran the production installer and complete Host renderer runtime. A
+minimal plugin fixture declared exact Session capabilities and consumed the
+real Chatroom handler, Room store and v10 source. Only the Agent driver used
+the existing deterministic implementation. The actual permission dialog
+granted each exact Session request; no `ownsSession: () => true` or replacement
+CDP bridge was used.
+
+The real CLI subprocess received `created`, then `replayed` with the same
+message id. The actual Room document and Host Shell model each contained one
+message; revocation rejected the next CLI invocation. This verifies real
+transport, authority, storage and model composition. It does not prove that a
+native Codex model read a Skill and chose to call the CLI, visible native UI,
+recovery, or user acceptance. The same Host candidate passed the full check:
+274 test files, 1432 tests, release, package and installed-package validation.
+
+When recreating this check:
+
+- A fixture must declare the Cordis services it reads in `inject`; obtaining a
+  context does not authorize reading an undeclared service.
+- Do not import Host-private singleton modules into a plugin bundle for
+  observation. A second copy of `plugin-agent-tools` has its own maps and can
+  overwrite the receiver while observing a different registry. The native
+  transport and Host runtime use one module instance. An external observer may
+  observe the real launcher's binding result and call its existing setup
+  operation without replacing authentication or dispatch.
+- Wait for real per-Session permission requests and operate the actual test
+  dialog. A denied or pending permission is not a reason to substitute the
+  permission broker or an ownership predicate.
+- Keep installed CLI/Skill files in the package resource closure outside the
+  browser graph, and inspect the actual package. Never invent graph MIME types
+  or exclude undeclared resources to make a verifier pass.
+- Record the original request's target and execution context. Do not retry a
+  failed reverse call in another window. Clean up only the browser profile,
+  socket and resource directories created by this check.
