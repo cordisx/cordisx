@@ -30,6 +30,36 @@ support developer instructions on thread start/resume, but not on turn start.
 schema generation. A bundled CLI schema is evidence about that binary, not proof
 that the current Desktop connection accepted a request or that a model read it.
 
+## Dynamic tool context
+
+The transport calls the real `getAgentToolSetup(sessionId)` broker before create,
+resume, each actual turn start (including dequeued turns), steer, and item
+injection. Enqueueing does not cache a setup. A never-bound ordinary Agent may
+receive an empty setup; a revoked, expired, unavailable, or mismatched binding
+fails closed. The consumer must persist its real run/Session association and
+successfully bind tools before submitting its first task.
+
+The broker supplies verified Skill IDs, paths, and actual content, plus exact
+CLI argv prefixes and non-secret descriptor references. The native transport
+never discovers resource paths or reads credential files. Tool instructions are
+an independent user-input block; they do not replace the original user content
+or become base instructions. Turn start and steer also attach the native
+`skill` input shape. Item injection uses the verified content because that
+operation accepts conversation items, not Skill input attachments. A textual
+Skill reference alone is not evidence that a model loaded or executed it.
+
+Dynamic context is not saved in AgentDefinition and is obtained again for each
+execution. Native conversation history can retain an older descriptor path;
+authority is always decided by the Host at actual CLI execution. Revocation must
+remain effective even if a model repeats an old command.
+
+The first collaboration milestone supports a newly created Session, followed by
+its persisted domain run association, tool binding, and first submission. A
+revoked CLI-bound Session cannot currently resume: resume validates before the
+consumer can establish a replacement binding. This intentionally fails closed;
+a controlled owner-recovery and rebind phase remains unfinished. Ordinary
+never-bound Agent resume does not prove bound collaboration recovery.
+
 ## Event and Room correlation
 
 The private `byThread` map correlates native thread IDs with the Host SessionId.
@@ -50,7 +80,11 @@ infer Room authority from prompt text.
 
 `tests/codex-desktop-agent-session-transport.test.ts` exercises real runtime
 composition against a controlled Desktop bridge: inherited context, implicit and
-explicit resume, unchanged user input, and invalid setup rejection. It proves
+explicit resume, unchanged user input, invalid setup rejection, fresh queued/steered/injected tool context, and
+revocation refusal. The context lifecycle cases substitute the broker getter;
+`plugin-agent-tools.test.ts` separately exercises the real authority, resources,
+renderer service, and subprocess with a substituted CDP transfer. Together these
+are scoped component evidence. The transport suite proves
 request construction and runtime handoff, not model consumption, native UI access,
 Skill execution, or a real CLI-to-Room message.
 
