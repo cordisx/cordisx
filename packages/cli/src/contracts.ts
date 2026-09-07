@@ -376,3 +376,9 @@ export type {
   AgentTaskOwnership,
   AgentTaskOwnershipResult,
 } from './agent-task-contracts.js'
+export type {
+  EntitySettingsAvailabilityResult,
+  EntitySettingsNavigationResult,
+  EntitySettingsNavigationService,
+} from '@cordisx/protocol/entity-settings-navigation/v1'
+export type { RouteLinkResolutionResult } from '@cordisx/protocol/route-link-resolution/v1'

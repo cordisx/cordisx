@@ -1,4 +1,5 @@
 import { historicalNativeSessionDetails } from './native-agent-session-recovery.js'
+import { CordisXEntitySettingsNavigationService } from './entity-settings-navigation.js'
 import { CordisXExtensionPointVisualService } from './composer-visual-service.js'
 import { COMPOSER_VISUAL_CATALOG } from './composer-visual-catalog.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
@@ -508,6 +509,16 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
     })
     await runtimeScope.commandFiber
     runtimeScope.commandService = runtimeScope.ctx.commands as CordisXCommandService
+    await runtimeScope.ctx.plugin(CordisXEntitySettingsNavigationService, {
+      console: runtimeScope.pluginConsole()!,
+      resolve: (identity: import('@cordisx/protocol/agents/v1').AgentDefinitionIdentity) =>
+        resolveHostManagerAgentDefinitionOpenRequest(
+          runtimeScope.routeService?.managerContentAgentDefinitionTarget(identity),
+          runtimeScope.managerModel()!.snapshot().settingsNavigationItems ?? [],
+        ),
+      open: (request: import('./manager/navigation-controller.js').HostManagerContentOpenRequest) =>
+        runtimeScope.managerNavigationController()!.openManagerContent(request),
+    })
     runtimeScope.agentConversationShellFiber = runtimeScope.ctx.plugin(CordisXAgentConversationShellService, {
       console: runtimeScope.pluginConsole()!,
       selectedNavigationActions: runtimeScope.selectedNavigationActions()!,
