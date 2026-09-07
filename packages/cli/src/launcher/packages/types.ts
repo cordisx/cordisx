@@ -62,7 +62,7 @@ export interface HostRuntimeServiceDeclaration {
 
 export interface HostResolvedRuntimeManifest {
   readonly $schema: string
-  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
+  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 10
   readonly id: string
   readonly name?: string
   readonly capabilities: readonly unknown[]

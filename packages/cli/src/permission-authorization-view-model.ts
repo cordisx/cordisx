@@ -1,3 +1,9 @@
+import {
+  INTERACTION_CAPABILITY,
+  VISUAL_PERMISSION_DECISION_SCHEMA_V5,
+  type VisualPermissionAuthorizationDecisionV5,
+  type VisualPermissionAuthorizationPlanV5,
+} from './extension-point-interaction-authorization.js'
 import type { CordisXLocalizedText } from './contracts.js'
 import { CapabilityRiskCatalog } from './capability-risk-catalog.js'
 import {
@@ -34,7 +40,9 @@ export interface PermissionItemAvailabilityProjection {
 
 export interface PermissionAuthorizationProjectionInput {
   readonly plugin: PermissionPluginPresentation
-  readonly availability: Readonly<Partial<Record<CordisXPermissionCapabilityV4, PermissionItemAvailabilityProjection>>>
+  readonly availability: Readonly<
+    Partial<Record<CordisXPermissionCapabilityV4 | typeof INTERACTION_CAPABILITY, PermissionItemAvailabilityProjection>>
+  >
   readonly resolve: (message: CordisXLocalizedText) => string
   readonly scope: (scope: CordisXPermissionScopeV4) => string
   readonly requestSource?: string
@@ -47,7 +55,7 @@ export interface PermissionAuthorizationOptionProjection {
 }
 
 export interface PermissionAuthorizationItemProjection {
-  readonly capability: CordisXPermissionCapabilityV4
+  readonly capability: CordisXPermissionCapabilityV4 | typeof INTERACTION_CAPABILITY
   readonly name: string
   readonly requirement: string
   readonly sensitivity: string
@@ -119,6 +127,7 @@ export type PermissionAuthorizationDialogResult =
       | CordisXPermissionAuthorizationDecisionV2
       | CordisXPermissionAuthorizationDecisionV3
       | CordisXPermissionAuthorizationDecisionV4
+      | VisualPermissionAuthorizationDecisionV5
   }
 
 const UI_FALLBACKS = Object.freeze(
@@ -176,16 +185,20 @@ const CAPABILITY_CATALOG = new CapabilityRiskCatalog()
 
 /** Stateful decision model; locale/theme reprojection never reconstructs the request. */
 export class PermissionAuthorizationViewModel {
-  readonly #selected = new Map<CordisXPermissionCapabilityV4, CordisXPermissionDecisionV2>()
+  readonly #selected = new Map<
+    CordisXPermissionCapabilityV4 | typeof INTERACTION_CAPABILITY,
+    CordisXPermissionDecisionV2
+  >()
   #settled = false
 
   constructor(
     readonly plan:
       | CordisXPermissionAuthorizationPlanV2
       | CordisXPermissionAuthorizationPlanV3
-      | CordisXPermissionAuthorizationPlanV4,
+      | CordisXPermissionAuthorizationPlanV4
+      | VisualPermissionAuthorizationPlanV5,
   ) {
-    const seen = new Set<CordisXPermissionCapabilityV4>()
+    const seen = new Set<CordisXPermissionCapabilityV4 | typeof INTERACTION_CAPABILITY>()
     for (const item of plan.declarations) {
       if (seen.has(item.capability)) {
         throw new Error(`permission plan contains duplicate capability: ${item.capability}`)
@@ -204,7 +217,10 @@ export class PermissionAuthorizationViewModel {
     }
   }
 
-  select(capability: CordisXPermissionCapabilityV4, decision: CordisXPermissionDecisionV2): void {
+  select(
+    capability: CordisXPermissionCapabilityV4 | typeof INTERACTION_CAPABILITY,
+    decision: CordisXPermissionDecisionV2,
+  ): void {
     this.assertOpen()
     const item = this.plan.declarations.find(candidate => candidate.capability === capability)
     if (item === undefined || !item.allowedDecisions.includes(decision)) {
@@ -213,20 +229,24 @@ export class PermissionAuthorizationViewModel {
     this.#selected.set(capability, decision)
   }
 
-  selection(capability: CordisXPermissionCapabilityV4): CordisXPermissionDecisionV2 | undefined {
+  selection(
+    capability: CordisXPermissionCapabilityV4 | typeof INTERACTION_CAPABILITY,
+  ): CordisXPermissionDecisionV2 | undefined {
     return this.#selected.get(capability)
   }
 
   project(input: PermissionAuthorizationProjectionInput): PermissionAuthorizationDialogProjection {
     const resolve = input.resolve
-    const visibleDeclarations = this.plan.schemaVersion === 4
+    const visibleDeclarations = (this.plan.schemaVersion === 4 || this.plan.schemaVersion === 5)
       ? this.plan.declarations.filter(item => item.decisionRequired)
       : this.plan.declarations
     const items = visibleDeclarations.map(item => {
       const availability = input.availability[item.capability]
       const selected = this.#selected.get(item.capability)
       const providers = availability?.providerIds ?? item.scope.providers ?? []
-      const reviewMode = CAPABILITY_CATALOG.get(item.capability).installPrompt
+      const reviewMode = item.capability === INTERACTION_CAPABILITY
+        ? 'explicit' as const
+        : CAPABILITY_CATALOG.get(item.capability).installPrompt
       return Object.freeze({
         capability: item.capability,
         name: resolve(item.presentation.name),
@@ -320,6 +340,32 @@ export class PermissionAuthorizationViewModel {
   confirm(): PermissionAuthorizationDialogResult {
     this.assertOpen()
     this.#settled = true
+    if (this.plan.schemaVersion === 5) {
+      const plan = this.plan
+      return Object.freeze({
+        status: 'confirmed',
+        decision: Object.freeze({
+          $schema: VISUAL_PERMISSION_DECISION_SCHEMA_V5,
+          schemaVersion: 5,
+          origin: 'explicit-user',
+          planId: plan.planId,
+          operation: plan.operation,
+          profileId: plan.profileId,
+          identity: plan.identity,
+          binding: plan.binding,
+          decisions: Object.freeze(
+            plan.declarations.filter(item => item.decisionRequired).map(item =>
+              Object.freeze({
+                capability: item.capability,
+                scope: item.scope,
+                securityFingerprint: item.securityFingerprint,
+                decision: this.#selected.get(item.capability)!,
+              })
+            ),
+          ),
+        }),
+      })
+    }
     if (this.plan.schemaVersion === 4) {
       const plan = this.plan
       return Object.freeze({

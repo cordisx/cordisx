@@ -87,6 +87,7 @@ function reactModule(): string {
 const React = runtime.React;
 export default React;
 export const defineReactPage = runtime.defineReactPage;
+export const defineReactVisual = runtime.defineReactVisual;
 ${REACT_EXPORTS.map(name => `export const ${name} = React.${name};`).join('\n')}`
 }
 

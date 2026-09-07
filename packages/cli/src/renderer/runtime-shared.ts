@@ -1,3 +1,4 @@
+import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
@@ -328,6 +329,7 @@ export interface PluginController {
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
+    | CordisXPluginManifestV10
   principal: PluginPrincipalToken
   activation: number
   principalLive: boolean
@@ -632,8 +634,9 @@ export function manifestUsesHostDom(
     | CordisXPluginManifestV5
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
-    | CordisXPluginManifestV8,
-): manifest is CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV8 {
+    | CordisXPluginManifestV8
+    | CordisXPluginManifestV10,
+): manifest is CordisXPluginManifestV5 | CordisXPluginManifestV6 | CordisXPluginManifestV8 | CordisXPluginManifestV10 {
   return (manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 8)
     && manifest.capabilities.some(capability => (
       capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
@@ -647,7 +650,8 @@ export function manifestUsesTransientCanvas(
     | CordisXPluginManifestV5
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
-    | CordisXPluginManifestV8,
+    | CordisXPluginManifestV8
+    | CordisXPluginManifestV10,
 ): manifest is CordisXPluginManifestV7 {
   return manifest.schemaVersion === 7
     && manifest.execution.realm === 'isolated-worker'

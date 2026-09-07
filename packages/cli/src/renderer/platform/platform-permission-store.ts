@@ -1,3 +1,7 @@
+import type {
+  VisualPermissionAuthorizationDecisionV5,
+  VisualPermissionAuthorizationPlanV5,
+} from '../../extension-point-interaction-authorization.js'
 import { CORDISX_PLATFORM_CAPABILITIES } from '../../contracts.js'
 import type {
   CordisXCapabilityDeclaration,
@@ -263,6 +267,11 @@ export interface PermissionPrompt {
 }
 
 export interface PermissionAuthorizationPromptV2 {
+  requestVisualV5?(
+    plan: VisualPermissionAuthorizationPlanV5,
+    identity: CordisXPluginIdentity,
+  ): Promise<VisualPermissionAuthorizationDecisionV5 | undefined>
+  cancelVisualV5?(planId: string, binding: CordisXPermissionAuthorizationBindingV2): void
   request(
     plan: CordisXPermissionAuthorizationPlanV2,
     identity: CordisXPluginIdentity,
@@ -424,6 +433,19 @@ export class BrowserPermissionAuthorizationPromptV2 implements PermissionAuthori
       project: () => this.project(plan as unknown as CordisXPermissionAuthorizationPlanV2, identity),
     })
     return result.status === 'confirmed' && result.decision.schemaVersion === 4 ? result.decision : undefined
+  }
+
+  async requestVisualV5(
+    plan: VisualPermissionAuthorizationPlanV5,
+    identity: CordisXPluginIdentity,
+  ): Promise<VisualPermissionAuthorizationDecisionV5 | undefined> {
+    const result = await this.dialog.show(new PermissionAuthorizationViewModel(plan), {
+      project: () => this.project(plan as unknown as CordisXPermissionAuthorizationPlanV2, identity),
+    })
+    return result.status === 'confirmed' && result.decision.schemaVersion === 5 ? result.decision : undefined
+  }
+  cancelVisualV5(planId: string, binding: CordisXPermissionAuthorizationBindingV2): void {
+    this.dialog.cancel(planId, binding)
   }
 
   cancelV3(planId: string, binding: CordisXPermissionAuthorizationBindingV2): void {

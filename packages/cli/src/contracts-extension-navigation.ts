@@ -299,6 +299,7 @@ export type CordisXExtensionPointPayloadFamily =
   | 'manager-settings-navigation-item-v2'
   | 'reasoning-intensity-presentation'
   | 'session-backdrop-presentation'
+  | 'extension-point-visual-v1'
   | 'transient-canvas-presentation'
   | 'presenter'
   | 'navigation-item'
@@ -678,4 +679,15 @@ export interface CordisXNavigationCollectionOptionsV2 extends CordisXNavigationC
 
 export interface CordisXNavigationCollectionOptionsV3 extends CordisXNavigationCollectionOptions {
   readonly contract: 'cordisx.navigation-collection/v3'
+}
+
+export const CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V10 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/host-extension-point-catalog.v10.schema.json' as const
+export interface CordisXComposerVisualDescriptorV10 extends CordisXHostExtensionPointDescriptorV8 {
+  readonly events: readonly ('pointer.observe' | 'activate' | 'drag')[]
+}
+export interface CordisXHostExtensionPointCatalogV10 {
+  readonly $schema: typeof CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V10
+  readonly schemaVersion: 10
+  readonly points: readonly (CordisXHostExtensionPointDescriptorV9 | CordisXComposerVisualDescriptorV10)[]
 }

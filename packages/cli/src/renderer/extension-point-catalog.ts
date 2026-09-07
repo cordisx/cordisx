@@ -1,3 +1,4 @@
+import { COMPOSER_VISUAL_LOCALES } from './composer-visual-catalog.js'
 import type {
   CordisXEffectivePointPolicy,
   CordisXExtensionPointAccessV2,
@@ -768,4 +769,5 @@ const ZH_MESSAGES: Readonly<Record<string, string>> = {
 export const CORDISX_EXTENSION_POINT_LOCALE_CATALOGS: readonly CordisXLocaleCatalog[] = Object.freeze([
   Object.freeze({ namespace: DESCRIPTOR_NAMESPACE, locale: 'en', default: true, messages: Object.freeze(EN_MESSAGES) }),
   Object.freeze({ namespace: DESCRIPTOR_NAMESPACE, locale: 'zh-CN', messages: Object.freeze(ZH_MESSAGES) }),
+  ...COMPOSER_VISUAL_LOCALES,
 ])

@@ -122,3 +122,10 @@ export function defineReactPage<
     throw new Error('defineReactPage is available only inside the CordisX renderer Host')
   }
 }
+
+/** Declare a lazy SVG component; the Host owns its root and native placement. */
+export function defineReactVisual(
+  component: import('./extension-point-visual-contracts.js').CordisXReactVisual['component'],
+): import('./extension-point-visual-contracts.js').CordisXReactVisual {
+  return Object.freeze({ kind: 'react-svg-v1', component })
+}

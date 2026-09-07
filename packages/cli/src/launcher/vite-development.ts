@@ -1,3 +1,4 @@
+import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import { createHash, randomBytes } from 'node:crypto'
 import { chmod, lstat, mkdir, readdir, readFile, realpath } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -67,7 +68,7 @@ interface DevelopmentGeneration {
   lastSuccessfulAt: string
   readonly packageFiles: readonly string[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
-  readonly manifest?: CordisXPluginManifestV7 | CordisXPluginManifestV8
+  readonly manifest?: CordisXPluginManifestV7 | CordisXPluginManifestV8 | CordisXPluginManifestV10
   /** Executable only by the Host-owned isolated Worker boundary. */
   readonly isolatedArtifactSource?: string
   /** Complete esbuild input graph for isolated-worker HMR ownership. */
@@ -569,6 +570,13 @@ if (import.meta.hot) {
         || id.startsWith(SHARED_PREFIX)
       ) return '\0' + id
       if (id === 'cordisx/contracts') return CONTRACTS_MODULE_PATH
+      // Host JSX participates in creating the singleton; it cannot import its facade.
+      if (
+        /^cordisx\/react\/jsx-(?:dev-)?runtime$/.test(id) && importer !== undefined
+        && inside(normalizePath(importer.split('?')[0]!), normalizePath(path.dirname(rendererPath)))
+      ) {
+        return this.resolve(id.slice('cordisx/'.length), importer, { skipSelf: true })
+      }
       if (SHARED_MODULES.has(id)) return '\0' + SHARED_PREFIX + id
       if (
         /^react(?:-dom)?(?:\/.*)?$/.test(id) && importer !== undefined

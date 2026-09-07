@@ -330,12 +330,12 @@ export async function bootSurfaces() {
     diagnostics: [],
   })
   expect(snapshot.navigation.outlets).toHaveLength(5)
-  expect(snapshot.extensionPoints.points).toHaveLength(40)
-  expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(33)
+  expect(snapshot.extensionPoints.points).toHaveLength(42)
+  expect(snapshot.extensionPoints.points.filter(item => item.kind === 'surface')).toHaveLength(35)
   expect(snapshot.extensionPoints.points.filter(item => item.kind === 'outlet')).toHaveLength(7)
   expect(snapshot.extensionPoints.descriptorDiagnostics).toEqual([])
-  expect(snapshot.localeCatalogs).toHaveLength(8)
-  expect(snapshot.localeCatalogs.filter(item => item.owner === 'host')).toHaveLength(6)
+  expect(snapshot.localeCatalogs).toHaveLength(10)
+  expect(snapshot.localeCatalogs.filter(item => item.owner === 'host')).toHaveLength(8)
   expect(snapshot.localeCatalogs.filter(item => item.owner === 'host')).toEqual(expect.arrayContaining([
     expect.objectContaining({ namespace: 'host:cordisx.manager.capability-availability', locale: 'en' }),
     expect.objectContaining({ namespace: 'host:cordisx.manager.capability-availability', locale: 'zh-CN' }),

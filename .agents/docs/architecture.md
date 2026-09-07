@@ -180,3 +180,7 @@ preserved in the [historical development plan](development-plan.md#historical-fe
 Current unresolved capability or delivery work belongs in its owning topic and
 current task ledger, with explicit evidence and scope; this overview does not
 carry a second roadmap.
+
+### Experimental Composer visual seats
+
+The [Composer visual runtime](composer-visuals.md) separates native probes, controlled React roots and plugin artwork. Its permission and activation composition remains pending; it is not an installed-plugin capability yet.

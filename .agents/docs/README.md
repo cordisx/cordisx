@@ -100,3 +100,5 @@ explain individual demos. The [plugin-development Skill](https://github.com/cord
 is shipped with the CLI and keeps its task references together for installed
 use. These local entry points may summarize a feature and link to the detailed
 reference without duplicating its authority.
+
+- [Composer controlled visuals](composer-visuals.md): experimental probe/runtime checkpoint and remaining production integration.

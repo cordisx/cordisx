@@ -777,7 +777,7 @@ export async function start(
 
     const setPermissionPolicy = (
       id: string,
-      capability: CordisXPermissionCapabilityV4,
+      capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact',
       policy: CordisXPermissionPolicy,
       scope?: CordisXPermissionScopeV4,
     ): Promise<void> => runtimeClosures3.createRuntimeSetPermissionPolicy(closureScope, id, capability, policy, scope)

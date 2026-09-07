@@ -5,6 +5,14 @@ import type { CordisXPermissionCapabilityV4 } from './permission-contracts.js'
 export const CORDISX_PERMISSION_NAMESPACE = 'permission'
 
 const EN_UI_MESSAGES = Object.freeze({
+  'permission.ui.extension-points.interact.name': 'Observe pointer in visual extension points',
+  'permission.ui.extension-points.interact.description':
+    'Receive normalized pointer position in the listed visual seats.',
+  'permission.ui.extension-points.interact.risk':
+    'The plugin can react to pointer movement while its visual is active.',
+  'permission.ui.extension-points.interact.limitation':
+    'No input text, raw events, native handlers or native action control. Permission lasts for this plugin generation.',
+
   'dialog.install-title': 'Review permissions before installing',
   'dialog.update-title': 'Review permission changes',
   'dialog.enable-title': 'Review permissions before enabling',
@@ -51,6 +59,12 @@ const EN_UI_MESSAGES = Object.freeze({
 })
 
 const ZH_UI_MESSAGES = Object.freeze({
+  'permission.ui.extension-points.interact.name': '观察视觉点位内的指针',
+  'permission.ui.extension-points.interact.description': '接收所列视觉点位内的归一化指针位置。',
+  'permission.ui.extension-points.interact.risk': '插件可在视觉激活期间响应指针移动。',
+  'permission.ui.extension-points.interact.limitation':
+    '不提供输入正文、原始事件、原生处理器或操作控制；授权仅在当前插件代次内有效。',
+
   'dialog.install-title': '安装前确认权限',
   'dialog.update-title': '确认权限变更',
   'dialog.enable-title': '启用前确认权限',
@@ -237,7 +251,15 @@ export const CORDISX_PERMISSION_LOCALE_CATALOGS: readonly CordisXLocaleCatalog[]
 ])
 
 /** Resolve the Host-owned capability name from the same catalogs used by permission review. */
-export function projectPermissionCapabilityName(capability: CordisXPermissionCapabilityV4, locale: string): string {
+export function projectPermissionCapabilityName(
+  capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact',
+  locale: string,
+): string {
+  if (capability === 'ui.extension-points.interact') {
+    return new Intl.Locale(locale).language === 'zh'
+      ? ZH_UI_MESSAGES['permission.ui.extension-points.interact.name']
+      : EN_UI_MESSAGES['permission.ui.extension-points.interact.name']
+  }
   const presentation = HOST_CAPABILITY_RISK_ENTRIES.find(entry => entry.capability === capability)?.presentation.name
   if (presentation === undefined) return capability
   const messages = new Intl.Locale(locale).language === 'zh' ? ZH_CAPABILITY_MESSAGES : EN_CAPABILITY_MESSAGES

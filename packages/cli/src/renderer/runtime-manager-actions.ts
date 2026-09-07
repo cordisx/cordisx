@@ -462,7 +462,8 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
     ...(runtimeScope.currentPluginBundles === undefined ? {} : { pluginBundles: runtimeScope.currentPluginBundles }),
     iconThemes: runtimeScope.iconThemeRegistry()!.redactedSnapshot(),
     permissions: runtimeScope.broker()!.snapshots().map((permission: PlatformPermissionSnapshot) => {
-      const pointId = permission.capability === 'ui.extension-points.render'
+      const pointId = (permission.capability === 'ui.extension-points.render'
+          || permission.capability === 'ui.extension-points.interact')
         ? permission.scope.extensionPoints?.[0]
         : undefined
       const descriptor = pointId === undefined
@@ -512,7 +513,8 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
               }),
               providers: [],
             }
-          : permission.capability === 'ui.extension-points.render'
+          : (permission.capability === 'ui.extension-points.render'
+              || permission.capability === 'ui.extension-points.interact')
           ? {
             status: descriptor?.adapterSupport === 'supported'
               ? 'supported' as const
@@ -550,7 +552,10 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
         required: permission.required,
         reason: permission.reason,
         reasonText: runtimeScope.i18nService?.resolveFor(
-          permission.capability === 'ui.extension-points.render' ? 'host' : permission.identity.id,
+          (permission.capability === 'ui.extension-points.render'
+              || permission.capability === 'ui.extension-points.interact')
+            ? 'host'
+            : permission.identity.id,
           permission.reason,
           site,
         ).text
@@ -763,7 +768,7 @@ export const createRuntimeUpdatePluginConfig = (
 export const createRuntimeSetPermissionPolicy = (
   runtimeScope: RuntimeClosureScope,
   id: string,
-  capability: CordisXPermissionCapabilityV4,
+  capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact',
   policy: CordisXPermissionPolicy,
   scope?: CordisXPermissionScopeV4,
 ): Promise<void> => {
@@ -775,7 +780,9 @@ export const createRuntimeSetPermissionPolicy = (
     if (controller === undefined) {
       throw new Error(`unknown CordisX plugin: ${id}`)
     }
-    if (capability === 'ui.extension-points.render') {
+    if (capability === 'ui.extension-points.interact') {
+      runtimeScope.broker()!.setVisualInteractionPolicy(controller.identity, policy !== 'deny')
+    } else if (capability === 'ui.extension-points.render') {
       const points = scope?.extensionPoints
       if (points === undefined || points.length !== 1) {
         throw new Error('DOM permission policy requires one exact extension point scope')

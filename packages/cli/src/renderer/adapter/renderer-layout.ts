@@ -550,6 +550,9 @@ class StructuredSurfaceRenderer extends StructuredSurfaceInteractions {
       this.navigationRenderSignature = undefined
     }
     for (const snapshot of snapshots) {
+      if (snapshot.surface === 'composer.primary-action.visual' || snapshot.surface === 'composer.frame.overlay') {
+        continue
+      }
       const rendered = snapshot.visible && snapshot.authorized && snapshot.valid && !snapshot.pending
         && availableSurfaces.has(snapshot.surface)
         && (snapshot.surface !== 'composer.reasoning-intensity' || snapshot.qualifiedId === renderedReasoningId)

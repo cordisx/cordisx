@@ -1,3 +1,8 @@
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
+  normalizeVisualManifestV10,
+} from '../../extension-point-interaction-permissions.js'
+import type { CordisXPluginManifestV10 } from '../../extension-point-interaction-permissions.js'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 } from '../../contracts.js'
 import type {
   CordisXCapabilityDeclaration,
@@ -104,6 +109,7 @@ export function normalizePluginManifest(
   | CordisXPluginManifestV6
   | CordisXPluginManifestV7
   | CordisXPluginManifestV8
+  | CordisXPluginManifestV10
 {
   if (!ID_PATTERN.test(expectedId)) throw new Error(`launcher plugin id ${expectedId} is invalid`)
   if (value === undefined) {
@@ -115,6 +121,9 @@ export function normalizePluginManifest(
     })
   }
   const manifest = object(value, `plugin ${expectedId} manifest`)
+  if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V10 || manifest.schemaVersion === 10) {
+    return normalizeVisualManifestV10(manifest, expectedId)
+  }
   if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 || manifest.schemaVersion === 8) {
     return normalizePluginManifestV8(manifest, expectedId, new CapabilityRiskCatalog())
   }
