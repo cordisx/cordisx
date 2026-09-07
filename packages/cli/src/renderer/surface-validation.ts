@@ -597,8 +597,12 @@ export function validateItem(surface: CordisXSurfaceName, item: unknown): unknow
     assertLocalId(visual.renderer.id, 'visual renderer id')
     if (
       visual.events !== undefined
-      && (!Array.isArray(visual.events) || visual.events.length > 1
-        || visual.events.some(event => event !== 'pointer.observe'))
+      && (!Array.isArray(visual.events) || visual.events.length > 3
+        || new Set(visual.events).size !== visual.events.length
+        || visual.events.some(event =>
+          event !== 'pointer.observe'
+          && !(surface === 'composer.frame.overlay' && (event === 'drag' || event === 'activate'))
+        ))
     ) throw new Error('Visual interaction is unavailable')
   } else if (surface === 'composer.submit.effects') {
     const canvas = snapshot as CordisXTransientCanvasPresentation

@@ -12,6 +12,24 @@ import {
   visualInteractionPlan,
 } from '../../extension-point-interaction-authorization.js'
 
+function supportedInteractionEvent(point: string, event: string): boolean {
+  return (point === 'composer.frame.overlay' && ['pointer.observe', 'drag', 'activate'].includes(event))
+    || (point === 'composer.primary-action.visual' && event === 'pointer.observe')
+}
+function supportedDeclaration(
+  declaration: ExtensionPointInteractionCapabilityV1,
+): ExtensionPointInteractionCapabilityV1 {
+  return {
+    ...declaration,
+    scope: {
+      ...declaration.scope,
+      events: declaration.scope.events.filter(event =>
+        declaration.scope.extensionPoints.some(point => supportedInteractionEvent(point, event))
+      ),
+    },
+  }
+}
+
 interface InteractionLease {
   state: 'pending' | 'allow' | 'deny'
   cancel(): void
@@ -39,7 +57,9 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
     if (current?.generation.moduleGeneration !== generation || current.manifest.schemaVersion !== 10) return false
     return !current.manifest.capabilities.some(item =>
       item.name === 'ui.extension-points.interact'
-      && item.required && item.scope.events.some(event => event !== 'pointer.observe')
+      && item.required && item.scope.extensionPoints.some(point =>
+        item.scope.events.some(event => !supportedInteractionEvent(point, event))
+      )
     )
   }
 
@@ -72,37 +92,41 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
       }
       return access.authorized
     }
+    const interact = (event: 'pointer.observe' | 'drag' | 'activate'): boolean => {
+      if (!render()) return false
+      const current = registration()!
+      const declaration = current.manifest.schemaVersion === 10
+        ? current.manifest.capabilities.find((item): item is ExtensionPointInteractionCapabilityV1 =>
+          item.name === 'ui.extension-points.interact'
+        )
+        : undefined
+      if (
+        declaration === undefined || !declaration.scope.extensionPoints.includes(pointId)
+        || !supportedInteractionEvent(pointId, event)
+        || !supportedDeclaration(declaration).scope.events.includes(event)
+      ) return false
+      let lease = this.visualInteractionLeases.get(current.token)
+      if (lease === undefined) {
+        lease = { state: this.isDevelopmentVisual(identity) ? 'allow' : 'pending', cancel() {} }
+        this.visualInteractionLeases.set(current.token, lease)
+        if (lease.state === 'allow') return true
+        const selectedLease = lease
+        this.visualReviewQueue = this.visualReviewQueue.catch(() => {}).then(async () => {
+          if (
+            registration() === current && this.visualInteractionLeases.get(current.token) === selectedLease
+            && render()
+          ) {
+            await this.requestVisualInteraction(current, declaration, selectedLease)
+          }
+        })
+      }
+      return lease.state === 'allow'
+    }
     return Object.freeze({
       render,
-      observePointer: () => {
-        if (!render()) return false
-        const current = registration()!
-        const declaration = current.manifest.schemaVersion === 10
-          ? current.manifest.capabilities.find((item): item is ExtensionPointInteractionCapabilityV1 =>
-            item.name === 'ui.extension-points.interact'
-          )
-          : undefined
-        if (
-          declaration === undefined || !declaration.scope.extensionPoints.includes(pointId)
-          || !declaration.scope.events.includes('pointer.observe')
-        ) return false
-        let lease = this.visualInteractionLeases.get(current.token)
-        if (lease === undefined) {
-          lease = { state: this.isDevelopmentVisual(identity) ? 'allow' : 'pending', cancel() {} }
-          this.visualInteractionLeases.set(current.token, lease)
-          if (lease.state === 'allow') return true
-          const selectedLease = lease
-          this.visualReviewQueue = this.visualReviewQueue.catch(() => {}).then(async () => {
-            if (
-              registration() === current && this.visualInteractionLeases.get(current.token) === selectedLease
-              && render()
-            ) {
-              await this.requestVisualInteraction(current, declaration, selectedLease)
-            }
-          })
-        }
-        return lease.state === 'allow'
-      },
+      observePointer: () => interact('pointer.observe'),
+      drag: () => interact('drag'),
+      activate: () => interact('activate'),
       subscribe: (listener: () => void) => {
         this.listeners.add(listener)
         return () => {
@@ -146,7 +170,7 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
       identity: { source: registration.identity.source, pluginId: registration.identity.id },
       catalogVersion: 'composer-visual-interaction-v1',
       binding: this.binding(registration, operationId, operationId),
-    }, { ...declaration, scope: { extensionPoints: declaration.scope.extensionPoints, events: ['pointer.observe'] } })
+    }, supportedDeclaration(declaration))
     let retired = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let cancel!: () => void

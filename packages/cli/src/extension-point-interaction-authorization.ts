@@ -66,12 +66,15 @@ export function visualInteractionPlan(
       allowedDecisions: Object.freeze(['allow-once', 'deny-once'] as const),
       defaultDecision: 'deny-once' as const,
       presentation: Object.freeze({
-        name: message('name', 'Observe pointer in visual extension points'),
-        description: message('description', 'Receive normalized pointer position in the listed visual seats.'),
-        risk: message('risk', 'The plugin can react to pointer movement while its visual is active.'),
+        name: message('name', 'Interact with visual extension points'),
+        description: message(
+          'description',
+          'Receive the declared pointer position, drag displacement and activation signals in the listed visual seats.',
+        ),
+        risk: message('risk', 'The plugin can react to declared interactions while its visual is active.'),
         limitation: message(
           'limitation',
-          'No input text, raw events, native handlers or native action control. Permission lasts for this plugin generation.',
+          'Drag and activation apply only to local overlay hit regions. No input text, raw events, native handlers or native action control. Permission lasts for this plugin generation.',
         ),
       }),
     })]),

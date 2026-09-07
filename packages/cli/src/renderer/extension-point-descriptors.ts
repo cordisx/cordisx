@@ -480,11 +480,15 @@ function normalizeDescriptor(
     }
   }
   const visualEvents = (value as { events?: unknown }).events
+  const visualPointId: string = descriptor.id
   if (schemaVersion === 10 && payloadFamily === 'extension-point-visual-v1') {
     if (
-      !['composer.primary-action.visual', 'composer.frame.overlay'].includes(descriptor.id)
+      !['composer.primary-action.visual', 'composer.frame.overlay'].includes(visualPointId)
       || descriptor.kind !== 'surface'
-      || !Array.isArray(visualEvents) || visualEvents.some(event => event !== 'pointer.observe')
+      || !Array.isArray(visualEvents) || visualEvents.some(event =>
+        event !== 'pointer.observe'
+        && !(visualPointId === 'composer.frame.overlay' && ['drag', 'activate'].includes(event))
+      )
       || new Set(visualEvents).size !== visualEvents.length
     ) throw new Error('Invalid composer visual descriptor')
   } else if (visualEvents !== undefined) throw new Error('Events require a visual descriptor')

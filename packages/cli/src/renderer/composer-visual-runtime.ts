@@ -1,3 +1,5 @@
+import { ComposerVisualDrag } from './composer-visual-drag.js'
+import type { ExtensionPointDragHandleV1 } from '@cordisx/protocol/extension-point-drag/v1'
 import type { ExtensionPointVisualSnapshotV2 } from '@cordisx/protocol/extension-point-visual/v2'
 import * as React from 'react'
 import { resolveHostTheme } from './host-theme.js'
@@ -14,6 +16,8 @@ export interface ComposerVisualAuthority {
   mounted?(): () => void
   render(): boolean
   observePointer(): boolean
+  drag?(): boolean
+  activate?(): boolean
   subscribe(listener: () => void): () => void
 }
 type VisualSnapshot = ExtensionPointVisualSnapshotV1 | ExtensionPointVisualSnapshotV2
@@ -38,6 +42,7 @@ interface Mounted {
   readonly releaseRendered: () => void
   readonly restore: () => void
   readonly source: VisualSource
+  drag?: ComposerVisualDrag
 }
 
 class VisualSource {
@@ -65,9 +70,16 @@ class VisualBoundary extends React.Component<{ children: React.ReactNode; failed
     return this.state.failed ? null : this.props.children
   }
 }
-function VisualBody({ source, visual }: { source: VisualSource; visual: CordisXReactVisual }): React.ReactElement {
+function VisualBody(
+  { source, visual, getDrag }: {
+    source: VisualSource
+    visual: CordisXReactVisual
+    getDrag: () => ExtensionPointDragHandleV1 | undefined
+  },
+): React.ReactElement {
   const state = React.useSyncExternalStore(source.subscribe, source.getSnapshot)
-  return React.createElement(visual.component, { state })
+  const drag = getDrag()
+  return React.createElement(visual.component, { state, ...(drag === undefined ? {} : { drag }) })
 }
 function positioned(parent: HTMLElement): () => void {
   if (parent.ownerDocument.defaultView?.getComputedStyle(parent).position !== 'static') return () => {}
@@ -102,7 +114,7 @@ export class ComposerVisualRuntime {
       if (
         records.some(record =>
           (record.target instanceof view.Element ? record.target : record.target.parentElement)
-            ?.closest('[data-cordisx-composer-visual]') == null
+            ?.closest('[data-cordisx-composer-visual], [data-cordisx-composer-drag]') == null
         )
       ) this.schedule()
     })
@@ -141,7 +153,12 @@ export class ComposerVisualRuntime {
     if (declaration.snapshotVersion !== undefined && ![1, 2].includes(declaration.snapshotVersion)) {
       throw new Error('Unsupported visual snapshot version')
     }
-    if (declaration.events?.some(event => event !== 'pointer.observe')) {
+    if (
+      declaration.events?.some(event =>
+        event !== 'pointer.observe'
+        && !(['drag', 'activate'].includes(event) && declaration.pointId === 'composer.frame.overlay')
+      )
+    ) {
       throw new Error('Requested visual interaction is unavailable')
     }
     const record: Registration = {
@@ -154,7 +171,10 @@ export class ComposerVisualRuntime {
         for (const [point, mount] of this.mounted) {
           if (mount.registration !== record) continue
           if (!authority.render()) this.unmount(point)
-          else mount.source.update(this.snapshot(mount.seat, record))
+          else {
+            this.syncDrag(mount)
+            mount.source.update(this.snapshot(mount.seat, record))
+          }
         }
         this.schedule()
       }),
@@ -194,7 +214,12 @@ export class ComposerVisualRuntime {
     const anchorBounds = (record.declaration.pointId === 'composer.primary-action.visual' ? seat.button : seat.frame)
       .getBoundingClientRect()
     const bounds = record.declaration.pointId === 'composer.frame.overlay'
-      ? { left: anchorBounds.left, top: anchorBounds.top - 128, width: anchorBounds.width, height: 128 }
+      ? {
+        left: anchorBounds.left,
+        top: anchorBounds.top - this.overlayHeight(seat, record),
+        width: anchorBounds.width,
+        height: this.overlayHeight(seat, record),
+      }
       : anchorBounds
     const pointer = record.declaration.events?.includes('pointer.observe') && record.authority.observePointer()
       ? this.pointer
@@ -281,9 +306,40 @@ export class ComposerVisualRuntime {
         continue
       }
       const existing = this.mounted.get(point)
-      if (existing !== undefined) existing.source.update(this.snapshot(seat, record))
-      else this.mount(point, record, seat)
+      if (existing !== undefined) {
+        this.syncDrag(existing)
+        existing.source.update(this.snapshot(seat, record))
+      } else this.mount(point, record, seat)
     }
+  }
+
+  private overlayHeight(seat: NativeComposerVisualSeat, record: Registration): number {
+    return record.declaration.events?.includes('drag') && record.authority.drag?.()
+      ? Math.max(0, seat.frame.getBoundingClientRect().top)
+      : 128
+  }
+
+  private syncDrag(mount: Mounted): void {
+    const record = mount.registration
+    if (record.declaration.pointId !== 'composer.frame.overlay') return
+    mount.container.style.height = `${this.overlayHeight(mount.seat, record)}px`
+    const drag = () =>
+      !record.retired && !this.disposed && record.authority.render()
+      && Boolean(record.declaration.events?.includes('drag') && record.authority.drag?.())
+    const activate = () =>
+      !record.retired && !this.disposed && record.authority.render()
+      && Boolean(record.declaration.events?.includes('activate') && record.authority.activate?.())
+    if (!drag() && !activate()) {
+      mount.drag?.dispose()
+      delete mount.drag
+      return
+    }
+    mount.drag ??= new ComposerVisualDrag(
+      mount.seat.frame,
+      () => ({ width: mount.seat.frame.getBoundingClientRect().width, height: this.overlayHeight(mount.seat, record) }),
+      { drag, activate },
+    )
+    mount.drag.refresh()
   }
 
   private mount(point: ExtensionPointVisualIdV1, record: Registration, seat: NativeComposerVisualSeat): void {
@@ -299,7 +355,13 @@ export class ComposerVisualRuntime {
     const visualStyle = (seat.visual as SVGElement | HTMLElement).style
     const oldVisibility = visualStyle.getPropertyValue('visibility')
     const oldPriority = visualStyle.getPropertyPriority('visibility')
-    if (point === 'composer.primary-action.visual') visualStyle.setProperty('visibility', 'hidden')
+    const buttonStyle = seat.button.style
+    const oldBackground = buttonStyle.getPropertyValue('background-color')
+    const oldBackgroundPriority = buttonStyle.getPropertyPriority('background-color')
+    if (point === 'composer.primary-action.visual') {
+      visualStyle.setProperty('visibility', 'hidden')
+      buttonStyle.setProperty('background-color', 'transparent')
+    }
     parent.append(container)
     const root = createRoot(container)
     const source = new VisualSource(this.snapshot(seat, record))
@@ -307,6 +369,12 @@ export class ComposerVisualRuntime {
       if (point === 'composer.primary-action.visual' && visualStyle.getPropertyValue('visibility') === 'hidden') {
         if (oldVisibility === '') visualStyle.removeProperty('visibility')
         else visualStyle.setProperty('visibility', oldVisibility, oldPriority)
+      }
+      if (
+        point === 'composer.primary-action.visual' && buttonStyle.getPropertyValue('background-color') === 'transparent'
+      ) {
+        if (oldBackground === '') buttonStyle.removeProperty('background-color')
+        else buttonStyle.setProperty('background-color', oldBackground, oldBackgroundPriority)
       }
       restorePosition()
     }
@@ -319,6 +387,7 @@ export class ComposerVisualRuntime {
       restore,
       releaseRendered: record.authority.mounted?.() ?? (() => {}),
     })
+    this.syncDrag(this.mounted.get(point)!)
     this.resize?.observe(parent)
     root.render(React.createElement(VisualBoundary, {
       failed: () => {
@@ -328,7 +397,11 @@ export class ComposerVisualRuntime {
         })
         this.schedule()
       },
-      children: React.createElement(VisualBody, { source, visual: record.loaded! }),
+      children: React.createElement(VisualBody, {
+        source,
+        visual: record.loaded!,
+        getDrag: () => this.mounted.get(point)?.drag?.handle,
+      }),
     }))
   }
 
@@ -337,6 +410,7 @@ export class ComposerVisualRuntime {
     if (mount === undefined) return
     this.mounted.delete(point)
     this.resize?.unobserve(point === 'composer.primary-action.visual' ? mount.seat.button : mount.seat.frame)
+    mount.drag?.dispose()
     mount.root.unmount()
     mount.container.remove()
     mount.restore()

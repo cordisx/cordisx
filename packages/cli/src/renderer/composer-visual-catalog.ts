@@ -9,13 +9,14 @@ const en = {
   'primary.title': 'Composer primary action visual',
   'primary.description': 'Replace the inner visual while the native button retains its action and accessibility.',
   'overlay.title': 'Composer frame overlay',
-  'overlay.description': 'Bounded pointer-inert SVG decoration with separately authorized pointer observation.',
+  'overlay.description':
+    'Bounded decoration with separately authorized pointer observation, local dragging and activation.',
 }
 const zh = {
   'primary.title': '输入框主操作视觉',
   'primary.description': '替换内部视觉，原生按钮保留操作和无障碍语义。',
   'overlay.title': '输入框覆盖视觉',
-  'overlay.description': '限定范围内的 SVG 装饰，点击穿透；指针观察需单独授权。',
+  'overlay.description': '限定范围内的装饰；指针观察、局部拖拽和点击响应需单独授权。',
 }
 export const COMPOSER_VISUAL_LOCALES: readonly CordisXLocaleCatalog[] = [
   { namespace, locale: 'en', default: true, messages: en },
@@ -33,7 +34,7 @@ export const COMPOSER_VISUAL_CATALOG: CordisXHostExtensionPointCatalogV10 = {
       maturity: 'experimental',
       adapterSupport: 'supported',
       icon: 'host:sparkles',
-      events: ['pointer.observe'],
+      events: index === 0 ? ['pointer.observe'] : ['pointer.observe', 'drag', 'activate'],
       title: { namespace, key: `${key}.title`, fallback: en[`${key}.title`] },
       description: { namespace, key: `${key}.description`, fallback: en[`${key}.description`] },
     }

@@ -43,11 +43,12 @@ function setup() {
   })
   const runtime = new ComposerVisualRuntime(dom.window.document)
   cleanup.push(() => dom.window.close(), () => runtime.dispose())
-  let render = false, pointer = false
+  let render = false, pointer = false, drag = false
   const listeners = new Set<() => void>()
   const authority: ComposerVisualAuthority = {
     render: () => render,
     observePointer: () => pointer,
+    drag: () => drag,
     subscribe: listener => {
       listeners.add(listener)
       return () => {
@@ -59,9 +60,10 @@ function setup() {
     runtime,
     document: dom.window.document,
     authority,
-    grant(r: boolean, p = false) {
+    grant(r: boolean, p = false, d = false) {
       render = r
       pointer = p
+      drag = d
       for (const listener of listeners) listener()
     },
     listeners,
@@ -91,6 +93,8 @@ const loadVisual = async () => ({ kind: 'react-svg-v1' as const, component: Visu
 describe('controlled Composer visual lifecycle', () => {
   it('mounts an explicitly declared DOM visual inertly and disposes its effects on revoke', async () => {
     const f = setup()
+    const button = f.document.querySelector('button')!
+    button.style.setProperty('background-color', 'red', 'important')
     const disposed = vi.fn()
     function DomVisual() {
       React.useEffect(() => disposed, [])
@@ -107,12 +111,15 @@ describe('controlled Composer visual lifecycle', () => {
     f.grant(true)
     await vi.waitFor(() => expect(f.document.querySelector('[data-real-avatar]')).not.toBeNull())
     const root = f.document.querySelector<HTMLElement>('[data-cordisx-composer-visual]')!
+    expect(button.style.backgroundColor).toBe('transparent')
     expect(root.hasAttribute('inert')).toBe(true)
     expect(root.style.pointerEvents).toBe('none')
     expect(root.style.overflow).toBe('hidden')
     f.grant(false)
     await vi.waitFor(() => expect(disposed).toHaveBeenCalledOnce())
     expect(f.document.querySelector('[data-real-avatar]')).toBeNull()
+    expect(button.style.backgroundColor).toBe('red')
+    expect(button.style.getPropertyPriority('background-color')).toBe('important')
     expect(f.document.querySelector<SVGElement>('button > svg')!.style.visibility).toBe('')
   })
 
@@ -263,4 +270,61 @@ it('keeps both visuals across the native waveform dictation footer replacement',
   await vi.waitFor(() => expect(f.document.querySelector('[data-dictation="transcribing"]')).not.toBeNull())
   expect(f.runtime.inspect().roots).toBe(2)
   expect(footer.querySelector('button')).toBe(stop)
+})
+
+it('gates the drag sibling independently, expands its band, and retires the old handle on revoke', async () => {
+  const f = setup()
+  const frame = f.document.querySelector<HTMLElement>('[data-codex-composer-root]')!
+  frame.getBoundingClientRect = () => ({
+    left: 0,
+    top: 400,
+    right: 300,
+    bottom: 500,
+    x: 0,
+    y: 400,
+    width: 300,
+    height: 100,
+    toJSON() {},
+  })
+  let handle: CordisXReactVisualProps['drag']
+  function DragVisual({ state, drag }: CordisXReactVisualProps) {
+    handle = drag
+    React.useEffect(() => {
+      drag?.setRegion({ x: 20, y: state.bounds.height - 80, width: 60, height: 80, label: 'Move cat' })
+      return () => drag?.setRegion(null)
+    }, [drag, state.bounds.height])
+    return React.createElement('span', {
+      'data-drag-available': Boolean(drag),
+      'data-band-height': state.bounds.height,
+    })
+  }
+  f.runtime.register(
+    'drag',
+    { id: 'cat', pointId: 'composer.frame.overlay', events: ['drag'] },
+    async () => ({ kind: 'react-dom-v1', component: DragVisual }),
+    f.authority,
+  )
+  f.grant(true)
+  await vi.waitFor(() => expect(f.document.querySelector('[data-band-height="128"]')).not.toBeNull())
+  expect(f.document.querySelector('[data-cordisx-composer-drag]')).toBeNull()
+  f.grant(true, false, true)
+  await vi.waitFor(() => expect(f.document.querySelector('[data-band-height="400"]')).not.toBeNull())
+  const target = f.document.querySelector('[data-cordisx-composer-drag]')!
+  expect(target.parentElement).toBe(frame)
+  expect(target.closest('[inert]')).toBeNull()
+  const old = handle!
+  f.grant(true)
+  expect(f.document.querySelector('[data-cordisx-composer-drag]')).toBeNull()
+  old.setRegion({ x: 0, y: 0, width: 100, height: 100, label: 'stale' })
+  expect(f.document.querySelector('[data-cordisx-composer-drag]')).toBeNull()
+  await vi.waitFor(() => expect(f.document.querySelector('[data-band-height="128"]')).not.toBeNull())
+  expect(handle).toBeUndefined()
+  expect(() =>
+    f.runtime.register(
+      'invalid',
+      { id: 'invalid', pointId: 'composer.primary-action.visual', events: ['drag'] },
+      loadVisual,
+      f.authority,
+    )
+  ).toThrow('unavailable')
 })

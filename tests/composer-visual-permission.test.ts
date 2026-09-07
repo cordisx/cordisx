@@ -205,3 +205,98 @@ it('auto-authorizes only Host-enrolled local development identities and keeps re
   expect(promptVisual).not.toHaveBeenCalled()
   broker.dispose()
 })
+
+it('gates overlay drag and activation independently and rejects required unsupported point/event pairs', () => {
+  for (const events of [['pointer.observe'], ['drag'], ['activate'], ['pointer.observe', 'drag', 'activate']]) {
+    const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), { request: async () => 'deny' })
+    broker.enableDevelopmentVisualIdentity(identity)
+    const declaration = { ...interaction, scope: { extensionPoints: points, events } }
+    const candidate = normalizeVisualManifestV10({
+      ...manifest(),
+      capabilities: [manifest().capabilities[0], declaration],
+    }, identity.id)
+    const unregister = broker.register(identity, candidate, { pluginId: identity.id, moduleGeneration: 'events' })
+    const primary = broker.visualAuthority(identity, 'events', points[0], () => true)
+    const overlay = broker.visualAuthority(identity, 'events', points[1], () => true)
+    expect(primary.observePointer()).toBe(events.includes('pointer.observe'))
+    expect(primary.drag?.()).toBe(false)
+    expect(primary.activate?.()).toBe(false)
+    expect(overlay.observePointer()).toBe(events.includes('pointer.observe'))
+    expect(overlay.drag?.()).toBe(events.includes('drag'))
+    expect(overlay.activate?.()).toBe(events.includes('activate'))
+    broker.setVisualInteractionPolicy(identity, false)
+    expect(overlay.drag?.()).toBe(false)
+    expect(overlay.activate?.()).toBe(false)
+    unregister()
+    expect(overlay.drag?.()).toBe(false)
+    const required = normalizeVisualManifestV10({
+      ...manifest(),
+      capabilities: [manifest().capabilities[0], { ...declaration, required: true }],
+    }, identity.id)
+    const retire = broker.register(identity, required, { pluginId: identity.id, moduleGeneration: 'required' })
+    expect(broker.visualDeclarationSupported(identity, 'required')).toBe(
+      events.length === 1 && events[0] === 'pointer.observe',
+    )
+    retire()
+    const overlayRequired = normalizeVisualManifestV10({
+      ...manifest(),
+      capabilities: [manifest().capabilities[0], {
+        ...declaration,
+        required: true,
+        scope: { extensionPoints: [points[1]], events },
+      }],
+    }, identity.id)
+    const retireOverlay = broker.register(identity, overlayRequired, {
+      pluginId: identity.id,
+      moduleGeneration: 'overlay-required',
+    })
+    expect(broker.visualDeclarationSupported(identity, 'overlay-required')).toBe(true)
+    retireOverlay()
+    broker.dispose()
+  }
+})
+
+it('reviews only declared supported events without widening a drag-only grant to pointer or activation', async () => {
+  const plans: ReturnType<typeof visualInteractionPlan>[] = []
+  const broker = new PermissionBroker(
+    new MemoryPermissionPolicyStore(),
+    { request: async () => 'deny' },
+    () => new Date(),
+    500,
+    'test',
+    'runtime',
+    undefined,
+    undefined,
+    {
+      request: async () => undefined,
+      requestVisualV5: async plan => {
+        plans.push(plan)
+        const model = new PermissionAuthorizationViewModel(plan)
+        model.select('ui.extension-points.interact', 'allow-once')
+        const result = model.confirm()
+        return result.status === 'confirmed' ? result.decision : undefined
+      },
+    },
+  )
+  const candidate = normalizeVisualManifestV10({
+    ...manifest(),
+    capabilities: [manifest().capabilities[0], {
+      ...interaction,
+      scope: { extensionPoints: points, events: ['drag'] },
+    }],
+  }, identity.id)
+  const unregister = broker.register(identity, candidate, { pluginId: identity.id, moduleGeneration: 'drag' })
+  try {
+    await broker.setDomPolicy(identity, points[1], 'allow-persistent')
+    const authority = broker.visualAuthority(identity, 'drag', points[1], () => true)
+    expect(authority.drag?.()).toBe(false)
+    await vi.waitFor(() => expect(authority.drag?.()).toBe(true))
+    expect(plans).toHaveLength(1)
+    expect(plans[0]!.declarations[0]!.scope).toEqual({ extensionPoints: [...points].sort(), events: ['drag'] })
+    expect(authority.observePointer()).toBe(false)
+    expect(authority.activate?.()).toBe(false)
+  } finally {
+    unregister()
+    broker.dispose()
+  }
+})

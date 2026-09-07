@@ -28,6 +28,7 @@ export type {
 } from './vite-development-generation.js'
 import {
   COMMONJS_INTEROP_LEAVES,
+  invalidateNativeVitePluginSources,
   SHARED_MODULES,
   SHARED_REACT_INTEROP_LEAVES,
   VITE_CLIENT_DISPOSER_SOURCE,
@@ -539,6 +540,7 @@ if (import.meta.hot) {
     const plugin = config.plugins.find(item => item.id === pluginId && item.enabled)
     if (plugin === undefined) throw new Error(`Unknown Vite development plugin: ${pluginId}`)
     await bumpGeneration(plugin)
+    invalidateNativeVitePluginSources(server.moduleGraph, await ensureGeneration(plugin), timestamp)
     invalidatePluginModule(plugin.id, timestamp)
   }
   const validateModuleGraph = async (module: ModuleNode, seen = new Set<ModuleNode>()): Promise<void> => {
@@ -685,6 +687,7 @@ if (import.meta.hot) {
           || (owners.has(plugin.id) && (directEntryOwners.size > 0 || !refreshBoundaryHandlesUpdate))
         ) {
           await bumpGeneration(plugin)
+          invalidateNativeVitePluginSources(server.moduleGraph, generation, context.timestamp)
           invalidatePluginModule(plugin.id, context.timestamp)
           replacements.add(plugin.id)
         }

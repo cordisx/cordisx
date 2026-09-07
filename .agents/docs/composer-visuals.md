@@ -50,7 +50,7 @@ has yet been established, so transient success/failure events are not emitted.
 ## Lifecycle and remaining delivery gates
 
 The runtime retains the native button and restores inner visual visibility on
-withdrawal. Both visual containers are pointer inert in this first runtime.
+withdrawal. Artwork in both visual containers remains pointer inert.
 The overlay is a bounded, pointer-inert 128 CSS px band immediately above the
 Composer frame, aligned to its width. It remains clipped to this Host-issued
 band, so plugin artwork can peek from the upper edge without covering native
@@ -58,7 +58,7 @@ input controls. Primary visuals retain their native button bounds. Overlay
 snapshots and pointer normalization use the upper band's bounds, not the
 native frame rectangle. Artwork size and expression remain plugin choices.
 Pointer observation is normalized within the selected point bounds and separately gated.
-Activate and drag remain unavailable even if declared. Deferred completions are
+Overlay drag and activation are available through a separately authorized Host-owned hit region; the primary point still supports observation only. Deferred completions are
 fenced by registration retirement and authority epoch. Native replacement
 remounts the selected contribution; a renderer error restores native content.
 
@@ -80,14 +80,13 @@ that never register a visual.
 
 Manifest v10 declares `ui.extension-points.render` with exact points, plus an
 optional `ui.extension-points.interact` declaration with exact points/events.
-The Host currently supports `pointer.observe`; a required unsupported event
+The Host supports `pointer.observe` at both points and `drag` / `activate` at the overlay; a required unsupported point/event pair
 prevents visual activation. Optional unimplemented events remain unavailable.
 Installed-plugin interaction review offers allow-once/deny-once only. Manager Allow opens a new
 explicit review; it never silently grants interaction. Deny revokes the active
 lease immediately. No certified implicit interaction approval is offered.
 
-This is trusted renderer code, not an isolation sandbox. Components must use
-SVG without native DOM access, refs, raw handlers, HTML, or external resources.
+This is trusted renderer code, not an isolation sandbox. Components use the declared SVG or React DOM visual renderer without native DOM access or raw native handlers.
 Both Host containers are inert and hidden from accessibility; the native button
 retains focus, event handling, label and disabled/busy semantics. Busy and
 enabled are independently projected from native evidence.
@@ -218,3 +217,26 @@ snapshot, holds/eases gaze in its own state, and maps dictation or primary state
 to its own expressions. It must dispose animation timers on unmount and honor
 reduced motion. Avatar dependencies and artwork remain plugin-owned; the Host
 adds no Avatar-specific state machine or mouse behavior.
+
+## Overlay drag and activation
+
+The optional React `drag` prop implements the Protocol [drag handle v1](https://github.com/cordisx/cordisx-protocol/blob/codex/composer-animal-visual/.agents/docs/extension-point-drag-v1.md).
+Declare `drag` and/or `activate` in the visual registration and manifest
+interaction scope. Pointer observation does not grant either capability.
+The handle is absent when unsupported or unauthorized.
+
+Report a local artwork rectangle with `setRegion`; Host creates a clipped,
+accessible interaction sibling while the artwork stays inert. Only that rectangle
+accepts presses. Drag-authorized overlays can use the viewport area above the
+Composer, with dimensions supplied in `state.bounds`; ordinary overlays retain
+the 128 px band. Plugins must place artwork relative to the supplied bounds.
+
+Pointer capture, cancellation, arrow-key movement and keyboard activation belong
+to Host. The plugin subscribes to gesture snapshots and owns placement, release
+physics and expressions. A drag cannot trigger activation when released, even
+if the pointer returned to its origin. Revocation, replacement and disposal
+remove hit regions and retire handles. No persistent placement is implied.
+
+Optional mixed scopes may list both points, but Host only exposes drag/activation
+at the overlay. Required unsupported pairs fail activation. Native submission
+and input are not intercepted by these interaction regions.
