@@ -61,3 +61,17 @@ covers owner mismatch, trusted-scope separation, resource layout, traversal and
 revocation, and reruns existing built-in Skill protection checks. This is scoped
 evidence. Production CDP/native composition and actual Room/Shell readback must
 be validated separately with the integration owners.
+
+## Existing Shell projection
+
+Plugins with actual persisted command messages use `registerSourceV10` and the
+Protocol v10 `plugin-command` source. The source carries Room/message/Session/
+participant/member/run/operation ids and original Room sequence. The Host
+checks the selected Room, message id and Agent author association, then reuses
+its existing message projection and renderer. The command does not become a
+SessionEvent or an acknowledgement. Older registrations retain strict source
+validation; a plugin must report the missing v10 service rather than relabel a
+command message. Body, timestamp and menu behavior stay in the existing Shell.
+
+The source is a projection of the plugin's persisted fact, not proof of authority
+on its own. The true write remains the authenticated command handler's Room CAS.

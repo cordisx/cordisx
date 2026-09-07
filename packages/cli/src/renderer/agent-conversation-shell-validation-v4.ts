@@ -12,7 +12,7 @@ import type {
 import type {
   AgentConversationItem as ProtocolItemV7,
   AgentConversationShellSnapshot as AgentConversationShellSnapshotV7,
-} from '@cordisx/protocol/agent-conversation-shell/v7'
+} from '@cordisx/protocol/agent-conversation-shell/v10'
 import {
   agentLoopHandle,
   assertAction,
@@ -110,7 +110,11 @@ export function assertSelectionV4(value: unknown, label: string): asserts value 
   })
 }
 
-export function assertItemV4(value: unknown, label: string): asserts value is ProtocolItemV4 {
+export function assertItemV4(
+  value: unknown,
+  label: string,
+  allowPluginCommands = false,
+): asserts value is ProtocolItemV4 {
   plainObject(value, label)
   if (value.kind === 'status') {
     exactKeys(value, ['kind', 'itemId', 'sequence', 'label', 'state', 'ariaLive'], label)
@@ -232,6 +236,26 @@ export function assertItemV4(value: unknown, label: string): asserts value is Pr
     if (!Number.isSafeInteger(value.source.eventSeq) || (value.source.eventSeq as number) < 1) {
       throw new Error(`${label}.source.eventSeq is invalid`)
     }
+  } else if (allowPluginCommands && value.source.kind === 'plugin-command') {
+    exactKeys(value.source, [
+      'kind',
+      'roomId',
+      'messageId',
+      'sessionId',
+      'participantId',
+      'memberId',
+      'runId',
+      'operationId',
+      'sequence',
+    ], `${label}.source`)
+    for (const key of ['roomId', 'messageId', 'sessionId', 'participantId', 'memberId', 'runId', 'operationId']) {
+      opaque(value.source[key], `${label}.source.${key}`)
+    }
+    safeSequence(value.source.sequence, `${label}.source.sequence`)
+    if (
+      (value.source.sequence as number) < 1 || value.source.messageId !== value.messageId
+      || value.source.participantId !== value.author.participantId || value.author.role !== 'agent'
+    ) throw new Error(`${label} plugin command identity mismatch`)
   } else if (value.source.kind === 'chatroom-acknowledgement') exactKeys(value.source, ['kind'], `${label}.source`)
   else throw new Error(`${label}.source.kind is invalid`)
   plainObject(value.semantic, `${label}.semantic`)
@@ -256,6 +280,9 @@ export function assertItemV4(value: unknown, label: string): asserts value is Pr
   } else throw new Error(`${label}.semantic.purpose is invalid`)
   if (value.source.kind === 'chatroom-acknowledgement' !== (value.semantic.purpose === 'chatroom-acknowledgement')) {
     throw new Error(`${label}.source and semantic mismatch`)
+  }
+  if (value.source.kind === 'plugin-command' && value.semantic.purpose !== 'conversation') {
+    throw new Error(`${label} plugin command semantic mismatch`)
   }
   if (!Array.isArray(value.body) || value.body.length === 0 || value.body.length > 64) {
     throw new Error(`${label}.body is invalid`)
@@ -354,10 +381,14 @@ export function assertItemV6(value: unknown, label: string): asserts value is Pr
   })
 }
 
-export function assertItemV7(value: unknown, label: string): asserts value is ProtocolItemV7 {
+export function assertItemV7(
+  value: unknown,
+  label: string,
+  allowPluginCommands = false,
+): asserts value is ProtocolItemV7 {
   plainObject(value, label)
   if (value.kind !== 'approval') {
-    assertItemV4(value, label)
+    assertItemV4(value, label, allowPluginCommands)
     return
   }
   exactKeys(value, [
@@ -609,7 +640,10 @@ export function assertSnapshotV6(value: unknown): asserts value is AgentConversa
   }
 }
 
-export function assertSnapshotV7(value: unknown): asserts value is AgentConversationShellSnapshotV7 {
+export function assertSnapshotV7(
+  value: unknown,
+  allowPluginCommands = false,
+): asserts value is AgentConversationShellSnapshotV7 {
   plainObject(value, 'v7 snapshot')
   exactKeys(
     value,
@@ -624,7 +658,7 @@ export function assertSnapshotV7(value: unknown): asserts value is AgentConversa
   safeSequence(value.snapshotSequence, 'v7 snapshot.snapshotSequence')
   assertSelectionV4(value.selection, 'v7 snapshot.selection')
   if (!Array.isArray(value.items) || value.items.length > 500) throw new Error('v7 snapshot.items is invalid')
-  value.items.forEach((item, index) => assertItemV7(item, `v7 snapshot.items[${index}]`))
+  value.items.forEach((item, index) => assertItemV7(item, `v7 snapshot.items[${index}]`, allowPluginCommands))
   if (value.items.some(item => item.sequence > (value.snapshotSequence as number))) {
     throw new Error('v7 snapshot item sequence exceeds watermark')
   }
@@ -648,7 +682,9 @@ export function assertSnapshotV7(value: unknown): asserts value is AgentConversa
   if (value.selection.kind !== 'room') {
     if (
       value.items.some(item =>
-        item.kind === 'approval' || item.kind === 'message' && item.semantic.purpose === 'member-self-introduction'
+        item.kind === 'approval'
+        || item.kind === 'message'
+          && (item.semantic.purpose === 'member-self-introduction' || item.source.kind === 'plugin-command')
       )
     ) throw new Error('v7 no-room snapshot contains Room items')
     return
@@ -664,6 +700,9 @@ export function assertSnapshotV7(value: unknown): asserts value is AgentConversa
   const approvals = new Set<string>()
   for (const item of value.items) {
     if (item.kind === 'message') {
+      if (item.source.kind === 'plugin-command' && item.source.roomId !== value.selection.roomId) {
+        throw new Error('plugin command belongs to another Room')
+      }
       const participant = participants.get(item.author.participantId)
       if (
         participant === undefined || participant.role !== item.author.role
