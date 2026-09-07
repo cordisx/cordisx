@@ -75,6 +75,10 @@ export function projectSidebarGroupAppearance(root: HTMLElement, seat: SidebarCo
     'padding-inline': heading?.paddingInlineStart,
     'padding-block': heading?.paddingBlockStart,
     'margin-block': section?.marginBlockStart,
+    'margin-block-end': section?.marginBlockEnd,
+    'section-padding-block-start': section?.paddingBlockStart,
+    'section-padding-block-end': section?.paddingBlockEnd,
+    ...collectionHorizontalInsets(root, seat),
     gap: view?.getComputedStyle(seat.parent).rowGap,
     'item-gap': rowListStyle?.display === 'grid'
         || (rowListStyle?.display === 'flex' && rowListStyle.flexDirection === 'column')
@@ -87,5 +91,44 @@ export function projectSidebarGroupAppearance(root: HTMLElement, seat: SidebarCo
     if (root.style.getPropertyValue(property) === value) continue
     if (value === '') root.style.removeProperty(property)
     else root.style.setProperty(property, value)
+  }
+}
+
+/** Native section padding can live several wrappers above its zero-padding toggle. */
+function collectionHorizontalInsets(
+  root: HTMLElement,
+  seat: SidebarCollectionsSeat,
+): Record<string, string | undefined> {
+  const view = root.ownerDocument.defaultView
+  const outer = root.getBoundingClientRect()
+  const rtl = view?.getComputedStyle(root).direction === 'rtl'
+  const bounds = (element: HTMLElement | undefined, content = false): { left: number; right: number } | undefined => {
+    if (element === undefined || view === null || outer.width <= 0) return undefined
+    const rect = element.getBoundingClientRect()
+    if (rect.width <= 0) return undefined
+    const style = view.getComputedStyle(element)
+    const pixels = (value: string): number => Number.parseFloat(value) || 0
+    return {
+      left: rect.left + (content ? pixels(style.paddingLeft) + pixels(style.borderLeftWidth) : 0),
+      right: rect.right - (content ? pixels(style.paddingRight) + pixels(style.borderRightWidth) : 0),
+    }
+  }
+  const section = bounds(seat.section, true)
+  const heading = bounds(seat.heading) ?? section
+  const row = bounds(seat.row) ?? section
+  const start = (box: typeof section): string | undefined =>
+    box === undefined
+      ? undefined
+      : `${Math.max(0, rtl ? outer.right - box.right : box.left - outer.left)}px`
+  const end = (box: typeof section): string | undefined =>
+    box === undefined
+      ? undefined
+      : `${Math.max(0, rtl ? box.left - outer.left : outer.right - box.right)}px`
+  return {
+    'heading-inset-start': start(heading),
+    // A native label-sized toggle must not cap a different plugin label's width.
+    'heading-inset-end': end(section),
+    'row-inset-start': start(row),
+    'row-inset-end': end(row),
   }
 }
