@@ -54,7 +54,7 @@ function identity(value: unknown): value is string {
 function vector(raw: unknown): UsageTokenVector | null {
   if (!record(raw)) return null
   // Older rollout versions omit cache writes; Codex serde gives this field a zero default.
-  const normalized = {
+  const normalized: Record<string, unknown> = {
     ...raw,
     cache_write_input_tokens: raw.cache_write_input_tokens === undefined ? 0 : raw.cache_write_input_tokens,
   }
