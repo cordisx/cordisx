@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -11,6 +11,12 @@ const channelRuntimeDestination = fileURLToPath(new URL('../dist/channel-runtime
 const channelServiceDestination = fileURLToPath(new URL('../dist/src/launcher/channel-service.js', import.meta.url))
 const cordisxSkillSource = fileURLToPath(new URL('../../../skills/cordisx-plugin-development', import.meta.url))
 const cordisxSkillDestination = fileURLToPath(new URL('../dist/skills/cordisx-plugin-development', import.meta.url))
+const markdownEditorStyleSource = fileURLToPath(
+  new URL('../src/renderer/host-ui/public-markdown-editor.css', import.meta.url),
+)
+const markdownEditorStyleDestination = fileURLToPath(
+  new URL('../dist/src/renderer/host-ui/public-markdown-editor.css', import.meta.url),
+)
 
 await mkdir(destination, { recursive: true })
 await cp(source, destination, { recursive: true, force: true })
@@ -20,6 +26,10 @@ await cp(cliProxySource, cliProxyDestination, {
   force: true,
   filter: sourcePath => !sourcePath.endsWith('index.ts'),
 })
+// TypeScript preserves the public editor's inline CSS import. Keep the source
+// beside its compiled module so Vite can resolve the normal installed graph.
+await mkdir(path.dirname(markdownEditorStyleDestination), { recursive: true })
+await copyFile(markdownEditorStyleSource, markdownEditorStyleDestination)
 // Channel runtime is private workspace infrastructure. Package the compiled
 // launcher-only runtime beside the CLI and rewrite its single Node entry import
 // so an installed `cordisx` tarball never relies on a workspace symlink.
