@@ -1,9 +1,13 @@
 import type { AgentLoopTaskDetailsUrl } from '@cordisx/protocol/agent-loop/v2'
 import type { AgentDetailReference } from '@cordisx/protocol/agents/v1'
 import type { SessionId } from '@cordisx/protocol/sessions/v1'
-import { withoutCordisXRouteHistoryEntry } from '../codex-router-history.js'
+import {
+  type BrowserRouteHistoryAdapter,
+  CodexRouterHistoryAdapter,
+  withoutCordisXRouteHistoryEntry,
+} from '../codex-router-history.js'
 
-/** Host-private notification for same-document task URL pushes. */
+/** Host-private notification consumed by browser-hosted Playground task surfaces. */
 export const CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT = 'cordisx:host-task-details-navigation'
 
 export interface HostTaskDetailsSameDocumentView {
@@ -101,7 +105,7 @@ export class HostAgentTaskDetailsNavigator {
   }
 }
 
-/** Commits one Host-owned app: task URL and notifies the same native history adapter synchronously. */
+/** Browser-hosted Playground path; native Codex must use its existing router adapter instead. */
 export function navigateHostTaskDetailsSameDocument(view: HostTaskDetailsSameDocumentView, value: string): void {
   const target = new URL(value)
   if (target.protocol !== 'app:' || target.hostname !== '-' || target.search !== '' || target.hash !== '') {
@@ -110,4 +114,23 @@ export function navigateHostTaskDetailsSameDocument(view: HostTaskDetailsSameDoc
   view.history.pushState(withoutCordisXRouteHistoryEntry(view.history.state), '', target.pathname)
   const EventConstructor = (view as HostTaskDetailsSameDocumentView & { readonly Event?: typeof Event }).Event ?? Event
   view.dispatchEvent(new EventConstructor(CORDISX_HOST_TASK_DETAILS_NAVIGATION_EVENT))
+}
+
+/** Reuse the runtime's single history adapter; never create a second native observer. */
+export function createHostAgentTaskDetailsNavigator(
+  history: BrowserRouteHistoryAdapter | CodexRouterHistoryAdapter,
+  view: HostTaskDetailsSameDocumentView,
+): HostAgentTaskDetailsNavigator {
+  return new HostAgentTaskDetailsNavigator({
+    navigateHost: value => {
+      if (history instanceof CodexRouterHistoryAdapter) {
+        history.navigateHost(value)
+        return
+      }
+      navigateHostTaskDetailsSameDocument(view, value)
+    },
+    navigateExternal: () => {
+      throw new Error('Agent detail references never expose external navigation')
+    },
+  })
 }

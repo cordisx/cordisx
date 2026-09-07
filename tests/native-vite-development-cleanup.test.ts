@@ -784,6 +784,128 @@ describe('native Vite development transport', () => {
     30_000,
   )
 
+  it('accepts an exact Vite bootstrap when the reloaded document drops the Page.reload response', async () => {
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const port = (server.address() as { port: number }).port
+    const requests: { method: string; params: Record<string, unknown> }[] = []
+    let reloadIssued = false
+    server.on('connection', socket => {
+      socket.on('message', data => {
+        const request = JSON.parse(String(data)) as { id: number; method: string; params: Record<string, unknown> }
+        requests.push(request)
+        if (request.method === 'Page.reload') {
+          reloadIssued = true
+          return
+        }
+        const bootCheck = request.method === 'Runtime.evaluate'
+          && String(request.params.expression).includes('cordisx:vite-boot-pending')
+        socket.send(JSON.stringify({
+          id: request.id,
+          result: request.method === 'Page.addScriptToEvaluateOnNewDocument'
+            ? { identifier: 'lost-reload-response-vite-bootstrap' }
+            : {
+              result: {
+                value: bootCheck && reloadIssued
+                  ? { ok: true }
+                  : { ok: true, result: true },
+              },
+            },
+        }))
+      })
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify([{
+        id: 'native-vite-lost-reload-response',
+        title: 'Codex',
+        type: 'page',
+        url: 'app://-/index.html',
+        webSocketDebuggerUrl: `ws://127.0.0.1:${port}`,
+      }]))
+    ) as typeof fetch
+    const controller = new AbortController()
+    const ready = vi.fn()
+    const watching = watchAndInject({
+      port,
+      source: 'lost-reload-response-vite-entry',
+      viteDevelopment: true,
+      signal: controller.signal,
+      onReady: ready,
+    })
+    try {
+      await vi.waitFor(() => expect(ready).toHaveBeenCalledOnce(), { timeout: 10_000 })
+      expect(requests.filter(item => item.method === 'Page.reload')).toHaveLength(1)
+      expect(requests.some(item =>
+        item.method === 'Runtime.evaluate'
+        && String(item.params.expression).includes('cordisx:vite-boot-pending')
+      )).toBe(true)
+    } finally {
+      controller.abort()
+      await watching
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
+  }, 15_000)
+
+  it.each([
+    {
+      name: 'explicit CDP rejection',
+      respond: (socket: WebSocket, requestId: number) =>
+        socket.send(JSON.stringify({
+          id: requestId,
+          error: { code: -32_000, message: 'fixture reload rejected' },
+        })),
+      message: 'CDP -32000: fixture reload rejected',
+    },
+    {
+      name: 'target closure',
+      respond: (socket: WebSocket) => socket.close(),
+      message: 'CDP connection closed',
+    },
+  ])('fails closed when Page.reload ends in $name before bootstrap', async fixture => {
+    const server = new WebSocketServer({ port: 0 })
+    await once(server, 'listening')
+    const port = (server.address() as { port: number }).port
+    server.on('connection', socket => {
+      socket.on('message', data => {
+        const request = JSON.parse(String(data)) as { id: number; method: string; params: Record<string, unknown> }
+        if (request.method === 'Page.reload') {
+          fixture.respond(socket, request.id)
+          return
+        }
+        socket.send(JSON.stringify({
+          id: request.id,
+          result: request.method === 'Page.addScriptToEvaluateOnNewDocument'
+            ? { identifier: 'failed-reload-vite-bootstrap' }
+            : { result: { value: { ok: true, result: true } } },
+        }))
+      })
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async () =>
+      new Response(JSON.stringify([{
+        id: 'native-vite-failed-reload',
+        title: 'Codex',
+        type: 'page',
+        url: 'app://-/index.html',
+        webSocketDebuggerUrl: `ws://127.0.0.1:${port}`,
+      }]))
+    ) as typeof fetch
+    const controller = new AbortController()
+    try {
+      await expect(
+        watchAndInject({ port, source: 'failed-reload-vite-entry', viteDevelopment: true, signal: controller.signal }),
+      ).rejects.toThrow(fixture.message)
+    } finally {
+      controller.abort()
+      globalThis.fetch = originalFetch
+      server.close()
+      await once(server, 'close')
+    }
+  })
+
   it('fails one broken native Vite installation without entering the CDP retry loop', async () => {
     const server = new WebSocketServer({ port: 0 })
     await once(server, 'listening')

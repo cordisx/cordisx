@@ -99,6 +99,14 @@ export async function install(
     }
     await session.send('Runtime.enable')
     await session.send('Page.enable')
+    if (viteDevelopment) {
+      await support.waitForNativeDocumentReadiness(
+        session,
+        target.url,
+        Date.now() + support.CDP_INJECTION_TIMEOUT_MS,
+        signal,
+      )
+    }
     if (loopbackModules) {
       viteLoopbackPermission = viteLoopbackPermissions === undefined
         ? await support.enableViteLoopbackPermission(session, target)
@@ -731,12 +739,14 @@ export async function install(
     if (viteDevelopment || loopbackModules) {
       const deadline = Date.now() + support.CDP_INJECTION_TIMEOUT_MS
       loopbackReloadStarted = true
-      await support.abortable(
-        session.send('Page.reload', viteDevelopment ? { ignoreCache: true } : {}, support.CDP_INJECTION_TIMEOUT_MS),
+      await support.reloadAndWaitForBootstrap(
+        session,
+        viteDevelopment ? { ignoreCache: true } : {},
+        viteDevelopment
+          ? async () => await support.waitForViteBootstrap(session, reloadInstallId!, deadline, signal)
+          : async () => await support.waitForProductionBootstrap(session, reloadInstallId!, deadline, signal),
         signal,
       )
-      if (viteDevelopment) await support.waitForViteBootstrap(session, reloadInstallId!, deadline, signal)
-      else await support.waitForProductionBootstrap(session, reloadInstallId!, deadline, signal)
     } else {
       const evaluated = await session.send(
         'Runtime.evaluate',

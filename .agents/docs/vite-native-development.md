@@ -79,6 +79,16 @@ and initial-error recovery; those exceptional recovery paths may reload the
 document. Project config, dependency installation, and Node-side launcher or
 bridge changes require restarting `cordisx dev`.
 
+The developer explicitly selects each local source in the `cordisx dev`
+configuration. For those exact descriptors, the native Vite entry grants only
+the structured UI seats needed to expose the development surface:
+`sidebar.navigation.items`, `main`, `manager.settings.navigation-items`, and
+`manager.content`. These grants live only in that renderer session and create
+no persistence writer. Agent, approval, data, and Host-DOM capabilities retain
+their normal permission policies. This avoids development-only UI prompts
+without turning local file URLs or unrelated plugin capabilities into a broad
+authorization signal.
+
 ## Native policy and cleanup
 
 The installed native page blocks loopback module and WebSocket access by
@@ -175,5 +185,72 @@ fresh installation nonce. Native startup now waits for that installation's
 actual Vite bootstrap acknowledgement instead of depending on
 `Page.loadEventFired`, which Electron did not emit consistently across
 immediate launches.
+
+## Native startup failure discipline
+
+Treat a user-operable native window as the delivery boundary. A source change,
+focused test, pull request, or pre-ready launch stage is not an experience
+result.
+
+Codex Desktop `26.901.41600` (build `7982`) has a last-known-good run on Host
+commit `87a521fc67e63d6d38680c1a25cd7a28e505ac1d`. The local evidence file
+`/private/tmp/cordisx-desktop-agent-session-live-20260905-2102-7982-bootstrap.json`
+records `Page.addScriptToEvaluateOnNewDocument` followed by
+`Page.reload({ ignoreCache: true })` and `waitForViteBootstrap`; it reached
+renderer ready in 5809 ms and exercised real Agent operations. Build 7982 and
+the new-document reload bootstrap are therefore proven viable. A later single
+`CDP connection closed` observation is not enough to replace that architecture:
+first compare the last-known-good source, launch arguments, target identity,
+and stage timings.
+
+One rejected experiment replaced the reload with current-document
+`Runtime.evaluate`, whose dynamic import of the virtual native preamble failed.
+Do not present that experiment as a solution. If a reload response is absent,
+preserve sequential navigation and bootstrap ordering; do not race a runtime
+evaluation against the document transition.
+
+A later isolated run reported renderer injection ready while the visible window
+showed Electron's `ChatGPT failed to start` fallback. Its captured Sentry scope
+recorded the initial `app://-/index.html` load rejecting with `ERR_ABORTED`
+immediately after the early reload. This proves that CDP injection readiness is
+not a user-operable-window check. The working hypothesis is that reload raced
+Electron main's still-pending initial `loadURL` promise; require the exact native
+URL, a complete document, and the expected preload bridge before requesting the
+development reload. Keep that explanation marked as a hypothesis until a fresh
+isolated run has no startup or data-URL failure modal and the user can operate
+the CordisX surface.
+
+That profile also recorded Chromium's network quality as `Offline`, but the
+Host launch arguments contained no network-disabling switch. The retained
+evidence does not establish whether that state preceded or followed the aborted
+window load. Keep external `ERR_INTERNET_DISCONNECTED` diagnostics separate
+from the proven local `app://` navigation abort until a run captures their
+ordering.
+
+Stable-home and fresh-home launches exercise different setup paths. A fresh
+home may materialize entity templates and thereby commit a new plugin module
+generation. The final renderer composition and its entity principal must be
+issued after that initial synchronization commits. Issuing them before
+materialization correctly fails closed later with `entity principal is stale`.
+Initial synchronization alone is insufficient if a later composition rebuild
+rotates the owner-document secret while Vite retains a cached virtual plugin
+module containing the previous token. In that case token verification is the
+exact stale-principal component. The current candidate invalidates only those
+owner-bound virtual plugin modules when composition authority changes, causing
+them to be reissued against the committed generation and new secret. That fix
+remains unverified until a real fresh-home native launch reaches a user-operable
+window.
+
+Diagnose native startup one boundary at a time and retain the first failure:
+
+```text
+app target -> reload/new document -> Vite preamble/boot -> shared React
+  -> final composition -> entity hydration -> Host/Chatroom ready
+```
+
+Use focused build or transport checks to test that boundary; full CI is not a
+diagnostic for a renderer that has not reached ready. Never relax stale-principal
+checks, guess a generation identity, patch `app.asar`, or treat internal progress
+as user experience.
 
 For a release claim, also run the owner repository's full gates.

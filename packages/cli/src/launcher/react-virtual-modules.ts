@@ -81,7 +81,7 @@ export const CONTRACTS_MODULE_PATH = fileURLToPath(
 )
 
 function runtimePrelude(): string {
-  return `const runtime = globalThis.__cordisxSharedReactRuntime;
+  return `const runtime = globalThis.__cordisxSharedReactRuntime ?? globalThis.__cordisxPreparedReactRuntime;
 if (runtime === undefined) throw new Error('CordisX shared React runtime is unavailable');`
 }
 

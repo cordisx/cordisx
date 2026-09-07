@@ -93,3 +93,28 @@ thread start/resume acceptance, then show the Agent using its supplied tools and
 the real consumer receipt. Do not substitute a controlled transport response or
 ordinary assistant text for those observations. UI access restrictions still
 apply; context work does not authorize a CDP workaround.
+
+## Native task navigation
+
+An Agent detail reference is resolved by `HostAgentTaskDetailsNavigator`; the
+existing `codex-thread:` mapping supplies its Host-owned task address. Native
+runtime composition must route that address through the already installed
+`CodexRouterHistoryAdapter`. Its existing React Router navigator owns actual
+navigation and Back/Forward. A `window.history.pushState` call plus the
+`cordisx:host-task-details-navigation` event only reaches the browser Playground
+listener; it does not navigate Codex's native MemoryHistory router.
+
+The native adapter pushes the resolved target, removes only the CordisX route
+projection from that new native location, updates its current reload checkpoint,
+and notifies its existing subscribers. The previous Room location remains in
+native history, so Back restores its original route entry. Do not create another
+navigator, replace React Router's single listener, infer a different task path,
+or reload the page when this seam is unavailable. Disposal or a missing router
+fails closed without a browser-history fallback.
+
+The focused router test drives the actual Host adapter and detail-navigation
+factory with a controlled native navigator, verifying native push, the original
+React listener, one transition notification, no browser push, and native Back.
+This is adapter evidence, not direct native UI verification. Keep an accepted
+CLI/Room window unchanged while preparing a separate navigation candidate;
+Host runtime HMR can revoke its live bindings.

@@ -166,7 +166,18 @@ function resolveSidebarNavigationParent(document: Document, sidebar: HTMLElement
     }
     if (parents.size === 0 && fallback !== undefined) parents.add(fallback)
   }
-  return parents.size === 1 ? [...parents][0] : undefined
+  if (parents.size === 1) return [...parents][0]
+  // Current Codex nests the primary actions inside a second vertical group
+  // that also contains Explore. Select the unique deepest multi-action group;
+  // keep failing closed when the DOM does not provide that distinction.
+  const multiAction = [...parents].filter(parent =>
+    nativeButtons(parent).filter(button => (
+      button.closest('[data-app-action-sidebar-section]') === null
+      && button.closest('[data-app-action-sidebar-project-list-id]') === null
+    )).length > 1
+  )
+  const deepest = multiAction.filter(parent => !multiAction.some(other => other !== parent && parent.contains(other)))
+  return deepest.length === 1 ? deepest[0] : undefined
 }
 
 function resolveSidebarFooterControl(document: Document, sidebar: HTMLElement): HTMLButtonElement | undefined {
