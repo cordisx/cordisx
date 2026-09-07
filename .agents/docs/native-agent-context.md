@@ -149,3 +149,37 @@ React listener, one transition notification, no browser push, and native Back.
 This is adapter evidence, not direct native UI verification. Keep an accepted
 CLI/Room window unchanged while preparing a separate navigation candidate;
 Host runtime HMR can revoke its live bindings.
+
+## Native persistence and explicit legacy recovery
+
+Native Host Sessions now use the existing authenticated owner-document CDP
+transport and locked CAS store. Each source/profile/plugin scope stores one
+native binding record per Session plus its recovery-afterward Session ledger.
+Creation saves the exact native thread id and setup digest before reporting
+success. Completed native turn counts are checkpointed before further work.
+A native resume never guesses a thread id from an unknown Host Session id.
+
+A source from before this persistence change has no old Host SessionEvent ledger
+to restore. The explicit local
+[receipt recovery script](../../packages/cli/scripts/recover-native-session-from-cli-receipt.mjs)
+validates one original Room run/Session, an actual native tool-call receipt,
+current authenticated local-thread evidence, terminal turn evidence, and exact
+Entity revision/catalog-to-native developer instruction bytes. It imports only
+the proved mapping. It must first run against a restoration-only copy and must
+recheck the original Room hash/revision before an authorized original-home write.
+It never merges same-named Rooms from different homes or overwrites a binding.
+
+The consumer may use the existing inline AgentSetup resume overload only after
+an exact missing Session result or for a marked seeded recovery Session. The
+Host's optional recovery driver resolves the scoped mapping and resumes that
+same native thread. A seeded empty ledger explicitly represents observations
+starting after recovery; it does not claim that unknown historical events were
+reconstructed. Native resume must return the same id and an explicit turns
+array containing only terminal turns. Unknown/running turn state fails closed.
+
+Successful resolution marks the single Agent tool state as requiring rebind.
+The recovered owner cannot execute a turn until the Room consumer validates its
+unchanged member/run/Session and issues a fresh bound CLI credential. Old tokens
+are never revived. Same-Session recovery does not rewrite the Room association
+or erase its outbox/history. History remains in the original Room and native
+thread; no old user task is replayed by recovery.
