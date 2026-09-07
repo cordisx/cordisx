@@ -327,6 +327,11 @@ describe('plugin generation native browser graph', () => {
       }],
     }, { generation, profileId: 'document-ready-profile' })
 
+    // Inline debug maps inflate this generated fixture beyond 100 MB once JSON
+    // encoded for CDP. They are not executable and are unrelated to document
+    // readiness/CSP; retain the entire real Host code, dropping only its final
+    // source-map comment instead of weakening the bootstrap assertions.
+    const executableSource = source.replace(/\n\/\/# sourceMappingURL=data:[^\n]*\n?$/, '')
     let documentServer: HttpServer | undefined
     let browser: ChildProcess | undefined
     let cdp: CdpClient | undefined
@@ -378,9 +383,8 @@ describe('plugin generation native browser graph', () => {
   documentElement: document.documentElement !== null,
   head: document.head !== null,
   body: document.body !== null,
-};\n${source}`,
-        // Chrome parses the complete Host renderer bundle before acknowledging
-        // this registration. Keep it bounded above the default CDP request budget.
+};\n${executableSource}`,
+        // Keep the real Host registration bounded above the small-request budget.
       }, 60_000) as { readonly identifier?: string }
       expect(registration.identifier).toBeTypeOf('string')
       await cdp.send('Page.navigate', { url: documentUrl })
