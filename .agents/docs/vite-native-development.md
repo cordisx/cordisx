@@ -232,8 +232,14 @@ home may materialize entity templates and thereby commit a new plugin module
 generation. The final renderer composition and its entity principal must be
 issued after that initial synchronization commits. Issuing them before
 materialization correctly fails closed later with `entity principal is stale`.
-Moving initial synchronization before final composition is a proposed ordering
-fix until a real fresh-home native launch reaches a user-operable window.
+Initial synchronization alone is insufficient if a later composition rebuild
+rotates the owner-document secret while Vite retains a cached virtual plugin
+module containing the previous token. In that case token verification is the
+exact stale-principal component. The current candidate invalidates only those
+owner-bound virtual plugin modules when composition authority changes, causing
+them to be reissued against the committed generation and new secret. That fix
+remains unverified until a real fresh-home native launch reaches a user-operable
+window.
 
 Diagnose native startup one boundary at a time and retain the first failure:
 

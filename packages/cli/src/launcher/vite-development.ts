@@ -973,8 +973,23 @@ if (import.meta.hot) {
     url: origin + base,
     cacheDir,
     async buildBootstrap(nextConfig, nextOptions) {
+      const previousAuthority = options?.ownerDocumentAuthority
       config = nextConfig
       options = nextOptions
+      const nextAuthority = options.ownerDocumentAuthority
+      if (
+        previousAuthority !== undefined
+        && (
+          nextAuthority === undefined || previousAuthority.secret !== nextAuthority.secret
+          || previousAuthority.profileId !== nextAuthority.profileId
+          || previousAuthority.generation !== nextAuthority.generation
+        )
+      ) {
+        const timestamp = Date.now()
+        for (const plugin of config.plugins.filter(plugin => plugin.enabled)) {
+          invalidatePluginModule(plugin.id, timestamp)
+        }
+      }
       const enabledGenerations = await Promise.all(
         config.plugins.filter(plugin => plugin.enabled).map(ensureGeneration),
       )
