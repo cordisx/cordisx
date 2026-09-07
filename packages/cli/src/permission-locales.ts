@@ -5,6 +5,12 @@ import type { CordisXPermissionCapabilityV4 } from './permission-contracts.js'
 export const CORDISX_PERMISSION_NAMESPACE = 'permission'
 
 const EN_UI_MESSAGES = Object.freeze({
+  'permission.usage.read.name': 'Read local usage totals',
+  'permission.usage.read.description':
+    'Read validated input and output Token totals observed in the current local profile.',
+  'permission.usage.read.risk': 'The plugin can use aggregate local usage for its own features.',
+  'permission.usage.read.limitation':
+    'No messages, credentials, raw paths or account billing totals. This access lasts for the current plugin generation.',
   'permission.ui.extension-points.interact.name': 'Interact with visual extension points',
   'permission.ui.extension-points.interact.description':
     'Receive the declared pointer position, drag displacement and activation signals in the listed visual seats.',
@@ -59,6 +65,10 @@ const EN_UI_MESSAGES = Object.freeze({
 })
 
 const ZH_UI_MESSAGES = Object.freeze({
+  'permission.usage.read.name': '读取本地用量汇总',
+  'permission.usage.read.description': '读取当前本地配置档案内经过校验的输入与输出 Token 用量。',
+  'permission.usage.read.risk': '插件可以使用本地用量汇总实现其功能。',
+  'permission.usage.read.limitation': '不含消息、凭据、原始路径或账号账单；权限仅对当前插件版本实例有效。',
   'permission.ui.extension-points.interact.name': '与视觉点位交互',
   'permission.ui.extension-points.interact.description': '接收所列视觉点位内已声明的指针位置、拖拽位移和点击响应信号。',
   'permission.ui.extension-points.interact.risk': '插件可在视觉激活期间响应已声明的交互。',
@@ -252,9 +262,14 @@ export const CORDISX_PERMISSION_LOCALE_CATALOGS: readonly CordisXLocaleCatalog[]
 
 /** Resolve the Host-owned capability name from the same catalogs used by permission review. */
 export function projectPermissionCapabilityName(
-  capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact',
+  capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact' | 'usage.read',
   locale: string,
 ): string {
+  if (capability === 'usage.read') {
+    return new Intl.Locale(locale).language === 'zh'
+      ? ZH_UI_MESSAGES['permission.usage.read.name']
+      : EN_UI_MESSAGES['permission.usage.read.name']
+  }
   if (capability === 'ui.extension-points.interact') {
     return new Intl.Locale(locale).language === 'zh'
       ? ZH_UI_MESSAGES['permission.ui.extension-points.interact.name']

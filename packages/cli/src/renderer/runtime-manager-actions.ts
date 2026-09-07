@@ -463,7 +463,7 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
     iconThemes: runtimeScope.iconThemeRegistry()!.redactedSnapshot(),
     permissions: runtimeScope.broker()!.snapshots().map((permission: PlatformPermissionSnapshot) => {
       const pointId = (permission.capability === 'ui.extension-points.render'
-          || permission.capability === 'ui.extension-points.interact')
+          || permission.capability === 'ui.extension-points.interact' || permission.capability === 'usage.read')
         ? permission.scope.extensionPoints?.[0]
         : undefined
       const descriptor = pointId === undefined
@@ -514,7 +514,7 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
               providers: [],
             }
           : (permission.capability === 'ui.extension-points.render'
-              || permission.capability === 'ui.extension-points.interact')
+              || permission.capability === 'ui.extension-points.interact' || permission.capability === 'usage.read')
           ? {
             status: descriptor?.adapterSupport === 'supported'
               ? 'supported' as const
@@ -553,7 +553,7 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
         reason: permission.reason,
         reasonText: runtimeScope.i18nService?.resolveFor(
           (permission.capability === 'ui.extension-points.render'
-              || permission.capability === 'ui.extension-points.interact')
+              || permission.capability === 'ui.extension-points.interact' || permission.capability === 'usage.read')
             ? 'host'
             : permission.identity.id,
           permission.reason,
@@ -768,7 +768,7 @@ export const createRuntimeUpdatePluginConfig = (
 export const createRuntimeSetPermissionPolicy = (
   runtimeScope: RuntimeClosureScope,
   id: string,
-  capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact',
+  capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact' | 'usage.read',
   policy: CordisXPermissionPolicy,
   scope?: CordisXPermissionScopeV4,
 ): Promise<void> => {
@@ -780,7 +780,9 @@ export const createRuntimeSetPermissionPolicy = (
     if (controller === undefined) {
       throw new Error(`unknown CordisX plugin: ${id}`)
     }
-    if (capability === 'ui.extension-points.interact') {
+    if (capability === 'usage.read') {
+      runtimeScope.broker()!.setUsagePolicy(controller.identity, policy !== 'deny')
+    } else if (capability === 'ui.extension-points.interact') {
       runtimeScope.broker()!.setVisualInteractionPolicy(controller.identity, policy !== 'deny')
     } else if (capability === 'ui.extension-points.render') {
       const points = scope?.extensionPoints

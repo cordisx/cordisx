@@ -1,3 +1,4 @@
+import type { UsageSnapshotV1 } from '../usage-contracts.js'
 import type {
   CordisXAgentHistoryPage,
   CordisXAgentHistoryQuery,
@@ -134,8 +135,16 @@ export class BindingAgentHistoryAdapter implements CordisXAgentHistoryAdapter {
     }
   }
 
+  async readUsage(caller: AgentHistoryBindingCaller): Promise<UsageSnapshotV1> {
+    try {
+      return clone(await this.request<UsageSnapshotV1>('usage', {}, caller))
+    } catch {
+      return { schemaVersion: 1, status: 'unavailable', reason: 'host-unavailable', diagnostics: [] }
+    }
+  }
+
   private request<Value>(
-    operation: 'status' | 'query' | 'tail',
+    operation: 'status' | 'query' | 'tail' | 'usage',
     input: unknown,
     caller: AgentHistoryBindingCaller | undefined,
   ): Promise<Value> {

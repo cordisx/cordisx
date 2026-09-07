@@ -1,3 +1,4 @@
+import { installUsageService } from './usage.js'
 import { CordisXExtensionPointVisualService } from './composer-visual-service.js'
 import { COMPOSER_VISUAL_CATALOG } from './composer-visual-catalog.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
@@ -496,6 +497,11 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
       console: runtimeScope.pluginConsole()!,
     })
     await runtimeScope.platformFiber
+    await installUsageService(
+      runtimeScope.ctx,
+      runtimeScope.broker()!,
+      runtimeScope.metadata()!.agentHistoryBridgeToken,
+    )
     runtimeScope.systemPromptFiber = runtimeScope.ctx.plugin(CordisXSystemPromptService, {
       runtime: runtimeScope.agentRuntime()!,
       console: runtimeScope.pluginConsole()!,

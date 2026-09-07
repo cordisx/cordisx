@@ -1,3 +1,5 @@
+import { LocalUsageHost } from './local-usage.js'
+import type { UsageSnapshotV1 } from '../usage-contracts.js'
 import { createHmac, randomBytes } from 'node:crypto'
 import { chmod, lstat, mkdir, open, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -186,6 +188,11 @@ async function persistentSecret(cacheDir: string): Promise<Buffer> {
 
 /** Node-owned exact-session Codex rollout importer. No path enters or leaves its public methods. */
 export class CodexAgentHistoryHost {
+  private usage: LocalUsageHost | undefined
+  async readUsage(): Promise<UsageSnapshotV1> {
+    this.usage ??= new LocalUsageHost(this.options)
+    return await this.usage.read()
+  }
   private readonly indexes = new Map<string, SessionIndex>()
   private readonly cursors = new Map<string, CursorBinding>()
   private readonly now: () => number
@@ -276,6 +283,7 @@ export class CodexAgentHistoryHost {
   }
 
   dispose(): void {
+    this.usage?.dispose()
     this.indexes.clear()
     this.cursors.clear()
   }

@@ -1,3 +1,5 @@
+export * from './usage-contracts.js'
+export { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, type CordisXPluginManifestV11 } from './usage-permissions.js'
 export {
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V10,
   type CordisXHostExtensionPointCatalogV10,

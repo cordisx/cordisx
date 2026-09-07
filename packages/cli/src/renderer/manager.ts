@@ -103,7 +103,7 @@ export interface ManagerPluginSnapshot {
 
 export interface ManagerPermissionSnapshot {
   readonly identity: CordisXPluginIdentity
-  readonly capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact'
+  readonly capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact' | 'usage.read'
   readonly required: boolean
   readonly reason: CordisXLocalizedText
   readonly reasonText: string
@@ -223,7 +223,7 @@ export interface ManagerModel {
   ): Promise<ConfigRendererMountHandle>
   setPermissionPolicy(
     id: string,
-    capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact',
+    capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact' | 'usage.read',
     policy: CordisXPermissionPolicy,
     scope?: CordisXPermissionScopeV4,
   ): Promise<void>
@@ -312,7 +312,7 @@ export type ManagerRouteState =
   | {
     readonly kind: 'permission'
     readonly pluginId: string
-    readonly capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact'
+    readonly capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact' | 'usage.read'
     readonly fingerprint: string
   }
   | { readonly kind: 'marketplace'; readonly identity: string; readonly facet: MarketplaceDetailTab }
