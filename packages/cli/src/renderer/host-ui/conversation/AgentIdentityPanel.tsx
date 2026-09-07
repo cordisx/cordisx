@@ -9,7 +9,6 @@ import * as React from 'react'
 import { HostSurfaceIcon } from '../HostSurfaceIcon.js'
 import { HostAgentTaskDetailsNavigator, validateAgentLoopTaskDetailsUrl } from '../AgentTaskDetailsNavigator.js'
 import { HostAgentAvatar } from '../avatar/AgentAvatar.js'
-import { HostConversationRightInspector } from './RightInspector.js'
 import {
   isPlaygroundRoomSimulationBinding,
   type PlaygroundRoomSimulationBinding,
@@ -61,22 +60,6 @@ export interface HostAgentIdentityPanelCopy {
   readonly noActiveSessions: string
   readonly sessionCount: (count: number) => string
   readonly lifecycle: Readonly<Record<HostAgentIdentitySessionLifecycle, string>>
-}
-
-export interface HostAgentIdentityPanelProps {
-  readonly open: boolean
-  readonly presentation?: HostAgentIdentityPresentation
-  readonly copy: HostAgentIdentityPanelCopy
-  readonly navigator: HostAgentTaskDetailsNavigator
-  readonly onOpenChange: (open: boolean) => void
-  readonly resolveSettings?: (
-    identity: HostAgentDefinitionIdentityPresentation,
-  ) => HostAgentIdentitySettingsAvailability
-  readonly onSettings: (identity: HostAgentDefinitionIdentityPresentation) => void | Promise<void>
-  readonly onNavigationError?: (error: unknown) => void
-  readonly onBack?: () => void
-  readonly inspectorWidth?: number
-  readonly onInspectorWidthChange?: (width: number) => void
 }
 
 export interface HostAgentIdentityContentProps {
@@ -456,65 +439,5 @@ export function HostAgentIdentityContent({
         </section>
       </div>
     </>
-  )
-}
-
-export function HostAgentIdentityPanel({
-  open,
-  presentation: input,
-  copy,
-  navigator,
-  onOpenChange,
-  resolveSettings,
-  onSettings,
-  onNavigationError,
-  onBack,
-  inspectorWidth = 360,
-  onInspectorWidthChange = () => {},
-}: HostAgentIdentityPanelProps) {
-  const presentation = React.useMemo(
-    () => input === undefined ? undefined : createHostAgentIdentityPresentation(input),
-    [input],
-  )
-  const interactive = canOpenHostAgentIdentity(presentation)
-  const contentId = React.useId()
-
-  React.useEffect(() => {
-    if (open && !interactive) onOpenChange(false)
-  }, [interactive, onOpenChange, open])
-
-  if (!open || !interactive || presentation === undefined) return null
-  const chinese = copy.close === '关闭'
-  return (
-    <HostConversationRightInspector
-      open={open}
-      title={presentation.name}
-      closeLabel={copy.close}
-      resizeLabel={chinese ? '调整详情栏宽度' : 'Resize inspector'}
-      width={inspectorWidth}
-      onWidthChange={onInspectorWidthChange}
-      pageKey={`identity:${presentation.participant.participantId}`}
-      {...(onBack === undefined ? {} : {
-        breadcrumb: {
-          parentLabel: copy.members ?? (chinese ? '群成员' : 'Members'),
-          backLabel: copy.backToMembers ?? (chinese ? '返回群成员' : 'Back to members'),
-          navigationLabel: copy.hierarchyNavigation ?? (chinese ? '详情栏层级导航' : 'Inspector hierarchy'),
-          onBack,
-        },
-      })}
-      describedBy={`${contentId}-introduction`}
-      onOpenChange={onOpenChange}
-    >
-      <HostAgentIdentityContent
-        presentation={presentation}
-        copy={copy}
-        navigator={navigator}
-        onClose={() => onOpenChange(false)}
-        {...(resolveSettings === undefined ? {} : { resolveSettings })}
-        onSettings={onSettings}
-        {...(onNavigationError === undefined ? {} : { onNavigationError })}
-        idPrefix={contentId}
-      />
-    </HostConversationRightInspector>
   )
 }

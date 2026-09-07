@@ -121,3 +121,21 @@ npm publication is changed by this preparation.
 Host PRs #270 and #335 record earlier removal/restoration decisions. They are
 historical evidence, not instructions to restore the entire Host business UI
 when a plugin layout regresses. Fix product presentation in its owning plugin.
+
+## Unused-wrapper retirement candidate
+
+The independent retirement candidate removes only the uncalled
+`HostAgentIdentityPanel` wrapper and its props. The actual
+`HostAgentIdentityContent`, Room renderer, source service and their styles stay
+in place until the replacement gate. No component is renamed to retain its
+business rendering under a generic public export.
+
+A follow-up import-graph check also found `playground/scenario-lab-{model,controller,controller-base}`
+consuming the Host conversation model for a debug snapshot, although the
+Playground's visible seats do not render that snapshot with the old renderer.
+That is an internal debug/data dependency, not another production plugin. Its
+projection and associated tests must be retired or reduced together with the
+model, without disturbing the mock AgentLoop command/forwarding path. Do not
+mechanically delete the whole directory while that import remains. This
+candidate deliberately stops at the zero-consumer wrapper and is not the final
+Shell removal patch.
