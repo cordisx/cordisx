@@ -1,3 +1,5 @@
+import { SidebarGroupState } from '../packages/cli/src/renderer/host-ui/SidebarGroup.js'
+import { projectSidebarDisclosure } from '../packages/cli/src/renderer/adapter/sidebar-disclosure.js'
 import { JSDOM } from 'jsdom'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -87,6 +89,78 @@ describe('Host sidebar collection seat', () => {
     const projected = root.style.cssText
     projectSidebarGroupAppearance(root, seat)
     expect(root.style.cssText).toBe(projected)
+    dom.window.close()
+  })
+
+  it('uses the outer native group gap through drag wrappers and display:contents in both states', () => {
+    const dom = fixture()
+    const document = dom.window.document
+    const sidebar = document.querySelector('aside')!
+    const groups = document.querySelector<HTMLElement>('#groups')!
+    const contents = document.createElement('div')
+    contents.style.display = 'contents'
+    const sections = [...groups.querySelectorAll<HTMLElement>('section')]
+    const wrappers = sections.map(section => {
+      const wrapper = document.createElement('div')
+      wrapper.append(section)
+      contents.append(wrapper)
+      return wrapper
+    })
+    groups.append(contents)
+    const root = document.createElement('div')
+    root.dataset.cordisxSurfaceHost = 'sidebar.collections'
+    // Reproduce the previous wrong location, inside the first drag wrapper.
+    wrappers[0]!.prepend(root)
+    for (const collapsed of [true, false]) {
+      sections[0]!.setAttribute('data-app-action-sidebar-section-collapsed', String(collapsed))
+      sections[0]!.querySelector('button')!.setAttribute('aria-expanded', String(!collapsed))
+      const seat = resolveSidebarCollectionsSeat(document, sidebar)!
+      expect(seat.parent).toBe(contents)
+      expect(seat.before).toBe(wrappers[0])
+      seat.parent.insertBefore(root, seat.before)
+      projectSidebarGroupAppearance(root, seat)
+      expect(root.nextElementSibling).toBe(wrappers[0])
+      expect(root.style.getPropertyValue('--cordisx-nav-group-gap')).toBe('12px')
+      expect(root.style.marginBlockEnd).toBe('')
+      expect(root.style.marginBlockStart).toBe('')
+    }
+    dom.window.close()
+  })
+
+  it('keeps the disclosure SVG across toggles and source refreshes while adopting native vector paint', () => {
+    const dom = fixture()
+    const document = dom.window.document
+    const state = new SidebarGroupState()
+    const root = document.createElement('div')
+    root.dataset.cordisxSidebarAppearance = 'codex'
+    document.body.append(root)
+    const native = document.createElement('button')
+    native.innerHTML =
+      '<svg viewBox="0 0 20 21"><path d="M3 7 L10 14 L16 7 Z" fill="currentColor" stroke="currentColor" stroke-width="0.6" class="native-utility" onclick="bad()"/></svg>'
+    let group = state.create(document, 'owner:rooms', 'Rooms')
+    root.append(group.section)
+    const toggle = group.section.querySelector<HTMLButtonElement>('button')!
+    const svg = toggle.querySelector('svg')!
+    projectSidebarDisclosure(root, native)
+    const path = svg.querySelector('path')!
+    expect(svg.getAttribute('viewBox')).toBe('0 0 20 21')
+    expect(path.getAttribute('stroke-width')).toBe('0.6')
+    expect(path.hasAttribute('class')).toBe(false)
+    expect(path.hasAttribute('onclick')).toBe(false)
+    toggle.click()
+    expect(group.content.hidden).toBe(true)
+    expect(toggle.querySelector('svg')).toBe(svg)
+    group = state.create(document, 'owner:rooms', 'Renamed Rooms')
+    root.replaceChildren(group.section)
+    projectSidebarDisclosure(root, native)
+    expect(group.section.querySelector('button')).toBe(toggle)
+    expect(toggle.querySelector('svg')).toBe(svg)
+    expect(svg.querySelector('path')).toBe(path)
+    expect(group.content.hidden).toBe(true)
+    toggle.click()
+    expect(group.content.hidden).toBe(false)
+    state.reconcile([])
+    expect(state.create(document, 'owner:rooms', 'New registration').section.querySelector('svg')).not.toBe(svg)
     dom.window.close()
   })
 

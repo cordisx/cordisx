@@ -1,3 +1,4 @@
+import { projectSidebarDisclosure } from './sidebar-disclosure.js'
 import {
   projectSidebarGroupAppearance,
   resolveSidebarCollectionsSeat,
@@ -370,6 +371,9 @@ class StructuredSurfaceRenderer extends StructuredSurfaceInteractions {
       ) {
         this.renderNavigation(root, navigationItems, nextSites, collectionRoot)
         this.navigationRenderSignature = signature
+      }
+      if (collectionRoot !== undefined && !playground) {
+        projectSidebarDisclosure(collectionRoot, collectionsSeat?.heading)
       }
     }
     if (sidebarFooterControl?.parentElement !== null && sidebarFooterControl?.parentElement !== undefined) {
