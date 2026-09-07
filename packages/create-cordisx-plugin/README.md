@@ -89,3 +89,12 @@ An independent plugin using only public, versioned CordisX plugin interfaces
 may be commercial, sold, distributed through a marketplace, and licensed under
 terms chosen by its author. The custom Exception is not a standard SPDX
 exception and should receive legal review before stable.
+
+## CSS authoring
+
+All three modes generate `src/vite-env.d.ts` in each plugin source tree.
+Use side-effect CSS imports in the owning component and keep the complete
+Vite output graph. Explicit `?inline` imports produce text; CSS Modules produce
+class maps only with a compatible Host development transform. Consult the
+[maintained CSS guidance](https://github.com/cordisx/cordisx/blob/main/skills/cordisx-plugin-development/references/css-and-lifecycle.md)
+for ownership, current limitations, and separate HMR/unload verification.

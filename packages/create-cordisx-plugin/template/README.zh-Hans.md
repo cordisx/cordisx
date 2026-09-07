@@ -30,3 +30,10 @@ CSS 和静态资源；正式的 `artifact.json` 会记录完整产物图，类�
 CordisX 公共插件接口，就可以用于商业用途并采用你选择的许可证。发布前请将
 `package.json` 中的 `UNLICENSED` 替换为所选许可证。该例外不包括复制或修改
 CordisX Host、Runtime、CLI 代码，也不包括使用私有接口。
+
+插件自有样式在所属组件或 lazy 页面模块中使用 `import './details.css'`。
+保留 `src/vite-env.d.ts`：Vite 类型区分普通 CSS 副作用导入、CSS Modules
+类名映射和显式 `?inline` 文本，普通 CSS 不返回字符串。组件卸载不等于
+CSS 模块回收；CSS HMR 与插件替换需要分别验证。具体生命周期和已安装
+Host 的 CSS Modules 限制见
+[CSS 指导](https://github.com/cordisx/cordisx/blob/main/skills/cordisx-plugin-development/references/css-and-lifecycle.md)。

@@ -125,11 +125,19 @@ target their private Host `HOME`. Direct-entry and config-driven Vite
 development use the same deployment path. Attach mode skips deployment because
 the launcher cannot prove the existing Host process's effective `HOME`.
 
+`skills/cordisx-plugin-development/version.json` records the guidance revision
+and owning source. Packaging mirrors it with all references; installation
+validates it and records the provenance in the management marker. Existing v1
+markers without provenance remain valid. Provenance is diagnostic: the complete
+content digest determines replacement, not a semver comparison. Launching an
+older CLI can therefore restore its older bundled guidance. An unmarked old
+copy cannot be distinguished from user edits and is not silently overwritten.
+
 The target marker records a digest over the relative path and bytes of every
 Skill file. Deployments take an adjacent directory-level lock before inspecting
 or changing the target, so concurrent CordisX starts serialize against the same
 Host `HOME`. If the actual target still matches its marker, an equal bundled
-digest is unchanged and a newer bundled digest is installed through a staged,
+digest is unchanged and a different bundled digest is installed through a staged,
 verified atomic replacement. The target is checked again after it is moved to
 the private rollback path. Rollback restores that copy only while the target is
 still absent; it never removes a directory or edit that appeared concurrently,

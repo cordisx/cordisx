@@ -8,7 +8,7 @@
 - React component updates through a valid Fast Refresh boundary, plus state retention when that behavior is claimed.
 - Multi-plugin isolation: editing or manually reloading one entry must not recreate unrelated plugin fibers.
 - Production graph: startup loads only `module.js`; exercising the lazy feature then loads its JavaScript, CSS, and static assets, executes once, and reuses the same immutable-generation cache on the second open.
-- Replacement and unload: old-generation URLs cannot publish after replacement, and disposing a generation removes its styles and runtime ownership without disturbing another plugin graph.
+- Installed production replacement and unload: old-generation URLs cannot publish after replacement, and disposing a generation removes its styles and runtime ownership without disturbing another plugin graph.
 - Search, scroll ownership, card action propagation, keyboard operation, and portal cleanup when relevant.
 
 ## Development transport
