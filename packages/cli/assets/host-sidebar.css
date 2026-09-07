@@ -42,6 +42,9 @@
   display: grid;
   gap: 1px;
 }
+.cordisx-navigation-group-items {
+  gap: var(--cordisx-nav-group-item-gap, 1px);
+}
 .cordisx-navigation-collections {
   display: grid;
   gap: var(--cordisx-nav-group-gap, 12px);

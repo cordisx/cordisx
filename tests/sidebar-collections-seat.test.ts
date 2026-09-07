@@ -9,7 +9,7 @@ function fixture() {
   const dom = new JSDOM(`<aside data-app-action-sidebar-scroll>
     <nav><div><button>Action</button></div><button>Discovery</button></nav>
     <div id="groups" style="display:grid;row-gap:12px">
-      <section data-app-action-sidebar-section="one">
+      <section data-app-action-sidebar-section="one" style="display:flex;flex-direction:column;row-gap:3px">
         <button aria-expanded="true" style="font-size:12px;line-height:20px;padding:4px 8px;color:rgb(120,120,120)">First</button>
         <button data-app-action-sidebar-thread-id="local:one" data-app-action-sidebar-thread-selected="true" style="background:rgb(40,40,40);color:rgb(240,240,240)">Session</button>
       </section>
@@ -38,6 +38,7 @@ describe('Host sidebar collection seat', () => {
     seat.parent.insertBefore(root, seat.before)
     projectSidebarGroupAppearance(root, seat)
     expect(root.style.getPropertyValue('--cordisx-nav-group-font-size')).toBe('12px')
+    expect(root.style.getPropertyValue('--cordisx-nav-group-item-gap')).toBe('3px')
     expect(root.style.getPropertyValue('--cordisx-nav-selected-background')).toBe('rgb(40, 40, 40)')
     expect(root.nextElementSibling).toBe(seat.before)
     expect(sidebar.querySelector('nav')!.outerHTML).toBe(nativeNavigation)
