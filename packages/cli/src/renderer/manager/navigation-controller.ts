@@ -100,6 +100,7 @@ export function resolveHostManagerRouteOpenRequest(
   target: CordisXRouteReference,
   items: readonly ManagerSettingsNavigationItemSnapshot[],
   parent: (reference: CordisXRouteReference) => CordisXRouteReference | undefined,
+  tabs: (root: CordisXRouteReference) => readonly CordisXRouteReference[] = () => [],
 ): HostManagerContentOpenRequest | undefined {
   let current: CordisXRouteReference | undefined = target
   const seen = new Set<string>()
@@ -108,7 +109,8 @@ export function resolveHostManagerRouteOpenRequest(
     if (seen.has(key)) return undefined
     seen.add(key)
     const matches = items.filter(item =>
-      item.owner === owner && !item.disabled && sameRouteReference(item.route, current!)
+      item.owner === owner && !item.disabled
+      && (sameRouteReference(item.route, current!) || tabs(item.route).some(tab => sameRouteReference(tab, current!)))
     )
     if (matches.length === 1) return { contributionId: matches[0]!.id, root: matches[0]!.route, target }
     if (matches.length > 1) return undefined

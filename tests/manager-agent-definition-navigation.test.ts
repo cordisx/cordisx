@@ -97,3 +97,21 @@ it('resolves same-owner public Manager roots and parent routes without foreign o
   expect(resolveHostManagerRouteOpenRequest('chatroom', { id: 'shop' }, [{ ...root, disabled: true }], value => value))
     .toBeUndefined()
 })
+
+it('resolves an exact same-owner root tab without inventing a parent route', () => {
+  const root = item({ route: { id: 'pet.pets' } })
+  const target = { id: 'pet.shop' }
+  const tabs = () => [{ id: 'pet.pets' }, target]
+  expect(resolveHostManagerRouteOpenRequest('chatroom', target, [root], () => undefined, tabs))
+    .toEqual({ contributionId: root.id, root: root.route, target })
+  expect(
+    resolveHostManagerRouteOpenRequest(
+      'chatroom',
+      target,
+      [root, item({ id: 'another', route: { id: 'other-root' } })],
+      () => undefined,
+      tabs,
+    ),
+  ).toBeUndefined()
+  expect(resolveHostManagerRouteOpenRequest('foreign', target, [root], () => undefined, tabs)).toBeUndefined()
+})

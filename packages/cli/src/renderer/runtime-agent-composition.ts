@@ -571,6 +571,10 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
         reference,
         runtimeScope.managerModel()!.snapshot().settingsNavigationItems ?? [],
         current => runtimeScope.routeService!.registry.managerContent.resolve(owner, current)?.declaration.parentRoute,
+        root =>
+          runtimeScope.routeService!.registry.managerContent.resolve(owner, root)?.declaration.tabs?.map(tab =>
+            tab.route
+          ) ?? [],
       )
       if (!request) throw new Error('No visible Manager navigation root owns this route')
       runtimeScope.managerNavigationController()!.openManagerContent(request)
