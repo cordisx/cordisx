@@ -18,7 +18,7 @@ import type {
 import type {
   AgentConversationShellSnapshot as AgentConversationShellSnapshotV7,
   AgentConversationShellSubscriptionClosed as AgentConversationShellSubscriptionClosedV7,
-} from '@cordisx/protocol/agent-conversation-shell/v10'
+} from '@cordisx/protocol/agent-conversation-shell/v11'
 import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV9 } from '@cordisx/protocol/agent-conversation-shell/v9'
 import type { AgentBootstrapCommandOrigin } from '@cordisx/protocol/agent-admission/v4'
 import * as React from 'react'
@@ -62,7 +62,8 @@ export class MountedConversation extends MountedConversationUpdates {
           this.record.owner,
           this.snapshot as AgentConversationShellSnapshotV7,
           localization,
-          this.record.version === 10,
+          this.record.version === 10 || this.record.version === 11,
+          this.record.version === 11,
         )
         : this.record.version === 6
         ? projectAgentConversationShellSnapshotV6(
@@ -85,9 +86,10 @@ export class MountedConversation extends MountedConversationUpdates {
         : projectSnapshot(this.record.owner, this.snapshot as AgentConversationShellSnapshot, localization)
       const controller = new AgentConversationCommandController({
         execute: async request => {
-          // v10 adds a message source and inherits v9 composer/admission semantics.
+          // v10/v11 add message sources and inherits v9 composer/admission semantics.
           // Keep the supported family explicit; a future version requires review.
           const inheritsV9ComposerAdmission = this.record.version === 9 || this.record.version === 10
+            || this.record.version === 11
           const isComposerCommand = request.context.scope === 'composer-submit'
           if (inheritsV9ComposerAdmission && this.record.composerMode === 'page-composer-v2' && isComposerCommand) {
             const pageComposer = this.mountContext.pageComposer
@@ -150,7 +152,7 @@ export class MountedConversation extends MountedConversationUpdates {
               })()
               : inheritsV9ComposerAdmission && isComposerSubmit && roomId !== undefined && runs.length >= 1
               ? (() => {
-                // A mounted v9/v10 Room already has an exact Session-backed
+                // A mounted v9/v10/v11 Room already has an exact Session-backed
                 // target. Preserve that public v1 authority so v3 can issue
                 // one opaque capability per known delivery; bootstrap is only
                 // for a command that has no such target yet.
@@ -228,7 +230,7 @@ export class MountedConversation extends MountedConversationUpdates {
               request.context,
             )
           }
-          // Shell v9/v10 uses bootstrap only when no exact Session-backed Room
+          // Shell v9/v10/v11 uses bootstrap only when no exact Session-backed Room
           // target exists. A mounted Room keeps v1/v3 source capture on its
           // current binding; fresh Room replacement remains the v6 claim path.
           const capturesBootstrapCommand = inheritsV9ComposerAdmission && bootstrapOrigin !== undefined

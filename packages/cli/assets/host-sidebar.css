@@ -55,10 +55,40 @@
 .cordisx-navigation-group {
   min-width: 0;
   margin-block-start: var(--cordisx-nav-group-margin-block, 12px);
+  margin-block-end: var(--cordisx-nav-group-margin-block-end, 0px);
+  padding-block-start: var(
+    --cordisx-nav-group-section-padding-block-start,
+    0px
+  );
+  padding-block-end: var(--cordisx-nav-group-section-padding-block-end, 0px);
 }
 .cordisx-navigation-group-heading {
   margin: 0;
   min-width: 0;
+}
+.cordisx-sidebar-collections[data-cordisx-sidebar-appearance="codex"]
+  .cordisx-navigation-group-heading {
+  box-sizing: border-box;
+  padding-inline-start: var(
+    --cordisx-nav-group-heading-inset-start,
+    var(--space-2, 8px)
+  );
+  padding-inline-end: var(
+    --cordisx-nav-group-heading-inset-end,
+    var(--space-2, 8px)
+  );
+}
+.cordisx-sidebar-collections[data-cordisx-sidebar-appearance="codex"]
+  .cordisx-navigation-group-items {
+  box-sizing: border-box;
+  padding-inline-start: var(
+    --cordisx-nav-group-row-inset-start,
+    var(--space-2, 8px)
+  );
+  padding-inline-end: var(
+    --cordisx-nav-group-row-inset-end,
+    var(--space-2, 8px)
+  );
 }
 .cordisx-navigation-group-toggle {
   appearance: none;

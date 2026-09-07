@@ -1,4 +1,7 @@
-import type { AgentConversationPluginCommandSource } from '@cordisx/protocol/agent-conversation-shell/v10'
+import type {
+  AgentConversationPluginCommandSource,
+  AgentConversationRoomUserMessageSource,
+} from '@cordisx/protocol/agent-conversation-shell/v11'
 import type { CordisXIconToken, CordisXJsonValue } from '../../../contracts.js'
 import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity, AgentDetailReference } from '@cordisx/protocol/agents/v1'
@@ -80,6 +83,7 @@ export interface AgentConversationMessage {
     | { readonly kind: 'session-event'; readonly sessionId: SessionId; readonly eventSeq: SessionSeq }
     | { readonly kind: 'chatroom-acknowledgement' }
     | AgentConversationPluginCommandSource
+    | AgentConversationRoomUserMessageSource
   readonly reactions?: readonly AgentConversationReaction[]
   readonly semantic?:
     | {
@@ -573,10 +577,16 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
             'operationId',
             'sequence',
           ]
+          : entry.source.kind === 'room-user-message'
+          ? ['kind', 'roomId', 'messageId', 'sequence']
           : ['kind'],
         `entries[${index}].source`,
       )
-      if (!['agent-loop', 'session-event', 'chatroom-acknowledgement', 'plugin-command'].includes(entry.source.kind)) {
+      if (
+        !['agent-loop', 'session-event', 'chatroom-acknowledgement', 'plugin-command', 'room-user-message'].includes(
+          entry.source.kind,
+        )
+      ) {
         throw new Error(`entries[${index}].source is invalid`)
       }
       if (entry.source.kind === 'plugin-command') {
@@ -596,6 +606,14 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
           || entry.source.messageId !== entry.messageId || entry.source.participantId !== entry.authorId
           || entry.semantic?.purpose !== 'conversation'
         ) throw new Error(`entries[${index}] plugin command identity mismatch`)
+      }
+      if (entry.source.kind === 'room-user-message') {
+        assertOpaque(entry.source.roomId, `entries[${index}].source.roomId`)
+        assertOpaque(entry.source.messageId, `entries[${index}].source.messageId`)
+        if (
+          !Number.isSafeInteger(entry.source.sequence) || entry.source.sequence < 0
+          || entry.source.messageId !== entry.messageId || entry.semantic?.purpose !== 'conversation'
+        ) throw new Error(`entries[${index}] Room user identity mismatch`)
       }
       if (entry.source.kind === 'session-event') {
         assertOpaque(entry.source.sessionId, `entries[${index}].source.sessionId`)

@@ -18,6 +18,7 @@ function fixture() {
   </aside>`)
   Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
   Object.defineProperty(dom.window.HTMLElement.prototype, 'getBoundingClientRect', {
+    writable: true,
     value: () => ({ x: 0, y: 100, left: 0, top: 100, right: 240, bottom: 132, width: 240, height: 32 }),
   })
   return dom
@@ -44,6 +45,48 @@ describe('Host sidebar collection seat', () => {
     expect(sidebar.querySelector('nav')!.outerHTML).toBe(nativeNavigation)
     expect([...document.querySelectorAll('section')].map(node => node.outerHTML)).toEqual(nativeSections)
     expect(resolveSidebarCollectionsSeat(document, sidebar)?.before).toBe(seat.before)
+    dom.window.close()
+  })
+
+  it('restores independent heading/row insets and section outer spacing without resizing rows', () => {
+    const dom = fixture()
+    const document = dom.window.document
+    const seat = resolveSidebarCollectionsSeat(document, document.querySelector('aside')!)!
+    const root = document.createElement('div')
+    seat.parent.insertBefore(root, seat.before)
+    const rect = (element: HTMLElement, left: number, right: number): void => {
+      element.getBoundingClientRect = () => ({
+        left,
+        right,
+        width: right - left,
+        top: 0,
+        bottom: 100,
+        height: 100,
+        x: left,
+        y: 0,
+        toJSON() {},
+      })
+    }
+    rect(root, 0, 240)
+    rect(seat.section!, 8, 232)
+    rect(seat.heading!, 16, 68)
+    rect(seat.row!, 8, 232)
+    seat.section!.style.cssText =
+      'padding-left:8px;padding-right:8px;padding-block-start:10px;padding-block-end:14px;margin-block-start:12px;margin-block-end:16px'
+    seat.heading!.style.paddingInlineStart = '0px'
+    projectSidebarGroupAppearance(root, seat)
+    expect(root.style.getPropertyValue('--cordisx-nav-group-heading-inset-start')).toBe('16px')
+    expect(root.style.getPropertyValue('--cordisx-nav-group-heading-inset-end')).toBe('16px')
+    expect(root.style.getPropertyValue('--cordisx-nav-group-row-inset-start')).toBe('8px')
+    expect(root.style.getPropertyValue('--cordisx-nav-group-row-inset-end')).toBe('8px')
+    expect(root.style.getPropertyValue('--cordisx-nav-group-margin-block')).toBe('12px')
+    expect(root.style.getPropertyValue('--cordisx-nav-group-margin-block-end')).toBe('16px')
+    expect(root.style.getPropertyValue('--cordisx-nav-group-section-padding-block-start')).toBe('10px')
+    expect(root.style.getPropertyValue('--cordisx-nav-group-section-padding-block-end')).toBe('14px')
+    expect(root.style.getPropertyValue('--cordisx-nav-two-line-height')).toBe('')
+    const projected = root.style.cssText
+    projectSidebarGroupAppearance(root, seat)
+    expect(root.style.cssText).toBe(projected)
     dom.window.close()
   })
 
