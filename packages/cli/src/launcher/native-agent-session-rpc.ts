@@ -1,14 +1,24 @@
-import { createHash } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import type { AgentSetup } from '@cordisx/protocol/agents/v1'
 import type { CordisXJsonValue } from '../contracts.js'
 import type { CordisXPersistedSession } from '../renderer/agent-session-runtime.js'
 import { nativeAgentInstructions } from '../renderer/codex-desktop-agent-setup.js'
 import { validatePersistedAgentSession } from '../playground/agent-session-store.js'
 import { type OwnerDocumentPrincipal, verifyOwnerDocumentPrincipalToken } from './owner-document-rpc.js'
-import { OwnerDocumentStore } from './owner-document-store.js'
+import { type OwnerDocumentIdentity, OwnerDocumentStore, type OwnerDocumentStoreScope } from './owner-document-store.js'
 
 const CONTRACT = 'cordisx.native-agent-session/v1'
 const INDEX = 'native-session-index'
+export function issueNativeSessionHostToken(input: { secret: string; profileId: string; generation: string }): string {
+  return createHmac('sha256', input.secret).update(
+    JSON.stringify(['cordisx.native-session-host/v1', input.profileId, input.generation]),
+  ).digest('hex')
+}
+/** Native binding facts are Host-owned, not writable through a plugin's documents service. */
+export function nativeSessionStoreScope(profileId: string, identity: OwnerDocumentIdentity): OwnerDocumentStoreScope {
+  const owner = createHash('sha256').update(JSON.stringify([identity.source, identity.pluginId])).digest('hex')
+  return { profileId, identity: { source: `file:///cordisx-native-session-owners/${owner}/host`, pluginId: 'host' } }
+}
 export interface NativeAgentSessionRecord {
   readonly contract: typeof CONTRACT
   readonly sessionId: string
@@ -82,6 +92,13 @@ export class NativeAgentSessionBridge {
 
   private async execute(value: unknown): Promise<unknown> {
     const request = record(value)
+    const hostToken = request.nativeToken
+    if (
+      typeof hostToken !== 'string' || !/^[a-f0-9]{64}$/.test(hostToken)
+      || !timingSafeEqual(Buffer.from(hostToken, 'hex'), Buffer.from(issueNativeSessionHostToken(this.input), 'hex'))
+    ) {
+      throw new Error('Host native Session authority unavailable')
+    }
     if (request.version !== 1 || typeof request.requestId !== 'string') {
       throw new Error('native Session envelope invalid')
     }
@@ -94,7 +111,7 @@ export class NativeAgentSessionBridge {
       || principal.generation !== this.input.generation
       || !this.input.principalAllowed(principal)
     ) throw new Error('native Session principal is stale')
-    const scope = { profileId: principal.profileId, identity: principal.identity }
+    const scope = nativeSessionStoreScope(principal.profileId, principal.identity)
     const load = async (documentId: string) => {
       const result = await this.input.store.load(scope, documentId)
       if (result.status === 'missing') return undefined

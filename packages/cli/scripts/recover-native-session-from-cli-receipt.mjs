@@ -5,6 +5,7 @@ import { readdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { OwnerDocumentStore } from '../dist/src/launcher/owner-document-store.js'
+import { nativeSessionStoreScope } from '../dist/src/launcher/native-agent-session-rpc.js'
 import { EntityDirectoryAuthority } from '../dist/src/launcher/entity-directory.js'
 import { entityInstallationId } from '../dist/src/launcher/owner-document-rpc.js'
 import { nativeAgentInstructions } from '../dist/src/renderer/codex-desktop-agent-setup.js'
@@ -187,7 +188,7 @@ const mapping = {
   recoveryEvidence: evidence,
 }
 const store = new OwnerDocumentStore(home)
-const scope = { profileId: stored.profileId, identity: stored.identity }
+const scope = nativeSessionStoreScope(stored.profileId, stored.identity)
 const documentId = `native-session.${hash(sessionId).slice(0, 40)}`
 const roomDigest = hash(JSON.stringify(doc))
 const unchangedRoom = () =>
@@ -222,7 +223,8 @@ if (args.get('--apply')) {
 const report = {
   status: args.get('--apply') ? 'imported-mapping-only' : 'validated',
   ...evidence,
-  owner: scope,
+  owner: { profileId: stored.profileId, identity: stored.identity },
+  nativeStoreScope: scope,
   roomRevision: doc.revision,
   roomDigest,
   oldEventsImported: 0,

@@ -255,6 +255,7 @@ export interface CordisXRuntimeMetadata {
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
   readonly configBridgeToken?: string
+  readonly nativeSessionBridgeToken?: string
   readonly playgroundAgentSessionStoreToken?: string
   readonly ownerDocumentBindings?: readonly {
     readonly source: string

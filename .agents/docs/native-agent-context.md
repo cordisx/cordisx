@@ -183,3 +183,10 @@ unchanged member/run/Session and issues a fresh bound CLI credential. Old tokens
 are never revived. Same-Session recovery does not rewrite the Room association
 or erase its outbox/history. History remains in the original Room and native
 thread; no old user task is replayed by recovery.
+
+Native Session RPC additionally requires a domain-separated Host-runtime HMAC
+credential and the current plugin owner principal. The Host credential remains
+in runtime-private composition, never plugin Context/setup, logs, or CLI binding
+files. Storage uses a reserved Host scope derived from the authenticated original
+source/profile/plugin tuple; the plugin's public document scope cannot read or
+replace the native records. Caller-supplied source/id fields never select a scope.
