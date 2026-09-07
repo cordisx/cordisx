@@ -8,7 +8,6 @@ import {
   entityDefinitionPresentation,
 } from '../packages/cli/src/renderer/entity-definition-presentation.js'
 import { readFile } from 'node:fs/promises'
-import path from 'node:path'
 import React, { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
@@ -179,12 +178,21 @@ describe('AgentConversation renderer model', () => {
       const restarted = new EntityDirectoryAuthority(home, 'identity-test')
       const snapshot = await restarted.snapshot({ ...binding, pluginGeneration: 2 })
       const entity = snapshot.entities[0]!
+      const openDetail = vi.fn(async () => undefined)
       const model = createAgentConversationModel({
         ...base,
         selection: {
           ...base.selection,
           participants: [{ ...agent, avatar, agentIdentity: entity.identity }],
           activeRuns: [],
+          associatedSessions: [{
+            participantId: agent.id,
+            memberId: 'original-member',
+            runId: 'original-run',
+            sessionId: 'cx-session.original',
+            state: 'unloaded',
+            details: { kind: 'host', ref: 'opaque-original' },
+          }],
         },
         entries: [message],
         headerActions: [],
@@ -197,6 +205,7 @@ describe('AgentConversation renderer model', () => {
       harness = await render(model, new AgentConversationCommandController({ execute: vi.fn() }, model), false, {
         identity: {
           resolve: resolver,
+          openDetail,
           navigator: new HostAgentTaskDetailsNavigator({ navigateHost: vi.fn(), navigateExternal: vi.fn() }),
           onSettings: vi.fn(),
         },
@@ -213,6 +222,14 @@ describe('AgentConversation renderer model', () => {
       )
       expect(harness.dom.window.document.querySelector('.cx-conversation-inspector-breadcrumb-current')?.textContent)
         .toBe('Persisted Entity')
+      const row = harness.dom.window.document.querySelector<HTMLButtonElement>('.cx-agent-identity-session')!
+      expect(row.textContent).toContain('cx-session.original')
+      expect(row.textContent).toMatch(/Not loaded|未加载/)
+      await act(async () => {
+        row.click()
+        await Promise.resolve()
+      })
+      expect(openDetail).toHaveBeenCalledWith(model.ownerId, { kind: 'host', ref: 'opaque-original' })
       expect(entityDefinitionPresentation(snapshot, { ...entity.identity, revision: 'unknown' })).toBeUndefined()
       expect(
         entityDefinitionPresentation(

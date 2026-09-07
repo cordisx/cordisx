@@ -85,7 +85,7 @@
     "node": ">=22.19"
   },
   "dependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#3b570970a0c2c4be4145c1e3a571b32196b9789a",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#10d935066f95be1acfb262a112209b6135c58174",
     "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
@@ -121,7 +121,7 @@
   },
   "devDependencies": {
     "@cordisx/eslint-config": "github:cordisx/cordisxmono#c63c2e8c2ba7e11502934a52ad2ce3734e804cdc",
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#3b570970a0c2c4be4145c1e3a571b32196b9789a",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#10d935066f95be1acfb262a112209b6135c58174",
     "eslint": "9.39.4",
     "@typescript-eslint/parser": "8.69.0",
     "dprint": "0.57.1",

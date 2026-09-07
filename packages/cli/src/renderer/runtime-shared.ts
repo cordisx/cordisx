@@ -349,6 +349,12 @@ export interface PluginController {
   sessionRegistryFiber?: Fiber
   agentSessionDetailReferenceFiber?: Fiber
   agentDetailNavigationFiber?: Fiber
+  agentDetailNavigation?: {
+    moduleGeneration: string
+    open: (
+      target: import('@cordisx/protocol/agents/v1').AgentDetailReference,
+    ) => Promise<import('@cordisx/protocol/agent-detail-navigation/v1').AgentDetailNavigationResult>
+  }
   approvalServiceFiber?: Fiber
   agentAdmissionReservationFiber?: Fiber
   agentAdmissionTargetOriginFiber?: Fiber

@@ -3,6 +3,8 @@ import type {
   AgentConversationRoomUserMessageSource,
 } from '@cordisx/protocol/agent-conversation-shell/v11'
 import type { CordisXIconToken, CordisXJsonValue } from '../../../contracts.js'
+import { assertAssociatedSessions } from '../../agent-conversation-associated-sessions.js'
+import type { AgentConversationAssociatedSession } from '@cordisx/protocol/agent-conversation-shell/v12'
 import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity, AgentDetailReference } from '@cordisx/protocol/agents/v1'
 import type { ApprovalAgentBinding, ApprovalReason } from '@cordisx/protocol/approval/v2'
@@ -207,6 +209,7 @@ export type AgentConversationSelection =
     readonly participantPresentation: 'none' | 'host-initials'
     readonly participants: readonly AgentConversationParticipant[]
     readonly activeRuns?: readonly AgentConversationActiveRun[]
+    readonly associatedSessions?: readonly AgentConversationAssociatedSession[]
   }
 
 export interface AgentConversationComposer {
@@ -315,6 +318,7 @@ function assertSelection(selection: AgentConversationSelection): void {
     'participantPresentation',
     'participants',
     'activeRuns',
+    'associatedSessions',
   ], 'selection')
   assertOpaque(selection.roomId, 'selection.roomId')
   assertText(selection.title, 'selection.title', 1_000)
@@ -351,6 +355,11 @@ function assertSelection(selection: AgentConversationSelection): void {
       )
     }
   }
+  assertAssociatedSessions(
+    selection.associatedSessions,
+    selection.participants.map(participant => ({ ...participant, participantId: participant.id })),
+    selection.activeRuns,
+  )
   const activeRuns = selection.activeRuns ?? []
   if (activeRuns.length > 64) throw new Error('selection.activeRuns exceeds 64 items')
   const runKeys = new Set<string>()

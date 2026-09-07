@@ -1,4 +1,4 @@
-import type { AgentSetup } from '@cordisx/protocol/agents/v1'
+import type { AgentDetailReference, AgentSetup } from '@cordisx/protocol/agents/v1'
 import type { PluginOwnerIdentity } from '@cordisx/protocol/sessions/v1'
 import type { CordisXPersistedSession, CordisXSessionEventPersistence } from './agent-session-runtime.js'
 import type { BrowserOwnerDocumentBridge, OwnerDocumentPrincipalBinding } from './owner-documents.js'
@@ -25,9 +25,10 @@ let current: NativeAgentSessionPersistence | undefined
 export class NativeAgentSessionPersistence implements CordisXSessionEventPersistence, NativeSessionRecoveryStore {
   private owners = new Map<string, OwnerClient>()
   private sessions = new Map<string, OwnerDocumentPrincipalBinding>()
+  private details = new Map<string, { owner: string; client: OwnerClient; sessionId: string; threadId: string }>()
   private closed = false
   constructor(
-    private readonly bridge: BrowserOwnerDocumentBridge,
+    private readonly bridge: Pick<BrowserOwnerDocumentBridge, 'request'>,
     private readonly principals: readonly OwnerDocumentPrincipalBinding[],
     private readonly hostToken: string,
   ) {
@@ -38,6 +39,7 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
     this.owners.set(key, client)
     return () => {
       if (this.owners.get(key) === client) this.owners.delete(key)
+      for (const [ref, detail] of this.details) if (detail.client === client) this.details.delete(ref)
     }
   }
   private owner(owner: PluginOwnerIdentity): OwnerClient {
@@ -87,6 +89,37 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
     this.sessions.set(input.sessionId, client.principal)
     return result
   }
+  /** View-only capability issuance; does not begin recovery or change a Session ledger. */
+  async getDetail(owner: PluginOwnerIdentity, sessionId: string): Promise<AgentDetailReference | undefined> {
+    const client = this.owner(owner)
+    const binding = await this.call(client.principal, 'native-session-detail', { sessionId }) as
+      | { threadId: string }
+      | null
+    if (this.owner(owner) !== client || binding === null) return undefined
+    for (const [ref, detail] of this.details) {
+      if (detail.client === client && detail.sessionId === sessionId && detail.threadId === binding.threadId) {
+        return Object.freeze({ kind: 'host', ref })
+      }
+    }
+    const ref = `native-session-detail:${crypto.randomUUID()}`
+    this.details.set(ref, { owner: ownerKey(owner), client, sessionId, threadId: binding.threadId })
+    return Object.freeze({ kind: 'host', ref })
+  }
+  async resolveDetail(owner: PluginOwnerIdentity, target: AgentDetailReference): Promise<
+    {
+      sessionId: string
+      detail: AgentDetailReference
+    } | undefined
+  > {
+    const client = this.owner(owner)
+    const issued = this.details.get(target.ref)
+    if (target.kind !== 'host' || issued?.client !== client || issued.owner !== ownerKey(owner)) return undefined
+    const binding = await this.call(client.principal, 'native-session-detail', {
+      sessionId: issued.sessionId,
+    }) as { threadId: string } | null
+    if (this.owner(owner) !== client || binding?.threadId !== issued.threadId) return undefined
+    return { sessionId: issued.sessionId, detail: { kind: 'host', ref: `codex-thread:${binding.threadId}` } }
+  }
   private principal(sessionId: string): OwnerDocumentPrincipalBinding {
     const principal = this.sessions.get(sessionId)
     if (principal === undefined) throw new Error('native Session mapping must be committed before its ledger')
@@ -103,6 +136,7 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
   }
   dispose(): void {
     this.closed = true
+    this.details.clear()
     this.owners.clear()
     this.sessions.clear()
     if (current === this) current = undefined
@@ -133,4 +167,11 @@ export async function resolveNativeSessionBinding(
 export const nativeSessionRecoveryStore: NativeSessionRecoveryStore = {
   saveBinding: saveNativeSessionBinding,
   resolveBinding: resolveNativeSessionBinding,
+}
+
+export async function getNativeSessionDetail(owner: PluginOwnerIdentity, sessionId: string) {
+  return await current?.getDetail(owner, sessionId)
+}
+export async function resolveNativeSessionDetail(owner: PluginOwnerIdentity, target: AgentDetailReference) {
+  return await current?.resolveDetail(owner, target)
 }

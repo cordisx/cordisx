@@ -18,7 +18,7 @@ import type {
 import type {
   AgentConversationShellSnapshot as AgentConversationShellSnapshotV7,
   AgentConversationShellSubscriptionClosed as AgentConversationShellSubscriptionClosedV7,
-} from '@cordisx/protocol/agent-conversation-shell/v11'
+} from '@cordisx/protocol/agent-conversation-shell/v12'
 import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV9 } from '@cordisx/protocol/agent-conversation-shell/v9'
 import type { AgentBootstrapCommandOrigin } from '@cordisx/protocol/agent-admission/v4'
 import * as React from 'react'
@@ -62,8 +62,9 @@ export class MountedConversation extends MountedConversationUpdates {
           this.record.owner,
           this.snapshot as AgentConversationShellSnapshotV7,
           localization,
-          this.record.version === 10 || this.record.version === 11,
-          this.record.version === 11,
+          this.record.version >= 10,
+          this.record.version >= 11,
+          this.record.version === 12,
         )
         : this.record.version === 6
         ? projectAgentConversationShellSnapshotV6(
@@ -89,7 +90,7 @@ export class MountedConversation extends MountedConversationUpdates {
           // v10/v11 add message sources and inherits v9 composer/admission semantics.
           // Keep the supported family explicit; a future version requires review.
           const inheritsV9ComposerAdmission = this.record.version === 9 || this.record.version === 10
-            || this.record.version === 11
+            || this.record.version >= 11
           const isComposerCommand = request.context.scope === 'composer-submit'
           if (inheritsV9ComposerAdmission && this.record.composerMode === 'page-composer-v2' && isComposerCommand) {
             const pageComposer = this.mountContext.pageComposer

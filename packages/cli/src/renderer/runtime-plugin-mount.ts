@@ -292,6 +292,7 @@ export const createRuntimeDisposeControllerFiber = async (
     delete controller.agentAdmissionReservationFiber
     await controller.approvalServiceFiber?.dispose()
     delete controller.approvalServiceFiber
+    delete controller.agentDetailNavigation
     await controller.agentDetailNavigationFiber?.dispose()
     delete controller.agentDetailNavigationFiber
     await controller.agentSessionDetailReferenceFiber?.dispose()
@@ -709,6 +710,14 @@ export const createRuntimeMountPlugin = async (
       runtimeScope.agentSessionRuntime,
     )
     await controller.agentDetailNavigationFiber
+    controller.agentDetailNavigation = {
+      moduleGeneration: runtimeScope.moduleGenerationOf()!(controller),
+      open: target =>
+        runtimeScope.agentSessionRuntime.openAgentDetail(
+          runtimeScope.agentSessionRuntime.ownerFromContext(pluginContext),
+          { target },
+        ),
+    }
     controller.approvalServiceFiber = pluginContext.plugin(CordisXApprovalServiceV1, runtimeScope.agentSessionRuntime)
     await controller.approvalServiceFiber
     controller.agentAdmissionReservationFiber = pluginContext.plugin(
@@ -842,6 +851,7 @@ export const createRuntimeMountPlugin = async (
     delete controller.agentAdmissionReservationFiber
     await controller.approvalServiceFiber?.dispose()
     delete controller.approvalServiceFiber
+    delete controller.agentDetailNavigation
     await controller.agentDetailNavigationFiber?.dispose()
     delete controller.agentDetailNavigationFiber
     await controller.agentSessionDetailReferenceFiber?.dispose()

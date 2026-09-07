@@ -211,3 +211,25 @@ into the decorative-only avatar renderer. The cold identity regression creates
 an Entity on disk, recreates the directory authority, reads it back without
 creating any Agent or Session, and clicks the actual avatar button to open its
 identity panel. Unknown revisions and foreign owner snapshots remain unavailable.
+
+## Associated Sessions before runtime loading
+
+Shell v12 renders a source's existing Room association independently from live
+`activeRuns`. The Host identity panel shows “此房间未加载 · 运行状态未知” for an
+unloaded Room-source association. This does not assert Host-global Session
+loading. A missing Room projector cannot establish whether its
+native task is running, stopped, or resumable. The panel keeps a row without a
+link when the authenticated mapping is unavailable.
+
+`NativeAgentSessionPersistence.getDetail` issues a generation-scoped ephemeral
+reference through `native-session-detail`; it neither calls recovery nor creates
+a Session ledger. `resolveDetail` checks the current owner client and rereads the
+same protected mapping before the existing Host navigator opens the native task.
+Plugin disposal clears these references. They contain no native task ID and are
+not a second persistent ledger. The Shell callback uses the mounted plugin's
+existing detail navigation authority, so a renderer row cannot bypass owner or
+generation checks by calling the raw navigator.
+
+The [Protocol v12 association contract](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/agent-conversation-shell/README.md#v12-persisted-session-associations)
+owns correlation semantics and downgrade behavior. Display and navigation do
+not start an Agent, bind tools, send input, or import historical SessionEvents.

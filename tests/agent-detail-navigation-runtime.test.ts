@@ -140,3 +140,74 @@ describe('agent detail navigation', () => {
     await runtime.dispose()
   })
 })
+
+it('opens a cold persisted native mapping without creating a Session or beginning recovery', async () => {
+  const { NativeAgentSessionPersistence } = await import(
+    '../packages/cli/src/renderer/native-agent-session-recovery.js'
+  )
+  const { getAgentToolSetup } = await import('../packages/cli/src/renderer/plugin-agent-tools.js')
+  let active = true
+  let threadId: string | undefined = 'original-native-thread'
+  const operations: string[] = []
+  const principal = {
+    source: 'file:///plugins/chatroom.ts',
+    pluginId: 'chatroom',
+    moduleGeneration: 'one',
+    token: 'authenticated',
+  }
+  const persistence = new NativeAgentSessionPersistence(
+    {
+      request: async (token, input) => {
+        expect(token).toBe(principal.token)
+        operations.push(String(input.operation))
+        expect(input.operation).toBe('native-session-detail')
+        return threadId === undefined ? null : { threadId }
+      },
+    },
+    [principal],
+    'host-secret',
+  )
+  const unregister = persistence.register(owner, { principal, active: () => active })
+  const opened: unknown[] = []
+  const driver = new DetailDriver(() => {
+    throw new Error('must not acquire')
+  })
+  const runtime = new CordisXAgentSessionRuntime({
+    driver,
+    authorize: async () => true,
+    getPersistedAgentDetail: (value, sessionId) => persistence.getDetail(value, sessionId),
+    resolvePersistedAgentDetail: (value, target) => persistence.resolveDetail(value, target),
+    navigateAgentDetail: (detail, sessionId) => {
+      opened.push({ detail, sessionId })
+    },
+  })
+  const sessionId = 'cx-session.cold-detail'
+  try {
+    const result = await runtime.getAgentSessionDetailReference(owner, { sessionId })
+    expect(result.status).toBe('accepted')
+    if (result.status !== 'accepted') throw new Error('cold reference unavailable')
+    expect(result.target.ref).not.toContain('original-native-thread')
+    expect(await runtime.openAgentDetail(owner, { target: result.target })).toEqual({
+      status: 'accepted',
+      code: 'opened',
+    })
+    expect(opened).toEqual([{ detail: { kind: 'host', ref: 'codex-thread:original-native-thread' }, sessionId }])
+    expect(await runtime.session(owner, sessionId)).toBeUndefined()
+    expect(await getAgentToolSetup(sessionId)).toEqual({ skills: [], commands: [] })
+    expect((await runtime.openAgentDetail(otherOwner, { target: result.target })).status).toBe('unavailable')
+    expect(
+      (await runtime.openAgentDetail(owner, { target: { kind: 'host', ref: 'codex-thread:original-native-thread' } }))
+        .status,
+    ).toBe('unavailable')
+    threadId = 'changed-native-thread'
+    expect((await runtime.openAgentDetail(owner, { target: result.target })).status).toBe('unavailable')
+    active = false
+    expect((await runtime.openAgentDetail(owner, { target: result.target })).status).toBe('unavailable')
+    expect(opened).toHaveLength(1)
+    expect(new Set(operations)).toEqual(new Set(['native-session-detail']))
+  } finally {
+    unregister()
+    persistence.dispose()
+    await runtime.dispose()
+  }
+})
