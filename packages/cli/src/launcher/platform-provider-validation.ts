@@ -2,11 +2,14 @@ import type {
   PlatformProviderAdapterV1,
   PlatformProviderBrokerDeclarationV1,
   PlatformProviderDefinitionV1,
-  PlatformProviderFactoryConfigurationV1,
   PlatformProviderJsonValue,
   PlatformProviderLifecycleEventV1,
   PlatformProviderOperationV1,
 } from '@cordisx/protocol/platform-provider/v1'
+import type {
+  PlatformProviderDefinition,
+  PlatformProviderFactoryConfiguration,
+} from './platform-provider-service-types.js'
 
 export const VALUE_SCHEMA =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-broker-value.v1.schema.json'
@@ -69,8 +72,54 @@ export function safeValue(value: unknown, label = 'broker value', depth = 0): Pl
   }))
 }
 
-export function factoryConfiguration(value: unknown): PlatformProviderFactoryConfigurationV1 {
+export function providerMapping(value: unknown): PlatformProviderDefinitionV1['mapping'] {
+  const mapping = record(value, 'Platform provider mapping')
+  exact(mapping, ['models'], 'Platform provider mapping')
+  if (!Array.isArray(mapping.models) || mapping.models.length > 256) {
+    throw new Error('Platform provider mapping is invalid')
+  }
+  const sourceIds = new Set<string>()
+  const modelIds = new Set<string>()
+  let defaults = 0
+  const models = mapping.models.map((candidate, index) => {
+    const item = record(candidate, `Platform provider mapping.models[${index}]`)
+    exact(item, ['sourceModelId', 'modelId', 'displayName', 'enabled', 'isDefault'], `mapping.models[${index}]`)
+    if (
+      typeof item.sourceModelId !== 'string' || item.sourceModelId === '' || item.sourceModelId.length > 256
+      || typeof item.modelId !== 'string' || item.modelId === '' || item.modelId.length > 256
+      || item.displayName !== undefined
+        && (typeof item.displayName !== 'string' || item.displayName === '' || item.displayName.length > 200)
+      || typeof item.enabled !== 'boolean' || typeof item.isDefault !== 'boolean'
+      || sourceIds.has(item.sourceModelId) || modelIds.has(item.modelId)
+    ) throw new Error(`Platform provider mapping.models[${index}] is invalid or duplicated`)
+    sourceIds.add(item.sourceModelId)
+    modelIds.add(item.modelId)
+    if (item.enabled && item.isDefault) defaults += 1
+    return immutable({
+      sourceModelId: item.sourceModelId,
+      modelId: item.modelId,
+      ...(item.displayName === undefined ? {} : { displayName: item.displayName }),
+      enabled: item.enabled,
+      isDefault: item.isDefault,
+    })
+  })
+  if (defaults > 1) throw new Error('Platform provider mapping has multiple enabled defaults')
+  return immutable({ models }) as unknown as PlatformProviderDefinitionV1['mapping']
+}
+
+export function factoryConfiguration(value: unknown): PlatformProviderFactoryConfiguration {
   const configuration = record(value, 'Platform provider factory configuration')
+  const version = configuration.$schema
+        === 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-factory-configuration.v1.schema.json'
+      && configuration.contract === 'cordisx.platform-provider-factory-configuration/v1'
+      && configuration.schemaVersion === 1
+    ? 1
+    : configuration.$schema
+          === 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-factory-configuration.v2.schema.json'
+        && configuration.contract === 'cordisx.platform-provider-factory-configuration/v2'
+        && configuration.schemaVersion === 2
+    ? 2
+    : undefined
   exact(configuration, [
     '$schema',
     'contract',
@@ -80,12 +129,10 @@ export function factoryConfiguration(value: unknown): PlatformProviderFactoryCon
     'displayName',
     'enabled',
     'requestTimeoutMs',
+    ...(version === 2 ? ['mapping'] : []),
   ], 'Platform provider factory configuration')
   if (
-    configuration.$schema
-      !== 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-factory-configuration.v1.schema.json'
-    || configuration.contract !== 'cordisx.platform-provider-factory-configuration/v1'
-    || configuration.schemaVersion !== 1
+    version === undefined
     || !Number.isInteger(configuration.configurationRevision) || (configuration.configurationRevision as number) < 0
     || typeof configuration.providerId !== 'string' || !PROVIDER_ID.test(configuration.providerId)
     || typeof configuration.displayName !== 'string' || configuration.displayName.trim() === ''
@@ -93,10 +140,21 @@ export function factoryConfiguration(value: unknown): PlatformProviderFactoryCon
     || !Number.isInteger(configuration.requestTimeoutMs) || (configuration.requestTimeoutMs as number) < 1_000
     || (configuration.requestTimeoutMs as number) > 120_000
   ) throw new Error('Platform provider factory configuration is invalid')
-  return immutable(configuration) as unknown as PlatformProviderFactoryConfigurationV1
+  const mapping = version === 2 ? providerMapping(configuration.mapping) : undefined
+  return immutable({
+    $schema: configuration.$schema,
+    contract: configuration.contract,
+    schemaVersion: configuration.schemaVersion,
+    configurationRevision: configuration.configurationRevision,
+    providerId: configuration.providerId,
+    displayName: configuration.displayName,
+    enabled: configuration.enabled,
+    requestTimeoutMs: configuration.requestTimeoutMs,
+    ...(mapping === undefined ? {} : { mapping }),
+  }) as unknown as PlatformProviderFactoryConfiguration
 }
 
-export function providerDefinition(value: PlatformProviderDefinitionV1): PlatformProviderDefinitionV1 {
+export function providerDefinition(value: PlatformProviderDefinition): PlatformProviderDefinition {
   const definition = record(value, 'Platform provider definition')
   exact(definition, ['descriptor', 'mapping', 'brokerRequest', 'createAdapter'], 'Platform provider definition')
   if (typeof definition.createAdapter !== 'function') throw new Error('Platform provider factory is invalid')
@@ -121,30 +179,7 @@ export function providerDefinition(value: PlatformProviderDefinitionV1): Platfor
     || descriptor.operations.some(operation => !OPERATIONS.has(operation as PlatformProviderOperationV1))
     || new Set(descriptor.operations).size !== descriptor.operations.length
   ) throw new Error('Platform provider descriptor is invalid')
-  const mapping = record(definition.mapping, 'Platform provider mapping')
-  exact(mapping, ['models'], 'Platform provider mapping')
-  if (!Array.isArray(mapping.models) || mapping.models.length > 256) {
-    throw new Error('Platform provider mapping is invalid')
-  }
-  const sourceIds = new Set<string>()
-  const modelIds = new Set<string>()
-  let defaults = 0
-  const models = mapping.models.map((candidate, index) => {
-    const item = record(candidate, `Platform provider mapping.models[${index}]`)
-    exact(item, ['sourceModelId', 'modelId', 'displayName', 'enabled', 'isDefault'], `mapping.models[${index}]`)
-    if (
-      typeof item.sourceModelId !== 'string' || item.sourceModelId === '' || item.sourceModelId.length > 256
-      || typeof item.modelId !== 'string' || item.modelId === '' || item.modelId.length > 256
-      || item.displayName !== undefined && (typeof item.displayName !== 'string' || item.displayName === '')
-      || typeof item.enabled !== 'boolean' || typeof item.isDefault !== 'boolean'
-      || sourceIds.has(item.sourceModelId) || modelIds.has(item.modelId)
-    ) throw new Error(`Platform provider mapping.models[${index}] is invalid or duplicated`)
-    sourceIds.add(item.sourceModelId)
-    modelIds.add(item.modelId)
-    if (item.enabled && item.isDefault) defaults += 1
-    return immutable(item)
-  })
-  if (defaults > 1) throw new Error('Platform provider mapping has multiple enabled defaults')
+  const mapping = providerMapping(definition.mapping)
   const brokerRequest = record(definition.brokerRequest, 'Platform provider broker request')
   exact(brokerRequest, ['bindings'], 'Platform provider broker request')
   if (!Array.isArray(brokerRequest.bindings) || brokerRequest.bindings.length === 0) {
@@ -152,10 +187,10 @@ export function providerDefinition(value: PlatformProviderDefinitionV1): Platfor
   }
   return {
     descriptor: immutable(descriptor) as unknown as PlatformProviderDefinitionV1['descriptor'],
-    mapping: immutable({ models }) as unknown as PlatformProviderDefinitionV1['mapping'],
+    mapping,
     brokerRequest: immutable(brokerRequest) as unknown as PlatformProviderBrokerDeclarationV1,
-    createAdapter: definition.createAdapter as PlatformProviderDefinitionV1['createAdapter'],
-  }
+    createAdapter: definition.createAdapter,
+  } as PlatformProviderDefinition
 }
 
 export function assertAdapter(value: PlatformProviderAdapterV1): void {

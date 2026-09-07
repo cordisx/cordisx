@@ -1,13 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type {
-  PlatformProviderAdapterV1,
-  PlatformProviderDefinitionV1,
-  PlatformProviderOwnerV1,
-  PlatformProviderRegistrationProjectionV1,
-  PlatformProviderServiceApplyV1,
-} from '@cordisx/protocol/platform-provider/v1'
+import type { PlatformProviderAdapterV1, PlatformProviderOwnerV1 } from '@cordisx/protocol/platform-provider/v1'
 import type { ProviderConnection } from '../providers/contracts.js'
 import { ProviderFleet } from '../providers/fleet.js'
 import type { PlatformProviderRuntimeServiceModuleAccess } from './packages/authority.js'
@@ -18,6 +12,11 @@ import {
   PlatformProviderWorkspaceAuthority,
 } from './platform-provider-authority.js'
 import { providerConnection } from './platform-provider-connection.js'
+import type {
+  PlatformProviderDefinition,
+  PlatformProviderFactoryConfiguration,
+  PlatformProviderRegistrationProjection,
+} from './platform-provider-service-types.js'
 import {
   assertAdapter,
   factoryConfiguration,
@@ -28,7 +27,7 @@ import {
 
 export interface ActivePlatformProviderServiceV1 {
   readonly owner: PlatformProviderOwnerV1
-  readonly registrations: readonly PlatformProviderRegistrationProjectionV1[]
+  readonly registrations: readonly PlatformProviderRegistrationProjection[]
   dispose(): Promise<void>
 }
 
@@ -50,6 +49,9 @@ export class PlatformProviderServiceHostV1 {
     }
     const contract = this.options.configurations.resolve(access.schema, access.applicationMode)
     const configurations = contract.project(rawConfiguration).map(factoryConfiguration)
+    if (configurations.some(configuration => configuration.schemaVersion !== contract.protocolVersion)) {
+      throw new Error(`Platform provider service requires Protocol v${contract.protocolVersion} configurations`)
+    }
     const ids = new Set<string>()
     for (const configuration of configurations) {
       if (!PROVIDER_ID.test(configuration.providerId) || ids.has(configuration.providerId)) {
@@ -77,7 +79,7 @@ export class PlatformProviderServiceHostV1 {
     const workspaces = new PlatformProviderWorkspaceAuthority()
     let publicationPromise: Promise<Awaited<ReturnType<ProviderFleet['publishConnections']>> | undefined> | undefined
     const prepared: Array<{
-      readonly projection: PlatformProviderRegistrationProjectionV1
+      readonly projection: PlatformProviderRegistrationProjection
       readonly connection: ProviderConnection
       readonly broker: HostBoundPlatformProviderBrokerV1
       disposed: boolean
@@ -85,7 +87,7 @@ export class PlatformProviderServiceHostV1 {
     const context = {
       platformProviders: {
         owner,
-        register: async (definition: PlatformProviderDefinitionV1) => {
+        register: async (definition: PlatformProviderDefinition) => {
           if (controller.signal.aborted) throw new Error('Platform provider generation is retired')
           const normalized = providerDefinition(definition)
           const configuration = configurations.find(item => item.providerId === normalized.descriptor.providerId)
@@ -95,6 +97,10 @@ export class PlatformProviderServiceHostV1 {
           if (!configuration.enabled) {
             throw new Error(`Provider ${normalized.descriptor.providerId} is disabled`)
           }
+          if (
+            configuration.schemaVersion === 2
+            && JSON.stringify(configuration.mapping) !== JSON.stringify(normalized.mapping)
+          ) throw new Error(`Provider ${normalized.descriptor.providerId} mapping differs from its Host projection`)
           if (prepared.some(item => item.projection.descriptor.providerId === normalized.descriptor.providerId)) {
             throw new Error(`Provider ${normalized.descriptor.providerId} is registered twice`)
           }
@@ -118,7 +124,15 @@ export class PlatformProviderServiceHostV1 {
           const broker = new HostBoundPlatformProviderBrokerV1(policy, transport)
           let adapter: PlatformProviderAdapterV1
           try {
-            adapter = await normalized.createAdapter({
+            const createAdapter = normalized.createAdapter as unknown as (input: {
+              readonly owner: PlatformProviderOwnerV1
+              readonly providerId: string
+              readonly providerGeneration: string
+              readonly configuration: PlatformProviderFactoryConfiguration
+              readonly broker: HostBoundPlatformProviderBrokerV1
+              readonly signal: AbortSignal
+            }) => Promise<PlatformProviderAdapterV1>
+            adapter = await createAdapter({
               owner,
               providerId: normalized.descriptor.providerId,
               providerGeneration,
@@ -144,20 +158,37 @@ export class PlatformProviderServiceHostV1 {
             await broker.dispose().catch(() => undefined)
             throw error
           }
-          const projection: PlatformProviderRegistrationProjectionV1 = immutable({
-            $schema:
-              'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-registration.v1.schema.json',
-            contract: 'cordisx.platform-provider-registration/v1',
-            schemaVersion: 1,
-            registrationId: `ppr_${randomUUID()}`,
-            owner,
-            descriptor: normalized.descriptor,
-            mapping: normalized.mapping,
-            providerGeneration,
-            brokerPolicy: policy,
-            configuration,
-            state: 'staged',
-          })
+          const projection = immutable(
+            configuration.schemaVersion === 2
+              ? {
+                $schema:
+                  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-registration.v2.schema.json' as const,
+                contract: 'cordisx.platform-provider-registration/v2' as const,
+                schemaVersion: 2 as const,
+                registrationId: `ppr_${randomUUID()}` as const,
+                owner,
+                descriptor: normalized.descriptor,
+                mapping: normalized.mapping,
+                providerGeneration,
+                brokerPolicy: policy,
+                configuration,
+                state: 'staged' as const,
+              }
+              : {
+                $schema:
+                  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-registration.v1.schema.json' as const,
+                contract: 'cordisx.platform-provider-registration/v1' as const,
+                schemaVersion: 1 as const,
+                registrationId: `ppr_${randomUUID()}` as const,
+                owner,
+                descriptor: normalized.descriptor,
+                mapping: normalized.mapping,
+                providerGeneration,
+                brokerPolicy: policy,
+                configuration,
+                state: 'staged' as const,
+              },
+          )
           const record = {
             projection,
             connection: providerConnection({
@@ -195,7 +226,14 @@ export class PlatformProviderServiceHostV1 {
       const service = await import(
         `${pathToFileURL(modulePath).href}?generation=${encodeURIComponent(owner.pluginGeneration)}`
       ) as {
-        readonly apply?: PlatformProviderServiceApplyV1
+        readonly apply?: (
+          context: unknown,
+          input: {
+            readonly owner: PlatformProviderOwnerV1
+            readonly configurations: readonly PlatformProviderFactoryConfiguration[]
+            readonly signal: AbortSignal
+          },
+        ) => void | Promise<void>
       }
       if (typeof service.apply !== 'function') throw new Error('Platform provider service exports no apply function')
       await service.apply(context as never, { owner, configurations, signal: controller.signal })
