@@ -193,10 +193,10 @@ export function AgentConversationRenderer(
     backToMembers: chinese ? '返回群成员' : 'Back to members',
     hierarchyNavigation: chinese ? '详情栏层级导航' : 'Inspector hierarchy',
     introduction: chinese ? '介绍' : 'Introduction',
-    activeSessions: chinese ? '当前已加载的会话' : 'Loaded sessions',
+    activeSessions: chinese ? '此房间已加载的会话' : 'Sessions loaded in this Room',
     associatedSessions: chinese ? '关联会话' : 'Associated sessions',
-    unloadedSession: chinese ? '未加载 · 运行状态未知' : 'Not loaded · Running state unknown',
-    noActiveSessions: chinese ? '当前没有已加载会话' : 'No loaded sessions',
+    unloadedSession: chinese ? '此房间未加载 · 运行状态未知' : 'Not loaded in this Room · Running state unknown',
+    noActiveSessions: chinese ? '此房间没有已加载会话' : 'No sessions loaded in this Room',
     sessionCount: count => chinese ? `${count} 个激活会话` : `${count} active session${count === 1 ? '' : 's'}`,
     lifecycle: {
       active: chinese ? '激活' : 'Active',

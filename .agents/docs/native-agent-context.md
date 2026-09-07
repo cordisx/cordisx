@@ -215,8 +215,9 @@ identity panel. Unknown revisions and foreign owner snapshots remain unavailable
 ## Associated Sessions before runtime loading
 
 Shell v12 renders a source's existing Room association independently from live
-`activeRuns`. The Host identity panel shows “未加载 · 运行状态未知” for an
-unloaded association. A missing runtime projector cannot establish whether its
+`activeRuns`. The Host identity panel shows “此房间未加载 · 运行状态未知” for an
+unloaded Room-source association. This does not assert Host-global Session
+loading. A missing Room projector cannot establish whether its
 native task is running, stopped, or resumable. The panel keeps a row without a
 link when the authenticated mapping is unavailable.
 
