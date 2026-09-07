@@ -427,7 +427,7 @@ describe('Agent conversation shell public runtime', () => {
     dom.window.close()
   })
 
-  it.each([9, 10] as const)(
+  it.each([9, 10, 11] as const)(
     'sends through public Shell v%s registration and real page-admission v2 command dispatch',
     async version => {
       const dom = installDom()
@@ -566,7 +566,9 @@ describe('Agent conversation shell public runtime', () => {
             },
           }
         }
-      const registration = version === 10
+      const registration = version === 11
+        ? shell.registerSourceV11(factory, { composer: { mode: 'page-composer-v2' } })
+        : version === 10
         ? shell.registerSourceV10(factory, { composer: { mode: 'page-composer-v2' } })
         : shell.registerSourceV9(factory, { composer: { mode: 'page-composer-v2' } })
       registration.mount({

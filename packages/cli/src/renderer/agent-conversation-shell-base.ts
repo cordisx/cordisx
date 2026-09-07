@@ -38,7 +38,7 @@ import type {
   AgentConversationShellSource as AgentConversationShellSourceV7,
   AgentConversationShellSubscribeRuntimeResult as AgentConversationShellSubscribeRuntimeResultV7,
   AgentConversationShellSubscription as AgentConversationShellSubscriptionV7,
-} from '@cordisx/protocol/agent-conversation-shell/v10'
+} from '@cordisx/protocol/agent-conversation-shell/v11'
 import type {
   AgentConversationShellSnapshot as AgentConversationShellSnapshotV8,
   AgentConversationShellSource as AgentConversationShellSourceV8,
@@ -48,6 +48,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import type {
   CordisXAgentConversationShellSourceFactory,
   CordisXAgentConversationShellSourceFactoryV10,
+  CordisXAgentConversationShellSourceFactoryV11,
   CordisXAgentConversationShellSourceFactoryV2,
   CordisXAgentConversationShellSourceFactoryV3,
   CordisXAgentConversationShellSourceFactoryV4,
@@ -95,7 +96,7 @@ import {
 } from './agent-conversation-shell-projection.js'
 
 export interface RegisteredSource {
-  readonly version: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
+  readonly version: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11
   readonly owner: string
   readonly ownerGeneration: string
   readonly effect: PluginGenerationEffectIdentity
@@ -110,6 +111,7 @@ export interface RegisteredSource {
     | CordisXAgentConversationShellSourceFactoryV8
     | CordisXAgentConversationShellSourceFactoryV9
     | CordisXAgentConversationShellSourceFactoryV10
+    | CordisXAgentConversationShellSourceFactoryV11
   readonly principal?: PluginPrincipalToken
   readonly composerMode?: 'page-composer-v2'
   readonly sessions: Set<MountedConversationBase>
@@ -261,16 +263,23 @@ export abstract class MountedConversationBase {
     const initial = immutableSnapshot(
       await this.runPlugin<unknown>('agent-conversation-shell.snapshot', () => source.snapshot()),
     )
-    if (this.record.version >= 7) assertSnapshotV7(initial, this.record.version === 10)
-    else if (this.record.version === 6) assertSnapshotV6(initial)
+    if (this.record.version >= 7) {
+      assertSnapshotV7(initial, this.record.version === 10 || this.record.version === 11, this.record.version === 11)
+    } else if (this.record.version === 6) assertSnapshotV6(initial)
     else if (this.record.version === 5) assertSnapshotV5(initial)
     else if (this.record.version === 4) assertSnapshotV4(initial)
     else assertSnapshot(initial)
     this.assertSnapshotFence(initial)
     if (this.record.version >= 7) {
-      projectAgentConversationShellSnapshotV7(this.record.owner, initial as AgentConversationShellSnapshotV7, {
-        resolve: message => message.fallback,
-      }, this.record.version === 10)
+      projectAgentConversationShellSnapshotV7(
+        this.record.owner,
+        initial as AgentConversationShellSnapshotV7,
+        {
+          resolve: message => message.fallback,
+        },
+        this.record.version === 10 || this.record.version === 11,
+        this.record.version === 11,
+      )
     } else if (this.record.version === 6) {
       projectAgentConversationShellSnapshotV6(this.record.owner, initial as AgentConversationShellSnapshotV6, {
         resolve: message => message.fallback,

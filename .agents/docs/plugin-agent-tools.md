@@ -94,3 +94,18 @@ Changing the mounted Host conversation class is not a safe isolated component
 refresh: Vite may restart the Host runtime and revoke active Agent/tool bindings.
 Do not patch a user's watched tree to apply this fix. Stage a separate candidate
 and preserve the running Room/profile until an explicit switch is coordinated.
+
+## Persisted human messages after reload
+
+Shell v11 adds a `room-user-message` source for the Room's own persisted human
+input. This fixes cold reconstruction when the original Host Session ledger was
+not persisted: the Room item and accepted admission link still exist, even
+though there is no honest historical SessionEvent to project. It does not
+relabel the input as an Agent command or acknowledgement.
+
+The Host validates human author, selected Room, original message identity and
+Room sequence. The consumer uses exact verified admission associations to avoid
+duplicating an input when its real Session projection is available later. No
+history record is rewritten and no task is replayed. v11 also explicitly
+inherits the v9/v10 page-composer behavior; source support alone is insufficient
+if the actual send path loses its typed admission context.

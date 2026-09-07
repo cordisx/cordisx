@@ -12,7 +12,7 @@ import type {
 import type {
   AgentConversationItem as ProtocolItemV7,
   AgentConversationShellSnapshot as AgentConversationShellSnapshotV7,
-} from '@cordisx/protocol/agent-conversation-shell/v10'
+} from '@cordisx/protocol/agent-conversation-shell/v11'
 import {
   agentLoopHandle,
   assertAction,
@@ -114,6 +114,7 @@ export function assertItemV4(
   value: unknown,
   label: string,
   allowPluginCommands = false,
+  allowRoomUserMessages = false,
 ): asserts value is ProtocolItemV4 {
   plainObject(value, label)
   if (value.kind === 'status') {
@@ -256,6 +257,14 @@ export function assertItemV4(
       (value.source.sequence as number) < 1 || value.source.messageId !== value.messageId
       || value.source.participantId !== value.author.participantId || value.author.role !== 'agent'
     ) throw new Error(`${label} plugin command identity mismatch`)
+  } else if (allowRoomUserMessages && value.source.kind === 'room-user-message') {
+    exactKeys(value.source, ['kind', 'roomId', 'messageId', 'sequence'], `${label}.source`)
+    opaque(value.source.roomId, `${label}.source.roomId`)
+    opaque(value.source.messageId, `${label}.source.messageId`)
+    safeSequence(value.source.sequence, `${label}.source.sequence`)
+    if (value.source.messageId !== value.messageId || value.author.role !== 'human') {
+      throw new Error(`${label} Room user message identity mismatch`)
+    }
   } else if (value.source.kind === 'chatroom-acknowledgement') exactKeys(value.source, ['kind'], `${label}.source`)
   else throw new Error(`${label}.source.kind is invalid`)
   plainObject(value.semantic, `${label}.semantic`)
@@ -281,7 +290,10 @@ export function assertItemV4(
   if (value.source.kind === 'chatroom-acknowledgement' !== (value.semantic.purpose === 'chatroom-acknowledgement')) {
     throw new Error(`${label}.source and semantic mismatch`)
   }
-  if (value.source.kind === 'plugin-command' && value.semantic.purpose !== 'conversation') {
+  if (
+    (value.source.kind === 'plugin-command' || value.source.kind === 'room-user-message')
+    && value.semantic.purpose !== 'conversation'
+  ) {
     throw new Error(`${label} plugin command semantic mismatch`)
   }
   if (!Array.isArray(value.body) || value.body.length === 0 || value.body.length > 64) {
@@ -385,10 +397,11 @@ export function assertItemV7(
   value: unknown,
   label: string,
   allowPluginCommands = false,
+  allowRoomUserMessages = false,
 ): asserts value is ProtocolItemV7 {
   plainObject(value, label)
   if (value.kind !== 'approval') {
-    assertItemV4(value, label, allowPluginCommands)
+    assertItemV4(value, label, allowPluginCommands, allowRoomUserMessages)
     return
   }
   exactKeys(value, [
@@ -643,6 +656,7 @@ export function assertSnapshotV6(value: unknown): asserts value is AgentConversa
 export function assertSnapshotV7(
   value: unknown,
   allowPluginCommands = false,
+  allowRoomUserMessages = false,
 ): asserts value is AgentConversationShellSnapshotV7 {
   plainObject(value, 'v7 snapshot')
   exactKeys(
@@ -658,7 +672,9 @@ export function assertSnapshotV7(
   safeSequence(value.snapshotSequence, 'v7 snapshot.snapshotSequence')
   assertSelectionV4(value.selection, 'v7 snapshot.selection')
   if (!Array.isArray(value.items) || value.items.length > 500) throw new Error('v7 snapshot.items is invalid')
-  value.items.forEach((item, index) => assertItemV7(item, `v7 snapshot.items[${index}]`, allowPluginCommands))
+  value.items.forEach((item, index) =>
+    assertItemV7(item, `v7 snapshot.items[${index}]`, allowPluginCommands, allowRoomUserMessages)
+  )
   if (value.items.some(item => item.sequence > (value.snapshotSequence as number))) {
     throw new Error('v7 snapshot item sequence exceeds watermark')
   }
@@ -684,7 +700,8 @@ export function assertSnapshotV7(
       value.items.some(item =>
         item.kind === 'approval'
         || item.kind === 'message'
-          && (item.semantic.purpose === 'member-self-introduction' || item.source.kind === 'plugin-command')
+          && (item.semantic.purpose === 'member-self-introduction'
+            || (item.source.kind === 'plugin-command' || item.source.kind === 'room-user-message'))
       )
     ) throw new Error('v7 no-room snapshot contains Room items')
     return
@@ -700,7 +717,10 @@ export function assertSnapshotV7(
   const approvals = new Set<string>()
   for (const item of value.items) {
     if (item.kind === 'message') {
-      if (item.source.kind === 'plugin-command' && item.source.roomId !== value.selection.roomId) {
+      if (
+        (item.source.kind === 'plugin-command' || item.source.kind === 'room-user-message')
+        && item.source.roomId !== value.selection.roomId
+      ) {
         throw new Error('plugin command belongs to another Room')
       }
       const participant = participants.get(item.author.participantId)

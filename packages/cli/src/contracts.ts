@@ -243,6 +243,7 @@ export type {
   CordisXAgentConversationShellRegistration,
   CordisXAgentConversationShellSourceFactory,
   CordisXAgentConversationShellSourceFactoryV10,
+  CordisXAgentConversationShellSourceFactoryV11,
   CordisXAgentConversationShellSourceFactoryV2,
   CordisXAgentConversationShellSourceFactoryV3,
   CordisXAgentConversationShellSourceFactoryV4,
