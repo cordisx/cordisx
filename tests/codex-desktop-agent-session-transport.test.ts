@@ -432,6 +432,18 @@ describe('native Agent definition context', () => {
     }],
   })
 
+  it('does not interpret an unknown Host SessionId or caller-spelled native reference as a thread binding', async () => {
+    const { requests, transport } = await harness()
+    try {
+      for (const sessionId of ['cx-session.unknown', 'codex-thread:unknown', 'unknown-native-id']) {
+        expect(await transport.resume({ sessionId })).toEqual({ status: 'unavailable', code: 'unsupported' })
+      }
+      expect(requests).toHaveLength(0)
+    } finally {
+      transport.dispose()
+    }
+  })
+
   it('gets fresh tool context at actual dequeue, steer and inject, with Skill content separate from user text', async () => {
     const { requests, transport, view } = await harness()
     let current: AgentToolSetup = { skills: [], commands: [] }
