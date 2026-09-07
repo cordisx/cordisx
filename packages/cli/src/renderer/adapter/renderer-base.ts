@@ -18,7 +18,6 @@ import type {
 } from '../selected-navigation-actions.js'
 
 export interface NavigationActionCandidate extends HostSelectedNavigationActionCandidate {
-  readonly actionContainer: HTMLElement
   presented: boolean
 }
 
