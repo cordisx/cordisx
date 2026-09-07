@@ -5,12 +5,13 @@ description: Assess the feasibility of a requested CordisX customization, then c
 
 # CordisX Plugin Development
 
-Build plugins against the public CordisX contract. Keep the Host responsible for product UI and runtime policy.
+Build plugins against the public CordisX contract. Keep the Host responsible for product UI and runtime policy. Bundled revision and owning source are recorded in [version.json](version.json); the launching CLI deploys this complete tree by content digest.
 
 ## Read the relevant references
 
 - Assess any requested product behavior before scaffolding or editing: [feasibility-assessment.md](references/feasibility-assessment.md)
 - Choose or inspect the project shape and development loop: [project-layouts-and-development.md](references/project-layouts-and-development.md)
+- Change plugin-owned styles or CSS imports: [css-and-lifecycle.md](references/css-and-lifecycle.md)
 - Start or package a plugin: [plugin-authoring.md](references/plugin-authoring.md)
 - Add any Manager page, contribution, action, collection, or icon: [ui-system.md](references/ui-system.md)
 - Add or change plugin configuration: [schema-configuration.md](references/schema-configuration.md)
@@ -20,8 +21,8 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 ## Core contract
 
 - Plugins provide manifests, localized labels, structured schemas, state, commands, icons, contribution descriptors, and React bodies in documented plugin-owned seats.
-- A React body uses `cordisx/react` and `cordisx/ui`. Plugins must not provide arbitrary HTML, CSS, Host selectors or DOM nodes, replacement renderers, popovers, breadcrumbs, tabs, page chrome, or shell navigation.
-- The Host owns DOM, layout, styling, themes, accessibility, search, scrolling, routing chrome, permissions, diagnostics, portals, and cleanup.
+- A React body uses `cordisx/react` and `cordisx/ui`. Style only plugin-owned presentation inside the documented body seat. Structured contributions do not accept arbitrary HTML, CSS, Host selectors or DOM nodes, replacement renderers, popovers, breadcrumbs, tabs, page chrome, or shell navigation.
+- The Host owns its DOM, shared-control styling, themes, accessibility, routing chrome, permissions, diagnostics, portals, and contribution cleanup. Plugin CSS must not override Host or native DOM.
 - Treat `manager.content` as a body seat. Do not add a second header, back button, breadcrumb, title/description block, tabs, outer padding, or outer scroll container.
 - Assign spacing to one layer only. A parent may own `gap` or a child may own margin, never both for the same separation.
 - Represent unavailable capabilities honestly. Do not pair an “unavailable” badge with an apparently editable control or imply a connection that does not exist.

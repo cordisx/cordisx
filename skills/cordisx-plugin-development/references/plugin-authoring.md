@@ -34,6 +34,9 @@ and semantic components. Do not install or bundle another React renderer or a
 component library. The React body remains inside the Host-composed page; it does
 not take over headers, breadcrumbs, tabs, navigation, or outer scrolling.
 
+For CSS import forms, type declarations, and cleanup boundaries, use
+[CSS and lifecycle](css-and-lifecycle.md).
+
 ## Runtime boundaries
 
 - Register contributions during activation and retain every returned disposer.
