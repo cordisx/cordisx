@@ -190,3 +190,24 @@ in runtime-private composition, never plugin Context/setup, logs, or CLI binding
 files. Storage uses a reserved Host scope derived from the authenticated original
 source/profile/plugin tuple; the plugin's public document scope cannot read or
 replace the native records. Caller-supplied source/id fields never select a scope.
+
+## Entity details without a live Session
+
+Entity names, avatar references, exact revisions and definitions already live in
+`profiles/<profileId>/entities` with their prompt files and owner index. Room
+members retain their exact AgentDefinition reference. A cold Room can therefore
+have complete identity data while having no live or recovered Session ledger.
+
+The Shell's display resolver first retains its existing Session/AgentLoop
+presentation behavior, then reads the calling owner's authenticated Entity
+snapshot view. The Entity service refreshes that view on its normal snapshot
+read; binding, owner and module-generation fences prevent a stale or foreign
+view from being used. The snapshot is cloned before returning it to plugin code.
+This is a read-only view of existing persistence, not a new ledger or a claim
+that an Agent is online. Exact revision/parent resolution is still required.
+
+A missing live Session must not turn a valid persisted Entity's message avatar
+into the decorative-only avatar renderer. The cold identity regression creates
+an Entity on disk, recreates the directory authority, reads it back without
+creating any Agent or Session, and clicks the actual avatar button to open its
+identity panel. Unknown revisions and foreign owner snapshots remain unavailable.

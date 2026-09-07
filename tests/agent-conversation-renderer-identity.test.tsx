@@ -1,3 +1,12 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import path from 'node:path'
+import os from 'node:os'
+import { EntityDirectoryAuthority, entityTreeDigest } from '../packages/cli/src/launcher/entity-directory.js'
+import { entityInstallationId } from '../packages/cli/src/launcher/owner-document-rpc.js'
+import {
+  createEntityAwareIdentityResolver,
+  entityDefinitionPresentation,
+} from '../packages/cli/src/renderer/entity-definition-presentation.js'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import React, { act } from 'react'
@@ -116,6 +125,107 @@ afterEach(() => {
 })
 
 describe('AgentConversation renderer model', () => {
+  it('opens an exact persisted Entity avatar after restart with no live Agent or Session', async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'entity-identity-restart-'))
+    let harness: RenderHarness | undefined
+    try {
+      const base = createPlaygroundConversationFixture('conversation', 'en')
+      if (base.selection.kind !== 'room') throw new Error('Room fixture unavailable')
+      const agent = base.selection.participants.find(value => value.role === 'agent')!
+      const message = base.entries.find(value => value.kind === 'message' && value.authorId === agent.id)!
+      const avatar = createGeneratedAgentAvatarRef({ namespace: 'agent-definition', agentId: agent.id })
+      const entityText = JSON.stringify({
+        $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/entity-file.v1.schema.json',
+        contract: 'cordisx.entity-file/v1',
+        schemaVersion: 1,
+        agentId: agent.id,
+        name: 'Persisted Entity',
+        avatar,
+        inherit: {
+          promptSections: 'none',
+          rules: 'none',
+          skills: 'none',
+          tools: 'none',
+          mcpServers: 'none',
+          runtimeDefaults: 'none',
+        },
+        promptSections: [{
+          sectionId: 'intro',
+          kind: 'introduction',
+          source: { kind: 'markdown', path: './prompts/intro.md' },
+        }],
+      })
+      const promptFiles = [{ path: './prompts/intro.md' as const, text: 'Persisted Entity introduction.' }]
+      const declaration = {
+        agentId: agent.id,
+        entityPath: `./entities/${agent.id}/entity.json` as const,
+        digest: entityTreeDigest(entityText, promptFiles),
+      }
+      const binding = {
+        profileId: 'identity-test',
+        pluginId: 'chatroom',
+        installationId: entityInstallationId('identity-test', 'chatroom'),
+        pluginGeneration: 1,
+      }
+      const writer = new EntityDirectoryAuthority(home, 'identity-test')
+      writer.register(binding, [declaration])
+      expect(
+        await writer.materialize(binding, '1.0.0', `sha256:${'1'.repeat(64)}`, [{
+          declaration,
+          entityText,
+          promptFiles,
+        }]),
+      ).toMatchObject([{ status: 'materialized' }])
+      const restarted = new EntityDirectoryAuthority(home, 'identity-test')
+      const snapshot = await restarted.snapshot({ ...binding, pluginGeneration: 2 })
+      const entity = snapshot.entities[0]!
+      const model = createAgentConversationModel({
+        ...base,
+        selection: {
+          ...base.selection,
+          participants: [{ ...agent, avatar, agentIdentity: entity.identity }],
+          activeRuns: [],
+        },
+        entries: [message],
+        headerActions: [],
+      })
+      const resolver = vi.fn(createEntityAwareIdentityResolver({
+        session: () => undefined,
+        agentLoop: () => undefined,
+        entitySnapshot: ownerId => ownerId === model.ownerId ? snapshot : undefined,
+      }))
+      harness = await render(model, new AgentConversationCommandController({ execute: vi.fn() }, model), false, {
+        identity: {
+          resolve: resolver,
+          navigator: new HostAgentTaskDetailsNavigator({ navigateHost: vi.fn(), navigateExternal: vi.fn() }),
+          onSettings: vi.fn(),
+        },
+      })
+      const button = harness.dom.window.document.querySelector<HTMLButtonElement>('.cx-agent-identity-avatar-button')
+      expect(button).not.toBeNull()
+      await act(async () => {
+        button!.click()
+        await Promise.resolve()
+      })
+      expect(resolver).toHaveBeenCalledWith(entity.identity, model.ownerId)
+      expect(harness.dom.window.document.querySelector('.cx-agent-identity-body')?.textContent).toContain(
+        'Persisted Entity introduction.',
+      )
+      expect(harness.dom.window.document.querySelector('.cx-conversation-inspector-breadcrumb-current')?.textContent)
+        .toBe('Persisted Entity')
+      expect(entityDefinitionPresentation(snapshot, { ...entity.identity, revision: 'unknown' })).toBeUndefined()
+      expect(
+        entityDefinitionPresentation(
+          { ...snapshot, binding: { ...snapshot.binding, pluginId: 'foreign' } },
+          entity.identity,
+        ),
+      ).toBeUndefined()
+    } finally {
+      await harness?.close()
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+
   it('renders Host semantic icons without changing avatar or message context-menu labels and order', async () => {
     const base = createPlaygroundConversationFixture('conversation', 'en')
     const agent = base.selection.kind === 'room'

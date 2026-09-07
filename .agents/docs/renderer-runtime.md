@@ -711,3 +711,27 @@ local packages, and activation transactions are described in
 [`dynamic-plugin-lifecycle.md`](dynamic-plugin-lifecycle.md). General-purpose
 untrusted execution isolation for legacy structured plugins remains a later
 stage; the Host DOM worker is deliberately capability-specific.
+
+## Native task selection while a plugin page is active
+
+Codex Desktop build 7982's native sidebar does not derive active-task background
+from focus alone. Static source evidence in `app-initial-86767c3d23e5.js` shows
+`qfr` (exported as `sEt`, imported as `RNe`) compares the thread key selected by
+`bF`; `bF` derives that key from the native router's `kT.pathname`. Home routes
+return no active thread. `KTn` in `app-primary-139889e10fbd.js` also includes this
+active state in its selected calculation; native multi-selection is separate.
+
+Keeping a previous native task pathname while adding a CordisX main-page entry
+therefore left that task active behind the plugin. The existing native history
+adapter now places main-outlet plugin entries at the already-declared `/` home
+route and stores the same closed CordisX entry in that native location's state.
+The bundle's `Ij` route parser explicitly classifies `/` as home, and its route
+tree declares that path. Other plugin outlets retain their existing behavior.
+
+This uses one native navigator and its original React listener. It neither
+clears global DOM classes nor creates a separate selected-state store, deletes
+a native task, or reloads the page. Back/Forward restores the previous native
+task or plugin location, and the reload checkpoint uses the actual destination
+pathname. Tests cover active-task projection, original-task preservation,
+native Back/Forward, and direct return to a native task. Native visual feedback
+remains separate from these adapter checks.
