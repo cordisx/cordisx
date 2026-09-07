@@ -1,3 +1,4 @@
+import { NativeAgentSessionBridge } from './native-agent-session-rpc.js'
 import { PluginAgentToolAuthority } from './plugin-agent-tools.js'
 import type { CordisXConfigPlugin } from './config.js'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
@@ -234,6 +235,7 @@ export function parseOwnerDocumentBindingRequest(value: unknown): OwnerDocumentB
 }
 
 export interface OwnerDocumentBridgeHandler {
+  readonly nativeSessions?: NativeAgentSessionBridge
   readonly agentTools?: PluginAgentToolAuthority
   readonly entities?: EntityBridgeHandler
   issue(identity: OwnerDocumentIdentity, moduleGeneration: string): OwnerDocumentPrincipalBinding
@@ -250,7 +252,9 @@ export function createOwnerDocumentBridgeHandler(input: {
   /** Synchronous Host principal lease check, repeated at commit. */
   readonly principalAllowed: (principal: OwnerDocumentPrincipal) => boolean
 }): OwnerDocumentBridgeHandler {
-  const agentTools = input.plugins === undefined ? undefined : new PluginAgentToolAuthority({ ...input, plugins: input.plugins })
+  const agentTools = input.plugins === undefined
+    ? undefined
+    : new PluginAgentToolAuthority({ ...input, plugins: input.plugins })
   let activeRequests = 0
   const bounded = async <Value>(operation: () => Promise<Value>): Promise<Value> => {
     if (activeRequests >= MAX_OWNER_DOCUMENT_REQUESTS) throw new Error('owner document authority request limit reached')
@@ -270,7 +274,7 @@ export function createOwnerDocumentBridgeHandler(input: {
     return principal
   }
   return {
-    ...(agentTools === undefined ? {} : { agentTools }),
+    ...(agentTools === undefined ? {} : { agentTools, nativeSessions: new NativeAgentSessionBridge(input) }),
     issue(identity, moduleGeneration) {
       const principal = { profileId: input.profileId, generation: input.generation, moduleGeneration, identity }
       return {

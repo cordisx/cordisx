@@ -1,3 +1,4 @@
+import { registerNativeSessionOwner } from './native-agent-session-recovery.js'
 import { installAgentTools } from './plugin-agent-tools.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
@@ -651,14 +652,24 @@ export const createRuntimeMountPlugin = async (
       controller.identity.id,
       runtimeScope.moduleGenerationOf()!(controller),
     ]))
-    controller.unregisterAgentTools = installAgentTools(pluginContext, {
-      bridge: runtimeScope.ownerDocumentBridge()!, principal: entityPrincipal,
+    const unregisterNativeSessionOwner = registerNativeSessionOwner(
+      owner,
+      entityPrincipal,
+      () => controller.principalLive,
+    )
+    const tools = installAgentTools(pluginContext, {
+      bridge: runtimeScope.ownerDocumentBridge()!,
+      principal: entityPrincipal,
       active: () => controller.principalLive,
       ownsSession: sessionId => {
         const current = runtimeScope.agentSessionRuntime.ownerForSession(sessionId)
         return current?.pluginId === owner.pluginId && current.generation === owner.generation
       },
-    }).dispose
+    })
+    controller.unregisterAgentTools = () => {
+      tools.dispose()
+      unregisterNativeSessionOwner()
+    }
     controller.entityRegistryFiber = pluginContext.plugin(CordisXEntityRegistryServiceV1, {
       bridge: runtimeScope.ownerDocumentBridge()!,
       principal: entityPrincipal,

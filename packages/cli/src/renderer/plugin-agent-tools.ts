@@ -25,6 +25,7 @@ export interface AgentToolClientOptions {
 }
 const registrations = new Map<string, Registration>()
 const bindings = new Map<string, SessionBinding>()
+const recoveringSessions = new Set<string>()
 const invocations = new Map<string, AbortController>()
 function immutable<T>(value: T): T {
   const copy = structuredClone(value)
@@ -87,6 +88,7 @@ globalThis.__cordisxDispatchAgentToolV1 = dispatchAgentTool
 
 /** Freshly checked by the native transport immediately before real execution. */
 export async function getAgentToolSetup(sessionId: string): Promise<AgentToolSetup> {
+  if (recoveringSessions.has(sessionId)) throw new Error('Agent tools require a fresh binding after recovery')
   const binding = bindings.get(sessionId)
   if (binding === undefined) return { skills: [], commands: [] }
   if (binding.revoked || !live(binding.registration, sessionId)) {
@@ -159,6 +161,7 @@ export function installAgentTools(ctx: Context, options: AgentToolClientOptions)
       const handle = await call(registration, 'agent-tools-bind', request) as Omit<AgentToolBindingHandle, 'revoke'>
       const binding: SessionBinding = { registration, handle, revoked: false }
       bindings.set(request.sessionId, binding)
+      recoveringSessions.delete(request.sessionId)
       return Object.freeze({
         ...handle,
         async revoke() {
@@ -170,4 +173,14 @@ export function installAgentTools(ctx: Context, options: AgentToolClientOptions)
   }
   remove = ctx.reflect.provide('agentTools', service)
   return Object.assign(service, { dispose })
+}
+
+/** A validated native recovery grants owner eligibility, never execution authority. */
+export async function beginAgentToolRecovery(sessionId: string): Promise<void> {
+  recoveringSessions.add(sessionId)
+  const binding = bindings.get(sessionId)
+  if (binding !== undefined) {
+    binding.revoked = true
+    await call(binding.registration, 'agent-tools-revoke', { bindingId: binding.handle.bindingId })
+  }
 }
