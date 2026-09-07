@@ -254,6 +254,7 @@ export abstract class AgentSessionRuntimeOperations extends AgentSessionRuntimeP
       )
     }
     let definitions: readonly CordisXResolvedAgentDefinition[] | undefined
+    const effectiveSetup = input.setup ?? existing?.setup
     if (input.setup !== undefined) {
       try {
         definitions = resolveAgentDefinitionCatalog(input.setup).definitions
@@ -265,12 +266,12 @@ export abstract class AgentSessionRuntimeOperations extends AgentSessionRuntimeP
       ? await this.options.driver.create({
         sessionId,
         options: input.options ?? {},
-        ...(input.setup === undefined ? {} : { setup: input.setup }),
+        ...(effectiveSetup === undefined ? {} : { setup: clone(effectiveSetup) }),
       })
       : await this.options.driver.resume({
         sessionId,
         options: input.options ?? {},
-        ...(input.setup === undefined ? {} : { setup: input.setup }),
+        ...(effectiveSetup === undefined ? {} : { setup: clone(effectiveSetup) }),
       })
     if (driver.status !== 'accepted') {
       return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, driver.code))
