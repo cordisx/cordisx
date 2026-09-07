@@ -4,7 +4,10 @@ import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
 import { execFile } from 'node:child_process'
-import { resolveDevelopmentIdentitySource } from '../packages/cli/src/launcher/development-source-identity.js'
+import {
+  resolveDevelopmentConfigIdentity,
+  resolveDevelopmentIdentitySource,
+} from '../packages/cli/src/launcher/development-source-identity.js'
 
 test('explicit development identity retains original path hashing and rejects a different Git repository', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'development-identity-'))
@@ -78,6 +81,73 @@ test('explicit development identity retains original path hashing and rejects a 
         developmentIdentityEntry: path.join(original, 'sample.ts'),
       }),
     ).rejects.toThrow('same Git')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('config development signs the canonical Vite source accepted by native bootstrap while rejecting raw or stale principals', async () => {
+  const { loadConfig } = await import('../packages/cli/src/launcher/config.js')
+  const { pluginIdentities } = await import('../packages/cli/src/cli/run-support.js')
+  const { OwnerDocumentLeaseRegistry, issueOwnerDocumentPrincipalToken } = await import(
+    '../packages/cli/src/launcher/owner-document-rpc.js'
+  )
+  const { NativeAgentSessionBridge, issueNativeSessionHostToken } = await import(
+    '../packages/cli/src/launcher/native-agent-session-rpc.js'
+  )
+  const { OwnerDocumentStore } = await import('../packages/cli/src/launcher/owner-document-store.js')
+  const root = await mkdtemp(path.join(tmpdir(), 'native-config-identity-'))
+  try {
+    await writeFile(path.join(root, 'plugin.ts'), 'export function apply() {}')
+    const configPath = path.join(root, 'cordisx.config.json')
+    const supplied = JSON.stringify({
+      version: 1,
+      plugins: [{ id: 'sample', entry: './plugin.ts', enabled: true, config: {} }],
+    })
+    await writeFile(configPath, supplied)
+    const raw = await loadConfig(configPath, { projectRoot: root })
+    const config = await resolveDevelopmentConfigIdentity(raw)
+    const viteSource = await resolveDevelopmentIdentitySource(raw.plugins[0]!)
+    const identities = pluginIdentities(config)
+    expect(identities).toEqual([{ id: 'sample', source: viteSource }])
+    expect(pluginIdentities(raw)[0]!.source).not.toBe(viteSource)
+    const leases = new OwnerDocumentLeaseRegistry({
+      stable: identities.map(item => ({ pluginId: item.id, source: item.source })),
+    })
+    const options = {
+      secret: 'test-only-secret',
+      profileId: 'development',
+      generation: 'launch-one',
+      store: new OwnerDocumentStore(root),
+      principalAllowed: (
+        principal: import('../packages/cli/src/launcher/owner-document-rpc.js').OwnerDocumentPrincipal,
+      ) => leases.allowed(principal),
+    }
+    const bridge = new NativeAgentSessionBridge(options)
+    const principal = {
+      profileId: options.profileId,
+      generation: options.generation,
+      moduleGeneration: 'vite-module',
+      identity: { source: viteSource, pluginId: 'sample' },
+    }
+    const request = (value: typeof principal) =>
+      bridge.handle({
+        version: 1,
+        requestId: 'bootstrap',
+        operation: 'native-session-list',
+        nativeToken: issueNativeSessionHostToken(options),
+        token: issueOwnerDocumentPrincipalToken(options.secret, value),
+      })
+    await expect(request(principal)).resolves.toEqual([])
+    for (
+      const invalid of [
+        { ...principal, identity: { ...principal.identity, source: pluginIdentities(raw)[0]!.source } },
+        { ...principal, identity: { ...principal.identity, source: 'file:///foreign.js' } },
+        { ...principal, generation: 'old-launch' },
+      ]
+    ) await expect(request(invalid)).rejects.toThrow('principal is stale')
+    const { readFile } = await import('node:fs/promises')
+    expect(await readFile(configPath, 'utf8')).toBe(supplied)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

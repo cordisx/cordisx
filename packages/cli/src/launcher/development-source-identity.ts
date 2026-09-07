@@ -4,7 +4,7 @@ import { realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { localDevelopmentPackageInfo } from './development.js'
-import type { CordisXConfigPlugin } from './config.js'
+import type { CordisXConfig, CordisXConfigPlugin } from './config.js'
 
 async function commonDirectory(entry: string): Promise<string> {
   if (!(await stat(entry)).isFile()) throw new Error('development identity entry must be a file')
@@ -44,4 +44,16 @@ export async function resolveDevelopmentIdentitySource(
   // Preserve the original algorithm exactly: hash path.resolve(entry), not realpath.
   const sourceKey = createHash('sha256').update(identityEntry).digest('hex').slice(0, 24)
   return `file:///cordisx-local-dev/${sourceKey}/${plugin.id}.js`
+}
+
+/** The launcher and Vite must grant and sign the same Host-derived development identity. */
+export async function resolveDevelopmentConfigIdentity(config: CordisXConfig): Promise<CordisXConfig> {
+  return {
+    ...config,
+    plugins: await Promise.all(
+      config.plugins.map(async plugin =>
+        plugin.enabled ? { ...plugin, source: await resolveDevelopmentIdentitySource(plugin) } : plugin
+      ),
+    ),
+  }
 }
