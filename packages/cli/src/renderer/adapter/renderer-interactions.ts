@@ -269,7 +269,6 @@ abstract class StructuredSurfaceInteractions extends StructuredSurfaceRendererBa
     root: HTMLElement,
     snapshots: readonly SurfaceContributionSnapshot[],
     sites: Set<string>,
-    _nativeTemplate?: HTMLButtonElement,
   ): void {
     this.disposeNavigationActions()
     const usedLeadingVisuals = new Set<string>()
