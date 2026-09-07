@@ -6,6 +6,7 @@ import type {
   CordisXAgentConversationShellSourceFactory,
   CordisXAgentConversationShellSourceFactoryV10,
   CordisXAgentConversationShellSourceFactoryV11,
+  CordisXAgentConversationShellSourceFactoryV12,
   CordisXAgentConversationShellSourceFactoryV2,
   CordisXAgentConversationShellSourceFactoryV3,
   CordisXAgentConversationShellSourceFactoryV4,
@@ -79,9 +80,10 @@ export class AgentConversationShellRegistry {
       | CordisXAgentConversationShellSourceFactoryV8
       | CordisXAgentConversationShellSourceFactoryV9
       | CordisXAgentConversationShellSourceFactoryV10
-      | CordisXAgentConversationShellSourceFactoryV11,
+      | CordisXAgentConversationShellSourceFactoryV11
+      | CordisXAgentConversationShellSourceFactoryV12,
     principal?: PluginPrincipalToken,
-    version: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 = 3,
+    version: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 = 3,
     options?: CordisXAgentConversationShellSourceOptionsV9,
   ): CordisXAgentConversationShellRegistration {
     if (this.disposed) throw new Error('Agent conversation shell registry is disposed')
@@ -403,6 +405,33 @@ export class CordisXAgentConversationShellService extends Service implements Cor
       return () => registration?.dispose()
     }, 'agentConversationShell.registerSourceV11()')
     if (registration === undefined) throw new Error('Agent conversation Shell v11 source registration failed')
+    return {
+      mount: registration.mount,
+      dispose: () => {
+        dispose()
+      },
+    }
+  }
+  registerSourceV12(
+    factory: CordisXAgentConversationShellSourceFactoryV12,
+    options: CordisXAgentConversationShellSourceOptionsV9 = {},
+  ): CordisXAgentConversationShellRegistration {
+    plainObject(options, 'Agent conversation Shell v12 options')
+    exactKeys(options, ['composer'], 'Agent conversation Shell v12 options')
+    if (options.composer !== undefined) {
+      plainObject(options.composer, 'Agent conversation Shell v12 composer options')
+      exactKeys(options.composer, ['mode'], 'Agent conversation Shell v12 composer options')
+      if (options.composer.mode !== 'page-composer-v2') {
+        throw new Error('Agent conversation Shell v12 composer mode is invalid')
+      }
+    }
+    const principal = this.console?.tokenFromContext(this.ctx)
+    let registration: CordisXAgentConversationShellRegistration | undefined
+    const dispose = this.ctx.effect(() => {
+      registration = this.registry.register(this.ctx, factory, principal, 12, options)
+      return () => registration?.dispose()
+    }, 'agentConversationShell.registerSourceV12()')
+    if (registration === undefined) throw new Error('Agent conversation Shell v12 source registration failed')
     return {
       mount: registration.mount,
       dispose: () => {

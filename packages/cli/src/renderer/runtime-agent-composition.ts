@@ -237,6 +237,7 @@ import { CordisXEntityRegistryServiceV1, type EntityPrincipalBinding } from './e
 import type { EntityRegistry } from '@cordisx/protocol/entities/v1'
 import { BrowserPlaygroundAgentSessionPersistence } from './playground-agent-session-persistence.js'
 import type { PlaygroundSessionScenarioCatalogV1 } from '../playground/session-scenario-catalog.js'
+import { getNativeSessionDetail, resolveNativeSessionDetail } from './native-agent-session-recovery.js'
 import type { CordisXOwnerDocumentsV1 } from '../durable-document-contracts.js'
 import type { RuntimeClosureScope } from './runtime-closure-scope.js'
 
@@ -247,6 +248,8 @@ export const createRuntimeAgentSessionRuntime = (
 ) =>
   new CordisXAgentSessionRuntime({
     driver: runtimeScope.agentSessionTransport()!,
+    getPersistedAgentDetail: getNativeSessionDetail,
+    resolvePersistedAgentDetail: resolveNativeSessionDetail,
     navigateAgentDetail: async (detail, sessionId) => {
       const restore = runtimeScope.managerNavigationController()!.captureReturn()
       await runtimeScope.agentDetailNavigator()!.navigateAgentDetail(detail, sessionId)
@@ -530,6 +533,17 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
             : { available: true }
         },
         navigator: runtimeScope.agentDetailNavigator()!,
+        openDetail: async (ownerId, target) => {
+          const controller = runtimeScope.activeController()!(ownerId)
+          const navigation = controller?.agentDetailNavigation
+          if (
+            controller === undefined || navigation?.moduleGeneration !== runtimeScope.moduleGenerationOf()!(controller)
+          ) {
+            throw new Error('Agent detail owner unavailable')
+          }
+          const result = await navigation.open(target)
+          if (result.status !== 'accepted') throw new Error(`Agent details unavailable: ${result.code}`)
+        },
         onSettings: value => {
           const request = resolveHostManagerAgentDefinitionOpenRequest(
             runtimeScope.routeService?.managerContentAgentDefinitionTarget(value),

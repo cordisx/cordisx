@@ -38,7 +38,7 @@ import type {
   AgentConversationShellSource as AgentConversationShellSourceV7,
   AgentConversationShellSubscribeRuntimeResult as AgentConversationShellSubscribeRuntimeResultV7,
   AgentConversationShellSubscription as AgentConversationShellSubscriptionV7,
-} from '@cordisx/protocol/agent-conversation-shell/v11'
+} from '@cordisx/protocol/agent-conversation-shell/v12'
 import type {
   AgentConversationShellSnapshot as AgentConversationShellSnapshotV8,
   AgentConversationShellSource as AgentConversationShellSourceV8,
@@ -49,6 +49,7 @@ import type {
   CordisXAgentConversationShellSourceFactory,
   CordisXAgentConversationShellSourceFactoryV10,
   CordisXAgentConversationShellSourceFactoryV11,
+  CordisXAgentConversationShellSourceFactoryV12,
   CordisXAgentConversationShellSourceFactoryV2,
   CordisXAgentConversationShellSourceFactoryV3,
   CordisXAgentConversationShellSourceFactoryV4,
@@ -96,7 +97,7 @@ import {
 } from './agent-conversation-shell-projection.js'
 
 export interface RegisteredSource {
-  readonly version: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11
+  readonly version: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12
   readonly owner: string
   readonly ownerGeneration: string
   readonly effect: PluginGenerationEffectIdentity
@@ -112,6 +113,7 @@ export interface RegisteredSource {
     | CordisXAgentConversationShellSourceFactoryV9
     | CordisXAgentConversationShellSourceFactoryV10
     | CordisXAgentConversationShellSourceFactoryV11
+    | CordisXAgentConversationShellSourceFactoryV12
   readonly principal?: PluginPrincipalToken
   readonly composerMode?: 'page-composer-v2'
   readonly sessions: Set<MountedConversationBase>
@@ -264,7 +266,7 @@ export abstract class MountedConversationBase {
       await this.runPlugin<unknown>('agent-conversation-shell.snapshot', () => source.snapshot()),
     )
     if (this.record.version >= 7) {
-      assertSnapshotV7(initial, this.record.version === 10 || this.record.version === 11, this.record.version === 11)
+      assertSnapshotV7(initial, this.record.version >= 10, this.record.version >= 11, this.record.version === 12)
     } else if (this.record.version === 6) assertSnapshotV6(initial)
     else if (this.record.version === 5) assertSnapshotV5(initial)
     else if (this.record.version === 4) assertSnapshotV4(initial)
@@ -277,8 +279,9 @@ export abstract class MountedConversationBase {
         {
           resolve: message => message.fallback,
         },
-        this.record.version === 10 || this.record.version === 11,
-        this.record.version === 11,
+        this.record.version >= 10,
+        this.record.version >= 11,
+        this.record.version === 12,
       )
     } else if (this.record.version === 6) {
       projectAgentConversationShellSnapshotV6(this.record.owner, initial as AgentConversationShellSnapshotV6, {

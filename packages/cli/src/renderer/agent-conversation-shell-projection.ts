@@ -3,7 +3,7 @@ import type { LocalizedText } from '@cordisx/protocol/agent-conversation-shell/v
 import type { AgentConversationShellSnapshot as AgentConversationShellSnapshotV4 } from '@cordisx/protocol/agent-conversation-shell/v4'
 import type { AgentConversationShellSnapshot as AgentConversationShellSnapshotV5 } from '@cordisx/protocol/agent-conversation-shell/v5'
 import type { AgentConversationShellSnapshot as AgentConversationShellSnapshotV6 } from '@cordisx/protocol/agent-conversation-shell/v6'
-import type { AgentConversationShellSnapshot as AgentConversationShellSnapshotV7 } from '@cordisx/protocol/agent-conversation-shell/v11'
+import type { AgentConversationShellSnapshot as AgentConversationShellSnapshotV7 } from '@cordisx/protocol/agent-conversation-shell/v12'
 import type { CordisXJsonValue, CordisXLocalizedText } from '../contracts.js'
 import type { AgentConversationRendererCopy } from './host-ui/conversation/AgentConversationRenderer.js'
 import {
@@ -420,6 +420,9 @@ export function projectAgentConversationShellSnapshotVersioned(
     participantPresentation: snapshot.selection.participantPresentation,
     participants,
     activeRuns: snapshot.selection.activeRuns ?? [],
+    ...('associatedSessions' in snapshot.selection
+      ? { associatedSessions: snapshot.selection.associatedSessions }
+      : {}),
   }
   if (snapshot.selection.kind === 'no-room' && (snapshot.items.length !== 0 || snapshot.headerActions.length !== 0)) {
     throw new Error('v4 no-room snapshot requires an empty timeline and no header actions')
@@ -489,9 +492,10 @@ export function projectAgentConversationShellSnapshotV7(
   localization: ProjectionLocalization,
   allowPluginCommands = false,
   allowRoomUserMessages = false,
+  allowAssociatedSessions = false,
 ): AgentConversationModel {
   const snapshot = immutableSnapshot(snapshotInput)
-  assertSnapshotV7(snapshot, allowPluginCommands, allowRoomUserMessages)
+  assertSnapshotV7(snapshot, allowPluginCommands, allowRoomUserMessages, allowAssociatedSessions)
   return projectAgentConversationShellSnapshotVersioned(owner, snapshot, localization, snapshot.composer.shortcutPolicy)
 }
 

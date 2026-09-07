@@ -803,7 +803,15 @@ export abstract class AgentSessionRuntimeAdmission extends AgentSessionRuntimeAp
     ) return { status: 'unavailable', code: 'session-unavailable' }
     if (!opaque(request.sessionId)) return { status: 'unavailable', code: 'session-unavailable' }
     const record = this.agents.get(request.sessionId)
-    if (record === undefined) return { status: 'unavailable', code: 'session-unavailable' }
+    if (record === undefined) {
+      try {
+        const target = await this.options.getPersistedAgentDetail?.(owner, request.sessionId)
+        if (!this.disposed && this.validAgentDetailReference(target)) {
+          return { status: 'accepted', sessionId: request.sessionId, target }
+        }
+      } catch { /* A replaced owner or unavailable mapping cannot issue a reference. */ }
+      return { status: 'unavailable', code: 'session-unavailable' }
+    }
     if (!this.sameOwner(owner, record.owner)) return { status: 'denied', code: 'permission-denied' }
     if (!this.current(record)) {
       return {
@@ -832,7 +840,17 @@ export abstract class AgentSessionRuntimeAdmission extends AgentSessionRuntimeAp
     )
     if (candidates.length > 1) return { status: 'denied', code: 'ambiguous-detail' }
     const record = candidates[0]
-    if (record === undefined) return { status: 'unavailable', code: 'unknown-detail' }
+    if (record === undefined) {
+      try {
+        const resolved = await this.options.resolvePersistedAgentDetail?.(owner, request.target)
+        if (this.disposed || resolved === undefined) return { status: 'unavailable', code: 'unknown-detail' }
+        if (this.options.navigateAgentDetail === undefined) return { status: 'unavailable', code: 'unsupported' }
+        await this.options.navigateAgentDetail(resolved.detail, resolved.sessionId)
+        return { status: 'accepted', code: 'opened' }
+      } catch {
+        return { status: 'unavailable', code: 'stale-reference' }
+      }
+    }
     if (this.options.navigateAgentDetail === undefined) return { status: 'unavailable', code: 'unsupported' }
     try {
       await this.options.navigateAgentDetail(Object.freeze(clone(record.detail!)), record.id)

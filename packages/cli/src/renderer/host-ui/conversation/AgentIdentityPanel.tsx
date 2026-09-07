@@ -1,3 +1,6 @@
+import type { AgentConversationAssociatedSession } from '@cordisx/protocol/agent-conversation-shell/v12'
+import { assertAssociatedSessions } from '../../agent-conversation-associated-sessions.js'
+import type { AgentDetailReference } from '@cordisx/protocol/agents/v1'
 import { cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type {
   AgentConversationActiveRunDescriptor,
@@ -37,6 +40,10 @@ export interface HostAgentIdentityPresentation {
   readonly introduction: string
   /** Host presentation of the snapshot's atomic activeRuns filtered by exact participantId. */
   readonly activeSessions: readonly HostAgentIdentitySessionPresentation[]
+  readonly associatedSessions?: readonly {
+    readonly association: AgentConversationAssociatedSession
+    readonly roomLabel: string
+  }[]
 }
 
 export interface HostEffectiveAgentIdentityProjection {
@@ -59,6 +66,8 @@ export interface HostAgentIdentityPanelCopy {
   readonly introduction: string
   readonly activeSessions: string
   readonly noActiveSessions: string
+  readonly associatedSessions?: string
+  readonly unloadedSession?: string
   readonly sessionCount: (count: number) => string
   readonly lifecycle: Readonly<Record<HostAgentIdentitySessionLifecycle, string>>
 }
@@ -80,6 +89,7 @@ export interface HostAgentIdentityPanelProps {
 }
 
 export interface HostAgentIdentityContentProps {
+  readonly onOpenDetail?: (target: AgentDetailReference) => Promise<void>
   readonly presentation: HostAgentIdentityPresentation
   readonly copy: HostAgentIdentityPanelCopy
   readonly navigator: HostAgentTaskDetailsNavigator
@@ -181,6 +191,11 @@ export function createHostAgentIdentityPresentation(
   if (!Array.isArray(input.activeSessions) || input.activeSessions.length > 256) {
     throw new TypeError('Active sessions are invalid')
   }
+  assertAssociatedSessions(
+    input.associatedSessions?.map(session => session.association),
+    [input.participant],
+    input.activeSessions.map(session => session.run),
+  )
   const keys = new Set<string>()
   const activeSessions = input.activeSessions.map((session, index) => {
     if (session === null || typeof session !== 'object') throw new TypeError(`Active session ${index} is invalid`)
@@ -261,6 +276,19 @@ export function createHostAgentIdentityPresentation(
     name,
     introduction,
     activeSessions: Object.freeze(activeSessions),
+    ...(input.associatedSessions === undefined ? {} : {
+      associatedSessions: Object.freeze(input.associatedSessions.map(session =>
+        Object.freeze({
+          association: Object.freeze({
+            ...session.association,
+            ...(session.association.details === undefined
+              ? {}
+              : { details: Object.freeze({ ...session.association.details }) }),
+          }),
+          roomLabel: boundedText(session.roomLabel, 'Associated Session Room', 256),
+        })
+      )),
+    }),
   })
 }
 
@@ -332,6 +360,7 @@ export function HostAgentIdentityContent({
   onSettings,
   onNavigationError,
   idPrefix,
+  onOpenDetail,
 }: HostAgentIdentityContentProps) {
   const presentation = React.useMemo(
     () => input === undefined ? undefined : createHostAgentIdentityPresentation(input),
@@ -455,6 +484,43 @@ export function HostAgentIdentityContent({
               </ul>
             )}
         </section>
+        {(presentation.associatedSessions?.length ?? 0) > 0
+          ? (
+            <section className="cx-agent-identity-section" aria-labelledby={`${contentId}-associated-sessions`}>
+              <h3 id={`${contentId}-associated-sessions`}>{copy.associatedSessions ?? 'Associated sessions'}</h3>
+              <ul className="cx-agent-identity-sessions">
+                {presentation.associatedSessions!.map(({ association, roomLabel }) => (
+                  <li key={association.sessionId}>
+                    <button
+                      type="button"
+                      className="cx-agent-identity-session"
+                      disabled={pendingSession !== undefined || association.details === undefined
+                        || onOpenDetail === undefined}
+                      aria-label={`${roomLabel} · ${association.sessionId} · ${
+                        copy.unloadedSession ?? 'Not loaded; running state unknown'
+                      }`}
+                      onClick={() => {
+                        if (
+                          association.details === undefined || onOpenDetail === undefined
+                          || pendingSession !== undefined
+                        ) return
+                        setPendingSession(association.sessionId)
+                        void onOpenDetail(association.details).then(onClose).catch(onNavigationError)
+                          .finally(() => setPendingSession(undefined))
+                      }}
+                    >
+                      <span className="cx-agent-identity-room">{roomLabel}</span>
+                      <span className="cx-agent-identity-task">{association.sessionId}</span>
+                      <span className="cx-agent-identity-lifecycle">
+                        {copy.unloadedSession ?? 'Not loaded; running state unknown'}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )
+          : null}
       </div>
     </>
   )

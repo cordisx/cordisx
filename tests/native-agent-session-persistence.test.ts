@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -50,6 +50,12 @@ test('native binding and recovery-afterward ledger share authenticated locked pe
     ).rejects.toThrow('Host native Session authority')
     expect(await call('native-session-load')).toBeNull()
     await call('native-session-save-binding', { threadId: 'original-native-thread', completedTurns: 1 })
+    const write = vi.spyOn(options.store, 'replace')
+    const beforeDetail = await call('native-session-list')
+    expect(await call('native-session-detail')).toEqual({ threadId: 'original-native-thread' })
+    expect(await call('native-session-list')).toEqual(beforeDetail)
+    expect(write).not.toHaveBeenCalled()
+    write.mockRestore()
     const foreignToken = issueOwnerDocumentPrincipalToken('secret', {
       ...principal,
       identity: { source: 'file:///owned/other.js', pluginId: 'other' },
@@ -60,7 +66,7 @@ test('native binding and recovery-afterward ledger share authenticated locked pe
         requestId: 'cross-owner',
         token: foreignToken,
         nativeToken,
-        operation: 'native-session-load',
+        operation: 'native-session-detail',
         sessionId: 'original-session',
         identity,
       }),

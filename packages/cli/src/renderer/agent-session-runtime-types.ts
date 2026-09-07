@@ -528,6 +528,14 @@ export interface CordisXAgentSessionRuntimeOptions {
     route: AgentPageRoomRoute,
   ) => Promise<'accepted' | 'navigation-failed'>
   /** Host-owned only; resolves a current ref through the private navigator. */
+  readonly getPersistedAgentDetail?: (
+    owner: PluginOwnerIdentity,
+    sessionId: SessionId,
+  ) => Promise<AgentDetailReference | undefined>
+  readonly resolvePersistedAgentDetail?: (
+    owner: PluginOwnerIdentity,
+    target: AgentDetailReference,
+  ) => Promise<{ sessionId: SessionId; detail: AgentDetailReference } | undefined>
   readonly navigateAgentDetail?: (detail: AgentDetailReference, sessionId: SessionId) => Promise<void> | void
 }
 

@@ -1,3 +1,4 @@
+import { assertAssociatedSessions } from './agent-conversation-associated-sessions.js'
 import type { AgentConversationShellSubscription } from '@cordisx/protocol/agent-conversation-shell/v1'
 import type {
   AgentConversationItem as ProtocolItemV4,
@@ -12,7 +13,7 @@ import type {
 import type {
   AgentConversationItem as ProtocolItemV7,
   AgentConversationShellSnapshot as AgentConversationShellSnapshotV7,
-} from '@cordisx/protocol/agent-conversation-shell/v11'
+} from '@cordisx/protocol/agent-conversation-shell/v12'
 import {
   agentLoopHandle,
   assertAction,
@@ -32,7 +33,11 @@ import {
   text,
 } from './agent-conversation-shell-validation.js'
 
-export function assertSelectionV4(value: unknown, label: string): asserts value is ProtocolSelectionV4 {
+export function assertSelectionV4(
+  value: unknown,
+  label: string,
+  allowAssociatedSessions = false,
+): asserts value is ProtocolSelectionV4 {
   plainObject(value, label)
   if (value.kind === 'no-room') {
     exactKeys(value, ['kind'], label)
@@ -49,6 +54,7 @@ export function assertSelectionV4(value: unknown, label: string): asserts value 
     'participantPresentation',
     'participants',
     'activeRuns',
+    ...(allowAssociatedSessions ? ['associatedSessions'] : []),
   ], label)
   opaque(value.roomId, `${label}.roomId`)
   assertLocalizedText(value.title, `${label}.title`)
@@ -75,6 +81,7 @@ export function assertSelectionV4(value: unknown, label: string): asserts value 
     if (participants.has(participant.participantId)) throw new Error(`${label}.participants has a duplicate id`)
     participants.add(participant.participantId)
   })
+  if (allowAssociatedSessions) assertAssociatedSessions(value.associatedSessions, value.participants, value.activeRuns)
   if (value.activeRuns === undefined) return
   if (!Array.isArray(value.activeRuns) || value.activeRuns.length > 64) {
     throw new Error(`${label}.activeRuns is invalid`)
@@ -657,6 +664,7 @@ export function assertSnapshotV7(
   value: unknown,
   allowPluginCommands = false,
   allowRoomUserMessages = false,
+  allowAssociatedSessions = false,
 ): asserts value is AgentConversationShellSnapshotV7 {
   plainObject(value, 'v7 snapshot')
   exactKeys(
@@ -670,7 +678,7 @@ export function assertSnapshotV7(
   opaque(value.binding.ownerGeneration, 'v7 snapshot.binding.ownerGeneration')
   opaque(value.generation, 'v7 snapshot.generation')
   safeSequence(value.snapshotSequence, 'v7 snapshot.snapshotSequence')
-  assertSelectionV4(value.selection, 'v7 snapshot.selection')
+  assertSelectionV4(value.selection, 'v7 snapshot.selection', allowAssociatedSessions)
   if (!Array.isArray(value.items) || value.items.length > 500) throw new Error('v7 snapshot.items is invalid')
   value.items.forEach((item, index) =>
     assertItemV7(item, `v7 snapshot.items[${index}]`, allowPluginCommands, allowRoomUserMessages)

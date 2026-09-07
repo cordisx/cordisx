@@ -58,6 +58,10 @@ export interface AgentConversationRendererProps {
       identity: { readonly agentId: string; readonly revision: string },
       ownerId?: string,
     ) => { readonly available: boolean; readonly reason?: string }
+    readonly openDetail?: (
+      ownerId: string,
+      target: import('@cordisx/protocol/agents/v1').AgentDetailReference,
+    ) => Promise<void>
     readonly navigator: HostAgentTaskDetailsNavigator
     readonly onSettings: (identity: { readonly agentId: string; readonly revision: string }) => void | Promise<void>
   }
@@ -145,6 +149,9 @@ export function AgentConversationRenderer(
           },
           name: effective.name,
           introduction: effective.introduction,
+          associatedSessions: (roomSelection.associatedSessions ?? [])
+            .filter(association => association.participantId === participant.id)
+            .map(association => ({ association, roomLabel: roomTitle })),
           activeSessions: (roomSelection.activeRuns ?? [])
             .filter(run => run.participantId === participant.id)
             .map(run => ({
@@ -186,8 +193,10 @@ export function AgentConversationRenderer(
     backToMembers: chinese ? '返回群成员' : 'Back to members',
     hierarchyNavigation: chinese ? '详情栏层级导航' : 'Inspector hierarchy',
     introduction: chinese ? '介绍' : 'Introduction',
-    activeSessions: chinese ? '当前激活的会话' : 'Active sessions',
-    noActiveSessions: chinese ? '当前没有激活会话' : 'No active sessions',
+    activeSessions: chinese ? '当前已加载的会话' : 'Loaded sessions',
+    associatedSessions: chinese ? '关联会话' : 'Associated sessions',
+    unloadedSession: chinese ? '未加载 · 运行状态未知' : 'Not loaded · Running state unknown',
+    noActiveSessions: chinese ? '当前没有已加载会话' : 'No loaded sessions',
     sessionCount: count => chinese ? `${count} 个激活会话` : `${count} active session${count === 1 ? '' : 's'}`,
     lifecycle: {
       active: chinese ? '激活' : 'Active',
@@ -432,6 +441,9 @@ export function AgentConversationRenderer(
                 presentation={memberInspectorIdentity}
                 copy={identityCopy}
                 navigator={identity.navigator}
+                {...(identity.openDetail === undefined ? {} : {
+                  onOpenDetail: target => identity.openDetail!(model.ownerId, target),
+                })}
                 onClose={closeInspector}
                 {...(identity.resolveSettings === undefined ? {} : { resolveSettings: identity.resolveSettings })}
                 onSettings={identity.onSettings}

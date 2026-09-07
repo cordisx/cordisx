@@ -19,7 +19,7 @@ import type {
   AgentConversationShellPage as AgentConversationShellPageV7,
   AgentConversationShellSnapshot as AgentConversationShellSnapshotV7,
   AgentConversationShellUpdate as AgentConversationShellUpdateV7,
-} from '@cordisx/protocol/agent-conversation-shell/v11'
+} from '@cordisx/protocol/agent-conversation-shell/v12'
 import { immutableSnapshot } from './validation.js'
 import {
   type AgentConversationShellPage,
@@ -149,8 +149,9 @@ export abstract class MountedConversationUpdates extends MountedConversationBase
       if (this.record.version >= 7) {
         assertSnapshotV7(
           value.snapshot,
-          this.record.version === 10 || this.record.version === 11,
-          this.record.version === 11,
+          this.record.version >= 10,
+          this.record.version >= 11,
+          this.record.version === 12,
         )
       } else if (this.record.version === 6) assertSnapshotV6(value.snapshot)
       else if (this.record.version === 5) assertSnapshotV5(value.snapshot)
@@ -165,8 +166,8 @@ export abstract class MountedConversationUpdates extends MountedConversationBase
         assertItemV7(
           value.item,
           `${label}.item`,
-          this.record.version === 10 || this.record.version === 11,
-          this.record.version === 11,
+          this.record.version >= 10,
+          this.record.version >= 11,
         )
       } else if (this.record.version === 6) assertItemV6(value.item, `${label}.item`)
       else if (this.record.version >= 4) assertItemV4(value.item, `${label}.item`)
@@ -448,7 +449,7 @@ export abstract class MountedConversationUpdates extends MountedConversationBase
     }
     const next = immutableSnapshot({ ...snapshot, snapshotSequence: update.sequence, items })
     if (this.record.version >= 7) {
-      assertSnapshotV7(next, this.record.version === 10 || this.record.version === 11, this.record.version === 11)
+      assertSnapshotV7(next, this.record.version >= 10, this.record.version >= 11, this.record.version === 12)
     } else if (this.record.version === 6) assertSnapshotV6(next)
     else if (this.record.version === 5) assertSnapshotV5(next)
     else assertSnapshotV4(next)

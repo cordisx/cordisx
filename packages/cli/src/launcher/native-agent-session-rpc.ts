@@ -145,6 +145,10 @@ export class NativeAgentSessionBridge {
     const documentId = key(sessionId)
     const snapshot = await load(documentId)
     const existing = snapshot === undefined ? undefined : parsed(snapshot.value, sessionId)
+    if (request.operation === 'native-session-detail') {
+      if (!this.input.principalAllowed(principal)) throw new Error('native Session principal replaced')
+      return existing === undefined ? null : { threadId: existing.threadId }
+    }
     if (request.operation === 'native-session-load') {
       if (existing === undefined) return null
       if (digest(request.setup as AgentSetup | undefined) !== existing.setupDigest) {
