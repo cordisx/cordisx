@@ -38,7 +38,19 @@ v3 requester resolver after tool binding and before the first submission. No
 plugin callback runs during installation, and no Agent capability is exposed
 before acceptance. Each real question receives an independent lifetime signal,
 including native `serverRequest/resolved` cancellation; closed questions cannot
-publish late approval results.
+publish late approval results. A child requester and its authority both own that
+question's lifetime: releasing the child cancels only its questions, while the
+Leader and sibling questions remain live. Registration and owner liveness are
+checked synchronously after awaited authorization, immediately before creation
+or submission, so revocation during authorization cannot execute an operation.
+
+Native approval requests may omit their reason. The Host preserves a supplied
+reason, otherwise describes only the native command and cwd when present and
+states that no reason was supplied. Descriptions are bounded plain text. This
+mapping still enters the existing approval flow; it does not grant permission
+or change the native approval policy. Native command approval uses the
+`codex.commandExecution` tool name. Definition tool filters are setup
+instructions, not an enforcement boundary or a mapping of native tool names.
 
 The durable operation stores whether approval binding was required. The plain
 v1 entrypoint can replay required operations without weakening them; the required
