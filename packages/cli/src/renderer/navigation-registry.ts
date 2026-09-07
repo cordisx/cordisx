@@ -375,6 +375,13 @@ export class NavigationRegistry extends NavigationRegistryRouting {
     this.managerNavigator = navigate
   }
   navigate(requestingOwner: string, reference: CordisXRouteReference): Promise<void> {
+    try {
+      if (this.disposed) throw new Error('Navigation registry is disposed')
+      assertKeys(reference, ['id', 'params'], 'route reference')
+      assertReference(reference.id, 'route reference')
+    } catch (error) {
+      return Promise.reject(error)
+    }
     const record = this.findRecord(requestingOwner, reference.id)
     if (record?.owner === requestingOwner && record.definition.outlet === 'manager.content' && this.managerNavigator) {
       const resolution = this.managerContentRoute(requestingOwner, reference)

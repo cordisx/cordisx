@@ -283,6 +283,7 @@ describe('Manager Settings navigation core', () => {
         managedMount = navigation.mountManagerContent(owner, reference, 'demo:entry', managerBody)
       })
     })
+    await expect(navigation.navigate('demo', { id: 'ready', extra: true } as never)).rejects.toThrow()
     await navigation.navigate('demo', { id: 'ready' })
     expect(controller.shows).toBe(0)
     const mount = await managedMount!
