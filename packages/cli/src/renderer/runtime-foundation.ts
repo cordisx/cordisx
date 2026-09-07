@@ -190,6 +190,7 @@ import { pluginBrandIconDataUrl } from './plugin-branding.js'
 import { BrowserPluginLifecycleBridge } from './plugin-lifecycle-binding.js'
 import {
   CapabilityAvailabilityRegistry,
+  channelManagerCapabilityProvider,
   CORDISX_CAPABILITY_AVAILABILITY_LOCALE_CATALOGS,
   externalProviderCapabilityProviders,
   hostLocalCapabilityProviders,
@@ -671,6 +672,7 @@ export const createRuntimeCapabilityAvailability = (runtimeScope: RuntimeClosure
       kind: 'current-connection',
     }),
     ...externalProviderCapabilityProviders(runtimeScope.externalProviderStatuses()!),
+    channelManagerCapabilityProvider(),
     ...hostLocalCapabilityProviders({
       agentStatus: runtimeScope.agentRuntime()!.status(),
       historyStatus: {

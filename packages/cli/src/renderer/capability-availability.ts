@@ -1,12 +1,12 @@
 import type {
   CordisXAgentEventStatus,
   CordisXAgentHistoryStatus,
-  CordisXCapabilityScope,
   CordisXLocaleCatalog,
   CordisXLocalizedText,
   CordisXPlatformAdapterStatus,
   CordisXPlatformCapability,
 } from '../contracts.js'
+import type { CordisXPermissionCapabilityV2, CordisXPermissionScopeV2 } from '../permission-contracts.js'
 import type {
   CordisXCapabilityAvailabilityState,
   CordisXCapabilityProviderFamily,
@@ -35,6 +35,10 @@ const AGENT_INPUT_CAPABILITIES: readonly CordisXPlatformCapability[] = Object.fr
   'agent.prompt.section',
   'agent.prompt.context',
 ])
+const CHANNEL_MANAGER_READ_CAPABILITIES: readonly CordisXPermissionCapabilityV2[] = Object.freeze([
+  'channel.accounts.read',
+  'channel.bindings.read',
+])
 
 function message(
   key: string,
@@ -49,7 +53,7 @@ function message(
   })
 }
 
-function frozenScope(scope: CordisXCapabilityScope): CordisXCapabilityScope {
+function frozenScope(scope: CordisXPermissionScopeV2): CordisXPermissionScopeV2 {
   return Object.freeze({
     ...(scope.providers === undefined ? {} : { providers: Object.freeze([...scope.providers]) }),
     ...(scope.cwdRoots === undefined ? {} : { cwdRoots: Object.freeze([...scope.cwdRoots]) }),
@@ -57,14 +61,26 @@ function frozenScope(scope: CordisXCapabilityScope): CordisXCapabilityScope {
       ? {}
       : { sessions: Object.freeze(scope.sessions.map(item => Object.freeze({ ...item }))) }),
     ...(scope.sessionIds === undefined ? {} : { sessionIds: Object.freeze([...scope.sessionIds]) }),
+    ...(scope.channelAccounts === undefined
+      ? {}
+      : { channelAccounts: Object.freeze(scope.channelAccounts.map(item => Object.freeze({ ...item }))) }),
+    ...(scope.channelTenants === undefined
+      ? {}
+      : { channelTenants: Object.freeze(scope.channelTenants.map(item => Object.freeze({ ...item }))) }),
+    ...(scope.channelConversations === undefined
+      ? {}
+      : { channelConversations: Object.freeze(scope.channelConversations.map(item => Object.freeze({ ...item }))) }),
+    ...(scope.channelUsers === undefined
+      ? {}
+      : { channelUsers: Object.freeze(scope.channelUsers.map(item => Object.freeze({ ...item }))) }),
   })
 }
 
 function route(
-  capability: CordisXPlatformCapability,
+  capability: CordisXPermissionCapabilityV2,
   status: CordisXCapabilityAvailabilityState,
   reason: CordisXLocalizedText,
-  scope: CordisXCapabilityScope = {},
+  scope: CordisXPermissionScopeV2 = {},
 ): CordisXCapabilityProviderRoute {
   return Object.freeze({ capability, status, reason, scope: frozenScope(scope) })
 }
@@ -81,7 +97,7 @@ export function platformAdapterCapabilityProvider(
   input: {
     readonly providerId: string
     readonly kind: Extract<CordisXCapabilityProviderKind, 'current-connection'>
-    readonly scope?: CordisXCapabilityScope
+    readonly scope?: CordisXPermissionScopeV2
   },
 ): CordisXCapabilityProviderReport {
   const supported = new Set(status.supportedCapabilities)
@@ -109,6 +125,23 @@ export function platformAdapterCapabilityProvider(
         input.scope,
       )
     ),
+  })
+}
+
+/** Public Channel Manager snapshot reads are served by the single Host provider. */
+export function channelManagerCapabilityProvider(): CordisXCapabilityProviderReport {
+  const reason = message(
+    'provider.channel-manager.supported',
+    'The Host Channel Manager can project redacted accounts and bindings.',
+  )
+  return report({
+    providerId: 'host-channel-manager',
+    providerName: message('provider.channel-manager.name', 'Host Channel Manager'),
+    kind: 'host-local',
+    family: 'channel',
+    status: 'supported',
+    reason,
+    routes: CHANNEL_MANAGER_READ_CAPABILITIES.map(capability => route(capability, 'supported', reason)),
   })
 }
 
@@ -249,17 +282,17 @@ export interface ResolvedCapabilityProvider {
   readonly status: CordisXCapabilityAvailabilityState
   readonly reason: CordisXLocalizedText
   readonly generation?: string
-  readonly scope: CordisXCapabilityScope
+  readonly scope: CordisXPermissionScopeV2
 }
 
 export interface ResolvedCapabilityAvailability {
-  readonly capability: CordisXPlatformCapability
+  readonly capability: CordisXPermissionCapabilityV2
   readonly status: CordisXCapabilityAvailabilityState
   readonly reason: CordisXLocalizedText
   readonly providers: readonly ResolvedCapabilityProvider[]
 }
 
-function providerIds(scope: CordisXCapabilityScope): readonly string[] {
+function providerIds(scope: CordisXPermissionScopeV2): readonly string[] {
   return Object.freeze([
     ...new Set([
       ...(scope.providers ?? []),
@@ -268,7 +301,7 @@ function providerIds(scope: CordisXCapabilityScope): readonly string[] {
   ].sort())
 }
 
-function routeProviderIds(scope: CordisXCapabilityScope): ReadonlySet<string> {
+function routeProviderIds(scope: CordisXPermissionScopeV2): ReadonlySet<string> {
   return new Set(providerIds(scope))
 }
 
@@ -323,7 +356,7 @@ export class CapabilityAvailabilityRegistry {
     return this.providers
   }
 
-  resolve(capability: CordisXPlatformCapability, scope: CordisXCapabilityScope): ResolvedCapabilityAvailability {
+  resolve(capability: CordisXPermissionCapabilityV2, scope: CordisXPermissionScopeV2): ResolvedCapabilityAvailability {
     const routes = this.providers.flatMap(provider =>
       provider.routes
         .filter(item => item.capability === capability)
@@ -379,11 +412,11 @@ export class CapabilityAvailabilityRegistry {
 
   unavailableRequired(
     capabilities: readonly {
-      readonly name: CordisXPlatformCapability
+      readonly name: CordisXPermissionCapabilityV2
       readonly required: boolean
-      readonly scope: CordisXCapabilityScope
+      readonly scope: CordisXPermissionScopeV2
     }[],
-  ): readonly CordisXPlatformCapability[] {
+  ): readonly CordisXPermissionCapabilityV2[] {
     return Object.freeze(
       capabilities
         .filter(item => item.required && this.resolve(item.name, item.scope).status === 'unavailable')
@@ -420,6 +453,8 @@ const EN_MESSAGES = {
   'provider.agent-input.name': 'Desktop Agent input',
   'provider.agent-input.supported': 'The current Agent connection can route Agent input capabilities.',
   'provider.agent-input.unavailable': 'Agent input requires a current connection that is not available.',
+  'provider.channel-manager.name': 'Host Channel Manager',
+  'provider.channel-manager.supported': 'The Host Channel Manager can project redacted accounts and bindings.',
   'provider.configuration.name': 'Host configuration',
   'provider.configuration.supported': 'Validated configuration and the Host writer are available.',
   'provider.configuration.degraded': 'Configuration descriptors are available, but the Host writer is unavailable.',
@@ -453,6 +488,8 @@ const ZH_MESSAGES = {
   'provider.agent-input.name': 'Desktop Agent 输入',
   'provider.agent-input.supported': '当前 Agent 连接可路由 Agent 输入能力。',
   'provider.agent-input.unavailable': 'Agent 输入需要当前尚不可用的 Desktop 连接。',
+  'provider.channel-manager.name': '宿主 Channel 管理器',
+  'provider.channel-manager.supported': '宿主 Channel 管理器可投影已脱敏的账号与绑定。',
   'provider.configuration.name': '宿主配置',
   'provider.configuration.supported': '校验后的配置与宿主写入器当前可用。',
   'provider.configuration.degraded': '配置描述可用，但宿主写入器暂不可用。',

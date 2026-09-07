@@ -35,7 +35,7 @@ describe('Channel Host service configuration contract', () => {
       }],
     })
     const contract = createChannelHostServiceConfigContract({
-      source: 'https://github.com/cordisx/cordisx/tree/main/packages/cli/src/plugins/channel',
+      source: 'https://github.com/cordisx/plugin-channel',
       pluginId: 'channel',
       serviceId: 'runtime',
     }, initial) as unknown as HostServiceConfigContract

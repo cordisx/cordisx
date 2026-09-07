@@ -1,9 +1,13 @@
 import { JSDOM } from 'jsdom'
+import { pathToFileURL } from 'node:url'
 import { expect, it } from 'vitest'
 import { buildRendererBundle } from '../../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../../packages/cli/src/launcher/config.js'
 import { defaultUiPlaygroundConfig } from '../../packages/cli/src/playground/defaults.js'
 import { exactDomPermissionPolicies, installPermissionPolicyBridge } from '../helpers/dom-permission.js'
+import { CORDISX_CAPABILITY_CATALOG_VERSION } from '../../packages/cli/src/capability-risk-catalog.js'
+import { CORDISX_PERMISSION_POLICY_SCHEMA_V2 } from '../../packages/cli/src/permission-contracts.js'
+import { permissionSecurityFingerprint } from '../../packages/cli/src/permission-model-v2.js'
 import { defaultPluginIds } from './ui-playground.fixtures.js'
 
 export function registerRuntimeTests() {
@@ -36,13 +40,31 @@ export function registerRuntimeTests() {
         ['channel', ['manager.settings.navigation-items', 'manager.content']],
         ['cli-proxy-api', ['sidebar.navigation.items', 'main']],
       ])
-      const permissionPolicies = exactDomPermissionPolicies(
+      const domPermissionPolicies = exactDomPermissionPolicies(
         'playground',
         config.plugins.flatMap(plugin => {
           const pointIds = pointIdsByPlugin.get(plugin.id)
           return pointIds === undefined ? [] : [{ id: plugin.id, entry: plugin.entry, pointIds }]
         }),
       )
+      const channel = config.plugins.find(plugin => plugin.id === 'channel')!
+      const accountRead = {
+        name: 'channel.accounts.read' as const,
+        required: true,
+        scope: {},
+      }
+      const permissionPolicies = [...domPermissionPolicies, {
+        $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V2,
+        schemaVersion: 2 as const,
+        key: {
+          profileId: 'playground',
+          identity: { source: pathToFileURL(channel.entry).href, pluginId: channel.id },
+          capability: accountRead.name,
+          scope: accountRead.scope,
+          securityFingerprint: permissionSecurityFingerprint(CORDISX_CAPABILITY_CATALOG_VERSION, accountRead),
+        },
+        policy: 'allow-persistent' as const,
+      }]
       const bundle = await buildRendererBundle(config, {
         playground: true,
         generation: 'playground-test-1',
@@ -111,7 +133,7 @@ export function registerRuntimeTests() {
           'CLIProxy 提供方',
         ])
         expect(runtime.__cordisxRuntime?.snapshot().plugins.find(plugin => plugin.id === 'channel')?.description)
-          .toBe('管理渠道账号、连接和会话。')
+          .toBe('管理渠道连接与会话。')
         expect(runtime.__cordisxRuntime?.snapshot().plugins.find(plugin => plugin.id === 'cli-proxy-api')?.icon)
           .toMatch(/^data:image\/png;base64,/)
         expect(runtime.__cordisxRuntime?.snapshot().platform.mode).toBe('unavailable')
