@@ -540,7 +540,11 @@ Publishing is allowed only from merged `main` through
 `.github/workflows/release-beta.yml`, on a GitHub-hosted runner with OIDC and the
 `npm-beta` GitHub environment. Each npm package configures that exact repository,
 workflow filename, environment, and the `npm publish` action as its trusted
-publisher. The workflow carries no npm token. It validates the requested
+publisher. The workflow carries no npm token. It pins npm `11.11.0`, which
+supports OIDC and the repository's exact Git dependencies. npm 12 defaults to
+rejecting Git dependencies (`EALLOWGIT`); adoption requires explicit validation
+of clean installs and installed consumers before changing this toolchain.
+It validates the requested
 version against the selected package manifests, the clean pack allowlists,
 install smokes, repository metadata, registry owner, version absence, and the
 selected `latest` values before the first publish. The default `coordinated`
