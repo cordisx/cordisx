@@ -174,6 +174,37 @@ export interface MarkdownViewerProps {
   readonly 'aria-label'?: string
 }
 
+/** UTF-16 selection offsets, matching textarea and browser selection APIs. */
+export interface MarkdownEditorSelection {
+  readonly start: number
+  readonly end: number
+}
+
+/** Imperative editing operations only; the Host-owned DOM remains private. */
+export interface MarkdownEditorHandle {
+  focus(options?: { readonly preventScroll?: boolean }): void
+  getSelection(): MarkdownEditorSelection
+  setSelection(start: number, end: number): void
+}
+
+export interface MarkdownEditorProps {
+  readonly value: string
+  readonly onValueChange: (value: string) => void
+  readonly placeholder?: string
+  readonly disabled?: boolean
+  readonly className?: string
+  readonly style?: React.CSSProperties
+  readonly 'aria-label': string
+  readonly 'aria-describedby'?: string
+  readonly 'aria-controls'?: string
+  readonly 'aria-activedescendant'?: string
+  readonly onKeyDown?: React.KeyboardEventHandler<HTMLTextAreaElement>
+  readonly onCompositionStart?: React.CompositionEventHandler<HTMLTextAreaElement>
+  readonly onCompositionEnd?: React.CompositionEventHandler<HTMLTextAreaElement>
+  readonly onSelectionChange?: (selection: MarkdownEditorSelection) => void
+  readonly ref?: React.Ref<MarkdownEditorHandle>
+}
+
 /** Presentation-only composer seat. It never accepts or exposes an attachment action. */
 export interface AttachmentPlaceholderProps {
   readonly className?: string
@@ -206,6 +237,7 @@ export const FilterToolbar = HostComponent<FilterToolbarProps>('FilterToolbar')
 export const SearchField = HostComponent<SearchFieldProps>('SearchField')
 export const Select = HostComponent<SelectProps>('Select')
 export const SelectionRail = HostComponent<SelectionRailProps>('SelectionRail')
+export const MarkdownEditor = HostComponent<MarkdownEditorProps>('MarkdownEditor')
 export const MarkdownViewer = HostComponent<MarkdownViewerProps>('MarkdownViewer')
 export const AttachmentPlaceholder = HostComponent<AttachmentPlaceholderProps>('AttachmentPlaceholder')
 export const AgentAvatar = HostComponent<AgentAvatarProps>('AgentAvatar')

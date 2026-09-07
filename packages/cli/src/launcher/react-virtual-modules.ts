@@ -64,6 +64,7 @@ const UI_EXPORTS = [
   'HorizontalSplitPane',
   'HoverCard',
   'Icon',
+  'MarkdownEditor',
   'MarkdownViewer',
   'PanZoomCanvas',
   'SearchField',

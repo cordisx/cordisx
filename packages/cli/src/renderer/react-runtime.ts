@@ -19,6 +19,7 @@ import { HorizontalSplitPane } from './host-ui/HorizontalSplitPane.js'
 import { HoverCard } from './host-ui/HoverCard.js'
 import { PanZoomCanvas } from './host-ui/PanZoomCanvas.js'
 import { FilterToolbar, SearchField } from './host-ui/PublicFilterToolbar.js'
+import { PublicMarkdownEditor } from './host-ui/PublicMarkdownEditor.js'
 import { PublicMarkdownViewer } from './host-ui/PublicMarkdownViewer.js'
 import { PublicSelectionRail } from './host-ui/PublicSelectionRail.js'
 import { HostAgentAvatar } from './host-ui/conversation/AgentAvatar.js'
@@ -449,6 +450,7 @@ export interface SharedReactRuntime {
     HoverCard: typeof HoverCard
     PanZoomCanvas: typeof PanZoomCanvas
     Icon: typeof Icon
+    MarkdownEditor: typeof PublicMarkdownEditor
     MarkdownViewer: typeof PublicMarkdownViewer
     SearchField: typeof SearchField
     Select: typeof Select
@@ -545,6 +547,7 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
       HoverCard,
       PanZoomCanvas,
       Icon,
+      MarkdownEditor: PublicMarkdownEditor,
       MarkdownViewer: PublicMarkdownViewer,
       SearchField,
       Select,
