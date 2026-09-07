@@ -380,6 +380,27 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
     return this.snapshot()
   }
 
+  /** Enter a validated Host task using the already observed native router. */
+  navigateHost(value: string): CodexRouteHistorySnapshot {
+    if (this.disposed) throw new Error('Codex React Router history adapter is disposed')
+    const target = new URL(value)
+    if (
+      target.protocol !== 'app:' || target.hostname !== '-' || target.username !== '' || target.password !== ''
+      || target.search !== '' || target.hash !== ''
+    ) throw new Error('Host task details URL is unavailable')
+    const navigator = this.requireNavigator()
+    const location = navigator.location
+    this.transition(location, undefined, () =>
+      navigator.push(
+        { pathname: target.pathname, search: '', hash: '' },
+        stateWithEntry(location.state),
+      ))
+    // This entry originates outside the plugin Route service. Publish the same
+    // native transition so its current-route projection and subscribers agree.
+    this.afterNativeTransition()
+    return this.snapshot()
+  }
+
   deepLink(entry: CodexRouteHistoryEntry): string {
     return routeDeepLink(this.view, entry)
   }
