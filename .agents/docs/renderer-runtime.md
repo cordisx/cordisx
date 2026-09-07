@@ -382,6 +382,22 @@ longer plugin group label. Section block-start/end margins and paddings belong
 to the group wrapper and preserve spacing above/below the entire group; they
 never change the accepted row-internal height or padding.
 
+Native section markers can be nested inside a separate drag/drop wrapper. The
+adapter lifts the insertion anchor through that wrapper without crossing another
+native section or the action area. Collection roots and native wrappers then
+participate in the same flex/grid gap, including through `display: contents`.
+Group spacing is not repaired by appending a guessed bottom margin, and does
+not grow again when a group expands.
+
+Disclosure headers retain their button/SVG nodes through collection refreshes.
+For Codex, the adapter projects the native toggle's viewBox and vector-only
+geometry/currentColor paint into that stable shared SVG; it never copies native
+utility classes, handlers, external references or transient rotation/opacity.
+This preserves the native ink dimensions and stroke rather than just changing
+the icon container. Native `--icon-disclosure-size` and transition duration/easing
+tokens control the size and rotation. Reduced motion disables this transition.
+Playground retains its shared-icon fallback.
+
 The group header has no new create/more menu: plugins already supply ordinary
 create entries and per-row structured actions. Existing saved Room titles are
 not rewritten by this layout projection.

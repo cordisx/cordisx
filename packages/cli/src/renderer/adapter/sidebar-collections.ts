@@ -1,4 +1,4 @@
-import { nativeControlInsertionAnchor, strictlyVisible } from './dom.js'
+import { nativeButtons, nativeControlInsertionAnchor, strictlyVisible } from './dom.js'
 import type { NativeSurfaceSeat } from './types.js'
 
 const sectionSelector = '[data-app-action-sidebar-section]'
@@ -22,8 +22,19 @@ export function resolveSidebarCollectionsSeat(
     .filter(element => element.parentElement?.closest(sectionSelector) === null)
   const first = sections[0]
   if (first === undefined) return undefined
-  const anchor = nativeControlInsertionAnchor(document, first)
-  const parent = anchor.parentElement
+  let anchor = nativeControlInsertionAnchor(document, first)
+  let parent = anchor.parentElement
+  // Native sections have a separate drag/drop wrapper. Insert beside that
+  // wrapper, so display:contents can expose both as peers in the flex gap.
+  // Never lift across another section or the top action area.
+  while (
+    parent !== null && parent !== sidebar
+    && !sections.slice(1).some(section => parent!.contains(section))
+    && nativeButtons(parent).every(button => button.closest(sectionSelector) !== null)
+  ) {
+    anchor = parent
+    parent = parent.parentElement
+  }
   if (parent === null || !sidebar.contains(parent)) return undefined
   const heading = first.matches(toggleSelector) ? first : first.querySelector<HTMLElement>(toggleSelector) ?? undefined
   const rows = [...sidebar.querySelectorAll<HTMLElement>('[data-app-action-sidebar-thread-id]')]
@@ -79,7 +90,7 @@ export function projectSidebarGroupAppearance(root: HTMLElement, seat: SidebarCo
     'section-padding-block-start': section?.paddingBlockStart,
     'section-padding-block-end': section?.paddingBlockEnd,
     ...collectionHorizontalInsets(root, seat),
-    gap: view?.getComputedStyle(seat.parent).rowGap,
+    gap: view?.getComputedStyle(collectionLayoutParent(seat.parent)).rowGap,
     'item-gap': rowListStyle?.display === 'grid'
         || (rowListStyle?.display === 'flex' && rowListStyle.flexDirection === 'column')
       ? rowListStyle.rowGap
@@ -131,4 +142,13 @@ function collectionHorizontalInsets(
     'row-inset-start': start(row),
     'row-inset-end': end(row),
   }
+}
+
+function collectionLayoutParent(parent: HTMLElement): HTMLElement {
+  const view = parent.ownerDocument.defaultView
+  let current = parent
+  while (view?.getComputedStyle(current).display === 'contents' && current.parentElement !== null) {
+    current = current.parentElement
+  }
+  return current
 }
