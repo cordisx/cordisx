@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import type { AgentSetup } from '@cordisx/protocol/agents/v1'
+import { CordisXAgentSessionRuntime } from '../packages/cli/src/renderer/agent-session-runtime.js'
 import type { UserMessage } from '@cordisx/protocol/sessions/v1'
 import {
   CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN,
@@ -297,5 +299,123 @@ describe('Codex Desktop Agent/Session transport', () => {
       sendMessageFromView: async () => {},
     })
     expect(await CodexDesktopAgentSessionTransport.connect()).toBeDefined()
+  })
+})
+
+describe('native Agent definition context', () => {
+  const definition = (agentId: string, text: string): AgentSetup['definitions'][number] => ({
+    $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-definition.v1.schema.json',
+    contract: 'cordisx.agent-definition/v1',
+    schemaVersion: 1,
+    identity: { agentId, revision: 'r1' },
+    name: agentId,
+    promptSections: [{ sectionId: agentId, kind: 'introduction', text }],
+    rules: [`${agentId} rule`],
+    skills: [`${agentId} skill`],
+    inherit: {
+      promptSections: 'append',
+      rules: 'merge',
+      skills: 'merge',
+      tools: 'merge',
+      mcpServers: 'merge',
+      runtimeDefaults: 'merge',
+    },
+  })
+  const base = definition('base', 'Base context')
+  const lead = { ...definition('lead', 'Lead context'), extends: [base.identity] }
+  const setup: AgentSetup = { definition: lead.identity, definitions: [base, lead] }
+
+  async function harness() {
+    const view = new TestWindow()
+    const requests: { method: string; params: Record<string, unknown> }[] = []
+    install('window', view)
+    install('location', view.location)
+    install('codexWindowType', 'electron')
+    install('electronBridge', {
+      getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[1] }),
+      sendMessageFromView: async (
+        envelope: { type: string; request: { id: string; method: string; params: Record<string, unknown> } },
+      ) => {
+        if (envelope.type !== 'mcp-request') return
+        const request = envelope.request
+        requests.push(structuredClone(request))
+        const result = request.method.startsWith('thread/')
+          ? { thread: { id: 'native-context-thread' } }
+          : { turn: { id: `turn-${requests.length}` } }
+        queueMicrotask(() =>
+          view.message({ type: 'mcp-response', hostId: 'local', message: { id: request.id, result } })
+        )
+      },
+    })
+    const transport = await CodexDesktopAgentSessionTransport.connect()
+    if (transport === undefined) throw new Error('transport unavailable')
+    return { view, requests, transport }
+  }
+
+  it('passes inherited setup through the real runtime on create and implicit resume, preserving user input', async () => {
+    const { requests, transport } = await harness()
+    const runtime = new CordisXAgentSessionRuntime({ driver: transport, authorize: async () => true })
+    const owner = { pluginId: 'context-test', pluginSource: 'file:///context-test', pluginGeneration: 'g1' }
+    try {
+      const created = await runtime.create(owner, {
+        sessionId: 'context-session',
+        options: { model: 'gpt-test' },
+        setup,
+      })
+      expect(created.status).toBe('accepted')
+      if (created.status !== 'accepted') throw new Error('create unavailable')
+      const start = requests.find(request => request.method === 'thread/start')!.params
+      expect(start.developerInstructions).toContain('"agentId":"lead"')
+      for (const text of ['Base context', 'Lead context', 'base rule', 'lead rule', 'base skill', 'lead skill']) {
+        expect(start.developerInstructions).toContain(text)
+      }
+      expect(start).not.toHaveProperty('baseInstructions')
+      await created.handle.dispose()
+      const resumed = await runtime.resume(owner, { sessionId: 'context-session' })
+      expect(resumed.status).toBe('accepted')
+      const resume = requests.find(request => request.method === 'thread/resume')!.params
+      expect(resume).toEqual({ threadId: 'native-context-thread', developerInstructions: start.developerInstructions })
+      await transport.submit({
+        sessionId: 'context-session',
+        message: user('input-1', 'Original user request'),
+        target: 'next-turn',
+        wakeup: true,
+      })
+      const turn = requests.find(request => request.method === 'turn/start')!.params
+      expect(turn.input).toEqual([{ type: 'text', text: 'Original user request', text_elements: [] }])
+      expect(turn).not.toHaveProperty('developerInstructions')
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it('replaces explicit resume setup and refuses invalid definitions before a native request', async () => {
+    const { requests, transport } = await harness()
+    try {
+      await transport.create({ sessionId: 'context-session', options: { model: 'gpt-test' }, setup })
+      const replacement = definition('reviewer', 'Review context')
+      expect(
+        await transport.resume({
+          sessionId: 'context-session',
+          setup: { definition: replacement.identity, definitions: [replacement] },
+        }),
+      ).toMatchObject({ status: 'accepted' })
+      const resume = requests.at(-1)!.params
+      expect(resume.developerInstructions).toContain('Review context')
+      expect(resume.developerInstructions).not.toContain('Lead context')
+      const count = requests.length
+      const invalid = { ...setup, definition: { agentId: 'missing', revision: 'r1' } }
+      expect(await transport.create({ sessionId: 'invalid', options: { model: 'gpt-test' }, setup: invalid })).toEqual({
+        status: 'unavailable',
+        code: 'unsupported',
+      })
+      expect(await transport.resume({ sessionId: 'context-session', setup: invalid })).toEqual({
+        status: 'unavailable',
+        code: 'unsupported',
+      })
+      expect(requests).toHaveLength(count)
+    } finally {
+      transport.dispose()
+    }
   })
 })

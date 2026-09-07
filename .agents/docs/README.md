@@ -74,6 +74,7 @@ implementation of those contracts, not a second public specification.
 | [publisher-grants](publisher-grants.md)                           | Reference              | Device-bound PublisherGrant authority, persistence, and optional registry       |
 | [multi-provider-sessions](multi-provider-sessions.md)             | Reference              | Provider Fleet, structured identities, independent connections, and CLIProxyAPI |
 | [agent-events](agent-events.md)                                   | Reference              | Session/Agent events, messaging, permissions, and private adapter boundary      |
+| [native-agent-context](native-agent-context.md)                   | Reference              | Native definition delivery, resume, event correlation, and evidence boundaries  |
 | [agent-history](agent-history.md)                                 | Reference              | Read-only durable history, paging, deduplication, redaction, and ownership      |
 | [agent-loop](agent-loop.md)                                       | Experimental reference | Principal-bound AgentLoop path, catalog resolution, and unsupported boundaries  |
 | [channel-runtime](channel-runtime.md)                             | Reference              | Node Channel services, bindings, adapters, reliability, and evidence scope      |
