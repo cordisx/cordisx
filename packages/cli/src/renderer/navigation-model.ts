@@ -127,6 +127,8 @@ export interface ManagedSettingsPageMountRecord extends ManagedSettingsPageMount
 }
 
 export interface ManagedManagerPageMountRecord extends ManagedManagerPageMount {
+  readonly reference: CordisXRouteReference
+  ready: boolean
   readonly route: RouteRecord
   readonly page: PageRecord
   readonly content: HTMLElement

@@ -93,3 +93,26 @@ export class HostManagerNavigationController {
     port.restore(structuredClone(pending))
   }
 }
+
+/** Resolve a public plugin route to one visible, same-owner Manager navigation root. */
+export function resolveHostManagerRouteOpenRequest(
+  owner: string,
+  target: CordisXRouteReference,
+  items: readonly ManagerSettingsNavigationItemSnapshot[],
+  parent: (reference: CordisXRouteReference) => CordisXRouteReference | undefined,
+): HostManagerContentOpenRequest | undefined {
+  let current: CordisXRouteReference | undefined = target
+  const seen = new Set<string>()
+  while (current && seen.size < 32) {
+    const key = JSON.stringify(current)
+    if (seen.has(key)) return undefined
+    seen.add(key)
+    const matches = items.filter(item =>
+      item.owner === owner && !item.disabled && sameRouteReference(item.route, current!)
+    )
+    if (matches.length === 1) return { contributionId: matches[0]!.id, root: matches[0]!.route, target }
+    if (matches.length > 1) return undefined
+    current = parent(current)
+  }
+  return undefined
+}

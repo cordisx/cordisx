@@ -1,3 +1,4 @@
+import { usagePermissionAvailability } from './usage-availability.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
@@ -463,7 +464,7 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
     iconThemes: runtimeScope.iconThemeRegistry()!.redactedSnapshot(),
     permissions: runtimeScope.broker()!.snapshots().map((permission: PlatformPermissionSnapshot) => {
       const pointId = (permission.capability === 'ui.extension-points.render'
-          || permission.capability === 'ui.extension-points.interact' || permission.capability === 'usage.read')
+          || permission.capability === 'ui.extension-points.interact')
         ? permission.scope.extensionPoints?.[0]
         : undefined
       const descriptor = pointId === undefined
@@ -475,75 +476,76 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
           : undefined
       const isolatedHostDomReady = hostDomController?.item.isolatedArtifactSource !== undefined
         && hostDomController.hostDomWorker?.status().status === 'ready'
-      const availability =
-        permission.capability === 'ui.host-dom.read' || permission.capability === 'ui.host-dom.modify'
-          ? isolatedHostDomReady
-            ? {
+      const availability = permission.capability === 'usage.read'
+        ? usagePermissionAvailability(runtimeScope.metadata()!.agentHistoryBridgeToken !== undefined, permission.scope)
+        : permission.capability === 'ui.host-dom.read' || permission.capability === 'ui.host-dom.modify'
+        ? isolatedHostDomReady
+          ? {
+            status: 'supported' as const,
+            reason: Object.freeze({
+              namespace: 'cordisx.permission.host',
+              key: 'availability.host-dom-worker-ready',
+              fallback: 'Host DOM access is available through the isolated CordisX worker boundary.',
+            }),
+            providers: [{
+              providerId: 'host-dom-worker',
+              providerName: Object.freeze({
+                namespace: 'cordisx.permission.host',
+                key: 'provider.host-dom-worker.name',
+                fallback: 'CordisX isolated Host DOM worker',
+              }),
+              kind: 'host-local' as const,
+              family: 'ui-rendering' as const,
               status: 'supported' as const,
               reason: Object.freeze({
                 namespace: 'cordisx.permission.host',
-                key: 'availability.host-dom-worker-ready',
-                fallback: 'Host DOM access is available through the isolated CordisX worker boundary.',
+                key: 'provider.host-dom-worker.ready',
+                fallback: 'Plugin code has no ambient renderer DOM and uses bounded opaque handles.',
               }),
-              providers: [{
-                providerId: 'host-dom-worker',
-                providerName: Object.freeze({
-                  namespace: 'cordisx.permission.host',
-                  key: 'provider.host-dom-worker.name',
-                  fallback: 'CordisX isolated Host DOM worker',
-                }),
-                kind: 'host-local' as const,
-                family: 'ui-rendering' as const,
-                status: 'supported' as const,
-                reason: Object.freeze({
-                  namespace: 'cordisx.permission.host',
-                  key: 'provider.host-dom-worker.ready',
-                  fallback: 'Plugin code has no ambient renderer DOM and uses bounded opaque handles.',
-                }),
-                generation: runtimeScope.generation()!,
-                scope: permission.scope,
-              }],
-            }
-            : {
-              status: 'unavailable' as const,
-              reason: Object.freeze({
-                namespace: 'cordisx.permission.host',
-                key: 'availability.host-dom-isolation-unavailable',
-                fallback: 'Host DOM access is unavailable until plugins run without ambient renderer DOM access.',
-              }),
-              providers: [],
-            }
-          : (permission.capability === 'ui.extension-points.render'
-              || permission.capability === 'ui.extension-points.interact' || permission.capability === 'usage.read')
-          ? {
-            status: descriptor?.adapterSupport === 'supported'
-              ? 'supported' as const
-              : descriptor?.adapterSupport === 'unverified'
-              ? 'degraded' as const
-              : 'unavailable' as const,
-            reason: descriptor?.diagnostic ?? descriptor?.description ?? Object.freeze({
-              namespace: 'cordisx.manager.extension-points',
-              key: 'permission.point-unavailable',
-              fallback: 'The declared Host extension point is unavailable.',
-            }),
-            providers: descriptor === undefined ? [] : [{
-              providerId: `host-extension-point:${descriptor.id}`,
-              providerName: descriptor.title,
-              kind: 'host-local' as const,
-              family: 'ui-rendering' as const,
-              status: descriptor.adapterSupport === 'supported'
-                ? 'supported' as const
-                : descriptor.adapterSupport === 'unverified'
-                ? 'degraded' as const
-                : 'unavailable' as const,
-              reason: descriptor.diagnostic ?? descriptor.description,
+              generation: runtimeScope.generation()!,
               scope: permission.scope,
             }],
           }
-          : runtimeScope.capabilityAvailability()!.resolve(
-            permission.capability as CordisXPlatformCapability,
-            permission.scope as CordisXCapabilityScope,
-          )
+          : {
+            status: 'unavailable' as const,
+            reason: Object.freeze({
+              namespace: 'cordisx.permission.host',
+              key: 'availability.host-dom-isolation-unavailable',
+              fallback: 'Host DOM access is unavailable until plugins run without ambient renderer DOM access.',
+            }),
+            providers: [],
+          }
+        : (permission.capability === 'ui.extension-points.render'
+            || permission.capability === 'ui.extension-points.interact')
+        ? {
+          status: descriptor?.adapterSupport === 'supported'
+            ? 'supported' as const
+            : descriptor?.adapterSupport === 'unverified'
+            ? 'degraded' as const
+            : 'unavailable' as const,
+          reason: descriptor?.diagnostic ?? descriptor?.description ?? Object.freeze({
+            namespace: 'cordisx.manager.extension-points',
+            key: 'permission.point-unavailable',
+            fallback: 'The declared Host extension point is unavailable.',
+          }),
+          providers: descriptor === undefined ? [] : [{
+            providerId: `host-extension-point:${descriptor.id}`,
+            providerName: descriptor.title,
+            kind: 'host-local' as const,
+            family: 'ui-rendering' as const,
+            status: descriptor.adapterSupport === 'supported'
+              ? 'supported' as const
+              : descriptor.adapterSupport === 'unverified'
+              ? 'degraded' as const
+              : 'unavailable' as const,
+            reason: descriptor.diagnostic ?? descriptor.description,
+            scope: permission.scope,
+          }],
+        }
+        : runtimeScope.capabilityAvailability()!.resolve(
+          permission.capability as CordisXPlatformCapability,
+          permission.scope as CordisXCapabilityScope,
+        )
       const site =
         `permission:${permission.identity.source}:${permission.identity.id}:${permission.capability}:${permission.fingerprint}`
       return {
@@ -782,6 +784,7 @@ export const createRuntimeSetPermissionPolicy = (
     }
     if (capability === 'usage.read') {
       runtimeScope.broker()!.setUsagePolicy(controller.identity, policy !== 'deny')
+      if (policy === 'allow') await runtimeScope.broker()!.authorizeUsage(controller.identity)
     } else if (capability === 'ui.extension-points.interact') {
       runtimeScope.broker()!.setVisualInteractionPolicy(controller.identity, policy !== 'deny')
     } else if (capability === 'ui.extension-points.render') {

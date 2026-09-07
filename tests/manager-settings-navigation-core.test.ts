@@ -275,7 +275,18 @@ describe('Manager Settings navigation core', () => {
     })
     const managerBody = dom.window.document.createElement('section')
     dom.window.document.body.append(managerBody)
-    const mount = await navigation.mountManagerContent('demo', { id: 'ready' }, 'demo:entry', managerBody)
+    let managedMount: ReturnType<typeof navigation.mountManagerContent> | undefined
+    controller.getSnapshot = () => ({ available: false, error: 'Manager is closed' })
+    navigation.setManagerNavigator((owner, reference) => {
+      // Emulate the closed Manager's asynchronous React seat mount.
+      queueMicrotask(() => {
+        managedMount = navigation.mountManagerContent(owner, reference, 'demo:entry', managerBody)
+      })
+    })
+    await navigation.navigate('demo', { id: 'ready' })
+    expect(controller.shows).toBe(0)
+    const mount = await managedMount!
+
     expect(managerBody.querySelector('[data-demo-manager-content]')?.textContent).toBe('Host-controlled demo body')
     expect(navigation.snapshot().outlets.find(item => item.id === 'manager.content')).toMatchObject({
       mounted: true,
