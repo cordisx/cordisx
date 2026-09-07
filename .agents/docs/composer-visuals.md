@@ -98,34 +98,16 @@ silently treats a v10 runtime as an older manifest.
 
 ## Recommended visual defaults
 
-For compact face-like Composer visuals, prefer these defaults as a starting
-point. They are design suggestions, not Protocol requirements, permission
-rules, schema validation, or acceptance gates. Other shapes, faces and motion
-styles remain appropriate when the plugin's purpose calls for them.
+Visual design belongs to the consuming plugin. The Host defines seat bounds,
+input ownership and capability availability; it does not prescribe a shape,
+palette, gaze transition or animation budget. The [pet plugin documentation](https://github.com/cordisx/plugin-pet/blob/main/README.md)
+owns that plugin's design and implementation choices. This heading remains for
+existing links.
 
-- Fit the primary artwork to the actual button seat: a centered circle should
-  cover the native button face without a visible underlying ring or overflow.
-  Size against the provided bounds, not an assumed screen position. Keep a
-  circle circular when the seat is not square.
-- A simple round face with two vertical rounded-rectangle eyes, without corners,
-  ears or a mouth, is the recommended minimal expression. Keep it legible at
-  native button size; color can still distinguish semantic action states.
-- When a face follows the pointer, declare and request `pointer.observe` for
-  each participating point, including the primary point. Use only authorized
-  public state. The current observation covers the application window, not the
-  desktop; normalized coordinates are clamped to the point's bounds.
-- Consider retaining the last gaze direction when pointer data becomes absent,
-  and gently interpolating toward the next observed position (about 160 ms is
-  a useful starting value). Avoid snapping on exit or reentry. Respect reduced
-  motion and clear component-local state on disposal. Missing initial pointer
-  data can use a neutral gaze; holding a prior direction is not new observation.
-- Check fit, contrast and gaze in the real native seat, including button state
-  changes, moving beyond Composer, window exit/reentry, denied observation and
-  reduced motion. Preserve the existing Host accessibility and input ownership.
-
-Artwork and easing belong to each plugin's SVG component. These recommendations
-do not introduce Host-owned animal assets or force other plugins to copy one
-reference implementation.
+Pointer observation covers the application window, not the desktop. Coordinates
+are normalized and clamped against the selected point bounds; observation must
+be declared and authorized for each participating point. An absent sample does
+not prescribe a visual response.
 
 ## Verification checkpoint
 
@@ -135,9 +117,9 @@ and theme/reduced-motion state updates. The plugin production graph, typecheck
 and lazy activation tests pass.
 
 On the isolated native installation, keyboard sending preserved the real
-button: send (green), disabled during submission (gray), stop during generation
-(red), then voice again. Pointer authorization changed gaze; denial centered
-it without withdrawing rendering. Render denial restored the native visual;
+button through send, disabled submission, stop during generation and voice.
+Pointer authorization enabled observation; denial removed pointer data without
+withdrawing rendering. Render denial restored the native visual;
 plugin block removed both roots and the additional document pointer listener.
 A component-only SVG edit used React Fast Refresh with the same boot/module
 generation, two roots and unchanged listener count.
@@ -163,9 +145,7 @@ and retry. English and verified Simplified Chinese labels are recognized;
 missing, ambiguous or unsupported controls project unavailable. Native dictation
 controls remain intact. No audio, transcript or microphone authority is granted.
 
-The example overlay uses recording red and transcribing/startup amber while its
-primary button keeps its own native action colors. Palette and expression are
-plugin choices. Probe fixtures verify transitions; a UI fixture is not evidence
+Probe fixtures verify transitions; a UI fixture is not evidence
 that the assistant recorded microphone audio or exercised a real transcription.
 
 ## Local development authorization
@@ -199,7 +179,7 @@ changes alone do not verify that native layout transition or microphone capture.
 ### DOM-based visual renderers
 
 `defineReactVisual(Component, { kind: 'react-dom-v1' })` opts into a lazy,
-shared-React DOM component for renderers such as OneWorks Avatar. The omitted
+shared-React DOM component. The omitted
 option still returns `react-svg-v1`; unknown renderer kinds remain unsupported.
 This is a Host-specific integration of the existing framework-neutral Protocol,
 not a new semantic snapshot or permission.
@@ -211,12 +191,9 @@ external mounts, native selectors, focusable interactions, or global stylesheet
 overrides. Styles must be scoped to the plugin's visual subtree. This is the
 existing trusted-renderer boundary, not a DOM sandbox.
 
-A plugin can pass an immutable Avatar definition to its own renderer with
-`interactive={false}`. It derives orientation from the authorized pointer
-snapshot, holds/eases gaze in its own state, and maps dictation or primary state
-to its own expressions. It must dispose animation timers on unmount and honor
-reduced motion. Avatar dependencies and artwork remain plugin-owned; the Host
-adds no Avatar-specific state machine or mouse behavior.
+Renderer dependencies, artwork and response to semantic state remain
+plugin-owned. The Host supplies no renderer-specific business state machine.
+Component-local tasks must be disposed on unmount.
 
 ## Overlay drag and activation
 

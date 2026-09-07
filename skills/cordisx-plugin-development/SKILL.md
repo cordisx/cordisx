@@ -5,7 +5,7 @@ description: Assess the feasibility of a requested CordisX customization, then c
 
 # CordisX Plugin Development
 
-Build plugins against the public CordisX contract. Keep the Host responsible for product UI and runtime policy. Bundled revision and owning source are recorded in [version.json](version.json); the launching CLI deploys this complete tree by content digest.
+Build plugins against the public CordisX contract. Keep the Host responsible for shared UI and runtime policy; keep business behavior and visual design in the owning plugin. Bundled revision and owning source are recorded in [version.json](version.json); the launching CLI deploys this complete tree by content digest.
 
 ## Read the relevant references
 
@@ -14,7 +14,6 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 - Change plugin-owned styles or CSS imports: [css-and-lifecycle.md](references/css-and-lifecycle.md)
 - Start or package a plugin: [plugin-authoring.md](references/plugin-authoring.md)
 - Add any Manager page, contribution, action, collection, or icon: [ui-system.md](references/ui-system.md)
-- Build a pointer-driven, animated, draggable, or activation-capable controlled visual: [interactive-controlled-visuals.md](references/interactive-controlled-visuals.md)
 - Add or change plugin configuration: [schema-configuration.md](references/schema-configuration.md)
 - Run or deliver the result: [verification.md](references/verification.md)
 - Continue work inside an already-running development session: [live-plugin-development.md](references/live-plugin-development.md)

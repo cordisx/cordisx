@@ -33,6 +33,13 @@ module uses Vite React Fast Refresh. Changes to the plugin entry, manifest,
 generation. Check the in-product result and cleanup; do not claim success from a
 file write alone.
 
+A helper or model module is not necessarily a React refresh boundary. If an edit
+appears stale, confirm the resolved entry and imported module in the active
+runtime, then inspect Vite invalidation and the plugin generation diagnostic.
+A saved source file or successful build does not prove the new helper was
+loaded. Verify the selected plugin's replacement before escalating to a
+renderer reload; use the boundary classification in [verification](verification.md#development-transport).
+
 The Manager's **Reload plugin** action is a second development trigger for an
 active local plugin. Use it when the task needs an explicit reload check. It
 invalidates and reloads that selected development module; it does not make
@@ -41,7 +48,11 @@ install, enable, disable, or uninstall available for unmanaged local entries.
 Restart `cordisx dev` only for changes outside the renderer HMR contract, such
 as project config, package installation, or Node-side launcher/bridge code.
 When the running session shows a failed candidate, preserve and inspect the
-last-good plugin instead of repeatedly restarting over the diagnostic.
+last-good plugin instead of repeatedly restarting over the diagnostic. A failed
+candidate must not publish delayed work into its successor. If launch itself
+fails, retain the first failure log and identify the failing startup phase
+before retrying; a disconnected debugger alone does not establish the cause.
+Keep an active user preview available while testing a replacement in isolation.
 
 The development graph is not the production package graph. Use the generated
 `cordisx/vite` build config for delivery; it creates one formal, indexed,
@@ -56,6 +67,22 @@ when it exposes the same public capability.
 For a native Host interaction, use only a cataloged extension point. If the
 contract is unavailable in the installed CordisX version, say so plainly
 instead of installing a selector or DOM fallback.
+
+## Check local development identity and permissions
+
+A development source path alone does not establish development authority.
+Confirm the launcher selected that exact config entry, its plugin id matches,
+and the artifact is ready in the current session. When a capability unexpectedly
+asks for permission, inspect its declaration, availability, generation and
+Host authorization path before changing plugin code. Do not manufacture a
+user grant or infer a wildcard exception from a file URL.
+
+Local-development exceptions are capability-specific; check the owning Host
+reference. For example, [controlled visual authorization](https://github.com/cordisx/cordisx/blob/main/.agents/docs/composer-visuals.md#local-development-authorization)
+recognizes exact Launcher-verified artifacts. Explicit denial and generation
+retirement still apply. Installed artifacts use their ordinary permission
+review, so an automatically authorized development preview does not prove the
+installed permission flow.
 
 ## Isolated transient canvas
 

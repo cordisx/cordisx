@@ -34,6 +34,14 @@ and semantic components. Do not install or bundle another React renderer or a
 component library. The React body remains inside the Host-composed page; it does
 not take over headers, breadcrumbs, tabs, navigation, or outer scrolling.
 
+When a linked dependency triggers an invalid hook call or a shared-React
+initialization error, inspect the resolved React/JSX runtime and package graph.
+Keep the plugin on the public singleton facade and the maintained Vite helper;
+do not patch the symptom by bundling another React copy or applying plugin
+aliases to Host bootstrap modules. Host bootstrap resolution belongs to Host.
+Check the actual lazy dependency closure, including transitive CSS/assets,
+rather than treating a source-level `import()` as proof of deferred loading.
+
 For CSS import forms, type declarations, and cleanup boundaries, use
 [CSS and lifecycle](css-and-lifecycle.md).
 

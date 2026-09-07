@@ -20,6 +20,19 @@ A visible Codex control, DOM node, renderer global, private bridge, or internal
 React state is not evidence of a plugin capability. A declared type without an
 active Host adapter is also not enough to claim support.
 
+Treat public semantic state and permissions independently. Observing a state
+does not grant its underlying content or device access, and observing input
+does not grant activation or manipulation. Check each required capability's
+exact scope; preserve unknown/unavailable states instead of guessing from
+native layout or from an attempted action. An input event alone is not proof
+that the requested operation succeeded.
+
+Keep a capability contribution independent of the consuming plugin's business
+model. Host owns native discovery, normalized state, permission enforcement and
+lifecycle; plugin-specific appearance, animation and interaction policy stay
+with that plugin. For controlled visual seats, inspect the [Host mechanism reference](https://github.com/cordisx/cordisx/blob/main/.agents/docs/composer-visuals.md)
+and its Protocol links for the installed version.
+
 ## Classify the request
 
 Use one of these outcomes:
