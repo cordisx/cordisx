@@ -1,3 +1,4 @@
+import { historicalNativeSessionDetails } from './native-agent-session-recovery.js'
 import { CordisXExtensionPointVisualService } from './composer-visual-service.js'
 import { COMPOSER_VISUAL_CATALOG } from './composer-visual-catalog.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
@@ -248,6 +249,7 @@ export const createRuntimeAgentSessionRuntime = (
 ) =>
   new CordisXAgentSessionRuntime({
     driver: runtimeScope.agentSessionTransport()!,
+    historicalAgentDetails: historicalNativeSessionDetails,
     navigateAgentDetail: async (detail, sessionId) => {
       const restore = runtimeScope.managerNavigationController()!.captureReturn()
       await runtimeScope.agentDetailNavigator()!.navigateAgentDetail(detail, sessionId)

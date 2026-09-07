@@ -31,7 +31,7 @@ import type {
 import type {
   AgentDetailNavigationService,
   AgentSessionDetailReferenceService,
-} from '@cordisx/protocol/agent-detail-navigation/v1'
+} from '@cordisx/protocol/agent-detail-navigation/v2'
 import type { SessionId, SessionRegistry } from '@cordisx/protocol/sessions/v1'
 
 export const CORDISX_AGENT_SESSION_LEGACY_ACQUIRE_SCHEMA_V1 =

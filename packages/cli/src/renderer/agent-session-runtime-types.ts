@@ -527,6 +527,8 @@ export interface CordisXAgentSessionRuntimeOptions {
     command: PageAdmissionCommand,
     route: AgentPageRoomRoute,
   ) => Promise<'accepted' | 'navigation-failed'>
+  /** Read-only historical detail capabilities; absent bridges remain unavailable. */
+  readonly historicalAgentDetails?: import('./native-session-detail-references.js').HistoricalAgentDetailProvider
   /** Host-owned only; resolves a current ref through the private navigator. */
   readonly navigateAgentDetail?: (detail: AgentDetailReference, sessionId: SessionId) => Promise<void> | void
 }

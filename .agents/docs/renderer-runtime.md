@@ -33,6 +33,32 @@ rollback restores last-good visibility, and render errors are contained to an
 empty decorative seat. The complete runtime boundary is specified in
 [`plugin-visuals.md`](plugin-visuals.md).
 
+### Historical Session detail navigation
+
+The existing `ctx.agentSessionDetailReferences` and `ctx.agentDetailNavigation`
+services add explicit `getV2({ sessionId })` and `openV2({ target })` methods under
+[Protocol detail navigation v2](https://github.com/cordisx/cordisx-protocol/blob/52c2a2d8c0e2ffc33ec4496701af184e0160fc74/.agents/docs/agent-detail-navigation/v2.md).
+Their v1 `get`/`open` methods remain current-only. V2 reads an authenticated,
+source-scoped native mapping when no current record exists and issues a temporary
+opaque capability; it reports no running status. Known foreign or replaced
+current records cannot fall back through historical lookup.
+
+`native-session-detail-references.ts` owns only temporary capabilities. It binds
+owner generation, current client, runtime connection epoch and persisted revision,
+checks Session-read permission, and re-reads the mapping before Host navigation.
+The `native-session-detail` bridge operation uses the existing Host-private store
+scope and checks its principal again after loading. It performs no persistent
+write, recovery, create/resume, input submission or history replay. Missing native
+bridges and stale targets return typed unavailable results. The existing native
+navigator owns destination and Back/history.
+
+The tests cover real Cordis service exposure, the actual authenticated store and
+renderer persistence adapter with zero writes, source substitution, old-target
+rejection and a mocked native history adapter. They are not a real `app://`
+preview or native acceptance. Integration must retain the original Room/source
+identity and test opening its existing historical Session and native Back without
+creating a replacement Session.
+
 ### Product-owned pages and admission
 
 Product pages normally own their complete internal renderer. Agent
