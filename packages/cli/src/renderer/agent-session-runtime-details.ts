@@ -78,8 +78,20 @@ export abstract class AgentSessionRuntimeDetails extends AgentSessionRuntimeAppr
       return { status: 'denied', code: 'permission-denied' }
     }
     if (!active()) return { status: 'unavailable', code: 'connection-replaced' }
-    // Known foreign or replaced records cannot be bypassed by a historical lookup.
-    if (this.agents.has(request.sessionId)) return await this.getAgentSessionDetailReference(owner, request)
+    const record = this.agents.get(request.sessionId)
+    // Durable source identity must match even when an old Agent generation remains in memory.
+    if (record !== undefined && record.owner.pluginId !== owner.pluginId) {
+      return { status: 'denied', code: 'permission-denied' }
+    }
+    if (
+      record !== undefined && this.sameOwner(owner, record.owner) && this.current(record)
+      && this.validAgentDetailReference(record.detail)
+    ) {
+      return await this.getAgentSessionDetailReference(owner, request)
+    }
+    // Disposed/ended or previous-generation Agents can still have an authorized
+    // persisted mapping. The provider authenticates the current client afresh;
+    // this does not reuse an old capability or revive an Agent handle.
     if (this.options.historicalAgentDetails === undefined) return { status: 'unavailable', code: 'unsupported' }
     return await this.options.historicalAgentDetails.get(owner, request.sessionId, active)
   }
