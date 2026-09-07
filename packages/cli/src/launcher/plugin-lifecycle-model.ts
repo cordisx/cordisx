@@ -1,3 +1,4 @@
+import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { access } from 'node:fs/promises'
@@ -124,6 +125,7 @@ export interface PluginRuntimeMutation {
       | CordisXPluginManifestV8
       | CordisXPluginManifestV9
       | CordisXPluginManifestV10
+      | CordisXPluginManifestV11
     readonly development: CordisXLocalDevelopmentSnapshot
   }
   /** Host-only renderer artifact compiled from the authority-resolved immutable runtime module. */

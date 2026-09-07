@@ -8,7 +8,7 @@ export const MAX_AGENT_HISTORY_REQUESTS = 4
 
 export interface AgentHistoryBindingRequest {
   readonly requestId: string
-  readonly operation: 'status' | 'query' | 'tail'
+  readonly operation: 'status' | 'query' | 'tail' | 'usage'
   readonly caller?: AgentHistoryCaller
   readonly input: Record<string, unknown>
 }
@@ -43,7 +43,7 @@ function parseInput(operation: AgentHistoryBindingRequest['operation'], value: u
       ? ['sessionId', 'cursor', 'limit', 'payloadPolicy']
       : [],
   )
-  if (operation === 'status') return {}
+  if (operation === 'status' || operation === 'usage') return {}
   if (typeof input.sessionId !== 'string' || input.sessionId.length === 0 || input.sessionId.length > 128) {
     throw new Error('invalid Agent history session')
   }
@@ -81,7 +81,7 @@ export function parseAgentHistoryBindingRequest(value: unknown, token: string): 
   if (typeof request.requestId !== 'string' || !/^[a-z0-9-]{1,96}$/i.test(request.requestId)) {
     throw new Error('invalid Agent history request id')
   }
-  if (!['status', 'query', 'tail'].includes(String(request.operation))) {
+  if (!['status', 'query', 'tail', 'usage'].includes(String(request.operation))) {
     throw new Error('invalid Agent history operation')
   }
   const operation = request.operation as AgentHistoryBindingRequest['operation']
@@ -101,6 +101,7 @@ export async function handleAgentHistoryBindingRequest(
 ): Promise<unknown> {
   if (request.operation === 'status') return await host.status()
   if (request.caller === undefined) throw new Error('Agent history caller is missing')
+  if (request.operation === 'usage') return await host.readUsage()
   if (request.operation === 'query') {
     return await host.query(request.input as unknown as CordisXAgentHistoryQuery, request.caller)
   }

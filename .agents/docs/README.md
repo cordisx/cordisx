@@ -104,3 +104,6 @@ reference without duplicating its authority.
 
 - [Composer controlled visuals](composer-visuals.md): experimental probe/runtime checkpoint and remaining production integration.
 - [Plugin Agent tools](plugin-agent-tools.md): restricted CLI invocation, Skill resources, and current integration limits.
+
+
+- [Local usage projection](local-usage.md): metadata-only usage, persistence and current coverage.

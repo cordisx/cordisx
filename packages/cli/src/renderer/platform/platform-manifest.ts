@@ -1,3 +1,5 @@
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, normalizeUsageManifestV11 } from '../../usage-permissions.js'
+import type { CordisXPluginManifestV11 } from '../../usage-permissions.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
   normalizeVisualManifestV10,
@@ -114,6 +116,7 @@ export function normalizePluginManifest(
   | CordisXPluginManifestV8
   | CordisXPluginManifestV9
   | CordisXPluginManifestV10
+  | CordisXPluginManifestV11
 {
   if (!ID_PATTERN.test(expectedId)) throw new Error(`launcher plugin id ${expectedId} is invalid`)
   if (value === undefined) {
@@ -125,6 +128,9 @@ export function normalizePluginManifest(
     })
   }
   const manifest = object(value, `plugin ${expectedId} manifest`)
+  if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 || manifest.schemaVersion === 11) {
+    return normalizeUsageManifestV11(manifest, expectedId)
+  }
   if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V10 || manifest.schemaVersion === 10) {
     return normalizeVisualManifestV10(manifest, expectedId)
   }
