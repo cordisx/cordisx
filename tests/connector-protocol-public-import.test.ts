@@ -15,7 +15,7 @@ import type {
 } from '@cordisx/protocol/connector-service/v1'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const protocolCommit = '06277f9d117893a9215c991db8c0881df0f0b0f3'
+const protocolCommit = '7b8c81104c2ab6b301ebe6a7414d45dc2cc8f724'
 const protocolSource = `github:cordisx/cordisx-protocol#${protocolCommit}`
 const protocolResolvedSource = `git+ssh://git@github.com/cordisx/cordisx-protocol.git#${protocolCommit}`
 const staleProtocolCommit = '9654023d1b1077d6fd0d43a2d294459bab63216b'
@@ -84,7 +84,7 @@ type FormalConnectorConsumerSurface = readonly [
 const formalConnectorConsumerSurface = null as unknown as FormalConnectorConsumerSurface
 
 describe('formal Connector Protocol public type import', () => {
-  it('pins every root, publishable CLI, and lock edge to one merged source dependency', async () => {
+  it('pins every root, publishable CLI, and lock edge to one exact source dependency', async () => {
     const [rootManifestText, cliManifestText, channelRuntimeManifestText, lockfileText] = await Promise.all([
       readFile(path.join(root, 'package.json'), 'utf8'),
       readFile(path.join(root, 'packages/cli/package.json'), 'utf8'),

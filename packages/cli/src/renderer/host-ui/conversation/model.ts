@@ -1,3 +1,4 @@
+import type { AgentConversationPluginCommandSource } from '@cordisx/protocol/agent-conversation-shell/v10'
 import type { CordisXIconToken, CordisXJsonValue } from '../../../contracts.js'
 import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity, AgentDetailReference } from '@cordisx/protocol/agents/v1'
@@ -78,6 +79,7 @@ export interface AgentConversationMessage {
     | { readonly kind: 'agent-loop' }
     | { readonly kind: 'session-event'; readonly sessionId: SessionId; readonly eventSeq: SessionSeq }
     | { readonly kind: 'chatroom-acknowledgement' }
+    | AgentConversationPluginCommandSource
   readonly reactions?: readonly AgentConversationReaction[]
   readonly semantic?:
     | {
@@ -557,11 +559,43 @@ function assertEntries(entries: readonly AgentConversationEntry[], selection: Ag
     } else if (entry.source !== undefined) {
       assertKnownKeys(
         entry.source,
-        entry.source.kind === 'session-event' ? ['kind', 'sessionId', 'eventSeq'] : ['kind'],
+        entry.source.kind === 'session-event'
+          ? ['kind', 'sessionId', 'eventSeq']
+          : entry.source.kind === 'plugin-command'
+          ? [
+            'kind',
+            'roomId',
+            'messageId',
+            'sessionId',
+            'participantId',
+            'memberId',
+            'runId',
+            'operationId',
+            'sequence',
+          ]
+          : ['kind'],
         `entries[${index}].source`,
       )
-      if (!['agent-loop', 'session-event', 'chatroom-acknowledgement'].includes(entry.source.kind)) {
+      if (!['agent-loop', 'session-event', 'chatroom-acknowledgement', 'plugin-command'].includes(entry.source.kind)) {
         throw new Error(`entries[${index}].source is invalid`)
+      }
+      if (entry.source.kind === 'plugin-command') {
+        for (
+          const key of [
+            'roomId',
+            'messageId',
+            'sessionId',
+            'participantId',
+            'memberId',
+            'runId',
+            'operationId',
+          ] as const
+        ) assertOpaque(entry.source[key], `entries[${index}].source.${key}`)
+        if (
+          !Number.isSafeInteger(entry.source.sequence) || entry.source.sequence < 1
+          || entry.source.messageId !== entry.messageId || entry.source.participantId !== entry.authorId
+          || entry.semantic?.purpose !== 'conversation'
+        ) throw new Error(`entries[${index}] plugin command identity mismatch`)
       }
       if (entry.source.kind === 'session-event') {
         assertOpaque(entry.source.sessionId, `entries[${index}].source.sessionId`)

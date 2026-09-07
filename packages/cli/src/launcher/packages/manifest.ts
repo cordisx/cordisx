@@ -2,6 +2,7 @@ import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V10 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V1
 export { PLUGIN_RUNTIME_MANIFEST_SCHEMA_V10 }
 export const PLUGIN_PACKAGE_SCHEMA_V10 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v10.schema.json'
+import { readAgentToolResources } from '../plugin-agent-tool-resources.js'
 import { createHash } from 'node:crypto'
 import { readFile, realpath } from 'node:fs/promises'
 import path from 'node:path'
@@ -241,6 +242,7 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
     }
     const entry = safePath(manifest.entry, ENTRY, 'package manifest entry')
     await containedFile(snapshotRoot, entry, 'package entry')
+    await readAgentToolResources(path.resolve(snapshotRoot, entry))
 
     const distribution = object(manifest.distribution, 'package distribution')
     exactKeys(distribution, ['mode', 'signature'], 'package distribution')

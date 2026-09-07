@@ -1,3 +1,5 @@
+import { PluginAgentToolAuthority } from './plugin-agent-tools.js'
+import type { CordisXConfigPlugin } from './config.js'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 
 import type { CordisXJsonValue } from '../contracts.js'
@@ -232,6 +234,7 @@ export function parseOwnerDocumentBindingRequest(value: unknown): OwnerDocumentB
 }
 
 export interface OwnerDocumentBridgeHandler {
+  readonly agentTools?: PluginAgentToolAuthority
   readonly entities?: EntityBridgeHandler
   issue(identity: OwnerDocumentIdentity, moduleGeneration: string): OwnerDocumentPrincipalBinding
   load(request: OwnerDocumentBindingRequest): Promise<CordisXOwnerDocumentLoadResultV1>
@@ -239,6 +242,7 @@ export interface OwnerDocumentBridgeHandler {
 }
 
 export function createOwnerDocumentBridgeHandler(input: {
+  readonly plugins?: readonly CordisXConfigPlugin[]
   readonly secret: string
   readonly profileId: string
   readonly generation: string
@@ -246,6 +250,7 @@ export function createOwnerDocumentBridgeHandler(input: {
   /** Synchronous Host principal lease check, repeated at commit. */
   readonly principalAllowed: (principal: OwnerDocumentPrincipal) => boolean
 }): OwnerDocumentBridgeHandler {
+  const agentTools = input.plugins === undefined ? undefined : new PluginAgentToolAuthority({ ...input, plugins: input.plugins })
   let activeRequests = 0
   const bounded = async <Value>(operation: () => Promise<Value>): Promise<Value> => {
     if (activeRequests >= MAX_OWNER_DOCUMENT_REQUESTS) throw new Error('owner document authority request limit reached')
@@ -265,6 +270,7 @@ export function createOwnerDocumentBridgeHandler(input: {
     return principal
   }
   return {
+    ...(agentTools === undefined ? {} : { agentTools }),
     issue(identity, moduleGeneration) {
       const principal = { profileId: input.profileId, generation: input.generation, moduleGeneration, identity }
       return {

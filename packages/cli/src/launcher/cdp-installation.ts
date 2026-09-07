@@ -1,3 +1,4 @@
+import { isAgentToolRequest } from './plugin-agent-tools.js'
 import { randomUUID } from 'node:crypto'
 import { waitForInitialDocument } from './cdp-document-ready.js'
 import * as support from './cdp-installation-support.js'
@@ -286,14 +287,25 @@ export async function install(
             const parsed = JSON.parse(payload) as unknown
             const generic = parsed as { readonly requestId?: unknown }
             requestId = typeof generic.requestId === 'string' ? generic.requestId : 'invalid'
-            entityRequest = support.isEntityBindingRequest(parsed)
+            entityRequest = support.isEntityBindingRequest(parsed) || isAgentToolRequest(parsed)
             if (ownerDocumentController?.signal.aborted === true) throw new Error('owner document bridge is closed')
             if (activeOwnerDocumentRequests >= support.MAX_OWNER_DOCUMENT_REQUESTS) {
               throw new Error('too many owner document requests')
             }
             activeOwnerDocumentRequests += 1
             try {
-              const value = entityRequest && ownerDocuments.entities !== undefined
+              const value = isAgentToolRequest(parsed) && ownerDocuments.agentTools !== undefined
+                ? await ownerDocuments.agentTools.handle(parsed, async request => {
+                  if (ownerDocumentController?.signal.aborted || !Number.isInteger(params.executionContextId)) throw new Error('agent tool renderer closed or context missing')
+                  const evaluated = await session.send('Runtime.evaluate', {
+                    expression: `globalThis.__cordisxDispatchAgentToolV1(${JSON.stringify(request)})`,
+                    contextId: params.executionContextId,
+                    awaitPromise: true, returnByValue: true,
+                  }, 25_000)
+                  if (ownerDocumentController?.signal.aborted || evaluated.exceptionDetails !== undefined) throw new Error('agent tool renderer unavailable')
+                  return (evaluated.result as { value?: unknown } | undefined)?.value
+                })
+                : entityRequest && ownerDocuments.entities !== undefined
                 ? await ownerDocuments.entities.handle(parsed)
                 : await (async () => {
                   const request = support.parseOwnerDocumentBindingRequest(parsed)

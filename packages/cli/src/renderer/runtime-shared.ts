@@ -339,6 +339,7 @@ export interface PluginController {
   unregisterExtensionPoints?: () => void
   unregisterConnector?: () => void | Promise<void>
   unregisterAgentLoop?: () => void | Promise<void>
+  unregisterAgentTools?: () => void
   unregisterDocuments?: () => void | Promise<void>
   entityRegistryFiber?: Fiber
   agentRegistryFiber?: Fiber
