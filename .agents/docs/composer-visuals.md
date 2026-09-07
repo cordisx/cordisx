@@ -91,6 +91,37 @@ newer platform-provider services remain unsupported. The experimental package
 parser requires a matching v10 runtime manifest in a v10 package. It never
 silently treats a v10 runtime as an older manifest.
 
+## Recommended visual defaults
+
+For compact face-like Composer visuals, prefer these defaults as a starting
+point. They are design suggestions, not Protocol requirements, permission
+rules, schema validation, or acceptance gates. Other shapes, faces and motion
+styles remain appropriate when the plugin's purpose calls for them.
+
+- Fit the primary artwork to the actual button seat: a centered circle should
+  cover the native button face without a visible underlying ring or overflow.
+  Size against the provided bounds, not an assumed screen position. Keep a
+  circle circular when the seat is not square.
+- A simple round face with two vertical rounded-rectangle eyes, without corners,
+  ears or a mouth, is the recommended minimal expression. Keep it legible at
+  native button size; color can still distinguish semantic action states.
+- When a face follows the pointer, declare and request `pointer.observe` for
+  each participating point, including the primary point. Use only authorized
+  public state. The current observation covers the application window, not the
+  desktop; normalized coordinates are clamped to the point's bounds.
+- Consider retaining the last gaze direction when pointer data becomes absent,
+  and gently interpolating toward the next observed position (about 160 ms is
+  a useful starting value). Avoid snapping on exit or reentry. Respect reduced
+  motion and clear component-local state on disposal. Missing initial pointer
+  data can use a neutral gaze; holding a prior direction is not new observation.
+- Check fit, contrast and gaze in the real native seat, including button state
+  changes, moving beyond Composer, window exit/reentry, denied observation and
+  reduced motion. Preserve the existing Host accessibility and input ownership.
+
+Artwork and easing belong to each plugin's SVG component. These recommendations
+do not introduce Host-owned animal assets or force other plugins to copy one
+reference implementation.
+
 ## Verification checkpoint
 
 The focused permission, catalog, Vite and lifecycle group passed 61 tests;
