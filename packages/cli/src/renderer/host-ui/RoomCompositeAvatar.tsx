@@ -5,7 +5,7 @@ import {
 import * as React from 'react'
 import { flushSync } from 'react-dom'
 import { createRoot } from 'react-dom/client'
-import { HostAgentAvatar } from './conversation/AgentAvatar.js'
+import { HostAgentAvatar } from './avatar/AgentAvatar.js'
 
 type CompositeCategory = '0' | '1' | '2' | '3' | '4+'
 type CompositeParticipant = CordisXRoomCompositeAvatarLeadingVisual['participants'][number]
@@ -79,7 +79,6 @@ export function HostRoomCompositeAvatarStack({
             <HostAgentAvatar
               participant={{
                 id: participant.participantId,
-                role: 'agent',
                 name: participant.participantId,
                 ...(participant.avatar === undefined ? {} : { avatar: participant.avatar }),
               }}

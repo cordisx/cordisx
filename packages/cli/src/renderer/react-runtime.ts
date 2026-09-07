@@ -21,7 +21,7 @@ import { PanZoomCanvas } from './host-ui/PanZoomCanvas.js'
 import { FilterToolbar, SearchField } from './host-ui/PublicFilterToolbar.js'
 import { PublicMarkdownViewer } from './host-ui/PublicMarkdownViewer.js'
 import { PublicSelectionRail } from './host-ui/PublicSelectionRail.js'
-import { HostAgentAvatar } from './host-ui/conversation/AgentAvatar.js'
+import { HostAgentAvatar } from './host-ui/avatar/AgentAvatar.js'
 import { HostIcon } from './host-ui/HostIcon.js'
 
 type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost'
@@ -601,7 +601,6 @@ export function AgentAvatar(
     React.createElement(HostAgentAvatar, {
       participant: {
         id: participant.id,
-        role: 'agent',
         name: participant.name,
         ...(participant.avatar === undefined ? {} : { avatar: participant.avatar }),
       },

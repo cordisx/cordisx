@@ -2,7 +2,7 @@ import * as React from 'react'
 import type { AgentConversationCommandController } from './commands.js'
 import type { AgentConversationActiveRun, AgentConversationModel } from './model.js'
 import { AGENT_CONVERSATION_STYLES } from './styles.js'
-import { HostAgentAvatar } from './AgentAvatar.js'
+import { HostAgentAvatar } from '../avatar/AgentAvatar.js'
 import type { HostAgentTaskDetailsNavigator } from '../AgentTaskDetailsNavigator.js'
 import {
   createHostAgentIdentityPresentation,
