@@ -166,7 +166,18 @@ function resolveSidebarNavigationParent(document: Document, sidebar: HTMLElement
     }
     if (parents.size === 0 && fallback !== undefined) parents.add(fallback)
   }
-  return parents.size === 1 ? [...parents][0] : undefined
+  if (parents.size === 1) return [...parents][0]
+  // Current Codex separates the primary actions from the single Explore row
+  // into adjacent vertical groups. The primary group is the only candidate
+  // containing multiple native navigation buttons; keep failing closed when
+  // that semantic distinction is not unique.
+  const primary = [...parents].filter(parent =>
+    nativeButtons(parent).filter(button => (
+      button.closest('[data-app-action-sidebar-section]') === null
+      && button.closest('[data-app-action-sidebar-project-list-id]') === null
+    )).length > 1
+  )
+  return primary.length === 1 ? primary[0] : undefined
 }
 
 function resolveSidebarFooterControl(document: Document, sidebar: HTMLElement): HTMLButtonElement | undefined {
