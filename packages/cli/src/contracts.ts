@@ -353,3 +353,10 @@ export type {
   CordisXStandardSchema,
   CordisXStandardSchemaResult,
 } from './contracts-plugin-api.js'
+
+export type {
+  EntitySettingsAvailabilityResult,
+  EntitySettingsNavigationResult,
+  EntitySettingsNavigationService,
+} from '@cordisx/protocol/entity-settings-navigation/v1'
+export type { RouteLinkResolutionResult } from '@cordisx/protocol/route-link-resolution/v1'

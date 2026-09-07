@@ -102,3 +102,5 @@ use. These local entry points may summarize a feature and link to the detailed
 reference without duplicating its authority.
 
 - [Composer controlled visuals](composer-visuals.md): experimental probe/runtime checkpoint and remaining production integration.
+
+- [Public presentation capabilities](public-presentation-capabilities.md): exact entity settings, Host route links, and controlled Markdown editing.
