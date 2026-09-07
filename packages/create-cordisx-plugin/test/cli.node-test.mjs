@@ -63,16 +63,33 @@ async function addLazyStyleAndAsset(pluginRoot, entryName) {
     component
       .replace(
         "import { useState } from 'cordisx/react'",
-        "import './overview-page.css'\nimport { useState } from 'cordisx/react'",
+        "import './overview-page.css'\nimport classes from './details.module.css'\nimport cssText from './inline.css?inline'\nimport { useState } from 'cordisx/react'",
       )
       .replace(
         'export function OverviewPage',
         "const lazyAsset = new URL('./overview-page.png', import.meta.url).href\n\nexport function OverviewPage",
       )
-      .replace('<Stack gap="large">', '<Stack gap="large"><img src={lazyAsset} alt="" />'),
+      .replace(
+        '<Stack gap="large">',
+        '<Stack gap="large"><div className={classes.detail}><style>{cssText}</style><img src={lazyAsset} alt="" /></div>',
+      ),
     'utf8',
   )
   await writeFile(path.join(pluginRoot, 'src', 'overview-page.css'), '.generated-plugin-proof { color: CanvasText; }\n')
+  await writeFile(path.join(pluginRoot, 'src', 'details.module.css'), '.detail { color: CanvasText; }\n')
+  await writeFile(path.join(pluginRoot, 'src', 'inline.css'), '.inline-proof { color: CanvasText; }\n')
+  await writeFile(
+    path.join(pluginRoot, 'src', 'css-types.ts'),
+    `import classes from './details.module.css'
+import cssText from './inline.css?inline'
+const className: string = classes.detail
+const processed: string = cssText
+import invalid from './overview-page.css'
+// @ts-expect-error A synthetic default import is not CSS text.
+const invalidText: string = invalid
+void [className, processed, invalidText]
+`,
+  )
   await writeFile(
     path.join(pluginRoot, 'src', 'overview-page.png'),
     Buffer.from(
@@ -102,6 +119,15 @@ async function assertProductionGraph(graphRoot, expectStaticAssets = false) {
     const assets = await readdir(path.join(graphRoot, 'assets'))
     assert.ok(assets.some(file => file.endsWith('.css')))
     assert.ok(assets.some(file => file.endsWith('.png')))
+    assert.deepEqual(artifact.initialStyles, [])
+    const styles = artifact.files.filter(file => file.kind === 'stylesheet')
+    assert.ok(styles.length > 0)
+    const css = (await Promise.all(styles.map(file => text(path.join(graphRoot, file.path))))).join('\n')
+    assert.match(css, /generated-plugin-proof/)
+    assert.doesNotMatch(css, /inline-proof/)
+    const modules = artifact.files.filter(file => file.kind === 'module')
+    const code = (await Promise.all(modules.map(file => text(path.join(graphRoot, file.path))))).join('\n')
+    assert.match(code, /inline-proof/)
   }
 }
 
