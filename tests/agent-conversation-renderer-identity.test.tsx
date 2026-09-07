@@ -223,8 +223,10 @@ describe('AgentConversation renderer model', () => {
       expect(harness.dom.window.document.querySelector('.cx-conversation-inspector-breadcrumb-current')?.textContent)
         .toBe('Persisted Entity')
       const row = harness.dom.window.document.querySelector<HTMLButtonElement>('.cx-agent-identity-session')!
-      expect(row.textContent).toContain('cx-session.original')
-      expect(row.textContent).toMatch(/Not loaded|未加载/)
+      expect(row.textContent).toContain('Persisted Entity')
+      expect(row.textContent).not.toContain('cx-session.original')
+      expect(row.textContent).not.toMatch(/Not loaded|未加载|未知/)
+      expect(harness.dom.window.document.querySelector('.cx-agent-identity-empty')).toBeNull()
       await act(async () => {
         row.click()
         await Promise.resolve()

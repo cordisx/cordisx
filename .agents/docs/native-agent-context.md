@@ -215,11 +215,13 @@ identity panel. Unknown revisions and foreign owner snapshots remain unavailable
 ## Associated Sessions before runtime loading
 
 Shell v12 renders a source's existing Room association independently from live
-`activeRuns`. The Host identity panel shows “此房间未加载 · 运行状态未知” for an
-unloaded Room-source association. This does not assert Host-global Session
-loading. A missing Room projector cannot establish whether its
-native task is running, stopped, or resumable. The panel keeps a row without a
-link when the authenticated mapping is unavailable.
+`activeRuns`. The Host identity panel merges both sources into one “会话” list,
+keyed by exact Session identity, and displays Room and Agent names. Internal
+Session IDs and unknown/loading diagnostics do not appear in the card. Only a
+reliable live working/waiting/attention state is shown; absence of a Room
+projector does not assert native idleness or resumability. An empty state appears
+only when the merged list is empty. The panel keeps a row without a link when the
+authenticated mapping is unavailable.
 
 `NativeAgentSessionPersistence.getDetail` issues a generation-scoped ephemeral
 reference through `native-session-detail`; it neither calls recovery nor creates
