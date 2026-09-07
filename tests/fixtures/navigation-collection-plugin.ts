@@ -180,9 +180,15 @@ export function apply(ctx: Context): void {
     id: 'room',
     title: message('page.room.title', 'Room conversation'),
     description: message('page.room.description', 'Shows one selected room conversation.'),
-    chrome: 'standard',
+    chrome: 'body-only',
   }, ({ container, params }) => {
-    container.textContent = `Room ${String(params.roomId ?? 'new')}`
+    const header = container.ownerDocument.createElement('header')
+    header.dataset.productRoomHeader = 'true'
+    header.textContent = `Room ${String(params.roomId ?? 'new')}`
+    const timeline = container.ownerDocument.createElement('div')
+    timeline.dataset.productRoomTimeline = 'true'
+    timeline.style.overflow = 'auto'
+    container.append(header, timeline)
     return () => {
       container.textContent = ''
     }

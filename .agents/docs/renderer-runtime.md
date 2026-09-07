@@ -35,8 +35,8 @@ empty decorative seat. The complete runtime boundary is specified in
 
 ### Product-owned pages and admission
 
-Product pages normally own their complete internal renderer. Agent
-conversation products may instead register a versioned data-only source with
+Product pages own their complete internal renderer. The legacy conversation
+path remains available during [consumer migration](conversation-ui-boundary.md) via
 `ctx.agentConversationShell`. The Host then owns the conversation title,
 header actions, timeline DOM, Shikitor composer, Agent avatars, on-demand
 member inspector, keyboard and focus behavior, styles, and cleanup. The plugin

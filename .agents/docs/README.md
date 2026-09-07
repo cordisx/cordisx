@@ -50,21 +50,22 @@ implementation of those contracts, not a second public specification.
 
 ## Design Host UI and extension points
 
-| Document                                                                    | Type                           | Use it for                                                                  |
-| --------------------------------------------------------------------------- | ------------------------------ | --------------------------------------------------------------------------- |
-| [data-contribution-routing](data-contribution-routing.md)                   | Reference                      | Structured shell records, pages, outlets, localization, and routing         |
-| [extension-point-management](extension-point-management.md)                 | Reference                      | Surface/outlet catalogs, diagnostics, and point policy                      |
-| [ui-extension-catalog-codex-adapter](ui-extension-catalog-codex-adapter.md) | Reference                      | Host-neutral catalog, Codex adapter availability, and verification matrix   |
-| [manager-content-design](manager-content-design.md)                         | Reference                      | Host UI hierarchy, navigation, controls, layout, and accessibility          |
-| [manager-settings-tabs](manager-settings-tabs.md)                           | Compatibility reference        | Stable Settings content-tab seam and honest not-mounted behavior            |
-| [manager-settings-navigation](manager-settings-navigation.md)               | Reference                      | Contributed first-level Manager destinations and standard page composition  |
-| [host-collections](host-collections.md)                                     | Reference                      | Host-owned list/detail collections, actions, search, and lifecycle          |
-| [host-form-system](host-form-system.md)                                     | Reference                      | Host form primitives, TDesign adapter, theme, layout, and validation        |
-| [schemastery-ui](schemastery-ui.md)                                         | Reference                      | Form-engine package boundary, presenters, and layout semantics              |
-| [host-icon-theme](host-icon-theme.md)                                       | Reference                      | Icon provider handles, preference persistence, and renderer synchronization |
-| [icon-theme-manager-token-map](icon-theme-manager-token-map.md)             | Reference / recorded decisions | Manager semantic icon seats and retained acceptance-map entries             |
-| [ui-copy-principles](ui-copy-principles.md)                                 | Reference                      | Concise product copy, localization, diagnostics, and review principles      |
-| [ui-copy-catalog](ui-copy-catalog.md)                                       | Reference / historical scan    | Copy inventory and explicitly dated integration observations                |
+| Document                                                                    | Type                           | Use it for                                                                      |
+| --------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------- |
+| [conversation-ui-boundary](conversation-ui-boundary.md)                     | Reference / dated audit        | Plugin page ownership, shared primitives, Shell retirement candidates and gates |
+| [data-contribution-routing](data-contribution-routing.md)                   | Reference                      | Structured shell records, pages, outlets, localization, and routing             |
+| [extension-point-management](extension-point-management.md)                 | Reference                      | Surface/outlet catalogs, diagnostics, and point policy                          |
+| [ui-extension-catalog-codex-adapter](ui-extension-catalog-codex-adapter.md) | Reference                      | Host-neutral catalog, Codex adapter availability, and verification matrix       |
+| [manager-content-design](manager-content-design.md)                         | Reference                      | Host UI hierarchy, navigation, controls, layout, and accessibility              |
+| [manager-settings-tabs](manager-settings-tabs.md)                           | Compatibility reference        | Stable Settings content-tab seam and honest not-mounted behavior                |
+| [manager-settings-navigation](manager-settings-navigation.md)               | Reference                      | Contributed first-level Manager destinations and standard page composition      |
+| [host-collections](host-collections.md)                                     | Reference                      | Host-owned list/detail collections, actions, search, and lifecycle              |
+| [host-form-system](host-form-system.md)                                     | Reference                      | Host form primitives, TDesign adapter, theme, layout, and validation            |
+| [schemastery-ui](schemastery-ui.md)                                         | Reference                      | Form-engine package boundary, presenters, and layout semantics                  |
+| [host-icon-theme](host-icon-theme.md)                                       | Reference                      | Icon provider handles, preference persistence, and renderer synchronization     |
+| [icon-theme-manager-token-map](icon-theme-manager-token-map.md)             | Reference / recorded decisions | Manager semantic icon seats and retained acceptance-map entries                 |
+| [ui-copy-principles](ui-copy-principles.md)                                 | Reference                      | Concise product copy, localization, diagnostics, and review principles          |
+| [ui-copy-catalog](ui-copy-catalog.md)                                       | Reference / historical scan    | Copy inventory and explicitly dated integration observations                    |
 
 ## Understand authority, Agent, Channel, and Marketplace features
 

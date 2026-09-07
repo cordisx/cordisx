@@ -313,6 +313,15 @@ describe('sidebar navigation collections', () => {
       const latestPrimary = currentLatestRow.querySelector<HTMLButtonElement>('.cordisx-nav-primary')!
       latestPrimary.click()
       await vi.waitFor(() => expect(currentLatestRow.dataset.selected).toBe('true'))
+      const roomPage = document.querySelector<HTMLElement>('[data-cordisx-page="navigation-collection:room"]')!
+      expect(roomPage.dataset.cordisxPageChromePolicy).toBe('body-only')
+      expect(roomPage.querySelector('[data-cordisx-page-chrome]')).toBeNull()
+      expect(roomPage.querySelectorAll('[data-product-room-header]')).toHaveLength(1)
+      expect(roomPage.querySelector('[data-product-room-header]')?.textContent).toBe('Room latest')
+      expect(roomPage.querySelector<HTMLElement>('[data-cordisx-page-body]')?.style.overflow).toBe('hidden')
+      expect(roomPage.querySelector<HTMLElement>('[data-product-room-timeline]')?.style.overflow).toBe('auto')
+      expect(document.querySelector('[data-native-recent-tasks]')).toBe(recentTasks)
+      expect(document.querySelector('[data-agent-conversation-renderer]')).toBeNull()
       const selectedActions = currentLatestRow.querySelector<HTMLElement>('.cxsi-actions')!
       expect(selectedActions.hidden).toBe(true)
       expect(dom.window.getComputedStyle(selectedActions).display).toBe('none')

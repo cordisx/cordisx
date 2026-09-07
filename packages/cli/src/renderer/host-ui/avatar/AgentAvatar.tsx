@@ -4,7 +4,7 @@ import { Avatar as OneWorksAvatar } from '@oneworks/avatar-react'
 import avatarVendorCss from '@oneworks/avatar-react/style.css'
 import * as React from 'react'
 import type { HostAppTheme } from '../../host-theme.js'
-import { type AgentConversationParticipant, participantInitials } from './model.js'
+import type { AgentAvatarProps } from '../../../ui.js'
 import {
   HOST_ONEWORKS_ARCTIC_FOX_AVATAR_ASSET_REF,
   HOST_ONEWORKS_ARCTIC_FOX_AVATAR_ASSET_REVISION,
@@ -162,8 +162,15 @@ class AvatarFailureBoundary extends React.Component<FailureBoundaryProps, { fail
   }
 }
 
+function participantInitials(name: string): string {
+  const segments = name.trim().split(/\s+/u).filter(Boolean)
+  if (segments.length === 0) return '?'
+  if (segments.length === 1) return [...segments[0]!].slice(0, 2).join('').toLocaleUpperCase()
+  return `${[...segments[0]!][0] ?? ''}${[...segments.at(-1)!][0] ?? ''}`.toLocaleUpperCase()
+}
+
 export interface HostAgentAvatarProps {
-  readonly participant: AgentConversationParticipant
+  readonly participant: AgentAvatarProps['participant']
   readonly resolver?: HostAgentAvatarResolver
   /** Group composites are raw artwork only: a missing asset is neutral, never initials. */
   readonly fallback?: 'initials' | 'neutral'
