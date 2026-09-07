@@ -5,7 +5,7 @@ import type { HostNavigationCollectionAction } from '../NavigationCollectionActi
 import { HostNavigationCollectionActionController } from '../NavigationCollectionActions.js'
 import { HostSurfaceIcon } from '../HostSurfaceIcon.js'
 import { HostThemeProjection } from '../../host-theme.js'
-import { HostAgentAvatar } from './AgentAvatar.js'
+import { HostAgentAvatar } from '../avatar/AgentAvatar.js'
 import type { HostAgentIdentityPresentation } from './AgentIdentityPanel.js'
 import type { AgentConversationCommandController } from './commands.js'
 import type { AgentConversationRendererCopy } from './AgentConversationRenderer.js'
