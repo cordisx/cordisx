@@ -25,6 +25,7 @@ import {
 import { stagePluginPackageSourceV1 } from '../packages/cli/src/launcher/packages/index.js'
 import { ProviderFleet } from '../packages/cli/src/providers/fleet.js'
 import { providerConnection } from '../packages/cli/src/launcher/platform-provider-connection.js'
+import { factoryConfiguration } from '../packages/cli/src/launcher/platform-provider-validation.js'
 import { validLifecycleEvent } from '../packages/cli/src/launcher/platform-provider-validation.js'
 
 const roots = new Set<string>()
@@ -128,7 +129,7 @@ export async function apply(ctx, input) {
       implementationStatus: 'experimental',
       operations: ['models.list'],
     },
-    mapping: { models: [] },
+    mapping: globalThis.__platformProviderTest.mappingMismatch ? { models: [] } : configuration.mapping ?? { models: [] },
     brokerRequest: { bindings: [{
       operation: 'models.list', direction: 'request', method: 'model/list',
       requestSchema: '${valueSchema}', resultSchema: '${valueSchema}',
@@ -258,65 +259,94 @@ export async function apply(ctx, input) {
     }])
     const configurations = new HostPlatformProviderConfigurationRegistryV1()
     configurations.register({
+      protocolVersion: 2,
       schema,
       applicationMode: 'service-restart',
       project: () => [{
         $schema:
-          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-factory-configuration.v1.schema.json',
-        contract: 'cordisx.platform-provider-factory-configuration/v1',
-        schemaVersion: 1,
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-factory-configuration.v2.schema.json',
+        contract: 'cordisx.platform-provider-factory-configuration/v2',
+        schemaVersion: 2,
         configurationRevision: 1,
         providerId: 'gateway-a',
         displayName: 'Gateway A',
         enabled: true,
         requestTimeoutMs: 30_000,
+        mapping: {
+          models: [{
+            sourceModelId: 'model-a',
+            modelId: 'public-a',
+            displayName: 'Public A',
+            enabled: true,
+            isDefault: true,
+          }],
+        },
       }],
     })
     const transportEvents: string[] = []
-    const serviceHost = new PlatformProviderServiceHostV1({
-      configurations,
-      brokers: {
-        catalog: () => ({ catalogDigest: `sha256:${'c'.repeat(64)}`, bindings: [binding] }),
-        open: async ({ rawConfiguration }) => {
-          expect(rawConfiguration).toEqual({ endpoint: 'https://gateway.example', secretRef: 'host-secret:key' })
-          return {
-            exchange: async () => ({}),
-            subscribe: () => () => undefined,
-            respond: async () => {},
-            dispose: async () => {
-              transportEvents.push('transport-dispose')
-            },
-          }
-        },
+    const brokers = {
+      catalog: () => ({ catalogDigest: `sha256:${'c'.repeat(64)}`, bindings: [binding] }),
+      open: async ({ rawConfiguration }: { readonly rawConfiguration: unknown }) => {
+        expect(rawConfiguration).toEqual({ endpoint: 'https://gateway.example', secretRef: 'host-secret:key' })
+        return {
+          exchange: async () => ({}),
+          subscribe: () => () => undefined,
+          respond: async () => {},
+          dispose: async () => {
+            transportEvents.push('transport-dispose')
+          },
+        }
       },
-      fleet,
-    })
+    }
+    const serviceHost = new PlatformProviderServiceHostV1({ configurations, brokers, fleet })
     const servicePath = stagedPluginServiceModulePath(homeDir, staged.digest, 'providers-runtime')
     ;(globalThis as { __platformProviderTest?: { disposeDuringSubscribe: boolean } }).__platformProviderTest = {
       disposeDuringSubscribe: true,
     }
-    const activation = serviceHost.activate({
+    const access = {
       packageIdentity: { pluginId: runtime.id, version: '1.0.0', integrity: staged.digest },
       pluginIdentity: { source: staged.identitySource, pluginId: runtime.id, generation: 'plugin-1' },
       serviceId: 'providers-runtime',
       hostGeneration: 'host-1',
-      serviceKind: 'platform-provider',
-      owner: 'host',
+      serviceKind: 'platform-provider' as const,
+      owner: 'host' as const,
       schema,
-      applicationMode: 'service-restart',
+      applicationMode: 'service-restart' as const,
       artifactDirectory: path.dirname(path.dirname(servicePath)),
-      runtimeEntry: './services/providers-runtime.mjs',
-    }, { endpoint: 'https://gateway.example', secretRef: 'host-secret:key' })
+      runtimeEntry: './services/providers-runtime.mjs' as const,
+    }
+    const activation = serviceHost.activate(
+      access,
+      { endpoint: 'https://gateway.example', secretRef: 'host-secret:key' },
+    )
     for (let attempt = 0; attempt < 100 && !priorCloseStarted; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 0))
     }
     expect(priorCloseStarted).toBe(true)
     await expect(fleet.listModels({})).resolves.toMatchObject({
       ok: true,
-      value: { models: [{ ref: { providerId: 'gateway-a', modelId: 'model-a' } }] },
+      value: { models: [{ ref: { providerId: 'gateway-a', modelId: 'public-a' }, label: 'Public A' }] },
     })
     expect((globalThis as { __platformProviderTest?: { configuration: unknown } }).__platformProviderTest)
-      .toMatchObject({ configuration: { providerId: 'gateway-a', requestTimeoutMs: 30_000 } })
+      .toMatchObject({
+        configuration: {
+          providerId: 'gateway-a',
+          requestTimeoutMs: 30_000,
+          mapping: { models: [{ modelId: 'public-a' }] },
+        },
+      })
+    expect(
+      (globalThis as {
+        __platformProviderTest?: { registration?: { registration?: unknown } }
+      }).__platformProviderTest?.registration?.registration,
+    ).toMatchObject({
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-registration.v2.schema.json',
+      contract: 'cordisx.platform-provider-registration/v2',
+      schemaVersion: 2,
+      mapping: { models: [{ sourceModelId: 'model-a', modelId: 'public-a' }] },
+      configuration: { schemaVersion: 2, mapping: { models: [{ modelId: 'public-a' }] } },
+    })
 
     const registrationDisposal = (globalThis as {
       __platformProviderTest?: { registrationDisposal?: Promise<void> }
@@ -338,6 +368,62 @@ export async function apply(ctx, input) {
       .toEqual(['unsubscribe', 'drain', 'dispose'])
     expect(transportEvents).toEqual(['transport-dispose'])
     expect(fleet.status().mode).toBe('unavailable')
+    ;(globalThis as { __platformProviderTest?: { mappingMismatch?: boolean } }).__platformProviderTest = {
+      mappingMismatch: true,
+    }
+    await expect(serviceHost.activate(
+      access,
+      { endpoint: 'https://gateway.example', secretRef: 'host-secret:key' },
+    )).rejects.toThrow('mapping differs from its Host projection')
+
+    const mismatchedConfigurations = new HostPlatformProviderConfigurationRegistryV1()
+    mismatchedConfigurations.register({
+      protocolVersion: 2,
+      schema,
+      applicationMode: 'service-restart',
+      project: () => [{
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-factory-configuration.v1.schema.json',
+        contract: 'cordisx.platform-provider-factory-configuration/v1',
+        schemaVersion: 1,
+        configurationRevision: 1,
+        providerId: 'gateway-a',
+        displayName: 'Gateway A',
+        enabled: true,
+        requestTimeoutMs: 30_000,
+      }],
+    })
+    await expect(new PlatformProviderServiceHostV1({
+      configurations: mismatchedConfigurations,
+      brokers,
+      fleet,
+    }).activate(access, {})).rejects.toThrow('requires Protocol v2 configurations')
+
+    const v1Configurations = new HostPlatformProviderConfigurationRegistryV1()
+    v1Configurations.register({
+      protocolVersion: 1,
+      schema,
+      applicationMode: 'service-restart',
+      project: () => [{
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-factory-configuration.v1.schema.json',
+        contract: 'cordisx.platform-provider-factory-configuration/v1',
+        schemaVersion: 1,
+        configurationRevision: 2,
+        providerId: 'gateway-a',
+        displayName: 'Gateway A',
+        enabled: true,
+        requestTimeoutMs: 30_000,
+      }],
+    })
+    ;(globalThis as { __platformProviderTest?: Record<string, unknown> }).__platformProviderTest = {}
+    const v1Active = await new PlatformProviderServiceHostV1({
+      configurations: v1Configurations,
+      brokers,
+      fleet,
+    }).activate(access, { endpoint: 'https://gateway.example', secretRef: 'host-secret:key' })
+    expect(v1Active.registrations).toMatchObject([{ contract: 'cordisx.platform-provider-registration/v1' }])
+    await v1Active.dispose()
     await fleet.close()
   })
 
@@ -467,6 +553,28 @@ export async function apply(ctx, input) {
     } as never)).rejects.toThrow('invalid')
     expect(exchanged).toBe(false)
     expect(validLifecycleEvent({ type: 'approval.required' }, 'gateway-a', 'provider-1')).toBe(false)
+    expect(() =>
+      factoryConfiguration({
+        $schema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/platform-provider-factory-configuration.v2.schema.json',
+        contract: 'cordisx.platform-provider-factory-configuration/v2',
+        schemaVersion: 2,
+        configurationRevision: 1,
+        providerId: 'gateway-a',
+        displayName: 'Gateway A',
+        enabled: true,
+        requestTimeoutMs: 30_000,
+        mapping: {
+          models: [{
+            sourceModelId: 'source',
+            modelId: 'public',
+            displayName: 'x'.repeat(201),
+            enabled: true,
+            isDefault: true,
+          }],
+        },
+      })
+    ).toThrow('invalid or duplicated')
     await broker.dispose()
   })
 
