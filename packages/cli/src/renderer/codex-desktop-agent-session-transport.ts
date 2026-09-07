@@ -197,7 +197,8 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     }
     const known = this.sessions.get(input.sessionId)
     const threadId = known?.threadId
-      ?? (input.sessionId.startsWith('codex-thread:') ? input.sessionId.slice('codex-thread:'.length) : input.sessionId)
+    // A Host SessionId is never itself evidence of a native thread binding.
+    if (threadId === undefined) return { status: 'unavailable', code: 'unsupported' }
     try {
       await getAgentToolSetup(input.sessionId)
       const result = object(
