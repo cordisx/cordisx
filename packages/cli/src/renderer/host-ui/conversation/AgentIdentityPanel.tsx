@@ -8,7 +8,7 @@ import type { AgentDefinitionIdentity } from '@cordisx/protocol/agent-loop/v2'
 import * as React from 'react'
 import { HostSurfaceIcon } from '../HostSurfaceIcon.js'
 import { HostAgentTaskDetailsNavigator, validateAgentLoopTaskDetailsUrl } from '../AgentTaskDetailsNavigator.js'
-import { HostAgentAvatar } from './AgentAvatar.js'
+import { HostAgentAvatar } from '../avatar/AgentAvatar.js'
 import { HostConversationRightInspector } from './RightInspector.js'
 import {
   isPlaygroundRoomSimulationBinding,
@@ -309,7 +309,6 @@ export function HostAgentIdentityAvatarButton(
     <HostAgentAvatar
       participant={{
         id: presentation.participant.participantId,
-        role: presentation.participant.role,
         name: presentation.name,
         ...(presentation.participant.avatar === undefined ? {} : { avatar: presentation.participant.avatar }),
       }}

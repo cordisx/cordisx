@@ -672,13 +672,6 @@ export function createAgentConversationModel(input: AgentConversationModel): Age
   return immutableSnapshot(input)
 }
 
-export function participantInitials(name: string): string {
-  const segments = name.trim().split(/\s+/u).filter(Boolean)
-  if (segments.length === 0) return '?'
-  if (segments.length === 1) return [...segments[0]!].slice(0, 2).join('').toLocaleUpperCase()
-  return `${[...segments[0]!][0] ?? ''}${[...segments.at(-1)!][0] ?? ''}`.toLocaleUpperCase()
-}
-
 export function participantFor(
   model: AgentConversationModel,
   participantId: string,
