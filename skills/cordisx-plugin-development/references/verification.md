@@ -29,6 +29,7 @@ loader. Do not add a second WebSocket or CDP source-transfer path for production
 - Use `cordisx dev` for claims about the installed native App. The expected path is an isolated Electron launch whose `app://` renderer imports the launcher-owned loopback Vite entry; do not substitute Computer Use or a generic browser launch.
 - CDP is the initial bootstrap and native policy-control seam. Before reload it grants loopback access to the exact target origin and enables CSP bypass. Subsequent modules and update notifications use Vite HTTP and Vite's own WebSocket. Source maps are separate resources fetched on demand; readiness follows the current installation's Vite bootstrap acknowledgement rather than a generic page-load event. Stopping restores the permission to `prompt`, disables the bypass, disconnects HMR, and removes Vite-injected styles even when plugin disposal fails.
 - Confirm the native renderer reaches ready and exercise the intended UI or contribution. On stop, verify the Vite/CDP ports, in-memory session state, and launcher-owned process/profile resources are released. The stable dependency cache under `CORDISX_HOME/cache/native-vite` should remain; reject symlinked or foreign-owned cache leaves, and verify that a second launch from the same CLI and workspace roots reuses the cache without an optimizer-triggered reload.
+- Respect explicit tool denials of native UI access; raw CDP must not become an alternate route around a denied action. A permitted harness does not establish user interaction or acceptance.
 - Test the actual native state transition relevant to the claim, including replacement of native layout when applicable. Changing fixture labels inside an `app://` page remains simulated evidence; it does not prove the real operation or full native flow.
 - Confirm the inspected window is foreground and running the intended module when verifying pointer or rendering behavior. Check behavior after the update, not just receipt of an HMR notification.
 - Use the maintained local Playground when it directly covers the feature under test.
@@ -40,8 +41,8 @@ loader. Do not add a second WebSocket or CDP source-transfer path for production
 
 ## Delivery evidence
 
-- Run the focused tests and owner-repository full gates.
+- Run the applicable owner gate and checks that support the claim; keep full gates at the repository-required merge/release boundary rather than every preview edit.
 - Run typecheck, build, package/install checks, audit, and diff check when required by the repository.
 - Record real request evidence: no lazy chunk/CSS/image before the feature is opened; those resources appear after the trigger; a second open does not issue a second evaluation; and a replaced generation cannot become active later.
 - Exercise the relevant real runtime in the needed theme and layout states; these should confirm rules already encoded in components and tests, not serve as the first design review.
-- Keep any user-reviewed Playground open while starting a replacement on a new port.
+- Honor the current preview agreement. Preserve a protected review instance; use already-authorized restart/HMR for an independent debug instance while retaining persistent data and non-target windows.

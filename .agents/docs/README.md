@@ -94,6 +94,9 @@ implementation of those contracts, not a second public specification.
 
 ## Maintainer and artifact entry points
 
+- [Native debugging and recovery](native-debugging-runbook.md): launch stages,
+  debug switches, durable identity and targeted Shell/sidebar diagnosis.
+
 [AGENTS.md](https://github.com/cordisx/cordisx/blob/main/AGENTS.md) routes maintainers to repository rules;
 [CONTRIBUTING.md](https://github.com/cordisx/cordisx/blob/main/CONTRIBUTING.md) records contribution terms. Those
 instructions are not public product reference material.

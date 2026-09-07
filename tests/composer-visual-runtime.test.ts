@@ -43,12 +43,13 @@ function setup() {
   })
   const runtime = new ComposerVisualRuntime(dom.window.document)
   cleanup.push(() => dom.window.close(), () => runtime.dispose())
-  let render = false, pointer = false, drag = false
+  let render = false, pointer = false, drag = false, activate = false
   const listeners = new Set<() => void>()
   const authority: ComposerVisualAuthority = {
     render: () => render,
     observePointer: () => pointer,
     drag: () => drag,
+    activate: () => activate,
     subscribe: listener => {
       listeners.add(listener)
       return () => {
@@ -60,10 +61,11 @@ function setup() {
     runtime,
     document: dom.window.document,
     authority,
-    grant(r: boolean, p = false, d = false) {
+    grant(r: boolean, p = false, d = false, a = false) {
       render = r
       pointer = p
       drag = d
+      activate = a
       for (const listener of listeners) listener()
     },
     listeners,
@@ -91,6 +93,42 @@ function Visual({ state }: CordisXReactVisualProps) {
 const loadVisual = async () => ({ kind: 'react-svg-v1' as const, component: Visual })
 
 describe('controlled Composer visual lifecycle', () => {
+  it('supplies independent interaction targets through the real visual mount and retires every menu on revoke', async () => {
+    const f = setup()
+    function Entities({ interactions }: CordisXReactVisualProps) {
+      React.useEffect(() => {
+        if (!interactions) return
+        const handles = ['Cat', 'Dog'].map((id, index) => {
+          const handle = interactions.create(id)
+          handle.setRegion({ x: index * 40, y: 0, width: 40, height: 40, label: id })
+          handle.setMenu([{ id: 'feed', label: 'Feed' }])
+          return handle
+        })
+        return () => {
+          for (const handle of handles) handle.dispose()
+        }
+      }, [interactions])
+      return React.createElement('svg')
+    }
+    f.runtime.register(
+      'entities',
+      { id: 'entities', pointId: 'composer.frame.overlay', events: ['activate'] },
+      async () => defineReactVisual(Entities),
+      f.authority,
+    )
+    f.grant(true, false, false, true)
+    await vi.waitFor(() =>
+      expect(f.document.querySelector('[aria-label="Dog"][data-cordisx-composer-drag]')).not.toBeNull()
+    )
+    const cat = f.document.querySelector<HTMLButtonElement>('[aria-label="Cat"][data-cordisx-composer-drag]')!
+    cat.dispatchEvent(new window.MouseEvent('contextmenu', { button: 2, bubbles: true, cancelable: true }))
+    expect(f.document.querySelector('[role="menu"]')).not.toBeNull()
+    expect(f.document.querySelector('[data-cordisx-composer-visual]')?.hasAttribute('inert')).toBe(true)
+    f.grant(false)
+    expect(f.document.querySelector('[role="menu"]')).toBeNull()
+    expect(f.document.querySelector('[data-cordisx-composer-drag]')).toBeNull()
+  })
+
   it('mounts an explicitly declared DOM visual inertly and disposes its effects on revoke', async () => {
     const f = setup()
     const button = f.document.querySelector('button')!

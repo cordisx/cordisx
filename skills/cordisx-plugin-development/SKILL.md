@@ -37,7 +37,7 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 5. When creating a plugin, infer a concise product slug and use the maintained `create-cordisx-plugin` generator in the selected mode. Keep the scaffolding command as an implementation detail unless the user asks for it.
 6. Define the manifest, localized product copy, contributions, config schema, permissions, React boundaries, and lifecycle behavior. Put activation effects under Cordis ownership and keep ESM top-level evaluation free of product side effects.
 7. Keep visual choices inside Host-supported components, tokens, semantic roles, and controlled visual seats. Locate a maintained example, but do not copy generated fixtures wholesale.
-8. Add focused contract, React, and lifecycle tests before visual inspection.
+8. Choose focused checks for the changed behavior. Show a useful preview early; add regression tests where they catch a real contract, React, or lifecycle failure, without requiring new tests for every reversible visual edit.
 9. Run the project through `cordisx dev`. Verify automatic file updates and, when relevant, the Manager's development reload for one active local plugin.
 10. Exercise the real isolated native `app://` path for native claims; use Playground evidence only for the behavior it actually hosts.
 11. For production delivery, use the generated `cordisx/vite` helper config and retain its complete indexed Vite ESM graph. Do not duplicate the production Rollup policy or flatten dynamic imports, CSS, or static assets into a hand-built single file.
@@ -53,4 +53,4 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 
 ## Delivery
 
-Provide exact evidence: focused tests, owner-repository gates, diff check, generated-project checks, and the relevant real runtime. A production graph check validates formal `artifact.json`, its entry, lazy chunks, CSS, and assets separately from development transport. For Vite/native work, distinguish React Fast Refresh, plugin lifecycle replacement, CordisX renderer restart, and full Electron restart. If the user is actively reviewing a running session, keep it available while validating a replacement separately.
+Provide exact evidence: focused tests, owner-repository gates, diff check, generated-project checks, and the relevant real runtime. A production graph check validates formal `artifact.json`, its entry, lazy chunks, CSS, and assets separately from development transport. For Vite/native work, distinguish React Fast Refresh, plugin lifecycle replacement, CordisX renderer restart, and full Electron restart. Honor the active preview agreement: keep a protected review session available, or update an independent debug instance directly when the user has authorized restart/HMR. Preserve persistent data and non-target instances.
