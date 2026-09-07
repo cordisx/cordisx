@@ -1,3 +1,4 @@
+import { nativeApprovalReason } from './native-approval-reason.js'
 import type { AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
 import { AgentTaskContextMismatch } from '../agent-task-record.js'
 import { type NativeSessionRecoveryStore, nativeSessionRecoveryStore } from './native-agent-session-recovery.js'
@@ -864,7 +865,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       signal: controller.signal,
       toolName,
       ...(itemId === undefined ? {} : { callId: itemId }),
-      ...(text(params.reason) === undefined ? {} : { reason: text(params.reason)! }),
+      reason: nativeApprovalReason(params, toolName),
     }
     for (const listener of this.approvalListeners) {
       try {
