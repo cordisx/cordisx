@@ -132,3 +132,22 @@ watched output. It creates and cleans only a separate headless Chrome profile,
 Host document home and temporary fixture. `CHROME_PATH` can select the actual
 Chrome executable. It operates the real observed exact-Session permission
 dialog in that test browser; it never opens, inspects, or automates Codex UI.
+
+## Shell v10 composer compatibility
+
+Shell v10 adds the plugin command message source and inherits v9 composer
+behavior. Its opt-in `page-composer-v2` mode must use the mount-bound page
+adapter, including the v2 Host command context and exact route/target fences.
+Keep the v9/v10 family explicit at this boundary; snapshot compatibility alone
+does not establish that the send path supplies a usable context.
+
+The regression test registers the public v9/v10 service, clicks its actual send
+control, and runs the production page adapter and command handler through
+`issue -> reserve -> submit`. It checks the v2 context and clears the draft
+only after Host-derived completion. A stubbed adapter or a message projection
+test cannot catch an omitted composer-version branch.
+
+Changing the mounted Host conversation class is not a safe isolated component
+refresh: Vite may restart the Host runtime and revoke active Agent/tool bindings.
+Do not patch a user's watched tree to apply this fix. Stage a separate candidate
+and preserve the running Room/profile until an explicit switch is coordinated.

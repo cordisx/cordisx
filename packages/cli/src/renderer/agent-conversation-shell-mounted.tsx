@@ -85,8 +85,11 @@ export class MountedConversation extends MountedConversationUpdates {
         : projectSnapshot(this.record.owner, this.snapshot as AgentConversationShellSnapshot, localization)
       const controller = new AgentConversationCommandController({
         execute: async request => {
+          // v10 adds a message source and inherits v9 composer/admission semantics.
+          // Keep the supported family explicit; a future version requires review.
+          const inheritsV9ComposerAdmission = this.record.version === 9 || this.record.version === 10
           const isComposerCommand = request.context.scope === 'composer-submit'
-          if (this.record.version === 9 && this.record.composerMode === 'page-composer-v2' && isComposerCommand) {
+          if (inheritsV9ComposerAdmission && this.record.composerMode === 'page-composer-v2' && isComposerCommand) {
             const pageComposer = this.mountContext.pageComposer
             if (pageComposer === undefined) {
               throw new Error('Page composer admission is unavailable for this mounted conversation')
@@ -145,9 +148,9 @@ export class MountedConversation extends MountedConversationUpdates {
                   }),
                 })
               })()
-              : this.record.version === 9 && isComposerSubmit && roomId !== undefined && runs.length >= 1
+              : inheritsV9ComposerAdmission && isComposerSubmit && roomId !== undefined && runs.length >= 1
               ? (() => {
-                // A mounted v9 Room already has an exact Session-backed
+                // A mounted v9/v10 Room already has an exact Session-backed
                 // target. Preserve that public v1 authority so v3 can issue
                 // one opaque capability per known delivery; bootstrap is only
                 // for a command that has no such target yet.
@@ -176,7 +179,7 @@ export class MountedConversation extends MountedConversationUpdates {
               })()
               : undefined
           const bootstrapOrigin: AgentBootstrapCommandOrigin | undefined =
-            this.record.version !== 9 || !isComposerCommand || admissionOrigin !== undefined
+            !inheritsV9ComposerAdmission || !isComposerCommand || admissionOrigin !== undefined
               ? undefined
               : Object.freeze({
                 $schema:
@@ -225,12 +228,12 @@ export class MountedConversation extends MountedConversationUpdates {
               request.context,
             )
           }
-          // Shell v9 uses bootstrap only when no exact Session-backed Room
+          // Shell v9/v10 uses bootstrap only when no exact Session-backed Room
           // target exists. A mounted Room keeps v1/v3 source capture on its
           // current binding; fresh Room replacement remains the v6 claim path.
-          const capturesBootstrapCommand = this.record.version === 9 && bootstrapOrigin !== undefined
-          const capturesExistingV9TargetCommand = this.record.version === 9 && admissionOrigin !== undefined
-          const capturesPredecessorCommand = this.record.version !== 9 && isComposerSubmit
+          const capturesBootstrapCommand = inheritsV9ComposerAdmission && bootstrapOrigin !== undefined
+          const capturesExistingV9TargetCommand = inheritsV9ComposerAdmission && admissionOrigin !== undefined
+          const capturesPredecessorCommand = !inheritsV9ComposerAdmission && isComposerSubmit
             && roomId !== undefined && runs.length > 0
           if (
             this.scenarioSource === undefined
@@ -242,11 +245,11 @@ export class MountedConversation extends MountedConversationUpdates {
           const sourceStillActive = (): boolean => {
             if (
               this.disposed || this.terminal || this.mountContext.signal.aborted || !this.record.active
-              || (this.record.version !== 8 && this.record.version !== 9
+              || (this.record.version !== 8 && !inheritsV9ComposerAdmission
                 && this.snapshot?.generation !== snapshotGeneration)
             ) return false
             const currentSelection = this.snapshot?.selection
-            if (this.record.version === 9) {
+            if (inheritsV9ComposerAdmission) {
               // A bootstrap source started from no-room cannot retrospectively
               // infer the Room created by the handler. Its binding/execution
               // fence stays live for this command; disposal/replacement still
