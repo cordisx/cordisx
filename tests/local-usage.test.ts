@@ -241,3 +241,22 @@ it('prioritizes durable pending appends while continuing bounded discovery fairl
   for (let index = 0; index < 8; index++) await host.read()
   expect(ready(await host.read()).eligibleTokens).toBe(130)
 })
+it('prioritizes instruction-bearing rollout headers without trusting filename identity', async t => {
+  const owner = '11111111-2222-4333-8444-555555555555'
+  const largeHeader = (id: string) =>
+    JSON.stringify({ type: 'session_meta', payload: { id, instructions: 'x'.repeat(22000) } }) + '\n'
+  const f = await fixture(t, { maxScanBytes: 48000 }), host = f.create()
+  const named = f.file(`rollout-2026-09-08-${owner}`)
+  const custom = f.file('custom-name')
+  await writeFile(named, largeHeader(owner) + token(100, 100, 1))
+  await writeFile(custom, largeHeader('custom-owner') + token(100, 100, 1))
+  for (let index = 0; index < 3; index++) await host.read()
+  await appendFile(named, token(140, 40, 2))
+  await appendFile(custom, token(150, 50, 2))
+  for (let index = 0; index < 3; index++) await host.read()
+  expect(ready(await host.read()).eligibleTokens).toBe(90)
+  // A familiar filename cannot turn a different owner into an established one.
+  await writeFile(named, largeHeader('different-owner') + token(9999, 9999, 1))
+  for (let index = 0; index < 3; index++) await host.read()
+  expect(ready(await host.read()).eligibleTokens).toBe(90)
+})

@@ -184,6 +184,7 @@ export class LocalUsageHost {
       // A bounded header probe finds append work by each owner's checkpoint, not
       // the global observation timestamp: deferred appends remain eligible.
       const priority: string[] = []
+      let probeBytes = 0
       const probeDeadline = now() + Math.max(1, (deadline - now()) / 4)
       for (const file of rotating) {
         if (now() > probeDeadline) break
@@ -192,8 +193,21 @@ export class LocalUsageHost {
         try {
           const stat = await handle.stat()
           if (!stat.isFile() || stat.size > Math.min(64 * 1024 * 1024, maxBytes / 2)) continue
-          const header = Buffer.alloc(4096)
+          // Standard rollout names carry an owner UUID. This is only a scheduling
+          // hint: the accounting pass still validates the complete metadata and
+          // prefix digest. Large instruction-bearing headers need not be probed.
+          const namedOwner = path.basename(file).match(
+            /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i,
+          )?.[1]
+          if (namedOwner) {
+            const previous = ledger.sources[hash(namedOwner)]
+            if (previous && !previous.blocked && stat.size > previous.offset) priority.push(file)
+            continue
+          }
+          if (probeBytes >= 8 * 1024 * 1024) continue
+          const header = Buffer.alloc(Math.min(64 * 1024, stat.size))
           const { bytesRead } = await handle.read(header, 0, header.length, 0)
+          probeBytes += bytesRead
           const end = header.subarray(0, bytesRead).indexOf(10)
           if (end < 0) continue
           const owner =
