@@ -75,6 +75,10 @@ describe('native Vite development transport', () => {
     server.on('connection', (socket, request) =>
       socket.on('message', data => {
         const item = JSON.parse(String(data)) as { id: number; method: string; params?: Record<string, unknown> }
+        if (String(item.params?.expression).includes('document.readyState === "complete"')) {
+          socket.send(JSON.stringify({ id: item.id, result: { result: { value: true } } }))
+          return
+        }
         const expression = String(item.params?.expression ?? '')
         if (item.method === 'Page.addScriptToEvaluateOnNewDocument') {
           registrations.push({ path: request.url ?? '', source: String(item.params?.source ?? '') })
@@ -196,6 +200,10 @@ describe('native Vite development transport', () => {
       scripts.set(socketPath, new Map())
       socket.on('message', data => {
         const item = JSON.parse(String(data)) as { id: number; method: string; params?: Record<string, unknown> }
+        if (String(item.params?.expression).includes('document.readyState === "complete"')) {
+          socket.send(JSON.stringify({ id: item.id, result: { result: { value: true } } }))
+          return
+        }
         const params = item.params ?? {}
         requests.push({ path: socketPath, method: item.method, params })
         const productionBoot = item.method === 'Runtime.evaluate'
@@ -357,6 +365,10 @@ describe('native Vite development transport', () => {
     server.on('connection', socket =>
       socket.on('message', data => {
         const request = JSON.parse(String(data)) as { id: number; method: string; params?: Record<string, unknown> }
+        if (String(request.params?.expression).includes('document.readyState === "complete"')) {
+          socket.send(JSON.stringify({ id: request.id, result: { result: { value: true } } }))
+          return
+        }
         requests.push({ method: request.method, params: request.params ?? {} })
         if (request.method === 'Page.addScriptToEvaluateOnNewDocument') registration += 1
         socket.send(JSON.stringify({
@@ -429,6 +441,10 @@ describe('native Vite development transport', () => {
     server.on('connection', socket =>
       socket.on('message', data => {
         const request = JSON.parse(String(data)) as { id: number; method: string; params?: Record<string, unknown> }
+        if (String(request.params?.expression).includes('document.readyState === "complete"')) {
+          socket.send(JSON.stringify({ id: request.id, result: { result: { value: true } } }))
+          return
+        }
         const params = request.params ?? {}
         requests.push({ method: request.method, params })
         const cleanupEvaluation = request.method === 'Runtime.evaluate'
@@ -503,6 +519,10 @@ describe('native Vite development transport', () => {
       connections += 1
       socket.on('message', data => {
         const request = JSON.parse(String(data)) as { id: number; method: string; params?: Record<string, unknown> }
+        if (String(request.params?.expression).includes('document.readyState === "complete"')) {
+          socket.send(JSON.stringify({ id: request.id, result: { result: { value: true } } }))
+          return
+        }
         const params = request.params ?? {}
         requests.push({ method: request.method, params })
         const failedBoot = request.method === 'Runtime.evaluate'
@@ -571,6 +591,10 @@ describe('native Vite development transport', () => {
       if (socketPath === '/native') targetSocket = socket as unknown as WebSocket
       socket.on('message', data => {
         const item = JSON.parse(String(data)) as { id: number; method: string; params: Record<string, unknown> }
+        if (String(item.params?.expression).includes('document.readyState === "complete"')) {
+          socket.send(JSON.stringify({ id: item.id, result: { result: { value: true } } }))
+          return
+        }
         requests.push({ path: socketPath, method: item.method, params: item.params })
         socket.send(JSON.stringify({
           id: item.id,
@@ -631,6 +655,10 @@ describe('native Vite development transport', () => {
     server.on('connection', socket =>
       socket.on('message', data => {
         const request = JSON.parse(String(data)) as { id: number; method: string; params: Record<string, unknown> }
+        if (String(request.params?.expression).includes('document.readyState === "complete"')) {
+          socket.send(JSON.stringify({ id: request.id, result: { result: { value: true } } }))
+          return
+        }
         requests.push(request)
         socket.send(JSON.stringify({
           id: request.id,
@@ -710,6 +738,10 @@ describe('native Vite development transport', () => {
       server.on('connection', socket => {
         socket.on('message', data => {
           const request = JSON.parse(String(data)) as { id: number; method: string; params: Record<string, unknown> }
+          if (String(request.params?.expression).includes('document.readyState === "complete"')) {
+            socket.send(JSON.stringify({ id: request.id, result: { result: { value: true } } }))
+            return
+          }
           requests.push(request)
           const bootCheck = request.method === 'Runtime.evaluate'
             && String(request.params.expression).includes('cordisx:vite-boot-pending')
@@ -794,6 +826,10 @@ describe('native Vite development transport', () => {
       connections += 1
       socket.on('message', data => {
         const request = JSON.parse(String(data)) as { id: number; method: string; params: Record<string, unknown> }
+        if (String(request.params?.expression).includes('document.readyState === "complete"')) {
+          socket.send(JSON.stringify({ id: request.id, result: { result: { value: true } } }))
+          return
+        }
         requests.push(request)
         const failedBoot = request.method === 'Runtime.evaluate'
           && String(request.params.expression).includes('await globalThis.__cordisxViteBoot')

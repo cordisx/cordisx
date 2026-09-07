@@ -222,11 +222,18 @@ describe('native Vite development transport', () => {
     const requests: { method: string; params: Record<string, unknown> }[] = []
     let acknowledge!: () => void
     let bootChecks = 0
+    let documentLoaded = false
+    let documentChecks = 0
     let connections = 0
     server.on('connection', socket => {
       connections += 1
       socket.on('message', data => {
         const request = JSON.parse(String(data)) as { id: number; method: string; params: Record<string, unknown> }
+        if (String(request.params?.expression).includes('document.readyState === "complete"')) {
+          documentChecks += 1
+          socket.send(JSON.stringify({ id: request.id, result: { result: { value: documentLoaded } } }))
+          return
+        }
         requests.push(request)
         const reply = () =>
           socket.send(
@@ -287,6 +294,9 @@ describe('native Vite development transport', () => {
       onReady: ready,
     })
     try {
+      await vi.waitFor(() => expect(documentChecks).toBeGreaterThan(0))
+      expect(requests.some(item => item.method === 'Page.reload')).toBe(false)
+      documentLoaded = true
       await vi.waitFor(() => expect(acknowledge).toBeTypeOf('function'))
       expect(ready).not.toHaveBeenCalled()
       await new Promise(resolve => setTimeout(resolve, 5_100))
@@ -374,6 +384,10 @@ describe('native Vite development transport', () => {
       const socketPath = request.url ?? ''
       socket.on('message', data => {
         const item = JSON.parse(String(data)) as { id: number; method: string; params?: Record<string, unknown> }
+        if (String(item.params?.expression).includes('document.readyState === "complete"')) {
+          socket.send(JSON.stringify({ id: item.id, result: { result: { value: true } } }))
+          return
+        }
         const params = item.params ?? {}
         requests.push({ path: socketPath, method: item.method, params })
         const reply = (value: Record<string, unknown> = { ok: true }): void => {
@@ -512,6 +526,10 @@ describe('native Vite development transport', () => {
     server.on('connection', socket =>
       socket.on('message', data => {
         const request = JSON.parse(String(data)) as { id: number; method: string; params?: Record<string, unknown> }
+        if (String(request.params?.expression).includes('document.readyState === "complete"')) {
+          socket.send(JSON.stringify({ id: request.id, result: { result: { value: true } } }))
+          return
+        }
         const params = request.params ?? {}
         requests.push({ method: request.method, params })
         socket.send(JSON.stringify({
@@ -563,6 +581,10 @@ describe('native Vite development transport', () => {
     server.on('connection', socket =>
       socket.on('message', data => {
         const request = JSON.parse(String(data)) as { id: number; method: string; params?: Record<string, unknown> }
+        if (String(request.params?.expression).includes('document.readyState === "complete"')) {
+          socket.send(JSON.stringify({ id: request.id, result: { result: { value: true } } }))
+          return
+        }
         const params = request.params ?? {}
         requests.push({ method: request.method, params })
         if (request.method === 'Page.addScriptToEvaluateOnNewDocument') registration += 1

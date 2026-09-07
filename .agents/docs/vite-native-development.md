@@ -85,8 +85,13 @@ The installed native page blocks loopback module and WebSocket access by
 default. Before its development reload, CDP grants `loopback-network` to the
 exact target origin and embedded origin. Chromium versions using the earlier
 name fall back to `local-network-access`. CDP then enables
-`Page.setBypassCSP`, installs the bootstrap, reloads the page once, and waits for
-the Vite client acknowledgement before reporting ready.
+`Page.setBypassCSP` and installs the bootstrap. Before reloading, the launcher
+waits for the initial non-blank document to reach `readyState === "complete"`,
+so it does not abort Electron's pending initial `loadURL` and fail native
+startup. This wait is bounded by the existing injection timeout and cancellation
+signal. It then reloads the page once and waits for the Vite client
+acknowledgement before reporting ready. The same initial-document ordering
+applies to production loopback graphs.
 
 Failure and disposal remove the installed bootstrap, dispose the Vite client,
 wait for any in-flight Vite connection before disconnecting HMR, remove
