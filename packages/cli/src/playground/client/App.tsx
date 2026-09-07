@@ -119,7 +119,9 @@ function previewResetReadback(): Pick<
 > {
   const epoch = playgroundPreviewResetEpochReadback()
   return {
-    roomRows: document.querySelectorAll('.pg-navigation-seat [data-navigation-group] [data-sidebar-item]').length,
+    roomRows: document.querySelectorAll(
+      '[data-cordisx-surface-host="sidebar.collections"] [data-navigation-group] [data-sidebar-item]',
+    ).length,
     recentTaskRows: document.querySelectorAll('[data-playground-recent-tasks] [data-recent-task-row]').length,
     simulatorRecords: countPlaygroundSimulatorSessionRecords(sessionStorage),
     sources: playgroundSimulatorSourceBreakdown(),
