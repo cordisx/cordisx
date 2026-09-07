@@ -13,6 +13,7 @@ interface Registration {
   readonly commandId: string
   readonly dispatch: AgentToolDispatch
   readonly entry: string
+  readonly deployment: Awaited<ReturnType<typeof deployAgentToolResources>>
 }
 interface Binding {
   readonly id: string
@@ -69,6 +70,7 @@ export class PluginAgentToolAuthority {
         readonly entry: string
         readonly source?: string
         readonly enabled: boolean
+        readonly package?: { readonly moduleGeneration: string }
       }[]
     },
   ) {}
@@ -172,7 +174,10 @@ export class PluginAgentToolAuthority {
       if (this.registrations.size >= 64) throw new Error('agent tool registration limit reached')
       const commandId = text(raw.commandId)
       const plugin = this.options.plugins.find(item => item.enabled && item.id === principal.identity.pluginId)
-      if (plugin === undefined) throw new Error('agent tool plugin unavailable')
+      if (
+        plugin === undefined
+        || (plugin.package !== undefined && plugin.package.moduleGeneration !== principal.moduleGeneration)
+      ) throw new Error('agent tool plugin generation unavailable')
       const resources = await readAgentToolResources(plugin.entry)
       if (!resources?.commands.some(command => command.id === commandId)) {
         throw new Error('agent tool command is undeclared')
@@ -184,7 +189,14 @@ export class PluginAgentToolAuthority {
           throw new Error('agent tool command already active')
         }
       }
+      await this.start()
+      const deployment = await deployAgentToolResources(
+        plugin.entry,
+        commandId,
+        await mkdtemp(path.join(this.directory!, 'resources-')),
+      )
       this.registrations.set(registrationId, {
+        deployment,
         id: registrationId,
         commandId,
         principal,
@@ -212,7 +224,7 @@ export class PluginAgentToolAuthority {
       }
       const bindingId = randomUUID()
       const directory = await mkdtemp(path.join(this.directory!, 'binding-'))
-      const deployment = await deployAgentToolResources(registration.entry, registration.commandId, directory)
+      const deployment = registration.deployment
       const token = randomBytes(32).toString('base64url')
       const bindingPath = path.join(directory, 'binding.json')
       const expiresAt = new Date(Date.now() + 30 * 60_000).toISOString()
