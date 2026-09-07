@@ -18,9 +18,9 @@ Explicit resume setup replaces the supplied definition context. Resume without
 setup passes the Session's saved setup back through the driver, so a fresh driver
 does not depend on an old renderer's prompt cache. This preserves definition
 context; it does not establish that a cold restart can resolve an arbitrary Host
-SessionId to a native thread. The current transport can reuse its in-memory thread
-mapping or an explicit native thread reference. Durable native thread mapping is
-a separate availability boundary.
+SessionId to a native thread. The transport currently requires its in-memory thread mapping; neither an
+unknown Host SessionId nor a caller-spelled native reference establishes that
+binding. Durable native thread mapping is a separate availability boundary.
 
 Subsequent turns use the thread's developer instructions. Do not append the same
 static definition to every user message or invent a `turn/start` instructions
