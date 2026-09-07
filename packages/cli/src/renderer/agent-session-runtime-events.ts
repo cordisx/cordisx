@@ -435,6 +435,8 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
     reason: 'owner-disposed' | 'runtime-disposed' | 'connection-replaced',
   ): void {
     if (record.disposed !== undefined) return
+    for (const controller of record.approvalControllers) controller.abort()
+    record.approvalControllers.clear()
     record.disposed = reason
     const answerer = this.answerers.get(this.answererKey(record))
     if (answerer !== undefined) this.closeAnswerer(record, answerer, 'agent-replaced')

@@ -313,6 +313,7 @@ export abstract class AgentSessionRuntimeOperations extends AgentSessionRuntimeP
       live: new Set(),
       status: 'idle',
       idleWaiters: new Set(),
+      approvalControllers: new Set(),
       ...(setup === undefined ? {} : { definition: clone(setup.definition) }),
       ...(resolvedDefinitions === undefined ? {} : { definitions: clone(resolvedDefinitions) }),
       ...(driver.detail === undefined ? {} : { detail: clone(driver.detail) }),

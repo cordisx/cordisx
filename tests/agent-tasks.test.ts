@@ -242,6 +242,31 @@ describe('Host Agent task transaction', () => {
     expect(await f.service.createAndSubmit(request)).toMatchObject({ code: 'permission-denied' })
     expect(f.deps.submit).not.toHaveBeenCalled()
   })
+  it.each(['context', 'creating', 'submitting'] as const)(
+    'fences registration revocation during the final %s authority await',
+    async stage => {
+      const f = fixture()
+      let live = true
+      const cleanup = vi.fn(async () => {})
+      const installer = { active: () => live, install: vi.fn(async () => cleanup) }
+      if (stage === 'context') {
+        vi.mocked(f.deps.resolveContext).mockImplementation(async () => {
+          live = false
+          return { status: 'resolved', context: { cwd: '/task' } }
+        })
+      } else {
+        vi.mocked(f.deps.authorize).mockImplementation(async operation => {
+          if (operation === 'approval' && f.phases.at(-1) === stage) live = false
+          return true
+        })
+      }
+      const service = new HostAgentTasks({ ...f.deps, captureApprovals: () => installer })
+      expect(await service.createAndSubmit(request, 'required')).toMatchObject({ code: 'permission-denied' })
+      expect(f.deps.create).toHaveBeenCalledTimes(stage === 'submitting' ? 1 : 0)
+      expect(f.deps.submit).not.toHaveBeenCalled()
+      expect(cleanup).toHaveBeenCalledTimes(stage === 'submitting' ? 1 : 0)
+    },
+  )
   it('never exposes a handle before durable acceptance or grants ownership from read permission alone', async () => {
     const f = fixture()
     const handle = { agent: { id: 'real' } } as import('@cordisx/protocol/agents/v1').AgentHandle

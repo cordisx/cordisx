@@ -3,9 +3,11 @@ export async function runApprovalInvocation<Value>(
   controllers: Set<AbortController>,
   source: AbortSignal | undefined,
   invoke: (signal: AbortSignal) => Value | Promise<Value>,
+  requesterControllers?: Set<AbortController>,
 ): Promise<Value> {
   const controller = new AbortController()
   controllers.add(controller)
+  requesterControllers?.add(controller)
   const abort = (): void => controller.abort()
   source?.addEventListener('abort', abort, { once: true })
   if (source?.aborted) controller.abort()
@@ -23,6 +25,7 @@ export async function runApprovalInvocation<Value>(
     remove()
     source?.removeEventListener('abort', abort)
     controllers.delete(controller)
+    requesterControllers?.delete(controller)
     controller.abort()
   }
 }

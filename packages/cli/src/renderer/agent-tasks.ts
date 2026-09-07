@@ -151,6 +151,7 @@ export class HostAgentTasks implements AgentTasks {
     if (bindingPolicy === 'required' && !await this.deps.authorize('approval', record.sessionId)) {
       return fail('permission-denied')
     }
+    if (!this.deps.active() || approvals?.active() === false) return fail('permission-denied')
     const claim = await this.deps.store.claim(record)
     if (!claim.claimed) {
       return claim.record.fingerprint === fingerprint
@@ -165,7 +166,15 @@ export class HostAgentTasks implements AgentTasks {
     let known = false
     try {
       await checkpoint('creating')
-      if (!this.deps.active() || !await this.deps.authorize('create', record.sessionId)) {
+      if (
+        !this.deps.active() || !await this.deps.authorize('create', record.sessionId)
+        || (bindingPolicy === 'required' && !await this.deps.authorize('approval', record.sessionId))
+      ) {
+        const result = fail('permission-denied')
+        await checkpoint('finished', result)
+        return result
+      }
+      if (!this.deps.active() || approvals?.active() === false) {
         const result = fail('permission-denied')
         await checkpoint('finished', result)
         return result
@@ -263,6 +272,12 @@ export class HostAgentTasks implements AgentTasks {
         await checkpoint('finished', result)
         return result
       }
+      if (!this.deps.active() || approvals?.active() === false) {
+        await cleanup?.()
+        const result = fail('permission-denied')
+        await checkpoint('finished', result)
+        return result
+      }
       const accepted = await this.deps.submit(agent, record.messageId, request.text)
       const result: AgentTaskCreateResult = accepted && agent.detail !== undefined
         ? {
@@ -287,6 +302,7 @@ export class HostAgentTasks implements AgentTasks {
 
   private readonly recovering = new Map<string, Promise<AgentTaskCreateResult>>()
   async recover(request: { operationId: string }): Promise<AgentTaskCreateResult> {
+    request = { operationId: request.operationId }
     if (!this.deps.active() || !await this.deps.authorize('create')) {
       return { status: 'unavailable', operationId: request.operationId, code: 'permission-denied' }
     }
@@ -341,6 +357,7 @@ export class HostAgentTasks implements AgentTasks {
       code: 'permission-denied' | 'not-found' | 'not-accepted' | 'host-unavailable' | 'unsupported'
     }
   > {
+    request = { operationId: request.operationId }
     if (!this.deps.active()) return { status: 'unavailable', code: 'host-unavailable' }
     if (!await this.deps.authorize('read')) return { status: 'unavailable', code: 'permission-denied' }
     try {
@@ -358,6 +375,7 @@ export class HostAgentTasks implements AgentTasks {
   }
 
   async query(request: { operationId: string }): Promise<AgentTaskQueryResult> {
+    request = { operationId: request.operationId }
     if (!this.deps.active()) return { status: 'unavailable', code: 'host-unavailable' }
     if (!await this.deps.authorize('read')) return { status: 'unavailable', code: 'permission-denied' }
     try {

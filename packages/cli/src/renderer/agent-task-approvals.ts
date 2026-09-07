@@ -60,6 +60,7 @@ export class HostAgentTaskApprovalRegistry {
         if (!live() || !await this.runtime.authorizeTask(this.owner, 'approval', agent.id)) {
           throw new Error('Task approval registration replaced')
         }
+        if (!live()) throw new Error('Task approval registration replaced')
         const controller = new AbortController()
         const handles: Installation['handles'] = []
         const installation: Installation = {
@@ -96,6 +97,10 @@ export class HostAgentTaskApprovalRegistry {
         }
         const retain = async (handle: { dispose(): Promise<unknown> }): Promise<void> => {
           if (!current() || !await this.runtime.authorizeTask(this.owner, 'approval', agent.id)) {
+            await handle.dispose()
+            throw new Error('Task approval installation replaced')
+          }
+          if (!current()) {
             await handle.dispose()
             throw new Error('Task approval installation replaced')
           }

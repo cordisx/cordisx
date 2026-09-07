@@ -262,6 +262,7 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
           answerer.controllers,
           request.signal,
           signal => answerer.answerer(question, signal),
+          record.approvalControllers,
         )
         if (request.signal?.aborted) outcome = 'cancelled'
         else if (
@@ -377,6 +378,7 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
           answerer.controllers,
           request.signal,
           signal => answerer.answerer(question, signal),
+          requester.approvalControllers,
         )
         if (
           !this.current(requester) || !this.current(authority)

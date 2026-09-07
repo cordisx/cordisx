@@ -236,6 +236,49 @@ describe('task approval installation reuses the existing runtime authority', () 
       await f.runtime.dispose()
     }
   })
+  it('aborts a disposed child requester while its Leader and sibling approval remain live', async () => {
+    const f = await fixture()
+    const signals = new Map<string, AbortSignal>()
+    const resolves = new Map<string, (outcome: ApprovalOutcome) => void>()
+    f.registry.register({ commandId: 'report' }, {
+      resolveRequest: question => routed(question, question.requester),
+      answerAuthority: (question, _binding, signal) => {
+        signals.set(question.callId!, signal)
+        return new Promise<ApprovalOutcome>(resolve => resolves.set(question.callId!, resolve))
+      },
+    })
+    try {
+      const leader = await f.install('leader')
+      const child = await f.runtime.create(owner, {
+        sessionId: 'child',
+        setup: { definition: definition.identity, definitions: [definition] },
+      })
+      const sibling = await f.create('sibling')
+      if (child.status !== 'accepted') throw new Error('missing child')
+      const question = (agent: typeof leader, callId: string) =>
+        f.runtime.requestApprovalV2(owner, {
+          requester: { agent, definition: definition.identity },
+          authority: { agent: leader, definition: definition.identity },
+          toolName: 'shell',
+          callId,
+          reason: { kind: 'plain-text', text: 'Human decision' },
+        })
+      const first = question(child.handle.agent, 'child'), second = question(sibling, 'sibling')
+      for (let i = 0; i < 30 && signals.size < 2; i++) await Promise.resolve()
+      expect(signals.size).toBe(2)
+      await child.handle.dispose()
+      expect(signals.get('child')!.aborted).toBe(true)
+      expect(signals.get('sibling')!.aborted).toBe(false)
+      expect(await f.runtime.get(owner, 'leader')).toBeDefined()
+      expect((await first).outcome).toBe('unavailable')
+      resolves.get('child')!('allowed-once')
+      resolves.get('sibling')!('rejected')
+      expect((await second).outcome).toBe('rejected')
+    } finally {
+      f.registry.dispose()
+      await f.runtime.dispose()
+    }
+  })
   it('rejects undeclared commands without replacing an existing registration', async () => {
     const f = await fixture()
     const handlers = {

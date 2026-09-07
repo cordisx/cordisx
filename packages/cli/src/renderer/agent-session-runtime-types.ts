@@ -588,6 +588,7 @@ export interface SessionRecord {
 }
 
 export interface AgentRecord {
+  readonly approvalControllers: Set<AbortController>
   readonly id: string
   generation: number
   readonly owner: PluginOwnerIdentity
