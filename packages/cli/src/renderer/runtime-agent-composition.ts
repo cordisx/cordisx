@@ -1,3 +1,4 @@
+import { createEntityAwareIdentityResolver } from './entity-definition-presentation.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
@@ -508,9 +509,17 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
       console: runtimeScope.pluginConsole()!,
       selectedNavigationActions: runtimeScope.selectedNavigationActions()!,
       identity: {
-        resolve: value =>
-          runtimeScope.agentSessionRuntime.definitionPresentation(value)
-            ?? runtimeScope.agentLoopBrokerV4()!.definitionPresentation(value),
+        resolve: createEntityAwareIdentityResolver({
+          session: value => runtimeScope.agentSessionRuntime.definitionPresentation(value),
+          agentLoop: value => runtimeScope.agentLoopBrokerV4()!.definitionPresentation(value),
+          entitySnapshot: ownerId => {
+            const controller = runtimeScope.activeController()!(ownerId)
+            const view = controller?.entityRegistrySnapshot
+            return controller !== undefined && view?.moduleGeneration === runtimeScope.moduleGenerationOf()!(controller)
+              ? view.snapshot
+              : undefined
+          },
+        }),
         resolveSettings: value => {
           const request = resolveHostManagerAgentDefinitionOpenRequest(
             runtimeScope.routeService?.managerContentAgentDefinitionTarget(value),

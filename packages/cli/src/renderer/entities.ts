@@ -134,7 +134,9 @@ export class CordisXEntityRegistryServiceV1 extends Service {
   readonly binding: EntityRegistryBinding
   readonly #subscriptions = new Set<BrowserEntitySubscription>()
   readonly #active: () => boolean
+  #disposed = false
   readonly #token: string
+  readonly #onSnapshot: ((snapshot: EntityRegistrySnapshot | undefined) => void) | undefined
   readonly bridge: BrowserOwnerDocumentBridge | undefined
 
   constructor(
@@ -145,11 +147,13 @@ export class CordisXEntityRegistryServiceV1 extends Service {
       readonly profileId: string
       readonly pluginGeneration: number
       readonly active: () => boolean
+      readonly onSnapshot?: (snapshot: EntityRegistrySnapshot | undefined) => void
     },
   ) {
     super(ctx, 'entities')
     this.bridge = options.bridge
     this.#active = options.active
+    this.#onSnapshot = options.onSnapshot
     this.#token = options.principal?.token ?? ''
     this.binding = Object.freeze({
       profileId: options.profileId,
@@ -158,19 +162,29 @@ export class CordisXEntityRegistryServiceV1 extends Service {
       pluginGeneration: options.pluginGeneration,
     })
     ctx.effect(() => () => {
+      this.#disposed = true
       for (const subscription of this.#subscriptions) void subscription.close('plugin-generation-replaced')
       this.#subscriptions.clear()
+      this.#onSnapshot?.(undefined)
     })
   }
 
   snapshot = async (): Promise<EntityRegistrySnapshot> => {
-    if (this.bridge === undefined || !this.#active()) throw new Error('entity registry is unavailable')
-    return clone(
-      await this.bridge.request(this.#token, {
-        operation: 'entity-snapshot',
-        binding: this.binding,
-      }) as EntityRegistrySnapshot,
-    )
+    if (this.#disposed || this.bridge === undefined || !this.#active()) {
+      throw new Error('entity registry is unavailable')
+    }
+    const snapshot = await this.bridge.request(this.#token, {
+      operation: 'entity-snapshot',
+      binding: this.binding,
+    }) as EntityRegistrySnapshot
+    if (
+      this.#disposed || !this.#active() || snapshot.binding.profileId !== this.binding.profileId
+      || snapshot.binding.pluginId !== this.binding.pluginId
+      || snapshot.binding.installationId !== this.binding.installationId
+      || snapshot.binding.pluginGeneration !== this.binding.pluginGeneration
+    ) throw new Error('entity snapshot binding is stale')
+    this.#onSnapshot?.(clone(snapshot))
+    return clone(snapshot)
   }
 
   get = async (identity: AgentDefinitionIdentity): Promise<EntityGetResult> => {

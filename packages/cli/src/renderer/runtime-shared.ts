@@ -340,6 +340,10 @@ export interface PluginController {
   unregisterAgentLoop?: () => void | Promise<void>
   unregisterAgentTools?: () => void
   unregisterDocuments?: () => void | Promise<void>
+  entityRegistrySnapshot?: {
+    readonly moduleGeneration: string
+    readonly snapshot: import('@cordisx/protocol/entities/v1').EntityRegistrySnapshot
+  }
   entityRegistryFiber?: Fiber
   agentRegistryFiber?: Fiber
   sessionRegistryFiber?: Fiber

@@ -48,6 +48,7 @@ export interface AgentConversationRendererProps {
   readonly identity?: {
     readonly resolve: (
       identity: { readonly agentId: string; readonly revision: string },
+      ownerId?: string,
     ) => {
       readonly identity: { readonly agentId: string; readonly revision: string }
       readonly name: string
@@ -55,6 +56,7 @@ export interface AgentConversationRendererProps {
     } | undefined
     readonly resolveSettings?: (
       identity: { readonly agentId: string; readonly revision: string },
+      ownerId?: string,
     ) => { readonly available: boolean; readonly reason?: string }
     readonly navigator: HostAgentTaskDetailsNavigator
     readonly onSettings: (identity: { readonly agentId: string; readonly revision: string }) => void | Promise<void>
@@ -129,7 +131,7 @@ export function AgentConversationRenderer(
     const roomTitle = roomSelection.title
     for (const participant of roomSelection.participants) {
       if (participant.role !== 'agent' || participant.agentIdentity === undefined) continue
-      const effective = identity.resolve(participant.agentIdentity)
+      const effective = identity.resolve(participant.agentIdentity, model.ownerId)
       if (effective === undefined) continue
       output.set(
         participant.id,
@@ -165,7 +167,7 @@ export function AgentConversationRenderer(
       )
     }
     return output
-  }, [copy.locale, identity, model.selection])
+  }, [copy.locale, identity, model.selection, model.ownerId])
   const mentionPresentations = React.useMemo(
     () => identityMentionAliases(model, identityPresentations),
     [identityPresentations, model],

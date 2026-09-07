@@ -676,6 +676,14 @@ export const createRuntimeMountPlugin = async (
       profileId: runtimeScope.metadata()!.profileId,
       pluginGeneration: entityPrincipal?.pluginGeneration ?? owner.generation,
       active: () => controller.principalLive,
+      onSnapshot: snapshot => {
+        if (entityPrincipal === undefined) return
+        if (snapshot === undefined) {
+          if (controller.entityRegistrySnapshot?.moduleGeneration === entityPrincipal.moduleGeneration) {
+            delete controller.entityRegistrySnapshot
+          }
+        } else controller.entityRegistrySnapshot = { moduleGeneration: entityPrincipal.moduleGeneration, snapshot }
+      },
     })
     await controller.entityRegistryFiber
     const entityRegistry = (pluginContext as unknown as {
