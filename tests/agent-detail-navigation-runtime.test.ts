@@ -257,3 +257,49 @@ it('exposes the additive methods on the real owner-bound Cordis services', async
     provider.dispose()
   }
 })
+
+it('opens disposed and previous-generation historical Agents through fresh mapping authority without resuming them', async () => {
+  const provider = new NativeSessionDetailReferences()
+  const read = vi.fn(async () => ({ threadId: 'persisted-history', revision: 1 }))
+  const unregister = provider.register(owner, { active: () => true, read })
+  const driver = new DetailDriver(id => `current:${id}`)
+  const runtime = new CordisXAgentSessionRuntime({
+    driver,
+    authorize: async () => true,
+    historicalAgentDetails: provider,
+    navigateAgentDetail: vi.fn(),
+  })
+  const acquired = await create(runtime, 'ended-session')
+  await acquired.handle.dispose()
+  const creates = vi.spyOn(driver, 'create')
+  const resumes = vi.spyOn(driver, 'resume')
+  const submits = vi.spyOn(driver, 'submit')
+  expect((await runtime.getAgentSessionDetailReference(owner, { sessionId: 'ended-session' })).status).toBe(
+    'unavailable',
+  )
+  const ended = await runtime.getAgentSessionDetailReferenceV2(owner, { sessionId: 'ended-session' })
+  if (ended.status !== 'accepted') throw new Error('disposed historical detail unavailable')
+  expect(await runtime.openAgentDetailV2(owner, { target: ended.target })).toEqual({
+    status: 'accepted',
+    code: 'opened',
+  })
+  unregister()
+  const nextOwner = { ...owner, generation: 2 }
+  provider.register(nextOwner, { active: () => true, read })
+  const current = await runtime.getAgentSessionDetailReferenceV2(nextOwner, { sessionId: 'ended-session' })
+  if (current.status !== 'accepted') throw new Error('new owner generation historical detail unavailable')
+  expect(current.target).not.toEqual(ended.target)
+  expect((await runtime.openAgentDetailV2(nextOwner, { target: ended.target })).status).toBe('unavailable')
+  expect(await runtime.openAgentDetailV2(nextOwner, { target: current.target })).toEqual({
+    status: 'accepted',
+    code: 'opened',
+  })
+  expect((await runtime.getAgentSessionDetailReferenceV2(owner, { sessionId: 'ended-session' })).status).toBe(
+    'unavailable',
+  )
+  expect(creates).not.toHaveBeenCalled()
+  expect(resumes).not.toHaveBeenCalled()
+  expect(submits).not.toHaveBeenCalled()
+  await runtime.dispose()
+  provider.dispose()
+})

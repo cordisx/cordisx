@@ -39,9 +39,10 @@ The existing `ctx.agentSessionDetailReferences` and `ctx.agentDetailNavigation`
 services add explicit `getV2({ sessionId })` and `openV2({ target })` methods under
 [Protocol detail navigation v2](https://github.com/cordisx/cordisx-protocol/blob/52c2a2d8c0e2ffc33ec4496701af184e0160fc74/.agents/docs/agent-detail-navigation/v2.md).
 Their v1 `get`/`open` methods remain current-only. V2 reads an authenticated,
-source-scoped native mapping when no current record exists and issues a temporary
-opaque capability; it reports no running status. Known foreign or replaced
-current records cannot fall back through historical lookup.
+source-scoped native mapping when no usable current same-owner detail exists and issues a temporary
+opaque capability; it reports no running status. A known foreign source cannot fall back through historical lookup. A disposed
+Agent or an older generation at the same exact source may obtain a new historical
+capability only through the currently authenticated mapping provider.
 
 `native-session-detail-references.ts` owns only temporary capabilities. It binds
 owner generation, current client, runtime connection epoch and persisted revision,
@@ -58,6 +59,18 @@ rejection and a mocked native history adapter. They are not a real `app://`
 preview or native acceptance. Integration must retain the original Room/source
 identity and test opening its existing historical Session and native Back without
 creating a replacement Session.
+
+### Copy actions in a trusted plugin page
+
+A trusted plugin's own React button or context-menu event may use the standard
+browser `event.currentTarget.ownerDocument.defaultView?.navigator.clipboard`
+`writeText` API for its own copy action. This is not a Host DOM query, clipboard
+read or private Host import. Keep the write in the user interaction path, feature-
+check availability and show the existing failure feedback when the browser
+rejects it. Do not route a product context-menu copy through a fake Navigation
+Collection contribution or add an IPC fallback. The structured collection's
+Host-owned clipboard rules continue to govern that separate surface. Browser
+availability and permission in the actual `app://` preview remain a runtime gate.
 
 ### Product-owned pages and admission
 
