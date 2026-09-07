@@ -180,3 +180,19 @@ policy, or persistent grant. Generation retirement, exact declarations, point
 availability and explicit denial still apply. Installed artifacts and ordinary
 file URLs are not enrolled. Other capabilities keep their own authorization
 rules; this exception does not grant microphone access.
+
+### Waveform dictation layout
+
+The native WLs/ULs waveform layout replaces the normal footer. Its primary
+control is labelled `Transcribe and send` (Simplified Chinese `转录并发送`),
+which projects primary action `send`; the exact accessible label remains
+available. The separate stop/insert control still drives recording or
+transcribing status, including transcription requested by either button.
+
+The adapter selects the unique primary control within native responsive
+footers rather than assuming that only one footer exists. A text editor can be
+hidden or noneditable during an evidenced dictation layout; its unique bound
+node still supplies draft emptiness. This exception does not apply to unknown
+layouts or ambiguous editors. Regression tests replace the whole footer and
+keep both roots mounted through recording and transcription. Simulated label
+changes alone do not verify that native layout transition or microphone capture.

@@ -103,3 +103,33 @@ it('projects independent dictation states without confusing the primary control'
   const ambiguous = probeComposerVisual(document)
   expect(ambiguous.status === 'available' && ambiguous.seat.dictation).toBe('unavailable')
 })
+
+it('keeps native dictation stop/insert and transcribe/send controls distinct', () => {
+  const { document, button, editor } = fixture()
+  editor.style.visibility = 'hidden'
+  editor.setAttribute('contenteditable', 'false')
+  const inputFooter = document.createElement('div')
+  inputFooter.setAttribute('data-composer-footer-responsive', '')
+  button.parentElement!.before(inputFooter)
+  const stop = document.createElement('button')
+  stop.setAttribute('aria-label', '停止听写')
+  stop.setAttribute('aria-busy', 'false')
+  stop.innerHTML = '<svg></svg>'
+  button.parentElement!.prepend(stop)
+  for (const label of ['转录并发送', 'Transcribe and send']) {
+    button.setAttribute('aria-label', label)
+    button.setAttribute('aria-busy', 'false')
+    let result = probeComposerVisual(document)
+    expect(result.status).toBe('available')
+    if (result.status !== 'available') throw new Error(result.reason)
+    expect(result.seat).toMatchObject({ action: 'send', dictation: 'recording', button })
+    button.setAttribute('aria-busy', 'true')
+    result = probeComposerVisual(document)
+    expect(result.status === 'available' && result.seat.dictation).toBe('transcribing')
+    button.setAttribute('aria-busy', 'false')
+    stop.setAttribute('aria-busy', 'true')
+    result = probeComposerVisual(document)
+    expect(result.status === 'available' && result.seat.dictation).toBe('transcribing')
+    stop.setAttribute('aria-busy', 'false')
+  }
+})

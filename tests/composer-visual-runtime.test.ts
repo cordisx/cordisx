@@ -204,3 +204,35 @@ it('adds dictation only for renderers that opt into v2', async () => {
   microphone.setAttribute('aria-busy', 'true')
   await vi.waitFor(() => expect(f.document.querySelector('[data-dictation="transcribing"]')).not.toBeNull())
 })
+
+it('keeps both visuals across the native waveform dictation footer replacement', async () => {
+  const f = setup()
+  f.grant(true)
+  f.runtime.register('primary', { id: 'primary', pointId: 'composer.primary-action.visual' }, loadVisual, f.authority)
+  f.runtime.register(
+    'orb',
+    { id: 'orb', pointId: 'composer.frame.overlay', snapshotVersion: 2 },
+    loadVisual,
+    f.authority,
+  )
+  await vi.waitFor(() => expect(f.runtime.inspect().roots).toBe(2))
+  const editor = f.document.querySelector<HTMLElement>('[contenteditable]')!
+  editor.setAttribute('contenteditable', 'false')
+  editor.style.visibility = 'hidden'
+  const footer = f.document.querySelector('[data-composer-footer-responsive]')!
+  const inputFooter = f.document.createElement('div')
+  inputFooter.setAttribute('data-composer-footer-responsive', '')
+  footer.before(inputFooter)
+  footer.innerHTML =
+    '<canvas></canvas><button aria-label="停止听写" aria-busy="false"><svg></svg></button><button class="size-token-button-composer" aria-label="转录并发送" aria-busy="false"><svg></svg></button>'
+  await vi.waitFor(() => expect(f.document.querySelector('[data-dictation="recording"]')).not.toBeNull())
+  expect(f.runtime.inspect().roots).toBe(2)
+  const stop = footer.querySelector<HTMLButtonElement>('button')!
+  const send = footer.querySelector<HTMLButtonElement>('button.size-token-button-composer')!
+  stop.setAttribute('aria-busy', 'true')
+  stop.disabled = true
+  send.disabled = true
+  await vi.waitFor(() => expect(f.document.querySelector('[data-dictation="transcribing"]')).not.toBeNull())
+  expect(f.runtime.inspect().roots).toBe(2)
+  expect(footer.querySelector('button')).toBe(stop)
+})
