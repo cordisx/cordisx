@@ -1,3 +1,4 @@
+import type { AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   Agent,
@@ -217,6 +218,7 @@ export abstract class AgentSessionRuntimeOperations extends AgentSessionRuntimeP
     source: 'host' | 'caller',
     resolvedLegacy = false,
     entityBinding?: EntitySessionDefinitionBinding,
+    executionContext?: AgentTaskResolvedContext,
   ): Promise<AgentAcquireResult> {
     if (this.disposed) return this.acquireUnavailable(operation, input.mutationId, 'runtime-unavailable')
     const mutationId = input.mutationId
@@ -273,6 +275,7 @@ export abstract class AgentSessionRuntimeOperations extends AgentSessionRuntimeP
       })
       : operation === 'create'
       ? await this.options.driver.create({
+        ...(executionContext === undefined ? {} : { executionContext }),
         sessionId,
         owner: clone(owner),
         options: input.options ?? {},

@@ -1,3 +1,5 @@
+import type { AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
+import { AgentTaskContextMismatch } from '../agent-task-record.js'
 import { type NativeSessionRecoveryStore, nativeSessionRecoveryStore } from './native-agent-session-recovery.js'
 import { getAgentToolSetup } from './plugin-agent-tools.js'
 import { nativeAgentToolContext } from './codex-desktop-agent-tool-context.js'
@@ -28,6 +30,12 @@ export const CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS = Object.freeze(
     Object.freeze({
       appVersion: '26.901.41600',
       buildNumber: '7982',
+      buildFlavor: 'prod',
+      hostId: 'local',
+    }),
+    Object.freeze({
+      appVersion: '26.901.51231',
+      buildNumber: '8109',
       buildFlavor: 'prod',
       hostId: 'local',
     }),
@@ -156,6 +164,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
 
   async create(
     input: {
+      readonly executionContext?: AgentTaskResolvedContext
       readonly sessionId: string
       readonly owner: PluginOwnerIdentity
       readonly options: AgentOptions
@@ -180,7 +189,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       const result = object(
         await this.request('thread/start', {
           model,
-          cwd: '',
+          cwd: input.executionContext?.cwd ?? '',
           ...(developerInstructions === undefined ? {} : { developerInstructions }),
         }),
       )
@@ -192,8 +201,14 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
         sessionId: input.sessionId,
         threadId,
         completedTurns: 0,
+        ...(input.executionContext === undefined
+          ? {}
+          : { context: { ...input.executionContext, cwd: String(object(result?.thread)?.cwd ?? '') } }),
         ...(input.setup === undefined ? {} : { setup: clone(input.setup) }),
       })
+      if (input.executionContext !== undefined && object(result?.thread)?.cwd !== input.executionContext.cwd) {
+        throw new AgentTaskContextMismatch(input.sessionId)
+      }
       const session: NativeSession = {
         sessionId: input.sessionId,
         threadId,
@@ -206,7 +221,8 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       this.sessions.set(input.sessionId, session)
       this.byThread.set(threadId, session)
       return { status: 'accepted', detail: { kind: 'host', ref: `codex-thread:${threadId}` } }
-    } catch {
+    } catch (error) {
+      if (error instanceof AgentTaskContextMismatch) throw error
       return { status: 'unavailable', code: 'host-unavailable' }
     }
   }

@@ -1,3 +1,5 @@
+import { handleAgentTaskStore } from './agent-task-store.js'
+import type { AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import type { AgentSetup } from '@cordisx/protocol/agents/v1'
 import type { CordisXJsonValue } from '../contracts.js'
@@ -25,6 +27,7 @@ export interface NativeAgentSessionRecord {
   readonly threadId: string
   readonly setupDigest: string
   readonly setup?: AgentSetup
+  readonly context?: AgentTaskResolvedContext
   readonly completedTurns: number
   readonly session?: CordisXPersistedSession
   /** Explicit one-time restoration evidence, never fabricated old SessionEvents. */
@@ -130,6 +133,16 @@ export class NativeAgentSessionBridge {
       })
       if (result.status !== 'accepted') throw new Error('native Session checkpoint conflict')
     }
+    if (String(request.operation).startsWith('native-session-task-')) {
+      return await handleAgentTaskStore(request, {
+        load,
+        write,
+        context: async sessionId => {
+          const saved = await load(key(id(sessionId)))
+          return saved === undefined ? undefined : parsed(saved.value, sessionId).context
+        },
+      })
+    }
     if (request.operation === 'native-session-list') {
       const index = await load(INDEX)
       const entries = index === undefined ? [] : record(index.value).sessionIds
@@ -153,6 +166,10 @@ export class NativeAgentSessionBridge {
       return { threadId: existing.threadId, completedTurns: existing.completedTurns, setupDigest: existing.setupDigest }
     }
     if (request.operation === 'native-session-save-binding') {
+      if (
+        existing?.context !== undefined && request.context !== undefined
+        && JSON.stringify(existing.context) !== JSON.stringify(request.context)
+      ) throw new Error('Native execution context is immutable')
       const threadId = id(request.threadId)
       const setup = request.setup as AgentSetup | undefined
       const setupDigest = digest(setup)
@@ -177,6 +194,7 @@ export class NativeAgentSessionBridge {
         setupDigest,
         ...(setup === undefined ? {} : { setup }),
         completedTurns,
+        ...(request.context === undefined ? {} : { context: request.context }),
       })
       return null
     }

@@ -1,3 +1,6 @@
+import type { AgentTaskContext, AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
+import type { AgentTaskRecord } from '../agent-task-record.js'
+import type { TaskContextResolution } from '../launcher/agent-task-context.js'
 import type { AgentSetup } from '@cordisx/protocol/agents/v1'
 import type { PluginOwnerIdentity } from '@cordisx/protocol/sessions/v1'
 import type { CordisXPersistedSession, CordisXSessionEventPersistence } from './agent-session-runtime.js'
@@ -7,7 +10,13 @@ import { beginAgentToolRecovery } from './plugin-agent-tools.js'
 export interface NativeSessionRecoveryStore {
   saveBinding(
     owner: PluginOwnerIdentity,
-    input: { sessionId: string; threadId: string; setup?: AgentSetup; completedTurns: number },
+    input: {
+      sessionId: string
+      threadId: string
+      setup?: AgentSetup
+      completedTurns: number
+      context?: AgentTaskResolvedContext
+    },
   ): Promise<void>
   resolveBinding(
     owner: PluginOwnerIdentity,
@@ -66,7 +75,13 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
   }
   async saveBinding(
     owner: PluginOwnerIdentity,
-    input: { sessionId: string; threadId: string; setup?: AgentSetup; completedTurns: number },
+    input: {
+      sessionId: string
+      threadId: string
+      setup?: AgentSetup
+      completedTurns: number
+      context?: AgentTaskResolvedContext
+    },
   ): Promise<void> {
     const client = this.owner(owner)
     await this.call(client.principal, 'native-session-save-binding', input)
@@ -86,6 +101,9 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
     await beginAgentToolRecovery(input.sessionId)
     this.sessions.set(input.sessionId, client.principal)
     return result
+  }
+  async taskCall(owner: PluginOwnerIdentity, operation: string, input: object): Promise<unknown> {
+    return await this.call(this.owner(owner).principal, `native-session-task-${operation}`, input)
   }
   private principal(sessionId: string): OwnerDocumentPrincipalBinding {
     const principal = this.sessions.get(sessionId)
@@ -133,4 +151,27 @@ export async function resolveNativeSessionBinding(
 export const nativeSessionRecoveryStore: NativeSessionRecoveryStore = {
   saveBinding: saveNativeSessionBinding,
   resolveBinding: resolveNativeSessionBinding,
+}
+
+export function nativeAgentTaskClient(owner: PluginOwnerIdentity) {
+  const call = async (operation: string, input: object): Promise<unknown> => {
+    if (current === undefined) throw new Error('Native task persistence unavailable')
+    return await current.taskCall(owner, operation, input)
+  }
+  return {
+    store: {
+      load: async (operationId: string): Promise<AgentTaskRecord | undefined> =>
+        (await call('load', { operationId }) as AgentTaskRecord | null) ?? undefined,
+      claim: async (record: AgentTaskRecord): Promise<{ claimed: boolean; record: AgentTaskRecord }> =>
+        await call('claim', { operationId: record.operationId, record }) as {
+          claimed: boolean
+          record: AgentTaskRecord
+        },
+      save: async (record: AgentTaskRecord): Promise<void> => {
+        await call('save', { operationId: record.operationId, record })
+      },
+    },
+    resolveContext: async (context: AgentTaskContext): Promise<TaskContextResolution> =>
+      await call('context', { context }) as TaskContextResolution,
+  }
 }

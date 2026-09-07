@@ -1,3 +1,4 @@
+import { installAgentTasks } from './agent-tasks-install.js'
 import { registerNativeSessionOwner } from './native-agent-session-recovery.js'
 import { installAgentTools } from './plugin-agent-tools.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
@@ -632,7 +633,7 @@ export const createRuntimeMountPlugin = async (
     .isolate('agentPageAdmissionTargets').isolate('agentPageAdmissionReservations')
     .isolate('agentPageAdmissionRouteDeclarations').isolate('agentPageAdmissionRouteReservations')
     .isolate('agentPageFreshRoomNavigation')
-    .isolate('agentTools').isolate('entities').isolate('documents').extend({
+    .isolate('agentTasks').isolate('agentTools').isolate('entities').isolate('documents').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: runtimeScope.moduleGenerationOf()!(controller),
@@ -686,6 +687,12 @@ export const createRuntimeMountPlugin = async (
       entities: entityRegistry,
     })
     await controller.agentRegistryFiber
+    installAgentTasks(pluginContext, {
+      runtime: runtimeScope.agentSessionRuntime,
+      entities: entityRegistry,
+      tools,
+      active: () => controller.principalLive,
+    })
     controller.sessionRegistryFiber = pluginContext.plugin(
       CordisXSessionRegistryServiceV1,
       runtimeScope.agentSessionRuntime,

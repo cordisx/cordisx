@@ -356,3 +356,15 @@ export type {
 } from './contracts-plugin-api.js'
 
 export type * from './plugin-agent-tool-contracts.js'
+
+export type {
+  AgentTaskContext,
+  AgentTaskCreateRequest,
+  AgentTaskCreateResult,
+  AgentTaskFailureCode,
+  AgentTaskQueryRequest,
+  AgentTaskQueryResult,
+  AgentTaskReference,
+  AgentTaskResolvedContext,
+  AgentTasks,
+} from './agent-task-contracts.js'

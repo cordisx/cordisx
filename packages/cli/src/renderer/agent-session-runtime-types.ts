@@ -1,3 +1,4 @@
+import type { AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   Agent,
@@ -336,6 +337,7 @@ export interface CordisXDriverMessageClaimed {
 export interface CordisXPrivateAgentDriver {
   create(
     input: {
+      readonly executionContext?: AgentTaskResolvedContext
       readonly sessionId: string
       readonly owner: PluginOwnerIdentity
       readonly options: AgentOptions
