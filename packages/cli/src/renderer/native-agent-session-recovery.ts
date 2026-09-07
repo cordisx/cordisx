@@ -1,6 +1,10 @@
 import type { AgentTaskContext, AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
 import type { AgentTaskRecord } from '../agent-task-record.js'
 import type { TaskContextResolution } from '../launcher/agent-task-context.js'
+import {
+  type HistoricalAgentDetailProvider,
+  NativeSessionDetailReferences,
+} from './native-session-detail-references.js'
 import type { AgentSetup } from '@cordisx/protocol/agents/v1'
 import type { PluginOwnerIdentity } from '@cordisx/protocol/sessions/v1'
 import type { CordisXPersistedSession, CordisXSessionEventPersistence } from './agent-session-runtime.js'
@@ -34,6 +38,7 @@ let current: NativeAgentSessionPersistence | undefined
 export class NativeAgentSessionPersistence implements CordisXSessionEventPersistence, NativeSessionRecoveryStore {
   private owners = new Map<string, OwnerClient>()
   private sessions = new Map<string, OwnerDocumentPrincipalBinding>()
+  readonly details = new NativeSessionDetailReferences()
   private closed = false
   constructor(
     private readonly bridge: BrowserOwnerDocumentBridge,
@@ -45,7 +50,18 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
   register(owner: PluginOwnerIdentity, client: OwnerClient): () => void {
     const key = ownerKey(owner)
     this.owners.set(key, client)
+    const releaseDetails = this.details.register(owner, {
+      active: () => !this.closed && this.owners.get(key) === client && client.active(),
+      read: async sessionId => {
+        const value = await this.call(client.principal, 'native-session-detail', { sessionId }) as {
+          threadId: string
+          revision: number
+        } | null
+        return value ?? undefined
+      },
+    })
     return () => {
+      releaseDetails()
       if (this.owners.get(key) === client) this.owners.delete(key)
     }
   }
@@ -121,6 +137,7 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
   }
   dispose(): void {
     this.closed = true
+    this.details.dispose()
     this.owners.clear()
     this.sessions.clear()
     if (current === this) current = undefined
@@ -176,4 +193,16 @@ export function nativeAgentTaskClient(owner: PluginOwnerIdentity) {
     resolveContext: async (context: AgentTaskContext): Promise<TaskContextResolution> =>
       await call('context', { context }) as TaskContextResolution,
   }
+}
+
+/** View-only detail capability path; never calls resolveBinding or starts recovery. */
+export const historicalNativeSessionDetails: HistoricalAgentDetailProvider = {
+  get: async (owner, sessionId, active) =>
+    current === undefined
+      ? { status: 'unavailable', code: 'unsupported' }
+      : await current.details.get(owner, sessionId, active),
+  open: async (owner, target, active, authorize, navigate) =>
+    current === undefined
+      ? { status: 'unavailable', code: 'unsupported' }
+      : await current.details.open(owner, target, active, authorize, navigate),
 }

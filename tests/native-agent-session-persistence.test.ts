@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -110,7 +110,24 @@ test('native binding and recovery-afterward ledger share authenticated locked pe
       .toThrow('conflict')
     await expect(call('native-session-save-binding', { threadId: 'original-native-thread', completedTurns: 1 })).rejects
       .toThrow('conflict')
+    const writes = vi.spyOn(options.store, 'replace')
+    const detail = await call('native-session-detail')
+    expect(detail).toEqual({ threadId: 'original-native-thread', revision: expect.any(Number) })
+    expect(
+      await bridge.handle({
+        version: 1,
+        requestId: 'foreign-detail',
+        token: foreignToken,
+        nativeToken,
+        operation: 'native-session-detail',
+        sessionId: 'original-session',
+        identity,
+      }),
+    ).toBeNull()
+    expect(await call('native-session-detail', { sessionId: 'missing' })).toBeNull()
+    expect(writes).not.toHaveBeenCalled()
     active = false
+    await expect(call('native-session-detail')).rejects.toThrow('stale')
     await expect(call('native-session-load')).rejects.toThrow('stale')
   } finally {
     await rm(home, { recursive: true, force: true })

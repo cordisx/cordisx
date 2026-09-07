@@ -166,7 +166,7 @@ import type {
   AgentSessionDetailReferenceRequest,
   AgentSessionDetailReferenceResult,
   AgentSessionDetailReferenceService,
-} from '@cordisx/protocol/agent-detail-navigation/v1'
+} from '@cordisx/protocol/agent-detail-navigation/v2'
 import type { PluginApprovalAuthorityLeaseV8 } from '@cordisx/protocol/plugin-manifest/v8'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from './service.js'
 import { generationFromContext } from './ownership.js'
@@ -487,7 +487,13 @@ export class CordisXAgentSessionDetailReferenceService extends Service implement
     super(ctx, 'agentSessionDetailReferences')
     runtimes.set(this, runtime)
   }
-  get = async (request: AgentSessionDetailReferenceRequest): Promise<AgentSessionDetailReferenceResult> => {
+  getV2 = async (request: AgentSessionDetailReferenceRequest): Promise<AgentSessionDetailReferenceResult> => {
+    const runtime = runtimeFor(this)
+    return await runtime.getAgentSessionDetailReferenceV2(runtime.ownerFromContext(this.ctx), request)
+  }
+  get = async (
+    request: AgentSessionDetailReferenceRequest,
+  ): Promise<import('@cordisx/protocol/agent-detail-navigation/v1').AgentSessionDetailReferenceResult> => {
     const runtime = runtimeFor(this)
     return await runtime.getAgentSessionDetailReference(runtime.ownerFromContext(this.ctx), request)
   }
@@ -497,6 +503,10 @@ export class CordisXAgentDetailNavigationService extends Service implements Agen
   constructor(ctx: Context, runtime: CordisXAgentSessionRuntime) {
     super(ctx, 'agentDetailNavigation')
     runtimes.set(this, runtime)
+  }
+  openV2 = async (request: AgentDetailNavigationRequest): Promise<AgentDetailNavigationResult> => {
+    const runtime = runtimeFor(this)
+    return await runtime.openAgentDetailV2(runtime.ownerFromContext(this.ctx), request)
   }
   open = async (request: AgentDetailNavigationRequest): Promise<AgentDetailNavigationResult> => {
     const runtime = runtimeFor(this)

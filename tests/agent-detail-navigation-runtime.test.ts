@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from '../packages/cli/src/renderer/ownership.js'
+import { describe, expect, it, vi } from 'vitest'
+import { NativeSessionDetailReferences } from '../packages/cli/src/renderer/native-session-detail-references.js'
 import type { AgentOptions, AgentSetup } from '@cordisx/protocol/agents/v1'
 import type { UserMessage } from '@cordisx/protocol/sessions/v1'
 
 import {
+  CordisXAgentDetailNavigationService,
+  CordisXAgentSessionDetailReferenceService,
   CordisXAgentSessionRuntime,
   type CordisXPrivateAgentDriver,
 } from '../packages/cli/src/renderer/agent-session-runtime.js'
@@ -139,4 +144,116 @@ describe('agent detail navigation', () => {
       })
     await runtime.dispose()
   })
+})
+
+describe('agent detail navigation v2', () => {
+  it('opens an unloaded historical Session without widening v1 or invoking execution', async () => {
+    const provider = new NativeSessionDetailReferences()
+    const runtimeOwner = owner
+    provider.register(runtimeOwner, {
+      active: () => true,
+      read: async () => ({ threadId: 'native-history', revision: 1 }),
+    })
+    const driver = new DetailDriver(id => `current:${id}`)
+    const createSpy = vi.spyOn(driver, 'create')
+    const resumeSpy = vi.spyOn(driver, 'resume')
+    const submitSpy = vi.spyOn(driver, 'submit')
+    const navigate = vi.fn()
+    let authorized = true
+    const runtime = new CordisXAgentSessionRuntime({
+      driver,
+      authorize: async () => authorized,
+      historicalAgentDetails: provider,
+      navigateAgentDetail: navigate,
+    })
+    await expect(runtime.getAgentSessionDetailReference(owner, { sessionId: 'history' })).resolves.toMatchObject({
+      status: 'unavailable',
+    })
+    const reference = await runtime.getAgentSessionDetailReferenceV2(owner, { sessionId: 'history' })
+    if (reference.status !== 'accepted') throw new Error('historical reference unavailable')
+    await expect(runtime.openAgentDetail(owner, { target: reference.target })).resolves.toMatchObject({
+      status: 'unavailable',
+    })
+    await expect(runtime.openAgentDetailV2(otherOwner, { target: reference.target })).resolves.toMatchObject({
+      status: 'unavailable',
+    })
+    await expect(runtime.openAgentDetailV2(owner, { target: reference.target })).resolves.toEqual({
+      status: 'accepted',
+      code: 'opened',
+    })
+    expect(navigate).toHaveBeenCalledExactlyOnceWith({ kind: 'host', ref: 'codex-thread:native-history' }, 'history')
+    authorized = false
+    await expect(runtime.openAgentDetailV2(owner, { target: reference.target })).resolves.toEqual({
+      status: 'denied',
+      code: 'permission-denied',
+    })
+    authorized = true
+    driver.replace()
+    await expect(runtime.openAgentDetailV2(owner, { target: reference.target })).resolves.toMatchObject({
+      status: 'unavailable',
+    })
+    expect(navigate).toHaveBeenCalledTimes(1)
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(resumeSpy).not.toHaveBeenCalled()
+    expect(submitSpy).not.toHaveBeenCalled()
+    await runtime.dispose()
+    provider.dispose()
+  })
+
+  it('reports a missing historical bridge and preserves known foreign/current record checks', async () => {
+    const runtime = new CordisXAgentSessionRuntime({
+      driver: new DetailDriver(id => `current:${id}`),
+      authorize: async () => true,
+    })
+    await expect(runtime.getAgentSessionDetailReferenceV2(owner, { sessionId: 'history' })).resolves.toEqual({
+      status: 'unavailable',
+      code: 'unsupported',
+    })
+    await create(runtime, 'current')
+    await expect(runtime.getAgentSessionDetailReferenceV2(otherOwner, { sessionId: 'current' })).resolves.toEqual({
+      status: 'denied',
+      code: 'permission-denied',
+    })
+    await expect(runtime.getAgentSessionDetailReferenceV2(owner, { sessionId: 'current' })).resolves.toMatchObject({
+      status: 'accepted',
+    })
+    await runtime.dispose()
+  })
+})
+
+it('exposes the additive methods on the real owner-bound Cordis services', async () => {
+  const context = new Context().extend({
+    [CORDISX_PLUGIN_SOURCE]: 'file:///plugins/public.ts',
+    [CORDISX_PLUGIN_ID]: 'chatroom',
+  })
+  const provider = new NativeSessionDetailReferences()
+  const runtime = new CordisXAgentSessionRuntime({
+    driver: new DetailDriver(id => id),
+    authorize: async () => true,
+    historicalAgentDetails: provider,
+    navigateAgentDetail: vi.fn(),
+  })
+  provider.register(runtime.ownerFromContext(context), {
+    active: () => true,
+    read: async () => ({ threadId: 'history', revision: 1 }),
+  })
+  const references = context.plugin(CordisXAgentSessionDetailReferenceService, runtime)
+  const navigation = context.plugin(CordisXAgentDetailNavigationService, runtime)
+  await references
+  await navigation
+  try {
+    expect((await context.agentSessionDetailReferences.get({ sessionId: 'history' })).status).toBe('unavailable')
+    const result = await context.agentSessionDetailReferences.getV2({ sessionId: 'history' })
+    if (result.status !== 'accepted') throw new Error('v2 service unavailable')
+    expect((await context.agentDetailNavigation.open({ target: result.target })).status).toBe('unavailable')
+    expect(await context.agentDetailNavigation.openV2({ target: result.target })).toEqual({
+      status: 'accepted',
+      code: 'opened',
+    })
+  } finally {
+    await navigation.dispose()
+    await references.dispose()
+    await runtime.dispose()
+    provider.dispose()
+  }
 })
