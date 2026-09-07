@@ -325,7 +325,10 @@ not require `.pg-sidebar`, which is absent in Codex Desktop. Playground visual t
 root. Single-line rows
 have one icon and title; two-line rows keep title and ellipsized summary in the
 same copy column. The primary button fills the row height, and trailing actions
-remain independent controls.
+remain independent controls. Both selected and unselected rows reveal trailing
+actions on hover or focus-within. Publishing selected actions to Conversation
+Shell shares their executor/confirmation/state; it does not transfer exclusive
+control ownership or hide the sidebar action container.
 
 Visual values are supplied separately from that shared layout. The adapter marks
 its sidebar root from its explicit identity: Codex uses the existing native

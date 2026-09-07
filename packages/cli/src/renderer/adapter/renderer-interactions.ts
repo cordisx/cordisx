@@ -439,7 +439,6 @@ abstract class StructuredSurfaceInteractions extends StructuredSurfaceRendererBa
               itemId: snapshot.qualifiedId,
               route: item.route,
               actions: actionViews,
-              actionContainer: actions,
               presented: false,
             }
             this.navigationActionCandidates.push(actionCandidate)
@@ -560,13 +559,6 @@ abstract class StructuredSurfaceInteractions extends StructuredSurfaceRendererBa
   protected publishSelectedNavigationActions(): void {
     const presented = this.navigationActionCandidates.filter(candidate => candidate.presented)
     this.selectedNavigationActions?.replace(presented)
-    for (const candidate of this.navigationActionCandidates) {
-      candidate.actionContainer.hidden = this.selectedNavigationActions?.isSelected(
-        candidate.owner,
-        candidate.itemId,
-        candidate.route,
-      ) === true
-    }
   }
 
   protected renderActions(
