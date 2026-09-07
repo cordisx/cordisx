@@ -101,3 +101,5 @@ explain individual demos. The [plugin-development Skill](https://github.com/cord
 is shipped with the CLI and keeps its task references together for installed
 use. These local entry points may summarize a feature and link to the detailed
 reference without duplicating its authority.
+
+- [Plugin Agent tools](plugin-agent-tools.md): restricted CLI invocation, Skill resources, and current integration limits.

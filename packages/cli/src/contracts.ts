@@ -344,3 +344,5 @@ export type {
   CordisXStandardSchema,
   CordisXStandardSchemaResult,
 } from './contracts-plugin-api.js'
+
+export type * from './plugin-agent-tool-contracts.js'
