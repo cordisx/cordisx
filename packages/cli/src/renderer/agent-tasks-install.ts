@@ -1,5 +1,6 @@
+import { HostAgentTaskApprovalRegistry } from './agent-task-approvals.js'
 import { resolveAgentDefinitionCatalog } from './agent-loop.js'
-import type { AgentDefinition, AgentDefinitionIdentity } from '@cordisx/protocol/agents/v1'
+import type { AgentDefinition, AgentDefinitionIdentity, AgentHandle } from '@cordisx/protocol/agents/v1'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentTools } from '@cordisx/protocol/agent-tools/v1'
 import type { EntityRegistry } from '@cordisx/protocol/entities/v1'
@@ -11,12 +12,29 @@ import { nativeAgentTaskClient } from './native-agent-session-recovery.js'
 export function installAgentTasks(ctx: Context, input: {
   readonly runtime: CordisXAgentSessionRuntime
   readonly entities: EntityRegistry
-  readonly tools: AgentTools & { validateCommand(commandId: string): Promise<boolean> }
+  readonly tools: AgentTools & {
+    validateCommand(commandId: string): Promise<boolean>
+    declaresCommand(commandId: string): boolean
+  }
   readonly active: () => boolean
 }): void {
   const owner = input.runtime.ownerFromContext(ctx)
   const client = nativeAgentTaskClient(owner)
+  const handles = new Map<string, AgentHandle>()
+  const approvals = new HostAgentTaskApprovalRegistry(
+    input.runtime,
+    owner,
+    input.active,
+    commandId => input.tools.declaresCommand(commandId),
+  )
   const tasks = new HostAgentTasks({
+    captureApprovals: commandId => approvals.capture(commandId),
+    existing: sessionId => input.runtime.get(owner, sessionId),
+    ownership: async sessionId => {
+      const handle = handles.get(sessionId)
+      const current = await input.runtime.get(owner, sessionId)
+      return current !== undefined && handle?.agent.generation === current.generation ? handle : undefined
+    },
     ...client,
     resolveContext: async context => {
       if (context?.kind === 'inherit' && !await input.runtime.authorizeTask(owner, 'read', context.sessionId)) {
@@ -63,7 +81,9 @@ export function installAgentTasks(ctx: Context, input: {
         input.entities,
         record.context,
       )
-      return acquired.status === 'accepted' ? await input.runtime.get(owner, acquired.sessionId) : undefined
+      if (acquired.status !== 'accepted') return undefined
+      handles.set(acquired.sessionId, acquired.handle)
+      return acquired.handle.agent
     },
     bind: async (commandId, sessionId, scope) => {
       await input.tools.bind({ commandId, sessionId, scope })
@@ -79,5 +99,24 @@ export function installAgentTasks(ctx: Context, input: {
       (await input.runtime.get(owner, sessionId))?.status
         ?? { status: 'unavailable', code: 'host-unavailable' },
   })
-  ctx.effect(() => ctx.reflect.provide('agentTasks', tasks))
+  ctx.effect(() => {
+    const removers = [
+      ctx.reflect.provide('agentTasks', {
+        createAndSubmit: (request: Parameters<HostAgentTasks['createAndSubmit']>[0]) => tasks.createAndSubmit(request),
+        query: tasks.query.bind(tasks),
+      }),
+      ctx.reflect.provide('agentTaskApprovals', {
+        register: approvals.register.bind(approvals),
+        createAndSubmit: (request: Parameters<HostAgentTasks['createAndSubmit']>[0]) =>
+          tasks.createAndSubmit(request, 'required'),
+        recover: tasks.recover.bind(tasks),
+      }),
+      ctx.reflect.provide('agentTaskOwnership', { acquire: tasks.acquireOwnership.bind(tasks) }),
+    ]
+    return () => {
+      handles.clear()
+      approvals.dispose()
+      for (const remove of removers) remove()
+    }
+  })
 }

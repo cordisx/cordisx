@@ -114,6 +114,7 @@ const injectedItems = (message: UserMessage): readonly Record<string, unknown>[]
  * the preload bridge, request ids, native thread ids, or raw native payloads.
  */
 export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDriver {
+  private readonly approvalInvocations = new Map<string, { threadId: string; controller: AbortController }>()
   private readonly pending = new Map<string, PendingRequest>()
   private readonly sessions = new Map<string, NativeSession>()
   private readonly byThread = new Map<string, NativeSession>()
@@ -409,6 +410,8 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       pending.reject(new Error('Codex Desktop Agent/Session transport disposed'))
     }
     this.pending.clear()
+    for (const invocation of this.approvalInvocations.values()) invocation.controller.abort()
+    this.approvalInvocations.clear()
     this.sessions.clear()
     this.byThread.clear()
     this.replacements.clear()
@@ -568,6 +571,8 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
           pending.reject(new Error('Codex Desktop app-server connection replaced'))
         }
         this.pending.clear()
+        for (const invocation of this.approvalInvocations.values()) invocation.controller.abort()
+        this.approvalInvocations.clear()
         this.sessions.clear()
         this.byThread.clear()
         for (const callback of [...this.replacements]) callback()
@@ -598,6 +603,15 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
   }
 
   private receiveNotification(message: Record<string, unknown> | undefined): void {
+    if (message?.method === 'serverRequest/resolved') {
+      const params = object(message.params)
+      const requestId = typeof params?.requestId === 'number' && Number.isSafeInteger(params.requestId)
+        ? String(params.requestId)
+        : text(params?.requestId)
+      const invocation = requestId === undefined ? undefined : this.approvalInvocations.get(requestId)
+      if (invocation !== undefined && invocation.threadId === params?.threadId) invocation.controller.abort()
+      return
+    }
     const method = text(message?.method)
     const params = object(message?.params)
     const threadId = text(params?.threadId)
@@ -813,7 +827,9 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
 
   private receiveServerRequest(event: MessageEvent<unknown>, request: Record<string, unknown> | undefined): void {
     const method = text(request?.method)
-    const requestId = text(request?.id)
+    const requestId = typeof request?.id === 'number' && Number.isSafeInteger(request.id)
+      ? request.id
+      : text(request?.id)
     const params = object(request?.params)
     const threadId = text(params?.threadId)
     const session = threadId === undefined ? undefined : this.byThread.get(threadId)
@@ -827,11 +843,13 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
   }
 
   private async answerNativeApproval(
-    requestId: string,
+    requestId: string | number,
     method: string,
     params: Record<string, unknown>,
     session: NativeSession,
   ): Promise<void> {
+    const controller = new AbortController()
+    this.approvalInvocations.set(String(requestId), { threadId: session.threadId, controller })
     const itemId = text(params.itemId)
     const toolName = method.includes('commandExecution') || method === 'execCommandApproval'
       ? 'codex.commandExecution'
@@ -843,18 +861,22 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     let outcome: ApprovalOutcome = 'unavailable'
     const request: CordisXDriverApprovalRequest = {
       sessionId: session.sessionId,
+      signal: controller.signal,
       toolName,
       ...(itemId === undefined ? {} : { callId: itemId }),
       ...(text(params.reason) === undefined ? {} : { reason: text(params.reason)! }),
     }
     for (const listener of this.approvalListeners) {
       try {
-        outcome = await listener(clone(request))
+        outcome = await listener({ ...request })
       } catch {
         outcome = 'unavailable'
       }
       break
     }
+    this.approvalInvocations.delete(String(requestId))
+    if (controller.signal.aborted) return
+    controller.abort()
     const decision = outcome === 'allowed-once' ? 'accept' : outcome === 'cancelled' ? 'cancel' : 'decline'
     try {
       await this.bridge.sendMessageFromView({

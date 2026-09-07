@@ -633,7 +633,9 @@ export const createRuntimeMountPlugin = async (
     .isolate('agentPageAdmissionTargets').isolate('agentPageAdmissionReservations')
     .isolate('agentPageAdmissionRouteDeclarations').isolate('agentPageAdmissionRouteReservations')
     .isolate('agentPageFreshRoomNavigation')
-    .isolate('agentTasks').isolate('agentTools').isolate('entities').isolate('documents').extend({
+    .isolate('agentTaskApprovals').isolate('agentTaskOwnership').isolate('agentTasks').isolate('agentTools').isolate(
+      'entities',
+    ).isolate('documents').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: runtimeScope.moduleGenerationOf()!(controller),

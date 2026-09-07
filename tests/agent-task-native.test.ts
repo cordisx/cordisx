@@ -7,6 +7,75 @@ import { AgentTaskContextMismatch } from '../packages/cli/src/agent-task-record.
 
 afterEach(() => vi.unstubAllGlobals())
 
+test('native integer approval identities abort on serverRequest/resolved without sending a late reply', async () => {
+  const view = new EventTarget()
+  const emit = (data: unknown): void => {
+    const event = new Event('message', { cancelable: true })
+    Object.defineProperties(event, { source: { value: null }, data: { value: data } })
+    view.dispatchEvent(event)
+  }
+  vi.stubGlobal('window', view)
+  vi.stubGlobal('location', { href: 'app://-/index.html' })
+  vi.stubGlobal('codexWindowType', 'electron')
+  const responses: unknown[] = []
+  vi.stubGlobal('electronBridge', {
+    getSentryInitOptions: () => CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS.find(pin => pin.buildNumber === '8109'),
+    sendMessageFromView: async (envelope: { type: string; request: { id: string } }) => {
+      if (envelope.type === 'mcp-response') {
+        responses.push(envelope)
+        return
+      }
+      queueMicrotask(() =>
+        emit({
+          type: 'mcp-response',
+          hostId: 'local',
+          message: {
+            id: envelope.request.id,
+            result: { thread: { id: 'native-cancel', cwd: '/task' } },
+          },
+        })
+      )
+    },
+  })
+  const transport = await CodexDesktopAgentSessionTransport.connect({
+    saveBinding: async () => {},
+    resolveBinding: async () => undefined,
+  })
+  let signal!: AbortSignal
+  transport!.onApprovalRequest(request => {
+    signal = request.signal!
+    return new Promise(resolve => signal.addEventListener('abort', () => resolve('cancelled'), { once: true }))
+  })
+  try {
+    await transport!.create({
+      owner: { pluginId: 'owner', generation: 1 },
+      sessionId: 'cancel',
+      options: { model: 'model' },
+    })
+    emit({
+      type: 'mcp-request',
+      hostId: 'local',
+      request: {
+        id: 42,
+        method: 'item/commandExecution/requestApproval',
+        params: { threadId: 'native-cancel', itemId: 'exec', reason: 'Run CLI' },
+      },
+    })
+    expect(signal.aborted).toBe(false)
+    emit({
+      type: 'mcp-notification',
+      hostId: 'local',
+      message: { method: 'serverRequest/resolved', params: { threadId: 'native-cancel', requestId: 42 } },
+    })
+    expect(signal.aborted).toBe(true)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(responses).toEqual([])
+  } finally {
+    transport?.dispose()
+  }
+})
+
 test.each(['/resolved/task', '/wrong/task', undefined])(
   'native task creation reads back cwd %s and preserves a mismatched partial binding',
   async returnedCwd => {

@@ -160,6 +160,8 @@ export function nativeAgentTaskClient(owner: PluginOwnerIdentity) {
   }
   return {
     store: {
+      recover: async (operationId: string): Promise<{ claimed: boolean; record: AgentTaskRecord }> =>
+        await call('recover', { operationId }) as { claimed: boolean; record: AgentTaskRecord },
       load: async (operationId: string): Promise<AgentTaskRecord | undefined> =>
         (await call('load', { operationId }) as AgentTaskRecord | null) ?? undefined,
       claim: async (record: AgentTaskRecord): Promise<{ claimed: boolean; record: AgentTaskRecord }> =>

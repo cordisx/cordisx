@@ -37,6 +37,22 @@ export async function handleAgentTaskStore(
       },
     }
   }
+  if (request.operation === 'native-session-task-recover') {
+    if (existing === undefined) throw new Error('Task intent unavailable')
+    if (existing.bindingPolicy !== 'required' || existing.phase !== 'approval-install-failed') {
+      return { claimed: false, record: existing }
+    }
+    const { result: _result, ...rest } = existing
+    const recovered: AgentTaskRecord = { ...rest, phase: 'approval-installing' }
+    try {
+      await storage.write(key, snapshot!.revision, recovered)
+      return { claimed: true, record: recovered }
+    } catch (error) {
+      const competing = await storage.load(key)
+      if (competing === undefined) throw error
+      return { claimed: false, record: competing.value }
+    }
+  }
   const record = request.record as AgentTaskRecord
   if (!record || record.operationId !== operationId || !record.sessionId || !record.messageId || !record.context?.cwd) {
     throw new Error('Invalid task checkpoint')
@@ -62,7 +78,19 @@ export async function handleAgentTaskStore(
       throw new Error('Task correlation conflict')
     }
   }
-  const phases = ['intent', 'creating', 'created', 'binding', 'submitting', 'finished']
+  if ((record.bindingPolicy ?? 'none') !== (existing.bindingPolicy ?? 'none')) {
+    throw new Error('Task approval policy conflict')
+  }
+  const phases = [
+    'intent',
+    'creating',
+    'created',
+    'binding',
+    'approval-installing',
+    'approval-install-failed',
+    'submitting',
+    'finished',
+  ]
   if (phases.indexOf(record.phase) < phases.indexOf(existing.phase) || !phases.includes(record.phase)) {
     throw new Error('Task phase conflict')
   }

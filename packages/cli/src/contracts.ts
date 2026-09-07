@@ -368,3 +368,11 @@ export type {
   AgentTaskResolvedContext,
   AgentTasks,
 } from './agent-task-contracts.js'
+
+export type {
+  AgentTaskApprovalBinding,
+  AgentTaskApprovalHandlers,
+  AgentTaskApprovals,
+  AgentTaskOwnership,
+  AgentTaskOwnershipResult,
+} from './agent-task-contracts.js'

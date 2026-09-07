@@ -1,3 +1,4 @@
+import { runApprovalInvocation } from './approval-invocation.js'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   Agent,
@@ -257,13 +258,22 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
       && this.current(record)
     ) {
       try {
-        const proposed = await answerer.answerer(question)
-        if (
+        const proposed = await runApprovalInvocation(
+          answerer.controllers,
+          request.signal,
+          signal => answerer.answerer(question, signal),
+        )
+        if (request.signal?.aborted) outcome = 'cancelled'
+        else if (
+          answerer.closed !== undefined || !this.current(record)
+          || this.answerers.get(this.answererKey(record)) !== answerer
+        ) outcome = 'unavailable'
+        else if (
           proposed === 'allowed-once' || proposed === 'rejected' || proposed === 'cancelled'
           || proposed === 'unavailable'
         ) outcome = proposed
       } catch {
-        outcome = 'unavailable'
+        outcome = request.signal?.aborted ? 'cancelled' : 'unavailable'
       }
     }
     if (!await this.append(record.session, 'approval/decided', { id, outcome })) outcome = 'unavailable'
@@ -284,7 +294,7 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
     }
     const key = this.answererKey(record)
     if (this.answerers.has(key)) throw new Error('Approval answerer is already registered')
-    const entry: AnswererRecord = { owner: clone(owner), answerer }
+    const entry: AnswererRecord = { owner: clone(owner), answerer, controllers: new Set() }
     this.answerers.set(key, entry)
     const handle = Object.freeze({
       agentId: record.id,
@@ -363,7 +373,11 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
       && this.current(requester) && this.current(authority)
     ) {
       try {
-        const proposed = await answerer.answerer(question)
+        const proposed = await runApprovalInvocation(
+          answerer.controllers,
+          request.signal,
+          signal => answerer.answerer(question, signal),
+        )
         if (
           !this.current(requester) || !this.current(authority)
           || answerer.closed !== undefined || this.authorityAnswerers.get(this.answererKey(authority)) !== answerer
@@ -374,7 +388,7 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
           || proposed === 'unavailable'
         ) outcome = proposed
       } catch {
-        outcome = 'unavailable'
+        outcome = request.signal?.aborted ? 'cancelled' : 'unavailable'
       }
     }
     if (!await this.append(requester.session, 'approval/decided', { id, outcome })) outcome = 'unavailable'
@@ -395,7 +409,7 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
     }
     const key = this.answererKey(authority)
     if (this.authorityAnswerers.has(key)) throw new Error('Approval authority answerer is already registered')
-    const entry: AuthorityAnswererRecord = { owner: clone(owner), answerer }
+    const entry: AuthorityAnswererRecord = { owner: clone(owner), answerer, controllers: new Set() }
     this.authorityAnswerers.set(key, entry)
     const handle = Object.freeze({
       authority: this.approvalBinding(authority),

@@ -18,6 +18,15 @@ function fixture() {
   const deps: AgentTaskDependencies = {
     store: {
       load: async id => structuredClone(records.get(id)),
+      recover: async operationId => {
+        const record = records.get(operationId)!
+        if (record.phase !== 'approval-install-failed') return { claimed: false, record }
+        const { result: _result, ...rest } = record
+        const next: AgentTaskRecord = { ...rest, phase: 'approval-installing' }
+        records.set(operationId, next)
+        phases.push('approval-installing')
+        return { claimed: true, record: next }
+      },
       claim: async record => {
         const prior = records.get(record.operationId)
         if (prior) return { claimed: false, record: structuredClone(prior) }
@@ -40,7 +49,7 @@ function fixture() {
       return { id: record.sessionId, detail: { kind: 'host', ref: 'opaque-detail' } } as Agent
     }),
     bind: vi.fn(async () => {
-      expect(phases.at(-1)).toBe('binding')
+      expect(['binding', 'approval-installing']).toContain(phases.at(-1))
     }),
     submit: vi.fn(async () => {
       expect(phases.at(-1)).toBe('submitting')
@@ -176,5 +185,73 @@ describe('Host Agent task transaction', () => {
     expect(await f.service.createAndSubmit(request)).toMatchObject({ code: 'reconciliation-required' })
     expect(await new HostAgentTasks(f.deps).createAndSubmit(request)).toMatchObject({ code: 'reconciliation-required' })
     expect(f.deps.submit).toHaveBeenCalledTimes(1)
+  })
+  it('requires captured approvals before creation and retains the policy on plain replays', async () => {
+    const f = fixture()
+    expect(await f.service.createAndSubmit(request, 'required')).toMatchObject({ code: 'tool-unavailable' })
+    expect(f.deps.create).not.toHaveBeenCalled()
+    const installer = { active: () => true, install: vi.fn(async () => async () => {}) }
+    const bound = new HostAgentTasks({ ...f.deps, captureApprovals: () => installer })
+    expect(await bound.createAndSubmit(request, 'required')).toMatchObject({ status: 'accepted' })
+    expect(installer.install).toHaveBeenCalledTimes(1)
+    expect(await bound.createAndSubmit(request)).toMatchObject({ status: 'accepted', disposition: 'replayed' })
+    const plain = fixture()
+    await plain.service.createAndSubmit(request)
+    expect(
+      await new HostAgentTasks({ ...plain.deps, captureApprovals: () => installer }).createAndSubmit(
+        request,
+        'required',
+      ),
+    )
+      .toMatchObject({ code: 'operation-conflict' })
+  })
+  it('recovers failed approval installation explicitly in one Session and shares concurrent recovery', async () => {
+    const f = fixture()
+    let current: import('@cordisx/protocol/agents/v1').Agent | undefined
+    const create = f.deps.create
+    const install = vi.fn().mockRejectedValueOnce(new Error('installation failed')).mockResolvedValue(async () => {})
+    const service = new HostAgentTasks({
+      ...f.deps,
+      captureApprovals: () => ({ active: () => true, install }),
+      create: async (input, record) => current = await create(input, record),
+      existing: async () => current,
+    })
+    expect(await service.createAndSubmit(request, 'required')).toMatchObject({
+      code: 'submit-failed',
+      sessionId: expect.any(String),
+    })
+    expect(await service.createAndSubmit(request, 'required')).toMatchObject({ code: 'submit-failed' })
+    expect(f.deps.submit).not.toHaveBeenCalled()
+    const results = await Promise.all([
+      service.recover({ operationId: 'task-1' }),
+      service.recover({ operationId: 'task-1' }),
+    ])
+    expect(results[0]).toEqual(results[1])
+    expect(results[0]).toMatchObject({ status: 'accepted' })
+    expect(f.deps.create).toHaveBeenCalledTimes(1)
+    expect(f.deps.submit).toHaveBeenCalledTimes(1)
+    expect(install).toHaveBeenCalledTimes(2)
+  })
+  it('rechecks authority after the durable submitting checkpoint and never executes a revoked operation', async () => {
+    const f = fixture()
+    const save = f.deps.store.save
+    f.deps.store.save = async record => {
+      await save(record)
+      if (record.phase === 'submitting') f.dispose()
+    }
+    expect(await f.service.createAndSubmit(request)).toMatchObject({ code: 'permission-denied' })
+    expect(f.deps.submit).not.toHaveBeenCalled()
+  })
+  it('never exposes a handle before durable acceptance or grants ownership from read permission alone', async () => {
+    const f = fixture()
+    const handle = { agent: { id: 'real' } } as import('@cordisx/protocol/agents/v1').AgentHandle
+    const ownership = vi.fn(async () => handle)
+    const service = new HostAgentTasks({ ...f.deps, ownership })
+    expect(await service.acquireOwnership({ operationId: 'task-1' })).toMatchObject({ code: 'not-found' })
+    await service.createAndSubmit(request)
+    expect(await service.acquireOwnership({ operationId: 'task-1' })).toEqual({ status: 'acquired', handle })
+    vi.mocked(f.deps.authorize).mockImplementation(async operation => operation === 'read')
+    expect(await service.acquireOwnership({ operationId: 'task-1' })).toMatchObject({ code: 'permission-denied' })
+    expect(ownership).toHaveBeenCalledTimes(1)
   })
 })

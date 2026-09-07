@@ -317,6 +317,7 @@ export type SessionEventInput = {
 }[SessionEvent['type']]
 
 export interface CordisXDriverApprovalRequest {
+  readonly signal?: AbortSignal
   readonly sessionId: string
   readonly toolName: string
   readonly callId?: string
@@ -647,13 +648,21 @@ export interface AgentSubscriber {
 
 export interface AnswererRecord {
   readonly owner: PluginOwnerIdentity
-  readonly answerer: ApprovalAnswererV1
+  readonly controllers: Set<AbortController>
+  readonly answerer: (
+    question: Parameters<ApprovalAnswererV1>[0],
+    signal?: AbortSignal,
+  ) => ReturnType<ApprovalAnswererV1>
   closed?: 'disposed' | 'agent-replaced' | 'plugin-generation-replaced' | 'permission-revoked'
 }
 
 export interface AuthorityAnswererRecord {
   readonly owner: PluginOwnerIdentity
-  readonly answerer: ApprovalAnswererV2
+  readonly controllers: Set<AbortController>
+  readonly answerer: (
+    question: Parameters<ApprovalAnswererV2>[0],
+    signal?: AbortSignal,
+  ) => ReturnType<ApprovalAnswererV2>
   closed?:
     | 'disposed'
     | 'authority-replaced'

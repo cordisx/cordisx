@@ -233,6 +233,7 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
     if (this.routeRequiredRequesters.has(key)) return 'unavailable'
     const decision = await this.requestApproval(record.owner, {
       agent: this.agent(record.owner, record),
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
       toolName: request.toolName,
       ...(request.callId === undefined ? {} : { callId: request.callId }),
       ...(request.reason === undefined ? {} : { reason: request.reason }),
@@ -266,14 +267,19 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
     })
     let result: ApprovalRequestRoutingResult
     try {
-      result = clone(await resolver.resolver(clone(question), controller.signal))
+      result = clone(
+        await resolver.resolver(
+          clone(question),
+          request.signal === undefined ? controller.signal : AbortSignal.any([controller.signal, request.signal]),
+        ),
+      )
     } catch {
       return 'unavailable'
     } finally {
       resolver.controllers.delete(controller)
     }
     if (
-      controller.signal.aborted || !this.requestResolverCurrent(requester, resolver)
+      controller.signal.aborted || request.signal?.aborted || !this.requestResolverCurrent(requester, resolver)
       || !this.validRoutingResult(result, question, resolver.registration)
     ) return 'unavailable'
     if (result.status !== 'accepted') return 'unavailable'
@@ -303,6 +309,7 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
         toolName: request.toolName,
         ...(request.callId === undefined ? {} : { callId: request.callId }),
         reason: clone(question.reason),
+        ...(request.signal === undefined ? {} : { signal: request.signal }),
       }, authorityLease)
       return decision.outcome
     } finally {
@@ -599,6 +606,8 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
     code: NonNullable<AnswererRecord['closed']>,
   ): void {
     if (answerer.closed === undefined) answerer.closed = code
+    for (const controller of answerer.controllers) controller.abort()
+    answerer.controllers.clear()
     if (this.answerers.get(this.answererKey(record)) === answerer) this.answerers.delete(this.answererKey(record))
   }
 
@@ -608,6 +617,8 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
     code: NonNullable<AuthorityAnswererRecord['closed']>,
   ): void {
     if (answerer.closed === undefined) answerer.closed = code
+    for (const controller of answerer.controllers) controller.abort()
+    answerer.controllers.clear()
     if (this.authorityAnswerers.get(this.answererKey(record)) === answerer) {
       this.authorityAnswerers.delete(this.answererKey(record))
     }

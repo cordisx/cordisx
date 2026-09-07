@@ -28,6 +28,30 @@ stays `reconciliation-required`; this implementation does not automatically
 reconcile unknown outcomes or resubmit them. Queries are read-only and preserve
 runtime-unavailable state after restart until the runtime has a live observation.
 
+## Required approvals and accepted ownership
+
+The additive [task binding contract](https://github.com/cordisx/cordisx-protocol/blob/9425e90dcc5085dcd262fd68467544cad761ed93/.agents/docs/agent-task-binding/README.md)
+uses `ctx.agentTaskApprovals.register` to select an existing same-owner declared
+CLI command. Its separate `createAndSubmit` entrypoint requires that registration.
+The Host installs the existing v2 authority answerer, optional v1 answerer and
+v3 requester resolver after tool binding and before the first submission. No
+plugin callback runs during installation, and no Agent capability is exposed
+before acceptance. Each real question receives an independent lifetime signal,
+including native `serverRequest/resolved` cancellation; closed questions cannot
+publish late approval results.
+
+The durable operation stores whether approval binding was required. The plain
+v1 entrypoint can replay required operations without weakening them; the required
+entrypoint rejects previously plain operations. `agentTaskApprovals.recover`
+retries only an explicitly retained approval-install failure with completed
+cleanup, using the same live Session and first MessageId. It never creates or
+resumes an Agent. Missing live resources after restart remain unavailable.
+
+After durable acceptance, `agentTaskOwnership.acquire` returns the original
+runtime-branded owner handle retained from creation, under current owner and
+create/submit authority. It supports existing branded page admission without
+manufacturing a handle from an Agent projection. The handle is not persisted.
+
 ## Desktop 8109 audit
 
 On 2026-09-08 the installed `/Applications/ChatGPT.app` reported version

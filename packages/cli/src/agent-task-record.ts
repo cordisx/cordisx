@@ -11,7 +11,16 @@ export interface AgentTaskRecord {
   readonly sessionId: string
   readonly messageId: string
   readonly context: AgentTaskResolvedContext
-  readonly phase: 'intent' | 'creating' | 'created' | 'binding' | 'submitting' | 'finished'
+  readonly bindingPolicy?: 'none' | 'required'
+  readonly phase:
+    | 'intent'
+    | 'creating'
+    | 'created'
+    | 'binding'
+    | 'approval-installing'
+    | 'approval-install-failed'
+    | 'submitting'
+    | 'finished'
   readonly result?: AgentTaskCreateResult
 }
 
@@ -58,5 +67,11 @@ export function validTaskRequest(value: AgentTaskCreateRequest): boolean {
 export class AgentTaskContextMismatch extends Error {
   constructor(readonly sessionId: string) {
     super('Native task execution directory did not match the resolved context')
+  }
+}
+
+export class AgentTaskApprovalCleanupError extends Error {
+  constructor() {
+    super('Task approval cleanup could not be established')
   }
 }

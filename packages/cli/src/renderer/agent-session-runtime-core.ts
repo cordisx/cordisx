@@ -418,8 +418,14 @@ export abstract class AgentSessionRuntimeCore {
     return Object.freeze({ pluginId: `${source}:${pluginId}`, generation })
   }
 
-  async authorizeTask(owner: PluginOwnerIdentity, operation: 'create' | 'read', sessionId?: string): Promise<boolean> {
-    const capabilities: AgentRuntimeCapability[] = operation === 'create'
+  async authorizeTask(
+    owner: PluginOwnerIdentity,
+    operation: 'create' | 'read' | 'approval',
+    sessionId?: string,
+  ): Promise<boolean> {
+    const capabilities: AgentRuntimeCapability[] = operation === 'approval'
+      ? ['approvals.request', 'approvals.answer']
+      : operation === 'create'
       ? ['agents.create', 'agents.message.submit', 'agents.get', 'sessions.read']
       : ['sessions.read', 'agents.get']
     for (const capability of capabilities) if (!await this.allowed(owner, capability, sessionId)) return false

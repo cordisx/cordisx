@@ -103,7 +103,11 @@ export async function getAgentToolSetup(sessionId: string): Promise<AgentToolSet
 export function installAgentTools(
   ctx: Context,
   options: AgentToolClientOptions,
-): AgentTools & { dispose(): void; validateCommand(commandId: string): Promise<boolean> } {
+): AgentTools & {
+  dispose(): void
+  validateCommand(commandId: string): Promise<boolean>
+  declaresCommand(commandId: string): boolean
+} {
   const owned = new Map<string, Registration>()
   let remove = (): void => {}
   const dispose = (): void => {
@@ -177,6 +181,10 @@ export function installAgentTools(
   remove = ctx.reflect.provide('agentTools', service)
   return Object.assign(service, {
     dispose,
+    declaresCommand(commandId: string): boolean {
+      const registration = owned.get(commandId)
+      return registration !== undefined && registration.active && options.active()
+    },
     async validateCommand(commandId: string): Promise<boolean> {
       const registration = owned.get(commandId)
       if (registration === undefined || !registration.active || !options.active()) return false
