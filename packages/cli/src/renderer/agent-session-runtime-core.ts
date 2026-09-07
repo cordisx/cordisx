@@ -528,7 +528,8 @@ export abstract class AgentSessionRuntimeCore {
     const prior = this.replayEntityMutation(owner, envelope, input)
     if (prior !== undefined) return prior
     const session = this.sessions.get(input.sessionId)
-    const event = session?.events.find(candidate => candidate.type === 'entity/definition-bound')
+    if (session === undefined) return { ...envelope, status: 'unavailable', code: 'session-unavailable' }
+    const event = session.events.find(candidate => candidate.type === 'entity/definition-bound')
     if (event === undefined || event.type !== 'entity/definition-bound') {
       return { ...envelope, status: 'unavailable', code: 'unsupported' }
     }

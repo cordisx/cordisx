@@ -246,7 +246,9 @@ export abstract class AgentSessionRuntimeOperations extends AgentSessionRuntimeP
       return this.remember(mutationKey, fingerprint, this.acquireConflict(operation, mutationId, 'agent-already-live'))
     }
     const existing = this.sessions.get(sessionId)
-    if (operation === 'resume' && existing === undefined && !resolvedLegacy) {
+    const recovering = operation === 'resume' && existing === undefined && !resolvedLegacy
+      && input.setup !== undefined && this.options.driver.recover !== undefined
+    if (operation === 'resume' && existing === undefined && !resolvedLegacy && !recovering) {
       return this.remember(
         mutationKey,
         fingerprint,
@@ -262,21 +264,30 @@ export abstract class AgentSessionRuntimeOperations extends AgentSessionRuntimeP
         return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, 'unsupported'))
       }
     }
-    const driver = operation === 'create'
+    const driver = recovering && input.setup !== undefined && this.options.driver.recover !== undefined
+      ? await this.options.driver.recover({
+        sessionId,
+        owner: clone(owner),
+        options: input.options ?? {},
+        setup: clone(input.setup),
+      })
+      : operation === 'create'
       ? await this.options.driver.create({
         sessionId,
+        owner: clone(owner),
         options: input.options ?? {},
         ...(effectiveSetup === undefined ? {} : { setup: clone(effectiveSetup) }),
       })
       : await this.options.driver.resume({
         sessionId,
+        owner: clone(owner),
         options: input.options ?? {},
         ...(effectiveSetup === undefined ? {} : { setup: clone(effectiveSetup) }),
       })
     if (driver.status !== 'accepted') {
       return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, driver.code))
     }
-    const session = existing ?? await this.newSession(sessionId, input.setup, definitions, entityBinding)
+    const session = existing ?? await this.newSession(sessionId, input.setup, definitions, entityBinding, recovering)
     if (session === undefined) {
       return this.remember(mutationKey, fingerprint, this.acquireUnavailable(operation, mutationId, 'host-unavailable'))
     }
@@ -656,6 +667,7 @@ export abstract class AgentSessionRuntimeOperations extends AgentSessionRuntimeP
     setup: AgentSetup | undefined,
     definitions: readonly CordisXResolvedAgentDefinition[] | undefined,
     entityBinding?: EntitySessionDefinitionBinding,
+    isSeeded?: boolean,
   ): Promise<SessionRecord | undefined>
 
   protected abstract updateSessionSetup(

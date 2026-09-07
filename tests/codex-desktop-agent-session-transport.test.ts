@@ -1,3 +1,4 @@
+import type { NativeSessionRecoveryStore } from '../packages/cli/src/renderer/native-agent-session-recovery.js'
 import * as agentTools from '../packages/cli/src/renderer/plugin-agent-tools.js'
 import type { AgentToolSetup } from '../packages/cli/src/plugin-agent-tool-contracts.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -22,6 +23,12 @@ class TestWindow extends EventTarget {
     return event
   }
 }
+
+const nativeOwner = { pluginId: 'context-test', generation: 1 }
+const emptyRecovery = (): NativeSessionRecoveryStore => ({
+  saveBinding: async () => {},
+  resolveBinding: async () => undefined,
+})
 
 const originals = new Map<string, PropertyDescriptor | undefined>()
 function install(name: string, value: unknown): void {
@@ -81,7 +88,7 @@ describe('Codex Desktop Agent/Session transport', () => {
     install('codexWindowType', 'electron')
     install('electronBridge', bridge)
 
-    const transport = await CodexDesktopAgentSessionTransport.connect()
+    const transport = await CodexDesktopAgentSessionTransport.connect(emptyRecovery())
     expect(transport).toBeDefined()
     if (transport === undefined) throw new Error('transport did not connect')
     const events: string[] = []
@@ -92,10 +99,11 @@ describe('Codex Desktop Agent/Session transport', () => {
     transport.onMessageClaimed(event => claims.push(event.messageId))
     transport.onApprovalRequest(async request => request.callId === 'tool-approval' ? 'allowed-once' : 'unavailable')
 
-    expect(await transport.create({ sessionId: 'session-1', options: { model: 'gpt-test' } })).toMatchObject({
-      status: 'accepted',
-      detail: { kind: 'host', ref: 'codex-thread:native-thread-1' },
-    })
+    expect(await transport.create({ owner: nativeOwner, sessionId: 'session-1', options: { model: 'gpt-test' } }))
+      .toMatchObject({
+        status: 'accepted',
+        detail: { kind: 'host', ref: 'codex-thread:native-thread-1' },
+      })
     expect(
       await transport.submit({
         sessionId: 'session-1',
@@ -289,7 +297,7 @@ describe('Codex Desktop Agent/Session transport', () => {
       getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PIN, buildNumber: 'other' }),
       sendMessageFromView: async () => {},
     })
-    expect(await CodexDesktopAgentSessionTransport.connect()).toBeUndefined()
+    expect(await CodexDesktopAgentSessionTransport.connect(emptyRecovery())).toBeUndefined()
   })
 
   it('accepts the separately audited 7982 bridge revision without widening the pin fence', async () => {
@@ -301,7 +309,7 @@ describe('Codex Desktop Agent/Session transport', () => {
       getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[1] }),
       sendMessageFromView: async () => {},
     })
-    expect(await CodexDesktopAgentSessionTransport.connect()).toBeDefined()
+    expect(await CodexDesktopAgentSessionTransport.connect(emptyRecovery())).toBeDefined()
   })
 })
 
@@ -328,7 +336,7 @@ describe('native Agent definition context', () => {
   const lead = { ...definition('lead', 'Lead context'), extends: [base.identity] }
   const setup: AgentSetup = { definition: lead.identity, definitions: [base, lead] }
 
-  async function harness() {
+  async function harness(recovery: NativeSessionRecoveryStore = emptyRecovery()) {
     const view = new TestWindow()
     const requests: { method: string; params: Record<string, unknown> }[] = []
     install('window', view)
@@ -350,15 +358,15 @@ describe('native Agent definition context', () => {
         )
       },
     })
-    const transport = await CodexDesktopAgentSessionTransport.connect()
+    const transport = await CodexDesktopAgentSessionTransport.connect(recovery)
     if (transport === undefined) throw new Error('transport unavailable')
-    return { view, requests, transport }
+    return { view, requests, transport, recovery }
   }
 
   it('passes inherited setup through the real runtime on create and implicit resume, preserving user input', async () => {
     const { requests, transport } = await harness()
     const runtime = new CordisXAgentSessionRuntime({ driver: transport, authorize: async () => true })
-    const owner = { pluginId: 'context-test', pluginSource: 'file:///context-test', pluginGeneration: 'g1' }
+    const owner = nativeOwner
     try {
       const created = await runtime.create(owner, {
         sessionId: 'context-session',
@@ -395,10 +403,16 @@ describe('native Agent definition context', () => {
   it('replaces explicit resume setup and refuses invalid definitions before a native request', async () => {
     const { requests, transport } = await harness()
     try {
-      await transport.create({ sessionId: 'context-session', options: { model: 'gpt-test' }, setup })
+      await transport.create({
+        owner: nativeOwner,
+        sessionId: 'context-session',
+        options: { model: 'gpt-test' },
+        setup,
+      })
       const replacement = definition('reviewer', 'Review context')
       expect(
         await transport.resume({
+          owner: nativeOwner,
           sessionId: 'context-session',
           setup: { definition: replacement.identity, definitions: [replacement] },
         }),
@@ -408,11 +422,18 @@ describe('native Agent definition context', () => {
       expect(resume.developerInstructions).not.toContain('Lead context')
       const count = requests.length
       const invalid = { ...setup, definition: { agentId: 'missing', revision: 'r1' } }
-      expect(await transport.create({ sessionId: 'invalid', options: { model: 'gpt-test' }, setup: invalid })).toEqual({
+      expect(
+        await transport.create({
+          owner: nativeOwner,
+          sessionId: 'invalid',
+          options: { model: 'gpt-test' },
+          setup: invalid,
+        }),
+      ).toEqual({
         status: 'unavailable',
         code: 'unsupported',
       })
-      expect(await transport.resume({ sessionId: 'context-session', setup: invalid })).toEqual({
+      expect(await transport.resume({ owner: nativeOwner, sessionId: 'context-session', setup: invalid })).toEqual({
         status: 'unavailable',
         code: 'unsupported',
       })
@@ -436,7 +457,10 @@ describe('native Agent definition context', () => {
     const { requests, transport } = await harness()
     try {
       for (const sessionId of ['cx-session.unknown', 'codex-thread:unknown', 'unknown-native-id']) {
-        expect(await transport.resume({ sessionId })).toEqual({ status: 'unavailable', code: 'unsupported' })
+        expect(await transport.resume({ owner: nativeOwner, sessionId })).toEqual({
+          status: 'unavailable',
+          code: 'unsupported',
+        })
       }
       expect(requests).toHaveLength(0)
     } finally {
@@ -449,7 +473,7 @@ describe('native Agent definition context', () => {
     let current: AgentToolSetup = { skills: [], commands: [] }
     const getSetup = vi.spyOn(agentTools, 'getAgentToolSetup').mockImplementation(async () => current)
     try {
-      await transport.create({ sessionId: 'tools-session', options: { model: 'gpt-test' }, setup })
+      await transport.create({ owner: nativeOwner, sessionId: 'tools-session', options: { model: 'gpt-test' }, setup })
       expect(getSetup).toHaveBeenLastCalledWith('tools-session')
       current = toolSetup('run-one')
       await transport.submit({
@@ -519,7 +543,7 @@ describe('native Agent definition context', () => {
     const { requests, transport, view } = await harness()
     const getSetup = vi.spyOn(agentTools, 'getAgentToolSetup').mockResolvedValue(toolSetup('active-run'))
     try {
-      await transport.create({ sessionId: 'revoked-session', options: { model: 'gpt-test' } })
+      await transport.create({ owner: nativeOwner, sessionId: 'revoked-session', options: { model: 'gpt-test' } })
       await transport.submit({
         sessionId: 'revoked-session',
         message: user('m1', 'first'),
@@ -544,10 +568,13 @@ describe('native Agent definition context', () => {
           }),
         ).toBe('unavailable')
       }
-      expect(await transport.resume({ sessionId: 'revoked-session' })).toMatchObject({ status: 'unavailable' })
-      expect(await transport.create({ sessionId: 'another', options: { model: 'gpt-test' } })).toMatchObject({
+      expect(await transport.resume({ owner: nativeOwner, sessionId: 'revoked-session' })).toMatchObject({
         status: 'unavailable',
       })
+      expect(await transport.create({ owner: nativeOwner, sessionId: 'another', options: { model: 'gpt-test' } }))
+        .toMatchObject({
+          status: 'unavailable',
+        })
       view.message({
         type: 'mcp-notification',
         hostId: 'local',
@@ -566,6 +593,165 @@ describe('native Agent definition context', () => {
         }),
       ).toBe('unavailable')
       expect(requests).toHaveLength(count)
+    } finally {
+      transport.dispose()
+    }
+  })
+
+  it('restores only an authorized missing Session, retains its turn watermark, and waits for a new tool binding', async () => {
+    const recovery = emptyRecovery()
+    const resolve = vi.spyOn(recovery, 'resolveBinding').mockResolvedValue({
+      threadId: 'native-context-thread',
+      completedTurns: 1,
+      setupDigest: 'verified-by-host',
+    })
+    const save = vi.spyOn(recovery, 'saveBinding')
+    const { requests, transport, view } = await harness(recovery)
+    const getSetup = vi.spyOn(agentTools, 'getAgentToolSetup').mockRejectedValue(new Error('rebind required'))
+    const runtime = new CordisXAgentSessionRuntime({ driver: transport, authorize: async () => true })
+    try {
+      expect(
+        await runtime.resumeEntity(nativeOwner, {
+          sessionId: 'original-session',
+          definitionSource: 'session-persisted',
+        }),
+      ).toMatchObject({ status: 'unavailable', code: 'session-unavailable' })
+      const result = await runtime.resume(nativeOwner, {
+        sessionId: 'original-session',
+        setup,
+        mutationId: 'recover-original',
+      })
+      expect(result.status).toBe('accepted')
+      expect(resolve).toHaveBeenCalledWith(nativeOwner, { sessionId: 'original-session', setup })
+      expect(getSetup).not.toHaveBeenCalled()
+      expect(requests.map(request => request.method)).toEqual(['thread/resume'])
+      expect(requests[0]!.params.threadId).toBe('native-context-thread')
+      const projection = runtime.playgroundProjection().find(session => session.sessionId === 'original-session')!
+      expect(projection.header.isSeeded).toBe(true)
+      expect(projection.events).toEqual([])
+      expect(
+        await runtime.resumeEntity(nativeOwner, {
+          sessionId: 'original-session',
+          definitionSource: 'session-persisted',
+        }),
+      ).toMatchObject({ status: 'unavailable', code: 'unsupported' })
+      expect(
+        await transport.submit({
+          sessionId: 'original-session',
+          message: user('not-bound', 'wait'),
+          target: 'next-turn',
+          wakeup: true,
+        }),
+      ).toBe('unavailable')
+      expect(requests).toHaveLength(1)
+      getSetup.mockResolvedValue(toolSetup('rebound-run'))
+      expect(
+        await transport.submit({
+          sessionId: 'original-session',
+          message: user('bound', 'continue'),
+          target: 'next-turn',
+          wakeup: true,
+        }),
+      ).toBe('accepted')
+      expect(requests.at(-1)!.method).toBe('turn/start')
+      view.message({
+        type: 'mcp-notification',
+        hostId: 'local',
+        message: {
+          method: 'turn/completed',
+          params: { threadId: 'native-context-thread', turn: { id: 'turn-2', status: 'completed' } },
+        },
+      })
+      await settle()
+      expect(save).toHaveBeenLastCalledWith(
+        nativeOwner,
+        expect.objectContaining({
+          sessionId: 'original-session',
+          threadId: 'native-context-thread',
+          completedTurns: 2,
+        }),
+      )
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it('does not create a recovery ledger or issue native requests when binding authorization refuses', async () => {
+    const recovery = emptyRecovery()
+    const resolve = vi.spyOn(recovery, 'resolveBinding').mockRejectedValue(new Error('owner or setup mismatch'))
+    const { requests, transport } = await harness(recovery)
+    const runtime = new CordisXAgentSessionRuntime({ driver: transport, authorize: async () => true })
+    try {
+      expect(await runtime.resume(nativeOwner, { sessionId: 'original-session', setup })).toMatchObject({
+        status: 'unavailable',
+      })
+      expect(resolve).toHaveBeenCalledTimes(1)
+      expect(runtime.playgroundProjection()).toEqual([])
+      expect(requests).toEqual([])
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it('persists creation before acceptance and prevents a queued turn overtaking its terminal checkpoint', async () => {
+    const recovery = emptyRecovery()
+    const save = vi.spyOn(recovery, 'saveBinding')
+    const { requests, transport, view } = await harness(recovery)
+    try {
+      expect(
+        await transport.create({
+          owner: nativeOwner,
+          sessionId: 'checkpointed',
+          options: { model: 'gpt-test' },
+          setup,
+        }),
+      ).toMatchObject({ status: 'accepted' })
+      expect(save).toHaveBeenCalledWith(nativeOwner, {
+        sessionId: 'checkpointed',
+        threadId: 'native-context-thread',
+        setup,
+        completedTurns: 0,
+      })
+      await transport.submit({
+        sessionId: 'checkpointed',
+        message: user('first', 'first'),
+        target: 'next-turn',
+        wakeup: true,
+      })
+      let rejectCheckpoint!: (error: Error) => void
+      save.mockImplementationOnce(() =>
+        new Promise((_resolve, reject) => {
+          rejectCheckpoint = reject
+        })
+      )
+      view.message({
+        type: 'mcp-notification',
+        hostId: 'local',
+        message: {
+          method: 'turn/completed',
+          params: { threadId: 'native-context-thread', turn: { id: 'turn-2', status: 'completed' } },
+        },
+      })
+      expect(
+        await transport.submit({
+          sessionId: 'checkpointed',
+          message: user('next', 'next'),
+          target: 'next-turn',
+          wakeup: true,
+        }),
+      ).toBe('accepted')
+      expect(requests.filter(request => request.method === 'turn/start')).toHaveLength(1)
+      rejectCheckpoint(new Error('persistence unavailable'))
+      await settle()
+      expect(
+        await transport.submit({
+          sessionId: 'checkpointed',
+          message: user('blocked', 'blocked'),
+          target: 'next-turn',
+          wakeup: true,
+        }),
+      ).toBe('unavailable')
+      expect(requests.filter(request => request.method === 'turn/start')).toHaveLength(1)
     } finally {
       transport.dispose()
     }
