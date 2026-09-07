@@ -1,0 +1,51 @@
+{
+  "status": "passed",
+  "host": "cb6e1b420102c5323a798656f664eb4e2d0fc178",
+  "chatroom": "2bca745adedead5a91ee9d0ba6b3d07988c9ede8",
+  "protocol": "7b8c81104c2ab6b301ebe6a7414d45dc2cc8f724",
+  "simulated": [
+    "Agent driver execution"
+  ],
+  "real": [
+    "production installer",
+    "Host Agent runtime Session ownership",
+    "CLI subprocess",
+    "private socket authentication",
+    "CDP target/context dispatch",
+    "Chatroom handler",
+    "Host documents Room CAS",
+    "Chatroom source-v10",
+    "Host Shell model"
+  ],
+  "first": {
+    "status": "accepted",
+    "operationId": "real-cdp-report",
+    "roomId": "room-real-cdp",
+    "messageId": "chatroom-cli.7f5021b7-cd48-47a4-9ed9-cd9800f77ecc",
+    "memberId": "leader",
+    "disposition": "created"
+  },
+  "replay": {
+    "status": "accepted",
+    "operationId": "real-cdp-report",
+    "roomId": "room-real-cdp",
+    "messageId": "chatroom-cli.7f5021b7-cd48-47a4-9ed9-cd9800f77ecc",
+    "memberId": "leader",
+    "disposition": "replayed"
+  },
+  "roomMessages": 1,
+  "notProven": [
+    "native Codex",
+    "user acceptance"
+  ],
+  "permissionDecisions": {
+    "method": "actual exact Session dialog allow-once",
+    "capabilities": [
+      "agents.create",
+      "sessions.get",
+      "agents.get",
+      "sessions.subscribe"
+    ]
+  },
+  "fixture": "Minimal plugin declaration, real Host runtime services, actual Chatroom handler and v10 source; not full Chatroom apply."
+}

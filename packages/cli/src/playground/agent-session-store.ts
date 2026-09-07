@@ -414,3 +414,6 @@ export class PlaygroundAgentSessionStore implements CordisXSessionEventPersisten
     }
   }
 }
+
+/** Shared Host ledger validation; does not grant Playground transport authority. */
+export { persistedSession as validatePersistedAgentSession }

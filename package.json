@@ -40,6 +40,10 @@
     "./vite": {
       "types": "./packages/cli/dist/src/vite.d.ts",
       "default": "./packages/cli/dist/src/vite.js"
+    },
+    "./agent-tools": {
+      "types": "./packages/cli/dist/src/agent-tools.d.ts",
+      "default": "./packages/cli/dist/src/agent-tools.js"
     }
   },
   "bundledDependencies": [
@@ -82,7 +86,7 @@
   },
   "dependencies": {
     "@cordisx/channel": "github:cordisx/plugin-channel#4cee12e3a92eeed557bc9de8cc4792710918327a",
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#06277f9d117893a9215c991db8c0881df0f0b0f3",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#139f0053219fe54c8a4ebefa67fa146f8f458e67",
     "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
@@ -118,7 +122,7 @@
   },
   "devDependencies": {
     "@cordisx/eslint-config": "github:cordisx/cordisxmono#c63c2e8c2ba7e11502934a52ad2ce3734e804cdc",
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#06277f9d117893a9215c991db8c0881df0f0b0f3",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#139f0053219fe54c8a4ebefa67fa146f8f458e67",
     "eslint": "9.39.4",
     "@typescript-eslint/parser": "8.69.0",
     "dprint": "0.57.1",

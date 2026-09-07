@@ -255,6 +255,7 @@ export interface CordisXRuntimeMetadata {
   readonly providerBridgeToken?: string
   readonly agentHistoryBridgeToken?: string
   readonly configBridgeToken?: string
+  readonly nativeSessionBridgeToken?: string
   readonly playgroundAgentSessionStoreToken?: string
   readonly ownerDocumentBindings?: readonly {
     readonly source: string
@@ -339,6 +340,7 @@ export interface PluginController {
   unregisterExtensionPoints?: () => void
   unregisterConnector?: () => void | Promise<void>
   unregisterAgentLoop?: () => void | Promise<void>
+  unregisterAgentTools?: () => void
   unregisterDocuments?: () => void | Promise<void>
   entityRegistryFiber?: Fiber
   agentRegistryFiber?: Fiber

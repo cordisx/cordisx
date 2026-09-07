@@ -3,7 +3,7 @@ import type { LocalizedText } from '@cordisx/protocol/agent-conversation-shell/v
 import type { AgentConversationShellSnapshot as AgentConversationShellSnapshotV4 } from '@cordisx/protocol/agent-conversation-shell/v4'
 import type { AgentConversationShellSnapshot as AgentConversationShellSnapshotV5 } from '@cordisx/protocol/agent-conversation-shell/v5'
 import type { AgentConversationShellSnapshot as AgentConversationShellSnapshotV6 } from '@cordisx/protocol/agent-conversation-shell/v6'
-import type { AgentConversationShellSnapshot as AgentConversationShellSnapshotV7 } from '@cordisx/protocol/agent-conversation-shell/v7'
+import type { AgentConversationShellSnapshot as AgentConversationShellSnapshotV7 } from '@cordisx/protocol/agent-conversation-shell/v10'
 import type { CordisXJsonValue, CordisXLocalizedText } from '../contracts.js'
 import type { AgentConversationRendererCopy } from './host-ui/conversation/AgentConversationRenderer.js'
 import {
@@ -487,9 +487,10 @@ export function projectAgentConversationShellSnapshotV7(
   owner: string,
   snapshotInput: AgentConversationShellSnapshotV7,
   localization: ProjectionLocalization,
+  allowPluginCommands = false,
 ): AgentConversationModel {
   const snapshot = immutableSnapshot(snapshotInput)
-  assertSnapshotV7(snapshot)
+  assertSnapshotV7(snapshot, allowPluginCommands)
   return projectAgentConversationShellSnapshotVersioned(owner, snapshot, localization, snapshot.composer.shortcutPolicy)
 }
 

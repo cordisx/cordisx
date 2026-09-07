@@ -335,7 +335,12 @@ export interface CordisXDriverMessageClaimed {
 
 export interface CordisXPrivateAgentDriver {
   create(
-    input: { readonly sessionId: string; readonly options: AgentOptions; readonly setup?: AgentCreateOptions['setup'] },
+    input: {
+      readonly sessionId: string
+      readonly owner: PluginOwnerIdentity
+      readonly options: AgentOptions
+      readonly setup?: AgentSetup
+    },
   ): Promise<
     { readonly status: 'accepted'; readonly detail?: AgentDetailReference } | {
       readonly status: 'unavailable'
@@ -343,13 +348,27 @@ export interface CordisXPrivateAgentDriver {
     }
   >
   resume(
-    input: { readonly sessionId: string; readonly options: AgentOptions; readonly setup?: AgentResumeOptions['setup'] },
+    input: {
+      readonly sessionId: string
+      readonly owner: PluginOwnerIdentity
+      readonly options: AgentOptions
+      readonly setup?: AgentSetup
+    },
   ): Promise<
     { readonly status: 'accepted'; readonly detail?: AgentDetailReference } | {
       readonly status: 'unavailable'
       readonly code: 'host-unavailable' | 'unsupported'
     }
   >
+  /** Explicit inline recovery only; the driver must verify a persisted native binding. */
+  recover?(
+    input: {
+      readonly sessionId: string
+      readonly owner: PluginOwnerIdentity
+      readonly options: AgentOptions
+      readonly setup: AgentSetup
+    },
+  ): ReturnType<CordisXPrivateAgentDriver['resume']>
   submit(
     input: {
       readonly sessionId: string

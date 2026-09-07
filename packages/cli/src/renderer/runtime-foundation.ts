@@ -111,10 +111,7 @@ import { CordisXI18nService } from './i18n.js'
 import { CordisXVisualService } from './visuals.js'
 import { CordisXManagerContentNavigationService, CordisXPageService, CordisXRouteService } from './navigation.js'
 import { BrowserRouteHistoryAdapter, CodexRouterHistoryAdapter } from './codex-router-history.js'
-import {
-  HostAgentTaskDetailsNavigator,
-  navigateHostTaskDetailsSameDocument,
-} from './host-ui/AgentTaskDetailsNavigator.js'
+import { createHostAgentTaskDetailsNavigator } from './host-ui/AgentTaskDetailsNavigator.js'
 import {
   type AgentRuntimeConnection,
   type AgentRuntimeRouteScope,
@@ -562,12 +559,7 @@ export const createRuntimeAgentSessionTransport = (runtimeScope: RuntimeClosureS
     : runtimeScope.desktopAgentSessionTransport()! ?? new UnavailableAgentSessionTransport()
 
 export const createRuntimeAgentDetailNavigator = (runtimeScope: RuntimeClosureScope) =>
-  new HostAgentTaskDetailsNavigator({
-    navigateHost: url => navigateHostTaskDetailsSameDocument(window, url),
-    navigateExternal: () => {
-      throw new Error('Agent detail references never expose external navigation')
-    },
-  })
+  createHostAgentTaskDetailsNavigator(runtimeScope.routeHistory()!, window)
 
 export const createRuntimeAgentDetailHistoryIdentity = (runtimeScope: RuntimeClosureScope) => {
   const state = window.history.state

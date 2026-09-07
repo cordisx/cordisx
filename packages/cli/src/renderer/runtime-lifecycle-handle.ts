@@ -453,6 +453,8 @@ export const createRuntimeDispose = async (runtimeScope: RuntimeClosureScope): P
     delete controller.unregisterAgentSessionMigration
     controller.documentsClient?.dispose()
     delete controller.documentsClient
+    controller.unregisterAgentTools?.()
+    delete controller.unregisterAgentTools
     await controller.unregisterDocuments?.()
     delete controller.unregisterDocuments
     runtimeScope.agentRuntime()!.releaseOwner(

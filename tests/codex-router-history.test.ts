@@ -1,5 +1,6 @@
 import { JSDOM } from 'jsdom'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createHostAgentTaskDetailsNavigator } from '../packages/cli/src/renderer/host-ui/AgentTaskDetailsNavigator.js'
 import {
   BrowserRouteHistoryAdapter,
   type CodexRouteHistoryEntry,
@@ -95,6 +96,58 @@ function copySessionStorage(source: Storage, target: Storage): void {
 }
 
 describe('CodexRouterHistoryAdapter', () => {
+  it('routes an Agent detail through the existing native navigator and restores the Room on native Back', async () => {
+    const dom = new JSDOM('', { url: 'https://codex.local/index.html' })
+    const native = new FakeCodexNavigator('/local/thread-one', { native: true })
+    mountNavigator(dom, native)
+    const reactListener = vi.fn()
+    native.listen(reactListener)
+    const browserPush = vi.spyOn(dom.window.history, 'pushState')
+    const adapter = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
+    adapter.push(route('room-to-return'))
+    const roomKey = adapter.snapshot().key
+    const changed = vi.fn()
+    adapter.subscribe(changed)
+    const details = createHostAgentTaskDetailsNavigator(adapter, dom.window)
+    await details.navigateAgentDetail({ kind: 'host', ref: 'codex-thread:thread-two' }, 'session-two')
+    await Promise.resolve()
+    expect(native.location).toMatchObject({
+      pathname: '/local/thread-two',
+      search: '',
+      hash: '',
+      state: { native: true },
+    })
+    expect(adapter.snapshot()).toMatchObject({ available: true, index: 2 })
+    expect(adapter.snapshot().entry).toBeUndefined()
+    expect(dom.window.history.state?.__cordisxRouteReloadV1).toBeUndefined()
+    expect(native.listener).toBe(reactListener)
+    expect(reactListener).toHaveBeenCalledTimes(2)
+    expect(changed).toHaveBeenCalledTimes(1)
+    expect(browserPush).not.toHaveBeenCalled()
+    expect(dom.window.location.pathname).toBe('/index.html')
+    await adapter.go(-1)
+    expect(adapter.snapshot()).toMatchObject({ key: roomKey, index: 1, entry: route('room-to-return') })
+    expect(native.listener).toBe(reactListener)
+    adapter.dispose()
+    expect(() => details.navigateAgentDetail({ kind: 'host', ref: 'codex-thread:thread-two' }, 'session-two')).toThrow(
+      'disposed',
+    )
+    dom.window.close()
+  })
+
+  it('rejects unavailable native detail navigation without falling back to browser history', () => {
+    const dom = new JSDOM('<div id="root"></div>', { url: 'https://codex.local/index.html' })
+    const browserPush = vi.spyOn(dom.window.history, 'pushState')
+    const adapter = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
+    const details = createHostAgentTaskDetailsNavigator(adapter, dom.window)
+    expect(() => details.navigateAgentDetail({ kind: 'host', ref: 'codex-thread:thread-two' }, 'session-two')).toThrow(
+      'Context navigator',
+    )
+    expect(browserPush).not.toHaveBeenCalled()
+    adapter.dispose()
+    dom.window.close()
+  })
+
   it('fails closed when the Codex React Router Context navigator is absent', () => {
     const dom = new JSDOM('<div id="root"></div>', { url: 'https://codex.local/native' })
     const adapter = new CodexRouterHistoryAdapter(dom.window as unknown as Window)

@@ -759,6 +759,12 @@ export type CordisXAgentConversationShellSourceFactoryV9 = (
   | import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellSource>
 
+export type CordisXAgentConversationShellSourceFactoryV10 = (
+  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v10').AgentConversationShellBinding>,
+) =>
+  | import('@cordisx/protocol/agent-conversation-shell/v10').AgentConversationShellSource
+  | Promise<import('@cordisx/protocol/agent-conversation-shell/v10').AgentConversationShellSource>
+
 export interface CordisXAgentConversationShellRegistration {
   readonly mount: CordisXPageMount
   dispose(): void
@@ -769,6 +775,10 @@ export interface CordisXAgentConversationShellSourceOptionsV9 {
 }
 
 export interface CordisXAgentConversationShell {
+  registerSourceV10(
+    factory: CordisXAgentConversationShellSourceFactoryV10,
+    options?: CordisXAgentConversationShellSourceOptionsV9,
+  ): CordisXAgentConversationShellRegistration
   registerSource(factory: CordisXAgentConversationShellSourceFactory): CordisXAgentConversationShellRegistration
   registerSource(factory: CordisXAgentConversationShellSourceFactoryV2): CordisXAgentConversationShellRegistration
   registerSource(factory: CordisXAgentConversationShellSourceFactoryV3): CordisXAgentConversationShellRegistration
