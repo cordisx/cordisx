@@ -1,3 +1,4 @@
+import { installAgentTools } from './plugin-agent-tools.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
@@ -308,6 +309,8 @@ export const createRuntimeDisposeControllerFiber = async (
     delete controller.unregisterAgentLoop
     controller.documentsClient?.dispose()
     delete controller.documentsClient
+    controller.unregisterAgentTools?.()
+    delete controller.unregisterAgentTools
     await controller.unregisterDocuments?.()
     delete controller.unregisterDocuments
     controller.connectorClient?.dispose()
@@ -628,7 +631,7 @@ export const createRuntimeMountPlugin = async (
     .isolate('agentPageAdmissionTargets').isolate('agentPageAdmissionReservations')
     .isolate('agentPageAdmissionRouteDeclarations').isolate('agentPageAdmissionRouteReservations')
     .isolate('agentPageFreshRoomNavigation')
-    .isolate('entities').isolate('documents').extend({
+    .isolate('agentTools').isolate('entities').isolate('documents').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: runtimeScope.moduleGenerationOf()!(controller),
@@ -648,6 +651,14 @@ export const createRuntimeMountPlugin = async (
       controller.identity.id,
       runtimeScope.moduleGenerationOf()!(controller),
     ]))
+    controller.unregisterAgentTools = installAgentTools(pluginContext, {
+      bridge: runtimeScope.ownerDocumentBridge()!, principal: entityPrincipal,
+      active: () => controller.principalLive,
+      ownsSession: sessionId => {
+        const current = runtimeScope.agentSessionRuntime.ownerForSession(sessionId)
+        return current?.pluginId === owner.pluginId && current.generation === owner.generation
+      },
+    }).dispose
     controller.entityRegistryFiber = pluginContext.plugin(CordisXEntityRegistryServiceV1, {
       bridge: runtimeScope.ownerDocumentBridge()!,
       principal: entityPrincipal,
@@ -830,6 +841,8 @@ export const createRuntimeMountPlugin = async (
     delete controller.unregisterAgentLoop
     documentsClient.dispose()
     delete controller.documentsClient
+    controller.unregisterAgentTools?.()
+    delete controller.unregisterAgentTools
     await controller.unregisterDocuments?.()
     delete controller.unregisterDocuments
     connectorClient.dispose()

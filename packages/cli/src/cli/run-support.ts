@@ -772,6 +772,7 @@ export async function runDevelopment(
       stable: identities.map(identity => ({ source: identity.source, pluginId: identity.id })),
     })
     const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
+      plugins: config.plugins,
       secret: composition.ownerDocumentSecret,
       profileId: 'development',
       generation: composition.generation,
@@ -837,6 +838,7 @@ export async function runDevelopment(
         stdout,
       })
     } finally {
+      await ownerDocuments.agentTools?.close()
       if (!resourcesHandedOff) {
         historyHost?.dispose()
         await providerFleet?.close()

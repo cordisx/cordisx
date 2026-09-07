@@ -1,3 +1,4 @@
+import { readAgentToolResources } from '../plugin-agent-tool-resources.js'
 import { createHash } from 'node:crypto'
 import { readFile, realpath } from 'node:fs/promises'
 import path from 'node:path'
@@ -234,6 +235,7 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
     }
     const entry = safePath(manifest.entry, ENTRY, 'package manifest entry')
     await containedFile(snapshotRoot, entry, 'package entry')
+    await readAgentToolResources(path.resolve(snapshotRoot, entry))
 
     const distribution = object(manifest.distribution, 'package distribution')
     exactKeys(distribution, ['mode', 'signature'], 'package distribution')
