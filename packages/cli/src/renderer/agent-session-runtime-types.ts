@@ -339,7 +339,7 @@ export interface CordisXPrivateAgentDriver {
       readonly sessionId: string
       readonly owner: PluginOwnerIdentity
       readonly options: AgentOptions
-      readonly setup?: AgentCreateOptions['setup']
+      readonly setup?: AgentSetup
     },
   ): Promise<
     { readonly status: 'accepted'; readonly detail?: AgentDetailReference } | {
@@ -352,7 +352,7 @@ export interface CordisXPrivateAgentDriver {
       readonly sessionId: string
       readonly owner: PluginOwnerIdentity
       readonly options: AgentOptions
-      readonly setup?: AgentResumeOptions['setup']
+      readonly setup?: AgentSetup
     },
   ): Promise<
     { readonly status: 'accepted'; readonly detail?: AgentDetailReference } | {
