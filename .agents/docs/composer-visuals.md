@@ -72,7 +72,7 @@ formal mainline adoption and Mono gitlinks.
 
 Plugins inject `extensionPointVisuals` and register `{ id, pointId, events? }`
 with an asynchronous loader returning `defineReactVisual(Component)`. The
-component receives only `CordisXReactVisualProps.state`. Import the SVG module
+component receives semantic `CordisXReactVisualProps.state` and optional bounded interaction handles. Import the SVG module
 inside the loader; do not import editors or complete resource catalogs eagerly.
 The owning fiber withdraws its registrations, and the last withdrawal disposes
 the Host observers and listeners. No global observers are created for plugins
@@ -217,3 +217,33 @@ remove hit regions and retire handles. No persistent placement is implied.
 Optional mixed scopes may list both points, but Host only exposes drag/activation
 at the overlay. Required unsupported pairs fail activation. Native submission
 and input are not intercepted by these interaction regions.
+
+## Multiple overlay entities and context menus
+
+The optional React `interactions` prop implements Protocol
+`cordisx.extension-point-interactions/v1`. It is available on the overlay under
+its existing exact `drag` and/or `activate` grants. Older Hosts omit it; visuals
+must degrade explicitly. The legacy `drag` prop remains available, but do not
+register both handles for the same artwork.
+
+Call `interactions.create(entityId)` to allocate a stable independent handle.
+Each handle supports the existing `setRegion`, `getSnapshot`, and `subscribe`
+methods plus `setMenu(items)` and `dispose()`. Dispose when an entity leaves the
+scene; at most 32 handles can be live for one registration. The Host owns bounded
+hit targets, capture, keyboard handling and menu chrome outside the inert art.
+
+Menu items are flat `{ id, label, disabled? }` values, at most 20 per entity.
+Labels are plain text. Menus require the `activate` grant, never just drag or
+pointer observation. Right click, Context Menu key or Shift+F10 opens a menu;
+Escape closes it, arrows/Home/End navigate, and selection emits `actionId`.
+Opening a menu grants no extra authority to execute a platform command.
+
+Snapshots additionally include `hovered` and `menuOpen`. Pause autonomous scene
+movement while a menu is open; process action transitions once by `sequence`.
+Update menu descriptors only when their contents change, because replacing them
+closes any open menu to invalidate stale actions. The Host removes every target,
+menu and listener on permission withdrawal or generation disposal.
+
+Focused tests exercise the production visual mount and controller boundaries.
+Native menu positioning, themes and keyboard behavior still require isolated
+app verification before claiming native acceptance.

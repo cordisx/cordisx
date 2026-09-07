@@ -1,34 +1,54 @@
+import { ComposerVisualMenu } from './composer-visual-menu.js'
 import type {
-  ExtensionPointDragHandleV1,
+  ExtensionPointInteractionHandleV1,
+  ExtensionPointInteractionSnapshotV1,
+  ExtensionPointMenuItemV1,
+} from '@cordisx/protocol/extension-point-interactions/v1'
+import type {
   ExtensionPointDragRegionV1,
   ExtensionPointDragSnapshotV1,
 } from '@cordisx/protocol/extension-point-drag/v1'
 
 /** Host-owned interaction sibling: plugin artwork remains inert. */
 export class ComposerVisualDrag {
-  readonly handle: ExtensionPointDragHandleV1
+  readonly handle: ExtensionPointInteractionHandleV1
   private readonly button: HTMLButtonElement
   private readonly listeners = new Set<() => void>()
-  private snapshot: ExtensionPointDragSnapshotV1 = Object.freeze({
+  private snapshot: ExtensionPointInteractionSnapshotV1 = Object.freeze({
     sequence: 0,
     gesture: 0,
     phase: 'idle',
+    hovered: false,
+    menuOpen: false,
     deltaX: 0,
     deltaY: 0,
   })
+  private readonly menu: ComposerVisualMenu
   private region: ExtensionPointDragRegionV1 | null = null
   private active: { id: number; x: number; y: number; moved: boolean; drag: boolean } | undefined
   private disposed = false
+  private hovered = false
   constructor(
     private readonly parent: HTMLElement,
     private readonly bounds: () => { width: number; height: number },
     private readonly authority: { drag(): boolean; activate(): boolean },
+    private readonly entity = false,
   ) {
     this.button = parent.ownerDocument.createElement('button')
     this.button.type = 'button'
     this.button.dataset.cordisxComposerDrag = ''
     this.button.style.cssText =
       'position:absolute;display:none;padding:0;border:0;background:transparent;touch-action:none;cursor:grab;z-index:1;'
+    this.menu = new ComposerVisualMenu(
+      this.button,
+      () => this.permitted() && this.authority.activate(),
+      (menuOpen, actionId) => this.emitState({ menuOpen, ...(actionId === undefined ? {} : { actionId }) }),
+    )
+    if (entity) {
+      this.button.addEventListener('pointerenter', this.enter)
+      this.button.addEventListener('pointerleave', this.leave)
+      this.button.addEventListener('contextmenu', this.context)
+    }
     this.button.addEventListener('pointerdown', this.down)
     this.button.addEventListener('pointermove', this.move)
     this.button.addEventListener('pointerup', this.up)
@@ -41,6 +61,8 @@ export class ComposerVisualDrag {
     parent.append(this.button)
     this.handle = Object.freeze({
       getSnapshot: () => this.snapshot,
+      setMenu: (items: readonly ExtensionPointMenuItemV1[] | null) => this.menu.set(items),
+      dispose: () => this.dispose(),
       subscribe: (listener: () => void) => {
         if (this.disposed) return () => {}
         this.listeners.add(listener)
@@ -60,6 +82,7 @@ export class ComposerVisualDrag {
   }
   refresh(): void {
     if (this.disposed) return
+    if (!this.authority.activate()) this.menu.close(false)
     if (this.active?.drag && !this.authority.drag()) this.cancel()
     const r = this.region, b = this.bounds()
     if (
@@ -67,6 +90,9 @@ export class ComposerVisualDrag {
       || r.height <= 0 || typeof r.label !== 'string' || !r.label.trim()
     ) {
       this.cancel()
+      this.menu.close(false)
+      this.hovered = false
+      if (this.snapshot.hovered) this.emitState({ hovered: false })
       this.button.style.display = 'none'
       return
     }
@@ -80,7 +106,12 @@ export class ComposerVisualDrag {
     this.button.style.height = `${height}px`
     this.button.setAttribute('aria-label', r.label.slice(0, 200))
     this.button.setAttribute('aria-keyshortcuts', 'ArrowLeft ArrowRight ArrowUp ArrowDown Enter Space')
-    if (!width || !height) this.cancel()
+    if (!width || !height) {
+      this.cancel()
+      this.menu.close(false)
+      this.hovered = false
+      if (this.snapshot.hovered) this.emitState({ hovered: false })
+    }
   }
   private emit(phase: ExtensionPointDragSnapshotV1['phase'], x = this.snapshot.deltaX, y = this.snapshot.deltaY): void {
     this.snapshot = Object.freeze({
@@ -89,11 +120,55 @@ export class ComposerVisualDrag {
       phase,
       deltaX: x,
       deltaY: y,
+      hovered: this.hovered,
+      menuOpen: this.menu.open,
     })
-    for (const listener of this.listeners) listener()
+    for (const listener of this.listeners) {
+      try {
+        listener()
+      } catch { /* A plugin observer cannot prevent Host gesture cleanup. */ }
+    }
+  }
+  private emitState(
+    change: Partial<Pick<ExtensionPointInteractionSnapshotV1, 'hovered' | 'menuOpen' | 'actionId'>>,
+  ): void {
+    if (this.disposed) return
+    this.snapshot = Object.freeze({
+      sequence: this.snapshot.sequence + 1,
+      gesture: this.snapshot.gesture,
+      phase: 'idle',
+      deltaX: 0,
+      deltaY: 0,
+      hovered: this.hovered,
+      menuOpen: this.menu.open,
+      ...change,
+    })
+    for (const listener of this.listeners) {
+      try {
+        listener()
+      } catch { /* A plugin observer cannot prevent Host gesture cleanup. */ }
+    }
+  }
+  private enter = (): void => {
+    if (!this.permitted() || this.hovered) return
+    this.hovered = true
+    if (!this.active) this.emitState({ hovered: true })
+  }
+  private leave = (): void => {
+    if (!this.hovered) return
+    this.hovered = false
+    if (!this.active) this.emitState({ hovered: false })
+  }
+  private context = (event: MouseEvent): void => {
+    if (!this.permitted()) return
+    event.preventDefault()
+    event.stopPropagation()
+    this.cancel()
+    this.menu.show()
   }
   private down = (event: PointerEvent): void => {
     if (!this.permitted() || this.active || event.button !== 0) return
+    this.menu.close(false)
     event.preventDefault()
     event.stopPropagation()
     this.active = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, drag: this.authority.drag() }
@@ -103,6 +178,7 @@ export class ComposerVisualDrag {
       /* Unsupported capture cancels rather than leaking a gesture. */ this.active = undefined
       return
     }
+    if (this.entity) this.button.style.zIndex = '2'
     this.button.style.outline = 'none'
     this.button.focus({ preventScroll: true })
     this.emit('start', 0, 0)
@@ -139,6 +215,7 @@ export class ComposerVisualDrag {
   private finish(phase: 'end' | 'cancel' | 'activate', x?: number, y?: number): void {
     const active = this.active
     this.active = undefined
+    if (this.entity) this.button.style.zIndex = '1'
     if (active) {
       this.emit(phase, x, y)
       try {
@@ -173,7 +250,14 @@ export class ComposerVisualDrag {
       this.cancel()
       return
     }
-    if (this.active || event.repeat) return
+    if (this.entity && (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey))) {
+      event.preventDefault()
+      event.stopPropagation()
+      this.cancel()
+      this.menu.show()
+      return
+    }
+    if (this.active || event.repeat || this.menu.open) return
     if ((event.key === 'Enter' || event.key === ' ') && this.authority.activate()) {
       event.preventDefault()
       event.stopPropagation()
@@ -198,6 +282,7 @@ export class ComposerVisualDrag {
   dispose(): void {
     if (this.disposed) return
     this.cancel()
+    this.menu.dispose()
     this.disposed = true
     this.parent.ownerDocument.defaultView?.removeEventListener('blur', this.cancel)
     this.button.remove()

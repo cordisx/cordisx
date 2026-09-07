@@ -1,3 +1,5 @@
+import { ComposerVisualInteractions } from './composer-visual-interactions.js'
+import type { ExtensionPointInteractionsV1 } from '@cordisx/protocol/extension-point-interactions/v1'
 import { ComposerVisualDrag } from './composer-visual-drag.js'
 import type { ExtensionPointDragHandleV1 } from '@cordisx/protocol/extension-point-drag/v1'
 import type { ExtensionPointVisualSnapshotV2 } from '@cordisx/protocol/extension-point-visual/v2'
@@ -43,6 +45,7 @@ interface Mounted {
   readonly restore: () => void
   readonly source: VisualSource
   drag?: ComposerVisualDrag
+  interactions?: ComposerVisualInteractions
 }
 
 class VisualSource {
@@ -71,15 +74,21 @@ class VisualBoundary extends React.Component<{ children: React.ReactNode; failed
   }
 }
 function VisualBody(
-  { source, visual, getDrag }: {
+  { source, visual, getDrag, getInteractions }: {
     source: VisualSource
     visual: CordisXReactVisual
     getDrag: () => ExtensionPointDragHandleV1 | undefined
+    getInteractions: () => ExtensionPointInteractionsV1 | undefined
   },
 ): React.ReactElement {
   const state = React.useSyncExternalStore(source.subscribe, source.getSnapshot)
   const drag = getDrag()
-  return React.createElement(visual.component, { state, ...(drag === undefined ? {} : { drag }) })
+  const interactions = getInteractions()
+  return React.createElement(visual.component, {
+    state,
+    ...(drag === undefined ? {} : { drag }),
+    ...(interactions === undefined ? {} : { interactions }),
+  })
 }
 function positioned(parent: HTMLElement): () => void {
   if (parent.ownerDocument.defaultView?.getComputedStyle(parent).position !== 'static') return () => {}
@@ -332,6 +341,8 @@ export class ComposerVisualRuntime {
     if (!drag() && !activate()) {
       mount.drag?.dispose()
       delete mount.drag
+      mount.interactions?.dispose()
+      delete mount.interactions
       return
     }
     mount.drag ??= new ComposerVisualDrag(
@@ -340,6 +351,12 @@ export class ComposerVisualRuntime {
       { drag, activate },
     )
     mount.drag.refresh()
+    mount.interactions ??= new ComposerVisualInteractions(
+      mount.seat.frame,
+      () => ({ width: mount.seat.frame.getBoundingClientRect().width, height: this.overlayHeight(mount.seat, record) }),
+      { drag, activate },
+    )
+    mount.interactions.refresh()
   }
 
   private mount(point: ExtensionPointVisualIdV1, record: Registration, seat: NativeComposerVisualSeat): void {
@@ -401,6 +418,7 @@ export class ComposerVisualRuntime {
         source,
         visual: record.loaded!,
         getDrag: () => this.mounted.get(point)?.drag?.handle,
+        getInteractions: () => this.mounted.get(point)?.interactions?.handle,
       }),
     }))
   }
@@ -411,6 +429,7 @@ export class ComposerVisualRuntime {
     this.mounted.delete(point)
     this.resize?.unobserve(point === 'composer.primary-action.visual' ? mount.seat.button : mount.seat.frame)
     mount.drag?.dispose()
+    mount.interactions?.dispose()
     mount.root.unmount()
     mount.container.remove()
     mount.restore()
