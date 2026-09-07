@@ -25,6 +25,7 @@ export interface LocalUsageOptions {
   readonly profileName: string
   readonly now?: () => number
   readonly maxScanBytes?: number
+  readonly scanCooldownMs?: number
   readonly maxScanMs?: number
 }
 const hash = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex')
@@ -138,6 +139,11 @@ export class LocalUsageHost {
           coverage: 'partial',
           diagnostics: [],
         },
+      }
+      // Reuse only a previously committed projection. Separate windows/processes
+      // share this cooldown; permission checks stay at the public-service boundary.
+      if (row && stamp - ledger.snapshot.observedThrough < (this.options.scanCooldownMs ?? 30_000)) {
+        return ledger.snapshot
       }
       const expectedSequence = row ? ledger.sequence : undefined
       const diagnostics = new Map<string, number>()

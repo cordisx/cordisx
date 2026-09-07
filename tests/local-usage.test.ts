@@ -22,7 +22,10 @@ const token = (input: number, last: number, ordinal: number) =>
     ordinal,
     payload: { type: 'token_count', info: { total_token_usage: total(input), last_token_usage: total(last) } },
   }) + '\n'
-async function fixture(t: TestContext, options: { maxScanBytes?: number } = {}) {
+async function fixture(
+  t: TestContext,
+  options: { maxScanBytes?: number; scanCooldownMs?: number; now?: () => number } = {},
+) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-usage-'))
   const home = path.join(root, 'home'), cache = path.join(root, 'cache')
   await mkdir(path.join(home, 'sessions'), { recursive: true })
@@ -34,6 +37,7 @@ async function fixture(t: TestContext, options: { maxScanBytes?: number } = {}) 
       cacheDir: cache,
       profileName: 'test',
       now: () => 1000,
+      scanCooldownMs: 0,
       ...options,
     })
     hosts.push(host)
@@ -185,4 +189,21 @@ it('invalid ledger fields fail closed and retain the original corrupted record',
   } finally {
     check.close()
   }
+})
+
+it('shares a durable scan cooldown and resumes validation after expiry', async t => {
+  let now = 1000
+  const f = await fixture(t, { scanCooldownMs: 30_000, now: () => now })
+  await writeFile(f.file(), header('owner') + token(100, 100, 1))
+  const baseline = ready(await f.create().read())
+  await appendFile(f.file(), token(150, 50, 2))
+  // Remove all rollout roots: a cached read must not enumerate or open them.
+  await rename(path.join(f.home, 'sessions'), path.join(f.home, 'hidden'))
+  await rename(path.join(f.home, 'archived_sessions'), path.join(f.home, 'hidden-archive'))
+  expect(await f.create().read()).toEqual(baseline)
+  now += 30_000
+  expect(await f.create().read()).toMatchObject({ status: 'unavailable', reason: 'source-unavailable' })
+  await rename(path.join(f.home, 'hidden'), path.join(f.home, 'sessions'))
+  await rename(path.join(f.home, 'hidden-archive'), path.join(f.home, 'archived_sessions'))
+  expect(ready(await f.create().read()).eligibleTokens).toBe(50)
 })

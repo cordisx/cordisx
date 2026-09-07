@@ -5,6 +5,8 @@ import type { CordisXPermissionCapabilityV4 } from './permission-contracts.js'
 export const CORDISX_PERMISSION_NAMESPACE = 'permission'
 
 const EN_UI_MESSAGES = Object.freeze({
+  'permission.usage.available': 'Validated local Token usage is available with a generation-scoped grant.',
+  'permission.usage.unavailable': 'The local usage bridge is unavailable.',
   'permission.usage.read.name': 'Read local usage totals',
   'permission.usage.read.description':
     'Read validated input and output Token totals observed in the current local profile.',
@@ -65,6 +67,8 @@ const EN_UI_MESSAGES = Object.freeze({
 })
 
 const ZH_UI_MESSAGES = Object.freeze({
+  'permission.usage.available': '本地 Token 用量可用；允许后仅对当前插件实例授予读取权限。',
+  'permission.usage.unavailable': '本地用量服务暂不可用。',
   'permission.usage.read.name': '读取本地用量汇总',
   'permission.usage.read.description': '读取当前本地配置档案内经过校验的输入与输出 Token 用量。',
   'permission.usage.read.risk': '插件可以使用本地用量汇总实现其功能。',

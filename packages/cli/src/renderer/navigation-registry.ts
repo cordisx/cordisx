@@ -302,6 +302,8 @@ export class NavigationRegistry extends NavigationRegistryRouting {
       effects.push(this.i18n.subscribeInternal(() => collection.registry.localeChanged()))
       const mount = {} as ManagedManagerPageMountRecord
       Object.assign(mount, {
+        reference: structuredClone(reference),
+        ready: false,
         owner: page.owner,
         contributionId,
         routeId: record.qualifiedId,
@@ -344,6 +346,7 @@ export class NavigationRegistry extends NavigationRegistryRouting {
             listener => this.i18n.subscribeInternal(listener),
           )
         if (typeof pageDispose === 'function') mount.pageDispose = pageDispose
+        mount.ready = true
         result = mount
         this.notify()
       } catch (error) {
@@ -367,7 +370,45 @@ export class NavigationRegistry extends NavigationRegistryRouting {
     })
   }
 
+  private managerNavigator: ((owner: string, reference: CordisXRouteReference) => void) | undefined
+  setManagerNavigator(navigate: (owner: string, reference: CordisXRouteReference) => void): void {
+    this.managerNavigator = navigate
+  }
   navigate(requestingOwner: string, reference: CordisXRouteReference): Promise<void> {
+    const record = this.findRecord(requestingOwner, reference.id)
+    if (record?.owner === requestingOwner && record.definition.outlet === 'manager.content' && this.managerNavigator) {
+      const resolution = this.managerContentRoute(requestingOwner, reference)
+      if (resolution.state !== 'available') {
+        return Promise.reject(new Error(resolution.detail ?? 'Manager route unavailable'))
+      }
+      // Manager mounting uses the registry queue; wait outside it to avoid deadlock.
+      return new Promise<void>((resolve, reject) => {
+        const finish = (error?: Error) => {
+          clearTimeout(timer)
+          unsubscribe()
+          error ? reject(error) : resolve()
+        }
+        const check = () => {
+          const mount = this.managerContentMount
+          if (
+            mount?.ready && !mount.disposed && mount.route === record && mount.content.isConnected
+            && sameRouteParams(mount.reference.params ?? {}, reference.params ?? {})
+          ) finish()
+          else if (this.disposed || this.findRecord(requestingOwner, reference.id) !== record) {
+            finish(new Error('Manager navigation was retired'))
+          }
+        }
+        const unsubscribe = this.subscribe(check)
+        const timer = setTimeout(() => finish(new Error('Manager content did not become ready')), 5_000)
+        try {
+          this.managerNavigator!(requestingOwner, reference)
+          check()
+        } catch (error) {
+          finish(error instanceof Error ? error : new Error(String(error)))
+        }
+      })
+    }
+
     return this.enqueue(() => this.navigateNow(requestingOwner, reference))
   }
 

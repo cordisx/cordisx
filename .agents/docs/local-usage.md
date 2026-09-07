@@ -8,6 +8,9 @@ commands. Permission is explicit and scoped to the current plugin generation.
 
 Read immediately after activation and subscribe for invalidation hints. The Host
 emits hints on permission changes and every five seconds while authorized.
+Actual rollout scans share a 30-second cooldown through the committed SQLite
+snapshot; hints and repeated reads during that interval reuse the last confirmed
+projection, including across windows and Launcher processes.
 Consumers coalesce reads, baseline the first accounting namespace, and atomically
 persist their business update with the last revision/aggregate. Identical reads
 and hints are not transactions. Reward rates and pet inventory belong in plugins.

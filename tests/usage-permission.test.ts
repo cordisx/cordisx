@@ -1,3 +1,4 @@
+import { usagePermissionAvailability } from '../packages/cli/src/renderer/usage-availability.js'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, normalizeUsageManifestV11 } from '../packages/cli/src/usage-permissions.js'
@@ -133,4 +134,13 @@ describe('public usage permission', () => {
     host.dispose()
     await fiber.dispose()
   })
+})
+
+it('keeps local usage recovery available without a DOM extension point provider', () => {
+  const scope = { profile: 'current' }
+  expect(usagePermissionAvailability(true, scope)).toMatchObject({
+    status: 'supported',
+    providers: [{ providerId: 'host-local-usage', scope }],
+  })
+  expect(usagePermissionAvailability(false, scope)).toMatchObject({ status: 'unavailable', providers: [] })
 })
