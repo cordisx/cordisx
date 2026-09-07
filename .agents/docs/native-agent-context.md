@@ -16,11 +16,10 @@ Malformed or incomplete definition catalogs fail before a native request.
 
 Explicit resume setup replaces the supplied definition context. Resume without
 setup passes the Session's saved setup back through the driver, so a fresh driver
-does not depend on an old renderer's prompt cache. This preserves definition
-context; it does not establish that a cold restart can resolve an arbitrary Host
-SessionId to a native thread. The current transport can reuse its in-memory thread
-mapping or an explicit native thread reference. Durable native thread mapping is
-a separate availability boundary.
+does not depend on an old renderer's prompt cache. Unknown Host SessionIds and
+caller-spelled native references never establish a native thread binding. Only
+the Host recovery store can supply a missing binding after checking the current
+owner and the exact supplied definition context.
 
 Subsequent turns use the thread's developer instructions. Do not append the same
 static definition to every user message or invent a `turn/start` instructions
@@ -53,12 +52,43 @@ execution. Native conversation history can retain an older descriptor path;
 authority is always decided by the Host at actual CLI execution. Revocation must
 remain effective even if a model repeats an old command.
 
-The first collaboration milestone supports a newly created Session, followed by
-its persisted domain run association, tool binding, and first submission. A
-revoked CLI-bound Session cannot currently resume: resume validates before the
-consumer can establish a replacement binding. This intentionally fails closed;
-a controlled owner-recovery and rebind phase remains unfinished. Ordinary
-never-bound Agent resume does not prove bound collaboration recovery.
+## Native Session recovery
+
+`NativeSessionRecoveryStore` owns persistence and authorization. The transport
+passes the current runtime owner to that store; it does not construct a plugin
+source, profile, principal, or thread ID from user input. A new native thread is
+acknowledged to the runtime only after its binding is saved. Each observed
+terminal turn saves its completed-turn checkpoint before a queued turn may run.
+Failed persistence blocks further execution; it does not silently advance the
+queue past an unavailable checkpoint.
+
+When the local Session ledger is absent, `resumeEntity` returns the existing
+`session-unavailable` result. A Session that exists without an
+`entity/definition-bound` event remains `unsupported` for entity-backed resume.
+An explicit inline AgentSetup resume may call the optional private driver
+`recover` method. Drivers without it retain the missing-Session refusal. A valid
+setup alone grants no recovery authority: the Host must resolve the exact
+persisted native binding and validate the supplied setup digest before the
+transport sends `thread/resume`. Returned thread identity must match, and a
+thread already mapped to another Host Session is refused.
+
+Successful missing-ledger recovery creates an `isSeeded: true` observation
+ledger with no initial events. Its observations begin at recovery time. It does
+not invent entity-binding, user, assistant, tool, or turn history that the Host
+did not persist. Existing native history and Room records retain their original
+identities. This inline recovery is not a claim that old entity-backed Session
+history has been reconstructed.
+
+The recovery store establishes the tool broker's `needs-rebind` fence as part of
+authorized resolution. Resume itself starts no task and bypasses the invalid old
+tool setup only through that controlled resolution. The consumer must establish
+a new binding for its same persisted Room run and Session before sending. Every
+actual turn, steer, or injection still obtains fresh tool setup and refuses the
+unbound recovery stage. Restored turns continue after the saved terminal-turn
+watermark; a native resume response's observed terminal count can raise but never
+lower it. Controlled recovery requires the native `turns` array and rejects any
+nonterminal turn. Missing turn state cannot establish an idle Session from a
+historical checkpoint alone. Known hot resume retains its existing behavior.
 
 ## Event and Room correlation
 
@@ -81,7 +111,8 @@ infer Room authority from prompt text.
 `tests/codex-desktop-agent-session-transport.test.ts` exercises real runtime
 composition against a controlled Desktop bridge: inherited context, implicit and
 explicit resume, unchanged user input, invalid setup rejection, fresh queued/steered/injected tool context, and
-revocation refusal. The context lifecycle cases substitute the broker getter;
+revocation refusal, authorized missing-ledger recovery, preserved turn numbering,
+and checkpoint ordering. The context lifecycle cases substitute the broker getter;
 `plugin-agent-tools.test.ts` separately exercises the real authority, resources,
 renderer service, and subprocess with a substituted CDP transfer. Together these
 are scoped component evidence. The transport suite proves
@@ -118,3 +149,44 @@ React listener, one transition notification, no browser push, and native Back.
 This is adapter evidence, not direct native UI verification. Keep an accepted
 CLI/Room window unchanged while preparing a separate navigation candidate;
 Host runtime HMR can revoke its live bindings.
+
+## Native persistence and explicit legacy recovery
+
+Native Host Sessions now use the existing authenticated owner-document CDP
+transport and locked CAS store. Each source/profile/plugin scope stores one
+native binding record per Session plus its recovery-afterward Session ledger.
+Creation saves the exact native thread id and setup digest before reporting
+success. Completed native turn counts are checkpointed before further work.
+A native resume never guesses a thread id from an unknown Host Session id.
+
+A source from before this persistence change has no old Host SessionEvent ledger
+to restore. The explicit local
+[receipt recovery script](../../packages/cli/scripts/recover-native-session-from-cli-receipt.mjs)
+validates one original Room run/Session, an actual native tool-call receipt,
+current authenticated local-thread evidence, terminal turn evidence, and exact
+Entity revision/catalog-to-native developer instruction bytes. It imports only
+the proved mapping. It must first run against a restoration-only copy and must
+recheck the original Room hash/revision before an authorized original-home write.
+It never merges same-named Rooms from different homes or overwrites a binding.
+
+The consumer may use the existing inline AgentSetup resume overload only after
+an exact missing Session result or for a marked seeded recovery Session. The
+Host's optional recovery driver resolves the scoped mapping and resumes that
+same native thread. A seeded empty ledger explicitly represents observations
+starting after recovery; it does not claim that unknown historical events were
+reconstructed. Native resume must return the same id and an explicit turns
+array containing only terminal turns. Unknown/running turn state fails closed.
+
+Successful resolution marks the single Agent tool state as requiring rebind.
+The recovered owner cannot execute a turn until the Room consumer validates its
+unchanged member/run/Session and issues a fresh bound CLI credential. Old tokens
+are never revived. Same-Session recovery does not rewrite the Room association
+or erase its outbox/history. History remains in the original Room and native
+thread; no old user task is replayed by recovery.
+
+Native Session RPC additionally requires a domain-separated Host-runtime HMAC
+credential and the current plugin owner principal. The Host credential remains
+in runtime-private composition, never plugin Context/setup, logs, or CLI binding
+files. Storage uses a reserved Host scope derived from the authenticated original
+source/profile/plugin tuple; the plugin's public document scope cannot read or
+replace the native records. Caller-supplied source/id fields never select a scope.

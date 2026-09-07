@@ -356,7 +356,7 @@ function resolveComposerSubmitSeat(document: Document, sessionId: string | undef
   }
 }
 
-function nativeToolbarCornerRadius(template: HTMLButtonElement): string {
+function nativeToolbarCornerRadius(template: HTMLElement): string {
   const style = template.ownerDocument.defaultView?.getComputedStyle(template)
   const radius = (style?.borderTopLeftRadius || style?.borderRadius || '').trim()
   return radius === '' ? '8px' : radius

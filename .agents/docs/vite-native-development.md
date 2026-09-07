@@ -254,3 +254,20 @@ checks, guess a generation identity, patch `app.asar`, or treat internal progres
 as user experience.
 
 For a release claim, also run the owner repository's full gates.
+
+## Explicit identity reuse across same-repository worktrees
+
+A `cordisx dev` composition may explicitly set a plugin's
+`developmentIdentityEntry` to its previous entry while `entry` selects the new
+code. This is a Host/user configuration choice, not a plugin manifest or runtime
+claim. Both files must exist, resolve within the same Git common-directory
+worktree family, and declare the same package plugin id. A mismatch aborts
+startup; it never silently chooses a new source identity.
+
+The Host preserves the existing `sha256(path.resolve(identityEntry))` identity
+algorithm. It deliberately does not substitute `realpath` when hashing the old
+entry. Code, resources, watches and generation hashes still come from the actual
+new entry. This permits an explicitly selected worktree update to keep the
+same Room storage scope without editing another live worktree or inheriting its
+credentials. It is a development assembly option, not a generic migration or
+historical compatibility service. Omission preserves existing behavior.

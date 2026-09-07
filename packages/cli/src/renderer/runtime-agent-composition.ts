@@ -239,7 +239,11 @@ import type { PlaygroundSessionScenarioCatalogV1 } from '../playground/session-s
 import type { CordisXOwnerDocumentsV1 } from '../durable-document-contracts.js'
 import type { RuntimeClosureScope } from './runtime-closure-scope.js'
 
-export const createRuntimeAgentSessionRuntime = (runtimeScope: RuntimeClosureScope) =>
+export const createRuntimeAgentSessionRuntime = (
+  runtimeScope: RuntimeClosureScope,
+  nativePersistence?: import('./agent-session-runtime.js').CordisXSessionEventPersistence,
+  nativeSessions?: readonly import('./agent-session-runtime.js').CordisXPersistedSession[],
+) =>
   new CordisXAgentSessionRuntime({
     driver: runtimeScope.agentSessionTransport()!,
     navigateAgentDetail: async (detail, sessionId) => {
@@ -334,6 +338,9 @@ export const createRuntimeAgentSessionRuntime = (runtimeScope: RuntimeClosureSco
       persistence: runtimeScope.playgroundAgentSessionPersistence()!,
       initialSessions: runtimeScope.recoveredPlaygroundSessions()!,
     }),
+    ...(nativePersistence === undefined
+      ? {}
+      : { persistence: nativePersistence, initialSessions: nativeSessions ?? [] }),
     pageAdmissionBindings: runtimeScope.pageAdmissionBindings()!,
     navigatePageAdmission: async (owner, _command, route) => {
       const controller = runtimeScope.controllerForAgentOwner()!(owner)
@@ -501,8 +508,9 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
       console: runtimeScope.pluginConsole()!,
       selectedNavigationActions: runtimeScope.selectedNavigationActions()!,
       identity: {
-        resolve: value => runtimeScope.agentSessionRuntime.definitionPresentation(value)
-          ?? runtimeScope.agentLoopBrokerV4()!.definitionPresentation(value),
+        resolve: value =>
+          runtimeScope.agentSessionRuntime.definitionPresentation(value)
+            ?? runtimeScope.agentLoopBrokerV4()!.definitionPresentation(value),
         resolveSettings: value => {
           const request = resolveHostManagerAgentDefinitionOpenRequest(
             runtimeScope.routeService?.managerContentAgentDefinitionTarget(value),

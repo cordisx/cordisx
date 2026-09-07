@@ -1,8 +1,9 @@
+import { type NativeSessionRecoveryStore, nativeSessionRecoveryStore } from './native-agent-session-recovery.js'
 import { getAgentToolSetup } from './plugin-agent-tools.js'
 import { nativeAgentToolContext } from './codex-desktop-agent-tool-context.js'
 import type { AgentOptions, AgentSetup } from '@cordisx/protocol/agents/v1'
 import { nativeAgentInstructions } from './codex-desktop-agent-setup.js'
-import type { ApprovalOutcome, UserMessage } from '@cordisx/protocol/sessions/v1'
+import type { ApprovalOutcome, PluginOwnerIdentity, UserMessage } from '@cordisx/protocol/sessions/v1'
 import type {
   CordisXDriverAgentStatus,
   CordisXDriverApprovalRequest,
@@ -60,6 +61,10 @@ interface ActiveTurn {
 interface NativeSession {
   readonly sessionId: string
   readonly threadId: string
+  readonly owner: PluginOwnerIdentity
+  readonly setup?: AgentSetup | undefined
+  checkpointFailed?: boolean
+  checkpointPending?: boolean
   nextTurn: number
   active?: ActiveTurn
   starting?: { readonly ordinal: number; readonly message: UserMessage }
@@ -117,11 +122,14 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
   private constructor(
     private readonly bridge: Required<ElectronBridge>,
     private readonly pin: CodexDesktopAgentSessionTransportPin,
+    private readonly recovery: NativeSessionRecoveryStore,
   ) {
     window.addEventListener('message', this.receive, true)
   }
 
-  static async connect(): Promise<CodexDesktopAgentSessionTransport | undefined> {
+  static async connect(
+    recovery: NativeSessionRecoveryStore = nativeSessionRecoveryStore,
+  ): Promise<CodexDesktopAgentSessionTransport | undefined> {
     const page = globalThis as typeof globalThis & {
       readonly electronBridge?: ElectronBridge
       readonly codexWindowType?: unknown
@@ -140,14 +148,19 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
         && options.buildFlavor === candidate.buildFlavor
       ))
       if (pin === undefined) return undefined
-      return new CodexDesktopAgentSessionTransport(bridge as Required<ElectronBridge>, pin)
+      return new CodexDesktopAgentSessionTransport(bridge as Required<ElectronBridge>, pin, recovery)
     } catch {
       return undefined
     }
   }
 
   async create(
-    input: { readonly sessionId: string; readonly options: AgentOptions; readonly setup?: AgentSetup | undefined },
+    input: {
+      readonly sessionId: string
+      readonly owner: PluginOwnerIdentity
+      readonly options: AgentOptions
+      readonly setup?: AgentSetup | undefined
+    },
   ): Promise<
     | { readonly status: 'accepted'; readonly detail: { readonly kind: 'host'; readonly ref: string } }
     | { readonly status: 'unavailable'; readonly code: 'host-unavailable' | 'unsupported' }
@@ -175,7 +188,21 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       if (threadId === undefined || this.byThread.has(threadId)) {
         return { status: 'unavailable', code: 'host-unavailable' }
       }
-      const session: NativeSession = { sessionId: input.sessionId, threadId, nextTurn: 0, queue: [], status: 'idle' }
+      await this.recovery.saveBinding(input.owner, {
+        sessionId: input.sessionId,
+        threadId,
+        completedTurns: 0,
+        ...(input.setup === undefined ? {} : { setup: clone(input.setup) }),
+      })
+      const session: NativeSession = {
+        sessionId: input.sessionId,
+        threadId,
+        owner: clone(input.owner),
+        ...(input.setup === undefined ? {} : { setup: clone(input.setup) }),
+        nextTurn: 0,
+        queue: [],
+        status: 'idle',
+      }
       this.sessions.set(input.sessionId, session)
       this.byThread.set(threadId, session)
       return { status: 'accepted', detail: { kind: 'host', ref: `codex-thread:${threadId}` } }
@@ -184,10 +211,27 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     }
   }
 
-  async resume(input: { readonly sessionId: string; readonly setup?: AgentSetup | undefined }): Promise<
-    | { readonly status: 'accepted'; readonly detail: { readonly kind: 'host'; readonly ref: string } }
-    | { readonly status: 'unavailable'; readonly code: 'host-unavailable' | 'unsupported' }
-  > {
+  async recover(
+    input: {
+      readonly sessionId: string
+      readonly owner: PluginOwnerIdentity
+      readonly options: AgentOptions
+      readonly setup: AgentSetup
+    },
+  ): ReturnType<CordisXPrivateAgentDriver['resume']> {
+    return await this.resumeNative(input, true)
+  }
+
+  async resume(
+    input: { readonly sessionId: string; readonly owner: PluginOwnerIdentity; readonly setup?: AgentSetup | undefined },
+  ): ReturnType<CordisXPrivateAgentDriver['resume']> {
+    return await this.resumeNative(input, false)
+  }
+
+  private async resumeNative(
+    input: { readonly sessionId: string; readonly owner: PluginOwnerIdentity; readonly setup?: AgentSetup | undefined },
+    recovering: boolean,
+  ): ReturnType<CordisXPrivateAgentDriver['resume']> {
     if (this.disposed || this.connectionReplaced) return { status: 'unavailable', code: 'host-unavailable' }
     let developerInstructions: string | undefined
     try {
@@ -196,23 +240,73 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       return { status: 'unavailable', code: 'unsupported' }
     }
     const known = this.sessions.get(input.sessionId)
-    const threadId = known?.threadId
-      ?? (input.sessionId.startsWith('codex-thread:') ? input.sessionId.slice('codex-thread:'.length) : input.sessionId)
+    if (
+      known?.active !== undefined || known?.starting !== undefined || known?.checkpointPending === true
+      || (known?.queue.length ?? 0) > 0
+    ) {
+      return { status: 'unavailable', code: 'unsupported' }
+    }
     try {
-      await getAgentToolSetup(input.sessionId)
+      let threadId = known?.threadId
+      let completedTurns = known?.nextTurn ?? 0
+      let needsRecovery = recovering || known === undefined || known.checkpointFailed === true
+        || known.owner.pluginId !== input.owner.pluginId || known.owner.generation !== input.owner.generation
+      if (!needsRecovery) {
+        try {
+          await getAgentToolSetup(input.sessionId)
+        } catch {
+          needsRecovery = true
+        }
+      }
+      if (needsRecovery) {
+        // Only this Host-authorized lookup may cross the missing-ledger or
+        // revoked-tool boundary. It also establishes the broker's rebind fence.
+        const binding = await this.recovery.resolveBinding(input.owner, {
+          sessionId: input.sessionId,
+          ...(input.setup === undefined ? {} : { setup: clone(input.setup) }),
+        })
+        if (binding === undefined) return { status: 'unavailable', code: 'unsupported' }
+        if (
+          !text(binding.threadId) || !Number.isSafeInteger(binding.completedTurns) || binding.completedTurns < 0
+          || (threadId !== undefined && binding.threadId !== threadId)
+        ) {
+          return { status: 'unavailable', code: 'unsupported' }
+        }
+        threadId = binding.threadId
+        completedTurns = Math.max(completedTurns, binding.completedTurns)
+      }
+      if (threadId === undefined) return { status: 'unavailable', code: 'unsupported' }
+      const collision = this.byThread.get(threadId)
+      if (collision !== undefined && collision.sessionId !== input.sessionId) {
+        return { status: 'unavailable', code: 'unsupported' }
+      }
       const result = object(
         await this.request('thread/resume', {
           threadId,
           ...(developerInstructions === undefined ? {} : { developerInstructions }),
         }),
       )
-      const resumed = text(object(result?.thread)?.id)
-      if (resumed !== threadId) return { status: 'unavailable', code: 'host-unavailable' }
-      if (known === undefined) {
-        const session: NativeSession = { sessionId: input.sessionId, threadId, nextTurn: 0, queue: [], status: 'idle' }
-        this.sessions.set(input.sessionId, session)
-        this.byThread.set(threadId, session)
+      const thread = object(result?.thread)
+      if (text(thread?.id) !== threadId) return { status: 'unavailable', code: 'host-unavailable' }
+      if (needsRecovery && !Array.isArray(thread?.turns)) return { status: 'unavailable', code: 'unsupported' }
+      if (Array.isArray(thread?.turns)) {
+        const terminal = thread.turns.filter(turn =>
+          ['completed', 'interrupted', 'failed'].includes(String(object(turn)?.status))
+        )
+        if (terminal.length !== thread.turns.length) return { status: 'unavailable', code: 'unsupported' }
+        completedTurns = Math.max(completedTurns, terminal.length)
       }
+      const session: NativeSession = {
+        sessionId: input.sessionId,
+        threadId,
+        owner: clone(input.owner),
+        ...(input.setup === undefined ? {} : { setup: clone(input.setup) }),
+        nextTurn: completedTurns,
+        queue: [],
+        status: 'idle',
+      }
+      this.sessions.set(input.sessionId, session)
+      this.byThread.set(threadId, session)
       return { status: 'accepted', detail: { kind: 'host', ref: `codex-thread:${threadId}` } }
     } catch {
       return { status: 'unavailable', code: 'host-unavailable' }
@@ -226,11 +320,15 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     readonly wakeup: boolean
   }): Promise<'accepted' | 'unavailable'> {
     const session = this.sessions.get(input.sessionId)
-    if (this.disposed || session === undefined) return 'unavailable'
-    if (input.target === 'next-turn' && (session.active !== undefined || session.starting !== undefined)) {
+    if (this.disposed || session === undefined || session.checkpointFailed === true) return 'unavailable'
+    if (
+      input.target === 'next-turn'
+      && (session.active !== undefined || session.starting !== undefined || session.checkpointPending === true)
+    ) {
       session.queue.push({ message: clone(input.message), target: input.target, wakeup: input.wakeup })
       return 'accepted'
     }
+    if (session.checkpointPending === true) return 'unavailable'
     if (input.target === 'next-step' && input.wakeup === false) return await this.inject(session, input.message)
     if (input.target === 'next-step' && session.active !== undefined) return await this.steer(session, input.message)
     return await this.startTurn(session, input.message)
@@ -306,8 +404,11 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
 
   private async startTurn(session: NativeSession, message: UserMessage): Promise<'accepted' | 'unavailable'> {
     const input = messageInput(message)
-    if (input === undefined || session.starting !== undefined || session.active !== undefined) return 'unavailable'
-    const ordinal = ++session.nextTurn
+    if (
+      input === undefined || session.starting !== undefined || session.active !== undefined
+      || session.checkpointFailed === true
+    ) return 'unavailable'
+    const ordinal = session.nextTurn + 1
     session.starting = { ordinal, message: clone(message) }
     this.emitStatus({ sessionId: session.sessionId, status: 'running' })
     try {
@@ -325,6 +426,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       )
       const turnId = text(object(result?.turn)?.id)
       if (turnId === undefined) throw new Error('turn/start returned no turn id')
+      session.nextTurn = Math.max(session.nextTurn, ordinal)
       const observed = session.active as ActiveTurn | undefined
       if (observed === undefined) {
         session.active = { id: turnId, ordinal, terminal: false, assistant: new Map(), emittedTools: new Set() }
@@ -490,7 +592,8 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     const turnId = text(params.turnId) ?? text(nativeTurn?.id)
     if (method === 'turn/started') {
       if (turnId === undefined) return
-      const ordinal = session.starting?.ordinal ?? ++session.nextTurn
+      const ordinal = session.starting?.ordinal ?? session.nextTurn + 1
+      session.nextTurn = Math.max(session.nextTurn, ordinal)
       session.active ??= { id: turnId, ordinal, terminal: false, assistant: new Map(), emittedTools: new Set() }
       this.emitStatus({ sessionId: session.sessionId, status: 'running' })
       this.emit({ sessionId: session.sessionId, type: 'turn/start', data: { turn: session.active.ordinal } })
@@ -639,6 +742,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
   private completeTurn(session: NativeSession, active: ActiveTurn, turn: Record<string, unknown> | undefined): void {
     if (active.terminal) return
     active.terminal = true
+    session.checkpointPending = true
     const status = text(turn?.status)
     const error = object(turn?.error)
     const reason = status === 'completed'
@@ -655,7 +759,26 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     this.emit({ sessionId: session.sessionId, type: 'step/end', data: { turn: active.ordinal, step: 1 } })
     this.emit({ sessionId: session.sessionId, type: 'turn/end', data: { turn: active.ordinal, reason } })
     if (session.active === active) delete session.active
-    void this.dispatchNext(session)
+    void this.checkpointCompletedTurn(session, active.ordinal)
+  }
+
+  private async checkpointCompletedTurn(session: NativeSession, completedTurns: number): Promise<void> {
+    try {
+      await this.recovery.saveBinding(session.owner, {
+        sessionId: session.sessionId,
+        threadId: session.threadId,
+        completedTurns,
+        ...(session.setup === undefined ? {} : { setup: clone(session.setup) }),
+      })
+      session.checkpointPending = false
+      if (!this.disposed && !this.connectionReplaced && this.sessions.get(session.sessionId) === session) {
+        await this.dispatchNext(session)
+      }
+    } catch {
+      session.checkpointPending = false
+      session.checkpointFailed = true
+      this.emitStatus({ sessionId: session.sessionId, status: 'idle' })
+    }
   }
 
   private async dispatchNext(session: NativeSession): Promise<void> {

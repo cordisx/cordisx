@@ -1,3 +1,4 @@
+import { issueNativeSessionHostToken } from './native-agent-session-rpc.js'
 import { createHash } from 'node:crypto'
 import { access, readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -300,6 +301,9 @@ export async function buildRendererCompositionSource(
     })),
     ...(config.codex.agentLoopBackend === 'local-cli' ? [{ id: 'codex-local', displayName: 'Local Codex' }] : []),
   ]
+  const nativeSessionBridgeToken = options.ownerDocumentAuthority === undefined
+    ? undefined
+    : issueNativeSessionHostToken(options.ownerDocumentAuthority)
   const ownerDocumentBindings = options.ownerDocumentAuthority === undefined
     ? undefined
     : enabled.map((plugin, index) => {
@@ -358,6 +362,10 @@ export async function buildRendererCompositionSource(
       ? ''
       : `, playgroundSessionScenarios: ${JSON.stringify(options.playgroundSessionScenarios)}`
   }${ownerDocumentBindings === undefined ? '' : `, ownerDocumentBindings: ${JSON.stringify(ownerDocumentBindings)}`}${
+    nativeSessionBridgeToken === undefined
+      ? ''
+      : `, nativeSessionBridgeToken: ${JSON.stringify(nativeSessionBridgeToken)}`
+  }${
     options.serviceConfigBridgeToken === undefined
       ? ''
       : `, serviceConfigBridgeToken: ${JSON.stringify(options.serviceConfigBridgeToken)}`

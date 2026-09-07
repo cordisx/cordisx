@@ -344,6 +344,7 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
     setup: AgentSetup | undefined,
     definitions: readonly CordisXResolvedAgentDefinition[] | undefined,
     entityBinding?: EntitySessionDefinitionBinding,
+    isSeeded = false,
   ): Promise<SessionRecord | undefined> {
     const initialEvents: SessionEvent[] = entityBinding === undefined ? [] : [Object.freeze({
       $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/session-event.v1.schema.json',
@@ -359,7 +360,7 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
     const record: SessionRecord = {
       id,
       generation: 1,
-      header: Object.freeze({ id, formatVersion: 1, createdAt: this.now(), isSeeded: false }),
+      header: Object.freeze({ id, formatVersion: 1, createdAt: this.now(), isSeeded }),
       events: initialEvents,
       setup: setup === undefined ? undefined : Object.freeze(clone(setup)),
       definitions: definitions === undefined ? undefined : Object.freeze(definitions.map(clone)),
