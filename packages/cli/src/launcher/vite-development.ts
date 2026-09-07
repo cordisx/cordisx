@@ -42,6 +42,12 @@ const PREAMBLE = 'virtual:cordisx-native-preamble'
 const REACT_PREPARE = 'virtual:cordisx-native-react-prepare'
 const PLUGIN_PREFIX = 'virtual:cordisx-native-plugin/'
 const SHARED_PREFIX = 'virtual:cordisx-native-shared/'
+const DEVELOPMENT_STRUCTURED_UI_SURFACES = [
+  'sidebar.navigation.items',
+  'main',
+  'manager.settings.navigation-items',
+  'manager.content',
+] as const
 const sourceMode = import.meta.url.endsWith('.ts')
 const extension = sourceMode ? 'ts' : 'js'
 const rendererPath = fileURLToPath(new URL(`../renderer/runtime.${extension}`, import.meta.url))
@@ -403,6 +409,7 @@ if (previous) await previous.dispose(true);
 const disposeSharedReactRuntime = prepareCordisXViteReactRuntime(document);
 const descriptors = ${composition.pluginsSource};
 const pluginUrls = ${JSON.stringify(pluginUrls)};
+const developmentStructuredUiSurfaces = ${JSON.stringify(DEVELOPMENT_STRUCTURED_UI_SURFACES)};
 const withDescriptor = artifact => ({ ...artifact, plugin: { ...descriptors.find(item => item.id === artifact.plugin.id), ...artifact.plugin } });
 const replacePlugin = (pluginId, timestamp) => {
   const index = descriptors.findIndex(plugin => plugin.id === pluginId);
@@ -453,7 +460,17 @@ try {
   disposeSharedReactRuntime();
   throw error;
 }
-export const ready = client.restart(installCordisX);
+export const ready = client.restart(installCordisX).then(async runtime => {
+  // cordisx dev explicitly selects these exact local sources. Grant only
+  // their structured UI seats for this renderer process; Agent, approval,
+  // data and Host-DOM capabilities retain their normal policies.
+  for (const plugin of descriptors) {
+    for (const pointId of developmentStructuredUiSurfaces) {
+      await runtime.setExtensionPointPolicy(plugin.source, plugin.id, pointId, 'allow');
+    }
+  }
+  return runtime;
+});
 if (import.meta.hot) {
   ${
       pluginImports.length === 0
