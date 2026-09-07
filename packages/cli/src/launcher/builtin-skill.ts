@@ -21,7 +21,13 @@ interface SkillFile {
   readonly content: Buffer
 }
 
+interface SkillProvenance {
+  readonly version: string
+  readonly source: string
+}
+
 interface SkillManifest {
+  readonly provenance?: SkillProvenance
   readonly files: readonly SkillFile[]
   readonly contentDigest: `sha256:${string}`
 }
@@ -29,6 +35,7 @@ interface SkillManifest {
 interface CordisXSkillMarkerV1 {
   readonly contract: typeof CORDISX_SKILL_MARKER_CONTRACT
   readonly schemaVersion: 1
+  readonly provenance?: SkillProvenance
   readonly managedBy: 'cordisx'
   readonly skillName: typeof CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME
   readonly contentDigest: `sha256:${string}`
@@ -142,7 +149,19 @@ async function sourceManifest(sourceDir: string): Promise<SkillManifest> {
   for (const required of REQUIRED_SKILL_FILES) {
     if (!names.has(required)) throw new Error(`bundled CordisX Skill source is missing ${required}`)
   }
-  return { files, contentDigest: digestSkillFiles(files) }
+  const versionFile = files.find(file => file.relativePath === 'version.json')
+  let provenance: SkillProvenance | undefined
+  if (versionFile !== undefined) {
+    const value: unknown = JSON.parse(versionFile.content.toString('utf8'))
+    if (
+      value === null || typeof value !== 'object'
+      || !('version' in value) || typeof value.version !== 'string' || value.version.trim() === ''
+      || !('source' in value)
+      || value.source !== 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-plugin-development'
+    ) throw new Error('bundled CordisX Skill has invalid version.json provenance')
+    provenance = { version: value.version, source: value.source }
+  }
+  return { files, contentDigest: digestSkillFiles(files), ...(provenance === undefined ? {} : { provenance }) }
 }
 
 function parseMarker(raw: string): CordisXSkillMarkerV1 | undefined {
@@ -226,6 +245,7 @@ async function copyManifestToStage(manifest: SkillManifest, stageDir: string): P
     managedBy: 'cordisx',
     skillName: CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME,
     contentDigest: manifest.contentDigest,
+    ...(manifest.provenance === undefined ? {} : { provenance: manifest.provenance }),
   }
   await writeFile(
     path.join(stageDir, CORDISX_SKILL_MARKER_FILE),
@@ -237,6 +257,7 @@ async function copyManifestToStage(manifest: SkillManifest, stageDir: string): P
 async function adoptExactUnmanagedTarget(
   targetDir: string,
   expectedDigest: `sha256:${string}`,
+  provenance: SkillProvenance | undefined,
   testHooks: CordisXSkillDeploymentTestHooks | undefined,
 ): Promise<void> {
   const markerPath = path.join(targetDir, CORDISX_SKILL_MARKER_FILE)
@@ -246,6 +267,7 @@ async function adoptExactUnmanagedTarget(
     managedBy: 'cordisx',
     skillName: CORDISX_PLUGIN_DEVELOPMENT_SKILL_NAME,
     contentDigest: expectedDigest,
+    ...(provenance === undefined ? {} : { provenance }),
   }
   const markerSource = `${JSON.stringify(marker, null, 2)}\n`
   const markerHandle = await open(markerPath, 'wx', 0o600)
@@ -474,7 +496,7 @@ export async function deployBundledCordisXSkillToHome(
         throw new CordisXSkillConflictError(targetDir, 'already exists with unmanaged or user-modified content')
       }
       try {
-        await adoptExactUnmanagedTarget(targetDir, manifest.contentDigest, options.testHooks)
+        await adoptExactUnmanagedTarget(targetDir, manifest.contentDigest, manifest.provenance, options.testHooks)
         return { status: 'unchanged', effectiveHome, targetDir, contentDigest: manifest.contentDigest }
       } catch (error) {
         if (!isNodeError(error, 'EEXIST')) throw error

@@ -11,6 +11,15 @@ import type { CordisXCommandService } from '../commands.js'
 import type { CordisXRouteService } from '../navigation.js'
 import type { CordisXI18nService } from '../i18n.js'
 import type { TransientCanvasCoordinator } from '../transient-canvas.js'
+import type {
+  HostSelectedNavigationActionCandidate,
+  SelectedNavigationActionRegistry,
+} from '../selected-navigation-actions.js'
+
+export interface NavigationActionCandidate extends HostSelectedNavigationActionCandidate {
+  readonly actionContainer: HTMLElement
+  presented: boolean
+}
 
 abstract class StructuredSurfaceRendererBase {
   protected readonly roots = new Map<string, HTMLElement>()
@@ -48,6 +57,7 @@ abstract class StructuredSurfaceRendererBase {
   protected navigationRenderSignature: string | undefined
 
   protected navigationActionDisposers: (() => void)[] = []
+  protected navigationActionCandidates: NavigationActionCandidate[] = []
 
   protected reasoningProjection: ReasoningIntensityProjection | undefined
 
@@ -63,6 +73,7 @@ abstract class StructuredSurfaceRendererBase {
     protected readonly i18n: CordisXI18nService,
     protected readonly reasoningControl: ReasoningIntensityControlBinding,
     protected readonly transientCanvas: TransientCanvasCoordinator | undefined,
+    protected readonly selectedNavigationActions: SelectedNavigationActionRegistry | undefined,
     protected readonly adapterIdentity: Readonly<{
       generation: string
       adapterVersion: string

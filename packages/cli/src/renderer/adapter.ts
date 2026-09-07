@@ -19,6 +19,7 @@ import {
   ControlledSurfacePolicyBroker,
 } from './controlled-surfaces.js'
 import { StructuredSurfaceRenderer } from './adapter/renderer-layout.js'
+import type { SelectedNavigationActionRegistry } from './selected-navigation-actions.js'
 
 export interface CodexAdapterHandle {
   dispose(): void
@@ -30,6 +31,7 @@ export interface CodexAdapterOptions {
   readonly hostId?: string
   readonly profileId?: string
   readonly transientCanvas?: TransientCanvasCoordinator
+  readonly selectedNavigationActions?: SelectedNavigationActionRegistry
 }
 
 export function installCodexAdapter(
@@ -139,6 +141,7 @@ export function installCodexAdapter(
     i18n,
     reasoningControl,
     options.transientCanvas,
+    options.selectedNavigationActions,
     {
       generation,
       adapterVersion: options.adapterVersion ?? 'ui-catalog-v2',
@@ -242,6 +245,7 @@ export function installPlaygroundAdapter(
       i18n,
       reasoningControl,
       options.transientCanvas,
+      options.selectedNavigationActions,
       {
         generation,
         adapterVersion: options.adapterVersion ?? 'ui-playground-v1',

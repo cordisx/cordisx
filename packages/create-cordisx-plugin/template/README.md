@@ -51,3 +51,11 @@ CordisX plugin interfaces, it may be commercial and use a license you choose.
 Replace `UNLICENSED` in `package.json` with that license before distribution.
 The Exception does not cover copying or modifying CordisX host/runtime/CLI code
 or using private interfaces.
+
+Plugin-owned styles use `import './details.css'` in the owning component (or
+lazy page module). Keep `src/vite-env.d.ts`: Vite types distinguish side-effect
+CSS, CSS Module class maps, and explicit `?inline` text. Ordinary CSS imports
+do not return strings. Component unmount is not CSS-module disposal; verify
+plugin replacement separately from CSS HMR. See the maintained
+[CSS guidance](https://github.com/cordisx/cordisx/blob/main/skills/cordisx-plugin-development/references/css-and-lifecycle.md)
+for lifecycle boundaries and installed-Host CSS Modules limitations.

@@ -410,10 +410,18 @@ describe('Node Cordis Channel service', () => {
     })
     const root = new Context()
     new CordisXChannelService(root, runtime)
-    const adapterContext = bindChannelPluginContext(root, SIMULATOR_ADAPTER_IDENTITY)
-    const consumerContext = bindChannelPluginContext(root, SIMULATOR_CONSUMER_IDENTITY)
-    const adapter = new SimulatedChannelAdapter()
+    const adapterContext = bindChannelPluginContext(root, SIMULATOR_ADAPTER_IDENTITY, 7)
+    const consumerContext = bindChannelPluginContext(root, SIMULATOR_CONSUMER_IDENTITY, 11)
+    const adapter = new SimulatedChannelAdapter({ configurationRevision: 7 })
     const handle = await adapterContext.channel.adapters.register(adapter)
+
+    await expect(adapterContext.channel.adapters.register(
+      new SimulatedChannelAdapter({ configurationRevision: 6 }),
+    )).rejects.toThrow('does not match the Host stamp')
+    await expect(adapterContext.channel.adapters.register(
+      new SimulatedChannelAdapter({ configurationRevision: 8 }),
+    )).rejects.toThrow('does not match the Host stamp')
+    expect(runtime.snapshot().accounts).toHaveLength(1)
 
     await expect(consumerContext.channel.connections.list()).resolves.toEqual([
       expect.objectContaining({ ref: adapter.descriptor.ref, connectionState: 'ready' }),
@@ -423,6 +431,11 @@ describe('Node Cordis Channel service', () => {
     expect('connection' in consumerContext.channel).toBe(false)
     expect('runtime' in consumerContext.channel).toBe(false)
     expect('store' in consumerContext.channel).toBe(false)
+    expect(adapterContext.channel.configuration).toEqual({ revision: 7 })
+    expect(consumerContext.channel.configuration).toEqual({ revision: 11 })
+    expect(Object.isFrozen(adapterContext.channel.configuration)).toBe(true)
+    expect(Reflect.set(adapterContext.channel.configuration, 'revision', 99)).toBe(false)
+    expect(Reflect.set(adapterContext.channel, 'configuration', { revision: 99 })).toBe(false)
 
     const observed: string[] = []
     const disposeSubscription = await consumerContext.channel.messages.subscribe(
@@ -462,17 +475,18 @@ describe('Node Cordis Channel service', () => {
     })
     const root = new Context()
     new CordisXChannelService(root, runtime)
-    const adapterContext = bindChannelPluginContext(root, SIMULATOR_ADAPTER_IDENTITY)
+    const adapterContext = bindChannelPluginContext(root, SIMULATOR_ADAPTER_IDENTITY, 1)
     const adapter = new SimulatedChannelAdapter()
     await adapterContext.channel.adapters.register(adapter)
 
     await expect(root.channel.connections.list()).rejects.toThrow('launcher-bound Node plugin identity')
+    expect(() => root.channel.configuration).toThrow('launcher-stamped service configuration revision')
     const deniedIdentity: ChannelPluginIdentity = {
       ...SIMULATOR_CONSUMER_IDENTITY,
       generation: 'denied-generation',
     }
     permissions.set(deniedIdentity, 'channel.events.subscribe', 'deny')
-    const deniedContext = bindChannelPluginContext(root, deniedIdentity)
+    const deniedContext = bindChannelPluginContext(root, deniedIdentity, 1)
     await expect(deniedContext.channel.messages.subscribe(
       { account: adapter.descriptor.ref },
       () => undefined,

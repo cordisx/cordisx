@@ -31,6 +31,7 @@ for (
     'template/_gitignore',
     'template/package.json',
     'template/src/overview-page.tsx',
+    'template/src/vite-env.d.ts',
     'template/src/{{packageName}}.tsx',
     'template/test/manifest.mjs',
     'template/tsconfig.json',

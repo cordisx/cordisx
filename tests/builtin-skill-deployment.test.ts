@@ -157,6 +157,53 @@ describe('built-in CordisX Skill deployment', () => {
     })
   })
 
+  it('upgrades a legacy managed tree with provenance while protecting edited references', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-skill-provenance-'))
+    try {
+      const home = path.join(root, 'home')
+      const source = await createSkillSource(root, 'legacy')
+      const plan = sharedPlan(home)
+      const old = await deployBundledCordisXSkill(plan, { sourceDir: source })
+      const provenance = {
+        version: '2026-09-07.1',
+        source: 'https://github.com/cordisx/cordisx/tree/main/skills/cordisx-plugin-development',
+      }
+      await writeFile(path.join(source, 'version.json'), JSON.stringify(provenance))
+      await writeFile(path.join(source, 'references', 'css.md'), 'component and generation lifetimes differ')
+      const upgraded = await deployBundledCordisXSkill(plan, { sourceDir: source })
+      expect(upgraded.status).toBe('upgraded')
+      expect(upgraded.contentDigest).not.toBe(old.contentDigest)
+      const marker = JSON.parse(await readFile(path.join(upgraded.targetDir, CORDISX_SKILL_MARKER_FILE), 'utf8'))
+      expect(marker.provenance).toEqual(provenance)
+      expect((await deployBundledCordisXSkill(plan, { sourceDir: source })).status).toBe('unchanged')
+      const edited = path.join(upgraded.targetDir, 'references', 'css.md')
+      await writeFile(edited, 'my project-specific guidance')
+      await writeFile(path.join(source, 'version.json'), JSON.stringify({ ...provenance, version: '2026-09-07.2' }))
+      await expect(deployBundledCordisXSkill(plan, { sourceDir: source })).rejects.toBeInstanceOf(
+        CordisXSkillConflictError,
+      )
+      expect(await readFile(edited, 'utf8')).toBe('my project-specific guidance')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects invalid bundled provenance before changing the installed Skill', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-skill-invalid-provenance-'))
+    try {
+      const source = await createSkillSource(root, 'legacy')
+      const plan = sharedPlan(path.join(root, 'home'))
+      const installed = await deployBundledCordisXSkill(plan, { sourceDir: source })
+      const markerPath = path.join(installed.targetDir, CORDISX_SKILL_MARKER_FILE)
+      const before = await readFile(markerPath, 'utf8')
+      await writeFile(path.join(source, 'version.json'), JSON.stringify({ version: '', source: 'elsewhere' }))
+      await expect(deployBundledCordisXSkill(plan, { sourceDir: source })).rejects.toThrow('invalid version.json')
+      expect(await readFile(markerPath, 'utf8')).toBe(before)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('serializes concurrent launch deployments before inspecting or replacing the target', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-builtin-skill-concurrent-'))
     const home = path.join(root, 'home')

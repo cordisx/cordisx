@@ -61,3 +61,28 @@ export function invalidateNativeVitePluginSources(
   const seen = new Set([...graph.idToModuleMap.values()].filter(module => !owned.has(module)))
   for (const module of owned) graph.invalidateModule(module, seen, timestamp, true)
 }
+
+/** Validate the complete plugin import graph before exposing its development generation. */
+export async function validateNativeVitePlugin(
+  server: ViteDevServer,
+  virtualId: string,
+  pluginId: string,
+): Promise<void> {
+  const validate = async (module: ModuleNode, seen = new Set<ModuleNode>()): Promise<void> => {
+    if (seen.has(module)) return
+    seen.add(module)
+    await server.transformRequest(module.url)
+    for (const dependency of module.importedModules) await validate(dependency, seen)
+  }
+  try {
+    const request = '\0' + virtualId
+    await server.transformRequest(request)
+    const module = server.moduleGraph.getModuleById(request)
+    if (module === undefined) throw new Error(`Vite did not create a module graph for plugin ${pluginId}`)
+    await validate(module)
+  } catch (error) {
+    throw new Error(`Build failed for plugin ${pluginId}: ${error instanceof Error ? error.message : String(error)}`, {
+      cause: error,
+    })
+  }
+}

@@ -75,6 +75,9 @@ One Host runtime owns plugin fibers and the shared React singleton. Reload and
 replacement retire registrations and pending operations through that lifecycle.
 Product pages may own their complete internal renderer inside a controlled page
 body, while the Host retains routing, outlet, lifecycle, and authority fences.
+Agent conversation products may instead register a versioned data-only source;
+the Host then owns the conversation shell, composer, actions, inspector,
+avatars, styling, and page-mount cleanup.
 Commands and route activation retain exact owner, Session, binding, and
 generation coordinates; product visuals cross into Host-owned rows only as
 validated generic snapshots.

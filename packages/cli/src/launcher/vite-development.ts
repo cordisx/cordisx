@@ -11,7 +11,11 @@ import { type BuildRendererBundleOptions, buildRendererCompositionSource } from 
 import type { CordisXConfig, CordisXConfigPlugin } from './config.js'
 import { findFreeLoopbackPort } from './process.js'
 import { buildLocalDevelopmentPlugin, localDevelopmentPackageInfo } from './development.js'
-import type { CordisXPluginManifestV7, CordisXPluginManifestV8 } from '../permission-contracts.js'
+import type {
+  CordisXPluginManifestV7,
+  CordisXPluginManifestV8,
+  CordisXPluginManifestV9,
+} from '../permission-contracts.js'
 import type { EntityTemplatePayload } from './entity-directory.js'
 import { CONTRACTS_MODULE_PATH, cordisXSharedModuleSource } from './react-virtual-modules.js'
 import { entityInstallationId, entityPluginGeneration, issueOwnerDocumentPrincipalToken } from './owner-document-rpc.js'
@@ -31,6 +35,7 @@ import {
   invalidateNativeVitePluginSources,
   SHARED_MODULES,
   SHARED_REACT_INTEROP_LEAVES,
+  validateNativeVitePlugin,
   VITE_CLIENT_DISPOSER_SOURCE,
 } from './vite-development-graph.js'
 
@@ -69,7 +74,11 @@ interface DevelopmentGeneration {
   lastSuccessfulAt: string
   readonly packageFiles: readonly string[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
-  readonly manifest?: CordisXPluginManifestV7 | CordisXPluginManifestV8 | CordisXPluginManifestV10
+  readonly manifest?:
+    | CordisXPluginManifestV7
+    | CordisXPluginManifestV8
+    | CordisXPluginManifestV9
+    | CordisXPluginManifestV10
   /** Executable only by the Host-owned isolated Worker boundary. */
   readonly isolatedArtifactSource?: string
   /** Complete esbuild input graph for isolated-worker HMR ownership. */
@@ -543,26 +552,6 @@ if (import.meta.hot) {
     invalidateNativeVitePluginSources(server.moduleGraph, await ensureGeneration(plugin), timestamp)
     invalidatePluginModule(plugin.id, timestamp)
   }
-  const validateModuleGraph = async (module: ModuleNode, seen = new Set<ModuleNode>()): Promise<void> => {
-    if (seen.has(module)) return
-    seen.add(module)
-    await server.transformRequest(module.url)
-    for (const dependency of module.importedModules) await validateModuleGraph(dependency, seen)
-  }
-  const validatePlugin = async (plugin: CordisXConfigPlugin): Promise<void> => {
-    try {
-      const request = '\0' + PLUGIN_PREFIX + plugin.id
-      await server.transformRequest(request)
-      const module = server.moduleGraph.getModuleById(request)
-      if (module === undefined) throw new Error(`Vite did not create a module graph for plugin ${plugin.id}`)
-      await validateModuleGraph(module)
-    } catch (error) {
-      throw new Error(
-        `Build failed for plugin ${plugin.id}: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      )
-    }
-  }
   const integration: Plugin = {
     name: 'cordisx-native-development',
     enforce: 'pre',
@@ -963,7 +952,11 @@ if (import.meta.hot) {
       options = nextOptions
       await Promise.all(config.plugins.filter(plugin => plugin.enabled).map(ensureGeneration))
       await compiledConfig()
-      await Promise.all(config.plugins.filter(plugin => plugin.enabled).map(validatePlugin))
+      await Promise.all(
+        config.plugins.filter(plugin => plugin.enabled).map(plugin =>
+          validateNativeVitePlugin(server, PLUGIN_PREFIX + plugin.id, plugin.id)
+        ),
+      )
       // CDP installs only this stable entry. Source modules and updates use Vite.
       return `if (!globalThis.__cordisxViteBoot) { globalThis.__cordisxViteBoot = (async () => { await import(${
         JSON.stringify(url(PREAMBLE))

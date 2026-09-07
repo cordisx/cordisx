@@ -341,6 +341,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          npm run build --workspace=@cordisx/channel-runtime
           npm run build --workspace=@cordisx/schemastery-ui
           npx vitest run --changed "$BASE_SHA" --passWithNoTests --maxWorkers=1 --no-file-parallelism --testTimeout=30000 --hookTimeout=30000
       - name: Record job evidence

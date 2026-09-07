@@ -7,6 +7,7 @@ import { buildLocalDevelopmentPlugin } from '../packages/cli/src/launcher/develo
 import {
   PLUGIN_PACKAGE_SCHEMA_V7,
   PLUGIN_PACKAGE_SCHEMA_V8,
+  PLUGIN_PACKAGE_SCHEMA_V9,
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7,
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8,
 } from '../packages/cli/src/launcher/packages/manifest.js'
@@ -19,16 +20,16 @@ afterEach(async () => {
 })
 
 async function fixture(
-  version: 7 | 8,
+  version: 7 | 8 | 9,
   declarationSchema = version === 7
     ? PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7
     : PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8,
 ): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), `cordisx-local-dev-v${version}-`))
   roots.add(root)
-  const id = version === 8 ? 'chatroom' : 'canvas-v7'
+  const id = version === 7 ? 'canvas-v7' : 'chatroom'
   const entry = path.join(root, `${id}.ts`)
-  const runtime = version === 8
+  const runtime = version !== 7
     ? {
       $schema: PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8,
       schemaVersion: 8,
@@ -68,7 +69,11 @@ async function fixture(
       `${
         JSON.stringify(
           {
-            $schema: version === 7 ? PLUGIN_PACKAGE_SCHEMA_V7 : PLUGIN_PACKAGE_SCHEMA_V8,
+            $schema: version === 7
+              ? PLUGIN_PACKAGE_SCHEMA_V7
+              : version === 8
+              ? PLUGIN_PACKAGE_SCHEMA_V8
+              : PLUGIN_PACKAGE_SCHEMA_V9,
             schemaVersion: version,
             id,
             version: '0.1.0',
@@ -111,5 +116,11 @@ describe('local development package v7/v8 runtime-manifest validation', () => {
       .rejects.toThrow('local development runtimeManifest declaration is invalid')
     await expect(buildLocalDevelopmentPlugin(await fixture(8, PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7)))
       .rejects.toThrow('local development runtimeManifest declaration is invalid')
+  })
+  it('accepts a v9 package that legally retains a v8 runtime manifest', async () => {
+    await expect(buildLocalDevelopmentPlugin(await fixture(9))).resolves.toMatchObject({
+      id: 'chatroom',
+      manifest: { schemaVersion: 8, id: 'chatroom' },
+    })
   })
 })

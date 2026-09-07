@@ -57,6 +57,13 @@ try {
   if (deployment.status !== 'installed' || deployment.effectiveHome !== deploymentHome) {
     throw new Error('tarball CordisX Skill deployment smoke returned an unexpected projection')
   }
+  const deployedMarker = JSON.parse(
+    readFileSync(path.join(deployment.targetDir, packagedSkillModule.CORDISX_SKILL_MARKER_FILE), 'utf8'),
+  )
+  const sourceVersion = JSON.parse(readFileSync(path.join(sourceSkillRoot, 'version.json'), 'utf8'))
+  if (JSON.stringify(deployedMarker.provenance) !== JSON.stringify(sourceVersion)) {
+    throw new Error('packaged CLI did not deploy the bundled Skill provenance')
+  }
   const sourceSkillFiles = listFiles(sourceSkillRoot)
   const bundledSkillFiles = listFiles(bundledSkillRoot)
   const tarballSkillFiles = listFiles(tarballSkillRoot)
@@ -69,6 +76,8 @@ try {
   for (
     const required of [
       'SKILL.md',
+      'version.json',
+      'references/css-and-lifecycle.md',
       'agents/openai.yaml',
       'references/feasibility-assessment.md',
       'references/live-plugin-development.md',

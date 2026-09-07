@@ -158,15 +158,19 @@ describe('React Manager plugin bundle pages', () => {
       subscribe: () => () => {},
     }
     const seat = dom.window.document.createElement('span')
+    seat.dataset.cordisxPlaygroundManagerTrigger = 'true'
     dom.window.document.body.append(seat)
+    dom.window.sessionStorage.setItem(
+      'cordisx.playground.manager.history.v1',
+      JSON.stringify([{ kind: 'plugin-bundle', bundleId: 'team-workflow', page: 'readme' }]),
+    )
     const root = createRoot(dom.window.document.body.appendChild(dom.window.document.createElement('div')))
     try {
       await act(async () =>
         root.render(<ManagerApp model={model} marketplace={{} as MarketplaceModel} triggerSeat={seat} />)
       )
       await click(dom.window.document, '[data-cordisx-manager-trigger]')
-      expect(dom.window.document.querySelector('[data-plugin-bundles-page]')).not.toBeNull()
-      await click(dom.window.document, '[data-plugin-bundle-id="team-workflow"]')
+      expect(dom.window.document.querySelector('[data-plugin-bundles-page]')).toBeNull()
 
       const detail = dom.window.document.querySelector<HTMLElement>('[data-plugin-bundle-detail="team-workflow"]')!
       const header = detail.querySelector<HTMLElement>('.cxr-bundle-identity')!

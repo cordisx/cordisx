@@ -45,6 +45,10 @@ import type { CordisXCommandService } from './commands.js'
 import { CordisXI18nService, type LocalizationEffectOwner } from './i18n.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
 import { createHostSurfaceIcon } from './icons.js'
+import {
+  isAgentConversationPageMount,
+  markAgentConversationPageMount,
+} from './agent-conversation-page.js'
 import { ownerFromContext, qualifyOwnedId, sourceFromContext } from './ownership.js'
 import {
   type GenerationVisibilityCoordinator,
@@ -174,6 +178,7 @@ export interface PageRecord {
   readonly candidateView?: PluginGenerationView
   readonly metadata: CordisXPageMetadata
   readonly mount: CordisXPageMount<any>
+  readonly presentation?: 'agent-conversation'
 }
 
 export interface PageSnapshot {
@@ -377,6 +382,13 @@ export class PageRegistry {
       actionIds.add(action.id)
     }
     if (typeof mount !== 'function') throw new Error(`page ${metadata.id} requires a mount callback`)
+    const agentConversation = isAgentConversationPageMount(mount)
+    if (
+      agentConversation
+      && (metadata.breadcrumbs !== undefined || metadata.tabs !== undefined || metadata.headerActions !== undefined)
+    ) {
+      throw new Error(`agent conversation page ${metadata.id} cannot declare breadcrumbs, tabs, or header actions`)
+    }
     const qualifiedId = qualifyOwnedId(owner, metadata.id)
     const physicalId = `${qualifiedId}\u0000${generation.moduleGeneration ?? 'host'}`
     if (this.records.has(physicalId)) throw new Error(`page ${qualifiedId} is already registered for this generation`)
@@ -387,6 +399,7 @@ export class PageRegistry {
       ...(candidateView === undefined ? {} : { candidateView }),
       metadata: immutableSnapshot(metadata),
       mount,
+      ...(agentConversation ? { presentation: 'agent-conversation' as const } : {}),
     })
     if (this.visibility?.visible(generation) !== false) this.notify()
     let active = true

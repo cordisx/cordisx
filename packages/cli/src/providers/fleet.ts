@@ -38,32 +38,17 @@ import {
 } from './codex-app-server.js'
 import type { CodexProviderConfig, ProviderConnection, ProviderLifecycleSignal } from './contracts.js'
 import { type AgentLoopInFlight, runFleetAgentLoopTransaction } from './fleet-agent-loop-transaction.js'
+import { CURRENT_CONNECTION_UNAVAILABLE, FLEET_CAPABILITIES } from './fleet-capabilities.js'
 import {
   appendFleetLifecycle,
   type ChannelTaskLifecycleEvent,
   type ChannelTaskLifecycleRange,
   lifecycleKey,
 } from './fleet-lifecycle.js'
+import { type ProviderFleetPublication, publishProviderConnections } from './fleet-publication.js'
 import { FleetTaskPagination } from './fleet-pagination.js'
 import { copy, failure, registryFailure } from './fleet-results.js'
 export type { ChannelTaskLifecycleEvent, ChannelTaskLifecycleRange } from './fleet-lifecycle.js'
-
-const FLEET_CAPABILITIES: readonly CordisXPlatformCapability[] = Object.freeze([
-  'models.read',
-  'tasks.catalog.read',
-  'tasks.content.read',
-  'tasks.create',
-  'tasks.control',
-  'turns.submit',
-  'turns.control',
-  'turns.introduce',
-  'approvals.decide',
-])
-const CURRENT_CONNECTION_UNAVAILABLE: CordisXPlatformDiagnostic = Object.freeze({
-  code: 'current-connection-client-unavailable',
-  message:
-    'The native Codex Desktop current connection remains unavailable; Provider Fleet connections are routed independently',
-})
 
 export interface ProviderFleetOptions {
   readonly now?: () => number
@@ -763,6 +748,20 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     this.lifecycleDisposers.clear()
     this.lifecycleListeners.clear()
     await this.registry.dispose()
+  }
+
+  /** Publish already-prepared plugin adapters into this Fleet without creating another registry. */
+  async publishConnections(
+    entries: readonly { readonly connection: ProviderConnection; readonly displayName: string }[],
+  ): Promise<ProviderFleetPublication> {
+    if (this.closed) throw new Error('Provider Fleet is closed')
+    return await publishProviderConnections({
+      entries,
+      registry: this.registry,
+      names: this.names,
+      lifecycleDisposers: this.lifecycleDisposers,
+      observeLifecycle: (generation, event) => this.observeLifecycle(this.registry, generation, event),
+    })
   }
 
   /**

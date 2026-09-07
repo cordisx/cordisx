@@ -8,6 +8,7 @@ import { npmPackItem } from './npm-pack-report.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#06277f9d117893a9215c991db8c0881df0f0b0f3'
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
   ? undefined
   : path.resolve(process.env.CORDISX_PROTOCOL_TARBALL)
@@ -212,9 +213,15 @@ try {
   if (
     installedCordisXManifest.dependencies?.['@oneworks/avatar'] !== '1.0.0-rc.8'
     || installedCordisXManifest.dependencies?.['@oneworks/avatar-react'] !== '1.0.0-rc.8'
+    || installedCordisXManifest.dependencies?.['@cordisx/protocol'] !== expectedProtocolSpec
   ) {
-    throw new Error('installed cordisx must pin the Host-owned AgentAvatar renderer')
+    throw new Error('installed cordisx must pin its Host-owned renderers and canonical Protocol')
   }
+  const protocolPaths = (await run('npm', ['ls', '--parseable', '--all', '@cordisx/protocol'], {
+    cwd: runnerDirectory,
+    env: process.env,
+  })).stdout.trim().split('\n').filter(Boolean)
+  if (protocolPaths.length !== 1) throw new Error('installed cordisx must resolve exactly one Protocol copy')
 
   for (const packageName of ['cordisx', 'create-cordisx-plugin']) {
     const packageRoot = path.join(runnerDirectory, 'node_modules', packageName)

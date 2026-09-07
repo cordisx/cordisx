@@ -295,15 +295,20 @@ async function renderPluginSource(
   await mkdir(path.join(destination, 'src'), { recursive: true })
   await writeFile(path.join(destination, 'src', 'index.tsx'), source, { encoding: 'utf8', flag: 'wx' })
   await writeFile(path.join(destination, 'src', 'overview-page.tsx'), page, { encoding: 'utf8', flag: 'wx' })
+  await writeFile(
+    path.join(destination, 'src', 'vite-env.d.ts'),
+    await readFile(path.join(templateRoot, 'src', 'vite-env.d.ts'), 'utf8'),
+    { encoding: 'utf8', flag: 'wx' },
+  )
   await writeFile(path.join(destination, 'vite.config.ts'), viteConfig, { encoding: 'utf8', flag: 'wx' })
   await writeFile(
     path.join(destination, 'README.md'),
-    `# ${id}\n\nThe local-development lifecycle entry is \`src/index.tsx\`. React page components live in component-only modules such as \`src/overview-page.tsx\` so Vite can apply React Fast Refresh. Production config calls the public \`cordisx/vite\` helper to write one immutable Vite ESM graph with \`module.js\`, content-addressed chunks, CSS, assets, and formal \`artifact.json\` under \`dist/runtime/\`. Declarations live separately under \`dist/types/\`. A portable package entry points at the adjacent \`dist/runtime/module.js\`; the Host validates and retains the indexed graph.\n\nThis plugin starts private and \`UNLICENSED\`. Its generated source is Marked Template Material under the CordisX Independent Plugin Exception; choose a license before distribution.\n`,
+    `# ${id}\n\nThe local-development lifecycle entry is \`src/index.tsx\`. React page components live in component-only modules such as \`src/overview-page.tsx\` so Vite can apply React Fast Refresh. Production config calls the public \`cordisx/vite\` helper to write one immutable Vite ESM graph with \`module.js\`, content-addressed chunks, CSS, assets, and formal \`artifact.json\` under \`${outDir}/\` relative to this directory. Declarations are emitted separately according to the owning tsconfig. A portable package entry points at the adjacent \`${outDir}/module.js\`; the Host validates and retains the indexed graph.\n\nKeep \`src/vite-env.d.ts\` for Vite CSS types. Ordinary CSS is a side-effect import in its owning component; explicit \`?inline\` yields text. CSS HMR does not prove plugin-unload cleanup. See [CSS guidance](https://github.com/cordisx/cordisx/blob/main/skills/cordisx-plugin-development/references/css-and-lifecycle.md) before changing import forms.\n\nThis plugin starts private and \`UNLICENSED\`. Its generated source is Marked Template Material under the CordisX Independent Plugin Exception; choose a license before distribution.\n`,
     { encoding: 'utf8', flag: 'wx' },
   )
   await writeFile(
     path.join(destination, 'README.zh-Hans.md'),
-    `# ${id}\n\n本地开发的生命周期入口为 \`src/index.tsx\`。React 页面组件位于 \`src/overview-page.tsx\` 等纯组件模块中，因此 Vite 可以应用 React Fast Refresh。生产配置调用公开的 \`cordisx/vite\` helper，在 \`dist/runtime/\` 下生成独立、不可变的 Vite ESM graph，包括 \`module.js\`、带内容摘要的 chunk、CSS、静态资源和正式的 \`artifact.json\`；类型声明单独写入 \`dist/types/\`。可移植 package 的入口指向相邻的 \`dist/runtime/module.js\`；Host 会验证并保留该索引 graph。\n\n此插件默认私有且使用 \`UNLICENSED\`。生成源码属于 CordisX 独立插件例外中的已标记模板材料；分发前请选择许可证。\n`,
+    `# ${id}\n\n本地开发的生命周期入口为 \`src/index.tsx\`。React 页面组件位于 \`src/overview-page.tsx\` 等纯组件模块中，因此 Vite 可以应用 React Fast Refresh。生产配置调用公开的 \`cordisx/vite\` helper，在相对于此目录的 \`${outDir}/\` 下生成独立、不可变的 Vite ESM graph，包括 \`module.js\`、带内容摘要的 chunk、CSS、静态资源和正式的 \`artifact.json\`；类型声明按所属 tsconfig 单独输出。可移植 package 的入口指向相邻的 \`${outDir}/module.js\`；Host 会验证并保留该索引 graph。\n\n保留 \`src/vite-env.d.ts\` 提供的 Vite CSS 类型。普通 CSS 使用副作用导入；显式 \`?inline\` 返回文本。CSS HMR 不等于插件卸载回收。更改导入前阅读 [CSS 指导](https://github.com/cordisx/cordisx/blob/main/skills/cordisx-plugin-development/references/css-and-lifecycle.md)。\n\n此插件默认私有且使用 \`UNLICENSED\`。生成源码属于 CordisX 独立插件例外中的已标记模板材料；分发前请选择许可证。\n`,
     { encoding: 'utf8', flag: 'wx' },
   )
 }

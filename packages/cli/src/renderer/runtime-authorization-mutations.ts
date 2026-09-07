@@ -494,7 +494,8 @@ export const createRuntimeCandidateController = (
     replacesTarget && mutation.developmentPackage !== undefined
     && (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5
       || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7
-      || (controller.manifest.schemaVersion === 8 || controller.manifest.schemaVersion === 10))
+      || controller.manifest.schemaVersion === 8 || controller.manifest.schemaVersion === 9
+      || controller.manifest.schemaVersion === 10)
     && controller.manifest.services.length > 0
   ) {
     throw new Error('local development phase 1 is renderer-only; manifest services are unavailable')

@@ -328,7 +328,7 @@ class StructuredSurfaceRenderer extends StructuredSurfaceInteractions {
           className: 'cordisx-sidebar-navigation',
         }, usedRoots)
         const signature = this.navigationContentSignature(items)
-        if (root.childElementCount === 0 || signature !== this.navigationRenderSignature) {
+        if (rebuild || root.childElementCount === 0 || signature !== this.navigationRenderSignature) {
           this.renderNavigation(root, items, nextSites, nativeButtons(sidebarNavigation)[0])
           this.navigationRenderSignature = signature
         }
@@ -544,6 +544,7 @@ class StructuredSurfaceRenderer extends StructuredSurfaceInteractions {
       }
       project()
     }
+    this.publishSelectedNavigationActions()
     if (!usedRoots.has('sidebar.navigation')) {
       this.disposeNavigationLeadingVisuals()
       this.disposeNavigationActions()

@@ -47,6 +47,7 @@ import {
   type CordisXPermissionPolicyRecordV4,
   type CordisXPluginManifestV7,
   type CordisXPluginManifestV8,
+  type CordisXPluginManifestV9,
 } from '../permission-contracts.js'
 import {
   type CordisXPersistedPermissionPolicyRecord,
@@ -118,7 +119,11 @@ export interface PluginRuntimeMutation {
     readonly identitySource: string
     readonly readme?: string
     readonly readmes?: Readonly<Record<string, string>>
-    readonly manifest?: CordisXPluginManifestV7 | CordisXPluginManifestV8 | CordisXPluginManifestV10
+    readonly manifest?:
+      | CordisXPluginManifestV7
+      | CordisXPluginManifestV8
+      | CordisXPluginManifestV9
+      | CordisXPluginManifestV10
     readonly development: CordisXLocalDevelopmentSnapshot
   }
   /** Host-only renderer artifact compiled from the authority-resolved immutable runtime module. */

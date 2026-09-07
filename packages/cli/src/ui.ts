@@ -33,7 +33,19 @@ export interface EmptyStateProps extends Omit<React.HTMLAttributes<HTMLDivElemen
   readonly action?: React.ReactNode
 }
 
-export type IconName = CordisXConfigFormIcon | 'search' | 'create' | 'success' | 'folder' | 'folder-open' | 'file'
+export type IconName =
+  | CordisXConfigFormIcon
+  | 'search'
+  | 'create'
+  | 'success'
+  | 'folder'
+  | 'folder-open'
+  | 'file'
+  | 'role'
+  | 'session'
+  | 'relationship'
+  | 'fit'
+  | 'reset'
 
 export interface IconProps extends React.HTMLAttributes<HTMLSpanElement> {
   readonly name: IconName
@@ -78,7 +90,65 @@ export interface SelectProps {
   readonly 'aria-label'?: string
   readonly value: string
   readonly options: readonly SelectOption[]
+  readonly prefixIcon?: React.ReactNode
+  readonly density?: 'default' | 'compact'
+  readonly disabled?: boolean
   readonly onChange: (value: string) => void
+}
+
+export interface PanZoomCanvasHandle {
+  getScale(): number
+  fitToView(): void
+  reset(): void
+}
+
+export interface PanZoomCanvasControls {
+  readonly fitLabel: string
+  readonly resetLabel: string
+  readonly disabled?: boolean
+  readonly onFit?: () => void
+  readonly onReset?: () => void
+}
+
+export interface PanZoomCanvasProps extends
+  Omit<
+    React.HTMLAttributes<HTMLDivElement>,
+    | 'children'
+    | 'onChange'
+    | 'onClickCapture'
+    | 'onDragStart'
+    | 'onKeyDown'
+    | 'onPointerCancel'
+    | 'onPointerDown'
+    | 'onPointerMove'
+    | 'onPointerUp'
+    | 'onWheel'
+  >
+{
+  readonly children: React.ReactNode
+  readonly 'aria-label': string
+  /** Establish a full-height Host page seat for canvas-style pages. */
+  readonly fill?: boolean
+  readonly minScale?: number
+  readonly maxScale?: number
+  readonly initialScale?: number
+  readonly controls?: PanZoomCanvasControls
+  readonly controllerRef?: React.Ref<PanZoomCanvasHandle>
+  readonly onScaleChange?: (scale: number) => void
+}
+
+export interface SearchFieldProps
+  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'type' | 'value'>
+{
+  readonly value: string
+  readonly onChange: (value: string) => void
+}
+
+export interface FilterToolbarProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'children'> {
+  readonly 'aria-label': string
+  readonly search: React.ReactElement
+  readonly filters?: readonly React.ReactElement[]
+  readonly actions?: React.ReactNode
 }
 
 export interface SelectionRailOption {
@@ -131,6 +201,9 @@ export const Heading = HostComponent<HeadingProps>('Heading')
 export const Icon = HostComponent<IconProps>('Icon')
 export const HorizontalSplitPane = HostComponent<HorizontalSplitPaneProps>('HorizontalSplitPane')
 export const HoverCard = HostComponent<HoverCardProps>('HoverCard')
+export const PanZoomCanvas = HostComponent<PanZoomCanvasProps>('PanZoomCanvas')
+export const FilterToolbar = HostComponent<FilterToolbarProps>('FilterToolbar')
+export const SearchField = HostComponent<SearchFieldProps>('SearchField')
 export const Select = HostComponent<SelectProps>('Select')
 export const SelectionRail = HostComponent<SelectionRailProps>('SelectionRail')
 export const MarkdownViewer = HostComponent<MarkdownViewerProps>('MarkdownViewer')

@@ -17,6 +17,8 @@ import type {
 import { HostThemeProjection } from './host-theme.js'
 import { HorizontalSplitPane } from './host-ui/HorizontalSplitPane.js'
 import { HoverCard } from './host-ui/HoverCard.js'
+import { PanZoomCanvas } from './host-ui/PanZoomCanvas.js'
+import { FilterToolbar, SearchField } from './host-ui/PublicFilterToolbar.js'
 import { PublicMarkdownViewer } from './host-ui/PublicMarkdownViewer.js'
 import { PublicSelectionRail } from './host-ui/PublicSelectionRail.js'
 import { HostAgentAvatar } from './host-ui/conversation/AgentAvatar.js'
@@ -56,7 +58,19 @@ interface EmptyStateProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'ti
   readonly action?: React.ReactNode
 }
 
-type IconName = CordisXConfigFormIcon | 'search' | 'create' | 'success' | 'folder' | 'folder-open' | 'file'
+type IconName =
+  | CordisXConfigFormIcon
+  | 'search'
+  | 'create'
+  | 'success'
+  | 'folder'
+  | 'folder-open'
+  | 'file'
+  | 'role'
+  | 'session'
+  | 'relationship'
+  | 'fit'
+  | 'reset'
 
 interface IconProps extends React.HTMLAttributes<HTMLSpanElement> {
   readonly name: IconName
@@ -73,6 +87,9 @@ interface SelectProps {
   readonly 'aria-label'?: string
   readonly value: string
   readonly options: readonly SelectOption[]
+  readonly prefixIcon?: React.ReactNode
+  readonly density?: 'default' | 'compact'
+  readonly disabled?: boolean
   readonly onChange: (value: string) => void
 }
 
@@ -90,6 +107,8 @@ interface AgentAvatarProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, '
 
 const SHARED_REACT_STYLES = `
 .cxr-react-root{box-sizing:border-box;min-height:100%;padding:16px;color:var(--cx-text);font:14px/1.5 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.cxr-react-root[data-cordisx-page-chrome-policy="agent-conversation"]{padding:0}
+.cxr-react-root:has(.cxr-ui-pan-zoom-canvas[data-fill="true"]){height:100%;min-height:0;overflow:hidden}
 .cxr-react-root *,.cxr-react-root *::before,.cxr-react-root *::after{box-sizing:border-box}
 .cxr-ui-stack{display:flex;min-width:0}
 .cxr-ui-attachment-placeholder{display:inline-grid;inline-size:30px;block-size:30px;flex:0 0 30px;place-items:center;padding:0;border:1px solid var(--cx-border);border-radius:50%;background:transparent;color:var(--cx-muted);opacity:var(--cx-disabled,.5);cursor:not-allowed}
@@ -117,7 +136,10 @@ const SHARED_REACT_STYLES = `
 @media (pointer:coarse){.cxr-ui-horizontal-split-pane__separator::after{position:absolute;inset-block:0;left:50%;width:15px;content:"";transform:translateX(-50%)}}
 .cxr-ui-hover-card__trigger:focus-visible{outline:2px solid var(--cx-focus);outline-offset:2px}
 .cxr-ui-hover-card__content{position:fixed;z-index:2147483600;max-width:min(24rem,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;border:1px solid var(--cx-border);border-radius:10px;padding:10px 12px;background:var(--cx-surface-raised);color:var(--cx-text);box-shadow:0 8px 28px var(--cx-shadow);visibility:hidden}
-.cxr-ui-select{position:relative;min-width:0}.cxr-ui-select-trigger{display:flex;width:100%;min-height:38px;align-items:center;gap:8px;border:1px solid var(--cx-border);border-radius:8px;padding:7px 10px;background:var(--cx-surface-raised);color:var(--cx-text);font:inherit;text-align:left;cursor:pointer}.cxr-ui-select-trigger>span:last-child{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cxr-ui-select-trigger::after{content:"⌄";margin-inline-start:auto;color:var(--cx-muted)}.cxr-ui-select-list{position:absolute;z-index:20;top:calc(100% + 5px);left:0;right:0;display:grid;gap:2px;border:1px solid var(--cx-border);border-radius:8px;padding:4px;background:var(--cx-surface-raised);box-shadow:0 12px 30px var(--cx-shadow)}.cxr-ui-select-option{display:flex;min-height:34px;align-items:center;gap:8px;border:0;border-radius:6px;padding:6px 8px;background:transparent;color:var(--cx-text);font:inherit;text-align:left;cursor:pointer}.cxr-ui-select-option:hover,.cxr-ui-select-option[aria-selected="true"]{background:var(--cx-hover)}
+.cxr-ui-filter-toolbar{display:flex;width:100%;min-width:0;min-height:30px;align-items:stretch;overflow:visible;border:1px solid var(--cx-border);border-radius:7px;background:var(--cx-surface-raised)}.cxr-ui-filter-toolbar:focus-within{border-color:var(--cx-primary);box-shadow:0 0 0 2px var(--cx-focus)}.cxr-ui-filter-toolbar__search{display:flex;min-width:10rem;flex:1}.cxr-ui-filter-search{display:flex;width:100%;min-width:0;align-items:center;gap:6px;padding:0 9px;color:var(--cx-muted)}.cxr-ui-filter-search__icon{display:grid;inline-size:16px;block-size:16px;flex:0 0 16px;place-items:center}.cxr-ui-filter-search input{width:100%;min-width:0;height:28px;border:0;outline:0;padding:0;background:transparent;color:var(--cx-text);font:inherit}.cxr-ui-filter-toolbar__filters{display:flex;min-width:0;align-items:stretch}.cxr-ui-filter-toolbar__filters>.cxr-ui-select{min-width:8rem;border-inline-start:1px solid var(--cx-border)}.cxr-ui-filter-toolbar__filters .cxr-ui-select-trigger{height:28px;min-height:28px;border:0;border-radius:0;background:transparent}.cxr-ui-filter-toolbar__filters .cxr-ui-select-trigger:focus-visible{outline:0;box-shadow:inset 0 0 0 1px var(--cx-primary)}.cxr-ui-filter-toolbar__actions{display:flex;align-items:center;border-inline-start:1px solid var(--cx-border)}
+.cxr-ui-select{position:relative;min-width:0}.cxr-ui-select-trigger{display:flex;width:100%;min-height:38px;align-items:center;gap:8px;border:1px solid var(--cx-border);border-radius:8px;padding:7px 10px;background:var(--cx-surface-raised);color:var(--cx-text);font:inherit;text-align:left;cursor:pointer}.cxr-ui-select[data-density="compact"]{--cx-filter-control-height:30px;--cx-filter-control-gap:6px;--cx-filter-control-radius:7px}.cxr-ui-select[data-density="compact"] .cxr-ui-select-trigger{min-height:var(--cx-filter-control-height);gap:var(--cx-filter-control-gap);border-radius:var(--cx-filter-control-radius);padding:4px 8px}.cxr-ui-select-trigger:focus-visible{border-color:var(--cx-primary);outline:2px solid var(--cx-focus);outline-offset:1px}.cxr-ui-select-trigger:disabled{cursor:not-allowed;opacity:var(--cx-disabled)}.cxr-ui-select-label{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cxr-ui-select-caret{inline-size:16px;block-size:16px;flex:0 0 16px;margin-inline-start:auto;color:var(--cx-muted);transition:transform .14s ease}.cxr-ui-select[data-open="true"] .cxr-ui-select-caret{transform:rotate(180deg)}.cxr-ui-select-list{position:absolute;z-index:20;top:calc(100% + 5px);left:0;right:0;display:grid;gap:2px;border:1px solid var(--cx-border);border-radius:8px;padding:4px;background:var(--cx-surface-raised);box-shadow:0 12px 30px var(--cx-shadow)}.cxr-ui-select-option{display:flex;min-height:34px;align-items:center;gap:8px;border:0;border-radius:6px;padding:6px 8px;background:transparent;color:var(--cx-text);font:inherit;text-align:left;cursor:pointer}.cxr-ui-select-option:hover,.cxr-ui-select-option[aria-selected="true"]{background:var(--cx-hover)}
+.cxr-ui-pan-zoom-canvas{position:relative;width:100%;height:100%;min-width:0;min-height:0;overflow:hidden;overscroll-behavior:contain;touch-action:none;cursor:grab;outline:none;user-select:none;-webkit-user-select:none}.cxr-ui-pan-zoom-canvas[data-dragging="true"]{cursor:grabbing}.cxr-ui-pan-zoom-canvas:focus-visible{outline:2px solid var(--cx-focus);outline-offset:-2px}.cxr-ui-pan-zoom-canvas__content{position:absolute;top:0;left:0;width:max-content;height:max-content;min-width:max-content;transform-origin:0 0;will-change:transform;-webkit-user-drag:none}.cxr-ui-pan-zoom-canvas[data-dragging="true"] .cxr-ui-pan-zoom-canvas__content{pointer-events:none}.cxr-ui-action-toolbar{display:flex;align-items:center;overflow:hidden;border:1px solid var(--cx-border);border-radius:7px;background:var(--cx-surface-raised)}.cxr-ui-icon-action{display:grid;width:29px;height:29px;place-items:center;border:0;padding:0;background:transparent;color:var(--cx-muted);cursor:pointer}.cxr-ui-icon-action+.cxr-ui-icon-action{border-inline-start:1px solid var(--cx-border)}.cxr-ui-icon-action:hover:not(:disabled){background:var(--cx-hover);color:var(--cx-text)}.cxr-ui-icon-action:focus-visible{outline:2px solid var(--cx-focus);outline-offset:-2px}.cxr-ui-icon-action:disabled{cursor:not-allowed;opacity:var(--cx-disabled)}.cxr-ui-pan-zoom-canvas__controls{position:absolute;z-index:2;top:10px;right:10px;box-shadow:none}.cxr-ui-canvas-control-icon{inline-size:16px;block-size:16px}.cxr-ui-visually-hidden{position:absolute!important;width:1px!important;height:1px!important;overflow:hidden!important;clip:rect(0 0 0 0)!important;white-space:nowrap!important;clip-path:inset(50%)!important}
+@media (prefers-reduced-motion:reduce){.cxr-ui-select-caret{transition:none}}
 .cxr-ui-empty{display:flex;min-height:180px;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:24px;text-align:center;color:var(--cx-muted)}
 .cxr-ui-empty-title{color:var(--cx-text);font-size:16px;font-weight:650}
 .cxr-ui-error{display:grid;min-height:180px;place-content:center;gap:6px;padding:24px;text-align:center;color:var(--cx-danger)}
@@ -215,6 +237,16 @@ export function Icon({ name, className, ...props }: IconProps): React.ReactEleme
     ? 'host:folder-open'
     : name === 'file'
     ? 'host:file'
+    : name === 'role'
+    ? 'host:people'
+    : name === 'session'
+    ? 'host:history'
+    : name === 'relationship'
+    ? 'host:hierarchy'
+    : name === 'fit'
+    ? 'host:fit'
+    : name === 'reset'
+    ? 'host:reset'
     : undefined
   if (hostSurfaceToken !== undefined) {
     return React.createElement('span', {
@@ -248,7 +280,16 @@ export function Icon({ name, className, ...props }: IconProps): React.ReactEleme
   }, icon)
 }
 
-function Select({ options, onChange, className, 'aria-label': ariaLabel, value }: SelectProps): React.ReactElement {
+function Select({
+  options,
+  onChange,
+  className,
+  'aria-label': ariaLabel,
+  value,
+  prefixIcon,
+  density = 'default',
+  disabled = false,
+}: SelectProps): React.ReactElement {
   const [open, setOpen] = React.useState(false)
   const trigger = React.useRef<HTMLButtonElement>(null)
   const optionElements = React.useRef(new Map<string, HTMLButtonElement>())
@@ -289,7 +330,11 @@ function Select({ options, onChange, className, 'aria-label': ariaLabel, value }
   }
   return React.createElement(
     'div',
-    { className: joinClassName('cxr-ui-select', className) },
+    {
+      className: joinClassName('cxr-ui-select', density === 'compact' ? 'cxr-ui-filter-control' : undefined, className),
+      'data-density': density,
+      'data-open': open,
+    },
     React.createElement(
       'button',
       {
@@ -299,6 +344,7 @@ function Select({ options, onChange, className, 'aria-label': ariaLabel, value }
         'aria-label': ariaLabel,
         'aria-haspopup': 'listbox',
         'aria-expanded': open,
+        disabled,
         onClick: () => setOpen(current => !current),
         onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => {
           if (event.key === 'Escape' && open) {
@@ -313,8 +359,13 @@ function Select({ options, onChange, className, 'aria-label': ariaLabel, value }
           openAt(event.key === 'ArrowDown' ? 0 : options.length - 1)
         },
       },
-      selected?.prefixIcon,
-      React.createElement('span', undefined, selected?.label ?? ''),
+      prefixIcon ?? selected?.prefixIcon,
+      React.createElement('span', { className: 'cxr-ui-select-label' }, selected?.label ?? ''),
+      React.createElement(HostIcon, {
+        token: 'control.chevron-down',
+        className: 'cxr-ui-select-caret',
+        size: 16,
+      }),
     ),
     open
       ? React.createElement(
@@ -392,11 +443,14 @@ export interface SharedReactRuntime {
     Button: typeof Button
     Card: typeof Card
     EmptyState: typeof EmptyState
+    FilterToolbar: typeof FilterToolbar
     Heading: typeof Heading
     HorizontalSplitPane: typeof HorizontalSplitPane
     HoverCard: typeof HoverCard
+    PanZoomCanvas: typeof PanZoomCanvas
     Icon: typeof Icon
     MarkdownViewer: typeof PublicMarkdownViewer
+    SearchField: typeof SearchField
     Select: typeof Select
     SelectionRail: typeof PublicSelectionRail
     Stack: typeof Stack
@@ -485,11 +539,14 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
       Button,
       Card,
       EmptyState,
+      FilterToolbar,
       Heading,
       HorizontalSplitPane,
       HoverCard,
+      PanZoomCanvas,
       Icon,
       MarkdownViewer: PublicMarkdownViewer,
+      SearchField,
       Select,
       SelectionRail: PublicSelectionRail,
       Stack,

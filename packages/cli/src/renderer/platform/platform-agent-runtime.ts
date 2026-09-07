@@ -444,7 +444,7 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
         && declaredScope.param === 'sessionId'
     }
     return declaredScope === undefined
-      && registration.manifest.schemaVersion === 8
+      && (registration.manifest.schemaVersion === 8 || registration.manifest.schemaVersion === 9)
       && input.capability === 'approvals.answer'
       && input.sessionId !== route.params.sessionId
       && isApprovalAuthorityRequesterRouteScope(authorityRequester)

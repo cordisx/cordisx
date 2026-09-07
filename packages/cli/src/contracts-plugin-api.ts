@@ -9,11 +9,13 @@ import type {
   CordisXPluginManifestV6,
   CordisXPluginManifestV7,
   CordisXPluginManifestV8,
+  CordisXPluginManifestV9,
 } from './permission-contracts.js'
 
 import type { CordisXPluginDependencyV1 } from './plugin-lifecycle-contracts.js'
 
 import type {
+  CordisXAgentConversationShell,
   CordisXCommands,
   CordisXConfigAppliesInput,
   CordisXManagerContentNavigation,
@@ -188,6 +190,8 @@ declare module '@deepseek-ai/cordis' {
     /** DSH-style semantic UI slot service backed by Codex DOM adapters. */
     slots: CordisXSlots
     commands: CordisXCommands
+    /** Host-owned Agent conversation renderer backed by a plugin data source. */
+    agentConversationShell: CordisXAgentConversationShell
     pages: CordisXPages
     routes: CordisXRoutes
     /** Data-only Manager subroute declarations; the Host renders chrome and controls history. */
@@ -223,6 +227,7 @@ export interface CordisXPluginModule {
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
+    | CordisXPluginManifestV9
     | CordisXPluginManifestV10
   readonly inject?: readonly string[] | Record<string, unknown>
   readonly Config?: CordisXStandardSchema
@@ -254,6 +259,7 @@ export interface CordisXBrowserPlugin {
     | CordisXPluginManifestV6
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
+    | CordisXPluginManifestV9
     | CordisXPluginManifestV10
   /** Immutable package and module generation metadata owned by the launcher. */
   readonly package?: {
