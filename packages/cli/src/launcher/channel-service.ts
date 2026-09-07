@@ -122,7 +122,7 @@ export function projectLocalChannelManager(input: {
 
 function localPermissions() {
   return {
-    // Only built-in connection adapters are granted their local registration seat.
+    // Only the external simulator and Host-owned official adapters receive a local registration seat.
     authorize: async (request: { readonly source: { readonly adapterId: string } }) => (
       ['simulator', 'feishu', 'lark'].includes(request.source.adapterId) ? 'allow' as const : 'deny' as const
     ),
@@ -130,9 +130,8 @@ function localPermissions() {
 }
 
 /**
- * Starts the built-in Channel simulator as a Node-owned service.  It is
- * intentionally not an official adapter: Feishu/Lark/WeCom configurations
- * fail closed in service.mjs before any credentials or network are touched.
+ * Starts the external Channel package's simulator service beside the Host-owned
+ * official adapters. The package receives neither credentials nor a secret resolver.
  */
 export function createLocalChannelService(input: {
   readonly artifactDirectory: string

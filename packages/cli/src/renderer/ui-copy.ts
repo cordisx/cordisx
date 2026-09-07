@@ -3,7 +3,6 @@
  * this entry preserves the resolver API and derives its key type from the data.
  */
 import type { CordisXProductLocale, ProductCopyMessages } from './ui-copy/types.js'
-import { CHANNEL_COPY } from './ui-copy/channel.js'
 import { MARKETPLACE_CATALOG_COPY, MARKETPLACE_SOURCE_COPY, MARKETPLACE_TAB_COPY } from './ui-copy/marketplace.js'
 import {
   ACTION_COPY,
@@ -29,7 +28,6 @@ export type { CordisXProductLocale } from './ui-copy/types.js'
 
 // Preserve the catalog's existing enumeration order for diagnostics and gates.
 const catalog = {
-  ...CHANNEL_COPY,
   ...MARKETPLACE_SOURCE_COPY,
   ...MANAGER_NAVIGATION_COPY,
   ...PLUGIN_COLLECTION_COPY,

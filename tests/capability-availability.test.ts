@@ -7,6 +7,7 @@ import type {
 import type { CordisXCapabilityProviderReport } from '../packages/cli/src/capability-availability-contracts.js'
 import {
   CapabilityAvailabilityRegistry,
+  channelManagerCapabilityProvider,
   externalProviderCapabilityProviders,
   hostLocalCapabilityProviders,
   platformAdapterCapabilityProvider,
@@ -65,6 +66,19 @@ describe('capability availability registry', () => {
     expect(available.resolve('agent.history.read', {}).status).toBe('supported')
     expect(available.resolve('models.read', {}).status).toBe('unavailable')
     expect(available.resolve('agent.messages.append', {}).status).toBe('unavailable')
+  })
+
+  it('publishes only the public Channel Manager read routes', () => {
+    const provider = channelManagerCapabilityProvider()
+    expect(provider).toMatchObject({
+      providerId: 'host-channel-manager',
+      family: 'channel',
+      status: 'supported',
+    })
+    expect(provider.routes.map(route => route.capability)).toEqual([
+      'channel.accounts.read',
+      'channel.bindings.read',
+    ])
   })
 
   it('routes external Fleet capabilities by exact provider scope', () => {

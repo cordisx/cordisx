@@ -678,46 +678,28 @@ Credential capture, connection creation, and local export handoff are not advert
 until their Host-owned interaction and handoff paths implement the complete
 target lineage. Requests for those operations fail closed as unavailable; a
 plugin must present that state and must not collect a secret or create a prompt
-as a fallback. The bundled pre-migration Channel consumer temporarily uses a
-separate internal facade over the same service state. That facade is absent
-from `cordisx/contracts` and the public `ctx.channelManager` type and is removed
-when the standalone consumer completes its v2 migration.
+as a fallback. `ctx.channelManager` is the only renderer-visible Channel
+authority; the removed pre-migration facade is neither registered nor shipped.
 
 Channel management uses the distinct B pair
-`manager.settings.navigation-items` and `manager.content`. The built-in
-`cordisx:channel` renderer bundle contributes one structured navigation record,
-a same-owner `/manager/extensions/channels` route, standard page metadata, and
-a manifest-v4 service declaration. The internal Host Channel Manager body
-renderer owns all body nodes, styles, state indicators, adaptive searchable
-collections, empty states, diagnostics, theme projection, accessibility, and
-cleanup; the plugin receives no header or navigation DOM.
+`manager.settings.navigation-items` and `manager.content`. The standalone
+`cordisx/plugin-channel` package contributes the structured navigation, routes,
+page bodies, and manifest-v8 service declaration through public APIs. The Host
+owns the Manager shell, routing mechanics, UI primitives, accessibility, theme,
+and cleanup. `cordisx:channel` is only a convenience alias that resolves the
+external package export; no Channel product source is bundled in Host.
 
-The data plane and Manager page are `implemented/verified`: isolated
-`app://-/index.html` CDP evidence proves an active plugin with `schemaKind=none`,
-valid authorized B registration, exact route, separate route/page metadata,
-standard Host icon/header, active `manager.content` mount, and a bounded Channel
-body. The Host owns navigation, header, seat, theme, accessibility, and cleanup;
-the Channel renderer contributes no navigation or header DOM. The renderer only
-receives a safe launch-time projection, never a credential or raw transport.
+The Host data plane is `implemented/verified` through the versioned
+`channel-manager/v2` service. The standalone package owns its own consumer tests;
+Host composition tests prove the external renderer export and Node service entry
+are the installed artifacts used by the convenience alias. The renderer receives
+opaque tokens and redacted state, never credentials or raw transport.
 
-The current Manager information architecture is Host-owned and
-`implemented/verified`: a fixed Channel list header has a fixed search field
-and an icon-only **New channel** action; only the card list scrolls. The
-Channel bundle declares the exact `manager-content-navigation.v1` child routes
-for the root list, create flow, and each safe account projection. A card opens
-one of those detail destinations; the Host resolves the renderer-safe account
-title, owns breadcrumb/back/history and renders the **Configuration**,
-**Logs**, and **Connections & sessions** tabs. The Channel body never renders a
-second heading, back control, or tablist. Configuration uses full-width Host
-form chrome and saves only through the narrow Host service-config CAS bridge;
-logs never synthesize strings and reserve the native `console.*` argument-array
-and structured-event shapes for when a real transport publishes them. A create
-flow writes an explicitly local simulator configuration through that Host
-bridge, retains only its renderer-safe display name in the Manager session,
-atomically reprojects exact record routes/titles, and returns to the list. It
-does not place a secret, credential reference, callback, or raw transport in
-the renderer. A card may still be unavailable until the configured adapter has
-an actual verified connection.
+The standalone plugin declares the exact `manager-content-navigation/v1` child
+routes for its list, create flow, and opaque account projections. Host resolves
+record titles and owns breadcrumb, history, tabs, and page chrome. Configuration
+and action requests cross only the public manager contract and retain the Host's
+revision and generation fences.
 
 The official Feishu/Lark WebSocket adapter is implemented and automated
 verified. A real account/message smoke is still not verified, so the UI must
@@ -740,7 +722,7 @@ Channel settings experience needs:
    and
 7. redacted diagnostics and simulator controls.
 
-The plugin detail README explains setup and official platform constraints.
+The standalone plugin README explains setup and official platform constraints.
 `配置管理`, `权限`, `运行状态`, and diagnostics use the existing manager
 hierarchy. No `secretRef`, secret value, raw callback body, full user message,
 or attachment path appears in the manager snapshot. The current page has no
@@ -788,8 +770,7 @@ CordisX Platform/Agent; there is only one task runtime and one broker model.
 
 ## Repository ownership and package plan
 
-No new GitHub repository is required for the approved scope. The existing
-`cordisx` monorepo can own:
+The Host repository owns:
 
 - `packages/channel-runtime`: Node-only core, service Host API, persistence
   ports, queue/binding/policy/task gateway, and simulator;
@@ -798,8 +779,11 @@ No new GitHub repository is required for the approved scope. The existing
   separated enterprise-application modes;
 - `packages/channel-adapter-wechat-service`: later Service Account webhook
   adapter; and
-- renderer-side manager/demo packages that use only public structured UI and
-  the brokered Channel Host API.
+- the public `ctx.channel` and `ctx.channelManager` providers, credential capture,
+  and official adapter authority.
+
+The standalone `cordisx/plugin-channel` repository owns the Channel Manager
+consumer, simulator service artifact, manifests, styles, and product documentation.
 
 Implementation-specific types and stores stay in `cordisx`. Stable package
 service declarations, sourced-input/binding snapshots, capabilities, and

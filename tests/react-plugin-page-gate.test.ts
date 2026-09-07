@@ -6,7 +6,6 @@ import { describe, expect, it } from 'vitest'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 const reactPageEntries = [
-  'packages/cli/src/plugins/channel/index.ts',
   'packages/cli/src/plugins/cli-proxy-api/index.ts',
   'packages/agent-trace-showcase/src/index.ts',
   'examples/plugins/slot-showcase/index.ts',

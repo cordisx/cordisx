@@ -1,4 +1,5 @@
-import type { CordisXCapabilityScope, CordisXLocalizedText, CordisXPlatformCapability } from './contracts.js'
+import type { CordisXLocalizedText } from './contracts.js'
+import type { CordisXPermissionCapabilityV2, CordisXPermissionScopeV2 } from './permission-contracts.js'
 
 export type CordisXCapabilityAvailabilityState = 'supported' | 'unavailable' | 'degraded'
 
@@ -16,12 +17,13 @@ export type CordisXCapabilityProviderFamily =
   | 'console'
   | 'ui-rendering'
   | 'package-lifecycle'
+  | 'channel'
 
 export interface CordisXCapabilityProviderRoute {
-  readonly capability: CordisXPlatformCapability
+  readonly capability: CordisXPermissionCapabilityV2
   readonly status: CordisXCapabilityAvailabilityState
   readonly reason: CordisXLocalizedText
-  readonly scope: CordisXCapabilityScope
+  readonly scope: CordisXPermissionScopeV2
 }
 
 /** Private Host projection. It is not a plugin manifest or public adapter handle. */
