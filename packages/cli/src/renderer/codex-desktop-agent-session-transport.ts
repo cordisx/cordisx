@@ -1,3 +1,5 @@
+import { getAgentToolSetup } from './plugin-agent-tools.js'
+import { nativeAgentToolContext } from './codex-desktop-agent-tool-context.js'
 import type { AgentOptions, AgentSetup } from '@cordisx/protocol/agents/v1'
 import { nativeAgentInstructions } from './codex-desktop-agent-setup.js'
 import type { ApprovalOutcome, UserMessage } from '@cordisx/protocol/sessions/v1'
@@ -161,6 +163,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     const model = input.options.model ?? await this.defaultModel()
     if (model === undefined) return { status: 'unavailable', code: 'host-unavailable' }
     try {
+      await getAgentToolSetup(input.sessionId)
       const result = object(
         await this.request('thread/start', {
           model,
@@ -196,6 +199,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     const threadId = known?.threadId
       ?? (input.sessionId.startsWith('codex-thread:') ? input.sessionId.slice('codex-thread:'.length) : input.sessionId)
     try {
+      await getAgentToolSetup(input.sessionId)
       const result = object(
         await this.request('thread/resume', {
           threadId,
@@ -307,10 +311,15 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     session.starting = { ordinal, message: clone(message) }
     this.emitStatus({ sessionId: session.sessionId, status: 'running' })
     try {
+      const context = nativeAgentToolContext(await getAgentToolSetup(session.sessionId))
+      const toolInput = context.text === undefined ? [] : [
+        ...context.skills,
+        { type: 'text', text: context.text, text_elements: [] },
+      ]
       const result = object(
         await this.request('turn/start', {
           threadId: session.threadId,
-          input,
+          input: [...toolInput, ...input],
           clientUserMessageId: message.id,
         }),
       )
@@ -335,10 +344,15 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     const active = session.active
     if (input === undefined || active === undefined || active.terminal) return 'unavailable'
     try {
+      const context = nativeAgentToolContext(await getAgentToolSetup(session.sessionId))
+      const toolInput = context.text === undefined ? [] : [
+        ...context.skills,
+        { type: 'text', text: context.text, text_elements: [] },
+      ]
       await this.request('turn/steer', {
         threadId: session.threadId,
         expectedTurnId: active.id,
-        input,
+        input: [...toolInput, ...input],
         clientUserMessageId: message.id,
       })
       this.deferClaim(session.sessionId, message.id, active.ordinal)
@@ -352,7 +366,13 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     const items = injectedItems(message)
     if (items === undefined) return 'unavailable'
     try {
-      await this.request('thread/inject_items', { threadId: session.threadId, items })
+      const context = nativeAgentToolContext(await getAgentToolSetup(session.sessionId))
+      const toolItems = context.text === undefined ? [] : [{
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: context.text }],
+      }]
+      await this.request('thread/inject_items', { threadId: session.threadId, items: [...toolItems, ...items] })
       this.deferClaim(session.sessionId, message.id, session.active?.ordinal ?? session.nextTurn + 1)
       return 'accepted'
     } catch {

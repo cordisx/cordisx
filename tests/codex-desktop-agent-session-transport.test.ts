@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import * as agentTools from '../packages/cli/src/renderer/plugin-agent-tools.js'
+import type { AgentToolSetup } from '../packages/cli/src/plugin-agent-tool-contracts.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentSetup } from '@cordisx/protocol/agents/v1'
 import { CordisXAgentSessionRuntime } from '../packages/cli/src/renderer/agent-session-runtime.js'
 import type { UserMessage } from '@cordisx/protocol/sessions/v1'
@@ -27,6 +29,7 @@ function install(name: string, value: unknown): void {
   Object.defineProperty(globalThis, name, { configurable: true, writable: true, value })
 }
 afterEach(() => {
+  vi.restoreAllMocks()
   for (const [name, descriptor] of originals) {
     if (descriptor === undefined) delete (globalThis as Record<string, unknown>)[name]
     else Object.defineProperty(globalThis, name, descriptor)
@@ -413,6 +416,143 @@ describe('native Agent definition context', () => {
         status: 'unavailable',
         code: 'unsupported',
       })
+      expect(requests).toHaveLength(count)
+    } finally {
+      transport.dispose()
+    }
+  })
+
+  const toolSetup = (run: string): AgentToolSetup => ({
+    skills: [{ id: 'collaboration', path: `/host/${run}/SKILL.md`, content: `Use the real CLI for ${run}.` }],
+    commands: [{
+      id: 'report',
+      argv: ['/host/node', `/host/${run}/cli.mjs`, '--binding', `/host/${run}/binding.json`],
+      bindingPath: `/host/${run}/binding.json`,
+      expiresAt: '2099-01-01T00:00:00Z',
+    }],
+  })
+
+  it('gets fresh tool context at actual dequeue, steer and inject, with Skill content separate from user text', async () => {
+    const { requests, transport, view } = await harness()
+    let current: AgentToolSetup = { skills: [], commands: [] }
+    const getSetup = vi.spyOn(agentTools, 'getAgentToolSetup').mockImplementation(async () => current)
+    try {
+      await transport.create({ sessionId: 'tools-session', options: { model: 'gpt-test' }, setup })
+      expect(getSetup).toHaveBeenLastCalledWith('tools-session')
+      current = toolSetup('run-one')
+      await transport.submit({
+        sessionId: 'tools-session',
+        message: user('m1', 'first user text'),
+        target: 'next-turn',
+        wakeup: true,
+      })
+      const first = requests.at(-1)!.params.input as Record<string, unknown>[]
+      expect(first[0]).toEqual({ type: 'skill', name: 'collaboration', path: '/host/run-one/SKILL.md' })
+      expect(first[1]!.text).toContain('Use the real CLI for run-one.')
+      expect(first[1]!.text).toContain(JSON.stringify(current.commands[0]!.argv))
+      expect(first.at(-1)).toEqual({ type: 'text', text: 'first user text', text_elements: [] })
+      const lookups = getSetup.mock.calls.length
+      await transport.submit({
+        sessionId: 'tools-session',
+        message: user('m2', 'queued user text'),
+        target: 'next-turn',
+        wakeup: true,
+      })
+      expect(getSetup).toHaveBeenCalledTimes(lookups)
+      current = toolSetup('run-two')
+      view.message({
+        type: 'mcp-notification',
+        hostId: 'local',
+        message: {
+          method: 'turn/completed',
+          params: { threadId: 'native-context-thread', turn: { id: 'turn-2', status: 'completed' } },
+        },
+      })
+      await settle()
+      const queued = requests.at(-1)!.params.input
+      expect(JSON.stringify(queued)).toContain('run-two')
+      expect(JSON.stringify(queued)).not.toContain('run-one')
+      expect(JSON.stringify(queued)).toContain('queued user text')
+      current = toolSetup('run-three')
+      await transport.submit({
+        sessionId: 'tools-session',
+        message: user('m3', 'steer text'),
+        target: 'next-step',
+        wakeup: true,
+      })
+      expect(requests.at(-1)!.method).toBe('turn/steer')
+      expect(JSON.stringify(requests.at(-1)!.params.input)).toContain('run-three')
+      current = toolSetup('run-four')
+      await transport.submit({
+        sessionId: 'tools-session',
+        message: user('m4', 'injected text'),
+        target: 'next-step',
+        wakeup: false,
+      })
+      expect(requests.at(-1)!.method).toBe('thread/inject_items')
+      const items = requests.at(-1)!.params.items as Record<string, unknown>[]
+      expect(items[0]!.role).toBe('user')
+      expect(JSON.stringify(items[0])).toContain('Use the real CLI for run-four.')
+      expect(items[1]).toEqual({
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: 'injected text' }],
+      })
+    } finally {
+      transport.dispose()
+    }
+  })
+
+  it('refuses revoked context on resume, create, dequeue and later inputs without a native fallback', async () => {
+    const { requests, transport, view } = await harness()
+    const getSetup = vi.spyOn(agentTools, 'getAgentToolSetup').mockResolvedValue(toolSetup('active-run'))
+    try {
+      await transport.create({ sessionId: 'revoked-session', options: { model: 'gpt-test' } })
+      await transport.submit({
+        sessionId: 'revoked-session',
+        message: user('m1', 'first'),
+        target: 'next-turn',
+        wakeup: true,
+      })
+      await transport.submit({
+        sessionId: 'revoked-session',
+        message: user('m2', 'queued'),
+        target: 'next-turn',
+        wakeup: true,
+      })
+      getSetup.mockRejectedValue(new Error('agent tool setup unavailable; rebind required'))
+      const count = requests.length
+      for (const wakeup of [true, false]) {
+        expect(
+          await transport.submit({
+            sessionId: 'revoked-session',
+            message: user('late', 'late'),
+            target: 'next-step',
+            wakeup,
+          }),
+        ).toBe('unavailable')
+      }
+      expect(await transport.resume({ sessionId: 'revoked-session' })).toMatchObject({ status: 'unavailable' })
+      expect(await transport.create({ sessionId: 'another', options: { model: 'gpt-test' } })).toMatchObject({
+        status: 'unavailable',
+      })
+      view.message({
+        type: 'mcp-notification',
+        hostId: 'local',
+        message: {
+          method: 'turn/completed',
+          params: { threadId: 'native-context-thread', turn: { id: 'turn-2', status: 'completed' } },
+        },
+      })
+      await settle()
+      expect(
+        await transport.submit({
+          sessionId: 'revoked-session',
+          message: user('late-2', 'late'),
+          target: 'next-turn',
+          wakeup: true,
+        }),
+      ).toBe('unavailable')
       expect(requests).toHaveLength(count)
     } finally {
       transport.dispose()
