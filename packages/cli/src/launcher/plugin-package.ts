@@ -1,3 +1,4 @@
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, normalizeUsageManifestV11 } from '../usage-permissions.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
   normalizeVisualManifestV10,
@@ -748,6 +749,8 @@ export async function stageResolvedPluginPackage(
     ? normalizePluginManifestV7(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
     : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 && runtime.schemaVersion === 8
     ? normalizePluginManifestV8(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
+    : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 && runtime.schemaVersion === 11
+    ? normalizeUsageManifestV11(runtime, resolved.packageManifest.pluginId)
     : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V10 && runtime.schemaVersion === 10
     ? normalizeVisualManifestV10(runtime, resolved.packageManifest.pluginId)
     : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V9 && runtime.schemaVersion === 9
@@ -755,7 +758,7 @@ export async function stageResolvedPluginPackage(
     : undefined
   if (runtimeManifest === undefined) {
     throw new Error(
-      'the current renderer generation ABI accepts runtime plugin manifest v1, v4, v5, v6, v7, v8, v9, or v10 only',
+      'the current renderer generation ABI accepts runtime plugin manifest v1, v4, v5, v6, v7, v8, v9, v10, or v11 only',
     )
   }
   const entry = await regularContainedFile(root, resolved.packageManifest.entry, 'package entry')
@@ -770,6 +773,7 @@ export async function stageResolvedPluginPackage(
     runtimeManifest.schemaVersion === 4 || runtimeManifest.schemaVersion === 5 || runtimeManifest.schemaVersion === 6
       || runtimeManifest.schemaVersion === 7 || runtimeManifest.schemaVersion === 8
       || runtimeManifest.schemaVersion === 9 || runtimeManifest.schemaVersion === 10
+      || runtimeManifest.schemaVersion === 11
       ? await Promise.all(runtimeManifest.services.map(service => buildServiceArtifact(root, service)))
       : []
   const entityTemplates = await Promise.all((resolved.packageManifest.entityTemplates ?? []).map(async declaration => (
@@ -926,6 +930,8 @@ export async function loadStagedPluginPackage(
       ? normalizePluginManifestV7(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
       : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 && candidate.schemaVersion === 8
       ? normalizePluginManifestV8(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
+      : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 && candidate.schemaVersion === 11
+      ? normalizeUsageManifestV11(rawRuntime, parsed.package.pluginId)
       : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V10 && candidate.schemaVersion === 10
       ? normalizeVisualManifestV10(rawRuntime, parsed.package.pluginId)
       : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V9 && candidate.schemaVersion === 9

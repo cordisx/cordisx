@@ -71,7 +71,7 @@ export interface HostPlatformProviderServiceDeclaration {
 
 export interface HostResolvedRuntimeManifest {
   readonly $schema: string
-  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10
+  readonly schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11
   readonly id: string
   readonly name?: string
   readonly capabilities: readonly unknown[]
