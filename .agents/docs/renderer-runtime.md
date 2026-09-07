@@ -411,6 +411,16 @@ height and vertical padding remain unchanged. Selected colors may project only
 from an explicitly selected native Session row that is neither hovered nor
 focused; missing/transparent samples retain semantic Host defaults. This avoids
 using a transient hover as idle paint or adding a second selected background.
+An independent collection seat does not inherit the native section's inner
+wrapper padding. Project title and row-background horizontal insets separately,
+relative to the collection root border box: title placement follows the native
+toggle's outer position (plus its own padding), while row backgrounds follow
+native Session row bounds. The native section content box supplies fallbacks
+and the heading's trailing limit, so a short native label cannot truncate a
+longer plugin group label. Section block-start/end margins and paddings belong
+to the group wrapper and preserve spacing above/below the entire group; they
+never change the accepted row-internal height or padding.
+
 The group header has no new create/more menu: plugins already supply ordinary
 create entries and per-row structured actions. Existing saved Room titles are
 not rewritten by this layout projection.
