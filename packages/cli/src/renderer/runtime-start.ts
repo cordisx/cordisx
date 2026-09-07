@@ -564,7 +564,12 @@ export async function start(
     )
     const nativeAgentSessionPersistence =
       desktopAgentSessionTransport !== undefined && ownerDocumentBridge !== undefined
-        ? new NativeAgentSessionPersistence(ownerDocumentBridge, metadata.ownerDocumentBindings ?? [])
+        && metadata.nativeSessionBridgeToken !== undefined
+        ? new NativeAgentSessionPersistence(
+          ownerDocumentBridge,
+          metadata.ownerDocumentBindings ?? [],
+          metadata.nativeSessionBridgeToken,
+        )
         : undefined
     const recoveredNativeSessions = nativeAgentSessionPersistence === undefined
       ? []

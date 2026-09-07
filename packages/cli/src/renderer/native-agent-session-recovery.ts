@@ -29,6 +29,7 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
   constructor(
     private readonly bridge: BrowserOwnerDocumentBridge,
     private readonly principals: readonly OwnerDocumentPrincipalBinding[],
+    private readonly hostToken: string,
   ) {
     current = this
   }
@@ -46,7 +47,7 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
   }
   private call(principal: OwnerDocumentPrincipalBinding, operation: string, input: object): Promise<unknown> {
     if (this.closed) return Promise.reject(new Error('native Session persistence disposed'))
-    return this.bridge.request(principal.token, { operation, ...input })
+    return this.bridge.request(principal.token, { ...input, operation, nativeToken: this.hostToken })
   }
   async load(): Promise<readonly CordisXPersistedSession[]> {
     const sessions: CordisXPersistedSession[] = []
