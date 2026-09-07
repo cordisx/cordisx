@@ -104,6 +104,11 @@ assert(creatorReadme.includes('Independent Plugin Exception'), 'creator README m
 assert(workflow.includes('id-token: write'), 'release workflow must grant OIDC id-token permission')
 assert(workflow.includes('environment: npm-beta'), 'release workflow must use the npm-beta environment')
 assert(workflow.includes('npm@11.11.0'), 'release workflow must pin an OIDC-capable npm CLI')
+assert(
+  workflow.includes('npm ci --registry=https://registry.npmjs.org'),
+  'release install must prepare Git dependencies',
+)
+assert(!workflow.includes('npm ci --ignore-scripts'), 'release install must not skip Git dependency preparation')
 assert(workflow.includes('check-registry-beta.mjs'), 'release workflow must verify clean registry installation')
 assert(!/NPM_TOKEN|NODE_AUTH_TOKEN|_authToken/.test(workflow), 'release workflow must not reference npm tokens')
 
