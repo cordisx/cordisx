@@ -288,6 +288,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       )
       const thread = object(result?.thread)
       if (text(thread?.id) !== threadId) return { status: 'unavailable', code: 'host-unavailable' }
+      if (needsRecovery && !Array.isArray(thread?.turns)) return { status: 'unavailable', code: 'unsupported' }
       if (Array.isArray(thread?.turns)) {
         const terminal = thread.turns.filter(turn =>
           ['completed', 'interrupted', 'failed'].includes(String(object(turn)?.status))
