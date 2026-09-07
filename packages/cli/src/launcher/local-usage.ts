@@ -180,9 +180,45 @@ export class LocalUsageHost {
       const seen = new Map<string, { content: Buffer; conflict: boolean }>()
       files.sort()
       const scanStart = ledger.scanIndex % Math.max(1, files.length)
-      const ordered = [...files.slice(scanStart), ...files.slice(0, scanStart)]
+      const rotating = [...files.slice(scanStart), ...files.slice(0, scanStart)]
+      // A bounded header probe finds append work by each owner's checkpoint, not
+      // the global observation timestamp: deferred appends remain eligible.
+      const priority: string[] = []
+      const probeDeadline = now() + Math.max(1, (deadline - now()) / 4)
+      for (const file of rotating) {
+        if (now() > probeDeadline) break
+        const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => undefined)
+        if (!handle) continue
+        try {
+          const stat = await handle.stat()
+          if (!stat.isFile() || stat.size > Math.min(64 * 1024 * 1024, maxBytes / 2)) continue
+          const header = Buffer.alloc(4096)
+          const { bytesRead } = await handle.read(header, 0, header.length, 0)
+          const end = header.subarray(0, bytesRead).indexOf(10)
+          if (end < 0) continue
+          const owner =
+            reduceUsageRecords(undefined, [header.subarray(0, end).toString('utf8')], { baseline: true }).state.ownerId
+          const previous = owner ? ledger.sources[hash(owner)] : undefined
+          if (previous && !previous.blocked && stat.size > previous.offset) priority.push(file)
+        } finally {
+          await handle.close()
+        }
+      }
+      // At most half the read budget goes to appends; the durable rotation keeps
+      // discovering new sources and verifying unchanged/rewritten old sources.
+      const ordered = [
+        ...priority.map(file => ({ file, urgent: true })),
+        ...rotating.map(file => ({ file, urgent: false })),
+      ]
+      const priorityDeadline = now() + Math.max(1, (deadline - now()) / 2)
+      const priorityRead = new Set<string>()
       let attempted = 0
-      for (const file of ordered) {
+      for (const { file, urgent } of ordered) {
+        if (urgent && (bytes >= maxBytes / 2 || now() > priorityDeadline)) continue
+        if (!urgent && priorityRead.has(file)) {
+          ledger.scanIndex = (files.indexOf(file) + 1) % Math.max(1, files.length)
+          continue
+        }
         // Time budgets are cooperative. Once discovery found files, attempt at least
         // one bounded read so slow directory enumeration cannot starve every scan.
         if ((now() > deadline && attempted > 0) || bytes >= maxBytes) {
@@ -190,7 +226,7 @@ export class LocalUsageHost {
           break
         }
         attempted++
-        ledger.scanIndex = (files.indexOf(file) + 1) % Math.max(1, files.length)
+        if (!urgent) ledger.scanIndex = (files.indexOf(file) + 1) % Math.max(1, files.length)
         const canonical = await realpath(file).catch(() => undefined)
         if (canonical !== file) {
           diagnostic('source-read-failed')
@@ -207,6 +243,7 @@ export class LocalUsageHost {
             diagnostic('scan-budget')
             continue
           }
+          if (urgent && bytes + stat.size > maxBytes / 2) continue
           if (bytes + stat.size > maxBytes) {
             // Resume at the first deferred file. Advancing past it would repeatedly
             // spend the next scan's budget on the same earlier files.
@@ -223,6 +260,7 @@ export class LocalUsageHost {
             read += result.bytesRead
           }
           bytes += read
+          if (urgent) priorityRead.add(file)
           const complete = buffer.subarray(0, read).lastIndexOf(10) + 1
           if (!complete) {
             diagnostic('incomplete-record')

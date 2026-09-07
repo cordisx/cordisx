@@ -221,3 +221,23 @@ it('does not reuse a cooldown snapshot when the wall clock moves backwards', asy
   expect(updated.revision).toBe(baseline.revision + 1)
   expect(updated.observedThrough).toBe(baseline.observedThrough)
 })
+it('prioritizes durable pending appends while continuing bounded discovery fairly', async t => {
+  const initial = header('old') + token(100, 100, 1)
+  const updated = initial + token(130, 30, 2)
+  const budget = updated.length * 2 + 100
+  const f = await fixture(t, { maxScanBytes: budget }), host = f.create()
+  for (let index = 0; index < 8; index++) {
+    await writeFile(f.file(`source-${index}`), header(`owner-${index}`) + token(100, 100, 1))
+  }
+  // Discover all sources using the normal bounded rotation.
+  for (let index = 0; index < 8; index++) await host.read()
+  for (let index = 4; index < 8; index++) await appendFile(f.file(`source-${index}`), token(130, 30, 2))
+  await writeFile(f.file('new-source'), header('new-owner') + token(999, 999, 1))
+  const first = ready(await host.read())
+  expect(first.eligibleTokens).toBeGreaterThan(0)
+  for (let index = 0; index < 12; index++) await host.read()
+  expect(ready(await host.read()).eligibleTokens).toBe(120)
+  await appendFile(f.file('new-source'), token(1009, 10, 2))
+  for (let index = 0; index < 8; index++) await host.read()
+  expect(ready(await host.read()).eligibleTokens).toBe(130)
+})

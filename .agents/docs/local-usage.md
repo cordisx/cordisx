@@ -31,7 +31,10 @@ namespace; reinstalling the same plugin does not reset the Host aggregate.
 Development and release profiles may have different namespaces.
 
 Scans are bounded to 20,000 sources, 64 MiB per rollout, 256 MiB per observation
-and a cooperative five-second budget. Deferred sources resume in later reads.
+and a cooperative five-second budget. Bounded header probes prioritize growth
+against each known owner checkpoint, reserving at least half the read budget for
+normal durable rotation. Deferred appends retain priority until consumed; newly
+discovered sources still establish a baseline. Deferred sources resume in later reads.
 An oversized or unsupported source remains excluded; no historical estimate is
 substituted. This is local observed usage, not authoritative cross-device or
 account-wide billing. The service is unavailable without the Launcher bridge.
