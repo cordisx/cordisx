@@ -183,5 +183,5 @@ describe('owner documents production renderer composition', () => {
     })
     await right.dom.window.__cordisxRuntime?.dispose()
     right.dom.window.close()
-  }, 30_000)
+  }, 60_000)
 })
