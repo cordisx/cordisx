@@ -79,6 +79,16 @@ and initial-error recovery; those exceptional recovery paths may reload the
 document. Project config, dependency installation, and Node-side launcher or
 bridge changes require restarting `cordisx dev`.
 
+The developer explicitly selects each local source in the `cordisx dev`
+configuration. For those exact descriptors, the native Vite entry grants only
+the structured UI seats needed to expose the development surface:
+`sidebar.navigation.items`, `main`, `manager.settings.navigation-items`, and
+`manager.content`. These grants live only in that renderer session and create
+no persistence writer. Agent, approval, data, and Host-DOM capabilities retain
+their normal permission policies. This avoids development-only UI prompts
+without turning local file URLs or unrelated plugin capabilities into a broad
+authorization signal.
+
 ## Native policy and cleanup
 
 The installed native page blocks loopback module and WebSocket access by
