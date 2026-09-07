@@ -316,6 +316,39 @@ freezes each replacement, validates bounded ids/text/icons/routes, renders the
 group heading and rows with the shared SidebarItem primitive, and derives the
 single selected row from the exact owner-qualified route plus parameters.
 
+The shared row layout and its action, menu, confirmation, forced-color and
+reduced-motion states live in `packages/cli/assets/host-sidebar.css`. The
+structured adapter imports its CSS text at the existing sidebar cascade position
+and retains the document-scoped reference-counted style lifetime. Native and
+Playground rows use the same `.cxsi-row.cordisx-nav-row` base; these rules must
+not require `.pg-sidebar`, which is absent in Codex Desktop. Playground visual tokens are mapped separately under its own `.pg-sidebar`
+root. Single-line rows
+have one icon and title; two-line rows keep title and ellipsized summary in the
+same copy column. The primary button fills the row height, and trailing actions
+remain independent controls.
+
+Visual values are supplied separately from that shared layout. The adapter marks
+its sidebar root from its explicit identity: Codex uses the existing native
+navigation template to project corner radius, font, row height and content
+spacing; Playground maps the same properties to its own `--pg-*` tokens. The
+projection reuses the normal layout reconciliation and existing native-control
+resolver, without another observer, copied classes or label matching. Geometry
+is sampled again on reconciliation and removed when no template is available.
+
+State backgrounds are not sampled from the native template, because it might
+currently be hovered or selected. Codex maps hover and selection to its existing
+`--color-background-primary-ghost-hover` semantic token, and focus adds the Host
+ring without another fill or extra currentColor blend. The row is the only
+background owner; its primary button stays transparent. Compare idle, hover,
+selected and selected-plus-focus separately when reviewing native screenshots.
+A screenshot of adjacent rows does not establish that their states are equal.
+
+This Host asset uses the existing renderer CSS-text path: native and Playground
+Vite transforms convert a default `.css` import to `?inline`, while the packaged
+renderer bundle uses esbuild's CSS text loader. The existing asset-copy step
+preserves the relative import in `dist/assets`. This does not change plugin CSS
+loading or imply that ordinary side-effect CSS imports share this lifecycle.
+
 The Playground unified Recent tasks list uses the same Host SidebarItem
 primitive and keeps a task/history semantic icon. Agent identity Avatars belong
 to conversation participant surfaces, not to generic task navigation. A future

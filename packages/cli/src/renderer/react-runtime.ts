@@ -568,6 +568,7 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
     },
   })
   globalThis.__cordisxSharedReactRuntime = runtime
+  Reflect.deleteProperty(globalThis, '__cordisxPreparedReactRuntime')
   return runtime
 }
 export function AttachmentPlaceholder(
