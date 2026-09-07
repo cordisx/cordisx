@@ -196,3 +196,25 @@ node still supplies draft emptiness. This exception does not apply to unknown
 layouts or ambiguous editors. Regression tests replace the whole footer and
 keep both roots mounted through recording and transcription. Simulated label
 changes alone do not verify that native layout transition or microphone capture.
+
+### DOM-based visual renderers
+
+`defineReactVisual(Component, { kind: 'react-dom-v1' })` opts into a lazy,
+shared-React DOM component for renderers such as OneWorks Avatar. The omitted
+option still returns `react-svg-v1`; unknown renderer kinds remain unsupported.
+This is a Host-specific integration of the existing framework-neutral Protocol,
+not a new semantic snapshot or permission.
+
+The Host keeps the same inert, aria-hidden, clipped seat, native event handling,
+error fallback, lazy authority checks, and generation disposal. DOM renderers
+must render only their owned subtree: no portals, document/window listeners,
+external mounts, native selectors, focusable interactions, or global stylesheet
+overrides. Styles must be scoped to the plugin's visual subtree. This is the
+existing trusted-renderer boundary, not a DOM sandbox.
+
+A plugin can pass an immutable Avatar definition to its own renderer with
+`interactive={false}`. It derives orientation from the authorized pointer
+snapshot, holds/eases gaze in its own state, and maps dictation or primary state
+to its own expressions. It must dispose animation timers on unmount and honor
+reduced motion. Avatar dependencies and artwork remain plugin-owned; the Host
+adds no Avatar-specific state machine or mouse behavior.

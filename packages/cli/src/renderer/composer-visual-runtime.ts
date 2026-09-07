@@ -267,7 +267,7 @@ export class ComposerVisualRuntime {
               visual === undefined || record.retired || this.disposed || record.epoch !== epoch
               || !record.authority.render()
             ) return
-            if (visual.kind !== 'react-svg-v1' || typeof visual.component !== 'function') {
+            if (!['react-svg-v1', 'react-dom-v1'].includes(visual.kind) || typeof visual.component !== 'function') {
               throw new Error('Unsupported visual renderer')
             }
             record.loaded = visual

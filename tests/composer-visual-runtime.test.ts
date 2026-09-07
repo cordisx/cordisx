@@ -1,4 +1,5 @@
 import * as React from 'react'
+import { defineReactVisual } from '../packages/cli/src/react.js'
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ComposerVisualRuntime } from '../packages/cli/src/renderer/composer-visual-runtime.js'
@@ -88,6 +89,33 @@ function Visual({ state }: CordisXReactVisualProps) {
 const loadVisual = async () => ({ kind: 'react-svg-v1' as const, component: Visual })
 
 describe('controlled Composer visual lifecycle', () => {
+  it('mounts an explicitly declared DOM visual inertly and disposes its effects on revoke', async () => {
+    const f = setup()
+    const disposed = vi.fn()
+    function DomVisual() {
+      React.useEffect(() => disposed, [])
+      return React.createElement('div', { 'data-real-avatar': true }, React.createElement('span', null, 'face'))
+    }
+    expect(defineReactVisual(Visual).kind).toBe('react-svg-v1')
+    const visual = defineReactVisual(DomVisual, { kind: 'react-dom-v1' })
+    f.runtime.register(
+      'dom',
+      { id: 'avatar', pointId: 'composer.primary-action.visual' },
+      async () => visual,
+      f.authority,
+    )
+    f.grant(true)
+    await vi.waitFor(() => expect(f.document.querySelector('[data-real-avatar]')).not.toBeNull())
+    const root = f.document.querySelector<HTMLElement>('[data-cordisx-composer-visual]')!
+    expect(root.hasAttribute('inert')).toBe(true)
+    expect(root.style.pointerEvents).toBe('none')
+    expect(root.style.overflow).toBe('hidden')
+    f.grant(false)
+    await vi.waitFor(() => expect(disposed).toHaveBeenCalledOnce())
+    expect(f.document.querySelector('[data-real-avatar]')).toBeNull()
+    expect(f.document.querySelector<SVGElement>('button > svg')!.style.visibility).toBe('')
+  })
+
   it('loads only after authority and availability, preserves the native button and immediately restores on deny', async () => {
     const f = setup()
     const load = vi.fn(loadVisual)

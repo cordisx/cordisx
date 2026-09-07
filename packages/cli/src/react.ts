@@ -123,9 +123,10 @@ export function defineReactPage<
   }
 }
 
-/** Declare a lazy SVG component; the Host owns its root and native placement. */
+/** Declare a lazy visual; DOM renderers remain inert and clipped to the Host-owned seat. */
 export function defineReactVisual(
   component: import('./extension-point-visual-contracts.js').CordisXReactVisual['component'],
+  options?: Readonly<{ kind: import('./extension-point-visual-contracts.js').CordisXReactVisual['kind'] }>,
 ): import('./extension-point-visual-contracts.js').CordisXReactVisual {
-  return Object.freeze({ kind: 'react-svg-v1', component })
+  return Object.freeze({ kind: options?.kind ?? 'react-svg-v1', component })
 }

@@ -12,7 +12,7 @@ export interface CordisXReactVisualProps {
   readonly state: ExtensionPointVisualSnapshotV1 | ExtensionPointVisualSnapshotV2
 }
 export interface CordisXReactVisual {
-  readonly kind: 'react-svg-v1'
+  readonly kind: 'react-svg-v1' | 'react-dom-v1'
   readonly component: ComponentType<CordisXReactVisualProps>
 }
 export interface CordisXVisualRegistration {
