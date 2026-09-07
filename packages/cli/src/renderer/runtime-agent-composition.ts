@@ -1,3 +1,5 @@
+import { CordisXExtensionPointVisualService } from './composer-visual-service.js'
+import { COMPOSER_VISUAL_CATALOG } from './composer-visual-catalog.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
@@ -501,8 +503,9 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
       console: runtimeScope.pluginConsole()!,
       selectedNavigationActions: runtimeScope.selectedNavigationActions()!,
       identity: {
-        resolve: value => runtimeScope.agentSessionRuntime.definitionPresentation(value)
-          ?? runtimeScope.agentLoopBrokerV4()!.definitionPresentation(value),
+        resolve: value =>
+          runtimeScope.agentSessionRuntime.definitionPresentation(value)
+            ?? runtimeScope.agentLoopBrokerV4()!.definitionPresentation(value),
         resolveSettings: value => {
           const request = resolveHostManagerAgentDefinitionOpenRequest(
             runtimeScope.routeService?.managerContentAgentDefinitionTarget(value),
@@ -644,6 +647,15 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
     runtimeScope.commandService.setAccessResolver(runtimeScope.extensionPointBroker()!)
     runtimeScope.routeService.setAccessResolver(runtimeScope.extensionPointBroker()!)
     runtimeScope.slotService.setAccessResolver(runtimeScope.extensionPointBroker()!)
+    runtimeScope.ctx.effect(
+      () => runtimeScope.extensionPointDescriptors()!.registerCatalog(COMPOSER_VISUAL_CATALOG),
+      'cordisx: composer visual catalog',
+    )
+    await runtimeScope.ctx.plugin(CordisXExtensionPointVisualService, {
+      surfaces: runtimeScope.slotService.registry,
+      broker: runtimeScope.broker(),
+      document,
+    })
     runtimeScope.transientCanvasCoordinator = new TransientCanvasCoordinator(
       document,
       runtimeScope.slotService.registry,

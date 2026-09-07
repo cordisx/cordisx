@@ -1,3 +1,4 @@
+import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -39,6 +40,7 @@ export interface CordisXConfigPlugin {
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
     | CordisXPluginManifestV9
+    | CordisXPluginManifestV10
   readonly package?: {
     readonly version: string
     readonly digest: `sha256:${string}`

@@ -1,3 +1,4 @@
+import type { ExtensionPointVisualPresentationV1 } from '@cordisx/protocol/extension-point-visual/v1'
 import type { Disposable, Effect } from '@deepseek-ai/cordis'
 
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
@@ -227,6 +228,8 @@ export interface CordisXSurfaceMap {
   'session.backdrop': CordisXSessionBackdropPresentation
   'composer.toolbar.items': CordisXToolbarItem
   'composer.reasoning-intensity': CordisXReasoningIntensityPresentation
+  'composer.primary-action.visual': ExtensionPointVisualPresentationV1
+  'composer.frame.overlay': ExtensionPointVisualPresentationV1
   'composer.submit.effects': CordisXTransientCanvasPresentation
   'composer.command-menu.items': CordisXStructuredAction
   'composer.dock.above': CordisXPresenterItem
@@ -271,6 +274,8 @@ export const CORDISX_SURFACE_NAMES = [
   'session.backdrop',
   'composer.toolbar.items',
   'composer.reasoning-intensity',
+  'composer.primary-action.visual',
+  'composer.frame.overlay',
   'composer.submit.effects',
   'composer.command-menu.items',
   'composer.dock.above',
@@ -299,6 +304,8 @@ export const CORDISX_IMPLEMENTED_SURFACE_NAMES = [
   'session.backdrop',
   'composer.toolbar.items',
   'composer.reasoning-intensity',
+  'composer.primary-action.visual',
+  'composer.frame.overlay',
   'composer.submit.effects',
   'environment.panel.header-actions',
   'environment.panel.sections',
@@ -329,8 +336,12 @@ export type CordisXContributionOptions<Name extends CordisXSurfaceName = CordisX
   & CordisXContributionOptionsBase<Name>
   & (Name extends 'manager.settings.navigation-items'
     ? Omit<CordisXManagerSettingsNavigationContributionOptions, keyof CordisXContributionOptionsBase<Name>>
-    : Name extends 'manager.settings.tabs' | 'composer.reasoning-intensity' | 'composer.submit.effects'
-      ? { readonly group?: never }
+    : Name extends
+      | 'manager.settings.tabs'
+      | 'composer.reasoning-intensity'
+      | 'composer.submit.effects'
+      | 'composer.primary-action.visual'
+      | 'composer.frame.overlay' ? { readonly group?: never }
     : { readonly group?: string })
 
 export interface CordisXContributionPresentationOptions {
@@ -714,32 +725,38 @@ export type CordisXAgentConversationShellSourceFactoryV3 = (
 
 export type CordisXAgentConversationShellSourceFactoryV4 = (
   binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellSource
+) =>
+  | import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellSource>
 
 export type CordisXAgentConversationShellSourceFactoryV5 = (
   binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellSource
+) =>
+  | import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellSource>
 
 export type CordisXAgentConversationShellSourceFactoryV6 = (
   binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellSource
+) =>
+  | import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellSource>
 
 export type CordisXAgentConversationShellSourceFactoryV7 = (
   binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellSource
+) =>
+  | import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellSource>
 
 export type CordisXAgentConversationShellSourceFactoryV8 = (
   binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellSource
+) =>
+  | import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellSource>
 
 export type CordisXAgentConversationShellSourceFactoryV9 = (
   binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellSource
+) =>
+  | import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellSource>
 
 export interface CordisXAgentConversationShellRegistration {

@@ -1,0 +1,135 @@
+import { describe, expect, it } from 'vitest'
+import { JSDOM } from 'jsdom'
+import { probeComposerVisual } from '../packages/cli/src/renderer/adapter/composer-visual-probe.js'
+
+function fixture() {
+  const dom = new JSDOM(
+    '<div data-codex-composer-root data-composer-placement="main"><div contenteditable="true" role="textbox"></div><div data-composer-footer-responsive><button class="size-token-button-composer" aria-label="Start voice chat" aria-busy="false"><svg></svg></button></div></div>',
+  )
+  const { document } = dom.window
+  dom.window.Element.prototype.getBoundingClientRect = () => ({
+    x: 0,
+    y: 0,
+    left: 0,
+    top: 0,
+    right: 28,
+    bottom: 28,
+    width: 28,
+    height: 28,
+    toJSON() {},
+  })
+  return { document, button: document.querySelector('button')!, editor: document.querySelector('[contenteditable]')! }
+}
+describe('native Composer visual semantic probe', () => {
+  it('uses actual operation labels independently of draft content and preserves native controls', () => {
+    const { document, button, editor } = fixture()
+    editor.textContent = 'private draft must never be projected'
+    for (
+      const [label, action] of [
+        ['Start voice chat', 'voice'],
+        ['Send', 'send'],
+        ['Stop', 'stop'],
+        ['Queue', 'queue'],
+        ['Steer', 'steer'],
+        ['Resume', 'resume'],
+        ['Cancel voice chat', 'cancel'],
+      ]
+    ) {
+      button.setAttribute('aria-label', label!)
+      const result = probeComposerVisual(document)
+      expect(result.status).toBe('available')
+      if (result.status !== 'available') throw new Error(result.reason)
+      expect(result.seat.action).toBe(action)
+      expect(result.seat.draftEmpty).toBe(false)
+      expect(result.seat.button).toBe(button)
+      expect(Object.keys(result.seat)).not.toContain('text')
+    }
+  })
+  it('fails closed on unknown, ambiguous, hidden, and unobservable native controls', () => {
+    const { document, button } = fixture()
+    button.setAttribute('aria-label', 'Unexpected operation')
+    expect(probeComposerVisual(document).status).toBe('unavailable')
+    button.setAttribute('aria-label', 'Send')
+    button.setAttribute('aria-busy', 'unknown')
+    expect(probeComposerVisual(document).status).toBe('unavailable')
+    button.setAttribute('aria-busy', 'false')
+    button.parentElement!.append(button.cloneNode(true))
+    expect(probeComposerVisual(document).status).toBe('unavailable')
+    document.body.innerHTML = ''
+    expect(probeComposerVisual(document).status).toBe('pending')
+  })
+  it('projects disabled and busy without treating a running response as busy', () => {
+    const { document, button } = fixture()
+    button.setAttribute('aria-label', 'Stop')
+    const first = probeComposerVisual(document)
+    expect(first.status === 'available' && first.seat.enabled).toBe(true)
+    button.setAttribute('aria-busy', 'true')
+    const second = probeComposerVisual(document)
+    expect(second.status === 'available' && second.seat.busy && second.seat.enabled).toBe(true)
+  })
+})
+
+it('projects independent dictation states without confusing the primary control', () => {
+  const { document, button } = fixture()
+  const microphone = document.createElement('button')
+  microphone.className = 'size-token-button-composer'
+  microphone.innerHTML = '<svg></svg>'
+  button.parentElement!.prepend(microphone)
+  for (
+    const [label, busy, state] of [
+      ['听写', 'false', 'idle'],
+      ['停止听写', 'false', 'recording'],
+      ['听写', 'true', 'transcribing'],
+      ['正在完成听写', 'true', 'transcribing'],
+      ['Starting dictation; click to cancel', 'true', 'starting'],
+      ['Retry dictation', 'false', 'retry'],
+      ['Unexpected', 'false', 'unavailable'],
+    ]
+  ) {
+    microphone.setAttribute('aria-label', label!)
+    microphone.setAttribute('aria-busy', busy!)
+    const result = probeComposerVisual(document)
+    if (label === 'Unexpected') {
+      expect(result.status).toBe('unavailable')
+      continue
+    }
+    expect(result.status).toBe('available')
+    if (result.status !== 'available') throw new Error(result.reason)
+    expect(result.seat.dictation).toBe(state)
+    expect(result.seat.action).toBe('voice')
+  }
+  microphone.setAttribute('aria-label', 'Dictate')
+  button.parentElement!.prepend(microphone.cloneNode(true))
+  const ambiguous = probeComposerVisual(document)
+  expect(ambiguous.status === 'available' && ambiguous.seat.dictation).toBe('unavailable')
+})
+
+it('keeps native dictation stop/insert and transcribe/send controls distinct', () => {
+  const { document, button, editor } = fixture()
+  editor.style.visibility = 'hidden'
+  editor.setAttribute('contenteditable', 'false')
+  const inputFooter = document.createElement('div')
+  inputFooter.setAttribute('data-composer-footer-responsive', '')
+  button.parentElement!.before(inputFooter)
+  const stop = document.createElement('button')
+  stop.setAttribute('aria-label', '停止听写')
+  stop.setAttribute('aria-busy', 'false')
+  stop.innerHTML = '<svg></svg>'
+  button.parentElement!.prepend(stop)
+  for (const label of ['转录并发送', 'Transcribe and send']) {
+    button.setAttribute('aria-label', label)
+    button.setAttribute('aria-busy', 'false')
+    let result = probeComposerVisual(document)
+    expect(result.status).toBe('available')
+    if (result.status !== 'available') throw new Error(result.reason)
+    expect(result.seat).toMatchObject({ action: 'send', dictation: 'recording', button })
+    button.setAttribute('aria-busy', 'true')
+    result = probeComposerVisual(document)
+    expect(result.status === 'available' && result.seat.dictation).toBe('transcribing')
+    button.setAttribute('aria-busy', 'false')
+    stop.setAttribute('aria-busy', 'true')
+    result = probeComposerVisual(document)
+    expect(result.status === 'available' && result.seat.dictation).toBe('transcribing')
+    stop.setAttribute('aria-busy', 'false')
+  }
+})

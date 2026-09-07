@@ -1,3 +1,4 @@
+import type { CordisXPluginManifestV10 } from './extension-point-interaction-permissions.js'
 import type { Context, Disposable } from '@deepseek-ai/cordis'
 
 import type { CordisXPluginManifestV1 } from './platform-contracts.js'
@@ -227,6 +228,7 @@ export interface CordisXPluginModule {
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
     | CordisXPluginManifestV9
+    | CordisXPluginManifestV10
   readonly inject?: readonly string[] | Record<string, unknown>
   readonly Config?: CordisXStandardSchema
   readonly configApplies?: CordisXConfigAppliesInput
@@ -258,6 +260,7 @@ export interface CordisXBrowserPlugin {
     | CordisXPluginManifestV7
     | CordisXPluginManifestV8
     | CordisXPluginManifestV9
+    | CordisXPluginManifestV10
   /** Immutable package and module generation metadata owned by the launcher. */
   readonly package?: {
     readonly version: string

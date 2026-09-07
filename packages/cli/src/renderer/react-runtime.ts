@@ -1,3 +1,4 @@
+import { defineReactVisual } from '../react.js'
 import * as React from 'react'
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import * as ReactDOM from 'react-dom'
@@ -455,6 +456,7 @@ export interface SharedReactRuntime {
     Stack: typeof Stack
     Text: typeof Text
   }>
+  readonly defineReactVisual: typeof defineReactVisual
   readonly defineReactPage: <Messages extends CordisXMessageDefinition<Messages> = CordisXMessageSchema>(
     component: CordisXReactPageComponent<Messages>,
   ) => CordisXPageMount<Messages>
@@ -550,6 +552,7 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
       Stack,
       Text,
     }),
+    defineReactVisual,
     defineReactPage,
     dispose(): void {
       if (disposed) return

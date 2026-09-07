@@ -1,3 +1,4 @@
+import type { CordisXPluginManifestV10 } from '../../extension-point-interaction-permissions.js'
 import { CORDISX_PLATFORM_CAPABILITIES } from '../../contracts.js'
 import type {
   CordisXCapabilityDeclaration,
@@ -196,7 +197,8 @@ export abstract class PlatformPermissionBrokerBase {
       | CordisXPluginManifestV6
       | CordisXPluginManifestV7
       | CordisXPluginManifestV8
-      | CordisXPluginManifestV9,
+      | CordisXPluginManifestV9
+      | CordisXPluginManifestV10,
     generation: PluginGenerationEffectIdentity = Object.freeze({ pluginId: identity.id }),
     candidateView?: PluginGenerationView,
     artifact?: PermissionArtifactBindingV3,
@@ -205,6 +207,7 @@ export abstract class PlatformPermissionBrokerBase {
     const declarations = new Map<CordisXPlatformCapability, CordisXCapabilityDeclaration>(
       manifest.schemaVersion === 4 || manifest.schemaVersion === 5 || manifest.schemaVersion === 6
         || manifest.schemaVersion === 7 || manifest.schemaVersion === 8 || manifest.schemaVersion === 9
+        || manifest.schemaVersion === 10
         ? manifest.capabilities.flatMap(item => (
           (CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
             ? [
@@ -281,6 +284,7 @@ export abstract class PlatformPermissionBrokerBase {
     return () => {
       if (this.registrations.get(key)?.token !== registration.token) return
       this.fenceAgentRuntime(identity, 'plugin-generation-replaced', registration.token)
+      this.retireAdditionalPermissions(registration)
       this.registrations.delete(key)
       this.clearDomCertificationTimer(key)
       const identityKey = platformIdentityKey(identity)
@@ -295,6 +299,8 @@ export abstract class PlatformPermissionBrokerBase {
       if (this.visibility?.visible(generation) !== false) this.changed()
     }
   }
+
+  protected retireAdditionalPermissions(_registration: Registration): void {}
 
   protected registration(identity: CordisXPluginIdentity, view?: PluginGenerationView): Registration | undefined {
     return [...this.registrations.values()].find(item =>

@@ -22,7 +22,13 @@ describe('production graph watcher', () => {
           id: item.id,
           result: item.method === 'Page.addScriptToEvaluateOnNewDocument'
             ? { identifier: 'production-bootstrap' }
-            : { result: { value: { ok: true, result: true } } },
+            : {
+              result: {
+                value: String(params.expression).includes('document.readyState === "complete"')
+                  ? true
+                  : { ok: true, result: true },
+              },
+            },
         }))
       })
     })

@@ -99,6 +99,7 @@ export class SurfaceRegistry {
   private readonly listeners = new Set<() => void>()
   private readonly declared = new Set<string>(CORDISX_IMPLEMENTED_SURFACE_NAMES)
   private readonly surfaceAnchors = new Map<string, Map<string, ReadonlySet<string>>>()
+  private readonly runtimeContexts = new Map<string, SurfaceCurrentContextSnapshot>()
   private readonly currentContext = new Map<string, SurfaceCurrentContextSnapshot>()
   private nextSequence = 0
   private notificationDepth = 0
@@ -243,13 +244,24 @@ export class SurfaceRegistry {
     this.notify()
   }
 
+  /** Host-owned independent seat contexts survive adapter-wide context replacement. */
+  setRuntimeContext(item: SurfaceCurrentContextSnapshot): void {
+    if (JSON.stringify(this.runtimeContexts.get(item.surface)) === JSON.stringify(item)) return
+    this.runtimeContexts.set(item.surface, immutableSnapshot(item))
+    this.notify()
+  }
+
+  clearRuntimeContext(surface: string): void {
+    if (this.runtimeContexts.delete(surface)) this.notify()
+  }
+
   /** @deprecated Use setCurrentContext. */
   setAvailability(items: readonly SurfaceCurrentContextSnapshot[]): void {
     this.setCurrentContext(items)
   }
 
   currentContextSnapshot(): readonly SurfaceCurrentContextSnapshot[] {
-    return [...this.currentContext.values()].sort((left, right) =>
+    return [...new Map([...this.currentContext, ...this.runtimeContexts]).values()].sort((left, right) =>
       left.surface < right.surface ? -1 : left.surface > right.surface ? 1 : 0
     )
   }
@@ -585,7 +597,8 @@ export class SurfaceRegistry {
             if (!rows.has(target)) pending = true
           }
         }
-        const currentContext = this.currentContext.get(record.options.name)
+        const currentContext = this.runtimeContexts.get(record.options.name)
+          ?? this.currentContext.get(record.options.name)
         const currentAnchor = toolbarItem === undefined
           ? undefined
           : currentContext?.anchors?.find(anchor => anchor.id === toolbarItem.anchor)

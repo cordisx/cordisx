@@ -255,7 +255,14 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
       profileId: this.profileId,
       identity: { source: registration.identity.source, pluginId: registration.identity.id },
       binding: this.binding(registration, operationId, operationId),
-      declaration: { name: 'ui.extension-points.render', required: false, scope: { extensionPoints: [pointId] } },
+      declaration: {
+        name: 'ui.extension-points.render',
+        required: registration.manifest.schemaVersion === 10
+          && registration.manifest.capabilities.some(item =>
+            item.name === 'ui.extension-points.render' && item.required && item.scope.extensionPoints.includes(pointId)
+          ),
+        scope: { extensionPoints: [pointId] },
+      },
       policies: [...this.policyRecords.values()].filter(isPermissionPolicyRecordV3),
       ...(certification === undefined ? {} : { certification }),
     }, this.catalog)
@@ -473,9 +480,15 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
 
   protected async resolveDomAccess(registration: Registration, pointId: string): Promise<DomPermissionAccessDecision> {
     const identity = registration.identity
-    const operationId = `dom:${this.generation}:${
-      registration.generation.moduleGeneration ?? 'host'
-    }:${identity.id}:${pointId}`
+    const operationId = `dom:${
+      sha256Hex(JSON.stringify([
+        this.generation,
+        registration.generation.moduleGeneration ?? 'host',
+        identity.source,
+        identity.id,
+        pointId,
+      ]))
+    }`
     const plan = this.domPlan(registration, pointId, operationId)
     const item = plan.declarations[0]!
     const key: CordisXPermissionAuthorizationKeyV3 = Object.freeze({

@@ -1,3 +1,4 @@
+import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import { createHash, randomBytes } from 'node:crypto'
 import { chmod, lstat, mkdir, readdir, readFile, realpath } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -31,8 +32,10 @@ export type {
 } from './vite-development-generation.js'
 import {
   COMMONJS_INTEROP_LEAVES,
+  invalidateNativeVitePluginSources,
   SHARED_MODULES,
   SHARED_REACT_INTEROP_LEAVES,
+  validateNativeVitePlugin,
   VITE_CLIENT_DISPOSER_SOURCE,
 } from './vite-development-graph.js'
 
@@ -71,7 +74,11 @@ interface DevelopmentGeneration {
   lastSuccessfulAt: string
   readonly packageFiles: readonly string[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
-  readonly manifest?: CordisXPluginManifestV7 | CordisXPluginManifestV8 | CordisXPluginManifestV9
+  readonly manifest?:
+    | CordisXPluginManifestV7
+    | CordisXPluginManifestV8
+    | CordisXPluginManifestV9
+    | CordisXPluginManifestV10
   /** Executable only by the Host-owned isolated Worker boundary. */
   readonly isolatedArtifactSource?: string
   /** Complete esbuild input graph for isolated-worker HMR ownership. */
@@ -542,27 +549,8 @@ if (import.meta.hot) {
     const plugin = config.plugins.find(item => item.id === pluginId && item.enabled)
     if (plugin === undefined) throw new Error(`Unknown Vite development plugin: ${pluginId}`)
     await bumpGeneration(plugin)
+    invalidateNativeVitePluginSources(server.moduleGraph, await ensureGeneration(plugin), timestamp)
     invalidatePluginModule(plugin.id, timestamp)
-  }
-  const validateModuleGraph = async (module: ModuleNode, seen = new Set<ModuleNode>()): Promise<void> => {
-    if (seen.has(module)) return
-    seen.add(module)
-    await server.transformRequest(module.url)
-    for (const dependency of module.importedModules) await validateModuleGraph(dependency, seen)
-  }
-  const validatePlugin = async (plugin: CordisXConfigPlugin): Promise<void> => {
-    try {
-      const request = '\0' + PLUGIN_PREFIX + plugin.id
-      await server.transformRequest(request)
-      const module = server.moduleGraph.getModuleById(request)
-      if (module === undefined) throw new Error(`Vite did not create a module graph for plugin ${plugin.id}`)
-      await validateModuleGraph(module)
-    } catch (error) {
-      throw new Error(
-        `Build failed for plugin ${plugin.id}: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      )
-    }
   }
   const integration: Plugin = {
     name: 'cordisx-native-development',
@@ -573,6 +561,13 @@ if (import.meta.hot) {
         || id.startsWith(SHARED_PREFIX)
       ) return '\0' + id
       if (id === 'cordisx/contracts') return CONTRACTS_MODULE_PATH
+      // Host JSX participates in creating the singleton; it cannot import its facade.
+      if (
+        /^cordisx\/react\/jsx-(?:dev-)?runtime$/.test(id) && importer !== undefined
+        && inside(normalizePath(importer.split('?')[0]!), normalizePath(path.dirname(rendererPath)))
+      ) {
+        return this.resolve(id.slice('cordisx/'.length), importer, { skipSelf: true })
+      }
       if (SHARED_MODULES.has(id)) return '\0' + SHARED_PREFIX + id
       if (
         /^react(?:-dom)?(?:\/.*)?$/.test(id) && importer !== undefined
@@ -681,6 +676,7 @@ if (import.meta.hot) {
           || (owners.has(plugin.id) && (directEntryOwners.size > 0 || !refreshBoundaryHandlesUpdate))
         ) {
           await bumpGeneration(plugin)
+          invalidateNativeVitePluginSources(server.moduleGraph, generation, context.timestamp)
           invalidatePluginModule(plugin.id, context.timestamp)
           replacements.add(plugin.id)
         }
@@ -956,7 +952,11 @@ if (import.meta.hot) {
       options = nextOptions
       await Promise.all(config.plugins.filter(plugin => plugin.enabled).map(ensureGeneration))
       await compiledConfig()
-      await Promise.all(config.plugins.filter(plugin => plugin.enabled).map(validatePlugin))
+      await Promise.all(
+        config.plugins.filter(plugin => plugin.enabled).map(plugin =>
+          validateNativeVitePlugin(server, PLUGIN_PREFIX + plugin.id, plugin.id)
+        ),
+      )
       // CDP installs only this stable entry. Source modules and updates use Vite.
       return `if (!globalThis.__cordisxViteBoot) { globalThis.__cordisxViteBoot = (async () => { await import(${
         JSON.stringify(url(PREAMBLE))

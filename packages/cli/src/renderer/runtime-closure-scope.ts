@@ -524,7 +524,7 @@ export interface RuntimeClosureScope {
   ) => Promise<void>
   readonly setPermissionPolicy: () => (
     id: string,
-    capability: CordisXPermissionCapabilityV4,
+    capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact',
     policy: CordisXPermissionPolicy,
     scope?: CordisXPermissionScopeV4,
   ) => Promise<void>

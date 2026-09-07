@@ -1,3 +1,7 @@
+import {
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V10,
+  type CordisXHostExtensionPointCatalogV10,
+} from '../contracts.js'
 import type {
   CordisXEffectivePointPolicy,
   CordisXExtensionPointAccessV2,
@@ -201,7 +205,7 @@ function legacyAdapterSupport(availability: CordisXExtensionPointAvailability): 
 function normalizeAnchor(
   value: unknown,
   pointId: string,
-  schemaVersion: 1 | 2 | 3 | 5 | 6 | 7 | 8 | 9,
+  schemaVersion: 1 | 2 | 3 | 5 | 6 | 7 | 8 | 9 | 10,
 ): CordisXHostExtensionPointAnchorDescriptorV5 {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`extension point ${pointId} anchor must be an object`)
@@ -290,7 +294,7 @@ function normalizeManagerSettingsNavigationGroups(
 
 function normalizeDescriptor(
   value: unknown,
-  schemaVersion: 1 | 2 | 3 | 5 | 6 | 7 | 8 | 9,
+  schemaVersion: 1 | 2 | 3 | 5 | 6 | 7 | 8 | 9 | 10,
 ): CordisXHostExtensionPointDescriptorV9 {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('descriptor must be an object')
@@ -342,15 +346,18 @@ function normalizeDescriptor(
         'pageChrome',
         'presentationGroup',
         'routePathFamily',
-        ...(schemaVersion === 9 ? ['navigationGroups'] : []),
+        ...(schemaVersion >= 9 ? ['navigationGroups'] : []),
+        ...(schemaVersion === 10 ? ['events'] : []),
       ],
     'descriptor',
   )
-  const descriptor = value as Partial<
-    & CordisXHostExtensionPointDescriptorV3
-    & CordisXHostExtensionPointDescriptorV5
-    & CordisXManagerSettingsNavigationDescriptorV9
-  >
+  const descriptor = value as
+    & Partial<
+      & Omit<CordisXHostExtensionPointDescriptorV3, 'payloadFamily'>
+      & Omit<CordisXHostExtensionPointDescriptorV5, 'payloadFamily'>
+      & Omit<CordisXManagerSettingsNavigationDescriptorV9, 'payloadFamily'>
+    >
+    & { payloadFamily?: CordisXExtensionPointPayloadFamily }
   if (typeof descriptor.id !== 'string') throw new Error('descriptor id is required')
   assertLocalId(descriptor.id, 'extension point id')
   if (descriptor.kind !== 'surface' && descriptor.kind !== 'outlet') {
@@ -373,7 +380,9 @@ function normalizeDescriptor(
   const payloadFamily = schemaVersion === 1
     ? descriptor.kind === 'outlet' ? 'outlet' : 'action'
     : descriptor.payloadFamily
-  const payloadFamilies = schemaVersion === 9
+  const payloadFamilies = schemaVersion === 10
+    ? new Set([...V9_PAYLOAD_FAMILIES, 'extension-point-visual-v1'])
+    : schemaVersion >= 9
     ? V9_PAYLOAD_FAMILIES
     : schemaVersion === 8
     ? V8_PAYLOAD_FAMILIES
@@ -458,10 +467,10 @@ function normalizeDescriptor(
     presentationGroup: schemaVersion === 1 || schemaVersion === 2 ? 'legacy' : descriptor.presentationGroup,
     routePathFamily: schemaVersion === 1 || schemaVersion === 2 ? 'host-defined' as const : descriptor.routePathFamily,
   }
-  const navigationGroups = schemaVersion === 9 && descriptor.id === 'manager.settings.navigation-items'
+  const navigationGroups = schemaVersion >= 9 && descriptor.id === 'manager.settings.navigation-items'
     ? normalizeManagerSettingsNavigationGroups(descriptor.navigationGroups)
     : undefined
-  if (schemaVersion === 9) {
+  if (schemaVersion >= 9) {
     if (descriptor.id === 'manager.settings.navigation-items') {
       if (payloadFamily !== 'manager-settings-navigation-item-v2') {
         throw new Error('manager.settings.navigation-items v9 requires manager-settings-navigation-item-v2')
@@ -470,7 +479,21 @@ function normalizeDescriptor(
       throw new Error(`extension point ${descriptor.id} cannot declare manager navigation groups`)
     }
   }
+  const visualEvents = (value as { events?: unknown }).events
+  const visualPointId: string = descriptor.id
+  if (schemaVersion === 10 && payloadFamily === 'extension-point-visual-v1') {
+    if (
+      !['composer.primary-action.visual', 'composer.frame.overlay'].includes(visualPointId)
+      || descriptor.kind !== 'surface'
+      || !Array.isArray(visualEvents) || visualEvents.some(event =>
+        event !== 'pointer.observe'
+        && !(visualPointId === 'composer.frame.overlay' && ['drag', 'activate'].includes(event))
+      )
+      || new Set(visualEvents).size !== visualEvents.length
+    ) throw new Error('Invalid composer visual descriptor')
+  } else if (visualEvents !== undefined) throw new Error('Events require a visual descriptor')
   return immutableSnapshot({
+    ...(visualEvents === undefined ? {} : { events: visualEvents }),
     id: descriptor.id,
     kind: descriptor.kind,
     title: descriptor.title,
@@ -528,6 +551,7 @@ export class ExtensionPointDescriptorRegistry {
         | CordisXHostExtensionPointCatalogV7
         | CordisXHostExtensionPointCatalogV8
         | CordisXHostExtensionPointCatalogV9
+        | CordisXHostExtensionPointCatalogV10
       >
       const schemaVersion =
         catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1 && catalog.schemaVersion === 1
@@ -546,6 +570,8 @@ export class ExtensionPointDescriptorRegistry {
           ? 8
           : catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V9 && catalog.schemaVersion === 9
           ? 9
+          : catalog.$schema === CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V10 && catalog.schemaVersion === 10
+          ? 10
           : undefined
       if (schemaVersion === undefined) {
         throw new Error('extension point catalog schema/version is unsupported')

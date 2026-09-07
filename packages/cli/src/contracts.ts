@@ -1,3 +1,12 @@
+export {
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V10,
+  type CordisXHostExtensionPointCatalogV10,
+} from './contracts-extension-navigation.js'
+export {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
+  type CordisXPluginManifestV10,
+} from './extension-point-interaction-permissions.js'
+export * from './extension-point-visual-contracts.js'
 export * from './control-contracts.js'
 export * from './platform-contracts.js'
 export * from './permission-contracts.js'

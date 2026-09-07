@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { waitForInitialDocument } from './cdp-document-ready.js'
 import * as support from './cdp-installation-support.js'
 
 export async function install(
@@ -718,6 +719,7 @@ export async function install(
     if (typeof identifier !== 'string') throw new Error('CDP did not return an injection identifier')
     if (viteDevelopment || loopbackModules) {
       const deadline = Date.now() + support.CDP_INJECTION_TIMEOUT_MS
+      await support.abortable(waitForInitialDocument(session, support.CDP_INJECTION_TIMEOUT_MS, signal), signal)
       loopbackReloadStarted = true
       await support.abortable(
         session.send('Page.reload', viteDevelopment ? { ignoreCache: true } : {}, support.CDP_INJECTION_TIMEOUT_MS),

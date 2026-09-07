@@ -391,6 +391,7 @@ export const createRuntimeAuthorizePluginV4 = (
     if (
       controller.manifest.schemaVersion !== 5 && controller.manifest.schemaVersion !== 6
       && controller.manifest.schemaVersion !== 7 && controller.manifest.schemaVersion !== 8
+      && controller.manifest.schemaVersion !== 10
     ) {
       throw new Error(`plugin ${id} does not use permission v4`)
     }
@@ -493,7 +494,8 @@ export const createRuntimeCandidateController = (
     replacesTarget && mutation.developmentPackage !== undefined
     && (controller.manifest.schemaVersion === 4 || controller.manifest.schemaVersion === 5
       || controller.manifest.schemaVersion === 6 || controller.manifest.schemaVersion === 7
-      || controller.manifest.schemaVersion === 8 || controller.manifest.schemaVersion === 9)
+      || controller.manifest.schemaVersion === 8 || controller.manifest.schemaVersion === 9
+      || controller.manifest.schemaVersion === 10)
     && controller.manifest.services.length > 0
   ) {
     throw new Error('local development phase 1 is renderer-only; manifest services are unavailable')
@@ -680,7 +682,7 @@ export const createRuntimeStagePluginMutation = (
             if (
               candidate.controller.manifest.schemaVersion !== 5 && candidate.controller.manifest.schemaVersion !== 6
               && candidate.controller.manifest.schemaVersion !== 7
-              && candidate.controller.manifest.schemaVersion !== 8
+              && candidate.controller.manifest.schemaVersion !== 8 && candidate.controller.manifest.schemaVersion !== 10
             ) {
               throw new Error('permission v4 decision requires manifest-v5, manifest-v6, manifest-v7, or manifest-v8')
             }

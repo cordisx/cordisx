@@ -1,3 +1,4 @@
+import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { access } from 'node:fs/promises'
 import path from 'node:path'
@@ -118,7 +119,11 @@ export interface PluginRuntimeMutation {
     readonly identitySource: string
     readonly readme?: string
     readonly readmes?: Readonly<Record<string, string>>
-    readonly manifest?: CordisXPluginManifestV7 | CordisXPluginManifestV8 | CordisXPluginManifestV9
+    readonly manifest?:
+      | CordisXPluginManifestV7
+      | CordisXPluginManifestV8
+      | CordisXPluginManifestV9
+      | CordisXPluginManifestV10
     readonly development: CordisXLocalDevelopmentSnapshot
   }
   /** Host-only renderer artifact compiled from the authority-resolved immutable runtime module. */

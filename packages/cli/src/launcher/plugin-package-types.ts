@@ -1,3 +1,4 @@
+import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import type {
   CordisXPluginManifestV4,
   CordisXPluginManifestV5,
@@ -22,6 +23,7 @@ export interface StagedPluginPackage {
       | CordisXPluginManifestV7
       | CordisXPluginManifestV8
       | CordisXPluginManifestV9
+      | CordisXPluginManifestV10
   }
   readonly digest: `sha256:${string}`
   readonly moduleSource: string

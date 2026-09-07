@@ -588,6 +588,24 @@ export function validateItem(surface: CordisXSurfaceName, item: unknown): unknow
       ) throw new Error(`session backdrop stage ${index} portrait data is invalid`)
       assertLocalizedText(portrait.alt, `session backdrop stage ${index} portrait alt`)
     }
+  } else if (surface === 'composer.primary-action.visual' || surface === 'composer.frame.overlay') {
+    assertKeys(snapshot, ['renderer', 'events'], 'visual presentation')
+    const visual = snapshot as { renderer?: { id?: string }; events?: unknown[] }
+    if (visual.renderer === null || typeof visual.renderer !== 'object' || Array.isArray(visual.renderer)) {
+      throw new Error('Visual requires a renderer reference')
+    }
+    assertKeys(visual.renderer, ['id'], 'visual renderer reference')
+    if (typeof visual.renderer.id !== 'string') throw new Error('Visual renderer id is required')
+    assertLocalId(visual.renderer.id, 'visual renderer id')
+    if (
+      visual.events !== undefined
+      && (!Array.isArray(visual.events) || visual.events.length > 3
+        || new Set(visual.events).size !== visual.events.length
+        || visual.events.some(event =>
+          event !== 'pointer.observe'
+          && !(surface === 'composer.frame.overlay' && (event === 'drag' || event === 'activate'))
+        ))
+    ) throw new Error('Visual interaction is unavailable')
   } else if (surface === 'composer.submit.effects') {
     const canvas = snapshot as CordisXTransientCanvasPresentation
     assertKeys(snapshot, ['kind', 'durationMs', 'reducedMotion'], 'transient canvas presentation')
