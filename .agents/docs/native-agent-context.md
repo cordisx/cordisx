@@ -86,8 +86,9 @@ a new binding for its same persisted Room run and Session before sending. Every
 actual turn, steer, or injection still obtains fresh tool setup and refuses the
 unbound recovery stage. Restored turns continue after the saved terminal-turn
 watermark; a native resume response's observed terminal count can raise but never
-lower it. A response containing a nonterminal turn remains unavailable rather
-than being represented as an idle Session.
+lower it. Controlled recovery requires the native `turns` array and rejects any
+nonterminal turn. Missing turn state cannot establish an idle Session from a
+historical checkpoint alone. Known hot resume retains its existing behavior.
 
 ## Event and Room correlation
 
