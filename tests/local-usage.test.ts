@@ -207,3 +207,17 @@ it('shares a durable scan cooldown and resumes validation after expiry', async t
   await rename(path.join(f.home, 'hidden-archive'), path.join(f.home, 'archived_sessions'))
   expect(ready(await f.create().read()).eligibleTokens).toBe(50)
 })
+
+it('does not reuse a cooldown snapshot when the wall clock moves backwards', async t => {
+  let now = 100_000
+  const f = await fixture(t, { scanCooldownMs: 30_000, now: () => now })
+  await writeFile(f.file(), header('owner') + token(100, 100, 1))
+  const host = f.create()
+  const baseline = ready(await host.read())
+  await appendFile(f.file(), token(150, 50, 2))
+  now = 90_000
+  const updated = ready(await f.create().read())
+  expect(updated.eligibleTokens).toBe(50)
+  expect(updated.revision).toBe(baseline.revision + 1)
+  expect(updated.observedThrough).toBe(baseline.observedThrough)
+})

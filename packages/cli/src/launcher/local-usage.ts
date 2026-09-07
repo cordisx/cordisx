@@ -142,7 +142,8 @@ export class LocalUsageHost {
       }
       // Reuse only a previously committed projection. Separate windows/processes
       // share this cooldown; permission checks stay at the public-service boundary.
-      if (row && stamp - ledger.snapshot.observedThrough < (this.options.scanCooldownMs ?? 30_000)) {
+      const elapsed = stamp - ledger.snapshot.observedThrough
+      if (row && elapsed >= 0 && elapsed < (this.options.scanCooldownMs ?? 30_000)) {
         return ledger.snapshot
       }
       const expectedSequence = row ? ledger.sequence : undefined
