@@ -76,6 +76,8 @@ function Visual({ state }: CordisXReactVisualProps) {
     {
       'data-action': state.action,
       'data-pointer': state.pointer?.x ?? 'none',
+      'data-pointer-y': state.pointer?.y ?? 'none',
+      'data-height': state.bounds.height,
       'data-motion': state.reducedMotion,
       'data-theme': state.theme,
     },
@@ -147,8 +149,15 @@ describe('controlled Composer visual lifecycle', () => {
       f.authority,
     )
     await vi.waitFor(() => expect(f.runtime.inspect().roots).toBe(1))
-    f.document.dispatchEvent(new window.MouseEvent('pointermove', { clientX: 50, clientY: 50 }))
+    f.document.dispatchEvent(new window.MouseEvent('pointermove', { clientX: 50, clientY: -64 }))
     await vi.waitFor(() => expect(f.document.querySelector('[data-pointer]')?.getAttribute('data-pointer')).toBe('0.5'))
+    const overlay = f.document.querySelector<HTMLElement>('[data-cordisx-composer-visual]')!
+    expect(overlay.style.bottom).toBe('100%')
+    expect(overlay.style.height).toBe('128px')
+    expect(overlay.style.overflow).toBe('hidden')
+    expect(overlay.style.pointerEvents).toBe('none')
+    expect(overlay.querySelector('[data-height]')?.getAttribute('data-height')).toBe('128')
+    expect(overlay.querySelector('[data-pointer-y]')?.getAttribute('data-pointer-y')).toBe('0.5')
     f.grant(true, false)
     await vi.waitFor(() =>
       expect(f.document.querySelector('[data-pointer]')?.getAttribute('data-pointer')).toBe('none')

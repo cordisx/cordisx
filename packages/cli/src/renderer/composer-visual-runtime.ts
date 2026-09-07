@@ -185,8 +185,11 @@ export class ComposerVisualRuntime {
   }
 
   private snapshot(seat: NativeComposerVisualSeat, record: Registration): ExtensionPointVisualSnapshotV1 {
-    const bounds = (record.declaration.pointId === 'composer.primary-action.visual' ? seat.button : seat.frame)
+    const anchorBounds = (record.declaration.pointId === 'composer.primary-action.visual' ? seat.button : seat.frame)
       .getBoundingClientRect()
+    const bounds = record.declaration.pointId === 'composer.frame.overlay'
+      ? { left: anchorBounds.left, top: anchorBounds.top - 128, width: anchorBounds.width, height: 128 }
+      : anchorBounds
     const pointer = record.declaration.events?.includes('pointer.observe') && record.authority.observePointer()
       ? this.pointer
       : undefined
@@ -281,7 +284,9 @@ export class ComposerVisualRuntime {
     container.dataset.cordisxComposerVisual = point
     container.setAttribute('aria-hidden', 'true')
     container.setAttribute('inert', '')
-    container.style.cssText = 'position:absolute;inset:0;display:block;pointer-events:none;overflow:hidden;'
+    container.style.cssText = point === 'composer.frame.overlay'
+      ? 'position:absolute;left:0;right:0;bottom:100%;height:128px;display:block;pointer-events:none;overflow:hidden;'
+      : 'position:absolute;inset:0;display:block;pointer-events:none;overflow:hidden;'
     const restorePosition = positioned(parent)
     const visualStyle = (seat.visual as SVGElement | HTMLElement).style
     const oldVisibility = visualStyle.getPropertyValue('visibility')

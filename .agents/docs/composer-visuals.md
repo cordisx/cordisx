@@ -51,6 +51,12 @@ has yet been established, so transient success/failure events are not emitted.
 
 The runtime retains the native button and restores inner visual visibility on
 withdrawal. Both visual containers are pointer inert in this first runtime.
+The overlay is a bounded, pointer-inert 128 CSS px band immediately above the
+Composer frame, aligned to its width. It remains clipped to this Host-issued
+band, so plugin artwork can peek from the upper edge without covering native
+input controls. Primary visuals retain their native button bounds. Overlay
+snapshots and pointer normalization use the upper band's bounds, not the
+native frame rectangle. Artwork size and expression remain plugin choices.
 Pointer observation is normalized within the selected point bounds and separately gated.
 Activate and drag remain unavailable even if declared. Deferred completions are
 fenced by registration retirement and authority epoch. Native replacement
