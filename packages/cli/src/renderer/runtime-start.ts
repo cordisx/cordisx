@@ -1,4 +1,5 @@
 import { isExplicitLocalDevelopmentArtifact } from './runtime-shared.js'
+import { NativeAgentSessionPersistence } from './native-agent-session-recovery.js'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
@@ -567,6 +568,13 @@ export async function start(
     const playgroundAgentSessionPersistence = runtimeClosures1.createRuntimePlaygroundAgentSessionPersistence(
       closureScope,
     )
+    const nativeAgentSessionPersistence =
+      desktopAgentSessionTransport !== undefined && ownerDocumentBridge !== undefined
+        ? new NativeAgentSessionPersistence(ownerDocumentBridge, metadata.ownerDocumentBindings ?? [])
+        : undefined
+    const recoveredNativeSessions = nativeAgentSessionPersistence === undefined
+      ? []
+      : await nativeAgentSessionPersistence.load()
     const recoveredPlaygroundSessions = playgroundAgentSessionPersistence === undefined
       ? []
       : await playgroundAgentSessionPersistence.load()
@@ -628,7 +636,12 @@ export async function start(
       window.removeEventListener('popstate', onAgentDetailHistoryPop, { capture: true })
       unsubscribeAgentDetailRouteReturn()
     }
-    agentSessionRuntime = runtimeClosures6.createRuntimeAgentSessionRuntime(closureScope)
+    agentSessionRuntime = runtimeClosures6.createRuntimeAgentSessionRuntime(
+      closureScope,
+      nativeAgentSessionPersistence,
+      recoveredNativeSessions,
+    )
+    ctx.effect(() => () => nativeAgentSessionPersistence?.dispose())
     scenarioSessionOwner = sessionId => agentSessionRuntime.ownerForSession(sessionId)
     const disposeAgentRouteFences = runtimeClosures1.createRuntimeDisposeAgentRouteFences(closureScope)
     const disposeAgentPermissionFences = runtimeClosures1.createRuntimeDisposeAgentPermissionFences(closureScope)
