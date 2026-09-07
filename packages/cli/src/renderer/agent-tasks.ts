@@ -77,7 +77,7 @@ export class HostAgentTasks implements AgentTasks {
     if (pending !== undefined) {
       return (pending.fingerprint === `${bindingPolicy}:${fingerprint}`
           || (bindingPolicy === 'none' && pending.fingerprint === `required:${fingerprint}`))
-        ? structuredClone(await pending.promise)
+        ? await this.joinPending(operationId, pending.promise)
         : unavailable('operation-conflict')
     }
     const promise = this.execute(request, fingerprint, bindingPolicy).catch(() => unavailable('host-unavailable'))
@@ -86,6 +86,27 @@ export class HostAgentTasks implements AgentTasks {
       return structuredClone(await promise)
     } finally {
       if (this.pending.get(operationId)?.promise === promise) this.pending.delete(operationId)
+    }
+  }
+
+  private async joinPending(
+    operationId: string,
+    pending: Promise<AgentTaskCreateResult>,
+  ): Promise<AgentTaskCreateResult> {
+    const unavailable = (code: AgentTaskFailureCode): AgentTaskCreateResult => ({
+      status: 'unavailable',
+      operationId,
+      code,
+    })
+    try {
+      const result = await pending
+      if (!this.deps.active()) return unavailable('host-unavailable')
+      const sessionId = result.status === 'accepted' ? result.task.sessionId : result.sessionId
+        ?? (await this.deps.store.load(operationId))?.sessionId
+      if (!await this.deps.authorize('create', sessionId)) return unavailable('permission-denied')
+      return this.deps.active() ? structuredClone(result) : unavailable('host-unavailable')
+    } catch {
+      return unavailable('host-unavailable')
     }
   }
 
@@ -307,7 +328,7 @@ export class HostAgentTasks implements AgentTasks {
       return { status: 'unavailable', operationId: request.operationId, code: 'permission-denied' }
     }
     const pending = this.recovering.get(request.operationId)
-    if (pending !== undefined) return structuredClone(await pending)
+    if (pending !== undefined) return await this.joinPending(request.operationId, pending)
     const operation = this.recoverOperation(request)
     this.recovering.set(request.operationId, operation)
     try {

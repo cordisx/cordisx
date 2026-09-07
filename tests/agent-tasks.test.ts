@@ -267,6 +267,51 @@ describe('Host Agent task transaction', () => {
       expect(cleanup).toHaveBeenCalledTimes(stage === 'submitting' ? 1 : 0)
     },
   )
+  it.each(['create', 'recover'] as const)(
+    'rechecks exact authority for a concurrent %s caller after the shared result resolves',
+    async mode => {
+      const f = fixture()
+      let current: Agent | undefined
+      const create = f.deps.create
+      const install = vi.fn().mockRejectedValueOnce(new Error('installation failed')).mockResolvedValue(async () => {})
+      const service = new HostAgentTasks({
+        ...f.deps,
+        captureApprovals: () => ({ active: () => true, install }),
+        create: async (input, record) => current = await create(input, record),
+        existing: async () => current,
+      })
+      if (mode === 'recover') await service.createAndSubmit(request, 'required')
+      let entered!: () => void, release!: () => void
+      const atCheckpoint = new Promise<void>(resolve => {
+        entered = resolve
+      })
+      const gate = new Promise<void>(resolve => {
+        release = resolve
+      })
+      const save = f.deps.store.save
+      f.deps.store.save = async record => {
+        if (record.phase === 'finished' && record.result?.status === 'accepted') {
+          entered()
+          await gate
+        }
+        await save(record)
+      }
+      const start = () =>
+        mode === 'create' ? service.createAndSubmit(request) : service.recover({ operationId: request.operationId })
+      const first = start()
+      await atCheckpoint
+      vi.mocked(f.deps.authorize).mockImplementation(async (_operation, sessionId) => sessionId === undefined)
+      const second = start()
+      await Promise.resolve()
+      await Promise.resolve()
+      release()
+      expect(await first).toMatchObject({ status: 'accepted' })
+      expect(await second).toMatchObject({ status: 'unavailable', code: 'permission-denied' })
+      expect(f.deps.authorize).toHaveBeenLastCalledWith('create', f.records.get(request.operationId)!.sessionId)
+      expect(f.deps.create).toHaveBeenCalledTimes(1)
+      expect(f.deps.submit).toHaveBeenCalledTimes(1)
+    },
+  )
   it('never exposes a handle before durable acceptance or grants ownership from read permission alone', async () => {
     const f = fixture()
     const handle = { agent: { id: 'real' } } as import('@cordisx/protocol/agents/v1').AgentHandle
