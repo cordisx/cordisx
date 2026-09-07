@@ -14,6 +14,7 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 - Change plugin-owned styles or CSS imports: [css-and-lifecycle.md](references/css-and-lifecycle.md)
 - Start or package a plugin: [plugin-authoring.md](references/plugin-authoring.md)
 - Add any Manager page, contribution, action, collection, or icon: [ui-system.md](references/ui-system.md)
+- Build a pointer-driven, animated, draggable, or activation-capable controlled visual: [interactive-controlled-visuals.md](references/interactive-controlled-visuals.md)
 - Add or change plugin configuration: [schema-configuration.md](references/schema-configuration.md)
 - Run or deliver the result: [verification.md](references/verification.md)
 - Continue work inside an already-running development session: [live-plugin-development.md](references/live-plugin-development.md)
@@ -36,7 +37,7 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 4. If `CORDISX_DEV_ENTRY` is set, use that exact legacy single-plugin entry and running launch. For config-driven development, use the explicit or discovered project config and all enabled entries. Do not start a second Vite or Electron process for each plugin.
 5. When creating a plugin, infer a concise product slug and use the maintained `create-cordisx-plugin` generator in the selected mode. Keep the scaffolding command as an implementation detail unless the user asks for it.
 6. Define the manifest, localized product copy, contributions, config schema, permissions, React boundaries, and lifecycle behavior. Put activation effects under Cordis ownership and keep ESM top-level evaluation free of product side effects.
-7. Keep visual choices inside Host-supported components, tokens, and semantic roles. Locate a maintained example, but do not copy generated fixtures wholesale.
+7. Keep visual choices inside Host-supported components, tokens, semantic roles, and controlled visual seats. Locate a maintained example, but do not copy generated fixtures wholesale.
 8. Add focused contract, React, and lifecycle tests before visual inspection.
 9. Run the project through `cordisx dev`. Verify automatic file updates and, when relevant, the Manager's development reload for one active local plugin.
 10. Exercise the real isolated native `app://` path for native claims; use Playground evidence only for the behavior it actually hosts.
