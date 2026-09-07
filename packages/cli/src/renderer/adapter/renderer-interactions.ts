@@ -266,14 +266,20 @@ abstract class StructuredSurfaceInteractions extends StructuredSurfaceRendererBa
   }
 
   protected renderNavigation(
-    root: HTMLElement,
+    root: HTMLElement | undefined,
     snapshots: readonly SurfaceContributionSnapshot[],
     sites: Set<string>,
+    collectionRoot?: HTMLElement,
   ): void {
+    const focusedGroup = this.document.activeElement?.matches('.cordisx-navigation-group-toggle')
+      ? this.document.activeElement.closest<HTMLElement>('[data-navigation-group]')?.dataset.navigationGroup
+      : undefined
     this.disposeNavigationActions()
     const usedLeadingVisuals = new Set<string>()
     const navigation = create(this.document, 'div', 'cordisx-navigation')
     const groups = this.slots.navigationCollectionGroupsSnapshot()
+    this.navigationGroups.reconcile(groups.map(group => group.qualifiedId))
+    const collections = create(this.document, 'div', 'cordisx-navigation-collections')
     const collectionGroupIds = new Set(groups.map(group => group.surfaceGroup))
     const renderRows = (items: readonly SurfaceContributionSnapshot[], parent: HTMLElement): void => {
       for (const snapshot of items) {
@@ -445,21 +451,29 @@ abstract class StructuredSurfaceInteractions extends StructuredSurfaceRendererBa
         parent.append(row)
       }
     }
-    renderRows(snapshots.filter(snapshot => !collectionGroupIds.has(snapshot.group)), navigation)
+    if (root !== undefined) {
+      renderRows(snapshots.filter(snapshot => !collectionGroupIds.has(snapshot.group)), navigation)
+    }
     for (const group of groups) {
       const items = snapshots.filter(snapshot => snapshot.group === group.surfaceGroup)
       if (items.length === 0) continue
-      const section = create(this.document, 'section', 'cordisx-navigation-group')
-      section.dataset.navigationGroup = group.qualifiedId
-      const heading = create(this.document, 'div', 'cordisx-navigation-group-heading')
-      heading.setAttribute('role', 'heading')
-      heading.setAttribute('aria-level', '2')
-      heading.textContent = this.navigationGroupText(group.owner, group.qualifiedId, group.label, sites)
-      section.append(heading)
-      renderRows(items, section)
-      navigation.append(section)
+      if (collectionRoot === undefined) continue
+      const { section, content } = this.navigationGroups.create(
+        this.document,
+        group.qualifiedId,
+        this.navigationGroupText(group.owner, group.qualifiedId, group.label, sites),
+      )
+      renderRows(items, content)
+      collections.append(section)
     }
-    root.replaceChildren(navigation)
+    root?.replaceChildren(navigation)
+    collectionRoot?.replaceChildren(collections)
+    if (focusedGroup !== undefined) {
+      const section = [...collections.children].find(element =>
+        (element as HTMLElement).dataset.navigationGroup === focusedGroup
+      )
+      section?.querySelector<HTMLButtonElement>('.cordisx-navigation-group-toggle')?.focus({ preventScroll: true })
+    }
     this.disposeUnusedNavigationLeadingVisuals(usedLeadingVisuals)
   }
 
