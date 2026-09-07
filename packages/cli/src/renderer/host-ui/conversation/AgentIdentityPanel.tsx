@@ -194,7 +194,7 @@ export function createHostAgentIdentityPresentation(
   assertAssociatedSessions(
     input.associatedSessions?.map(session => session.association),
     [input.participant],
-    input.activeSessions.map(session => session.run),
+    [], // Display merges live and persisted associations; wire validation remains unchanged.
   )
   const keys = new Set<string>()
   const activeSessions = input.activeSessions.map((session, index) => {
@@ -351,6 +351,32 @@ export function HostAgentIdentityAvatarButton(
   )
 }
 
+interface HostAgentIdentitySessionRow {
+  readonly key: string
+  readonly roomLabel: string
+  readonly active?: HostAgentIdentitySessionPresentation
+  readonly associated?: NonNullable<HostAgentIdentityPresentation['associatedSessions']>[number]
+}
+
+/** A display union keyed by real Session identity; it does not alter either source. */
+export function hostAgentIdentitySessionRows(
+  presentation: HostAgentIdentityPresentation,
+): readonly HostAgentIdentitySessionRow[] {
+  const rows = new Map<string, HostAgentIdentitySessionRow>()
+  for (const active of presentation.activeSessions) {
+    const key = 'sessionId' in active.run
+      ? active.run.sessionId
+      : JSON.stringify([active.run.participantId, active.run.memberId, active.run.runId])
+    if (!rows.has(key)) rows.set(key, { key, roomLabel: active.roomLabel, active })
+  }
+  for (const associated of presentation.associatedSessions ?? []) {
+    const key = associated.association.sessionId
+    const existing = rows.get(key)
+    rows.set(key, { ...(existing ?? { key, roomLabel: associated.roomLabel }), associated })
+  }
+  return [...rows.values()]
+}
+
 export function HostAgentIdentityContent({
   presentation: input,
   copy,
@@ -372,6 +398,7 @@ export function HostAgentIdentityContent({
   const contentId = idPrefix ?? generatedId
 
   if (!interactive || presentation === undefined) return null
+  const sessions = hostAgentIdentitySessionRows(presentation)
   const settingsAvailability = resolveSettings?.(presentation.participant.agentIdentity!) ?? { available: true }
   const settingsReasonId = `${contentId}-settings-unavailable`
   const run = async (key: string, session: HostAgentIdentitySessionPresentation): Promise<void> => {
@@ -454,29 +481,44 @@ export function HostAgentIdentityContent({
         <section className="cx-agent-identity-section" aria-labelledby={`${contentId}-sessions`}>
           <h3 id={`${contentId}-sessions`}>{copy.activeSessions}</h3>
           <span className="cx-agent-identity-live" role="status" aria-live="polite">
-            {copy.sessionCount(presentation.activeSessions.length)}
+            {copy.sessionCount(sessions.length)}
           </span>
-          {presentation.activeSessions.length === 0
+          {sessions.length === 0
             ? <p className="cx-agent-identity-empty">{copy.noActiveSessions}</p>
             : (
               <ul className="cx-agent-identity-sessions">
-                {presentation.activeSessions.map(session => {
-                  const key = JSON.stringify([session.run.participantId, session.run.memberId, session.run.runId])
-                  const lifecycle = copy.lifecycle[session.run.lifecycle.phase]
+                {sessions.map(session => {
+                  const phase = session.active?.run.lifecycle.phase
+                  const lifecycle = phase !== undefined && phase !== 'active' ? copy.lifecycle[phase] : undefined
+                  const label = session.active?.taskLabel ?? presentation.name
+                  const activeNavigation = session.active !== undefined
+                    && (!('sessionId' in session.active.run) || session.active.run.details !== undefined)
+                  const target = session.associated?.association.details
+                  const canNavigate = activeNavigation || (target !== undefined && onOpenDetail !== undefined)
                   return (
-                    <li key={key}>
+                    <li key={session.key}>
                       <button
                         type="button"
                         className="cx-agent-identity-session"
-                        disabled={pendingSession !== undefined}
-                        aria-label={`${session.roomLabel} · ${session.taskLabel} · ${lifecycle}`}
+                        disabled={pendingSession !== undefined || !canNavigate}
+                        aria-label={[session.roomLabel, label, lifecycle].filter(Boolean).join(' · ')}
                         onClick={() => {
-                          void run(key, session)
+                          if (activeNavigation) {
+                            void run(session.key, session.active!)
+                          } else if (
+                            target !== undefined && onOpenDetail !== undefined && pendingSession === undefined
+                          ) {
+                            setPendingSession(session.key)
+                            void onOpenDetail(target).then(onClose).catch(onNavigationError)
+                              .finally(() => setPendingSession(undefined))
+                          }
                         }}
                       >
                         <span className="cx-agent-identity-room">{session.roomLabel}</span>
-                        <span className="cx-agent-identity-task">{session.taskLabel}</span>
-                        <span className="cx-agent-identity-lifecycle">{lifecycle}</span>
+                        <span className="cx-agent-identity-task">{label}</span>
+                        {lifecycle === undefined
+                          ? null
+                          : <span className="cx-agent-identity-lifecycle">{lifecycle}</span>}
                       </button>
                     </li>
                   )
@@ -484,43 +526,6 @@ export function HostAgentIdentityContent({
               </ul>
             )}
         </section>
-        {(presentation.associatedSessions?.length ?? 0) > 0
-          ? (
-            <section className="cx-agent-identity-section" aria-labelledby={`${contentId}-associated-sessions`}>
-              <h3 id={`${contentId}-associated-sessions`}>{copy.associatedSessions ?? 'Associated sessions'}</h3>
-              <ul className="cx-agent-identity-sessions">
-                {presentation.associatedSessions!.map(({ association, roomLabel }) => (
-                  <li key={association.sessionId}>
-                    <button
-                      type="button"
-                      className="cx-agent-identity-session"
-                      disabled={pendingSession !== undefined || association.details === undefined
-                        || onOpenDetail === undefined}
-                      aria-label={`${roomLabel} · ${association.sessionId} · ${
-                        copy.unloadedSession ?? 'Not loaded; running state unknown'
-                      }`}
-                      onClick={() => {
-                        if (
-                          association.details === undefined || onOpenDetail === undefined
-                          || pendingSession !== undefined
-                        ) return
-                        setPendingSession(association.sessionId)
-                        void onOpenDetail(association.details).then(onClose).catch(onNavigationError)
-                          .finally(() => setPendingSession(undefined))
-                      }}
-                    >
-                      <span className="cx-agent-identity-room">{roomLabel}</span>
-                      <span className="cx-agent-identity-task">{association.sessionId}</span>
-                      <span className="cx-agent-identity-lifecycle">
-                        {copy.unloadedSession ?? 'Not loaded; running state unknown'}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )
-          : null}
       </div>
     </>
   )
