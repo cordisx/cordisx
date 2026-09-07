@@ -1,3 +1,4 @@
+import { projectSidebarAppearance } from './sidebar-appearance.js'
 import { StructuredSurfaceInteractions } from './renderer-interactions.js'
 import {
   currentSessionId,
@@ -327,9 +328,10 @@ class StructuredSurfaceRenderer extends StructuredSurfaceInteractions {
           before: null,
           className: 'cordisx-sidebar-navigation',
         }, usedRoots)
+        projectSidebarAppearance(root, this.adapterIdentity, nativeButtons(sidebarNavigation)[0])
         const signature = this.navigationContentSignature(items)
         if (rebuild || root.childElementCount === 0 || signature !== this.navigationRenderSignature) {
-          this.renderNavigation(root, items, nextSites, nativeButtons(sidebarNavigation)[0])
+          this.renderNavigation(root, items, nextSites)
           this.navigationRenderSignature = signature
         }
       }
