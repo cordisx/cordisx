@@ -116,3 +116,19 @@ When recreating this check:
 - Record the original request's target and execution context. Do not retry a
   failed reverse call in another window. Clean up only the browser profile,
   socket and resource directories created by this check.
+
+The retained [CDP evidence](history/plugin-agent-tools-cdp-2026-09-07.json)
+contains no credentials. Reproduce the single integration checkpoint with the
+[owner script](../../packages/cli/scripts/plugin-agent-tools-cdp-smoke.mjs):
+
+```sh
+node packages/cli/scripts/plugin-agent-tools-cdp-smoke.mjs \
+  /absolute/frozen-host-checkout /absolute/frozen-chatroom-checkout \
+  /absolute/output/report.json
+```
+
+Use already-built matching checkouts. The script does not build or modify their
+watched output. It creates and cleans only a separate headless Chrome profile,
+Host document home and temporary fixture. `CHROME_PATH` can select the actual
+Chrome executable. It operates the real observed exact-Session permission
+dialog in that test browser; it never opens, inspects, or automates Codex UI.
