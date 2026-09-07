@@ -203,10 +203,25 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
       this.policyRecords.set(permissionRecordKeyV4(record), record)
       this.changed()
     } else if (!isPermissionPolicyRecordV4(policy) || policy.policy !== 'allow-persistent') {
+      const task = input.scopeSource.kind === 'host-agent-task'
+        ? input.scopeSource
+        : input.scopeSource.kind === 'host-agent-task-authority'
+        ? input.scopeSource.lease.taskSource
+        : undefined
+      const display = (value: string): string => value.replace(/[\u0000-\u001f\u007f]/gu, ' ').slice(0, 512)
+      const taskReason = task === undefined ? undefined : Object.freeze({
+        namespace: 'permission',
+        key: 'agent-runtime.task-approval',
+        fallback: `${input.capability} for command ${display(task.commandId)}; operation ${
+          display(task.operationId)
+        }; requester Session ${display(task.sessionId)}${
+          input.capability === 'approvals.answer' ? `; authority Session ${display(input.sessionId)}` : ''
+        }`,
+      })
       const promptDeclaration: CordisXCapabilityDeclaration = Object.freeze({
         name: input.capability as CordisXPlatformCapability,
         required: declaration.required,
-        reason: rationale?.description ?? Object.freeze({
+        reason: taskReason ?? rationale?.description ?? Object.freeze({
           namespace: 'permission',
           key: `agent-runtime.${input.capability}`,
           fallback: `${input.capability} for one exact Agent Session`,
@@ -552,7 +567,10 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
     policy: CordisXPermissionPolicyV2,
     scopeSource?: AgentRuntimeScopeSource,
   ): CordisXPermissionPolicyRecordV4 {
-    return this.agentRuntimePolicyRecordForIdentity(registration.identity, capability, sessionId, policy, scopeSource)
+    return this.agentRuntimePolicyRecordForIdentity(registration.identity, capability, sessionId, policy, scopeSource, {
+      schema: registration.manifest.$schema,
+      declaration: registration.manifest.capabilities.find(item => item.name === capability),
+    })
   }
 
   protected agentRuntimePolicyRecordForIdentity(
@@ -561,6 +579,7 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
     sessionId: string,
     policy: CordisXPermissionPolicyV2,
     scopeSource?: AgentRuntimeScopeSource,
+    manifestScope?: unknown,
   ): CordisXPermissionPolicyRecordV4 {
     const task = scopeSource?.kind === 'host-agent-task'
       ? scopeSource
@@ -576,7 +595,7 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
         capability,
         scope: { sessionIds: [sessionId] },
         securityFingerprint: `sha256:${
-          sha256Hex(JSON.stringify({ capability, sessionId, ...(task === undefined ? {} : { task }) }))
+          sha256Hex(JSON.stringify({ capability, sessionId, ...(task === undefined ? {} : { task, manifestScope }) }))
         }`,
       },
       policy,

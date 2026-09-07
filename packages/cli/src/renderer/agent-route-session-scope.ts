@@ -461,7 +461,7 @@ export class AgentRouteSessionScopeAuthority {
       if (
         selector !== undefined
         && (declaration.manifestVersion !== 12 || declaration.name !== capability || declaration.required
-          || selector.kind !== 'agent-task-command' || !localId.test(selector.commandId))
+          || selector.kind !== 'agent-task-command' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(selector.commandId))
       ) throw new Error('Invalid task permission declaration')
     }
     const scope = declaration.scope.sessionIds

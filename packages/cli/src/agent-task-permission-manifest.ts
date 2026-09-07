@@ -31,7 +31,7 @@ function object(value: unknown): Record<string, unknown> {
 function exact(value: Record<string, unknown>, keys: readonly string[]): void {
   if (Object.keys(value).some(key => !keys.includes(key))) throw new Error('Unknown task permission field')
 }
-const localId = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u
+const localId = /^[a-z0-9][a-z0-9._-]{0,95}$/u
 
 function taskDeclaration(value: unknown): AgentTaskRequestCapabilityV1 | AgentTaskAnswerCapabilityV1 {
   const declaration = object(value)

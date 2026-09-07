@@ -1,3 +1,4 @@
+import type { PermissionPromptRequest } from '../packages/cli/src/renderer/platform/platform-permission-store.js'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentSetup } from '@cordisx/protocol/agents/v1'
@@ -50,7 +51,7 @@ async function fixture() {
   let live = true
   const durable = new Map<string, { sessionId: string; bindingPolicy: string }>()
   const identities = new Map([[owner.pluginId, identity]])
-  const prompt = vi.fn(async () => permission)
+  const prompt = vi.fn(async (_request: PermissionPromptRequest) => permission)
   const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), { request: prompt })
   const unregisterOwner = broker.register(identity, manifest())
   broker.replaceAgentRuntimeConnection(connection)
@@ -244,6 +245,12 @@ async function fixture() {
     waitAnswer: (promise: Promise<void>) => {
       answerWait = promise
     },
+    changeManifestScope: () => {
+      const changed = structuredClone(consumerManifest)
+      changed.capabilities.find((item: { name: string }) => item.name === 'approvals.request').scope.sessionIds
+        .routeId = 'other-detail'
+      broker.register(identity, normalizeTaskManifest(changed, identity.id))
+    },
     unregisterOwner,
     revokePermission: async () => {
       // Exercise the existing broker revocation path with a deny record, never seed an allow.
@@ -292,6 +299,12 @@ describe('production task manifest through actual broker and runtime resolver', 
       await f.install('child')
       expect(await f.approve('child')).toBe('allowed-once')
       expect(f.scopes.tasks.hasSource(owner, 'existing-leader')).toBe(false)
+      const answerPrompt = f.prompt.mock.calls.map(([request]) => request).find(request =>
+        request.declaration.name === 'approvals.answer'
+      )
+      expect(answerPrompt?.declaration.reason.fallback).toContain('command send')
+      expect(answerPrompt?.declaration.reason.fallback).toContain('requester Session child')
+      expect(answerPrompt?.declaration.reason.fallback).toContain('authority Session existing-leader')
       f.staleAuthority()
       expect(await f.approve('child')).toBe('unavailable')
       await f.existingLeader(true)
@@ -348,6 +361,21 @@ describe('production task manifest through actual broker and runtime resolver', 
       ).toEqual({ authorized: false })
       expect(f.prompt.mock.calls.length).toBe(before)
       expect(f.human).not.toHaveBeenCalled()
+    } finally {
+      await f.close()
+    }
+  })
+
+  it('does not reuse task persistent allow after the registered maximum scope changes', async () => {
+    const f = await fixture()
+    try {
+      await f.install('root')
+      f.persistPermission()
+      expect(await f.approve('root')).toBe('allowed-once')
+      f.changeManifestScope()
+      f.deny()
+      expect(await f.approve('root')).toBe('unavailable')
+      expect(f.human).toHaveBeenCalledOnce()
     } finally {
       await f.close()
     }
