@@ -16,18 +16,18 @@ const interaction = {
   required: false,
   scope: { extensionPoints: [points[1]], events: ['pointer.observe'] },
 } as const
-function manifest() {
+function manifest(id = 'animal') {
   return normalizeVisualManifestV10({
     $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
     schemaVersion: 10,
-    id: 'animal',
+    id,
     name: 'Animal',
     services: [],
     capabilities: [
       { name: 'ui.extension-points.render', required: true, scope: { extensionPoints: points } },
       interaction,
     ],
-  }, 'animal')
+  }, id)
 }
 describe('Composer visual authority', () => {
   it('preserves exact manifest capabilities and rejects broad or malformed interaction scopes', () => {
@@ -137,4 +137,40 @@ describe('Composer visual authority', () => {
       broker.dispose()
     }
   })
+})
+
+it('bounds interaction request identifiers even for a maximum-length plugin id', async () => {
+  let planId: string | undefined
+  const broker = new PermissionBroker(
+    new MemoryPermissionPolicyStore(),
+    { request: async () => 'deny' },
+    () => new Date(),
+    500,
+    'test',
+    'runtime',
+    undefined,
+    undefined,
+    {
+      request: async () => undefined,
+      requestVisualV5: async plan => {
+        planId = plan.planId
+        return undefined
+      },
+    },
+  )
+  const identity = { source: 'file:///long-visual.js', id: 'a'.repeat(96) }
+  const unregister = broker.register(identity, manifest(identity.id), {
+    pluginId: identity.id,
+    moduleGeneration: 'module',
+  })
+  try {
+    await broker.setDomPolicy(identity, points[1], 'allow-persistent')
+    const authority = broker.visualAuthority(identity, 'module', points[1], () => true)
+    authority.observePointer()
+    await vi.waitFor(() => expect(planId).toBeTypeOf('string'))
+    expect(planId!.length).toBeLessThanOrEqual(128)
+  } finally {
+    unregister()
+    broker.dispose()
+  }
 })

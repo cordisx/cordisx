@@ -1,3 +1,4 @@
+import { sha256Hex } from '../../permission-model-v2.js'
 import { PlatformAuthorizationBroker } from './platform-authorization.js'
 import type { CordisXPluginIdentity } from '../../contracts.js'
 import type {
@@ -6,7 +7,10 @@ import type {
 } from '@cordisx/protocol/extension-point-visual/v1'
 import type { ComposerVisualAuthority } from '../composer-visual-runtime.js'
 import type { PlatformPermissionSnapshot, Registration } from './platform-permission-types.js'
-import { visualInteractionPlan } from '../../extension-point-interaction-authorization.js'
+import {
+  VISUAL_PERMISSION_DECISION_SCHEMA_V5,
+  visualInteractionPlan,
+} from '../../extension-point-interaction-authorization.js'
 
 interface InteractionLease {
   state: 'pending' | 'allow' | 'deny'
@@ -14,6 +18,7 @@ interface InteractionLease {
 }
 /** Generation-scoped interaction leases; persistent policy is intentionally not offered yet. */
 export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizationBroker {
+  private visualReviewSequence = 0
   private visualReviewQueue: Promise<unknown> = Promise.resolve()
   private readonly visualInteractionLeases = new Map<object, InteractionLease>()
 
@@ -112,7 +117,15 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
     declaration: ExtensionPointInteractionCapabilityV1,
     lease: InteractionLease,
   ): Promise<void> {
-    const operationId = `visual-interaction:${registration.identity.id}:${Date.now()}`
+    const operationId = `visual:${
+      sha256Hex(JSON.stringify([
+        this.generation,
+        registration.generation.moduleGeneration,
+        registration.identity.source,
+        registration.identity.id,
+        ++this.visualReviewSequence,
+      ]))
+    }`
     // Only implemented events enter a plan. Required unsupported interaction
     // is rejected by the visual service before activating a renderer.
     const plan = visualInteractionPlan({
@@ -147,7 +160,8 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
       const valid = !retired && this.isRegistered(registration)
         && this.registration(registration.identity) === registration
         && this.visualInteractionLeases.get(registration.token) === lease
-        && result?.schemaVersion === 5 && result.origin === 'explicit-user' && result.planId === plan.planId
+        && result?.$schema === VISUAL_PERMISSION_DECISION_SCHEMA_V5 && result.schemaVersion === 5
+        && result.origin === 'explicit-user' && result.planId === plan.planId
         && result.profileId === plan.profileId && result.operation === plan.operation
         && JSON.stringify(result.identity) === JSON.stringify(plan.identity)
         && JSON.stringify(result.binding) === JSON.stringify(plan.binding)
