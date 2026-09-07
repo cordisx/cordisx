@@ -335,8 +335,16 @@ describe('sidebar navigation collections', () => {
       expect(document.querySelector('[data-native-recent-tasks]')).toBe(recentTasks)
       expect(document.querySelector('[data-agent-conversation-renderer]')).toBeNull()
       const selectedActions = currentLatestRow.querySelector<HTMLElement>('.cxsi-actions')!
-      expect(selectedActions.hidden).toBe(true)
-      expect(dom.window.getComputedStyle(selectedActions).display).toBe('none')
+      expect(selectedActions.hidden).toBe(false)
+      expect(dom.window.getComputedStyle(selectedActions).display).toBe('flex')
+      latestPrimary.focus()
+      expect(document.activeElement).toBe(latestPrimary)
+      const selectedMore = selectedActions.querySelector<HTMLButtonElement>('.cordisx-navigation-more-action')!
+      selectedMore.focus()
+      expect(document.activeElement).toBe(selectedMore)
+      selectedMore.click()
+      document.querySelector<HTMLButtonElement>('[aria-label="Copy ID"]')!.click()
+      await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(2))
 
       const older = [...document.querySelectorAll<HTMLButtonElement>('[data-navigation-group] .cordisx-nav-primary')]
         .find(button => button.querySelector('.cxsi-title')?.textContent === 'Older room')!
@@ -367,6 +375,16 @@ describe('sidebar navigation collections', () => {
             ?.querySelector<HTMLElement>('.cxsi-actions')!,
         ).display,
       ).toBe('flex')
+
+      const inactiveLatestRow = [...document.querySelectorAll<HTMLElement>('.cordisx-nav-row')]
+        .find(row => row.querySelector('.cxsi-title')?.textContent === 'Latest room')!
+      inactiveLatestRow.querySelector<HTMLButtonElement>('.cordisx-nav-primary')!.focus()
+      const inactiveMore = inactiveLatestRow.querySelector<HTMLButtonElement>('.cordisx-navigation-more-action')!
+      inactiveMore.focus()
+      expect(document.activeElement).toBe(inactiveMore)
+      inactiveMore.click()
+      document.querySelector<HTMLButtonElement>('[aria-label="Copy ID"]')!.click()
+      await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(3))
 
       const fixture = (dom.window as unknown as {
         __cordisxNavigationCollectionFixture: {
