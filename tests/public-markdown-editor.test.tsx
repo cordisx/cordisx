@@ -187,7 +187,27 @@ describe('public Markdown editor', () => {
     )
     expect(ui.input.value).toBe('a\nb')
     expect(value).toHaveBeenCalledWith('a\nb')
-    expect(key).not.toHaveBeenCalled()
+    expect(key).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets the consumer prevent a default editing shortcut before the editor handles it', async () => {
+    const value = vi.fn()
+    const key = vi.fn(event => event.preventDefault())
+    const ui = await mount({ value: 'ab', onValueChange: value, onKeyDown: key })
+    ui.input.setSelectionRange(1, 1)
+    await act(async () =>
+      ui.input.dispatchEvent(
+        new ui.view.KeyboardEvent('keydown', {
+          key: 'Enter',
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      )
+    )
+    expect(key).toHaveBeenCalledTimes(1)
+    expect(ui.input.value).toBe('ab')
+    expect(value).not.toHaveBeenCalled()
   })
 
   it('follows theme and rendering-mode changes without recreating the editor', async () => {

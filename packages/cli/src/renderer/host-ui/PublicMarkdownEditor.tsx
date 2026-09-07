@@ -48,7 +48,7 @@ export function PublicMarkdownEditor({ ref, className, style, ...props }: Markdo
         onInput={event => publishValue(event.currentTarget.value)}
         onChange={event => publishValue(event.currentTarget.value)}
         onSelect={event => publishSelection(event.currentTarget)}
-        onKeyDown={props.onKeyDown}
+        onKeyDownCapture={props.onKeyDown}
         onCompositionStart={props.onCompositionStart}
         onCompositionEnd={props.onCompositionEnd}
       />
