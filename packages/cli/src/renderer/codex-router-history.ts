@@ -1,6 +1,8 @@
 import type { CordisXJsonScalar } from '../contracts.js'
 
 const CORDISX_ROUTE_STATE_KEY = '__cordisxRouteV1'
+// Build 7982 declares '/' as home; native thread active/selected selectors return no thread there.
+const CODEX_PLUGIN_MAIN_LOCATION = Object.freeze({ pathname: '/', search: '', hash: '' })
 const CORDISX_ROUTE_DEEP_LINK_PREFIX = '#cordisx-route-v1='
 
 /** Host-private task/detail surfaces must not inherit a plugin route selection. */
@@ -361,10 +363,11 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
   push(entry: CodexRouteHistoryEntry): CodexRouteHistorySnapshot {
     const navigator = this.requireNavigator()
     const location = navigator.location
+    const destination = entry.outlet === 'main' ? CODEX_PLUGIN_MAIN_LOCATION : routerTarget(location)
     this.transition(
-      location,
+      { ...location, ...destination },
       entry,
-      () => navigator.push(routerTarget(location), stateWithEntry(location.state, entry)),
+      () => navigator.push(destination, stateWithEntry(location.state, entry)),
     )
     return this.snapshot()
   }
@@ -372,10 +375,11 @@ export class CodexRouterHistoryAdapter implements CodexRouteHistoryAdapter {
   replace(entry?: CodexRouteHistoryEntry): CodexRouteHistorySnapshot {
     const navigator = this.requireNavigator()
     const location = navigator.location
+    const destination = entry?.outlet === 'main' ? CODEX_PLUGIN_MAIN_LOCATION : routerTarget(location)
     this.transition(
-      location,
+      { ...location, ...destination },
       entry,
-      () => navigator.replace(routerTarget(location), stateWithEntry(location.state, entry)),
+      () => navigator.replace(destination, stateWithEntry(location.state, entry)),
     )
     return this.snapshot()
   }
