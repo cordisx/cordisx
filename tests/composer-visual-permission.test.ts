@@ -174,3 +174,34 @@ it('bounds interaction request identifiers even for a maximum-length plugin id',
     broker.dispose()
   }
 })
+
+it('auto-authorizes only Host-enrolled local development identities and keeps revocation and generation fences', () => {
+  const request = vi.fn(async () => 'deny' as const)
+  const promptVisual = vi.fn(async () => undefined)
+  const broker = new PermissionBroker(
+    new MemoryPermissionPolicyStore(),
+    { request },
+    () => new Date(),
+    500,
+    'dev',
+    'runtime',
+    undefined,
+    undefined,
+    { request: async () => undefined, requestVisualV5: promptVisual },
+  )
+  broker.enableDevelopmentVisualIdentity(identity)
+  const unregister = broker.register(identity, manifest(), { pluginId: identity.id, moduleGeneration: 'dev-one' })
+  const authority = broker.visualAuthority(identity, 'dev-one', points[1], () => true)
+  expect(authority.render()).toBe(true)
+  expect(authority.observePointer()).toBe(true)
+  expect(broker.visualAuthority(identity, 'dev-one', points[0], () => true).observePointer()).toBe(false)
+  broker.setVisualInteractionPolicy(identity, false)
+  expect(authority.observePointer()).toBe(false)
+  broker.setVisualInteractionPolicy(identity, true)
+  expect(authority.observePointer()).toBe(true)
+  unregister()
+  expect(authority.observePointer()).toBe(false)
+  expect(request).not.toHaveBeenCalled()
+  expect(promptVisual).not.toHaveBeenCalled()
+  broker.dispose()
+})

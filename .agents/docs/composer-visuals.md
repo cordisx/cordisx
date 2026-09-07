@@ -5,7 +5,7 @@ composition, with exact render declarations, explicit generation-scoped pointer
 review, Manager permission projection, and lazy shared-React SVG loaders. Formal
 release and the full native state matrix remain pending.
 
-The normative contract is the [Protocol visual-seat successor](https://github.com/cordisx/cordisx-protocol/blob/4d815609059301d3bc8edfde8c7d3d4fd47fd438/.agents/docs/extension-point-visuals/README.md).
+The normative contract is the [Protocol visual-seat successor](https://github.com/cordisx/cordisx-protocol/blob/5f4130fc112020ba0711db5c42ca6852df085da2/.agents/docs/extension-point-visuals/README.md).
 Root and CLI use that exact experimental feature head. Channel runtime retains
 its previous formal exact dependency; this change does not adopt unrelated
 Channel configuration contracts. Formal dependency-pin gates remain required
@@ -82,7 +82,7 @@ Manifest v10 declares `ui.extension-points.render` with exact points, plus an
 optional `ui.extension-points.interact` declaration with exact points/events.
 The Host currently supports `pointer.observe`; a required unsupported event
 prevents visual activation. Optional unimplemented events remain unavailable.
-Interaction review offers allow-once/deny-once only. Manager Allow opens a new
+Installed-plugin interaction review offers allow-once/deny-once only. Manager Allow opens a new
 explicit review; it never silently grants interaction. Deny revokes the active
 lease immediately. No certified implicit interaction approval is offered.
 
@@ -153,3 +153,30 @@ also reproduced at the starting Host commit (plugin bundle entry, local-dev
 projection and navigation menu expectations); they are separate from the
 new visual tests. No release or Mono compatibility is claimed from this
 experimental dependency.
+
+## Optional dictation state
+
+A visual registration can opt into `snapshotVersion: 2`; omitted or explicit
+version 1 retains the original snapshot without dictation. Version 2 adds
+`dictation` independently of primary action, enabled and busy. Current native
+GLs labels and aria-busy distinguish idle, starting, recording, transcribing,
+and retry. English and verified Simplified Chinese labels are recognized;
+missing, ambiguous or unsupported controls project unavailable. Native dictation
+controls remain intact. No audio, transcript or microphone authority is granted.
+
+The example overlay uses recording red and transcribing/startup amber while its
+primary button keeps its own native action colors. Palette and expression are
+plugin choices. Probe fixtures verify transitions; a UI fixture is not evidence
+that the assistant recorded microphone audio or exercised a real transcription.
+
+## Local development authorization
+
+The Host recognizes only Launcher-verified, ready local development artifacts
+through `isExplicitLocalDevelopmentArtifact`. For those exact source/plugin
+identities in the current development session, declared visual rendering and
+pointer observation do not open permission dialogs. This is Host development
+authority, not a fabricated explicit-user decision, certification, wildcard
+policy, or persistent grant. Generation retirement, exact declarations, point
+availability and explicit denial still apply. Installed artifacts and ordinary
+file URLs are not enrolled. Other capabilities keep their own authorization
+rules; this exception does not grant microphone access.

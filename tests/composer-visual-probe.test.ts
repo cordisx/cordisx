@@ -68,3 +68,38 @@ describe('native Composer visual semantic probe', () => {
     expect(second.status === 'available' && second.seat.busy && second.seat.enabled).toBe(true)
   })
 })
+
+it('projects independent dictation states without confusing the primary control', () => {
+  const { document, button } = fixture()
+  const microphone = document.createElement('button')
+  microphone.className = 'size-token-button-composer'
+  microphone.innerHTML = '<svg></svg>'
+  button.parentElement!.prepend(microphone)
+  for (
+    const [label, busy, state] of [
+      ['听写', 'false', 'idle'],
+      ['停止听写', 'false', 'recording'],
+      ['听写', 'true', 'transcribing'],
+      ['正在完成听写', 'true', 'transcribing'],
+      ['Starting dictation; click to cancel', 'true', 'starting'],
+      ['Retry dictation', 'false', 'retry'],
+      ['Unexpected', 'false', 'unavailable'],
+    ]
+  ) {
+    microphone.setAttribute('aria-label', label!)
+    microphone.setAttribute('aria-busy', busy!)
+    const result = probeComposerVisual(document)
+    if (label === 'Unexpected') {
+      expect(result.status).toBe('unavailable')
+      continue
+    }
+    expect(result.status).toBe('available')
+    if (result.status !== 'available') throw new Error(result.reason)
+    expect(result.seat.dictation).toBe(state)
+    expect(result.seat.action).toBe('voice')
+  }
+  microphone.setAttribute('aria-label', 'Dictate')
+  button.parentElement!.prepend(microphone.cloneNode(true))
+  const ambiguous = probeComposerVisual(document)
+  expect(ambiguous.status === 'available' && ambiguous.seat.dictation).toBe('unavailable')
+})

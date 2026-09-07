@@ -78,6 +78,7 @@ function Visual({ state }: CordisXReactVisualProps) {
       'data-pointer': state.pointer?.x ?? 'none',
       'data-pointer-y': state.pointer?.y ?? 'none',
       'data-height': state.bounds.height,
+      'data-dictation': state.schemaVersion === 2 ? state.dictation : 'v1',
       'data-motion': state.reducedMotion,
       'data-theme': state.theme,
     },
@@ -185,4 +186,21 @@ it('updates theme and reduced-motion semantic props without remounting the nativ
   await vi.waitFor(() => expect(f.document.querySelector('[data-motion="true"][data-theme="dark"]')).not.toBeNull())
   expect(f.document.querySelector('button')).toBe(button)
   expect(f.runtime.inspect().roots).toBe(1)
+})
+
+it('adds dictation only for renderers that opt into v2', async () => {
+  const f = setup()
+  const microphone = f.document.createElement('button')
+  microphone.setAttribute('aria-label', 'Stop dictation')
+  f.document.querySelector('[data-composer-footer-responsive]')!.append(microphone)
+  f.grant(true)
+  f.runtime.register('legacy', { id: 'legacy', pointId: 'composer.primary-action.visual' }, loadVisual, f.authority)
+  f.runtime.register('v2', { id: 'v2', pointId: 'composer.frame.overlay', snapshotVersion: 2 }, loadVisual, f.authority)
+  await vi.waitFor(() => expect(f.document.querySelector('[data-dictation="recording"]')).not.toBeNull())
+  expect(
+    f.document.querySelector('[data-cordisx-composer-visual="composer.primary-action.visual"] [data-dictation]')
+      ?.getAttribute('data-dictation'),
+  ).toBe('v1')
+  microphone.setAttribute('aria-busy', 'true')
+  await vi.waitFor(() => expect(f.document.querySelector('[data-dictation="transcribing"]')).not.toBeNull())
 })

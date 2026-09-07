@@ -1,3 +1,4 @@
+import type { ComposerDictationStateV2 } from '@cordisx/protocol/extension-point-visual/v2'
 /** Version-sensitive probes verified against the 26.901.51231 installation source.
  * These nodes never cross the Host renderer boundary. Unknown labels fail closed.
  */
@@ -34,6 +35,7 @@ export interface NativeComposerVisualSeat {
   readonly busy: boolean
   readonly draftEmpty: boolean
   readonly accessibleLabel: string
+  readonly dictation: ComposerDictationStateV2
 }
 export type NativeComposerVisualProbe =
   | Readonly<{ status: 'available'; seat: NativeComposerVisualSeat }>
@@ -49,6 +51,31 @@ function visible(element: Element): boolean {
     && bounds.right > 0 && bounds.bottom > 0 && bounds.left < view.innerWidth && bounds.top < view.innerHeight
 }
 
+const DICTATION_LABELS: Readonly<Record<string, ComposerDictationStateV2>> = {
+  Dictate: 'idle',
+  '听写': 'idle',
+  'Stop dictation': 'recording',
+  '停止听写': 'recording',
+  'Finishing dictation': 'transcribing',
+  '正在完成听写': 'transcribing',
+  'Starting dictation; click to cancel': 'starting',
+  'Retry dictation': 'retry',
+  '重试听写': 'retry',
+}
+function dictationState(footer: HTMLElement): ComposerDictationStateV2 {
+  const controls = [...footer.querySelectorAll<HTMLButtonElement>('button[aria-label]')]
+    .filter(visible)
+    .filter(button => DICTATION_LABELS[button.getAttribute('aria-label') ?? ''] !== undefined)
+  if (controls.length !== 1) return 'unavailable'
+  const button = controls[0]!
+  const state = DICTATION_LABELS[button.getAttribute('aria-label') ?? '']!
+  const busy = button.getAttribute('aria-busy')
+  if (busy !== null && busy !== 'true' && busy !== 'false') return 'unavailable'
+  // Native GLs uses aria-busy for both startup and final transcription.
+  if (state === 'starting') return 'starting'
+  return busy === 'true' ? 'transcribing' : state
+}
+
 export function probeComposerVisual(document: Document): NativeComposerVisualProbe {
   const frames = [...document.querySelectorAll<HTMLElement>('[data-codex-composer-root][data-composer-placement]')]
     .filter(visible)
@@ -61,6 +88,7 @@ export function probeComposerVisual(document: Document): NativeComposerVisualPro
   // operations (including queue/steer), never inferred from draft contents.
   const buttons = [...footers[0]!.querySelectorAll<HTMLButtonElement>('button.size-token-button-composer[aria-label]')]
     .filter(visible)
+    .filter(button => DICTATION_LABELS[button.getAttribute('aria-label') ?? ''] === undefined)
     .filter(button => button.closest('[data-cordisx-surface-host]') === null)
   if (buttons.length !== 1) return { status: 'unavailable', reason: 'Primary control is ambiguous or absent' }
   const button = buttons[0]!
@@ -93,6 +121,7 @@ export function probeComposerVisual(document: Document): NativeComposerVisualPro
       button,
       visual: children[0]!,
       action,
+      dictation: dictationState(footers[0]!),
       busy,
       enabled: !button.disabled && button.getAttribute('aria-disabled') !== 'true',
       draftEmpty: text.trim().length === 0,

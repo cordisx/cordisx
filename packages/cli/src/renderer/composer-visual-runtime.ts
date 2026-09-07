@@ -1,3 +1,4 @@
+import type { ExtensionPointVisualSnapshotV2 } from '@cordisx/protocol/extension-point-visual/v2'
 import * as React from 'react'
 import { resolveHostTheme } from './host-theme.js'
 import { createRoot, type Root } from 'react-dom/client'
@@ -15,6 +16,8 @@ export interface ComposerVisualAuthority {
   observePointer(): boolean
   subscribe(listener: () => void): () => void
 }
+type VisualSnapshot = ExtensionPointVisualSnapshotV1 | ExtensionPointVisualSnapshotV2
+
 interface Registration {
   readonly key: string
   readonly declaration: CordisXVisualRegistration
@@ -39,13 +42,13 @@ interface Mounted {
 
 class VisualSource {
   private readonly listeners = new Set<() => void>()
-  constructor(private value: ExtensionPointVisualSnapshotV1) {}
-  getSnapshot = (): ExtensionPointVisualSnapshotV1 => this.value
+  constructor(private value: VisualSnapshot) {}
+  getSnapshot = (): VisualSnapshot => this.value
   subscribe = (listener: () => void): () => void => {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
   }
-  update(value: ExtensionPointVisualSnapshotV1): void {
+  update(value: VisualSnapshot): void {
     this.value = Object.freeze(value)
     for (const listener of this.listeners) listener()
   }
@@ -132,8 +135,11 @@ export class ComposerVisualRuntime {
     if (!['composer.primary-action.visual', 'composer.frame.overlay'].includes(declaration.pointId)) {
       throw new Error('Unknown visual point')
     }
-    if (Object.keys(declaration).some(key => !['id', 'pointId', 'events', 'order'].includes(key))) {
+    if (Object.keys(declaration).some(key => !['id', 'pointId', 'events', 'order', 'snapshotVersion'].includes(key))) {
       throw new Error('Unknown visual declaration field')
+    }
+    if (declaration.snapshotVersion !== undefined && ![1, 2].includes(declaration.snapshotVersion)) {
+      throw new Error('Unsupported visual snapshot version')
     }
     if (declaration.events?.some(event => event !== 'pointer.observe')) {
       throw new Error('Requested visual interaction is unavailable')
@@ -184,7 +190,7 @@ export class ComposerVisualRuntime {
     })
   }
 
-  private snapshot(seat: NativeComposerVisualSeat, record: Registration): ExtensionPointVisualSnapshotV1 {
+  private snapshot(seat: NativeComposerVisualSeat, record: Registration): VisualSnapshot {
     const anchorBounds = (record.declaration.pointId === 'composer.primary-action.visual' ? seat.button : seat.frame)
       .getBoundingClientRect()
     const bounds = record.declaration.pointId === 'composer.frame.overlay'
@@ -196,7 +202,9 @@ export class ComposerVisualRuntime {
     const x = pointer === undefined ? 0 : (pointer.x - bounds.left) / bounds.width
     const y = pointer === undefined ? 0 : (pointer.y - bounds.top) / bounds.height
     return Object.freeze({
-      schemaVersion: 1,
+      ...(record.declaration.snapshotVersion === 2
+        ? { schemaVersion: 2 as const, dictation: seat.dictation }
+        : { schemaVersion: 1 as const }),
       sequence: ++this.sequence,
       action: seat.action,
       enabled: seat.enabled,

@@ -1,3 +1,4 @@
+import { isExplicitLocalDevelopmentArtifact } from './runtime-shared.js'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
@@ -496,6 +497,11 @@ export async function start(
       closureScope,
     )
     const broker = runtimeClosures1.createRuntimeBroker(closureScope)
+    for (const plugin of plugins) {
+      if (isExplicitLocalDevelopmentArtifact(plugin)) {
+        broker.enableDevelopmentVisualIdentity({ id: plugin.id, source: plugin.source })
+      }
+    }
     if (metadata.certifiedPermissionChannelToken !== undefined && window.top === window) {
       certifiedPermissionChannel = createCertifiedPermissionDocumentChannel({
         token: metadata.certifiedPermissionChannelToken,

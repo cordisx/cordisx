@@ -1,3 +1,5 @@
+import type { ExtensionPointVisualSnapshotV2 } from '@cordisx/protocol/extension-point-visual/v2'
+export type * from '@cordisx/protocol/extension-point-visual/v2'
 import type { ComponentType } from 'react'
 import type {
   ExtensionPointInteractionV1,
@@ -7,7 +9,7 @@ import type {
 export type * from '@cordisx/protocol/extension-point-visual/v1'
 
 export interface CordisXReactVisualProps {
-  readonly state: ExtensionPointVisualSnapshotV1
+  readonly state: ExtensionPointVisualSnapshotV1 | ExtensionPointVisualSnapshotV2
 }
 export interface CordisXReactVisual {
   readonly kind: 'react-svg-v1'
@@ -18,6 +20,8 @@ export interface CordisXVisualRegistration {
   readonly pointId: ExtensionPointVisualIdV1
   readonly events?: readonly ExtensionPointInteractionV1[]
   readonly order?: number
+  /** Opt into dictation status; omission retains the frozen v1 snapshot. */
+  readonly snapshotVersion?: 1 | 2
 }
 export interface CordisXExtensionPointVisuals {
   register(
