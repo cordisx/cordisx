@@ -426,8 +426,14 @@ export abstract class AgentSessionRuntimeCore {
     const capabilities: AgentRuntimeCapability[] = operation === 'approval'
       ? ['approvals.request', 'approvals.answer']
       : operation === 'create'
-      ? ['agents.create', 'agents.message.submit', 'agents.get', 'sessions.read']
-      : ['sessions.read', 'agents.get']
+      ? ['agents.create', 'agents.message.submit', 'agents.get']
+      : ['agents.get']
+    if (this.disposed) return false
+    // Before a task has been looked up/reserved, check declaration availability only.
+    // The task transaction must still authorize the exact Session before any effect.
+    if (sessionId === undefined) {
+      return capabilities.every(capability => this.options.declares?.(owner, capability) === true)
+    }
     for (const capability of capabilities) if (!await this.allowed(owner, capability, sessionId)) return false
     return true
   }
