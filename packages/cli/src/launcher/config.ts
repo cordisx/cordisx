@@ -28,6 +28,8 @@ import type {
 export interface CordisXConfigPlugin {
   readonly id: string
   readonly entry: string
+  /** Explicit dev-only owner continuity across worktrees of the same plugin repository. */
+  readonly developmentIdentityEntry?: string
   readonly enabled: boolean
   readonly config: unknown
   readonly revision?: number
@@ -269,6 +271,15 @@ export function parseConfigDocument(
     return {
       id,
       entry,
+      ...(plugin.developmentIdentityEntry === undefined
+        ? {}
+        : {
+          developmentIdentityEntry: pluginEntry(
+            plugin.developmentIdentityEntry,
+            `config.plugins[${index}].developmentIdentityEntry`,
+            configRoot,
+          ),
+        }),
       enabled: plugin.enabled !== false,
       config: scoped?.config ?? plugin.config ?? {},
       revision: revision as number,

@@ -1,4 +1,5 @@
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
+import { resolveDevelopmentIdentitySource } from './development-source-identity.js'
 import { createHash, randomBytes } from 'node:crypto'
 import { chmod, lstat, mkdir, readdir, readFile, realpath } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -271,13 +272,13 @@ export async function startNativeViteServer(
     const realRoot = await realpath(info.root).catch(() => path.resolve(info.root))
     const packageFiles = [...new Set([path.join(realRoot, 'cordisx-package.json'), ...info.packageFiles])]
     await rememberPluginMetadata(realEntry, realRoot, packageFiles)
-    const sourceKey = createHash('sha256').update(path.resolve(plugin.entry)).digest('hex').slice(0, 24)
+    const identitySource = await resolveDevelopmentIdentitySource(plugin)
     const created: DevelopmentGeneration = {
       root: info.root,
       realRoot,
       realEntry,
       version: info.version,
-      source: `file:///cordisx-local-dev/${sourceKey}/${plugin.id}.js`,
+      source: identitySource,
       revision: 0,
       ...generationValues(plugin.id, 0),
       lastSuccessfulAt: new Date().toISOString(),
