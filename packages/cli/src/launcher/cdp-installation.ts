@@ -98,6 +98,14 @@ export async function install(
     }
     await session.send('Runtime.enable')
     await session.send('Page.enable')
+    if (viteDevelopment) {
+      await support.waitForNativeDocumentReadiness(
+        session,
+        target.url,
+        Date.now() + support.CDP_INJECTION_TIMEOUT_MS,
+        signal,
+      )
+    }
     if (loopbackModules) {
       viteLoopbackPermission = viteLoopbackPermissions === undefined
         ? await support.enableViteLoopbackPermission(session, target)

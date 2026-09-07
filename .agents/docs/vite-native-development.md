@@ -199,6 +199,24 @@ Do not present that experiment as a solution. If a reload response is absent,
 preserve sequential navigation and bootstrap ordering; do not race a runtime
 evaluation against the document transition.
 
+A later isolated run reported renderer injection ready while the visible window
+showed Electron's `ChatGPT failed to start` fallback. Its captured Sentry scope
+recorded the initial `app://-/index.html` load rejecting with `ERR_ABORTED`
+immediately after the early reload. This proves that CDP injection readiness is
+not a user-operable-window check. The working hypothesis is that reload raced
+Electron main's still-pending initial `loadURL` promise; require the exact native
+URL, a complete document, and the expected preload bridge before requesting the
+development reload. Keep that explanation marked as a hypothesis until a fresh
+isolated run has no startup or data-URL failure modal and the user can operate
+the CordisX surface.
+
+That profile also recorded Chromium's network quality as `Offline`, but the
+Host launch arguments contained no network-disabling switch. The retained
+evidence does not establish whether that state preceded or followed the aborted
+window load. Keep external `ERR_INTERNET_DISCONNECTED` diagnostics separate
+from the proven local `app://` navigation abort until a run captures their
+ordering.
+
 Stable-home and fresh-home launches exercise different setup paths. A fresh
 home may materialize entity templates and thereby commit a new plugin module
 generation. The final renderer composition and its entity principal must be

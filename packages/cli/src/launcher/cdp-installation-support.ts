@@ -349,6 +349,49 @@ export class ViteLoopbackPermissionCoordinator {
   }
 }
 
+export async function waitForNativeDocumentReadiness(
+  session: CdpSession,
+  expectedUrl: string,
+  deadline: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  let lastError: Error | undefined
+  while (Date.now() < deadline) {
+    if (signal?.aborted === true) throw cdpInstallationAborted()
+    try {
+      await abortable(
+        evaluateRuntimeOperation(
+          session,
+          `(() => { try {
+        const bridge = globalThis.electronBridge
+        if (
+          globalThis.location?.href !== ${JSON.stringify(expectedUrl)}
+          || globalThis.document?.readyState !== 'complete'
+          || globalThis.codexWindowType !== 'electron'
+          || typeof bridge?.sendMessageFromView !== 'function'
+          || typeof bridge?.getSentryInitOptions !== 'function'
+        ) return { ok: false, error: 'cordisx:native-document-pending' }
+        return { ok: true }
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } } })()`,
+          Math.max(1, deadline - Date.now()),
+        ),
+        signal,
+      )
+      return
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+      const transient = lastError.message === 'cordisx:native-document-pending'
+        || /Execution context was destroyed|Cannot find context|Inspected target navigated|CDP request timed out: Runtime\.evaluate/i
+          .test(lastError.message)
+      if (!transient || session.isClosed()) throw lastError
+      await delay(100, signal)
+    }
+  }
+  throw new Error(
+    `CordisX native document readiness timed out${lastError === undefined ? '' : `: ${lastError.message}`}`,
+  )
+}
+
 export async function waitForViteBootstrap(
   session: CdpSession,
   installId: string,
