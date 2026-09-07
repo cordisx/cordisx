@@ -103,6 +103,7 @@ export const CORDISX_HOST_ICON_TOKENS = [
   'host:marketplace',
   'host:people',
   'host:more',
+  'host:new',
   'host:open',
   'host:pin',
   'host:pinned',

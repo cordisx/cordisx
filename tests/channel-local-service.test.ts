@@ -1,12 +1,15 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SIMULATOR_CHANNEL_SERVICE_CONFIG } from '../packages/channel-runtime/src/simulator.js'
 import { createLocalChannelService } from '../packages/cli/src/launcher/channel-service.js'
 
 const temporary = new Set<string>()
+const channelEntry = createRequire(import.meta.url).resolve('@cordisx/channel')
+const channelArtifactDirectory = path.dirname(channelEntry)
 
 afterEach(async () => {
   await Promise.all([...temporary].map(async root => await rm(root, { recursive: true, force: true })))
@@ -17,12 +20,10 @@ describe('built-in local Channel service', () => {
   it('starts and restart-fences the simulator without accepting an official adapter', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-channel-'))
     temporary.add(root)
-    const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-    const artifactDirectory = path.join(repo, 'packages/cli/src/plugins/channel')
     const service = createLocalChannelService({
-      artifactDirectory,
+      artifactDirectory: channelArtifactDirectory,
       dataDir: path.join(root, 'runtime'),
-      source: pathToFileURL(path.join(artifactDirectory, 'index.ts')).href,
+      source: pathToFileURL(channelEntry).href,
     })
     await service.start(SIMULATOR_CHANNEL_SERVICE_CONFIG)
     expect(service.snapshot()?.accounts).toEqual([expect.objectContaining({
@@ -45,12 +46,10 @@ describe('built-in local Channel service', () => {
   it('exposes launcher-private connection controls that rebuild the current service generation', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-channel-actions-'))
     temporary.add(root)
-    const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-    const artifactDirectory = path.join(repo, 'packages/cli/src/plugins/channel')
     const service = createLocalChannelService({
-      artifactDirectory,
+      artifactDirectory: channelArtifactDirectory,
       dataDir: path.join(root, 'runtime'),
-      source: pathToFileURL(path.join(artifactDirectory, 'index.ts')).href,
+      source: pathToFileURL(channelEntry).href,
     })
     const ref = SIMULATOR_CHANNEL_SERVICE_CONFIG.connections[0]!.ref
     const firstGeneration = await service.start(SIMULATOR_CHANNEL_SERVICE_CONFIG)
@@ -81,12 +80,10 @@ describe('built-in local Channel service', () => {
   it('restores the prior configuration when a service restart is rolled back', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-channel-rollback-'))
     temporary.add(root)
-    const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-    const artifactDirectory = path.join(repo, 'packages/cli/src/plugins/channel')
     const service = createLocalChannelService({
-      artifactDirectory,
+      artifactDirectory: channelArtifactDirectory,
       dataDir: path.join(root, 'runtime'),
-      source: pathToFileURL(path.join(artifactDirectory, 'index.ts')).href,
+      source: pathToFileURL(channelEntry).href,
     })
     await service.start(SIMULATOR_CHANNEL_SERVICE_CONFIG)
     const restarted = await service.restart({
@@ -108,8 +105,6 @@ describe('built-in local Channel service', () => {
   it('keeps the launcher alive and projects an official account unavailable when its private secret is absent', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-local-channel-feishu-'))
     temporary.add(root)
-    const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-    const artifactDirectory = path.join(repo, 'packages/cli/src/plugins/channel')
     const configuration = structuredClone(SIMULATOR_CHANNEL_SERVICE_CONFIG)
     configuration.connections.push({
       ref: { adapterId: 'feishu', accountId: 'cli_test', tenantId: 'tenant-test' },
@@ -119,9 +114,9 @@ describe('built-in local Channel service', () => {
       secretRef: 'host-secret:env/CORDISX_MISSING_TEST_SECRET',
     })
     const service = createLocalChannelService({
-      artifactDirectory,
+      artifactDirectory: channelArtifactDirectory,
       dataDir: path.join(root, 'runtime'),
-      source: pathToFileURL(path.join(artifactDirectory, 'index.ts')).href,
+      source: pathToFileURL(channelEntry).href,
       environment: {},
     })
     await service.start(configuration)

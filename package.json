@@ -85,6 +85,7 @@
     "node": ">=22.19"
   },
   "dependencies": {
+    "@cordisx/channel": "github:cordisx/plugin-channel#4cee12e3a92eeed557bc9de8cc4792710918327a",
     "@cordisx/protocol": "github:cordisx/cordisx-protocol#9425e90dcc5085dcd262fd68467544cad761ed93",
     "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",

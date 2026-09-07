@@ -447,10 +447,6 @@ function normalizeProjection(value: unknown): ChannelManagerProjectionV1 {
   }
 }
 
-function cloneProjection(projection: ChannelManagerProjectionV1): ChannelManagerProjectionV1 {
-  return normalizeProjection(JSON.parse(JSON.stringify(projection)) as unknown)
-}
-
 /** Merge a launcher action response into the existing renderer-safe product view. */
 function withRuntimeProjection(
   base: ChannelManagerProjectionV1,
@@ -482,24 +478,6 @@ function withRuntimeProjection(
   })
 }
 
-export interface CordisXChannelManager {
-  snapshot(): ChannelManagerProjectionV1
-  subscribe(listener: () => void): Disposable<void>
-  rememberLocalCandidate(connection: ChannelManagerConnectionProjection): void
-  serviceConfiguration(): Promise<HostServiceConfigDescriptor | undefined>
-  mutateServiceConfiguration(mutation: HostServiceConfigMutation): Promise<HostServiceConfigMutationResult>
-  createConnection(input: {
-    readonly account: ChannelManagerConnectionProjection['ref']
-    readonly secret: string
-    readonly mutation: HostServiceConfigMutation
-  }): Promise<HostServiceConfigMutationResult>
-  actionsAvailable(): boolean
-  runAction(
-    action: 'enable' | 'disable' | 'reconnect' | 'archive' | 'restore' | 'unbind',
-    input: Record<string, unknown>,
-  ): Promise<ChannelManagerActionResult>
-}
-
 export interface ChannelManagerServiceConfigApi {
   list(): Promise<readonly HostServiceConfigDescriptor[]>
   mutate(mutation: HostServiceConfigMutation): Promise<HostServiceConfigMutationResult>
@@ -519,7 +497,7 @@ export interface ChannelManagerServiceInput {
   readonly actions?: ChannelManagerActionsApi
 }
 
-/** Public opaque Channel Manager service; legacy inputs remain Host-internal during consumer migration. */
+/** Public opaque Channel Manager service backed by the Host-owned runtime projection. */
 export class CordisXChannelManagerService extends Service implements ChannelManagerV2 {
   constructor(ctx: Context, input: unknown = EMPTY_PROJECTION) {
     super(ctx, 'channelManager')
@@ -545,17 +523,6 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
       actionsAvailable: () => stateFor(this).actions !== undefined,
       runAction: async (action, value) => await this.runAction(action, value),
     })
-    const facade: CordisXChannelManager = {
-      snapshot: () => this.legacySnapshot(),
-      subscribe: listener => this.legacySubscribe(listener),
-      rememberLocalCandidate: connection => this.rememberLocalCandidate(connection),
-      serviceConfiguration: async () => await this.serviceConfiguration(),
-      mutateServiceConfiguration: async mutation => await this.mutateServiceConfiguration(mutation),
-      createConnection: async input => await this.createConnection(input),
-      actionsAvailable: () => this.actionsAvailable(),
-      runAction: async (action, input) => await this.runAction(action, input),
-    }
-    new CordisXLegacyChannelManagerService(ctx, Object.freeze(facade))
   }
 
   snapshot(): ChannelManagerSnapshotV3 {
@@ -583,17 +550,11 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
   }
 
   subscribe(listener: () => void): { dispose(): void } {
-    const dispose = this.legacySubscribe(listener)
+    const dispose = this.subscribeInternal(listener)
     return Object.freeze({ dispose })
   }
 
-  private legacySnapshot(): ChannelManagerProjectionV1 {
-    const state = stateFor(this)
-    state.cachedProjection ??= cloneProjection(projectionFor(this))
-    return state.cachedProjection
-  }
-
-  private legacySubscribe(listener: () => void): Disposable<void> {
+  private subscribeInternal(listener: () => void): Disposable<void> {
     const listeners = stateFor(this).listeners
     listeners.add(listener)
     return () => listeners.delete(listener)
@@ -654,61 +615,5 @@ export class CordisXChannelManagerService extends Service implements ChannelMana
 
   private notifyListeners(): void {
     for (const listener of stateFor(this).listeners) listener()
-  }
-}
-
-const legacyFacades = new WeakMap<object, CordisXChannelManager>()
-
-function legacyFacadeFor(service: object): CordisXChannelManager {
-  const original = (service as { [CORDIS_ORIGINAL]?: object })[CORDIS_ORIGINAL]
-  const facade = legacyFacades.get(original ?? service)
-  if (facade === undefined) throw new Error('CordisX Channel Manager legacy facade is unavailable')
-  return facade
-}
-
-/** Temporary internal service adapter for the bundled consumer during its public-v2 migration. */
-class CordisXLegacyChannelManagerService extends Service implements CordisXChannelManager {
-  constructor(ctx: Context, facade: CordisXChannelManager) {
-    super(ctx, 'channelManagerLegacy')
-    legacyFacades.set(this, facade)
-  }
-
-  snapshot(): ChannelManagerProjectionV1 {
-    return legacyFacadeFor(this).snapshot()
-  }
-
-  subscribe(listener: () => void): Disposable<void> {
-    return legacyFacadeFor(this).subscribe(listener)
-  }
-
-  rememberLocalCandidate(connection: ChannelManagerConnectionProjection): void {
-    legacyFacadeFor(this).rememberLocalCandidate(connection)
-  }
-
-  serviceConfiguration(): Promise<HostServiceConfigDescriptor | undefined> {
-    return legacyFacadeFor(this).serviceConfiguration()
-  }
-
-  mutateServiceConfiguration(mutation: HostServiceConfigMutation): Promise<HostServiceConfigMutationResult> {
-    return legacyFacadeFor(this).mutateServiceConfiguration(mutation)
-  }
-
-  createConnection(input: {
-    readonly account: ChannelManagerConnectionProjection['ref']
-    readonly secret: string
-    readonly mutation: HostServiceConfigMutation
-  }): Promise<HostServiceConfigMutationResult> {
-    return legacyFacadeFor(this).createConnection(input)
-  }
-
-  actionsAvailable(): boolean {
-    return legacyFacadeFor(this).actionsAvailable()
-  }
-
-  runAction(
-    action: 'enable' | 'disable' | 'reconnect' | 'archive' | 'restore' | 'unbind',
-    input: Record<string, unknown>,
-  ): Promise<ChannelManagerActionResult> {
-    return legacyFacadeFor(this).runAction(action, input)
   }
 }
