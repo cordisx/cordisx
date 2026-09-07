@@ -49,6 +49,8 @@ export function projectSidebarGroupAppearance(root: HTMLElement, seat: SidebarCo
   const view = root.ownerDocument.defaultView
   const heading = seat.heading === undefined ? undefined : view?.getComputedStyle(seat.heading)
   const section = seat.section === undefined ? undefined : view?.getComputedStyle(seat.section)
+  const rowList = seat.row?.parentElement
+  const rowListStyle = rowList === undefined || rowList === null ? undefined : view?.getComputedStyle(rowList)
   // Only a visibly selected, non-hovered/non-focused session row can supply
   // selected colors. Never turn the current action template fill into idle paint.
   const selected = seat.selectedRow === undefined ? undefined : view?.getComputedStyle(seat.selectedRow)
@@ -74,6 +76,10 @@ export function projectSidebarGroupAppearance(root: HTMLElement, seat: SidebarCo
     'padding-block': heading?.paddingBlockStart,
     'margin-block': section?.marginBlockStart,
     gap: view?.getComputedStyle(seat.parent).rowGap,
+    'item-gap': rowListStyle?.display === 'grid'
+        || (rowListStyle?.display === 'flex' && rowListStyle.flexDirection === 'column')
+      ? rowListStyle.rowGap
+      : undefined,
   }
   for (const [name, sampled] of Object.entries(values)) {
     const property = `--cordisx-nav-group-${name}`
