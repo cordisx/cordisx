@@ -91,7 +91,7 @@ async function realDirectory(directory: string): Promise<boolean> {
   })
 }
 
-async function collectSkillFiles(root: string, ignoreMarker: boolean): Promise<readonly SkillFile[]> {
+export async function collectSkillFiles(root: string, ignoreMarker: boolean): Promise<readonly SkillFile[]> {
   const files: SkillFile[] = []
 
   const visit = async (directory: string, relativeDirectory: string): Promise<void> => {
@@ -118,7 +118,7 @@ async function collectSkillFiles(root: string, ignoreMarker: boolean): Promise<r
   return files
 }
 
-function digestSkillFiles(files: readonly SkillFile[]): `sha256:${string}` {
+export function digestSkillFiles(files: readonly SkillFile[]): `sha256:${string}` {
   const digest = createHash('sha256')
   for (const file of files) {
     const pathBytes = Buffer.from(file.relativePath, 'utf8')

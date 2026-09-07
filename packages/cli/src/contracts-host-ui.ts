@@ -714,33 +714,45 @@ export type CordisXAgentConversationShellSourceFactoryV3 = (
 
 export type CordisXAgentConversationShellSourceFactoryV4 = (
   binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellSource
+) =>
+  | import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v4').AgentConversationShellSource>
 
 export type CordisXAgentConversationShellSourceFactoryV5 = (
   binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellSource
+) =>
+  | import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v5').AgentConversationShellSource>
 
 export type CordisXAgentConversationShellSourceFactoryV6 = (
   binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellSource
+) =>
+  | import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v6').AgentConversationShellSource>
 
 export type CordisXAgentConversationShellSourceFactoryV7 = (
   binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellSource
+) =>
+  | import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v7').AgentConversationShellSource>
 
 export type CordisXAgentConversationShellSourceFactoryV8 = (
   binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellSource
+) =>
+  | import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v8').AgentConversationShellSource>
 
 export type CordisXAgentConversationShellSourceFactoryV9 = (
   binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellBinding>,
-) => import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellSource
+) =>
+  | import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellSource
   | Promise<import('@cordisx/protocol/agent-conversation-shell/v9').AgentConversationShellSource>
+
+export type CordisXAgentConversationShellSourceFactoryV10 = (
+  binding: Readonly<import('@cordisx/protocol/agent-conversation-shell/v10').AgentConversationShellBinding>,
+) =>
+  | import('@cordisx/protocol/agent-conversation-shell/v10').AgentConversationShellSource
+  | Promise<import('@cordisx/protocol/agent-conversation-shell/v10').AgentConversationShellSource>
 
 export interface CordisXAgentConversationShellRegistration {
   readonly mount: CordisXPageMount
@@ -752,6 +764,10 @@ export interface CordisXAgentConversationShellSourceOptionsV9 {
 }
 
 export interface CordisXAgentConversationShell {
+  registerSourceV10(
+    factory: CordisXAgentConversationShellSourceFactoryV10,
+    options?: CordisXAgentConversationShellSourceOptionsV9,
+  ): CordisXAgentConversationShellRegistration
   registerSource(factory: CordisXAgentConversationShellSourceFactory): CordisXAgentConversationShellRegistration
   registerSource(factory: CordisXAgentConversationShellSourceFactoryV2): CordisXAgentConversationShellRegistration
   registerSource(factory: CordisXAgentConversationShellSourceFactoryV3): CordisXAgentConversationShellRegistration

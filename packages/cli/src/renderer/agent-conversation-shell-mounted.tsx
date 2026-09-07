@@ -18,7 +18,7 @@ import type {
 import type {
   AgentConversationShellSnapshot as AgentConversationShellSnapshotV7,
   AgentConversationShellSubscriptionClosed as AgentConversationShellSubscriptionClosedV7,
-} from '@cordisx/protocol/agent-conversation-shell/v7'
+} from '@cordisx/protocol/agent-conversation-shell/v10'
 import type { AgentConversationShellCommandContext as AgentConversationShellCommandContextV9 } from '@cordisx/protocol/agent-conversation-shell/v9'
 import type { AgentBootstrapCommandOrigin } from '@cordisx/protocol/agent-admission/v4'
 import * as React from 'react'
@@ -62,6 +62,7 @@ export class MountedConversation extends MountedConversationUpdates {
           this.record.owner,
           this.snapshot as AgentConversationShellSnapshotV7,
           localization,
+          this.record.version === 10,
         )
         : this.record.version === 6
         ? projectAgentConversationShellSnapshotV6(

@@ -242,6 +242,7 @@ export type {
   CordisXAgentConversationShell,
   CordisXAgentConversationShellRegistration,
   CordisXAgentConversationShellSourceFactory,
+  CordisXAgentConversationShellSourceFactoryV10,
   CordisXAgentConversationShellSourceFactoryV2,
   CordisXAgentConversationShellSourceFactoryV3,
   CordisXAgentConversationShellSourceFactoryV4,
@@ -344,3 +345,5 @@ export type {
   CordisXStandardSchema,
   CordisXStandardSchemaResult,
 } from './contracts-plugin-api.js'
+
+export type * from './plugin-agent-tool-contracts.js'

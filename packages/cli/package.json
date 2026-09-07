@@ -41,6 +41,10 @@
     "./vite": {
       "types": "./dist/src/vite.d.ts",
       "default": "./dist/src/vite.js"
+    },
+    "./agent-tools": {
+      "types": "./dist/src/agent-tools.d.ts",
+      "default": "./dist/src/agent-tools.js"
     }
   },
   "scripts": {
@@ -82,7 +86,7 @@
     "provenance": true
   },
   "dependencies": {
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#3f0dbcd8b04ae83c920d2d913ac2c313af5f83f1",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#7b8c81104c2ab6b301ebe6a7414d45dc2cc8f724",
     "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
@@ -120,7 +124,7 @@
   },
   "devDependencies": {
     "@cordisx/channel-runtime": "file:../channel-runtime",
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#3f0dbcd8b04ae83c920d2d913ac2c313af5f83f1",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#7b8c81104c2ab6b301ebe6a7414d45dc2cc8f724",
     "@types/node": "^22.18.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
