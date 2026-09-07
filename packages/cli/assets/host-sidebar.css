@@ -1,3 +1,43 @@
+/* Visual mappings are adapter-owned; the row rules below own shared structure. */
+.cordisx-sidebar-navigation[data-cordisx-sidebar-appearance="codex"] {
+  --cordisx-nav-radius: 8px;
+  --cordisx-nav-single-height: var(--height-token-row, 30px);
+  --cordisx-nav-two-line-height: max(46px, var(--cordisx-nav-single-height));
+  --cordisx-nav-font-family: inherit;
+  --cordisx-nav-font-size: inherit;
+  --cordisx-nav-font-weight: inherit;
+  --cordisx-nav-line-height: inherit;
+  --cordisx-nav-hover-background: var(
+    --color-background-primary-ghost-hover,
+    transparent
+  );
+  --cordisx-nav-selected-background: var(
+    --color-background-primary-ghost-hover,
+    transparent
+  );
+  --cordisx-nav-selected-hover-background: var(
+    --cordisx-nav-selected-background
+  );
+  --cordisx-nav-focus-background: transparent;
+  --cordisx-nav-focus-ring: var(--color-ring, currentColor);
+}
+
+/* Playground maps the shared SidebarItem structure to its own visual tokens. */
+.pg-sidebar {
+  --cordisx-nav-radius: 7px;
+  --cordisx-nav-single-height: 30px;
+  --cordisx-nav-two-line-height: 46px;
+  --cordisx-nav-font-family: ui-sans-serif, system-ui, sans-serif;
+  --cordisx-nav-font-size: 13px;
+  --cordisx-nav-font-weight: 445;
+  --cordisx-nav-line-height: 18px;
+  --cordisx-nav-hover-background: var(--pg-hover);
+  --cordisx-nav-selected-background: var(--pg-active);
+  --cordisx-nav-selected-hover-background: var(--pg-active);
+  --cordisx-nav-focus-background: var(--pg-hover);
+  --cordisx-nav-focus-ring: var(--pg-accent);
+}
+
 .cordisx-navigation, .cordisx-navigation-group {
   display: grid;
   gap: 1px;
@@ -24,19 +64,6 @@
   }
 }
 .cxsi-row.cordisx-nav-row[data-sidebar-item] {
-  --cordisx-nav-content-gutter: var(--space-2, 8px);
-  --cordisx-nav-content-gap: var(--space-2, 8px);
-  --cordisx-nav-action-gap: var(--space-1, 4px);
-  --cordisx-nav-action-target: 24px;
-  --cordisx-nav-row-interactive-surface: var(
-    --color-background-primary-ghost-hover,
-    color-mix(in srgb, currentColor 8%, transparent)
-  );
-  --cordisx-nav-row-selected-hover-surface: color-mix(
-    in srgb,
-    var(--cordisx-nav-row-interactive-surface) 92%,
-    currentColor 8%
-  );
   display: flex;
   inline-size: auto;
   max-inline-size: 100%;
@@ -44,26 +71,31 @@
   height: auto;
   box-sizing: border-box;
   align-items: stretch;
-  gap: var(--cordisx-nav-content-gap);
-  min-height: var(--cordisx-nav-row-height, var(--height-token-row, 30px));
+  gap: var(--cordisx-nav-content-gap, 8px);
+  min-height: var(
+    --cordisx-nav-row-height,
+    var(--cordisx-nav-single-height, 30px)
+  );
   padding-block: 0;
-  padding-inline: var(--cordisx-nav-content-gutter);
+  padding-inline: var(--cordisx-nav-content-gutter, 8px);
   overflow: visible;
-  border-radius: var(--radius-lg, 10px);
+  border-radius: var(--cordisx-nav-radius, 8px);
   background: transparent;
   -webkit-app-region: no-drag;
 }
 .cxsi-row.cordisx-nav-row[data-sidebar-item][data-variant="two-line"] {
-  --cordisx-nav-row-height: 46px;
+  --cordisx-nav-row-height: var(--cordisx-nav-two-line-height, 46px);
 }
-.cxsi-row.cordisx-nav-row[data-sidebar-item]:hover,
 .cxsi-row.cordisx-nav-row[data-sidebar-item]:focus-within {
-  background: var(--cordisx-nav-row-interactive-surface);
+  background: var(--cordisx-nav-focus-background, transparent);
+}
+.cxsi-row.cordisx-nav-row[data-sidebar-item]:hover {
+  background: var(--cordisx-nav-hover-background, transparent);
 }
 .cxsi-row.cordisx-nav-row[data-sidebar-item][data-selected="true"],
 .cxsi-row.cordisx-nav-row[data-sidebar-item][data-cordisx-route-state="active"],
 .cxsi-row.cordisx-nav-row[data-sidebar-item][data-cordisx-route-state="presented"] {
-  background: var(--cordisx-nav-row-interactive-surface);
+  background: var(--cordisx-nav-selected-background, transparent);
 }
 .cxsi-row.cordisx-nav-row[data-sidebar-item][data-selected="true"]:hover,
 .cxsi-row.cordisx-nav-row[data-sidebar-item][data-selected="true"]:focus-within,
@@ -71,7 +103,10 @@
 .cxsi-row.cordisx-nav-row[data-sidebar-item][data-cordisx-route-state="active"]:focus-within,
 .cxsi-row.cordisx-nav-row[data-sidebar-item][data-cordisx-route-state="presented"]:hover,
 .cxsi-row.cordisx-nav-row[data-sidebar-item][data-cordisx-route-state="presented"]:focus-within {
-  background: var(--cordisx-nav-row-selected-hover-surface);
+  background: var(
+    --cordisx-nav-selected-hover-background,
+    var(--cordisx-nav-selected-background, transparent)
+  );
 }
 .cxsi-row.cordisx-nav-row[data-sidebar-item]
   > .cxsi-primary.cordisx-nav-primary {
@@ -80,15 +115,21 @@
   flex: 1 1 auto;
   grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
-  gap: var(--cordisx-nav-content-gap);
+  gap: var(--cordisx-nav-content-gap, 8px);
   align-self: stretch;
-  min-height: var(--cordisx-nav-row-height, var(--height-token-row, 30px));
+  min-height: var(
+    --cordisx-nav-row-height,
+    var(--cordisx-nav-single-height, 30px)
+  );
   min-width: 0;
   padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
-  font: 445 13px/18px system-ui, sans-serif;
+  font-family: var(--cordisx-nav-font-family, inherit);
+  font-size: var(--cordisx-nav-font-size, 13px);
+  font-weight: var(--cordisx-nav-font-weight, 400);
+  line-height: var(--cordisx-nav-line-height, 18px);
   text-align: left;
   cursor: default;
 }
@@ -103,9 +144,9 @@
   background: transparent;
 }
 .cordisx-nav-primary:focus-visible {
-  outline: 2px solid var(--color-ring, rgba(131, 195, 255, 0.76));
+  outline: 2px solid var(--cordisx-nav-focus-ring, currentColor);
   outline-offset: -2px;
-  border-radius: var(--radius-lg, 10px);
+  border-radius: var(--cordisx-nav-radius, 8px);
 }
 .cordisx-nav-copy {
   display: grid;
@@ -127,7 +168,7 @@
   min-width: 0;
   flex: 0 0 auto;
   align-items: center;
-  gap: var(--cordisx-nav-action-gap);
+  gap: var(--cordisx-nav-action-gap, 4px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 120ms ease;
@@ -144,11 +185,11 @@
 }
 .cordisx-navigation-direct-action, .cordisx-navigation-more-action {
   display: inline-flex;
-  width: var(--cordisx-nav-action-target);
-  min-width: var(--cordisx-nav-action-target);
-  height: var(--cordisx-nav-action-target);
-  min-height: var(--cordisx-nav-action-target);
-  flex: 0 0 var(--cordisx-nav-action-target);
+  width: var(--cordisx-nav-action-target, 24px);
+  min-width: var(--cordisx-nav-action-target, 24px);
+  height: var(--cordisx-nav-action-target, 24px);
+  min-height: var(--cordisx-nav-action-target, 24px);
+  flex: 0 0 var(--cordisx-nav-action-target, 24px);
   align-items: center;
   justify-content: center;
   padding: 0;
