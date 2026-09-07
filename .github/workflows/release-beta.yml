@@ -37,7 +37,7 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - run: npm install --global npm@12.0.2 --registry=https://registry.npmjs.org
+      - run: npm install --global npm@11.11.0 --registry=https://registry.npmjs.org
       - run: npm ci --ignore-scripts --registry=https://registry.npmjs.org
       - run: npm run check
       - name: Publish and verify selected beta packages
