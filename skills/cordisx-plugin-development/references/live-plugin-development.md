@@ -27,7 +27,7 @@ manager links them through the business project's root lockfile.
 Use public CordisX services and structured Host surfaces. Keep plugin ids equal
 to their config ids, and keep product effects under the owning Cordis lifecycle.
 
-Run the project's normal check. Saving a refresh-compatible React component
+Run checks appropriate to the edit and the next decision. Saving a refresh-compatible React component
 module uses Vite React Fast Refresh. Changes to the plugin entry, manifest,
 `apply`, or another non-refresh boundary may stage and replace that plugin's
 generation. Check the in-product result and cleanup; do not claim success from a
@@ -52,7 +52,13 @@ last-good plugin instead of repeatedly restarting over the diagnostic. A failed
 candidate must not publish delayed work into its successor. If launch itself
 fails, retain the first failure log and identify the failing startup phase
 before retrying; a disconnected debugger alone does not establish the cause.
-Keep an active user preview available while testing a replacement in isolation.
+Keep a protected user preview available while testing a replacement in isolation.
+For an independent debug instance with restart/HMR/switch authorization, proceed
+without repeatedly asking about temporary drafts; preserve persistent data and
+non-target instances. Build candidate Host/CLI output outside the active watched
+tree, then keep the reusable launch entry on the working repair combination.
+See the Host [native debugging runbook](https://github.com/cordisx/cordisx/blob/main/.agents/docs/native-debugging-runbook.md)
+for launch stages and data-scope diagnosis.
 
 The development graph is not the production package graph. Use the generated
 `cordisx/vite` build config for delivery; it creates one formal, indexed,
