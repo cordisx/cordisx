@@ -4,7 +4,7 @@ import { nativeToolbarCornerRadius } from './dom.js'
 export function projectSidebarAppearance(
   root: HTMLElement,
   identity: Readonly<{ hostId: string; mode?: 'codex' | 'playground' }>,
-  template: HTMLButtonElement | undefined,
+  template: HTMLElement | undefined,
 ): void {
   const appearance = identity.mode === 'playground'
     ? 'playground'

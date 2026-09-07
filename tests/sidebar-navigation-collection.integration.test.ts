@@ -260,6 +260,18 @@ describe('sidebar navigation collections', () => {
       expect(document.querySelector('.cordisx-navigation > .cordisx-nav-row .cordisx-host-icon')).not.toBeNull()
       const group = document.querySelector<HTMLElement>('[data-navigation-group="navigation-collection:rooms:rooms"]')!
       expect(group.querySelector('[role="heading"]')?.textContent).toBe('Rooms')
+      const collectionRoot = group.closest<HTMLElement>('[data-cordisx-surface-host="sidebar.collections"]')!
+      expect(collectionRoot.parentElement).toBe(recentTasks.parentElement)
+      expect(collectionRoot.nextElementSibling).toBe(recentTasks)
+      const toggle = group.querySelector<HTMLButtonElement>('.cordisx-navigation-group-toggle')!
+      const content = document.getElementById(toggle.getAttribute('aria-controls')!)!
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+      toggle.click()
+      expect(content.hidden).toBe(true)
+      expect(toggle.getAttribute('aria-expanded')).toBe('false')
+      toggle.click()
+      expect(content.hidden).toBe(false)
+
       expect([...group.querySelectorAll('.cordisx-nav-row')].map(row => row.querySelector('.cxsi-title')?.textContent))
         .toEqual(['Latest room', 'Older room'])
       expect(group.querySelectorAll('.cordisx-navigation-image-seat')).toHaveLength(2)
@@ -353,6 +365,9 @@ describe('sidebar navigation collections', () => {
           commands: string[]
         }
       }).__cordisxNavigationCollectionFixture
+      const beforeRefreshToggle = document.querySelector<HTMLButtonElement>('.cordisx-navigation-group-toggle')!
+      beforeRefreshToggle.click()
+      beforeRefreshToggle.focus()
       fixture.replace({
         revision: 2,
         items: [
@@ -387,6 +402,11 @@ describe('sidebar navigation collections', () => {
         )
           .toEqual(['Created room', 'Latest room', 'Older room'])
       })
+      const afterRefreshToggle = document.querySelector<HTMLButtonElement>('.cordisx-navigation-group-toggle')!
+      expect(afterRefreshToggle.getAttribute('aria-expanded')).toBe('false')
+      expect(document.getElementById(afterRefreshToggle.getAttribute('aria-controls')!)!.hidden).toBe(true)
+      expect(document.activeElement).toBe(afterRefreshToggle)
+      afterRefreshToggle.click()
       const created = [...document.querySelectorAll<HTMLButtonElement>('[data-navigation-group] .cordisx-nav-primary')]
         .find(button => button.querySelector('.cxsi-title')?.textContent === 'Created room')!
       created.click()
