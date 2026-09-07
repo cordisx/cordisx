@@ -1,3 +1,4 @@
+import { SidebarGroupState } from '../host-ui/SidebarGroup.js'
 import { HostTooltipController } from '../tooltips.js'
 import type { NativeActionSeat, NavigationLeadingVisualMount } from './types.js'
 import {
@@ -53,6 +54,8 @@ abstract class StructuredSurfaceRendererBase {
   protected readonly routeProjectors = new Map<HTMLButtonElement, () => void>()
 
   protected readonly navigationLeadingVisualMounts = new Map<string, NavigationLeadingVisualMount>()
+
+  protected readonly navigationGroups = new SidebarGroupState()
 
   protected navigationRenderSignature: string | undefined
 
