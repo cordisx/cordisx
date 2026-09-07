@@ -5,10 +5,11 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { npmMaintainerNames, npmPackItem, npmViewItem } from './npm-pack-report.mjs'
+import { betaReleasePackages } from './beta-release-scope.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const packages = [
+const packageDefinitions = [
   { name: 'cordisx', workspace: 'cordisx', directory: 'packages/cli' },
   { name: 'create-cordisx-plugin', workspace: 'create-cordisx-plugin', directory: 'packages/create-cordisx-plugin' },
 ]
@@ -18,6 +19,7 @@ function argument(name) {
   return index === -1 ? undefined : process.argv[index + 1]
 }
 
+const packages = packageDefinitions.filter(pkg => betaReleasePackages(argument('--scope')).includes(pkg.name))
 const version = argument('--version')
 const registry = argument('--registry') ?? 'https://registry.npmjs.org'
 if (typeof version !== 'string' || !/^0\.1\.0-beta\.\d+$/.test(version)) {

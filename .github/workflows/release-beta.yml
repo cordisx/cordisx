@@ -7,6 +7,14 @@ on:
         description: Exact coordinated beta version (for example 0.1.0-beta.0)
         required: true
         type: string
+      scope:
+        description: Packages authorized for publication
+        required: true
+        type: choice
+        default: coordinated
+        options:
+          - coordinated
+          - cli
 
 permissions:
   contents: read
@@ -32,7 +40,7 @@ jobs:
       - run: npm install --global npm@12.0.2 --registry=https://registry.npmjs.org
       - run: npm ci --ignore-scripts --registry=https://registry.npmjs.org
       - run: npm run check
-      - name: Publish and verify coordinated beta
-        run: node scripts/release-beta.mjs --version "${{ inputs.version }}" --registry https://registry.npmjs.org
+      - name: Publish and verify selected beta packages
+        run: node scripts/release-beta.mjs --version "${{ inputs.version }}" --scope "${{ inputs.scope }}" --registry https://registry.npmjs.org
       - name: Verify clean registry installation
-        run: node scripts/check-registry-beta.mjs --version "${{ inputs.version }}" --registry https://registry.npmjs.org
+        run: node scripts/check-registry-beta.mjs --version "${{ inputs.version }}" --scope "${{ inputs.scope }}" --registry https://registry.npmjs.org

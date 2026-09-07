@@ -541,11 +541,15 @@ Publishing is allowed only from merged `main` through
 `npm-beta` GitHub environment. Each npm package configures that exact repository,
 workflow filename, environment, and the `npm publish` action as its trusted
 publisher. The workflow carries no npm token. It validates the requested
-version against both package manifests, the clean pack allowlists, install
-smokes, repository metadata, registry owner, version absence, and both
-`latest` values before the first publish.
+version against the selected package manifests, the clean pack allowlists,
+install smokes, repository metadata, registry owner, version absence, and the
+selected `latest` values before the first publish. The default `coordinated`
+scope publishes both packages. An explicitly CLI-only release selects `cli`;
+it publishes only `cordisx`, leaves the scaffolder and its tags untouched, and
+retains the complete owner gate. Neither scope publishes private workspaces or
+moves `latest`.
 
-The registry cannot atomically publish two packages. The workflow therefore
+The registry cannot atomically publish two packages. In coordinated scope the workflow therefore
 publishes and reads back `cordisx` first, then publishes and reads back the
 scaffolder that depends on it. A retry may skip an already published first
 package only after its registry tarball integrity and metadata match the local
@@ -553,7 +557,7 @@ merged commit exactly. Any mismatched existing version, owner, tag, integrity,
 or repository metadata stops the workflow; recovery advances to a new
 prerelease unless the already published artifact is proven identical.
 
-Completion requires remote readback, not only `npm pack`: both `beta` tags must
+Coordinated completion requires remote readback, not only `npm pack`: both `beta` tags must
 resolve to the requested versions, both `latest` tags must still resolve to
 `0.0.0`, and a clean temporary directory must install/run `cordisx@beta`, invoke
 both scaffolder package command forms and all three creator modes, install each
@@ -562,6 +566,13 @@ graph with the published
 `cordisx dev --dry-run`. Package tests also assert that the tarball includes its
 README, license, bin, built output, and complete template while excluding repo-
 private docs, tests, source-only bins, tokens, and developer configuration.
+
+For CLI-only completion, `cordisx@beta` must resolve to the requested version
+and `latest` must remain `0.0.0`. The registry smoke installs the CLI into a
+fresh temporary directory and verifies its metadata, `--help`, isolated setup,
+and launch-plan dry-run without starting Codex. The complete package gate still
+verifies the bundled Skill tree and installed consumers. Scaffolder registry
+smokes apply only when that package participates in publication.
 
 ### Beta licensing boundary
 
