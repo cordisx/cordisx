@@ -82,7 +82,10 @@ export function usePublicMarkdownEditor(props: MarkdownEditorProps) {
     // Preserve the old adapter's explicit Shift+Enter line-break behavior before
     // Shikitor/native listeners; this layer does not own any submit shortcut.
     const insertLineBreak = (event: KeyboardEvent) => {
-      if (event.key !== 'Enter' || !event.shiftKey || event.isComposing || event.keyCode === 229 || input.disabled) {
+      if (
+        event.defaultPrevented || event.key !== 'Enter' || !event.shiftKey || event.isComposing || event.keyCode === 229
+        || input.disabled
+      ) {
         return
       }
       event.preventDefault()
