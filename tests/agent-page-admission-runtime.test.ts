@@ -376,3 +376,41 @@ describe('page admission runtime', () => {
     authority.dispose()
   })
 })
+
+it('counts composer and reservation text as Unicode code points at the declared boundary', async () => {
+  const lifecycle = new PageAdmissionBindingRegistry()
+  const current = pageBinding(lifecycle, { routeDefinitionId: 'room', roomId: 'unicode' })
+  const agentRuntime = runtime(lifecycle)
+  const owner = agentRuntime.ownerForPlugin(source, pluginId, generation)
+  const text = '😀'.repeat(65_536)
+  const input = {
+    binding: current.binding,
+    route: { outlet: 'main' as const, routeDefinitionId: 'room', roomId: 'unicode' },
+    generation,
+    commandId: 'room-submit',
+    submitPayload: text,
+  }
+  expect(agentRuntime.beginPageComposerCommand(owner, { ...input, submitPayload: text + 'x' })).toBeUndefined()
+  const context = agentRuntime.beginPageComposerCommand(owner, input)
+  expect(context !== undefined).toBe(true)
+  const issued = await agentRuntime.issuePageAdmissionTarget(owner, {
+    origin: context!.origin,
+    target: target('unicode', 0),
+  })
+  if (issued.status !== 'issued') throw new Error('target not issued')
+  const handle = await createHandle(agentRuntime, owner, 'unicode-session')
+  const tooLong = await agentRuntime.reservePageAdmissionTarget(owner, {
+    handle,
+    origin: issued.origin,
+    message: { text: text + 'x' },
+  })
+  expect(tooLong.status).not.toBe('reserved')
+  const valid = await agentRuntime.reservePageAdmissionTarget(owner, {
+    handle,
+    origin: issued.origin,
+    message: { text },
+  })
+  expect(valid.status).toBe('reserved')
+  if (valid.status === 'reserved') expect((await valid.reservation.submit()).status).toBe('accepted')
+  await agentRuntime.dispose()
+})

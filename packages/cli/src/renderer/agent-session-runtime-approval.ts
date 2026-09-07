@@ -495,7 +495,7 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
     const lifecycle = this.options.pageAdmissionBindings
     if (
       this.disposed || issued === undefined || lifecycle === undefined || typeof requestMessage?.text !== 'string'
-      || requestMessage.text.length < 1 || requestMessage.text.length > 65_536
+      || requestMessage.text.length < 1 || [...requestMessage.text].length > 65_536
     ) {
       return { status: 'denied', code: 'origin-denied' }
     }

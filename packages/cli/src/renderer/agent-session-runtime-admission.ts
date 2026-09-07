@@ -246,7 +246,7 @@ export abstract class AgentSessionRuntimeAdmission extends AgentSessionRuntimeAp
       || typeof request.origin.token !== 'string' || request.origin.token.length < 1
       || request.origin.token.length > 4_096
       || typeof request.message.text !== 'string' || request.message.text.length < 1
-      || request.message.text.length > 65_536
+      || [...request.message.text].length > 65_536
     ) {
       return { status: 'denied', code: 'origin-denied' }
     }
@@ -351,7 +351,7 @@ export abstract class AgentSessionRuntimeAdmission extends AgentSessionRuntimeAp
       || typeof request.origin.token !== 'string' || request.origin.token.length < 1
       || request.origin.token.length > 4_096
       || typeof request.message.text !== 'string' || request.message.text.length < 1
-      || request.message.text.length > 65_536
+      || [...request.message.text].length > 65_536
     ) {
       return { status: 'denied', code: 'origin-denied' }
     }
@@ -486,7 +486,7 @@ export abstract class AgentSessionRuntimeAdmission extends AgentSessionRuntimeAp
     if (
       this.disposed || !this.validBootstrapRoomOrigin(request.origin) || request.message === undefined
       || typeof request.message.text !== 'string' || request.message.text.length < 1
-      || request.message.text.length > 65_536
+      || [...request.message.text].length > 65_536
     ) {
       return { status: 'denied', code: 'origin-denied' }
     }
@@ -627,7 +627,7 @@ export abstract class AgentSessionRuntimeAdmission extends AgentSessionRuntimeAp
     if (
       this.disposed || !this.validBootstrapRouteContinuation(request.continuation) || request.message === undefined
       || typeof request.message.text !== 'string' || request.message.text.length < 1
-      || request.message.text.length > 65_536
+      || [...request.message.text].length > 65_536
     ) {
       return { status: 'denied', code: 'origin-denied' }
     }
