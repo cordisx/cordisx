@@ -1,3 +1,4 @@
+import '@deepseek-ai/cordis'
 import type { UsageV1 } from '@cordisx/protocol/usage/v1'
 export type * from '@cordisx/protocol/usage/v1'
 
