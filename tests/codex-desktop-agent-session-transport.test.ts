@@ -336,7 +336,10 @@ describe('native Agent definition context', () => {
   const lead = { ...definition('lead', 'Lead context'), extends: [base.identity] }
   const setup: AgentSetup = { definition: lead.identity, definitions: [base, lead] }
 
-  async function harness(recovery: NativeSessionRecoveryStore = emptyRecovery()) {
+  async function harness(
+    recovery: NativeSessionRecoveryStore = emptyRecovery(),
+    resumeTurns?: readonly { readonly status: string }[],
+  ) {
     const view = new TestWindow()
     const requests: { method: string; params: Record<string, unknown> }[] = []
     install('window', view)
@@ -351,7 +354,12 @@ describe('native Agent definition context', () => {
         const request = envelope.request
         requests.push(structuredClone(request))
         const result = request.method.startsWith('thread/')
-          ? { thread: { id: 'native-context-thread' } }
+          ? {
+            thread: {
+              id: 'native-context-thread',
+              ...(request.method === 'thread/resume' && resumeTurns !== undefined ? { turns: resumeTurns } : {}),
+            },
+          }
           : { turn: { id: `turn-${requests.length}` } }
         queueMicrotask(() =>
           view.message({ type: 'mcp-response', hostId: 'local', message: { id: request.id, result } })
@@ -606,7 +614,7 @@ describe('native Agent definition context', () => {
       setupDigest: 'verified-by-host',
     })
     const save = vi.spyOn(recovery, 'saveBinding')
-    const { requests, transport, view } = await harness(recovery)
+    const { requests, transport, view } = await harness(recovery, [{ status: 'completed' }])
     const getSetup = vi.spyOn(agentTools, 'getAgentToolSetup').mockRejectedValue(new Error('rebind required'))
     const runtime = new CordisXAgentSessionRuntime({ driver: transport, authorize: async () => true })
     try {
@@ -671,6 +679,27 @@ describe('native Agent definition context', () => {
           completedTurns: 2,
         }),
       )
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it('does not register a recovered Session when native turn state is absent', async () => {
+    const recovery = emptyRecovery()
+    vi.spyOn(recovery, 'resolveBinding').mockResolvedValue({
+      threadId: 'native-context-thread',
+      completedTurns: 1,
+      setupDigest: 'verified-by-host',
+    })
+    const save = vi.spyOn(recovery, 'saveBinding')
+    const { requests, transport } = await harness(recovery)
+    const runtime = new CordisXAgentSessionRuntime({ driver: transport, authorize: async () => true })
+    try {
+      expect(await runtime.resume(nativeOwner, { sessionId: 'unknown-state', setup }))
+        .toMatchObject({ status: 'unavailable', code: 'unsupported' })
+      expect(requests.map(request => request.method)).toEqual(['thread/resume'])
+      expect(runtime.playgroundProjection()).toEqual([])
+      expect(save).not.toHaveBeenCalled()
     } finally {
       await runtime.dispose()
     }
