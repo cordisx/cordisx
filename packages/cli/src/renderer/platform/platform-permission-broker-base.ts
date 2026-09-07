@@ -1,3 +1,4 @@
+import type { CordisXPluginManifestV11, CordisXPluginManifestV12 } from '../../agent-task-permission-manifest.js'
 import type { CordisXPluginManifestV10 } from '../../extension-point-interaction-permissions.js'
 import { CORDISX_PLATFORM_CAPABILITIES } from '../../contracts.js'
 import type {
@@ -198,7 +199,9 @@ export abstract class PlatformPermissionBrokerBase {
       | CordisXPluginManifestV7
       | CordisXPluginManifestV8
       | CordisXPluginManifestV9
-      | CordisXPluginManifestV10,
+      | CordisXPluginManifestV10
+      | CordisXPluginManifestV11
+      | CordisXPluginManifestV12,
     generation: PluginGenerationEffectIdentity = Object.freeze({ pluginId: identity.id }),
     candidateView?: PluginGenerationView,
     artifact?: PermissionArtifactBindingV3,
@@ -207,7 +210,7 @@ export abstract class PlatformPermissionBrokerBase {
     const declarations = new Map<CordisXPlatformCapability, CordisXCapabilityDeclaration>(
       manifest.schemaVersion === 4 || manifest.schemaVersion === 5 || manifest.schemaVersion === 6
         || manifest.schemaVersion === 7 || manifest.schemaVersion === 8 || manifest.schemaVersion === 9
-        || manifest.schemaVersion === 10
+        || manifest.schemaVersion === 10 || manifest.schemaVersion === 11 || manifest.schemaVersion === 12
         ? manifest.capabilities.flatMap(item => (
           (CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
             ? [

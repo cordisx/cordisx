@@ -1,3 +1,8 @@
+import type {
+  AgentTaskApprovalAuthorityLeaseV1,
+  AgentTaskPermissionSourceV1,
+} from '@cordisx/protocol/agent-task-permission/v1'
+export type HostApprovalAuthorityLease = PluginApprovalAuthorityLeaseV8 | AgentTaskApprovalAuthorityLeaseV1
 import type { AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
@@ -409,17 +414,30 @@ export interface CordisXAgentSessionRuntimeOptions {
     readonly registrationId: string
     readonly requester: ApprovalAgentBinding
     readonly authority: ApprovalAgentBinding
-  }) => Promise<PluginApprovalAuthorityLeaseV8 | undefined>
+  }, current: () => boolean) => Promise<HostApprovalAuthorityLease | undefined>
   readonly requiresApprovalAuthorityLease?: (owner: PluginOwnerIdentity) => boolean
   readonly approvalAuthorityLeaseActive?: (
     owner: PluginOwnerIdentity,
-    lease: PluginApprovalAuthorityLeaseV8,
+    lease: HostApprovalAuthorityLease,
     requester: ApprovalAgentBinding,
     authority: ApprovalAgentBinding,
   ) => boolean
-  readonly releaseApprovalAuthorityLease?: (lease: PluginApprovalAuthorityLeaseV8) => void
+  readonly revalidateApprovalAuthorityLease?: (
+    owner: PluginOwnerIdentity,
+    lease: HostApprovalAuthorityLease,
+  ) => Promise<boolean>
+  readonly releaseApprovalAuthorityLease?: (lease: HostApprovalAuthorityLease) => void
   /** Host-only manifest/route declaration check; it must not materialize permission authority. */
   readonly declares?: (owner: PluginOwnerIdentity, capability: AgentRuntimeCapability) => boolean
+  readonly taskPermissions?: {
+    declares(owner: PluginOwnerIdentity, commandId?: string): boolean
+    bind(
+      source: Omit<AgentTaskPermissionSourceV1, 'connectionGeneration'>,
+      requester: ApprovalAgentBinding,
+      current: () => boolean,
+      readback: () => Promise<boolean>,
+    ): () => void
+  }
   readonly now?: () => number
   readonly persistence?: CordisXSessionEventPersistence
   readonly initialSessions?: readonly CordisXPersistedSession[]

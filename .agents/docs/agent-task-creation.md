@@ -64,6 +64,44 @@ runtime-branded owner handle retained from creation, under current owner and
 create/submit authority. It supports existing branded page admission without
 manufacturing a handle from an Agent projection. The handle is not persisted.
 
+## Task permission source
+
+The [agent-task-permission/v1 contract](https://github.com/cordisx/cordisx-protocol/blob/af4b86a1f51a218dfee8e9a734e655dee1000ab5/.agents/docs/agent-task-permission/README.md)
+adds command-bounded approval scope through manifest/package v12. Earlier
+manifest versions, including usage/v11 and visual/v10, retain their meanings.
+An approval declaration can retain its original detail-route branch alongside
+its task branch. The Host selects one actual source; a failed task source never
+falls back to a page route.
+
+Task preflight and approval-handler installation check current declarations and
+registrations. They do not grant approval permissions. After the same-owner
+required operation is durable and the real Agent is known, the Host binds an
+ephemeral source to that exact Session, definition, command, operation and
+required-handler registration. Each request/answer authorization rechecks the
+native owner record across asynchronous permission-broker boundaries. Persistent
+permissions use the existing broker with a task-source fingerprint; an old
+route grant or lease cannot silently authorize the task branch.
+
+Only an accepted v3 routing result can request an answer lease for its exact
+requester and authority. A root can select its own human answerer; a child can
+select a live same-owner existing Leader, whether or not the Leader was created
+as a required task. Foreign, replaced or disposed bindings fail closed. A late
+human result must still pass registration, connection, durable-source and
+permission-lease checks. Installation never answers a question automatically.
+
+The original native Session owner record retains its required operation id.
+Restart readback uses that marker only to keep the task source mandatory; it
+restores neither a callback nor an approval lease. Explicit recovery still
+requires the existing live Agent and a valid current registration. Concurrent
+joins and cross-instance losing intent claims reauthorize the actual retained
+Session before returning its result.
+
+The resolver integration test consumes the Chatroom v12 manifest from commit
+`80f4b2e834f0d2ee444de2ac7de7e611d21ecefb` through the normal manifest normalizer
+and permission broker. Native owner-store tests cover restart provenance and
+cross-owner rejection. These focused tests do not substitute for the combined
+real-App acceptance and exact final full gate.
+
 ## Desktop 8109 audit
 
 On 2026-09-08 the installed `/Applications/ChatGPT.app` reported version

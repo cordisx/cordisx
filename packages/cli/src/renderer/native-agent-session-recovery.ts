@@ -37,6 +37,7 @@ let current: NativeAgentSessionPersistence | undefined
 /** Reuses the runtime's authenticated owner-document transport, never plugin-supplied ownership. */
 export class NativeAgentSessionPersistence implements CordisXSessionEventPersistence, NativeSessionRecoveryStore {
   private owners = new Map<string, OwnerClient>()
+  private readonly requiredTasks = new Set<string>()
   private sessions = new Map<string, OwnerDocumentPrincipalBinding>()
   readonly details = new NativeSessionDetailReferences()
   private closed = false
@@ -79,11 +80,13 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
     for (const principal of this.principals) {
       const records = await this.call(principal, 'native-session-list', {}) as readonly {
         sessionId: string
+        requiredTaskOperationId?: string
         session?: CordisXPersistedSession
       }[]
       for (const record of records) {
         if (this.sessions.has(record.sessionId)) throw new Error('native Session has ambiguous owner')
         this.sessions.set(record.sessionId, principal)
+        if (record.requiredTaskOperationId !== undefined) this.requiredTasks.add(record.sessionId)
         if (record.session !== undefined) sessions.push(record.session)
       }
     }
@@ -120,6 +123,15 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
   }
   async taskCall(owner: PluginOwnerIdentity, operation: string, input: object): Promise<unknown> {
     return await this.call(this.owner(owner).principal, `native-session-task-${operation}`, input)
+  }
+  isRequiredTask(owner: PluginOwnerIdentity, sessionId: string): boolean {
+    if (!this.requiredTasks.has(sessionId)) return false
+    const client = this.owners.get(ownerKey(owner))
+    return client !== undefined && client.active() && this.sessions.get(sessionId)?.source === client.principal.source
+      && this.sessions.get(sessionId)?.pluginId === client.principal.pluginId
+  }
+  markRequiredTask(sessionId: string): void {
+    this.requiredTasks.add(sessionId)
   }
   private principal(sessionId: string): OwnerDocumentPrincipalBinding {
     const principal = this.sessions.get(sessionId)
@@ -176,6 +188,10 @@ export function nativeAgentTaskClient(owner: PluginOwnerIdentity) {
     return await current.taskCall(owner, operation, input)
   }
   return {
+    requireTask: async (operationId: string, sessionId: string): Promise<void> => {
+      await call('associate', { operationId, sessionId })
+      current?.markRequiredTask(sessionId)
+    },
     store: {
       recover: async (operationId: string): Promise<{ claimed: boolean; record: AgentTaskRecord }> =>
         await call('recover', { operationId }) as { claimed: boolean; record: AgentTaskRecord },
@@ -206,3 +222,6 @@ export const historicalNativeSessionDetails: HistoricalAgentDetailProvider = {
       ? { status: 'unavailable', code: 'unsupported' }
       : await current.details.open(owner, target, active, authorize, navigate),
 }
+
+export const isNativeRequiredTaskSession = (owner: PluginOwnerIdentity, sessionId: string): boolean =>
+  current?.isRequiredTask(owner, sessionId) === true

@@ -9,6 +9,7 @@ export async function handleAgentTaskStore(
   storage: {
     load(id: string): Promise<Snapshot | undefined>
     write(id: string, revision: number, value: unknown): Promise<void>
+    requireTask?(sessionId: string, operationId: string): Promise<void>
     context(sessionId: string): Promise<AgentTaskResolvedContext | undefined>
   },
 ): Promise<unknown> {
@@ -36,6 +37,14 @@ export async function handleAgentTaskStore(
         sessionId: existing.sessionId,
       },
     }
+  }
+  if (request.operation === 'native-session-task-associate') {
+    if (
+      existing?.bindingPolicy !== 'required' || existing.sessionId !== request.sessionId
+      || storage.requireTask === undefined
+    ) throw new Error('Required task provenance unavailable')
+    await storage.requireTask(existing.sessionId, existing.operationId)
+    return null
   }
   if (request.operation === 'native-session-task-recover') {
     if (existing === undefined) throw new Error('Task intent unavailable')

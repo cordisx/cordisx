@@ -1,4 +1,10 @@
 import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V11,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
+  normalizeTaskManifest,
+} from '../../agent-task-permission-manifest.js'
+import type { CordisXPluginManifestV11, CordisXPluginManifestV12 } from '../../agent-task-permission-manifest.js'
+import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
   normalizeVisualManifestV10,
 } from '../../extension-point-interaction-permissions.js'
@@ -114,6 +120,8 @@ export function normalizePluginManifest(
   | CordisXPluginManifestV8
   | CordisXPluginManifestV9
   | CordisXPluginManifestV10
+  | CordisXPluginManifestV11
+  | CordisXPluginManifestV12
 {
   if (!ID_PATTERN.test(expectedId)) throw new Error(`launcher plugin id ${expectedId} is invalid`)
   if (value === undefined) {
@@ -125,6 +133,10 @@ export function normalizePluginManifest(
     })
   }
   const manifest = object(value, `plugin ${expectedId} manifest`)
+  if (
+    manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 || manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V12
+    || manifest.schemaVersion === 11 || manifest.schemaVersion === 12
+  ) return normalizeTaskManifest(manifest, expectedId)
   if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V10 || manifest.schemaVersion === 10) {
     return normalizeVisualManifestV10(manifest, expectedId)
   }

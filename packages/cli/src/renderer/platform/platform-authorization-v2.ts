@@ -214,7 +214,12 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
   ): CordisXPermissionAuthorizationPlanV4 | undefined {
     const registration = this.registration(identity, view)
     if (registration === undefined) throw new Error(`plugin ${identity.id} is not registered`)
-    if (registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6) return undefined
+    if (
+      registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6
+      && registration.manifest.schemaVersion !== 7 && registration.manifest.schemaVersion !== 8
+      && registration.manifest.schemaVersion !== 9 && registration.manifest.schemaVersion !== 10
+      && registration.manifest.schemaVersion !== 11 && registration.manifest.schemaVersion !== 12
+    ) return undefined
     const operationBinding = binding ?? this.binding(registration, `${this.generation}:${identity.id}`)
     const certification = this.activeCertification(registration)
     return buildPermissionAuthorizationPlanV4({
@@ -239,7 +244,10 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
     const registration = this.registration(identity, view)
     if (
       registration === undefined
-      || (registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6)
+      || (registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6
+        && registration.manifest.schemaVersion !== 7 && registration.manifest.schemaVersion !== 8
+        && registration.manifest.schemaVersion !== 9 && registration.manifest.schemaVersion !== 10
+        && registration.manifest.schemaVersion !== 11 && registration.manifest.schemaVersion !== 12)
     ) {
       throw new Error(`plugin ${identity.id} does not use permission v4`)
     }

@@ -230,6 +230,8 @@ export class PluginLifecycleCoordinator extends PluginLifecycleCoordinatorTransa
       if (
         staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
         && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8
+        && staged.manifest.runtimeManifest.schemaVersion !== 9 && staged.manifest.runtimeManifest.schemaVersion !== 11
+        && staged.manifest.runtimeManifest.schemaVersion !== 12 && staged.manifest.runtimeManifest.schemaVersion !== 10
       ) return undefined
       return authorizationPlanV4(
         staged,
@@ -254,6 +256,8 @@ export class PluginLifecycleCoordinator extends PluginLifecycleCoordinatorTransa
     if (
       staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
       && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8
+      && staged.manifest.runtimeManifest.schemaVersion !== 9 && staged.manifest.runtimeManifest.schemaVersion !== 11
+      && staged.manifest.runtimeManifest.schemaVersion !== 12 && staged.manifest.runtimeManifest.schemaVersion !== 10
     ) return undefined
     const { candidate } = this.mutationCandidate(active, 'enable', pluginId)
     await this.store.writeCandidate(candidate)

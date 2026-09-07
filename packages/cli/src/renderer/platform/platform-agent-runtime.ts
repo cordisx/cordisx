@@ -1,3 +1,4 @@
+import type { AgentTaskScopeSource } from '../agent-task-permission-scope.js'
 import { PlatformPermissionBrokerBase } from './platform-permission-broker-base.js'
 import type { AgentRuntimeCapability } from '@cordisx/protocol/agents/v1'
 import type {
@@ -37,6 +38,29 @@ import {
 } from './platform-permission-types.js'
 
 export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBrokerBase {
+  private taskScopeValidator?: (
+    identity: CordisXPluginIdentity,
+    capability: AgentRuntimeCapability,
+    sessionId: string,
+    source: AgentTaskScopeSource,
+  ) => boolean
+
+  private taskScopeReadback?: (
+    identity: CordisXPluginIdentity,
+    capability: AgentRuntimeCapability,
+    sessionId: string,
+    source: AgentTaskScopeSource,
+  ) => Promise<boolean>
+
+  /** Connected by the Host runtime only; plugins never receive the broker. */
+  setAgentTaskScopeValidator(
+    validate: NonNullable<typeof this.taskScopeValidator>,
+    readback: NonNullable<typeof this.taskScopeReadback>,
+  ): void {
+    this.taskScopeValidator = validate
+    this.taskScopeReadback = readback
+  }
+
   /** Installs the current opaque transport generation. Replacing it fences every lease. */
   replaceAgentRuntimeConnection(connection: AgentRuntimeConnection): void {
     if (!validAgentRuntimeConnection(connection)) throw new Error('Agent Session runtime connection is invalid')
@@ -130,7 +154,13 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
       registration === undefined || !validAgentRuntimeSessionId(input.sessionId)
       || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
       || (registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6
-        && registration.manifest.schemaVersion !== 7 && registration.manifest.schemaVersion !== 8)
+        && registration.manifest.schemaVersion !== 7 && registration.manifest.schemaVersion !== 8
+        && registration.manifest.schemaVersion !== 9 && registration.manifest.schemaVersion !== 10
+        && registration.manifest.schemaVersion !== 11 && registration.manifest.schemaVersion !== 12)
+    ) return Object.freeze({ authorized: false })
+    if (
+      registration.manifest.$schema
+        !== `https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v${registration.manifest.schemaVersion}.schema.json`
     ) return Object.freeze({ authorized: false })
     const declaration = registration.manifest.capabilities.find((
       item,
@@ -143,16 +173,22 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
       ? declaration.scope.authorityRequester
       : undefined
     const rationale = 'rationale' in declaration ? declaration.rationale : undefined
-    if (!this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)) {
+    if (!await this.agentRuntimeScopeCurrent(registration, input, declaredSessionIds, authorityRequester)) {
       return Object.freeze({ authorized: false })
     }
-    const policyKey = this.agentRuntimePolicyKey(registration, input.capability, input.sessionId)
+    const policyKey = this.agentRuntimePolicyKey(registration, input.capability, input.sessionId, input.scopeSource)
     const policy = this.policyRecords.get(policyKey)
     if (!developmentAutoApprove && isPermissionPolicyRecordV4(policy) && policy.policy === 'deny-persistent') {
       return Object.freeze({ authorized: false })
     }
     if (developmentAutoApprove && (!isPermissionPolicyRecordV4(policy) || policy.policy !== 'allow-persistent')) {
-      const record = this.agentRuntimePolicyRecord(registration, input.capability, input.sessionId, 'allow-persistent')
+      const record = this.agentRuntimePolicyRecord(
+        registration,
+        input.capability,
+        input.sessionId,
+        'allow-persistent',
+        input.scopeSource,
+      )
       try {
         await this.persistV4([record])
       } catch {
@@ -160,7 +196,7 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
       }
       if (
         !this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-        || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)
+        || !await this.agentRuntimeScopeCurrent(registration, input, declaredSessionIds, authorityRequester)
       ) {
         return Object.freeze({ authorized: false })
       }
@@ -207,7 +243,7 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
       if (decision !== 'allow' && decision !== 'allow-once') return Object.freeze({ authorized: false })
       if (
         !this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-        || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)
+        || !await this.agentRuntimeScopeCurrent(registration, input, declaredSessionIds, authorityRequester)
       ) {
         return Object.freeze({ authorized: false })
       }
@@ -217,6 +253,7 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
           input.capability,
           input.sessionId,
           'allow-persistent',
+          input.scopeSource,
         )
         try {
           await this.persistV4([record])
@@ -225,7 +262,7 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
         }
         if (
           !this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-          || !this.validAgentRuntimeScopeSource(registration, input, declaredSessionIds, authorityRequester)
+          || !await this.agentRuntimeScopeCurrent(registration, input, declaredSessionIds, authorityRequester)
         ) {
           return Object.freeze({ authorized: false })
         }
@@ -233,8 +270,13 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
         this.changed()
       }
     }
+    const taskSource =
+      input.scopeSource.kind === 'host-agent-task' || input.scopeSource.kind === 'host-agent-task-authority'
+        ? input.scopeSource
+        : undefined
     const existing = [...this.agentRuntimeLeases.values()].find(item => (
-      item.identity.source === input.identity.source && item.identity.id === input.identity.id
+      item.taskSource === taskSource
+      && item.identity.source === input.identity.source && item.identity.id === input.identity.id
       && item.capability === input.capability && item.lease.sessionId === input.sessionId
       && sameAgentRuntimeConnection(item.connection, input.connection)
       && item.routeInstanceId
@@ -249,6 +291,7 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
         lease,
         identity: Object.freeze({ ...input.identity }),
         capability: input.capability,
+        ...(taskSource === undefined ? {} : { taskSource }),
         connection: Object.freeze({ ...input.connection }),
         ...(input.scopeSource.kind === 'host-route'
           ? { routeInstanceId: input.scopeSource.routeInstanceId, routeSessionId: input.scopeSource.params.sessionId }
@@ -268,6 +311,8 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
       && lease.identity.source === identity.source && lease.identity.id === identity.id
       && lease.moduleGeneration === registration.generation.moduleGeneration
       && sameAgentRuntimeConnection(lease.connection, this.agentRuntimeConnection)
+      && (lease.taskSource === undefined
+        || this.taskScopeValidator?.(identity, lease.capability, lease.lease.sessionId, lease.taskSource) === true)
       && (lease.routeInstanceId === undefined || this.agentRuntimeRouteValues().some(route => (
         route.routeInstanceId === lease.routeInstanceId
         && route.params.sessionId === (lease.routeSessionId ?? lease.lease.sessionId)
@@ -404,12 +449,58 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
     await this.persistV4(records)
   }
 
+  private async agentRuntimeScopeCurrent(
+    registration: Registration,
+    input: {
+      identity: CordisXPluginIdentity
+      sessionId: string
+      capability: AgentRuntimeCapability
+      scopeSource: AgentRuntimeScopeSource
+    },
+    declaredScope: unknown,
+    authorityRequester: unknown,
+  ): Promise<boolean> {
+    if (!this.validAgentRuntimeScopeSource(registration, input, declaredScope, authorityRequester)) return false
+    if (input.scopeSource.kind !== 'host-agent-task' && input.scopeSource.kind !== 'host-agent-task-authority') {
+      return true
+    }
+    try {
+      return await this.taskScopeReadback?.(input.identity, input.capability, input.sessionId, input.scopeSource)
+          === true && this.validAgentRuntimeScopeSource(registration, input, declaredScope, authorityRequester)
+    } catch {
+      return false
+    }
+  }
+
   protected validAgentRuntimeScopeSource(
     registration: Registration,
     input: Readonly<{ sessionId: string; capability: AgentRuntimeCapability; scopeSource: AgentRuntimeScopeSource }>,
     declaredScope: unknown,
     authorityRequester: unknown,
   ): boolean {
+    const declaration = registration.manifest.capabilities.find(item => item.name === input.capability)
+    const taskScope = declaration !== undefined && 'task' in declaration.scope ? declaration.scope.task : undefined
+    const taskRequester = declaration !== undefined && 'taskRequester' in declaration.scope
+      ? declaration.scope.taskRequester
+      : undefined
+    if (input.scopeSource.kind === 'host-agent-task' || input.scopeSource.kind === 'host-agent-task-authority') {
+      if (
+        registration.manifest.schemaVersion !== 12
+        || declaredScope !== undefined && input.scopeSource.kind === 'host-agent-task-authority'
+      ) return false
+      const source = input.scopeSource.kind === 'host-agent-task'
+        ? input.scopeSource
+        : input.scopeSource.lease.taskSource
+      const selector = input.scopeSource.kind === 'host-agent-task' ? taskScope : taskRequester
+      return selector !== undefined && selector.kind === 'agent-task-command' && selector.commandId === source.commandId
+        && source.owner.pluginId === `${registration.identity.source}:${registration.identity.id}`
+        && this.taskScopeValidator?.(registration.identity, input.capability, input.sessionId, input.scopeSource)
+          === true
+    }
+    if (
+      (taskScope !== undefined && declaredScope === undefined)
+      || (taskRequester !== undefined && authorityRequester === undefined)
+    ) return false
     if (input.scopeSource.kind === 'host-create') {
       return input.capability === 'agents.create'
         && input.scopeSource.reservedSessionId === input.sessionId
@@ -444,7 +535,9 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
         && declaredScope.param === 'sessionId'
     }
     return declaredScope === undefined
-      && (registration.manifest.schemaVersion === 8 || registration.manifest.schemaVersion === 9)
+      && (registration.manifest.schemaVersion === 8 || registration.manifest.schemaVersion === 9
+        || registration.manifest.schemaVersion === 10 || registration.manifest.schemaVersion === 11
+        || registration.manifest.schemaVersion === 12)
       && input.capability === 'approvals.answer'
       && input.sessionId !== route.params.sessionId
       && isApprovalAuthorityRequesterRouteScope(authorityRequester)
@@ -457,8 +550,9 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
     capability: AgentRuntimeCapability,
     sessionId: string,
     policy: CordisXPermissionPolicyV2,
+    scopeSource?: AgentRuntimeScopeSource,
   ): CordisXPermissionPolicyRecordV4 {
-    return this.agentRuntimePolicyRecordForIdentity(registration.identity, capability, sessionId, policy)
+    return this.agentRuntimePolicyRecordForIdentity(registration.identity, capability, sessionId, policy, scopeSource)
   }
 
   protected agentRuntimePolicyRecordForIdentity(
@@ -466,7 +560,13 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
     capability: AgentRuntimeCapability,
     sessionId: string,
     policy: CordisXPermissionPolicyV2,
+    scopeSource?: AgentRuntimeScopeSource,
   ): CordisXPermissionPolicyRecordV4 {
+    const task = scopeSource?.kind === 'host-agent-task'
+      ? scopeSource
+      : scopeSource?.kind === 'host-agent-task-authority'
+      ? scopeSource.lease.taskSource
+      : undefined
     return normalizePermissionPolicyRecordV4({
       $schema: CORDISX_PERMISSION_POLICY_SCHEMA_V4,
       schemaVersion: 4,
@@ -475,7 +575,9 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
         identity: { source: identity.source, pluginId: identity.id },
         capability,
         scope: { sessionIds: [sessionId] },
-        securityFingerprint: `sha256:${sha256Hex(JSON.stringify({ capability, sessionId }))}`,
+        securityFingerprint: `sha256:${
+          sha256Hex(JSON.stringify({ capability, sessionId, ...(task === undefined ? {} : { task }) }))
+        }`,
       },
       policy,
     })
@@ -485,8 +587,9 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
     registration: Registration,
     capability: AgentRuntimeCapability,
     sessionId: string,
+    scopeSource?: AgentRuntimeScopeSource,
   ): string {
-    return permissionRecordKeyV4(this.agentRuntimePolicyRecord(registration, capability, sessionId, 'ask'))
+    return permissionRecordKeyV4(this.agentRuntimePolicyRecord(registration, capability, sessionId, 'ask', scopeSource))
   }
 
   protected fenceAgentRuntime(

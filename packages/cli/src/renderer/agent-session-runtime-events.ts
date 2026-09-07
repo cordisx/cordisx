@@ -1,3 +1,4 @@
+import type { CordisXAgentSessionRuntimeOptions } from './agent-session-runtime-types.js'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   Agent,
@@ -213,6 +214,26 @@ import {
 } from './agent-session-runtime-types.js'
 
 export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOperations {
+  bindTaskPermission(
+    source: Parameters<NonNullable<CordisXAgentSessionRuntimeOptions['taskPermissions']>['bind']>[0],
+    agent: Agent,
+    current: () => boolean,
+    readback: () => Promise<boolean>,
+  ): () => void {
+    const record = this.recordForApprovalTarget({ agent, definition: source.definition })
+    if (record === undefined || !this.sameOwner(source.owner, record.owner)) throw new Error('Task Agent unavailable')
+    const resolver = this.requestResolvers.get(this.answererKey(record))
+    if (resolver === undefined || this.options.taskPermissions === undefined) {
+      throw new Error('Task resolver unavailable')
+    }
+    return this.options.taskPermissions.bind(
+      source,
+      this.approvalBinding(record),
+      () => current() && this.requestResolverCurrent(record, resolver),
+      readback,
+    )
+  }
+
   protected async appendDriverEvent(event: CordisXDriverSessionEvent): Promise<void> {
     const record = this.agents.get(event.sessionId)
     if (record === undefined || !this.current(record)) return
@@ -298,7 +319,7 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
       registrationId: resolver.registration.registrationId,
       requester: this.approvalBinding(requester),
       authority: this.approvalBinding(authority),
-    })
+    }, () => !request.signal?.aborted && this.requestResolverCurrent(requester, resolver) && this.current(authority))
     if (authorityLease === undefined && this.options.requiresApprovalAuthorityLease?.(resolver.owner) === true) {
       return 'unavailable'
     }

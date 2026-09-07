@@ -1,3 +1,4 @@
+import type { HostApprovalAuthorityLease } from './agent-session-runtime-types.js'
 import { runApprovalInvocation } from './approval-invocation.js'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
@@ -311,7 +312,7 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
   async requestApprovalV2(
     owner: PluginOwnerIdentity,
     request: ApprovalRequestV2,
-    authorityLease?: PluginApprovalAuthorityLeaseV8,
+    authorityLease?: HostApprovalAuthorityLease,
   ): Promise<ApprovalDecisionV2> {
     if (
       !opaque(request.toolName) || request.callId !== undefined && !opaque(request.callId)
@@ -380,9 +381,20 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
           signal => answerer.answerer(question, signal),
           requester.approvalControllers,
         )
+        const taskLeaseCurrent = authorityLease?.contract !== 'cordisx.agent-task-approval-authority-lease/v1'
+          || await this.options.revalidateApprovalAuthorityLease?.(answerer.owner, authorityLease) === true
         if (
-          !this.current(requester) || !this.current(authority)
+          !taskLeaseCurrent || !this.current(requester) || !this.current(authority)
           || answerer.closed !== undefined || this.authorityAnswerers.get(this.answererKey(authority)) !== answerer
+        ) outcome = 'unavailable'
+        else if (
+          authorityLease?.contract === 'cordisx.agent-task-approval-authority-lease/v1'
+          && this.options.approvalAuthorityLeaseActive?.(
+              answerer.owner,
+              authorityLease,
+              this.approvalBinding(requester),
+              this.approvalBinding(authority),
+            ) !== true
         ) outcome = 'unavailable'
         else if (request.signal?.aborted === true) outcome = 'cancelled'
         else if (
@@ -394,6 +406,18 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
       }
     }
     if (!await this.append(requester.session, 'approval/decided', { id, outcome })) outcome = 'unavailable'
+    if (
+      authorityLease?.contract === 'cordisx.agent-task-approval-authority-lease/v1' && (
+        !await this.options.revalidateApprovalAuthorityLease?.(owner, authorityLease)
+        || this.options.approvalAuthorityLeaseActive?.(
+            owner,
+            authorityLease,
+            this.approvalBinding(requester),
+            this.approvalBinding(authority),
+          ) !== true
+        || !this.current(requester) || !this.current(authority) || request.signal?.aborted
+      )
+    ) outcome = 'unavailable'
     return this.approvalDecisionV2(requester, authority, id, outcome)
   }
 

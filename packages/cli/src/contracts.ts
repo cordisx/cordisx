@@ -1,4 +1,10 @@
 export {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V11,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
+  type CordisXPluginManifestV11,
+  type CordisXPluginManifestV12,
+} from './agent-task-permission-manifest.js'
+export {
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V10,
   type CordisXHostExtensionPointCatalogV10,
 } from './contracts-extension-navigation.js'

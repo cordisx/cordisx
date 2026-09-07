@@ -1,3 +1,4 @@
+import { canonicalTaskJson } from '../agent-task-record.js'
 import { HostAgentTaskApprovalRegistry } from './agent-task-approvals.js'
 import { resolveAgentDefinitionCatalog } from './agent-loop.js'
 import type { AgentDefinition, AgentDefinitionIdentity, AgentHandle } from '@cordisx/protocol/agents/v1'
@@ -26,6 +27,11 @@ export function installAgentTasks(ctx: Context, input: {
     owner,
     input.active,
     commandId => input.tools.declaresCommand(commandId),
+    async (request, record, stage) => {
+      const saved = await client.store.load(record.operationId)
+      return saved?.bindingPolicy === 'required' && (stage === 'use' || saved.phase === 'approval-installing')
+        && saved.sessionId === record.sessionId && saved.fingerprint === canonicalTaskJson(request)
+    },
   )
   const tasks = new HostAgentTasks({
     captureApprovals: commandId => approvals.capture(commandId),
@@ -82,6 +88,7 @@ export function installAgentTasks(ctx: Context, input: {
         record.context,
       )
       if (acquired.status !== 'accepted') return undefined
+      if (record.bindingPolicy === 'required') await client.requireTask(record.operationId, record.sessionId)
       handles.set(acquired.sessionId, acquired.handle)
       return acquired.handle.agent
     },

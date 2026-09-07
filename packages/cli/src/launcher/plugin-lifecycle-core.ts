@@ -1,4 +1,9 @@
 import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V11,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
+  normalizeTaskManifest,
+} from '../agent-task-permission-manifest.js'
+import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
   normalizeVisualManifestV10,
 } from '../extension-point-interaction-permissions.js'
@@ -255,6 +260,16 @@ export class PluginLifecycleCoordinatorCore {
     return await stagePluginPackageSourceV1(source, {
       homeDir: this.options.homeDir,
       runtimeValidators: {
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V11]: value => {
+          const id = (value as { id?: unknown })?.id
+          if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
+          return normalizeTaskManifest(value, id)
+        },
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V12]: value => {
+          const id = (value as { id?: unknown })?.id
+          if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
+          return normalizeTaskManifest(value, id)
+        },
         [CORDISX_PLUGIN_MANIFEST_SCHEMA_V10]: value => {
           const id = (value as { readonly id?: unknown })?.id
           if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')

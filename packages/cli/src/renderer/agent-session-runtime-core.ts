@@ -418,6 +418,10 @@ export abstract class AgentSessionRuntimeCore {
     return Object.freeze({ pluginId: `${source}:${pluginId}`, generation })
   }
 
+  taskApprovalDeclarations(owner: PluginOwnerIdentity, commandId?: string): boolean {
+    return !this.disposed && (this.options.taskPermissions?.declares(owner, commandId) ?? false)
+  }
+
   async authorizeTask(
     owner: PluginOwnerIdentity,
     operation: 'create' | 'read' | 'approval',
@@ -431,7 +435,7 @@ export abstract class AgentSessionRuntimeCore {
     if (this.disposed) return false
     // Before a task has been looked up/reserved, check declaration availability only.
     // The task transaction must still authorize the exact Session before any effect.
-    if (sessionId === undefined) {
+    if (sessionId === undefined || operation === 'approval' && this.options.taskPermissions?.declares(owner) === true) {
       return capabilities.every(capability => this.options.declares?.(owner, capability) === true)
     }
     for (const capability of capabilities) if (!await this.allowed(owner, capability, sessionId)) return false

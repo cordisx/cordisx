@@ -95,8 +95,9 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
     const interact = (event: 'pointer.observe' | 'drag' | 'activate'): boolean => {
       if (!render()) return false
       const current = registration()!
-      const declaration = current.manifest.schemaVersion === 10
-        ? current.manifest.capabilities.find((item): item is ExtensionPointInteractionCapabilityV1 =>
+      const declaration = (current.manifest.schemaVersion === 10 || current.manifest.schemaVersion === 11
+          || current.manifest.schemaVersion === 12)
+        ? [...current.manifest.capabilities].find((item): item is ExtensionPointInteractionCapabilityV1 =>
           item.name === 'ui.extension-points.interact'
         )
         : undefined

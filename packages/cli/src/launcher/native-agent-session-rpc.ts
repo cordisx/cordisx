@@ -28,6 +28,7 @@ export interface NativeAgentSessionRecord {
   readonly setupDigest: string
   readonly setup?: AgentSetup
   readonly context?: AgentTaskResolvedContext
+  readonly requiredTaskOperationId?: string
   readonly completedTurns: number
   readonly session?: CordisXPersistedSession
   /** Explicit one-time restoration evidence, never fabricated old SessionEvents. */
@@ -56,6 +57,7 @@ function parsed(value: unknown, sessionId: string): NativeAgentSessionRecord {
   if (valueRecord.contract !== CONTRACT || valueRecord.sessionId !== sessionId) {
     throw new Error('native Session scope mismatch')
   }
+  if (valueRecord.requiredTaskOperationId !== undefined) id(valueRecord.requiredTaskOperationId)
   id(valueRecord.threadId)
   turns(valueRecord.completedTurns)
   if (valueRecord.setupDigest !== digest(valueRecord.setup as AgentSetup | undefined)) {
@@ -137,6 +139,16 @@ export class NativeAgentSessionBridge {
       return await handleAgentTaskStore(request, {
         load,
         write,
+        requireTask: async (sessionId, operationId) => {
+          const documentId = key(id(sessionId))
+          const saved = await load(documentId)
+          if (saved === undefined) throw new Error('Native task Session missing')
+          const record = parsed(saved.value, sessionId)
+          if (record.requiredTaskOperationId !== undefined && record.requiredTaskOperationId !== operationId) {
+            throw new Error('Native task provenance immutable')
+          }
+          await write(documentId, saved.revision, { ...record, requiredTaskOperationId: operationId })
+        },
         context: async sessionId => {
           const saved = await load(key(id(sessionId)))
           return saved === undefined ? undefined : parsed(saved.value, sessionId).context

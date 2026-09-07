@@ -175,6 +175,9 @@ export class HostAgentTasks implements AgentTasks {
     if (!this.deps.active() || approvals?.active() === false) return fail('permission-denied')
     const claim = await this.deps.store.claim(record)
     if (!claim.claimed) {
+      if (!await this.deps.authorize('create', claim.record.sessionId) || !this.deps.active()) {
+        return fail('permission-denied')
+      }
       return claim.record.fingerprint === fingerprint
           && (bindingPolicy === 'none' || (claim.record.bindingPolicy ?? 'none') === bindingPolicy)
         ? this.retained(claim.record)
@@ -364,7 +367,12 @@ export class HostAgentTasks implements AgentTasks {
         }
       }
       const claimed = await this.deps.store.recover(request.operationId)
-      if (!claimed.claimed) return this.retained(claimed.record)
+      if (!claimed.claimed) {
+        if (!await this.deps.authorize('create', claimed.record.sessionId) || !this.deps.active()) {
+          return fail('permission-denied')
+        }
+        return this.retained(claimed.record)
+      }
       return await this.finish(input, agent, claimed.record, approvals)
     } catch {
       return fail('host-unavailable')

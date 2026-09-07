@@ -87,7 +87,7 @@
   },
   "dependencies": {
     "@cordisx/channel": "github:cordisx/plugin-channel#4cee12e3a92eeed557bc9de8cc4792710918327a",
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#33429ba50df1c1c86b85f1aa1e206e9fed343b19",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#af4b86a1f51a218dfee8e9a734e655dee1000ab5",
     "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
@@ -125,7 +125,7 @@
   },
   "devDependencies": {
     "@cordisx/channel-runtime": "file:../channel-runtime",
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#33429ba50df1c1c86b85f1aa1e206e9fed343b19",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#af4b86a1f51a218dfee8e9a734e655dee1000ab5",
     "@types/node": "^22.18.1",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",

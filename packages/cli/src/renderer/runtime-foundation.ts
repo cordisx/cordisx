@@ -450,8 +450,8 @@ export const createRuntimeActualAgentRuntimeRoute = (runtimeScope: RuntimeClosur
   })
 }
 
-export const createRuntimeAgentRouteScopes = (runtimeScope: RuntimeClosureScope): AgentRouteSessionScopeAuthority =>
-  new AgentRouteSessionScopeAuthority({
+export const createRuntimeAgentRouteScopes = (runtimeScope: RuntimeClosureScope): AgentRouteSessionScopeAuthority => {
+  const authority = new AgentRouteSessionScopeAuthority({
     activeRoute: (): AgentActiveRoute | undefined => {
       const supplementalOwner = runtimeScope.scenarioSessionScopeAuthority!?.supplementalOwner()
       if (supplementalOwner !== undefined) {
@@ -509,6 +509,17 @@ export const createRuntimeAgentRouteScopes = (runtimeScope: RuntimeClosureScope)
     },
     connectionGeneration: () => runtimeScope.agentRuntimeConnection()!.generation,
   })
+  runtimeScope.broker()!.setAgentTaskScopeValidator((identity, capability, sessionId, source) => {
+    const owner = source.kind === 'host-agent-task' ? source.owner : source.lease.taskSource.owner
+    const controller = runtimeScope.controllerForAgentOwner()!(owner)
+    return controller?.identity.source === identity.source && controller?.identity.id === identity.id
+      && authority.tasks.validate(owner, capability, sessionId, source)
+  }, async (_identity, capability, sessionId, source) => {
+    const owner = source.kind === 'host-agent-task' ? source.owner : source.lease.taskSource.owner
+    return await authority.tasks.readback(owner, capability, sessionId, source)
+  })
+  return authority
+}
 
 export const createRuntimeReconcileAgentRuntimeRoute = (runtimeScope: RuntimeClosureScope): void => {
   if (runtimeScope.agentRuntimeRouteDisposed || runtimeScope.reconcilingAgentRuntimeRoute) {
@@ -805,10 +816,12 @@ export const createRuntimeRegisterController = (
     const agentRuntimeManifestVersion =
       controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6
         || controller.manifest.schemaVersion === 7 || controller.manifest.schemaVersion === 8
-        || controller.manifest.schemaVersion === 9
+        || controller.manifest.schemaVersion === 9 || controller.manifest.schemaVersion === 10
+        || controller.manifest.schemaVersion === 11 || controller.manifest.schemaVersion === 12
         ? controller.manifest.schemaVersion === 7
           ? 6
-          : controller.manifest.schemaVersion === 9
+          : controller.manifest.schemaVersion === 9 || controller.manifest.schemaVersion === 10
+              || controller.manifest.schemaVersion === 11
           ? 8
           : controller.manifest.schemaVersion
         : undefined

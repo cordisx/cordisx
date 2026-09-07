@@ -1,5 +1,7 @@
 import { AgentTaskApprovalCleanupError } from '../agent-task-record.js'
 import type { AgentTaskApprovalBinding, AgentTaskApprovalHandlers } from '@cordisx/protocol/agent-task-binding/v1'
+import type { AgentTaskRecord } from '../agent-task-record.js'
+import type { AgentTaskCreateRequest } from '@cordisx/protocol/agent-task/v1'
 import type { AgentTaskApprovalInstaller } from './agent-tasks.js'
 import type { CordisXAgentSessionRuntime } from './agent-session-runtime.js'
 import type { PluginOwnerIdentity } from '@cordisx/protocol/sessions/v1'
@@ -10,6 +12,7 @@ interface Installation {
   close(): Promise<void>
 }
 interface Registration {
+  readonly id: string
   readonly handlers: AgentTaskApprovalHandlers
   readonly installations: Set<Installation>
   active: boolean
@@ -23,6 +26,11 @@ export class HostAgentTaskApprovalRegistry {
     private readonly owner: PluginOwnerIdentity,
     private readonly active: () => boolean,
     private readonly declared: (commandId: string) => boolean,
+    private readonly validateRecord?: (
+      request: AgentTaskCreateRequest,
+      record: AgentTaskRecord,
+      stage: 'install' | 'use',
+    ) => Promise<boolean>,
   ) {}
 
   register(command: { commandId: string }, handlers: AgentTaskApprovalHandlers): () => void {
@@ -36,6 +44,7 @@ export class HostAgentTaskApprovalRegistry {
       throw new Error('Task approval registration unavailable or duplicate')
     }
     const registration: Registration = {
+      id: crypto.randomUUID(),
       handlers: Object.freeze({ ...handlers }),
       installations: new Set(),
       active: true,
@@ -53,21 +62,29 @@ export class HostAgentTaskApprovalRegistry {
     if (registration === undefined) return undefined
     const live = (): boolean =>
       this.declared(commandId) && this.active() && registration.active
+      && (!this.runtime.taskApprovalDeclarations(this.owner)
+        || this.runtime.taskApprovalDeclarations(this.owner, commandId))
       && this.registrations.get(commandId) === registration
     return {
       active: live,
       install: async (agent, request, record) => {
+        if (this.validateRecord !== undefined && !await this.validateRecord(request, record, 'install')) {
+          throw new Error('Durable required task intent unavailable')
+        }
         if (!live() || !await this.runtime.authorizeTask(this.owner, 'approval', agent.id)) {
           throw new Error('Task approval registration replaced')
         }
         if (!live()) throw new Error('Task approval registration replaced')
+        const taskScoped = this.runtime.taskApprovalDeclarations(this.owner, commandId)
         const controller = new AbortController()
+        let releaseTask: (() => void) | undefined
         const handles: Installation['handles'] = []
         const installation: Installation = {
           controller,
           handles,
           close: async () => {
             controller.abort()
+            releaseTask?.()
             registration.installations.delete(installation)
             const results = await Promise.allSettled(handles.splice(0).map(handle => handle.dispose()))
             if (results.some(result => result.status === 'rejected')) throw new AgentTaskApprovalCleanupError()
@@ -133,6 +150,29 @@ export class HostAgentTaskApprovalRegistry {
           )
           if (resolver.status !== 'registered') throw new Error('Task approval resolver unavailable')
           await retain(resolver.handle)
+          if (taskScoped) {
+            if (record.bindingPolicy !== 'required' || record.phase !== 'approval-installing') {
+              throw new Error('Required task intent unavailable')
+            }
+            releaseTask = this.runtime.bindTaskPermission(
+              {
+                $schema:
+                  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/agent-task-permission-source.v1.schema.json',
+                contract: 'cordisx.agent-task-permission-source/v1',
+                schemaVersion: 1,
+                kind: 'host-agent-task',
+                owner: this.owner,
+                operationId: record.operationId,
+                commandId,
+                sessionId: record.sessionId,
+                definition: request.definition,
+                taskRegistrationId: registration.id,
+              },
+              agent,
+              current,
+              async () => this.validateRecord !== undefined && await this.validateRecord(request, record, 'use'),
+            )
+          }
           return installation.close
         } catch (error) {
           await installation.close()

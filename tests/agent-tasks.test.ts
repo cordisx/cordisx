@@ -89,6 +89,20 @@ describe('Host Agent task transaction', () => {
     })
     expect(f.deps.submit).toHaveBeenCalledTimes(1)
   })
+
+  it('reauthorizes the actual winning Session after losing a cross-instance intent claim', async () => {
+    const f = fixture()
+    const winner = fixture()
+    const accepted = await winner.service.createAndSubmit(request)
+    expect(accepted.status).toBe('accepted')
+    const record = winner.records.get(request.operationId)!
+    f.deps.store.claim = async () => ({ claimed: false, record })
+    vi.mocked(f.deps.authorize).mockImplementation(async (_operation, sessionId) => sessionId !== record.sessionId)
+    expect(await f.service.createAndSubmit(request)).toMatchObject({ status: 'unavailable', code: 'permission-denied' })
+    expect(f.deps.create).not.toHaveBeenCalled()
+    expect(f.deps.submit).not.toHaveBeenCalled()
+  })
+
   it('freezes the request before async resolution', async () => {
     const f = fixture()
     const input = structuredClone(request)

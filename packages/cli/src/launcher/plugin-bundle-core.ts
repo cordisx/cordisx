@@ -490,6 +490,8 @@ export class PluginBundleCoordinatorCore {
     if (
       staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
       && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8
+      && staged.manifest.runtimeManifest.schemaVersion !== 9 && staged.manifest.runtimeManifest.schemaVersion !== 11
+      && staged.manifest.runtimeManifest.schemaVersion !== 12 && staged.manifest.runtimeManifest.schemaVersion !== 10
     ) {
       throw new Error('bundle members must use runtime manifest v1, v4, v5, v6, v7, or v8')
     }
@@ -618,6 +620,8 @@ export class PluginBundleCoordinatorCore {
     if (
       staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
       && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8
+      && staged.manifest.runtimeManifest.schemaVersion !== 9 && staged.manifest.runtimeManifest.schemaVersion !== 11
+      && staged.manifest.runtimeManifest.schemaVersion !== 12 && staged.manifest.runtimeManifest.schemaVersion !== 10
     ) {
       throw new Error('bundle members must use runtime manifest v1, v4, v5, v6, v7, or v8')
     }
