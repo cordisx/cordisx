@@ -1,12 +1,12 @@
 import path from 'node:path'
 import Schema from '@deepseek-ai/schemastery'
-import type { JsonValue } from '../../config/home-config.js'
-import type { CliProxyProviderConfig } from '../../providers/contracts.js'
+import type { JsonValue } from '../config/home-config.js'
+import type { CliProxyProviderConfig } from './contracts.js'
 import type {
   HostSecretState,
   HostServiceConfigContract,
   HostServiceConfigProjection,
-} from '../../launcher/service-config.js'
+} from '../launcher/service-config.js'
 
 export const CLI_PROXY_PROVIDER_RUNTIME_SERVICE_ID = 'providers-runtime'
 export const CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID = 'providers-startup'
@@ -416,27 +416,6 @@ export function projectCliProxyProviderStartupConfig(
   return immutable({ configuration: value as unknown as JsonValue, secrets: [] })
 }
 
-export function sourceModelId(
-  provider: CliProxyProviderRuntimeEntryV1,
-  modelId: string,
-): string | undefined {
-  const mapping = provider.models.mappings.find(item => item.modelId === modelId)
-  return mapping === undefined ? modelId : mapping.enabled ? mapping.sourceModelId : undefined
-}
-
-export function projectedModel(
-  provider: CliProxyProviderRuntimeEntryV1,
-  model: { readonly modelId: string; readonly displayName: string; readonly isDefault: boolean },
-): { readonly modelId: string; readonly displayName: string; readonly isDefault: boolean } | undefined {
-  const mapping = provider.models.mappings.find(item => item.sourceModelId === model.modelId)
-  if (mapping?.enabled === false) return undefined
-  return {
-    modelId: mapping?.modelId ?? model.modelId,
-    displayName: mapping?.displayName ?? model.displayName,
-    isDefault: mapping?.isDefault ?? model.isDefault,
-  }
-}
-
 export const CLI_PROXY_PROVIDER_RUNTIME_CONFIG_INITIAL: CliProxyProviderRuntimeConfigV1 = immutable({
   contract: 'cordisx.cli-proxy-provider-runtime-config/v1',
   schemaVersion: 1,
@@ -449,7 +428,7 @@ export const CLI_PROXY_PROVIDER_STARTUP_CONFIG_INITIAL: CliProxyProviderStartupC
   providers: [],
 })
 
-const identitySource = 'https://github.com/cordisx/cordisx/tree/main/packages/cli/src/plugins/cli-proxy-api'
+const identitySource = 'https://github.com/cordisx/plugin-cli-proxy-api'
 
 export const CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT: HostServiceConfigContract = Object.freeze({
   identity: Object.freeze({

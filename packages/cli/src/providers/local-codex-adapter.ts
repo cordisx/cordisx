@@ -16,7 +16,7 @@ import type {
 } from '../contracts.js'
 import type { CodexAppServerRpc } from './codex-app-server.js'
 import type {
-  CodexProviderConfig,
+  LocalCodexProviderConfig,
   ProviderConnection,
   ProviderConnectionStatus,
   ProviderLifecycleSignal,
@@ -85,12 +85,12 @@ function iso(seconds: unknown): string | undefined {
 
 function diagnostic(error: unknown): CordisXPlatformResult<never> {
   if (error instanceof JsonLineRpcError && error.message.includes('timed out')) {
-    return failure('timeout', 'External provider request timed out', true)
+    return failure('timeout', 'Local Codex provider request timed out', true)
   }
   if (error instanceof JsonLineRpcError && /not found|unknown thread/i.test(error.message)) {
-    return failure('task-not-found', 'The external provider session was not found')
+    return failure('task-not-found', 'The local Codex session was not found')
   }
-  return failure('adapter-failure', 'External provider operation failed', true)
+  return failure('adapter-failure', 'Local Codex provider operation failed', true)
 }
 
 function turnState(value: unknown): CordisXTurnProjection['state'] {
@@ -211,7 +211,7 @@ class SessionModelIndex {
   }
 }
 
-export class CliProxyProviderAdapter implements ProviderConnection {
+export class LocalCodexProviderAdapter implements ProviderConnection {
   readonly providerId: string
   readonly generation: string
   private readonly modelIndex: SessionModelIndex
@@ -230,7 +230,7 @@ export class CliProxyProviderAdapter implements ProviderConnection {
   }>()
 
   constructor(
-    private readonly config: CodexProviderConfig,
+    private readonly config: LocalCodexProviderConfig,
     private readonly rpc: CodexAppServerRpc,
   ) {
     this.providerId = config.id
@@ -248,7 +248,7 @@ export class CliProxyProviderAdapter implements ProviderConnection {
       displayName: this.config.displayName,
       generation: this.generation,
       state: this.state,
-      external: this.config.kind === 'cli-proxy-api',
+      external: false,
       nativeCurrentConnection: false,
       rawBridgeExposed: false,
     }
@@ -279,7 +279,7 @@ export class CliProxyProviderAdapter implements ProviderConnection {
             contract: 'cordisx.platform-model/v1',
             schemaVersion: 1,
             ref: { providerId: this.providerId, modelId },
-            hostId: `cli-proxy-api:${this.providerId}`,
+            hostId: `codex-local:${this.providerId}`,
             label: mapping?.displayName ?? string(model.displayName) ?? modelId,
             ...(mapping?.isDefault === true || mapping === undefined && model.isDefault === true
               ? { isDefault: true }
@@ -333,7 +333,7 @@ export class CliProxyProviderAdapter implements ProviderConnection {
       })
       const thread = response.thread as AppServerThread
       const summary = await this.summary(thread)
-      if (summary === undefined) return failure('task-not-found', 'The external provider session was not found')
+      if (summary === undefined) return failure('task-not-found', 'The local Codex session was not found')
       return { ok: true, value: { ...summary, turns: projectTurns(thread.turns) } }
     } catch (error) {
       return diagnostic(error)
@@ -357,9 +357,8 @@ export class CliProxyProviderAdapter implements ProviderConnection {
         model: sourceModelId,
         modelProvider: this.sourceProviderId(),
         cwd: input.cwd,
-        ...(this.config.kind === 'local-codex'
-          ? { approvalPolicy: input.approvalPolicy ?? 'never', sandbox: 'read-only' }
-          : {}),
+        approvalPolicy: input.approvalPolicy ?? 'never',
+        sandbox: 'read-only',
         ...(developerInstructions === undefined ? {} : { developerInstructions }),
         ...(input.effort === undefined ? {} : { effort: input.effort }),
       })
@@ -503,7 +502,7 @@ export class CliProxyProviderAdapter implements ProviderConnection {
     try {
       const turnId = input.turnId ?? await this.activeTurnId(input.session)
       if (turnId === undefined) {
-        return failure('turn-not-found', 'No active turn was found for the external provider session')
+        return failure('turn-not-found', 'No active turn was found for the local Codex session')
       }
       if (input.action === 'steer') {
         const response = await this.rpc.request<{ turnId?: unknown }>('turn/steer', {
@@ -696,7 +695,7 @@ export class CliProxyProviderAdapter implements ProviderConnection {
   }
 
   private sourceProviderId(): string {
-    return this.config.kind === 'local-codex' ? this.config.sourceProviderId : this.config.id
+    return this.config.sourceProviderId
   }
 
   private checkRef(ref: CordisXPlatformSessionRef): CordisXPlatformResult<never> | undefined {
@@ -724,7 +723,7 @@ export class CliProxyProviderAdapter implements ProviderConnection {
       contract: 'cordisx.platform-session/v1',
       schemaVersion: 1,
       ref: { providerId: this.providerId, remoteSessionId: id },
-      hostId: `cli-proxy-api:${this.providerId}`,
+      hostId: `codex-local:${this.providerId}`,
       model: { providerId: this.providerId, modelId },
       cwd,
       ...(title === undefined ? {} : { title }),

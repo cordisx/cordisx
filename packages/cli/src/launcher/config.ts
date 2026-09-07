@@ -15,7 +15,9 @@ import {
   parseCliProxyProviderRuntimeConfig,
   parseCliProxyProviderStartupConfig,
   resolveCliProxyProviderConfigs,
-} from '../plugins/cli-proxy-api/service-config.js'
+} from '../providers/cli-proxy-service-config.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V13, normalizePluginManifestV13 } from '../runtime-exact-request-permissions.js'
+import { JsonPackageManifestV2Resolver } from './packages/manifest.js'
 import type { CordisXPluginDependencyV1 } from '../plugin-lifecycle-contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
 import type { CordisXPluginManifestV1 } from '../platform-contracts.js'
@@ -194,8 +196,7 @@ function nonEmptyString(value: unknown, label: string): string {
 function pluginEntry(value: unknown, label: string, rootDir: string): string {
   const entry = nonEmptyString(value, label)
   if (entry === 'cordisx:cli-proxy-api') {
-    const extension = import.meta.url.endsWith('.ts') ? 'ts' : 'js'
-    return fileURLToPath(new URL(`../plugins/cli-proxy-api/index.${extension}`, import.meta.url))
+    return createRequire(import.meta.url).resolve('@cordisx/plugin-cli-proxy-api')
   }
   if (entry === 'cordisx:channel') {
     return createRequire(import.meta.url).resolve('@cordisx/channel')
@@ -333,5 +334,16 @@ export function parseConfigDocument(
 /** Read and validate the version-1 local composition file. */
 export async function loadConfig(configPath: string, options: LoadConfigOptions = {}): Promise<CordisXConfig> {
   const absolutePath = path.resolve(configPath)
-  return parseConfigDocument(JSON.parse(await readFile(absolutePath, 'utf8')) as unknown, absolutePath, options)
+  const config = parseConfigDocument(JSON.parse(await readFile(absolutePath, 'utf8')) as unknown, absolutePath, options)
+  const plugins = await Promise.all(config.plugins.map(async plugin => {
+    if (plugin.id !== 'cli-proxy-api') return plugin
+    const packageRoot = path.resolve(path.dirname(plugin.entry), '..', '..')
+    const resolved = await new JsonPackageManifestV2Resolver({
+      runtimeValidators: {
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V13]: value => normalizePluginManifestV13(value, plugin.id),
+      },
+    }).resolve(packageRoot)
+    return { ...plugin, manifest: normalizePluginManifestV13(resolved.runtimeManifest, plugin.id) }
+  }))
+  return { ...config, plugins }
 }

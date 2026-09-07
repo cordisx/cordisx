@@ -1,6 +1,6 @@
 # Plugin-owned service configuration
 
-Status: Host data/API foundation and the CLIProxy Providers plugin-detail
+Status: Host data/API foundation and the standalone CLIProxy Providers plugin-detail
 bridge are implemented against the formally merged
 `cordisx-protocol@871f028c57cffaa3080b06f6319baebfb4107438` contracts. The
 Manager bridge uses the existing Host TDesign form and a token/profile/generation
@@ -77,6 +77,13 @@ replace, and file-mode path.
 No field-dependent inference changes the declared mode after Save.
 
 ## CLIProxy Providers planes
+
+The standalone [`cordisx/plugin-cli-proxy-api`](https://github.com/cordisx/plugin-cli-proxy-api)
+package owns the renderer, Provider session page, localization, and public
+Platform provider service. The `cordisx:cli-proxy-api` convenience alias
+resolves that normal package export. Host retains configuration persistence,
+endpoint and credential resolution, App Server processes, broker policy,
+workspace authority, and the single Provider Fleet.
 
 The built-in plugin declares two protocol-owned Schemastery-backed contracts:
 

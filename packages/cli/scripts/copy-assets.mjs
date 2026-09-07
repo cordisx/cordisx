@@ -4,8 +4,6 @@ import { fileURLToPath } from 'node:url'
 
 const source = fileURLToPath(new URL('../assets', import.meta.url))
 const destination = fileURLToPath(new URL('../dist/assets', import.meta.url))
-const cliProxySource = fileURLToPath(new URL('../src/plugins/cli-proxy-api', import.meta.url))
-const cliProxyDestination = fileURLToPath(new URL('../dist/src/plugins/cli-proxy-api', import.meta.url))
 const channelRuntimeSource = fileURLToPath(new URL('../../channel-runtime/dist', import.meta.url))
 const channelRuntimeDestination = fileURLToPath(new URL('../dist/channel-runtime', import.meta.url))
 const channelServiceDestination = fileURLToPath(new URL('../dist/src/launcher/channel-service.js', import.meta.url))
@@ -14,12 +12,6 @@ const cordisxSkillDestination = fileURLToPath(new URL('../dist/skills/cordisx-pl
 
 await mkdir(destination, { recursive: true })
 await cp(source, destination, { recursive: true, force: true })
-await mkdir(cliProxyDestination, { recursive: true })
-await cp(cliProxySource, cliProxyDestination, {
-  recursive: true,
-  force: true,
-  filter: sourcePath => !sourcePath.endsWith('index.ts'),
-})
 // Channel runtime is private workspace infrastructure. Package the compiled
 // launcher-only runtime beside the CLI and rewrite its single Node entry import
 // so an installed `cordisx` tarball never relies on a workspace symlink.

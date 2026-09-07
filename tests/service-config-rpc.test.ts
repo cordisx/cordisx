@@ -12,7 +12,7 @@ import {
 import {
   CLI_PROXY_PROVIDER_STARTUP_CONFIG_CONTRACT,
   CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID,
-} from '../packages/cli/src/plugins/cli-proxy-api/service-config.js'
+} from '../packages/cli/src/providers/cli-proxy-service-config.js'
 
 const token = 'e'.repeat(64)
 const generation = 'service-config-rpc-test'

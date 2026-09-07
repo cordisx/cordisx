@@ -52,8 +52,6 @@ const expectedRegistrations = [
   'packages/agent-trace-showcase/src/index.ts|route|session.timeline',
   'packages/cli/scripts/live-smoke.mjs|page|overview',
   'packages/cli/scripts/live-smoke.mjs|route|overview',
-  'packages/cli/src/plugins/cli-proxy-api/index.ts|page|providers.sessions',
-  'packages/cli/src/plugins/cli-proxy-api/index.ts|route|providers.sessions',
   'packages/create-cordisx-plugin/template/src/{{packageName}}.tsx|page|overview',
   'packages/create-cordisx-plugin/template/src/{{packageName}}.tsx|route|overview',
   'tests/fixtures/agent-route-owner-coordinate-plugin.ts|page|room',
@@ -76,7 +74,10 @@ const expectedRegistrations = [
 
 async function sourceFiles(root: string): Promise<string[]> {
   const absolute = path.join(projectRoot, root)
-  const entries = await readdir(absolute, { withFileTypes: true })
+  const entries = await readdir(absolute, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return []
+    throw error
+  })
   const nested = await Promise.all(entries.map(async entry => {
     const item = path.join(root, entry.name)
     if (entry.isDirectory()) return sourceFiles(item)

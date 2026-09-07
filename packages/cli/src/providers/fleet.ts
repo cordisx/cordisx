@@ -30,14 +30,14 @@ import {
 import type { CordisXExactProviderAdapter, CordisXPlatformAdapter } from '../renderer/platform.js'
 import { withExactProviderGeneration } from './fleet-exact-provider.js'
 import { ProviderAdapterRegistry } from '../renderer/provider-registry.js'
-import { CliProxyProviderAdapter } from './cli-proxy-adapter.js'
-import {
-  type CodexAppServerOptions,
-  type CodexAppServerRpc,
-  startCodexAppServer,
-  startLocalCodexAppServer,
-} from './codex-app-server.js'
-import type { CodexProviderConfig, ProviderConnection, ProviderLifecycleSignal } from './contracts.js'
+import { LocalCodexProviderAdapter } from './local-codex-adapter.js'
+import { type CodexAppServerOptions, type CodexAppServerRpc, startLocalCodexAppServer } from './codex-app-server.js'
+import type {
+  CodexProviderConfig,
+  LocalCodexProviderConfig,
+  ProviderConnection,
+  ProviderLifecycleSignal,
+} from './contracts.js'
 import { type AgentLoopInFlight, runFleetAgentLoopTransaction } from './fleet-agent-loop-transaction.js'
 import { CURRENT_CONNECTION_UNAVAILABLE, FLEET_CAPABILITIES } from './fleet-capabilities.js'
 import {
@@ -86,10 +86,10 @@ export class ProviderFleet implements CordisXPlatformAdapter {
       requested => this.providers(requested),
       (providerId, operation, generation) => this.withProvider(providerId, operation, generation),
     )
-    this.startServer = options.startServer ?? (async (config, serverOptions) =>
-      config.kind === 'local-codex'
-        ? await startLocalCodexAppServer(config, serverOptions)
-        : await startCodexAppServer(config, serverOptions))
+    this.startServer = options.startServer ?? (async (config, serverOptions) => {
+      if (config.kind !== 'local-codex') throw new Error('External providers require a plugin-owned service adapter')
+      return await startLocalCodexAppServer(config, serverOptions)
+    })
     this.appServer = options.appServer
     this.agentLoopAuthority = options.agentLoopAuthority
   }
@@ -102,11 +102,13 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     const start = fleet.startServer
     const sourceRegistry = fleet.registry
     await Promise.all(
-      configs.filter(config => config.enabled).map(async config => {
+      configs.filter((config): config is LocalCodexProviderConfig => (
+        config.enabled && config.kind === 'local-codex'
+      )).map(async config => {
         fleet.names.set(config.id, config.displayName)
         try {
           const server = await start(config, options.appServer)
-          const adapter = new CliProxyProviderAdapter(config, server)
+          const adapter = new LocalCodexProviderAdapter(config, server)
           fleet.registry.register({
             providerId: config.id,
             generation: adapter.generation,

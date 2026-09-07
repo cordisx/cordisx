@@ -206,4 +206,32 @@ describe('loadConfig', () => {
     expect(config.plugins[0]).toMatchObject({ id: 'channel', enabled: true, config: {} })
     expect(config.plugins[0]?.entry).toMatch(/node_modules\/@cordisx\/channel\/dist\/channel\.js$/)
   })
+
+  it('resolves the CLIProxy convenience alias to the external package export', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-proxy-config-'))
+    const configPath = path.join(directory, 'cordisx.config.json')
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: 'cli-proxy-api', entry: 'cordisx:cli-proxy-api', enabled: true }],
+      }),
+    )
+    const config = await loadConfig(configPath)
+    expect(config.plugins[0]).toMatchObject({
+      id: 'cli-proxy-api',
+      enabled: true,
+      config: {},
+      manifest: {
+        schemaVersion: 13,
+        capabilities: expect.arrayContaining([
+          expect.objectContaining({ name: 'tasks.create', scope: { runtime: 'exact-request' } }),
+          expect.objectContaining({ name: 'turns.submit', scope: { runtime: 'exact-request' } }),
+        ]),
+      },
+    })
+    expect(config.plugins[0]?.entry).toMatch(
+      /node_modules\/@cordisx\/plugin-cli-proxy-api\/dist\/runtime\/module\.js$/,
+    )
+  })
 })
