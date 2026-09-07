@@ -388,6 +388,33 @@ renderer bundle uses esbuild's CSS text loader. The existing asset-copy step
 preserves the relative import in `dist/assets`. This does not change plugin CSS
 loading or imply that ordinary side-effect CSS imports share this lifecycle.
 
+Ordinary entries and dynamic collection groups use separate Host-private seats
+within the same public `sidebar.navigation.items` contract. The native adapter
+keeps ordinary entries in the action area and inserts collections as siblings
+before the first native `[data-app-action-sidebar-section]`, after the action
+area (including Explore). It never identifies a group by localized text or a
+plugin id. Without a native section anchor the collection projection stays
+unrendered; it is not appended to the action area as a fallback. Playground
+places its collections before Recent tasks. Neither path moves native groups.
+
+Collection headers use a Host-owned disclosure button with `aria-expanded`,
+`aria-controls` and the shared chevron icon. Collapse is presentation-only:
+registered Room items, selection, actions, bindings and drafts remain intact.
+An adapter-local group state keeps collapse through snapshot/localization
+updates and restores a focused disclosure after reconstruction. This is not a
+second Room store. Removed group registrations release their view state.
+
+Native group header typography, color, spacing and group gaps project from the
+existing native section/template. Collection row geometry uses native Session
+rows instead of top-level action buttons, while the accepted 46px two-line
+height and vertical padding remain unchanged. Selected colors may project only
+from an explicitly selected native Session row that is neither hovered nor
+focused; missing/transparent samples retain semantic Host defaults. This avoids
+using a transient hover as idle paint or adding a second selected background.
+The group header has no new create/more menu: plugins already supply ordinary
+create entries and per-row structured actions. Existing saved Room titles are
+not rewritten by this layout projection.
+
 The Playground unified Recent tasks list uses the same Host SidebarItem
 primitive and keeps a task/history semantic icon. Agent identity Avatars belong
 to conversation participant surfaces, not to generic task navigation. A future
