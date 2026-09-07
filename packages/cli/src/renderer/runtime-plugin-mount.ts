@@ -23,6 +23,8 @@ import type {
   CordisXPluginLifecycleOperationV1,
   CordisXPluginLifecycleResultV1,
   CordisXPluginManifestV1,
+  CordisXPluginManifestV12,
+  CordisXPluginManifestV13,
   CordisXPluginManifestV4,
   CordisXPluginManifestV5,
   CordisXPluginManifestV6,

@@ -100,6 +100,8 @@ import {
   startPluginGenerationArtifactServer,
 } from '../launcher/plugin-generation-loader.js'
 import { AgentLoopAuthority } from '../launcher/agent-loop-authority.js'
+import { createCliProxyPlatformProviderBatch } from '../launcher/cli-proxy-platform-provider-batch.js'
+import { PlatformProviderPluginLifecycleRuntime } from '../launcher/platform-provider-plugin-lifecycle.js'
 import {
   CordisXSkillConflictError,
   type CordisXSkillDeploymentResult,
@@ -262,6 +264,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       lifecycleGeneration,
     )
     const lifecycleRuntime = new CdpPluginLifecycleRuntime()
+    const lifecycleTransactionRuntime = new PlatformProviderPluginLifecycleRuntime(lifecycleRuntime)
     const configuredIds = new Set(configuredComposition.plugins.map(plugin => plugin.id))
     const pluginLifecycleCoordinator = new PluginLifecycleCoordinator({
       homeDir: rootFromConfigPath(configPath),
@@ -271,7 +274,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       loadPermissionPolicies: async () =>
         (await loadHomeConfig(configPath)).permissions
           .filter(policy => policy.key.profileId === selection.profileId),
-      runtime: lifecycleRuntime,
+      runtime: lifecycleTransactionRuntime,
       pluginGenerationArtifactServer: activePluginGenerationArtifactServer,
       reservedPluginIds: [...configuredIds],
       ...(certifiedPermissionAuthority === undefined ? {} : {
@@ -612,6 +615,44 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         appServer: { environment: runtime.env ?? process.env },
         agentLoopAuthority: await AgentLoopAuthority.open(rootFromConfigPath(configPath), selection.profileId),
       })
+    const platformProviderServices = providerFleet === undefined
+      ? undefined
+      : createCliProxyPlatformProviderBatch({
+        homeDir: rootFromConfigPath(configPath),
+        profileId: selection.profileId,
+        hostGeneration: lifecycleGeneration,
+        configPath,
+        rootDir: rootFromConfigPath(configPath),
+        environment: runtime.env ?? process.env,
+        activation: async () => await lifecycleStore.bindRuntimeGeneration(),
+      })
+    if (providerFleet !== undefined && platformProviderServices !== undefined) {
+      lifecycleTransactionRuntime.connect(async activation =>
+        await platformProviderServices.reconfigure(
+          providerFleet,
+          providerConfigs(composition, runtime.env ?? process.env),
+          undefined,
+          activation,
+        )
+      )
+      try {
+        if (await platformProviderServices.hasCandidates()) {
+          const initialProviders = await platformProviderServices.reconfigure(
+            providerFleet,
+            providerConfigs(composition, runtime.env ?? process.env),
+          )
+          await initialProviders.finalize()
+        }
+      } catch (error) {
+        await platformProviderServices.close()
+        await providerFleet.close()
+        throw error
+      }
+    }
+    const closeProviderFleet = async (): Promise<void> => {
+      await platformProviderServices?.close()
+      await providerFleet?.close()
+    }
     const serviceConfigToken = rendererComposition.serviceConfigBridgeToken
     const services: Array<
       { readonly pluginId: string; readonly serviceId: string; readonly api: HostServiceConfigNarrowApi }
@@ -626,6 +667,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         rootDir: rootFromConfigPath(configPath),
         environment: runtime.env ?? process.env,
         fleet: providerFleet,
+        ...(platformProviderServices === undefined ? {} : { platformProviderServices }),
       }))
     }
     if (serviceConfigToken !== undefined && channelPlugin !== undefined && channelService !== undefined) {
@@ -675,7 +717,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       } catch (error) {
         await ownerDocuments.agentTools?.close()
         await channelService?.dispose()
-        await providerFleet?.close()
+        await closeProviderFleet()
         throw error
       }
       const debugPort = invocation.options.debugPort ?? composition.codex.debugPort
@@ -683,7 +725,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         stdout(JSON.stringify({ status: 'ready', mode: 'attach', appId, debugPort }, null, 2))
         await ownerDocuments.agentTools?.close()
         await channelService?.dispose()
-        await providerFleet?.close()
+        await closeProviderFleet()
         return
       }
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
@@ -730,7 +772,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       } finally {
         await ownerDocuments.agentTools?.close()
         await channelService?.dispose()
-        await providerFleet?.close()
+        await closeProviderFleet()
       }
       return
     }
@@ -755,7 +797,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       stdout(`[cordisx] loopback CDP port: ${invocation.options.debugPort ?? 'automatic'}`)
       await ownerDocuments.agentTools?.close()
       await channelService?.dispose()
-      await providerFleet?.close()
+      await closeProviderFleet()
       return
     }
 
@@ -831,7 +873,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     } finally {
       await ownerDocuments.agentTools?.close()
       await channelService?.dispose()
-      await providerFleet?.close()
+      await closeProviderFleet()
     }
   } finally {
     await pluginGenerationArtifactServer?.close()

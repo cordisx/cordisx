@@ -1,6 +1,14 @@
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, normalizeUsageManifestV11 } from '../../usage-permissions.js'
 import type { CordisXPluginManifestV11 } from '../../usage-permissions.js'
 import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,
+  type CordisXPluginManifestV12,
+  type CordisXPluginManifestV13,
+  normalizePluginManifestV12,
+  normalizePluginManifestV13,
+} from '../../runtime-exact-request-permissions.js'
+import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
   normalizeVisualManifestV10,
 } from '../../extension-point-interaction-permissions.js'
@@ -117,6 +125,8 @@ export function normalizePluginManifest(
   | CordisXPluginManifestV9
   | CordisXPluginManifestV10
   | CordisXPluginManifestV11
+  | CordisXPluginManifestV12
+  | CordisXPluginManifestV13
 {
   if (!ID_PATTERN.test(expectedId)) throw new Error(`launcher plugin id ${expectedId} is invalid`)
   if (value === undefined) {
@@ -128,6 +138,12 @@ export function normalizePluginManifest(
     })
   }
   const manifest = object(value, `plugin ${expectedId} manifest`)
+  if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V12 || manifest.schemaVersion === 12) {
+    return normalizePluginManifestV12(manifest, expectedId)
+  }
+  if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V13 || manifest.schemaVersion === 13) {
+    return normalizePluginManifestV13(manifest, expectedId)
+  }
   if (manifest.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 || manifest.schemaVersion === 11) {
     return normalizeUsageManifestV11(manifest, expectedId)
   }

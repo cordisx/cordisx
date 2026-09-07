@@ -31,6 +31,7 @@ export {
 } from './platform/platform-permission-types.js'
 export { PermissionBroker } from './platform/platform-permission-broker.js'
 export {
+  type CordisXExactProviderAdapter,
   type CordisXPlatformAdapter,
   type CordisXPlatformProjection,
   type CordisXPlatformProjectionSource,

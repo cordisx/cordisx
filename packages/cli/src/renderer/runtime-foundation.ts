@@ -732,7 +732,8 @@ export const createRuntimeRequiredBlockReason = (
   controller: PluginController,
 ): string | undefined => {
   if (
-    controller.manifest.schemaVersion === 11
+    (controller.manifest.schemaVersion === 11 || controller.manifest.schemaVersion === 12
+      || controller.manifest.schemaVersion === 13)
     && controller.manifest.capabilities.some(item => item.name === 'usage.read' && item.required)
   ) {
     if (runtimeScope.metadata()!.agentHistoryBridgeToken === undefined) {
@@ -745,7 +746,7 @@ export const createRuntimeRequiredBlockReason = (
     return `Required capability denied: ${denied.join(', ')}`
   }
   const declarations = controller.manifest.capabilities.flatMap(
-    item => ((CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
+    item => ((CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name) && !('runtime' in item.scope)
       ? [{
         name: item.name as CordisXPlatformCapability,
         required: item.required,

@@ -148,7 +148,7 @@ describe('local development package-v5 entity templates', () => {
 
     await value.writeManifest(thirdEntityDigest, 4)
     await expect(buildLocalDevelopmentPlugin(value.entry)).rejects.toThrow(
-      /require plugin-package\.v5 through plugin-package\.v11/,
+      /require plugin-package\.v5 through plugin-package\.v13/,
     )
   })
 
