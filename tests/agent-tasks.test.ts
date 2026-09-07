@@ -151,4 +151,30 @@ describe('Host Agent task transaction', () => {
     await a.service.createAndSubmit(request)
     expect(await b.service.query({ operationId: 'task-1' })).toEqual({ status: 'not-found' })
   })
+  it('allows an early report to query the retained partial Session before the receipt resolves', async () => {
+    const f = fixture()
+    vi.mocked(f.deps.submit).mockImplementation(async () => {
+      expect(await f.service.query({ operationId: request.operationId })).toMatchObject({
+        status: 'found',
+        result: { code: 'reconciliation-required', sessionId: f.records.get('task-1')!.sessionId },
+      })
+      return true
+    })
+    expect(await f.service.createAndSubmit(request)).toMatchObject({ status: 'accepted' })
+    expect(await f.service.query({ operationId: request.operationId })).toMatchObject({
+      status: 'found',
+      result: { status: 'accepted', disposition: 'created' },
+    })
+  })
+  it('does not replay a submit after losing its final durable acknowledgement', async () => {
+    const f = fixture()
+    const save = f.deps.store.save
+    f.deps.store.save = async record => {
+      if (record.phase === 'finished') throw new Error('disk unavailable')
+      await save(record)
+    }
+    expect(await f.service.createAndSubmit(request)).toMatchObject({ code: 'reconciliation-required' })
+    expect(await new HostAgentTasks(f.deps).createAndSubmit(request)).toMatchObject({ code: 'reconciliation-required' })
+    expect(f.deps.submit).toHaveBeenCalledTimes(1)
+  })
 })

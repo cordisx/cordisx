@@ -65,9 +65,14 @@ test('task intent uses Host protected owner CAS storage across generation/restar
   try {
     const claims = await Promise.all([
       call('claim', { operationId: 'op', record }),
-      call('claim', { operationId: 'op', record }),
+      new NativeAgentSessionBridge(options).handle({
+        ...envelope,
+        operation: 'native-session-task-claim',
+        operationId: 'op',
+        record,
+      }),
     ])
-    expect(claims).toEqual([{ claimed: true, record }, { claimed: false, record }])
+    expect(claims.map(value => (value as { claimed: boolean }).claimed).sort()).toEqual([false, true])
     await expect(call('save', { operationId: 'op', record: { ...record, sessionId: 'other', phase: 'creating' } }))
       .rejects.toThrow('correlation')
     const restarted = new NativeAgentSessionBridge({ ...options, generation: 'next-launch' })

@@ -15,7 +15,7 @@ import type {
 } from '@cordisx/protocol/connector-service/v1'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const protocolCommit = '7b8c81104c2ab6b301ebe6a7414d45dc2cc8f724'
+const protocolCommit = 'd657899e763a524efe97a137396642fbcb167f47'
 const protocolSource = `github:cordisx/cordisx-protocol#${protocolCommit}`
 const protocolResolvedSource = `git+ssh://git@github.com/cordisx/cordisx-protocol.git#${protocolCommit}`
 const staleProtocolCommit = '9654023d1b1077d6fd0d43a2d294459bab63216b'

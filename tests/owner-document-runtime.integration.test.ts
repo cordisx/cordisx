@@ -89,6 +89,11 @@ describe('owner documents production renderer composition', () => {
     }
 
     const [left, right] = await Promise.all([boot(), boot()])
+    // The production bundle/mount exposes the optional service using the same owner lifetime.
+    const tasks = left.dom.window.__cordisxOwnerDocumentsFixture?.agentTasks
+    expect(typeof tasks?.createAndSubmit).toBe('function')
+    expect(typeof tasks?.query).toBe('function')
+    // The read-only observation below never invokes Agent methods or invents native runtime evidence.
     const create = (client: CordisXOwnerDocumentsV1, windowId: string) =>
       client.replace({
         contract: CORDISX_OWNER_DOCUMENT_SERVICE_V1,

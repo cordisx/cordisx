@@ -8,7 +8,7 @@ import { npmPackItem } from './npm-pack-report.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#7b8c81104c2ab6b301ebe6a7414d45dc2cc8f724'
+const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#d657899e763a524efe97a137396642fbcb167f47'
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
   ? undefined
   : path.resolve(process.env.CORDISX_PROTOCOL_TARBALL)
