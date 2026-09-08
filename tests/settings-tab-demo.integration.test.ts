@@ -93,6 +93,7 @@ describe('settings navigation demo bundle', () => {
         url: 'https://codex.local/native',
       },
     )
+    Object.defineProperty(dom.window, 'structuredClone', { value: structuredClone })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
     Object.defineProperty(dom.window, 'fetch', {
       value: async () => ({ ok: false, status: 503, text: async () => '' }),

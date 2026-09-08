@@ -54,7 +54,11 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
       item.identity.id === identity.id && item.identity.source === identity.source
       && item.generation.moduleGeneration === generation
     )
-    if (current?.generation.moduleGeneration !== generation || current.manifest.schemaVersion !== 10) return false
+    if (
+      current?.generation.moduleGeneration !== generation
+      || (current.manifest.schemaVersion !== 10 && current.manifest.schemaVersion !== 11
+        && current.manifest.schemaVersion !== 12)
+    ) return false
     return !current.manifest.capabilities.some(item =>
       item.name === 'ui.extension-points.interact'
       && item.required && item.scope.extensionPoints.some(point =>
@@ -76,8 +80,12 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
     }
     const render = (): boolean => {
       const current = registration()
-      if (current === undefined || current.manifest.schemaVersion !== 10 || !pointAllowed()) return false
-      const declared = current.manifest.capabilities.find(item => item.name === 'ui.extension-points.render')
+      if (
+        current === undefined || (current.manifest.schemaVersion !== 10 && current.manifest.schemaVersion !== 11
+          && current.manifest.schemaVersion !== 12)
+        || !pointAllowed()
+      ) return false
+      const declared = [...current.manifest.capabilities].find(item => item.name === 'ui.extension-points.render')
       if (
         declared === undefined || !('extensionPoints' in declared.scope)
         || !declared.scope.extensionPoints?.includes(pointId)
@@ -216,8 +224,12 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
 
   protected visualPermissionSnapshots(): readonly PlatformPermissionSnapshot[] {
     return [...this.registrations.values()].flatMap(current => {
-      if (this.registration(current.identity) !== current || current.manifest.schemaVersion !== 10) return []
-      const declaration = current.manifest.capabilities.find(item => item.name === 'ui.extension-points.interact')
+      if (
+        this.registration(current.identity) !== current
+        || (current.manifest.schemaVersion !== 10 && current.manifest.schemaVersion !== 11
+          && current.manifest.schemaVersion !== 12)
+      ) return []
+      const declaration = [...current.manifest.capabilities].find(item => item.name === 'ui.extension-points.interact')
       if (declaration === undefined) return []
       const plan = visualInteractionPlan({
         planId: 'visual-snapshot',

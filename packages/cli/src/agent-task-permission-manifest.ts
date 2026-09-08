@@ -1,3 +1,4 @@
+import { normalizeUsageDeclaration, normalizeUsageManifestV11 } from './usage-permissions.js'
 import type { PluginRuntimeManifestV12 } from '@cordisx/protocol/plugin-manifest/v12'
 import type { PluginRuntimeManifestV11 } from '@cordisx/protocol/plugin-manifest/v11'
 import type {
@@ -85,10 +86,11 @@ export function normalizeTaskManifest(
 ): CordisXPluginManifestV11 | CordisXPluginManifestV12 {
   const manifest = object(value)
   const version = manifest.schemaVersion
+  if (version === 11) return normalizeUsageManifestV11(value, expectedId)
   if (
     (version !== 11 && version !== 12)
     || manifest.$schema !== (version === 12 ? CORDISX_PLUGIN_MANIFEST_SCHEMA_V12 : CORDISX_PLUGIN_MANIFEST_SCHEMA_V11)
-    || !Array.isArray(manifest.capabilities) || manifest.capabilities.length > 36
+    || !Array.isArray(manifest.capabilities) || manifest.capabilities.length > 37
   ) throw new Error('Unsupported task manifest')
   const names = new Set<string>()
   const additions:
@@ -104,18 +106,7 @@ export function normalizeTaskManifest(
     const scope = object(declaration.scope)
     if (version === 12 && ('task' in scope || 'taskRequester' in scope)) additions.push(taskDeclaration(value))
     else if (declaration.name === 'usage.read') {
-      exact(declaration, ['name', 'required', 'scope'])
-      exact(scope, ['profile'])
-      if (typeof declaration.required !== 'boolean' || scope.profile !== 'current') {
-        throw new Error('Invalid usage scope')
-      }
-      additions.push(
-        Object.freeze({
-          name: 'usage.read',
-          required: declaration.required,
-          scope: Object.freeze({ profile: 'current' }),
-        }),
-      )
+      additions.push(normalizeUsageDeclaration(value))
     } else baseCapabilities.push(value)
   }
   const base = normalizeVisualManifestV10({

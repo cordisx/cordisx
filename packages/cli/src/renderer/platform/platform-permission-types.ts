@@ -46,7 +46,7 @@ export interface AuditRecord {
 
 export interface PlatformPermissionSnapshot {
   readonly identity: CordisXPluginIdentity
-  readonly capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact'
+  readonly capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact' | 'usage.read'
   readonly required: boolean
   readonly reason: CordisXLocalizedText
   readonly scope: CordisXPermissionScopeV4

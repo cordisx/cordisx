@@ -314,6 +314,9 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
     if (packageVersion === 10 && runtimeSchema !== PLUGIN_RUNTIME_MANIFEST_SCHEMA_V10) {
       throw new PackageLifecycleError('incompatible-runtime', 'plugin-package.v10 requires plugin-manifest.v10')
     }
+    if (packageVersion === 11 && runtimeSchema !== PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11) {
+      throw new PackageLifecycleError('incompatible-runtime', 'plugin-package.v11 requires plugin-manifest.v11')
+    }
     const runtimeFile = await containedFile(snapshotRoot, runtimePath, 'runtime manifest')
     const runtimeBytes = await readFile(runtimeFile)
     const actualRuntimeDigest = `sha256:${createHash('sha256').update(runtimeBytes).digest('hex')}`

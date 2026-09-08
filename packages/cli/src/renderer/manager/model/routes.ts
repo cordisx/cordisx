@@ -12,7 +12,7 @@ export type ManagerRoute =
   | {
     readonly kind: 'permission'
     readonly pluginId: string
-    readonly capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact'
+    readonly capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact' | 'usage.read'
     readonly fingerprint: string
   }
   | { readonly kind: 'extension-point'; readonly pointId: string }

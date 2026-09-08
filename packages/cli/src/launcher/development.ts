@@ -268,8 +268,9 @@ async function readRendererOnlyPackage(root: string): Promise<{
   const declaresVersionedManifest = manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V7 || manifest.schemaVersion === 7
     || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V8 || manifest.schemaVersion === 8
     || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V9 || manifest.schemaVersion === 9
-    || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V10 || manifest.schemaVersion === 10 || manifest.schemaVersion === 11
-    || manifest.schemaVersion === 12
+    || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V10 || manifest.schemaVersion === 10
+    || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V11 || manifest.schemaVersion === 11
+    || manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V12 || manifest.schemaVersion === 12
   if (manifest.runtimeManifest !== undefined && runtimeManifestSchema !== undefined) {
     if (
       manifest.runtimeManifest === null || typeof manifest.runtimeManifest !== 'object'
@@ -308,7 +309,7 @@ async function readRendererOnlyPackage(root: string): Promise<{
       : normalizePluginManifestV7(JSON.parse(runtimeText) as unknown, packageId, new CapabilityRiskCatalog())
   } else if (manifest.runtimeManifest !== undefined && declaresVersionedManifest) {
     throw new Error(
-      'local development runtimeManifest requires exact plugin-package.v7, plugin-package.v8, plugin-package.v9, or plugin-package.v10',
+      'local development runtimeManifest requires exact plugin-package.v7, plugin-package.v8, plugin-package.v9, plugin-package.v10, plugin-package.v11, or plugin-package.v12',
     )
   }
   if (manifest.entityTemplates === undefined) {

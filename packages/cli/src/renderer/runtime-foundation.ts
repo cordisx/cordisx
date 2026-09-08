@@ -742,6 +742,15 @@ export const createRuntimeRequiredBlockReason = (
   runtimeScope: RuntimeClosureScope,
   controller: PluginController,
 ): string | undefined => {
+  if (
+    (controller.manifest.schemaVersion === 11 || controller.manifest.schemaVersion === 12)
+    && controller.manifest.capabilities.some(item => item.name === 'usage.read' && item.required)
+  ) {
+    if (runtimeScope.metadata()!.agentHistoryBridgeToken === undefined) {
+      return 'Required capability unavailable: usage.read'
+    }
+    if (runtimeScope.broker()!.usageDenied(controller.identity)) return 'Required capability denied: usage.read'
+  }
   const denied = runtimeScope.broker()!.requiredDenied(controller.identity, controller.generationView)
   if (denied.length > 0) {
     return `Required capability denied: ${denied.join(', ')}`

@@ -809,7 +809,7 @@ export async function start(
 
     const setPermissionPolicy = (
       id: string,
-      capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact',
+      capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact' | 'usage.read',
       policy: CordisXPermissionPolicy,
       scope?: CordisXPermissionScopeV4,
     ): Promise<void> => runtimeClosures3.createRuntimeSetPermissionPolicy(closureScope, id, capability, policy, scope)

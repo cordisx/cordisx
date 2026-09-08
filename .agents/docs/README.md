@@ -112,3 +112,4 @@ reference without duplicating its authority.
 - [Plugin Agent tools](plugin-agent-tools.md): restricted CLI invocation, Skill resources, and current integration limits.
 
 - [Public presentation capabilities](public-presentation-capabilities.md): exact entity settings, Host route links, and controlled Markdown editing.
+- [Local usage projection](local-usage.md): metadata-only usage, persistence and current coverage.

@@ -1,3 +1,4 @@
+export * from './usage-contracts.js'
 export {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V11,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
