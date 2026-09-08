@@ -1,4 +1,4 @@
-import { copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -38,3 +38,6 @@ await writeFile(
   channelService.replace("from '@cordisx/channel-runtime'", "from '../../channel-runtime/index.js'"),
   'utf8',
 )
+
+// npm bin linking can chmod an old output; fresh tsc output must pack identically.
+await chmod(fileURLToPath(new URL('../dist/src/cli.js', import.meta.url)), 0o755)

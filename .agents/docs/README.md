@@ -42,6 +42,7 @@ implementation of those contracts, not a second public specification.
 | [launcher-runtime](launcher-runtime.md)                         | Reference | Node/CDP composition, exact authority, durable state, and services                |
 | [renderer-runtime](renderer-runtime.md)                         | Reference | Renderer, conversation, adapter, routing, Manager, and trust integration          |
 | [distribution-and-cli](distribution-and-cli.md)                 | Reference | CLI grammar, launch profiles, package ownership, and release contract             |
+| [sdk-source-packaging](sdk-source-packaging.md)                 | Guide     | Exact-source SDK bootstrap, complete runtime bundles, and artifact evidence       |
 | [dynamic-plugin-lifecycle](dynamic-plugin-lifecycle.md)         | Reference | Dynamic package generations, activation, rollback, and cleanup                    |
 | [development-permissions](development-permissions.md)           | Reference | Automatic generation-scoped permissions for verified local plugin development     |
 | [local-plugin-paths](local-plugin-paths.md)                     | Proposal  | Future secondary view over configured local plugin entry paths                    |

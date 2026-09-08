@@ -47,7 +47,10 @@
     }
   },
   "bundledDependencies": [
-    "@cordisx/schemastery-ui"
+    "@cordisx/schemastery-ui",
+    "@cordisx/channel",
+    "@cordisx/plugin-cli-proxy-api",
+    "@cordisx/protocol"
   ],
   "workspaces": [
     "packages/*"
@@ -79,7 +82,8 @@
     "format:check": "dprint check",
     "lint:source": "eslint .",
     "lint": "eslint .",
-    "lint:staged": "lint-staged --config .lintstagedrc.mjs"
+    "lint:staged": "lint-staged --config .lintstagedrc.mjs",
+    "prepare:sdk": "node scripts/prepare-sdk.mjs"
   },
   "engines": {
     "node": ">=22.19"
@@ -130,6 +134,9 @@
     "lint-staged": "16.2.7"
   },
   "bundleDependencies": [
-    "@cordisx/schemastery-ui"
+    "@cordisx/schemastery-ui",
+    "@cordisx/channel",
+    "@cordisx/plugin-cli-proxy-api",
+    "@cordisx/protocol"
   ]
 }
