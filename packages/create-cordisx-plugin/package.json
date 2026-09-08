@@ -15,7 +15,7 @@
     "create-cordisx-plugin": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/normalize-bin-mode.mjs",
     "check": "npm run typecheck && npm run build && npm test",
     "check:package": "node scripts/check-package-contents.mjs",
     "prepack": "npm run build",
