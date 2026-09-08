@@ -1,3 +1,6 @@
+import { nativeApprovalReason } from './native-approval-reason.js'
+import type { AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
+import { AgentTaskContextMismatch } from '../agent-task-record.js'
 import { type NativeSessionRecoveryStore, nativeSessionRecoveryStore } from './native-agent-session-recovery.js'
 import { getAgentToolSetup } from './plugin-agent-tools.js'
 import { nativeAgentToolContext } from './codex-desktop-agent-tool-context.js'
@@ -28,6 +31,12 @@ export const CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS = Object.freeze(
     Object.freeze({
       appVersion: '26.901.41600',
       buildNumber: '7982',
+      buildFlavor: 'prod',
+      hostId: 'local',
+    }),
+    Object.freeze({
+      appVersion: '26.901.51231',
+      buildNumber: '8109',
       buildFlavor: 'prod',
       hostId: 'local',
     }),
@@ -106,6 +115,7 @@ const injectedItems = (message: UserMessage): readonly Record<string, unknown>[]
  * the preload bridge, request ids, native thread ids, or raw native payloads.
  */
 export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDriver {
+  private readonly approvalInvocations = new Map<string, { threadId: string; controller: AbortController }>()
   private readonly pending = new Map<string, PendingRequest>()
   private readonly sessions = new Map<string, NativeSession>()
   private readonly byThread = new Map<string, NativeSession>()
@@ -156,6 +166,8 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
 
   async create(
     input: {
+      readonly requiredTaskOperationId?: string
+      readonly executionContext?: AgentTaskResolvedContext
       readonly sessionId: string
       readonly owner: PluginOwnerIdentity
       readonly options: AgentOptions
@@ -180,7 +192,7 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       const result = object(
         await this.request('thread/start', {
           model,
-          cwd: '',
+          cwd: input.executionContext?.cwd ?? '',
           ...(developerInstructions === undefined ? {} : { developerInstructions }),
         }),
       )
@@ -192,8 +204,17 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
         sessionId: input.sessionId,
         threadId,
         completedTurns: 0,
+        ...(input.requiredTaskOperationId === undefined
+          ? {}
+          : { requiredTaskOperationId: input.requiredTaskOperationId }),
+        ...(input.executionContext === undefined
+          ? {}
+          : { context: { ...input.executionContext, cwd: String(object(result?.thread)?.cwd ?? '') } }),
         ...(input.setup === undefined ? {} : { setup: clone(input.setup) }),
       })
+      if (input.executionContext !== undefined && object(result?.thread)?.cwd !== input.executionContext.cwd) {
+        throw new AgentTaskContextMismatch(input.sessionId)
+      }
       const session: NativeSession = {
         sessionId: input.sessionId,
         threadId,
@@ -206,7 +227,8 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       this.sessions.set(input.sessionId, session)
       this.byThread.set(threadId, session)
       return { status: 'accepted', detail: { kind: 'host', ref: `codex-thread:${threadId}` } }
-    } catch {
+    } catch (error) {
+      if (error instanceof AgentTaskContextMismatch) throw error
       return { status: 'unavailable', code: 'host-unavailable' }
     }
   }
@@ -393,6 +415,8 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
       pending.reject(new Error('Codex Desktop Agent/Session transport disposed'))
     }
     this.pending.clear()
+    for (const invocation of this.approvalInvocations.values()) invocation.controller.abort()
+    this.approvalInvocations.clear()
     this.sessions.clear()
     this.byThread.clear()
     this.replacements.clear()
@@ -552,6 +576,8 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
           pending.reject(new Error('Codex Desktop app-server connection replaced'))
         }
         this.pending.clear()
+        for (const invocation of this.approvalInvocations.values()) invocation.controller.abort()
+        this.approvalInvocations.clear()
         this.sessions.clear()
         this.byThread.clear()
         for (const callback of [...this.replacements]) callback()
@@ -582,6 +608,15 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
   }
 
   private receiveNotification(message: Record<string, unknown> | undefined): void {
+    if (message?.method === 'serverRequest/resolved') {
+      const params = object(message.params)
+      const requestId = typeof params?.requestId === 'number' && Number.isSafeInteger(params.requestId)
+        ? String(params.requestId)
+        : text(params?.requestId)
+      const invocation = requestId === undefined ? undefined : this.approvalInvocations.get(requestId)
+      if (invocation !== undefined && invocation.threadId === params?.threadId) invocation.controller.abort()
+      return
+    }
     const method = text(message?.method)
     const params = object(message?.params)
     const threadId = text(params?.threadId)
@@ -797,7 +832,9 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
 
   private receiveServerRequest(event: MessageEvent<unknown>, request: Record<string, unknown> | undefined): void {
     const method = text(request?.method)
-    const requestId = text(request?.id)
+    const requestId = typeof request?.id === 'number' && Number.isSafeInteger(request.id)
+      ? request.id
+      : text(request?.id)
     const params = object(request?.params)
     const threadId = text(params?.threadId)
     const session = threadId === undefined ? undefined : this.byThread.get(threadId)
@@ -811,11 +848,13 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
   }
 
   private async answerNativeApproval(
-    requestId: string,
+    requestId: string | number,
     method: string,
     params: Record<string, unknown>,
     session: NativeSession,
   ): Promise<void> {
+    const controller = new AbortController()
+    this.approvalInvocations.set(String(requestId), { threadId: session.threadId, controller })
     const itemId = text(params.itemId)
     const toolName = method.includes('commandExecution') || method === 'execCommandApproval'
       ? 'codex.commandExecution'
@@ -827,18 +866,22 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     let outcome: ApprovalOutcome = 'unavailable'
     const request: CordisXDriverApprovalRequest = {
       sessionId: session.sessionId,
+      signal: controller.signal,
       toolName,
       ...(itemId === undefined ? {} : { callId: itemId }),
-      ...(text(params.reason) === undefined ? {} : { reason: text(params.reason)! }),
+      reason: nativeApprovalReason(params, toolName),
     }
     for (const listener of this.approvalListeners) {
       try {
-        outcome = await listener(clone(request))
+        outcome = await listener({ ...request })
       } catch {
         outcome = 'unavailable'
       }
       break
     }
+    this.approvalInvocations.delete(String(requestId))
+    if (controller.signal.aborted) return
+    controller.abort()
     const decision = outcome === 'allowed-once' ? 'accept' : outcome === 'cancelled' ? 'cancel' : 'decline'
     try {
       await this.bridge.sendMessageFromView({

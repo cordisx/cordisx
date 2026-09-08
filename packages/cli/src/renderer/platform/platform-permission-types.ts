@@ -1,5 +1,6 @@
 import type { CordisXPluginManifestV11 } from '../../usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../../runtime-exact-request-permissions.js'
+import type { AgentTaskScopeSource } from '../agent-task-permission-scope.js'
 import type { CordisXPluginManifestV10 } from '../../extension-point-interaction-permissions.js'
 import type { AgentRuntimeCapability } from '@cordisx/protocol/agents/v1'
 import type {
@@ -320,6 +321,7 @@ export type AgentRuntimeScopeSource =
   >
   | Readonly<{ kind: 'host-create'; reservedSessionId: string }>
   | Readonly<{ kind: 'host-exact'; exactSessionId: string }>
+  | AgentTaskScopeSource
 
 export type AgentRuntimePermissionFence = Readonly<{
   identity: CordisXPluginIdentity
@@ -348,6 +350,7 @@ export interface AgentRuntimeLeaseRecord {
   readonly routeInstanceId?: string
   /** The requester route may be distinct from a v8-approved authority Session. */
   readonly routeSessionId?: string
+  readonly taskSource?: AgentTaskScopeSource
   readonly moduleGeneration?: string
 }
 

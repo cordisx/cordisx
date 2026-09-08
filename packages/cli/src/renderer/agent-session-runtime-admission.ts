@@ -190,7 +190,7 @@ import {
   type PageAdmissionSourceCapture,
   type PageAdmissionTarget as HostPageAdmissionTarget,
 } from './page-admission-lifecycle.js'
-import { AgentSessionRuntimeApproval } from './agent-session-runtime-approval.js'
+import { AgentSessionRuntimeDetails } from './agent-session-runtime-details.js'
 import {
   AgentRecord,
   clone,
@@ -200,7 +200,7 @@ import {
   plainObject,
 } from './agent-session-runtime-types.js'
 
-export abstract class AgentSessionRuntimeAdmission extends AgentSessionRuntimeApproval {
+export abstract class AgentSessionRuntimeAdmission extends AgentSessionRuntimeDetails {
   async issueAdmissionTargetOrigin(
     owner: PluginOwnerIdentity,
     request: AgentAdmissionTargetOriginRequest,
@@ -246,7 +246,7 @@ export abstract class AgentSessionRuntimeAdmission extends AgentSessionRuntimeAp
       || typeof request.origin.token !== 'string' || request.origin.token.length < 1
       || request.origin.token.length > 4_096
       || typeof request.message.text !== 'string' || request.message.text.length < 1
-      || request.message.text.length > 65_536
+      || [...request.message.text].length > 65_536
     ) {
       return { status: 'denied', code: 'origin-denied' }
     }
@@ -351,7 +351,7 @@ export abstract class AgentSessionRuntimeAdmission extends AgentSessionRuntimeAp
       || typeof request.origin.token !== 'string' || request.origin.token.length < 1
       || request.origin.token.length > 4_096
       || typeof request.message.text !== 'string' || request.message.text.length < 1
-      || request.message.text.length > 65_536
+      || [...request.message.text].length > 65_536
     ) {
       return { status: 'denied', code: 'origin-denied' }
     }
@@ -486,7 +486,7 @@ export abstract class AgentSessionRuntimeAdmission extends AgentSessionRuntimeAp
     if (
       this.disposed || !this.validBootstrapRoomOrigin(request.origin) || request.message === undefined
       || typeof request.message.text !== 'string' || request.message.text.length < 1
-      || request.message.text.length > 65_536
+      || [...request.message.text].length > 65_536
     ) {
       return { status: 'denied', code: 'origin-denied' }
     }
@@ -627,7 +627,7 @@ export abstract class AgentSessionRuntimeAdmission extends AgentSessionRuntimeAp
     if (
       this.disposed || !this.validBootstrapRouteContinuation(request.continuation) || request.message === undefined
       || typeof request.message.text !== 'string' || request.message.text.length < 1
-      || request.message.text.length > 65_536
+      || [...request.message.text].length > 65_536
     ) {
       return { status: 'denied', code: 'origin-denied' }
     }
@@ -792,58 +792,6 @@ export abstract class AgentSessionRuntimeAdmission extends AgentSessionRuntimeAp
     return { status: 'claimed', code: 'claimed', receipt }
   }
 
-  async getAgentSessionDetailReference(
-    owner: PluginOwnerIdentity,
-    request: AgentSessionDetailReferenceRequest,
-  ): Promise<AgentSessionDetailReferenceResult> {
-    if (this.disposed) return { status: 'unavailable', code: 'host-unavailable' }
-    if (
-      !plainObject(request) || !hasExactKeys(request, ['sessionId'])
-      || typeof request.sessionId !== 'string'
-    ) return { status: 'unavailable', code: 'session-unavailable' }
-    if (!opaque(request.sessionId)) return { status: 'unavailable', code: 'session-unavailable' }
-    const record = this.agents.get(request.sessionId)
-    if (record === undefined) return { status: 'unavailable', code: 'session-unavailable' }
-    if (!this.sameOwner(owner, record.owner)) return { status: 'denied', code: 'permission-denied' }
-    if (!this.current(record)) {
-      return {
-        status: 'unavailable',
-        code: record.disposed === 'connection-replaced' ? 'connection-replaced' : 'generation-replaced',
-      }
-    }
-    if (record.detail === undefined || !this.validAgentDetailReference(record.detail)) {
-      return { status: 'unavailable', code: 'detail-unavailable' }
-    }
-    return { status: 'accepted', sessionId: record.id, target: Object.freeze(clone(record.detail)) }
-  }
-
-  async openAgentDetail(
-    owner: PluginOwnerIdentity,
-    request: AgentDetailNavigationRequest,
-  ): Promise<AgentDetailNavigationResult> {
-    if (this.disposed) return { status: 'unavailable', code: 'host-unavailable' }
-    if (!plainObject(request) || !hasExactKeys(request, ['target'])) {
-      return { status: 'unavailable', code: 'unknown-detail' }
-    }
-    if (!this.validAgentDetailReference(request.target)) return { status: 'unavailable', code: 'unknown-detail' }
-    const candidates = [...this.agents.values()].filter(record =>
-      this.sameOwner(owner, record.owner) && this.current(record) && record.detail !== undefined
-      && this.sameAgentDetailReference(record.detail, request.target)
-    )
-    if (candidates.length > 1) return { status: 'denied', code: 'ambiguous-detail' }
-    const record = candidates[0]
-    if (record === undefined) return { status: 'unavailable', code: 'unknown-detail' }
-    if (this.options.navigateAgentDetail === undefined) return { status: 'unavailable', code: 'unsupported' }
-    try {
-      await this.options.navigateAgentDetail(Object.freeze(clone(record.detail!)), record.id)
-    } catch {
-      return { status: 'unavailable', code: 'stale-reference' }
-    }
-    if (!this.current(record) || !this.sameOwner(owner, record.owner)) {
-      return { status: 'unavailable', code: 'generation-replaced' }
-    }
-    return { status: 'accepted', code: 'opened' }
-  }
   protected abstract sameOwner(left: PluginOwnerIdentity, right: PluginOwnerIdentity): boolean
 
   protected abstract current(record: AgentRecord): boolean

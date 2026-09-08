@@ -1,3 +1,8 @@
+import { AgentTaskPermissionScopeAuthority, type AgentTaskScopeSource } from './agent-task-permission-scope.js'
+import type {
+  AgentTaskApprovalAuthorityLeaseV1,
+  AgentTaskCommandScopeV1,
+} from '@cordisx/protocol/agent-task-permission/v1'
 import type { AgentRuntimeCapability } from '@cordisx/protocol/agents/v1'
 import type { PluginOwnerIdentity } from '@cordisx/protocol/sessions/v1'
 import type { ApprovalAgentBinding } from '@cordisx/protocol/approval/v2'
@@ -39,15 +44,26 @@ export interface AgentRouteScopeBinding {
   readonly param: string
 }
 
+/** Map additive manifest versions to their inherited Agent permission semantics. */
+export function agentRuntimePermissionManifestVersion(version: number): 5 | 6 | 8 | 12 | undefined {
+  if (version === 5) return 5
+  if (version === 6 || version === 7) return 6
+  if (version === 8 || version === 9 || version === 10 || version === 11) return 8
+  if (version === 12 || version === 13) return 12
+  return undefined
+}
+
 export interface AgentRuntimePermissionDeclaration {
   /** Host-owned source schema discriminator; omitted only by legacy v5 callers. */
-  readonly manifestVersion?: 5 | 6 | 8
+  readonly manifestVersion?: 5 | 6 | 8 | 12
   readonly name: AgentRuntimeCapability
   readonly required: boolean
   readonly scope: Readonly<
     {
       readonly sessionIds?: readonly string[] | AgentRouteScopeBinding
       readonly authorityRequester?: AgentApprovalAuthorityRequesterScope
+      readonly task?: AgentTaskCommandScopeV1
+      readonly taskRequester?: AgentTaskCommandScopeV1
     }
   >
 }
@@ -81,6 +97,7 @@ export interface AgentPermissionPlanV4 {
     }
     | { kind: 'host-create'; reservedSessionId: string }
     | { kind: 'host-exact'; exactSessionId: string }
+    | AgentTaskScopeSource
   >
 }
 
@@ -138,7 +155,10 @@ export class AgentRouteSessionScopeAuthority {
   private readonly listeners = new Set<(owner: string, sessionId: string, code: AgentRouteFenceCode) => void>()
   private readonly approvalAuthorityLeases = new Map<string, ApprovalAuthorityLeaseRecord>()
 
-  constructor(private readonly options: AgentRouteSessionScopeOptions) {}
+  readonly tasks: AgentTaskPermissionScopeAuthority
+  constructor(private readonly options: AgentRouteSessionScopeOptions) {
+    this.tasks = new AgentTaskPermissionScopeAuthority(options)
+  }
 
   install(owner: PluginOwnerIdentity, declarations: readonly AgentRuntimePermissionDeclaration[]): void {
     if (this.declarations.has(owner.pluginId)) this.fence(owner.pluginId, 'plugin-generation-replaced')
@@ -150,6 +170,7 @@ export class AgentRouteSessionScopeAuthority {
       names.add(declaration.name)
     }
     const normalized = declarations.map(item => this.validate(owner, item))
+    this.tasks.install(owner, normalized.map(item => item.declaration))
     this.declarations.set(owner.pluginId, normalized)
     this.generations.set(owner.pluginId, owner.generation)
   }
@@ -215,6 +236,7 @@ export class AgentRouteSessionScopeAuthority {
   uninstall(owner: PluginOwnerIdentity): void {
     if (this.generations.get(owner.pluginId) !== owner.generation) return
     this.fence(owner.pluginId, 'plugin-generation-replaced')
+    this.tasks.uninstall(owner)
     this.declarations.delete(owner.pluginId)
     this.generations.delete(owner.pluginId)
   }
@@ -261,6 +283,13 @@ export class AgentRouteSessionScopeAuthority {
     if (declaration === undefined) return false
     if (sessionId === undefined) return false
     if (!validSessionId(sessionId)) return false
+    if (capability === 'approvals.request' && this.tasks.hasSource(owner, sessionId)) {
+      return await this.tasks.authorizeRequest(owner, sessionId)
+    }
+    if (
+      (declaration.scope.task !== undefined && declaration.scope.sessionIds === undefined)
+      || (declaration.scope.taskRequester !== undefined && declaration.scope.authorityRequester === undefined)
+    ) return false
     const scope = declaration.scope.sessionIds
     if (scope === undefined) {
       const source: AgentPermissionPlanV4['scopeSource'] = capability === 'agents.create'
@@ -334,7 +363,9 @@ export class AgentRouteSessionScopeAuthority {
   async mintApprovalAuthorityLease(
     owner: PluginOwnerIdentity,
     request: AgentApprovalAuthorityRouteRequest,
-  ): Promise<PluginApprovalAuthorityLeaseV8 | undefined> {
+    current: () => boolean = () => false,
+  ): Promise<PluginApprovalAuthorityLeaseV8 | AgentTaskApprovalAuthorityLeaseV1 | undefined> {
+    if (this.tasks.hasSource(owner, request.requester.sessionId)) return await this.tasks.mint(owner, request, current)
     const installed = this.declarations.get(owner.pluginId)?.find(item => item.declaration.name === 'approvals.answer')
     const declaration = installed?.owner.generation === owner.generation ? installed.declaration : undefined
     const scope = declaration?.scope.authorityRequester
@@ -398,15 +429,19 @@ export class AgentRouteSessionScopeAuthority {
   requiresApprovalAuthorityLease(owner: PluginOwnerIdentity): boolean {
     const installed = this.declarations.get(owner.pluginId)?.find(item => item.declaration.name === 'approvals.answer')
     return installed?.owner.generation === owner.generation
-      && installed.declaration.scope.authorityRequester !== undefined
+      && (installed.declaration.scope.authorityRequester !== undefined
+        || installed.declaration.scope.taskRequester !== undefined)
   }
 
   approvalAuthorityLeaseActive(
     owner: PluginOwnerIdentity,
-    lease: PluginApprovalAuthorityLeaseV8,
+    lease: PluginApprovalAuthorityLeaseV8 | AgentTaskApprovalAuthorityLeaseV1,
     requester: ApprovalAgentBinding,
     authority: ApprovalAgentBinding,
   ): boolean {
+    if (lease.contract === 'cordisx.agent-task-approval-authority-lease/v1') {
+      return this.tasks.leaseActive(owner, lease, requester, authority)
+    }
     const stored = this.approvalAuthorityLeases.get(lease.leaseId)
     if (
       stored === undefined || stored.lease !== lease || !sameOwner(stored.owner, owner)
@@ -420,11 +455,24 @@ export class AgentRouteSessionScopeAuthority {
       && active.params[stored.routeParam] === lease.correlation.route.sessionId
   }
 
-  releaseApprovalAuthorityLease(lease: PluginApprovalAuthorityLeaseV8): void {
+  releaseApprovalAuthorityLease(lease: PluginApprovalAuthorityLeaseV8 | AgentTaskApprovalAuthorityLeaseV1): void {
+    if (lease.contract === 'cordisx.agent-task-approval-authority-lease/v1') {
+      this.tasks.release(lease)
+      return
+    }
     this.approvalAuthorityLeases.delete(lease.leaseId)
   }
 
   private validate(owner: PluginOwnerIdentity, declaration: AgentRuntimePermissionDeclaration): InstalledDeclaration {
+    const task = declaration.scope.task
+    const taskRequester = declaration.scope.taskRequester
+    for (const [selector, capability] of [[task, 'approvals.request'], [taskRequester, 'approvals.answer']] as const) {
+      if (
+        selector !== undefined
+        && (declaration.manifestVersion !== 12 || declaration.name !== capability || declaration.required
+          || selector.kind !== 'agent-task-command' || !/^[a-z0-9][a-z0-9._-]{0,95}$/u.test(selector.commandId))
+      ) throw new Error('Invalid task permission declaration')
+    }
     const scope = declaration.scope.sessionIds
     if (isBinding(scope)) {
       if (
@@ -442,7 +490,9 @@ export class AgentRouteSessionScopeAuthority {
     }
     const authorityRequester = declaration.scope.authorityRequester
     if (
-      authorityRequester !== undefined && (declaration.manifestVersion !== 8 || declaration.name !== 'approvals.answer'
+      authorityRequester !== undefined
+      && ((declaration.manifestVersion !== 8 && declaration.manifestVersion !== 12)
+        || declaration.name !== 'approvals.answer'
         || declaration.required || authorityRequester.kind !== 'approval-authority-requester-route'
         || !localId.test(authorityRequester.requester.routeId) || authorityRequester.requester.param !== 'sessionId')
     ) {
@@ -453,6 +503,8 @@ export class AgentRouteSessionScopeAuthority {
       declaration: Object.freeze({
         ...declaration,
         scope: Object.freeze({
+          ...(task === undefined ? {} : { task: Object.freeze({ ...task }) }),
+          ...(taskRequester === undefined ? {} : { taskRequester: Object.freeze({ ...taskRequester }) }),
           ...(scope === undefined
             ? {}
             : { sessionIds: Array.isArray(scope) ? Object.freeze([...scope]) : Object.freeze({ ...scope }) }),
@@ -484,7 +536,11 @@ export class AgentRouteSessionScopeAuthority {
         ? scopeSource.routeInstanceId
         : scopeSource.kind === 'host-create'
         ? `reserved:${scopeSource.reservedSessionId}`
-        : `exact:${scopeSource.exactSessionId}`,
+        : scopeSource.kind === 'host-exact'
+        ? `exact:${scopeSource.exactSessionId}`
+        : scopeSource.kind === 'host-agent-task'
+        ? scopeSource.operationId
+        : scopeSource.lease.routingId,
       routeId: scopeSource.kind === 'host-route' ? scopeSource.routeId : scopeSource.kind,
       scopeSource: Object.freeze(scopeSource),
     })
@@ -504,6 +560,7 @@ export class AgentRouteSessionScopeAuthority {
   }
 
   private fence(owner: string, code: Exclude<AgentRouteFenceCode, 'route-replaced'>): void {
+    this.tasks.revoke(owner)
     for (const [key, record] of this.leases) {
       if (record.lease.owner.pluginId !== owner) continue
       this.leases.delete(key)
@@ -537,10 +594,10 @@ function routeHasParam(path: string, param: string): boolean {
 function validRouteBinding(
   route: AgentRouteDefinition,
   scope: AgentRouteScopeBinding,
-  manifestVersion: 5 | 6 | 8 | undefined,
+  manifestVersion: 5 | 6 | 8 | 12 | undefined,
 ): boolean {
   return routeHasParam(route.path, scope.param)
-    && ((manifestVersion !== 6 && manifestVersion !== 8) || route.schemaVersion === 2)
+    && ((manifestVersion !== 6 && manifestVersion !== 8 && manifestVersion !== 12) || route.schemaVersion === 2)
 }
 function sameOwner(left: PluginOwnerIdentity, right: PluginOwnerIdentity): boolean {
   return left.pluginId === right.pluginId && left.generation === right.generation

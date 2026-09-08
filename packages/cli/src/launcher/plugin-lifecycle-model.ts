@@ -444,10 +444,12 @@ export function authorizationPlanV4(
   if (
     staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
     && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8
+    && staged.manifest.runtimeManifest.schemaVersion !== 9 && staged.manifest.runtimeManifest.schemaVersion !== 11
+    && staged.manifest.runtimeManifest.schemaVersion !== 12 && staged.manifest.runtimeManifest.schemaVersion !== 10
   ) {
     throw new LifecycleFailure(
       'permission-denied',
-      'Permission V4 review requires manifest-v5, manifest-v6, manifest-v7, or manifest-v8.',
+      'Permission V4 review requires manifest-v5, manifest-v6, manifest-v7 through manifest-v12.',
     )
   }
   const catalog = new CapabilityRiskCatalog()
@@ -476,7 +478,8 @@ export function isLegacyPermissionDeclarationV4(
 ): boolean {
   return !(declaration.name.startsWith('agents.')
     || declaration.name.startsWith('sessions.')
-    || declaration.name.startsWith('approvals.'))
+    || declaration.name.startsWith('approvals.') || declaration.name === 'usage.read'
+    || declaration.name === 'ui.extension-points.interact' || declaration.name === 'ui.extension-points.render')
 }
 
 export function validateDecisionV2(

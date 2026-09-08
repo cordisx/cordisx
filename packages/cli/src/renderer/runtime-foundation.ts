@@ -87,6 +87,7 @@ import {
   type AgentActiveRoute,
   AgentRouteSessionScopeAuthority,
   type AgentRuntimePermissionDeclaration,
+  agentRuntimePermissionManifestVersion,
 } from './agent-route-session-scope.js'
 import {
   type CordisXBoundConnectorClient,
@@ -450,8 +451,8 @@ export const createRuntimeActualAgentRuntimeRoute = (runtimeScope: RuntimeClosur
   })
 }
 
-export const createRuntimeAgentRouteScopes = (runtimeScope: RuntimeClosureScope): AgentRouteSessionScopeAuthority =>
-  new AgentRouteSessionScopeAuthority({
+export const createRuntimeAgentRouteScopes = (runtimeScope: RuntimeClosureScope): AgentRouteSessionScopeAuthority => {
+  const authority = new AgentRouteSessionScopeAuthority({
     activeRoute: (): AgentActiveRoute | undefined => {
       const supplementalOwner = runtimeScope.scenarioSessionScopeAuthority!?.supplementalOwner()
       if (supplementalOwner !== undefined) {
@@ -509,6 +510,17 @@ export const createRuntimeAgentRouteScopes = (runtimeScope: RuntimeClosureScope)
     },
     connectionGeneration: () => runtimeScope.agentRuntimeConnection()!.generation,
   })
+  runtimeScope.broker()!.setAgentTaskScopeValidator((identity, capability, sessionId, source) => {
+    const owner = source.kind === 'host-agent-task' ? source.owner : source.lease.taskSource.owner
+    const controller = runtimeScope.controllerForAgentOwner()!(owner)
+    return controller?.identity.source === identity.source && controller?.identity.id === identity.id
+      && authority.tasks.validate(owner, capability, sessionId, source)
+  }, async (_identity, capability, sessionId, source) => {
+    const owner = source.kind === 'host-agent-task' ? source.owner : source.lease.taskSource.owner
+    return await authority.tasks.readback(owner, capability, sessionId, source)
+  })
+  return authority
+}
 
 export const createRuntimeReconcileAgentRuntimeRoute = (runtimeScope: RuntimeClosureScope): void => {
   if (runtimeScope.agentRuntimeRouteDisposed || runtimeScope.reconcilingAgentRuntimeRoute) {
@@ -812,16 +824,7 @@ export const createRuntimeRegisterController = (
         transactionEpoch: controller.generationView.transactionEpoch,
       }),
     }, controller.generationView)
-    const agentRuntimeManifestVersion =
-      controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6
-        || controller.manifest.schemaVersion === 7 || controller.manifest.schemaVersion === 8
-        || controller.manifest.schemaVersion === 9
-        ? controller.manifest.schemaVersion === 7
-          ? 6
-          : controller.manifest.schemaVersion === 9
-          ? 8
-          : controller.manifest.schemaVersion
-        : undefined
+    const agentRuntimeManifestVersion = agentRuntimePermissionManifestVersion(controller.manifest.schemaVersion)
     const agentRuntimeDeclarations = agentRuntimeManifestVersion !== undefined
       ? controller.manifest.capabilities
         .filter((

@@ -1,3 +1,10 @@
+import { projectSidebarDisclosure } from './sidebar-disclosure.js'
+import {
+  projectSidebarGroupAppearance,
+  resolveSidebarCollectionsSeat,
+  type SidebarCollectionsSeat,
+} from './sidebar-collections.js'
+import { projectSidebarAppearance } from './sidebar-appearance.js'
 import { StructuredSurfaceInteractions } from './renderer-interactions.js'
 import {
   currentSessionId,
@@ -317,21 +324,56 @@ class StructuredSurfaceRenderer extends StructuredSurfaceInteractions {
     const active = snapshots.filter(item => item.visible && item.authorized && item.valid && !item.pending)
     let renderedReasoningId: string | undefined
     let renderedBackdropId: string | undefined
-    if (sidebarNavigation !== undefined) {
+    const navigationItems = active.filter(item => item.surface === 'sidebar.navigation.items')
+    const collectionGroups = new Set(this.slots.navigationCollectionGroupsSnapshot().map(group => group.surfaceGroup))
+    const recentTasks = playground ? this.document.querySelector<HTMLElement>('[data-playground-recent-tasks]') : null
+    const collectionsSeat: SidebarCollectionsSeat | undefined = managerOverlay ? undefined : playground
+      ? sidebarNavigation?.parentElement === null || sidebarNavigation === undefined ? undefined : {
+        key: 'sidebar.collections',
+        parent: recentTasks?.parentElement ?? sidebarNavigation.parentElement!,
+        before: recentTasks ?? nextNativeSibling(sidebarNavigation),
+        className: 'cordisx-sidebar-navigation cordisx-sidebar-collections',
+      }
+      : sidebar === undefined
+      ? undefined
+      : resolveSidebarCollectionsSeat(this.document, sidebar)
+    const renderedNavigationIds = new Set(
+      navigationItems.filter(item =>
+        collectionGroups.has(item.group) ? collectionsSeat !== undefined : sidebarNavigation !== undefined
+      ).map(item => item.qualifiedId),
+    )
+    if (navigationItems.length > 0 && (sidebarNavigation !== undefined || collectionsSeat !== undefined)) {
       availableSurfaces.add('sidebar.navigation.items')
-      const items = active.filter(item => item.surface === 'sidebar.navigation.items')
-      if (items.length > 0) {
-        const root = this.placeRoot({
-          key: 'sidebar.navigation',
-          parent: sidebarNavigation,
-          before: null,
-          className: 'cordisx-sidebar-navigation',
-        }, usedRoots)
-        const signature = this.navigationContentSignature(items)
-        if (rebuild || root.childElementCount === 0 || signature !== this.navigationRenderSignature) {
-          this.renderNavigation(root, items, nextSites, nativeButtons(sidebarNavigation)[0])
-          this.navigationRenderSignature = signature
-        }
+      const root = sidebarNavigation === undefined ? undefined : this.placeRoot({
+        key: 'sidebar.navigation',
+        parent: sidebarNavigation,
+        before: null,
+        className: 'cordisx-sidebar-navigation',
+      }, usedRoots)
+      const collectionRoot = collectionsSeat === undefined || !navigationItems.some(item =>
+          collectionGroups.has(item.group)
+        )
+        ? undefined
+        : this.placeRoot(collectionsSeat, usedRoots)
+      if (root !== undefined) projectSidebarAppearance(root, this.adapterIdentity, nativeButtons(sidebarNavigation!)[0])
+      if (collectionRoot !== undefined && collectionsSeat !== undefined) {
+        projectSidebarAppearance(collectionRoot, this.adapterIdentity, collectionsSeat.row)
+        if (!playground) projectSidebarGroupAppearance(collectionRoot, collectionsSeat)
+      }
+      const signature = JSON.stringify([
+        root !== undefined,
+        collectionRoot !== undefined,
+        this.navigationContentSignature(navigationItems),
+      ])
+      if (
+        rebuild || root?.childElementCount === 0 || collectionRoot?.childElementCount === 0
+        || signature !== this.navigationRenderSignature
+      ) {
+        this.renderNavigation(root, navigationItems, nextSites, collectionRoot)
+        this.navigationRenderSignature = signature
+      }
+      if (collectionRoot !== undefined && !playground) {
+        projectSidebarDisclosure(collectionRoot, collectionsSeat?.heading)
       }
     }
     if (sidebarFooterControl?.parentElement !== null && sidebarFooterControl?.parentElement !== undefined) {
@@ -545,7 +587,7 @@ class StructuredSurfaceRenderer extends StructuredSurfaceInteractions {
       project()
     }
     this.publishSelectedNavigationActions()
-    if (!usedRoots.has('sidebar.navigation')) {
+    if (!usedRoots.has('sidebar.navigation') && !usedRoots.has('sidebar.collections')) {
       this.disposeNavigationLeadingVisuals()
       this.disposeNavigationActions()
       this.navigationRenderSignature = undefined
@@ -556,6 +598,7 @@ class StructuredSurfaceRenderer extends StructuredSurfaceInteractions {
       }
       const rendered = snapshot.visible && snapshot.authorized && snapshot.valid && !snapshot.pending
         && availableSurfaces.has(snapshot.surface)
+        && (snapshot.surface !== 'sidebar.navigation.items' || renderedNavigationIds.has(snapshot.qualifiedId))
         && (snapshot.surface !== 'composer.reasoning-intensity' || snapshot.qualifiedId === renderedReasoningId)
         && (snapshot.surface !== 'session.backdrop' || snapshot.qualifiedId === renderedBackdropId)
       const renderToken = this.slots.registry.renderToken(snapshot.surface, snapshot.qualifiedId)

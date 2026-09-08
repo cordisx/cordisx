@@ -1,5 +1,8 @@
-import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, normalizeUsageManifestV11 } from '../../usage-permissions.js'
-import type { CordisXPluginManifestV11 } from '../../usage-permissions.js'
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V11,
+  type CordisXPluginManifestV11,
+  normalizeUsageManifestV11,
+} from '../../usage-permissions.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,

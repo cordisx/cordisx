@@ -96,6 +96,37 @@ function copySessionStorage(source: Storage, target: Storage): void {
 }
 
 describe('CodexRouterHistoryAdapter', () => {
+  it('uses native home for plugin main pages so native task active state follows one history', async () => {
+    const dom = new JSDOM('', { url: 'https://codex.local/index.html' })
+    const native = new FakeCodexNavigator('/local/previous-task', { native: true })
+    mountNavigator(dom, native)
+    const reactListener = vi.fn()
+    native.listen(reactListener)
+    const adapter = new CodexRouterHistoryAdapter(dom.window as unknown as Window)
+    const nativeTaskActive = () => native.location.pathname === '/local/previous-task'
+    expect(nativeTaskActive()).toBe(true)
+    adapter.push(route('room-one'))
+    expect(native.location.pathname).toBe('/')
+    expect(nativeTaskActive()).toBe(false)
+    expect(adapter.snapshot().entry).toEqual(route('room-one'))
+    expect(dom.window.history.state.__cordisxRouteReloadV1.pathname).toBe('/')
+    await adapter.go(-1)
+    expect(nativeTaskActive()).toBe(true)
+    expect(adapter.snapshot().entry).toBeUndefined()
+    await adapter.go(1)
+    expect(nativeTaskActive()).toBe(false)
+    expect(adapter.snapshot().entry).toEqual(route('room-one'))
+    adapter.replace(route('room-two'))
+    expect(native.location.pathname).toBe('/')
+    expect(native.entries[0]).toMatchObject({ pathname: '/local/previous-task', state: { native: true } })
+    expect(native.listener).toBe(reactListener)
+    adapter.navigateHost('app://-/local/previous-task')
+    expect(nativeTaskActive()).toBe(true)
+    expect(adapter.snapshot().entry).toBeUndefined()
+    adapter.dispose()
+    dom.window.close()
+  })
+
   it('routes an Agent detail through the existing native navigator and restores the Room on native Back', async () => {
     const dom = new JSDOM('', { url: 'https://codex.local/index.html' })
     const native = new FakeCodexNavigator('/local/thread-one', { native: true })
@@ -191,7 +222,7 @@ describe('CodexRouterHistoryAdapter', () => {
       index: 1,
       entry: { routeId: 'chatroom:room', params: { roomId: 'one' } },
     })
-    expect(navigator.location).toMatchObject({ pathname: '/local/thread-one' })
+    expect(navigator.location).toMatchObject({ pathname: '/' })
     expect(navigator.location.state).toMatchObject({ native: true, __cordisxRouteV1: { params: { roomId: 'one' } } })
     expect(dom.window.history.length).toBe(1)
     expect(reactUpdates).toBe(1)
@@ -272,12 +303,12 @@ describe('CodexRouterHistoryAdapter', () => {
     first.push(route('one'))
     first.push(route('two'))
     expect(dom.window.history.state.__cordisxRouteReloadV1).toMatchObject({
-      pathname: '/local/thread-one',
+      pathname: '/',
       entry: { params: { roomId: 'two' } },
     })
     first.dispose()
 
-    const reloadedNavigator = new FakeCodexNavigator('/local/thread-one')
+    const reloadedNavigator = new FakeCodexNavigator('/')
     mountNavigator(dom, reloadedNavigator)
     let reactUpdates = 0
     reloadedNavigator.listen(() => {

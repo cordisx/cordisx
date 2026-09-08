@@ -1,3 +1,4 @@
+import { normalizeTaskManifest } from '../packages/cli/src/agent-task-permission-manifest.js'
 import { describe, expect, it, vi } from 'vitest'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
@@ -81,7 +82,7 @@ describe('Composer visual authority', () => {
       }
     }
   })
-  it('serializes point prompts, accepts long HMR generations, and revokes on unload', async () => {
+  it.each([10, 11, 12])('serializes point prompts and revokes on unload for manifest v%s', async version => {
     const seen: string[] = []
     let concurrent = 0, maximum = 0
     const broker = new PermissionBroker(
@@ -122,7 +123,13 @@ describe('Composer visual authority', () => {
       },
     )
     const generation = 'vite-'.repeat(15)
-    const unregister = broker.register(identity, manifest(), { pluginId: identity.id, moduleGeneration: generation })
+    const candidate = version === 10 ? manifest() : normalizeTaskManifest({
+      ...manifest(),
+      schemaVersion: version,
+      $schema:
+        `https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v${version}.schema.json`,
+    }, identity.id)
+    const unregister = broker.register(identity, candidate, { pluginId: identity.id, moduleGeneration: generation })
     try {
       const authorities = points.map(point => broker.visualAuthority(identity, generation, point, () => true))
       expect(authorities.map(item => item.render())).toEqual([false, false])

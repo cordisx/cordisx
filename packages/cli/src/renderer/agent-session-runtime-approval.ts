@@ -1,3 +1,5 @@
+import type { HostApprovalAuthorityLease } from './agent-session-runtime-types.js'
+import { runApprovalInvocation } from './approval-invocation.js'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   Agent,
@@ -257,13 +259,23 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
       && this.current(record)
     ) {
       try {
-        const proposed = await answerer.answerer(question)
-        if (
+        const proposed = await runApprovalInvocation(
+          answerer.controllers,
+          request.signal,
+          signal => answerer.answerer(question, signal),
+          record.approvalControllers,
+        )
+        if (request.signal?.aborted) outcome = 'cancelled'
+        else if (
+          answerer.closed !== undefined || !this.current(record)
+          || this.answerers.get(this.answererKey(record)) !== answerer
+        ) outcome = 'unavailable'
+        else if (
           proposed === 'allowed-once' || proposed === 'rejected' || proposed === 'cancelled'
           || proposed === 'unavailable'
         ) outcome = proposed
       } catch {
-        outcome = 'unavailable'
+        outcome = request.signal?.aborted ? 'cancelled' : 'unavailable'
       }
     }
     if (!await this.append(record.session, 'approval/decided', { id, outcome })) outcome = 'unavailable'
@@ -284,7 +296,7 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
     }
     const key = this.answererKey(record)
     if (this.answerers.has(key)) throw new Error('Approval answerer is already registered')
-    const entry: AnswererRecord = { owner: clone(owner), answerer }
+    const entry: AnswererRecord = { owner: clone(owner), answerer, controllers: new Set() }
     this.answerers.set(key, entry)
     const handle = Object.freeze({
       agentId: record.id,
@@ -300,7 +312,7 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
   async requestApprovalV2(
     owner: PluginOwnerIdentity,
     request: ApprovalRequestV2,
-    authorityLease?: PluginApprovalAuthorityLeaseV8,
+    authorityLease?: HostApprovalAuthorityLease,
   ): Promise<ApprovalDecisionV2> {
     if (
       !opaque(request.toolName) || request.callId !== undefined && !opaque(request.callId)
@@ -363,10 +375,26 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
       && this.current(requester) && this.current(authority)
     ) {
       try {
-        const proposed = await answerer.answerer(question)
+        const proposed = await runApprovalInvocation(
+          answerer.controllers,
+          request.signal,
+          signal => answerer.answerer(question, signal),
+          requester.approvalControllers,
+        )
+        const taskLeaseCurrent = authorityLease?.contract !== 'cordisx.agent-task-approval-authority-lease/v1'
+          || await this.options.revalidateApprovalAuthorityLease?.(answerer.owner, authorityLease) === true
         if (
-          !this.current(requester) || !this.current(authority)
+          !taskLeaseCurrent || !this.current(requester) || !this.current(authority)
           || answerer.closed !== undefined || this.authorityAnswerers.get(this.answererKey(authority)) !== answerer
+        ) outcome = 'unavailable'
+        else if (
+          authorityLease?.contract === 'cordisx.agent-task-approval-authority-lease/v1'
+          && this.options.approvalAuthorityLeaseActive?.(
+              answerer.owner,
+              authorityLease,
+              this.approvalBinding(requester),
+              this.approvalBinding(authority),
+            ) !== true
         ) outcome = 'unavailable'
         else if (request.signal?.aborted === true) outcome = 'cancelled'
         else if (
@@ -374,10 +402,22 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
           || proposed === 'unavailable'
         ) outcome = proposed
       } catch {
-        outcome = 'unavailable'
+        outcome = request.signal?.aborted ? 'cancelled' : 'unavailable'
       }
     }
     if (!await this.append(requester.session, 'approval/decided', { id, outcome })) outcome = 'unavailable'
+    if (
+      authorityLease?.contract === 'cordisx.agent-task-approval-authority-lease/v1' && (
+        !await this.options.revalidateApprovalAuthorityLease?.(owner, authorityLease)
+        || this.options.approvalAuthorityLeaseActive?.(
+            owner,
+            authorityLease,
+            this.approvalBinding(requester),
+            this.approvalBinding(authority),
+          ) !== true
+        || !this.current(requester) || !this.current(authority) || request.signal?.aborted
+      )
+    ) outcome = 'unavailable'
     return this.approvalDecisionV2(requester, authority, id, outcome)
   }
 
@@ -395,7 +435,7 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
     }
     const key = this.answererKey(authority)
     if (this.authorityAnswerers.has(key)) throw new Error('Approval authority answerer is already registered')
-    const entry: AuthorityAnswererRecord = { owner: clone(owner), answerer }
+    const entry: AuthorityAnswererRecord = { owner: clone(owner), answerer, controllers: new Set() }
     this.authorityAnswerers.set(key, entry)
     const handle = Object.freeze({
       authority: this.approvalBinding(authority),
@@ -495,7 +535,7 @@ export abstract class AgentSessionRuntimeApproval extends AgentSessionRuntimeCor
     const lifecycle = this.options.pageAdmissionBindings
     if (
       this.disposed || issued === undefined || lifecycle === undefined || typeof requestMessage?.text !== 'string'
-      || requestMessage.text.length < 1 || requestMessage.text.length > 65_536
+      || requestMessage.text.length < 1 || [...requestMessage.text].length > 65_536
     ) {
       return { status: 'denied', code: 'origin-denied' }
     }

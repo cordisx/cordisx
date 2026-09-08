@@ -1,3 +1,10 @@
+import type { AgentTaskContext, AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
+import type { AgentTaskRecord } from '../agent-task-record.js'
+import type { TaskContextResolution } from '../launcher/agent-task-context.js'
+import {
+  type HistoricalAgentDetailProvider,
+  NativeSessionDetailReferences,
+} from './native-session-detail-references.js'
 import type { AgentSetup } from '@cordisx/protocol/agents/v1'
 import type { PluginOwnerIdentity } from '@cordisx/protocol/sessions/v1'
 import type { CordisXPersistedSession, CordisXSessionEventPersistence } from './agent-session-runtime.js'
@@ -7,7 +14,14 @@ import { beginAgentToolRecovery } from './plugin-agent-tools.js'
 export interface NativeSessionRecoveryStore {
   saveBinding(
     owner: PluginOwnerIdentity,
-    input: { sessionId: string; threadId: string; setup?: AgentSetup; completedTurns: number },
+    input: {
+      sessionId: string
+      threadId: string
+      setup?: AgentSetup
+      completedTurns: number
+      context?: AgentTaskResolvedContext
+      requiredTaskOperationId?: string
+    },
   ): Promise<void>
   resolveBinding(
     owner: PluginOwnerIdentity,
@@ -24,7 +38,9 @@ let current: NativeAgentSessionPersistence | undefined
 /** Reuses the runtime's authenticated owner-document transport, never plugin-supplied ownership. */
 export class NativeAgentSessionPersistence implements CordisXSessionEventPersistence, NativeSessionRecoveryStore {
   private owners = new Map<string, OwnerClient>()
+  private readonly requiredTasks = new Set<string>()
   private sessions = new Map<string, OwnerDocumentPrincipalBinding>()
+  readonly details = new NativeSessionDetailReferences()
   private closed = false
   constructor(
     private readonly bridge: BrowserOwnerDocumentBridge,
@@ -36,7 +52,18 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
   register(owner: PluginOwnerIdentity, client: OwnerClient): () => void {
     const key = ownerKey(owner)
     this.owners.set(key, client)
+    const releaseDetails = this.details.register(owner, {
+      active: () => !this.closed && this.owners.get(key) === client && client.active(),
+      read: async sessionId => {
+        const value = await this.call(client.principal, 'native-session-detail', { sessionId }) as {
+          threadId: string
+          revision: number
+        } | null
+        return value ?? undefined
+      },
+    })
     return () => {
+      releaseDetails()
       if (this.owners.get(key) === client) this.owners.delete(key)
     }
   }
@@ -54,11 +81,13 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
     for (const principal of this.principals) {
       const records = await this.call(principal, 'native-session-list', {}) as readonly {
         sessionId: string
+        requiredTaskOperationId?: string
         session?: CordisXPersistedSession
       }[]
       for (const record of records) {
         if (this.sessions.has(record.sessionId)) throw new Error('native Session has ambiguous owner')
         this.sessions.set(record.sessionId, principal)
+        if (record.requiredTaskOperationId !== undefined) this.requiredTasks.add(record.sessionId)
         if (record.session !== undefined) sessions.push(record.session)
       }
     }
@@ -66,10 +95,18 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
   }
   async saveBinding(
     owner: PluginOwnerIdentity,
-    input: { sessionId: string; threadId: string; setup?: AgentSetup; completedTurns: number },
+    input: {
+      sessionId: string
+      threadId: string
+      setup?: AgentSetup
+      completedTurns: number
+      context?: AgentTaskResolvedContext
+      requiredTaskOperationId?: string
+    },
   ): Promise<void> {
     const client = this.owner(owner)
     await this.call(client.principal, 'native-session-save-binding', input)
+    if (input.requiredTaskOperationId !== undefined) this.requiredTasks.add(input.sessionId)
     this.sessions.set(input.sessionId, client.principal)
   }
   async resolveBinding(
@@ -87,6 +124,15 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
     this.sessions.set(input.sessionId, client.principal)
     return result
   }
+  async taskCall(owner: PluginOwnerIdentity, operation: string, input: object): Promise<unknown> {
+    return await this.call(this.owner(owner).principal, `native-session-task-${operation}`, input)
+  }
+  isRequiredTask(owner: PluginOwnerIdentity, sessionId: string): boolean {
+    if (!this.requiredTasks.has(sessionId)) return false
+    const client = this.owners.get(ownerKey(owner))
+    return client !== undefined && client.active() && this.sessions.get(sessionId)?.source === client.principal.source
+      && this.sessions.get(sessionId)?.pluginId === client.principal.pluginId
+  }
   private principal(sessionId: string): OwnerDocumentPrincipalBinding {
     const principal = this.sessions.get(sessionId)
     if (principal === undefined) throw new Error('native Session mapping must be committed before its ledger')
@@ -103,6 +149,7 @@ export class NativeAgentSessionPersistence implements CordisXSessionEventPersist
   }
   dispose(): void {
     this.closed = true
+    this.details.dispose()
     this.owners.clear()
     this.sessions.clear()
     if (current === this) current = undefined
@@ -134,3 +181,43 @@ export const nativeSessionRecoveryStore: NativeSessionRecoveryStore = {
   saveBinding: saveNativeSessionBinding,
   resolveBinding: resolveNativeSessionBinding,
 }
+
+export function nativeAgentTaskClient(owner: PluginOwnerIdentity) {
+  const call = async (operation: string, input: object): Promise<unknown> => {
+    if (current === undefined) throw new Error('Native task persistence unavailable')
+    return await current.taskCall(owner, operation, input)
+  }
+  return {
+    store: {
+      recover: async (operationId: string): Promise<{ claimed: boolean; record: AgentTaskRecord }> =>
+        await call('recover', { operationId }) as { claimed: boolean; record: AgentTaskRecord },
+      load: async (operationId: string): Promise<AgentTaskRecord | undefined> =>
+        (await call('load', { operationId }) as AgentTaskRecord | null) ?? undefined,
+      claim: async (record: AgentTaskRecord): Promise<{ claimed: boolean; record: AgentTaskRecord }> =>
+        await call('claim', { operationId: record.operationId, record }) as {
+          claimed: boolean
+          record: AgentTaskRecord
+        },
+      save: async (record: AgentTaskRecord): Promise<void> => {
+        await call('save', { operationId: record.operationId, record })
+      },
+    },
+    resolveContext: async (context: AgentTaskContext): Promise<TaskContextResolution> =>
+      await call('context', { context }) as TaskContextResolution,
+  }
+}
+
+/** View-only detail capability path; never calls resolveBinding or starts recovery. */
+export const historicalNativeSessionDetails: HistoricalAgentDetailProvider = {
+  get: async (owner, sessionId, active) =>
+    current === undefined
+      ? { status: 'unavailable', code: 'unsupported' }
+      : await current.details.get(owner, sessionId, active),
+  open: async (owner, target, active, authorize, navigate) =>
+    current === undefined
+      ? { status: 'unavailable', code: 'unsupported' }
+      : await current.details.open(owner, target, active, authorize, navigate),
+}
+
+export const isNativeRequiredTaskSession = (owner: PluginOwnerIdentity, sessionId: string): boolean =>
+  current?.isRequiredTask(owner, sessionId) === true

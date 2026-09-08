@@ -31,11 +31,23 @@ try {
 
   const sourceSkillRoot = path.join(repositoryRoot, 'skills/cordisx-plugin-development')
   const bundledSkillRoot = path.join(repositoryRoot, 'packages/cli/dist/skills/cordisx-plugin-development')
+  const sourceMarkdownEditorStyle = path.join(
+    repositoryRoot,
+    'packages/cli/src/renderer/host-ui/public-markdown-editor.css',
+  )
+  const bundledMarkdownEditorStyle = path.join(
+    repositoryRoot,
+    'packages/cli/dist/src/renderer/host-ui/public-markdown-editor.css',
+  )
   const extractedRoot = path.join(packRoot, 'extracted')
   mkdirSync(extractedRoot)
   if (typeof packItem.filename !== 'string') throw new Error('npm pack did not report a tarball filename')
   await extractTar({ cwd: extractedRoot, file: path.join(packRoot, packItem.filename) })
   const tarballSkillRoot = path.join(extractedRoot, 'package/dist/skills/cordisx-plugin-development')
+  const tarballMarkdownEditorStyle = path.join(
+    extractedRoot,
+    'package/dist/src/renderer/host-ui/public-markdown-editor.css',
+  )
   const packagedSkillModule = await import(
     pathToFileURL(
       path.join(extractedRoot, 'package/dist/src/launcher/builtin-skill.js'),
@@ -56,6 +68,13 @@ try {
   })
   if (deployment.status !== 'installed' || deployment.effectiveHome !== deploymentHome) {
     throw new Error('tarball CordisX Skill deployment smoke returned an unexpected projection')
+  }
+  const markdownEditorStyle = readFileSync(sourceMarkdownEditorStyle)
+  if (!markdownEditorStyle.equals(readFileSync(bundledMarkdownEditorStyle))) {
+    throw new Error('bundled public Markdown editor stylesheet differs from source')
+  }
+  if (!markdownEditorStyle.equals(readFileSync(tarballMarkdownEditorStyle))) {
+    throw new Error('public Markdown editor stylesheet differs in the cordisx tarball')
   }
   const deployedMarker = JSON.parse(
     readFileSync(path.join(deployment.targetDir, packagedSkillModule.CORDISX_SKILL_MARKER_FILE), 'utf8'),
@@ -165,6 +184,7 @@ try {
       'dist/src/vite.js',
       'dist/src/vite.d.ts',
       'dist/src/launcher/builtin-skill.js',
+      'dist/src/renderer/host-ui/public-markdown-editor.css',
       'dist/skills/cordisx-plugin-development/SKILL.md',
       'dist/skills/cordisx-plugin-development/agents/openai.yaml',
       'dist/skills/cordisx-plugin-development/references/feasibility-assessment.md',

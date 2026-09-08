@@ -1,3 +1,5 @@
+import { resolveRouteLink } from './route-link-resolution.js'
+import type { RouteLinkResolutionResult } from '@cordisx/protocol/route-link-resolution/v1'
 import { Context, type Disposable, Service } from '@deepseek-ai/cordis'
 import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity } from '@cordisx/protocol/agents/v1'
@@ -404,6 +406,18 @@ export class NavigationRegistryBase {
     if (focus?.isConnected === true && !focus.matches(':disabled')) focus.focus()
   }
 
+  async resolveLink(
+    requestingOwner: string,
+    reference: CordisXRouteReference,
+    active: () => boolean = () => true,
+  ): Promise<RouteLinkResolutionResult> {
+    return resolveRouteLink(reference, {
+      disposed: this.disposed,
+      active,
+      deepLink: () => this.deepLink(requestingOwner, reference),
+    })
+  }
+
   protected async navigateNow(
     requestingOwner: string,
     reference: CordisXRouteReference,
@@ -557,7 +571,9 @@ export class NavigationRegistryBase {
       const bodyOnly = page.metadata.chrome === 'body-only'
       content.dataset.cordisxPageChromePolicy = agentConversation
         ? 'agent-conversation'
-        : bodyOnly ? 'body-only' : 'standard'
+        : bodyOnly
+        ? 'body-only'
+        : 'standard'
       if (!bodyOnly && !agentConversation) {
         const chrome = content.ownerDocument.createElement('header')
         chrome.dataset.cordisxPageChrome = 'true'
@@ -716,8 +732,9 @@ export class NavigationRegistryBase {
       }
       const body = content.ownerDocument.createElement('div')
       body.dataset.cordisxPageBody = 'true'
-      body.style.cssText =
-        `position:relative;flex:1;min-height:0;overflow:${agentConversation || bodyOnly ? 'hidden' : 'auto'}`
+      body.style.cssText = `position:relative;flex:1;min-height:0;overflow:${
+        agentConversation || bodyOnly ? 'hidden' : 'auto'
+      }`
       content.append(body)
       const controls = new HostPageControls(content.ownerDocument, content)
       effects.push(() => controls.dispose())
@@ -730,6 +747,10 @@ export class NavigationRegistryBase {
         outlet: name as CordisXOutletName,
         params: entry.params,
         navigation: {
+          resolveLink: reference =>
+            this.resolveLink(page.owner, reference, () =>
+              !abort.signal.aborted && !this.disposed
+              && (this.pages.visibility?.visible(entry.record.generation) ?? true)),
           navigate: reference => this.navigate(page.owner, reference),
           back: outletName => this.back(page.owner, outletName),
           close: outletName => this.close(page.owner, outletName),
@@ -959,6 +980,7 @@ export class NavigationRegistryBase {
 }
 
 export interface NavigationRegistryBase {
+  deepLink(requestingOwner: string, reference: CordisXRouteReference): string
   managerSettingsRoute(
     requestingOwner: string,
     id: string,

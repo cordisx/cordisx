@@ -1,3 +1,4 @@
+import type { AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   Agent,
@@ -417,6 +418,30 @@ export abstract class AgentSessionRuntimeCore {
     return Object.freeze({ pluginId: `${source}:${pluginId}`, generation })
   }
 
+  taskApprovalDeclarations(owner: PluginOwnerIdentity, commandId?: string): boolean {
+    return !this.disposed && (this.options.taskPermissions?.declares(owner, commandId) ?? false)
+  }
+
+  async authorizeTask(
+    owner: PluginOwnerIdentity,
+    operation: 'create' | 'read' | 'approval',
+    sessionId?: string,
+  ): Promise<boolean> {
+    const capabilities: AgentRuntimeCapability[] = operation === 'approval'
+      ? ['approvals.request', 'approvals.answer']
+      : operation === 'create'
+      ? ['agents.create', 'agents.message.submit', 'agents.get']
+      : ['agents.get']
+    if (this.disposed) return false
+    // Before a task has been looked up/reserved, check declaration availability only.
+    // The task transaction must still authorize the exact Session before any effect.
+    if (sessionId === undefined || operation === 'approval' && this.options.taskPermissions?.declares(owner) === true) {
+      return capabilities.every(capability => this.options.declares?.(owner, capability) === true)
+    }
+    for (const capability of capabilities) if (!await this.allowed(owner, capability, sessionId)) return false
+    return true
+  }
+
   async create(owner: PluginOwnerIdentity, input: AgentCreateOptions): Promise<AgentAcquireResult> {
     const sessionId = input.sessionId ?? `cx-session.${crypto.randomUUID()}`
     if (!opaque(sessionId)) throw new Error('Agent SessionId must be a non-empty opaque identifier')
@@ -436,6 +461,8 @@ export abstract class AgentSessionRuntimeCore {
     owner: PluginOwnerIdentity,
     input: EntityAgentCreateOptions,
     registry: EntityRegistry,
+    executionContext?: AgentTaskResolvedContext,
+    requiredTaskOperationId?: string,
   ): Promise<EntityAgentAcquireResult> {
     const sessionId = input.sessionId ?? `cx-session.${crypto.randomUUID()}`
     const envelope = {
@@ -504,6 +531,8 @@ export abstract class AgentSessionRuntimeCore {
       input.sessionId === undefined ? 'host' : 'caller',
       false,
       binding,
+      executionContext,
+      requiredTaskOperationId,
     )
     const result = this.entityAcquireResult(envelope, acquired, {
       identity: clone(target.entity.identity),
@@ -855,6 +884,8 @@ export abstract class AgentSessionRuntimeCore {
     source: 'host' | 'caller',
     resolvedLegacy?: boolean,
     entityBinding?: EntitySessionDefinitionBinding,
+    executionContext?: AgentTaskResolvedContext,
+    requiredTaskOperationId?: string,
   ): Promise<AgentAcquireResult>
 
   protected abstract replayEntityMutation(

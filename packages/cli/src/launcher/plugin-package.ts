@@ -1,4 +1,4 @@
-import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, normalizeUsageManifestV11 } from '../usage-permissions.js'
+import { normalizeModernPluginManifest } from './modern-plugin-manifest.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
   normalizeVisualManifestV10,
@@ -748,15 +748,7 @@ export async function stageResolvedPluginPackage(
       ? normalizePluginManifestV6(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
       : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 && runtime.schemaVersion === 7
       ? normalizePluginManifestV7(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
-      : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 && runtime.schemaVersion === 8
-      ? normalizePluginManifestV8(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
-      : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 && runtime.schemaVersion === 11
-      ? normalizeUsageManifestV11(runtime, resolved.packageManifest.pluginId)
-      : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V10 && runtime.schemaVersion === 10
-      ? normalizeVisualManifestV10(runtime, resolved.packageManifest.pluginId)
-      : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V9 && runtime.schemaVersion === 9
-      ? normalizePluginManifestV9(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
-      : undefined)
+      : normalizeModernPluginManifest(runtime, resolved.packageManifest.pluginId))
   if (runtimeManifest === undefined) {
     throw new Error(
       'the current renderer generation ABI does not accept this runtime plugin manifest schema',
@@ -926,15 +918,7 @@ export async function loadStagedPluginPackage(
         ? normalizePluginManifestV6(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
         : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 && candidate.schemaVersion === 7
         ? normalizePluginManifestV7(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
-        : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V8 && candidate.schemaVersion === 8
-        ? normalizePluginManifestV8(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
-        : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 && candidate.schemaVersion === 11
-        ? normalizeUsageManifestV11(rawRuntime, parsed.package.pluginId)
-        : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V10 && candidate.schemaVersion === 10
-        ? normalizeVisualManifestV10(rawRuntime, parsed.package.pluginId)
-        : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V9 && candidate.schemaVersion === 9
-        ? normalizePluginManifestV9(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
-        : undefined)
+        : normalizeModernPluginManifest(candidate, parsed.package.pluginId))
     if (runtime === undefined) throw new Error('stored runtime manifest schema is unsupported')
     manifest = {
       $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,

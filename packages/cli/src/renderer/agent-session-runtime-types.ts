@@ -1,3 +1,9 @@
+import type {
+  AgentTaskApprovalAuthorityLeaseV1,
+  AgentTaskPermissionSourceV1,
+} from '@cordisx/protocol/agent-task-permission/v1'
+export type HostApprovalAuthorityLease = PluginApprovalAuthorityLeaseV8 | AgentTaskApprovalAuthorityLeaseV1
+import type { AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   Agent,
@@ -316,6 +322,7 @@ export type SessionEventInput = {
 }[SessionEvent['type']]
 
 export interface CordisXDriverApprovalRequest {
+  readonly signal?: AbortSignal
   readonly sessionId: string
   readonly toolName: string
   readonly callId?: string
@@ -336,6 +343,8 @@ export interface CordisXDriverMessageClaimed {
 export interface CordisXPrivateAgentDriver {
   create(
     input: {
+      readonly requiredTaskOperationId?: string
+      readonly executionContext?: AgentTaskResolvedContext
       readonly sessionId: string
       readonly owner: PluginOwnerIdentity
       readonly options: AgentOptions
@@ -406,17 +415,30 @@ export interface CordisXAgentSessionRuntimeOptions {
     readonly registrationId: string
     readonly requester: ApprovalAgentBinding
     readonly authority: ApprovalAgentBinding
-  }) => Promise<PluginApprovalAuthorityLeaseV8 | undefined>
+  }, current: () => boolean) => Promise<HostApprovalAuthorityLease | undefined>
   readonly requiresApprovalAuthorityLease?: (owner: PluginOwnerIdentity) => boolean
   readonly approvalAuthorityLeaseActive?: (
     owner: PluginOwnerIdentity,
-    lease: PluginApprovalAuthorityLeaseV8,
+    lease: HostApprovalAuthorityLease,
     requester: ApprovalAgentBinding,
     authority: ApprovalAgentBinding,
   ) => boolean
-  readonly releaseApprovalAuthorityLease?: (lease: PluginApprovalAuthorityLeaseV8) => void
+  readonly revalidateApprovalAuthorityLease?: (
+    owner: PluginOwnerIdentity,
+    lease: HostApprovalAuthorityLease,
+  ) => Promise<boolean>
+  readonly releaseApprovalAuthorityLease?: (lease: HostApprovalAuthorityLease) => void
   /** Host-only manifest/route declaration check; it must not materialize permission authority. */
   readonly declares?: (owner: PluginOwnerIdentity, capability: AgentRuntimeCapability) => boolean
+  readonly taskPermissions?: {
+    declares(owner: PluginOwnerIdentity, commandId?: string): boolean
+    bind(
+      source: Omit<AgentTaskPermissionSourceV1, 'connectionGeneration'>,
+      requester: ApprovalAgentBinding,
+      current: () => boolean,
+      readback: () => Promise<boolean>,
+    ): () => void
+  }
   readonly now?: () => number
   readonly persistence?: CordisXSessionEventPersistence
   readonly initialSessions?: readonly CordisXPersistedSession[]
@@ -527,6 +549,8 @@ export interface CordisXAgentSessionRuntimeOptions {
     command: PageAdmissionCommand,
     route: AgentPageRoomRoute,
   ) => Promise<'accepted' | 'navigation-failed'>
+  /** Read-only historical detail capabilities; absent bridges remain unavailable. */
+  readonly historicalAgentDetails?: import('./native-session-detail-references.js').HistoricalAgentDetailProvider
   /** Host-owned only; resolves a current ref through the private navigator. */
   readonly navigateAgentDetail?: (detail: AgentDetailReference, sessionId: SessionId) => Promise<void> | void
 }
@@ -585,6 +609,7 @@ export interface SessionRecord {
 }
 
 export interface AgentRecord {
+  readonly approvalControllers: Set<AbortController>
   readonly id: string
   generation: number
   readonly owner: PluginOwnerIdentity
@@ -645,13 +670,21 @@ export interface AgentSubscriber {
 
 export interface AnswererRecord {
   readonly owner: PluginOwnerIdentity
-  readonly answerer: ApprovalAnswererV1
+  readonly controllers: Set<AbortController>
+  readonly answerer: (
+    question: Parameters<ApprovalAnswererV1>[0],
+    signal?: AbortSignal,
+  ) => ReturnType<ApprovalAnswererV1>
   closed?: 'disposed' | 'agent-replaced' | 'plugin-generation-replaced' | 'permission-revoked'
 }
 
 export interface AuthorityAnswererRecord {
   readonly owner: PluginOwnerIdentity
-  readonly answerer: ApprovalAnswererV2
+  readonly controllers: Set<AbortController>
+  readonly answerer: (
+    question: Parameters<ApprovalAnswererV2>[0],
+    signal?: AbortSignal,
+  ) => ReturnType<ApprovalAnswererV2>
   closed?:
     | 'disposed'
     | 'authority-replaced'

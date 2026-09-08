@@ -84,6 +84,23 @@ async function fixture(version: 11 | 12 | 13) {
 }
 
 describe('runtime exact-request package admission', () => {
+  it.each([
+    { providers: ['provider-a'], cwdRoots: ['/workspace'] },
+    { runtime: 'exact-request' },
+  ])('rejects duplicate names across static and exact branches: %j', scope => {
+    expect(() =>
+      normalizePluginManifestV13({
+        $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,
+        schemaVersion: 13,
+        id: 'runtime-exact',
+        services: [],
+        capabilities: [
+          { name: 'tasks.create', required: false, scope },
+          { name: 'tasks.create', required: false, scope: { runtime: 'exact-request' } },
+        ],
+      }, 'runtime-exact')
+    ).toThrow('Duplicate or invalid capability')
+  })
   for (const version of [11, 12, 13] as const) {
     it(`admits formal package and manifest v${version} without rewriting its schema`, async () => {
       const { source, homeDir } = await fixture(version)

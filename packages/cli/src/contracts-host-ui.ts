@@ -1,3 +1,4 @@
+import type { RouteLinkResolutionResult } from '@cordisx/protocol/route-link-resolution/v1'
 import type { ExtensionPointVisualPresentationV1 } from '@cordisx/protocol/extension-point-visual/v1'
 import type { Disposable, Effect } from '@deepseek-ai/cordis'
 
@@ -636,6 +637,8 @@ export type CordisXPageMetadataV3 =
   }
 
 export interface CordisXPageNavigation {
+  /** Additive route-link-resolution/v1 capability; absent on older Hosts. No clipboard side effects. */
+  resolveLink?(reference: CordisXRouteReference): Promise<RouteLinkResolutionResult>
   /**
    * Plugin page-body navigation records an ordinary Host Manager history
    * entry. Host-rendered `manager.content` sibling tabs do not call this

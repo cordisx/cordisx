@@ -1,3 +1,5 @@
+import type { RouteLinkResolutionResult } from '@cordisx/protocol/route-link-resolution/v1'
+import { publicNavigationCallerActive } from './public-navigation-caller.js'
 import { Context, type Disposable, Service } from '@deepseek-ai/cordis'
 import { type AgentAvatarRef, cloneAgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { AgentDefinitionIdentity } from '@cordisx/protocol/agents/v1'
@@ -222,6 +224,14 @@ export class CordisXRouteService extends Service implements CordisXRoutes {
       invocation.dispatch('Dispatched to Host navigation registry')
       await this.registry.navigate(owner.id, reference)
     })
+  }
+
+  async resolveLink(reference: CordisXRouteReference): Promise<RouteLinkResolutionResult> {
+    return this.registry.resolveLink(
+      ownerFromContext(this.ctx),
+      reference,
+      () => publicNavigationCallerActive(this.ctx, this.console),
+    )
   }
 
   /** Host-internal projection used by structured navigation collection actions. */

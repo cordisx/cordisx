@@ -1,5 +1,5 @@
 export * from './usage-contracts.js'
-export { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, type CordisXPluginManifestV11 } from './usage-permissions.js'
+export { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, type CordisXPluginManifestV11 } from './agent-task-permission-manifest.js'
 export {
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V10,
   type CordisXHostExtensionPointCatalogV10,
@@ -364,3 +364,29 @@ export type {
 } from './contracts-plugin-api.js'
 
 export type * from './plugin-agent-tool-contracts.js'
+
+export type {
+  AgentTaskContext,
+  AgentTaskCreateRequest,
+  AgentTaskCreateResult,
+  AgentTaskFailureCode,
+  AgentTaskQueryRequest,
+  AgentTaskQueryResult,
+  AgentTaskReference,
+  AgentTaskResolvedContext,
+  AgentTasks,
+} from './agent-task-contracts.js'
+
+export type {
+  AgentTaskApprovalBinding,
+  AgentTaskApprovalHandlers,
+  AgentTaskApprovals,
+  AgentTaskOwnership,
+  AgentTaskOwnershipResult,
+} from './agent-task-contracts.js'
+export type {
+  EntitySettingsAvailabilityResult,
+  EntitySettingsNavigationResult,
+  EntitySettingsNavigationService,
+} from '@cordisx/protocol/entity-settings-navigation/v1'
+export type { RouteLinkResolutionResult } from '@cordisx/protocol/route-link-resolution/v1'

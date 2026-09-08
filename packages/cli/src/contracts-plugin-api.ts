@@ -1,5 +1,6 @@
 import type { CordisXPluginManifestV11 } from './usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from './runtime-exact-request-permissions.js'
+import type { EntitySettingsNavigationService } from '@cordisx/protocol/entity-settings-navigation/v1'
 import type { CordisXPluginManifestV10 } from './extension-point-interaction-permissions.js'
 import type { Context, Disposable } from '@deepseek-ai/cordis'
 
@@ -195,6 +196,7 @@ declare module '@deepseek-ai/cordis' {
     /** Host-owned Agent conversation renderer backed by a plugin data source. */
     agentConversationShell: CordisXAgentConversationShell
     pages: CordisXPages
+    entitySettingsNavigation: EntitySettingsNavigationService
     routes: CordisXRoutes
     /** Data-only Manager subroute declarations; the Host renders chrome and controls history. */
     managerContent: CordisXManagerContentNavigation

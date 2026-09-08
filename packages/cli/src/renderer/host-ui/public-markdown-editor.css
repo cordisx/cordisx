@@ -1,0 +1,232 @@
+/* Core Shikitor projection rules retained from the Host composer adapter.
+ * Business form/toolbar/attachment layout is deliberately absent. */
+.cxr-markdown-editor {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  color: var(--cx-text);
+  font: inherit;
+}
+.cxr-markdown-editor__input {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cx-text);
+  font: inherit;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  resize: none;
+  overflow-x: hidden;
+}
+.cxr-markdown-editor:focus-within {
+  outline: 2px solid var(--cx-focus, Highlight);
+  outline-offset: 1px;
+  border-radius: 6px;
+}
+.cxr-markdown-editor__input:focus {
+  outline: none;
+}
+.cxr-markdown-editor__input:disabled {
+  opacity: var(--cx-disabled, 0.5);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cxr-markdown-editor > .shikitor {
+    transition: none;
+  }
+}
+
+.cxr-markdown-editor:has(> .shikitor--attached) {
+  position: relative;
+  isolation: isolate;
+}
+.cxr-markdown-editor > .shikitor.shikitor--attached {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  flex: none;
+  contain: layout paint;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: transparent !important;
+  color: var(--cx-text) !important;
+  --shikitor-caret-color: var(--cx-text) !important;
+}
+.cxr-markdown-editor > .shikitor--attached > .shikitor-lines {
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  flex: 0 0 0 !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+.cxr-markdown-editor > .shikitor--attached .shikitor-gutter-viewport,
+.cxr-markdown-editor > .shikitor--attached .shikitor-gutter-line,
+.cxr-markdown-editor > .shikitor--attached .shikitor-gutter-line-number {
+  display: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  flex: 0 0 0 !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+.cxr-markdown-editor > .shikitor--attached .shikitor-container,
+.cxr-markdown-editor > .shikitor--attached .shikitor-output,
+.cxr-markdown-editor > .shikitor--attached .shikitor-output > pre,
+.cxr-markdown-editor > .shikitor--attached .shikitor-output > pre > code,
+.cxr-markdown-editor > .shikitor--attached .shikitor-output-line,
+.cxr-markdown-editor > .shikitor--attached .shikitor-output-line *,
+.cxr-markdown-editor > .shikitor--attached .shikitor-placeholder {
+  font-family: inherit !important;
+  font-size: inherit !important;
+  font-stretch: inherit !important;
+  font-style: inherit !important;
+  font-variant: inherit !important;
+  font-weight: inherit !important;
+  letter-spacing: inherit !important;
+  line-height: inherit !important;
+  word-spacing: inherit !important;
+}
+.cxr-markdown-editor > .shikitor--attached .shikitor-container {
+  min-width: 0;
+  width: 100%;
+}
+.cxr-markdown-editor > .shikitor--attached::before {
+  display: none !important;
+  content: none !important;
+}
+.cxr-markdown-editor > .shikitor--attached .shikitor-gutter-line-highlighted,
+.cxr-markdown-editor > .shikitor--attached .shikitor-output-line-highlighted,
+.cxr-markdown-editor > .shikitor--attached .shikitor-line-highlighted {
+  background: none !important;
+}
+.cxr-markdown-editor > .shikitor--attached .shikitor-cursor__username--you {
+  display: none !important;
+}
+.cxr-markdown-editor > .shikitor--attached,
+.cxr-markdown-editor > .shikitor--attached .shikitor-output,
+.cxr-markdown-editor > .shikitor--attached .shikitor-output > pre {
+  background: transparent !important;
+}
+.cxr-markdown-editor > .shikitor--attached .shikitor-placeholder {
+  color: var(--cx-muted);
+}
+.cxr-markdown-editor
+  > .shikitor--attached:has(+ textarea[data-cordisx-editor-fallback]) {
+  display: none !important;
+}
+.cxr-markdown-editor
+  > .shikitor--attached
+  + textarea.cxr-markdown-editor__input.shikitor-input--attached:not([data-cordisx-editor-fallback]) {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: transparent;
+}
+.cxr-markdown-editor
+  > .shikitor--attached
+  + textarea.cxr-markdown-editor__input.shikitor-input--attached:not([data-cordisx-editor-fallback]):focus,
+.cxr-markdown-editor
+  > .shikitor--attached
+  + textarea.cxr-markdown-editor__input.shikitor-input--attached:not([data-cordisx-editor-fallback]):focus-visible {
+  border-color: transparent !important;
+  outline: 0 !important;
+  outline-offset: 0 !important;
+  box-shadow: none !important;
+}
+.cxr-markdown-editor
+  > .shikitor--attached
+  + textarea.cxr-markdown-editor__input.shikitor-input--attached:not([data-cordisx-editor-fallback])::placeholder {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+.cxr-markdown-editor
+  > .shikitor--attached
+  + textarea.cxr-markdown-editor__input.shikitor-input--attached:not([data-cordisx-editor-fallback])::selection {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  background: color-mix(in srgb, var(--cx-primary) 28%, transparent);
+}
+.cxr-markdown-editor
+  > .shikitor--attached
+  + textarea.cxr-markdown-editor__input.shikitor-input--attached[data-cordisx-editor-native-text="true"]:not([data-cordisx-editor-fallback]) {
+  color: var(--cx-text) !important;
+  -webkit-text-fill-color: var(--cx-text) !important;
+  caret-color: var(--cx-text) !important;
+}
+.cxr-markdown-editor
+  > .shikitor--attached
+  + textarea.cxr-markdown-editor__input.shikitor-input--attached[data-cordisx-editor-native-text="true"]:not([data-cordisx-editor-fallback])::placeholder {
+  color: var(--cx-muted) !important;
+  -webkit-text-fill-color: var(--cx-muted) !important;
+}
+.cxr-markdown-editor
+  > .shikitor--attached
+  + textarea.cxr-markdown-editor__input.shikitor-input--attached[data-cordisx-editor-native-text="true"]:not([data-cordisx-editor-fallback])::selection {
+  color: var(--cx-text) !important;
+  -webkit-text-fill-color: var(--cx-text) !important;
+  background: color-mix(in srgb, var(--cx-primary) 28%, transparent);
+}
+@media (forced-colors: active) {
+  .cxr-markdown-editor > .shikitor.shikitor--attached {
+    display: none !important;
+  }
+  .cxr-markdown-editor
+    > .shikitor--attached
+    + textarea.cxr-markdown-editor__input.shikitor-input--attached:not([data-cordisx-editor-fallback]) {
+    color: CanvasText !important;
+    -webkit-text-fill-color: CanvasText !important;
+    caret-color: CanvasText !important;
+    forced-color-adjust: auto;
+  }
+  .cxr-markdown-editor
+    > .shikitor--attached
+    + textarea.cxr-markdown-editor__input.shikitor-input--attached:not([data-cordisx-editor-fallback])::placeholder {
+    color: GrayText !important;
+    -webkit-text-fill-color: GrayText !important;
+  }
+  .cxr-markdown-editor
+    > .shikitor--attached
+    + textarea.cxr-markdown-editor__input.shikitor-input--attached:not([data-cordisx-editor-fallback])::selection {
+    color: HighlightText !important;
+    -webkit-text-fill-color: HighlightText !important;
+    background: Highlight !important;
+  }
+  .cxr-markdown-editor
+    > .shikitor--attached
+    + textarea.cxr-markdown-editor__input.shikitor-input--attached[data-cordisx-editor-native-text="true"]:not([data-cordisx-editor-fallback]) {
+    color: CanvasText !important;
+    -webkit-text-fill-color: CanvasText !important;
+    caret-color: CanvasText !important;
+  }
+  .cxr-markdown-editor
+    > .shikitor--attached
+    + textarea.cxr-markdown-editor__input.shikitor-input--attached[data-cordisx-editor-native-text="true"]:not([data-cordisx-editor-fallback])::placeholder {
+    color: GrayText !important;
+    -webkit-text-fill-color: GrayText !important;
+  }
+  .cxr-markdown-editor
+    > .shikitor--attached
+    + textarea.cxr-markdown-editor__input.shikitor-input--attached[data-cordisx-editor-native-text="true"]:not([data-cordisx-editor-fallback])::selection {
+    color: HighlightText !important;
+    -webkit-text-fill-color: HighlightText !important;
+    background: Highlight !important;
+  }
+}

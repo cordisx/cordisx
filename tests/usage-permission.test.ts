@@ -1,3 +1,7 @@
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
+  normalizeTaskManifest,
+} from '../packages/cli/src/agent-task-permission-manifest.js'
 import { usagePermissionAvailability } from '../packages/cli/src/renderer/usage-availability.js'
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -43,7 +47,12 @@ function broker(requestUsageV6 = async (plan: UsagePermissionAuthorizationPlanV6
     { request: async () => undefined, requestUsageV6 },
   )
 }
-describe('public usage permission', () => {
+describe.each([11, 12])('public usage permission v%s', version => {
+  const activeManifest = version === 11 ? manifest : normalizeTaskManifest({
+    ...manifest,
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
+    schemaVersion: 12,
+  }, identity.id)
   it('offers current-profile explicit generation-only authorization', () => {
     const plan = usagePermissionPlan({
       planId: 'usage-1',
@@ -68,7 +77,7 @@ describe('public usage permission', () => {
   it('deduplicates concurrent prompts and revokes/rechecks on policy and generation changes', async () => {
     const request = vi.fn(async (plan: UsagePermissionAuthorizationPlanV6) => confirm(plan))
     const host = broker(request),
-      dispose = host.register(identity, manifest, { pluginId: identity.id, moduleGeneration: 'module' })
+      dispose = host.register(identity, activeManifest, { pluginId: identity.id, moduleGeneration: 'module' })
     expect(await Promise.all([host.authorizeUsage(identity), host.authorizeUsage(identity)])).toEqual([true, true])
     expect(request).toHaveBeenCalledTimes(1)
     host.setUsagePolicy(identity, false)
@@ -82,11 +91,14 @@ describe('public usage permission', () => {
   })
   it('retires an old context even when the same artifact generation is enabled again', () => {
     const host = broker()
-    const remove = host.register(identity, manifest, { pluginId: identity.id, moduleGeneration: 'same-artifact' })
+    const remove = host.register(identity, activeManifest, { pluginId: identity.id, moduleGeneration: 'same-artifact' })
     const old = host.usageFence(identity, 'same-artifact')
     expect(old()).toBe(true)
     remove()
-    const removeNew = host.register(identity, manifest, { pluginId: identity.id, moduleGeneration: 'same-artifact' })
+    const removeNew = host.register(identity, activeManifest, {
+      pluginId: identity.id,
+      moduleGeneration: 'same-artifact',
+    })
     expect(old()).toBe(false)
     expect(host.usageFence(identity, 'same-artifact')()).toBe(true)
     removeNew()
@@ -101,7 +113,7 @@ describe('public usage permission', () => {
         release = resolve
       })
     })
-    const dispose = host.register(identity, manifest, { pluginId: identity.id, moduleGeneration: 'module' })
+    const dispose = host.register(identity, activeManifest, { pluginId: identity.id, moduleGeneration: 'module' })
     const result = host.authorizeUsage(identity)
     dispose()
     release(confirm(pending))
@@ -110,7 +122,7 @@ describe('public usage permission', () => {
   })
   it('does not deliver data after permission revocation while a read is in flight', async () => {
     const host = broker(),
-      unregister = host.register(identity, manifest, { pluginId: identity.id, moduleGeneration: 'module' })
+      unregister = host.register(identity, activeManifest, { pluginId: identity.id, moduleGeneration: 'module' })
     const ctx = new Context()
     let resolve!: (value: any) => void
     const readUsage = vi.fn(() =>

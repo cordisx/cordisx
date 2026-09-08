@@ -260,6 +260,18 @@ describe('sidebar navigation collections', () => {
       expect(document.querySelector('.cordisx-navigation > .cordisx-nav-row .cordisx-host-icon')).not.toBeNull()
       const group = document.querySelector<HTMLElement>('[data-navigation-group="navigation-collection:rooms:rooms"]')!
       expect(group.querySelector('[role="heading"]')?.textContent).toBe('Rooms')
+      const collectionRoot = group.closest<HTMLElement>('[data-cordisx-surface-host="sidebar.collections"]')!
+      expect(collectionRoot.parentElement).toBe(recentTasks.parentElement)
+      expect(collectionRoot.nextElementSibling).toBe(recentTasks)
+      const toggle = group.querySelector<HTMLButtonElement>('.cordisx-navigation-group-toggle')!
+      const content = document.getElementById(toggle.getAttribute('aria-controls')!)!
+      expect(toggle.getAttribute('aria-expanded')).toBe('true')
+      toggle.click()
+      expect(content.hidden).toBe(true)
+      expect(toggle.getAttribute('aria-expanded')).toBe('false')
+      toggle.click()
+      expect(content.hidden).toBe(false)
+
       expect([...group.querySelectorAll('.cordisx-nav-row')].map(row => row.querySelector('.cxsi-title')?.textContent))
         .toEqual(['Latest room', 'Older room'])
       expect(group.querySelectorAll('.cordisx-navigation-image-seat')).toHaveLength(2)
@@ -313,9 +325,26 @@ describe('sidebar navigation collections', () => {
       const latestPrimary = currentLatestRow.querySelector<HTMLButtonElement>('.cordisx-nav-primary')!
       latestPrimary.click()
       await vi.waitFor(() => expect(currentLatestRow.dataset.selected).toBe('true'))
+      const roomPage = document.querySelector<HTMLElement>('[data-cordisx-page="navigation-collection:room"]')!
+      expect(roomPage.dataset.cordisxPageChromePolicy).toBe('body-only')
+      expect(roomPage.querySelector('[data-cordisx-page-chrome]')).toBeNull()
+      expect(roomPage.querySelectorAll('[data-product-room-header]')).toHaveLength(1)
+      expect(roomPage.querySelector('[data-product-room-header]')?.textContent).toBe('Room latest')
+      expect(roomPage.querySelector<HTMLElement>('[data-cordisx-page-body]')?.style.overflow).toBe('hidden')
+      expect(roomPage.querySelector<HTMLElement>('[data-product-room-timeline]')?.style.overflow).toBe('auto')
+      expect(document.querySelector('[data-native-recent-tasks]')).toBe(recentTasks)
+      expect(document.querySelector('[data-agent-conversation-renderer]')).toBeNull()
       const selectedActions = currentLatestRow.querySelector<HTMLElement>('.cxsi-actions')!
-      expect(selectedActions.hidden).toBe(true)
-      expect(dom.window.getComputedStyle(selectedActions).display).toBe('none')
+      expect(selectedActions.hidden).toBe(false)
+      expect(dom.window.getComputedStyle(selectedActions).display).toBe('flex')
+      latestPrimary.focus()
+      expect(document.activeElement).toBe(latestPrimary)
+      const selectedMore = selectedActions.querySelector<HTMLButtonElement>('.cordisx-navigation-more-action')!
+      selectedMore.focus()
+      expect(document.activeElement).toBe(selectedMore)
+      selectedMore.click()
+      document.querySelector<HTMLButtonElement>('[aria-label="Copy ID"]')!.click()
+      await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(2))
 
       const older = [...document.querySelectorAll<HTMLButtonElement>('[data-navigation-group] .cordisx-nav-primary')]
         .find(button => button.querySelector('.cxsi-title')?.textContent === 'Older room')!
@@ -347,12 +376,25 @@ describe('sidebar navigation collections', () => {
         ).display,
       ).toBe('flex')
 
+      const inactiveLatestRow = [...document.querySelectorAll<HTMLElement>('.cordisx-nav-row')]
+        .find(row => row.querySelector('.cxsi-title')?.textContent === 'Latest room')!
+      inactiveLatestRow.querySelector<HTMLButtonElement>('.cordisx-nav-primary')!.focus()
+      const inactiveMore = inactiveLatestRow.querySelector<HTMLButtonElement>('.cordisx-navigation-more-action')!
+      inactiveMore.focus()
+      expect(document.activeElement).toBe(inactiveMore)
+      inactiveMore.click()
+      document.querySelector<HTMLButtonElement>('[aria-label="Copy ID"]')!.click()
+      await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(3))
+
       const fixture = (dom.window as unknown as {
         __cordisxNavigationCollectionFixture: {
           replace(next: CordisXNavigationCollectionSnapshotV3): void
           commands: string[]
         }
       }).__cordisxNavigationCollectionFixture
+      const beforeRefreshToggle = document.querySelector<HTMLButtonElement>('.cordisx-navigation-group-toggle')!
+      beforeRefreshToggle.click()
+      beforeRefreshToggle.focus()
       fixture.replace({
         revision: 2,
         items: [
@@ -387,6 +429,11 @@ describe('sidebar navigation collections', () => {
         )
           .toEqual(['Created room', 'Latest room', 'Older room'])
       })
+      const afterRefreshToggle = document.querySelector<HTMLButtonElement>('.cordisx-navigation-group-toggle')!
+      expect(afterRefreshToggle.getAttribute('aria-expanded')).toBe('false')
+      expect(document.getElementById(afterRefreshToggle.getAttribute('aria-controls')!)!.hidden).toBe(true)
+      expect(document.activeElement).toBe(afterRefreshToggle)
+      afterRefreshToggle.click()
       const created = [...document.querySelectorAll<HTMLButtonElement>('[data-navigation-group] .cordisx-nav-primary')]
         .find(button => button.querySelector('.cxsi-title')?.textContent === 'Created room')!
       created.click()

@@ -1,4 +1,4 @@
-import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, normalizeUsageManifestV11 } from '../usage-permissions.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, normalizeTaskManifest } from '../agent-task-permission-manifest.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,
@@ -273,9 +273,9 @@ export class PluginLifecycleCoordinatorCore {
           return normalizePluginManifestV13(value, id)
         },
         [CORDISX_PLUGIN_MANIFEST_SCHEMA_V11]: value => {
-          const id = (value as { readonly id?: unknown })?.id
+          const id = (value as { id?: unknown })?.id
           if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
-          return normalizeUsageManifestV11(value, id)
+          return normalizeTaskManifest(value, id)
         },
         [CORDISX_PLUGIN_MANIFEST_SCHEMA_V10]: value => {
           const id = (value as { readonly id?: unknown })?.id

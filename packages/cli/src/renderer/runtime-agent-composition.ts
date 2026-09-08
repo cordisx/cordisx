@@ -1,3 +1,6 @@
+import { isNativeRequiredTaskSession } from './native-agent-session-recovery.js'
+import { historicalNativeSessionDetails } from './native-agent-session-recovery.js'
+import { CordisXEntitySettingsNavigationService } from './entity-settings-navigation.js'
 import { resolveHostManagerRouteOpenRequest } from './manager/navigation-controller.js'
 import { installUsageService } from './usage.js'
 import { CordisXExtensionPointVisualService } from './composer-visual-service.js'
@@ -250,6 +253,7 @@ export const createRuntimeAgentSessionRuntime = (
 ) =>
   new CordisXAgentSessionRuntime({
     driver: runtimeScope.agentSessionTransport()!,
+    historicalAgentDetails: historicalNativeSessionDetails,
     navigateAgentDetail: async (detail, sessionId) => {
       const restore = runtimeScope.managerNavigationController()!.captureReturn()
       await runtimeScope.agentDetailNavigator()!.navigateAgentDetail(detail, sessionId)
@@ -262,14 +266,36 @@ export const createRuntimeAgentSessionRuntime = (
         )
       }
     },
-    authorize: async (owner, capability, sessionId) =>
-      await runtimeScope.agentRouteScopes()!.authorize(owner, capability, sessionId),
-    mintApprovalAuthorityLease: async (owner, input) =>
-      await runtimeScope.agentRouteScopes()!.mintApprovalAuthorityLease(owner, input),
+    authorize: async (owner, capability, sessionId) => {
+      if (sessionId !== undefined && isNativeRequiredTaskSession(owner, sessionId)) {
+        runtimeScope.agentRouteScopes()!.tasks.markRequired(owner, sessionId)
+      }
+      return await runtimeScope.agentRouteScopes()!.authorize(owner, capability, sessionId)
+    },
+    mintApprovalAuthorityLease: async (owner, input, current) =>
+      await runtimeScope.agentRouteScopes()!.mintApprovalAuthorityLease(owner, input, current),
     requiresApprovalAuthorityLease: owner => runtimeScope.agentRouteScopes()!.requiresApprovalAuthorityLease(owner),
     approvalAuthorityLeaseActive: (owner, lease, requester, authority) =>
       runtimeScope.agentRouteScopes()!.approvalAuthorityLeaseActive(owner, lease, requester, authority),
+    revalidateApprovalAuthorityLease: async (owner, lease) =>
+      lease.contract !== 'cordisx.agent-task-approval-authority-lease/v1'
+      || await runtimeScope.agentRouteScopes()!.tasks.readback(owner, 'approvals.answer', lease.authority.sessionId, {
+        kind: 'host-agent-task-authority',
+        lease,
+      }),
     releaseApprovalAuthorityLease: lease => runtimeScope.agentRouteScopes()!.releaseApprovalAuthorityLease(lease),
+    taskPermissions: {
+      declares: (owner, commandId) =>
+        runtimeScope.agentRouteScopes()!.tasks.declares(owner, 'approvals.request', commandId)
+        && runtimeScope.agentRouteScopes()!.tasks.declares(owner, 'approvals.answer', commandId),
+      bind: (source, requester, current, readback) =>
+        runtimeScope.agentRouteScopes()!.tasks.bind(
+          { ...source, connectionGeneration: runtimeScope.agentRuntimeConnection()!.generation },
+          requester,
+          current,
+          readback,
+        ),
+    },
     declares: (owner, capability) => runtimeScope.agentRouteScopes()!.declares(owner, capability),
     ...(runtimeScope.scenarioSessionScopeAuthority! === undefined ? {} : {
       captureSubmission: (owner, sessionId, messageId) =>
@@ -514,6 +540,16 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
     })
     await runtimeScope.commandFiber
     runtimeScope.commandService = runtimeScope.ctx.commands as CordisXCommandService
+    await runtimeScope.ctx.plugin(CordisXEntitySettingsNavigationService, {
+      console: runtimeScope.pluginConsole()!,
+      resolve: (identity: import('@cordisx/protocol/agents/v1').AgentDefinitionIdentity) =>
+        resolveHostManagerAgentDefinitionOpenRequest(
+          runtimeScope.routeService?.managerContentAgentDefinitionTarget(identity),
+          runtimeScope.managerModel()!.snapshot().settingsNavigationItems ?? [],
+        ),
+      open: (request: import('./manager/navigation-controller.js').HostManagerContentOpenRequest) =>
+        runtimeScope.managerNavigationController()!.openManagerContent(request),
+    })
     runtimeScope.agentConversationShellFiber = runtimeScope.ctx.plugin(CordisXAgentConversationShellService, {
       console: runtimeScope.pluginConsole()!,
       selectedNavigationActions: runtimeScope.selectedNavigationActions()!,

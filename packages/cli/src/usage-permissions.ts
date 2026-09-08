@@ -33,10 +33,12 @@ export function normalizeUsageManifestV11(value: unknown, expectedId: string): C
     schemaVersion: 10,
     capabilities: manifest.capabilities.filter(item => item?.name !== 'usage.read'),
   }, expectedId)
+  const normalized = [...base.capabilities, ...usage]
+  const byName = new Map(normalized.map(item => [item.name, item]))
   return Object.freeze({
     ...base,
     $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V11,
     schemaVersion: 11,
-    capabilities: Object.freeze([...base.capabilities, ...usage]),
+    capabilities: Object.freeze(manifest.capabilities.map(item => byName.get(item.name)!)),
   })
 }

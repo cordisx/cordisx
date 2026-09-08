@@ -1,3 +1,4 @@
+import type { CordisXAgentSessionRuntimeOptions } from './agent-session-runtime-types.js'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   Agent,
@@ -213,6 +214,26 @@ import {
 } from './agent-session-runtime-types.js'
 
 export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOperations {
+  bindTaskPermission(
+    source: Parameters<NonNullable<CordisXAgentSessionRuntimeOptions['taskPermissions']>['bind']>[0],
+    agent: Agent,
+    current: () => boolean,
+    readback: () => Promise<boolean>,
+  ): () => void {
+    const record = this.recordForApprovalTarget({ agent, definition: source.definition })
+    if (record === undefined || !this.sameOwner(source.owner, record.owner)) throw new Error('Task Agent unavailable')
+    const resolver = this.requestResolvers.get(this.answererKey(record))
+    if (resolver === undefined || this.options.taskPermissions === undefined) {
+      throw new Error('Task resolver unavailable')
+    }
+    return this.options.taskPermissions.bind(
+      source,
+      this.approvalBinding(record),
+      () => current() && this.requestResolverCurrent(record, resolver),
+      readback,
+    )
+  }
+
   protected async appendDriverEvent(event: CordisXDriverSessionEvent): Promise<void> {
     const record = this.agents.get(event.sessionId)
     if (record === undefined || !this.current(record)) return
@@ -233,6 +254,7 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
     if (this.routeRequiredRequesters.has(key)) return 'unavailable'
     const decision = await this.requestApproval(record.owner, {
       agent: this.agent(record.owner, record),
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
       toolName: request.toolName,
       ...(request.callId === undefined ? {} : { callId: request.callId }),
       ...(request.reason === undefined ? {} : { reason: request.reason }),
@@ -253,6 +275,25 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
     ) return 'unavailable'
     const controller = new AbortController()
     resolver.controllers.add(controller)
+    try {
+      const outcome = await this.resolveDriverApproval(
+        requester,
+        resolver,
+        { ...request, reason: request.reason },
+        controller,
+      )
+      return this.requestResolverCurrent(requester, resolver) ? outcome : 'unavailable'
+    } finally {
+      resolver.controllers.delete(controller)
+    }
+  }
+
+  private async resolveDriverApproval(
+    requester: AgentRecord,
+    resolver: RequestResolverRecord,
+    request: CordisXDriverApprovalRequest & { readonly reason: string },
+    controller: AbortController,
+  ): Promise<ApprovalOutcome> {
     const question: ApprovalRequestRoutingQuestion = Object.freeze({
       $schema: ROUTING_QUESTION_SCHEMA,
       contract: 'cordisx.approval-request-routing-question/v1',
@@ -266,14 +307,17 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
     })
     let result: ApprovalRequestRoutingResult
     try {
-      result = clone(await resolver.resolver(clone(question), controller.signal))
+      result = clone(
+        await resolver.resolver(
+          clone(question),
+          request.signal === undefined ? controller.signal : AbortSignal.any([controller.signal, request.signal]),
+        ),
+      )
     } catch {
       return 'unavailable'
-    } finally {
-      resolver.controllers.delete(controller)
     }
     if (
-      controller.signal.aborted || !this.requestResolverCurrent(requester, resolver)
+      controller.signal.aborted || request.signal?.aborted || !this.requestResolverCurrent(requester, resolver)
       || !this.validRoutingResult(result, question, resolver.registration)
     ) return 'unavailable'
     if (result.status !== 'accepted') return 'unavailable'
@@ -292,7 +336,7 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
       registrationId: resolver.registration.registrationId,
       requester: this.approvalBinding(requester),
       authority: this.approvalBinding(authority),
-    })
+    }, () => !request.signal?.aborted && this.requestResolverCurrent(requester, resolver) && this.current(authority))
     if (authorityLease === undefined && this.options.requiresApprovalAuthorityLease?.(resolver.owner) === true) {
       return 'unavailable'
     }
@@ -303,6 +347,7 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
         toolName: request.toolName,
         ...(request.callId === undefined ? {} : { callId: request.callId }),
         reason: clone(question.reason),
+        signal: request.signal === undefined ? controller.signal : AbortSignal.any([controller.signal, request.signal]),
       }, authorityLease)
       return decision.outcome
     } finally {
@@ -428,6 +473,8 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
     reason: 'owner-disposed' | 'runtime-disposed' | 'connection-replaced',
   ): void {
     if (record.disposed !== undefined) return
+    for (const controller of record.approvalControllers) controller.abort()
+    record.approvalControllers.clear()
     record.disposed = reason
     const answerer = this.answerers.get(this.answererKey(record))
     if (answerer !== undefined) this.closeAnswerer(record, answerer, 'agent-replaced')
@@ -599,6 +646,8 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
     code: NonNullable<AnswererRecord['closed']>,
   ): void {
     if (answerer.closed === undefined) answerer.closed = code
+    for (const controller of answerer.controllers) controller.abort()
+    answerer.controllers.clear()
     if (this.answerers.get(this.answererKey(record)) === answerer) this.answerers.delete(this.answererKey(record))
   }
 
@@ -608,6 +657,8 @@ export abstract class AgentSessionRuntimeEvents extends AgentSessionRuntimeOpera
     code: NonNullable<AuthorityAnswererRecord['closed']>,
   ): void {
     if (answerer.closed === undefined) answerer.closed = code
+    for (const controller of answerer.controllers) controller.abort()
+    answerer.controllers.clear()
     if (this.authorityAnswerers.get(this.answererKey(record)) === answerer) {
       this.authorityAnswerers.delete(this.answererKey(record))
     }

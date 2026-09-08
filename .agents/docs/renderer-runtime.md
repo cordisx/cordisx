@@ -33,10 +33,49 @@ rollback restores last-good visibility, and render errors are contained to an
 empty decorative seat. The complete runtime boundary is specified in
 [`plugin-visuals.md`](plugin-visuals.md).
 
+### Historical Session detail navigation
+
+The existing `ctx.agentSessionDetailReferences` and `ctx.agentDetailNavigation`
+services add explicit `getV2({ sessionId })` and `openV2({ target })` methods under
+[Protocol detail navigation v2](https://github.com/cordisx/cordisx-protocol/blob/52c2a2d8c0e2ffc33ec4496701af184e0160fc74/.agents/docs/agent-detail-navigation/v2.md).
+Their v1 `get`/`open` methods remain current-only. V2 reads an authenticated,
+source-scoped native mapping when no usable current same-owner detail exists and issues a temporary
+opaque capability; it reports no running status. A known foreign source cannot fall back through historical lookup. A disposed
+Agent or an older generation at the same exact source may obtain a new historical
+capability only through the currently authenticated mapping provider.
+
+`native-session-detail-references.ts` owns only temporary capabilities. It binds
+owner generation, current client, runtime connection epoch and persisted revision,
+checks Session-read permission, and re-reads the mapping before Host navigation.
+The `native-session-detail` bridge operation uses the existing Host-private store
+scope and checks its principal again after loading. It performs no persistent
+write, recovery, create/resume, input submission or history replay. Missing native
+bridges and stale targets return typed unavailable results. The existing native
+navigator owns destination and Back/history.
+
+The tests cover real Cordis service exposure, the actual authenticated store and
+renderer persistence adapter with zero writes, source substitution, old-target
+rejection and a mocked native history adapter. They are not a real `app://`
+preview or native acceptance. Integration must retain the original Room/source
+identity and test opening its existing historical Session and native Back without
+creating a replacement Session.
+
+### Copy actions in a trusted plugin page
+
+A trusted plugin's own React button or context-menu event may use the standard
+browser `event.currentTarget.ownerDocument.defaultView?.navigator.clipboard`
+`writeText` API for its own copy action. This is not a Host DOM query, clipboard
+read or private Host import. Keep the write in the user interaction path, feature-
+check availability and show the existing failure feedback when the browser
+rejects it. Do not route a product context-menu copy through a fake Navigation
+Collection contribution or add an IPC fallback. The structured collection's
+Host-owned clipboard rules continue to govern that separate surface. Browser
+availability and permission in the actual `app://` preview remain a runtime gate.
+
 ### Product-owned pages and admission
 
-Product pages normally own their complete internal renderer. Agent
-conversation products may instead register a versioned data-only source with
+Product pages own their complete internal renderer. The legacy conversation
+path remains available during [consumer migration](conversation-ui-boundary.md) via
 `ctx.agentConversationShell`. The Host then owns the conversation title,
 header actions, timeline DOM, Shikitor composer, Agent avatars, on-demand
 member inspector, keyboard and focus behavior, styles, and cleanup. The plugin
@@ -315,6 +354,95 @@ The source orders its Room descriptors latest-first; the Host clones and
 freezes each replacement, validates bounded ids/text/icons/routes, renders the
 group heading and rows with the shared SidebarItem primitive, and derives the
 single selected row from the exact owner-qualified route plus parameters.
+
+The shared row layout and its action, menu, confirmation, forced-color and
+reduced-motion states live in `packages/cli/assets/host-sidebar.css`. The
+structured adapter imports its CSS text at the existing sidebar cascade position
+and retains the document-scoped reference-counted style lifetime. Native and
+Playground rows use the same `.cxsi-row.cordisx-nav-row` base; these rules must
+not require `.pg-sidebar`, which is absent in Codex Desktop. Playground visual tokens are mapped separately under its own `.pg-sidebar`
+root. Single-line rows
+have one icon and title; two-line rows keep title and ellipsized summary in the
+same copy column. The primary button fills the row height, and trailing actions
+remain independent controls. Both selected and unselected rows reveal trailing
+actions on hover or focus-within. Publishing selected actions to Conversation
+Shell shares their executor/confirmation/state; it does not transfer exclusive
+control ownership or hide the sidebar action container.
+
+Visual values are supplied separately from that shared layout. The adapter marks
+its sidebar root from its explicit identity: Codex uses the existing native
+navigation template to project corner radius, font, row height and content
+spacing; Playground maps the same properties to its own `--pg-*` tokens. The
+projection reuses the normal layout reconciliation and existing native-control
+resolver, without another observer, copied classes or label matching. Geometry
+is sampled again on reconciliation and removed when no template is available.
+
+State backgrounds are not sampled from the native template, because it might
+currently be hovered or selected. Codex maps hover and selection to its existing
+`--color-background-primary-ghost-hover` semantic token, and focus adds the Host
+ring without another fill or extra currentColor blend. The row is the only
+background owner; its primary button stays transparent. Compare idle, hover,
+selected and selected-plus-focus separately when reviewing native screenshots.
+A screenshot of adjacent rows does not establish that their states are equal.
+
+This Host asset uses the existing renderer CSS-text path: native and Playground
+Vite transforms convert a default `.css` import to `?inline`, while the packaged
+renderer bundle uses esbuild's CSS text loader. The existing asset-copy step
+preserves the relative import in `dist/assets`. This does not change plugin CSS
+loading or imply that ordinary side-effect CSS imports share this lifecycle.
+
+Ordinary entries and dynamic collection groups use separate Host-private seats
+within the same public `sidebar.navigation.items` contract. The native adapter
+keeps ordinary entries in the action area and inserts collections as siblings
+before the first native `[data-app-action-sidebar-section]`, after the action
+area (including Explore). It never identifies a group by localized text or a
+plugin id. Without a native section anchor the collection projection stays
+unrendered; it is not appended to the action area as a fallback. Playground
+places its collections before Recent tasks. Neither path moves native groups.
+
+Collection headers use a Host-owned disclosure button with `aria-expanded`,
+`aria-controls` and the shared chevron icon. Collapse is presentation-only:
+registered Room items, selection, actions, bindings and drafts remain intact.
+An adapter-local group state keeps collapse through snapshot/localization
+updates and restores a focused disclosure after reconstruction. This is not a
+second Room store. Removed group registrations release their view state.
+
+Native group header typography, color, spacing and group gaps project from the
+existing native section/template. Collection row geometry uses native Session
+rows instead of top-level action buttons, while the accepted 46px two-line
+height and vertical padding remain unchanged. Selected colors may project only
+from an explicitly selected native Session row that is neither hovered nor
+focused; missing/transparent samples retain semantic Host defaults. This avoids
+using a transient hover as idle paint or adding a second selected background.
+An independent collection seat does not inherit the native section's inner
+wrapper padding. Project title and row-background horizontal insets separately,
+relative to the collection root border box: title placement follows the native
+toggle's outer position (plus its own padding), while row backgrounds follow
+native Session row bounds. The native section content box supplies fallbacks
+and the heading's trailing limit, so a short native label cannot truncate a
+longer plugin group label. Section block-start/end margins and paddings belong
+to the group wrapper and preserve spacing above/below the entire group; they
+never change the accepted row-internal height or padding.
+
+Native section markers can be nested inside a separate drag/drop wrapper. The
+adapter lifts the insertion anchor through that wrapper without crossing another
+native section or the action area. Collection roots and native wrappers then
+participate in the same flex/grid gap, including through `display: contents`.
+Group spacing is not repaired by appending a guessed bottom margin, and does
+not grow again when a group expands.
+
+Disclosure headers retain their button/SVG nodes through collection refreshes.
+For Codex, the adapter projects the native toggle's viewBox and vector-only
+geometry/currentColor paint into that stable shared SVG; it never copies native
+utility classes, handlers, external references or transient rotation/opacity.
+This preserves the native ink dimensions and stroke rather than just changing
+the icon container. Native `--icon-disclosure-size` and transition duration/easing
+tokens control the size and rotation. Reduced motion disables this transition.
+Playground retains its shared-icon fallback.
+
+The group header has no new create/more menu: plugins already supply ordinary
+create entries and per-row structured actions. Existing saved Room titles are
+not rewritten by this layout projection.
 
 The Playground unified Recent tasks list uses the same Host SidebarItem
 primitive and keeps a task/history semantic icon. Agent identity Avatars belong

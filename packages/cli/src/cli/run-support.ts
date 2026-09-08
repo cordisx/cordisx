@@ -1,3 +1,4 @@
+import { resolveDevelopmentConfigIdentity } from '../launcher/development-source-identity.js'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
@@ -700,12 +701,13 @@ export async function runDevelopment(
       `CordisX project config not found from ${cwd}; create .cordisx/config.json or pass a plugin path/--config`,
     )
   }
-  const config: CordisXConfig = entry === undefined
+  const suppliedConfig: CordisXConfig = entry === undefined
     ? await loadConfig(location!.configPath, { projectRoot: location!.projectRoot })
     : {
       ...localDevelopmentHostConfig(cwd),
       plugins: [{ id: localIdentity!.id, source: localIdentity!.source, entry, enabled: true, config: {} }],
     }
+  const config = await resolveDevelopmentConfigIdentity(suppliedConfig)
   if (!invocation.options.dryRun) await ensureCordisXHomeDirectory(homeConfigOptions)
   const dryRunCacheRoot = invocation.options.dryRun
     ? await mkdtemp(path.join(os.tmpdir(), 'cordisx-vite-dry-run-'))

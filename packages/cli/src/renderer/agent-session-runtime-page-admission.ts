@@ -226,7 +226,7 @@ export abstract class AgentSessionRuntimePageAdmission extends AgentSessionRunti
     if (
       this.disposed || lifecycle === undefined || !opaque(input.generation) || !opaque(input.commandId)
       || typeof input.submitPayload !== 'string' || input.submitPayload.length < 1
-      || input.submitPayload.length > 65_536
+      || [...input.submitPayload].length > 65_536
     ) return undefined
     const command = lifecycle.begin(input.binding, input.commandId)
     const route = command === undefined ? undefined : lifecycle.route(command)
@@ -512,7 +512,7 @@ export abstract class AgentSessionRuntimePageAdmission extends AgentSessionRunti
     if (
       this.disposed || !this.validAdmissionOrigin(request.origin) || request.message === undefined
       || typeof request.message.text !== 'string' || request.message.text.length < 1
-      || request.message.text.length > 65_536
+      || [...request.message.text].length > 65_536
     ) {
       return { status: 'denied', code: 'origin-denied' }
     }

@@ -100,7 +100,14 @@ export async function getAgentToolSetup(sessionId: string): Promise<AgentToolSet
 }
 
 /** The real plugin context supplies both owner identity and fiber disposal. */
-export function installAgentTools(ctx: Context, options: AgentToolClientOptions): AgentTools & { dispose(): void } {
+export function installAgentTools(
+  ctx: Context,
+  options: AgentToolClientOptions,
+): AgentTools & {
+  dispose(): void
+  validateCommand(commandId: string): Promise<boolean>
+  declaresCommand(commandId: string): boolean
+} {
   const owned = new Map<string, Registration>()
   let remove = (): void => {}
   const dispose = (): void => {
@@ -172,7 +179,23 @@ export function installAgentTools(ctx: Context, options: AgentToolClientOptions)
     },
   }
   remove = ctx.reflect.provide('agentTools', service)
-  return Object.assign(service, { dispose })
+  return Object.assign(service, {
+    dispose,
+    declaresCommand(commandId: string): boolean {
+      const registration = owned.get(commandId)
+      return registration !== undefined && registration.active && options.active()
+    },
+    async validateCommand(commandId: string): Promise<boolean> {
+      const registration = owned.get(commandId)
+      if (registration === undefined || !registration.active || !options.active()) return false
+      try {
+        await registration.ready
+        return registration.active && options.active()
+      } catch {
+        return false
+      }
+    },
+  })
 }
 
 /** A validated native recovery grants owner eligibility, never execution authority. */

@@ -138,7 +138,7 @@ export abstract class PlatformUsagePermissionBroker extends PlatformVisualPermis
         !usageManifest(current) || this.registration(current.identity) !== current
         || !this.isRegistered(current)
       ) return []
-      const declaration = current.manifest.capabilities.find(item => item.name === 'usage.read')
+      const declaration = [...current.manifest.capabilities].find(item => item.name === 'usage.read')
       if (!declaration) return []
       const plan = usagePermissionPlan({
         planId: 'usage-snapshot',
