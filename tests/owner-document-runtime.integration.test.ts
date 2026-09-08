@@ -15,9 +15,13 @@ import {
   parseOwnerDocumentBindingRequest,
 } from '../packages/cli/src/launcher/owner-document-rpc.js'
 
+import { PluginHttpAuthority } from '../packages/cli/src/launcher/plugin-http-authority.js'
+
 const temporary: string[] = []
+const httpAuthorities: PluginHttpAuthority[] = []
 
 afterEach(async () => {
+  await Promise.all(httpAuthorities.splice(0).map(authority => authority.dispose()))
   await Promise.all(temporary.splice(0).map(item => rm(item, { recursive: true, force: true })))
 })
 
@@ -56,6 +60,16 @@ describe('owner documents production renderer composition', () => {
     })
 
     const boot = async (): Promise<{ dom: JSDOM; client: CordisXOwnerDocumentsV1 }> => {
+      const http = new PluginHttpAuthority({
+        secret,
+        profileId: 'work',
+        generation,
+        keychain: null,
+        principalAllowed: principal =>
+          principal.identity.source === source
+          && principal.identity.pluginId === 'owner-documents-runtime',
+      })
+      httpAuthorities.push(http)
       const dom = new JSDOM(
         '<html lang="en"><head></head><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div></body></html>',
         {
@@ -71,8 +85,13 @@ describe('owner documents production renderer composition', () => {
         configurable: true,
         value: (payload: string) => {
           void (async () => {
-            const request = parseOwnerDocumentBindingRequest(JSON.parse(payload))
-            const value = request.operation === 'load' ? await handler.load(request) : await handler.replace(request)
+            const raw = JSON.parse(payload)
+            const request = raw.operation?.startsWith('plugin-http-') ? raw : parseOwnerDocumentBindingRequest(raw)
+            const value = raw.operation?.startsWith('plugin-http-')
+              ? await http.handle(raw)
+              : request.operation === 'load'
+              ? await handler.load(request)
+              : await handler.replace(request)
             queueMicrotask(() =>
               (dom.window as unknown as { __cordisxOwnerDocumentReceiveV1?: (response: string) => void })
                 .__cordisxOwnerDocumentReceiveV1?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
