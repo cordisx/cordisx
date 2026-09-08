@@ -64,16 +64,31 @@ export async function authorizePlaygroundReviewNavigation(
     candidate.qualifiedId === qualifiedContributionId
     && candidate.surface === 'sidebar.navigation.items'
   )
-  if (registration === undefined || registration.authorized) return
-  if (registration.pointPolicyReason !== 'permission.review-pending') return
+  if (registration === undefined) return
+  if (!registration.authorized && registration.pointPolicyReason !== 'permission.review-pending') return
   const plugin = snapshot.plugins.find(candidate => candidate.id === registration.owner)
   if (plugin === undefined) return
-  const pointIds = [registration.surface]
+  const pointIds = registration.authorized ? [] : [registration.surface]
   const routeId = registration.item?.route?.id
   const route = routeId === undefined
     ? undefined
     : snapshot.navigation.routes.find(candidate => candidate.owner === registration.owner && candidate.id === routeId)
-  if (route !== undefined) pointIds.push(route.definition.outlet)
+  if (route !== undefined && !route.authorized && route.pointPolicyReason !== 'permission.policy-denied') {
+    pointIds.push(route.definition.outlet)
+  }
+  // manager.content is mounted through a Host-owned Manager navigation root.
+  // A fresh review tab needs both seats; authorizing only the sidebar/outlet
+  // leaves the root absent from Manager's public navigation projection.
+  if (route?.definition.outlet === 'manager.content') {
+    const root = snapshot.registrations.find(candidate =>
+      candidate.owner === registration.owner && candidate.surface === 'manager.settings.navigation-items'
+      && candidate.item?.route?.id === routeId
+    )
+    if (root !== undefined && !root.authorized && root.pointPolicyReason === 'permission.review-pending') {
+      pointIds.push('manager.settings.navigation-items')
+    }
+  }
+  if (pointIds.length === 0) return
   await runtime.setExtensionPointPolicies(
     plugin.source,
     registration.owner,
