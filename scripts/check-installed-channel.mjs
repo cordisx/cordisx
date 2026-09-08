@@ -10,7 +10,7 @@ export function enableInstalledChannel(config) {
 
 /** Verify the installed convenience alias without assuming npm's dependency layout. */
 export async function verifyInstalledChannel(input) {
-  if (input.cordisxManifest.dependencies?.['@cordisx/channel'] !== CHANNEL_DEPENDENCY) {
+  if (input.cordisxManifest.cordisxSources?.['@cordisx/channel'] !== CHANNEL_DEPENDENCY) {
     throw new Error('installed cordisx must pin the standalone Channel package')
   }
   const config = await input.loadConfig(input.configPath)

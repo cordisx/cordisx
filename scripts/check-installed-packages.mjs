@@ -548,11 +548,20 @@ createElement(AgentAvatar, props)
   Object.defineProperty(durableDom.window, 'structuredClone', { value: globalThis.structuredClone })
   Object.defineProperty(durableDom.window, 'TextEncoder', { value: globalThis.TextEncoder })
   Object.defineProperty(durableDom.window, 'TextDecoder', { value: globalThis.TextDecoder })
+  let httpDisposals = 0
   Object.defineProperty(durableDom.window, '__cordisxOwnerDocumentRequestV1', {
     configurable: true,
     value: payload => {
       void (async () => {
-        const request = parseOwnerDocumentBindingRequest(JSON.parse(payload))
+        const raw = JSON.parse(payload)
+        if (raw.operation === 'plugin-http-dispose') {
+          httpDisposals++
+          durableDom.window.__cordisxOwnerDocumentReceiveV1?.(
+            JSON.stringify({ requestId: raw.requestId, ok: true, value: { status: 'accepted', value: null } }),
+          )
+          return
+        }
+        const request = parseOwnerDocumentBindingRequest(raw)
         const value = request.operation === 'load'
           ? await durableHandler.load(request)
           : await durableHandler.replace(request)
@@ -577,6 +586,7 @@ createElement(AgentAvatar, props)
   })
   if (bridgeAccepted.status !== 'accepted') throw new Error('installed public ctx.documents bridge did not commit')
   await durableDom.window.__cordisxRuntime?.dispose()
+  if (httpDisposals !== 1) throw new Error('installed runtime must dispose its HTTP owner exactly once')
   durableDom.window.close()
   const bridgeReload = await new OwnerDocumentStore(cordisxHome).load({
     profileId: 'installed',
