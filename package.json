@@ -127,7 +127,6 @@
   },
   "devDependencies": {
     "@cordisx/eslint-config": "github:cordisx/cordisxmono#c63c2e8c2ba7e11502934a52ad2ce3734e804cdc",
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#465c444c65eec1be8e337b94c2cf658ed536f49c",
     "eslint": "9.39.4",
     "@typescript-eslint/parser": "8.69.0",
     "dprint": "0.57.1",
