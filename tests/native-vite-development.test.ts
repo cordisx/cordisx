@@ -87,6 +87,61 @@ describe('native Vite development transport', () => {
     await second.close()
   }, 30_000)
 
+  it('validates cold plugin dependency batches without Host prebundling', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-vite-cold-plugin-deps-'))
+    const cacheRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-vite-cold-plugin-cache-'))
+    const entry = path.join(root, 'index.ts')
+    viteCacheRoots.push(cacheRoot)
+    await symlink(path.join(process.cwd(), 'node_modules'), path.join(root, 'node_modules'), 'dir')
+    await Promise.all([
+      writeFile(
+        path.join(root, 'package.json'),
+        JSON.stringify({
+          name: 'cold-plugin-dependencies',
+          version: '1.0.0',
+          type: 'module',
+          dependencies: {
+            '@deepseek-ai/schemastery': '^3.18.1',
+            'react-markdown': '10.1.0',
+            'rehype-raw': '^7.0.0',
+            'rehype-sanitize': '^6.0.0',
+            'remark-gfm': '4.0.1',
+          },
+        }),
+      ),
+      writeFile(
+        entry,
+        "import './schema.js'\nimport './markdown.js'\nexport function apply() {}\n",
+      ),
+      writeFile(
+        path.join(root, 'schema.ts'),
+        "import Schema from '@deepseek-ai/schemastery'\nexport const schema = Schema.object({})\n",
+      ),
+      writeFile(
+        path.join(root, 'markdown.ts'),
+        "import Markdown from 'react-markdown'\nimport rehypeRaw from 'rehype-raw'\nimport rehypeSanitize from 'rehype-sanitize'\nimport remarkGfm from 'remark-gfm'\nexport const markdown = [Markdown, rehypeRaw, rehypeSanitize, remarkGfm]\n",
+      ),
+    ])
+    const config = {
+      version: 1 as const,
+      rootDir: root,
+      codex: { debugPort: 9229 },
+      providers: [],
+      plugins: [{ id: 'cold-dependencies', entry, enabled: true, config: {} }],
+    }
+    let vite: Awaited<ReturnType<typeof startNativeViteServer>> | undefined
+    try {
+      vite = await startNativeViteServer(config, { cacheRoot, prebundleHostDependencies: false })
+      viteCacheDirectories.push(vite.cacheDir)
+      await expect(buildRendererComposition(config, () => {}, {
+        developmentBuild: (nextConfig, options) => vite!.buildBootstrap(nextConfig, options ?? {}),
+      })).resolves.toMatchObject({ source: expect.any(String) })
+    } finally {
+      await vite?.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 30_000)
+
   it('rejects a symlinked cache root before changing or using its target', async () => {
     const parent = await mkdtemp(path.join(os.tmpdir(), 'cordisx-vite-cache-symlink-'))
     const target = path.join(parent, 'target')
