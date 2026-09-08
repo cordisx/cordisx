@@ -70,7 +70,7 @@ const cli = path.join(host, 'packages/cli')
 const cliManifest = await json(path.join(cli, 'package.json'))
 const artifacts = path.join(output, 'packages')
 for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api', '@cordisx/protocol']) {
-  const spec = cliManifest.dependencies[name]
+  const spec = cliManifest.cordisxSources?.[name] ?? cliManifest.dependencies[name]
   const record = records.find(item => item.location === `node_modules/${name}`)
   if (!record || !record.spec.endsWith(`#${spec.split('#')[1]}`)) throw new Error(`Unpinned output: ${name}`)
   if (name !== '@cordisx/protocol') {

@@ -22,8 +22,8 @@ try {
     await run('tar', ['-xf', tarball, '--strip-components=1', '-C', destination], cli)
     await verifyPackage(destination, true)
     const packageFile = path.join(destination, 'package.json')
-    // npm validates bundled Git edges through their resolved source metadata.
-    await save(packageFile, { ...await json(packageFile), _resolved: manifest.dependencies[name] })
+    // Bundle dependencies use exact versions; preserve immutable source provenance.
+    await save(packageFile, { ...await json(packageFile), cordisxSource: manifest.cordisxSources[name] })
   }
 } finally {
   await rm(temporary, { recursive: true, force: true })

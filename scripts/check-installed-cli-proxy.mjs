@@ -7,7 +7,7 @@ const CLI_PROXY_DEPENDENCY = `github:cordisx/plugin-cli-proxy-api#${CLI_PROXY_CO
 
 /** Verify the installed convenience alias and its sibling service artifact. */
 export async function verifyInstalledCliProxy(input) {
-  if (input.cordisxManifest.dependencies?.['@cordisx/plugin-cli-proxy-api'] !== CLI_PROXY_DEPENDENCY) {
+  if (input.cordisxManifest.cordisxSources?.['@cordisx/plugin-cli-proxy-api'] !== CLI_PROXY_DEPENDENCY) {
     throw new Error('installed cordisx must pin the standalone CLIProxy plugin')
   }
   const config = await input.loadConfig(input.configPath)
