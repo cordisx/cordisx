@@ -48,6 +48,12 @@ registers its localized page and route through `ctx.pages` and `ctx.routes`.
 No protocol revision is needed: page-v3 already assigns a trusted local plugin
 a bounded body seat while retaining Host ownership of route state and chrome.
 
+For a `chrome: 'body-only'` page, the shared React root fills its bounded seat
+with zero outer padding. Standard pages retain the default inset. Plugins own
+spacing inside their body; they must not compensate by styling Host ancestors.
+Public `Icon` names prefixed with `host:` resolve through the shared Host icon
+theme, just like the role/session/relationship aliases.
+
 The initial `cordisx/ui` set is deliberately small:
 
 - `Button`

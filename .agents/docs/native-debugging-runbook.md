@@ -69,6 +69,11 @@ Present available conversations separately from reliable running state. Keep
 internal IDs and `unloaded`/`unknown` mechanics in diagnostics, not competing
 product lists. Absence from memory does not mean absence from storage.
 
+A Session opened from a plugin page must not capture a hidden Manager as its
+return destination. Manager return capture is available only while its modal
+is open; otherwise Back returns to the existing plugin route without reopening
+an old Manager detail. This is generic Host navigation behavior.
+
 ## Trace the affected UI path
 
 A new Shell source version can register successfully while a composer version
