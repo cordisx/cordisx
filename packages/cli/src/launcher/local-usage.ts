@@ -1,3 +1,4 @@
+import { classifyWorkUsageHeader } from './work-usage.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, open, readdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
@@ -20,6 +21,7 @@ interface Ledger {
   sources: Record<string, Checkpoint>
 }
 export interface LocalUsageOptions {
+  readonly projection?: 'work-v2'
   readonly codexHome: string
   readonly cacheDir: string
   readonly profileName: string
@@ -108,8 +110,13 @@ export class LocalUsageHost {
     const now = this.options.now ?? Date.now
     const home = await realpath(this.options.codexHome).catch(() => undefined)
     if (!home) return unavailable('source-unavailable')
-    const scopeId = hash(`${home}\0${this.options.profileName}`)
-    const directory = path.join(this.options.cacheDir, 'local-usage-v1')
+    const scopeId = hash(
+      `${home}\0${this.options.profileName}${this.options.projection === 'work-v2' ? '\0work-v2' : ''}`,
+    )
+    const directory = path.join(
+      this.options.cacheDir,
+      this.options.projection === 'work-v2' ? 'local-work-usage-v2' : 'local-usage-v1',
+    )
     await mkdir(directory, { recursive: true, mode: 0o700 })
     const db = new DatabaseSync(path.join(directory, `${scopeId}.sqlite`))
     try {
@@ -342,6 +349,13 @@ export class LocalUsageHost {
         const reduced = reduceUsageRecords(continuous ? previous.state : undefined, records, { baseline: !continuous })
         for (const item of reduced.diagnostics) diagnostic(item.code, item.count)
         ledger.sources[key] = { offset: complete, digest: hash(content), state: reduced.state }
+        if (this.options.projection === 'work-v2') {
+          const classification = classifyWorkUsageHeader(content.subarray(0, content.indexOf(10)).toString('utf8'))
+          if (classification !== 'work' || reduced.state.ownership !== 'root') {
+            diagnostic(classification === 'game' ? 'host-game-source-excluded' : 'unclassified-source-excluded')
+            continue
+          }
+        }
         input += reduced.increment.inputTokens
         output += reduced.increment.outputTokens
       }

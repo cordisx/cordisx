@@ -133,6 +133,7 @@ async function waitForChromeTarget(
 }
 
 class CdpClient {
+  readonly diagnostics: unknown[] = []
   readonly #socket: WebSocket
   readonly #pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>()
   #nextId = 1
@@ -142,10 +143,21 @@ class CdpClient {
     socket.on('message', data => {
       const message = JSON.parse(data.toString()) as {
         readonly id?: number
+        readonly method?: string
+        readonly params?: unknown
         readonly error?: { readonly message?: string }
         readonly result?: unknown
       }
-      if (message.id === undefined) return
+      if (message.id === undefined) {
+        if (
+          message.method === 'Runtime.exceptionThrown' || message.method === 'Network.loadingFailed'
+          || message.method === 'Runtime.consoleAPICalled'
+        ) {
+          this.diagnostics.push({ method: message.method, params: message.params })
+          if (this.diagnostics.length > 30) this.diagnostics.shift()
+        }
+        return
+      }
       const pending = this.#pending.get(message.id)
       if (pending === undefined) return
       this.#pending.delete(message.id)
@@ -295,6 +307,7 @@ describe('plugin generation native browser graph', () => {
       const target = await waitForChromeTarget(port, browser, () => browserStderr)
       cdp = await CdpClient.connect(target)
       await cdp.send('Runtime.enable')
+      await cdp.send('Network.enable')
       await cdp.send('Page.navigate', { url: server.url })
       try {
         await expect.poll(async () => await cdp!.evaluate('globalThis.__lazyCssReady === true'), { timeout: 15_000 })
@@ -303,9 +316,14 @@ describe('plugin generation native browser graph', () => {
         const diagnostic = await cdp.evaluate(
           `({ href: location.href, readyState: document.readyState, cordisxReady: document.documentElement.dataset.cordisxReady, runtimeError: document.querySelector('[data-playground-runtime-error]')?.getAttribute('data-playground-runtime-error'), runtimeErrorText: document.querySelector('[data-playground-runtime-error]')?.textContent, links: [...document.querySelectorAll('link[data-cordisx-plugin-generation]')].map(link => link.href), text: document.body.innerText.slice(0, 500) })`,
         )
-        throw new Error(`Playground lazy CSS fixture did not become ready: ${JSON.stringify(diagnostic)}`, {
-          cause: error,
-        })
+        throw new Error(
+          `Playground lazy CSS fixture did not become ready: ${
+            JSON.stringify({ ...diagnostic as object, events: cdp.diagnostics })
+          }`,
+          {
+            cause: error,
+          },
+        )
       }
       const result = await cdp.evaluate<{ links: string[]; page: string; avatar: string }>(
         `(() => { const p=document.createElement('div'); p.className='lazy-page'; const a=document.createElement('div'); a.className='lazy-avatar'; document.body.append(p,a); return { links:[...document.querySelectorAll('link[data-cordisx-plugin-generation]')].map(x=>x.href), page:getComputedStyle(p).display, avatar:getComputedStyle(a).display } })()`,

@@ -1,4 +1,5 @@
 import { nativeAgentTaskClient } from './native-agent-session-recovery.js'
+import { createRestrictedContentService } from './restricted-content-service.js'
 import { createPluginHttpClient } from './plugin-http.js'
 import { installAgentTasks } from './agent-tasks-install.js'
 import { registerNativeSessionOwner } from './native-agent-session-recovery.js'
@@ -315,6 +316,14 @@ export const createRuntimeDisposeControllerFiber = async (
     delete controller.httpClient
     await controller.unregisterHttp?.()
     delete controller.unregisterHttp
+    controller.restrictedContent?.dispose()
+    await controller.unregisterRestrictedContent?.()
+    delete controller.restrictedContent
+    delete controller.unregisterRestrictedContent
+    controller.agentLoopControl?.dispose()
+    await controller.unregisterAgentLoopControl?.()
+    delete controller.agentLoopControl
+    delete controller.unregisterAgentLoopControl
     await controller.unregisterAgentLoop?.()
     delete controller.unregisterAgentLoop
     controller.documentsClient?.dispose()
@@ -548,7 +557,11 @@ export const createRuntimeMountPlugin = async (
     },
     authorize: connectorAuthorization,
   })
-  const agentLoopAuthorizationV4 = async (request: CordisXAgentLoopAuthorizationRequestV4) => {
+  const agentLoopAuthorizationV4 = async (
+    request: Omit<CordisXAgentLoopAuthorizationRequestV4, 'capability'> & {
+      readonly capability: CordisXAgentLoopAuthorizationRequestV4['capability'] | 'turns.control'
+    },
+  ) => {
     if (!controller.principalLive) {
       return { capability: request.capability, state: 'unavailable' as const, code: 'host-unavailable' as const }
     }
@@ -595,7 +608,8 @@ export const createRuntimeMountPlugin = async (
     },
     authorize: request =>
       agentLoopAuthorizationV4(request) as ReturnType<CordisXBoundAgentLoopClientOptions['authorize']>,
-    authorizeV4: agentLoopAuthorizationV4,
+    authorizeV4: request =>
+      agentLoopAuthorizationV4(request) as ReturnType<NonNullable<CordisXBoundAgentLoopClientOptions['authorizeV4']>>,
     registerPrompt: (sessionId, definition) =>
       (definition.promptSections ?? []).map((section, order) =>
         runtimeScope.agentRuntime()!.registerPrompt(controller.identity, 'section', {
@@ -645,7 +659,7 @@ export const createRuntimeMountPlugin = async (
       'agentTasks',
     ).isolate('agentTools').isolate(
       'entities',
-    ).isolate('documents').isolate('http').extend({
+    ).isolate('documents').isolate('http').isolate('agentLoopControl').isolate('restrictedContent').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: runtimeScope.moduleGenerationOf()!(controller),
@@ -656,6 +670,18 @@ export const createRuntimeMountPlugin = async (
   controller.unregisterConnector = pluginContext.reflect.provide('connectors', connectorClient)
   controller.agentLoopClient = agentLoopClient
   controller.unregisterAgentLoop = pluginContext.reflect.provide('agentLoop', agentLoopClient)
+  controller.agentLoopControl = runtimeScope.agentLoopBrokerV4()!.bindControl(
+    agentLoopOptions,
+    async (capability, binding) =>
+      (await agentLoopAuthorizationV4({ capability, ...(binding === undefined ? {} : { task: binding.task }) })).state
+        === 'allowed',
+  )
+  controller.unregisterAgentLoopControl = pluginContext.reflect.provide('agentLoopControl', controller.agentLoopControl)
+  controller.restrictedContent = createRestrictedContentService(agentLoopOptions.active)
+  controller.unregisterRestrictedContent = pluginContext.reflect.provide(
+    'restrictedContent',
+    controller.restrictedContent,
+  )
   controller.documentsClient = documentsClient
   controller.unregisterDocuments = pluginContext.reflect.provide('documents', documentsClient)
   try {
@@ -885,6 +911,14 @@ export const createRuntimeMountPlugin = async (
     delete controller.httpClient
     await controller.unregisterHttp?.()
     delete controller.unregisterHttp
+    controller.restrictedContent?.dispose()
+    await controller.unregisterRestrictedContent?.()
+    delete controller.restrictedContent
+    delete controller.unregisterRestrictedContent
+    controller.agentLoopControl?.dispose()
+    await controller.unregisterAgentLoopControl?.()
+    delete controller.agentLoopControl
+    delete controller.unregisterAgentLoopControl
     await controller.unregisterAgentLoop?.()
     delete controller.unregisterAgentLoop
     documentsClient.dispose()

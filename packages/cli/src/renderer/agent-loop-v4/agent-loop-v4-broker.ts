@@ -1,3 +1,4 @@
+import { createAgentLoopControl } from '../agent-loop-control.js'
 import type {
   AgentLoopApprovalDecisionResult,
   AgentLoopAuthorizationOutcome,
@@ -138,7 +139,20 @@ export class CordisXAgentLoopBrokerV4 {
     })
   }
 
-  bind(options: CordisXBoundAgentLoopClientOptions): BoundAgentLoopClient {
+  bindControl(
+    options: CordisXBoundAgentLoopClientOptions,
+    authorize: Parameters<typeof createAgentLoopControl>[0]['authorize'],
+  ) {
+    return createAgentLoopControl({
+      transport: this.transport,
+      scope: scope(this.profileId, this.compositionGeneration, options.ownerKey),
+      createClient: this.bind(options, true),
+      active: options.active,
+      authorize,
+    })
+  }
+
+  bind(options: CordisXBoundAgentLoopClientOptions, gameWorkspace = false): BoundAgentLoopClient {
     let disposed = false
     const subscriptions = new Set<AgentLoopSubscription>()
     const clientPrompts = new Map<string, PromptRegistration>()
@@ -228,6 +242,9 @@ export class CordisXAgentLoopBrokerV4 {
       }),
       createOrBind: async (command: CreateCommand): Promise<AgentLoopCreateOrBindResult> => {
         const capability = command.target.mode === 'create' ? 'tasks.create' : 'tasks.content.read'
+        if (gameWorkspace && command.target.mode !== 'create') {
+          return refusal(command, capability, 'unavailable', 'unsupported')
+        }
         if (!live() || this.transport === undefined) {
           return refusal(command, capability, 'unavailable', 'host-unavailable')
         }
@@ -260,6 +277,7 @@ export class CordisXAgentLoopBrokerV4 {
             definition: command.definition,
             model,
             cwd,
+            ...(gameWorkspace ? { workspaceCategory: 'game' as const } : {}),
             ...(renderAgentDeveloperInstructions(definition) === undefined
               ? {}
               : { developerInstructions: renderAgentDeveloperInstructions(definition)! }),

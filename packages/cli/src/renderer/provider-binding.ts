@@ -187,6 +187,7 @@ export class BindingPlatformAdapter implements CordisXPlatformAdapter {
     readonly definition: { readonly agentId: string; readonly revision: string }
     readonly model: CordisXTaskCreateInput['model']
     readonly cwd: string
+    readonly workspaceCategory?: 'game'
     readonly developerInstructions?: string
     readonly effort?: 'low' | 'medium' | 'high' | 'xhigh'
   }): Promise<unknown> {
@@ -215,6 +216,16 @@ export class BindingPlatformAdapter implements CordisXPlatformAdapter {
     },
   ): Promise<unknown> {
     return await this.request('agent-loop.v4.send', input)
+  }
+
+  async controlAgentLoop(
+    input: {
+      readonly scope: CordisXAgentLoopV4Scope
+      readonly action: 'submit' | 'cancel' | 'read' | 'dispose'
+      readonly value?: unknown
+    },
+  ): Promise<unknown> {
+    return await this.request('agent-loop.control', input)
   }
 
   async decideAgentLoopApprovalV4(

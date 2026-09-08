@@ -1,3 +1,5 @@
+import { ControlledAgentTurns } from './controlled-agent-turns.js'
+import type { AgentLoopControlledTurnV1, AgentLoopControlV1 } from '@cordisx/protocol/agent-loop-control/v1'
 import type { ChannelTaskDispatchResult } from '@cordisx/channel-runtime'
 import { randomUUID } from 'node:crypto'
 import type { CordisXExternalProviderAvailabilityStatus } from '../capability-availability-contracts.js'
@@ -76,6 +78,48 @@ export class ProviderFleet implements CordisXPlatformAdapter {
   private readonly agentLoopInFlight = new Map<string, AgentLoopInFlight>()
   private lifecycleAuthorityQueue: Promise<void> = Promise.resolve()
   private lifecycleDisposers = new Map<string, () => void>()
+  private readonly controlledTurns = new ControlledAgentTurns({
+    resolve: (scope, binding) =>
+      this.resolveAgentLoopBinding({
+        scope,
+        task: binding.task,
+        binding: binding.binding,
+        definition: binding.definition,
+      }),
+    submit: (scope, input) => this.submitControlledTurn(scope, input),
+    stored: (scope, id) => this.agentLoopAuthority?.committedResult(scope, id),
+    save: async (scope, id, state) => {
+      if (this.agentLoopAuthority === undefined) throw new Error('authority unavailable')
+      await this.agentLoopAuthority.setControlledTurnState(scope, id, state)
+    },
+    terminal: (locator, turn) => {
+      const event = this.readLifecycle({ providerId: locator.providerId, remoteSessionId: locator.remoteSessionId }, -1)
+        .events
+        .find(event =>
+          event.providerGeneration === locator.providerGeneration && event.turnId === turn
+          && (event.type === 'turn.completed' || event.type === 'turn.failed')
+        )
+      return event === undefined
+        ? undefined
+        : {
+          state: event.type === 'turn.completed' ? 'completed' as const : 'failed' as const,
+          observedAt: Date.parse(event.observedAt),
+        }
+    },
+    interrupt: async (locator, turn) => {
+      const result = await this.withProvider(
+        locator.providerId,
+        adapter =>
+          adapter.controlTurn({
+            action: 'interrupt',
+            session: { providerId: locator.providerId, remoteSessionId: locator.remoteSessionId },
+            turnId: turn,
+          }),
+        locator.providerGeneration,
+      )
+      return result.ok
+    },
+  })
   private closed = false
 
   private constructor(options: ProviderFleetOptions) {
@@ -214,39 +258,50 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     readonly definition: { readonly agentId: string; readonly revision: string }
     readonly model: CordisXTaskCreateInput['model']
     readonly cwd: string
+    readonly workspaceCategory?: 'game'
     readonly developerInstructions?: string
     readonly effort?: 'low' | 'medium' | 'high' | 'xhigh'
   }): Promise<unknown> {
     const generation = this.generationFor(input.model.providerId)
     if (generation === 'retired') return { status: 'unavailable', code: 'host-unavailable' }
     const provider = { providerId: input.model.providerId, providerGeneration: generation }
-    return await this.durableAgentLoop(input, provider, async commandDigest => {
-      const created = await this.withProvider(input.model.providerId, async adapter =>
-        await adapter.createSession({
-          model: input.model,
-          cwd: input.cwd,
-          ...(input.developerInstructions === undefined ? {} : { developerInstructions: input.developerInstructions }),
-          ...(input.effort === undefined ? {} : { effort: input.effort }),
-          approvalPolicy: 'on-request',
-        }), generation)
-      if (!created.ok) return { status: 'unavailable', code: 'host-unavailable' }
-      const locator: AgentLoopTaskLocator = {
-        task: `cxloop-task:${randomUUID()}`,
-        binding: { bindingId: `cxloop-binding:${randomUUID()}`, generation: 1 },
-        providerId: created.value.ref.providerId,
-        providerGeneration: generation,
-        remoteSessionId: created.value.ref.remoteSessionId,
-        definition: copy(input.definition),
-        state: 'active',
-      }
-      await this.agentLoopAuthority!.rememberTask(input.scope, locator)
-      return {
-        status: 'accepted',
-        locator,
-        commandDigest,
-        detailsUrl: { url: `codex:task/${encodeURIComponent(locator.remoteSessionId)}`, target: 'external' },
-      }
-    })
+    return await this.durableAgentLoop(
+      input.workspaceCategory === 'game'
+        ? { ...input, command: { ...(input.command as Record<string, unknown>), hostWorkspaceCategory: 'game' } }
+        : input,
+      provider,
+      async commandDigest => {
+        const created = await this.withProvider(input.model.providerId, async adapter =>
+          await adapter.createSession({
+            model: input.model,
+            cwd: input.workspaceCategory === 'game'
+              ? await this.agentLoopAuthority!.gameWorkspace(input.scope, input.operationId)
+              : input.cwd,
+            ...(input.developerInstructions === undefined
+              ? {}
+              : { developerInstructions: input.developerInstructions }),
+            ...(input.effort === undefined ? {} : { effort: input.effort }),
+            approvalPolicy: 'on-request',
+          }), generation)
+        if (!created.ok) return { status: 'unavailable', code: 'host-unavailable' }
+        const locator: AgentLoopTaskLocator = {
+          task: `cxloop-task:${randomUUID()}`,
+          binding: { bindingId: `cxloop-binding:${randomUUID()}`, generation: 1 },
+          providerId: created.value.ref.providerId,
+          providerGeneration: generation,
+          remoteSessionId: created.value.ref.remoteSessionId,
+          definition: copy(input.definition),
+          state: 'active',
+        }
+        await this.agentLoopAuthority!.rememberTask(input.scope, locator)
+        return {
+          status: 'accepted',
+          locator,
+          commandDigest,
+          detailsUrl: { url: `codex:task/${encodeURIComponent(locator.remoteSessionId)}`, target: 'external' },
+        }
+      },
+    )
   }
 
   async bindAgentLoopV4(input: {
@@ -741,12 +796,86 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     return () => this.lifecycleListeners.delete(listener)
   }
 
+  private async submitControlledTurn(
+    scope: AgentLoopAuthorityScope,
+    input: Parameters<AgentLoopControlV1['submit']>[0],
+  ): Promise<unknown> {
+    const locator = this.resolveAgentLoopBinding({
+      scope,
+      task: input.binding.task,
+      binding: input.binding.binding,
+      definition: input.binding.definition,
+    })
+    if (locator === undefined || this.generationFor(locator.providerId) !== locator.providerGeneration) {
+      return { status: 'unavailable', code: 'provider-replaced' }
+    }
+    if (input.content.some(part => part.kind !== 'text')) return { status: 'unavailable', code: 'unsupported' }
+    const message = input.content.map(part => part.kind === 'text' ? part.text : '').join('\n')
+    if (!message.trim() || message.length > 65_536) return { status: 'unavailable', code: 'invalid-request' }
+    return await this.durableAgentLoop(
+      { scope, operationId: input.commandId, command: { type: 'controlled-submit', ...input } },
+      locator,
+      async commandDigest => {
+        const sent = await this.withProvider(locator.providerId, adapter =>
+          adapter.submitTurn({
+            session: { providerId: locator.providerId, remoteSessionId: locator.remoteSessionId },
+            message,
+            operationId: input.commandId,
+            operationDigest: commandDigest,
+          }), locator.providerGeneration)
+        return !sent.ok
+          ? { status: 'unavailable', code: 'host-unavailable' }
+          : {
+            status: 'accepted',
+            locator,
+            turn: sent.value.turnId,
+            deadline: input.deadline,
+            controlledState: 'running',
+          }
+      },
+    )
+  }
+
+  async controlAgentLoop(
+    input: {
+      readonly scope: AgentLoopAuthorityScope
+      readonly action: 'submit' | 'cancel' | 'read' | 'dispose'
+      readonly value?: unknown
+    },
+  ): Promise<unknown> {
+    if (input.action === 'dispose') {
+      await this.controlledTurns.dispose(input.scope)
+      return { status: 'accepted', value: null }
+    }
+    if (input.action === 'submit') {
+      return await this.controlledTurns.submit(input.scope, input.value as Parameters<AgentLoopControlV1['submit']>[0])
+    }
+    if (input.action === 'read') {
+      return await this.controlledTurns.read(input.scope, input.value as AgentLoopControlledTurnV1)
+    }
+    const request = input.value as Parameters<AgentLoopControlV1['cancel']>[0]
+    const target = request.target
+    const locator = this.resolveAgentLoopBinding({
+      scope: input.scope,
+      task: target.binding.task,
+      binding: target.binding.binding,
+      definition: target.binding.definition,
+    })
+    if (locator === undefined) return { status: 'unavailable', code: 'turn-unavailable' }
+    return await this.durableAgentLoop(
+      { scope: input.scope, operationId: request.commandId, command: { type: 'controlled-cancel', ...request } },
+      locator,
+      async () => await this.controlledTurns.cancel(input.scope, target),
+    )
+  }
+
   async controlTurn(input: CordisXTurnControlInput): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>> {
     return await this.withSession(input.session, async adapter => await adapter.controlTurn(input))
   }
 
   async close(): Promise<void> {
     if (this.closed) return
+    await this.controlledTurns.dispose()
     this.closed = true
     this.pagination.clear()
     for (const dispose of this.lifecycleDisposers.values()) dispose()

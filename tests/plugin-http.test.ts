@@ -31,6 +31,16 @@ async function fixture() {
       response.end('x'.repeat(1_048_577))
       return
     }
+    if (request.url === '/grant') {
+      response.setHeader('content-type', 'application/json')
+      response.end(JSON.stringify({ token: 'child-secret', grantId: 'grant-1' }))
+      return
+    }
+    if (request.url === '/denied') {
+      response.writeHead(403)
+      response.end(JSON.stringify({ token: 'never-store' }))
+      return
+    }
     if (request.url === '/wait') return
     response.setHeader('set-cookie', 'private-cookie')
     response.setHeader('content-type', 'application/json')
@@ -144,6 +154,30 @@ describe('public plugin HTTP authority', () => {
     await f.authority.handle({ ...connectionInput, operation: 'plugin-http-dispose' })
     expect(f.secrets.size).toBe(0)
     expect(await f.send()).toMatchObject({ code: 'connection-unavailable' })
+  })
+  it('captures a derived credential before returning a redacted same-origin response', async () => {
+    const f = await fixture()
+    const exchange = (path: string) =>
+      f.authority.handle({
+        ...connectionInput,
+        operation: 'plugin-http-exchange',
+        operationId: crypto.randomUUID(),
+        connection: f.connection,
+        path,
+        credentialField: 'token',
+        deadline: Date.now() + 2000,
+      })
+    expect(await exchange('/denied')).toMatchObject({ code: 'network-error' })
+    expect(f.secrets.size).toBe(1)
+    const derived = await exchange('/grant')
+    expect(derived).toMatchObject({ status: 'accepted', value: { response: { body: '{"grantId":"grant-1"}' } } })
+    expect(JSON.stringify(derived)).not.toContain('child-secret')
+    if (derived.status !== 'accepted') throw new Error('missing grant')
+    const child = (derived.value as { connection: unknown }).connection
+    await f.send({ connection: child })
+    expect(f.seen.at(-1)?.authorization).toBe('Bearer child-secret')
+    await f.send()
+    expect(f.seen.at(-1)?.authorization).toBe('Bearer test-bearer')
   })
   it('does not follow redirects and bounds the real streamed response', async () => {
     const f = await fixture()

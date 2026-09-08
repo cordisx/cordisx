@@ -107,6 +107,7 @@ export class PluginHttpAuthority {
         grant.requests.get(String(input.operationId))?.abort()
         return accepted(null)
       }
+      if (input.operation === 'plugin-http-exchange') return await this.exchange(grant, input)
       if (input.operation !== 'plugin-http-request') return fail('invalid-request')
       return await this.request(grant, input)
     } catch {
@@ -150,6 +151,40 @@ export class PluginHttpAuthority {
     this.grants.set(id, { connection, principal, owner, keychainService, requests: new Map() })
     return accepted(connection)
   }
+  private async exchange(grant: Grant, input: Record<string, unknown>): Promise<HttpResultV1<unknown>> {
+    const field = input.credentialField
+    if (
+      typeof field !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]{0,63}$/u.test(field)
+      || ['__proto__', 'constructor', 'prototype'].includes(field)
+    ) return fail('invalid-request')
+    const result = await this.request(grant, { ...input, method: 'POST' })
+    if (result.status !== 'accepted') return result
+    if (result.value.statusCode < 200 || result.value.statusCode >= 300) return fail('network-error')
+    let body: Record<string, unknown>
+    try {
+      body = record(JSON.parse(result.value.body))
+    } catch {
+      return fail('invalid-request')
+    }
+    if (!Object.hasOwn(body, field) || typeof body[field] !== 'string') return fail('credential-unavailable')
+    if (this.grants.get(grant.connection.id) !== grant || !this.options.principalAllowed(grant.principal)) {
+      return fail('stale-generation')
+    }
+    const connection = await this.authorize(grant.principal, {
+      origin: grant.connection.origin,
+      credential: 'bearer',
+      secret: body[field],
+    })
+    delete body[field]
+    if (connection.status !== 'accepted') return connection
+    if (this.grants.get(grant.connection.id) !== grant || !this.options.principalAllowed(grant.principal)) {
+      const child = this.grants.get(connection.value.id)
+      if (child !== undefined) await this.retire(child.connection.id, child)
+      return fail('stale-generation')
+    }
+    return accepted({ connection: connection.value, response: { ...result.value, body: JSON.stringify(body) } })
+  }
+
   private async request(grant: Grant, input: Record<string, unknown>): Promise<HttpResultV1<HttpResponseV1>> {
     const operationId = input.operationId
     if (
