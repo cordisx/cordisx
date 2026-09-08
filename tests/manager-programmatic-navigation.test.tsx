@@ -66,96 +66,104 @@ function snapshot(): ManagerSnapshot {
 }
 
 describe('programmatic Manager identity detail navigation', () => {
-  it('opens one modal at the exact detail, returns to the declared root, and closes back to the Room', async () => {
-    const dom = new JSDOM(
-      '<!doctype html><html><head></head><body><button id="native-trigger">CordisX</button></body></html>',
-      { url: 'app://-/index.html' },
-    )
-    Object.assign(globalThis, {
-      window: dom.window,
-      document: dom.window.document,
-      HTMLElement: dom.window.HTMLElement,
-      Element: dom.window.Element,
-      Node: dom.window.Node,
-      MutationObserver: dom.window.MutationObserver,
-      IS_REACT_ACT_ENVIRONMENT: true,
-    })
-    const controller = new HostManagerNavigationController()
-    const closeManagerContent = vi.fn(async () => {})
-    const presentation = (reference: { readonly id: string }): ManagerContentPresentation =>
-      reference.id === 'team'
-        ? { title: 'Team Architecture', description: 'Entities', tabs: [] }
-        : { title: 'Lead', description: 'Lead detail', parent: { id: 'team' }, tabs: [] }
-    const model = {
-      snapshot,
-      subscribe: () => () => {},
-      managerContentPresentation: (_id: string, reference: { readonly id: string }) => presentation(reference),
-      mountManagerContent: async (
-        _id: string,
-        reference: { readonly id: string },
-        container: HTMLElement,
-      ): Promise<ManagedManagerPageMount> => {
-        const body = container.ownerDocument.createElement('div')
-        body.dataset.managerRoute = reference.id
-        container.append(body)
-        const abort = new AbortController()
-        return {
-          owner: 'chatroom',
-          contributionId: 'chatroom:team',
-          routeId: `chatroom:${reference.id}`,
-          pageId: `chatroom:${reference.id}`,
-          signal: abort.signal,
-          abort: () => abort.abort(),
-          dispose: async () => body.remove(),
-        }
-      },
-      closeManagerContent,
-      setPluginBlocked: async () => {},
-      setPermissionPolicy: async () => {},
-    } as unknown as ManagerModel
-    let dispose: (() => void) | undefined
-    try {
-      await act(async () => {
-        dispose = installReactCordisXManager(dom.window.document, model, {
-          triggerTarget: () => dom.window.document.getElementById('native-trigger') ?? undefined,
-          navigationController: controller,
-        })
-        await Promise.resolve()
-      })
-      await act(async () => {
-        controller.openManagerContent({
-          contributionId: 'chatroom:team',
-          root: { id: 'team' },
-          target: { id: 'entity-overview', params: { entityId: 'lead' } },
-        })
-        await Promise.resolve()
-      })
-      expect(dom.window.document.querySelectorAll('[data-cordisx-manager-modal="true"]')).toHaveLength(1)
-      expect(dom.window.document.querySelector('[data-manager-route="entity-overview"]')).not.toBeNull()
-
-      const restoreDetail = controller.captureReturn()
-      expect(restoreDetail).toBeTypeOf('function')
-
-      await act(async () => {
-        dom.window.document.querySelector<HTMLButtonElement>('.cxr-header [aria-label="Back"]')!.click()
-        await Promise.resolve()
-      })
-      expect(dom.window.document.querySelector('[data-manager-route="team"]')).not.toBeNull()
-
-      await act(async () => {
-        restoreDetail?.()
-        await Promise.resolve()
-      })
-      expect(dom.window.document.querySelector('[data-manager-route="entity-overview"]')).not.toBeNull()
-      await act(async () =>
-        dom.window.document.querySelector<HTMLButtonElement>('.cxr-header [aria-label="Close CordisX Manager"]')!
-          .click()
+  it.each(['team', 'shop'])(
+    'opens exact detail and returns to declared parent %s rather than seeded root history',
+    async parentId => {
+      const dom = new JSDOM(
+        '<!doctype html><html><head></head><body><button id="native-trigger">CordisX</button></body></html>',
+        { url: 'app://-/index.html' },
       )
-      expect(dom.window.document.querySelector('[data-cordisx-manager-modal="true"]')).toBeNull()
-      expect(closeManagerContent).toHaveBeenCalled()
-    } finally {
-      await act(async () => dispose?.())
-      dom.window.close()
-    }
-  })
+      Object.assign(globalThis, {
+        window: dom.window,
+        document: dom.window.document,
+        HTMLElement: dom.window.HTMLElement,
+        Element: dom.window.Element,
+        Node: dom.window.Node,
+        MutationObserver: dom.window.MutationObserver,
+        IS_REACT_ACT_ENVIRONMENT: true,
+      })
+      const controller = new HostManagerNavigationController()
+      const closeManagerContent = vi.fn(async () => {})
+      const presentation = (reference: { readonly id: string }): ManagerContentPresentation =>
+        reference.id === 'team'
+          ? { title: 'Team Architecture', description: 'Entities', tabs: [] }
+          : {
+            title: 'Lead',
+            description: 'Lead detail',
+            parent: { id: parentId === reference.id ? 'team' : parentId },
+            tabs: [],
+          }
+      const model = {
+        snapshot,
+        subscribe: () => () => {},
+        managerContentPresentation: (_id: string, reference: { readonly id: string }) => presentation(reference),
+        mountManagerContent: async (
+          _id: string,
+          reference: { readonly id: string },
+          container: HTMLElement,
+        ): Promise<ManagedManagerPageMount> => {
+          const body = container.ownerDocument.createElement('div')
+          body.dataset.managerRoute = reference.id
+          container.append(body)
+          const abort = new AbortController()
+          return {
+            owner: 'chatroom',
+            contributionId: 'chatroom:team',
+            routeId: `chatroom:${reference.id}`,
+            pageId: `chatroom:${reference.id}`,
+            signal: abort.signal,
+            abort: () => abort.abort(),
+            dispose: async () => body.remove(),
+          }
+        },
+        closeManagerContent,
+        setPluginBlocked: async () => {},
+        setPermissionPolicy: async () => {},
+      } as unknown as ManagerModel
+      let dispose: (() => void) | undefined
+      try {
+        await act(async () => {
+          dispose = installReactCordisXManager(dom.window.document, model, {
+            triggerTarget: () => dom.window.document.getElementById('native-trigger') ?? undefined,
+            navigationController: controller,
+          })
+          await Promise.resolve()
+        })
+        await act(async () => {
+          controller.openManagerContent({
+            contributionId: 'chatroom:team',
+            root: { id: 'team' },
+            target: { id: 'entity-overview', params: { entityId: 'lead' } },
+          })
+          await Promise.resolve()
+        })
+        expect(dom.window.document.querySelectorAll('[data-cordisx-manager-modal="true"]')).toHaveLength(1)
+        expect(dom.window.document.querySelector('[data-manager-route="entity-overview"]')).not.toBeNull()
+
+        const restoreDetail = controller.captureReturn()
+        expect(restoreDetail).toBeTypeOf('function')
+
+        await act(async () => {
+          dom.window.document.querySelector<HTMLButtonElement>('.cxr-header [aria-label="Back"]')!.click()
+          await Promise.resolve()
+        })
+        expect(dom.window.document.querySelector(`[data-manager-route="${parentId}"]`)).not.toBeNull()
+
+        await act(async () => {
+          restoreDetail?.()
+          await Promise.resolve()
+        })
+        expect(dom.window.document.querySelector('[data-manager-route="entity-overview"]')).not.toBeNull()
+        await act(async () =>
+          dom.window.document.querySelector<HTMLButtonElement>('.cxr-header [aria-label="Close CordisX Manager"]')!
+            .click()
+        )
+        expect(dom.window.document.querySelector('[data-cordisx-manager-modal="true"]')).toBeNull()
+        expect(closeManagerContent).toHaveBeenCalled()
+      } finally {
+        await act(async () => dispose?.())
+        dom.window.close()
+      }
+    },
+  )
 })
