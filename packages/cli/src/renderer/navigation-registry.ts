@@ -466,6 +466,9 @@ export class NavigationRegistry extends NavigationRegistryRouting {
         new Error(decision.reason ?? `extension point ${pointId} is denied for plugin ${requestingOwner}`),
       )
     }
+    if (this.findRecord(requestingOwner, reference.id)?.definition.outlet === 'manager.content') {
+      return this.navigate(requestingOwner, reference)
+    }
     return this.enqueue(() => this.navigateNow(requestingOwner, reference, returnFocus))
   }
 
