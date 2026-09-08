@@ -1,0 +1,123 @@
+{
+  "valid": [
+    {
+      "name": "literal-text",
+      "scene": {
+        "version": 1,
+        "root": { "type": "text", "text": "<script>fetch('https://example.invalid')</script>", "tone": "muted" }
+      }
+    },
+    {
+      "name": "board",
+      "scene": {
+        "version": 1,
+        "root": {
+          "type": "grid",
+          "columns": 19,
+          "children": [
+            {
+              "type": "button",
+              "label": "●",
+              "ariaLabel": "Row 1 column 1",
+              "action": { "x": 0, "y": 0 },
+              "disabled": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "numeric-action",
+      "scene": {
+        "version": 1,
+        "root": {
+          "type": "number-action",
+          "label": "Raise to",
+          "min": 20,
+          "max": 100,
+          "step": 1,
+          "value": 20,
+          "action": { "type": "raise" },
+          "valueKey": "to"
+        }
+      }
+    },
+    {
+      "name": "stack",
+      "scene": { "version": 1, "root": { "type": "stack", "direction": "horizontal", "children": [] } }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "raw-html",
+      "scene": { "version": 1, "root": { "type": "html", "html": "<script>parent.Host()</script>" } }
+    },
+    {
+      "name": "remote-image",
+      "scene": { "version": 1, "root": { "type": "image", "src": "http://127.0.0.1/seat-secret" } }
+    },
+    {
+      "name": "arbitrary-css",
+      "scene": {
+        "version": 1,
+        "root": { "type": "text", "text": "x", "style": "background:url(https://example.invalid)" }
+      }
+    },
+    {
+      "name": "action-prototype",
+      "scene": {
+        "version": 1,
+        "root": { "type": "button", "label": "x", "action": { "__proto__": { "polluted": true } } }
+      }
+    },
+    {
+      "name": "numeric-prototype",
+      "scene": {
+        "version": 1,
+        "root": {
+          "type": "number-action",
+          "label": "x",
+          "min": 1,
+          "max": 10,
+          "step": 1,
+          "value": 1,
+          "action": {},
+          "valueKey": "constructor"
+        }
+      }
+    },
+    {
+      "name": "numeric-step",
+      "scene": {
+        "version": 1,
+        "root": {
+          "type": "number-action",
+          "label": "x",
+          "min": 1,
+          "max": 10,
+          "step": 2,
+          "value": 2,
+          "action": {},
+          "valueKey": "amount"
+        }
+      }
+    },
+    {
+      "name": "numeric-path",
+      "scene": {
+        "version": 1,
+        "root": {
+          "type": "number-action",
+          "label": "x",
+          "min": 1,
+          "max": 10,
+          "step": 1,
+          "value": 1,
+          "action": {},
+          "valueKey": "a.b"
+        }
+      }
+    },
+    { "name": "too-many-columns", "scene": { "version": 1, "root": { "type": "grid", "columns": 20, "children": [] } } }
+  ]
+}
