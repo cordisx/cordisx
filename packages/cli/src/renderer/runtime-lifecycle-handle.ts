@@ -510,8 +510,6 @@ export const createRuntimeDispose = async (runtimeScope: RuntimeClosureScope): P
   runtimeScope.routeHistory()!.dispose()
   await runtimeScope.pageFiber?.dispose()
   runtimeScope.pageFiber = undefined
-  await runtimeScope.agentConversationShellFiber?.dispose()
-  runtimeScope.agentConversationShellFiber = undefined
   runtimeScope.selectedNavigationActions()!.dispose()
   if (runtimeScope.ownsSharedReactRuntime) {
     runtimeScope.sharedReactRuntime?.dispose()

@@ -777,6 +777,7 @@ export interface CordisXAgentConversationShellSourceOptionsV9 {
   readonly composer?: Readonly<{ readonly mode: 'page-composer-v2' }>
 }
 
+/** @deprecated Type-only compatibility export. Host no longer injects this retired renderer service. */
 export interface CordisXAgentConversationShell {
   registerSourceV10(
     factory: CordisXAgentConversationShellSourceFactoryV10,

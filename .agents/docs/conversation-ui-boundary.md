@@ -2,9 +2,9 @@
 
 This reference describes the Host implementation boundary for
 [Chatroom #74](https://github.com/cordisx/plugin-chatroom/issues/74).
-The migration is pending: the current Shell remains available until the
-replacement passes the real product gate below. A preparation branch is not a
-switched product or a released Host.
+This retirement candidate removes the old Host renderer and service injection.
+It is not a switched product or released Host: merging and switching still
+require the native replacement evidence and product acceptance below.
 
 ## Supported plugin page
 
@@ -41,62 +41,59 @@ model. Its public `cordisx/ui` export, Manager content summary and collection
 composite consumers remain. Styles, asset definitions, fallback and public
 signatures are preserved by this extraction.
 
-`host-ui/conversation/RightInspector.tsx` is private implementation, not a
-public reusable inspector: both width observation and resize limits query
-`.cxa-root`, and its drawer/split styles depend on the conversation container.
-Its only current production callers are the conversation renderer and its
-identity wrapper. Keep Chatroom's member/settings/detail UI in Chatroom; do not
-export this complete business panel under a generic name. Existing public
-controls, including `HorizontalSplitPane`, remain available where appropriate.
-A later primitive requires a concrete gap and a small independent contract.
+The former private `RightInspector` was tied to the Room container and had no
+independent consumer. It is removed with the Room renderer; it is not exported
+under a generic name. Existing public controls, including `HorizontalSplitPane`
+and the controlled Markdown editor, remain available.
 
-## Retirement candidates and retained authority
+## Removed implementation and retained consumers
 
-The following are deletion candidates after replacement acceptance, not an
-instruction to remove a live consumer now:
+The candidate deletes all eight `agent-conversation-shell*` implementation
+modules, the private page-mount brand, nine conversation renderer/interaction/
+style modules, and the unused outer Room composite renderer. It removes service
+creation, lifetime state, disposal, Context injection, the private conversation
+command executor, and the branded navigation/chrome branch. The unused UI
+fixture and thirteen dedicated Shell/renderer/editor-adapter test files retire
+with their implementations. No replacement business renderer is added to Host.
 
-- `agent-conversation-shell-mounted.tsx` and the Shell registration, base,
-  projection, update and validation modules: the legacy renderer/source path.
-- The remaining `host-ui/conversation` renderer, entries, interactions,
-  identity panel, inspector, styles, model and command-controller modules:
-  Room UI, business fields and copy. Do not retain them by renaming them.
-- The corresponding Shell service composition, lifecycle registration and
-  renderer-only fixtures/tests. Remove their edges together with the renderer.
+The following remain for specific consumers:
 
-Retain the extracted avatar modules, public `cordisx/ui` primitives, generic
-pages/routes/sidebar, entities, detail navigation, Agent/Session, admission,
-CLI execution and source authorization. In particular, `renderer/commands.ts`
-and execution authority still consume frozen Shell command-context types.
-Removing a renderer does not delete those types or authorize rewriting that
-execution chain. The Protocol package's historical exports, schemas and
-conformance are a separate compatibility boundary.
+- `host-ui/conversation/model.ts` remains at its original path because
+  `scenario-lab-model.ts`, `scenario-lab-controller-base.ts` and
+  `scenario-lab-controller.ts` call its in-memory model. It contains no renderer,
+  DOM, stylesheet, service registration or persistent store. It is not a second
+  Chatroom page. Removing ScenarioLab's actual model is outside this retirement.
+- Shared avatar components, generic pages/routes/sidebar, entity storage,
+  Agent/Session, public page composer admission, CLI execution and source
+  authorization remain. Chatroom owns its own composite avatars.
+- Exported Shell types are deprecated, type-only compatibility declarations;
+  `Context.agentConversationShell` is no longer available. They do not install
+  a service. Frozen Protocol Shell types remain referenced by the public
+  `CordisXCommandContext.hostContext` union and the scenario model. After retiring
+  the private Shell executor, no production renderer emits those contexts; the
+  public page composer context and its execution authorization remain in use.
+  Protocol versions are not deleted or silently changed by this retirement.
 
-## Bounded consumer audit, 2026-09-08
+## Bounded consumer audit (2026-09-09)
 
-Host baseline: `5836c52a78a544945c644fa5d06395ccc9f0306c`.
-Protocol baseline: `06277f9d117893a9215c991db8c0881df0f0b0f3`.
-All six plugin repositories registered in the Mono inventory were initialized
-and their remote `main` fetched. A tracked-tree search for Shell service names,
-versioned source registration, protocol specifiers and renderer/identity names
-was followed by production call-site inspection.
+Chatroom `e24911008b5646c2e3a79b2410673a97e0d3d4a1` mounts
+`createLazyChatroomPage` directly through `ctx.pages.register`; its production
+source has no Shell service reference. Channel `4cee12e3a92eeed557bc9de8cc4792710918327a`
+and CLI Proxy `1428ee205aab31df2779398cc8491879b303d1d0` were inspected from
+Host's installed exact dependencies. Agent Trace
+`539da1928bc2dfd113ae90c93f0a115086c96c63`, Pet
+`9689fdb34a4e46e2102249df18012338a5a6a7cf`, and Ascension
+`bd36754a4305c1096a84674b252377aff3049f52` were inspected from fetched main
+checkouts. None references the retired Shell injection or private renderer.
+This is a bounded source audit, not a claim about unknown third-party plugins.
+An older Chatroom requiring Shell must migrate before using this candidate.
 
-| Plugin          | Exact fetched main                         | Result                                                                                                                                             |
-| --------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chatroom        | `c92fe8bdb7633c56ad8ed02e8637f81495bfa42b` | `src/chatroom-page-surface.ts` calls `registerSourceV9(...).mount`; 24 tracked files reference the family, including shared item and command types |
-| Channel         | `4cee12e3a92eeed557bc9de8cc4792710918327a` | No matching tracked references                                                                                                                     |
-| CLI Proxy API   | `42e113f7d82547fd87c0578c82716dc898c29fd6` | No matching tracked references                                                                                                                     |
-| Agent Trace     | `539da1928bc2dfd113ae90c93f0a115086c96c63` | No matching tracked references                                                                                                                     |
-| Pet             | `1f5d671ce57796deb19127fe777d6078256d0953` | No matching tracked references                                                                                                                     |
-| Codex Ascension | `bd36754a4305c1096a84674b252377aff3049f52` | No matching tracked references                                                                                                                     |
+## Session Back behavior
 
-This establishes one known registered production plugin consumer at these
-revisions. It does not audit third-party installations, published package
-contents, unmerged branches or a future remote main. Host's `MountedConversation`
-is the production renderer entry; projection/service type references are
-internal dependencies, and Playground fixtures and tests are not additional
-products. `HostAgentIdentityPanel` has no production call outside its own
-module; its content component is called by the conversation renderer. Manager
-uses the shared avatar, not that identity panel.
+Returning from a Session restores Manager history only when Manager was open at
+the time of navigation. Capturing a hidden Manager would reopen its stale detail
+over a plugin page on Back. The return port now captures no route while closed;
+existing open-Manager detail restoration remains covered by its integration test.
 
 ## Evidence and switch gate
 
@@ -107,7 +104,7 @@ The requirement ledger for this preparation is:
 | Plugin header and one scroll owner | Existing `navigation.history` body-only test; sidebar bundle fixture now mounts a body-only Room with its own header/timeline                                       | Real Chatroom layout/keyboard preview                           |
 | Preserve route/source and sidebar  | Existing exact-source/generation routing tests; production bundle sidebar test covers Room selection, actions, other native rows, history and body-only composition | Real native sidebar geometry and navigation                     |
 | Retain shared avatar               | Extracted public shape; public UI and Manager summary tests                                                                                                         | Real themes/avatar preview                                      |
-| Delete business renderer           | Candidate list above; live implementation retained                                                                                                                  | Equivalent replacement evidence and explicit preview acceptance |
+| Delete business renderer           | Renderer/service removed in the candidate; frozen type exports retained                                                                                             | Equivalent replacement evidence and explicit preview acceptance |
 
 These tests use JSDOM and the actual renderer bundle; they do not establish a
 real `app://` launch or user acceptance. Before removing the live Shell, record
@@ -115,8 +112,8 @@ exact Host/Protocol/Chatroom candidate SHAs and show cold-start historical
 messages/CLI replies without duplicates, persisted-avatar details, one readable
 session list and opening, input/send/actions, back navigation, sidebar states
 and stable Room/source identity. The coordinating task owns that product
-baseline and acceptance record. No installed App, profile, existing window or
-npm publication is changed by this preparation.
+baseline and acceptance record. The native preview and its persistent source identity remain separate from
+this candidate until the replacement gate is met. No npm publication is made.
 
 Host PRs #270 and #335 record earlier removal/restoration decisions. They are
 historical evidence, not instructions to restore the entire Host business UI

@@ -75,9 +75,8 @@ One Host runtime owns plugin fibers and the shared React singleton. Reload and
 replacement retire registrations and pending operations through that lifecycle.
 Product pages may own their complete internal renderer inside a controlled page
 body, while the Host retains routing, outlet, lifecycle, and authority fences.
-The legacy data-only conversation source still mounts a Host-owned business
-renderer while its consumer migrates. New product presentation belongs in the
-plugin page; see the [ownership and retirement boundary](conversation-ui-boundary.md)
+The legacy Host conversation renderer and its service injection are retired.
+Product presentation belongs in the plugin page; see the [ownership and retirement boundary](conversation-ui-boundary.md)
 for shared primitives, consumer evidence and the replacement gate.
 Commands and route activation retain exact owner, Session, binding, and
 generation coordinates; product visuals cross into Host-owned rows only as
