@@ -147,6 +147,7 @@ try {
     .map(name => `node_modules/${name}/`)
   for (
     const required of [
+      '@cordisx/protocol/package.json',
       '@cordisx/channel/dist/channel.js',
       '@cordisx/channel/dist/channel.d.ts',
       '@cordisx/channel/dist/service.mjs',
