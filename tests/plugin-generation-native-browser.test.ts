@@ -265,18 +265,32 @@ describe('plugin generation native browser graph', () => {
     const profile = path.join(root, 'chrome')
     let browser: ChildProcess | undefined
     let cdp: CdpClient | undefined
+    let browserStderr = ''
     try {
+      // Use the same isolated Linux-compatible launch policy as the other native fixtures.
       browser = spawn(chrome, [
         '--headless=new',
         '--no-first-run',
         '--no-default-browser-check',
+        '--disable-background-networking',
+        '--disable-component-update',
+        '--disable-sync',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--no-sandbox',
+        '--remote-allow-origins=*',
+        '--remote-debugging-address=127.0.0.1',
         `--remote-debugging-port=${port}`,
         `--user-data-dir=${profile}`,
-        server.url,
+        'about:blank',
       ], { stdio: ['ignore', 'ignore', 'pipe'] })
-      const target = await waitForChromeTarget(port, browser, () => '', server.url)
+      browser.stderr?.on('data', data => {
+        browserStderr = `${browserStderr}${data.toString()}`.slice(-8_192)
+      })
+      const target = await waitForChromeTarget(port, browser, () => browserStderr)
       cdp = await CdpClient.connect(target)
       await cdp.send('Runtime.enable')
+      await cdp.send('Page.navigate', { url: server.url })
       try {
         await expect.poll(async () => await cdp!.evaluate('globalThis.__lazyCssReady === true'), { timeout: 15_000 })
           .toBe(true)
