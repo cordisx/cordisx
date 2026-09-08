@@ -259,7 +259,7 @@ describe('public Select and PanZoomCanvas', () => {
       expect(pageRoot.matches('.cxr-react-root:has(.cxr-ui-pan-zoom-canvas[data-fill="true"])')).toBe(true)
       const style = dom.window.document.querySelector('style[data-cordisx-shared-react]')?.textContent ?? ''
       expect(style).toContain(
-        '.cxr-react-root:has(.cxr-ui-pan-zoom-canvas[data-fill="true"]){height:100%;min-height:0;overflow:hidden}',
+        '.cxr-react-root:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"]){height:100%;min-height:0;overflow:hidden}',
       )
       expect(style).toContain('.cxr-ui-pan-zoom-canvas{position:relative;width:100%;height:100%')
     } finally {
