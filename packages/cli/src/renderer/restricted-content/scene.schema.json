@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CordisX restricted scene v1",
+  "$comment": "Additional semantic checks: 65536 UTF8 bytes per scene, 1024 total nodes, node depth 16 (root=1), 4096 UTF8 bytes and JSON depth 16 per action, reject dangerous keys recursively. Numeric ranges/differences must be safe integers; min<=value<=max, (value-min)%step=0. Validate merged number-action at both range endpoints within the action budget. JS string limits use UTF16 code units. This implementation schema complements the owning Protocol contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "root"],
+  "properties": { "version": { "const": 1 }, "root": { "$ref": "#/$defs/node" } },
+  "$defs": {
+    "text": { "type": "string", "maxLength": 2048 },
+    "integer": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+    "children": { "type": "array", "maxItems": 400, "items": { "$ref": "#/$defs/node" } },
+    "json": {
+      "oneOf": [
+        { "type": ["null", "boolean", "number", "string"] },
+        { "type": "array", "items": { "$ref": "#/$defs/json" } },
+        { "$ref": "#/$defs/object" }
+      ]
+    },
+    "object": {
+      "type": "object",
+      "propertyNames": { "not": { "enum": ["__proto__", "prototype", "constructor"] } },
+      "additionalProperties": { "$ref": "#/$defs/json" }
+    },
+    "node": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "text"],
+          "properties": {
+            "type": { "const": "text" },
+            "text": { "$ref": "#/$defs/text" },
+            "tone": { "enum": ["default", "muted", "accent"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "children"],
+          "properties": {
+            "type": { "const": "stack" },
+            "direction": { "enum": ["vertical", "horizontal"] },
+            "children": { "$ref": "#/$defs/children" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "columns", "children"],
+          "properties": {
+            "type": { "const": "grid" },
+            "columns": { "type": "integer", "minimum": 1, "maximum": 19 },
+            "children": { "$ref": "#/$defs/children" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "label", "action"],
+          "properties": {
+            "type": { "const": "button" },
+            "label": { "$ref": "#/$defs/text" },
+            "ariaLabel": { "$ref": "#/$defs/text" },
+            "action": { "$ref": "#/$defs/json" },
+            "disabled": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "label", "min", "max", "step", "value", "action", "valueKey"],
+          "properties": {
+            "type": { "const": "number-action" },
+            "label": { "$ref": "#/$defs/text" },
+            "min": { "$ref": "#/$defs/integer" },
+            "max": { "$ref": "#/$defs/integer" },
+            "value": { "$ref": "#/$defs/integer" },
+            "step": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+            "action": { "$ref": "#/$defs/object" },
+            "valueKey": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$",
+              "not": { "enum": ["__proto__", "prototype", "constructor"] }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
