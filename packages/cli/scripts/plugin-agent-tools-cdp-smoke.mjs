@@ -1,7 +1,7 @@
 // Separate real Chrome/CDP integration checkpoint. It never opens or inspects Codex.
 // Build the selected exact Host checkout first; the script never builds watched dist.
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -54,18 +54,15 @@ import { createRoom, addRoomRun, bindRoomRunSession } from ${JSON.stringify(chat
 import { ChatroomCliBindings } from ${JSON.stringify(chat + '/src/room-cli-bindings.ts')};
 import { ChatroomConversationController } from ${JSON.stringify(chat + '/src/conversation-source.ts')};
 import { ChatroomAgentSessionController } from ${JSON.stringify(chat + '/src/agent-session-controller.ts')};
-import { ChatroomAgentSessionConversationSourceV10 } from ${
-  JSON.stringify(chat + '/src/agent-session-conversation-source-v10.ts')
-};
+import { ChatroomPageSource } from ${JSON.stringify(chat + '/src/chatroom-page-source.ts')};
 import { CHATROOM_DEFAULT_AGENT_CONFIGURATION } from ${JSON.stringify(chat + '/src/agent-definition.ts')};
-import { projectAgentConversationShellSnapshotV7 } from ${
-  JSON.stringify(host + '/packages/cli/dist/src/renderer/agent-conversation-shell-projection.js')
-};
 export const manifest=${JSON.stringify(manifest)};
 export const inject=['agents','sessions','approvals','documents','agentTools','settings'];
 export function apply(ctx) {
   globalThis.__smokeContextReady=true;
   globalThis.__smokeStart=async()=>{
+    globalThis.__smokeStartComplete=false;
+    globalThis.__smokeStartError=undefined;
     try {
       const acquired=await ctx.agents.create({sessionId:${
   JSON.stringify(sessionId)
@@ -82,18 +79,61 @@ export function apply(ctx) {
       await collaboration.ensureBound(room,room.runs[0]);
       const sessions=new ChatroomAgentSessionController({agents:ctx.agents,sessions:ctx.sessions,approvals:ctx.approvals},CHATROOM_DEFAULT_AGENT_CONFIGURATION,store);
       const domain=new ChatroomConversationController(store.rooms);
-      const binding={bindingId:'shell-real-cdp',shell:'agent-desktop',ownerGeneration:'shell-generation',routeSelection:{scope:'room-or-new',selectedRoomParam:room.id}};
-      const shell=new ChatroomAgentSessionConversationSourceV10(binding,domain.createSource(binding),sessions,'enter');
-      await shell.snapshot();
+      const settings={current:'enter',subscribe:()=>()=>{}};
+      const page=new ChatroomPageSource(domain,sessions,settings);
+      await page.hydrate(room.id);
       globalThis.__smokeRead=async()=>{
         const stored=await ctx.documents.load('room-registry');
-        const snapshot=await shell.snapshot();
-        const model=projectAgentConversationShellSnapshotV7('chatroom',snapshot,{resolve: text=>text.fallback??text.key},true);
-        return {stored,snapshot,model};
+        return {stored,page:page.getSnapshot(room.id)};
+      };
+      globalThis.__smokeColdRead=()=>{
+        globalThis.__smokeColdComplete=false;
+        globalThis.__smokeColdError=undefined;
+        globalThis.__smokeColdResult=undefined;
+        void (async()=>{
+          const coldStore=await DurableChatroomRoomStore.openOwnerDocuments(ctx.documents);
+          const coldSessions=new ChatroomAgentSessionController({agents:ctx.agents,sessions:ctx.sessions,approvals:ctx.approvals},CHATROOM_DEFAULT_AGENT_CONFIGURATION,coldStore);
+          const coldDomain=new ChatroomConversationController(coldStore.rooms);
+          const coldPage=new ChatroomPageSource(coldDomain,coldSessions,settings);
+          try {
+            await coldPage.hydrate(room.id);
+            return coldPage.getSnapshot(room.id);
+          } finally {
+            coldPage.dispose();
+            try {
+              await coldSessions.dispose();
+            } finally {
+              try {
+                coldDomain.dispose();
+              } finally {
+                coldStore.dispose();
+              }
+            }
+          }
+        })().then(
+          result=>{globalThis.__smokeColdResult=result;globalThis.__smokeColdComplete=true},
+          error=>{globalThis.__smokeColdError=String(error?.stack??error)},
+        );
       };
       globalThis.__smokeRevoke=()=>collaboration.revoke(acquired.sessionId);
-      globalThis.__smokeReady=true;
-    }catch(error){globalThis.__smokeError=String(error?.stack??error)}
+      ctx.effect(()=>async()=>{
+        page.dispose();
+        try {
+          await sessions.dispose();
+        } finally {
+          try {
+            domain.dispose();
+          } finally {
+            try {
+              await collaboration.dispose();
+            } finally {
+              store.dispose();
+            }
+          }
+        }
+      },'chatroom-cdp-smoke');
+      globalThis.__smokeStartComplete=true;
+    }catch(error){globalThis.__smokeStartError=String(error?.stack??error)}
   };
 }
 `
@@ -135,7 +175,19 @@ const bundle = await buildRendererBundle(config, {
   generation,
   ownerDocumentAuthority: { secret, profileId: 'smoke', generation },
 })
-const http = createServer((_req, res) => {
+console.log('BUNDLE BYTES', Buffer.byteLength(bundle))
+const http = createServer((req, res) => {
+  res.setHeader('Cache-Control', 'no-store')
+  if (req.method === 'GET' && req.url === '/bundle.js') {
+    res.setHeader('Content-Type', 'text/javascript; charset=utf-8')
+    res.end(bundle)
+    return
+  }
+  if (req.method !== 'GET' || req.url !== '/') {
+    res.writeHead(404)
+    res.end()
+    return
+  }
   res.setHeader('Content-Type', 'text/html')
   res.end(
     '<!doctype html><html lang="en"><head></head><body><div class="sidebar-header"><button aria-haspopup="menu">Codex</button></div><main data-cordisx-playground-seat="main"></main></body></html>',
@@ -143,6 +195,17 @@ const http = createServer((_req, res) => {
 })
 await new Promise(resolve => http.listen(0, '127.0.0.1', resolve))
 const url = `http://127.0.0.1:${http.address().port}`
+// Deliver the unchanged production IIFE over the fixture's HTTP server. Sending
+// its inline source maps through one CDP command can exceed Chrome's deadline.
+const bootstrap = `globalThis.__smokeBundleLoaded = new Promise((resolve, reject) => {
+  const script = document.createElement('script');
+  script.src = ${JSON.stringify(url + '/bundle.js')};
+  script.onload = () => resolve(true);
+  script.onerror = () => reject(new Error('fixture production bundle failed to load'));
+  const append = () => (document.head ?? document.documentElement).append(script);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', append, { once: true });
+  else append();
+});`
 const port = await findFreeLoopbackPort()
 const browser = spawn(process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', [
   '--headless=new',
@@ -155,11 +218,16 @@ const browser = spawn(process.env.CHROME_PATH ?? '/Applications/Google Chrome.ap
   `--user-data-dir=${path.join(root, 'chrome')}`,
   url,
 ], { stdio: ['ignore', 'ignore', 'pipe'] })
+const browserExit = new Promise(resolve => {
+  browser.once('error', error => resolve({ error: String(error) }))
+  browser.once('exit', (code, signal) => resolve({ code, signal }))
+})
 let stderr = ''
 browser.stderr.on('data', value => {
   stderr = (stderr + value).slice(-2000)
 })
-let cdp, installed
+let cdp, installed, report, cleanup, primaryError
+const cleanupErrors = []
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 try {
   let target
@@ -173,13 +241,46 @@ try {
   }
   if (!target) throw new Error('Chrome unavailable ' + stderr)
   console.log('PHASE production CDP install', port)
-  installed = await install(target, bundle, undefined, undefined, undefined, authority)
+  try {
+    installed = await install(target, bootstrap, undefined, undefined, undefined, authority)
+  } catch (error) {
+    console.error('INSTALL ERROR', error?.stack ?? String(error))
+    console.error('CHROME STDERR TAIL', stderr)
+    throw error
+  }
+  console.log('PHASE installed')
   cdp = await CdpSession.connect(target.webSocketDebuggerUrl)
   const evaluate = async expression => {
     const reply = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, 30000)
     if (reply.exceptionDetails) throw new Error(JSON.stringify(reply.exceptionDetails))
     return reply.result?.value
   }
+  const allowedFixtureCapabilities = new Set(capabilities)
+  const pumpFixtureApprovals = async (phase, completeExpression, errorExpression) => {
+    for (let i = 0; i < 160; i++) {
+      const state = await evaluate(
+        `({complete:Boolean(${completeExpression}),error:${errorExpression},text:document.body.innerText.slice(-2500),buttons:[...document.querySelectorAll("button")].map(b=>({text:b.textContent,disabled:b.disabled}))})`,
+      )
+      if (state.error) throw new Error(state.error)
+      if (state.complete) return
+      if (i === 10 || i === 40) console.log('PENDING', phase, JSON.stringify(state))
+      const prompts = [...state.text.matchAll(/chatroom 请求 ([a-z.]+)/gu)]
+      const capability = prompts.at(-1)?.[1]
+      if (
+        capability !== undefined && allowedFixtureCapabilities.has(capability)
+        && state.text.includes('one exact Agent Session')
+        && state.buttons.some(button => button.text === '仅此次允许' && !button.disabled)
+      ) {
+        console.log('PERMISSION', phase, capability)
+        await evaluate(
+          '(()=>{const buttons=[...document.querySelectorAll("button")].filter(button=>button.textContent==="仅此次允许"&&!button.disabled);if(buttons.length!==1)throw new Error("expected one fixture permission button");buttons[0].click();return true})()',
+        )
+      }
+      await pause(200)
+    }
+    throw new Error(`${phase} did not complete`)
+  }
+  await evaluate('globalThis.__smokeBundleLoaded')
   for (let i = 0; i < 100; i++) {
     if (await evaluate('globalThis.__smokeContextReady===true')) break
     await pause(100)
@@ -190,25 +291,14 @@ try {
       await evaluate('({ready:__smokeContextReady===true,plugins:globalThis.__cordisxRuntime?.snapshot().plugins})'),
     ),
   )
+  console.log('PHASE fixture startup')
   await evaluate('void globalThis.__smokeStart()')
-  for (let i = 0; i < 160; i++) {
-    const state = await evaluate(
-      '({ready:globalThis.__smokeReady,error:globalThis.__smokeError,text:document.body.innerText.slice(-2500),buttons:[...document.querySelectorAll("button")].map(b=>({text:b.textContent,disabled:b.disabled}))})',
-    )
-    if (state.error) throw new Error(state.error)
-    if (state.ready) break
-    if (i === 10 || i === 40) console.log('PENDING', JSON.stringify(state))
-    if (
-      state.text.includes('chatroom 请求 ') && state.text.includes('one exact Agent Session')
-      && state.buttons.some(button => button.text === '仅此次允许' && !button.disabled)
-    ) {
-      console.log('PERMISSION', state.text.match(/chatroom 请求 ([a-z.]+)/)?.[1])
-      await evaluate(
-        '(()=>{const button=[...document.querySelectorAll("button")].find(button=>button.textContent==="仅此次允许"&&!button.disabled);if(!button)throw new Error("observed permission button disappeared");button.click();return true})()',
-      )
-    }
-    await pause(200)
-  }
+  await pumpFixtureApprovals(
+    'fixture startup',
+    'globalThis.__smokeStartComplete===true',
+    'globalThis.__smokeStartError',
+  )
+  console.log('PHASE fixture startup complete')
   const setup = observedSetup
   if (!setup) throw new Error('fixture setup not ready')
   assert.match(setup.skills[0].content, /Actively report/)
@@ -221,53 +311,144 @@ try {
     '--text',
     'Real CDP authenticated Room report.',
   ]
+  console.log('PHASE CLI first')
   const first = JSON.parse((await promisify(execFile)(command.argv[0], argv)).stdout)
-  const replay = JSON.parse((await promisify(execFile)(command.argv[0], argv)).stdout)
   assert.equal(first.status, 'accepted')
+  console.log('PHASE CLI first accepted', first.messageId)
+  console.log('PHASE CLI replay')
+  const replay = JSON.parse((await promisify(execFile)(command.argv[0], argv)).stdout)
   assert.equal(replay.disposition, 'replayed')
   assert.equal(first.messageId, replay.messageId)
+  console.log('PHASE CLI replay confirmed', replay.messageId)
+  console.log('PHASE live page projection')
   await pause(350)
   const result = await evaluate('globalThis.__smokeRead()')
   assert.equal(result.stored.status, 'loaded')
   const room = result.stored.snapshot.value.rooms.find(item => item.id === 'room-real-cdp')
   assert.equal(room.cliMessages.length, 1)
-  assert.equal(
-    result.model.entries.filter(item => item.kind === 'message' && item.messageId === first.messageId).length,
-    1,
+  const pageMessages = result.page.items.filter(item => item.kind === 'message' && item.source === 'chatroom-cli')
+  assert.deepEqual(pageMessages.map(item => item.messageId), room.cliMessages.map(item => item.messageId))
+  const pageMessage = pageMessages.find(item => item.messageId === first.messageId)
+  assert.ok(pageMessage)
+  assert.equal(pageMessage.author.participantId, room.cliMessages[0].participantId)
+  assert.equal(pageMessage.body[0].text.fallback, room.cliMessages[0].text)
+  assert.equal(pageMessage.timestamp, room.cliMessages[0].timestamp)
+  assert.equal(pageMessage.semantic.causation.operationId, room.cliMessages[0].operationId)
+  console.log('PHASE live page projection confirmed')
+  console.log('PHASE cold page projection')
+  await evaluate('void globalThis.__smokeColdRead()')
+  await pumpFixtureApprovals(
+    'cold page projection',
+    'globalThis.__smokeColdComplete===true',
+    'globalThis.__smokeColdError',
   )
-  assert.equal(result.snapshot.items.find(item => item.messageId === first.messageId).source.kind, 'plugin-command')
+  const coldPage = await evaluate('globalThis.__smokeColdResult')
+  const coldMessages = coldPage.items.filter(item => item.kind === 'message' && item.source === 'chatroom-cli')
+  assert.deepEqual(coldMessages.map(item => item.messageId), room.cliMessages.map(item => item.messageId))
+  const coldMessage = coldMessages.find(item => item.messageId === first.messageId)
+  assert.ok(coldMessage)
+  assert.equal(coldMessages.filter(item => item.messageId === first.messageId).length, 1)
+  assert.equal(coldMessage.author.participantId, room.cliMessages[0].participantId)
+  assert.equal(coldMessage.body[0].text.fallback, room.cliMessages[0].text)
+  assert.equal(coldMessage.timestamp, room.cliMessages[0].timestamp)
+  assert.equal(coldMessage.semantic.causation.operationId, room.cliMessages[0].operationId)
+  const afterCold = await evaluate('globalThis.__smokeRead()')
+  assert.deepEqual(afterCold.stored, result.stored, 'cold page hydration must not rewrite Host owner documents')
+  console.log('PHASE cold page projection confirmed')
+  console.log('PHASE revoke')
   await evaluate('globalThis.__smokeRevoke()')
   await assert.rejects(promisify(execFile)(command.argv[0], argv))
-  const report = {
+  console.log('PHASE revoke confirmed')
+  report = {
     status: 'passed',
     host: hostSha,
     chatroom: chatSha,
     protocol: protocolSha,
-    simulated: ['Agent driver execution'],
+    simulated: [
+      'fixture Agent driver execution',
+      'fixture permission approval click',
+      'fixture HTTP delivery of unchanged production bundle',
+    ],
     real: [
       'production installer',
-      'Host Agent runtime Session ownership',
+      'Host Session ownership and capability authorization',
       'CLI subprocess',
       'private socket authentication',
       'CDP target/context dispatch',
       'Chatroom handler',
       'Host documents Room CAS',
-      'Chatroom source-v10',
-      'Host Shell model',
+      'Chatroom direct page projection',
+      'cold page projection from Host documents',
     ],
     first,
     replay,
     roomMessages: room.cliMessages.length,
-    notProven: ['native Codex', 'user acceptance'],
+    notProven: [
+      'native Codex',
+      'production loopback graph admission',
+      'real Agent execution',
+      'human permission approval',
+      'user acceptance',
+    ],
   }
-  await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n')
-  console.log('RESULT', JSON.stringify(report))
+} catch (error) {
+  primaryError = error
 } finally {
-  await cdp?.close?.()
-  if (installed) await uninstall(installed).catch(() => {})
-  await authority.agentTools?.close()
-  browser.kill('SIGTERM')
-  await new Promise(resolve => http.close(resolve))
-  await pause(300)
-  await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  console.log('PHASE cleanup')
+  let chromeExited = false
+  const cleanupStep = async (label, operation) => {
+    try {
+      await operation()
+    } catch (error) {
+      cleanupErrors.push(new Error(`${label}: ${String(error?.message ?? error)}`, { cause: error }))
+    }
+  }
+  await cleanupStep('CDP close', async () => cdp?.close?.())
+  await cleanupStep('plugin uninstall', async () => {
+    if (installed) await uninstall(installed)
+  })
+  await cleanupStep('Agent tools socket close', async () => authority.agentTools?.close())
+  await cleanupStep('fixture Chrome exit', async () => {
+    if (browser.exitCode === null && browser.signalCode === null) browser.kill('SIGTERM')
+    let browserResult = await Promise.race([
+      browserExit,
+      pause(5_000).then(() => ({ timeout: true })),
+    ])
+    if (browserResult.timeout === true) {
+      if (browser.exitCode === null && browser.signalCode === null) browser.kill('SIGKILL')
+      browserResult = await Promise.race([
+        browserExit,
+        pause(5_000).then(() => ({ timeout: true })),
+      ])
+    }
+    assert.equal(browserResult.timeout, undefined, 'fixture Chrome did not exit after SIGKILL')
+    assert.equal(browserResult.error, undefined, 'fixture Chrome process failed')
+    chromeExited = true
+  })
+  await cleanupStep('fixture HTTP close', async () => new Promise(resolve => http.close(resolve)))
+  await cleanupStep('CDP closed assertion', async () => assert.equal(cdp?.isClosed() ?? true, true))
+  await cleanupStep('debug port closed assertion', async () => {
+    await assert.rejects(fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(1_000) }))
+  })
+  await cleanupStep('temporary root removal', async () => {
+    assert.equal(chromeExited, true, 'refusing to remove the temporary root while fixture Chrome is running')
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    await assert.rejects(access(root), error => error?.code === 'ENOENT')
+  })
+  if (cleanupErrors.length === 0) {
+    cleanup = {
+      installationRemoved: true,
+      cdpClosed: true,
+      chromeExited: true,
+      debugPortClosed: true,
+      temporaryRootRemoved: true,
+    }
+    console.log('PHASE cleanup complete')
+  }
 }
+const failures = [...(primaryError === undefined ? [] : [primaryError]), ...cleanupErrors]
+if (failures.length > 0) throw new AggregateError(failures, 'smoke execution or cleanup failed')
+if (report === undefined || cleanup === undefined) throw new Error('smoke result was not completed')
+const completedReport = { ...report, cleanup }
+await writeFile(reportPath, JSON.stringify(completedReport, null, 2) + '\n')
+console.log('RESULT', JSON.stringify(completedReport))
