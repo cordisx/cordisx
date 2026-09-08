@@ -13,7 +13,9 @@ and a route in `main`. The plugin owns its header, timeline scroll, members,
 settings, identity presentation, and composer within that body. The existing
 [page and routing contract](data-contribution-routing.md) supplies an accessible
 page label, a full-height body with `overflow: hidden`, route history and mount
-abort/disposal. It supplies no second header or scroll container. `manager.content`
+abort/disposal. The shared React root inside this body also has zero padding
+and a bounded height; standard React pages retain their default inset. It
+supplies no second header or scroll container. `manager.content`
 retains Host chrome; it is not this full product page seat.
 
 `navigation-registry-base.ts` captures route owner, source, module generation,
