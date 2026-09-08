@@ -118,3 +118,4 @@ reference without duplicating its authority.
 - [Local usage projection](local-usage.md): metadata-only usage, persistence and current coverage.
 
 - [Entity execution contexts](entity-execution-contexts.md): owned project/projectless defaults, native project authority and first-task context.
+- [Plugin HTTP](plugin-http.md): Host consent, origin-bound transport and lifecycle.

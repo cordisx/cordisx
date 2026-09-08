@@ -407,6 +407,10 @@ export const createRuntimeDispose = async (runtimeScope: RuntimeClosureScope): P
     delete controller.hostDomWorker
     controller.agentLoopClient?.dispose()
     delete controller.agentLoopClient
+    controller.httpClient?.dispose()
+    delete controller.httpClient
+    await controller.unregisterHttp?.()
+    delete controller.unregisterHttp
     await controller.unregisterAgentLoop?.()
     delete controller.unregisterAgentLoop
     await controller.agentPageFreshRoomNavigationFiber?.dispose()

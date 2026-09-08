@@ -392,3 +392,4 @@ export type {
 export type { RouteLinkResolutionResult } from '@cordisx/protocol/route-link-resolution/v1'
 
 export type * from './entity-execution-context-contracts.js'
+export type * from './plugin-http-contracts.js'
