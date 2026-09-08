@@ -72,7 +72,6 @@ try {
     '--loglevel=error',
     cordisxTarball,
     creatorTarball,
-    ...(protocolTarball === undefined ? [] : [protocolTarball]),
   ], { cwd: runnerDirectory, env: installEnvironment })
 
   const installedCordisXRoot = path.join(runnerDirectory, 'node_modules', 'cordisx')
@@ -89,6 +88,17 @@ try {
     env: process.env,
   })).stdout.trim().split('\n').filter(Boolean)
   if (protocolPaths.length !== 1) throw new Error('installed cordisx must resolve exactly one Protocol copy')
+
+  const dependencyClosure = await packInstalledDependencyClosure(runnerDirectory, packDirectory, installEnvironment)
+  // A plugin that imports Protocol directly declares its own dependency; bundled
+  // Host dependencies are intentionally nested and are not consumer hoists.
+  await run('npm', [
+    'install',
+    '--no-audit',
+    '--no-fund',
+    '--loglevel=error',
+    protocolTarball ?? dependencyClosure['@cordisx/protocol'],
+  ], { cwd: runnerDirectory, env: installEnvironment })
 
   for (const packageName of ['cordisx', 'create-cordisx-plugin']) {
     const packageRoot = path.join(runnerDirectory, 'node_modules', packageName)
@@ -581,7 +591,6 @@ createElement(AgentAvatar, props)
     loadConfig,
     configPath,
   })
-  const dependencyClosure = await packInstalledDependencyClosure(runnerDirectory, packDirectory, installEnvironment)
   const installedBundle = await buildRendererBundle(installedConfig)
   if (
     !installedBundle.includes('# CLIProxy Providers')
