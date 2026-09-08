@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { AgentTaskContext, AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
 import { type AgentTaskRecord, canonicalTaskJson } from '../agent-task-record.js'
-import { resolveAgentTaskContext } from './agent-task-context.js'
+import { resolveAgentTaskContext, resolveNativeProjectRoots } from './agent-task-context.js'
 
 type Snapshot = { revision: number; value: unknown }
 export async function handleAgentTaskStore(
@@ -13,7 +13,12 @@ export async function handleAgentTaskStore(
   },
 ): Promise<unknown> {
   if (request.operation === 'native-session-task-context') {
-    return await resolveAgentTaskContext(request.context as AgentTaskContext, { inherited: storage.context })
+    return await resolveAgentTaskContext(request.context as AgentTaskContext, {
+      inherited: storage.context,
+      ...(request.project === undefined
+        ? {}
+        : { project: (projectId, cwd) => resolveNativeProjectRoots(request.project, projectId, cwd) }),
+    })
   }
   const operationId = request.operationId
   if (typeof operationId !== 'string' || !operationId.length || operationId.length > 512) {

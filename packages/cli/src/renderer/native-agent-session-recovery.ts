@@ -202,6 +202,14 @@ export function nativeAgentTaskClient(owner: PluginOwnerIdentity) {
         await call('save', { operationId: record.operationId, record })
       },
     },
+    resolveProjectContext: async (
+      context: AgentTaskContext,
+      project: { readonly id: string; readonly roots: readonly string[] },
+    ): Promise<TaskContextResolution> =>
+      await call('context', {
+        context,
+        project: { id: project.id, roots: [...project.roots] },
+      }) as TaskContextResolution,
     resolveContext: async (context: AgentTaskContext): Promise<TaskContextResolution> =>
       await call('context', { context }) as TaskContextResolution,
   }

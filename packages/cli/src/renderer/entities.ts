@@ -1,3 +1,7 @@
+import { createEntityExecutionContexts } from './entity-execution-contexts.js'
+import type { NativeExecutionProjectAuthority } from './native-execution-projects.js'
+import type { AgentTaskContext, AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
+import type { HostExecutionProject } from '@cordisx/protocol/entity-execution-context/v1'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   EntityChangePage,
@@ -140,6 +144,13 @@ export class CordisXEntityRegistryServiceV1 extends Service {
   constructor(
     ctx: Context,
     options: {
+      readonly projects?: NativeExecutionProjectAuthority
+      readonly resolveProject?: (context: AgentTaskContext, project: HostExecutionProject) => Promise<
+        { readonly status: 'resolved'; readonly context: AgentTaskResolvedContext } | {
+          readonly status: 'unavailable'
+          readonly code: string
+        }
+      >
       readonly bridge: BrowserOwnerDocumentBridge | undefined
       readonly principal: EntityPrincipalBinding | undefined
       readonly profileId: string
@@ -157,6 +168,24 @@ export class CordisXEntityRegistryServiceV1 extends Service {
       pluginId: options.principal?.pluginId ?? 'unavailable',
       pluginGeneration: options.pluginGeneration,
     })
+    ctx.effect(() =>
+      ctx.reflect.provide(
+        'entityExecutionContexts',
+        createEntityExecutionContexts({
+          active: this.#active,
+          ...(options.projects === undefined ? {} : { projects: options.projects }),
+          resolveProject: options.resolveProject ?? (async () => ({ status: 'unavailable', code: 'unsupported' })),
+          request: async (operation, value) => {
+            if (!this.bridge || !this.#active()) throw new Error('Entity context bridge unavailable')
+            return await this.bridge.request(this.#token, {
+              operation: `entity-execution-${operation}`,
+              binding: this.binding,
+              ...value,
+            })
+          },
+        }),
+      )
+    )
     ctx.effect(() => () => {
       for (const subscription of this.#subscriptions) void subscription.close('plugin-generation-replaced')
       this.#subscriptions.clear()

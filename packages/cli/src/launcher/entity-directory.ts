@@ -1,3 +1,5 @@
+import { EntityExecutionContextDirectory } from './entity-execution-context.js'
+import type { EntityExecutionBindingWrite } from '@cordisx/protocol/entity-execution-context/v1'
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import { chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from 'node:fs/promises'
@@ -308,6 +310,7 @@ async function syncedWrite(file: string, text: string): Promise<void> {
 }
 
 export class EntityDirectoryAuthority {
+  readonly #executionContexts: EntityExecutionContextDirectory
   readonly #homeDir: string
   readonly #profileId: string
   readonly #root: string
@@ -324,6 +327,7 @@ export class EntityDirectoryAuthority {
     this.#profileId = localId(profileId, 'profileId')
     this.#root = path.join(this.#homeDir, 'profiles', this.#profileId, 'entities')
     this.#ownersFile = path.join(this.#homeDir, 'profiles', this.#profileId, 'entity-owners.v1.json')
+    this.#executionContexts = new EntityExecutionContextDirectory(this.#homeDir, this.#profileId)
   }
 
   register(binding: EntityDirectoryBinding, declarations: readonly EntityTemplateDeclaration[]): void {
@@ -457,6 +461,32 @@ export class EntityDirectoryAuthority {
           && record.identity.revision === identity.revision
         ? immutable(record)
         : undefined
+    })
+  }
+
+  async executionContext(
+    binding: EntityDirectoryBinding,
+    identity: AgentDefinitionIdentity,
+    operation: 'get' | 'set' | 'resolve',
+    input: { readonly operationId?: string; readonly request?: EntityExecutionBindingWrite },
+    active: () => boolean,
+  ) {
+    return await this.serial(async () => {
+      this.assertBinding(binding)
+      await this.refresh()
+      const entity = this.#states.get(identity.agentId)?.record
+      if (!entity || !sameOwner(entity.owner, this.owner(binding)) || entity.identity.revision !== identity.revision) {
+        return { status: 'unavailable' as const, code: 'entity-unavailable' as const }
+      }
+      if (!active()) return { status: 'unavailable' as const, code: 'host-unavailable' as const }
+      if (operation === 'get') return await this.#executionContexts.get(entity)
+      if (operation === 'set' && input.request !== undefined) {
+        return await this.#executionContexts.set(entity, input.request, active)
+      }
+      if (operation === 'resolve' && input.operationId !== undefined) {
+        return await this.#executionContexts.resolve(entity, input.operationId, active)
+      }
+      return { status: 'unavailable' as const, code: 'invalid-input' as const }
     })
   }
 
