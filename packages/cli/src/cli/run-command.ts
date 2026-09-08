@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import { mkdtemp, rm } from 'node:fs/promises'
 import type { ChildProcess } from 'node:child_process'
@@ -16,7 +17,7 @@ import {
 } from '../config/home-config.js'
 import { buildRendererBundle, type BuildRendererBundleOptions } from '../launcher/bundle.js'
 import { CdpPluginLifecycleRuntime, watchAndInject, type WatchInjectionOptions } from '../launcher/cdp.js'
-import { localDevelopmentPluginIdentity } from '../launcher/development.js'
+import { findPackageRoot, localDevelopmentPluginIdentity } from '../launcher/development.js'
 import { createNativeViteEntityGenerationHandler, startNativeViteServer } from '../launcher/vite-development.js'
 import {
   DirectPublisherGrantAuthority,
@@ -66,7 +67,7 @@ import {
   CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID,
   parseCliProxyProviderStartupConfig,
   resolveCliProxyProviderConfigs,
-} from '../plugins/cli-proxy-api/service-config.js'
+} from '../providers/cli-proxy-service-config.js'
 import {
   CHANNEL_SERVICE_CONFIG_INITIAL,
   createChannelHostServiceConfigContract,
@@ -102,6 +103,8 @@ import {
 import { AgentLoopAuthority } from '../launcher/agent-loop-authority.js'
 import { createCliProxyPlatformProviderBatch } from '../launcher/cli-proxy-platform-provider-batch.js'
 import { PlatformProviderPluginLifecycleRuntime } from '../launcher/platform-provider-plugin-lifecycle.js'
+import { stagePluginPackageSourceV1 } from '../launcher/packages/index.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V13, normalizePluginManifestV13 } from '../runtime-exact-request-permissions.js'
 import {
   CordisXSkillConflictError,
   type CordisXSkillDeploymentResult,
@@ -609,9 +612,37 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         hostGeneration: rendererComposition.generation,
         token: rendererComposition.iconThemePreferenceBridgeToken,
       } satisfies IconThemePreferencePersistenceContext
+    const fleetConfigs = providerConfigs(composition, runtime.env ?? process.env)
+      .filter(provider => provider.kind === 'local-codex')
+    const cliProxyConfigured = composition.plugins.some(plugin => plugin.id === 'cli-proxy-api' && plugin.enabled)
+    const launcherCliProxy = cliProxyConfigured
+      ? await (async () => {
+        const entry = createRequire(import.meta.url).resolve('@cordisx/plugin-cli-proxy-api')
+        const staged = await stagePluginPackageSourceV1({
+          kind: 'local-directory',
+          location: pathToFileURL(await findPackageRoot(entry)).href,
+        }, {
+          homeDir: rootFromConfigPath(configPath),
+          runtimeValidators: {
+            [CORDISX_PLUGIN_MANIFEST_SCHEMA_V13]: value => normalizePluginManifestV13(value, 'cli-proxy-api'),
+          },
+        })
+        return {
+          id: staged.manifest.id,
+          version: staged.manifest.version,
+          digest: staged.digest,
+          moduleGeneration: `launcher-cli-proxy:${lifecycleGeneration}`,
+          enabled: true,
+          dependencies: staged.manifest.dependencies,
+          ...(staged.manifest.canonicalSource === undefined
+            ? {}
+            : { canonicalSource: staged.manifest.canonicalSource }),
+        }
+      })()
+      : undefined
     const providerFleet = rendererComposition.providerBridgeToken === undefined
       ? undefined
-      : await ProviderFleet.create(providerConfigs(composition, runtime.env ?? process.env), {
+      : await ProviderFleet.create(fleetConfigs, {
         appServer: { environment: runtime.env ?? process.env },
         agentLoopAuthority: await AgentLoopAuthority.open(rootFromConfigPath(configPath), selection.profileId),
       })
@@ -625,12 +656,13 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         rootDir: rootFromConfigPath(configPath),
         environment: runtime.env ?? process.env,
         activation: async () => await lifecycleStore.bindRuntimeGeneration(),
+        ...(launcherCliProxy === undefined ? {} : { launcherCandidates: [launcherCliProxy] }),
       })
     if (providerFleet !== undefined && platformProviderServices !== undefined) {
       lifecycleTransactionRuntime.connect(async activation =>
         await platformProviderServices.reconfigure(
           providerFleet,
-          providerConfigs(composition, runtime.env ?? process.env),
+          fleetConfigs,
           undefined,
           activation,
         )
@@ -639,7 +671,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         if (await platformProviderServices.hasCandidates()) {
           const initialProviders = await platformProviderServices.reconfigure(
             providerFleet,
-            providerConfigs(composition, runtime.env ?? process.env),
+            fleetConfigs,
           )
           await initialProviders.finalize()
         }

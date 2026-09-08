@@ -1,3 +1,5 @@
+import { access, readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
@@ -5,8 +7,10 @@ import { describe, expect, it } from 'vitest'
 import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from '../packages/cli/src/contracts.js'
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
-import { Config } from '../packages/cli/src/plugins/cli-proxy-api/index.js'
 import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
+
+const externalEntry = createRequire(import.meta.url).resolve('@cordisx/plugin-cli-proxy-api')
+const externalPackageRoot = path.resolve(path.dirname(externalEntry), '..', '..')
 
 interface RuntimeHandle {
   navigate(owner: string, reference: { id: string }): Promise<void>
@@ -81,30 +85,15 @@ function session(providerId: string) {
 }
 
 describe('CLIProxy provider plugin renderer', () => {
-  it('exports a renderer-only Schemastery Config with safe defaults and validation', () => {
-    expect(Config({})).toEqual({ providerIds: [], defaultCwd: '' })
-    expect(Config({ providerIds: ['gateway-a', 'gateway-a', 'region.eu_1'], defaultCwd: '/workspace' })).toEqual({
-      providerIds: ['gateway-a', 'gateway-a', 'region.eu_1'],
-      defaultCwd: '/workspace',
-    })
-    expect(() => Config({ providerIds: ['Gateway-A'], defaultCwd: '' })).toThrow(/match regexp/i)
-    expect(() => Config({ providerIds: [null], defaultCwd: '' } as never)).toThrow(/required value/i)
-    expect(() => Config({ providerIds: Array.from({ length: 65 }, (_, index) => `gateway-${index}`), defaultCwd: '' }))
-      .toThrow(/length/i)
-    expect(() => Config({ providerIds: [], defaultCwd: `bad\0path` })).toThrow(/match regexp/i)
-    expect(Config.meta).not.toHaveProperty('role')
-    expect(Config.dict?.providerIds?.meta.role).toBeUndefined()
-    expect(Config.dict?.defaultCwd?.meta.role).toBeUndefined()
-    expect(Object.keys(Config.dict ?? {})).toEqual(['providerIds', 'defaultCwd'])
-    expect(Config.dict?.providerIds?.meta.extra?.label).toEqual({ 'zh-CN': 'Provider 过滤范围', en: 'Provider filter' })
-    expect(Config.dict?.providerIds?.meta.description).toMatchObject({
-      'zh-CN': '选择要显示的 Provider；留空表示全部。',
-      en: 'Choose the providers to show; leave empty for all.',
-    })
-    expect(Config.dict?.defaultCwd?.meta.extra?.label).toEqual({
-      'zh-CN': '默认工作目录',
-      en: 'Default working directory',
-    })
+  it('loads the renderer and service artifacts from the exact standalone package', async () => {
+    const manifest = JSON.parse(await readFile(path.join(externalPackageRoot, 'package.json'), 'utf8')) as {
+      readonly name?: unknown
+      readonly version?: unknown
+    }
+    expect(manifest).toMatchObject({ name: '@cordisx/plugin-cli-proxy-api', version: '0.1.0' })
+    expect(externalEntry).toBe(path.join(externalPackageRoot, 'dist', 'runtime', 'module.js'))
+    await expect(access(path.join(externalPackageRoot, 'dist', 'service.mjs'))).resolves.toBeUndefined()
+    await expect(readFile(path.join(externalPackageRoot, 'src', 'index.ts'))).rejects.toThrow()
   })
 
   it('uses the existing main outlet and keeps provider identity in models and colliding session rows', async () => {
@@ -193,7 +182,7 @@ describe('CLIProxy provider plugin renderer', () => {
         contract: 'cordisx.service-config-descriptor/v1',
         schemaVersion: 1,
         identity: {
-          source: 'https://github.com/cordisx/cordisx/tree/main/packages/cli/src/plugins/cli-proxy-api',
+          source: 'https://github.com/cordisx/plugin-cli-proxy-api',
           pluginId: 'cli-proxy-api',
           serviceId: 'providers-runtime',
         },
@@ -211,7 +200,7 @@ describe('CLIProxy provider plugin renderer', () => {
         contract: 'cordisx.service-config-descriptor/v1',
         schemaVersion: 1,
         identity: {
-          source: 'https://github.com/cordisx/cordisx/tree/main/packages/cli/src/plugins/cli-proxy-api',
+          source: 'https://github.com/cordisx/plugin-cli-proxy-api',
           pluginId: 'cli-proxy-api',
           serviceId: 'providers-startup',
         },
@@ -350,9 +339,9 @@ describe('CLIProxy provider plugin renderer', () => {
     )
     const bundledPlugin = runtime?.snapshot().plugins.find(plugin => plugin.id === 'cli-proxy-api')
     expect(bundledPlugin?.readme).toContain('# CLIProxy Providers')
-    expect(bundledPlugin?.readme).toContain('Use the **Providers** navigation entry')
-    expect(bundledPlugin?.readme).toContain('stable machine identifiers and are never translated')
-    expect(bundledPlugin?.readme).toContain('Every model is identified by both `providerId` and `modelId`')
+    expect(bundledPlugin?.readme).toContain('standalone owner')
+    expect(bundledPlugin?.readme).toContain('The Host owns endpoint and credential resolution')
+    expect(bundledPlugin?.readme).toContain('The plugin receives no endpoint, credential, process')
     expect(bundledPlugin?.configuration).toMatchObject({
       schemaKind: 'schemastery',
       applies: 'plugin-restart',
@@ -427,7 +416,12 @@ describe('CLIProxy provider plugin renderer', () => {
       attempt < 100 && dom.window.document.querySelectorAll('[data-session]').length < 2;
       attempt += 1
     ) {
-      dom.window.document.querySelector<HTMLButtonElement>('[data-permission-decision="allow"]')?.click()
+      const decisions = dom.window.document.querySelectorAll<HTMLElement>(
+        '[data-permission-decision="allow-once"]',
+      )
+      for (const decision of decisions) decision.click()
+      if (decisions.length > 0) await new Promise(resolve => setTimeout(resolve, 0))
+      dom.window.document.querySelector<HTMLButtonElement>('[data-permission-action="confirm"]')?.click()
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-provider-fleet="true"]')
@@ -464,8 +458,8 @@ describe('CLIProxy provider plugin renderer', () => {
     await waitFor(() => dom.window.document.querySelector('[role="tabpanel"][aria-label="README"]') !== null)
     const readmePanel = dom.window.document.querySelector<HTMLElement>('[role="tabpanel"][aria-label="README"]')
     expect(readmePanel?.querySelector('.cxm-readme h1')?.textContent).toBe('CLIProxy Providers')
-    expect(readmePanel?.textContent).toContain('Configure providers')
-    expect(readmePanel?.textContent).toContain('External providers and the native connection')
+    expect(readmePanel?.textContent).toContain('standalone owner')
+    expect(readmePanel?.textContent).toContain('Host owns endpoint and credential resolution')
     expect(readmePanel?.textContent).not.toContain('该插件没有随当前 bundle 提供 README.md')
     dom.window.document.querySelector<HTMLButtonElement>('[data-plugin-detail-tab="config"]')?.click()
     await waitFor(() => dom.window.document.querySelector('[role="tabpanel"][aria-label="Configuration"]') !== null)

@@ -11,11 +11,9 @@ const pluginRoots = [
   'examples/plugins/form-schema-gallery',
   'examples/plugins/settings-tab-demo',
   'examples/plugins/console-showcase',
-  'examples/plugins/cli-proxy-api',
   'examples/plugins/lifecycle-smoke',
   'examples/plugins/permission-v2-smoke',
   'examples/plugins/permission-v2-smoke-expanded',
-  'packages/cli/src/plugins/cli-proxy-api',
   'packages/agent-trace-showcase',
 ] as const
 

@@ -4,9 +4,15 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
-import { npmPackItem } from './npm-pack-report.mjs'
 import { enableInstalledChannel, verifyInstalledChannel } from './check-installed-channel.mjs'
-import { verifyGeneratedViteGraph } from './check-installed-vite-graph.mjs'
+import { verifyInstalledCliProxy } from './check-installed-cli-proxy.mjs'
+import { makeDirectoriesWritable } from './installed-check-cleanup.mjs'
+import { packInstalledDependencyClosure, packWorkspace } from './installed-check-package-cache.mjs'
+import {
+  verifyGeneratedEmbedded,
+  verifyGeneratedProject,
+  verifyGeneratedWorkspace,
+} from './installed-check-generated-projects.mjs'
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -30,31 +36,6 @@ async function run(file, args, options = {}) {
   }
 }
 
-function parsePackReport(stdout, packageName) {
-  let report
-  try {
-    report = JSON.parse(stdout)
-  } catch (error) {
-    throw new Error(`npm pack did not return JSON:\n${stdout}`, { cause: error })
-  }
-  const filename = npmPackItem(report, packageName).filename
-  if (typeof filename !== 'string' || filename.length === 0) {
-    throw new Error('npm pack did not report a tarball filename')
-  }
-  return filename
-}
-
-async function packWorkspace(workspace, packDirectory) {
-  const packed = await run('npm', [
-    'pack',
-    `--workspace=${workspace}`,
-    '--pack-destination',
-    packDirectory,
-    '--json',
-  ], { cwd: repositoryRoot, env: process.env })
-  return path.join(packDirectory, parsePackReport(packed.stdout, workspace))
-}
-
 async function expectMissing(target, label) {
   try {
     await access(target)
@@ -65,112 +46,12 @@ async function expectMissing(target, label) {
   throw new Error(`${label} must not be created by --dry-run: ${target}`)
 }
 
-async function verifyGeneratedProject(project, cordisxTarball, expectedVersion) {
-  const packagePath = path.join(project, 'package.json')
-  const [manifestSource, englishReadme, simplifiedChineseReadme] = await Promise.all([
-    readFile(packagePath, 'utf8'),
-    readFile(path.join(project, 'README.md'), 'utf8'),
-    readFile(path.join(project, 'README.zh-Hans.md'), 'utf8'),
-  ])
-  const manifest = JSON.parse(manifestSource)
-  if (!englishReadme.includes('CordisX plugin') || !simplifiedChineseReadme.includes('CordisX')) {
-    throw new Error('generated plugin must include English and Simplified Chinese README fallbacks')
-  }
-  if (manifest.license !== 'UNLICENSED') {
-    throw new Error('generated plugin must leave its author an explicit license choice')
-  }
-  if (manifest.devDependencies?.cordisx !== expectedVersion) {
-    throw new Error(`generated CordisX dependency must be ${expectedVersion}`)
-  }
-  manifest.devDependencies.cordisx = `file:${cordisxTarball}`
-  await writeFile(packagePath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
-  await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], {
-    cwd: project,
-    env: process.env,
-  })
-  await run('npm', ['run', 'check'], { cwd: project, env: process.env })
-  await verifyGeneratedViteGraph(path.join(project, 'dist', 'runtime'), 'generated standalone plugin')
-  const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project, env: process.env })
-  if (
-    !dryRun.stdout.includes('[cordisx] Vite entry ready:')
-    || !dryRun.stdout.includes('"status": "ready"')
-    || !dryRun.stdout.includes('"transport": "vite"')
-  ) {
-    throw new Error('generated plugin was not accepted by cordisx dev --dry-run')
-  }
-}
-
-async function usePackedCordisX(packagePath, cordisxTarball, expectedVersion) {
-  const manifest = JSON.parse(await readFile(packagePath, 'utf8'))
-  if (manifest.devDependencies?.cordisx !== expectedVersion) {
-    throw new Error(`generated CordisX dependency must be ${expectedVersion}`)
-  }
-  manifest.devDependencies.cordisx = `file:${cordisxTarball}`
-  await writeFile(packagePath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
-}
-
-function assertViteProjectDryRun(stdout, pluginIds) {
-  if (
-    !stdout.includes('[cordisx] Vite entry ready:')
-    || !stdout.includes('"status": "ready"')
-    || !stdout.includes('"transport": "vite"')
-    || pluginIds.some(id => !stdout.includes(`"${id}"`))
-  ) {
-    throw new Error('generated multi-plugin project was not accepted by cordisx dev --dry-run')
-  }
-}
-
-async function verifyGeneratedWorkspace(project, cordisxTarball, expectedVersion, pluginIds) {
-  const manifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'))
-  if (manifest.license !== 'UNLICENSED' || !Array.isArray(manifest.workspaces)) {
-    throw new Error('generated plugin workspace metadata is invalid')
-  }
-  await usePackedCordisX(path.join(project, 'package.json'), cordisxTarball, expectedVersion)
-  for (const id of pluginIds) {
-    await usePackedCordisX(path.join(project, 'plugins', id, 'package.json'), cordisxTarball, expectedVersion)
-  }
-  await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], { cwd: project, env: process.env })
-  await run('npm', ['run', 'check'], { cwd: project, env: process.env })
-  for (const id of pluginIds) {
-    await verifyGeneratedViteGraph(
-      path.join(project, 'plugins', id, 'dist', 'runtime'),
-      `generated workspace plugin ${id}`,
-    )
-  }
-  const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: project, env: process.env })
-  assertViteProjectDryRun(dryRun.stdout, pluginIds)
-}
-
-async function verifyGeneratedEmbedded(project, cordisxTarball, expectedVersion, pluginIds, integrated) {
-  const cordisxRoot = path.join(project, '.cordisx')
-  const manifestPath = path.join(cordisxRoot, 'package.json')
-  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
-  if (manifest.license !== 'UNLICENSED') throw new Error('embedded CordisX package license choice is not explicit')
-  const rootManifest = JSON.parse(await readFile(path.join(project, 'package.json'), 'utf8'))
-  if (integrated && !rootManifest.workspaces?.includes('.cordisx')) {
-    throw new Error('embedded CordisX package did not join the npm workspace')
-  }
-  if (!integrated && rootManifest.workspaces !== undefined) {
-    throw new Error('isolated embedded fixture unexpectedly became a workspace')
-  }
-  await usePackedCordisX(manifestPath, cordisxTarball, expectedVersion)
-  await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], {
-    cwd: integrated ? project : cordisxRoot,
-    env: process.env,
-  })
-  await run('npm', ['run', 'check'], { cwd: cordisxRoot, env: process.env })
-  for (const id of pluginIds) {
-    await verifyGeneratedViteGraph(path.join(cordisxRoot, 'dist', 'runtime', id), `generated embedded plugin ${id}`)
-  }
-  const dryRun = await run('npm', ['run', 'dev:dry-run'], { cwd: cordisxRoot, env: process.env })
-  assertViteProjectDryRun(dryRun.stdout, pluginIds)
-}
-
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'cordisx-installed-check-'))
 try {
   const packDirectory = path.join(temporaryRoot, 'pack')
   const runnerDirectory = path.join(temporaryRoot, 'runner')
   const cordisxHome = path.join(temporaryRoot, 'cordisx-home')
+  const installEnvironment = { ...process.env, npm_config_cache: path.join(temporaryRoot, 'npm-cache') }
   await mkdir(packDirectory, { recursive: true })
   await mkdir(runnerDirectory, { recursive: true })
   await writeFile(
@@ -180,8 +61,8 @@ try {
   )
 
   const [cordisxTarball, creatorTarball] = await Promise.all([
-    packWorkspace('cordisx', packDirectory),
-    packWorkspace('create-cordisx-plugin', packDirectory),
+    packWorkspace(repositoryRoot, 'cordisx', packDirectory),
+    packWorkspace(repositoryRoot, 'create-cordisx-plugin', packDirectory),
   ])
   if (protocolTarball !== undefined) await access(protocolTarball)
   await run('npm', [
@@ -192,7 +73,7 @@ try {
     cordisxTarball,
     creatorTarball,
     ...(protocolTarball === undefined ? [] : [protocolTarball]),
-  ], { cwd: runnerDirectory, env: process.env })
+  ], { cwd: runnerDirectory, env: installEnvironment })
 
   const installedCordisXRoot = path.join(runnerDirectory, 'node_modules', 'cordisx')
   const installedCordisXManifest = JSON.parse(await readFile(path.join(installedCordisXRoot, 'package.json'), 'utf8'))
@@ -690,15 +571,21 @@ createElement(AgentAvatar, props)
   ) {
     throw new Error('installed public ctx.documents bridge did not survive launcher store reload')
   }
+  await verifyInstalledCliProxy({
+    cordisxManifest: installedCordisXManifest,
+    loadConfig,
+    configPath,
+  })
   const installedConfig = await verifyInstalledChannel({
     cordisxManifest: installedCordisXManifest,
     loadConfig,
     configPath,
   })
+  const dependencyClosure = await packInstalledDependencyClosure(runnerDirectory, packDirectory, installEnvironment)
   const installedBundle = await buildRendererBundle(installedConfig)
   if (
     !installedBundle.includes('# CLIProxy Providers')
-    || !installedBundle.includes('External providers and the native connection')
+    || !installedBundle.includes('standalone owner')
     || !installedBundle.includes('/manager/extensions/channels')
   ) {
     throw new Error('installed external plugin composition is incomplete')
@@ -896,8 +783,15 @@ createElement(AgentAvatar, props)
       'utf8',
     ),
   )
-  await verifyGeneratedProject(createTarget, cordisxTarball, creatorManifest.version)
-  await verifyGeneratedProject(npxTarget, cordisxTarball, creatorManifest.version)
+  const generatedOptions = {
+    run,
+    cordisxTarball,
+    expectedVersion: creatorManifest.version,
+    dependencyClosure,
+    installEnvironment,
+  }
+  await verifyGeneratedProject(createTarget, generatedOptions)
+  await verifyGeneratedProject(npxTarget, generatedOptions)
 
   await run(executable('create-cordisx-plugin'), [
     '--mode',
@@ -908,7 +802,7 @@ createElement(AgentAvatar, props)
     '--plugin',
     'beta',
   ], { cwd: runnerDirectory, env: process.env })
-  await verifyGeneratedWorkspace(workspaceTarget, cordisxTarball, creatorManifest.version, ['alpha', 'beta'])
+  await verifyGeneratedWorkspace(workspaceTarget, ['alpha', 'beta'], generatedOptions)
 
   for (const project of [embeddedWorkspaceTarget, embeddedIsolatedTarget]) {
     await mkdir(project, { recursive: true })
@@ -971,14 +865,8 @@ createElement(AgentAvatar, props)
     '--package-manager',
     'npm',
   ], { cwd: runnerDirectory, env: process.env })
-  await verifyGeneratedEmbedded(
-    embeddedWorkspaceTarget,
-    cordisxTarball,
-    creatorManifest.version,
-    ['alpha', 'beta'],
-    true,
-  )
-  await verifyGeneratedEmbedded(embeddedIsolatedTarget, cordisxTarball, creatorManifest.version, ['solo'], false)
+  await verifyGeneratedEmbedded(embeddedWorkspaceTarget, ['alpha', 'beta'], true, generatedOptions)
+  await verifyGeneratedEmbedded(embeddedIsolatedTarget, ['solo'], false, generatedOptions)
 
   console.log(
     `[cordisx] installed tarballs verified: licenses, pinned Host-owned AgentAvatar runtime, combined multi-binding AgentLoop, executable v4 create/send concurrent replay/approval/introduction/cancel/subscription, owner documents, and generic raster navigation collection${
@@ -986,5 +874,6 @@ createElement(AgentAvatar, props)
     }, durable outbox reload, local AgentLoop provider composition, Connector and Manager navigation v9 consumer types, CLI, built-in README, both creator commands, standalone/workspace/embedded-isolated/embedded-workspace generated checks, Vite dev dry-run`,
   )
 } finally {
+  await makeDirectoriesWritable(temporaryRoot)
   await rm(temporaryRoot, { recursive: true, force: true })
 }

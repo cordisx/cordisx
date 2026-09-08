@@ -6,7 +6,6 @@ import { describe, expect, it } from 'vitest'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 const reactPageEntries = [
-  'packages/cli/src/plugins/cli-proxy-api/index.ts',
   'packages/agent-trace-showcase/src/index.ts',
   'examples/plugins/slot-showcase/index.ts',
   'examples/plugins/settings-tab-demo/index.ts',
@@ -26,7 +25,6 @@ describe('React plugin page gate', () => {
 
   it('does not retain retired imperative page renderer implementations', async () => {
     const retired = [
-      'packages/cli/src/plugins/cli-proxy-api/index.ts',
       'packages/cli/src/renderer/channel-manager.ts',
       'packages/agent-trace-showcase/src/react-view.tsx',
     ] as const

@@ -3,16 +3,15 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { CodexAppServerRpc } from '../packages/cli/src/providers/codex-app-server.js'
-import type { CliProxyProviderConfig } from '../packages/cli/src/providers/contracts.js'
+import type { LocalCodexProviderConfig } from '../packages/cli/src/providers/contracts.js'
 import { ProviderFleet } from '../packages/cli/src/providers/fleet.js'
 
-function config(root: string): CliProxyProviderConfig {
+function config(root: string): LocalCodexProviderConfig {
   return {
     id: 'alpha',
-    kind: 'cli-proxy-api',
+    kind: 'local-codex',
+    sourceProviderId: 'alpha',
     displayName: 'Alpha',
-    baseUrl: 'https://alpha.test/v1',
-    apiKeyEnv: 'ALPHA_KEY',
     codexExecutable: 'codex',
     codexHome: path.join(root, 'alpha'),
     enabled: true,

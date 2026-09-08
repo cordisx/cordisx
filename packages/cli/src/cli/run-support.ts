@@ -68,7 +68,7 @@ import {
   CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID,
   parseCliProxyProviderStartupConfig,
   resolveCliProxyProviderConfigs,
-} from '../plugins/cli-proxy-api/service-config.js'
+} from '../providers/cli-proxy-service-config.js'
 import {
   CHANNEL_SERVICE_CONFIG_INITIAL,
   createChannelHostServiceConfigContract,

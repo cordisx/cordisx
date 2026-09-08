@@ -4,7 +4,7 @@ import path from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { ensureHomeConfig, updateHomeConfigAtomic } from '../packages/cli/src/config/home-config.js'
 import { cliProxyServiceConfigApis } from '../packages/cli/src/cli/run-support.js'
-import { CLI_PROXY_PROVIDER_RUNTIME_SERVICE_ID } from '../packages/cli/src/plugins/cli-proxy-api/service-config.js'
+import { CLI_PROXY_PROVIDER_RUNTIME_SERVICE_ID } from '../packages/cli/src/providers/cli-proxy-service-config.js'
 import { ProviderFleet } from '../packages/cli/src/providers/fleet.js'
 
 it('routes the production service restart through external provider batch preparation', async () => {

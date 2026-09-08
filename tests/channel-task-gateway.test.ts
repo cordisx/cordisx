@@ -39,10 +39,9 @@ describe('launcher Channel task gateway', () => {
     temporary.add(root)
     const fleet = await ProviderFleet.create([{
       id: 'alpha',
-      kind: 'cli-proxy-api',
+      kind: 'local-codex',
+      sourceProviderId: 'alpha',
       displayName: 'Alpha',
-      baseUrl: 'https://example.test',
-      credentialRef: 'host-secret:test',
       codexExecutable: 'codex',
       codexHome: root,
       enabled: true,

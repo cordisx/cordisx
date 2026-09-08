@@ -8,10 +8,8 @@ import {
   parseCliProxyProviderRuntimeConfig,
   parseCliProxyProviderStartupConfig,
   projectCliProxyProviderRuntimeConfig,
-  projectedModel,
-  sourceModelId,
   validateCliProxyProviderPlanes,
-} from '../packages/cli/src/plugins/cli-proxy-api/service-config.js'
+} from '../packages/cli/src/providers/cli-proxy-service-config.js'
 
 function runtimeProvider(overrides: Record<string, unknown> = {}) {
   return {
@@ -86,12 +84,6 @@ describe('CLIProxy Providers service configuration contracts', () => {
       },
       timeoutMs: 30_000,
     })
-    expect(sourceModelId(parsed.providers[0]!, 'coder')).toBe('remote-coder')
-    expect(projectedModel(parsed.providers[0]!, {
-      modelId: 'remote-coder',
-      displayName: 'Remote coder',
-      isDefault: false,
-    })).toEqual({ modelId: 'coder', displayName: 'Coder', isDefault: true })
   })
 
   it('redacts secret references into exact Host secret slots and preserves omitted references', () => {
