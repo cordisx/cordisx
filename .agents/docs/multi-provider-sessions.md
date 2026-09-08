@@ -170,15 +170,15 @@ upgrading the CLIProxyAPI binary are separate future capabilities.
    fields.
 3. Host core PR in `cordisx`: provider-aware Platform types, Permission Broker
    scope/audit, fleet router, launcher-private RPC, Codex app-server client,
-   CLIProxyAPI adapter, configuration, lifecycle, tests, and diagnostics.
-4. Plugin/UI PR in `cordisx`: the CLIProxyAPI page built only on the public
-   Platform, page, route, command, i18n, and existing outlet services. It does
-   not modify the separate UI extension catalog document or add a surface.
+   configuration, lifecycle, tests, diagnostics, and broker authority.
+4. Plugin/UI delivery in `cordisx/plugin-cli-proxy-api`: the CLIProxyAPI page
+   and public provider adapter built only on Protocol and the public Platform,
+   page, route, command, i18n, and existing outlet services.
 5. CordisXMono PR: from the then-current `origin/main`, pin only compatible
    merged protocol and host commits while retaining all concurrent pointers.
 
-The host core and UI may share one repository branch during implementation,
-but review evidence and commits keep their validation boundaries distinct.
+The Host and plugin retain separate repositories, packages, tests, and release
+boundaries.
 
 ## Validation boundary
 

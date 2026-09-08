@@ -51,7 +51,7 @@ constraints.
 | `renderer/permission-authorization-dialog.ts` and `permission-locales.ts` | `CordisXLocaleCatalog` with en/zh-CN         | The dialog was assigned to the TDesign owner; its stable requirement is short risk text plus an explicit decision.                                                                                               |
 | `renderer/capability-availability.ts`                                     | en/zh-CN keyed catalog                       | Keep provider/route explanations out of primary state labels; show them in detail or diagnostics.                                                                                                                |
 | `renderer/extension-points.ts`                                            | localized catalog projections                | Keep semantic point IDs secondary; unavailable anchors remain `pending` plus diagnostic.                                                                                                                         |
-| `plugins/cli-proxy-api` and `agent-trace-showcase`                        | plugin catalogs with en/zh-CN                | Their empty/error states already have a dedicated plugin localization boundary.                                                                                                                                  |
+| standalone CLIProxy plugin and `agent-trace-showcase`                     | plugin catalogs with en/zh-CN                | Their empty/error states already have a dedicated plugin localization boundary.                                                                                                                                  |
 
 ## Gate and handoff
 

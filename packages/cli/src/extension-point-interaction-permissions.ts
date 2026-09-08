@@ -1,13 +1,13 @@
 import type { ExtensionPointInteractionCapabilityV1 } from '@cordisx/protocol/extension-point-visual/v1'
 import type { PluginRuntimeManifestV10 } from '@cordisx/protocol/plugin-manifest/v10'
-import { normalizePluginManifestV8 } from './permission-model-v4.js'
+import { normalizePluginManifestV9 } from './permission-model-v4.js'
 import { CapabilityRiskCatalog } from './capability-risk-catalog.js'
 import { normalizeDomCapabilityDeclarationV3, normalizeDomPermissionScopeV3 } from './permission-model-v3.js'
 
 export const CORDISX_PLUGIN_MANIFEST_SCHEMA_V10 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v10.schema.json' as const
 export type CordisXPluginManifestV10 = Omit<PluginRuntimeManifestV10, 'services'> & {
-  readonly services: ReturnType<typeof normalizePluginManifestV8>['services']
+  readonly services: ReturnType<typeof normalizePluginManifestV9>['services']
 }
 export function normalizeInteractionDeclaration(value: unknown): ExtensionPointInteractionCapabilityV1 {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -59,11 +59,11 @@ export function normalizeVisualManifestV10(value: unknown, expectedId: string): 
     normalizeInteractionDeclaration,
   )
   if (interactions.length > 1) throw new Error('Duplicate interaction declaration')
-  const base = normalizePluginManifestV8(
+  const base = normalizePluginManifestV9(
     {
       ...manifest,
-      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v8.schema.json',
-      schemaVersion: 8,
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-manifest.v9.schema.json',
+      schemaVersion: 9,
       capabilities: manifest.capabilities.filter(item =>
         item?.name !== 'ui.extension-points.interact' && item?.name !== 'ui.extension-points.render'
       ),

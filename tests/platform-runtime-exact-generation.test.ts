@@ -10,7 +10,7 @@ import {
   normalizePluginManifestV13,
 } from '../packages/cli/src/runtime-exact-request-permissions.js'
 import { ProviderFleet } from '../packages/cli/src/providers/fleet.js'
-import type { CliProxyProviderConfig } from '../packages/cli/src/providers/contracts.js'
+import type { LocalCodexProviderConfig } from '../packages/cli/src/providers/contracts.js'
 import type { CodexAppServerRpc } from '../packages/cli/src/providers/codex-app-server.js'
 import {
   CordisXPlatformService,
@@ -21,13 +21,12 @@ import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from '../packages/cli/src/re
 
 const identity = { source: 'https://plugins.example/runtime-exact-generation', id: 'runtime-exact-generation' }
 
-function config(root: string): CliProxyProviderConfig {
+function config(root: string): LocalCodexProviderConfig {
   return {
     id: 'alpha',
-    kind: 'cli-proxy-api',
+    kind: 'local-codex',
+    sourceProviderId: 'alpha',
     displayName: 'Alpha',
-    baseUrl: 'https://alpha.example/v1',
-    apiKeyEnv: 'ALPHA_KEY',
     codexExecutable: 'codex',
     codexHome: path.join(root, 'alpha'),
     enabled: true,

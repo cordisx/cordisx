@@ -24,7 +24,7 @@ import {
 import {
   CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
   CLI_PROXY_PROVIDER_STARTUP_CONFIG_CONTRACT,
-} from '../packages/cli/src/plugins/cli-proxy-api/service-config.js'
+} from '../packages/cli/src/providers/cli-proxy-service-config.js'
 
 const generation = 'service-config-generation-1'
 const ownerToken = 'a'.repeat(64)

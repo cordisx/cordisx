@@ -7,7 +7,7 @@ import {
   parseCliProxyProviderRuntimeConfig,
   parseCliProxyProviderStartupConfig,
   resolveCliProxyProviderConfigs,
-} from '../plugins/cli-proxy-api/service-config.js'
+} from '../providers/cli-proxy-service-config.js'
 import { CodexAppServerPlatformBrokerAuthority } from '../providers/codex-app-server-platform-broker.js'
 import { startCodexAppServer } from '../providers/codex-app-server.js'
 import type { CordisXPluginActivationRecordV1 } from '../plugin-lifecycle-contracts.js'
@@ -24,6 +24,7 @@ export function createCliProxyPlatformProviderBatch(input: {
   readonly rootDir: string
   readonly environment: NodeJS.ProcessEnv
   readonly activation: () => Promise<CordisXPluginActivationRecordV1>
+  readonly launcherCandidates?: CordisXPluginActivationRecordV1['plugins']
 }): PlatformProviderServiceBatchRuntime {
   const configurations = new HostPlatformProviderConfigurationRegistryV1()
   configurations.register({
@@ -69,7 +70,10 @@ export function createCliProxyPlatformProviderBatch(input: {
     candidates: async selectedActivation => {
       const activation = selectedActivation ?? await input.activation()
       const candidates = []
-      for (const item of activation.plugins) {
+      const items = new Map(
+        [...(input.launcherCandidates ?? []), ...activation.plugins].map(item => [item.id, item]),
+      )
+      for (const item of items.values()) {
         if (!item.enabled) continue
         const staged = await loadStagedPluginPackage(input.homeDir, item.digest)
         for (const service of staged.serviceModules) {

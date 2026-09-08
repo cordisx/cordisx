@@ -3,17 +3,16 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { CodexAppServerRpc } from '../packages/cli/src/providers/codex-app-server.js'
-import type { CliProxyProviderConfig, LocalCodexProviderConfig } from '../packages/cli/src/providers/contracts.js'
+import type { LocalCodexProviderConfig } from '../packages/cli/src/providers/contracts.js'
 import { AgentLoopAuthority } from '../packages/cli/src/launcher/agent-loop-authority.js'
 import { ProviderFleet } from '../packages/cli/src/providers/fleet.js'
 
-function config(root: string, id: string): CliProxyProviderConfig {
+function config(root: string, id: string): LocalCodexProviderConfig {
   return {
     id,
-    kind: 'cli-proxy-api',
+    kind: 'local-codex',
+    sourceProviderId: id,
     displayName: id.toUpperCase(),
-    baseUrl: `https://${id}.test/v1`,
-    apiKeyEnv: `${id.toUpperCase()}_KEY`,
     codexExecutable: 'codex',
     codexHome: path.join(root, id),
     enabled: true,

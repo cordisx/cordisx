@@ -38,7 +38,7 @@ npm run dev:ui -- --config /absolute/path/to/cordisx.config.json --port 43124
 The default fixture is `cordisx.config.playground.json` (`Comprehensive UI
 demos`). It activates seven local, credential-free renderer plugins:
 `slot-showcase`, `hello-toolbar`, `form-schema-gallery`, `settings-tab-demo`,
-`console-showcase`, built-in `channel`, and built-in `cli-proxy-api`. This
+`console-showcase`, external `channel`, and external `cli-proxy-api`. This
 covers structured slots/pages/routes, schema-driven configuration, Manager
 content navigation, Console entries, and the Channel/Provider projections. The
 last two remain honestly unavailable when no launcher-side connection or

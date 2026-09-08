@@ -170,8 +170,6 @@ try {
       'dist/skills/cordisx-plugin-development/references/feasibility-assessment.md',
       'dist/skills/cordisx-plugin-development/references/live-plugin-development.md',
       'dist/skills/cordisx-plugin-development/references/project-layouts-and-development.md',
-      'dist/src/plugins/cli-proxy-api/README.md',
-      'dist/src/plugins/cli-proxy-api/README.zh-Hans.md',
       'dist/assets/brand/cordisx-mark-light.svg',
       'dist/assets/brand/cordisx-mark-dark.svg',
       'dist/assets/brand/cordisx-mark-animated-light.svg',

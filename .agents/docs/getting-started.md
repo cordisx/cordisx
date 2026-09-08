@@ -53,9 +53,10 @@ Set the named environment variable before launching CordisX. Credential values
 do not belong in the JSON file. Remote endpoints require HTTPS; cleartext HTTP
 is accepted only for loopback development. Each provider gets a private
 `providers/<providerId>/codex-home` session store, and the normal
-`cli-proxy-api` plugin contributes the existing sidebar navigation and `main`
-page. The native Codex Desktop current connection remains a separate, honestly
-reported connection plane.
+The external `@cordisx/plugin-cli-proxy-api` package contributes the sidebar
+navigation and `main` page through the `cordisx:cli-proxy-api` convenience
+alias. The native Codex Desktop current connection remains a separate,
+honestly reported connection plane.
 
 The default profile uses the existing signed-in Codex/ChatGPT Host profile,
 account, conversations, projects, models, and host configuration. CordisX
