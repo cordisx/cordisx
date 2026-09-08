@@ -17,7 +17,8 @@ is needed. Network access to GitHub and the configured npm registry is required.
 
 The builder restores the canonical manifests and lockfile, compiles the Host,
 and builds the pinned Channel and CLIProxy plugins against that public Host SDK
-using its installed build tools. It checks package exports, runtime manifest
+using its installed build tools. Plugin-local `.bin` links select the locked
+Host compiler and CLI Vite before npm can prepend an outer project's tools. It checks package exports, runtime manifest
 digests, and service entry files before packing. This is a Host compatibility
 build of unchanged plugin source, not a claim that each plugin's independent
 development lockfile was installed.

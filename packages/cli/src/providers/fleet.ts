@@ -1,5 +1,5 @@
-import { ControlledAgentTurns } from './controlled-agent-turns.js'
-import type { AgentLoopControlledTurnV1, AgentLoopControlV1 } from '@cordisx/protocol/agent-loop-control/v1'
+import { type FleetControlInput, FleetControlledAgentTurns } from './fleet-controlled-agent-turns.js'
+import { withFleetLease } from './fleet-provider-lease.js'
 import type { ChannelTaskDispatchResult } from '@cordisx/channel-runtime'
 import { randomUUID } from 'node:crypto'
 import type { CordisXExternalProviderAvailabilityStatus } from '../capability-availability-contracts.js'
@@ -50,7 +50,7 @@ import {
 } from './fleet-lifecycle.js'
 import { type ProviderFleetPublication, publishProviderConnections } from './fleet-publication.js'
 import { FleetTaskPagination } from './fleet-pagination.js'
-import { copy, failure, registryFailure } from './fleet-results.js'
+import { copy, failure } from './fleet-results.js'
 import { selectFleetProviders } from './fleet-provider-selection.js'
 import { fleetReconfigurationTransaction } from './fleet-reconfiguration-transaction.js'
 export type { ChannelTaskLifecycleEvent, ChannelTaskLifecycleRange } from './fleet-lifecycle.js'
@@ -78,47 +78,12 @@ export class ProviderFleet implements CordisXPlatformAdapter {
   private readonly agentLoopInFlight = new Map<string, AgentLoopInFlight>()
   private lifecycleAuthorityQueue: Promise<void> = Promise.resolve()
   private lifecycleDisposers = new Map<string, () => void>()
-  private readonly controlledTurns = new ControlledAgentTurns({
-    resolve: (scope, binding) =>
-      this.resolveAgentLoopBinding({
-        scope,
-        task: binding.task,
-        binding: binding.binding,
-        definition: binding.definition,
-      }),
-    submit: (scope, input) => this.submitControlledTurn(scope, input),
-    stored: (scope, id) => this.agentLoopAuthority?.committedResult(scope, id),
-    save: async (scope, id, state) => {
-      if (this.agentLoopAuthority === undefined) throw new Error('authority unavailable')
-      await this.agentLoopAuthority.setControlledTurnState(scope, id, state)
-    },
-    terminal: (locator, turn) => {
-      const event = this.readLifecycle({ providerId: locator.providerId, remoteSessionId: locator.remoteSessionId }, -1)
-        .events
-        .find(event =>
-          event.providerGeneration === locator.providerGeneration && event.turnId === turn
-          && (event.type === 'turn.completed' || event.type === 'turn.failed')
-        )
-      return event === undefined
-        ? undefined
-        : {
-          state: event.type === 'turn.completed' ? 'completed' as const : 'failed' as const,
-          observedAt: Date.parse(event.observedAt),
-        }
-    },
-    interrupt: async (locator, turn) => {
-      const result = await this.withProvider(
-        locator.providerId,
-        adapter =>
-          adapter.controlTurn({
-            action: 'interrupt',
-            session: { providerId: locator.providerId, remoteSessionId: locator.remoteSessionId },
-            turnId: turn,
-          }),
-        locator.providerGeneration,
-      )
-      return result.ok
-    },
+  private readonly controlledTurns = new FleetControlledAgentTurns({
+    authority: () => this.agentLoopAuthority,
+    generationFor: id => this.generationFor(id),
+    withProvider: (id, operation, generation) => this.withProvider(id, operation, generation),
+    transaction: (input, provider, execute) => this.durableAgentLoop(input, provider, execute),
+    readLifecycle: (session, after) => this.readLifecycle(session, after),
   })
   private closed = false
 
@@ -796,77 +761,8 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     return () => this.lifecycleListeners.delete(listener)
   }
 
-  private async submitControlledTurn(
-    scope: AgentLoopAuthorityScope,
-    input: Parameters<AgentLoopControlV1['submit']>[0],
-  ): Promise<unknown> {
-    const locator = this.resolveAgentLoopBinding({
-      scope,
-      task: input.binding.task,
-      binding: input.binding.binding,
-      definition: input.binding.definition,
-    })
-    if (locator === undefined || this.generationFor(locator.providerId) !== locator.providerGeneration) {
-      return { status: 'unavailable', code: 'provider-replaced' }
-    }
-    if (input.content.some(part => part.kind !== 'text')) return { status: 'unavailable', code: 'unsupported' }
-    const message = input.content.map(part => part.kind === 'text' ? part.text : '').join('\n')
-    if (!message.trim() || message.length > 65_536) return { status: 'unavailable', code: 'invalid-request' }
-    return await this.durableAgentLoop(
-      { scope, operationId: input.commandId, command: { type: 'controlled-submit', ...input } },
-      locator,
-      async commandDigest => {
-        const sent = await this.withProvider(locator.providerId, adapter =>
-          adapter.submitTurn({
-            session: { providerId: locator.providerId, remoteSessionId: locator.remoteSessionId },
-            message,
-            operationId: input.commandId,
-            operationDigest: commandDigest,
-          }), locator.providerGeneration)
-        return !sent.ok
-          ? { status: 'unavailable', code: 'host-unavailable' }
-          : {
-            status: 'accepted',
-            locator,
-            turn: sent.value.turnId,
-            deadline: input.deadline,
-            controlledState: 'running',
-          }
-      },
-    )
-  }
-
-  async controlAgentLoop(
-    input: {
-      readonly scope: AgentLoopAuthorityScope
-      readonly action: 'submit' | 'cancel' | 'read' | 'dispose'
-      readonly value?: unknown
-    },
-  ): Promise<unknown> {
-    if (input.action === 'dispose') {
-      await this.controlledTurns.dispose(input.scope)
-      return { status: 'accepted', value: null }
-    }
-    if (input.action === 'submit') {
-      return await this.controlledTurns.submit(input.scope, input.value as Parameters<AgentLoopControlV1['submit']>[0])
-    }
-    if (input.action === 'read') {
-      return await this.controlledTurns.read(input.scope, input.value as AgentLoopControlledTurnV1)
-    }
-    const request = input.value as Parameters<AgentLoopControlV1['cancel']>[0]
-    const target = request.target
-    const locator = this.resolveAgentLoopBinding({
-      scope: input.scope,
-      task: target.binding.task,
-      binding: target.binding.binding,
-      definition: target.binding.definition,
-    })
-    if (locator === undefined) return { status: 'unavailable', code: 'turn-unavailable' }
-    return await this.durableAgentLoop(
-      { scope: input.scope, operationId: request.commandId, command: { type: 'controlled-cancel', ...request } },
-      locator,
-      async () => await this.controlledTurns.cancel(input.scope, target),
-    )
+  async controlAgentLoop(input: FleetControlInput): Promise<unknown> {
+    return await this.controlledTurns.handle(input)
   }
 
   async controlTurn(input: CordisXTurnControlInput): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>> {
@@ -984,32 +880,14 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     operation: (adapter: ProviderConnection) => Promise<CordisXPlatformResult<Value>>,
     generation?: string,
   ): Promise<CordisXPlatformResult<Value>> {
-    try {
-      const lease = this.registry.acquire(providerId, generation)
-      try {
-        return await operation(lease.adapter)
-      } finally {
-        lease.release()
-      }
-    } catch (error) {
-      return registryFailure(error)
-    }
+    return await withFleetLease(() => this.registry.acquire(providerId, generation), operation)
   }
 
   private async withSession<Value>(
     session: CordisXTaskReadInput['session'],
     operation: (adapter: ProviderConnection) => Promise<CordisXPlatformResult<Value>>,
   ): Promise<CordisXPlatformResult<Value>> {
-    try {
-      const lease = this.registry.acquireSession(session)
-      try {
-        return await operation(lease.adapter)
-      } finally {
-        lease.release()
-      }
-    } catch (error) {
-      return registryFailure(error)
-    }
+    return await withFleetLease(() => this.registry.acquireSession(session), operation)
   }
 
   private async durableAgentLoop(
