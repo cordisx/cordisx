@@ -13,6 +13,7 @@ import {
   type CordisXPermissionAuthorizationPlanV1,
   type CordisXPermissionPolicy,
   type CordisXPlatformAdapterStatus,
+  type CordisXPlatformCapability,
   type CordisXPluginConsolePageV1,
   type CordisXPluginIdentity,
   type CordisXPluginLifecycleOperationV1,
@@ -151,6 +152,11 @@ export interface ManagerSnapshot {
   readonly localizationDiagnostics: readonly CordisXLocalizationDiagnostic[]
   readonly platform: CordisXPlatformAdapterStatus
   readonly permissions: readonly ManagerPermissionSnapshot[]
+  /** Read-only declarations whose concrete scope is verified from each real request. */
+  readonly runtimeExactPermissions?: readonly {
+    readonly identity: CordisXPluginIdentity
+    readonly capability: CordisXPlatformCapability
+  }[]
   /** Host-owned providers; permission policy remains independently editable. */
   readonly capabilityProviders?: readonly ManagerCapabilityProviderSnapshot[]
   /** Runtime-owned point catalog/policy projection; manager UX consumes it in the following slice. */

@@ -15,6 +15,20 @@ import { declarationFingerprint, object, platformIdentityKey } from './platform-
 import { PlatformPermissionSnapshot, Registration } from './platform-permission-types.js'
 
 export class PermissionBroker extends PlatformUsagePermissionBroker {
+  runtimeExactExplanations(): readonly {
+    readonly identity: Registration['identity']
+    readonly capability: CordisXPlatformCapability
+  }[] {
+    return [...this.registrations.values()]
+      .filter(registration => this.visibility?.visible(registration.generation) ?? true)
+      .flatMap(registration =>
+        [...registration.runtimeExactCapabilities].map(capability => ({
+          identity: registration.identity,
+          capability,
+        }))
+      )
+  }
+
   snapshots(): readonly PlatformPermissionSnapshot[] {
     const platform = [...this.registrations.values()]
       .filter(registration => this.visibility?.visible(registration.generation) ?? true)

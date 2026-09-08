@@ -1,10 +1,5 @@
 import { normalizeModernPluginManifest } from './modern-plugin-manifest.js'
 import {
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V11,
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
-  normalizeTaskManifest,
-} from '../agent-task-permission-manifest.js'
-import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
   normalizeVisualManifestV10,
 } from '../extension-point-interaction-permissions.js'
@@ -59,7 +54,7 @@ import { type EntityTemplatePayload, readEntityTemplatePayload } from './entity-
 import { buildProductionPluginGraph, type BuiltPluginGenerationArtifact } from './production-plugin-build.js'
 import { readPluginGenerationArtifactV1 } from './plugin-generation-artifact-server.js'
 import { assertPluginGenerationArtifactFileReferences } from './plugin-generation-artifact-validation.js'
-
+import { normalizeLatestRuntimeManifest, runtimeManifestHasServices } from './latest-runtime-manifest.js'
 const PLUGIN_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
 const SEMANTIC_VERSION =
   /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
@@ -742,20 +737,21 @@ export async function stageResolvedPluginPackage(
 ): Promise<StagedPluginPackage> {
   const root = await realpath(sourceDirectory)
   const runtime = resolved.runtimeManifest
-  const runtimeManifest = runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 && runtime.schemaVersion === 1
-    ? runtimeManifestV1(runtime, resolved.packageManifest.pluginId)
-    : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 && runtime.schemaVersion === 4
-    ? normalizePluginManifestV4(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
-    : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 && runtime.schemaVersion === 5
-    ? normalizePluginManifestV5(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
-    : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V6 && runtime.schemaVersion === 6
-    ? normalizePluginManifestV6(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
-    : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 && runtime.schemaVersion === 7
-    ? normalizePluginManifestV7(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
-    : normalizeModernPluginManifest(runtime, resolved.packageManifest.pluginId)
+  const runtimeManifest = normalizeLatestRuntimeManifest(runtime, resolved.packageManifest.pluginId)
+    ?? (runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 && runtime.schemaVersion === 1
+      ? runtimeManifestV1(runtime, resolved.packageManifest.pluginId)
+      : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 && runtime.schemaVersion === 4
+      ? normalizePluginManifestV4(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
+      : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 && runtime.schemaVersion === 5
+      ? normalizePluginManifestV5(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
+      : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V6 && runtime.schemaVersion === 6
+      ? normalizePluginManifestV6(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
+      : runtime.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 && runtime.schemaVersion === 7
+      ? normalizePluginManifestV7(runtime, resolved.packageManifest.pluginId, new CapabilityRiskCatalog())
+      : normalizeModernPluginManifest(runtime, resolved.packageManifest.pluginId))
   if (runtimeManifest === undefined) {
     throw new Error(
-      'the current renderer generation ABI accepts runtime plugin manifest v1, v4, v5, v6, v7, v8, v9, v10, v11, or v12 only',
+      'the current renderer generation ABI does not accept this runtime plugin manifest schema',
     )
   }
   const entry = await regularContainedFile(root, resolved.packageManifest.entry, 'package entry')
@@ -766,13 +762,9 @@ export async function stageResolvedPluginPackage(
     buildArtifact(root, entry),
     readmePath === undefined ? Promise.resolve(undefined) : readFile(readmePath, 'utf8'),
   ])
-  const serviceModules =
-    runtimeManifest.schemaVersion === 4 || runtimeManifest.schemaVersion === 5 || runtimeManifest.schemaVersion === 6
-      || runtimeManifest.schemaVersion === 7 || runtimeManifest.schemaVersion === 8
-      || runtimeManifest.schemaVersion === 9 || runtimeManifest.schemaVersion === 10
-      || runtimeManifest.schemaVersion === 11 || runtimeManifest.schemaVersion === 12
-      ? await Promise.all(runtimeManifest.services.map(service => buildServiceArtifact(root, service)))
-      : []
+  const serviceModules = runtimeManifestHasServices(runtimeManifest)
+    ? await Promise.all(runtimeManifest.services.map(service => buildServiceArtifact(root, service)))
+    : []
   const entityTemplates = await Promise.all((resolved.packageManifest.entityTemplates ?? []).map(async declaration => (
     await readEntityTemplatePayload(root, declaration)
   )))
@@ -915,17 +907,18 @@ export async function loadStagedPluginPackage(
     if (actualRuntimeDigest !== expectedRuntimeDigest) throw new Error('runtime manifest failed integrity readback')
     const rawRuntime = JSON.parse(runtimeBytes.toString('utf8')) as unknown
     const candidate = rawRuntime as { readonly $schema?: unknown; readonly schemaVersion?: unknown }
-    const runtime = candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 && candidate.schemaVersion === 1
-      ? runtimeManifestV1(rawRuntime, parsed.package.pluginId)
-      : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 && candidate.schemaVersion === 4
-      ? normalizePluginManifestV4(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
-      : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 && candidate.schemaVersion === 5
-      ? normalizePluginManifestV5(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
-      : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V6 && candidate.schemaVersion === 6
-      ? normalizePluginManifestV6(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
-      : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 && candidate.schemaVersion === 7
-      ? normalizePluginManifestV7(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
-      : normalizeModernPluginManifest(candidate, parsed.package.pluginId)
+    const runtime = normalizeLatestRuntimeManifest(rawRuntime, parsed.package.pluginId)
+      ?? (candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V1 && candidate.schemaVersion === 1
+        ? runtimeManifestV1(rawRuntime, parsed.package.pluginId)
+        : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V4 && candidate.schemaVersion === 4
+        ? normalizePluginManifestV4(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
+        : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V5 && candidate.schemaVersion === 5
+        ? normalizePluginManifestV5(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
+        : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V6 && candidate.schemaVersion === 6
+        ? normalizePluginManifestV6(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
+        : candidate.$schema === CORDISX_PLUGIN_MANIFEST_SCHEMA_V7 && candidate.schemaVersion === 7
+        ? normalizePluginManifestV7(rawRuntime, parsed.package.pluginId, new CapabilityRiskCatalog())
+        : normalizeModernPluginManifest(candidate, parsed.package.pluginId))
     if (runtime === undefined) throw new Error('stored runtime manifest schema is unsupported')
     manifest = {
       $schema: CORDISX_PLUGIN_PACKAGE_SCHEMA_V1,

@@ -1,4 +1,5 @@
-import type { CordisXPluginManifestV11, CordisXPluginManifestV12 } from '../agent-task-permission-manifest.js'
+import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
+import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -47,6 +48,7 @@ export interface CordisXConfigPlugin {
     | CordisXPluginManifestV10
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
+    | CordisXPluginManifestV13
   readonly package?: {
     readonly version: string
     readonly digest: `sha256:${string}`

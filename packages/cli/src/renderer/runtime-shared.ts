@@ -1,4 +1,5 @@
-import type { CordisXPluginManifestV11, CordisXPluginManifestV12 } from '../agent-task-permission-manifest.js'
+import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
+import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
@@ -281,6 +282,7 @@ export interface CordisXRuntimeMetadata {
   readonly channelManager?: ChannelManagerProjectionV1
   /** Development-only host with explicit semantic seats and no Codex DOM probes. */
   readonly hostKind?: 'codex' | 'playground'
+  readonly executionPlatform: 'posix' | 'win32'
   /** Debug-only deterministic service; accepted only by the explicit Playground host. */
   readonly agentLoopBackend?: 'mock'
   /** Host-validated declarative catalog; never accepted from a plugin Context. */
@@ -336,6 +338,7 @@ export interface PluginController {
     | CordisXPluginManifestV10
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
+    | CordisXPluginManifestV13
   principal: PluginPrincipalToken
   activation: number
   principalLive: boolean
@@ -645,7 +648,8 @@ export function manifestUsesHostDom(
     | CordisXPluginManifestV9
     | CordisXPluginManifestV10
     | CordisXPluginManifestV11
-    | CordisXPluginManifestV12,
+    | CordisXPluginManifestV12
+    | CordisXPluginManifestV13,
 ): manifest is
   | CordisXPluginManifestV5
   | CordisXPluginManifestV6
@@ -654,11 +658,13 @@ export function manifestUsesHostDom(
   | CordisXPluginManifestV10
   | CordisXPluginManifestV11
   | CordisXPluginManifestV12
+  | CordisXPluginManifestV13
 {
   return (
     manifest.schemaVersion === 5 || manifest.schemaVersion === 6 || manifest.schemaVersion === 8
-    || manifest.schemaVersion === 9 || manifest.schemaVersion === 10 || manifest.schemaVersion === 11
-    || manifest.schemaVersion === 12
+    || manifest.schemaVersion === 9
+    || (manifest.schemaVersion === 10 || manifest.schemaVersion === 11 || manifest.schemaVersion === 12
+      || manifest.schemaVersion === 13)
   )
     && manifest.capabilities.some(capability => (
       capability.name === 'ui.host-dom.read' || capability.name === 'ui.host-dom.modify'
@@ -676,7 +682,8 @@ export function manifestUsesTransientCanvas(
     | CordisXPluginManifestV9
     | CordisXPluginManifestV10
     | CordisXPluginManifestV11
-    | CordisXPluginManifestV12,
+    | CordisXPluginManifestV12
+    | CordisXPluginManifestV13,
 ): manifest is CordisXPluginManifestV7 {
   return manifest.schemaVersion === 7
     && manifest.execution.realm === 'isolated-worker'

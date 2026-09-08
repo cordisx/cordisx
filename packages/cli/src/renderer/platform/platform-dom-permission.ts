@@ -258,7 +258,7 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
       declaration: {
         name: 'ui.extension-points.render',
         required: (registration.manifest.schemaVersion === 10 || registration.manifest.schemaVersion === 11
-          || registration.manifest.schemaVersion === 12)
+          || registration.manifest.schemaVersion === 12 || registration.manifest.schemaVersion === 13)
           && registration.manifest.capabilities.some(item =>
             item.name === 'ui.extension-points.render' && item.required && item.scope.extensionPoints.includes(pointId)
           ),

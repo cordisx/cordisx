@@ -522,6 +522,7 @@ export const runRuntimeStage4077 = async (runtimeScope: RuntimeClosureScope): Pr
       adapter: runtimeScope.platformAdapter()!,
       broker: runtimeScope.broker()!,
       console: runtimeScope.pluginConsole()!,
+      executionPlatform: runtimeScope.metadata()!.executionPlatform,
     })
     await runtimeScope.platformFiber
     await installUsageService(

@@ -20,7 +20,7 @@ import {
   stageResolvedPluginPackage,
 } from '../packages/cli/src/launcher/plugin-package.js'
 
-async function fixture(packageVersion = 11, runtimeVersion = 11) {
+async function fixture(packageVersion = 11, runtimeVersion = 11, includeUsage = runtimeVersion === 11) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-usage-package-'))
   const source = path.join(root, 'source')
   await mkdir(source)
@@ -30,7 +30,9 @@ async function fixture(packageVersion = 11, runtimeVersion = 11) {
     schemaVersion: runtimeVersion,
     id: 'usage-pet',
     services: [],
-    capabilities: [{ name: 'usage.read', required: false, scope: { profile: 'current' } }],
+    capabilities: includeUsage
+      ? [{ name: 'usage.read', required: false, scope: { profile: 'current' } }]
+      : [],
   }
   const bytes = JSON.stringify(manifest)
   const packageManifest = {
@@ -82,7 +84,7 @@ it('stages the same v11 usage declaration through formal and local development a
     await rm(root, { recursive: true, force: true })
   }
 })
-it.each([[11, 10], [10, 11]])(
+it.each([[10, 11]])(
   'rejects package/runtime version mismatch %s/%s in both paths',
   async (packageVersion, runtimeVersion) => {
     const { root, source } = await fixture(packageVersion, runtimeVersion)
@@ -96,8 +98,17 @@ it.each([[11, 10], [10, 11]])(
     }
   },
 )
+it('accepts the v10 predecessor from a v11 package without rewriting its runtime identity', async () => {
+  const { root, source } = await fixture(11, 10)
+  try {
+    const resolved = await resolver().resolve(source)
+    expect(resolved.runtimeManifest).toMatchObject({ schemaVersion: 10 })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 it('does not smuggle usage.read into unchanged v10 semantics', async () => {
-  const { root, source } = await fixture(10, 10)
+  const { root, source } = await fixture(10, 10, true)
   try {
     await expect(resolver().resolve(source)).rejects.toThrow()
     await expect(buildLocalDevelopmentPlugin(path.join(source, 'usage-pet.js'))).rejects.toThrow()
@@ -113,7 +124,9 @@ it('rejects mismatched package schemaVersion and v11 schema URI', async () => {
       JSON.stringify({ ...packageManifest, schemaVersion: 10 }),
     )
     await expect(resolver().resolve(source)).rejects.toThrow('package manifest must use')
-    await expect(buildLocalDevelopmentPlugin(path.join(source, 'usage-pet.js'))).rejects.toThrow('requires exact')
+    await expect(buildLocalDevelopmentPlugin(path.join(source, 'usage-pet.js'))).rejects.toThrow(
+      'requires a supported exact plugin-package schema',
+    )
   } finally {
     await rm(root, { recursive: true, force: true })
   }

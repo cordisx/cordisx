@@ -9,6 +9,10 @@ interface UsageLease {
   result: Promise<boolean>
   cancel(): void
 }
+function usageManifest(registration: Registration): boolean {
+  return registration.manifest.schemaVersion === 11 || registration.manifest.schemaVersion === 12
+    || registration.manifest.schemaVersion === 13
+}
 /** Usage leases never borrow message/history authority. */
 export abstract class PlatformUsagePermissionBroker extends PlatformVisualPermissionBroker {
   private readonly usageLeases = new Map<object, UsageLease>()
@@ -44,11 +48,8 @@ export abstract class PlatformUsagePermissionBroker extends PlatformVisualPermis
   }
   async authorizeUsage(identity: CordisXPluginIdentity): Promise<boolean> {
     const current = this.registration(identity)
-    if (
-      !current || (current.manifest.schemaVersion !== 11 && current.manifest.schemaVersion !== 12)
-      || !this.isRegistered(current)
-    ) return false
-    const declaration = [...current.manifest.capabilities].find(item => item.name === 'usage.read')
+    if (current === undefined || !usageManifest(current) || !this.isRegistered(current)) return false
+    const declaration = current.manifest.capabilities.find(item => item.name === 'usage.read')
     if (!declaration) return false
     const old = this.usageLeases.get(current.token)
     if (old) return old.state === 'pending' ? old.result : this.usageAllowed(identity)
@@ -134,8 +135,7 @@ export abstract class PlatformUsagePermissionBroker extends PlatformVisualPermis
   protected usagePermissionSnapshots(): readonly PlatformPermissionSnapshot[] {
     return [...this.registrations.values()].flatMap(current => {
       if (
-        (current.manifest.schemaVersion !== 11 && current.manifest.schemaVersion !== 12)
-        || this.registration(current.identity) !== current
+        !usageManifest(current) || this.registration(current.identity) !== current
         || !this.isRegistered(current)
       ) return []
       const declaration = [...current.manifest.capabilities].find(item => item.name === 'usage.read')

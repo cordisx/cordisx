@@ -1,4 +1,5 @@
-import type { CordisXPluginManifestV11, CordisXPluginManifestV12 } from '../agent-task-permission-manifest.js'
+import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
+import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import { resolveDevelopmentIdentitySource } from './development-source-identity.js'
 import { createHash, randomBytes } from 'node:crypto'
@@ -83,6 +84,7 @@ interface DevelopmentGeneration {
     | CordisXPluginManifestV10
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
+    | CordisXPluginManifestV13
   /** Executable only by the Host-owned isolated Worker boundary. */
   readonly isolatedArtifactSource?: string
   /** Complete esbuild input graph for isolated-worker HMR ownership. */

@@ -12,6 +12,11 @@ import {
   visualInteractionPlan,
 } from '../../extension-point-interaction-authorization.js'
 
+function visualManifest(registration: Registration): boolean {
+  return registration.manifest.schemaVersion === 10 || registration.manifest.schemaVersion === 11
+    || registration.manifest.schemaVersion === 12 || registration.manifest.schemaVersion === 13
+}
+
 function supportedInteractionEvent(point: string, event: string): boolean {
   return (point === 'composer.frame.overlay' && ['pointer.observe', 'drag', 'activate'].includes(event))
     || (point === 'composer.primary-action.visual' && event === 'pointer.observe')
@@ -56,8 +61,7 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
     )
     if (
       current?.generation.moduleGeneration !== generation
-      || (current.manifest.schemaVersion !== 10 && current.manifest.schemaVersion !== 11
-        && current.manifest.schemaVersion !== 12)
+      || !visualManifest(current)
     ) return false
     return !current.manifest.capabilities.some(item =>
       item.name === 'ui.extension-points.interact'
@@ -81,8 +85,7 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
     const render = (): boolean => {
       const current = registration()
       if (
-        current === undefined || (current.manifest.schemaVersion !== 10 && current.manifest.schemaVersion !== 11
-          && current.manifest.schemaVersion !== 12)
+        current === undefined || !visualManifest(current)
         || !pointAllowed()
       ) return false
       const declared = [...current.manifest.capabilities].find(item => item.name === 'ui.extension-points.render')
@@ -103,8 +106,7 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
     const interact = (event: 'pointer.observe' | 'drag' | 'activate'): boolean => {
       if (!render()) return false
       const current = registration()!
-      const declaration = (current.manifest.schemaVersion === 10 || current.manifest.schemaVersion === 11
-          || current.manifest.schemaVersion === 12)
+      const declaration = visualManifest(current)
         ? [...current.manifest.capabilities].find((item): item is ExtensionPointInteractionCapabilityV1 =>
           item.name === 'ui.extension-points.interact'
         )
@@ -226,8 +228,7 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
     return [...this.registrations.values()].flatMap(current => {
       if (
         this.registration(current.identity) !== current
-        || (current.manifest.schemaVersion !== 10 && current.manifest.schemaVersion !== 11
-          && current.manifest.schemaVersion !== 12)
+        || !visualManifest(current)
       ) return []
       const declaration = [...current.manifest.capabilities].find(item => item.name === 'ui.extension-points.interact')
       if (declaration === undefined) return []

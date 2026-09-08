@@ -39,6 +39,7 @@ export interface BuildRendererBundleOptions {
   readonly pluginActivation?: CordisXPluginActivationRecordV1
   readonly initialRegistryEpoch?: number
   readonly channelManager?: ChannelManagerProjectionV1
+  readonly executionPlatform?: 'posix' | 'win32'
   readonly permission?: {
     readonly profileId: string
     readonly policies: readonly CordisXPersistedPermissionPolicyRecord[]
@@ -331,6 +332,8 @@ export async function buildRendererCompositionSource(
   }
   const metadata = `{ version: ${JSON.stringify(version)}, workspaceCwd: ${
     JSON.stringify(config.rootDir)
+  }, executionPlatform: ${
+    JSON.stringify(options.executionPlatform ?? (process.platform === 'win32' ? 'win32' : 'posix'))
   }, providers: ${JSON.stringify(providers)}, profileId: ${JSON.stringify(permission.profileId)}, permissionPolicies: ${
     JSON.stringify(permission.policies)
   }${options.playground === true ? ', hostKind: "playground"' : ''}${

@@ -1,8 +1,10 @@
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, normalizeTaskManifest } from '../agent-task-permission-manifest.js'
 import {
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V11,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
-  normalizeTaskManifest,
-} from '../agent-task-permission-manifest.js'
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,
+  normalizePluginManifestV12,
+  normalizePluginManifestV13,
+} from '../runtime-exact-request-permissions.js'
 import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
   normalizeVisualManifestV10,
@@ -260,12 +262,17 @@ export class PluginLifecycleCoordinatorCore {
     return await stagePluginPackageSourceV1(source, {
       homeDir: this.options.homeDir,
       runtimeValidators: {
-        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V11]: value => {
-          const id = (value as { id?: unknown })?.id
-          if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
-          return normalizeTaskManifest(value, id)
-        },
         [CORDISX_PLUGIN_MANIFEST_SCHEMA_V12]: value => {
+          const id = (value as { readonly id?: unknown })?.id
+          if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
+          return normalizePluginManifestV12(value, id)
+        },
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V13]: value => {
+          const id = (value as { readonly id?: unknown })?.id
+          if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
+          return normalizePluginManifestV13(value, id)
+        },
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V11]: value => {
           const id = (value as { id?: unknown })?.id
           if (typeof id !== 'string') throw new Error('runtime manifest id is invalid')
           return normalizeTaskManifest(value, id)

@@ -1,3 +1,8 @@
+import { agentRuntimePermissionManifestVersion } from '../packages/cli/src/renderer/agent-route-session-scope.js'
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,
+  normalizePluginManifestV13,
+} from '../packages/cli/src/runtime-exact-request-permissions.js'
 import type { PermissionPromptRequest } from '../packages/cli/src/renderer/platform/platform-permission-store.js'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
@@ -40,9 +45,16 @@ const definition: AgentSetup['definitions'][number] = {
 const consumerManifest = JSON.parse(
   readFileSync(new URL('./fixtures/chatroom-task-runtime-manifest.json', import.meta.url), 'utf8'),
 )
-const manifest = () => normalizeTaskManifest(consumerManifest, identity.id)
+const manifest = (version = 12) =>
+  version === 12
+    ? normalizeTaskManifest(consumerManifest, identity.id)
+    : normalizePluginManifestV13({
+      ...consumerManifest,
+      schemaVersion: 13,
+      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,
+    }, identity.id)
 
-async function fixture() {
+async function fixture(version = 12) {
   let connection = { connectionId: 'native-connection', generation: 1 }
   let permission: 'allow-once' | 'allow' | 'deny' = 'allow-once'
   let humanOutcome: ApprovalOutcome = 'allowed-once'
@@ -53,7 +65,7 @@ async function fixture() {
   const identities = new Map([[owner.pluginId, identity]])
   const prompt = vi.fn(async (_request: PermissionPromptRequest) => permission)
   const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), { request: prompt })
-  const unregisterOwner = broker.register(identity, manifest())
+  const unregisterOwner = broker.register(identity, manifest(version))
   broker.replaceAgentRuntimeConnection(connection)
   let activeRoute:
     | { owner: typeof owner; routeId: string; instanceId: string; params: { sessionId: string } }
@@ -75,9 +87,9 @@ async function fixture() {
       broker.isAgentRuntimeLeaseActive(identities.get(candidate.pluginId)!, leaseId),
     connectionGeneration: () => connection.generation,
   })
-  const declarations = manifest().capabilities.map(item => ({
+  const declarations = manifest(version).capabilities.map(item => ({
     ...item,
-    manifestVersion: 12,
+    manifestVersion: agentRuntimePermissionManifestVersion(version),
   })) as AgentRuntimePermissionDeclaration[]
   scopes.install(owner, declarations)
   scopes.validateInstalledRoutes(owner)
@@ -281,9 +293,9 @@ async function fixture() {
   }
 }
 
-describe('production task manifest through actual broker and runtime resolver', () => {
+describe.each([12, 13])('production task manifest v%s through actual broker and runtime resolver', version => {
   it('routes root human and child to Leader without a current page route; real permission denial prevents answering', async () => {
-    const f = await fixture()
+    const f = await fixture(version)
     try {
       await f.install('root')
       expect(f.human).not.toHaveBeenCalled()
@@ -302,7 +314,7 @@ describe('production task manifest through actual broker and runtime resolver', 
   })
 
   it('routes a task to an ordinary existing Leader and rejects stale/foreign authorities', async () => {
-    const f = await fixture()
+    const f = await fixture(version)
     try {
       await f.existingLeader()
       await f.install('child')
@@ -325,7 +337,7 @@ describe('production task manifest through actual broker and runtime resolver', 
   })
 
   it('keeps ordinary route scope independent, and never falls back after a required task registration closes', async () => {
-    const f = await fixture()
+    const f = await fixture(version)
     try {
       f.activateRoute('ordinary')
       expect(await f.scopes.authorize(owner, 'approvals.request', 'ordinary')).toBe(true)
@@ -341,7 +353,7 @@ describe('production task manifest through actual broker and runtime resolver', 
   })
 
   it('keeps activation review separate and rejects structurally valid plugin-supplied task provenance', async () => {
-    const f = await fixture()
+    const f = await fixture(version)
     try {
       expect(f.broker.authorizationPlanV4(identity)?.declarations).toEqual([])
       await f.install('root')
@@ -376,7 +388,7 @@ describe('production task manifest through actual broker and runtime resolver', 
   })
 
   it('does not reuse task persistent allow after the registered maximum scope changes', async () => {
-    const f = await fixture()
+    const f = await fixture(version)
     try {
       await f.install('root')
       f.persistPermission()
@@ -391,7 +403,7 @@ describe('production task manifest through actual broker and runtime resolver', 
   })
 
   it('does not reuse a persistent ordinary-route allow or old lease for a new task source', async () => {
-    const f = await fixture()
+    const f = await fixture(version)
     try {
       f.activateRoute('root')
       f.persistPermission()
@@ -408,7 +420,7 @@ describe('production task manifest through actual broker and runtime resolver', 
   it.each(['missing', 'session', 'policy'] as const)(
     'rejects %s durable task provenance before answering',
     async defect => {
-      const f = await fixture()
+      const f = await fixture(version)
       try {
         await f.install('root')
         if (defect === 'missing') f.durable.delete('root')
@@ -425,7 +437,7 @@ describe('production task manifest through actual broker and runtime resolver', 
   )
 
   it('immediately aborts a routed ordinary Leader callback when the required registration closes', async () => {
-    const f = await fixture()
+    const f = await fixture(version)
     let release!: () => void
     try {
       await f.existingLeader()
@@ -452,7 +464,7 @@ describe('production task manifest through actual broker and runtime resolver', 
   })
 
   it('closes only the selected requester routing while an ordinary Leader and sibling remain live', async () => {
-    const f = await fixture()
+    const f = await fixture(version)
     let release!: () => void
     try {
       const leader = await f.existingLeader()
@@ -482,7 +494,7 @@ describe('production task manifest through actual broker and runtime resolver', 
   it.each(['connection', 'registration', 'dispose', 'durable', 'owner', 'permission'] as const)(
     'rejects a late human answer after %s closure',
     async mode => {
-      const f = await fixture()
+      const f = await fixture(version)
       let release!: () => void
       try {
         const handle = await f.install('root')

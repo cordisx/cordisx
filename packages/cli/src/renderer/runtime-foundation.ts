@@ -87,6 +87,7 @@ import {
   type AgentActiveRoute,
   AgentRouteSessionScopeAuthority,
   type AgentRuntimePermissionDeclaration,
+  agentRuntimePermissionManifestVersion,
 } from './agent-route-session-scope.js'
 import {
   type CordisXBoundConnectorClient,
@@ -743,7 +744,8 @@ export const createRuntimeRequiredBlockReason = (
   controller: PluginController,
 ): string | undefined => {
   if (
-    (controller.manifest.schemaVersion === 11 || controller.manifest.schemaVersion === 12)
+    (controller.manifest.schemaVersion === 11 || controller.manifest.schemaVersion === 12
+      || controller.manifest.schemaVersion === 13)
     && controller.manifest.capabilities.some(item => item.name === 'usage.read' && item.required)
   ) {
     if (runtimeScope.metadata()!.agentHistoryBridgeToken === undefined) {
@@ -756,7 +758,7 @@ export const createRuntimeRequiredBlockReason = (
     return `Required capability denied: ${denied.join(', ')}`
   }
   const declarations = controller.manifest.capabilities.flatMap(
-    item => ((CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
+    item => ((CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name) && !('runtime' in item.scope)
       ? [{
         name: item.name as CordisXPlatformCapability,
         required: item.required,
@@ -822,18 +824,7 @@ export const createRuntimeRegisterController = (
         transactionEpoch: controller.generationView.transactionEpoch,
       }),
     }, controller.generationView)
-    const agentRuntimeManifestVersion =
-      controller.manifest.schemaVersion === 5 || controller.manifest.schemaVersion === 6
-        || controller.manifest.schemaVersion === 7 || controller.manifest.schemaVersion === 8
-        || controller.manifest.schemaVersion === 9 || controller.manifest.schemaVersion === 10
-        || controller.manifest.schemaVersion === 11 || controller.manifest.schemaVersion === 12
-        ? controller.manifest.schemaVersion === 7
-          ? 6
-          : controller.manifest.schemaVersion === 9 || controller.manifest.schemaVersion === 10
-              || controller.manifest.schemaVersion === 11
-          ? 8
-          : controller.manifest.schemaVersion
-        : undefined
+    const agentRuntimeManifestVersion = agentRuntimePermissionManifestVersion(controller.manifest.schemaVersion)
     const agentRuntimeDeclarations = agentRuntimeManifestVersion !== undefined
       ? controller.manifest.capabilities
         .filter((

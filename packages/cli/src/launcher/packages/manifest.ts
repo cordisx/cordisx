@@ -1,12 +1,15 @@
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11 } from '../../usage-permissions.js'
 import {
-  CORDISX_PLUGIN_MANIFEST_SCHEMA_V11 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V12 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V12,
-} from '../../agent-task-permission-manifest.js'
-export { PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11, PLUGIN_RUNTIME_MANIFEST_SCHEMA_V12 }
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V13 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V13,
+} from '../../runtime-exact-request-permissions.js'
+export { PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11 }
 export const PLUGIN_PACKAGE_SCHEMA_V11 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v11.schema.json'
 export const PLUGIN_PACKAGE_SCHEMA_V12 =
   'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v12.schema.json'
+export const PLUGIN_PACKAGE_SCHEMA_V13 =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/plugin-package.v13.schema.json'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V10 as PLUGIN_RUNTIME_MANIFEST_SCHEMA_V10 } from '../../extension-point-interaction-permissions.js'
 export { PLUGIN_RUNTIME_MANIFEST_SCHEMA_V10 }
 export const PLUGIN_PACKAGE_SCHEMA_V10 =
@@ -65,6 +68,7 @@ export const PLUGIN_RUNTIME_MANIFEST_SCHEMAS = [
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V10,
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11,
   PLUGIN_RUNTIME_MANIFEST_SCHEMA_V12,
+  PLUGIN_RUNTIME_MANIFEST_SCHEMA_V13,
 ] as const
 
 const LOCAL_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/
@@ -237,11 +241,13 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
       ? 11
       : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V12 && manifest.schemaVersion === 12
       ? 12
+      : manifest.$schema === PLUGIN_PACKAGE_SCHEMA_V13 && manifest.schemaVersion === 13
+      ? 13
       : undefined
     if (packageVersion === undefined) {
       throw new PackageLifecycleError(
         'invalid-package-manifest',
-        'package manifest must use plugin-package.v2 through plugin-package.v12',
+        'package manifest must use plugin-package.v2 through plugin-package.v13',
       )
     }
     const pluginId = string(manifest.id, 'package manifest id')
@@ -289,13 +295,21 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
       || (packageVersion < 4 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V5)
       || (packageVersion < 6 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V6)
       || (packageVersion < 7 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7)
-      || (packageVersion !== 8 && packageVersion !== 9 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8)
-      || (packageVersion !== 9 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V9)
-      || (packageVersion !== 10 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V10)
-      || (packageVersion !== 11 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11)
-      || (packageVersion !== 12 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V12)
-      || (packageVersion === 11 && runtimeSchema !== PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11)
-      || (packageVersion === 12 && runtimeSchema !== PLUGIN_RUNTIME_MANIFEST_SCHEMA_V12)
+      || (packageVersion !== 8 && packageVersion !== 9 && packageVersion !== 11 && packageVersion !== 12
+        && packageVersion !== 13
+        && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V8)
+      || (packageVersion !== 9 && packageVersion !== 11 && packageVersion !== 12 && packageVersion !== 13
+        && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V9)
+      || (packageVersion !== 10 && packageVersion !== 11 && packageVersion !== 12 && packageVersion !== 13
+        && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V10)
+      || (packageVersion !== 11 && packageVersion !== 12 && packageVersion !== 13
+        && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11)
+      || (packageVersion !== 12 && packageVersion !== 13 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V12)
+      || (packageVersion !== 13 && runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V13)
+      || (packageVersion >= 11 && (
+        runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V6
+        || runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7
+      ))
       || (packageVersion === 9 && (
         runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V6
         || runtimeSchema === PLUGIN_RUNTIME_MANIFEST_SCHEMA_V7
@@ -313,9 +327,6 @@ export class JsonPackageManifestV2Resolver implements PackageManifestResolver {
     }
     if (packageVersion === 10 && runtimeSchema !== PLUGIN_RUNTIME_MANIFEST_SCHEMA_V10) {
       throw new PackageLifecycleError('incompatible-runtime', 'plugin-package.v10 requires plugin-manifest.v10')
-    }
-    if (packageVersion === 11 && runtimeSchema !== PLUGIN_RUNTIME_MANIFEST_SCHEMA_V11) {
-      throw new PackageLifecycleError('incompatible-runtime', 'plugin-package.v11 requires plugin-manifest.v11')
     }
     const runtimeFile = await containedFile(snapshotRoot, runtimePath, 'runtime manifest')
     const runtimeBytes = await readFile(runtimeFile)

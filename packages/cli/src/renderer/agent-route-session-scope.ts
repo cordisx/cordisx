@@ -44,6 +44,15 @@ export interface AgentRouteScopeBinding {
   readonly param: string
 }
 
+/** Map additive manifest versions to their inherited Agent permission semantics. */
+export function agentRuntimePermissionManifestVersion(version: number): 5 | 6 | 8 | 12 | undefined {
+  if (version === 5) return 5
+  if (version === 6 || version === 7) return 6
+  if (version === 8 || version === 9 || version === 10 || version === 11) return 8
+  if (version === 12 || version === 13) return 12
+  return undefined
+}
+
 export interface AgentRuntimePermissionDeclaration {
   /** Host-owned source schema discriminator; omitted only by legacy v5 callers. */
   readonly manifestVersion?: 5 | 6 | 8 | 12

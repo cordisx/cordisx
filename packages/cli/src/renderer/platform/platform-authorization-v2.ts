@@ -219,6 +219,7 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
       && registration.manifest.schemaVersion !== 7 && registration.manifest.schemaVersion !== 8
       && registration.manifest.schemaVersion !== 9 && registration.manifest.schemaVersion !== 10
       && registration.manifest.schemaVersion !== 11 && registration.manifest.schemaVersion !== 12
+      && registration.manifest.schemaVersion !== 13
     ) return undefined
     const operationBinding = binding ?? this.binding(registration, `${this.generation}:${identity.id}`)
     const certification = this.activeCertification(registration)
@@ -247,7 +248,8 @@ export abstract class PlatformAuthorizationV2Broker extends PlatformHostDomPermi
       || (registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6
         && registration.manifest.schemaVersion !== 7 && registration.manifest.schemaVersion !== 8
         && registration.manifest.schemaVersion !== 9 && registration.manifest.schemaVersion !== 10
-        && registration.manifest.schemaVersion !== 11 && registration.manifest.schemaVersion !== 12)
+        && registration.manifest.schemaVersion !== 11 && registration.manifest.schemaVersion !== 12
+        && registration.manifest.schemaVersion !== 13)
     ) {
       throw new Error(`plugin ${identity.id} does not use permission v4`)
     }

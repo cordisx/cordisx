@@ -156,7 +156,8 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
       || (registration.manifest.schemaVersion !== 5 && registration.manifest.schemaVersion !== 6
         && registration.manifest.schemaVersion !== 7 && registration.manifest.schemaVersion !== 8
         && registration.manifest.schemaVersion !== 9 && registration.manifest.schemaVersion !== 10
-        && registration.manifest.schemaVersion !== 11 && registration.manifest.schemaVersion !== 12)
+        && registration.manifest.schemaVersion !== 11 && registration.manifest.schemaVersion !== 12
+        && registration.manifest.schemaVersion !== 13)
     ) return Object.freeze({ authorized: false })
     if (
       registration.manifest.$schema
@@ -500,7 +501,7 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
       : undefined
     if (input.scopeSource.kind === 'host-agent-task' || input.scopeSource.kind === 'host-agent-task-authority') {
       if (
-        registration.manifest.schemaVersion !== 12
+        registration.manifest.schemaVersion !== 12 && registration.manifest.schemaVersion !== 13
         || declaredScope !== undefined && input.scopeSource.kind === 'host-agent-task-authority'
       ) return false
       const source = input.scopeSource.kind === 'host-agent-task'
@@ -552,7 +553,7 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
     return declaredScope === undefined
       && (registration.manifest.schemaVersion === 8 || registration.manifest.schemaVersion === 9
         || registration.manifest.schemaVersion === 10 || registration.manifest.schemaVersion === 11
-        || registration.manifest.schemaVersion === 12)
+        || registration.manifest.schemaVersion === 12 || registration.manifest.schemaVersion === 13)
       && input.capability === 'approvals.answer'
       && input.sessionId !== route.params.sessionId
       && isApprovalAuthorityRequesterRouteScope(authorityRequester)

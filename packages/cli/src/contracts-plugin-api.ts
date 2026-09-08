@@ -1,4 +1,5 @@
-import type { CordisXPluginManifestV11, CordisXPluginManifestV12 } from './agent-task-permission-manifest.js'
+import type { CordisXPluginManifestV11 } from './usage-permissions.js'
+import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from './runtime-exact-request-permissions.js'
 import type { EntitySettingsNavigationService } from '@cordisx/protocol/entity-settings-navigation/v1'
 import type { CordisXPluginManifestV10 } from './extension-point-interaction-permissions.js'
 import type { Context, Disposable } from '@deepseek-ai/cordis'
@@ -234,6 +235,7 @@ export interface CordisXPluginModule {
     | CordisXPluginManifestV10
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
+    | CordisXPluginManifestV13
   readonly inject?: readonly string[] | Record<string, unknown>
   readonly Config?: CordisXStandardSchema
   readonly configApplies?: CordisXConfigAppliesInput
@@ -268,6 +270,7 @@ export interface CordisXBrowserPlugin {
     | CordisXPluginManifestV10
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
+    | CordisXPluginManifestV13
   /** Immutable package and module generation metadata owned by the launcher. */
   readonly package?: {
     readonly version: string
