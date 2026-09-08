@@ -67,6 +67,21 @@ export async function linkBuildDependencies(source, host) {
       }
     }
   }
+  // npm prepends every ancestor .bin before the supplied PATH. Put the locked
+  // tools beside this plugin so an outer consumer's TypeScript cannot win.
+  await mkdir(path.join(target, '.bin'), { recursive: true })
+  for (const modules of [path.join(host, 'node_modules'), path.join(host, 'packages/cli/node_modules')]) {
+    const bin = path.join(modules, '.bin')
+    const tools = await readdir(bin).catch(error => {
+      if (error.code === 'ENOENT') return []
+      throw error
+    })
+    for (const name of tools) {
+      const destination = path.join(target, '.bin', name)
+      await rm(destination, { force: true })
+      await symlink(path.join(bin, name), destination)
+    }
+  }
   await rm(path.join(target, 'cordisx'), { force: true, recursive: true })
   await symlink(path.join(host, 'packages/cli'), path.join(target, 'cordisx'), 'dir')
 }

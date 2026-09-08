@@ -6,6 +6,7 @@ import { checkout, digest, json, linkBuildDependencies, pack, run, save, verifyP
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const output = path.resolve(process.argv[2] ?? path.join(repository, 'artifacts/sdk'))
 // Refuse reuse: a successful build must never borrow an existing installation.
+await mkdir(path.dirname(output), { recursive: true })
 await mkdir(output)
 const host = path.join(output, 'host')
 await mkdir(host)
