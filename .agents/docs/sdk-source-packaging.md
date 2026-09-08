@@ -23,9 +23,13 @@ build of unchanged plugin source, not a claim that each plugin's independent
 development lockfile was installed.
 
 The `packages` directory contains the CLI, creator, Protocol, Channel, and
-CLIProxy tarballs. The CLI bundles the complete runtime Git dependencies and
-Schemastery UI; its manifest retains their canonical Git commit references.
-Consumers can install the CLI tarball without rebuilding these Git plugins.
+CLIProxy tarballs. The CLI bundles complete Channel and CLIProxy runtimes plus Schemastery UI;
+its manifest and the bundled packages retain canonical Git source references.
+Protocol remains a shared dependency because its unique-symbol types must have
+one module identity across Host and consumer imports. Protocol has no prepare
+hook. Consumers can install the CLI without rebuilding the Git plugins. When
+using the generated Protocol tarball directly, consumers must apply one npm
+override for that same package throughout the dependency graph.
 `sdk-evidence.json` records the Host commit, all Git inputs, Node/npm versions,
 and SHA-256 and SHA-512 hashes. The retained `host` directory can run the normal
 Host validation gates. Bootstrap tarballs are incomplete build inputs and must

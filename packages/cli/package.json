@@ -14,8 +14,7 @@
   "bundledDependencies": [
     "@cordisx/schemastery-ui",
     "@cordisx/channel",
-    "@cordisx/plugin-cli-proxy-api",
-    "@cordisx/protocol"
+    "@cordisx/plugin-cli-proxy-api"
   ],
   "bin": {
     "cordisx": "dist/src/cli.js"
@@ -143,7 +142,6 @@
   "bundleDependencies": [
     "@cordisx/schemastery-ui",
     "@cordisx/channel",
-    "@cordisx/plugin-cli-proxy-api",
-    "@cordisx/protocol"
+    "@cordisx/plugin-cli-proxy-api"
   ]
 }
