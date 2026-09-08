@@ -7,7 +7,11 @@ import { promisify } from 'node:util'
 import { enableInstalledChannel, verifyInstalledChannel } from './check-installed-channel.mjs'
 import { verifyInstalledCliProxy } from './check-installed-cli-proxy.mjs'
 import { makeDirectoriesWritable } from './installed-check-cleanup.mjs'
-import { packInstalledDependencyClosure, packWorkspace } from './installed-check-package-cache.mjs'
+import {
+  packInstalledDependencyClosure,
+  packWorkspace,
+  usePackedDependencyClosure,
+} from './installed-check-package-cache.mjs'
 import {
   verifyGeneratedEmbedded,
   verifyGeneratedProject,
@@ -90,15 +94,17 @@ try {
   if (protocolPaths.length !== 1) throw new Error('installed cordisx must resolve exactly one Protocol copy')
 
   const dependencyClosure = await packInstalledDependencyClosure(runnerDirectory, packDirectory, installEnvironment)
-  // A plugin that imports Protocol directly declares its own dependency; bundled
-  // Host dependencies are intentionally nested and are not consumer hoists.
-  await run('npm', [
-    'install',
-    '--no-audit',
-    '--no-fund',
-    '--loglevel=error',
-    protocolTarball ?? dependencyClosure['@cordisx/protocol'],
-  ], { cwd: runnerDirectory, env: installEnvironment })
+  // Direct Protocol imports use the same exact source override as the Host.
+  // This preserves unique-symbol brands across the public API boundary.
+  await usePackedDependencyClosure(path.join(runnerDirectory, 'package.json'), {
+    '@cordisx/protocol': protocolTarball === undefined
+      ? dependencyClosure['@cordisx/protocol']
+      : `file:${protocolTarball}`,
+  })
+  await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], {
+    cwd: runnerDirectory,
+    env: installEnvironment,
+  })
 
   for (const packageName of ['cordisx', 'create-cordisx-plugin']) {
     const packageRoot = path.join(runnerDirectory, 'node_modules', packageName)

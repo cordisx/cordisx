@@ -49,8 +49,7 @@
   "bundledDependencies": [
     "@cordisx/schemastery-ui",
     "@cordisx/channel",
-    "@cordisx/plugin-cli-proxy-api",
-    "@cordisx/protocol"
+    "@cordisx/plugin-cli-proxy-api"
   ],
   "workspaces": [
     "packages/*"
@@ -135,7 +134,6 @@
   "bundleDependencies": [
     "@cordisx/schemastery-ui",
     "@cordisx/channel",
-    "@cordisx/plugin-cli-proxy-api",
-    "@cordisx/protocol"
+    "@cordisx/plugin-cli-proxy-api"
   ]
 }

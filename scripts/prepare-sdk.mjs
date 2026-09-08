@@ -93,10 +93,13 @@ for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api', '@cordi
 await run(process.execPath, ['scripts/prepare-bundled-runtime-dependencies.mjs'], cli)
 const cliTarball = await pack(cli, artifacts)
 const packedFiles = (await run('tar', ['-tf', cliTarball], host)).split('\n')
-for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api', '@cordisx/protocol']) {
+for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api']) {
   if (!packedFiles.includes(`package/node_modules/${name}/package.json`)) {
     throw new Error(`CLI tarball omitted bundled runtime dependency: ${name}`)
   }
+}
+if (packedFiles.some(file => file.startsWith('package/node_modules/@cordisx/protocol/'))) {
+  throw new Error('Protocol must remain a shared, unbundled dependency')
 }
 await pack(path.join(host, 'packages/create-cordisx-plugin'), artifacts)
 const packages = []
