@@ -160,6 +160,8 @@ describe('programmatic Manager identity detail navigation', () => {
         )
         expect(dom.window.document.querySelector('[data-cordisx-manager-modal="true"]')).toBeNull()
         expect(closeManagerContent).toHaveBeenCalled()
+        // Opening a Session from a plugin page must not resurrect this hidden Manager on Back.
+        expect(controller.captureReturn()).toBeUndefined()
       } finally {
         await act(async () => dispose?.())
         dom.window.close()

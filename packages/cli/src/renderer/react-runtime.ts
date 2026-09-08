@@ -110,6 +110,7 @@ interface AgentAvatarProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, '
 const SHARED_REACT_STYLES = `
 .cxr-react-root{box-sizing:border-box;min-height:100%;padding:16px;color:var(--cx-text);font:14px/1.5 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .cxr-react-root[data-cordisx-page-chrome-policy="agent-conversation"]{padding:0}
+[data-cordisx-page-chrome-policy="body-only"]>.cxr-react-root{height:100%;min-height:0;padding:0;overflow:hidden}
 .cxr-react-root:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"]){height:100%;min-height:0;overflow:hidden}
 .cxr-react-root *,.cxr-react-root *::before,.cxr-react-root *::after{box-sizing:border-box}
 .cxr-ui-stack{display:flex;min-width:0}
@@ -236,7 +237,9 @@ function EmptyState({ title, description, action, className, ...props }: EmptySt
 }
 
 export function Icon({ name, className, ...props }: IconProps): React.ReactElement {
-  const hostSurfaceToken = name === 'folder'
+  const hostSurfaceToken = name.startsWith('host:')
+    ? name
+    : name === 'folder'
     ? 'host:folder'
     : name === 'folder-open'
     ? 'host:folder-open'
