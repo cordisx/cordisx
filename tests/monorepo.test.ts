@@ -26,7 +26,7 @@ describe('npm workspace boundary', () => {
       workspaces: ['packages/*'],
       files: expect.arrayContaining(['packages/cli/dist', 'packages/cli/package.json']),
       bin: { cordisx: 'packages/cli/dist/src/cli.js' },
-      bundledDependencies: ['@cordisx/schemastery-ui'],
+      bundledDependencies: ['@cordisx/schemastery-ui', '@cordisx/channel', '@cordisx/plugin-cli-proxy-api'],
     })
     expect(root.exports).toEqual(Object.fromEntries(
       Object.entries(
@@ -40,7 +40,10 @@ describe('npm workspace boundary', () => {
       }]),
     ))
     expect(root.dependencies).toEqual(Object.fromEntries(
-      Object.entries(cli.dependencies as Record<string, unknown>)
+      Object.entries({
+        ...cli.dependencies as Record<string, unknown>,
+        ...cli.cordisxSources as Record<string, unknown>,
+      })
         .filter(([name]) => name !== '@vitejs/plugin-react' && name !== 'vite'),
     ))
     expect(cli).toMatchObject({

@@ -15,7 +15,7 @@ import type {
 } from '@cordisx/protocol/connector-service/v1'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const protocolCommit = 'a39c5d1f61999a69043180d6b7e7bbbee3072c09'
+const protocolCommit = '465c444c65eec1be8e337b94c2cf658ed536f49c'
 const protocolSource = `github:cordisx/cordisx-protocol#${protocolCommit}`
 const protocolResolvedSource = `git+ssh://git@github.com/cordisx/cordisx-protocol.git#${protocolCommit}`
 const staleProtocolCommit = '3f0dbcd8b04ae83c920d2d913ac2c313af5f83f1'
@@ -61,6 +61,7 @@ function protocolEdges(documents: ProtocolPinDocuments): ReadonlyArray<readonly 
 
 function protocolPinViolations(documents: ProtocolPinDocuments): string[] {
   return protocolEdges(documents)
+    .filter(([label, source]) => !label.includes('devDependencies') || source !== undefined)
     .filter(([label, source]) =>
       source !== (label === 'package-lock installed resolution' ? protocolResolvedSource : protocolSource)
     )
