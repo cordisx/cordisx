@@ -115,3 +115,8 @@ reference without duplicating its authority.
 - [Local usage projection](local-usage.md): metadata-only usage, persistence and current coverage.
 
 - [Plugin HTTP](plugin-http.md): Host consent, origin-bound transport and lifecycle.
+
+- [Restricted content](restricted-content.md): validated scene rendering and current-owner action dispatch.
+
+- [Controlled AgentLoop](agent-loop-control.md): independent game workspaces, deadlines and exact turn interruption.
+- [Work usage](work-usage.md): separate ledger and conservative game-source exclusion.

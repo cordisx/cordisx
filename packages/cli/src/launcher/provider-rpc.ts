@@ -6,6 +6,7 @@ export const MAX_PROVIDER_REQUEST_BYTES = 128 * 1024
 export const MAX_PROVIDER_REQUESTS = 8
 
 export type ProviderRpcOperation =
+  | 'agent-loop.control'
   | 'status'
   | 'availability'
   | 'models.list'
@@ -34,6 +35,7 @@ export interface ProviderBindingRequest {
 }
 
 const OPERATIONS: readonly ProviderRpcOperation[] = [
+  'agent-loop.control',
   'status',
   'availability',
   'models.list',
@@ -131,6 +133,57 @@ function agentLoopV4Base(value: unknown, keys: readonly string[]): Record<string
 }
 
 function validateInput(operation: ProviderRpcOperation, value: unknown): void {
+  if (operation === 'agent-loop.control') {
+    const input = exact(value, ['scope', 'action', 'value'], 'controlled turn')
+    agentLoopScope(input.scope)
+    if (!['submit', 'cancel', 'read', 'dispose'].includes(String(input.action))) throw new Error('invalid action')
+    if (input.action === 'dispose') {
+      if (input.value !== undefined) throw new Error('dispose takes no value')
+    } else {
+      agentLoopCommand(input.value)
+      const value = exact(
+        input.value,
+        input.action === 'submit'
+          ? ['commandId', 'binding', 'content', 'deadline']
+          : input.action === 'cancel'
+          ? ['commandId', 'target']
+          : ['contract', 'binding', 'turn', 'commandId', 'deadline'],
+        'control value',
+      )
+      if (input.action === 'submit') {
+        text(value.commandId, 'commandId', 512)
+        if (!Number.isSafeInteger(value.deadline)) throw new Error('invalid deadline')
+        if (!Array.isArray(value.content) || value.content.length < 1 || value.content.length > 128) {
+          throw new Error('invalid content')
+        }
+        for (const part of value.content) {
+          const item = exact(part, ['kind', 'text'], 'content part')
+          if (item.kind !== 'text') throw new Error('unsupported content')
+          text(item.text, 'text', 65_536)
+        }
+      }
+      if (input.action === 'cancel') text(value.commandId, 'commandId', 512)
+      const target = input.action === 'cancel'
+        ? exact(value.target, ['contract', 'binding', 'turn', 'commandId', 'deadline'], 'target')
+        : value
+      if (input.action !== 'submit') {
+        if (target.contract !== 'cordisx.agent-loop-controlled-turn/v1' || !Number.isSafeInteger(target.deadline)) {
+          throw new Error('invalid target')
+        }
+        text(target.turn, 'turn', 512)
+        text(target.commandId, 'commandId', 512)
+      }
+      const binding = object(target.binding, 'task binding')
+      if (
+        binding.contract !== 'cordisx.agent-loop-task-binding/v4' || binding.schemaVersion !== 4
+        || binding.state !== 'active'
+      ) throw new Error('invalid binding')
+      text(binding.task, 'task', 512)
+      agentLoopBinding(binding.binding)
+      agentLoopDefinition(binding.definition)
+    }
+    return
+  }
   if (operation === 'status' || operation === 'availability') {
     exact(value, [], 'input')
     return
@@ -184,7 +237,17 @@ function validateInput(operation: ProviderRpcOperation, value: unknown): void {
     return
   }
   if (operation === 'agent-loop.v4.create') {
-    const input = agentLoopV4Base(value, ['definition', 'model', 'cwd', 'developerInstructions', 'effort'])
+    const input = agentLoopV4Base(value, [
+      'definition',
+      'model',
+      'cwd',
+      'workspaceCategory',
+      'developerInstructions',
+      'effort',
+    ])
+    if (input.workspaceCategory !== undefined && input.workspaceCategory !== 'game') {
+      throw new Error('invalid workspace category')
+    }
     agentLoopDefinition(input.definition)
     modelRef(input.model)
     text(input.cwd, 'AgentLoop cwd')
@@ -315,6 +378,8 @@ export async function handleProviderBindingRequest(
   request: ProviderBindingRequest,
 ): Promise<unknown> {
   switch (request.operation) {
+    case 'agent-loop.control':
+      return await fleet.controlAgentLoop(request.input as Parameters<ProviderFleet['controlAgentLoop']>[0])
     case 'status':
       return fleet.status()
     case 'availability':

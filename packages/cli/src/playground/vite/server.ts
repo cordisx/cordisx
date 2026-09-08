@@ -29,13 +29,13 @@ export interface VitePlaygroundHandle {
   close(): Promise<void>
 }
 
-async function requestBody(request: NodeJS.ReadableStream): Promise<string> {
+async function requestBody(request: NodeJS.ReadableStream, maxBytes = 1_048_576): Promise<string> {
   const chunks: Buffer[] = []
   let size = 0
   for await (const chunk of request) {
     const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += value.byteLength
-    if (size > 1_048_576) throw new Error('request is too large')
+    if (size > maxBytes) throw new Error('request is too large')
     chunks.push(value)
   }
   return Buffer.concat(chunks).toString('utf8')
@@ -105,7 +105,7 @@ export async function startVitePlayground(options: VitePlaygroundOptions): Promi
             return
           }
           if (request.method === 'POST' && url.pathname === '/api/documents') {
-            sendJson(response, 200, await session.handleOwnerDocumentRequest(await requestBody(request)))
+            sendJson(response, 200, await session.handleOwnerDocumentRequest(await requestBody(request, 8_388_608)))
             return
           }
           if (request.method === 'POST' && url.pathname === '/api/service-config') {

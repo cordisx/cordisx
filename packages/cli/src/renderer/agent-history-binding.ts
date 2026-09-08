@@ -135,6 +135,16 @@ export class BindingAgentHistoryAdapter implements CordisXAgentHistoryAdapter {
     }
   }
 
+  async readWorkUsage(
+    caller: AgentHistoryBindingCaller,
+  ): Promise<import('@cordisx/protocol/usage/v2').WorkUsageSnapshotV2> {
+    try {
+      return clone(await this.request('work-usage', {}, caller))
+    } catch {
+      return { schemaVersion: 2, status: 'unavailable', reason: 'host-unavailable', diagnostics: [] }
+    }
+  }
+
   async readUsage(caller: AgentHistoryBindingCaller): Promise<UsageSnapshotV1> {
     try {
       return clone(await this.request<UsageSnapshotV1>('usage', {}, caller))
@@ -144,7 +154,7 @@ export class BindingAgentHistoryAdapter implements CordisXAgentHistoryAdapter {
   }
 
   private request<Value>(
-    operation: 'status' | 'query' | 'tail' | 'usage',
+    operation: 'status' | 'query' | 'tail' | 'usage' | 'work-usage',
     input: unknown,
     caller: AgentHistoryBindingCaller | undefined,
   ): Promise<Value> {

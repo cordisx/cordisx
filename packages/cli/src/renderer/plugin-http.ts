@@ -96,6 +96,40 @@ export function createPluginHttpClient(options: {
         signal?.removeEventListener('abort', abort)
       }
     },
+    async exchange(input: Parameters<HttpClientV1['exchange']>[0]) {
+      if (!owns(input.connection)) return { status: 'unavailable' as const, code: 'connection-unavailable' as const }
+      if (input.signal?.aborted) return { status: 'unavailable' as const, code: 'aborted' as const }
+      if (input.body !== undefined && new TextEncoder().encode(input.body).byteLength > 1_048_576) {
+        return { status: 'unavailable' as const, code: 'invalid-request' as const }
+      }
+      const { signal, ...request } = input
+      const operationId = crypto.randomUUID()
+      const abort = () => {
+        void call('plugin-http-abort', { connection: input.connection, operationId })
+      }
+      signal?.addEventListener('abort', abort, { once: true })
+      try {
+        const result = await call<
+          {
+            readonly connection: HttpConnectionV1
+            readonly response: import('@cordisx/protocol/plugin-http/v1').HttpResponseV1
+          }
+        >(
+          'plugin-http-exchange',
+          { ...request, operationId },
+        )
+        if (result.status === 'accepted') {
+          if (signal?.aborted) {
+            await call('plugin-http-revoke', { connection: result.value.connection })
+            return { status: 'unavailable' as const, code: 'aborted' as const }
+          }
+          connections.set(result.value.connection.id, Object.freeze({ ...result.value.connection }))
+        }
+        return result
+      } finally {
+        signal?.removeEventListener('abort', abort)
+      }
+    },
     async revoke(connection: HttpConnectionV1) {
       if (!owns(connection)) return { status: 'unavailable' as const, code: 'connection-unavailable' as const }
       const result = await call<null>('plugin-http-revoke', { connection })

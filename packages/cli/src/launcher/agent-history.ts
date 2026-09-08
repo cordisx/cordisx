@@ -1,3 +1,4 @@
+import { projectWorkUsage } from './work-usage.js'
 import { LocalUsageHost } from './local-usage.js'
 import type { UsageSnapshotV1 } from '../usage-contracts.js'
 import { createHmac, randomBytes } from 'node:crypto'
@@ -188,6 +189,11 @@ async function persistentSecret(cacheDir: string): Promise<Buffer> {
 
 /** Node-owned exact-session Codex rollout importer. No path enters or leaves its public methods. */
 export class CodexAgentHistoryHost {
+  private workUsage: LocalUsageHost | undefined
+  async readWorkUsage() {
+    this.workUsage ??= new LocalUsageHost({ ...this.options, projection: 'work-v2' })
+    return projectWorkUsage(await this.workUsage.read())
+  }
   private usage: LocalUsageHost | undefined
   async readUsage(): Promise<UsageSnapshotV1> {
     this.usage ??= new LocalUsageHost(this.options)
@@ -284,6 +290,7 @@ export class CodexAgentHistoryHost {
 
   dispose(): void {
     this.usage?.dispose()
+    this.workUsage?.dispose()
     this.indexes.clear()
     this.cursors.clear()
   }

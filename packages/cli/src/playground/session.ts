@@ -705,7 +705,10 @@ export async function createPlaygroundSession(
       let requestId = 'invalid'
       let entityRequest = false
       try {
-        const value = JSON.parse(raw) as unknown
+        const value = JSON.parse(raw)
+        if ((!isPluginHttpRequest(value) && Buffer.byteLength(raw) > 1_048_576) || Buffer.byteLength(raw) > 8_388_608) {
+          throw new Error('request is too large')
+        }
         const generic = value as { readonly requestId?: unknown }
         requestId = typeof generic.requestId === 'string' ? generic.requestId : 'invalid'
         if (isPluginHttpRequest(value)) return { requestId, ok: true, value: await active.documents.http.handle(value) }
