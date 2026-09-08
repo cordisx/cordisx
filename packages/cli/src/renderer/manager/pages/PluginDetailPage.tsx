@@ -137,6 +137,9 @@ export function PluginDetailPage(
   const permissions = snapshot.permissions.filter(item =>
     item.identity.id === plugin.id && item.identity.source === plugin.source
   )
+  const runtimeExactPermissions = (snapshot.runtimeExactPermissions ?? []).filter(item =>
+    item.identity.id === plugin.id && item.identity.source === plugin.source
+  )
   const pointUsage = (snapshot.extensionPoints?.points ?? []).filter(point =>
     point.plugins.some(item => item.identity.id === plugin.id && item.identity.source === plugin.source)
   )
@@ -315,7 +318,27 @@ export function PluginDetailPage(
               <span className="cxr-status">{item.policy}</span>
             </button>
           ))}
-          {permissions.length === 0
+          {runtimeExactPermissions.map(item => (
+            <div className="cxr-card" key={`runtime-exact:${item.capability}`}>
+              <span className="cxr-card-body">
+                <span className="cxr-card-title">
+                  {projectPermissionCapabilityName(item.capability, snapshot.localization.locale)}
+                </span>
+                <span className="cxr-card-description">
+                  {snapshot.localization.locale.toLowerCase().startsWith('zh')
+                    ? '实际范围会在每次请求时由 Host 验证，并按当前 provider、工作目录或会话单独授权。'
+                    : 'The Host verifies the concrete provider, working directory, or session for each request.'}
+                </span>
+                <code className="cxr-card-code">{item.capability}</code>
+              </span>
+              <span className="cxr-status">
+                {snapshot.localization.locale.toLowerCase().startsWith('zh')
+                  ? '按请求'
+                  : 'per request'}
+              </span>
+            </div>
+          ))}
+          {permissions.length === 0 && runtimeExactPermissions.length === 0
             ? <div className="cxr-empty">{managerCopy(snapshot.localization.locale, 'plugins.no-permissions')}</div>
             : null}
         </div>

@@ -8,6 +8,12 @@ export {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
   type CordisXPluginManifestV10,
 } from './extension-point-interaction-permissions.js'
+export {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,
+  type CordisXPluginManifestV12,
+  type CordisXPluginManifestV13,
+} from './runtime-exact-request-permissions.js'
 export * from './extension-point-visual-contracts.js'
 export * from './control-contracts.js'
 export * from './platform-contracts.js'

@@ -54,6 +54,7 @@ import {
   requestedSnapshot,
   scopeAllows,
 } from './platform-permission-types.js'
+import { materializeValidatedRuntimeExactScope } from './platform-runtime-exact-scope.js'
 
 export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV2Broker {
   policy(
@@ -373,7 +374,17 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
     view?: PluginGenerationView,
   ): Promise<CordisXPlatformResult<AuthorizationGrant>> {
     const currentRegistration = this.registration(identity, view)
-    const declarationV2 = currentRegistration?.declarationsV2.get(capability as CordisXPermissionCapabilityV2)
+    const staticDeclaration = currentRegistration?.declarationsV2.get(capability as CordisXPermissionCapabilityV2)
+    const exactScope = currentRegistration?.runtimeExactCapabilities.has(capability)
+      ? materializeValidatedRuntimeExactScope(capability, requested)
+      : undefined
+    const declarationV2 = exactScope === undefined
+      ? staticDeclaration
+      : {
+        name: capability as CordisXPermissionCapabilityV2,
+        required: false,
+        scope: normalizePermissionScopeV2(exactScope, `${capability} runtime exact-request scope`),
+      }
     if (currentRegistration === undefined || declarationV2 === undefined) {
       this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is not declared`)
       this.denied(platformIdentityKey(identity), capability, requested)
@@ -478,6 +489,19 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
     const identity = registration.identity
     const identityKey = platformIdentityKey(identity)
     const legacyDeclaration = registration.declarations.get(capability)
+      ?? (registration.runtimeExactCapabilities.has(capability)
+        ? {
+          name: capability,
+          required: false,
+          reason: {
+            namespace: 'permission',
+            key: `permission.${capability}.runtime-exact`,
+            fallback: this.catalog.get(capability as CordisXPermissionCapabilityV4).presentation.description.fallback
+              ?? `${capability} for one exact runtime request`,
+          },
+          scope: declaration.scope as CordisXCapabilityScope,
+        }
+        : undefined)
     if (legacyDeclaration === undefined) {
       this.consoleObserver?.permission(identity, capability, 'deny', `${capability} is not declared`)
       this.denied(identityKey, capability, requested)

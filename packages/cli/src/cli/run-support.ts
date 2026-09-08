@@ -49,6 +49,7 @@ import type { CodexProviderConfig } from '../providers/contracts.js'
 import { CodexAgentHistoryHost } from '../launcher/agent-history.js'
 import { type ConfigBridgeHandler, createConfigBridgeHandler } from '../launcher/config-rpc.js'
 import { type HostSecretState, HostServiceConfigNarrowApi } from '../launcher/service-config.js'
+import type { PlatformProviderServiceReconfigureRuntime } from '../launcher/platform-provider-service-batch.js'
 import { createServiceConfigBridgeHandler, type ServiceConfigBridgeHandler } from '../launcher/service-config-rpc.js'
 import {
   type ChannelCredentialBridgeHandler,
@@ -443,6 +444,7 @@ export function cliProxyServiceConfigApis(input: {
   readonly rootDir: string
   readonly environment: NodeJS.ProcessEnv
   readonly fleet: ProviderFleet
+  readonly platformProviderServices?: PlatformProviderServiceReconfigureRuntime
 }): readonly { readonly pluginId: string; readonly serviceId: string; readonly api: HostServiceConfigNarrowApi }[] {
   const secretState = (reference: string | undefined): HostSecretState => {
     if (reference === undefined || reference === '') return 'missing'
@@ -485,7 +487,12 @@ export function cliProxyServiceConfigApis(input: {
         parseCliProxyProviderStartupConfig(startupState.config as unknown),
         { rootDir: input.rootDir },
       )
-      return await input.fleet.reconfigure(providers)
+      return await (input.platformProviderServices?.reconfigure(input.fleet, providers, {
+        pluginId: 'cli-proxy-api',
+        serviceId: CLI_PROXY_PROVIDER_RUNTIME_SERVICE_ID,
+        rawConfiguration: candidate,
+      })
+        ?? input.fleet.reconfigure(providers))
     },
   })
   return [

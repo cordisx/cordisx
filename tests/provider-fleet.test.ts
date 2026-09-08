@@ -175,6 +175,22 @@ describe('Provider Fleet', () => {
     await fleet.close()
   })
 
+  it('keeps the current registry when external batch preparation fails before the swap', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-fleet-prepare-'))
+    const calls: { provider: string; method: string; params: unknown }[] = []
+    let generation = 0
+    const fleet = await ProviderFleet.create([config(root, 'alpha')], {
+      startServer: async () => server(`alpha-${++generation}`, calls),
+    })
+    await expect(fleet.reconfigure([config(root, 'alpha')], async replacement => {
+      expect(replacement.providerStatuses()[0]?.generation).toBe('generation-alpha-2')
+      throw new Error('external batch preparation failed')
+    })).rejects.toThrow('external batch preparation failed')
+    expect(fleet.providerStatuses()[0]?.generation).toBe('generation-alpha-1')
+    await expect(fleet.listModels({ providerIds: ['alpha'] })).resolves.toMatchObject({ ok: true })
+    await fleet.close()
+  })
+
   it('normalizes id-less provider lifecycle notifications into replayable launcher events without retaining raw frames', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-fleet-'))
     let notify: ((method: string, params: unknown) => void) | undefined

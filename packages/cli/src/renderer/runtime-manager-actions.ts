@@ -596,6 +596,7 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
         },
       }
     }),
+    runtimeExactPermissions: runtimeScope.broker()!.runtimeExactExplanations(),
     extensionPoints: buildExtensionPointRuntimeSnapshot({
       descriptors: runtimeScope.extensionPointDescriptors()!,
       broker: runtimeScope.extensionPointBroker()!,

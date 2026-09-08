@@ -33,6 +33,7 @@ import type { PermissionBroker } from './platform-permission-broker.js'
 import { copy, failure, object, safeAdapterFailure } from './platform-manifest.js'
 import { RequestedScope } from './platform-permission-store.js'
 import { AuthorizationGrant, normalizedPath, scopeAllows } from './platform-permission-types.js'
+import { normalizeAbsoluteCwd, type PlatformExecutionPlatform } from './platform-runtime-exact-scope.js'
 
 export interface CordisXPlatformAdapter {
   status(): CordisXPlatformAdapterStatus
@@ -45,7 +46,17 @@ export interface CordisXPlatformAdapter {
   controlTask(input: CordisXTaskControlInput): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>>
   submitTurn(input: CordisXTurnSubmitInput): Promise<CordisXPlatformResult<CordisXTurnStart>>
   controlTurn(input: CordisXTurnControlInput): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>>
+  /** Host-only generation lease; the callback receives no transport or authority object. */
+  withExactProviderGeneration?<Value>(
+    providerId: string,
+    operation: (adapter: CordisXExactProviderAdapter) => Promise<Value>,
+  ): Promise<Value>
 }
+
+export type CordisXExactProviderAdapter = Pick<
+  CordisXPlatformAdapter,
+  'listModels' | 'readTask' | 'createTask' | 'controlTask' | 'submitTurn' | 'controlTurn'
+>
 
 const CURRENT_CONNECTION_UNAVAILABLE: CordisXPlatformDiagnostic = Object.freeze({
   code: 'current-connection-client-unavailable',
@@ -205,6 +216,7 @@ export interface CordisXPlatformServiceOptions {
   readonly adapter: CordisXPlatformAdapter
   readonly broker: PermissionBroker
   readonly console?: PluginConsoleAspect
+  readonly executionPlatform?: PlatformExecutionPlatform
 }
 
 const platformServiceOptions = new WeakMap<object, CordisXPlatformServiceOptions>()
@@ -352,6 +364,22 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     )
   }
 
+  private runtimeExact(capability: CordisXPlatformCapability, token?: PluginPrincipalToken): boolean {
+    const identity = token === undefined ? pluginIdentity(this.ctx) : optionsFor(this).console?.owner(token)
+    return identity !== undefined && optionsFor(this).broker.runtimeExactRequest(
+      identity,
+      capability,
+      generationVisibilityFromContext(this.ctx)?.view(this.ctx),
+    )
+  }
+
+  private exactGeneration<Value>(
+    providerId: string,
+    operation: (adapter: CordisXExactProviderAdapter) => Promise<Value>,
+  ): Promise<Value> | undefined {
+    return optionsFor(this).adapter.withExactProviderGeneration?.(providerId, operation)
+  }
+
   private async guarded<Value>(
     operation: () => Promise<CordisXPlatformResult<Value>>,
   ): Promise<CordisXPlatformResult<Value>> {
@@ -451,15 +479,34 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     input: CordisXTaskReadInput,
     token?: PluginPrincipalToken,
     invocation?: PluginConsoleInvocation,
+    adapter: CordisXExactProviderAdapter | CordisXPlatformAdapter = optionsFor(this).adapter,
+    exactBound = false,
   ): Promise<CordisXPlatformResult<CordisXSessionProjection>> {
     if (!validSessionRef(input.session)) {
       return failure('invalid-request', 'session must be a complete Platform session reference')
     }
+    const exact = this.runtimeExact('tasks.content.read', token)
+    if (exact && !exactBound) {
+      const bound = this.exactGeneration(
+        input.session.providerId,
+        async current => await this.readTask(input, token, invocation, current, true),
+      )
+      return bound === undefined ? safeAdapterFailure() : await this.guarded(async () => await bound)
+    }
+    const preflight = exact
+      ? await this.guarded(async () => await adapter.readTask(input))
+      : undefined
+    if (preflight !== undefined && !preflight.ok) return preflight
+    if (
+      preflight?.ok === true
+      && (!sameSession(preflight.value.ref, input.session)
+        || preflight.value.model.providerId !== input.session.providerId)
+    ) return safeAdapterFailure()
     const requested = { providerId: input.session.providerId, session: input.session }
     const grant = await this.authorize('tasks.content.read', requested, token)
     if (!grant.ok) return grant
     invocation?.dispatch()
-    const result = await this.guarded(async () => await optionsFor(this).adapter.readTask(input))
+    const result = preflight ?? await this.guarded(async () => await adapter.readTask(input))
     if (!result.ok) return result
     if (!sameSession(result.value.ref, input.session) || result.value.model.providerId !== input.session.providerId) {
       return safeAdapterFailure()
@@ -479,6 +526,8 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     input: CordisXTaskCreateInput,
     token?: PluginPrincipalToken,
     invocation?: PluginConsoleInvocation,
+    adapter: CordisXExactProviderAdapter | CordisXPlatformAdapter = optionsFor(this).adapter,
+    exactBound = false,
   ): Promise<CordisXPlatformResult<CordisXSessionCreateOutcome>> {
     if (!validModelRef(input.model)) {
       return failure('invalid-request', 'model must be a complete Platform model reference')
@@ -489,16 +538,45 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     if (input.initialMessage !== undefined && !validText(input.initialMessage)) {
       return failure('invalid-request', 'initialMessage must be a non-empty string')
     }
+    const exact = this.runtimeExact('tasks.create', token)
+    if (exact && !exactBound) {
+      const bound = this.exactGeneration(
+        input.model.providerId,
+        async current => await this.createTask(input, token, invocation, current, true),
+      )
+      return bound === undefined ? safeAdapterFailure() : await this.guarded(async () => await bound)
+    }
+    const normalizedCwd = exact
+      ? normalizeAbsoluteCwd(input.cwd, optionsFor(this).executionPlatform ?? 'posix')
+      : input.cwd
+    if (normalizedCwd === undefined) return failure('invalid-request', 'cwd is invalid for the Host execution platform')
+    const preflightModels = exact
+      ? await this.guarded(async () => await adapter.listModels({ providerIds: [input.model.providerId] }))
+      : undefined
+    if (preflightModels !== undefined && !preflightModels.ok) return preflightModels
+    const exactProviderModels = preflightModels?.ok === true
+      ? preflightModels.value.models.filter(model => model.ref.providerId === input.model.providerId)
+      : undefined
+    if (exactProviderModels !== undefined && exactProviderModels.length === 0) {
+      return failure('invalid-provider', `Provider ${input.model.providerId} is not currently available`)
+    }
+    if (
+      exactProviderModels !== undefined && !exactProviderModels.some(model => model.ref.modelId === input.model.modelId)
+    ) {
+      return failure(
+        'invalid-model',
+        `Model ${input.model.modelId} is not currently available from provider ${input.model.providerId}`,
+      )
+    }
     const grant = await this.authorize('tasks.create', {
       providerId: input.model.providerId,
       model: input.model,
-      cwd: input.cwd,
+      cwd: normalizedCwd,
     }, token)
     if (!grant.ok) return grant
     invocation?.dispatch()
-    const models = await this.guarded(async () =>
-      await optionsFor(this).adapter.listModels({ providerIds: [input.model.providerId] })
-    )
+    const models = preflightModels
+      ?? await this.guarded(async () => await adapter.listModels({ providerIds: [input.model.providerId] }))
     if (!models.ok) return models
     const providerModels = models.value.models.filter(model => model.ref.providerId === input.model.providerId)
     if (providerModels.length === 0) {
@@ -511,9 +589,9 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
       )
     }
     const created = await this.guarded(async () =>
-      await optionsFor(this).adapter.createTask({
+      await adapter.createTask({
         model: input.model,
-        cwd: input.cwd,
+        cwd: normalizedCwd,
       })
     )
     if (!created.ok) return created
@@ -523,7 +601,7 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     ) return safeAdapterFailure()
     if (input.initialMessage === undefined) return { ok: true, value: { status: 'created', session: created.value } }
     const turn = await this.guarded(async () =>
-      await optionsFor(this).adapter.submitTurn({ session: created.value.ref, message: input.initialMessage as string })
+      await adapter.submitTurn({ session: created.value.ref, message: input.initialMessage as string })
     )
     if (turn.ok) return { ok: true, value: { status: 'created', session: created.value, initialTurn: turn.value } }
     return {
@@ -545,11 +623,26 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     input: CordisXTaskControlInput,
     token?: PluginPrincipalToken,
     invocation?: PluginConsoleInvocation,
+    adapter: CordisXExactProviderAdapter | CordisXPlatformAdapter = optionsFor(this).adapter,
+    exactBound = false,
   ): Promise<CordisXPlatformResult<CordisXTaskControlOutcome>> {
     if (
       !validSessionRef(input.session) || !['continue', 'fork', 'archive', 'restore', 'delete'].includes(input.action)
     ) {
       return failure('invalid-request', 'task control input is invalid')
+    }
+    const exact = this.runtimeExact('tasks.control', token)
+    if (exact && !exactBound) {
+      const bound = this.exactGeneration(
+        input.session.providerId,
+        async current => await this.controlTask(input, token, invocation, current, true),
+      )
+      return bound === undefined ? safeAdapterFailure() : await this.guarded(async () => await bound)
+    }
+    if (exact) {
+      const target = await this.guarded(async () => await adapter.readTask({ session: input.session }))
+      if (!target.ok) return target
+      if (!sameSession(target.value.ref, input.session)) return safeAdapterFailure()
     }
     const grant = await this.authorize('tasks.control', {
       providerId: input.session.providerId,
@@ -559,16 +652,31 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     invocation?.dispatch()
     const scope = await this.ensureSessionScope(grant.value, input.session)
     if (!scope.ok) return scope
-    return await this.guarded(async () => await optionsFor(this).adapter.controlTask(input))
+    return await this.guarded(async () => await adapter.controlTask(input))
   }
 
   private async submitTurn(
     input: CordisXTurnSubmitInput,
     token?: PluginPrincipalToken,
     invocation?: PluginConsoleInvocation,
+    adapter: CordisXExactProviderAdapter | CordisXPlatformAdapter = optionsFor(this).adapter,
+    exactBound = false,
   ): Promise<CordisXPlatformResult<CordisXTurnStart>> {
     if (!validSessionRef(input.session) || !validText(input.message)) {
       return failure('invalid-request', 'session and message must be valid')
+    }
+    const exact = this.runtimeExact('turns.submit', token)
+    if (exact && !exactBound) {
+      const bound = this.exactGeneration(
+        input.session.providerId,
+        async current => await this.submitTurn(input, token, invocation, current, true),
+      )
+      return bound === undefined ? safeAdapterFailure() : await this.guarded(async () => await bound)
+    }
+    if (exact) {
+      const target = await this.guarded(async () => await adapter.readTask({ session: input.session }))
+      if (!target.ok) return target
+      if (!sameSession(target.value.ref, input.session)) return safeAdapterFailure()
     }
     const grant = await this.authorize(
       'turns.submit',
@@ -579,19 +687,34 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     invocation?.dispatch()
     const scope = await this.ensureSessionScope(grant.value, input.session)
     if (!scope.ok) return scope
-    return await this.guarded(async () => await optionsFor(this).adapter.submitTurn(input))
+    return await this.guarded(async () => await adapter.submitTurn(input))
   }
 
   private async controlTurn(
     input: CordisXTurnControlInput,
     token?: PluginPrincipalToken,
     invocation?: PluginConsoleInvocation,
+    adapter: CordisXExactProviderAdapter | CordisXPlatformAdapter = optionsFor(this).adapter,
+    exactBound = false,
   ): Promise<CordisXPlatformResult<CordisXTurnControlOutcome>> {
     if (!validSessionRef(input.session) || !['steer', 'interrupt'].includes(input.action)) {
       return failure('invalid-request', 'turn control input is invalid')
     }
     if (input.action === 'steer' && !validText(input.message)) {
       return failure('invalid-request', 'steer message must be a non-empty string')
+    }
+    const exact = this.runtimeExact('turns.control', token)
+    if (exact && !exactBound) {
+      const bound = this.exactGeneration(
+        input.session.providerId,
+        async current => await this.controlTurn(input, token, invocation, current, true),
+      )
+      return bound === undefined ? safeAdapterFailure() : await this.guarded(async () => await bound)
+    }
+    if (exact) {
+      const target = await this.guarded(async () => await adapter.readTask({ session: input.session }))
+      if (!target.ok) return target
+      if (!sameSession(target.value.ref, input.session)) return safeAdapterFailure()
     }
     const grant = await this.authorize('turns.control', {
       providerId: input.session.providerId,
@@ -601,6 +724,6 @@ export class CordisXPlatformService extends Service implements CordisXPlatform {
     invocation?.dispatch()
     const scope = await this.ensureSessionScope(grant.value, input.session)
     if (!scope.ok) return scope
-    return await this.guarded(async () => await optionsFor(this).adapter.controlTurn(input))
+    return await this.guarded(async () => await adapter.controlTurn(input))
   }
 }

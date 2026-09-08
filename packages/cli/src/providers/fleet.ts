@@ -27,7 +27,8 @@ import {
   type AgentLoopProviderFence,
   type AgentLoopTaskLocator,
 } from '../launcher/agent-loop-authority.js'
-import type { CordisXPlatformAdapter } from '../renderer/platform.js'
+import type { CordisXExactProviderAdapter, CordisXPlatformAdapter } from '../renderer/platform.js'
+import { withExactProviderGeneration } from './fleet-exact-provider.js'
 import { ProviderAdapterRegistry } from '../renderer/provider-registry.js'
 import { CliProxyProviderAdapter } from './cli-proxy-adapter.js'
 import {
@@ -48,6 +49,8 @@ import {
 import { type ProviderFleetPublication, publishProviderConnections } from './fleet-publication.js'
 import { FleetTaskPagination } from './fleet-pagination.js'
 import { copy, failure, registryFailure } from './fleet-results.js'
+import { selectFleetProviders } from './fleet-provider-selection.js'
+import { fleetReconfigurationTransaction } from './fleet-reconfiguration-transaction.js'
 export type { ChannelTaskLifecycleEvent, ChannelTaskLifecycleRange } from './fleet-lifecycle.js'
 
 export interface ProviderFleetOptions {
@@ -750,6 +753,13 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     await this.registry.dispose()
   }
 
+  async withExactProviderGeneration<Value>(
+    providerId: string,
+    operation: (adapter: CordisXExactProviderAdapter) => Promise<Value>,
+  ): Promise<Value> {
+    return await withExactProviderGeneration(this.registry, providerId, operation)
+  }
+
   /** Publish already-prepared plugin adapters into this Fleet without creating another registry. */
   async publishConnections(
     entries: readonly { readonly connection: ProviderConnection; readonly displayName: string }[],
@@ -770,7 +780,10 @@ export class ProviderFleet implements CordisXPlatformAdapter {
    * commits, or `rollback` when it cannot, so callers never observe a
    * half-published Provider Fleet.
    */
-  async reconfigure(configs: readonly CodexProviderConfig[]): Promise<{
+  async reconfigure(
+    configs: readonly CodexProviderConfig[],
+    prepare?: (replacement: ProviderFleet) => Promise<void>,
+  ): Promise<{
     readonly generation: string
     rollback(): Promise<void>
     finalize(): Promise<void>
@@ -781,8 +794,15 @@ export class ProviderFleet implements CordisXPlatformAdapter {
       startServer: this.startServer,
       ...(this.appServer === undefined ? {} : { appServer: this.appServer }),
     })
-    for (const dispose of replacement.lifecycleDisposers.values()) dispose()
-    replacement.lifecycleDisposers.clear()
+    let replacementLifecycleDisposers: Map<string, () => void> | undefined
+    try {
+      await prepare?.(replacement)
+      replacementLifecycleDisposers = this.subscribeRegistryLifecycle(replacement.registry)
+    } catch (error) {
+      for (const dispose of replacementLifecycleDisposers?.values() ?? []) dispose()
+      await replacement.close().catch(() => undefined)
+      throw error
+    }
     const previous = {
       registry: this.registry,
       failures: this.failures,
@@ -794,58 +814,38 @@ export class ProviderFleet implements CordisXPlatformAdapter {
     this.registry = replacement.registry
     this.failures = replacement.failures
     this.names = replacement.names
-    this.lifecycleDisposers = this.subscribeRegistryLifecycle(this.registry)
+    for (const dispose of replacement.lifecycleDisposers.values()) dispose()
+    replacement.lifecycleDisposers.clear()
+    this.lifecycleDisposers = replacementLifecycleDisposers
     replacement.closed = true
     const generation = this.registry.snapshots().map(item => item.generation).sort().join(',')
       || `unavailable:${randomUUID()}`
-    let settled = false
-    return {
-      generation,
-      rollback: async () => {
-        if (settled) return
-        settled = true
-        const current = this.registry
-        const currentLifecycleDisposers = this.lifecycleDisposers
-        const currentProviders = current.snapshots().filter(item => item.state === 'active')
-          .map(item => ({ providerId: item.providerId, providerGeneration: item.generation }))
-        await current.dispose()
-        for (const dispose of currentLifecycleDisposers.values()) dispose()
-        for (const provider of currentProviders) await this.agentLoopAuthority?.closeProviderGeneration(provider)
-        this.registry = previous.registry
-        this.failures = previous.failures
-        this.names = previous.names
-        this.lifecycleDisposers = previous.lifecycleDisposers
-      },
-      finalize: async () => {
-        if (settled) return
-        settled = true
-        const current = new Set(
-          this.registry.snapshots().filter(item => item.state === 'active')
-            .map(item => `${item.providerId}\0${item.generation}`),
-        )
-        await previous.registry.dispose()
-        for (const dispose of previous.lifecycleDisposers.values()) dispose()
-        for (const provider of previous.providers) {
-          if (!current.has(`${provider.providerId}\0${provider.providerGeneration}`)) {
-            await this.agentLoopAuthority?.closeProviderGeneration(provider)
-          }
-        }
-      },
+    const replacementState = {
+      registry: this.registry,
+      failures: this.failures,
+      names: this.names,
+      lifecycleDisposers: this.lifecycleDisposers,
+      providers: this.registry.snapshots().filter(item => item.state === 'active')
+        .map(item => ({ providerId: item.providerId, providerGeneration: item.generation })),
     }
+    return fleetReconfigurationTransaction({
+      generation,
+      previous,
+      replacement: replacementState,
+      restore: state => {
+        this.registry = state.registry
+        this.failures = state.failures
+        this.names = state.names
+        this.lifecycleDisposers = state.lifecycleDisposers
+      },
+      ...(this.agentLoopAuthority === undefined ? {} : {
+        closeProviderGeneration: async provider => await this.agentLoopAuthority!.closeProviderGeneration(provider),
+      }),
+    })
   }
 
   private providers(requested?: readonly string[]): CordisXPlatformResult<readonly string[]> {
-    const active = new Set(
-      this.registry.snapshots().filter(item => item.state === 'active').map(item => item.providerId),
-    )
-    const selected = requested === undefined || requested.length === 0 ? [...active].sort() : [...requested].sort()
-    const unavailable = selected.find(providerId => !active.has(providerId))
-    if (unavailable !== undefined) {
-      return this.names.has(unavailable)
-        ? failure('adapter-unavailable', `External provider ${unavailable} is unavailable`, true)
-        : failure('invalid-provider', `External provider ${unavailable} is not configured`)
-    }
-    return { ok: true, value: selected }
+    return selectFleetProviders(this.registry.snapshots(), this.names, requested)
   }
 
   private async withProvider<Value>(
@@ -911,16 +911,21 @@ export class ProviderFleet implements CordisXPlatformAdapter {
 
   private subscribeRegistryLifecycle(registry: ProviderAdapterRegistry<ProviderConnection>): Map<string, () => void> {
     const disposers = new Map<string, () => void>()
-    for (const snapshot of registry.snapshots().filter(item => item.state === 'active')) {
-      const lease = registry.acquire(snapshot.providerId, snapshot.generation)
-      try {
-        const dispose = lease.adapter.subscribeLifecycle?.(event =>
-          this.observeLifecycle(registry, snapshot.generation, event)
-        )
-        if (dispose !== undefined) disposers.set(snapshot.providerId, dispose)
-      } finally {
-        lease.release()
+    try {
+      for (const snapshot of registry.snapshots().filter(item => item.state === 'active')) {
+        const lease = registry.acquire(snapshot.providerId, snapshot.generation)
+        try {
+          const dispose = lease.adapter.subscribeLifecycle?.(event =>
+            this.observeLifecycle(registry, snapshot.generation, event)
+          )
+          if (dispose !== undefined) disposers.set(snapshot.providerId, dispose)
+        } finally {
+          lease.release()
+        }
       }
+    } catch (error) {
+      for (const dispose of disposers.values()) dispose()
+      throw error
     }
     return disposers
   }

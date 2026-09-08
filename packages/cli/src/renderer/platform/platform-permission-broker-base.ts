@@ -1,4 +1,6 @@
 import type { CordisXPluginManifestV11 } from '../../usage-permissions.js'
+import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../../runtime-exact-request-permissions.js'
+import { runtimeExactCapabilities } from '../../runtime-exact-request-permissions.js'
 import type { CordisXPluginManifestV10 } from '../../extension-point-interaction-permissions.js'
 import { CORDISX_PLATFORM_CAPABILITIES } from '../../contracts.js'
 import type {
@@ -200,7 +202,9 @@ export abstract class PlatformPermissionBrokerBase {
       | CordisXPluginManifestV8
       | CordisXPluginManifestV9
       | CordisXPluginManifestV10
-      | CordisXPluginManifestV11,
+      | CordisXPluginManifestV11
+      | CordisXPluginManifestV12
+      | CordisXPluginManifestV13,
     generation: PluginGenerationEffectIdentity = Object.freeze({ pluginId: identity.id }),
     candidateView?: PluginGenerationView,
     artifact?: PermissionArtifactBindingV3,
@@ -209,9 +213,11 @@ export abstract class PlatformPermissionBrokerBase {
     const declarations = new Map<CordisXPlatformCapability, CordisXCapabilityDeclaration>(
       manifest.schemaVersion === 4 || manifest.schemaVersion === 5 || manifest.schemaVersion === 6
         || manifest.schemaVersion === 7 || manifest.schemaVersion === 8 || manifest.schemaVersion === 9
-        || (manifest.schemaVersion === 10 || manifest.schemaVersion === 11)
+        || (manifest.schemaVersion === 10 || manifest.schemaVersion === 11 || manifest.schemaVersion === 12
+          || manifest.schemaVersion === 13)
         ? manifest.capabilities.flatMap(item => (
           (CORDISX_PLATFORM_CAPABILITIES as readonly string[]).includes(item.name)
+            && !('runtime' in item.scope)
             ? [
               [item.name as CordisXPlatformCapability, {
                 name: item.name as CordisXPlatformCapability,
@@ -271,6 +277,9 @@ export abstract class PlatformPermissionBrokerBase {
       declarations,
       declarationsV2,
       declarationsV4,
+      runtimeExactCapabilities: manifest.schemaVersion === 13
+        ? runtimeExactCapabilities(manifest)
+        : new Set(),
       generation,
       ...(candidateView === undefined ? {} : { candidateView }),
       ...(normalizedArtifact === undefined ? {} : { artifact: normalizedArtifact }),
@@ -313,6 +322,14 @@ export abstract class PlatformPermissionBrokerBase {
 
   protected isRegistered(registration: Registration): boolean {
     return [...this.registrations.values()].some(candidate => candidate.token === registration.token)
+  }
+
+  runtimeExactRequest(
+    identity: CordisXPluginIdentity,
+    capability: CordisXPlatformCapability,
+    view?: PluginGenerationView,
+  ): boolean {
+    return this.registration(identity, view)?.runtimeExactCapabilities.has(capability) === true
   }
 
   protected persistV2(records: readonly CordisXPermissionPolicyRecordV2[]): Promise<void> {
