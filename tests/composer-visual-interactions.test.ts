@@ -239,3 +239,22 @@ it('rejects nested malformed declarations atomically and copies caller-owned chi
     f.close()
   }
 })
+
+it('focuses an all-disabled menu so Escape dismisses and restores its target', () => {
+  const f = setup()
+  try {
+    const { handle, button } = f.create('cat')
+    handle.setMenu([{ id: 'unavailable', label: 'Unavailable', disabled: true }])
+    button.focus()
+    button.dispatchEvent(new f.dom.window.KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true }))
+    const menu = f.dom.window.document.querySelector<HTMLElement>('[role="menu"]')!
+    expect(f.dom.window.document.activeElement).toBe(menu)
+    menu.dispatchEvent(new f.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(handle.getSnapshot().menuOpen).toBe(false)
+    expect(handle.getSnapshot().actionId).toBeUndefined()
+    expect(menu.isConnected).toBe(false)
+    expect(f.dom.window.document.activeElement).toBe(button)
+  } finally {
+    f.close()
+  }
+})

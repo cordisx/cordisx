@@ -63,7 +63,8 @@ export class ComposerVisualMenu {
     document.defaultView?.addEventListener('resize', this.dismiss)
     this.target.setAttribute('aria-expanded', 'true')
     this.change(true)
-    this.buttons(this.panels[0]?.node)[0]?.focus({ preventScroll: true })
+    const root = this.panels[0]?.node
+    ;(this.buttons(root)[0] ?? root)?.focus({ preventScroll: true })
   }
   private addPanel(items: readonly ExtensionPointMenuItemV2[], parent?: HTMLButtonElement): void {
     const document = this.target.ownerDocument, depth = this.panels.length

@@ -76,15 +76,28 @@ describe('Manager content fill layout', () => {
       new FakeOutlet(outletContainer, 'manager:fill'),
       path => path.startsWith('/manager/extensions/'),
     )
-    pages.register('team', {
-      $schema: CORDISX_PAGE_SCHEMA_V3,
-      schemaVersion: 3,
-      id: 'architecture',
-      title: { key: 'team.title', fallback: 'Team architecture' },
-      description: { key: 'team.description', fallback: 'Team hierarchy' },
-      icon: 'host:hierarchy',
-      chrome: 'standard',
-    }, shared.defineReactPage(kind === 'canvas' ? TeamFillFixture : () => <div className="team-fill-fixture"><shared.ui.Stack fill><div>Fixed controls</div><div style={{ overflow: 'auto', minHeight: 0 }}>Scrollable body</div></shared.ui.Stack></div>))
+    pages.register(
+      'team',
+      {
+        $schema: CORDISX_PAGE_SCHEMA_V3,
+        schemaVersion: 3,
+        id: 'architecture',
+        title: { key: 'team.title', fallback: 'Team architecture' },
+        description: { key: 'team.description', fallback: 'Team hierarchy' },
+        icon: 'host:hierarchy',
+        chrome: 'standard',
+      },
+      shared.defineReactPage(
+        kind === 'canvas' ? TeamFillFixture : () => (
+          <div className="team-fill-fixture">
+            <shared.ui.Stack fill>
+              <div>Fixed controls</div>
+              <div style={{ overflow: 'auto', minHeight: 0 }}>Scrollable body</div>
+            </shared.ui.Stack>
+          </div>
+        ),
+      ),
+    )
     navigation.register('team', {
       $schema: CORDISX_ROUTE_SCHEMA_V2,
       schemaVersion: 2,
@@ -136,7 +149,9 @@ describe('Manager content fill layout', () => {
       expect(body.firstElementChild).toBe(team)
       expect(team.contains(canvas)).toBe(true)
       expect(canvas.dataset.fill).toBe('true')
-      expect(body.matches('.cxr-react-root:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"])')).toBe(true)
+      expect(
+        body.matches('.cxr-react-root:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"])'),
+      ).toBe(true)
 
       expect(fixture.element('.cxr-content').style.height).toBe('767px')
       expect(fixture.dom.window.getComputedStyle(panel).display).toBe('flex')
