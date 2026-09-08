@@ -435,7 +435,7 @@ export function registerNavigationTests() {
     expect(seats).not.toContain('AgentConversationRenderer')
     expect(styles).not.toContain('插件导航贡献会显示在这里')
     expect(viteServer).toContain("url.pathname === '/api/documents'")
-    expect(viteServer).toContain('session.handleOwnerDocumentRequest(await requestBody(request))')
+    expect(viteServer).toContain('session.handleOwnerDocumentRequest(await requestBody(request, 8_388_608))')
   })
 
   it('renders brand, built-in, contributed, and recent rows with one readable semantic primitive', async () => {
