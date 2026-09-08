@@ -61,6 +61,13 @@ These are semantic CordisX components, not re-exports of a third-party design
 system. Their DOM, accessibility defaults, CSS, theme tokens, and future visual
 changes remain Host-owned.
 
+A page whose controls stay visible while its lists scroll may use `Stack fill`
+as its body root. The runtime marks that stack and extends the Manager's bounded
+height through the page mount chain. Its children must explicitly own scrolling
+and use `minHeight: 0` when they share the remaining height. Ordinary stacks keep
+the existing whole-body scrolling behavior. `PanZoomCanvas fill` keeps the same
+layout treatment.
+
 ## Runtime and ownership
 
 The immutable package path consumes the plugin's Vite ESM graph with automatic

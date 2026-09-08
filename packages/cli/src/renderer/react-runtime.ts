@@ -33,6 +33,7 @@ interface ButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>
 }
 
 interface StackProps extends React.HTMLAttributes<HTMLDivElement> {
+  readonly fill?: boolean
   readonly direction?: StackDirection
   readonly gap?: number | 'small' | 'medium' | 'large'
   readonly align?: React.CSSProperties['alignItems']
@@ -109,7 +110,7 @@ interface AgentAvatarProps extends Omit<React.HTMLAttributes<HTMLSpanElement>, '
 const SHARED_REACT_STYLES = `
 .cxr-react-root{box-sizing:border-box;min-height:100%;padding:16px;color:var(--cx-text);font:14px/1.5 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .cxr-react-root[data-cordisx-page-chrome-policy="agent-conversation"]{padding:0}
-.cxr-react-root:has(.cxr-ui-pan-zoom-canvas[data-fill="true"]){height:100%;min-height:0;overflow:hidden}
+.cxr-react-root:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"]){height:100%;min-height:0;overflow:hidden}
 .cxr-react-root *,.cxr-react-root *::before,.cxr-react-root *::after{box-sizing:border-box}
 .cxr-ui-stack{display:flex;min-width:0}
 .cxr-ui-attachment-placeholder{display:inline-grid;inline-size:30px;block-size:30px;flex:0 0 30px;place-items:center;padding:0;border:1px solid var(--cx-border);border-radius:50%;background:transparent;color:var(--cx-muted);opacity:var(--cx-disabled,.5);cursor:not-allowed}
@@ -182,6 +183,7 @@ function Button({ variant = 'secondary', className, type = 'button', ...props }:
 }
 
 function Stack({
+  fill = false,
   direction = 'column',
   gap = 'medium',
   align,
@@ -194,7 +196,9 @@ function Stack({
   return React.createElement('div', {
     ...props,
     className: joinClassName('cxr-ui-stack', className),
+    'data-fill': fill || undefined,
     style: {
+      ...(fill ? { height: '100%', minHeight: 0, minWidth: 0, overflow: 'hidden' } : {}),
       flexDirection: direction,
       gap: gapValue(gap),
       alignItems: align,
