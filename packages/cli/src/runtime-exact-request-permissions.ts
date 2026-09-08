@@ -64,6 +64,12 @@ export function normalizePluginManifestV13(value: unknown, expectedId: string): 
     manifest.$schema !== CORDISX_PLUGIN_MANIFEST_SCHEMA_V13 || manifest.schemaVersion !== 13
     || !Array.isArray(manifest.capabilities) || manifest.capabilities.length > 37
   ) throw new Error('Unsupported manifest v13')
+  const names = new Set<string>()
+  for (const candidate of manifest.capabilities) {
+    const name = (candidate as { readonly name?: unknown } | null)?.name
+    if (typeof name !== 'string' || names.has(name)) throw new Error('Duplicate or invalid capability')
+    names.add(name)
+  }
   const exact = manifest.capabilities.filter(candidate => isRuntimeExactRequestDeclaration(candidate))
   const invalidExact = manifest.capabilities.find(candidate =>
     typeof (candidate as { name?: unknown })?.name === 'string'
