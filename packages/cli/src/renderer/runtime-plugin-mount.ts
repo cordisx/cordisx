@@ -1,3 +1,4 @@
+import { createPluginHttpClient } from './plugin-http.js'
 import { installAgentTasks } from './agent-tasks-install.js'
 import { registerNativeSessionOwner } from './native-agent-session-recovery.js'
 import { installAgentTools } from './plugin-agent-tools.js'
@@ -309,6 +310,10 @@ export const createRuntimeDisposeControllerFiber = async (
     delete controller.unregisterAgentSessionMigration
     controller.agentLoopClient?.dispose()
     delete controller.agentLoopClient
+    controller.httpClient?.dispose()
+    delete controller.httpClient
+    await controller.unregisterHttp?.()
+    delete controller.unregisterHttp
     await controller.unregisterAgentLoop?.()
     delete controller.unregisterAgentLoop
     controller.documentsClient?.dispose()
@@ -637,7 +642,7 @@ export const createRuntimeMountPlugin = async (
     .isolate('agentPageFreshRoomNavigation')
     .isolate('agentTaskApprovals').isolate('agentTaskOwnership').isolate('agentTasks').isolate('agentTools').isolate(
       'entities',
-    ).isolate('documents').extend({
+    ).isolate('documents').isolate('http').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: runtimeScope.moduleGenerationOf()!(controller),
@@ -662,6 +667,13 @@ export const createRuntimeMountPlugin = async (
       entityPrincipal,
       () => controller.principalLive,
     )
+    const http = createPluginHttpClient({
+      bridge: runtimeScope.ownerDocumentBridge(),
+      principal: entityPrincipal,
+      active: () => controller.principalLive,
+    })
+    controller.httpClient = http
+    controller.unregisterHttp = pluginContext.reflect.provide('http', http)
     const tools = installAgentTools(pluginContext, {
       bridge: runtimeScope.ownerDocumentBridge()!,
       principal: entityPrincipal,
@@ -859,6 +871,10 @@ export const createRuntimeMountPlugin = async (
     delete controller.unregisterAgentSessionMigration
     agentLoopClient.dispose()
     delete controller.agentLoopClient
+    controller.httpClient?.dispose()
+    delete controller.httpClient
+    await controller.unregisterHttp?.()
+    delete controller.unregisterHttp
     await controller.unregisterAgentLoop?.()
     delete controller.unregisterAgentLoop
     documentsClient.dispose()

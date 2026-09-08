@@ -113,3 +113,5 @@ reference without duplicating its authority.
 
 - [Public presentation capabilities](public-presentation-capabilities.md): exact entity settings, Host route links, and controlled Markdown editing.
 - [Local usage projection](local-usage.md): metadata-only usage, persistence and current coverage.
+
+- [Plugin HTTP](plugin-http.md): Host consent, origin-bound transport and lifecycle.

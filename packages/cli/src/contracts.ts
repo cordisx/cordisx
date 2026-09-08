@@ -390,3 +390,5 @@ export type {
   EntitySettingsNavigationService,
 } from '@cordisx/protocol/entity-settings-navigation/v1'
 export type { RouteLinkResolutionResult } from '@cordisx/protocol/route-link-resolution/v1'
+
+export type * from './plugin-http-contracts.js'

@@ -747,6 +747,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       try {
         assertProductionGraphLaunchOwnership(true, rendererComposition.hasLoopbackGraph)
       } catch (error) {
+        await ownerDocuments.http.dispose()
         await ownerDocuments.agentTools?.close()
         await channelService?.dispose()
         await closeProviderFleet()
@@ -755,6 +756,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       const debugPort = invocation.options.debugPort ?? composition.codex.debugPort
       if (invocation.options.dryRun) {
         stdout(JSON.stringify({ status: 'ready', mode: 'attach', appId, debugPort }, null, 2))
+        await ownerDocuments.http.dispose()
         await ownerDocuments.agentTools?.close()
         await channelService?.dispose()
         await closeProviderFleet()
@@ -802,6 +804,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           stdout,
         })
       } finally {
+        await ownerDocuments.http.dispose()
         await ownerDocuments.agentTools?.close()
         await channelService?.dispose()
         await closeProviderFleet()
@@ -827,6 +830,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     printPlan(plan, stdout, invocation.options.dryRun ? 'ready' : 'launching')
     if (invocation.options.dryRun) {
       stdout(`[cordisx] loopback CDP port: ${invocation.options.debugPort ?? 'automatic'}`)
+      await ownerDocuments.http.dispose()
       await ownerDocuments.agentTools?.close()
       await channelService?.dispose()
       await closeProviderFleet()
@@ -903,6 +907,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         stdout,
       })
     } finally {
+      await ownerDocuments.http.dispose()
       await ownerDocuments.agentTools?.close()
       await channelService?.dispose()
       await closeProviderFleet()

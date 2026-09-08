@@ -135,6 +135,7 @@ export class BrowserOwnerDocumentBridge {
   async request(
     token: string,
     value: Omit<Record<string, unknown>, 'version' | 'requestId' | 'token'>,
+    timeoutMs = REQUEST_TIMEOUT_MS,
   ): Promise<unknown> {
     if (this.#disposed) throw new Error('owner document bridge is disposed')
     if (this.#pending.size >= MAX_PENDING_REQUESTS) throw new Error('owner document bridge request limit reached')
@@ -147,7 +148,7 @@ export class BrowserOwnerDocumentBridge {
         if (pending === undefined) return
         this.#pending.delete(requestId)
         pending.reject(new Error('owner document bridge request timed out'))
-      }, REQUEST_TIMEOUT_MS)
+      }, timeoutMs)
       this.#pending.set(requestId, { resolve, reject, timer })
       try {
         binding(JSON.stringify({ version: 1, requestId, token, ...value }))
