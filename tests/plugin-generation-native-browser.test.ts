@@ -71,6 +71,26 @@ function chromeExecutable(): string | undefined {
   return undefined
 }
 
+/** Shared isolated browser policy keeps native fixtures equivalent on macOS and Linux CI. */
+function chromeLaunchArguments(port: number, profile: string): string[] {
+  return [
+    '--headless=new',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-background-networking',
+    '--disable-component-update',
+    '--disable-sync',
+    '--disable-gpu',
+    '--disable-dev-shm-usage',
+    '--no-sandbox',
+    '--remote-allow-origins=*',
+    '--remote-debugging-address=127.0.0.1',
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${profile}`,
+    'about:blank',
+  ]
+}
+
 async function unusedPort(): Promise<number> {
   const server = createServer()
   await new Promise<void>((resolve, reject) => {
@@ -265,18 +285,17 @@ describe('plugin generation native browser graph', () => {
     const profile = path.join(root, 'chrome')
     let browser: ChildProcess | undefined
     let cdp: CdpClient | undefined
+    let browserStderr = ''
     try {
-      browser = spawn(chrome, [
-        '--headless=new',
-        '--no-first-run',
-        '--no-default-browser-check',
-        `--remote-debugging-port=${port}`,
-        `--user-data-dir=${profile}`,
-        server.url,
-      ], { stdio: ['ignore', 'ignore', 'pipe'] })
-      const target = await waitForChromeTarget(port, browser, () => '', server.url)
+      // Use the same isolated Linux-compatible launch policy as the other native fixtures.
+      browser = spawn(chrome, chromeLaunchArguments(port, profile), { stdio: ['ignore', 'ignore', 'pipe'] })
+      browser.stderr?.on('data', data => {
+        browserStderr = `${browserStderr}${data.toString()}`.slice(-8_192)
+      })
+      const target = await waitForChromeTarget(port, browser, () => browserStderr)
       cdp = await CdpClient.connect(target)
       await cdp.send('Runtime.enable')
+      await cdp.send('Page.navigate', { url: server.url })
       try {
         await expect.poll(async () => await cdp!.evaluate('globalThis.__lazyCssReady === true'), { timeout: 15_000 })
           .toBe(true)
@@ -354,22 +373,7 @@ describe('plugin generation native browser graph', () => {
       if (address === null || typeof address === 'string') throw new Error('strict CSP fixture did not bind')
       const documentUrl = `http://127.0.0.1:${address.port}/`
       const port = await unusedPort()
-      browser = spawn(chrome, [
-        '--headless=new',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--disable-background-networking',
-        '--disable-component-update',
-        '--disable-sync',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--no-sandbox',
-        '--remote-allow-origins=*',
-        '--remote-debugging-address=127.0.0.1',
-        `--remote-debugging-port=${port}`,
-        `--user-data-dir=${profile}`,
-        'about:blank',
-      ], { stdio: ['ignore', 'ignore', 'pipe'] })
+      browser = spawn(chrome, chromeLaunchArguments(port, profile), { stdio: ['ignore', 'ignore', 'pipe'] })
       browser.stderr?.on('data', data => {
         browserStderr = `${browserStderr}${data.toString()}`.slice(-8_192)
       })
@@ -493,22 +497,7 @@ describe('plugin generation native browser graph', () => {
       const documentUrl = `http://127.0.0.1:${address.port}/`
 
       const port = await unusedPort()
-      browser = spawn(chrome, [
-        '--headless=new',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--disable-background-networking',
-        '--disable-component-update',
-        '--disable-sync',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--no-sandbox',
-        '--remote-allow-origins=*',
-        '--remote-debugging-address=127.0.0.1',
-        `--remote-debugging-port=${port}`,
-        `--user-data-dir=${profile}`,
-        'about:blank',
-      ], { stdio: ['ignore', 'ignore', 'pipe'] })
+      browser = spawn(chrome, chromeLaunchArguments(port, profile), { stdio: ['ignore', 'ignore', 'pipe'] })
       browser.stderr?.on('data', data => {
         browserStderr = `${browserStderr}${data.toString()}`.slice(-8_192)
       })
@@ -682,22 +671,7 @@ globalThis.__cordisxStrictCspBoot = import(${JSON.stringify(lease.entryUrl)}).th
     let browserStderr = ''
     try {
       const port = await unusedPort()
-      browser = spawn(chrome, [
-        '--headless=new',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--disable-background-networking',
-        '--disable-component-update',
-        '--disable-sync',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--no-sandbox',
-        '--remote-allow-origins=*',
-        '--remote-debugging-address=127.0.0.1',
-        `--remote-debugging-port=${port}`,
-        `--user-data-dir=${profile}`,
-        'about:blank',
-      ], { stdio: ['ignore', 'ignore', 'pipe'] })
+      browser = spawn(chrome, chromeLaunchArguments(port, profile), { stdio: ['ignore', 'ignore', 'pipe'] })
       browser.stderr?.on('data', data => {
         browserStderr = `${browserStderr}${data.toString()}`.slice(-8_192)
       })
@@ -899,22 +873,7 @@ globalThis.__cordisxStrictCspBoot = import(${JSON.stringify(lease.entryUrl)}).th
         runtimeEntry: './module.js',
       }, 'native-browser-generation')
       const port = await unusedPort()
-      browser = spawn(chrome, [
-        '--headless=new',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--disable-background-networking',
-        '--disable-component-update',
-        '--disable-sync',
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--no-sandbox',
-        '--remote-allow-origins=*',
-        '--remote-debugging-address=127.0.0.1',
-        `--remote-debugging-port=${port}`,
-        `--user-data-dir=${profile}`,
-        'about:blank',
-      ], { stdio: ['ignore', 'ignore', 'pipe'] })
+      browser = spawn(chrome, chromeLaunchArguments(port, profile), { stdio: ['ignore', 'ignore', 'pipe'] })
       browser.stderr?.on('data', data => {
         browserStderr = `${browserStderr}${data.toString()}`.slice(-8_192)
       })

@@ -1,9 +1,9 @@
 import { ComposerVisualMenu } from './composer-visual-menu.js'
 import type {
-  ExtensionPointInteractionHandleV1,
-  ExtensionPointInteractionSnapshotV1,
-  ExtensionPointMenuItemV1,
-} from '@cordisx/protocol/extension-point-interactions/v1'
+  ExtensionPointInteractionHandleV2,
+  ExtensionPointInteractionSnapshotV2,
+  ExtensionPointMenuItemV2,
+} from '@cordisx/protocol/extension-point-interactions/v2'
 import type {
   ExtensionPointDragRegionV1,
   ExtensionPointDragSnapshotV1,
@@ -11,10 +11,10 @@ import type {
 
 /** Host-owned interaction sibling: plugin artwork remains inert. */
 export class ComposerVisualDrag {
-  readonly handle: ExtensionPointInteractionHandleV1
+  readonly handle: ExtensionPointInteractionHandleV2
   private readonly button: HTMLButtonElement
   private readonly listeners = new Set<() => void>()
-  private snapshot: ExtensionPointInteractionSnapshotV1 = Object.freeze({
+  private snapshot: ExtensionPointInteractionSnapshotV2 = Object.freeze({
     sequence: 0,
     gesture: 0,
     phase: 'idle',
@@ -61,7 +61,7 @@ export class ComposerVisualDrag {
     parent.append(this.button)
     this.handle = Object.freeze({
       getSnapshot: () => this.snapshot,
-      setMenu: (items: readonly ExtensionPointMenuItemV1[] | null) => this.menu.set(items),
+      setMenu: (items: readonly ExtensionPointMenuItemV2[] | null) => this.menu.set(items),
       dispose: () => this.dispose(),
       subscribe: (listener: () => void) => {
         if (this.disposed) return () => {}
@@ -130,7 +130,7 @@ export class ComposerVisualDrag {
     }
   }
   private emitState(
-    change: Partial<Pick<ExtensionPointInteractionSnapshotV1, 'hovered' | 'menuOpen' | 'actionId'>>,
+    change: Partial<Pick<ExtensionPointInteractionSnapshotV2, 'hovered' | 'menuOpen' | 'actionId'>>,
   ): void {
     if (this.disposed) return
     this.snapshot = Object.freeze({

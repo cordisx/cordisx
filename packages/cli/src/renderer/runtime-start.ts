@@ -507,6 +507,7 @@ export async function start(
     for (const plugin of plugins) {
       if (isExplicitLocalDevelopmentArtifact(plugin)) {
         broker.enableDevelopmentVisualIdentity({ id: plugin.id, source: plugin.source })
+        broker.enableDevelopmentUsageIdentity({ id: plugin.id, source: plugin.source })
       }
     }
     if (metadata.certifiedPermissionChannelToken !== undefined && window.top === window) {

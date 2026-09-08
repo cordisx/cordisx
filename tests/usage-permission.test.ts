@@ -1,4 +1,8 @@
 import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,
+  normalizePluginManifestV13,
+} from '../packages/cli/src/runtime-exact-request-permissions.js'
+import {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
   normalizeTaskManifest,
 } from '../packages/cli/src/agent-task-permission-manifest.js'
@@ -47,12 +51,20 @@ function broker(requestUsageV6 = async (plan: UsagePermissionAuthorizationPlanV6
     { request: async () => undefined, requestUsageV6 },
   )
 }
-describe.each([11, 12])('public usage permission v%s', version => {
-  const activeManifest = version === 11 ? manifest : normalizeTaskManifest({
-    ...manifest,
-    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
-    schemaVersion: 12,
-  }, identity.id)
+describe.each([11, 12, 13])('public usage permission v%s', version => {
+  const activeManifest = version === 13
+    ? normalizePluginManifestV13({
+      ...manifest,
+      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V13,
+      schemaVersion: 13,
+    }, identity.id)
+    : version === 11
+    ? manifest
+    : normalizeTaskManifest({
+      ...manifest,
+      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V12,
+      schemaVersion: 12,
+    }, identity.id)
   it('offers current-profile explicit generation-only authorization', () => {
     const plan = usagePermissionPlan({
       planId: 'usage-1',
@@ -87,6 +99,48 @@ describe.each([11, 12])('public usage permission v%s', version => {
     expect(request).toHaveBeenCalledTimes(2)
     dispose()
     expect(host.usageAllowed(identity)).toBe(false)
+    host.dispose()
+  })
+  it('uses verified local-development authority across HMR without minting explicit-user decisions', async () => {
+    const request = vi.fn(async (plan: UsagePermissionAuthorizationPlanV6) => confirm(plan))
+    const host = broker(request)
+    host.enableDevelopmentUsageIdentity(identity)
+    const remove = host.register(identity, activeManifest, { pluginId: identity.id, moduleGeneration: 'dev-1' })
+    expect(await host.authorizeUsage(identity)).toBe(true)
+    const oldFence = host.usageFence(identity, 'dev-1')
+    host.setUsagePolicy(identity, false)
+    expect(await host.authorizeUsage(identity)).toBe(false)
+    remove()
+    expect(oldFence()).toBe(false)
+    expect(host.usageAllowed(identity)).toBe(false)
+    const removeNew = host.register(identity, activeManifest, { pluginId: identity.id, moduleGeneration: 'dev-2' })
+    expect(await host.authorizeUsage(identity)).toBe(true)
+    expect(request).not.toHaveBeenCalled()
+    removeNew()
+    host.dispose()
+  })
+  it('does not infer development authority from file URLs, matching ids, or visual permission', async () => {
+    const request = vi.fn(async (plan: UsagePermissionAuthorizationPlanV6) => confirm(plan))
+    const host = broker(request)
+    host.enableDevelopmentUsageIdentity({ ...identity, source: 'file:///different.js' })
+    host.enableDevelopmentVisualIdentity(identity)
+    const remove = host.register(identity, activeManifest, { pluginId: identity.id, moduleGeneration: 'production' })
+    expect(await host.authorizeUsage(identity)).toBe(true)
+    expect(request).toHaveBeenCalledTimes(1)
+    remove()
+    host.dispose()
+  })
+  it('requires a declared usage capability even for verified development identities', async () => {
+    const request = vi.fn(async (plan: UsagePermissionAuthorizationPlanV6) => confirm(plan))
+    const host = broker(request)
+    host.enableDevelopmentUsageIdentity(identity)
+    const remove = host.register(identity, { ...activeManifest, capabilities: [] }, {
+      pluginId: identity.id,
+      moduleGeneration: 'dev',
+    })
+    expect(await host.authorizeUsage(identity)).toBe(false)
+    expect(request).not.toHaveBeenCalled()
+    remove()
     host.dispose()
   })
   it('retires an old context even when the same artifact generation is enabled again', () => {

@@ -36,7 +36,7 @@ function TeamFillFixture() {
 }
 
 describe('Manager content fill layout', () => {
-  it('preserves the real ManagerContentPage mount chain under one 767px Host seat', async () => {
+  it.each(['canvas', 'stack'] as const)('preserves the Manager mount chain for a fill %s', async kind => {
     const fixture = reactManagerFixture()
     const style = fixture.document.createElement('style')
     style.textContent = `${REACT_MANAGER_STYLES}\n${TEAM_FIXTURE_STYLES}`
@@ -76,15 +76,28 @@ describe('Manager content fill layout', () => {
       new FakeOutlet(outletContainer, 'manager:fill'),
       path => path.startsWith('/manager/extensions/'),
     )
-    pages.register('team', {
-      $schema: CORDISX_PAGE_SCHEMA_V3,
-      schemaVersion: 3,
-      id: 'architecture',
-      title: { key: 'team.title', fallback: 'Team architecture' },
-      description: { key: 'team.description', fallback: 'Team hierarchy' },
-      icon: 'host:hierarchy',
-      chrome: 'standard',
-    }, shared.defineReactPage(TeamFillFixture))
+    pages.register(
+      'team',
+      {
+        $schema: CORDISX_PAGE_SCHEMA_V3,
+        schemaVersion: 3,
+        id: 'architecture',
+        title: { key: 'team.title', fallback: 'Team architecture' },
+        description: { key: 'team.description', fallback: 'Team hierarchy' },
+        icon: 'host:hierarchy',
+        chrome: 'standard',
+      },
+      shared.defineReactPage(
+        kind === 'canvas' ? TeamFillFixture : () => (
+          <div className="team-fill-fixture">
+            <shared.ui.Stack fill>
+              <div>Fixed controls</div>
+              <div style={{ overflow: 'auto', minHeight: 0 }}>Scrollable body</div>
+            </shared.ui.Stack>
+          </div>
+        ),
+      ),
+    )
     navigation.register('team', {
       $schema: CORDISX_ROUTE_SCHEMA_V2,
       schemaVersion: 2,
@@ -128,7 +141,7 @@ describe('Manager content fill layout', () => {
       const page = fixture.element('[data-cordisx-manager-page]')
       const body = fixture.element('[data-cordisx-manager-page-body]')
       const team = fixture.element('.team-fill-fixture')
-      const canvas = fixture.element('.cxr-ui-pan-zoom-canvas')
+      const canvas = fixture.element(kind === 'canvas' ? '.cxr-ui-pan-zoom-canvas' : '.cxr-ui-stack')
       expect(panel.firstElementChild).toBe(seat)
       expect(seat.firstElementChild).toBe(page)
       expect(page.lastElementChild).toBe(body)
@@ -136,7 +149,9 @@ describe('Manager content fill layout', () => {
       expect(body.firstElementChild).toBe(team)
       expect(team.contains(canvas)).toBe(true)
       expect(canvas.dataset.fill).toBe('true')
-      expect(body.matches('.cxr-react-root:has(.cxr-ui-pan-zoom-canvas[data-fill="true"])')).toBe(true)
+      expect(
+        body.matches('.cxr-react-root:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"])'),
+      ).toBe(true)
 
       expect(fixture.element('.cxr-content').style.height).toBe('767px')
       expect(fixture.dom.window.getComputedStyle(panel).display).toBe('flex')
@@ -206,10 +221,10 @@ describe('Manager content fill layout', () => {
       '.cxr-manager-content-panel { min-width: 0; min-height: 0; flex: 1; overflow: auto;',
     )
     expect(REACT_MANAGER_STYLES).toContain(
-      '.cxr-manager-content-panel:has(.cxr-ui-pan-zoom-canvas[data-fill="true"]) { display: flex;',
+      '.cxr-manager-content-panel:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"]) { display: flex;',
     )
     expect(REACT_MANAGER_STYLES).toContain(
-      '[data-cordisx-manager-page]:has(.cxr-ui-pan-zoom-canvas[data-fill="true"]) > [data-cordisx-manager-page-body] { grid-row: 2; height: 100%;',
+      '[data-cordisx-manager-page]:has(.cxr-ui-pan-zoom-canvas[data-fill="true"],.cxr-ui-stack[data-fill="true"]) > [data-cordisx-manager-page-body] { grid-row: 2; height: 100%;',
     )
   })
 })

@@ -425,7 +425,7 @@ export function ManagerApp({ model, marketplace, triggerSeat, navigationControll
                           variant="text"
                           aria-label={managerCopy(snapshot.localization.locale, 'manager.back')}
                           icon={<HostIcon token="back" />}
-                          onClick={router.back}
+                          onClick={() => router.navigate(managerContentBackRoute)}
                         />
                       )
                       : contributionIcon !== undefined

@@ -7,6 +7,8 @@ export interface ButtonProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonE
 }
 
 export interface StackProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** Fill the Manager body seat; children explicitly own their scrolling. */
+  readonly fill?: boolean
   readonly direction?: 'row' | 'column'
   readonly gap?: number | 'small' | 'medium' | 'large'
   readonly align?: React.CSSProperties['alignItems']

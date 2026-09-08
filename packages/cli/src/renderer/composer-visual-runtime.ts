@@ -1,5 +1,5 @@
 import { ComposerVisualInteractions } from './composer-visual-interactions.js'
-import type { ExtensionPointInteractionsV1 } from '@cordisx/protocol/extension-point-interactions/v1'
+import type { ExtensionPointInteractionsV2 } from '@cordisx/protocol/extension-point-interactions/v2'
 import { ComposerVisualDrag } from './composer-visual-drag.js'
 import type { ExtensionPointDragHandleV1 } from '@cordisx/protocol/extension-point-drag/v1'
 import type { ExtensionPointVisualSnapshotV2 } from '@cordisx/protocol/extension-point-visual/v2'
@@ -78,7 +78,7 @@ function VisualBody(
     source: VisualSource
     visual: CordisXReactVisual
     getDrag: () => ExtensionPointDragHandleV1 | undefined
-    getInteractions: () => ExtensionPointInteractionsV1 | undefined
+    getInteractions: () => ExtensionPointInteractionsV2 | undefined
   },
 ): React.ReactElement {
   const state = React.useSyncExternalStore(source.subscribe, source.getSnapshot)

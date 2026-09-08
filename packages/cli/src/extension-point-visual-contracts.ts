@@ -1,3 +1,5 @@
+import type { ExtensionPointInteractionsV2 } from '@cordisx/protocol/extension-point-interactions/v2'
+export type * from '@cordisx/protocol/extension-point-interactions/v2'
 import type { ExtensionPointInteractionsV1 } from '@cordisx/protocol/extension-point-interactions/v1'
 export type * from '@cordisx/protocol/extension-point-interactions/v1'
 import type { ExtensionPointDragHandleV1 } from '@cordisx/protocol/extension-point-drag/v1'
@@ -15,7 +17,7 @@ export type * from '@cordisx/protocol/extension-point-visual/v1'
 export interface CordisXReactVisualProps {
   readonly state: ExtensionPointVisualSnapshotV1 | ExtensionPointVisualSnapshotV2
   readonly drag?: ExtensionPointDragHandleV1
-  readonly interactions?: ExtensionPointInteractionsV1
+  readonly interactions?: ExtensionPointInteractionsV1 | ExtensionPointInteractionsV2
 }
 export interface CordisXReactVisual {
   readonly kind: 'react-svg-v1' | 'react-dom-v1'
