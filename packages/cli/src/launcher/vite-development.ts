@@ -883,28 +883,26 @@ if (import.meta.hot) {
       publicDir: false,
       appType: 'custom',
       plugins: [integration, react()],
-      ...(serverOptions.prebundleHostDependencies === true
-        ? {
-          optimizeDeps: {
-            entries: [
-              rendererPath,
-              ...initialGenerations
-                .filter(item => item.isolatedArtifactSource === undefined)
-                .map(item => item.realEntry),
-            ],
-            // Host and plugin ESM graphs can reach these CommonJS leaves after
-            // Vite's static scan. Resolve only installed leaves at their owning
-            // boundary so fixtures need not install unrelated product peers.
-            // Shared React is reached through Host virtual modules. Prebundle
-            // every CommonJS entry before injection so Vite never invalidates a
-            // loaded React DOM graph during an on-demand dependency restart.
+      optimizeDeps: {
+        // Cold dry-runs must discover plugin dependencies before validating
+        // versioned module URLs. Host dependencies remain normal-launch only.
+        entries: [
+          ...(serverOptions.prebundleHostDependencies === true ? [rendererPath] : []),
+          ...initialGenerations
+            .filter(item => item.isolatedArtifactSource === undefined)
+            .map(item => item.realEntry),
+        ],
+        ...(serverOptions.prebundleHostDependencies === true
+          ? {
+            // Shared React virtual modules can reach CommonJS leaves after
+            // static scanning. Settle them before injecting the native graph.
             include: [
               ...SHARED_REACT_INTEROP_LEAVES,
               ...commonJsInteropLeaves.map(item => item.specifier),
             ],
-          },
-        }
-        : {}),
+          }
+          : {}),
+      },
       resolve: {
         dedupe: ['react', 'react-dom'],
         alias: [
@@ -945,7 +943,7 @@ if (import.meta.hot) {
     await server.listen()
     server.watcher.add(initialGenerations.flatMap(generation => generation.watchFiles))
     await watcherReady
-    if (serverOptions.prebundleHostDependencies === true) await waitForDependencyOptimization()
+    await waitForDependencyOptimization()
   } catch (error) {
     await server!?.close()
     throw error

@@ -701,12 +701,31 @@ describe('functional CordisX CLI', () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-local-dev-'))
     const entry = path.join(root, 'demo.ts')
     const dependency = path.join(root, 'value.ts')
+    const home = path.join(root, 'uncreated-home')
+    await symlink(path.join(process.cwd(), 'node_modules'), path.join(root, 'node_modules'), 'dir')
+    await writeFile(
+      path.join(root, 'view.ts'),
+      [
+        "import Markdown from 'react-markdown'",
+        "import remarkGfm from 'remark-gfm'",
+        'export const components = [Markdown, remarkGfm]',
+      ].join('\n'),
+    )
     await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'demo', version: '1.0.0' }))
-    await writeFile(entry, "import { value } from './value.js'\nexport default { name: value, apply() {} }\n")
+    await writeFile(
+      entry,
+      [
+        "import { value } from './value.js'",
+        "export { default as Schema } from '@deepseek-ai/schemastery'",
+        "export const loadView = () => import('./view.js')",
+        'export default { name: value, apply() {} }',
+      ].join('\n'),
+    )
     await writeFile(dependency, "export const value = 'demo'\n")
     const output: string[] = []
     await runCordisXCli(['dev', entry, '--dry-run'], {
       cwd: root,
+      env: { CORDISX_HOME: home },
       stdout: line => {
         output.push(line)
       },
@@ -718,6 +737,7 @@ describe('functional CordisX CLI', () => {
       pluginId: 'demo',
       sourcePath: entry,
     })
+    await expect(access(home)).rejects.toMatchObject({ code: 'ENOENT' })
     await writeFile(dependency, 'export const value =\n')
     await expect(runCordisXCli(['dev', entry, '--dry-run'], { cwd: root, stdout: () => undefined })).rejects.toThrow(
       /Build failed/u,
