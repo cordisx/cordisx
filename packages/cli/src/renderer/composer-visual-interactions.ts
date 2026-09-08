@@ -1,15 +1,15 @@
 import type {
-  ExtensionPointInteractionHandleV1,
-  ExtensionPointInteractionsV1,
-} from '@cordisx/protocol/extension-point-interactions/v1'
+  ExtensionPointInteractionHandleV2,
+  ExtensionPointInteractionsV2,
+} from '@cordisx/protocol/extension-point-interactions/v2'
 import { ComposerVisualDrag } from './composer-visual-drag.js'
 
 /** Independent, bounded hit targets for one registration generation. */
 export class ComposerVisualInteractions {
-  readonly handle: ExtensionPointInteractionsV1
+  readonly handle: ExtensionPointInteractionsV2
   private readonly entries = new Map<
     string,
-    { controller: ComposerVisualDrag; handle: ExtensionPointInteractionHandleV1 }
+    { controller: ComposerVisualDrag; handle: ExtensionPointInteractionHandleV2 }
   >()
   private disposed = false
   constructor(
@@ -18,11 +18,11 @@ export class ComposerVisualInteractions {
     private readonly authority: { drag(): boolean; activate(): boolean },
   ) {
     this.handle = Object.freeze({
-      version: 'cordisx.extension-point-interactions/v1',
+      version: 'cordisx.extension-point-interactions/v2',
       create: (id: string) => this.create(id),
     })
   }
-  private create(id: string): ExtensionPointInteractionHandleV1 {
+  private create(id: string): ExtensionPointInteractionHandleV2 {
     if (this.disposed) throw new Error('Visual interactions retired')
     if (typeof id !== 'string' || !id.trim() || id.length > 100) throw new TypeError('Invalid visual interaction id')
     const existing = this.entries.get(id)

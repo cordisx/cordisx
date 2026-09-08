@@ -163,3 +163,79 @@ describe('Composer independent interaction handles', () => {
     }
   })
 })
+
+it('renders themed icons and navigates only enabled submenu leaves', () => {
+  const f = setup()
+  try {
+    const { handle, button } = f.create('cat')
+    expect(f.factory.handle.version).toBe('cordisx.extension-point-interactions/v2')
+    handle.setMenu([{
+      id: 'care',
+      label: 'Care',
+      icon: 'action.favorite',
+      children: [
+        { id: 'locked', label: 'Locked', disabled: true },
+        { id: 'feed', label: 'Feed', icon: 'action.add' },
+      ],
+    }, { id: 'shop', label: 'Shop' }])
+    f.event(button, 'contextmenu', { button: 2 })
+    const document = f.dom.window.document
+    const branch = document.querySelector<HTMLButtonElement>('[data-cordisx-menu-item="care"]')!
+    expect(branch.querySelector('svg')).not.toBeNull()
+    branch.dispatchEvent(new f.dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    const leaf = document.querySelector<HTMLButtonElement>('[data-cordisx-menu-item="feed"]')!
+    expect(document.activeElement).toBe(leaf)
+    expect(branch.getAttribute('aria-expanded')).toBe('true')
+    expect(handle.getSnapshot().actionId).toBeUndefined()
+    leaf.dispatchEvent(new f.dom.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))
+    expect(document.activeElement).toBe(branch)
+    expect(document.querySelectorAll('[role="menu"]')).toHaveLength(1)
+    f.event(branch, 'pointerenter')
+    expect(document.querySelectorAll('[role="menu"]')).toHaveLength(2)
+    document.querySelector<HTMLButtonElement>('[data-cordisx-menu-item="feed"]')!.click()
+    expect(handle.getSnapshot()).toMatchObject({ actionId: 'feed', menuOpen: false })
+    expect(document.querySelectorAll('[role="menu"]')).toHaveLength(0)
+  } finally {
+    f.close()
+  }
+})
+
+it('rejects nested malformed declarations atomically and copies caller-owned children', () => {
+  const f = setup()
+  try {
+    const { handle, button } = f.create('cat')
+    const children = [{ id: 'food', label: 'Food' }]
+    handle.setMenu([{ id: 'care', label: 'Care', children }])
+    children[0]!.label = 'Mutated'
+    const bad: unknown[] = [
+      [{ id: 'x', label: 'X', children: [] }],
+      [{ id: 'x', label: 'X', icon: '<svg>' }],
+      [{ id: 'x', label: 'X', children: [{ id: 'x', label: 'Again' }] }],
+      [{
+        id: '1',
+        label: '1',
+        children: [{ id: '2', label: '2', children: [{ id: '3', label: '3', children: [{ id: '4', label: '4' }] }] }],
+      }],
+      Array.from(
+        { length: 4 },
+        (_, p) => ({
+          id: String(p),
+          label: 'P',
+          children: Array.from({ length: 16 }, (_, c) => ({ id: `${p}-${c}`, label: 'C' })),
+        }),
+      ),
+    ]
+    for (const value of bad) expect(() => handle.setMenu(value as never)).toThrow('Invalid visual menu items')
+    f.event(button, 'contextmenu', { button: 2 })
+    const branch = f.dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-menu-item="care"]')!
+    branch.click()
+    expect(f.dom.window.document.querySelector('[data-cordisx-menu-item="food"]')?.textContent).toBe('Food')
+    const stale = f.dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-menu-item="food"]')!
+    f.grant(true, false)
+    stale.click()
+    expect(handle.getSnapshot().actionId).toBeUndefined()
+    expect(f.dom.window.document.querySelectorAll('[role="menu"]')).toHaveLength(0)
+  } finally {
+    f.close()
+  }
+})

@@ -221,7 +221,7 @@ and input are not intercepted by these interaction regions.
 ## Multiple overlay entities and context menus
 
 The optional React `interactions` prop implements Protocol
-`cordisx.extension-point-interactions/v1`. It is available on the overlay under
+`cordisx.extension-point-interactions/v2`. It is available on the overlay under
 its existing exact `drag` and/or `activate` grants. Older Hosts omit it; visuals
 must degrade explicitly. The legacy `drag` prop remains available, but do not
 register both handles for the same artwork.
@@ -232,7 +232,8 @@ methods plus `setMenu(items)` and `dispose()`. Dispose when an entity leaves the
 scene; at most 32 handles can be live for one registration. The Host owns bounded
 hit targets, capture, keyboard handling and menu chrome outside the inert art.
 
-Menu items are flat `{ id, label, disabled? }` values, at most 20 per entity.
+Menu items support `{ id, label, disabled?, icon?, children? }` trees, bounded by
+Protocol v2. Existing flat arrays remain compatible.
 Labels are plain text. Menus require the `activate` grant, never just drag or
 pointer observation. Right click, Context Menu key or Shift+F10 opens a menu;
 Escape closes it, arrows/Home/End navigate, and selection emits `actionId`.
@@ -247,3 +248,17 @@ menu and listener on permission withdrawal or generation disposal.
 Focused tests exercise the production visual mount and controller boundaries.
 Native menu positioning, themes and keyboard behavior still require isolated
 app verification before claiming native acceptance.
+
+### Icon and submenu implementation
+
+Interaction menus implement [Protocol v2](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/extension-point-interactions-v2.md).
+Flat v1-shaped arrays remain accepted; callers detect the factory version before
+supplying v2 fields to older Hosts. The renderer recursively copies and validates
+all items before replacing the existing menu. Host icon resolution supplies themed
+SVGs without passing markup or browser objects across the capability boundary.
+
+Each submenu has an independently viewport-clamped Host panel, sharing permission,
+focus and disposal ownership with its root. Keyboard arrows navigate/open/close
+levels; pointer entry opens a branch and changing siblings retires deeper panels.
+The root lifetime owns document listeners and removes every panel on dismissal,
+revocation or generation retirement. Only enabled leaf IDs reach the plugin.
