@@ -59,6 +59,52 @@ export function registerNavigationTests() {
     ]]])
   })
 
+  it('authorizes the exact Manager root in a fresh review and preserves explicit denial', async () => {
+    const calls: unknown[][] = []
+    const root = {
+      owner: 'game',
+      qualifiedId: 'game:manager',
+      surface: 'manager.settings.navigation-items',
+      authorized: false,
+      pointPolicyReason: 'permission.review-pending',
+      item: { route: { id: 'home' } },
+    }
+    const runtime = {
+      snapshot: () => ({
+        plugins: [{ id: 'game', source: 'file:///game.ts', status: 'active' }],
+        registrations: [
+          {
+            owner: 'game',
+            qualifiedId: 'game:home',
+            surface: 'sidebar.navigation.items',
+            authorized: true,
+            item: { route: { id: 'home' } },
+          },
+          root,
+          { ...root, owner: 'other', qualifiedId: 'other:manager' },
+        ],
+        navigation: {
+          routes: [{ owner: 'game', id: 'home', authorized: true, definition: { outlet: 'manager.content' } }],
+        },
+      }),
+      setExtensionPointPolicies: async (...args: unknown[]) => {
+        calls.push(args)
+      },
+    }
+    await authorizePlaygroundReviewNavigation(runtime, 'game:home')
+    expect(calls).toEqual([['file:///game.ts', 'game', [{
+      pointId: 'manager.settings.navigation-items',
+      policy: 'allow',
+    }]]])
+    calls.length = 0
+    root.pointPolicyReason = 'permission.policy-denied'
+    await authorizePlaygroundReviewNavigation(runtime, 'game:home')
+    expect(calls).toEqual([])
+    root.authorized = true
+    await authorizePlaygroundReviewNavigation(runtime, 'game:home')
+    expect(calls).toEqual([])
+  })
+
   it('does not override an explicit denial or authorize a non-sidebar review contribution', async () => {
     const calls: unknown[][] = []
     const runtime = {

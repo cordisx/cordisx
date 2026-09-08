@@ -41,6 +41,8 @@ interface PlaygroundRegistrationSnapshot {
 }
 
 interface PlaygroundRouteSnapshot {
+  readonly authorized?: boolean
+  readonly pointPolicyReason?: string
   readonly owner: string
   readonly id: string
   readonly definition: {
