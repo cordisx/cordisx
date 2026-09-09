@@ -38,7 +38,7 @@ jobs:
         run: node --test scripts/test-ci-scope.mjs
 
   full:
-    if: always() && (github.event_name == 'push' || needs.scope.result != 'success' || needs.scope.outputs.full == 'true')
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.scope.result != 'success' || needs.scope.outputs.full == 'true') }}
     needs: scope
     runs-on: ubuntu-latest
     timeout-minutes: 40

@@ -171,3 +171,9 @@ test('affected runtime tests prepare Git plugin dependencies', () => {
   assert.ok(tests.includes('run: npm ci\n'))
   assert.ok(!tests.includes('npm ci --ignore-scripts'))
 })
+
+test('complete jobs honor cancellation so superseded PR runs release their slot', () => {
+  const source = readFileSync(new URL('../.github/workflows/check.yml', import.meta.url), 'utf8')
+  assert.ok(source.includes('    if: ${{ !cancelled() && '))
+  assert.ok(!source.includes('    if: always() && '))
+})

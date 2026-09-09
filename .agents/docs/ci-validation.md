@@ -32,6 +32,12 @@ static build jobs may skip those lifecycle builds.
 
 ## Diagnose a long run
 
+Complete jobs use `!cancelled()` so a superseded PR releases its concurrency
+slot while a failed scope still selects full validation. Job-level `always()`
+would keep the old run alive after cancellation and delay its replacement;
+see [GitHub cancellation semantics](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation).
+Short evidence/upload cleanup steps may still use `always()`.
+
 Inspect the run attempt, head SHA, and active step before rerunning anything.
 The full job exposes the same ordered commands as `npm run check` as separate
 steps: clean development, typecheck, build, tests, release metadata, package
