@@ -1,7 +1,54 @@
 # Live CordisX plugin development
 
-Use this workflow when the current session is already attached to a CordisX
-development project.
+Use this workflow when debugging or verifying a CordisX plugin on a Codex Host,
+including when the current session is already attached to a development project.
+
+## Choose debugging tools before accessing the Host
+
+This boundary applies to the CordisX-launched Codex test instance, including
+startup failures, UI inspection, screenshots, interactions, HMR and permission
+failures. Never select Computer Use/CUA for this work: do not attach it to the
+Codex app, enumerate its windows, capture its screen or automate its native UI.
+Do not replace it with generic desktop automation or a generic browser launch.
+
+1. Identify the authorized test instance from the CordisX launch/config and
+   loaded plugin entry. Check the effective Host/CLI build, profile/data mode
+   and launcher-owned debug target before attaching; a matching window title
+   or an open debug port alone is insufficient.
+2. Use the existing `cordisx dev` session, or its documented development launch
+   when a new instance is needed and within scope. Let CordisX own Host injection,
+   Vite bootstrap and reload. Read launcher/Host logs and plugin generation
+   diagnostics to identify the first failing stage.
+3. For runtime inspection or interaction, use CordisX's documented CDP/debug
+   mechanisms on that verified target within the authorized action scope. Use
+   its Host permission diagnostics to check declarations, capability availability,
+   launcher provenance, grants/denials and generation state. Follow the
+   [native debugging runbook](https://github.com/cordisx/cordisx/blob/main/.agents/docs/native-debugging-runbook.md)
+   and the installed version's references; do not invent a private Host API or
+   move debug access into a plugin as a missing-capability fallback.
+4. Verify the expected plugin/build is loaded, inspect the relevant visible
+   contribution and actual state transition, and check cleanup after HMR,
+   replacement or stop as applicable. Logs saying ready or an HMR notification
+   alone do not prove the repaired interaction. Record the mechanism and evidence
+   scope; if native observation is unavailable, report that gap explicitly.
+
+This tool choice does not bypass a permission boundary. Respect explicit user,
+Host and tool restrictions on the target or action, including a denial that
+applies regardless of the access route; do not retry that denied action via CDP.
+Do not forge grants, bypass Host capability or authorization decisions, patch
+the installed Codex app, or access unrelated profiles, windows or data. The
+[documented launcher-owned native policy setup](verification.md#real-native-app-and-playground)
+is part of the authorized development launch; it cannot override an applicable
+user, Host or tool denial.
+
+If CUA was selected accidentally, acknowledge the tool-selection error and read
+the actual restriction before continuing. A tool-specific unsupported surface
+or capability limitation does not by itself establish that the user lacks
+authority to debug their own test instance. Continue through CordisX only when
+the action is independently authorized and no applicable denial prohibits it;
+when a restriction's scope is unclear, stop that action and report the exact
+restriction while continuing permitted source/log checks. Do not turn a mistaken
+tool choice into a blanket refusal of CordisX debugging.
 
 ## Locate the active project
 

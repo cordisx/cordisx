@@ -18,6 +18,15 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 - Run or deliver the result: [verification.md](references/verification.md)
 - Continue work inside an already-running development session: [live-plugin-development.md](references/live-plugin-development.md)
 
+## Native plugin debugging tool boundary
+
+When debugging or verifying a CordisX plugin in a CordisX-launched Codex Host,
+never use Computer Use/CUA, including for screenshots or native UI inspection.
+Use CordisX development launch, Host injection, logs, permission diagnostics,
+and its authorized CDP/debug mechanisms. Read
+[the debugging workflow and permission boundary](references/live-plugin-development.md#choose-debugging-tools-before-accessing-the-host)
+before accessing the running Host.
+
 ## Core contract
 
 - Plugins provide manifests, localized labels, structured schemas, state, commands, icons, contribution descriptors, and React bodies in documented plugin-owned seats.
