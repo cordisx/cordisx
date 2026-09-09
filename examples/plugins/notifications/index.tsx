@@ -8,7 +8,7 @@ import {
 } from '../../../packages/cli/src/contracts.js'
 
 export const name = 'notifications-demo'
-export const inject = ['notifications', 'pages', 'routes', 'slots']
+export const inject = ['notifications', 'i18n', 'pages', 'routes', 'slots']
 export const manifest = {
   $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V1,
   schemaVersion: 1,
@@ -21,16 +21,36 @@ export const icon = {
   data:
     'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGMIibxBU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULAGTXFFtPNsmFAAAAAElFTkSuQmCC',
 } as const
-const text = (key: string, fallback: string) => ({ key, fallback })
+const text = (key: string, fallback: string) => ({ namespace: name, key, fallback })
 export function apply(ctx: Context) {
+  ctx.i18n.define({
+    namespace: name,
+    locale: 'en',
+    messages: {
+      'page.title': 'Notification demo',
+      'page.description': 'Exercise the public notification API.',
+      'route.title': 'Notification demo',
+      'route.description': 'Open the notification interaction demo.',
+    },
+  })
+  ctx.i18n.define({
+    namespace: name,
+    locale: 'zh-CN',
+    messages: {
+      'page.title': '通知演示',
+      'page.description': '体验统一通知卡片、操作和屏蔽规则。',
+      'route.title': '通知演示',
+      'route.description': '打开通知交互演示页面。',
+    },
+  })
   let attempts = 0
   ctx.pages.register(
     {
       $schema: CORDISX_PAGE_SCHEMA_V3,
       schemaVersion: 3,
       id: 'main',
-      title: text('title', 'Notification demo'),
-      description: text('description', 'Exercise the public notification API.'),
+      title: text('page.title', 'Notification demo'),
+      description: text('page.description', 'Exercise the public notification API.'),
     },
     defineReactPage(() => (
       <Stack gap="medium">
@@ -86,11 +106,11 @@ export function apply(ctx: Context) {
     path: '/notification-demo',
     outlet: 'app',
     page: 'main',
-    title: text('title', 'Notification demo'),
-    description: text('description', 'Exercise notifications.'),
+    title: text('route.title', 'Notification demo'),
+    description: text('route.description', 'Open the notification interaction demo.'),
   })
   ctx.slots.register({ name: 'sidebar.navigation.items', id: 'notifications-demo', order: -100 }, {
-    label: text('title', 'Notification demo'),
+    label: text('route.title', 'Notification demo'),
     icon: 'host:info',
     route: { id: 'main' },
   })

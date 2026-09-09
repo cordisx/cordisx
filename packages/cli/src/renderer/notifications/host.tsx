@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import { flushSync } from 'react-dom'
 import { NotificationCenter } from './model.js'
 import { NotificationViewport } from './view.js'
 import styles from './styles.css'
@@ -34,7 +35,7 @@ export function installNotificationHost(document: Document, profileId: string): 
   const theme = new HostThemeProjection(document)
   const detachTheme = theme.attach(container)
   const root = createRoot(seat)
-  root.render(<NotificationViewport center={center} document={document} />)
+  flushSync(() => root.render(<NotificationViewport center={center} document={document} />))
   centers.set(document, center)
   let last = Date.now()
   const timer = setInterval(() => {

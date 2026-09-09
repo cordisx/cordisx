@@ -59,3 +59,12 @@ do not return strings. Component unmount is not CSS-module disposal; verify
 plugin replacement separately from CSS HMR. See the maintained
 [CSS guidance](https://github.com/cordisx/cordisx/blob/main/skills/cordisx-plugin-development/references/css-and-lifecycle.md)
 for lifecycle boundaries and installed-Host CSS Modules limitations.
+
+For operation feedback, use `ctx.notifications.show()` and declare
+`notifications` in plugin injection. Host supplies plugin identity, cards and
+user suppression rules. Do not create a Toast provider, manually positioned
+alert or page-wide operation error; keep field validation and durable business
+state next to the relevant control. See the
+[notification guide](https://github.com/cordisx/cordisx/blob/efbff656d84b482d51598bc5ba303d24134e0c62/.agents/docs/notifications.md).
+Verify SDK/Host availability first: an older version without this service is a
+capability gap, not a reason to build a private DOM fallback.

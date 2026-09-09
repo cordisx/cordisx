@@ -20,7 +20,7 @@ import {
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#bbd02f4b092566c5e7ca5e0e9b7d63230890c602'
+const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#f3e18c925c34d90fdf203c158811cef10f7ebf57'
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
   ? undefined
   : path.resolve(process.env.CORDISX_PROTOCOL_TARBALL)
@@ -207,6 +207,7 @@ import type {
   CordisXOwnerDocumentLoadResultV1,
   CordisXOwnerDocumentReplaceResultV1,
   CordisXOwnerDocumentsV1,
+  NotificationsV1,
   CordisXNavigationCollectionSnapshotV3,
   CordisXNavigationCollectionSourceV3,
   RasterImageSnapshotV1,
@@ -248,6 +249,8 @@ const projectedItems = {
 
 ctx.agentLoop satisfies BoundAgentLoopClient
 ctx.documents satisfies CordisXOwnerDocumentsV1
+ctx.notifications satisfies NotificationsV1
+ctx.notifications.show({ kind: 'connection.failed', type: 'error', message: 'Connection failed', action: { label: 'Retry', run: async signal => { signal.throwIfAborted() } } }).dismiss()
 ctx.agentLoop satisfies ProtocolBoundAgentLoopClient
 ctx.agentLoop satisfies ProtocolBoundAgentLoopClientV2
 ctx.agentLoop satisfies ProtocolBoundAgentLoopClientV3

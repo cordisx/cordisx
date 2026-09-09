@@ -44,4 +44,4 @@ state local. Do not notify repeatedly from polling or show the same failure both
 inline and through notifications. Use localized user copy; redact optional details.
 An older Host without the service requires a supported SDK upgrade or honest
 capability unavailability, never a private DOM or home-grown notification fallback.
-See the [Host notification reference](https://github.com/cordisx/cordisx/blob/main/.agents/docs/notifications.md).
+See the [Host notification reference](https://github.com/cordisx/cordisx/blob/efbff656d84b482d51598bc5ba303d24134e0c62/.agents/docs/notifications.md).
