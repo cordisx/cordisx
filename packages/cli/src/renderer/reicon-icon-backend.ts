@@ -4,6 +4,7 @@
  * nor IconFunction crosses the normalized descriptor boundary.
  */
 import type { IconFunction, IconWeight } from 'reicon/createIcon'
+import createIcon from 'reicon/createIcon'
 import Activity from 'reicon/icons/Activity'
 import Add from 'reicon/icons/Add'
 import ArrangeSquare2 from 'reicon/icons/ArrangeSquare2'
@@ -151,6 +152,7 @@ const REICON_GLYPHS = Object.freeze(
 export const BUILTIN_HOST_SURFACE_ICON_KEYS = [
   'host:archive',
   'host:chat',
+  'host:dice',
   'host:file',
   'host:fit',
   'host:folder-open',
@@ -166,10 +168,16 @@ export const BUILTIN_HOST_SURFACE_ICON_KEYS = [
 
 export type BuiltinHostSurfaceIconKey = typeof BUILTIN_HOST_SURFACE_ICON_KEYS[number]
 
+const Dice = createIcon('Dice', {
+  O: `<path d="M7 3H17C19.2091 3 21 4.79086 21 7V17C21 19.2091 19.2091 21 17 21H7C4.79086 21 3 19.2091 3 17V7C3 4.79086 4.79086 3 7 3Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 8H8.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 8H16.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 12H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 16H8.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 16H16.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`,
+  F: `<path d="M7 3H17C19.2091 3 21 4.79086 21 7V17C21 19.2091 19.2091 21 17 21H7C4.79086 21 3 19.2091 3 17V7C3 4.79086 4.79086 3 7 3Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 8H8.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 8H16.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 12H12.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 16H8.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 16H16.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`,
+})
+
 const HOST_SURFACE_GLYPHS = Object.freeze(
   {
     'host:archive': ArchiveBox,
     'host:chat': Chat,
+    'host:dice': Dice,
     'host:file': File,
     'host:fit': Frame,
     'host:folder-open': FolderOpen,

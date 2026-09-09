@@ -597,7 +597,7 @@ export class NavigationRegistryBase {
         leading.dataset.cordisxPageLeading = 'true'
         leading.style.cssText =
           'display:flex;width:28px;height:28px;flex:0 0 28px;align-items:center;justify-content:center'
-        if ((this.history.snapshot().index ?? 0) > 0) {
+        if ((this.history.snapshot().index ?? 0) > 0 && page.metadata.breadcrumbs?.length !== 0) {
           const back = pageChromeButton(content.ownerDocument, 'Back', 'host:back')
           back.addEventListener('click', () => {
             void this.back(page.owner, name as CordisXOutletName)

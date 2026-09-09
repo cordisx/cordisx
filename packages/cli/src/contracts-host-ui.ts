@@ -619,6 +619,7 @@ export interface CordisXPageMetadata {
   readonly icon?: CordisXIconToken
   /** Host-rendered chrome policy. Body-only remains subject to the target outlet policy. */
   readonly chrome?: CordisXPageChrome
+  /** Explicitly empty marks a navigation root whose Host chrome keeps the page icon instead of Back. */
   readonly breadcrumbs?: readonly CordisXLocalizedText[]
   readonly tabs?: readonly CordisXPageTab[]
   readonly headerActions?: readonly CordisXPageHeaderAction[]

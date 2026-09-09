@@ -177,6 +177,22 @@ and rollback. The initial templates have no marketplace submission, package
 signing, permission grants, or execution sandbox; plugins remain trusted local
 renderer code.
 
+Keep that source-mode process running while iterating. Edit the plugin files
+listed by the selected `cordisx.config.json`; do not copy them into a packaged
+or temporary install. Plugin component edits use Fast Refresh when safe, while
+plugin boundary edits replace only that plugin generation. When developing the
+Host repository itself, start the same command through its source entry point:
+
+```bash
+npm run dev -- dev --config /absolute/plugin-workspace/cordisx.config.json
+```
+
+Host renderer edits restart the CordisX runtime through Vite inside the same
+native application process. They do not require rebuilding an SDK or replacing
+the preview installation. Use `npm run check:fast` after behavior edits during
+this feedback loop. Run the complete package, installed-artifact, native, and
+release gates once against the final candidate before formal delivery.
+
 Generated projects start with `license: UNLICENSED` so the plugin author makes
 the licensing choice explicitly. Under the CordisX Independent Plugin
 Exception, an independent plugin that uses only documented, versioned public
