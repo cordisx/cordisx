@@ -6,6 +6,7 @@ export function createPluginHttpClient(options: {
   readonly bridge: BrowserOwnerDocumentBridge | undefined
   readonly principal: OwnerDocumentPrincipalBinding | undefined
   readonly active: () => boolean
+  readonly development?: () => boolean
   readonly consent?: typeof captureHttpConsent
   readonly configuredOrigins?: () => readonly string[]
 }): HttpClientV1 {
@@ -65,7 +66,7 @@ export function createPluginHttpClient(options: {
           configured = false
         }
       }
-      const consent = configured
+      const consent = configured || (input.credential === 'none' && options.development?.() === true)
         ? { approved: true as const }
         : await (options.consent ?? captureHttpConsent)({
           pluginId: options.principal.pluginId,

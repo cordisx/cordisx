@@ -84,17 +84,23 @@ describe('Agent Session permission-v4 Host authority', () => {
     expect(requested).toEqual(['agents.create:host-reserved-session'])
   })
 
-  it('uses the Host development authority to persist an exact lease without a dialog', async () => {
+  it('uses the Host development authority for an ephemeral exact lease without a dialog', async () => {
     const store = new MemoryPermissionPolicyStore()
     const request = vi.fn<PermissionPrompt['request']>(async () => 'deny')
     const broker = new PermissionBroker(store, { request })
-    broker.register(identity, {
-      ...manifest,
-      capabilities: [{ name: 'sessions.get', required: true, scope: {} }],
-    })
+    broker.register(
+      identity,
+      {
+        ...manifest,
+        capabilities: [{ name: 'sessions.get', required: true, scope: {} }],
+      },
+      { pluginId: identity.id, moduleGeneration: 'dev' },
+      undefined,
+      undefined,
+      true,
+    )
     broker.replaceAgentRuntimeConnection(connection)
-    const authority = broker.createDevelopmentAgentRuntimeAuthorizationAuthority()
-    const decision = await broker.authorizeDevelopmentAgentRuntime(authority, {
+    const decision = await broker.authorizeAgentRuntime({
       identity,
       capability: 'sessions.get',
       sessionId: 'room-a-run-a',
@@ -106,17 +112,7 @@ describe('Agent Session permission-v4 Host authority', () => {
     expect(decision.authorized).toBe(true)
     expect(decision.lease?.sessionId).toBe('room-a-run-a')
     expect(broker.isAgentRuntimeLeaseActive(identity, decision.lease!.leaseId)).toBe(true)
-    expect(store.readV4()).toEqual([
-      expect.objectContaining({
-        schemaVersion: 4,
-        key: expect.objectContaining({
-          identity: { source: identity.source, pluginId: identity.id },
-          capability: 'sessions.get',
-          scope: { sessionIds: ['room-a-run-a'] },
-        }),
-        policy: 'allow-persistent',
-      }),
-    ])
+    expect(store.readV4()).toEqual([])
   })
 
   it('admits explicit local-development Agent runtime authorization for every supported manifest predecessor through v8, and rejects unknown versions', async () => {
@@ -134,10 +130,16 @@ describe('Agent Session permission-v4 Host authority', () => {
     for (const candidate of manifests) {
       const store = new MemoryPermissionPolicyStore()
       const broker = new PermissionBroker(store, prompt)
-      broker.register(identity, candidate)
+      broker.register(
+        identity,
+        candidate,
+        { pluginId: identity.id, moduleGeneration: 'dev' },
+        undefined,
+        undefined,
+        true,
+      )
       broker.replaceAgentRuntimeConnection(connection)
-      const authority = broker.createDevelopmentAgentRuntimeAuthorizationAuthority()
-      const result = await broker.authorizeDevelopmentAgentRuntime(authority, {
+      const result = await broker.authorizeAgentRuntime({
         identity,
         capability: 'agents.create',
         sessionId: `cx-session.manifest-v${candidate.schemaVersion}`,
@@ -145,13 +147,7 @@ describe('Agent Session permission-v4 Host authority', () => {
         connection,
       })
       expect(result.authorized).toBe(true)
-      expect(store.readV4()).toEqual([expect.objectContaining({
-        key: expect.objectContaining({
-          capability: 'agents.create',
-          scope: { sessionIds: [`cx-session.manifest-v${candidate.schemaVersion}`] },
-        }),
-        policy: 'allow-persistent',
-      })])
+      expect(store.readV4()).toEqual([])
     }
 
     const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), prompt)
@@ -160,8 +156,7 @@ describe('Agent Session permission-v4 Host authority', () => {
       { ...manifest, $schema: 'https://example.invalid/plugin-manifest.v9.schema.json', schemaVersion: 9 } as never,
     )
     broker.replaceAgentRuntimeConnection(connection)
-    const authority = broker.createDevelopmentAgentRuntimeAuthorizationAuthority()
-    await expect(broker.authorizeDevelopmentAgentRuntime(authority, {
+    await expect(broker.authorizeAgentRuntime({
       identity,
       capability: 'agents.create',
       sessionId: 'cx-session.unknown',

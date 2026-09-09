@@ -15,11 +15,6 @@ function usageManifest(registration: Registration): boolean {
 }
 /** Usage leases never borrow message/history authority. */
 export abstract class PlatformUsagePermissionBroker extends PlatformVisualPermissionBroker {
-  private readonly developmentUsageIdentities = new Set<string>()
-  /** Host composition only: identities must come from verified Launcher local-dev provenance. */
-  enableDevelopmentUsageIdentity(identity: CordisXPluginIdentity): void {
-    this.developmentUsageIdentities.add(JSON.stringify([identity.source, identity.id]))
-  }
   private readonly usageLeases = new Map<object, UsageLease>()
   private usageSequence = 0
   private usageListening = false
@@ -64,7 +59,7 @@ export abstract class PlatformUsagePermissionBroker extends PlatformVisualPermis
     }
     // Local development is trusted renderer code. Keep the lease generation-scoped,
     // retain explicit denial above, and never infer development from a file URL.
-    if (this.developmentUsageIdentities.has(JSON.stringify([identity.source, identity.id]))) {
+    if (this.developmentPermission(current, 'usage.read')) {
       this.usageLeases.set(current.token, {
         registration: current,
         state: 'allow',
@@ -147,7 +142,6 @@ export abstract class PlatformUsagePermissionBroker extends PlatformVisualPermis
   protected disposeUsagePermissions(): void {
     for (const lease of this.usageLeases.values()) lease.cancel()
     this.usageLeases.clear()
-    this.developmentUsageIdentities.clear()
     this.listeners.delete(this.retireUsage)
   }
   protected usagePermissionSnapshots(): readonly PlatformPermissionSnapshot[] {

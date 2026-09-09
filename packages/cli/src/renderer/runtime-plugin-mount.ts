@@ -694,6 +694,12 @@ export const createRuntimeMountPlugin = async (
       () => controller.principalLive,
     )
     const http = createPluginHttpClient({
+      development: () =>
+        runtimeScope.broker()!.isLocalDevelopment(
+          controller.identity,
+          runtimeScope.moduleGenerationOf()!(controller),
+          controller.generationView,
+        ),
       bridge: runtimeScope.ownerDocumentBridge(),
       principal: entityPrincipal,
       active: () => controller.principalLive,

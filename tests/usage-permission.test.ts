@@ -104,8 +104,14 @@ describe.each([11, 12, 13])('public usage permission v%s', version => {
   it('uses verified local-development authority across HMR without minting explicit-user decisions', async () => {
     const request = vi.fn(async (plan: UsagePermissionAuthorizationPlanV6) => confirm(plan))
     const host = broker(request)
-    host.enableDevelopmentUsageIdentity(identity)
-    const remove = host.register(identity, activeManifest, { pluginId: identity.id, moduleGeneration: 'dev-1' })
+    const remove = host.register(
+      identity,
+      activeManifest,
+      { pluginId: identity.id, moduleGeneration: 'dev-1' },
+      undefined,
+      undefined,
+      true,
+    )
     expect(await host.authorizeUsage(identity)).toBe(true)
     const oldFence = host.usageFence(identity, 'dev-1')
     host.setUsagePolicy(identity, false)
@@ -113,17 +119,22 @@ describe.each([11, 12, 13])('public usage permission v%s', version => {
     remove()
     expect(oldFence()).toBe(false)
     expect(host.usageAllowed(identity)).toBe(false)
-    const removeNew = host.register(identity, activeManifest, { pluginId: identity.id, moduleGeneration: 'dev-2' })
+    const removeNew = host.register(
+      identity,
+      activeManifest,
+      { pluginId: identity.id, moduleGeneration: 'dev-2' },
+      undefined,
+      undefined,
+      true,
+    )
     expect(await host.authorizeUsage(identity)).toBe(true)
     expect(request).not.toHaveBeenCalled()
     removeNew()
     host.dispose()
   })
-  it('does not infer development authority from file URLs, matching ids, or visual permission', async () => {
+  it('does not infer development authority from file URLs or matching ids', async () => {
     const request = vi.fn(async (plan: UsagePermissionAuthorizationPlanV6) => confirm(plan))
     const host = broker(request)
-    host.enableDevelopmentUsageIdentity({ ...identity, source: 'file:///different.js' })
-    host.enableDevelopmentVisualIdentity(identity)
     const remove = host.register(identity, activeManifest, { pluginId: identity.id, moduleGeneration: 'production' })
     expect(await host.authorizeUsage(identity)).toBe(true)
     expect(request).toHaveBeenCalledTimes(1)
@@ -133,11 +144,17 @@ describe.each([11, 12, 13])('public usage permission v%s', version => {
   it('requires a declared usage capability even for verified development identities', async () => {
     const request = vi.fn(async (plan: UsagePermissionAuthorizationPlanV6) => confirm(plan))
     const host = broker(request)
-    host.enableDevelopmentUsageIdentity(identity)
-    const remove = host.register(identity, { ...activeManifest, capabilities: [] }, {
-      pluginId: identity.id,
-      moduleGeneration: 'dev',
-    })
+    const remove = host.register(
+      identity,
+      { ...activeManifest, capabilities: [] },
+      {
+        pluginId: identity.id,
+        moduleGeneration: 'dev',
+      },
+      undefined,
+      undefined,
+      true,
+    )
     expect(await host.authorizeUsage(identity)).toBe(false)
     expect(request).not.toHaveBeenCalled()
     remove()

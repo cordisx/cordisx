@@ -41,15 +41,6 @@ interface InteractionLease {
 }
 /** Generation-scoped interaction leases; persistent policy is intentionally not offered yet. */
 export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizationBroker {
-  private readonly developmentVisualIdentities = new Set<string>()
-  /** Host composition only; pass identities from verified Launcher local-dev provenance. */
-  enableDevelopmentVisualIdentity(identity: CordisXPluginIdentity): void {
-    this.developmentVisualIdentities.add(JSON.stringify([identity.source, identity.id]))
-  }
-  private isDevelopmentVisual(identity: CordisXPluginIdentity): boolean {
-    return this.developmentVisualIdentities.has(JSON.stringify([identity.source, identity.id]))
-  }
-
   private visualReviewSequence = 0
   private visualReviewQueue: Promise<unknown> = Promise.resolve()
   private readonly visualInteractionLeases = new Map<object, InteractionLease>()
@@ -94,7 +85,6 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
         || !declared.scope.extensionPoints?.includes(pointId)
       ) return false
       const access = this.domAccess(identity, pointId)
-      if (this.isDevelopmentVisual(identity) && access.state !== 'denied') return true
       if (!access.authorized && access.state === 'pending' && !renderRequested) {
         renderRequested = true
         this.visualReviewQueue = this.visualReviewQueue.catch(() => {}).then(async () => {
@@ -118,7 +108,10 @@ export abstract class PlatformVisualPermissionBroker extends PlatformAuthorizati
       ) return false
       let lease = this.visualInteractionLeases.get(current.token)
       if (lease === undefined) {
-        lease = { state: this.isDevelopmentVisual(identity) ? 'allow' : 'pending', cancel() {} }
+        lease = {
+          state: this.developmentPermission(current, 'ui.extension-points.interact') ? 'allow' : 'pending',
+          cancel() {},
+        }
         this.visualInteractionLeases.set(current.token, lease)
         if (lease.state === 'allow') return true
         const selectedLease = lease

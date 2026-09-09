@@ -315,7 +315,11 @@ export function PluginDetailPage(
                 <span className="cxr-card-description">{item.reasonText}</span>
                 <code className="cxr-card-code">{item.capability}</code>
               </span>
-              <span className="cxr-status">{item.policy}</span>
+              <span className="cxr-status">
+                {item.authorizationOrigin === 'local-development'
+                  ? managerCopy(snapshot.localization.locale, 'permission.development-authorized')
+                  : item.policy}
+              </span>
             </button>
           ))}
           {runtimeExactPermissions.map(item => (
@@ -332,7 +336,9 @@ export function PluginDetailPage(
                 <code className="cxr-card-code">{item.capability}</code>
               </span>
               <span className="cxr-status">
-                {snapshot.localization.locale.toLowerCase().startsWith('zh')
+                {plugin.development?.origin === 'local-dev' && plugin.development.state === 'ready'
+                  ? managerCopy(snapshot.localization.locale, 'permission.development-authorized')
+                  : snapshot.localization.locale.toLowerCase().startsWith('zh')
                   ? '按请求'
                   : 'per request'}
               </span>
