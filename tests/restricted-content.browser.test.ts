@@ -184,11 +184,15 @@ it.skipIf(!executable)(
         const exited = once(chrome, 'exit')
         chrome.kill('SIGTERM')
         await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 3000))])
-        if (chrome.exitCode === null && chrome.signalCode === null) chrome.kill('SIGKILL')
+        if (chrome.exitCode === null && chrome.signalCode === null) {
+          chrome.kill('SIGKILL')
+          await exited
+        }
       }
       server.closeAllConnections()
       await new Promise<void>(resolve => server.close(() => resolve()))
-      await rm(profile, { recursive: true, force: true })
+      // Chrome descendants can briefly finish writing after the parent exits.
+      await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     }
   },
   30_000,

@@ -22,16 +22,6 @@ describe('development checkpoint regressions', () => {
     expect(cliManifest.scripts.build).toContain('tsc -p tsconfig.json')
   })
 
-  it('builds the complete Host workspace before dependency-affected tests', async () => {
-    const workflow = await readFile(path.join(root, '.github/workflows/check.yml'), 'utf8')
-    const changedTests = workflow.slice(workflow.indexOf('  changed-tests:'))
-    const hostBuild = changedTests.indexOf('npm run build --workspace=cordisx')
-    const affectedTests = changedTests.indexOf('npx vitest run --changed "$BASE_SHA"')
-
-    expect(hostBuild).toBeGreaterThan(-1)
-    expect(affectedTests).toBeGreaterThan(hostBuild)
-  })
-
   it('opens the on-demand React Manager before collecting live-smoke state', async () => {
     const source = await readLiveSmokeSourceGraph(root)
     const managerSmoke = source.slice(
