@@ -1,3 +1,4 @@
+import type { NativeExecutionProjectAuthority } from './native-execution-projects.js'
 import { canonicalTaskJson } from '../agent-task-record.js'
 import { HostAgentTaskApprovalRegistry } from './agent-task-approvals.js'
 import { resolveAgentDefinitionCatalog } from './agent-loop.js'
@@ -11,6 +12,7 @@ import { nativeAgentTaskClient } from './native-agent-session-recovery.js'
 
 /** Production plugin mount supplies current authority; plugins cannot supply dependencies. */
 export function installAgentTasks(ctx: Context, input: {
+  readonly projects?: NativeExecutionProjectAuthority
   readonly runtime: CordisXAgentSessionRuntime
   readonly entities: EntityRegistry
   readonly tools: AgentTools & {
@@ -45,6 +47,11 @@ export function installAgentTasks(ctx: Context, input: {
     resolveContext: async context => {
       if (context?.kind === 'inherit' && !await input.runtime.authorizeTask(owner, 'read', context.sessionId)) {
         return { status: 'unavailable', code: 'permission-denied' }
+      }
+      if (context?.kind === 'project') {
+        const project = await input.projects?.read(context.projectId)
+        if (project === undefined) return { status: 'unavailable', code: 'project-unavailable' }
+        return await client.resolveProjectContext(context, project)
       }
       return await client.resolveContext(context)
     },

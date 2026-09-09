@@ -1,3 +1,4 @@
+import { type NativeExecutionProjectAuthority, nativeExecutionProjects } from './native-execution-projects.js'
 import { nativeApprovalReason } from './native-approval-reason.js'
 import type { AgentTaskResolvedContext } from '@cordisx/protocol/agent-task/v1'
 import { AgentTaskContextMismatch } from '../agent-task-record.js'
@@ -179,6 +180,9 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
   > {
     if (this.disposed || this.connectionReplaced) return { status: 'unavailable', code: 'host-unavailable' }
     if (this.sessions.has(input.sessionId)) return { status: 'unavailable', code: 'unsupported' }
+    if (input.executionContext?.projectId !== undefined && this.pin.buildNumber !== '8109') {
+      return { status: 'unavailable', code: 'unsupported' }
+    }
     let developerInstructions: string | undefined
     try {
       developerInstructions = nativeAgentInstructions(input.setup)
@@ -193,6 +197,9 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
         await this.request('thread/start', {
           model,
           cwd: input.executionContext?.cwd ?? '',
+          ...(this.pin.buildNumber === '8109' && input.executionContext !== undefined
+            ? { projectId: input.executionContext.projectId ?? null }
+            : {}),
           ...(developerInstructions === undefined ? {} : { developerInstructions }),
         }),
       )
@@ -209,10 +216,21 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
           : { requiredTaskOperationId: input.requiredTaskOperationId }),
         ...(input.executionContext === undefined
           ? {}
-          : { context: { ...input.executionContext, cwd: String(object(result?.thread)?.cwd ?? '') } }),
+          : {
+            context: {
+              cwd: String(object(result?.thread)?.cwd ?? ''),
+              ...(typeof object(result?.thread)?.projectId === 'string'
+                ? { projectId: String(object(result?.thread)?.projectId) }
+                : {}),
+            },
+          }),
         ...(input.setup === undefined ? {} : { setup: clone(input.setup) }),
       })
-      if (input.executionContext !== undefined && object(result?.thread)?.cwd !== input.executionContext.cwd) {
+      if (
+        input.executionContext !== undefined && (object(result?.thread)?.cwd !== input.executionContext.cwd
+          || this.pin.buildNumber === '8109'
+            && (object(result?.thread)?.projectId ?? null) !== (input.executionContext.projectId ?? null))
+      ) {
         throw new AgentTaskContextMismatch(input.sessionId)
       }
       const session: NativeSession = {
@@ -523,6 +541,14 @@ export class CodexDesktopAgentSessionTransport implements CordisXPrivateAgentDri
     } catch {
       return undefined
     }
+  }
+
+  get executionProjects(): NativeExecutionProjectAuthority | undefined {
+    // project/list/read and nullable thread/start.projectId are audited in the
+    // bundled app-server schema for Desktop 8109. Older pins keep v1 behavior.
+    return this.pin.buildNumber === '8109' && !this.disposed && !this.connectionReplaced
+      ? nativeExecutionProjects((method, params) => this.request(method, params))
+      : undefined
   }
 
   private async request(method: string, params: Record<string, unknown>): Promise<unknown> {

@@ -1,3 +1,4 @@
+import { nativeAgentTaskClient } from './native-agent-session-recovery.js'
 import { installAgentTasks } from './agent-tasks-install.js'
 import { registerNativeSessionOwner } from './native-agent-session-recovery.js'
 import { installAgentTools } from './plugin-agent-tools.js'
@@ -635,7 +636,9 @@ export const createRuntimeMountPlugin = async (
     .isolate('agentPageAdmissionTargets').isolate('agentPageAdmissionReservations')
     .isolate('agentPageAdmissionRouteDeclarations').isolate('agentPageAdmissionRouteReservations')
     .isolate('agentPageFreshRoomNavigation')
-    .isolate('agentTaskApprovals').isolate('agentTaskOwnership').isolate('agentTasks').isolate('agentTools').isolate(
+    .isolate('entityExecutionContexts').isolate('agentTaskApprovals').isolate('agentTaskOwnership').isolate(
+      'agentTasks',
+    ).isolate('agentTools').isolate(
       'entities',
     ).isolate('documents').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
@@ -676,6 +679,10 @@ export const createRuntimeMountPlugin = async (
       unregisterNativeSessionOwner()
     }
     controller.entityRegistryFiber = pluginContext.plugin(CordisXEntityRegistryServiceV1, {
+      ...(runtimeScope.desktopAgentSessionTransport()?.executionProjects === undefined
+        ? {}
+        : { projects: runtimeScope.desktopAgentSessionTransport()!.executionProjects! }),
+      resolveProject: (context, project) => nativeAgentTaskClient(owner).resolveProjectContext(context, project),
       bridge: runtimeScope.ownerDocumentBridge()!,
       principal: entityPrincipal,
       profileId: runtimeScope.metadata()!.profileId,
@@ -692,6 +699,9 @@ export const createRuntimeMountPlugin = async (
     })
     await controller.agentRegistryFiber
     installAgentTasks(pluginContext, {
+      ...(runtimeScope.desktopAgentSessionTransport()?.executionProjects === undefined
+        ? {}
+        : { projects: runtimeScope.desktopAgentSessionTransport()!.executionProjects! }),
       runtime: runtimeScope.agentSessionRuntime,
       entities: entityRegistry,
       tools,

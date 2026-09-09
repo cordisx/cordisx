@@ -113,3 +113,5 @@ reference without duplicating its authority.
 
 - [Public presentation capabilities](public-presentation-capabilities.md): exact entity settings, Host route links, and controlled Markdown editing.
 - [Local usage projection](local-usage.md): metadata-only usage, persistence and current coverage.
+
+- [Entity execution contexts](entity-execution-contexts.md): owned project/projectless defaults, native project authority and first-task context.

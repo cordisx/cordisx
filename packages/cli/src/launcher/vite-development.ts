@@ -1,3 +1,4 @@
+import { listenNativeViteServer, nativeViteWatchOptions } from './vite-development-watcher.js'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
@@ -219,7 +220,7 @@ export async function startNativeViteServer(
   const rememberFile = async (file: string): Promise<void> => {
     const realFile = await realpath(file).catch(() => path.resolve(file))
     const source = await readFile(realFile).catch(() => undefined)
-    if (source !== undefined) fileHashes.set(realFile, hashSource(source))
+    if (source !== undefined && !fileHashes.has(realFile)) fileHashes.set(realFile, hashSource(source))
   }
   const rememberPluginMetadata = async (
     realEntry: string,
@@ -641,7 +642,9 @@ if (import.meta.hot) {
       const sourcePath = id.split('?')[0]!
       if (path.isAbsolute(sourcePath)) {
         const realFile = await realpath(sourcePath).catch(() => path.resolve(sourcePath))
-        fileHashes.set(realFile, hashSource(source))
+        // A module request can race ahead of its queued file-change event.
+        // Loading must not acknowledge that event or suppress its replacement.
+        if (!fileHashes.has(realFile)) fileHashes.set(realFile, hashSource(source))
       }
       const code = source.replace(/(from\s+['"][^'"]+\.css)(['"])/g, '$1?inline$2')
         .replace(/(from\s+['"][^'"]+\.svg)(['"])/g, '$1?raw$2')
@@ -932,17 +935,11 @@ if (import.meta.hot) {
             ...config.plugins.map(item => path.dirname(item.entry)),
           ],
         },
-        watch: {
-          ignoreInitial: true,
-          ignored: [...(sourceMode ? [`${generatedRoot}**`] : []), '**/node_modules/**', '**/.git/**'],
-        },
+        watch: nativeViteWatchOptions(sourceMode ? generatedRoot : undefined),
       },
       clearScreen: false,
     })
-    const watcherReady = new Promise<void>(resolve => server.watcher.once('ready', resolve))
-    await server.listen()
-    server.watcher.add(initialGenerations.flatMap(generation => generation.watchFiles))
-    await watcherReady
+    await listenNativeViteServer(server, initialGenerations.flatMap(generation => generation.watchFiles))
     await waitForDependencyOptimization()
   } catch (error) {
     await server!?.close()

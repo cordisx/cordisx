@@ -786,3 +786,78 @@ describe('native Agent definition context', () => {
     }
   })
 })
+
+it('passes explicit native project identity or null and verifies returned task metadata on Desktop 8109', async () => {
+  const view = new TestWindow()
+  const requests: Record<string, any>[] = []
+  let wrongProject = false
+  let sequence = 0
+  const bridge = {
+    getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[2] }),
+    sendMessageFromView: async (value: any) => {
+      const request = value.request
+      if (value.type !== 'mcp-request') return
+      requests.push(request)
+      queueMicrotask(() =>
+        view.message({
+          type: 'mcp-response',
+          hostId: 'local',
+          message: {
+            id: request.id,
+            result: {
+              thread: {
+                id: `native-${++sequence}`,
+                cwd: request.params.cwd,
+                projectId: wrongProject ? 'wrong' : request.params.projectId,
+              },
+            },
+          },
+        })
+      )
+    },
+  }
+  install('window', view)
+  install('location', view.location)
+  install('codexWindowType', 'electron')
+  install('electronBridge', bridge)
+  const saved: unknown[] = []
+  const transport = await CodexDesktopAgentSessionTransport.connect({
+    ...emptyRecovery(),
+    saveBinding: async (_owner, binding) => {
+      saved.push(binding)
+    },
+  })
+  if (!transport) throw new Error('transport unavailable')
+  try {
+    expect(
+      await transport.create({
+        owner: nativeOwner,
+        sessionId: 'global',
+        options: { model: 'gpt-test' },
+        executionContext: { cwd: '/host-managed/projectless' },
+      }),
+    ).toMatchObject({ status: 'accepted' })
+    expect(requests[0]!.params).toMatchObject({ cwd: '/host-managed/projectless', projectId: null })
+    expect(
+      await transport.create({
+        owner: nativeOwner,
+        sessionId: 'project',
+        options: { model: 'gpt-test' },
+        executionContext: { cwd: '/actual/project', projectId: 'actual-id' },
+      }),
+    ).toMatchObject({ status: 'accepted' })
+    expect(requests[1]!.params).toMatchObject({ cwd: '/actual/project', projectId: 'actual-id' })
+    wrongProject = true
+    await expect(
+      transport.create({
+        owner: nativeOwner,
+        sessionId: 'mismatch',
+        options: { model: 'gpt-test' },
+        executionContext: { cwd: '/actual/project', projectId: 'actual-id' },
+      }),
+    ).rejects.toThrow()
+    expect(saved.at(-1)).toMatchObject({ sessionId: 'mismatch', context: { projectId: 'wrong' } })
+  } finally {
+    await transport.dispose()
+  }
+})
