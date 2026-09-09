@@ -83,6 +83,7 @@
     "lint": "eslint .",
     "lint:staged": "lint-staged --config .lintstagedrc.mjs",
     "prepare:sdk": "node scripts/prepare-sdk.mjs",
+    "lint:css": "stylelint \"packages/cli/src/renderer/dialogs/**/*.css\"",
     "test:unit": "vitest run --project core --project renderer",
     "test:integration": "vitest run --project integration",
     "test:browser": "vitest run --project browser",
@@ -95,7 +96,7 @@
   "dependencies": {
     "@cordisx/channel": "github:cordisx/plugin-channel#d426ec0a7a907746bc62317269a0ec5b3379adf9",
     "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#5857dac38a1d3d0f0a45b43150fe69b92321dab4",
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#f46dd21e15a949a26f05f89bf11dea339fc60c02",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#ffb4827fdfee550865b55593fc5b8a1cc51ed53c",
     "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
@@ -134,7 +135,9 @@
     "@typescript-eslint/parser": "8.69.0",
     "dprint": "0.57.1",
     "eslint": "9.39.4",
-    "lint-staged": "16.2.7"
+    "lint-staged": "16.2.7",
+    "stylelint": "17.15.0",
+    "@projectwallace/stylelint-plugin": "0.7.0"
   },
   "bundleDependencies": [
     "@cordisx/schemastery-ui",

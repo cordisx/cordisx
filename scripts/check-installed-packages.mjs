@@ -20,7 +20,8 @@ import {
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#f46dd21e15a949a26f05f89bf11dea339fc60c02'
+// Canonical merged dialogs Protocol baseline.
+const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#ffb4827fdfee550865b55593fc5b8a1cc51ed53c'
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
   ? undefined
   : path.resolve(process.env.CORDISX_PROTOCOL_TARBALL)

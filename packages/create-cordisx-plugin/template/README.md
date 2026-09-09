@@ -68,3 +68,8 @@ state next to the relevant control. See the
 [notification guide](https://github.com/cordisx/cordisx/blob/efbff656d84b482d51598bc5ba303d24134e0c62/.agents/docs/notifications.md).
 Verify SDK/Host availability first: an older version without this service is a
 capability gap, not a reason to build a private DOM fallback.
+
+For modals, use Host `Dialog`/`DialogProvider` from `cordisx/ui` or `ctx.dialogs`.
+Keep full JSX in the body and use structured header/footer actions. The Host
+owns the rightmost close button, focus, theme and lifecycle. See the
+[dialog guide](https://github.com/cordisx/cordisx/blob/main/.agents/docs/dialogs.md).

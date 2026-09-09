@@ -46,3 +46,7 @@ const notificationStyles = '../src/renderer/notifications/styles.css'
 const notificationDestination = new URL('../dist/src/renderer/notifications/styles.css', import.meta.url)
 await mkdir(path.dirname(fileURLToPath(notificationDestination)), { recursive: true })
 await copyFile(new URL(notificationStyles, import.meta.url), notificationDestination)
+
+const dialogDestination = new URL('../dist/src/renderer/dialogs/styles.css', import.meta.url)
+await mkdir(new URL('.', dialogDestination), { recursive: true })
+await copyFile(new URL('../src/renderer/dialogs/styles.css', import.meta.url), dialogDestination)

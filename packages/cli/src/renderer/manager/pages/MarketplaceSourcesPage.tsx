@@ -1,5 +1,6 @@
+import { HostEditorDialog } from '../../dialogs/internal.js'
 import { useState } from 'react'
-import { Button, Dialog, Input, Switch } from 'tdesign-react'
+import { Button, Input, Switch } from 'tdesign-react'
 import {
   type MarketplaceModel,
   normalizeMarketplaceSource,
@@ -85,13 +86,13 @@ export function MarketplaceSourcesPage(
           )
         })}
       </div>
-      <Dialog
+      <HostEditorDialog
         visible={visible}
         header="添加来源"
         confirmBtn="保存"
         cancelBtn="取消"
         onClose={() => setVisible(false)}
-        onConfirm={() => void save()}
+        onConfirm={save}
       >
         <div className="cxr-dialog-form">
           <label>
@@ -104,7 +105,7 @@ export function MarketplaceSourcesPage(
           </label>
           {error === undefined ? null : <div className="cxr-danger" role="alert">{error}</div>}
         </div>
-      </Dialog>
+      </HostEditorDialog>
     </section>
   )
 }

@@ -411,6 +411,8 @@ export const createRuntimeDispose = async (runtimeScope: RuntimeClosureScope): P
     delete controller.httpClient
     await controller.unregisterHttp?.()
     delete controller.unregisterHttp
+    controller.unregisterDialogs?.()
+    delete controller.unregisterDialogs
     controller.unregisterNotifications?.()
     delete controller.unregisterNotifications
     controller.restrictedContent?.dispose()

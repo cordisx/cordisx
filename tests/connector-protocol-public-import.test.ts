@@ -15,7 +15,8 @@ import type {
 } from '@cordisx/protocol/connector-service/v1'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const protocolCommit = 'f46dd21e15a949a26f05f89bf11dea339fc60c02'
+// Canonical merged dialogs Protocol baseline.
+const protocolCommit = 'ffb4827fdfee550865b55593fc5b8a1cc51ed53c'
 const protocolSource = `github:cordisx/cordisx-protocol#${protocolCommit}`
 const protocolResolvedSource = `git+ssh://git@github.com/cordisx/cordisx-protocol.git#${protocolCommit}`
 const staleProtocolCommit = '3f0dbcd8b04ae83c920d2d913ac2c313af5f83f1'

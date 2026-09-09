@@ -1,3 +1,4 @@
+import { installPluginDialogs } from './dialogs/plugin.js'
 import { notificationCenterForDocument } from './notifications/host.js'
 import { nativeAgentTaskClient } from './native-agent-session-recovery.js'
 import { createRestrictedContentService } from './restricted-content-service.js'
@@ -317,6 +318,8 @@ export const createRuntimeDisposeControllerFiber = async (
     delete controller.httpClient
     await controller.unregisterHttp?.()
     delete controller.unregisterHttp
+    controller.unregisterDialogs?.()
+    delete controller.unregisterDialogs
     controller.unregisterNotifications?.()
     delete controller.unregisterNotifications
     controller.restrictedContent?.dispose()
@@ -664,7 +667,7 @@ export const createRuntimeMountPlugin = async (
       'entities',
     ).isolate('documents').isolate('http').isolate('agentLoopControl').isolate('restrictedContent').isolate(
       'notifications',
-    ).extend({
+    ).isolate('dialogs').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: runtimeScope.moduleGenerationOf()!(controller),
@@ -714,6 +717,11 @@ export const createRuntimeMountPlugin = async (
       notificationBinding.dispose()
     }
   }
+  controller.unregisterDialogs = installPluginDialogs(pluginContext, document, {
+    key: agentLoopOptions.ownerKey,
+    name: () => controller.manifest.name ?? controller.item.id,
+    active: () => agentLoopOptions.active() && runtimeScope.activeControllers()().includes(controller),
+  }, notificationBinding?.api)
   controller.restrictedContent = createRestrictedContentService(agentLoopOptions.active)
   controller.unregisterRestrictedContent = pluginContext.reflect.provide(
     'restrictedContent',
@@ -956,6 +964,8 @@ export const createRuntimeMountPlugin = async (
     delete controller.httpClient
     await controller.unregisterHttp?.()
     delete controller.unregisterHttp
+    controller.unregisterDialogs?.()
+    delete controller.unregisterDialogs
     controller.unregisterNotifications?.()
     delete controller.unregisterNotifications
     controller.restrictedContent?.dispose()

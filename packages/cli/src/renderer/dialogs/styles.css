@@ -1,0 +1,237 @@
+:host {
+  color: var(--cx-text);
+  font: 13px/1.5 system-ui, sans-serif;
+}
+* {
+  box-sizing: border-box;
+}
+dialog {
+  position: fixed;
+  inset: 0;
+  width: min(640px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 0;
+  overflow: visible;
+  border: 1px solid var(--cx-border);
+  border-radius: 14px;
+  color: var(--cx-text);
+  background: var(--cx-surface-raised);
+  box-shadow: 0 20px 80px var(--cx-shadow);
+  font: inherit;
+}
+dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+dialog[data-size="small"] {
+  width: min(440px, calc(100vw - 32px));
+}
+dialog[data-size="large"] {
+  width: min(960px, calc(100vw - 32px));
+}
+dialog::backdrop {
+  background: var(--cx-backdrop);
+}
+header {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--cx-border);
+}
+.heading {
+  min-width: 0;
+  flex: 1;
+}
+h2 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 26px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.source, .description, .status {
+  color: var(--cx-muted);
+  overflow-wrap: anywhere;
+}
+.source {
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+.description {
+  margin: 6px 0 0;
+}
+.header-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  border: 1px solid var(--cx-border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--cx-text);
+  font: inherit;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  background: var(--cx-hover);
+}
+button:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--cx-focus);
+  outline-offset: 2px;
+}
+button:disabled {
+  opacity: var(--cx-disabled);
+  cursor: default;
+}
+button[data-primary="true"] {
+  background: var(--cx-primary);
+  color: var(--cx-primary-text);
+}
+button[data-primary="true"]:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--cx-primary) 88%,
+    var(--cx-surface-raised)
+  );
+}
+button[data-tone="danger"] {
+  color: var(--cx-danger);
+}
+button[data-primary="true"][data-tone="danger"] {
+  color: var(--cx-surface);
+  background: var(--cx-danger);
+}
+.icon-button, summary {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  border: 0;
+  padding: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+summary {
+  list-style: none;
+}
+summary::-webkit-details-marker {
+  display: none;
+}
+summary:hover {
+  background: var(--cx-hover);
+}
+svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.body {
+  min-height: 0;
+  padding: 20px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.body[data-layout="fill"] {
+  display: flex;
+  flex-direction: column;
+  height: min(640px, calc(100dvh - 220px));
+  overflow: hidden;
+}
+slot[name="body"] {
+  display: contents;
+}
+::slotted([slot="body"]) {
+  display: block;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  color: var(--cx-text);
+  font: 13px/1.5 system-ui, sans-serif;
+}
+footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--cx-border);
+}
+.status {
+  min-width: 0;
+  margin-inline-end: auto;
+}
+.footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+details {
+  position: relative;
+}
+.menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 1;
+  display: grid;
+  min-width: 160px;
+  max-width: 260px;
+  padding: 6px;
+  border: 1px solid var(--cx-border);
+  border-radius: 10px;
+  background: var(--cx-surface-raised);
+  box-shadow: 0 8px 24px var(--cx-shadow);
+}
+.menu button {
+  border: 0;
+  justify-content: flex-start;
+  text-align: start;
+}
+@media (max-width: 480px) {
+  header {
+    gap: 8px;
+    padding: 16px;
+  }
+  .body {
+    padding: 16px;
+  }
+  footer {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 16px;
+  }
+  .status {
+    margin: 0;
+  }
+  h2 {
+    font-size: 16px;
+  }
+}
+@media (pointer: coarse) {
+  button, summary {
+    min-height: 44px;
+  }
+  .icon-button, summary {
+    width: 44px;
+  }
+}

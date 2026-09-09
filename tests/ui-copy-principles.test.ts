@@ -128,7 +128,8 @@ describe('Host UI catalog and production React composition', () => {
       expectRenderedImport('host-ui/HostForm.tsx', 'tdesign-react', control)
     }
     expectRenderedImport('manager/pages/PermissionDetailPage.tsx', 'tdesign-react', 'Select')
-    for (const control of ['Dialog', 'Input', 'Switch', 'Button']) {
+    expectRenderedImport('manager/pages/MarketplaceSourcesPage.tsx', '../../dialogs/internal.js', 'HostEditorDialog')
+    for (const control of ['Input', 'Switch', 'Button']) {
       expectRenderedImport('manager/pages/MarketplaceSourcesPage.tsx', 'tdesign-react', control)
     }
   })
