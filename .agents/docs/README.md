@@ -125,3 +125,5 @@ reference without duplicating its authority.
 
 - [Controlled AgentLoop](agent-loop-control.md): independent game workspaces, deadlines and exact turn interruption.
 - [Work usage](work-usage.md): separate ledger and conservative game-source exclusion.
+
+- [Plugin notifications](notifications.md): public operation feedback, card interactions and user rules.

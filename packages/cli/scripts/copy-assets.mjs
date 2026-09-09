@@ -41,3 +41,8 @@ await writeFile(
 
 // npm bin linking can chmod an old output; fresh tsc output must pack identically.
 await chmod(fileURLToPath(new URL('../dist/src/cli.js', import.meta.url)), 0o755)
+
+const notificationStyles = '../src/renderer/notifications/styles.css'
+const notificationDestination = new URL('../dist/src/renderer/notifications/styles.css', import.meta.url)
+await mkdir(path.dirname(fileURLToPath(notificationDestination)), { recursive: true })
+await copyFile(new URL(notificationStyles, import.meta.url), notificationDestination)

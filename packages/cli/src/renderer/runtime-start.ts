@@ -1,3 +1,4 @@
+import { installNotificationHost } from './notifications/host.js'
 import { NativeAgentSessionPersistence } from './native-agent-session-recovery.js'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
@@ -125,6 +126,7 @@ export async function start(
   if (options.previousRuntimeDisposed !== true) await globalThis.__cordisxRuntime?.dispose()
 
   let ctx = new Context()
+  let disposeNotifications = () => {}
   let disposeInternalBootstrap: (() => void | Promise<void>) | undefined
   let disposePreparedSharedReactRuntime = options.disposePreparedSharedReactRuntime
   let sharedReactRuntime: ReturnType<typeof installSharedReactRuntime> | undefined
@@ -236,6 +238,7 @@ export async function start(
   }
   let certifiedPermissionChannel: CertifiedPermissionDocumentChannel | undefined
   try {
+    disposeNotifications = installNotificationHost(document, metadata.profileId)
     const generationVisibility = new GenerationVisibilityCoordinator(currentActivation, metadata.initialRegistryEpoch)
     const pluginConsole = new PluginConsoleAspect(generation, 2000, () => Date.now(), generationVisibility)
     let pluginErrorOwners = (): readonly {
@@ -950,7 +953,13 @@ export async function start(
     ): Readonly<{ revision: number; pluginRevision: number }> =>
       runtimeClosures5.createRuntimeAdoptPluginBundleSnapshot(closureScope, snapshot)
 
-    const dispose = async (): Promise<void> => runtimeClosures5.createRuntimeDispose(closureScope)
+    const dispose = async (): Promise<void> => {
+      try {
+        await runtimeClosures5.createRuntimeDispose(closureScope)
+      } finally {
+        disposeNotifications()
+      }
+    }
 
     const handle: CordisXRuntimeHandle = runtimeClosures5.createRuntimeHandle(closureScope)
     const managerModel: ManagerModel = runtimeClosures5.createRuntimeManagerModel(closureScope)
@@ -964,6 +973,7 @@ export async function start(
     console.info(`[cordisx] mounted ${activeIds.length} plugin(s): ${activeIds.join(', ')}`)
     return handle
   } catch (error) {
+    disposeNotifications()
     certifiedPermissionChannel?.dispose()
     certifiedPermissionChannel = undefined
     disposeAgentDetailHistoryReturn()

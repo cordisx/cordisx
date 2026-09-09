@@ -13,7 +13,7 @@ Build plugins against the public CordisX contract. Keep the Host responsible for
 - Choose or inspect the project shape and development loop: [project-layouts-and-development.md](references/project-layouts-and-development.md)
 - Change plugin-owned styles or CSS imports: [css-and-lifecycle.md](references/css-and-lifecycle.md)
 - Start or package a plugin: [plugin-authoring.md](references/plugin-authoring.md)
-- Add any Manager page, contribution, action, collection, or icon: [ui-system.md](references/ui-system.md)
+- Add notifications or any Manager page, contribution, action, collection, or icon: [ui-system.md](references/ui-system.md)
 - Add or change plugin configuration: [schema-configuration.md](references/schema-configuration.md)
 - Run or deliver the result: [verification.md](references/verification.md)
 - Continue work inside an already-running development session: [live-plugin-development.md](references/live-plugin-development.md)

@@ -1,3 +1,4 @@
+import { notificationCenterForDocument } from './notifications/host.js'
 import { nativeAgentTaskClient } from './native-agent-session-recovery.js'
 import { createRestrictedContentService } from './restricted-content-service.js'
 import { createPluginHttpClient } from './plugin-http.js'
@@ -316,6 +317,8 @@ export const createRuntimeDisposeControllerFiber = async (
     delete controller.httpClient
     await controller.unregisterHttp?.()
     delete controller.unregisterHttp
+    controller.unregisterNotifications?.()
+    delete controller.unregisterNotifications
     controller.restrictedContent?.dispose()
     await controller.unregisterRestrictedContent?.()
     delete controller.restrictedContent
@@ -659,7 +662,7 @@ export const createRuntimeMountPlugin = async (
       'agentTasks',
     ).isolate('agentTools').isolate(
       'entities',
-    ).isolate('documents').isolate('http').isolate('agentLoopControl').isolate('restrictedContent').extend({
+    ).isolate('documents').isolate('http').isolate('agentLoopControl').isolate('restrictedContent').isolate('notifications').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: runtimeScope.moduleGenerationOf()!(controller),
@@ -677,6 +680,25 @@ export const createRuntimeMountPlugin = async (
         === 'allowed',
   )
   controller.unregisterAgentLoopControl = pluginContext.reflect.provide('agentLoopControl', controller.agentLoopControl)
+  const notificationBinding = notificationCenterForDocument(document)?.bind({
+    key: agentLoopOptions.ownerKey,
+    pluginId: controller.item.id,
+    active: () => agentLoopOptions.active() && runtimeScope.activeControllers()().includes(controller),
+    presentation: () => {
+      const plugin = runtimeScope.publicSnapshot()().plugins.find(item => item.id === controller.item.id && item.source === controller.identity.source)
+      return { name: plugin?.name ?? controller.manifest.name ?? controller.item.id, ...(plugin?.icon ? { icon: plugin.icon } : {}) }
+    },
+    canOpen: () => runtimeScope.routeService?.snapshot().routes.some(item => item.owner === controller.item.id && item.valid && item.authorized && !item.definition.path.includes(':')) ?? false,
+    open: async () => {
+      const route = runtimeScope.routeService?.snapshot().routes.find(item => item.owner === controller.item.id && item.valid && item.authorized && !item.definition.path.includes(':'))
+      if (!route || !runtimeScope.routeService) throw new Error('Plugin page unavailable')
+      await runtimeScope.routeService.navigateFor(controller.item.id, { id: route.id })
+    },
+  })
+  if (notificationBinding) {
+    const release = pluginContext.reflect.provide('notifications', notificationBinding.api)
+    controller.unregisterNotifications = () => { release(); notificationBinding.dispose() }
+  }
   controller.restrictedContent = createRestrictedContentService(agentLoopOptions.active)
   controller.unregisterRestrictedContent = pluginContext.reflect.provide(
     'restrictedContent',
@@ -919,6 +941,8 @@ export const createRuntimeMountPlugin = async (
     delete controller.httpClient
     await controller.unregisterHttp?.()
     delete controller.unregisterHttp
+    controller.unregisterNotifications?.()
+    delete controller.unregisterNotifications
     controller.restrictedContent?.dispose()
     await controller.unregisterRestrictedContent?.()
     delete controller.restrictedContent

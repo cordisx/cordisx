@@ -40,3 +40,5 @@ initial gate; follow the organization splitting guidance when expanding them.
 its initial CI report is nonblocking while that debt is handled separately.
 A passing configuration job is not a passing full-source lint result.
 Update the dependency, lock, formatter reference and CI provider SHA together.
+
+- For plugin operation feedback, follow [notifications](../docs/notifications.md). Use the owner-bound public notification API; do not add custom Toasts or page-level operation alerts.
