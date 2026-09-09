@@ -7,6 +7,7 @@ export function createPluginHttpClient(options: {
   readonly principal: OwnerDocumentPrincipalBinding | undefined
   readonly active: () => boolean
   readonly consent?: typeof captureHttpConsent
+  readonly configuredOrigins?: () => readonly string[]
 }): HttpClientV1 {
   let disposed = false
   const lifetime = new AbortController()
@@ -56,12 +57,22 @@ export function createPluginHttpClient(options: {
       } catch {
         return { status: 'unavailable' as const, code: 'invalid-request' as const }
       }
-      const consent = await (options.consent ?? captureHttpConsent)({
-        pluginId: options.principal.pluginId,
-        origin,
-        credential: input.credential,
-        signal: lifetime.signal,
-      })
+      let configured = false
+      if (input.credential === 'none') {
+        try {
+          configured = options.configuredOrigins?.().includes(origin) === true
+        } catch {
+          configured = false
+        }
+      }
+      const consent = configured
+        ? { approved: true as const }
+        : await (options.consent ?? captureHttpConsent)({
+          pluginId: options.principal.pluginId,
+          origin,
+          credential: input.credential,
+          signal: lifetime.signal,
+        })
       if (!consent.approved) return { status: 'unavailable' as const, code: 'denied' as const }
       const result = await call<HttpConnectionV1>('plugin-http-authorize', {
         origin,

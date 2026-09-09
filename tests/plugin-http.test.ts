@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PluginHttpAuthority } from '../packages/cli/src/launcher/plugin-http-authority.js'
 import { issueOwnerDocumentPrincipalToken } from '../packages/cli/src/launcher/owner-document-rpc.js'
 import { createPluginHttpClient } from '../packages/cli/src/renderer/plugin-http.js'
@@ -224,6 +224,41 @@ describe('public plugin HTTP authority', () => {
     setTimeout(() => abort.abort(), 20)
     expect(await pending).toMatchObject({ code: 'aborted' })
     expect(calls.some(v => Object.hasOwn(v as object, 'signal'))).toBe(false)
+    client.dispose()
+  })
+  it('auto-connects only exact configured origins without credentials', async () => {
+    const consent = vi.fn(async () => ({ approved: false as const }))
+    const calls: Record<string, unknown>[] = []
+    const client = createPluginHttpClient({
+      principal: { ...principal.identity, moduleGeneration: 'm1', token },
+      active: () => true,
+      configuredOrigins: () => ['https://configured.example'],
+      consent,
+      bridge: {
+        request: async (_: string, value: Record<string, unknown>) => {
+          calls.push(value)
+          return {
+            status: 'accepted',
+            value: {
+              contract: 'cordisx.http-connection/v1',
+              id: `connection-${calls.length}`,
+              origin: value.origin,
+              credential: value.credential,
+            },
+          }
+        },
+      } as never,
+    })
+    await expect(client.authorize({ origin: 'https://configured.example/', credential: 'none' })).resolves
+      .toMatchObject({ status: 'accepted' })
+    expect(consent).not.toHaveBeenCalled()
+    expect(calls).toHaveLength(1)
+    await expect(client.authorize({ origin: 'https://other.example', credential: 'none' })).resolves
+      .toMatchObject({ status: 'unavailable', code: 'denied' })
+    await expect(client.authorize({ origin: 'https://configured.example', credential: 'bearer' })).resolves
+      .toMatchObject({ status: 'unavailable', code: 'denied' })
+    expect(consent).toHaveBeenCalledTimes(2)
+    expect(calls).toHaveLength(1)
     client.dispose()
   })
 })
