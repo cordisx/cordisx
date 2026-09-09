@@ -95,6 +95,8 @@ implementation of those contracts, not a second public specification.
 
 ## Maintainer and artifact entry points
 
+- [CI validation and diagnosis](ci-validation.md): scope selection, Skill package checks, and slow-phase diagnosis.
+
 - [Native debugging and recovery](native-debugging-runbook.md): launch stages,
   debug switches, durable identity and targeted Shell/sidebar diagnosis.
 
