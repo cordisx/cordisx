@@ -935,6 +935,10 @@ if (import.meta.hot) {
           ],
         },
         watch: {
+          // Chokidar's macOS FSEvents path emits ready before its asynchronous
+          // native registration completes. Use fs.watch so returning this
+          // server actually covers the first edit, without a timing delay.
+          ...(process.platform === 'darwin' ? { useFsEvents: false } : {}),
           ignoreInitial: true,
           ignored: [...(sourceMode ? [`${generatedRoot}**`] : []), '**/node_modules/**', '**/.git/**'],
         },

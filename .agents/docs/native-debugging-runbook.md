@@ -110,6 +110,10 @@ ordinary loading; only HMR processing advances the acknowledged file version.
 Otherwise a request that loads new bytes before the queued change callback can
 suppress its own generation replacement. Canonical plugin inputs are registered
 before the initial watcher-ready epoch can complete, so an immediate edit after
-startup is observed. The load-before-change regression test controls event
+startup is observed. On macOS the adapter selects Chokidar's `fs.watch` backend:
+its FSEvents implementation can emit `ready` before asynchronously registering
+the native watch, losing an edit after startup returns. A watcher-ready event
+alone must not be treated as proof that this backend can receive the first edit.
+The load-before-change regression test controls event
 ordering on an isolated real Vite server; it does not add a timing sleep or a
 second watcher/transport to the product.
