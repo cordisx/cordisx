@@ -6,6 +6,19 @@ import styles from './styles.css'
 import { HostThemeProjection } from '../host-theme.js'
 
 const centers = new WeakMap<Document, NotificationCenter>()
+const viewports = new WeakMap<Document, HTMLElement>()
+/** Keep the one existing notification viewport in the active modal's flat tree. */
+export function moveNotificationViewport(document: Document, target?: HTMLElement) {
+  const viewport = viewports.get(document)
+  if (!viewport) return
+  if (target) {
+    viewport.slot = 'notifications'
+    target.append(viewport)
+  } else {
+    viewport.removeAttribute('slot')
+    document.body.append(viewport)
+  }
+}
 export function notificationCenterForDocument(document: Document) {
   return centers.get(document)
 }
@@ -32,6 +45,7 @@ export function installNotificationHost(document: Document, profileId: string): 
   const seat = document.createElement('div')
   container.append(seat)
   document.body.append(container)
+  viewports.set(document, container)
   const theme = new HostThemeProjection(document)
   const detachTheme = theme.attach(container)
   const root = createRoot(seat)
@@ -52,6 +66,7 @@ export function installNotificationHost(document: Document, profileId: string): 
     root.unmount()
     detachTheme()
     theme.dispose()
+    viewports.delete(document)
     container.remove()
     if (centers.get(document) === center) centers.delete(document)
   }

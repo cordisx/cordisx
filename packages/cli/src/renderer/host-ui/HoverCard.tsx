@@ -1,3 +1,4 @@
+import { DialogOverlayContext } from '../dialogs/react.js'
 import * as React from 'react'
 import { createPortal } from 'react-dom'
 import type { HoverCardProps } from '../../ui.js'
@@ -144,7 +145,8 @@ export function HoverCard({
   const description = [triggerProps['aria-describedby'], describedBy, open ? cardId : undefined]
     .filter(Boolean)
     .join(' ') || undefined
-  const portalRoot = triggerRef.current?.ownerDocument.body
+  const dialogPortal = React.useContext(DialogOverlayContext)
+  const portalRoot = dialogPortal ?? triggerRef.current?.ownerDocument.body
   const card = open && portalRoot != null
     ? createPortal(
       <div

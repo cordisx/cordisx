@@ -1,3 +1,4 @@
+import type { DialogChromeV1, DialogHandleV1, DialogMountV1, DialogResultV1, DialogsV1 } from './dialog-contracts.js'
 import type * as React from 'react'
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
 import type { CordisXConfigFormIcon } from './contracts.js'
@@ -245,3 +246,30 @@ export const AttachmentPlaceholder = HostComponent<AttachmentPlaceholderProps>('
 export const AgentAvatar = HostComponent<AgentAvatarProps>('AgentAvatar')
 export const Stack = HostComponent<StackProps>('Stack')
 export const Text = HostComponent<TextProps>('Text')
+
+/** Chrome accepts only structured descriptors; JSX is confined to the body seat. */
+export interface DialogProps extends DialogChromeV1 {
+  readonly service?: DialogsV1
+  readonly kind?: string
+  readonly open: boolean
+  readonly onOpenChange: (open: boolean, result: DialogResultV1) => void
+  readonly children: React.ReactNode
+}
+export interface DialogProviderProps {
+  readonly service: DialogsV1
+  readonly children: React.ReactNode
+}
+export interface DialogViewProps {
+  readonly props: Readonly<Record<string, unknown>>
+  readonly dialog: DialogHandleV1
+  readonly signal: AbortSignal
+}
+export const Dialog = HostComponent<DialogProps>('Dialog')
+export const DialogProvider = HostComponent<DialogProviderProps>('DialogProvider')
+export function defineDialog(_component: React.ComponentType<DialogViewProps>): DialogMountV1 {
+  throw new Error('defineDialog is available only inside the CordisX renderer Host')
+}
+
+export function useDialog(): DialogHandleV1 {
+  throw new Error('useDialog is available only inside a CordisX dialog body')
+}

@@ -1,3 +1,4 @@
+import { installDialogHost } from './dialogs/host.js'
 import { installNotificationHost } from './notifications/host.js'
 import { NativeAgentSessionPersistence } from './native-agent-session-recovery.js'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
@@ -126,6 +127,7 @@ export async function start(
   if (options.previousRuntimeDisposed !== true) await globalThis.__cordisxRuntime?.dispose()
 
   let ctx = new Context()
+  let disposeDialogs = () => {}
   let disposeNotifications = () => {}
   let disposeInternalBootstrap: (() => void | Promise<void>) | undefined
   let disposePreparedSharedReactRuntime = options.disposePreparedSharedReactRuntime
@@ -239,6 +241,7 @@ export async function start(
   let certifiedPermissionChannel: CertifiedPermissionDocumentChannel | undefined
   try {
     disposeNotifications = installNotificationHost(document, metadata.profileId)
+    disposeDialogs = installDialogHost(document)
     const generationVisibility = new GenerationVisibilityCoordinator(currentActivation, metadata.initialRegistryEpoch)
     const pluginConsole = new PluginConsoleAspect(generation, 2000, () => Date.now(), generationVisibility)
     let pluginErrorOwners = (): readonly {
@@ -957,6 +960,7 @@ export async function start(
       try {
         await runtimeClosures5.createRuntimeDispose(closureScope)
       } finally {
+        disposeDialogs()
         disposeNotifications()
       }
     }
@@ -973,6 +977,7 @@ export async function start(
     console.info(`[cordisx] mounted ${activeIds.length} plugin(s): ${activeIds.join(', ')}`)
     return handle
   } catch (error) {
+    disposeDialogs()
     disposeNotifications()
     certifiedPermissionChannel?.dispose()
     certifiedPermissionChannel = undefined

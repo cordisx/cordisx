@@ -54,6 +54,10 @@ const REACT_EXPORTS = [
 ] as const
 
 const UI_EXPORTS = [
+  'Dialog',
+  'DialogProvider',
+  'defineDialog',
+  'useDialog',
   'AttachmentPlaceholder',
   'AgentAvatar',
   'Button',

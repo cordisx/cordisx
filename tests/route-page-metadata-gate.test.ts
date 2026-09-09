@@ -32,6 +32,8 @@ const bundledRoots = [
 const bundledFiles = ['packages/cli/scripts/live-smoke.mjs'] as const
 
 const expectedRegistrations = [
+  'examples/plugins/dialogs/index.tsx|page|main',
+  'examples/plugins/dialogs/index.tsx|route|main',
   'examples/plugins/notifications/index.tsx|page|main',
   'examples/plugins/notifications/index.tsx|route|main',
   'examples/plugins/lifecycle-smoke/index.ts|page|overview',

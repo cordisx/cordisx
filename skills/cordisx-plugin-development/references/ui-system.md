@@ -45,3 +45,13 @@ inline and through notifications. Use localized user copy; redact optional detai
 An older Host without the service requires a supported SDK upgrade or honest
 capability unavailability, never a private DOM or home-grown notification fallback.
 See the [Host notification reference](https://github.com/cordisx/cordisx/blob/efbff656d84b482d51598bc5ba303d24134e0c62/.agents/docs/notifications.md).
+
+## Dialogs and complex JSX
+
+Use `Dialog`/`DialogProvider` from `cordisx/ui` or the owner-bound `ctx.dialogs`
+service. Body seats support full JSX, state, async workflows and editors; they
+are not text-only renderers. Host owns the header, footer and rightmost close
+button. Supply structured action descriptors, never a JSX header/footer or CSS
+override of the modal shell. Use the documented modal body container for
+popovers. Declare `dialogs` injection; older Hosts require an upgrade. See the
+[dialog guide](https://github.com/cordisx/cordisx/blob/main/.agents/docs/dialogs.md).

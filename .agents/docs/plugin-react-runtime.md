@@ -74,6 +74,12 @@ and use `minHeight: 0` when they share the remaining height. Ordinary stacks kee
 the existing whole-body scrolling behavior. `PanZoomCanvas fill` keeps the same
 layout treatment.
 
+Complex modal bodies use `Dialog` and `DialogProvider`; commands can register a
+React body with `defineDialog`, then open it through the owner-bound `dialogs`
+service. Header/footer remain structured Host chrome. See [plugin dialogs](dialogs.md)
+for this experimental capability's provider version, JSX context behavior and
+lifecycle contract.
+
 ## Runtime and ownership
 
 The immutable package path consumes the plugin's Vite ESM graph with automatic

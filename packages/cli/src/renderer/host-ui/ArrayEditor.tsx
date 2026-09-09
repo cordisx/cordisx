@@ -1,5 +1,6 @@
+import { HostEditorDialog } from '../dialogs/internal.js'
 import { Fragment, type ReactElement, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Dialog } from 'tdesign-react'
+import { Button } from 'tdesign-react'
 import type { CordisXConfigFieldSnapshot, CordisXConfigFormSchemaNode, CordisXJsonValue } from '../../contracts.js'
 import { formSchemaDefaultValue } from '../form-schema-defaults.js'
 import { managerCopy } from '../ui-copy.js'
@@ -403,7 +404,7 @@ export function ArrayEditor({ field, value, onChange, locale, validateField, ren
           </span>
         </div>
       ))}
-      <Dialog
+      <HostEditorDialog
         visible={target !== undefined}
         dialogClassName="cxf-array-item-dialog"
         header={targetTitle(locale, target)}
@@ -434,7 +435,7 @@ export function ArrayEditor({ field, value, onChange, locale, validateField, ren
           validateField={validateField}
           renderFieldRow={renderFieldRow}
         />
-      </Dialog>
+      </HostEditorDialog>
     </div>
   )
 }

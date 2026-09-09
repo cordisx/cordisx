@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "plugins": [
+    { "id": "dialogs-demo", "entry": "./examples/plugins/dialogs/index.tsx", "enabled": true, "config": {} }
+  ]
+}

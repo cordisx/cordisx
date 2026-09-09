@@ -1,3 +1,4 @@
+export type * from './dialog-contracts.js'
 export * from './usage-contracts.js'
 export { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, type CordisXPluginManifestV11 } from './agent-task-permission-manifest.js'
 export {

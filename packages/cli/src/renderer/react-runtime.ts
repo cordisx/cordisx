@@ -1,3 +1,4 @@
+import { defineDialog, Dialog, DialogProvider, useDialog } from './dialogs/react.js'
 import { defineReactVisual } from '../react.js'
 import * as React from 'react'
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
@@ -446,6 +447,10 @@ export interface SharedReactRuntime {
   readonly jsxRuntime: typeof jsxRuntime
   readonly jsxDevRuntime: typeof jsxDevRuntime
   readonly ui: Readonly<{
+    Dialog: typeof Dialog
+    DialogProvider: typeof DialogProvider
+    defineDialog: typeof defineDialog
+    useDialog: typeof useDialog
     AttachmentPlaceholder: typeof AttachmentPlaceholder
     AgentAvatar: typeof AgentAvatar
     Button: typeof Button
@@ -543,6 +548,10 @@ export function installSharedReactRuntime(document: Document): SharedReactRuntim
     jsxRuntime,
     jsxDevRuntime,
     ui: Object.freeze({
+      Dialog,
+      DialogProvider,
+      defineDialog,
+      useDialog,
       AttachmentPlaceholder,
       AgentAvatar,
       Button,

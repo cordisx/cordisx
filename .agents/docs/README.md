@@ -129,3 +129,5 @@ reference without duplicating its authority.
 - [Work usage](work-usage.md): separate ledger and conservative game-source exclusion.
 
 - [Plugin notifications](notifications.md): public operation feedback, card interactions and user rules.
+
+- [Plugin dialogs](dialogs.md): Host-owned chrome with full JSX bodies and owner-bound operations.

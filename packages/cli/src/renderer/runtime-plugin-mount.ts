@@ -1,3 +1,4 @@
+import { dialogCenterForDocument } from './dialogs/host.js'
 import { notificationCenterForDocument } from './notifications/host.js'
 import { nativeAgentTaskClient } from './native-agent-session-recovery.js'
 import { createRestrictedContentService } from './restricted-content-service.js'
@@ -317,6 +318,8 @@ export const createRuntimeDisposeControllerFiber = async (
     delete controller.httpClient
     await controller.unregisterHttp?.()
     delete controller.unregisterHttp
+    controller.unregisterDialogs?.()
+    delete controller.unregisterDialogs
     controller.unregisterNotifications?.()
     delete controller.unregisterNotifications
     controller.restrictedContent?.dispose()
@@ -664,7 +667,7 @@ export const createRuntimeMountPlugin = async (
       'entities',
     ).isolate('documents').isolate('http').isolate('agentLoopControl').isolate('restrictedContent').isolate(
       'notifications',
-    ).extend({
+    ).isolate('dialogs').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: runtimeScope.moduleGenerationOf()!(controller),
@@ -712,6 +715,27 @@ export const createRuntimeMountPlugin = async (
     controller.unregisterNotifications = () => {
       release()
       notificationBinding.dispose()
+    }
+  }
+  const dialogBinding = dialogCenterForDocument(document)?.bind({
+    key: agentLoopOptions.ownerKey,
+    name: () => controller.manifest.name ?? controller.item.id,
+    active: () => agentLoopOptions.active() && runtimeScope.activeControllers()().includes(controller),
+    report: () => {
+      notificationBinding?.api.show({
+        kind: 'dialog.operation-failed',
+        type: 'error',
+        message: document.documentElement.lang.startsWith('zh')
+          ? '操作未完成，请重试。'
+          : 'Operation failed. Please retry.',
+      })
+    },
+  })
+  if (dialogBinding) {
+    const release = pluginContext.reflect.provide('dialogs', dialogBinding.api)
+    controller.unregisterDialogs = () => {
+      release()
+      dialogBinding.dispose()
     }
   }
   controller.restrictedContent = createRestrictedContentService(agentLoopOptions.active)
@@ -956,6 +980,8 @@ export const createRuntimeMountPlugin = async (
     delete controller.httpClient
     await controller.unregisterHttp?.()
     delete controller.unregisterHttp
+    controller.unregisterDialogs?.()
+    delete controller.unregisterDialogs
     controller.unregisterNotifications?.()
     delete controller.unregisterNotifications
     controller.restrictedContent?.dispose()
