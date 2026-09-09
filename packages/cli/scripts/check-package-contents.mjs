@@ -1,3 +1,5 @@
+// The check skips prepack's rebuild, but must perform its runtime bundling.
+import './prepare-bundled-runtime-dependencies.mjs'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import os from 'node:os'
@@ -138,10 +140,25 @@ try {
     'THIRD_PARTY_NOTICES.md',
     'package.json',
   ]
-  const bundledSchemasteryUi = 'node_modules/@cordisx/schemastery-ui/'
+  const bundledRoots = [
+    '@cordisx/schemastery-ui',
+    '@cordisx/channel',
+    '@cordisx/plugin-cli-proxy-api',
+  ]
+    .map(name => `node_modules/${name}/`)
+  for (
+    const required of [
+      '@cordisx/channel/dist/channel.js',
+      '@cordisx/channel/dist/channel.d.ts',
+      '@cordisx/channel/dist/service.mjs',
+      '@cordisx/plugin-cli-proxy-api/dist/runtime/module.js',
+    ]
+  ) {
+    if (!files.includes(`node_modules/${required}`)) throw new Error(`missing bundled runtime: ${required}`)
+  }
   const leaked = files.filter(file => (
     !allowedRoots.includes(file) && !file.startsWith('dist/') && !file.startsWith('third_party/')
-    && !file.startsWith(bundledSchemasteryUi)
+    && !bundledRoots.some(root => file.startsWith(root))
   ))
   if (leaked.length > 0) throw new Error(`cordisx package leaked non-allowlisted files: ${leaked.join(', ')}`)
 

@@ -43,22 +43,23 @@ function uniqueStrictlyVisible(document: Document, selector: string): HTMLElemen
   return candidates.length === 1 ? candidates[0] : undefined
 }
 
-function titlebarTrafficLightInset(document: Document): number {
+function titlebarNativeControlInset(document: Document): number {
   const platform = document.defaultView?.navigator.platform ?? ''
   if (!/mac/iu.test(platform)) return 12
   const titlebar = uniqueVisible(document, 'header[data-app-shell-application-menu-bar]')
-  if (titlebar === undefined) return 88
+  if (titlebar === undefined) return 128
   const titlebarRect = titlebar.getBoundingClientRect()
   const candidates = nativeButtons(titlebar)
     .map(button => button.getBoundingClientRect())
     .filter(rect => rect.width > 0 && rect.left >= titlebarRect.left + 64 && rect.left < titlebarRect.left + 180)
     .sort((left, right) => left.left - right.left)
-  return Math.max(12, Math.ceil((candidates[0]?.left ?? titlebarRect.left + 88) - titlebarRect.left))
+  const nativeControlRight = candidates[0]?.right ?? titlebarRect.left + 116
+  return Math.max(12, Math.ceil(nativeControlRight + 12 - titlebarRect.left))
 }
 
 function pageChromeSafeLeft(document: Document, anchor: HTMLElement): number {
   const anchorLeft = Math.max(0, anchor.getBoundingClientRect().left)
-  return Math.max(0, titlebarTrafficLightInset(document) - anchorLeft)
+  return Math.max(0, titlebarNativeControlInset(document) - anchorLeft)
 }
 
 function selectedSessionId(document: Document): string | undefined {

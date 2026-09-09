@@ -284,7 +284,7 @@ describe('Manager Settings navigation core', () => {
       })
     })
     await expect(navigation.navigate('demo', { id: 'ready', extra: true } as never)).rejects.toThrow()
-    await navigation.navigate('demo', { id: 'ready' })
+    await navigation.navigateFromSurface('demo', { id: 'ready' }, 'sidebar.navigation.items', 'demo:sidebar')
     expect(controller.shows).toBe(0)
     const mount = await managedMount!
 

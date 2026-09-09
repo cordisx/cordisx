@@ -45,10 +45,7 @@ import type { CordisXCommandService } from './commands.js'
 import { CordisXI18nService, type LocalizationEffectOwner } from './i18n.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
 import { createHostSurfaceIcon } from './icons.js'
-import {
-  isAgentConversationPageMount,
-  markAgentConversationPageMount,
-} from './agent-conversation-page.js'
+import { isAgentConversationPageMount, markAgentConversationPageMount } from './agent-conversation-page.js'
 import { ownerFromContext, qualifyOwnedId, sourceFromContext } from './ownership.js'
 import {
   type GenerationVisibilityCoordinator,
@@ -312,6 +309,9 @@ export function pageChromeButton(document: Document, ariaLabel: string, icon: st
   button.append(createHostSurfaceIcon(document, icon))
   return button
 }
+
+export const STANDARD_PAGE_CLIP_PATH =
+  'polygon(var(--cordisx-page-chrome-safe-left, 0px) 0, 100% 0, 100% 100%, 0 100%, 0 46px, var(--cordisx-page-chrome-safe-left, 0px) 46px)'
 
 export class PageRegistry {
   private readonly records = new Map<string, PageRecord>()

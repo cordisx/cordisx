@@ -1,3 +1,4 @@
+import { PluginHttpAuthority } from './plugin-http-authority.js'
 import { NativeAgentSessionBridge } from './native-agent-session-rpc.js'
 import { PluginAgentToolAuthority } from './plugin-agent-tools.js'
 import type { CordisXConfigPlugin } from './config.js'
@@ -235,6 +236,7 @@ export function parseOwnerDocumentBindingRequest(value: unknown): OwnerDocumentB
 }
 
 export interface OwnerDocumentBridgeHandler {
+  readonly http: PluginHttpAuthority
   readonly nativeSessions?: NativeAgentSessionBridge
   readonly agentTools?: PluginAgentToolAuthority
   readonly entities?: EntityBridgeHandler
@@ -274,6 +276,7 @@ export function createOwnerDocumentBridgeHandler(input: {
     return principal
   }
   return {
+    http: new PluginHttpAuthority(input),
     ...(agentTools === undefined ? {} : { agentTools, nativeSessions: new NativeAgentSessionBridge(input) }),
     issue(identity, moduleGeneration) {
       const principal = { profileId: input.profileId, generation: input.generation, moduleGeneration, identity }

@@ -145,6 +145,19 @@ export class AgentLoopAuthority {
     private readonly crash: AgentLoopAuthorityCrashHooks,
   ) {}
 
+  /** Host-generated task workspace; the author never chooses this path. */
+  async gameWorkspace(scope: AgentLoopAuthorityScope, commandId: string): Promise<string> {
+    const directory = path.join(
+      path.dirname(this.file),
+      'game-workspaces',
+      ownerDigest(scope),
+      digest('cordisx.game-workspace.v1', commandId),
+    )
+    await mkdir(directory, { recursive: true, mode: 0o700 })
+    await chmod(directory, 0o700)
+    return directory
+  }
+
   static async open(
     homeDir: string,
     profileId: string,
@@ -301,6 +314,24 @@ export class AgentLoopAuthority {
           }
         }
       }
+    })
+  }
+
+  async setControlledTurnState(
+    scope: AgentLoopAuthorityScope,
+    operationId: string,
+    state: 'running' | 'completed' | 'failed' | 'cancelled' | 'deadline-exceeded',
+  ): Promise<void> {
+    await this.mutate(document => {
+      const index = document.operations.findIndex(item =>
+        item.key === operationKey(scope, operationId)
+        && item.state === 'committed' && item.kind === 'controlled-submit'
+      )
+      if (index < 0) throw new Error('Controlled turn is unavailable')
+      const item = document.operations[index]!
+      const result = item.result as Record<string, unknown>
+      if (result.controlledState !== 'running' && result.controlledState !== state) return
+      document.operations[index] = { ...item, result: { ...result, controlledState: state } }
     })
   }
 

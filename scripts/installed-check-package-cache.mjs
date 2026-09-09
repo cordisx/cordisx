@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { access, cp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { npmPackItem } from './npm-pack-report.mjs'
@@ -28,7 +28,11 @@ export async function packWorkspace(repositoryRoot, workspace, packDirectory) {
 export async function packInstalledDependencyClosure(runnerDirectory, packDirectory, environment) {
   return Object.fromEntries(
     await Promise.all(EXTERNAL_PACKAGES.map(async packageName => {
-      const packageRoot = path.join(runnerDirectory, 'node_modules', ...packageName.split('/'))
+      const bundled = path.join(runnerDirectory, 'node_modules/cordisx/node_modules', packageName)
+      const packageRoot = await access(bundled).then(
+        () => bundled,
+        () => path.join(runnerDirectory, 'node_modules', packageName),
+      )
       const packSource = path.join(packDirectory, 'sources', packageName.replaceAll('/', '__'))
       await mkdir(path.dirname(packSource), { recursive: true })
       await cp(packageRoot, packSource, { recursive: true })

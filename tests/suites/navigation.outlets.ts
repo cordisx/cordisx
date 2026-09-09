@@ -49,9 +49,15 @@ export function registerOutletsTests() {
     const navigation = new NavigationRegistry(pages, outlets, fakeI18n(), new TestCodexRouteHistory())
     pages.register('demo', { id: 'first', title: { key: 'first' }, icon: 'host:info' }, () => undefined)
     pages.register('demo', { id: 'second', title: { key: 'second' }, icon: 'host:analytics' }, () => undefined)
+    pages.register(
+      'demo',
+      { id: 'root', title: { key: 'root' }, icon: 'host:dice', breadcrumbs: [] },
+      () => undefined,
+    )
     pages.register('demo', { id: 'session', title: { key: 'session' } }, () => undefined)
     navigation.register('demo', { id: 'first', path: '/first', outlet: 'app', page: 'first' })
     navigation.register('demo', { id: 'second', path: '/second', outlet: 'app', page: 'second' })
+    navigation.register('demo', { id: 'root', path: '/root', outlet: 'app', page: 'root' })
     navigation.register('demo', {
       id: 'session',
       path: '/sessions/:sessionId/files',
@@ -75,6 +81,13 @@ export function registerOutletsTests() {
     expect(navigation.snapshot().outlets.find(item => item.id === 'app')?.activeRoute).toBe('demo:first')
     await navigation.close('demo', 'app')
     expect(app.hides).toBe(1)
+    await navigation.navigate('demo', { id: 'root' })
+    const rootIcon = dom.window.document.querySelector(
+      '[data-cordisx-page-leading] [data-host-icon="host:dice"] svg',
+    )
+    expect(rootIcon?.getAttribute('data-host-icon-provider')).toBe('builtin:reicon')
+    expect(rootIcon?.querySelectorAll('path')).toHaveLength(6)
+    expect(dom.window.document.querySelector('[data-cordisx-page-leading] button[aria-label="Back"]')).toBeNull()
     await expect(navigation.navigate('demo', { id: 'session', params: { sessionId: 'stale' } })).rejects.toThrow(
       /does not match native session one/,
     )

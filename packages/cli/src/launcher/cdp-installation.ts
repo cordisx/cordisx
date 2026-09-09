@@ -1,3 +1,4 @@
+import { isPluginHttpRequest } from './plugin-http-authority.js'
 import { isNativeAgentSessionRequest } from './native-agent-session-rpc.js'
 import { isAgentToolRequest } from './plugin-agent-tools.js'
 import { randomUUID } from 'node:crypto'
@@ -282,10 +283,13 @@ export async function install(
           let requestId = 'invalid'
           let entityRequest = false
           try {
-            if (Buffer.byteLength(payload) > support.MAX_OWNER_DOCUMENT_REQUEST_BYTES) {
+            if (Buffer.byteLength(payload) > 8_388_608) {
               throw new Error('owner document request exceeds maximum size')
             }
             const parsed = JSON.parse(payload) as unknown
+            if (!isPluginHttpRequest(parsed) && Buffer.byteLength(payload) > support.MAX_OWNER_DOCUMENT_REQUEST_BYTES) {
+              throw new Error('owner document request exceeds maximum size')
+            }
             const generic = parsed as { readonly requestId?: unknown }
             requestId = typeof generic.requestId === 'string' ? generic.requestId : 'invalid'
             entityRequest = support.isEntityBindingRequest(parsed) || isAgentToolRequest(parsed)
@@ -296,7 +300,9 @@ export async function install(
             }
             activeOwnerDocumentRequests += 1
             try {
-              const value = isNativeAgentSessionRequest(parsed) && ownerDocuments.nativeSessions !== undefined
+              const value = isPluginHttpRequest(parsed)
+                ? await ownerDocuments.http.handle(parsed)
+                : isNativeAgentSessionRequest(parsed) && ownerDocuments.nativeSessions !== undefined
                 ? await ownerDocuments.nativeSessions.handle(parsed)
                 : isAgentToolRequest(parsed) && ownerDocuments.agentTools !== undefined
                 ? await ownerDocuments.agentTools.handle(parsed, async request => {

@@ -1,3 +1,4 @@
+import { isPluginHttpRequest } from '../launcher/plugin-http-authority.js'
 import { randomBytes } from 'node:crypto'
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -382,6 +383,7 @@ export async function createPlaygroundSession(
   const nextGeneration = async (browserGraphOnly: boolean): Promise<PlaygroundGeneration> => {
     for (const lease of pendingGraphLeases) lease.retire()
     pendingGraphLeases = []
+    await active?.documents.http.dispose()
     active?.channelConfig?.dispose()
     await active?.providerFleet?.close()
     const generation = `playground-${randomBytes(12).toString('hex')}`
@@ -703,9 +705,13 @@ export async function createPlaygroundSession(
       let requestId = 'invalid'
       let entityRequest = false
       try {
-        const value = JSON.parse(raw) as unknown
+        const value = JSON.parse(raw)
+        if ((!isPluginHttpRequest(value) && Buffer.byteLength(raw) > 1_048_576) || Buffer.byteLength(raw) > 8_388_608) {
+          throw new Error('request is too large')
+        }
         const generic = value as { readonly requestId?: unknown }
         requestId = typeof generic.requestId === 'string' ? generic.requestId : 'invalid'
+        if (isPluginHttpRequest(value)) return { requestId, ok: true, value: await active.documents.http.handle(value) }
         entityRequest = isEntityBindingRequest(value)
         if (entityRequest && active.documents.entities !== undefined) {
           return { requestId, ok: true, value: await active.documents.entities.handle(value) }
@@ -771,6 +777,7 @@ export async function createPlaygroundSession(
     },
     async reset() {
       await runCompositionOperation(async () => {
+        await active?.documents.http.dispose()
         active?.channelConfig?.dispose()
         await active?.providerFleet?.close()
         credentialBackend.clear()
@@ -786,6 +793,7 @@ export async function createPlaygroundSession(
     },
     async close() {
       await runCompositionOperation(async () => {
+        await active?.documents.http.dispose()
         active?.channelConfig?.dispose()
         await active?.providerFleet?.close()
         credentialBackend.clear()

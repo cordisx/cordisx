@@ -92,6 +92,7 @@ export const CORDISX_HOST_ICON_TOKENS = [
   'host:close',
   'host:copy',
   'host:delete',
+  'host:dice',
   'host:error',
   'host:files',
   'host:fit',

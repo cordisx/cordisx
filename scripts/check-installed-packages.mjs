@@ -7,7 +7,11 @@ import { promisify } from 'node:util'
 import { enableInstalledChannel, verifyInstalledChannel } from './check-installed-channel.mjs'
 import { verifyInstalledCliProxy } from './check-installed-cli-proxy.mjs'
 import { makeDirectoriesWritable } from './installed-check-cleanup.mjs'
-import { packInstalledDependencyClosure, packWorkspace } from './installed-check-package-cache.mjs'
+import {
+  packInstalledDependencyClosure,
+  packWorkspace,
+  usePackedDependencyClosure,
+} from './installed-check-package-cache.mjs'
 import {
   verifyGeneratedEmbedded,
   verifyGeneratedProject,
@@ -16,7 +20,7 @@ import {
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#a39c5d1f61999a69043180d6b7e7bbbee3072c09'
+const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#bbd02f4b092566c5e7ca5e0e9b7d63230890c602'
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
   ? undefined
   : path.resolve(process.env.CORDISX_PROTOCOL_TARBALL)
@@ -72,7 +76,6 @@ try {
     '--loglevel=error',
     cordisxTarball,
     creatorTarball,
-    ...(protocolTarball === undefined ? [] : [protocolTarball]),
   ], { cwd: runnerDirectory, env: installEnvironment })
 
   const installedCordisXRoot = path.join(runnerDirectory, 'node_modules', 'cordisx')
@@ -89,6 +92,19 @@ try {
     env: process.env,
   })).stdout.trim().split('\n').filter(Boolean)
   if (protocolPaths.length !== 1) throw new Error('installed cordisx must resolve exactly one Protocol copy')
+
+  const dependencyClosure = await packInstalledDependencyClosure(runnerDirectory, packDirectory, installEnvironment)
+  // Direct Protocol imports use the same exact source override as the Host.
+  // This preserves unique-symbol brands across the public API boundary.
+  await usePackedDependencyClosure(path.join(runnerDirectory, 'package.json'), {
+    '@cordisx/protocol': protocolTarball === undefined
+      ? dependencyClosure['@cordisx/protocol']
+      : `file:${protocolTarball}`,
+  })
+  await run('npm', ['install', '--no-audit', '--no-fund', '--loglevel=error'], {
+    cwd: runnerDirectory,
+    env: installEnvironment,
+  })
 
   for (const packageName of ['cordisx', 'create-cordisx-plugin']) {
     const packageRoot = path.join(runnerDirectory, 'node_modules', packageName)
@@ -532,11 +548,20 @@ createElement(AgentAvatar, props)
   Object.defineProperty(durableDom.window, 'structuredClone', { value: globalThis.structuredClone })
   Object.defineProperty(durableDom.window, 'TextEncoder', { value: globalThis.TextEncoder })
   Object.defineProperty(durableDom.window, 'TextDecoder', { value: globalThis.TextDecoder })
+  let httpDisposals = 0
   Object.defineProperty(durableDom.window, '__cordisxOwnerDocumentRequestV1', {
     configurable: true,
     value: payload => {
       void (async () => {
-        const request = parseOwnerDocumentBindingRequest(JSON.parse(payload))
+        const raw = JSON.parse(payload)
+        if (raw.operation === 'plugin-http-dispose') {
+          httpDisposals++
+          durableDom.window.__cordisxOwnerDocumentReceiveV1?.(
+            JSON.stringify({ requestId: raw.requestId, ok: true, value: { status: 'accepted', value: null } }),
+          )
+          return
+        }
+        const request = parseOwnerDocumentBindingRequest(raw)
         const value = request.operation === 'load'
           ? await durableHandler.load(request)
           : await durableHandler.replace(request)
@@ -561,6 +586,7 @@ createElement(AgentAvatar, props)
   })
   if (bridgeAccepted.status !== 'accepted') throw new Error('installed public ctx.documents bridge did not commit')
   await durableDom.window.__cordisxRuntime?.dispose()
+  if (httpDisposals !== 1) throw new Error('installed runtime must dispose its HTTP owner exactly once')
   durableDom.window.close()
   const bridgeReload = await new OwnerDocumentStore(cordisxHome).load({
     profileId: 'installed',
@@ -581,7 +607,6 @@ createElement(AgentAvatar, props)
     loadConfig,
     configPath,
   })
-  const dependencyClosure = await packInstalledDependencyClosure(runnerDirectory, packDirectory, installEnvironment)
   const installedBundle = await buildRendererBundle(installedConfig)
   if (
     !installedBundle.includes('# CLIProxy Providers')

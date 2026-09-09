@@ -1,3 +1,4 @@
+import type { UsageV2, WorkUsageSnapshotV2 } from '@cordisx/protocol/usage/v2'
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { CordisXPluginIdentity, UsageSnapshotV1, UsageV1 } from '../contracts.js'
 import { CORDISX_PLUGIN_GENERATION, CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from './service.js'
@@ -5,7 +6,10 @@ import { BindingAgentHistoryAdapter } from './agent-history-binding.js'
 import type { PermissionBroker } from './platform.js'
 interface UsageOptions {
   readonly broker: PermissionBroker
-  readonly adapter: { readUsage(caller: { ownerKey: string; generation: string }): Promise<UsageSnapshotV1> }
+  readonly adapter: {
+    readUsage(caller: { ownerKey: string; generation: string }): Promise<UsageSnapshotV1>
+    readWorkUsage?(caller: { ownerKey: string; generation: string }): Promise<WorkUsageSnapshotV2>
+  }
 }
 const options = new WeakMap<object, UsageOptions>()
 const ORIGINAL = Symbol.for('cordis.original')
@@ -33,10 +37,32 @@ const unavailable = (reason: 'permission-denied' | 'generation-retired' | 'host-
   diagnostics: [],
 })
 /** Plugins receive aggregate metadata only; identity, bridge credentials and lifecycle remain Host-owned. */
-export class CordisXUsageService extends Service implements UsageV1 {
+export class CordisXUsageService extends Service implements UsageV2 {
   constructor(ctx: Context, input: UsageOptions) {
     super(ctx, 'usage')
     options.set(this, input)
+  }
+  async readWork(): Promise<WorkUsageSnapshotV2> {
+    const owner = caller(this.ctx), input = bound(this)
+    const fail = (reason: 'permission-denied' | 'generation-retired' | 'host-unavailable'): WorkUsageSnapshotV2 => ({
+      schemaVersion: 2,
+      status: 'unavailable',
+      reason,
+      diagnostics: [],
+    })
+    if (!owner) return fail('permission-denied')
+    const fence = input.broker.usageFence(owner.identity, owner.generation)
+    if (!fence()) return fail('generation-retired')
+    if (!await input.broker.authorizeUsage(owner.identity)) return fail('permission-denied')
+    if (!fence()) return fail('generation-retired')
+    if (input.adapter.readWorkUsage === undefined) return fail('host-unavailable')
+    const result = await input.adapter.readWorkUsage({
+      ownerKey: `${owner.identity.source}:${owner.identity.id}`,
+      generation: owner.generation,
+    })
+    if (!fence()) return fail('generation-retired')
+    if (!input.broker.usageAllowed(owner.identity)) return fail('permission-denied')
+    return structuredClone(result)
   }
   async read(): Promise<UsageSnapshotV1> {
     const owner = caller(this.ctx), input = bound(this)

@@ -1,3 +1,4 @@
+import type { ControlledLoopTransport } from '../agent-loop-control.js'
 import type { Disposable } from '@deepseek-ai/cordis'
 import type {
   AgentLoopAuthorizationOutcome,
@@ -106,7 +107,7 @@ export function presentationForDefinition(
   })
 }
 
-export interface AgentLoopV4Transport {
+export interface AgentLoopV4Transport extends ControlledLoopTransport {
   readonly debugMock?: true
   createAgentLoopV4(
     input: {
@@ -116,6 +117,7 @@ export interface AgentLoopV4Transport {
       readonly definition: { readonly agentId: string; readonly revision: string }
       readonly model: { readonly providerId: string; readonly modelId: string }
       readonly cwd: string
+      readonly workspaceCategory?: 'game'
       readonly developerInstructions?: string
       readonly effort?: 'low' | 'medium' | 'high' | 'xhigh'
     },
