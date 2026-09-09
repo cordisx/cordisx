@@ -275,7 +275,6 @@ export interface RuntimeClosureScope {
     | Readonly<{ readonly scope: AgentRuntimeRouteScope; readonly owner: AgentActiveRoute['owner'] }>
     | undefined
   adapterHandle: CodexAdapterHandle | undefined
-  agentConversationShellFiber: Fiber | undefined
   readonly adoptPluginBundleSnapshot: () => (
     snapshot: CordisXPluginBundleManagerSnapshotV1,
   ) => Readonly<{ revision: number; pluginRevision: number }>

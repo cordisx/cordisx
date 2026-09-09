@@ -18,7 +18,6 @@ import type {
 import type { CordisXPluginDependencyV1 } from './plugin-lifecycle-contracts.js'
 
 import type {
-  CordisXAgentConversationShell,
   CordisXCommands,
   CordisXConfigAppliesInput,
   CordisXManagerContentNavigation,
@@ -193,8 +192,6 @@ declare module '@deepseek-ai/cordis' {
     /** DSH-style semantic UI slot service backed by Codex DOM adapters. */
     slots: CordisXSlots
     commands: CordisXCommands
-    /** Host-owned Agent conversation renderer backed by a plugin data source. */
-    agentConversationShell: CordisXAgentConversationShell
     pages: CordisXPages
     entitySettingsNavigation: EntitySettingsNavigationService
     routes: CordisXRoutes

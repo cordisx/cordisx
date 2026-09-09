@@ -272,10 +272,6 @@ export async function start(
       agentRuntimeRouteDisposed: [() => agentRuntimeRouteDisposed, (value: any) => agentRuntimeRouteDisposed = value],
       agentSessionRuntime: [() => agentSessionRuntime, (value: any) => agentSessionRuntime = value],
       agentSessionTransport: () => agentSessionTransport,
-      agentConversationShellFiber: [
-        () => agentConversationShellFiber,
-        (value: any) => agentConversationShellFiber = value,
-      ],
       applyRestartCandidate: () => applyRestartCandidate,
       authorizePlugin: () => authorizePlugin,
       authorizePluginV2: () => authorizePluginV2,
@@ -712,7 +708,6 @@ export async function start(
     let platformFiber: Fiber | undefined
     let systemPromptFiber: Fiber | undefined
     let commandFiber: Fiber | undefined
-    let agentConversationShellFiber: Fiber | undefined
     let pageFiber: Fiber | undefined
     let routeFiber: Fiber | undefined
     let managerContentFiber: Fiber | undefined
