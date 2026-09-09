@@ -1,3 +1,5 @@
+// The check skips prepack's rebuild, but must perform its runtime bundling.
+import './prepare-bundled-runtime-dependencies.mjs'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import os from 'node:os'
