@@ -16,8 +16,11 @@ export const manifest = {
   name: 'Notification demo',
   capabilities: [],
 }
-export const icon =
-  'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="32" height="32"%3E%3Crect width="32" height="32" rx="8" fill="%235459d8"/%3E%3Ctext x="16" y="23" text-anchor="middle" fill="white" font-size="24"%3EN%3C/text%3E%3C/svg%3E'
+export const icon = {
+  mediaType: 'image/png',
+  data:
+    'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGMIibxBU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULAGTXFFtPNsmFAAAAAElFTkSuQmCC',
+} as const
 const text = (key: string, fallback: string) => ({ key, fallback })
 export function apply(ctx: Context) {
   let attempts = 0

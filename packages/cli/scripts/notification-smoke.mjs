@@ -29,10 +29,11 @@ const click = async selector => {
 }
 try {
   await cdp.send('Runtime.enable')
-  await wait(`Array.from(document.querySelectorAll('button,a')).some(e=>e.textContent.includes('Notification demo'))`)
+  await wait(`!!globalThis.__cordisxRuntime`)
   await evaluate(
-    `Array.from(document.querySelectorAll('button,a')).find(e=>e.textContent.includes('Notification demo')).click()`,
+    `(async () => { const plugin=__cordisxRuntime.snapshot().plugins.find(p=>p.id==='notifications-demo'); for (const point of ['app','sidebar.navigation.items']) await __cordisxRuntime.setExtensionPointPolicy(plugin.source,plugin.id,point,'allow') })()`,
   )
+  await evaluate(`__cordisxRuntime.navigate('notifications-demo', {id:'main'})`)
   await wait(`!!document.querySelector('[data-notification-demo="error"]')`)
   await click('[data-notification-demo="error"]')
   await wait(`document.querySelector('.cxn-card')?.textContent.includes('无法连接来源')`)
@@ -45,7 +46,7 @@ try {
   )
   await wait(`!!document.querySelector('.cxn-card pre')`)
   await evaluate(`Array.from(document.querySelectorAll('.cxn-card button')).find(e=>e.textContent==='重试').click()`)
-  await wait(`document.querySelector('.cxn-card')?.textContent.match(/重试失败|操作未完成|Action failed|重试/)`)
+  await wait(`document.querySelector('.cxn-error')?.textContent.match(/操作未完成|Action failed/)`)
   checks.push('details expansion and retry failure remains')
   await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] })
   await writeFile('/tmp/notifications-dark.png', Buffer.from((await cdp.send('Page.captureScreenshot')).data, 'base64'))
@@ -56,7 +57,7 @@ try {
   await click('[data-notification-demo="error"]')
   assert.equal(await evaluate(`document.querySelectorAll('.cxn-card').length`), 0)
   await evaluate(
-    `Array.from(document.querySelectorAll('.cxn-viewport button')).find(e=>/撤销|Undo/.test(e.textContent)).click()`,
+    `Array.from(document.querySelectorAll('.cxn-undo button')).find(e=>/撤销|Undo/.test(e.textContent)).click()`,
   )
   await click('[data-notification-demo="error"]')
   await wait(`document.querySelectorAll('.cxn-card').length === 1`)

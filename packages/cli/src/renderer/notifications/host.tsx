@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { NotificationCenter } from './model.js'
 import { NotificationViewport } from './view.js'
 import styles from './styles.css'
+import { HostThemeProjection } from '../host-theme.js'
 
 const centers = new WeakMap<Document, NotificationCenter>()
 export function notificationCenterForDocument(document: Document) {
@@ -30,6 +31,8 @@ export function installNotificationHost(document: Document, profileId: string): 
   const seat = document.createElement('div')
   container.append(seat)
   document.body.append(container)
+  const theme = new HostThemeProjection(document)
+  const detachTheme = theme.attach(container)
   const root = createRoot(seat)
   root.render(<NotificationViewport center={center} document={document} />)
   centers.set(document, center)
@@ -46,6 +49,8 @@ export function installNotificationHost(document: Document, profileId: string): 
     clearInterval(timer)
     center.dispose()
     root.unmount()
+    detachTheme()
+    theme.dispose()
     container.remove()
     if (centers.get(document) === center) centers.delete(document)
   }
