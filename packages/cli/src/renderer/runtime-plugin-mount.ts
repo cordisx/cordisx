@@ -1,4 +1,4 @@
-import { dialogCenterForDocument } from './dialogs/host.js'
+import { installPluginDialogs } from './dialogs/plugin.js'
 import { notificationCenterForDocument } from './notifications/host.js'
 import { nativeAgentTaskClient } from './native-agent-session-recovery.js'
 import { createRestrictedContentService } from './restricted-content-service.js'
@@ -717,27 +717,11 @@ export const createRuntimeMountPlugin = async (
       notificationBinding.dispose()
     }
   }
-  const dialogBinding = dialogCenterForDocument(document)?.bind({
+  controller.unregisterDialogs = installPluginDialogs(pluginContext, document, {
     key: agentLoopOptions.ownerKey,
     name: () => controller.manifest.name ?? controller.item.id,
     active: () => agentLoopOptions.active() && runtimeScope.activeControllers()().includes(controller),
-    report: () => {
-      notificationBinding?.api.show({
-        kind: 'dialog.operation-failed',
-        type: 'error',
-        message: document.documentElement.lang.startsWith('zh')
-          ? '操作未完成，请重试。'
-          : 'Operation failed. Please retry.',
-      })
-    },
-  })
-  if (dialogBinding) {
-    const release = pluginContext.reflect.provide('dialogs', dialogBinding.api)
-    controller.unregisterDialogs = () => {
-      release()
-      dialogBinding.dispose()
-    }
-  }
+  }, notificationBinding?.api)
   controller.restrictedContent = createRestrictedContentService(agentLoopOptions.active)
   controller.unregisterRestrictedContent = pluginContext.reflect.provide(
     'restrictedContent',

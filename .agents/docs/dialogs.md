@@ -1,8 +1,8 @@
 # Plugin dialogs
 
-Experimental implementation on the shared-dialogs candidate. The
-[Protocol contract](https://github.com/cordisx/cordisx-protocol/blob/88a08f1b20ab89f33b5ebd0a4791b80dd8271658/.agents/docs/dialogs-v1.md)
-is an experimental provider commit pending merge. Require `dialogs` in plugin injection and a compatible Host.
+The shared dialog API uses the merged
+[Protocol contract](https://github.com/cordisx/cordisx-protocol/blob/ffb4827fdfee550865b55593fc5b8a1cc51ed53c/.agents/docs/dialogs-v1.md).
+Require `dialogs` in plugin injection and a compatible Host.
 Do not recreate a modal with fixed-position plugin markup or import TDesign.
 
 ## Full JSX bodies

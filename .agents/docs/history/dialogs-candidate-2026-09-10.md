@@ -60,3 +60,14 @@ The active game-room task checkout was inspected read-only. Its in-progress
 room UI was not changed. Adoption here covers the shared public capability,
 a complex plugin example, the array editor and marketplace-source editor;
 specialized collection and privileged permission dialogs remain separate.
+
+## Integration update
+
+The user authorized merging and notifying the consuming tasks. Protocol PR #138
+merged as `ffb4827fdfee550865b55593fc5b8a1cc51ed53c`; Host now pins that canonical
+main commit through its manifests and generated lock. The earlier feature-input
+record above remains historical. Host main through `98b6fa6` was merged into the
+candidate, preserving the notification-enabled bundled plugins and current CI.
+Host PR #395 is the implementation delivery. Integration validation is repeated
+against this updated candidate; merge authorization does not claim visual
+acceptance or switch the user's running app.
