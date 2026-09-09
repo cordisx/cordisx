@@ -121,6 +121,31 @@ describe('plugin config persistence', () => {
 })
 
 describe('plugin config registry', () => {
+  it('exposes only exact origins present in raw configuration, excluding schema defaults and URL paths', () => {
+    const registry = new PluginConfigurationRegistry()
+    registry.register({
+      identity: { id: 'example', source: 'file:///example.ts' },
+      schema: Schema.object({
+        defaultOrigin: Schema.string().default('https://default.example'),
+        sources: Schema.array(Schema.object({ url: Schema.string().required() })).default([]),
+        endpoint: Schema.string().required(),
+      }),
+      applies: 'plugin-restart',
+      raw: {
+        sources: [{ url: 'https://configured.example/' }, { url: 'http://127.0.0.1:43130' }],
+        endpoint: 'https://configured.example/api',
+      },
+      revision: 1,
+      writable: true,
+    })
+    expect(registry.get('example')).toMatchObject({ defaultOrigin: 'https://default.example' })
+    expect(registry.configuredHttpOrigins('example')).toEqual([
+      'http://127.0.0.1:43130',
+      'https://configured.example',
+    ])
+    registry.dispose()
+  })
+
   it('normalizes the closed v1 restart spelling and preserves explicit v2 application planes', () => {
     expect(moduleConfigApplies(undefined)).toBe('plugin-restart')
     expect(moduleConfigApplies({ configApplies: 'restart' })).toBe('plugin-restart')

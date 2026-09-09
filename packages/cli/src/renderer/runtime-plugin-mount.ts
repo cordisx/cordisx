@@ -697,6 +697,8 @@ export const createRuntimeMountPlugin = async (
       bridge: runtimeScope.ownerDocumentBridge(),
       principal: entityPrincipal,
       active: () => controller.principalLive,
+      configuredOrigins: () =>
+        runtimeScope.configuration()!.configuredHttpOrigins(controller.item.id, controller.generationView),
     })
     controller.httpClient = http
     controller.unregisterHttp = pluginContext.reflect.provide('http', http)

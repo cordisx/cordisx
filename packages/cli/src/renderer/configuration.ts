@@ -65,6 +65,32 @@ const CONFIG_BINDING = '__cordisxConfigRequestV1'
 
 const CONFIG_RECEIVER = '__cordisxConfigReceiveV1'
 
+function collectConfiguredHttpOrigins(value: unknown): readonly string[] {
+  const origins = new Set<string>()
+  const pending: unknown[] = [value]
+  let visited = 0
+  while (pending.length > 0 && visited < 10_000) {
+    const current = pending.pop()
+    visited += 1
+    if (typeof current === 'string' && current.length <= 2048) {
+      try {
+        const url = new URL(current)
+        if (
+          ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash
+          && url.pathname === '/' && (current === url.origin || current === `${url.origin}/`)
+        ) origins.add(url.origin)
+      } catch {
+        // Non-URL configuration strings do not grant network authority.
+      }
+      continue
+    }
+    if (current === null || typeof current !== 'object') continue
+    if (Array.isArray(current)) pending.push(...current)
+    else pending.push(...Object.values(current))
+  }
+  return Object.freeze([...origins].sort())
+}
+
 export class PluginConfigurationRegistry {
   private readonly records = new Map<string, ConfigRecord>()
   private readonly listeners = new Set<() => void>()
@@ -138,6 +164,12 @@ export class PluginConfigurationRegistry {
   get(owner: string, view?: PluginGenerationView): unknown {
     const record = this.require(owner, view)
     return record.candidate?.value ?? record.value
+  }
+
+  /** Exact HTTP origins explicitly present in this generation's raw user/project configuration. */
+  configuredHttpOrigins(owner: string, view?: PluginGenerationView): readonly string[] {
+    const record = this.require(owner, view)
+    return collectConfiguredHttpOrigins(record.candidate?.raw ?? record.raw)
   }
 
   watch(owner: string, listener: (value: unknown) => void, view?: PluginGenerationView): () => void {

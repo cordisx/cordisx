@@ -8,6 +8,12 @@ stores it in macOS Keychain and injects it only for the bound origin. This
 extends the public plugin context; Channel private credentials are separate.
 HTTP bearer origins require HTTPS except exact localhost, 127.0.0.1 and ::1.
 
+An unauthenticated connection skips the consent prompt only when its canonical
+origin is an exact URL leaf in that plugin generation's raw user or project
+configuration. Resolved schema defaults, URLs with paths, other plugin
+configuration and unconfigured origins do not grant this authority. Bearer
+connections always use the Host consent surface.
+
 Requests use a relative path, three allowed headers, a 1 MiB UTF-8 body and
 response bound, manual redirect refusal and a 30-second maximum transport
 lifetime. Browser cancellation reaches the launcher transport. Retirement,
