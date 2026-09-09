@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('..', import.meta.url))
 const classifier = path.join(root, 'scripts/ci-scope.sh')
 
-function classify({ initial = {}, changes = {}, rename, remove = [], empty = false }) {
+function classify({ initial = {}, changes = {}, rename, remove = [], empty = false, outputFile = true }) {
   const cwd = mkdtempSync(path.join(tmpdir(), 'cordisx-ci-scope-'))
   const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
   const write = files => {
@@ -36,17 +36,19 @@ function classify({ initial = {}, changes = {}, rename, remove = [], empty = fal
       git('add', '.')
       git('commit', '--quiet', '-m', 'change')
     }
-    const output = execFileSync('bash', [classifier], {
+    const outputPath = path.join(cwd, 'outputs')
+    const stdout = execFileSync('bash', [classifier], {
       cwd,
       encoding: 'utf8',
       env: {
         ...process.env,
         BASE_SHA: base,
         HEAD_SHA: git('rev-parse', 'HEAD'),
-        GITHUB_OUTPUT: '/dev/stdout',
+        GITHUB_OUTPUT: outputFile ? outputPath : '',
         GITHUB_STEP_SUMMARY: '',
       },
     })
+    const output = outputFile ? readFileSync(outputPath, 'utf8') : stdout
     return Object.fromEntries(output.trim().split('\n').map(line => line.split('=')))
   } finally {
     rmSync(cwd, { recursive: true, force: true })
@@ -157,4 +159,15 @@ test('CI full phases retain the exact complete owner command sequence', () => {
   assert.deepEqual(phases, manifest.scripts.check.split(' && '))
   assert.ok(full.includes("needs.scope.result != 'success'"))
   assert.ok(workflow.includes('run: node --test scripts/ci-scope.test.mjs'))
+})
+
+test('standalone classifier writes to a captured stdout pipe', () => {
+  assert.equal(classify({ changes: { 'README.md': '# Changed\n' }, outputFile: false }).docs_only, 'true')
+})
+
+test('affected runtime tests prepare Git plugin dependencies', () => {
+  const workflow = readFileSync(path.join(root, '.github/workflows/check.yml'), 'utf8')
+  const tests = workflow.split('\n  changed-tests:\n')[1]
+  assert.ok(tests.includes('run: npm ci\n'))
+  assert.ok(!tests.includes('npm ci --ignore-scripts'))
 })

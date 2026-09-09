@@ -26,6 +26,9 @@ Git diffs and guards the complete command sequence without installing dependenci
 
 The shared quality audit checks the PR head itself and caches npm downloads.
 The download cache is not an exact-SHA validation result or a reusable build.
+Runtime-test installs retain lifecycle scripts: the Git Channel and CLIProxy
+dependencies need `prepare` to supply their runtime exports. Format-only and
+static build jobs may skip those lifecycle builds.
 
 ## Diagnose a long run
 

@@ -45,13 +45,18 @@ while IFS= read -r -d '' file; do
   esac
 done < "$changed_files"
 test -s "$changed_files" || full=true
-{
+write_outputs() {
   echo "docs_only=$docs_only"
   echo "style_only=$style_only"
   echo "full=$full"
   echo "cli_only=$cli_only"
   echo "skill_changed=$skill_changed"
-} >> "${GITHUB_OUTPUT:-/dev/stdout}"
+}
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  write_outputs >> "$GITHUB_OUTPUT"
+else
+  write_outputs
+fi
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   {
     echo '### Host pull-request scope'

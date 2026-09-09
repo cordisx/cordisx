@@ -365,7 +365,8 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci --ignore-scripts
+      # Runtime tests load the Git Channel/CLIProxy dependencies built by prepare.
+      - run: npm ci
       - name: Run Vitest dependency-affected tests
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
