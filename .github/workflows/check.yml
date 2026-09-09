@@ -35,7 +35,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: bash scripts/ci-scope.sh
       - name: Check scope regression cases
-        run: node --test scripts/ci-scope.test.mjs
+        run: node --test scripts/test-ci-scope.mjs
 
   full:
     if: always() && (github.event_name == 'push' || needs.scope.result != 'success' || needs.scope.outputs.full == 'true')
@@ -55,6 +55,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Check CI scope regressions on main
+        if: github.event_name == 'push'
+        run: node --test scripts/test-ci-scope.mjs
       - run: npm ci
       # Keep the same order and commands as npm run check, with visible timings.
       - name: Verify clean development setup

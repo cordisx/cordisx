@@ -158,7 +158,7 @@ test('CI full phases retain the exact complete owner command sequence', () => {
   const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))
   assert.deepEqual(phases, manifest.scripts.check.split(' && '))
   assert.ok(full.includes("needs.scope.result != 'success'"))
-  assert.ok(workflow.includes('run: node --test scripts/ci-scope.test.mjs'))
+  assert.ok(workflow.includes('run: node --test scripts/test-ci-scope.mjs'))
 })
 
 test('standalone classifier writes to a captured stdout pipe', () => {

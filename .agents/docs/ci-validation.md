@@ -7,7 +7,7 @@ for evidence requirements. This guide describes the Host workflow that implement
 
 `scripts/ci-scope.sh` classifies the merge-base/head diff. It includes deleted
 paths and both sides of renames, using NUL-delimited paths. Empty diffs or a
-failed scope job retain the full gate. `scripts/ci-scope.test.mjs` exercises real
+failed scope job retain the full gate. `scripts/test-ci-scope.mjs` exercises real
 Git diffs and guards the complete command sequence without installing dependencies.
 
 - Host guides under `.agents/docs` use changed-file quality checks. Maintenance
