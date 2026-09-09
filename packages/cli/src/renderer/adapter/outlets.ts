@@ -30,7 +30,12 @@ export class DomOutletController implements OutletController {
       // Mounted pages opt back into hit testing. This lets a standard page clip
       // its titlebar safe area so native window controls remain reachable.
       pointerEvents: 'none',
-      zIndex: '2147483200',
+      zIndex: '40',
+      backgroundImage:
+        'linear-gradient(var(--color-border, rgba(255,255,255,.084)), var(--color-border, rgba(255,255,255,.084)))',
+      backgroundPosition: 'left 45px',
+      backgroundSize: 'var(--cordisx-page-chrome-safe-left, 0px) 1px',
+      backgroundRepeat: 'no-repeat',
     })
     this.snapshot = Object.freeze({
       available: false,

@@ -309,6 +309,10 @@ export async function verifyRoutes(context: Awaited<ReturnType<typeof bootSurfac
   expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.left).toBe('0px')
   expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.pointerEvents)
     .toBe('none')
+  expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.zIndex)
+    .toBe('40')
+  expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.backgroundSize)
+    .toContain('--cordisx-page-chrome-safe-left')
   expect(
     dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.getPropertyValue(
       '--cordisx-page-chrome-safe-left',
