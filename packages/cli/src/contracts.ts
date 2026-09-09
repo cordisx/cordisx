@@ -397,3 +397,5 @@ export type * from './plugin-http-contracts.js'
 export type * from './agent-loop-control-contracts.js'
 
 export type * from './restricted-content-contracts.js'
+
+export type * from './notification-contracts.js'

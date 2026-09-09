@@ -29,3 +29,19 @@ Apply these rules before implementation. They are authoring constraints, not scr
 - Place state in the control that represents it. An unavailable policy is a disabled control whose displayed value is “Unavailable”, not a separate badge beside an active select.
 - Use `currentColor` and Host icon tokens. Verify visible contrast in both light and dark themes.
 - Keep concise status copy in the primary UI. Put causal or architectural details in diagnostics, tooltips, or documentation.
+
+## Operation notifications
+
+First verify the installed SDK and Host expose this candidate capability;
+availability and merge status are recorded in the Host reference.
+Use `ctx.notifications.show({ kind, type, message, ... })` for transient operation
+feedback; declare `notifications` in the plugin injection requirements. Host owns
+source icon/name, navigation, More/mute rules, close, timers and optional actions.
+Use stable semantic kinds such as `connection.failed`, independent of localized
+text. Do not build plugin Toast providers, positioned alerts or page-wide error
+state for operation results. Keep field validation and persistent business-object
+state local. Do not notify repeatedly from polling or show the same failure both
+inline and through notifications. Use localized user copy; redact optional details.
+An older Host without the service requires a supported SDK upgrade or honest
+capability unavailability, never a private DOM or home-grown notification fallback.
+See the [Host notification reference](https://github.com/cordisx/cordisx/blob/efbff656d84b482d51598bc5ba303d24134e0c62/.agents/docs/notifications.md).

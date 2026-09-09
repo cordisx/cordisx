@@ -132,8 +132,10 @@ function setup(input: Readonly<{
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers()
+  // A failed renderer boot retires React roots; let passive teardown finish before removing window.
+  await new Promise(resolve => setImmediate(resolve))
   vi.unstubAllGlobals()
   const globals = globalThis as typeof globalThis & Record<string, unknown>
   Reflect.deleteProperty(globals, certifiedPermissionEndpointTakeKey(token))

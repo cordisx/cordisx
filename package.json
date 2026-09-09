@@ -89,7 +89,8 @@
   },
   "dependencies": {
     "@cordisx/channel": "github:cordisx/plugin-channel#4cee12e3a92eeed557bc9de8cc4792710918327a",
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#bbd02f4b092566c5e7ca5e0e9b7d63230890c602",
+    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#1428ee205aab31df2779398cc8491879b303d1d0",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#f46dd21e15a949a26f05f89bf11dea339fc60c02",
     "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
@@ -121,14 +122,13 @@
     "swr": "2.5.1",
     "tar": "7.5.22",
     "tdesign-react": "1.18.2",
-    "ws": "^8.18.3",
-    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#1428ee205aab31df2779398cc8491879b303d1d0"
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@cordisx/eslint-config": "github:cordisx/cordisxmono#c63c2e8c2ba7e11502934a52ad2ce3734e804cdc",
-    "eslint": "9.39.4",
     "@typescript-eslint/parser": "8.69.0",
     "dprint": "0.57.1",
+    "eslint": "9.39.4",
     "lint-staged": "16.2.7"
   },
   "bundleDependencies": [

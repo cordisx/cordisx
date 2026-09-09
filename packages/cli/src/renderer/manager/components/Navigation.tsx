@@ -1,3 +1,4 @@
+import { notificationCenterForDocument } from '../../notifications/host.js'
 import { useRef } from 'react'
 import type { ManagerSettingsNavigationItemSnapshot, ManagerSnapshot } from '../../manager.js'
 import { managerCopy } from '../../ui-copy.js'
@@ -114,6 +115,14 @@ export function Navigation({ snapshot, router }: NavigationProps) {
         )
       })}
       <span className="cxr-nav-spacer" />
+      <button
+        type="button"
+        data-tab="notifications"
+        onClick={event => notificationCenterForDocument(event.currentTarget.ownerDocument)?.manage()}
+      >
+        <HostIcon token="configuration" />
+        <span>{locale.startsWith('zh') ? '通知规则' : 'Notification rules'}</span>
+      </button>
       <button
         type="button"
         data-tab="about"
