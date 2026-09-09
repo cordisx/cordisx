@@ -1,0 +1,11 @@
+name: Restore prepared Host
+description: Reuse this workflow run's Linux dependency and build outputs, preserving workspace symlinks.
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: prepared-host
+        path: ${{ runner.temp }}/prepared-host
+    - shell: bash
+      run: tar -xzf "$RUNNER_TEMP/prepared-host/host.tgz"

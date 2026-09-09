@@ -34,6 +34,10 @@ implementation of those contracts, not a second public specification.
 | [plugin-devtools-console](plugin-devtools-console.md) | Reference              | Plugin-scoped Console attribution, coverage, privacy, and lifetime                                    |
 | [agent-trace-showcase](agent-trace-showcase.md)       | Reference              | Development-only Trace plugin, Timeline, fixtures, and validation scope                               |
 
+## Host development checks
+
+- [Host testing](testing.md): local test selection, CI groups, and test necessity.
+
 ## Understand runtime composition and delivery
 
 | Document                                                        | Type      | Use it for                                                                        |

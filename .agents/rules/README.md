@@ -8,12 +8,14 @@
 - Follow the organization [file-size rule](https://github.com/cordisx/cordisxmono/blob/main/.agents/rules/file-size.md)
   for dprint formatting and responsibility-based splitting guidance.
 - Land externally observable contract changes in `cordisx-protocol` before or alongside compatible implementation changes.
-- Use `npm run check:fast` for the ordinary development loop. Require the
-  complete `npm run check` for permission, persistent-data, lifecycle,
-  launcher/native, dependency, packaging, and release changes, and focused
-  live smoke tests for launcher or DOM-adapter changes. Pull requests classify
-  those safety-sensitive paths into the complete gate; release and Mono
-  integration always retain it.
+- Use [Host testing](../docs/testing.md) to select the smallest relevant test
+  group. Browser/native checks apply to their execution boundary, not all plugin
+  development. Reuse matching CI evidence for complete delivery requirements;
+  do not duplicate a running full CI job locally. Dependency revision differences
+  require compatibility assessment, not automatic alignment or full local runs.
+- Retain complete evidence for release/Mono integration and high-risk runtime
+  changes. Each new or expanded heavy test must cover a concrete regression that
+  a cheaper layer cannot detect; review duplicate setup and coverage.
 - Follow [long-running-task-recovery.md](long-running-task-recovery.md) when a long-running coordination task is interrupted or its visible history disagrees with durable task evidence.
 - Follow [functional-delivery.md](functional-delivery.md) for user-visible Manager,
   launcher, bridge, and preview work. It defines the requirement ledger,

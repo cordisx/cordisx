@@ -56,7 +56,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "check": "npm run check:clean-dev && npm run typecheck && npm run build && npm test && npm run check:release && npm run check:package && npm run check:installed",
+    "check": "npm run check:clean-dev && npm run typecheck && npm run build && npm run test:all && npm run check:release && npm run check:package && npm run check:installed",
     "check:fast": "npm run lint:staged && npm run typecheck && npm run test:affected",
     "check:clean-dev": "node scripts/check-clean-dev.mjs",
     "check:installed": "node scripts/check-installed-packages.mjs",
@@ -74,8 +74,8 @@
     "smoke": "node packages/cli/scripts/live-smoke.mjs",
     "smoke:desktop-agents": "node packages/cli/scripts/run-codex-desktop-agent-session-harness.mjs",
     "smoke:isolated-app": "node packages/cli/scripts/run-isolated-app-smoke.mjs",
-    "test": "npm run build --workspace=@cordisx/schemastery-ui && vitest run --maxWorkers=1 --no-file-parallelism --testTimeout=30000 --hookTimeout=30000",
-    "test:affected": "npm run build --workspace=@cordisx/schemastery-ui && vitest run --changed --passWithNoTests --maxWorkers=1 --no-file-parallelism --testTimeout=30000 --hookTimeout=30000",
+    "test": "npm run test:unit",
+    "test:affected": "vitest run --changed --passWithNoTests --project core --project renderer",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "format": "dprint fmt",
     "format:check": "dprint check",
@@ -83,14 +83,19 @@
     "lint": "eslint .",
     "lint:staged": "lint-staged --config .lintstagedrc.mjs",
     "prepare:sdk": "node scripts/prepare-sdk.mjs",
-    "lint:css": "stylelint \"packages/cli/src/renderer/dialogs/**/*.css\""
+    "lint:css": "stylelint \"packages/cli/src/renderer/dialogs/**/*.css\"",
+    "test:unit": "vitest run --project core --project renderer",
+    "test:integration": "vitest run --project integration",
+    "test:browser": "vitest run --project browser",
+    "test:all": "vitest run",
+    "test:ci-policy": "node --test scripts/test-ci-scope.mjs scripts/test-test-projects.mjs"
   },
   "engines": {
     "node": ">=22.19"
   },
   "dependencies": {
-    "@cordisx/channel": "github:cordisx/plugin-channel#4cee12e3a92eeed557bc9de8cc4792710918327a",
-    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#1428ee205aab31df2779398cc8491879b303d1d0",
+    "@cordisx/channel": "github:cordisx/plugin-channel#d426ec0a7a907746bc62317269a0ec5b3379adf9",
+    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#5857dac38a1d3d0f0a45b43150fe69b92321dab4",
     "@cordisx/protocol": "github:cordisx/cordisx-protocol#88a08f1b20ab89f33b5ebd0a4791b80dd8271658",
     "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",
