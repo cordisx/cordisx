@@ -78,9 +78,6 @@ test('PR 389 content selects documentation plus shipped Skill checks', () => {
 
 for (
   const file of [
-    '.agents/rules/README.md',
-    'AGENTS.md',
-    'package-lock.json',
     'packages/cli/src/launcher/main.ts',
     'packages/cli/src/renderer/permission-state.ts',
     'packages/channel-runtime/src/index.ts',
@@ -151,29 +148,85 @@ test('empty diff fails closed to the full gate', () => {
   assert.equal(classify({ empty: true }).full, 'true')
 })
 
-test('CI full phases retain the exact complete owner command sequence', () => {
+test('CI shares preparation and preserves independent full delivery checks', () => {
   const workflow = readFileSync(path.join(root, '.github/workflows/check.yml'), 'utf8')
-  const full = workflow.split('\n  full:\n')[1].split('\n  skill-package:\n')[0]
-  const phases = [...full.matchAll(/run: (npm (?:run [\w:-]+|test))$/gm)].map(match => match[1])
-  const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'))
-  assert.deepEqual(phases, manifest.scripts.check.split(' && '))
-  assert.ok(full.includes("needs.scope.result != 'success'"))
-  assert.ok(workflow.includes('run: node --test scripts/test-ci-scope.mjs'))
+  assert.equal([...workflow.matchAll(/run: npm ci\n/g)].length, 1)
+  assert.match(workflow, /max-parallel: 3/)
+  assert.match(workflow, /matrix: \$\{\{ fromJSON\(needs.scope.outputs.matrix\) \}\}/)
+  for (
+    const command of ['check:clean-dev', 'typecheck', 'build', 'check:release', 'check:package', 'check:installed']
+  ) {
+    assert.ok(workflow.includes(`npm run ${command}`), command)
+  }
+  assert.match(workflow, /args=\(run --project/)
+  assert.match(workflow, /--changed "\$BASE_SHA"/)
+  assert.match(workflow, /needs: \[scope, changed-quality, prepare, typecheck, tests, package-checks\]/)
+  assert.ok(workflow.includes('.result == "success" or .result == "skipped"'))
 })
 
 test('standalone classifier writes to a captured stdout pipe', () => {
   assert.equal(classify({ changes: { 'README.md': '# Changed\n' }, outputFile: false }).docs_only, 'true')
 })
 
-test('affected runtime tests prepare Git plugin dependencies', () => {
-  const workflow = readFileSync(path.join(root, '.github/workflows/check.yml'), 'utf8')
-  const tests = workflow.split('\n  changed-tests:\n')[1]
-  assert.ok(tests.includes('run: npm ci\n'))
-  assert.ok(!tests.includes('npm ci --ignore-scripts'))
-})
-
 test('complete jobs honor cancellation so superseded PR runs release their slot', () => {
   const source = readFileSync(new URL('../.github/workflows/check.yml', import.meta.url), 'utf8')
   assert.ok(source.includes('    if: ${{ !cancelled() && '))
   assert.ok(!source.includes('    if: always() && '))
+})
+
+for (const file of ['AGENTS.md', '.agents/rules/README.md']) {
+  test(`maintenance prose does not launch runtime checks: ${file}`, () => {
+    const result = classify({ changes: { [file]: '# Rule\n' } })
+    assert.equal(result.full, 'false')
+    assert.equal(result.docs_only, 'true')
+  })
+}
+
+test('service changes do not request Chrome', () => {
+  const result = classify({ changes: { 'packages/cli/src/providers/service.ts': 'export {}\n' } })
+  assert.equal(result.browser, 'false')
+})
+
+test('browser semantics and browser test deletions select the browser group', () => {
+  assert.equal(
+    classify({ changes: { 'packages/cli/src/renderer/restricted-content/index.ts': 'export {}\n' } }).browser,
+    'true',
+  )
+  assert.equal(
+    classify({ initial: { 'tests/example.browser.test.ts': 'test\n' }, remove: ['tests/example.browser.test.ts'] })
+      .browser,
+    'true',
+  )
+})
+
+test('lockfile changes select resolved Node consumers and package checks, not full release', () => {
+  const result = classify({ changes: { 'package-lock.json': '{}\n' } })
+  assert.equal(result.full, 'false')
+  assert.equal(result.node_all, 'true')
+  assert.equal(result.package_checks, 'true')
+})
+
+test('browser dependency updates select browser checks without unrelated service upgrades doing so', () => {
+  const manifest = version => JSON.stringify({ dependencies: { react: version } })
+  assert.equal(
+    classify({ initial: { 'package.json': manifest('1') }, changes: { 'package.json': manifest('2') } }).browser,
+    'true',
+  )
+  assert.equal(
+    classify({ changes: { 'package.json': JSON.stringify({ dependencies: { debug: '4' } }) } }).browser,
+    'false',
+  )
+})
+
+test('Playground browser composition selects browser checks', () => {
+  assert.equal(classify({ changes: { 'packages/cli/src/playground/vite/server.ts': 'export {}\n' } }).browser, 'true')
+})
+
+test('failed-job reruns reuse the successful prepare artifact and evidence retains scope', () => {
+  const workflow = readFileSync(path.join(root, '.github/workflows/check.yml'), 'utf8')
+  const restore = readFileSync(path.join(root, '.github/actions/restore-prepared-host/action.yml'), 'utf8')
+  assert.ok(workflow.includes('name: prepared-host\n'))
+  assert.ok(restore.includes('name: prepared-host\n'))
+  assert.ok(workflow.includes('overwrite: true'))
+  assert.ok(workflow.includes('environment:$environment,groups:$groups,outcomes:$outcomes'))
 })

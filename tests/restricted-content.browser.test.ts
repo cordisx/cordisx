@@ -41,6 +41,8 @@ it.skipIf(!executable)(
     try {
       chrome = spawn(executable!, [
         '--headless=new',
+        // Match the other isolated browser fixture on Linux CI runners.
+        ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
         `--user-data-dir=${profile}`,
         '--remote-debugging-port=0',
         '--no-first-run',
