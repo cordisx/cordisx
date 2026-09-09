@@ -111,7 +111,7 @@ import type {
   RouteSnapshot,
 } from './navigation-model.js'
 import { buildPath, matchPath, routeParameters, sameRouteParams } from './navigation-model.js'
-import { assertKeys, pageChromeButton } from './navigation-pages.js'
+import { assertKeys, pageChromeButton, STANDARD_PAGE_CLIP_PATH } from './navigation-pages.js'
 import type { ManagerSettingsNavigationRouteResolution, ManagerSettingsRouteResolution } from './navigation-pages.js'
 
 export class NavigationRegistryBase {
@@ -505,6 +505,7 @@ export class NavigationRegistryBase {
       background: 'var(--color-background-surface-under, #141414)',
       color: 'var(--color-text, #dfdfdf)',
       font: '13px/1.45 ui-sans-serif, system-ui, sans-serif',
+      pointerEvents: 'auto',
     })
     content.dataset.cordisxNoDrag = 'true'
     content.style.setProperty('-webkit-app-region', 'no-drag')
@@ -575,6 +576,8 @@ export class NavigationRegistryBase {
         ? 'body-only'
         : 'standard'
       if (!bodyOnly && !agentConversation) {
+        // Keep native titlebar controls visible and reachable when the app outlet starts at x=0.
+        content.style.clipPath = STANDARD_PAGE_CLIP_PATH
         const chrome = content.ownerDocument.createElement('header')
         chrome.dataset.cordisxPageChrome = 'true'
         chrome.dataset.cordisxDrag = 'true'

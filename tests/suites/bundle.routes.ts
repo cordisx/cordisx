@@ -307,12 +307,44 @@ export async function verifyRoutes(context: Awaited<ReturnType<typeof bootSurfac
   await settle()
   await settle()
   expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.left).toBe('0px')
+  expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.pointerEvents)
+    .toBe('none')
   expect(
     dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.getPropertyValue(
       '--cordisx-page-chrome-safe-left',
     ),
-  ).toBe('88px')
+  ).toBe('128px')
   expect(mainChrome.style.paddingLeft).toContain('--cordisx-page-chrome-safe-left')
+  expect(mainPage.style.pointerEvents).toBe('auto')
+  expect(mainPage.style.clipPath).toContain('--cordisx-page-chrome-safe-left')
+  expect(mainPage.style.clipPath).toContain('46px')
+  setMainRect(rect(240, 0, 960, 900))
+  dom.window.document.querySelector('[data-app-shell-main-content-layout]')?.setAttribute(
+    'data-sidebar-collapsed',
+    'false',
+  )
+  await settle()
+  await settle()
+  expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.left)
+    .toBe('240px')
+  expect(
+    dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.getPropertyValue(
+      '--cordisx-page-chrome-safe-left',
+    ),
+  ).toBe('0px')
+  setMainRect(rect(0, 0, 1200, 900))
+  dom.window.document.querySelector('[data-app-shell-main-content-layout]')?.setAttribute(
+    'data-sidebar-collapsed',
+    'true',
+  )
+  await settle()
+  await settle()
+  expect(dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.left).toBe('0px')
+  expect(
+    dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="main"]')?.style.getPropertyValue(
+      '--cordisx-page-chrome-safe-left',
+    ),
+  ).toBe('128px')
   await runtime!.navigate('slot-showcase', { id: 'app.overview' })
   expect(runtime!.snapshot().navigation.outlets.find(item => item.id === 'app')).toMatchObject({
     activeRoute: 'slot-showcase:app.overview',
@@ -328,7 +360,7 @@ export async function verifyRoutes(context: Awaited<ReturnType<typeof bootSurfac
   expect(dom.window.document.querySelector('.cordisx-nav-primary')?.hasAttribute('aria-current')).toBe(false)
   const appOutlet = dom.window.document.querySelector<HTMLElement>('[data-cordisx-page-outlet="app"]')!
   expect(appOutlet.style.top).toBe('0px')
-  expect(appOutlet.style.getPropertyValue('--cordisx-page-chrome-safe-left')).toBe('88px')
+  expect(appOutlet.style.getPropertyValue('--cordisx-page-chrome-safe-left')).toBe('128px')
   const appChrome = appOutlet.querySelector<HTMLElement>('[data-cordisx-page-chrome]')!
   expect(appChrome.dataset.cordisxDrag).toBe('true')
   expect(appChrome.style.paddingLeft).toContain('--cordisx-page-chrome-safe-left')

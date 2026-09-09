@@ -313,6 +313,9 @@ export function pageChromeButton(document: Document, ariaLabel: string, icon: st
   return button
 }
 
+export const STANDARD_PAGE_CLIP_PATH =
+  'polygon(var(--cordisx-page-chrome-safe-left, 0px) 0, 100% 0, 100% 100%, 0 100%, 0 46px, var(--cordisx-page-chrome-safe-left, 0px) 46px)'
+
 export class PageRegistry {
   private readonly records = new Map<string, PageRecord>()
   private readonly listeners = new Set<() => void>()

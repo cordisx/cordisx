@@ -60,7 +60,7 @@ export async function bootSurfaces() {
       </style></head><body>
         <div class="sidebar-header"><button id="workspace-switcher" aria-haspopup="menu">Codex</button></div>
         <header data-app-shell-application-menu-bar style="position:relative">
-          <div data-test-id="header-shell-slot"><div><div><button>left native</button></div></div></div>
+          <div data-test-id="header-shell-slot"><div><div><button id="native-sidebar-toggle" aria-label="Show sidebar">left native</button></div></div></div>
           <div data-test-id="header-shell-slot" style="width:0px;min-width:70px"><div><div id="native-toolbar-controls" style="display:flex">
             <span id="native-toolbar-tooltip-trigger" style="display:contents"><button id="native-toolbar-primary" class="codex-toolbar-button">native primary</button></span><button class="codex-toolbar-button">native secondary</button>
           </div></div></div>
@@ -199,6 +199,9 @@ export async function bootSurfaces() {
     'getBoundingClientRect',
     { value: () => rect(0, 0, 1200, 46) },
   )
+  Object.defineProperty(dom.window.document.getElementById('native-sidebar-toggle'), 'getBoundingClientRect', {
+    value: () => rect(88, 9, 28, 28),
+  })
   Object.defineProperty(
     dom.window.document.querySelector('[data-testid="app-shell-header-context-menu-surface"]'),
     'getBoundingClientRect',

@@ -27,7 +27,9 @@ export class DomOutletController implements OutletController {
     Object.assign(this.layer.style, {
       boxSizing: 'border-box',
       overflow: 'auto',
-      pointerEvents: 'auto',
+      // Mounted pages opt back into hit testing. This lets a standard page clip
+      // its titlebar safe area so native window controls remain reachable.
+      pointerEvents: 'none',
       zIndex: '2147483200',
     })
     this.snapshot = Object.freeze({
