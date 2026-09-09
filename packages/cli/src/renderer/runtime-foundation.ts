@@ -492,13 +492,7 @@ export const createRuntimeAgentRouteScopes = (runtimeScope: RuntimeClosureScope)
         scopeSource: plan.scopeSource,
         connection: runtimeScope.agentRuntimeConnection()!,
       }
-      const decision = runtimeScope.developmentAgentRuntimeAuthorization()! !== undefined
-          && isExplicitLocalDevelopmentArtifact(controller.item)
-        ? await runtimeScope.broker()!.authorizeDevelopmentAgentRuntime(
-          runtimeScope.developmentAgentRuntimeAuthorization()!,
-          input,
-        )
-        : await runtimeScope.broker()!.authorizeAgentRuntime(input)
+      const decision = await runtimeScope.broker()!.authorizeAgentRuntime(input)
       return Object.freeze({
         authorized: decision.authorized,
         ...(decision.lease === undefined ? {} : { leaseId: decision.lease.leaseId }),
@@ -815,6 +809,7 @@ export const createRuntimeRegisterController = (
       },
       controller.generationView,
       artifact,
+      isExplicitLocalDevelopmentArtifact(controller.item),
     )
     controller.unregisterExtensionPoints = runtimeScope.extensionPointBroker()!.register(controller.identity, {
       pluginId: controller.item.id,

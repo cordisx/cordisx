@@ -71,6 +71,11 @@ export const STATUS_COPY = {
 } satisfies ProductCopyCatalog<'status'>
 
 export const PERMISSION_COPY = {
+  'permission.development-authorized': { en: 'Allowed for development', 'zh-CN': '开发模式已授权' },
+  'permission.development-reason': {
+    en: 'Declared permissions are automatically allowed for this local development plugin.',
+    'zh-CN': '此本地开发插件声明的权限已自动允许。',
+  },
   'permission.required-denial': {
     en: 'Required permission. Denying it stops this plugin.',
     'zh-CN': '这是一项必需权限。拒绝后插件将停止运行。',

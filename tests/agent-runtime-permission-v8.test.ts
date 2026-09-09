@@ -109,10 +109,9 @@ describe('plugin-manifest/v8 correlated approval authority', () => {
     }
     const store = new MemoryPermissionPolicyStore()
     const broker = new PermissionBroker(store, { request: async () => 'deny' })
-    broker.register(identity, manifest)
+    broker.register(identity, manifest, { pluginId: identity.id, moduleGeneration: 'dev' }, undefined, undefined, true)
     broker.replaceAgentRuntimeConnection(connection)
     broker.replaceAgentRuntimeRouteScope(reviewerRoute)
-    const developmentAuthority = broker.createDevelopmentAgentRuntimeAuthorizationAuthority()
     let active: AgentActiveRoute = {
       owner: agentOwner,
       routeId: reviewerRoute.routeId,
@@ -126,7 +125,7 @@ describe('plugin-manifest/v8 correlated approval authority', () => {
           ? [{ id: reviewerRoute.routeId, path: reviewerRoute.path, schemaVersion: 2 }]
           : [],
       decide: async plan => {
-        const decision = await broker.authorizeDevelopmentAgentRuntime(developmentAuthority, {
+        const decision = await broker.authorizeAgentRuntime({
           identity,
           capability: plan.capability,
           sessionId: plan.scope.sessionIds[0],
@@ -153,19 +152,16 @@ describe('plugin-manifest/v8 correlated approval authority', () => {
     expect(lease).toBeDefined()
     if (lease === undefined) throw new Error('authority lease unavailable')
     expect(scopeAuthority.approvalAuthorityLeaseActive(agentOwner, lease, requester, authority)).toBe(true)
-    expect(store.readV4()).toEqual([expect.objectContaining({
-      key: expect.objectContaining({ capability: 'approvals.answer', scope: { sessionIds: [authority.sessionId] } }),
-      policy: 'allow-persistent',
-    })])
+    expect(store.readV4()).toEqual([])
 
-    await expect(broker.authorizeDevelopmentAgentRuntime(developmentAuthority, {
+    await expect(broker.authorizeAgentRuntime({
       identity,
       capability: 'approvals.answer',
       sessionId: authority.sessionId,
       scopeSource: { kind: 'host-exact', exactSessionId: authority.sessionId },
       connection,
     })).resolves.toEqual({ authorized: false })
-    await expect(broker.authorizeDevelopmentAgentRuntime(developmentAuthority, {
+    await expect(broker.authorizeAgentRuntime({
       identity,
       capability: 'approvals.answer',
       sessionId: requester.sessionId,

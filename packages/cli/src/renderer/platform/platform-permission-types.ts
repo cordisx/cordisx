@@ -40,7 +40,7 @@ export interface AuditRecord {
   lastDeniedAt?: string
   lastRequested?: RequestedScope
   denialCount: number
-  authorizationOrigin?: 'explicit-user' | 'certified-implicit'
+  authorizationOrigin?: 'explicit-user' | 'certified-implicit' | 'local-development'
   authorizationReason?: string
   certification?: CordisXCertifiedPermissionProjectionV1
 }
@@ -58,7 +58,7 @@ export interface PlatformPermissionSnapshot {
   readonly lastDeniedAt?: string
   readonly denialCount: number
   readonly blockedReason?: string
-  readonly authorizationOrigin?: 'explicit-user' | 'certified-implicit'
+  readonly authorizationOrigin?: 'explicit-user' | 'certified-implicit' | 'local-development'
   readonly authorizationReason?: string
   readonly certification?: CordisXCertifiedPermissionProjectionV1
 }
@@ -77,7 +77,7 @@ export interface DomPermissionAccessDecision {
   readonly state: 'allowed' | 'denied' | 'pending'
   readonly reason: string
   readonly policy: 'inherit' | 'allow' | 'deny'
-  readonly authorizationOrigin?: 'explicit-user' | 'certified-implicit'
+  readonly authorizationOrigin?: 'explicit-user' | 'certified-implicit' | 'local-development'
 }
 
 export interface DomPermissionPolicyEntry {
@@ -88,6 +88,8 @@ export interface DomPermissionPolicyEntry {
 
 export interface Registration {
   readonly token: object
+  /** Verified Host composition input, valid only for this registration. */
+  readonly development: boolean
   readonly identity: CordisXPluginIdentity
   readonly manifest:
     | CordisXPluginManifestV1
@@ -114,7 +116,7 @@ export interface DomPermissionLease {
   readonly key: CordisXPermissionAuthorizationKeyV3
   readonly runtimeGeneration: string
   readonly moduleGeneration?: string
-  readonly authorizationOrigin: 'explicit-user' | 'certified-implicit'
+  readonly authorizationOrigin: 'explicit-user' | 'certified-implicit' | 'local-development'
   readonly certificationFingerprint?: `sha256:${string}`
   readonly certificationRevision?: string
 }
@@ -124,7 +126,7 @@ export interface HostDomPermissionLease {
   readonly key: CordisXPermissionAuthorizationKeyV4
   readonly runtimeGeneration: string
   readonly moduleGeneration?: string
-  readonly authorizationOrigin: 'explicit-user' | 'certified-implicit'
+  readonly authorizationOrigin: 'explicit-user' | 'certified-implicit' | 'local-development'
   readonly certificationFingerprint?: `sha256:${string}`
   readonly certificationRevision?: string
 }
@@ -332,8 +334,6 @@ export type AgentRuntimePermissionFence = Readonly<{
 export type AgentRuntimeLease = Readonly<{ leaseId: string; sessionId: string }>
 
 export type DevelopmentAgentRuntimePolicySeedAuthority = object
-
-export type DevelopmentAgentRuntimeAuthorizationAuthority = object
 
 export type PlaygroundScenarioAgentRuntimeRouteAuthority = object
 

@@ -157,21 +157,25 @@ afterEach(async () => {
 })
 
 describe('production renderer generation bootstrap', () => {
-  it('does not show a permission dialog for an explicitly loaded Playground development artifact', async () => {
-    const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
-    const dom = installBrowserGlobals()
-    const applied = vi.fn()
+  it.each(['playground', 'codex'] as const)(
+    'does not show a permission dialog for a verified development artifact on %s',
+    async hostKind => {
+      const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
+      const dom = installBrowserGlobals()
+      const applied = vi.fn()
 
-    await expect(installCordisX(
-      [localDevelopmentPlugin(true, applied)],
-      metadata('playground-local-development', 'playground', true),
-    )).resolves.toBeDefined()
+      await expect(installCordisX(
+        [localDevelopmentPlugin(true, applied)],
+        metadata(`${hostKind}-local-development`, hostKind, true),
+      )).resolves.toBeDefined()
 
-    expect(applied).toHaveBeenCalledOnce()
-    expect(dom.window.document.querySelector('[data-permission-prompt]')).toBeNull()
-    await disposeRuntime()
-    dom.window.close()
-  }, 60_000)
+      expect(applied).toHaveBeenCalledOnce()
+      expect(dom.window.document.querySelector('[data-permission-prompt]')).toBeNull()
+      await disposeRuntime()
+      dom.window.close()
+    },
+    60_000,
+  )
 
   it('still prompts for an ordinary packaged remote plugin outside the local development authority', async () => {
     const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
@@ -198,12 +202,12 @@ describe('production renderer generation bootstrap', () => {
     dom.window.close()
   }, 60_000)
 
-  it('still prompts outside the Playground host even when local development metadata is present', async () => {
+  it('still prompts when local-development metadata lacks the Launcher-owned source identity', async () => {
     const { installCordisX } = await import('../packages/cli/src/renderer/runtime.js')
     const dom = installBrowserGlobals()
     const applied = vi.fn()
     const boot = installCordisX(
-      [localDevelopmentPlugin(true, applied)],
+      [localDevelopmentPlugin(true, applied, 'file:///unverified-local-plugin.js')],
       metadata('codex-local-development-metadata', 'codex', true),
     )
     for (

@@ -116,7 +116,7 @@ export interface ManagerPermissionSnapshot {
   readonly lastDeniedAt?: string
   readonly denialCount: number
   readonly blockedReason?: string
-  readonly authorizationOrigin?: 'explicit-user' | 'certified-implicit'
+  readonly authorizationOrigin?: 'explicit-user' | 'certified-implicit' | 'local-development'
   readonly authorizationReason?: string
   readonly certification?: CordisXCertifiedPermissionProjectionV1
   readonly availability: ManagerCapabilityAvailabilitySnapshot

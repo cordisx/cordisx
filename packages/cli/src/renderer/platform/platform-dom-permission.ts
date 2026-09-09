@@ -367,6 +367,15 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
           : { moduleGeneration: registration.generation.moduleGeneration }),
       }),
     )
+    if (policy !== 'deny' && this.developmentPoint(registration, pointId)) {
+      return Object.freeze({
+        authorized: true,
+        state: 'allowed',
+        reason: 'permission.local-development',
+        policy: 'allow',
+        authorizationOrigin: 'local-development',
+      })
+    }
     const lease = this.validDomLease(registration, pointId)
     if (lease !== undefined) {
       return Object.freeze({
@@ -432,6 +441,9 @@ export abstract class PlatformDomPermissionBroker extends PlatformAgentRuntimeBr
         reason: 'permission.identity-unavailable',
         policy: this.domPolicy(identity, pointId),
       }))
+    }
+    if (this.developmentPoint(registration, pointId) && this.domPolicy(identity, pointId) !== 'deny') {
+      return Promise.resolve(this.domAccess(identity, pointId, view))
     }
     const pointKey = this.domPointKey(identity, pointId, registration.generation.moduleGeneration)
     const pendingKey = this.domPendingReviewKey(identity, registration.generation.moduleGeneration)

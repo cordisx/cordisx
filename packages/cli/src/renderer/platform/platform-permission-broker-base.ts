@@ -151,8 +151,6 @@ export abstract class PlatformPermissionBrokerBase {
 
   protected readonly developmentAgentRuntimeSeeds = new WeakSet<object>()
 
-  protected readonly developmentAgentRuntimeAuthorizations = new WeakSet<object>()
-
   protected readonly playgroundScenarioAgentRuntimeRouteAuthorities = new WeakSet<object>()
 
   protected agentRuntimeConnection: AgentRuntimeConnection | undefined
@@ -208,6 +206,7 @@ export abstract class PlatformPermissionBrokerBase {
     generation: PluginGenerationEffectIdentity = Object.freeze({ pluginId: identity.id }),
     candidateView?: PluginGenerationView,
     artifact?: PermissionArtifactBindingV3,
+    development = false,
   ): () => void {
     const key = `${platformIdentityKey(identity)}\u0000${generation.moduleGeneration ?? 'host'}`
     const declarations = new Map<CordisXPlatformCapability, CordisXCapabilityDeclaration>(
@@ -272,6 +271,7 @@ export abstract class PlatformPermissionBrokerBase {
       })
     const registration: Registration = {
       token: Object.freeze({}),
+      development: development && generation.moduleGeneration !== undefined,
       identity: Object.freeze({ ...identity }),
       manifest,
       declarations,
@@ -318,6 +318,26 @@ export abstract class PlatformPermissionBrokerBase {
       platformIdentityKey(item.identity) === platformIdentityKey(identity)
       && (this.visibility?.visible(item.generation, view) ?? true)
     )
+  }
+
+  isLocalDevelopment(identity: CordisXPluginIdentity, moduleGeneration: string, view?: PluginGenerationView): boolean {
+    const current = this.registration(identity, view)
+    return current?.development === true && current.generation.moduleGeneration === moduleGeneration
+      && this.isRegistered(current)
+  }
+
+  /** Shared default for every permission family, after its normal scope validation. */
+  protected developmentPermission(registration: Registration, capability: string): boolean {
+    return registration.development && this.isRegistered(registration)
+      && registration.manifest.capabilities.some(item => item.name === capability)
+  }
+
+  protected developmentPoint(registration: Registration, pointId: string): boolean {
+    return this.developmentPermission(registration, 'ui.extension-points.render')
+      && registration.manifest.capabilities.some(item =>
+        item.name === 'ui.extension-points.render' && 'extensionPoints' in item.scope
+        && item.scope.extensionPoints?.includes(pointId)
+      )
   }
 
   protected isRegistered(registration: Registration): boolean {

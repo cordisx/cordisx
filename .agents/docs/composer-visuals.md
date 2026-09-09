@@ -150,15 +150,12 @@ that the assistant recorded microphone audio or exercised a real transcription.
 
 ## Local development authorization
 
-The Host recognizes only Launcher-verified, ready local development artifacts
-through `isExplicitLocalDevelopmentArtifact`. For those exact source/plugin
-identities in the current development session, declared visual rendering and
-pointer observation do not open permission dialogs. This is Host development
-authority, not a fabricated explicit-user decision, certification, wildcard
-policy, or persistent grant. Generation retirement, exact declarations, point
-availability and explicit denial still apply. Installed artifacts and ordinary
-file URLs are not enrolled. Other capabilities keep their own authorization
-rules; this exception does not grant microphone access.
+Visual permissions use the shared [development permission policy](development-permissions.md).
+The Host binds Launcher-verified local development provenance to each plugin
+generation before extension-point admission. Declared rendering and supported
+interaction events automatically authorize without persistent user grants.
+Exact points and events, availability, explicit denial, and generation retirement
+still apply. This policy does not supply a missing device or native capability.
 
 ### Waveform dictation layout
 

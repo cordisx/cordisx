@@ -255,8 +255,9 @@ export abstract class PlatformHostDomPermissionBroker extends PlatformDomPermiss
         policy: 'deny',
       })
     }
-    let origin: 'explicit-user' | 'certified-implicit'
-    if (item.authorizationMode === 'certified-implicit') origin = 'certified-implicit'
+    let origin: 'explicit-user' | 'certified-implicit' | 'local-development'
+    if (this.developmentPermission(registration, capability)) origin = 'local-development'
+    else if (item.authorizationMode === 'certified-implicit') origin = 'certified-implicit'
     else if (item.authorizationMode === 'persistent-policy' && item.policy === 'allow-persistent') {
       origin = 'explicit-user'
     } else {
@@ -435,7 +436,7 @@ export abstract class PlatformHostDomPermissionBroker extends PlatformDomPermiss
     registration: Registration,
     plan: CordisXPermissionAuthorizationPlanV4,
     item: CordisXPermissionAuthorizationPlanV4['declarations'][number],
-    origin: 'explicit-user' | 'certified-implicit',
+    origin: 'explicit-user' | 'certified-implicit' | 'local-development',
   ): HostDomPermissionAccessDecision {
     const key: CordisXPermissionAuthorizationKeyV4 = Object.freeze({
       profileId: plan.profileId,
@@ -469,13 +470,15 @@ export abstract class PlatformHostDomPermissionBroker extends PlatformDomPermiss
       origin,
       origin === 'certified-implicit'
         ? 'Exact Certified artifact auto-approved by the Host catalog'
+        : origin === 'local-development'
+        ? 'Launcher-verified local development'
         : 'Explicit user approval',
       certification,
     )
     return Object.freeze({
       authorized: true,
       state: 'allowed',
-      reason: origin === 'certified-implicit' ? 'permission.certified-implicit' : 'permission.explicit-user',
+      reason: `permission.${origin}`,
       policy: item.policy === 'allow-persistent' ? 'allow' : 'inherit',
       authorizationOrigin: origin,
       lease,
@@ -553,7 +556,7 @@ export abstract class PlatformHostDomPermissionBroker extends PlatformDomPermiss
     registration: Registration,
     capability: 'ui.host-dom.read' | 'ui.host-dom.modify',
     allowed: boolean,
-    authorizationOrigin: 'explicit-user' | 'certified-implicit',
+    authorizationOrigin: 'explicit-user' | 'certified-implicit' | 'local-development',
     authorizationReason: string,
     certification?: CordisXCertifiedPermissionProjectionV1,
   ): void {
