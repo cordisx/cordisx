@@ -31,9 +31,13 @@ that an existing home hides; repair the ordering, not the stale-principal check.
 
 A `renderer ready` log proves that startup stage only. Check that the expected
 route/contribution exists and its relevant interaction works before calling the
-result usable. If tools explicitly deny native UI access, respect that denial;
-do not switch to raw CDP to perform the prohibited inspection or action. A
-permitted headless integration harness has its own evidence scope.
+result usable. For CordisX plugin debugging, follow the skill's
+[tool selection and permission boundary](../../skills/cordisx-plugin-development/references/live-plugin-development.md#choose-debugging-tools-before-accessing-the-host):
+use CordisX launch, injection, logs, permission diagnostics and authorized
+CDP/debug mechanisms; never use Computer Use/CUA. That workflow distinguishes
+a tool-specific limitation from a denial of the target action and does not
+permit bypassing an applicable restriction. A permitted headless integration
+harness has its own evidence scope.
 
 ## Keep a debug fix experienceable
 
