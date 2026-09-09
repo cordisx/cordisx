@@ -34,6 +34,11 @@ It applies after scope validation; undeclared operations and out-of-scope roots,
 points, providers or sessions do not become available. Runtime-exact declarations
 still materialize and validate their concrete request before authorization.
 
+Anonymous HTTP connections use the same verified development generation to skip
+connection consent. Credential entry remains necessary when no bearer secret is
+available: authorization cannot supply a missing credential. Launcher-owned HTTP
+origin, ownership, transport and generation checks still apply.
+
 Explicit denials remain effective. Reset a stored denial through Manager when
 resuming development; per-generation usage and interaction denials retire with
 their generation. Existing blocked/disabled-plugin state also remains effective.
@@ -53,8 +58,8 @@ versioned user authorization plans and stored user policies remain unchanged.
 
 The regression suites cover initial point admission, sensitive calls, exact
 scope rejection, HMR scope changes, installed replacements, retired leases,
-explicit denials, no persistent writes, and the Launcher bundle through renderer
-candidate composition. Existing installed
+explicit denials, no persistent writes, HTTP connection consent, and the
+Launcher bundle through renderer candidate composition. Existing installed
 permission, usage, visual, Agent and Host DOM suites must remain green.
 A production-native claim additionally requires the isolated `app://` path;
 JSDOM composition evidence alone does not establish native verification.

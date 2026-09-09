@@ -261,4 +261,40 @@ describe('public plugin HTTP authority', () => {
     expect(calls).toHaveLength(1)
     client.dispose()
   })
+  it('auto-connects unconfigured public origins only while the verified development generation is live', async () => {
+    let development = true
+    const consent = vi.fn(async () => ({ approved: false as const }))
+    const request = vi.fn(async (_token: string, value: Record<string, unknown>) => ({
+      status: 'accepted',
+      value: {
+        contract: 'cordisx.http-connection/v1',
+        id: 'development',
+        origin: value.origin,
+        credential: value.credential,
+      },
+    }))
+    const client = createPluginHttpClient({
+      principal: { ...principal.identity, moduleGeneration: 'm1', token },
+      active: () => true,
+      development: () => development,
+      consent,
+      bridge: { request } as never,
+    })
+    expect(await client.authorize({ origin: 'https://dev.example', credential: 'none' })).toMatchObject({
+      status: 'accepted',
+    })
+    expect(consent).not.toHaveBeenCalled()
+    expect(await client.authorize({ origin: 'https://dev.example/path', credential: 'none' }))
+      .toMatchObject({ code: 'invalid-request' })
+    // Credential entry is still real user input; development cannot invent a bearer token.
+    expect(await client.authorize({ origin: 'https://dev.example', credential: 'bearer' })).toMatchObject({
+      code: 'denied',
+    })
+    development = false
+    expect(await client.authorize({ origin: 'https://other.example', credential: 'none' })).toMatchObject({
+      code: 'denied',
+    })
+    expect(request).toHaveBeenCalledTimes(1)
+    client.dispose()
+  })
 })
