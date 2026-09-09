@@ -104,6 +104,9 @@ removing the current experience.
 
 ## Native Vite notification ordering
 
+`vite-development-watcher.ts` owns backend selection and listener startup
+ordering; the main Vite module retains plugin graphs and replacement handling.
+
 A successful module fetch is not evidence that its pending file-change event
 was delivered. The native Vite integration records only an initial hash during
 ordinary loading; only HMR processing advances the acknowledged file version.

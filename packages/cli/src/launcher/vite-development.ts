@@ -1,3 +1,4 @@
+import { listenNativeViteServer, nativeViteWatchOptions } from './vite-development-watcher.js'
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
@@ -934,23 +935,11 @@ if (import.meta.hot) {
             ...config.plugins.map(item => path.dirname(item.entry)),
           ],
         },
-        watch: {
-          // Chokidar's macOS FSEvents path emits ready before its asynchronous
-          // native registration completes. Use fs.watch so returning this
-          // server actually covers the first edit, without a timing delay.
-          ...(process.platform === 'darwin' ? { useFsEvents: false } : {}),
-          ignoreInitial: true,
-          ignored: [...(sourceMode ? [`${generatedRoot}**`] : []), '**/node_modules/**', '**/.git/**'],
-        },
+        watch: nativeViteWatchOptions(sourceMode ? generatedRoot : undefined),
       },
       clearScreen: false,
     })
-    const watcherReady = new Promise<void>(resolve => server.watcher.once('ready', resolve))
-    // Register explicit canonical inputs before listen can finish the first
-    // watcher-ready epoch; adding them afterward can miss an immediate edit.
-    server.watcher.add(initialGenerations.flatMap(generation => generation.watchFiles))
-    await server.listen()
-    await watcherReady
+    await listenNativeViteServer(server, initialGenerations.flatMap(generation => generation.watchFiles))
     await waitForDependencyOptimization()
   } catch (error) {
     await server!?.close()
