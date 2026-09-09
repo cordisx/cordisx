@@ -45,10 +45,7 @@ import type { CordisXCommandService } from './commands.js'
 import { CordisXI18nService, type LocalizationEffectOwner } from './i18n.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
 import { createHostSurfaceIcon } from './icons.js'
-import {
-  isAgentConversationPageMount,
-  markAgentConversationPageMount,
-} from './agent-conversation-page.js'
+import { isAgentConversationPageMount, markAgentConversationPageMount } from './agent-conversation-page.js'
 import { ownerFromContext, qualifyOwnedId, sourceFromContext } from './ownership.js'
 import {
   type GenerationVisibilityCoordinator,
