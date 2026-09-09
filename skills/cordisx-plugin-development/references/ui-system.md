@@ -32,7 +32,7 @@ Apply these rules before implementation. They are authoring constraints, not scr
 
 ## Operation notifications
 
-First verify the installed SDK and Host expose this candidate capability;
+First verify the installed SDK and Host expose this capability;
 availability and merge status are recorded in the Host reference.
 Use `ctx.notifications.show({ kind, type, message, ... })` for transient operation
 feedback; declare `notifications` in the plugin injection requirements. Host owns
