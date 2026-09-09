@@ -7,7 +7,7 @@ import type {
   EntityExecutionContextResult,
   EntityExecutionContexts,
   HostExecutionProject,
-} from '@cordisx/protocol/entity-execution-context/v1'
+} from '@cordisx/protocol/entity-execution-context/v2'
 import type { NativeExecutionProjectAuthority } from './native-execution-projects.js'
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -58,6 +58,29 @@ export function createEntityExecutionContexts(input: {
       ? result.context
       : undefined
   }
+  const resolve = async (value: unknown, projectless: boolean): Promise<EntityExecutionContextResult> => {
+    if (
+      !object(value) || !identity(value.identity) || !text(value.operationId)
+      || !Object.keys(value).every(key => ['identity', 'operationId'].includes(key))
+    ) return unavailable('invalid-input')
+    if (!input.projects?.projectlessSupported) return unavailable('unsupported')
+    const result = await call(projectless ? 'projectless' : 'resolve', value) as EntityExecutionContextResult
+    if (result.status !== 'resolved') return result
+    if (!binding(result.binding)) return unavailable('host-unavailable')
+    if (projectless && result.binding.kind !== 'projectless') return unavailable('host-unavailable')
+    if (result.binding.kind === 'project') {
+      const resolved = await validateProject(result.binding)
+      if (!resolved) return unavailable('project-unavailable')
+      return {
+        status: 'resolved',
+        binding: result.binding,
+        context: { kind: 'project', projectId: result.binding.projectId, cwd: resolved.cwd },
+      }
+    }
+    return result.context.kind === 'directory' && text(result.context.cwd, 4096)
+      ? result
+      : unavailable('host-unavailable')
+  }
   return {
     async get(value) {
       if (!identity(value)) return unavailable('invalid-input')
@@ -75,28 +98,8 @@ export function createEntityExecutionContexts(input: {
       }
       return await call('set', { contextRequest: value }) as EntityExecutionBindingWriteResult
     },
-    async resolve(value) {
-      if (
-        !object(value) || !identity(value.identity) || !text(value.operationId)
-        || !Object.keys(value).every(key => ['identity', 'operationId'].includes(key))
-      ) return unavailable('invalid-input')
-      if (!input.projects?.projectlessSupported) return unavailable('unsupported')
-      const result = await call('resolve', value) as EntityExecutionContextResult
-      if (result.status !== 'resolved') return result
-      if (!binding(result.binding)) return unavailable('host-unavailable')
-      if (result.binding.kind === 'project') {
-        const resolved = await validateProject(result.binding)
-        if (!resolved) return unavailable('project-unavailable')
-        return {
-          status: 'resolved',
-          binding: result.binding,
-          context: { kind: 'project', projectId: result.binding.projectId, cwd: resolved.cwd },
-        }
-      }
-      return result.context.kind === 'directory' && text(result.context.cwd, 4096)
-        ? result
-        : unavailable('host-unavailable')
-    },
+    resolve: value => resolve(value, false),
+    projectless: value => resolve(value, true),
     async projects() {
       if (!input.active()) return unavailable('host-unavailable')
       if (!input.projects) return unavailable('unsupported')

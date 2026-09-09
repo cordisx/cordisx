@@ -84,6 +84,30 @@ describe('owned Entity execution contexts', () => {
       .toMatchObject({ status: 'unavailable' })
   })
 
+  it('resolves an explicit projectless operation without rewriting the saved project binding', async () => {
+    const contexts = new EntityExecutionContextDirectory(await home(), 'test')
+    const binding = { kind: 'project' as const, projectId: 'native-project' }
+    await contexts.set(
+      entity,
+      { identity: entity.identity, mutationId: 'bind', expectedRevision: 0, binding },
+      () => true,
+    )
+    const before = await contexts.get(entity)
+    const ordinary = await contexts.resolve(entity, 'global', () => true, true)
+    expect(ordinary).toMatchObject({
+      status: 'resolved',
+      binding: { kind: 'projectless' },
+      context: { kind: 'directory' },
+    })
+    expect(await contexts.get(entity)).toEqual(before)
+    expect(await contexts.resolve(entity, 'selected', () => true)).toMatchObject({
+      status: 'resolved',
+      binding,
+      context: binding,
+    })
+    expect(await contexts.resolve(entity, 'global', () => true, true)).toEqual(ordinary)
+  })
+
   it('rejects a symlink replacing an owned workspace on replay', async () => {
     const contexts = new EntityExecutionContextDirectory(await home(), 'test')
     const result = await contexts.resolve(entity, 'first', () => true)
@@ -126,6 +150,46 @@ describe('owned Entity execution contexts', () => {
     })
     expect(await port.read('foreign')).toBeUndefined()
     expect(calls).toEqual([['project/list', { cursor: null, limit: 100 }], ['project/read', { projectId: 'foreign' }]])
+  })
+
+  it('routes explicit projectless calls separately and rejects a project response', async () => {
+    const calls: string[] = []
+    let active = true
+    let projectResponse = false
+    const service = createEntityExecutionContexts({
+      active: () => active,
+      request: async operation => {
+        calls.push(operation)
+        return projectResponse
+          ? {
+            status: 'resolved',
+            binding: { kind: 'project', projectId: 'bound' },
+            context: { kind: 'project', projectId: 'bound' },
+          }
+          : {
+            status: 'resolved',
+            binding: { kind: 'projectless' },
+            context: { kind: 'directory', cwd: '/private/global' },
+          }
+      },
+      projects: {
+        projectlessSupported: true,
+        read: async () => {
+          throw new Error('project read must not occur')
+        },
+        list: async () => ({ status: 'available', projects: [] }),
+      },
+      resolveProject: async () => {
+        throw new Error('project resolution must not occur')
+      },
+    })
+    const request = { identity: entity.identity, operationId: 'global' }
+    expect(await service.projectless(request)).toMatchObject({ status: 'resolved', binding: { kind: 'projectless' } })
+    projectResponse = true
+    expect(await service.projectless(request)).toEqual({ status: 'unavailable', code: 'host-unavailable' })
+    active = false
+    expect(await service.projectless(request)).toEqual({ status: 'unavailable', code: 'host-unavailable' })
+    expect(calls).toEqual(['projectless', 'projectless'])
   })
 
   it('checks native projects before binding writes and retires delayed calls with their owner', async () => {

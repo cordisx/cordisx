@@ -467,7 +467,7 @@ export class EntityDirectoryAuthority {
   async executionContext(
     binding: EntityDirectoryBinding,
     identity: AgentDefinitionIdentity,
-    operation: 'get' | 'set' | 'resolve',
+    operation: 'get' | 'set' | 'resolve' | 'projectless',
     input: { readonly operationId?: string; readonly request?: EntityExecutionBindingWrite },
     active: () => boolean,
   ) {
@@ -483,8 +483,8 @@ export class EntityDirectoryAuthority {
       if (operation === 'set' && input.request !== undefined) {
         return await this.#executionContexts.set(entity, input.request, active)
       }
-      if (operation === 'resolve' && input.operationId !== undefined) {
-        return await this.#executionContexts.resolve(entity, input.operationId, active)
+      if ((operation === 'resolve' || operation === 'projectless') && input.operationId !== undefined) {
+        return await this.#executionContexts.resolve(entity, input.operationId, active, operation === 'projectless')
       }
       return { status: 'unavailable' as const, code: 'invalid-input' as const }
     })

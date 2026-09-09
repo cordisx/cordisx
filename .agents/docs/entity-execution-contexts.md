@@ -49,3 +49,7 @@ Context resolution does not grant execution authority. The existing task
 transaction still validates Entity/tool setup, installs required approval and
 CLI bindings, authorizes the exact new Session, and submits the first input once.
 The native UI and real model/CLI round trip remain separate acceptance evidence.
+
+## Explicit projectless operations
+
+The v2 `projectless(request)` method uses the same owned Entity RPC and private directory checks as v1 resolution, while ignoring the saved binding for this operation. It never writes Entity configuration. The public renderer rejects a project-bearing response for this method; consumers must treat a missing method as unavailable rather than rewriting the saved binding.

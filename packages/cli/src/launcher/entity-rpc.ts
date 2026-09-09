@@ -17,6 +17,7 @@ export const ENTITY_OPERATIONS = new Set([
   'entity-execution-get',
   'entity-execution-set',
   'entity-execution-resolve',
+  'entity-execution-projectless',
   'entity-snapshot',
   'entity-get',
   'entity-save',
@@ -155,6 +156,8 @@ export function createEntityBridgeHandler(input: {
             ? 'get'
             : request.operation === 'entity-execution-set'
             ? 'set'
+            : request.operation === 'entity-execution-projectless'
+            ? 'projectless'
             : 'resolve',
           {
             ...(request.contextRequest === undefined ? {} : { request: request.contextRequest }),

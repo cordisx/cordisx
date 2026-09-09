@@ -110,9 +110,12 @@ export class EntityExecutionContextDirectory {
     entity: EntityRecord,
     operationId: string,
     active: () => boolean,
+    projectless = false,
   ): Promise<EntityExecutionContextResult> {
     if (!id(operationId)) return { status: 'unavailable', code: 'invalid-input' }
-    const snapshot = await this.get(entity)
+    const snapshot: EntityExecutionBindingResult = projectless
+      ? { status: 'available', revision: 0, binding: { kind: 'projectless' } }
+      : await this.get(entity)
     if (snapshot.status !== 'available') return snapshot
     if (!active()) return { status: 'unavailable', code: 'host-unavailable' }
     if (snapshot.binding.kind === 'project') {
