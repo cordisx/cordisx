@@ -1,3 +1,4 @@
+import type { EntityExecutionBindingWrite } from '@cordisx/protocol/entity-execution-context/v1'
 import { randomUUID } from 'node:crypto'
 
 import type { AgentDefinitionIdentity } from '@cordisx/protocol/agents/v1'
@@ -13,6 +14,10 @@ import {
 } from './owner-document-rpc.js'
 
 export const ENTITY_OPERATIONS = new Set([
+  'entity-execution-get',
+  'entity-execution-set',
+  'entity-execution-resolve',
+  'entity-execution-projectless',
   'entity-snapshot',
   'entity-get',
   'entity-save',
@@ -29,6 +34,8 @@ interface EntityRequest {
   readonly binding?: EntityRegistryBinding
   readonly identity?: AgentDefinitionIdentity
   readonly request?: EntitySaveRequest
+  readonly contextRequest?: EntityExecutionBindingWrite
+  readonly operationId?: string
   readonly afterRevision?: number
   readonly replayThrough?: number
   readonly subscriptionId?: string
@@ -137,6 +144,28 @@ export function createEntityBridgeHandler(input: {
         return await input.authority.changes(subscription.binding, request.afterRevision!, subscription.replayThrough)
       }
       const { principal, binding } = resolve(request)
+      if (request.operation.startsWith('entity-execution-')) {
+        const identity = request.identity ?? request.contextRequest?.identity
+        if (identity === undefined || typeof identity.agentId !== 'string' || typeof identity.revision !== 'string') {
+          throw new Error('Entity context identity required')
+        }
+        return await input.authority.executionContext(
+          binding,
+          identity,
+          request.operation === 'entity-execution-get'
+            ? 'get'
+            : request.operation === 'entity-execution-set'
+            ? 'set'
+            : request.operation === 'entity-execution-projectless'
+            ? 'projectless'
+            : 'resolve',
+          {
+            ...(request.contextRequest === undefined ? {} : { request: request.contextRequest }),
+            ...(request.operationId === undefined ? {} : { operationId: request.operationId }),
+          },
+          () => input.principalAllowed(principal),
+        )
+      }
       if (request.operation === 'entity-snapshot') return await input.authority.snapshot(binding)
       if (request.operation === 'entity-get') {
         if (request.identity === undefined) throw new Error('entity identity is required')

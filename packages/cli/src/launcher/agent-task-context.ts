@@ -55,3 +55,23 @@ export async function resolveAgentTaskContext(
     return fail(failure)
   }
 }
+
+/** Canonical membership check for a project just read by the existing native transport. */
+export async function resolveNativeProjectRoots(
+  project: unknown,
+  projectId: string,
+  cwd?: string,
+): Promise<AgentTaskResolvedContext | undefined> {
+  if (!project || typeof project !== 'object' || Array.isArray(project)) return undefined
+  const value = project as { id?: unknown; roots?: unknown }
+  if (
+    value.id !== projectId || !Array.isArray(value.roots) || value.roots.length === 0 || value.roots.length > 64
+    || value.roots.some(root => typeof root !== 'string' || !isAbsolute(root) || root.includes('\0'))
+  ) return undefined
+  const roots = await Promise.all((value.roots as string[]).map(root => realpath(root)))
+  const selected = await realpath(cwd ?? roots[0]!)
+  if (!roots.some(root => selected === root || selected.startsWith(root.endsWith('/') ? root : root + '/'))) {
+    return undefined
+  }
+  return { projectId, cwd: selected }
+}
