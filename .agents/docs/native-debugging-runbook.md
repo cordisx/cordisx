@@ -101,3 +101,15 @@ products. The Shell was introduced/extended in Host PRs
 future ownership. [Chatroom #74](https://github.com/cordisx/plugin-chatroom/issues/74)
 owns the proposed migration; this runbook does not implement it or authorize
 removing the current experience.
+
+## Native Vite notification ordering
+
+A successful module fetch is not evidence that its pending file-change event
+was delivered. The native Vite integration records only an initial hash during
+ordinary loading; only HMR processing advances the acknowledged file version.
+Otherwise a request that loads new bytes before the queued change callback can
+suppress its own generation replacement. Canonical plugin inputs are registered
+before the initial watcher-ready epoch can complete, so an immediate edit after
+startup is observed. The load-before-change regression test controls event
+ordering on an isolated real Vite server; it does not add a timing sleep or a
+second watcher/transport to the product.

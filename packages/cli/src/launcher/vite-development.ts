@@ -219,7 +219,7 @@ export async function startNativeViteServer(
   const rememberFile = async (file: string): Promise<void> => {
     const realFile = await realpath(file).catch(() => path.resolve(file))
     const source = await readFile(realFile).catch(() => undefined)
-    if (source !== undefined) fileHashes.set(realFile, hashSource(source))
+    if (source !== undefined && !fileHashes.has(realFile)) fileHashes.set(realFile, hashSource(source))
   }
   const rememberPluginMetadata = async (
     realEntry: string,
@@ -641,7 +641,9 @@ if (import.meta.hot) {
       const sourcePath = id.split('?')[0]!
       if (path.isAbsolute(sourcePath)) {
         const realFile = await realpath(sourcePath).catch(() => path.resolve(sourcePath))
-        fileHashes.set(realFile, hashSource(source))
+        // A module request can race ahead of its queued file-change event.
+        // Loading must not acknowledge that event or suppress its replacement.
+        if (!fileHashes.has(realFile)) fileHashes.set(realFile, hashSource(source))
       }
       const code = source.replace(/(from\s+['"][^'"]+\.css)(['"])/g, '$1?inline$2')
         .replace(/(from\s+['"][^'"]+\.svg)(['"])/g, '$1?raw$2')
@@ -940,8 +942,10 @@ if (import.meta.hot) {
       clearScreen: false,
     })
     const watcherReady = new Promise<void>(resolve => server.watcher.once('ready', resolve))
-    await server.listen()
+    // Register explicit canonical inputs before listen can finish the first
+    // watcher-ready epoch; adding them afterward can miss an immediate edit.
     server.watcher.add(initialGenerations.flatMap(generation => generation.watchFiles))
+    await server.listen()
     await watcherReady
     await waitForDependencyOptimization()
   } catch (error) {
