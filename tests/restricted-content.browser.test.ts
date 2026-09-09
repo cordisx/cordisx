@@ -41,6 +41,8 @@ it.skipIf(!executable)(
     try {
       chrome = spawn(executable!, [
         '--headless=new',
+        // Match the other isolated browser fixture on Linux CI runners.
+        ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
         `--user-data-dir=${profile}`,
         '--remote-debugging-port=0',
         '--no-first-run',
@@ -118,6 +120,7 @@ it.skipIf(!executable)(
         return found!
       }
       async function click(node: BrowserNode): Promise<void> {
+        await cdp!.send('DOM.scrollIntoViewIfNeeded', { backendNodeId: node.backendNodeId })
         const result = await cdp!.send('DOM.getBoxModel', { backendNodeId: node.backendNodeId })
         const quad = (result.model as { content: number[] }).content
         const x = (quad[0]! + quad[2]!) / 2
@@ -182,11 +185,15 @@ it.skipIf(!executable)(
         const exited = once(chrome, 'exit')
         chrome.kill('SIGTERM')
         await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 3000))])
-        if (chrome.exitCode === null && chrome.signalCode === null) chrome.kill('SIGKILL')
+        if (chrome.exitCode === null && chrome.signalCode === null) {
+          chrome.kill('SIGKILL')
+          await exited
+        }
       }
       server.closeAllConnections()
       await new Promise<void>(resolve => server.close(() => resolve()))
-      await rm(profile, { recursive: true, force: true })
+      // Chrome descendants can briefly finish writing after the parent exits.
+      await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
     }
   },
   30_000,
