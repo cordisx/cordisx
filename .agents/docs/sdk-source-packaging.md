@@ -1,6 +1,6 @@
 # Build an SDK from an exact Host commit
 
-Use Node 22.19 or newer, npm, Git, and tar. From a checkout of the desired
+Use Node 22.19 or newer, npm, Git, tar, and a POSIX shell. From a checkout of the desired
 Host commit, run:
 
 ```sh
@@ -14,6 +14,9 @@ tarballs without lifecycle scripts, and runs `npm ci --ignore-scripts` against
 a disposable lockfile with those local source references. Registry versions
 and integrity hashes remain locked. No recursive Git `prepare` installation
 is needed. Network access to GitHub and the configured npm registry is required.
+The pack helper also uses a temporary no-op shell because npm 10 can invoke
+`prepare` despite `--ignore-scripts`. This preserves manifests and enforces the
+same explicit-build behavior when repacking installed packages without build source.
 
 The builder restores the canonical manifests and lockfile, compiles the Host,
 and builds the pinned Channel and CLIProxy plugins against that public Host SDK

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { access, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 
@@ -41,11 +42,29 @@ export async function checkout(spec, destination) {
 
 export async function pack(source, output) {
   await mkdir(output, { recursive: true })
-  const report = JSON.parse(
-    await run('npm', ['pack', '--ignore-scripts', '--json', '--pack-destination', output], source),
-  )
-  if (report.length !== 1) throw new Error(`Expected one package from ${source}`)
-  return path.join(output, report[0].filename)
+  const temporary = await mkdtemp(path.join(os.tmpdir(), 'cordisx-pack-shell-'))
+  try {
+    // npm 10's directory pack runs prepare even with --ignore-scripts. Source
+    // builds are explicit; installed packages may not contain their build source.
+    // A no-op shell enforces the requested behavior without changing manifests.
+    const shell = path.join(temporary, 'ignore-scripts')
+    await writeFile(shell, '#!/bin/sh\nexit 0\n')
+    await chmod(shell, 0o700)
+    const report = JSON.parse(
+      await run('npm', [
+        'pack',
+        '--ignore-scripts',
+        `--script-shell=${shell}`,
+        '--json',
+        '--pack-destination',
+        output,
+      ], source),
+    )
+    if (report.length !== 1) throw new Error(`Expected one package from ${source}`)
+    return path.join(output, report[0].filename)
+  } finally {
+    await rm(temporary, { recursive: true, force: true })
+  }
 }
 
 // Resolve external plugin build tools from the fresh, locked Host installation.

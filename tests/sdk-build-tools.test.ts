@@ -2,7 +2,34 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import os from 'node:os'
 import path from 'node:path'
 import { expect, it } from 'vitest'
-import { linkBuildDependencies, run } from '../scripts/sdk-build-tools.mjs'
+import { linkBuildDependencies, pack, run } from '../scripts/sdk-build-tools.mjs'
+
+it('packs an installed package without invoking missing build scripts or changing its manifest', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-sdk-pack-'))
+  const source = path.join(root, 'installed')
+  try {
+    await mkdir(source)
+    const manifest = JSON.stringify({
+      name: 'installed-runtime-fixture',
+      version: '1.0.0',
+      files: ['dist'],
+      scripts: {
+        prepack: 'node scripts/missing-prepack.cjs',
+        prepare: 'node scripts/missing-build.cjs',
+        postpack: 'node scripts/missing-postpack.cjs',
+      },
+    })
+    await writeFile(path.join(source, 'package.json'), manifest)
+    await mkdir(path.join(source, 'dist'))
+    await writeFile(path.join(source, 'dist/index.js'), 'export const ready = true\n')
+    const archive = await pack(source, path.join(root, 'output'))
+    expect(await run('tar', ['-xOf', archive, 'package/package.json'], root)).toBe(manifest)
+    expect(await run('tar', ['-xOf', archive, 'package/dist/index.js'], root)).toBe('export const ready = true')
+    expect(await readFile(path.join(source, 'package.json'), 'utf8')).toBe(manifest)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 it('uses locked plugin-local tools before an incompatible ancestor npm bin', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-sdk-tools-'))
