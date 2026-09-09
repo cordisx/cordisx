@@ -1,7 +1,7 @@
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
-const CHANNEL_COMMIT = '4cee12e3a92eeed557bc9de8cc4792710918327a'
+const CHANNEL_COMMIT = 'd426ec0a7a907746bc62317269a0ec5b3379adf9'
 const CHANNEL_DEPENDENCY = `github:cordisx/plugin-channel#${CHANNEL_COMMIT}`
 
 export function enableInstalledChannel(config) {
