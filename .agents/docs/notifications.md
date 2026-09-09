@@ -3,9 +3,9 @@
 Use `ctx.notifications.show()` for operation success, information, warnings and
 errors. Host owns the card, plugin identity, source navigation, optional action,
 close/details controls, timers, queue and user suppression rules. The
-[Protocol v1 contract](https://github.com/cordisx/cordisx-protocol/blob/dfa2c5fa956184df11a97955b8e5c74a76cb8876/.agents/docs/notifications-v1.md)
-is the authority for ownership and compatibility. This implementation is a
-feature-branch candidate until the provider and Host revisions are merged.
+[Protocol v1 contract](https://github.com/cordisx/cordisx-protocol/blob/f46dd21e15a949a26f05f89bf11dea339fc60c02/.agents/docs/notifications-v1.md)
+is the authority for ownership and compatibility. Notification support requires
+a Host version containing this API; older installations must be upgraded.
 
 ```ts
 export const inject = ['notifications']

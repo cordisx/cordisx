@@ -90,7 +90,7 @@
   "dependencies": {
     "@cordisx/channel": "github:cordisx/plugin-channel#4cee12e3a92eeed557bc9de8cc4792710918327a",
     "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#1428ee205aab31df2779398cc8491879b303d1d0",
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#f3e18c925c34d90fdf203c158811cef10f7ebf57",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#f46dd21e15a949a26f05f89bf11dea339fc60c02",
     "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",

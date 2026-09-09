@@ -1,4 +1,6 @@
 {
   "version": 1,
-  "plugins": [{ "id": "notifications-demo", "entry": "./examples/plugins/notifications/index.tsx", "enabled": true, "config": {} }]
+  "plugins": [
+    { "id": "notifications-demo", "entry": "./examples/plugins/notifications/index.tsx", "enabled": true, "config": {} }
+  ]
 }

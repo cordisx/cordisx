@@ -22,7 +22,9 @@ requirements belong to [Plugin notifications](notifications.md).
 
 ## Verification
 
-Protocol conformance passed. Host typecheck, build and source lint passed (the
+Protocol conformance passed. Merge CI additionally exposed a missing distribution
+allowlist entry; the correction and packed Notifications consumer check passed
+in Protocol PR #137 before its merge. Host typecheck, build and source lint passed (the
 lint run retains 20 existing warnings). Release metadata and package allowlists
 passed. A full Host suite passed 1,747 tests and exposed three demo metadata
 failures and React test teardown errors. After fixing those failures, the five
