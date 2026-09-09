@@ -341,7 +341,6 @@ export interface RuntimeClosureScope {
   currentActivation: CordisXPluginActivationRecordV1
   currentPluginBundles: CordisXPluginBundleManagerSnapshotV1 | undefined
   readonly desktopAgentSessionTransport: () => CodexDesktopAgentSessionTransport | undefined
-  readonly developmentAgentRuntimeAuthorization: () => object | undefined
   readonly developmentPolicySeed: () => object | undefined
   readonly disconnectPluginConsoleVisibility: () => () => void
   readonly dispose: () => () => Promise<void>

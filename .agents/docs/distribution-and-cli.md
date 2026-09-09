@@ -478,6 +478,11 @@ rollback pauses further updates rather than publishing over an unresolved
 transaction. Each renderer handles its own update; this development transport
 does not claim an atomic transaction across multiple native windows.
 
+Ready local plugins use the shared [development permission policy](development-permissions.md):
+all declared Host permissions default to allowed before first mount and after
+HMR, without persisting a user grant. Explicit denials and normal scope and
+availability checks remain effective.
+
 Initial bootstrap and plugin metadata/module validation must succeed before the
 native Host is declared ready. Those failures are reported by the CLI;
 subsequent transform or activation errors use Vite diagnostics and keep the

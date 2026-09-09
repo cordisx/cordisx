@@ -73,13 +73,18 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
         scope: declaration.scope,
         policy: 'ask',
       })))
-      return record !== undefined && !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record)
+      const policy = record !== undefined && !isPermissionPolicyRecordV2(record) && !isPermissionPolicyRecordV3(record)
           && !isPermissionPolicyRecordV4(record)
         ? record.policy
         : 'ask'
+      return policy !== 'deny' && this.developmentPermission(registration, capability) ? 'allow' : policy
     }
     const policy = this.policyV2(identity, capability as CordisXPermissionCapabilityV2, view)
-    return policy === 'allow-persistent' ? 'allow' : policy === 'deny-persistent' ? 'deny' : 'ask'
+    return policy === 'deny-persistent'
+      ? 'deny'
+      : policy === 'allow-persistent' || this.developmentPermission(registration, capability)
+      ? 'allow'
+      : 'ask'
   }
 
   async setPolicy(
@@ -419,7 +424,7 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
       this.denied(identityKey, capability, requested)
       return failure('permission-denied', `${capability} is denied for plugin ${identity.id}`)
     }
-    if (policy === 'ask' && !activationTicket) {
+    if (policy === 'ask' && !activationTicket && !this.developmentPermission(registration, capability)) {
       this.consoleObserver?.permission(identity, capability, 'ask', `${capability} requires a decision`)
       let decision: Exclude<CordisXPermissionDecision, 'ask'> | 'timeout'
       let timer: ReturnType<typeof setTimeout> | undefined
@@ -532,7 +537,8 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
       this.denied(identityKey, capability, requested)
       return failure('permission-denied', `${capability} is denied for plugin ${identity.id}`)
     }
-    let allowed = activationTicket || (item.policy === 'allow-persistent' && item.sensitivity !== 'high-risk')
+    let allowed = this.developmentPermission(registration, capability)
+      || activationTicket || (item.policy === 'allow-persistent' && item.sensitivity !== 'high-risk')
     if (!allowed) {
       this.consoleObserver?.permission(identity, capability, 'ask', `${capability} requires a decision`)
       let decision: CordisXPermissionAuthorizationDecisionV2 | undefined
@@ -623,6 +629,7 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
     const denied: CordisXPermissionCapabilityV4[] = plan.declarations.filter(item =>
       item.required
       && item.policy !== 'allow-persistent'
+      && (item.policy === 'deny-persistent' || !this.developmentPermission(registration, item.capability))
       && !this.onceV2.has(this.authorizationKey(plan, item.capability), plan.binding)
     )
       .map(item => item.capability)
@@ -634,7 +641,8 @@ export abstract class PlatformAuthorizationBroker extends PlatformAuthorizationV
         if (
           policy === 'deny' || (policy !== 'allow'
             && this.validHostDomLease(registration, capability) === undefined
-            && this.activeCertification(registration) === undefined)
+            && this.activeCertification(registration) === undefined
+            && !this.developmentPermission(registration, capability))
         ) denied.push(capability)
       }
     }

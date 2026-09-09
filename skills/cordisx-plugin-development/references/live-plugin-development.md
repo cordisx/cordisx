@@ -83,12 +83,14 @@ asks for permission, inspect its declaration, availability, generation and
 Host authorization path before changing plugin code. Do not manufacture a
 user grant or infer a wildcard exception from a file URL.
 
-Local-development exceptions are capability-specific; check the owning Host
-reference. For example, [controlled visual authorization](https://github.com/cordisx/cordisx/blob/main/.agents/docs/composer-visuals.md#local-development-authorization)
-recognizes exact Launcher-verified artifacts. Explicit denial and generation
-retirement still apply. Installed artifacts use their ordinary permission
-review, so an automatically authorized development preview does not prove the
-installed permission flow.
+Verified local-development generations automatically authorize all declared
+Host permissions before mount, including scopes introduced by HMR. The Manager
+shows “Allowed for development”. If a fresh development plugin still asks,
+check the running Host version and exact Launcher provenance rather than adding
+plugin-specific permission workarounds. This is an ephemeral Host default, not
+a persistent user grant. Explicit denial, declared scope, capability availability,
+and generation retirement still apply. Installed artifacts retain ordinary
+permission review. See the Host [development permission policy](https://github.com/cordisx/cordisx/blob/main/.agents/docs/development-permissions.md).
 
 ## Isolated transient canvas
 

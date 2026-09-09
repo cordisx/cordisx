@@ -19,7 +19,6 @@ export {
   type AgentRuntimePermissionFence,
   type AgentRuntimeRouteScope,
   type AgentRuntimeScopeSource,
-  type DevelopmentAgentRuntimeAuthorizationAuthority,
   type DevelopmentAgentRuntimePolicySeedAuthority,
   type DomPermissionAccessDecision,
   type DomPermissionPolicyEntry,

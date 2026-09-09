@@ -196,8 +196,14 @@ it('auto-authorizes only Host-enrolled local development identities and keeps re
     undefined,
     { request: async () => undefined, requestVisualV5: promptVisual },
   )
-  broker.enableDevelopmentVisualIdentity(identity)
-  const unregister = broker.register(identity, manifest(), { pluginId: identity.id, moduleGeneration: 'dev-one' })
+  const unregister = broker.register(
+    identity,
+    manifest(),
+    { pluginId: identity.id, moduleGeneration: 'dev-one' },
+    undefined,
+    undefined,
+    true,
+  )
   const authority = broker.visualAuthority(identity, 'dev-one', points[1], () => true)
   expect(authority.render()).toBe(true)
   expect(authority.observePointer()).toBe(true)
@@ -216,13 +222,19 @@ it('auto-authorizes only Host-enrolled local development identities and keeps re
 it('gates overlay drag and activation independently and rejects required unsupported point/event pairs', () => {
   for (const events of [['pointer.observe'], ['drag'], ['activate'], ['pointer.observe', 'drag', 'activate']]) {
     const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), { request: async () => 'deny' })
-    broker.enableDevelopmentVisualIdentity(identity)
     const declaration = { ...interaction, scope: { extensionPoints: points, events } }
     const candidate = normalizeVisualManifestV10({
       ...manifest(),
       capabilities: [manifest().capabilities[0], declaration],
     }, identity.id)
-    const unregister = broker.register(identity, candidate, { pluginId: identity.id, moduleGeneration: 'events' })
+    const unregister = broker.register(
+      identity,
+      candidate,
+      { pluginId: identity.id, moduleGeneration: 'events' },
+      undefined,
+      undefined,
+      true,
+    )
     const primary = broker.visualAuthority(identity, 'events', points[0], () => true)
     const overlay = broker.visualAuthority(identity, 'events', points[1], () => true)
     expect(primary.observePointer()).toBe(events.includes('pointer.observe'))

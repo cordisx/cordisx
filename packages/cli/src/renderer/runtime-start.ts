@@ -1,4 +1,3 @@
-import { isExplicitLocalDevelopmentArtifact } from './runtime-shared.js'
 import { NativeAgentSessionPersistence } from './native-agent-session-recovery.js'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import { CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
@@ -311,7 +310,6 @@ export async function start(
       currentActivation: [() => currentActivation, (value: any) => currentActivation = value],
       currentPluginBundles: [() => currentPluginBundles, (value: any) => currentPluginBundles = value],
       desktopAgentSessionTransport: () => desktopAgentSessionTransport,
-      developmentAgentRuntimeAuthorization: () => developmentAgentRuntimeAuthorization,
       developmentPolicySeed: () => developmentPolicySeed,
       disconnectPluginConsoleVisibility: () => disconnectPluginConsoleVisibility,
       dispose: () => dispose,
@@ -504,12 +502,6 @@ export async function start(
       closureScope,
     )
     const broker = runtimeClosures1.createRuntimeBroker(closureScope)
-    for (const plugin of plugins) {
-      if (isExplicitLocalDevelopmentArtifact(plugin)) {
-        broker.enableDevelopmentVisualIdentity({ id: plugin.id, source: plugin.source })
-        broker.enableDevelopmentUsageIdentity({ id: plugin.id, source: plugin.source })
-      }
-    }
     if (metadata.certifiedPermissionChannelToken !== undefined && window.top === window) {
       certifiedPermissionChannel = createCertifiedPermissionDocumentChannel({
         token: metadata.certifiedPermissionChannelToken,
@@ -588,11 +580,6 @@ export async function start(
       closureScope,
     )
     broker.replaceAgentRuntimeConnection(agentRuntimeConnection)
-    // Created only by the Playground Host; each use still requires the
-    // launcher-owned provenance of one explicitly loaded local artifact.
-    const developmentAgentRuntimeAuthorization = metadata.hostKind === 'playground'
-      ? broker.createDevelopmentAgentRuntimeAuthorizationAuthority()
-      : undefined
     const playgroundScenarioAgentRuntimeRoute = runtimeClosures1.createRuntimePlaygroundScenarioAgentRuntimeRoute(
       closureScope,
     )

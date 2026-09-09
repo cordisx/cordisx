@@ -4,7 +4,9 @@ The Host implements the Protocol [local usage v1 contract](https://github.com/co
 through `ctx.usage`. A manifest/package v11 declaration requests `usage.read` for
 `{ profile: 'current' }`. This grants metadata-only input/output aggregates; it
 does not grant message history, raw session files, account billing or native
-commands. Permission is explicit and scoped to the current plugin generation.
+commands. Authorization is scoped to the current plugin generation. Installed
+plugins request explicit consent; verified local plugins use the shared
+[development permission default](development-permissions.md).
 
 Read immediately after activation and subscribe for invalidation hints. The Host
 emits hints on permission changes and every five seconds while authorized.

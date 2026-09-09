@@ -1,3 +1,4 @@
+import { managerCopy } from '../../ui-copy.js'
 import { Select } from 'tdesign-react'
 import type { CordisXPermissionPolicy } from '../../../contracts.js'
 import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
@@ -29,7 +30,13 @@ export function PermissionDetailPage(
         <p>{permission.reasonText}</p>
         <Select
           value={permission.policy}
-          options={policyOptions}
+          options={permission.authorizationOrigin === 'local-development'
+            ? policyOptions.map(option =>
+              option.value === 'allow'
+                ? { ...option, label: managerCopy(snapshot.localization.locale, 'permission.development-authorized') }
+                : option
+            )
+            : policyOptions}
           onChange={value =>
             void model.setPermissionPolicy(
               route.pluginId,
@@ -56,9 +63,11 @@ export function PermissionDetailPage(
               {permission.authorizationOrigin === 'certified-implicit' ? '认证自动批准的 DOM 权限' : '最近授权来源'}
             </h3>
             <p>
-              {permission.authorizationReason ?? (permission.authorizationOrigin === 'certified-implicit'
-                ? 'Host 根据精确制品认证投影自动批准。'
-                : '由用户显式确认。')}
+              {permission.authorizationOrigin === 'local-development'
+                ? managerCopy(snapshot.localization.locale, 'permission.development-reason')
+                : permission.authorizationReason ?? (permission.authorizationOrigin === 'certified-implicit'
+                  ? 'Host 根据精确制品认证投影自动批准。'
+                  : '由用户显式确认。')}
             </p>
             {permission.certification === undefined ? null : (
               <dl className="cxr-facts">

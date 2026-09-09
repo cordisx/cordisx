@@ -168,13 +168,29 @@ export class PermissionBroker extends PlatformUsagePermissionBroker {
         })
       })
     })
-    return Object.freeze([
+    const snapshots: PlatformPermissionSnapshot[] = [
       ...platform,
       ...dom,
       ...hostDom,
       ...this.visualPermissionSnapshots(),
       ...this.usagePermissionSnapshots(),
-    ])
+    ]
+    return Object.freeze(snapshots.map(snapshot => {
+      const registration = this.registration(snapshot.identity)
+      const declared = registration !== undefined && this.developmentPermission(registration, snapshot.capability)
+      const points = snapshot.capability === 'ui.extension-points.render' ? snapshot.scope.extensionPoints : undefined
+      if (
+        !declared || snapshot.policy === 'deny'
+        || (points !== undefined && !points.every(point => this.developmentPoint(registration!, point)))
+      ) return snapshot
+      const { blockedReason: _blocked, certification: _certification, ...current } = snapshot
+      return Object.freeze({
+        ...current,
+        policy: 'allow' as const,
+        authorizationOrigin: 'local-development' as const,
+        authorizationReason: 'Launcher-verified local development; authorization expires with this plugin generation',
+      })
+    }))
   }
 
   subscribe(listener: () => void): () => void {

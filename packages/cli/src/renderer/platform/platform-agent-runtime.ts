@@ -22,7 +22,6 @@ import {
   AgentRuntimePermissionFence,
   AgentRuntimeRouteScope,
   AgentRuntimeScopeSource,
-  DevelopmentAgentRuntimeAuthorizationAuthority,
   DevelopmentAgentRuntimePolicySeedAuthority,
   isAgentRuntimePermission,
   isApprovalAuthorityRequesterRouteScope,
@@ -106,7 +105,7 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
     }
   }
 
-  /** Returns an exact revocable lease only after a registered v5/v6 declaration and exact policy match. */
+  /** Scope-checked, revocable authorization using the shared development default. */
   async authorizeAgentRuntime(
     input: Readonly<{
       identity: CordisXPluginIdentity
@@ -116,38 +115,6 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
       connection: AgentRuntimeConnection
       view?: PluginGenerationView
     }>,
-  ): Promise<AgentRuntimeAuthorization> {
-    return await this.authorizeAgentRuntimeInternal(input, false)
-  }
-
-  /** Host development composition only: applies a normal exact policy without opening interactive UI. */
-  async authorizeDevelopmentAgentRuntime(
-    authority: DevelopmentAgentRuntimeAuthorizationAuthority,
-    input: Readonly<{
-      identity: CordisXPluginIdentity
-      capability: AgentRuntimeCapability
-      sessionId: string
-      scopeSource: AgentRuntimeScopeSource
-      connection: AgentRuntimeConnection
-      view?: PluginGenerationView
-    }>,
-  ): Promise<AgentRuntimeAuthorization> {
-    if (!this.developmentAgentRuntimeAuthorizations.has(authority)) {
-      throw new Error('Agent Session development authorization authority is invalid')
-    }
-    return await this.authorizeAgentRuntimeInternal(input, true)
-  }
-
-  protected async authorizeAgentRuntimeInternal(
-    input: Readonly<{
-      identity: CordisXPluginIdentity
-      capability: AgentRuntimeCapability
-      sessionId: string
-      scopeSource: AgentRuntimeScopeSource
-      connection: AgentRuntimeConnection
-      view?: PluginGenerationView
-    }>,
-    developmentAutoApprove: boolean,
   ): Promise<AgentRuntimeAuthorization> {
     const registration = this.registration(input.identity, input.view)
     if (
@@ -177,33 +144,18 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
     if (!await this.agentRuntimeScopeCurrent(registration, input, declaredSessionIds, authorityRequester)) {
       return Object.freeze({ authorized: false })
     }
-    const policyKey = this.agentRuntimePolicyKey(registration, input.capability, input.sessionId, input.scopeSource)
-    const policy = this.policyRecords.get(policyKey)
-    if (!developmentAutoApprove && isPermissionPolicyRecordV4(policy) && policy.policy === 'deny-persistent') {
+    if (
+      !this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
+    ) {
       return Object.freeze({ authorized: false })
     }
-    if (developmentAutoApprove && (!isPermissionPolicyRecordV4(policy) || policy.policy !== 'allow-persistent')) {
-      const record = this.agentRuntimePolicyRecord(
-        registration,
-        input.capability,
-        input.sessionId,
-        'allow-persistent',
-        input.scopeSource,
-      )
-      try {
-        await this.persistV4([record])
-      } catch {
-        return Object.freeze({ authorized: false })
-      }
-      if (
-        !this.isRegistered(registration) || !sameAgentRuntimeConnection(this.agentRuntimeConnection, input.connection)
-        || !await this.agentRuntimeScopeCurrent(registration, input, declaredSessionIds, authorityRequester)
-      ) {
-        return Object.freeze({ authorized: false })
-      }
-      this.policyRecords.set(permissionRecordKeyV4(record), record)
-      this.changed()
-    } else if (!isPermissionPolicyRecordV4(policy) || policy.policy !== 'allow-persistent') {
+    const policyKey = this.agentRuntimePolicyKey(registration, input.capability, input.sessionId, input.scopeSource)
+    const policy = this.policyRecords.get(policyKey)
+    if (isPermissionPolicyRecordV4(policy) && policy.policy === 'deny-persistent') {
+      return Object.freeze({ authorized: false })
+    }
+    const development = this.developmentPermission(registration, input.capability)
+    if (!development && (!isPermissionPolicyRecordV4(policy) || policy.policy !== 'allow-persistent')) {
       const task = input.scopeSource.kind === 'host-agent-task'
         ? input.scopeSource
         : input.scopeSource.kind === 'host-agent-task-authority'
@@ -345,13 +297,6 @@ export abstract class PlatformAgentRuntimeBroker extends PlatformPermissionBroke
   createDevelopmentAgentRuntimePolicySeedAuthority(): DevelopmentAgentRuntimePolicySeedAuthority {
     const authority = Object.freeze({})
     this.developmentAgentRuntimeSeeds.add(authority)
-    return authority
-  }
-
-  /** Created only by a Host development composition and never projected into plugin context. */
-  createDevelopmentAgentRuntimeAuthorizationAuthority(): DevelopmentAgentRuntimeAuthorizationAuthority {
-    const authority = Object.freeze({})
-    this.developmentAgentRuntimeAuthorizations.add(authority)
     return authority
   }
 
