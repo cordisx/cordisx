@@ -120,6 +120,7 @@ it.skipIf(!executable)(
         return found!
       }
       async function click(node: BrowserNode): Promise<void> {
+        await cdp!.send('DOM.scrollIntoViewIfNeeded', { backendNodeId: node.backendNodeId })
         const result = await cdp!.send('DOM.getBoxModel', { backendNodeId: node.backendNodeId })
         const quad = (result.model as { content: number[] }).content
         const x = (quad[0]! + quad[2]!) / 2
