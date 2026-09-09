@@ -94,6 +94,8 @@ implementation of those contracts, not a second public specification.
 | [manager-feedback-ledger-2026-08-26](manager-feedback-ledger-2026-08-26.md)                 | Historical delivery record  | 2026-08-26 requirement batch and its retained evidence states         |
 | [certified-dom-permission-ledger-2026-08-30](certified-dom-permission-ledger-2026-08-30.md) | Historical candidate record | 2026-08-30 candidate SHAs, local checks, and pending gates            |
 
+- [Unified notifications delivery, 2026-09-10](notification-delivery-2026-09-10.md): dated candidate implementation and verification evidence.
+
 ## Maintainer and artifact entry points
 
 - [CI validation and diagnosis](ci-validation.md): scope selection, Skill package checks, and slow-phase diagnosis.
