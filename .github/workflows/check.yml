@@ -22,6 +22,7 @@ jobs:
       style_only: ${{ steps.scope.outputs.style_only }}
       full: ${{ steps.scope.outputs.full }}
       cli_only: ${{ steps.scope.outputs.cli_only }}
+      skill_changed: ${{ steps.scope.outputs.skill_changed }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -32,51 +33,12 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          git diff --name-only --diff-filter=ACMRT "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/changed-files"
-          docs_only=true
-          style_only=true
-          full=false
-          cli_only=true
-          while IFS= read -r file; do
-            case "$file" in
-              *.md|*.markdown) ;;
-              *) docs_only=false ;;
-            esac
-            case "$file" in
-              *.css|*.md|*.markdown) ;;
-              *) style_only=false ;;
-            esac
-            case "$file" in
-              packages/cli/src/*|tests/*|*.md|*.markdown) ;;
-              *) cli_only=false ;;
-            esac
-            case "$file" in
-              AGENTS.md|CONTRIBUTING.md|.agents/*|package.json|package-lock.json|.npmrc|.github/*|scripts/*|config/*|cordisx.config.*|packages/*/package.json|packages/channel-runtime/*|packages/cli/scripts/*|packages/cli/src/adapters/*|packages/cli/src/cli/*|packages/cli/src/config/*|packages/cli/src/launcher/*|packages/cli/src/providers/*|packages/cli/src/renderer/adapter*|packages/cli/src/contracts.ts|packages/cli/src/react.ts|packages/cli/src/react-jsx-*|packages/cli/src/ui.ts|packages/cli/src/vite.ts|packages/cli/src/*contract*|packages/cli/src/*permission*|packages/cli/src/*document*|packages/cli/src/*store*|packages/cli/src/*lifecycle*|packages/cli/src/*session*|packages/cli/src/*transport*|packages/cli/src/*connector*|packages/cli/src/*channel*)
-                full=true
-                ;;
-            esac
-          done < "$RUNNER_TEMP/changed-files"
-          test -s "$RUNNER_TEMP/changed-files" || full=true
-          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
-          echo "style_only=$style_only" >> "$GITHUB_OUTPUT"
-          echo "full=$full" >> "$GITHUB_OUTPUT"
-          echo "cli_only=$cli_only" >> "$GITHUB_OUTPUT"
-          {
-            echo '### Host pull-request scope'
-            echo
-            echo "- base: \`$BASE_SHA\`"
-            echo "- head: \`$HEAD_SHA\`"
-            echo "- docs-only: \`$docs_only\`"
-            echo "- style-only: \`$style_only\`"
-            echo "- full gate: \`$full\`"
-            echo "- CLI dependency closure only: \`$cli_only\`"
-            echo '- changed files:'
-            sed 's/^/  - `/' "$RUNNER_TEMP/changed-files" | sed 's/$/`/'
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: bash scripts/ci-scope.sh
+      - name: Check scope regression cases
+        run: node --test scripts/ci-scope.test.mjs
 
   full:
-    if: always() && (github.event_name == 'push' || needs.scope.outputs.full == 'true')
+    if: always() && (github.event_name == 'push' || needs.scope.result != 'success' || needs.scope.outputs.full == 'true')
     needs: scope
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -94,8 +56,21 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Run the complete owner gate
-        run: npm run check
+      # Keep the same order and commands as npm run check, with visible timings.
+      - name: Verify clean development setup
+        run: npm run check:clean-dev
+      - name: Typecheck all workspaces
+        run: npm run typecheck
+      - name: Build all workspaces
+        run: npm run build
+      - name: Run the full test suite
+        run: npm test
+      - name: Verify release metadata
+        run: npm run check:release
+      - name: Verify package contents
+        run: npm run check:package
+      - name: Verify installed packages
+        run: npm run check:installed
       - name: Record job evidence
         if: always()
         env:
@@ -113,7 +88,7 @@ jobs:
           cache=$([[ "$CACHE_HIT" == 'true' ]] && echo hit || echo miss)
           evidence="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           jq -n --arg schema 'cordisx/ci-job-result/v1' --arg repo "$GITHUB_REPOSITORY" \
-            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v2' \
+            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v3' \
             --arg classification "$CLASSIFICATION" --arg job "$GITHUB_JOB" --arg startedAt "$STARTED_AT" \
             --arg completedAt "$completed_at" --arg cache "$cache" --arg result "$RESULT" \
             --arg environment 'github-hosted/ubuntu-latest/node22' \
@@ -127,6 +102,61 @@ jobs:
         with:
           name: ci-result-${{ github.run_id }}-${{ github.job }}
           path: .ci-results/full.json
+          if-no-files-found: warn
+
+  skill-package:
+    if: github.event_name == 'pull_request' && needs.scope.outputs.full != 'true' && needs.scope.outputs.skill_changed == 'true'
+    needs: scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - id: clock
+        run: |
+          echo "started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "started_epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - id: node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Build the CLI and its dependency closure
+        run: npm run build --workspace=cordisx
+      - name: Verify shipped Skill contents and deployment from the tarball
+        run: npm run check:package --workspace=cordisx
+      - name: Record job evidence
+        if: always()
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          STARTED_AT: ${{ steps.clock.outputs.started_at }}
+          STARTED_EPOCH: ${{ steps.clock.outputs.started_epoch }}
+          CACHE_HIT: ${{ steps.node.outputs.cache-hit }}
+          RESULT: ${{ job.status }}
+        run: |
+          mkdir -p .ci-results
+          completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          duration=$(($(date +%s) - STARTED_EPOCH))
+          cache=$([[ "$CACHE_HIT" == 'true' ]] && echo hit || echo miss)
+          evidence="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          jq -n --arg schema 'cordisx/ci-job-result/v1' --arg repo "$GITHUB_REPOSITORY" \
+            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v3' \
+            --arg classification 'skill-package' --arg job "$GITHUB_JOB" --arg startedAt "$STARTED_AT" \
+            --arg completedAt "$completed_at" --arg cache "$cache" --arg result "$RESULT" \
+            --arg environment 'github-hosted/ubuntu-latest/node22' \
+            --arg evidenceUrl "$evidence" --argjson durationSeconds "$duration" \
+            '{schema:$schema,repo:$repo,head:$head,base:$base,gateVersion:$gateVersion,classification:$classification,job:$job,environment:$environment,startedAt:$startedAt,completedAt:$completedAt,durationSeconds:$durationSeconds,cache:$cache,result:$result,evidenceUrl:$evidenceUrl}' \
+            > .ci-results/skill-package.json
+          echo '### CI job result' >> "$GITHUB_STEP_SUMMARY"
+          jq -c . .ci-results/skill-package.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-result-${{ github.run_id }}-${{ github.job }}
+          path: .ci-results/skill-package.json
           if-no-files-found: warn
 
   changed-quality:
@@ -176,7 +206,7 @@ jobs:
           cache=$([[ "$CACHE_HIT" == 'true' ]] && echo hit || echo miss)
           evidence="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           jq -n --arg schema 'cordisx/ci-job-result/v1' --arg repo "$GITHUB_REPOSITORY" \
-            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v2' \
+            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v3' \
             --arg classification 'changed-quality' --arg job "$GITHUB_JOB" --arg startedAt "$STARTED_AT" \
             --arg completedAt "$completed_at" --arg cache "$cache" --arg result "$RESULT" \
             --arg environment 'github-hosted/ubuntu-latest/node22' \
@@ -238,7 +268,7 @@ jobs:
           cache=$([[ "$CACHE_HIT" == 'true' ]] && echo hit || echo miss)
           evidence="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           jq -n --arg schema 'cordisx/ci-job-result/v1' --arg repo "$GITHUB_REPOSITORY" \
-            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v2' \
+            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v3' \
             --arg classification 'changed-typecheck' --arg job "$GITHUB_JOB" --arg startedAt "$STARTED_AT" \
             --arg completedAt "$completed_at" --arg cache "$cache" --arg result "$RESULT" \
             --arg environment 'github-hosted/ubuntu-latest/node22' \
@@ -300,7 +330,7 @@ jobs:
           cache=$([[ "$CACHE_HIT" == 'true' ]] && echo hit || echo miss)
           evidence="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           jq -n --arg schema 'cordisx/ci-job-result/v1' --arg repo "$GITHUB_REPOSITORY" \
-            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v2' \
+            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v3' \
             --arg classification 'changed-build' --arg job "$GITHUB_JOB" --arg startedAt "$STARTED_AT" \
             --arg completedAt "$completed_at" --arg cache "$cache" --arg result "$RESULT" \
             --arg environment 'github-hosted/ubuntu-latest/node22' \
@@ -359,7 +389,7 @@ jobs:
           cache=$([[ "$CACHE_HIT" == 'true' ]] && echo hit || echo miss)
           evidence="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           jq -n --arg schema 'cordisx/ci-job-result/v1' --arg repo "$GITHUB_REPOSITORY" \
-            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v2' \
+            --arg head "$HEAD_SHA" --arg base "$BASE_SHA" --arg gateVersion 'host-check-v3' \
             --arg classification 'changed-tests' --arg job "$GITHUB_JOB" --arg startedAt "$STARTED_AT" \
             --arg completedAt "$completed_at" --arg cache "$cache" --arg result "$RESULT" \
             --arg environment 'github-hosted/ubuntu-latest/node22' \
