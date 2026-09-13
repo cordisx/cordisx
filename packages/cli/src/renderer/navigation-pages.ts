@@ -282,9 +282,12 @@ export function assertPageHeaderAction(action: CordisXPageHeaderActionV4, label:
     if (!['icon', 'primary', 'text'].includes(action.presentation) || action.menu !== undefined) {
       throw new Error(`${label} presentation requires a command action`)
     }
-    if (['primary', 'text'].includes(action.presentation) && action.visual !== undefined) {
-      throw new Error(`${label} ${action.presentation} action cannot use an identity visual`)
+    if (action.presentation === 'primary' && action.visual !== undefined) {
+      throw new Error(`${label} primary action cannot use an identity visual`)
     }
+  }
+  if (action.presentation === 'text' && action.visual !== undefined && action.visual.kind !== 'image') {
+    throw new Error(`${label} text action requires an image visual`)
   }
   if ('variant' in action && action.variant !== undefined) {
     if (action.variant !== 'outlined' || action.presentation !== 'primary' || action.menu !== undefined) {

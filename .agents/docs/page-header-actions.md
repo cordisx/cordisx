@@ -170,5 +170,14 @@ mounts return false. Feature-check older Hosts and retain the declared label.
 Use `presentation: 'text'` for a balance command beside the single primary
 create command, and update its label from actual consumer data without
 re-registering the page. Text commands keep metadata order and existing action
-limits; they cannot declare identity visuals, menus or the primary variant.
+limits; they cannot declare avatar visuals, menus or the primary variant.
 The public `CordisXPageControls` type is exported by `cordisx`.
+
+Matching experimental Hosts allow a text action to declare a leading
+`visual: { kind: 'image', src }` under the
+[page-v4 contract](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/ui-contributions/page-v4.md#leading-images-on-text-commands).
+It reuses the existing 20px image class and bounded inline raster validation.
+Rendering and visual updates preserve the visible label node, trigger and focus;
+failed decoding replaces only the image with the neutral action icon. Avatar
+visuals remain forbidden on text commands. Older experimental Hosts require
+omitting this visual while retaining the text label.

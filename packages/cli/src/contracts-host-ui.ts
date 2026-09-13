@@ -501,7 +501,7 @@ export type CordisXPageHeaderActionV4 =
     readonly variant?: 'outlined'
   })
   | (CordisXPageHeaderAction & {
-    readonly visual?: never
+    readonly visual?: Extract<CordisXPageHeaderVisual, { readonly kind: 'image' }>
     readonly menu?: never
     readonly presentation: 'text'
     readonly variant?: never

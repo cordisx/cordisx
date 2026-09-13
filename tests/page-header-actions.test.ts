@@ -279,6 +279,52 @@ describe('Host page v4 headers', () => {
   })
 })
 
+it.each(['light', 'dark'])(
+  'preserves a text action label and focus through leading image updates and fallback in %s',
+  async theme => {
+    const f = fixture({
+      ...command('balance'),
+      label: { key: 'balance', fallback: '0 Token' },
+      presentation: 'text',
+      visual: { kind: 'image', src: 'data:image/png;base64,AAAA' },
+    })
+    try {
+      f.document.documentElement.dataset.theme = theme
+      f.trigger.focus()
+      const visibleLabel = f.trigger.querySelector('.cordisx-page-header-label')!
+      const image = f.trigger.querySelector('img')!
+      expect(f.trigger.firstElementChild).toBe(image)
+      expect(image.alt).toBe('')
+      expect(image.draggable).toBe(false)
+      expect(f.dom.window.getComputedStyle(image).width).toBe('20px')
+      expect(f.trigger.textContent).toBe('0 Token')
+      expect(f.updateLabel('balance', { key: 'balance', fallback: '12 Token' })).toBe(true)
+      expect(f.updateVisual('balance', { kind: 'image', src: 'data:image/webp;base64,BBBB' })).toBe(true)
+      expect(f.trigger.querySelector('.cordisx-page-header-label')).toBe(visibleLabel)
+      expect(f.trigger.textContent).toBe('12 Token')
+      expect(f.document.activeElement).toBe(f.trigger)
+      const replacement = f.trigger.querySelector('img')!
+      replacement.dispatchEvent(new f.dom.window.Event('error'))
+      expect(f.trigger.querySelector('img')).toBeNull()
+      expect(f.trigger.firstElementChild?.classList.contains('cordisx-host-icon')).toBe(true)
+      expect(f.trigger.querySelector('.cordisx-page-header-label')).toBe(visibleLabel)
+      expect(f.trigger.getAttribute('aria-label')).toBe('12 Token')
+      expect(f.document.activeElement).toBe(f.trigger)
+      expect(f.updateVisual('balance', { kind: 'avatar' })).toBe(false)
+      expect(f.updateVisual('balance', { kind: 'image', src: 'https://example.test/coin.png' })).toBe(false)
+      f.trigger.click()
+      await Promise.resolve()
+      expect(f.calls).toEqual(['balance'])
+      f.dispose()
+      expect(f.updateVisual('balance', { kind: 'image', src: 'data:image/png;base64,AAAA' })).toBe(false)
+      expect(f.updateLabel('balance', { key: 'balance' })).toBe(false)
+    } finally {
+      f.dispose()
+      f.dom.window.close()
+    }
+  },
+)
+
 it('updates declared visuals without replacing the trigger or its open menu; fences invalid and retired updates', () => {
   const f = fixture()
   try {

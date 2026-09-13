@@ -77,7 +77,7 @@ export function mountPageHeaderActions(options: {
     const update = visualUpdates.get(id)
     if (!action?.visual || !update || visual?.kind !== action.visual.kind) return false
     try {
-      assertPageHeaderAction({ ...action, visual }, 'page header visual update', true)
+      assertPageHeaderAction({ ...action, visual } as CordisXPageHeaderActionV4, 'page header visual update', true)
       update(structuredClone(visual))
       return true
     } catch {
@@ -115,7 +115,10 @@ export function mountPageHeaderActions(options: {
           svg.append(path)
           return svg
         }
-        trigger.replaceChildren(anonymous())
+        const show = (leading: SVGSVGElement | HTMLElement) => {
+          trigger.replaceChildren(leading, ...(visibleLabel ? [visibleLabel] : []))
+        }
+        show(anonymous())
         if (visual.src !== undefined) {
           const img = document.createElement('img')
           img.className = 'cordisx-page-header-visual'
@@ -124,7 +127,7 @@ export function mountPageHeaderActions(options: {
           img.draggable = false
           img.addEventListener('error', () => img.replaceWith(anonymous()), { once: true })
           img.src = visual.src
-          trigger.replaceChildren(img)
+          show(img)
         }
       }
       visualUpdates.set(action.id, renderVisual)
