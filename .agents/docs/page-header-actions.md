@@ -181,3 +181,19 @@ Rendering and visual updates preserve the visible label node, trigger and focus;
 failed decoding replaces only the image with the neutral action icon. Avatar
 visuals remain forbidden on text commands. Older experimental Hosts require
 omitting this visual while retaining the text label.
+
+Matching experimental Hosts also support text image
+`visual: { kind: 'image', src, position: 'trailing' }` and independent
+`tooltip: LocalizedText`. Omitted position remains leading; omitted tooltip
+retains the existing accessible-label tooltip, while a disabled reason still
+wins. Position is part of the declared text visual; image updates retain it and
+reject a conflicting position. Other visuals and presentations do not gain
+these metadata fields.
+
+`mount.controls.setHeaderActionLabel(actionId, label, ariaLabel?)` can update the
+visible and accessible messages together. Each is validated and cloned with the
+existing finite scalar and 16KiB bounds before either changes. Omission preserves
+the current accessible override. Use an ordinary localized numeric visible label,
+a complete accessible amount with its unit, and a separate action tooltip; Host
+does not interpret currencies. Locale refresh retains the latest messages,
+trigger, focus and dispatch. Invalid accessible input leaves both messages intact.

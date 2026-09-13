@@ -4,6 +4,7 @@ import type {
   CordisXJsonScalar,
   CordisXLocalizedText,
   CordisXPageControls,
+  CordisXPageHeaderTextVisual,
   CordisXPageHeaderVisual,
   CordisXPageSelectControl,
   CordisXRouteReference,
@@ -89,24 +90,31 @@ export class HostPageControls implements CordisXPageControls {
   constructor(
     private readonly document: Document,
     _portalParent?: HTMLElement,
-    private readonly updateHeaderVisual?: (id: string, visual: CordisXPageHeaderVisual) => boolean,
+    private readonly updateHeaderVisual?: (
+      id: string,
+      visual: CordisXPageHeaderVisual | CordisXPageHeaderTextVisual,
+    ) => boolean,
     private readonly updateBreadcrumbs?: (
       items: readonly CordisXLocalizedText[],
       back: CordisXRouteReference,
     ) => boolean,
-    private readonly updateHeaderLabel?: (id: string, label: CordisXLocalizedText) => boolean,
+    private readonly updateHeaderLabel?: (
+      id: string,
+      label: CordisXLocalizedText,
+      ariaLabel?: CordisXLocalizedText,
+    ) => boolean,
   ) {}
 
   setHeaderBreadcrumbs(items: readonly CordisXLocalizedText[], back: CordisXRouteReference): boolean {
     return !this.closed && (this.updateBreadcrumbs?.(items, back) ?? false)
   }
 
-  setHeaderActionVisual(id: string, visual: CordisXPageHeaderVisual): boolean {
+  setHeaderActionVisual(id: string, visual: CordisXPageHeaderVisual | CordisXPageHeaderTextVisual): boolean {
     return !this.closed && (this.updateHeaderVisual?.(id, visual) ?? false)
   }
 
-  setHeaderActionLabel(id: string, label: CordisXLocalizedText): boolean {
-    return !this.closed && (this.updateHeaderLabel?.(id, label) ?? false)
+  setHeaderActionLabel(id: string, label: CordisXLocalizedText, ariaLabel?: CordisXLocalizedText): boolean {
+    return !this.closed && (this.updateHeaderLabel?.(id, label, ariaLabel) ?? false)
   }
 
   select<Value extends CordisXJsonScalar>(options: {

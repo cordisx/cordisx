@@ -276,7 +276,7 @@ export function assertPageHeaderAction(action: CordisXPageHeaderActionV4, label:
     'command',
     'when',
     'disabled',
-    ...(v4 ? ['visual', 'menu', 'presentation', 'variant'] : []),
+    ...(v4 ? ['visual', 'menu', 'presentation', 'variant', 'tooltip'] : []),
   ], label)
   if ('presentation' in action && action.presentation !== undefined) {
     if (!['icon', 'primary', 'text'].includes(action.presentation) || action.menu !== undefined) {
@@ -294,8 +294,24 @@ export function assertPageHeaderAction(action: CordisXPageHeaderActionV4, label:
       throw new Error(`${label} variant requires an outlined primary command action`)
     }
   }
+  if (action.tooltip !== undefined) {
+    if (action.presentation !== 'text' || action.menu !== undefined) {
+      throw new Error(`${label} tooltip requires a text command action`)
+    }
+    assertLocalizedText(action.tooltip, `${label} tooltip`)
+  }
   if (action.visual !== undefined) {
-    assertKeys(action.visual, ['kind', 'src'], `${label} visual`)
+    assertKeys(
+      action.visual,
+      ['kind', 'src', ...(action.presentation === 'text' ? ['position'] : [])],
+      `${label} visual`,
+    )
+    if (
+      action.presentation === 'text' && action.visual.position !== undefined
+      && !['leading', 'trailing'].includes(action.visual.position)
+    ) {
+      throw new Error(`${label} visual position is invalid`)
+    }
     if (!['avatar', 'image'].includes(action.visual.kind)) throw new Error(`${label} visual kind is invalid`)
     if (action.icon !== undefined) throw new Error(`${label} cannot combine icon and visual`)
     const src = action.visual.src

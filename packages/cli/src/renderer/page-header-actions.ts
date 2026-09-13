@@ -1,14 +1,18 @@
 import type { CordisXLocalizedText, CordisXPageHeaderAction, CordisXPageHeaderActionV4 } from '../contracts.js'
 import { assertLocalizedText, immutableSnapshot } from './validation.js'
 import { assertPageHeaderAction } from './navigation-pages.js'
-import type { CordisXPageHeaderVisual } from '../contracts.js'
+import type { CordisXPageHeaderTextVisual, CordisXPageHeaderVisual } from '../contracts.js'
 import { createHostSurfaceIcon } from './icons.js'
 import { HostTooltipController } from './tooltips.js'
 
 /** The navigation owner supplies authorization and lifecycle; this module owns only chrome. */
 export function mountPageHeaderActions(options: {
-  readonly registerLabelUpdater?: (update: (id: string, label: CordisXLocalizedText) => boolean) => void
-  readonly registerVisualUpdater?: (update: (id: string, visual: CordisXPageHeaderVisual) => boolean) => void
+  readonly registerLabelUpdater?: (
+    update: (id: string, label: CordisXLocalizedText, ariaLabel?: CordisXLocalizedText) => boolean,
+  ) => void
+  readonly registerVisualUpdater?: (
+    update: (id: string, visual: CordisXPageHeaderVisual | CordisXPageHeaderTextVisual) => boolean,
+  ) => void
   readonly chrome: HTMLElement
   readonly actions: readonly CordisXPageHeaderActionV4[]
   readonly button: (label: string, icon: string) => HTMLButtonElement
@@ -51,26 +55,29 @@ export function mountPageHeaderActions(options: {
   disposers.push(() => style.remove())
   let closeOpen: (() => void) | undefined
   let disposed = false
-  const labelUpdates = new Map<string, (label: CordisXLocalizedText) => void>()
-  options.registerLabelUpdater?.((id, label) => {
+  const labelUpdates = new Map<string, (label: CordisXLocalizedText, ariaLabel?: CordisXLocalizedText) => void>()
+  options.registerLabelUpdater?.((id, label, ariaLabel) => {
     if (disposed) return false
     const update = labelUpdates.get(id)
     if (!update) return false
     try {
       const cloned = immutableSnapshot(label)
-      assertLocalizedText(cloned, 'page header label update')
-      if (cloned.namespace !== undefined && typeof cloned.namespace !== 'string') return false
-      if (Object.values(cloned.params ?? {}).some(value => typeof value === 'number' && !Number.isFinite(value))) {
-        return false
+      const clonedAria = ariaLabel === undefined ? undefined : immutableSnapshot(ariaLabel)
+      for (const message of clonedAria === undefined ? [cloned] : [cloned, clonedAria]) {
+        assertLocalizedText(message, 'page header label update')
+        if (message.namespace !== undefined && typeof message.namespace !== 'string') return false
+        if (Object.values(message.params ?? {}).some(value => typeof value === 'number' && !Number.isFinite(value))) {
+          return false
+        }
+        if (new TextEncoder().encode(JSON.stringify(message)).byteLength > 16384) return false
       }
-      if (new TextEncoder().encode(JSON.stringify(cloned)).byteLength > 16384) return false
-      update(cloned)
+      update(cloned, clonedAria)
       return true
     } catch {
       return false
     }
   })
-  const visualUpdates = new Map<string, (visual: CordisXPageHeaderVisual) => void>()
+  const visualUpdates = new Map<string, (visual: CordisXPageHeaderVisual | CordisXPageHeaderTextVisual) => void>()
   options.registerVisualUpdater?.((id, visual) => {
     if (disposed) return false
     const action = options.actions.find(item => item.id === id)
@@ -78,6 +85,12 @@ export function mountPageHeaderActions(options: {
     if (!action?.visual || !update || visual?.kind !== action.visual.kind) return false
     try {
       assertPageHeaderAction({ ...action, visual } as CordisXPageHeaderActionV4, 'page header visual update', true)
+      if (
+        'position' in visual
+        && (action.presentation !== 'text' || (visual.position ?? 'leading') !== (action.visual.position ?? 'leading'))
+      ) {
+        return false
+      }
       update(structuredClone(visual))
       return true
     } catch {
@@ -93,13 +106,14 @@ export function mountPageHeaderActions(options: {
     if (text && action.icon === undefined) trigger.replaceChildren()
     if (primary && action.variant === 'outlined') trigger.dataset.variant = 'outlined'
     let currentLabel = action.label
+    let currentAriaLabel = action.ariaLabel
     const visibleLabel = primary || text ? document.createElement('span') : undefined
     if (visibleLabel) {
       visibleLabel.className = 'cordisx-page-header-label'
       trigger.append(visibleLabel)
     }
     if (action.visual !== undefined) {
-      const renderVisual = (visual: CordisXPageHeaderVisual) => {
+      const renderVisual = (visual: CordisXPageHeaderVisual | CordisXPageHeaderTextVisual) => {
         const anonymous = (): SVGSVGElement | HTMLElement => {
           if (visual.kind !== 'avatar') return createHostSurfaceIcon(document, 'host:more')
           const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
@@ -115,8 +129,12 @@ export function mountPageHeaderActions(options: {
           svg.append(path)
           return svg
         }
-        const show = (leading: SVGSVGElement | HTMLElement) => {
-          trigger.replaceChildren(leading, ...(visibleLabel ? [visibleLabel] : []))
+        const show = (image: SVGSVGElement | HTMLElement) => {
+          if (action.presentation === 'text' && action.visual?.position === 'trailing' && visibleLabel) {
+            trigger.replaceChildren(visibleLabel, image)
+          } else {
+            trigger.replaceChildren(image, ...(visibleLabel ? [visibleLabel] : []))
+          }
         }
         show(anonymous())
         if (visual.src !== undefined) {
@@ -159,12 +177,14 @@ export function mountPageHeaderActions(options: {
         button.disabled = item.disabled?.value === true || !options.available(item)
       }
     }
-    const localize = (message = currentLabel): void => {
-      const label = options.resolve(action.ariaLabel ?? message, `${action.id}.label`)
+    const localize = (message = currentLabel, ariaLabel = currentAriaLabel): void => {
+      const label = options.resolve(ariaLabel ?? message, `${action.id}.label`)
       const visibleText = visibleLabel ? options.resolve(message, `${action.id}.visible-label`) : undefined
       const tooltip = action.disabled?.value && action.disabled.reason
         ? options.resolve(action.disabled.reason, `${action.id}.disabled`)
-        : label
+        : action.tooltip === undefined
+        ? label
+        : options.resolve(action.tooltip, `${action.id}.tooltip`)
       trigger.setAttribute('aria-label', label)
       if (visibleLabel) visibleLabel.textContent = visibleText!
       trigger.dataset.cordisxTooltip = tooltip
@@ -174,9 +194,10 @@ export function mountPageHeaderActions(options: {
         button.setAttribute('aria-label', options.resolve(item.ariaLabel ?? item.label, `${action.id}.${item.id}.aria`))
       }
     }
-    labelUpdates.set(action.id, message => {
-      localize(message)
+    labelUpdates.set(action.id, (message, ariaLabel) => {
+      localize(message, ariaLabel ?? currentAriaLabel)
       currentLabel = message
+      if (ariaLabel !== undefined) currentAriaLabel = ariaLabel
     })
     const run = async (item: CordisXPageHeaderAction, id: string): Promise<void> => {
       if (

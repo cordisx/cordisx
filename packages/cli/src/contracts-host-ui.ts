@@ -487,29 +487,37 @@ export type CordisXPageHeaderVisual =
   | { readonly kind: 'avatar'; readonly src?: string }
   | { readonly kind: 'image'; readonly src: string }
 
+export type CordisXPageHeaderTextVisual = Extract<CordisXPageHeaderVisual, { readonly kind: 'image' }> & {
+  readonly position?: 'leading' | 'trailing'
+}
+
 export type CordisXPageHeaderActionV4 =
   | (CordisXPageHeaderAction & {
     readonly visual?: CordisXPageHeaderVisual
     readonly menu?: never
     readonly presentation?: 'icon'
     readonly variant?: never
+    readonly tooltip?: never
   })
   | (CordisXPageHeaderAction & {
     readonly visual?: never
     readonly menu?: never
     readonly presentation: 'primary'
     readonly variant?: 'outlined'
+    readonly tooltip?: never
   })
   | (CordisXPageHeaderAction & {
-    readonly visual?: Extract<CordisXPageHeaderVisual, { readonly kind: 'image' }>
+    readonly visual?: CordisXPageHeaderTextVisual
     readonly menu?: never
     readonly presentation: 'text'
     readonly variant?: never
+    readonly tooltip?: CordisXLocalizedText
   })
   | (Omit<CordisXPageHeaderAction, 'command'> & {
     readonly command?: never
     readonly presentation?: never
     readonly variant?: never
+    readonly tooltip?: never
     readonly visual?: CordisXPageHeaderVisual
     readonly menu: readonly CordisXPageHeaderAction[]
   })
@@ -713,9 +721,9 @@ export interface CordisXPageControls {
   /** Replaces the title with bounded breadcrumbs and an owner-scoped Back route. */
   setHeaderBreadcrumbs(items: readonly CordisXLocalizedText[], back: CordisXRouteReference): boolean
   /** Updates only an existing visual action in this live mounted standard page. */
-  setHeaderActionVisual(actionId: string, visual: CordisXPageHeaderVisual): boolean
+  setHeaderActionVisual(actionId: string, visual: CordisXPageHeaderVisual | CordisXPageHeaderTextVisual): boolean
   /** Updates a declared top-level command or menu trigger label in the current mounted standard header. */
-  setHeaderActionLabel(actionId: string, label: CordisXLocalizedText): boolean
+  setHeaderActionLabel(actionId: string, label: CordisXLocalizedText, ariaLabel?: CordisXLocalizedText): boolean
   select<Value extends CordisXJsonScalar>(options: {
     readonly id?: string
     readonly label: string

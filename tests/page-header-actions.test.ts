@@ -6,6 +6,7 @@ import { CORDISX_PAGE_SCHEMA_V3, CORDISX_PAGE_SCHEMA_V4 } from '../packages/cli/
 import type {
   CordisXLocalizedText,
   CordisXPageHeaderActionV4,
+  CordisXPageHeaderTextVisual,
   CordisXPageHeaderVisual,
 } from '../packages/cli/src/contracts.js'
 
@@ -25,8 +26,8 @@ function fixture(action = guest) {
   let available = true
   let refresh = () => {}
   let relocalize = () => {}
-  let updateLabel: (id: string, label: CordisXLocalizedText) => boolean = () => false
-  let updateVisual: (id: string, visual: CordisXPageHeaderVisual) => boolean = () => false
+  let updateLabel: (id: string, label: CordisXLocalizedText, ariaLabel?: CordisXLocalizedText) => boolean = () => false
+  let updateVisual: (id: string, visual: CordisXPageHeaderVisual | CordisXPageHeaderTextVisual) => boolean = () => false
   const dispose = mountPageHeaderActions({
     registerLabelUpdater: update => {
       updateLabel = update
@@ -57,8 +58,10 @@ function fixture(action = guest) {
     document,
     calls,
     relocalize: () => relocalize(),
-    updateLabel: (id: string, label: CordisXLocalizedText) => updateLabel(id, label),
-    updateVisual: (id: string, visual: CordisXPageHeaderVisual) => updateVisual(id, visual),
+    updateLabel: (id: string, label: CordisXLocalizedText, ariaLabel?: CordisXLocalizedText) =>
+      updateLabel(id, label, ariaLabel),
+    updateVisual: (id: string, visual: CordisXPageHeaderVisual | CordisXPageHeaderTextVisual) =>
+      updateVisual(id, visual),
     dispose,
     trigger: chrome.querySelector('button')!,
     revoke: () => {
@@ -299,7 +302,8 @@ it.each(['light', 'dark'])(
       expect(f.dom.window.getComputedStyle(image).width).toBe('20px')
       expect(f.trigger.textContent).toBe('0 Token')
       expect(f.updateLabel('balance', { key: 'balance', fallback: '12 Token' })).toBe(true)
-      expect(f.updateVisual('balance', { kind: 'image', src: 'data:image/webp;base64,BBBB' })).toBe(true)
+      expect(f.updateVisual('balance', { kind: 'image', src: 'data:image/webp;base64,BBBB', position: 'leading' }))
+        .toBe(true)
       expect(f.trigger.querySelector('.cordisx-page-header-label')).toBe(visibleLabel)
       expect(f.trigger.textContent).toBe('12 Token')
       expect(f.document.activeElement).toBe(f.trigger)
@@ -433,7 +437,7 @@ it('keeps explicit accessible labels and disabled reasons when a primary label c
 it('retains cloned params on locale refresh and preserves pending command identity during label updates', async () => {
   const dom = new JSDOM('<header></header>')
   const document = dom.window.document
-  let update: (id: string, label: CordisXLocalizedText) => boolean = () => false
+  let update: (id: string, label: CordisXLocalizedText, ariaLabel?: CordisXLocalizedText) => boolean = () => false
   let refresh = () => {}
   let language = '余额'
   let finish = () => {}
@@ -555,4 +559,114 @@ it('preserves explicit account menu accessible labels and disabled tooltip overr
       item.dom.window.close()
     }
   }
+})
+
+it.each(['light', 'dark'])(
+  'keeps a trailing image, dynamic accessible amount and independent tooltip in %s',
+  async theme => {
+    const f = fixture({
+      ...command('balance'),
+      label: { key: 'amount', fallback: '0' },
+      ariaLabel: { key: 'full', fallback: '0 Token' },
+      presentation: 'text',
+      tooltip: { key: 'details', fallback: '查看收支明细' },
+      visual: { kind: 'image', src: 'data:image/png;base64,AAAA', position: 'trailing' },
+    })
+    try {
+      f.document.documentElement.dataset.theme = theme
+      f.trigger.focus()
+      const label = f.trigger.querySelector('.cordisx-page-header-label')!
+      expect(f.trigger.firstElementChild).toBe(label)
+      expect(f.trigger.lastElementChild?.tagName).toBe('IMG')
+      expect(f.trigger.textContent).toBe('0')
+      expect(f.trigger.getAttribute('aria-label')).toBe('0 Token')
+      expect(f.trigger.dataset.cordisxTooltip).toBe('查看收支明细')
+      expect(f.updateVisual('balance', { kind: 'image', src: 'data:image/png;base64,AAAA', position: 'trailing' }))
+        .toBe(true)
+      expect(f.updateVisual('balance', { kind: 'image', src: 'data:image/png;base64,AAAA', position: 'leading' })).toBe(
+        false,
+      )
+      const aria = { key: 'full', fallback: '12 Token' }
+      expect(f.updateLabel('balance', { key: 'amount', fallback: '12' }, aria)).toBe(true)
+      aria.fallback = 'caller mutation'
+      expect(f.updateVisual('balance', { kind: 'image', src: 'data:image/webp;base64,BBBB' })).toBe(true)
+      expect(f.trigger.firstElementChild).toBe(label)
+      expect(f.trigger.lastElementChild?.tagName).toBe('IMG')
+      f.trigger.lastElementChild!.dispatchEvent(new f.dom.window.Event('error'))
+      expect(f.trigger.firstElementChild).toBe(label)
+      expect(f.trigger.lastElementChild?.classList.contains('cordisx-host-icon')).toBe(true)
+      f.relocalize()
+      expect(f.trigger.textContent).toBe('12')
+      expect(f.trigger.getAttribute('aria-label')).toBe('12 Token')
+      expect(f.trigger.dataset.cordisxTooltip).toBe('查看收支明细')
+      expect(f.document.activeElement).toBe(f.trigger)
+      expect(f.updateLabel('balance', { key: 'amount', fallback: '13' }, { key: 'bad', params: { value: Infinity } }))
+        .toBe(false)
+      expect(f.trigger.textContent).toBe('12')
+      expect(f.trigger.getAttribute('aria-label')).toBe('12 Token')
+      expect(f.updateLabel('balance', { key: 'amount', fallback: '14' })).toBe(true)
+      expect(f.trigger.getAttribute('aria-label')).toBe('12 Token')
+      f.trigger.click()
+      await Promise.resolve()
+      expect(f.calls).toEqual(['balance'])
+      f.revoke()
+      expect(f.trigger.disabled).toBe(true)
+      f.dispose()
+      expect(f.updateLabel('balance', { key: 'amount' }, { key: 'full' })).toBe(false)
+    } finally {
+      f.dispose()
+      f.dom.window.close()
+    }
+  },
+)
+it('keeps disabled reasons above an independent text tooltip', () => {
+  const f = fixture({
+    ...command('balance'),
+    presentation: 'text',
+    tooltip: { key: 'details', fallback: 'View details' },
+    disabled: { value: true, reason: { key: 'loading', fallback: 'Loading' } },
+  })
+  try {
+    expect(f.trigger.dataset.cordisxTooltip).toBe('Loading')
+  } finally {
+    f.dispose()
+    f.dom.window.close()
+  }
+})
+it('rejects text-only position and tooltip metadata on other header shapes', () => {
+  const register = (action: unknown, schemaVersion = 4) => {
+    const pages = new PageRegistry()
+    try {
+      pages.register(
+        'demo',
+        {
+          $schema: schemaVersion === 4 ? CORDISX_PAGE_SCHEMA_V4 : CORDISX_PAGE_SCHEMA_V3,
+          schemaVersion,
+          id: 'lobby',
+          title: label,
+          description: label,
+          headerActions: [action],
+        } as never,
+        () => {},
+      )
+    } finally {
+      pages.dispose()
+    }
+  }
+  for (
+    const action of [
+      { ...guest, tooltip: label },
+      { ...command('create'), presentation: 'primary', tooltip: label },
+      { ...command('create'), presentation: 'icon', tooltip: label },
+      { ...guest, visual: { kind: 'image', src: 'data:image/png;base64,AAAA', position: 'trailing' } },
+      {
+        ...command('balance'),
+        presentation: 'text',
+        visual: { kind: 'image', src: 'data:image/png;base64,AAAA', position: 'below' },
+      },
+      { ...command('balance'), presentation: 'text', tooltip: 'View details' },
+      { ...guest, menu: [{ ...command('profile'), tooltip: label }] },
+    ]
+  ) expect(() => register(action)).toThrow()
+  expect(() => register({ ...command('balance'), presentation: 'text', tooltip: label }, 3)).toThrow()
 })

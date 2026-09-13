@@ -1,7 +1,7 @@
 import { projectPageSurfaceTheme } from './page-surface-theme.js'
 import { mountLocalizedPageHeaderBreadcrumbs } from './page-header-breadcrumbs.js'
 import { projectPageContentAlignment } from './page-content-alignment.js'
-import type { CordisXPageHeaderVisual } from '../contracts.js'
+import type { CordisXPageHeaderTextVisual, CordisXPageHeaderVisual } from '../contracts.js'
 import { createPageHeaderChrome } from './page-header-chrome.js'
 import { mountPageHeaderActions } from './page-header-actions.js'
 import { resolveRouteLink } from './route-link-resolution.js'
@@ -565,8 +565,12 @@ export class NavigationRegistryBase {
     try {
       // Activate Host page admission before mounting the body or resolving navigation.
       await this.pageAdmissionBindings.activate(pageAdmissionBinding)
-      let updateHeaderLabel: ((id: string, label: CordisXLocalizedText) => boolean) | undefined
-      let updateHeaderVisual: ((id: string, visual: CordisXPageHeaderVisual) => boolean) | undefined
+      let updateHeaderLabel:
+        | ((id: string, label: CordisXLocalizedText, ariaLabel?: CordisXLocalizedText) => boolean)
+        | undefined
+      let updateHeaderVisual:
+        | ((id: string, visual: CordisXPageHeaderVisual | CordisXPageHeaderTextVisual) => boolean)
+        | undefined
       let breadcrumbs: ReturnType<typeof mountLocalizedPageHeaderBreadcrumbs> | undefined
       let alignment: { leading: HTMLElement; title: HTMLElement } | undefined
       const agentConversation = page.presentation === 'agent-conversation'
@@ -731,7 +735,7 @@ export class NavigationRegistryBase {
         content,
         (id, visual) => !abort.signal.aborted && (updateHeaderVisual?.(id, visual) ?? false),
         (items, back) => breadcrumbs?.update(items, back) ?? false,
-        (id, label) => !abort.signal.aborted && (updateHeaderLabel?.(id, label) ?? false),
+        (id, label, ariaLabel) => !abort.signal.aborted && (updateHeaderLabel?.(id, label, ariaLabel) ?? false),
       )
       effects.push(() => controls.dispose())
       const context: CordisXPageMountContext = {

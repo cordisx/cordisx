@@ -313,6 +313,7 @@ export type {
   CordisXPageControls,
   CordisXPageHeaderAction,
   CordisXPageHeaderActionV4,
+  CordisXPageHeaderTextVisual,
   CordisXPageHeaderVisual,
   CordisXPageMetadata,
   CordisXPageMetadataV3,
