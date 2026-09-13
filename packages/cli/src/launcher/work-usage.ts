@@ -1,6 +1,9 @@
 import path from 'node:path'
 import type { WorkUsageSnapshotV2 } from '@cordisx/protocol/usage/v2'
 import type { UsageSnapshotV1 } from '../usage-contracts.js'
+export type WorkUsageReader = (() => Promise<WorkUsageSnapshotV2>) & {
+  readonly current?: (snapshot: { readonly scopeId: string; readonly epoch: string }) => boolean
+}
 /** Host initial task metadata only. Never infer activity from prompts or task names. */
 export function classifyWorkUsageHeader(header: string): 'work' | 'game' | 'unclassified' {
   try {

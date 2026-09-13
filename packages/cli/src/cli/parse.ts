@@ -28,6 +28,8 @@ export interface CordisXLauncherOptions {
   readonly profileDir?: string
   readonly executable?: string
   readonly debugPort?: number
+  /** Restrictive dev ledger admission precondition; never selects or overrides usage. */
+  readonly workScopeGuard?: string
   readonly onlineDevtools: boolean
   readonly dryRun: boolean
   /** Explicit dev --config persistence opt-in. */
@@ -77,7 +79,7 @@ export type CordisXCliInvocation =
   | CordisXDevInvocation
 
 type BooleanOptionName = 'attach' | 'system' | 'isolated' | 'onlineDevtools' | 'dryRun' | 'writeConfig' | 'help'
-type ValueOptionName = 'dataMode' | 'profileDir' | 'executable' | 'debugPort' | 'configPath'
+type ValueOptionName = 'dataMode' | 'profileDir' | 'executable' | 'debugPort' | 'configPath' | 'workScopeGuard'
 type ParsedOptionName = BooleanOptionName | ValueOptionName
 
 interface ParsedOptions {
@@ -93,6 +95,7 @@ interface ParsedOptions {
   executable?: string
   debugPort?: number
   configPath?: string
+  workScopeGuard?: string
 }
 
 const BOOLEAN_OPTIONS = new Map<string, BooleanOptionName>([
@@ -112,6 +115,7 @@ const VALUE_OPTIONS = new Map<string, ValueOptionName>([
   ['--executable', 'executable'],
   ['--debug-port', 'debugPort'],
   ['--config', 'configPath'],
+  ['--work-scope-guard', 'workScopeGuard'],
   ['-c', 'configPath'],
 ])
 
@@ -119,6 +123,9 @@ const COMMANDS = new Set(['help', 'setup', 'config', 'doctor', 'dev'])
 const PROFILE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/
 
 function parseValue(option: string, name: ValueOptionName, raw: string): string | number {
+  if (name === 'workScopeGuard' && !/^[a-f0-9]{64}\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(raw)) {
+    throw new CordisXCliParseError('invalid-option-value', '--work-scope-guard requires scope/epoch')
+  }
   if (raw.length === 0) {
     throw new CordisXCliParseError('missing-option-value', `${option} requires a value`)
   }
@@ -221,6 +228,7 @@ function launcherOptions(options: ParsedOptions): CordisXLauncherOptions {
     ...(options.profileDir === undefined ? {} : { profileDir: options.profileDir }),
     ...(options.executable === undefined ? {} : { executable: options.executable }),
     ...(options.debugPort === undefined ? {} : { debugPort: options.debugPort }),
+    ...(options.workScopeGuard === undefined ? {} : { workScopeGuard: options.workScopeGuard }),
   }
 }
 
@@ -288,6 +296,7 @@ function assertNoOptions(options: ParsedOptions, action: 'setup' | 'config' | 'd
     options.executable !== undefined && '--executable',
     options.debugPort !== undefined && '--debug-port',
     options.configPath !== undefined && '--config',
+    options.workScopeGuard !== undefined && '--work-scope-guard',
   ].find((value): value is string => typeof value === 'string')
   if (supplied !== undefined) {
     if (supplied === '--config') {
@@ -363,6 +372,9 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
       options: launcherOptions(options),
       hostArgs,
     }
+  }
+  if (options.workScopeGuard !== undefined) {
+    throw new CordisXCliParseError('unsupported-option', '--work-scope-guard is only valid with cordisx dev')
   }
 
   assertLauncherOptionCompatibility(options)

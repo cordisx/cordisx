@@ -49,6 +49,7 @@ import { ProviderFleet } from '../providers/fleet.js'
 import { resolveLocalCodexProviderConfig } from '../providers/config.js'
 import type { CodexProviderConfig } from '../providers/contracts.js'
 import { CodexAgentHistoryHost } from '../launcher/agent-history.js'
+import { WorkUsageProfileHost, type WorkUsageProfileLocation } from '../launcher/work-usage-profile.js'
 import { type ConfigBridgeHandler, createConfigBridgeHandler } from '../launcher/config-rpc.js'
 import { createLauncherConfigBridgeHandler } from '../launcher/launcher-plugin-config.js'
 import { type HostSecretState, HostServiceConfigNarrowApi } from '../launcher/service-config.js'
@@ -133,6 +134,7 @@ Options:
   --online-devtools        Allow the official online DevTools frontend
   --dry-run                Resolve and print the plan without starting the host
   --write-config           Enable plugin saves to an explicit dev --config file
+  --work-scope-guard <scope/epoch>  Require the original dev work ledger identity on admission
   dev without a path       Discover .cordisx/config.json (or cordisx.config.json) upwards
   -h, --help               Show this help`
 
@@ -409,15 +411,26 @@ export function codexHome(environment: Readonly<Record<string, string>> | NodeJS
   return path.join(home, '.codex')
 }
 
+function historyLocation(
+  environment: Readonly<Record<string, string>> | NodeJS.ProcessEnv,
+  configPath: string,
+  profileName: string,
+) {
+  return {
+    codexHome: codexHome(environment),
+    cacheDir: path.join(path.dirname(configPath), 'cache', 'agent-history'),
+    profileName,
+  }
+}
 export function agentHistoryHost(
   environment: Readonly<Record<string, string>> | NodeJS.ProcessEnv,
   configPath: string,
   profileName: string,
+  workProfile?: WorkUsageProfileLocation,
 ): CodexAgentHistoryHost {
   return new CodexAgentHistoryHost({
-    codexHome: codexHome(environment),
-    cacheDir: path.join(path.dirname(configPath), 'cache', 'agent-history'),
-    profileName,
+    ...historyLocation(environment, configPath, profileName),
+    ...(workProfile === undefined ? {} : { workProfile }),
   })
 }
 
@@ -720,7 +733,31 @@ export async function runDevelopment(
       plugins: [{ id: localIdentity!.id, source: localIdentity!.source, entry, enabled: true, config: {} }],
     }
   const config = await resolveDevelopmentConfigIdentity(suppliedConfig)
-  if (!invocation.options.dryRun) await ensureCordisXHomeDirectory(homeConfigOptions)
+  if (!invocation.options.dryRun && invocation.options.workScopeGuard === undefined) {
+    await ensureCordisXHomeDirectory(homeConfigOptions)
+  }
+  const workProfile = {
+    homeDir: cordisxHomeDir,
+    profileId: 'development',
+    ...(invocation.options.workScopeGuard === undefined ? {} : {
+      bootstrapGuard: {
+        scopeId: invocation.options.workScopeGuard.split('/')[0]!,
+        epoch: invocation.options.workScopeGuard.split('/')[1]!,
+      },
+    }),
+  }
+  const historyPreflight = new WorkUsageProfileHost(
+    workProfile,
+    historyLocation(environment, homeConfigPath, `development:${config.rootDir}`),
+  )
+  try {
+    await historyPreflight.preflight()
+  } finally {
+    historyPreflight.dispose()
+  }
+  if (!invocation.options.dryRun && invocation.options.workScopeGuard !== undefined) {
+    await ensureCordisXHomeDirectory(homeConfigOptions)
+  }
   const dryRunCacheRoot = invocation.options.dryRun
     ? await mkdtemp(path.join(os.tmpdir(), 'cordisx-vite-dry-run-'))
     : undefined
@@ -843,7 +880,7 @@ export async function runDevelopment(
     let providerFleet: ProviderFleet | undefined
     let resourcesHandedOff = false
     try {
-      historyHost = agentHistoryHost(environment, homeConfigPath, `development:${config.rootDir}`)
+      historyHost = agentHistoryHost(environment, homeConfigPath, `development:${config.rootDir}`, workProfile)
       providerFleet = composition.providerBridgeToken === undefined
         ? undefined
         : await ProviderFleet.create(providerConfigs(config, environment), {

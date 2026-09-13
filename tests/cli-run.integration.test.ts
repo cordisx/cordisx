@@ -1,16 +1,33 @@
-import { access, chmod, mkdir, mkdtemp, readFile, stat, symlink, writeFile } from 'node:fs/promises'
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp as createTemporaryDirectory,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { createServer } from 'node:net'
 import { pathToFileURL } from 'node:url'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { runCordisXCli } from '../packages/cli/src/cli/run.js'
 import { parseOwnerDocumentBindingRequest } from '../packages/cli/src/launcher/owner-document-rpc.js'
 import { BrowserOwnerDocumentBridge, CordisXOwnerDocumentBroker } from '../packages/cli/src/renderer/owner-documents.js'
 import { defaultIsolatedProfileDir } from '../packages/cli/src/launcher/process.js'
 import { LauncherMarketplaceCertifiedAuthority } from '../packages/cli/src/launcher/marketplace-certified-authority.js'
+import { LocalUsageHost } from '../packages/cli/src/launcher/local-usage.js'
 
 const directGrantStatePath = path.join('state', 'publisher-grants', 'direct-device-bound.v1.json')
+
+async function mkdtemp(prefix: string): Promise<string> {
+  const root = await createTemporaryDirectory(prefix)
+  onTestFinished(() => rm(root, { recursive: true, force: true }))
+  return root
+}
 
 async function createLocalDevelopmentFixture(root: string): Promise<{
   readonly project: string
@@ -43,6 +60,45 @@ async function createBuiltinSkillFixture(root: string): Promise<string> {
 }
 
 describe('functional CordisX CLI', () => {
+  it('rejects mismatched work guards before Vite, profile admission or history-secret writes', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-work-guard-'))
+    const original = await createLocalDevelopmentFixture(path.join(root, 'original'))
+    const moved = await createLocalDevelopmentFixture(path.join(root, 'moved'))
+    const home = path.join(root, 'home'), codexHome = path.join(root, 'codex')
+    await mkdir(path.join(codexHome, 'sessions'), { recursive: true })
+    await mkdir(path.join(codexHome, 'archived_sessions'))
+    const reader = new LocalUsageHost({
+      codexHome,
+      cacheDir: path.join(home, 'cache', 'agent-history'),
+      profileName: `development:${original.project}`,
+      projection: 'work-v2',
+    })
+    const snapshot = await reader.read()
+    reader.dispose()
+    if (snapshot.status !== 'ready') throw new Error('legacy work fixture unavailable')
+    for (const dryRun of [true, false]) {
+      for (const config of [original, moved]) {
+        const epoch = config === original ? '00000000-0000-0000-0000-000000000001' : snapshot.epoch
+        const output: string[] = []
+        await expect(runCordisXCli([
+          'dev',
+          '--config',
+          config.configPath,
+          '--work-scope-guard',
+          `${snapshot.scopeId}/${epoch}`,
+          ...(dryRun ? ['--dry-run'] : []),
+        ], {
+          cwd: config.project,
+          env: { CORDISX_HOME: home, CODEX_HOME: codexHome },
+          stdout: line => output.push(line),
+        })).rejects.toThrow(/work profile|legacy work/)
+        expect(output).toEqual([])
+        await expect(access(path.join(home, 'state'))).rejects.toMatchObject({ code: 'ENOENT' })
+        await expect(access(path.join(home, 'cache', 'agent-history', 'history.key')))
+          .rejects.toMatchObject({ code: 'ENOENT' })
+      }
+    }
+  })
   it('enables only explicit development plugin writes and keeps dry-run disk state unchanged', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-dev-write-config-'))
     const { project, configPath } = await createLocalDevelopmentFixture(root)

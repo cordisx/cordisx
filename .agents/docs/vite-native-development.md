@@ -8,6 +8,12 @@ This reference covers development transport only. Production plugin builds use
 separate immutable Vite ESM graphs with lazy chunks, CSS, and assets. Installed
 generations do not connect to this development server or its HMR WebSocket.
 
+Work usage has a persistent Host profile identity independent of later config
+directory moves. Existing multi-ledger adoption requires the restrictive normal
+`--work-scope-guard <scope>/<epoch>` precondition and original canonical config
+directory. See [work usage](work-usage.md) for legacy ledger continuity, dry-run
+preflight and failure boundaries.
+
 ## Requirement ledger
 
 | Requirement                                                                                   | State       | Evidence                                                                                                                                                                                                                     |

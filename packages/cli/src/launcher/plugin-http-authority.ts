@@ -1,5 +1,5 @@
 import { guardPluginHttpPublication } from './plugin-http-publication.js'
-import { LocalWorkSettlementCustody } from './local-work-settlement-custody.js'
+import { guardedLegacyWork, LocalWorkSettlementCustody } from './local-work-settlement-custody.js'
 import { LocalWorkSettlementLifetimes } from './local-work-settlement-lifetime.js'
 import { handleLocalWalletHttpOperation } from './local-wallet-http-operation.js'
 import type { LocalWalletHttpResultV4 } from '@cordisx/protocol/plugin-http/v4'
@@ -34,7 +34,7 @@ import {
   type ManagedSourceTrust,
   ManagedSourceTrustUnavailableError,
 } from './managed-source-authority.js'
-import type { WorkUsageSnapshotV2 } from '@cordisx/protocol/usage/v2'
+import type { WorkUsageReader } from './work-usage.js'
 import { type PluginHttpClientLifetime, PluginHttpClientLifetimes } from './plugin-http-client-lifetime.js'
 import {
   emitPluginHttpDiagnostic,
@@ -276,7 +276,7 @@ export class PluginHttpAuthority {
   async handle(
     raw: unknown,
     account?: () => Promise<HttpNativeAccountValue>,
-    readWork?: () => Promise<WorkUsageSnapshotV2>,
+    readWork?: WorkUsageReader,
   ): Promise<LocalWalletHttpResultV4<unknown>> {
     // Every observed Native change, including ordinary retained requests and
     // exchange/session checks, retires managed work continuity for this owner.
@@ -454,7 +454,7 @@ export class PluginHttpAuthority {
                   if (!this.custody) throw new Error('work custody unavailable')
                   await this.custody.claimLegacy(snapshot.scopeId, guard)
                 },
-                workAllowed: snapshot => this.custody?.legacyAllowed(snapshot.scopeId) ?? false,
+                workAllowed: guardedLegacyWork(this.custody, readWork),
                 ...(readWork === undefined ? {} : { readWork: async () => readWork() }),
               })
               if (this.disposed) managed.dispose()

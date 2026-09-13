@@ -1,4 +1,5 @@
 import { projectWorkUsage } from './work-usage.js'
+import { WorkUsageProfileHost, type WorkUsageProfileLocation } from './work-usage-profile.js'
 import { LocalUsageHost } from './local-usage.js'
 import type { UsageSnapshotV1 } from '../usage-contracts.js'
 import { createHmac, randomBytes } from 'node:crypto'
@@ -83,6 +84,7 @@ export interface AgentHistoryCaller {
 }
 
 export interface CodexAgentHistoryHostOptions {
+  readonly workProfile?: WorkUsageProfileLocation
   readonly codexHome: string
   readonly cacheDir: string
   readonly profileName: string
@@ -189,8 +191,25 @@ async function persistentSecret(cacheDir: string): Promise<Buffer> {
 
 /** Node-owned exact-session Codex rollout importer. No path enters or leaves its public methods. */
 export class CodexAgentHistoryHost {
+  private closed = false
+  private workProfile: WorkUsageProfileHost | undefined
+  workUsageCurrent(snapshot: { readonly scopeId: string; readonly epoch: string }) {
+    return !this.closed && (this.options.workProfile === undefined || this.workProfile?.current(snapshot) === true)
+  }
   private workUsage: LocalUsageHost | undefined
   async readWorkUsage() {
+    if (this.closed) {
+      return projectWorkUsage({
+        schemaVersion: 1,
+        status: 'unavailable',
+        reason: 'store-unavailable',
+        diagnostics: [],
+      })
+    }
+    if (this.options.workProfile) {
+      this.workProfile ??= new WorkUsageProfileHost(this.options.workProfile, this.options)
+      return projectWorkUsage(await this.workProfile.read())
+    }
     this.workUsage ??= new LocalUsageHost({ ...this.options, projection: 'work-v2' })
     return projectWorkUsage(await this.workUsage.read())
   }
@@ -289,8 +308,10 @@ export class CodexAgentHistoryHost {
   }
 
   dispose(): void {
+    this.closed = true
     this.usage?.dispose()
     this.workUsage?.dispose()
+    this.workProfile?.dispose()
     this.indexes.clear()
     this.cursors.clear()
   }

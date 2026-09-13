@@ -95,6 +95,7 @@ async function fixture() {
     badSettlementPolicy = false
   let workLease = { allow: true }, challengeHold: Promise<void> | undefined, workChallengeStarted = false
   let settlementReplies = 0
+  let workProfileLive = true
   const permissionListeners = new Set<() => void>()
   const nativeRead = vi.fn(async () => native)
   const seen: Record<string, unknown>[] = []
@@ -246,7 +247,9 @@ async function fixture() {
         const result = await authority.handle(
           { ...input, token },
           nativeRead,
-          async () => ({ ...snapshot, eligibleTokens: observed, inputTokens: observed - 10 }),
+          Object.assign(async () => ({ ...snapshot, eligibleTokens: observed, inputTokens: observed - 10 }), {
+            current: () => workProfileLive,
+          }),
         )
         if (input.operation === 'plugin-http-settle-local-work') settlementReplies++
         return result
@@ -266,6 +269,9 @@ async function fixture() {
     return enrolled
   }
   return {
+    retireWorkProfile: () => {
+      workProfileLive = false
+    },
     diagnostics,
     home,
     retireTrustOnPostRead: (read: number) => {
@@ -856,6 +862,27 @@ it('permission retirement rejects a late settlement response while local balance
   expect(await f.workSettlement.settle({ ...f.localBinding, audience: 'local-work-income' })).toMatchObject({
     status: 'accepted',
   })
+})
+it('work profile retirement rejects a late signed settlement without retiring balance', async () => {
+  const f = await fixture()
+  expect(await f.enroll()).toMatchObject({ status: 'accepted' })
+  let release!: () => void
+  f.hold(
+    new Promise<void>(resolve => {
+      release = resolve
+    }),
+  )
+  const pending = f.workSettlement.settle({ ...f.localBinding, audience: 'local-work-income' })
+  await vi.waitFor(() => expect(f.seen.some(p => p.contract === 'cordisx.local-work-settlement/v1')).toBe(true))
+  f.retireWorkProfile()
+  release()
+  f.hold()
+  expect(await pending).toMatchObject({ status: 'unavailable' })
+  const sent = f.seen.filter(p => p.contract === 'cordisx.local-work-settlement/v1').length
+  expect(await f.workSettlement.settle({ ...f.localBinding, audience: 'local-work-income' }))
+    .toMatchObject({ status: 'unavailable' })
+  expect(f.seen.filter(p => p.contract === 'cordisx.local-work-settlement/v1')).toHaveLength(sent)
+  expect(await f.client.connectLocalAccount(f.localBinding)).toMatchObject({ status: 'accepted' })
 })
 it('durable custody excludes both leased local and Native work channels without affecting balance', async () => {
   const f = await fixture()

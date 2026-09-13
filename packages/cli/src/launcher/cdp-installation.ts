@@ -302,13 +302,20 @@ export async function install(
             activeOwnerDocumentRequests += 1
             try {
               const value = isPluginHttpRequest(parsed)
-                ? await ownerDocuments.http.handle(parsed, () =>
-                  readNativeHttpAccount(
-                    session,
-                    params.executionContextId,
-                    () => ownerDocumentController?.signal.aborted !== true,
-                    reason => ownerDocuments.http.reportNativeAccountUnavailable(parsed, reason),
-                  ), history === undefined ? undefined : () => history.host.readWorkUsage())
+                ? await ownerDocuments.http.handle(
+                  parsed,
+                  () =>
+                    readNativeHttpAccount(
+                      session,
+                      params.executionContextId,
+                      () => ownerDocumentController?.signal.aborted !== true,
+                      reason => ownerDocuments.http.reportNativeAccountUnavailable(parsed, reason),
+                    ),
+                  history === undefined ? undefined : Object.assign(() => history.host.readWorkUsage(), {
+                    current: (snapshot: { readonly scopeId: string; readonly epoch: string }) =>
+                      history.host.workUsageCurrent(snapshot),
+                  }),
+                )
                 : isNativeAgentSessionRequest(parsed) && ownerDocuments.nativeSessions !== undefined
                 ? await ownerDocuments.nativeSessions.handle(parsed)
                 : isAgentToolRequest(parsed) && ownerDocuments.agentTools !== undefined

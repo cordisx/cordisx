@@ -4,6 +4,7 @@ import { createHash, createPublicKey, randomBytes, sign, verify } from 'node:cry
 import { localWalletBinding, localWalletBytes, localWalletChallenge } from '@cordisx/protocol/local-wallet/v1'
 import type { LocalWalletBindingV1 } from '@cordisx/protocol/local-wallet/v1'
 import type { WorkUsageSnapshotV2 } from '@cordisx/protocol/usage/v2'
+import type { WorkUsageReader } from './work-usage.js'
 import type { OwnerDocumentPrincipal } from './owner-document-rpc.js'
 import type { LauncherKeychainBackend } from './secret-store.js'
 import { MANAGED_SOURCE_KEYCHAIN_SERVICE, type ManagedSourceTrust } from './managed-source-authority.js'
@@ -78,7 +79,7 @@ export class LocalWalletAuthority {
       readonly account: () => Promise<HttpNativeAccountValue>
       readonly bearer: () => Promise<string>
     },
-    readWork?: () => Promise<WorkUsageSnapshotV2>,
+    readWork?: WorkUsageReader,
     settlement = false,
   ) {
     const input = object(raw)
@@ -156,11 +157,13 @@ export class LocalWalletAuthority {
         )
       } else profile = this.options.registry.active(binding)
       let custodyGuard: (() => void) | undefined
+      let workProfileGuard: (() => void) | undefined
       const publicationGuard = () => {
         if (abort.signal.aborted || this.disposed || !this.options.live(principal) || Date.now() >= deadline) {
           throw new Error('local wallet publication retired')
         }
         custodyGuard?.()
+        workProfileGuard?.()
         if (!this.current(profile)) throw new Error('local wallet delegation retired')
         const currentTrust = this.trust(principal, binding, this.options.trustsNow())
         if (
@@ -265,6 +268,10 @@ export class LocalWalletAuthority {
           await fence()
           if (snapshot.status !== 'ready') throw new Error('classified work unavailable')
           workSnapshot = snapshot
+          workProfileGuard = () => {
+            if (readWork.current?.(snapshot) === false) throw new Error('work profile continuity retired')
+          }
+          synchronousFence()
           const custody = this.options.custody
           if (settlement) {
             if (!custody) throw new Error('settlement custody unavailable')

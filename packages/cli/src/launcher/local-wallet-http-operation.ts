@@ -1,6 +1,6 @@
 import type { HttpConnectionV1, HttpResultV1 } from '@cordisx/protocol/plugin-http/v1'
 import type { LocalWalletHttpResultV4 } from '@cordisx/protocol/plugin-http/v4'
-import type { WorkUsageSnapshotV2 } from '@cordisx/protocol/usage/v2'
+import type { WorkUsageReader } from './work-usage.js'
 import type { OwnerDocumentPrincipal } from './owner-document-rpc.js'
 import type { Grant } from './plugin-http-authority.js'
 import type { PluginHttpClientLifetime } from './plugin-http-client-lifetime.js'
@@ -29,7 +29,7 @@ interface LocalWalletHttpOperationOptions {
   readonly client: PluginHttpClientLifetime
   readonly clientLive: () => boolean
   readonly account: (() => Promise<HttpNativeAccountValue>) | undefined
-  readonly readWork: (() => Promise<WorkUsageSnapshotV2>) | undefined
+  readonly readWork: WorkUsageReader | undefined
   readonly ownerKey: string
   readonly keychain: LauncherKeychainBackend
   readonly local: LocalWalletAuthority

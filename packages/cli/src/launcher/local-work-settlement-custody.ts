@@ -4,6 +4,11 @@ import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 import type { LocalWalletBindingV1 } from '@cordisx/protocol/local-wallet/v1'
 import { localWalletRealm } from './local-wallet-registry.js'
+import type { WorkUsageReader } from './work-usage.js'
+export const guardedLegacyWork =
+  (custody: LocalWorkSettlementCustody | undefined, reader: WorkUsageReader | undefined) =>
+  (snapshot: { readonly scopeId: string; readonly epoch: string }) =>
+    (custody?.legacyAllowed(snapshot.scopeId) ?? false) && reader?.current?.(snapshot) !== false
 interface Claim {
   readonly policy: 'leased' | 'durable-admitted-v1'
   readonly scopeId: string

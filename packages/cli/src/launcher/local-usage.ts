@@ -21,6 +21,7 @@ interface Ledger {
   sources: Record<string, Checkpoint>
 }
 export interface LocalUsageOptions {
+  readonly expectedWorkIdentity?: { readonly scopeId: string; readonly epoch: string }
   readonly projection?: 'work-v2'
   readonly codexHome: string
   readonly cacheDir: string
@@ -89,6 +90,10 @@ function decode(value: unknown, scopeId: string): Ledger {
   }
   return ledger
 }
+export function localUsageLedgerIdentity(value: unknown, scopeId: string) {
+  const { epoch } = decode(value, scopeId).snapshot
+  return { scopeId, epoch }
+}
 /** The only persisted source data are counters, source hashes and continuity checkpoints.
  * SQLite atomically commits aggregate and checkpoints; sequence CAS also fences other processes. */
 export class LocalUsageHost {
@@ -124,6 +129,13 @@ export class LocalUsageHost {
         'PRAGMA busy_timeout=1000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS ledger (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL)',
       )
       const row = db.prepare('SELECT value FROM ledger WHERE id=1').get()
+      const expected = this.options.expectedWorkIdentity
+      if (
+        expected
+        && (!row || scopeId !== expected.scopeId || decode(row.value, scopeId).snapshot.epoch !== expected.epoch)
+      ) {
+        throw new Error('work ledger identity changed')
+      }
       const stamp = now()
       const ledger: Ledger = row ? decode(row.value, scopeId) : {
         version: 1,
