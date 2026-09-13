@@ -574,6 +574,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       })
     const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
       onDiagnostic: event => stdout(`[cordisx] HTTP transport ${JSON.stringify(event)}`),
+      localWalletHomeDir: rootFromConfigPath(configPath),
       managedSourcesNow: () => loadManagedSourceTrustNow(rootFromConfigPath(configPath), selection.profileId),
       managedSources: async () =>
         (await import('../launcher/managed-source-trust.js')).loadManagedSourceTrust(

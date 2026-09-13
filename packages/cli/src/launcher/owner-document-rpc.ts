@@ -248,6 +248,7 @@ export interface OwnerDocumentBridgeHandler {
 
 export function createOwnerDocumentBridgeHandler(input: {
   readonly managedSources?: () => Promise<readonly import('./managed-source-authority.js').ManagedSourceTrust[]>
+  readonly localWalletHomeDir?: string
   readonly managedSourcesNow?: () => readonly import('./managed-source-authority.js').ManagedSourceTrust[]
   readonly plugins?: readonly CordisXConfigPlugin[]
   readonly secret: string

@@ -1,3 +1,7 @@
+import { handleLocalWalletHttpOperation } from './local-wallet-http-operation.js'
+import type { LocalWalletHttpResultV4 } from '@cordisx/protocol/plugin-http/v4'
+import { LocalWalletAuthority } from './local-wallet-authority.js'
+import { LocalWalletRegistry, LocalWalletStateError } from './local-wallet-registry.js'
 import {
   type HttpNativeAccountValue,
   HttpNativeCallingContextUnavailableError,
@@ -37,7 +41,7 @@ import {
   type PluginHttpRetirementReason,
 } from './plugin-http-diagnostics.js'
 
-interface Grant {
+export interface Grant {
   readonly connection: HttpConnectionV1
   readonly principal: OwnerDocumentPrincipal
   readonly owner: string
@@ -45,13 +49,16 @@ interface Grant {
   readonly keychainService: string
   readonly requests: Map<string, AbortController>
   readonly issued: number
+  localFence?: () => boolean
   retained?: RetainedHttpSession
+  nativeWalletAccountId?: string
   nativeAccount?: string
   accountReader?: () => Promise<HttpNativeAccountValue>
   checkingAccount?: boolean
   checkedAccountAt?: number
 }
 export interface PluginHttpAuthorityOptions {
+  readonly localWalletHomeDir?: string
   readonly secret: string
   readonly profileId: string
   readonly generation: string
@@ -106,6 +113,7 @@ export class PluginHttpAuthority {
   private readonly keychain: LauncherKeychainBackend | undefined
   private readonly transport: typeof fetch
   private disposed = false
+  private local?: LocalWalletAuthority
   private managed?: ManagedSourceAuthority
   private managedInit?: Promise<ManagedSourceAuthority>
   private readonly accountEpochs = new Map<string, number>()
@@ -118,7 +126,10 @@ export class PluginHttpAuthority {
     this.transport = options.fetch ?? fetch
     this.retirement = setInterval(() => {
       for (const [id, grant] of this.grants) {
-        if (!grant.client.active || !this.options.principalAllowed(grant.principal)) {
+        if (
+          !grant.client.active || !this.options.principalAllowed(grant.principal)
+          || (grant.localFence && !grant.localFence())
+        ) {
           void this.retire(id, grant, 'principal-retired').catch(() => {})
         } else if (
           grant.nativeAccount && grant.accountReader && !grant.checkingAccount
@@ -258,7 +269,7 @@ export class PluginHttpAuthority {
     raw: unknown,
     account?: () => Promise<HttpNativeAccountValue>,
     readWork?: () => Promise<WorkUsageSnapshotV2>,
-  ): Promise<HttpResultV1<unknown>> {
+  ): Promise<LocalWalletHttpResultV4<unknown>> {
     // Every observed Native change, including ordinary retained requests and
     // exchange/session checks, retires managed work continuity for this owner.
     let diagnosticPrincipal: OwnerDocumentPrincipal | undefined
@@ -309,6 +320,7 @@ export class PluginHttpAuthority {
           client: client.key,
         })
         if (!this.clients.hasSibling(client)) {
+          this.local?.closeOwner(principal)
           this.managed?.closeOwner(principal)
           this.accountEpochs.set(key(principal), (this.accountEpochs.get(key(principal)) ?? 0) + 1)
         }
@@ -321,6 +333,41 @@ export class PluginHttpAuthority {
       const clientEpoch = client.epoch
       const clientLive = () => client.active && client.epoch === clientEpoch
       nativeReadLive = clientLive
+      if (
+        ['plugin-http-enroll-local-wallet', 'plugin-http-connect-local-account', 'plugin-http-submit-local-work']
+          .includes(String(input.operation))
+      ) {
+        if (
+          !this.keychain || !this.options.localWalletHomeDir || !this.options.managedSources
+          || !this.options.managedSourcesNow
+        ) return fail('unsupported')
+        this.local ??= new LocalWalletAuthority({
+          registry: new LocalWalletRegistry(this.options.localWalletHomeDir, this.options.profileId, this.keychain),
+          keychain: this.keychain,
+          fetch: this.transport,
+          trusts: this.options.managedSources,
+          trustsNow: this.options.managedSourcesNow,
+          live: owner => !this.disposed && this.options.principalAllowed(owner),
+        })
+        return await handleLocalWalletHttpOperation({
+          setNativeReadLive: live => {
+            nativeReadLive = live
+          },
+          input,
+          principal,
+          client,
+          clientLive,
+          account,
+          readWork,
+          ownerKey: key(principal),
+          keychain: this.keychain,
+          local: this.local,
+          grants: this.grants,
+          live: () => !this.disposed && this.options.principalAllowed(principal),
+          authorize: (owner, request, lifetime) => this.authorize(owner, request, lifetime),
+          retire: (id, grant) => this.retire(id, grant),
+        })
+      }
       if (input.operation === 'plugin-http-connect-account' || input.operation === 'plugin-http-submit-work') {
         if (!account || !this.keychain || !this.options.managedSources) return fail('unsupported')
         const deadline = input.managedDeadline
@@ -447,6 +494,7 @@ export class PluginHttpAuthority {
             }, client)
             if (authorized.status !== 'accepted') return authorized
             const grant = this.grants.get(authorized.value.id)!
+            grant.nativeWalletAccountId = String(record(result.body.account).id)
             grant.nativeAccount = result.account
             grant.accountReader = account
             cleanup(() => this.retire(grant.connection.id, grant))
@@ -497,6 +545,7 @@ export class PluginHttpAuthority {
       if (input.operation === 'plugin-http-revoke') {
         client.epoch++
         if (grant.retained !== undefined || !this.clients.hasSibling(client)) {
+          this.local?.closeOwner(principal)
           this.managed?.closeOwner(principal)
           this.accountEpochs.set(key(principal), (this.accountEpochs.get(key(principal)) ?? 0) + 1)
         }
@@ -535,6 +584,7 @@ export class PluginHttpAuthority {
         error instanceof ManagedSourceCredentialUnavailableError
         || error instanceof HttpNativeCallingContextUnavailableError
       ) return fail('credential-unavailable')
+      if (error instanceof LocalWalletStateError) return { status: 'unavailable', code: error.code }
       if (error instanceof ManagedSourceTrustUnavailableError) return fail('connection-unavailable')
       return diagnosticPrincipal && diagnosticClient
         ? this.invalidRequest(
@@ -551,6 +601,9 @@ export class PluginHttpAuthority {
     client: PluginHttpClientLifetime,
     readAccount?: () => Promise<HttpNativeAccountValue>,
   ): Promise<HttpResultV1<unknown>> {
+    if (input.operation === 'plugin-http-retain' && this.grants.get(String(record(input.connection).id))?.localFence) {
+      return fail('unsupported')
+    }
     if (this.keychain === undefined || readAccount === undefined) return fail('unsupported')
     const nativeAccount = await readAccount()
     if (typeof nativeAccount !== 'string' || !nativeAccount) return fail('credential-unavailable')
@@ -574,6 +627,7 @@ export class PluginHttpAuthority {
       if (!await valid()) return fail('stale-generation')
       try {
         if (input.operation === 'plugin-http-forget') {
+          this.local?.closeOwner(principal)
           this.managed?.closeOwner(principal)
           this.accountEpochs.set(key(principal), (this.accountEpochs.get(key(principal)) ?? 0) + 1)
           await removeSession(this.keychain!, location)
@@ -708,6 +762,7 @@ export class PluginHttpAuthority {
     if (!Object.hasOwn(body, field) || typeof body[field] !== 'string') return fail('credential-unavailable')
     if (
       (grant.nativeAccount !== undefined && await account?.() !== grant.nativeAccount)
+      || (grant.localFence && !grant.localFence())
       || this.disposed || this.grants.get(grant.connection.id) !== grant
       || !this.options.principalAllowed(grant.principal)
     ) {
@@ -722,6 +777,7 @@ export class PluginHttpAuthority {
     if (connection.status !== 'accepted') return connection
     if (
       (grant.nativeAccount !== undefined && await account?.() !== grant.nativeAccount)
+      || (grant.localFence && !grant.localFence())
       || this.disposed || this.grants.get(grant.connection.id) !== grant
       || !this.options.principalAllowed(grant.principal)
     ) {
@@ -730,6 +786,7 @@ export class PluginHttpAuthority {
       return fail('stale-generation')
     }
     const child = this.grants.get(connection.value.id)!
+    if (grant.localFence) child.localFence = grant.localFence
     if (grant.nativeAccount !== undefined) {
       child.nativeAccount = grant.nativeAccount
       if (grant.accountReader !== undefined) child.accountReader = grant.accountReader
@@ -789,11 +846,15 @@ export class PluginHttpAuthority {
       abort.abort()
     }, Math.min(30_000, input.deadline - Date.now()))
     const fence = setInterval(() => {
-      if (!this.options.principalAllowed(grant.principal) || this.grants.get(grant.connection.id) !== grant) {
+      if (
+        !this.options.principalAllowed(grant.principal) || this.grants.get(grant.connection.id) !== grant
+        || (grant.localFence && !grant.localFence())
+      ) {
         abort.abort()
       }
     }, 100)
     const matchesAccount = async () => {
+      if (grant.localFence && !grant.localFence()) return false
       const retained = grant.retained?.account, native = grant.nativeAccount
       if (retained !== undefined && native !== undefined && retained !== native) return false
       if (retained === undefined && native === undefined) return true
@@ -891,6 +952,7 @@ export class PluginHttpAuthority {
   }
   async dispose(): Promise<void> {
     this.disposed = true
+    this.local?.dispose()
     this.managed?.dispose()
     clearInterval(this.retirement)
     await Promise.allSettled([...this.grants].map(([id, grant]) => this.retire(id, grant, 'authority-disposed')))

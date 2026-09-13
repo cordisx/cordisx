@@ -807,6 +807,7 @@ export async function runDevelopment(
     })
     const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
       onDiagnostic: event => stdout(`[cordisx] HTTP transport ${JSON.stringify(event)}`),
+      localWalletHomeDir: cordisxHomeDir,
       managedSourcesNow: () => loadManagedSourceTrustNow(cordisxHomeDir, 'development'),
       managedSources: async () =>
         (await import('../launcher/managed-source-trust.js')).loadManagedSourceTrust(cordisxHomeDir, 'development'),

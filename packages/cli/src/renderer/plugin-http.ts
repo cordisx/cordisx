@@ -1,4 +1,4 @@
-import type { HttpClientV3, HttpSessionScopeV2 } from '@cordisx/protocol/plugin-http/v3'
+import type { HttpClientV4, HttpSessionScopeV2, LocalWalletHttpResultV4 } from '@cordisx/protocol/plugin-http/v4'
 import type { HttpClientV1, HttpConnectionV1, HttpRequestV1, HttpResultV1 } from '@cordisx/protocol/plugin-http/v1'
 import type { BrowserOwnerDocumentBridge, OwnerDocumentPrincipalBinding } from './owner-documents.js'
 import { captureHttpConsent } from './plugin-http-consent.js'
@@ -15,7 +15,7 @@ export function createPluginHttpClient(options: {
     code: 'renderer-connection-not-owned' | 'launcher-connection-unavailable',
     message: string,
   ) => void
-}): HttpClientV3 {
+}): HttpClientV4 {
   let disposed = false
   const lifetime = new AbortController()
   // Private bridge metadata: plugins never receive renderer/target lifetime identity.
@@ -70,7 +70,10 @@ export function createPluginHttpClient(options: {
       if (Date.now() >= managedDeadline) return { status: 'unavailable', code: 'deadline-exceeded' }
       const result = await call<T>(operation, { ...input, managedDeadline })
       if (Date.now() >= managedDeadline) {
-        if (operation === 'plugin-http-connect-account' && result.status === 'accepted') {
+        if (
+          ['plugin-http-connect-account', 'plugin-http-connect-local-account'].includes(operation)
+          && result.status === 'accepted'
+        ) {
           const connection = (result.value as { connection?: HttpConnectionV1 }).connection
           if (connection && options.bridge && options.principal) {
             void options.bridge.request(options.principal.token, {
@@ -94,8 +97,38 @@ export function createPluginHttpClient(options: {
       && stored.contract === connection.contract
   }
   return Object.freeze({
-    contract: 'cordisx.http-client/v3' as const,
-    async connectAccount(input: Parameters<HttpClientV3['connectAccount']>[0]) {
+    contract: 'cordisx.http-client/v4' as const,
+    async enrollLocalWallet(
+      input: Parameters<HttpClientV4['enrollLocalWallet']>[0],
+    ): Promise<LocalWalletHttpResultV4<import('@cordisx/protocol/plugin-http/v1').HttpResponseV1>> {
+      if (!owns(input.connection)) return notOwned()
+      return await managedCall('plugin-http-enroll-local-wallet', { input })
+    },
+    async connectLocalAccount(
+      input: Parameters<HttpClientV4['connectLocalAccount']>[0],
+    ): Promise<
+      LocalWalletHttpResultV4<
+        { connection: HttpConnectionV1; response: import('@cordisx/protocol/plugin-http/v1').HttpResponseV1 }
+      >
+    > {
+      const result = await managedCall<
+        { connection: HttpConnectionV1; response: import('@cordisx/protocol/plugin-http/v1').HttpResponseV1 }
+      >('plugin-http-connect-local-account', { input })
+      if (result.status === 'accepted') {
+        connections.set(result.value.connection.id, Object.freeze({ ...result.value.connection }))
+      }
+      return result
+    },
+    async submitLocalWorkUsage(
+      input: Parameters<HttpClientV4['submitLocalWorkUsage']>[0],
+    ): Promise<LocalWalletHttpResultV4<import('@cordisx/protocol/plugin-http/v1').HttpResponseV1>> {
+      return await managedCall(
+        'plugin-http-submit-local-work',
+        { input },
+        async () => !!await options.authorizeWork?.(),
+      )
+    },
+    async connectAccount(input: Parameters<HttpClientV4['connectAccount']>[0]) {
       if (input.previousConnection && !owns(input.previousConnection)) {
         return notOwned()
       }
@@ -110,7 +143,7 @@ export function createPluginHttpClient(options: {
       }
       return result
     },
-    async submitWorkUsage(input: Parameters<HttpClientV3['submitWorkUsage']>[0]) {
+    async submitWorkUsage(input: Parameters<HttpClientV4['submitWorkUsage']>[0]) {
       return await managedCall<import('@cordisx/protocol/plugin-http/v1').HttpResponseV1>(
         'plugin-http-submit-work',
         { input },

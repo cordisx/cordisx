@@ -142,3 +142,5 @@ reference without duplicating its authority.
 - [Page header actions](page-header-actions.md): versioned visuals and command menus.
 
 - [Managed source authentication](managed-source-auth.md): explicit peer pins, native account fences and Launcher work submission.
+
+- [Host-profile local wallet authority](local-wallet-auth.md)

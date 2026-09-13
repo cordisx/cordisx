@@ -1,7 +1,7 @@
-import type { HttpClientV3 } from '@cordisx/protocol/plugin-http/v3'
-export type * from '@cordisx/protocol/plugin-http/v3'
+import type { HttpClientV4 } from '@cordisx/protocol/plugin-http/v4'
+export type * from '@cordisx/protocol/plugin-http/v4'
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    readonly http: HttpClientV3
+    readonly http: HttpClientV4
   }
 }

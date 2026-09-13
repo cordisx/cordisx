@@ -74,3 +74,7 @@ This is a local trusted Host capability, not an OpenAI cloud credential or
 cryptographic isolation from malicious local Host code. Native execution,
 formal provisioning, original Pet retirement evidence and real future usage
 remain separate acceptance evidence; source tests do not establish those states.
+
+The successor [Host-profile local wallet authority](local-wallet-auth.md) implements
+HTTP v4 fresh enrollment and independent local authentication. Original v3
+Native authority remains unchanged.
