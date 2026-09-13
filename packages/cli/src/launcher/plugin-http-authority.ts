@@ -883,6 +883,7 @@ export class PluginHttpAuthority {
       if (
         abort.signal.aborted || this.disposed || !this.options.principalAllowed(grant.principal)
         || this.grants.get(grant.connection.id) !== grant
+        || (grant.localFence && !grant.localFence())
       ) return fail(expired ? 'deadline-exceeded' : 'aborted')
       const response = await this.transport(url, {
         method: String(input.method),
@@ -919,6 +920,7 @@ export class PluginHttpAuthority {
       if (
         abort.signal.aborted || this.disposed || !this.options.principalAllowed(grant.principal)
         || this.grants.get(grant.connection.id) !== grant
+        || (grant.localFence && !grant.localFence())
       ) return fail(expired ? 'deadline-exceeded' : 'aborted')
       return accepted({
         statusCode: response.status,

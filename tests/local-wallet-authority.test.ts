@@ -233,6 +233,7 @@ async function fixture() {
     localFenceCalls: () => localFenceCalls,
     client,
     authority,
+    transport,
     registry,
     keychain,
     secrets,
@@ -257,6 +258,49 @@ async function fixture() {
     },
   }
 }
+it.each(['before transport', 'after body'] as const)(
+  'fences local revocation committed during the awaited account check %s',
+  async boundary => {
+    const f = await fixture()
+    expect(await f.enroll()).toMatchObject({ status: 'accepted' })
+    const connected = await f.client.connectLocalAccount(f.localBinding)
+    if (connected.status !== 'accepted') throw new Error('local connect failed')
+    vi.useFakeTimers()
+    // Model the registry revision becoming stale in the microtask between a
+    // successful local check and its await continuation, without timer polling.
+    const grants = (f.authority as unknown as {
+      grants: Map<string, { localFence?: () => boolean }>
+    }).grants
+    const grant = grants.get(connected.value.connection.id)!
+    let current = true, checks = 0, transported = false
+    grant.localFence = () => {
+      const matched = current
+      if (
+        (boundary === 'before transport' && ++checks === 2)
+        || (boundary === 'after body' && transported)
+      ) {
+        queueMicrotask(() => {
+          current = false
+        })
+      }
+      return matched
+    }
+    f.transport.mockClear()
+    f.transport.mockImplementationOnce(async () => {
+      transported = true
+      return Response.json({ privateResult: 'must not escape revoked grant' })
+    })
+    const result = await f.client.request({
+      connection: connected.value.connection,
+      method: 'POST',
+      path: '/v1/exchange',
+      body: '{}',
+      deadline: Date.now() + 2000,
+    })
+    expect(f.transport).toHaveBeenCalledTimes(boundary === 'before transport' ? 0 : 1)
+    expect(result).toEqual({ status: 'unavailable', code: 'aborted' })
+  },
+)
 it('opens only an explicitly enrolled original balance and ledger without Native reads, with a persistent local key', async () => {
   const f = await fixture()
   expect(await f.client.connectLocalAccount(f.localBinding)).toEqual({
