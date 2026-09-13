@@ -46,6 +46,15 @@ export abstract class PlatformUsagePermissionBroker extends PlatformVisualPermis
     const current = this.registration(identity)
     return current !== undefined && this.isRegistered(current) && this.usageLeases.get(current.token)?.state === 'allow'
   }
+  /** Capture the exact granted lease; replacement or denial never revives an old operation. */
+  usageOperationFence(identity: CordisXPluginIdentity, generation: string): () => boolean {
+    const current = this.registration(identity)
+    const lease = current && this.usageLeases.get(current.token)
+    const generationLive = this.usageFence(identity, generation)
+    return () =>
+      generationLive() && lease?.state === 'allow'
+      && this.usageLeases.get(current!.token) === lease
+  }
   async authorizeUsage(identity: CordisXPluginIdentity): Promise<boolean> {
     const current = this.registration(identity)
     if (current === undefined || !usageManifest(current) || !this.isRegistered(current)) return false

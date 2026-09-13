@@ -1,3 +1,7 @@
+import { mkdtempSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { generateKeyPairSync, randomBytes, sign } from 'node:crypto'
 import { vi } from 'vitest'
 import { managedSourceBytes } from '@cordisx/protocol/managed-source/v1'
@@ -119,7 +123,9 @@ export function managedSourceFixture(
     },
     status: async (service: string, key: string) => stored.has(`${service}:${key}`) ? 'set' as const : 'unset' as const,
   }
+  const fixtureHome = mkdtempSync(path.join(tmpdir(), 'managed-work-custody-'))
   const authority = new PluginHttpAuthority({
+    localWalletHomeDir: fixtureHome,
     onDiagnostic,
     secret,
     profileId: 'test',
@@ -145,7 +151,10 @@ export function managedSourceFixture(
       }))
     },
   })
-  cleanups.push(() => authority.dispose())
+  cleanups.push(async () => {
+    await authority.dispose()
+    await rm(fixtureHome, { recursive: true, force: true })
+  })
   const invoke = (operation: string, input: unknown, p = principal, deadline = Date.now() + 15_000) =>
     authority.handle({
       operation,

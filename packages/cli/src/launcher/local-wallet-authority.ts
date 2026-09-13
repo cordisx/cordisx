@@ -1,3 +1,5 @@
+import type { LocalWorkSettlementCustody } from './local-work-settlement-custody.js'
+import { localWorkSettlementReceipt } from '@cordisx/protocol/local-work-settlement/v1'
 import { createHash, createPublicKey, randomBytes, sign, verify } from 'node:crypto'
 import { localWalletBinding, localWalletBytes, localWalletChallenge } from '@cordisx/protocol/local-wallet/v1'
 import type { LocalWalletBindingV1 } from '@cordisx/protocol/local-wallet/v1'
@@ -36,6 +38,7 @@ export class LocalWalletAuthority {
   private readonly leases = new Map<string, { id: string; observed: number; revision: string }>()
   constructor(
     private readonly options: {
+      readonly custody?: LocalWorkSettlementCustody
       readonly registry: LocalWalletRegistry
       readonly keychain: LauncherKeychainBackend
       readonly fetch: typeof fetch
@@ -76,14 +79,22 @@ export class LocalWalletAuthority {
       readonly bearer: () => Promise<string>
     },
     readWork?: () => Promise<WorkUsageSnapshotV2>,
+    settlement = false,
   ) {
     const input = object(raw)
     if (
-      Object.keys(input).some(key => !['origin', 'sourceId', 'instanceId', 'audience', 'baseline'].includes(key))
-      || (input.baseline !== undefined && input.baseline !== true)
+      Object.keys(input).some(key =>
+        !(settlement
+          ? ['origin', 'sourceId', 'instanceId', 'audience']
+          : ['origin', 'sourceId', 'instanceId', 'audience', 'baseline']).includes(key)
+      )
+      || (input.baseline !== undefined && (input.baseline !== true || settlement))
     ) throw new Error('invalid local wallet input')
     const binding = localWalletBinding(input), work = binding.audience === 'local-work-income'
-    if (!!enrollment !== (binding.audience === 'local-wallet-enrollment') || (!work && input.baseline !== undefined)) {
+    if (
+      !!enrollment !== (binding.audience === 'local-wallet-enrollment') || (!work && input.baseline !== undefined)
+      || (settlement && !work)
+    ) {
       throw new Error('invalid local wallet operation')
     }
     if (!Number.isSafeInteger(deadline) || deadline <= Date.now() || deadline > Date.now() + 15_000) {
@@ -144,8 +155,12 @@ export class LocalWalletAuthority {
           preparationGuard,
         )
       } else profile = this.options.registry.active(binding)
-      const synchronousFence = () => {
-        live()
+      let custodyGuard: (() => void) | undefined
+      const publicationGuard = () => {
+        if (abort.signal.aborted || this.disposed || !this.options.live(principal) || Date.now() >= deadline) {
+          throw new Error('local wallet publication retired')
+        }
+        custodyGuard?.()
         if (!this.current(profile)) throw new Error('local wallet delegation retired')
         const currentTrust = this.trust(principal, binding, this.options.trustsNow())
         if (
@@ -153,6 +168,10 @@ export class LocalWalletAuthority {
         ) throw new Error('local wallet server trust retired')
         const entry = profile.entries.find(entry => entry.realm === localWalletRealm(binding))!
         if (!work && entry.serverPublicKey !== trust.serverPublicKey) throw new Error('local wallet realm key mismatch')
+      }
+      const synchronousFence = () => {
+        live()
+        publicationGuard()
       }
       const fence = async () => {
         synchronousFence()
@@ -172,7 +191,7 @@ export class LocalWalletAuthority {
       }, 100)
       const stop = () => clearInterval(monitor)
       abort.signal.addEventListener('abort', stop, { once: true })
-      if (work) operationLease = this.leases.get(leaseKey)
+      if (work && !settlement) operationLease = this.leases.get(leaseKey)
       try {
         const request = async (path: string, body?: unknown, bearer?: string) => {
           await fence()
@@ -227,6 +246,7 @@ export class LocalWalletAuthority {
         if (!verify(null, localWalletBytes(challenge), trust.serverPublicKey, signature(envelope.signature))) {
           throw new Error('invalid local challenge signature')
         }
+        let workSnapshot: Extract<WorkUsageSnapshotV2, { status: 'ready' }> | undefined
         let payload: Record<string, unknown> = {
           ...challenge,
           contract: 'cordisx.local-wallet-assertion/v1',
@@ -244,23 +264,41 @@ export class LocalWalletAuthority {
           const snapshot = await readWork()
           await fence()
           if (snapshot.status !== 'ready') throw new Error('classified work unavailable')
-          const priorLease = this.leases.get(leaseKey), now = Date.now()
-          const baseline = input.baseline === true || !priorLease || priorLease.revision !== profile.revision
-            || now - priorLease.observed > 15_000
-          if (this.leases.size >= 128 && !priorLease) throw new Error('local work lease limit')
-          const lease = baseline
-            ? { id: randomBytes(32).toString('base64url'), observed: now, revision: profile.revision }
-            : { ...priorLease, observed: now }
-          payload = {
-            ...payload,
-            contract: 'cordisx.local-work-observation/v1',
-            snapshot,
-            leaseId: lease.id,
-            continuity: baseline ? 'baseline' : 'continuous',
+          workSnapshot = snapshot
+          const custody = this.options.custody
+          if (settlement) {
+            if (!custody) throw new Error('settlement custody unavailable')
+            const accountId = profile.entries.find(entry => entry.realm === localWalletRealm(binding))!.accountId!
+            await custody.claim(snapshot.scopeId, binding, accountId, profile.subject, synchronousFence)
+            custodyGuard = () => custody.assert(snapshot.scopeId, binding, accountId, profile.subject)
+            synchronousFence()
+            payload = { ...payload, contract: 'cordisx.local-work-settlement/v1', snapshot }
+          } else {
+            await custody?.claimLegacy(snapshot.scopeId, synchronousFence)
+            custodyGuard = () => {
+              if (custody && !custody.legacyAllowed(snapshot.scopeId)) {
+                throw new Error('durable settlement policy conflict')
+              }
+            }
+            synchronousFence()
+            const priorLease = this.leases.get(leaseKey), now = Date.now()
+            const baseline = input.baseline === true || !priorLease || priorLease.revision !== profile.revision
+              || now - priorLease.observed > 15_000
+            if (this.leases.size >= 128 && !priorLease) throw new Error('local work lease limit')
+            const lease = baseline
+              ? { id: randomBytes(32).toString('base64url'), observed: now, revision: profile.revision }
+              : { ...priorLease, observed: now }
+            payload = {
+              ...payload,
+              contract: 'cordisx.local-work-observation/v1',
+              snapshot,
+              leaseId: lease.id,
+              continuity: baseline ? 'baseline' : 'continuous',
+            }
+            lease.observed = now
+            this.leases.set(leaseKey, lease)
+            operationLease = lease
           }
-          lease.observed = now
-          this.leases.set(leaseKey, lease)
-          operationLease = lease
         }
         const privateKey = await this.options.keychain.read(
           enrollment ? MANAGED_SOURCE_KEYCHAIN_SERVICE : LOCAL_WALLET_KEYCHAIN_SERVICE,
@@ -290,7 +328,13 @@ export class LocalWalletAuthority {
           await fence()
         }
         const response = await request(
-          enrollment ? '/v1/auth/host/local-wallet/enroll' : work ? '/v1/income/work' : '/v1/auth/host/session',
+          enrollment
+            ? '/v1/auth/host/local-wallet/enroll'
+            : settlement
+            ? '/v1/income/work/settle'
+            : work
+            ? '/v1/income/work'
+            : '/v1/auth/host/session',
           signed,
           bearer,
         )
@@ -335,9 +379,12 @@ export class LocalWalletAuthority {
             wallet.origin !== binding.origin || wallet.instanceId !== binding.instanceId
             || wallet.accountId !== profile.entries.find(entry => entry.realm === localWalletRealm(binding))!.accountId
           ) throw new Error('local work wallet mismatch')
+          if (settlement) {
+            localWorkSettlementReceipt(object(result.result).receipt, workSnapshot!, binding, String(wallet.accountId))
+          }
         }
         synchronousFence()
-        return { body: object(result.result), statusCode: response.statusCode, profile }
+        return { body: object(result.result), statusCode: response.statusCode, profile, publicationGuard }
       } catch (error) {
         if (work) clearOperationLease()
         throw error

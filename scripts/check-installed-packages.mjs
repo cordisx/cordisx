@@ -21,7 +21,7 @@ import {
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 // Exact local-wallet Protocol candidate; consumers may supply the verified companion tarball.
-const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#d0233e290f2a9fd46d33371c1bb516830d8704c6'
+const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#15e0d7b63228624477890b48bb091a5f88d45dbe'
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
   ? undefined
   : path.resolve(process.env.CORDISX_PROTOCOL_TARBALL)

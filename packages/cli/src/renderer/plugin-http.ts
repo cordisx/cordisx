@@ -1,9 +1,10 @@
+import type { LocalWorkSettlementV1 } from '@cordisx/protocol/local-work-settlement/v1'
 import type { HttpClientV4, HttpSessionScopeV2, LocalWalletHttpResultV4 } from '@cordisx/protocol/plugin-http/v4'
 import type { HttpClientV1, HttpConnectionV1, HttpRequestV1, HttpResultV1 } from '@cordisx/protocol/plugin-http/v1'
 import type { BrowserOwnerDocumentBridge, OwnerDocumentPrincipalBinding } from './owner-documents.js'
 import { captureHttpConsent } from './plugin-http-consent.js'
 
-export function createPluginHttpClient(options: {
+export interface PluginHttpClientOptions {
   readonly bridge: BrowserOwnerDocumentBridge | undefined
   readonly principal: OwnerDocumentPrincipalBinding | undefined
   readonly active: () => boolean
@@ -11,11 +12,23 @@ export function createPluginHttpClient(options: {
   readonly consent?: typeof captureHttpConsent
   readonly configuredOrigins?: () => readonly string[]
   readonly authorizeWork?: () => Promise<boolean>
+  readonly workPermissionFence?: () => () => boolean
+  readonly subscribeWorkPermission?: (listener: () => void) => () => void
   readonly diagnostic?: (
     code: 'renderer-connection-not-owned' | 'launcher-connection-unavailable',
     message: string,
   ) => void
-}): HttpClientV4 {
+}
+
+export function createPluginHttpClient(options: PluginHttpClientOptions): HttpClientV4 {
+  return createPluginHttpClients(options).http
+}
+
+/** One private owner/client lifetime for HTTP and the independent settlement capability. */
+export function createPluginHttpClients(options: PluginHttpClientOptions): {
+  readonly http: HttpClientV4
+  readonly workSettlement: LocalWorkSettlementV1
+} {
   let disposed = false
   const lifetime = new AbortController()
   // Private bridge metadata: plugins never receive renderer/target lifetime identity.
@@ -59,7 +72,12 @@ export function createPluginHttpClient(options: {
       return { status: 'unavailable', code: 'host-unavailable' }
     }
   }
-  const managedCall = <T>(operation: string, input: Record<string, unknown>, authorize?: () => Promise<boolean>) => {
+  const managedCall = <T>(
+    operation: string,
+    input: Record<string, unknown>,
+    authorize?: () => Promise<boolean>,
+    fence?: () => boolean,
+  ) => {
     const managedDeadline = Date.now() + 15_000
     let timeout: ReturnType<typeof setTimeout>
     const expired = new Promise<HttpResultV1<T>>(resolve => {
@@ -68,7 +86,9 @@ export function createPluginHttpClient(options: {
     const request = Promise.resolve().then(async (): Promise<HttpResultV1<T>> => {
       if (authorize && !await authorize()) return { status: 'unavailable', code: 'denied' }
       if (Date.now() >= managedDeadline) return { status: 'unavailable', code: 'deadline-exceeded' }
+      if (fence && !fence()) return { status: 'unavailable', code: 'denied' }
       const result = await call<T>(operation, { ...input, managedDeadline })
+      if (fence && !fence()) return { status: 'unavailable', code: 'denied' }
       if (Date.now() >= managedDeadline) {
         if (
           ['plugin-http-connect-account', 'plugin-http-connect-local-account'].includes(operation)
@@ -96,7 +116,7 @@ export function createPluginHttpClient(options: {
     return stored !== undefined && stored.origin === connection.origin && stored.credential === connection.credential
       && stored.contract === connection.contract
   }
-  return Object.freeze({
+  const http = Object.freeze({
     contract: 'cordisx.http-client/v4' as const,
     async enrollLocalWallet(
       input: Parameters<HttpClientV4['enrollLocalWallet']>[0],
@@ -287,4 +307,43 @@ export function createPluginHttpClient(options: {
       connections.clear()
     },
   })
+  const workSettlement: LocalWorkSettlementV1 = Object.freeze({
+    contract: 'cordisx.local-work-settlement/v1',
+    settle(input: Parameters<LocalWorkSettlementV1['settle']>[0]) {
+      if (!live()) return Promise.resolve({ status: 'unavailable' as const, code: 'stale-generation' as const })
+      const operationId = crypto.randomUUID()
+      let permissionLive = () => true, retired = false, dispatched = false, finalized = false
+      let unsubscribe: (() => void) | undefined
+      let retire!: (value: HttpResultV1<never>) => void
+      const cancelled = new Promise<HttpResultV1<never>>(resolve => {
+        retire = resolve
+      })
+      const guard = () => !retired && permissionLive()
+      const changed = () => {
+        if (guard()) return
+        retired = true
+        retire({ status: 'unavailable', code: 'denied' })
+        if (dispatched) void call('plugin-http-cancel-local-settlement', { operationId }).catch(() => {})
+      }
+      const attempt = managedCall<import('@cordisx/protocol/plugin-http/v1').HttpResponseV1>(
+        'plugin-http-settle-local-work',
+        { input, operationId },
+        async () => {
+          if (!await options.authorizeWork?.() || finalized || !live()) return false
+          permissionLive = options.workPermissionFence?.() ?? (() => true)
+          unsubscribe = options.subscribeWorkPermission?.(changed)
+          changed()
+          if (!guard()) return false
+          dispatched = true
+          return true
+        },
+        guard,
+      )
+      return Promise.race([attempt, cancelled]).finally(() => {
+        finalized = true
+        unsubscribe?.()
+      })
+    },
+  })
+  return Object.freeze({ http, workSettlement })
 }

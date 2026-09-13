@@ -400,6 +400,7 @@ export type { RouteLinkResolutionResult } from '@cordisx/protocol/route-link-res
 
 export type * from './entity-execution-context-contracts.js'
 export type * from './plugin-http-contracts.js'
+export type * from './work-settlement-contracts.js'
 
 export type * from './agent-loop-control-contracts.js'
 

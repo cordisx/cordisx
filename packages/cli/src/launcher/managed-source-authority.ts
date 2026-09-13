@@ -56,6 +56,11 @@ export class ManagedSourceAuthority {
       readonly keychain: LauncherKeychainBackend
       readonly fetch: typeof fetch
       readonly live: (principal: OwnerDocumentPrincipal) => boolean
+      readonly claimWork?: (
+        snapshot: Extract<WorkUsageSnapshotV2, { status: 'ready' }>,
+        guard: () => void,
+      ) => Promise<void>
+      readonly workAllowed?: (snapshot: Extract<WorkUsageSnapshotV2, { status: 'ready' }>) => boolean
       readonly readWork?: (principal: OwnerDocumentPrincipal) => Promise<WorkUsageSnapshotV2>
       readonly trusted?: (trust: ManagedSourceTrust) => Promise<boolean>
       readonly trustedNow?: (trust: ManagedSourceTrust) => boolean
@@ -132,7 +137,11 @@ export class ManagedSourceAuthority {
     this.observeAccount(principal, account)
     const ownerKey = JSON.stringify(principal), accountEpoch = this.accountEpochs.get(ownerKey) ?? 0
     this.operationEpochs.set(abort, accountEpoch)
+    let workSnapshot: Extract<WorkUsageSnapshotV2, { status: 'ready' }> | undefined
     const synchronousFence = () => {
+      if (workSnapshot && this.options.workAllowed && !this.options.workAllowed(workSnapshot)) {
+        throw new Error('durable settlement policy conflict')
+      }
       if (
         abort.signal.aborted || this.disposed || !active() || !this.options.live(principal)
         || (this.accountEpochs.get(ownerKey) ?? 0) !== accountEpoch
@@ -240,6 +249,9 @@ export class ManagedSourceAuthority {
         const snapshot = await this.options.readWork(principal)
         await fence()
         if (snapshot.status !== 'ready') throw new Error('classified work usage unavailable')
+        await this.options.claimWork?.(snapshot, synchronousFence)
+        workSnapshot = snapshot
+        synchronousFence()
         const prior = this.leases.get(leaseKey), now = Date.now()
         const baseline = input.baseline === true || !prior || prior.account !== account || now - prior.observed > 15_000
         const lease = baseline

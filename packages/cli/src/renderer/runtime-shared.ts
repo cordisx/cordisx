@@ -347,6 +347,7 @@ export interface PluginController {
   unregisterConnector?: () => void | Promise<void>
   httpClient?: import('@cordisx/protocol/plugin-http/v4').HttpClientV4
   unregisterHttp?: () => void | Promise<void>
+  unregisterWorkSettlement?: () => void | Promise<void>
   unregisterDialogs?: () => void
   unregisterNotifications?: () => void
   unregisterCurrentUser?: () => void

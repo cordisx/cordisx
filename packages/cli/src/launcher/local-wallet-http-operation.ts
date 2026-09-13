@@ -22,6 +22,7 @@ const record = (value: unknown): Record<string, unknown> => {
   return value as Record<string, unknown>
 }
 interface LocalWalletHttpOperationOptions {
+  readonly setPublicationGuard: (guard: () => void) => void
   readonly setNativeReadLive: (live: () => boolean) => void
   readonly input: Record<string, unknown>
   readonly principal: OwnerDocumentPrincipal
@@ -79,7 +80,7 @@ async function executeLocalWalletHttpOperation(
   if (
     binding.audience !== (enrolling
       ? 'local-wallet-enrollment'
-      : input.operation === 'plugin-http-submit-local-work'
+      : ['plugin-http-submit-local-work', 'plugin-http-settle-local-work'].includes(String(input.operation))
       ? 'local-work-income'
       : 'local-wallet')
   ) return fail('invalid-request')
@@ -126,7 +127,10 @@ async function executeLocalWalletHttpOperation(
     live,
     enrollment,
     readWork,
+    input.operation === 'plugin-http-settle-local-work',
   )
+  options.setPublicationGuard(result.publicationGuard)
+  result.publicationGuard()
   if (!live() || !options.local.current(result.profile)) return fail('stale-generation')
   const response = {
     statusCode: result.statusCode,

@@ -1,3 +1,4 @@
+import { publishPluginHttpEnvelope } from '../launcher/plugin-http-publication.js'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createPlaygroundSession, type PlaygroundFixtureInfo } from './session.js'
 
@@ -94,7 +95,13 @@ export async function startUiPlayground(options: UiPlaygroundOptions): Promise<U
         return
       }
       if (request.method === 'POST' && url.pathname === '/api/documents') {
-        json(response, 200, await session.handleOwnerDocumentRequest(await body(request)))
+        json(
+          response,
+          200,
+          publishPluginHttpEnvelope(
+            await session.handleOwnerDocumentRequest(await body(request)) as Record<string, unknown>,
+          ),
+        )
         return
       }
       if (request.method === 'POST' && url.pathname === '/api/service-config') {

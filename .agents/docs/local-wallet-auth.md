@@ -60,6 +60,26 @@ operation that expires cannot clear a live sibling's observation. Every public
 operation shares its original absolute deadline through credential allocation;
 late allocated credentials are retired without relying on Renderer delivery.
 
+The independent `ctx.workSettlement` capability implements
+[durable admitted work settlement v1](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/local-work-settlement/v1.md).
+It uses the same private HTTP principal/client lifetime and usage permission,
+while dispatching a distinct signed payload to `/v1/income/work/settle`.
+The Launcher reads its own classified snapshot, checks the signed response's
+original account and exact durable receipt cursor, and applies synchronous
+registry/trust/lifetime fences before transport and after response delivery.
+It allocates no work continuity lease. The Launcher persists a private work-scope
+claim to the original realm/account before signing, independently of source
+aliases. Unknown completion and owner disposal preserve that claim. Both legacy
+local and Native work attempts record a permanent leased-policy claim before
+sending, so concurrent legacy issuance cannot race an apparently pristine durable
+adoption in another server store. Existing leased custody requires explicit
+reconciliation. Custody files and directories through the profile home are flushed before signing is allowed; synchronization failure prevents dispatch. A started custody marker with a missing file fails closed.
+A granted usage permission lease is captured per attempt; policy replacement
+retires it permanently. A private cancellation message fences the matching
+Launcher attempt without retiring ordinary balance connections. The attempt deadline still bounds
+permission, queue, signing and transport; server financial state survives
+reconnection. The existing HTTP v4 work method retains its leased semantics.
+
 Source implementation and automated source tests do not prove that an existing
 runtime wallet has migrated. Runtime adoption and original-wallet ownership
 verification must complete separately before recording actual acceptance.

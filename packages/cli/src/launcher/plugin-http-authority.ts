@@ -1,3 +1,6 @@
+import { guardPluginHttpPublication } from './plugin-http-publication.js'
+import { LocalWorkSettlementCustody } from './local-work-settlement-custody.js'
+import { LocalWorkSettlementLifetimes } from './local-work-settlement-lifetime.js'
 import { handleLocalWalletHttpOperation } from './local-wallet-http-operation.js'
 import type { LocalWalletHttpResultV4 } from '@cordisx/protocol/plugin-http/v4'
 import { LocalWalletAuthority } from './local-wallet-authority.js'
@@ -113,6 +116,8 @@ export class PluginHttpAuthority {
   private readonly keychain: LauncherKeychainBackend | undefined
   private readonly transport: typeof fetch
   private disposed = false
+  private readonly custody: LocalWorkSettlementCustody | undefined
+  private readonly settlementLifetimes = new LocalWorkSettlementLifetimes()
   private local?: LocalWalletAuthority
   private managed?: ManagedSourceAuthority
   private managedInit?: Promise<ManagedSourceAuthority>
@@ -124,6 +129,9 @@ export class PluginHttpAuthority {
       ? undefined
       : options.keychain ?? (process.platform === 'darwin' ? createMacOSKeychainBackend() : undefined)
     this.transport = options.fetch ?? fetch
+    this.custody = options.localWalletHomeDir
+      ? new LocalWorkSettlementCustody(options.localWalletHomeDir, options.profileId)
+      : undefined
     this.retirement = setInterval(() => {
       for (const [id, grant] of this.grants) {
         if (
@@ -333,8 +341,17 @@ export class PluginHttpAuthority {
       const clientEpoch = client.epoch
       const clientLive = () => client.active && client.epoch === clientEpoch
       nativeReadLive = clientLive
+      if (input.operation === 'plugin-http-cancel-local-settlement') {
+        this.settlementLifetimes.cancel(client, input.operationId)
+        return accepted(null)
+      }
       if (
-        ['plugin-http-enroll-local-wallet', 'plugin-http-connect-local-account', 'plugin-http-submit-local-work']
+        [
+          'plugin-http-enroll-local-wallet',
+          'plugin-http-connect-local-account',
+          'plugin-http-submit-local-work',
+          'plugin-http-settle-local-work',
+        ]
           .includes(String(input.operation))
       ) {
         if (
@@ -342,6 +359,7 @@ export class PluginHttpAuthority {
           || !this.options.managedSourcesNow
         ) return fail('unsupported')
         this.local ??= new LocalWalletAuthority({
+          custody: this.custody!,
           registry: new LocalWalletRegistry(this.options.localWalletHomeDir, this.options.profileId, this.keychain),
           keychain: this.keychain,
           fetch: this.transport,
@@ -349,24 +367,39 @@ export class PluginHttpAuthority {
           trustsNow: this.options.managedSourcesNow,
           live: owner => !this.disposed && this.options.principalAllowed(owner),
         })
-        return await handleLocalWalletHttpOperation({
-          setNativeReadLive: live => {
-            nativeReadLive = live
-          },
-          input,
-          principal,
-          client,
-          clientLive,
-          account,
-          readWork,
-          ownerKey: key(principal),
-          keychain: this.keychain,
-          local: this.local,
-          grants: this.grants,
-          live: () => !this.disposed && this.options.principalAllowed(principal),
-          authorize: (owner, request, lifetime) => this.authorize(owner, request, lifetime),
-          retire: (id, grant) => this.retire(id, grant),
-        })
+        let publicationGuard: (() => void) | undefined
+        const execute = (settlementLive: () => boolean = () => true) =>
+          handleLocalWalletHttpOperation({
+            setPublicationGuard: guard => {
+              publicationGuard = guard
+            },
+            setNativeReadLive: live => {
+              nativeReadLive = live
+            },
+            input,
+            principal,
+            client,
+            clientLive,
+            account,
+            readWork,
+            ownerKey: key(principal),
+            keychain: this.keychain!,
+            local: this.local!,
+            grants: this.grants,
+            live: () => settlementLive() && !this.disposed && this.options.principalAllowed(principal),
+            authorize: (owner, request, lifetime) => this.authorize(owner, request, lifetime),
+            retire: (id, grant) => this.retire(id, grant),
+          })
+        const result = input.operation === 'plugin-http-settle-local-work'
+          ? await this.settlementLifetimes.run(client, input.operationId, Number(input.managedDeadline), execute)
+          : await execute()
+        return guardPluginHttpPublication(
+          result,
+          () => publicationGuard?.(),
+          () =>
+            clientLive() && (input.operation !== 'plugin-http-settle-local-work'
+              || this.settlementLifetimes.publicationLive(client, input.operationId)),
+        )
       }
       if (input.operation === 'plugin-http-connect-account' || input.operation === 'plugin-http-submit-work') {
         if (!account || !this.keychain || !this.options.managedSources) return fail('unsupported')
@@ -417,6 +450,11 @@ export class PluginHttpAuthority {
                     && JSON.stringify(entry.binding) === JSON.stringify(trust.binding)
                     && entry.owner.pluginId === trust.owner.pluginId && entry.owner.source === trust.owner.source
                   ),
+                claimWork: async (snapshot, guard) => {
+                  if (!this.custody) throw new Error('work custody unavailable')
+                  await this.custody.claimLegacy(snapshot.scopeId, guard)
+                },
+                workAllowed: snapshot => this.custody?.legacyAllowed(snapshot.scopeId) ?? false,
                 ...(readWork === undefined ? {} : { readWork: async () => readWork() }),
               })
               if (this.disposed) managed.dispose()

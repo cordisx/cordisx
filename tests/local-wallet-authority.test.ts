@@ -12,7 +12,7 @@ import {
   LocalWalletRegistry,
 } from '../packages/cli/src/launcher/local-wallet-registry.js'
 import { MANAGED_SOURCE_KEYCHAIN_SERVICE } from '../packages/cli/src/launcher/managed-source-authority.js'
-import { createPluginHttpClient } from '../packages/cli/src/renderer/plugin-http.js'
+import { createPluginHttpClients } from '../packages/cli/src/renderer/plugin-http.js'
 import { issueOwnerDocumentPrincipalToken } from '../packages/cli/src/launcher/owner-document-rpc.js'
 import { binding, owner, principal, secret, snapshot } from './fixtures/managed-source-http.js'
 const cleanups: (() => Promise<unknown>)[] = []
@@ -63,7 +63,14 @@ async function fixture() {
       secrets.has(service + ':' + key) ? 'set' as const : 'unset' as const,
   }
   const registry = new LocalWalletRegistry(home, principal.profileId, keychain)
+  let trustLive = true, retireTrustAt = 0, postTrustReads = 0, workResponseReturned = false
   const trusts = () => {
+    if (!trustLive) return []
+    if (workResponseReturned && retireTrustAt && ++postTrustReads === retireTrustAt) {
+      queueMicrotask(() => {
+        trustLive = false
+      })
+    }
     if (retireAfterFence && localKeyRead && ++localFenceCalls === 2) {
       queueMicrotask(() => {
         live = false
@@ -84,7 +91,11 @@ async function fixture() {
     live = true,
     hold: Promise<void> | undefined,
     wrongAccount = false,
-    observed = 100
+    observed = 100,
+    badSettlementPolicy = false
+  let workLease = { allow: true }, challengeHold: Promise<void> | undefined, workChallengeStarted = false
+  let settlementReplies = 0
+  const permissionListeners = new Set<() => void>()
   const nativeRead = vi.fn(async () => native)
   const seen: Record<string, unknown>[] = []
   const signed = (payload: unknown, local: boolean, work = false) => ({
@@ -100,6 +111,10 @@ async function fixture() {
       audience = url.searchParams.get('audience'),
       local = audience?.startsWith('local-')
     if (url.pathname === '/v1/auth/host/challenge') {
+      if (audience === 'local-work-income') {
+        workChallengeStarted = true
+        await challengeHold
+      }
       return Response.json(
         signed(
           {
@@ -158,13 +173,31 @@ async function fixture() {
           available: 731,
           reserved: 9,
         },
-        receipt: { amount: 0 },
+        receipt: payload.contract === 'cordisx.local-work-settlement/v1'
+          ? {
+            eventId: 'work:' + 'a'.repeat(64),
+            binding: { instanceId: binding.instanceId, accountId: account.id, scopeId: snapshot.scopeId },
+            amount: 0,
+            remainder: 0,
+            cursor: {
+              scopeId: snapshot.scopeId,
+              sourceId: snapshot.sourceId,
+              epoch: snapshot.epoch,
+              revision: snapshot.revision,
+              tokens: observed,
+              observedThrough: snapshot.observedThrough,
+            },
+            coverage: 'partial',
+            policy: badSettlementPolicy ? 'leased' : 'durable-admitted-v1',
+          }
+          : { amount: 0 },
       }
       : {
         instanceId: binding.instanceId,
         account,
         sessionToken: isLocal ? 'local-session-secret' : 'original-session-secret',
       }
+    if (payload.contract === 'cordisx.local-work-settlement/v1') workResponseReturned = true
     return Response.json(signed(
       {
         ...binding,
@@ -194,17 +227,30 @@ async function fixture() {
   })
   cleanups.push(() => authority.dispose())
   const token = issueOwnerDocumentPrincipalToken(secret, principal)
-  const client = createPluginHttpClient({
+  const { http: client, workSettlement } = createPluginHttpClients({
     active: () => live,
     principal: { ...owner, moduleGeneration: principal.moduleGeneration, token },
-    authorizeWork: async () => true,
+    authorizeWork: async () => workLease.allow,
+    workPermissionFence: () => {
+      const lease = workLease
+      return () => lease === workLease && lease.allow
+    },
+    subscribeWorkPermission: listener => {
+      permissionListeners.add(listener)
+      return () => {
+        permissionListeners.delete(listener)
+      }
+    },
     bridge: {
-      request: async (_: string, input: Record<string, unknown>) =>
-        authority.handle(
+      request: async (_: string, input: Record<string, unknown>) => {
+        const result = await authority.handle(
           { ...input, token },
           nativeRead,
           async () => ({ ...snapshot, eligibleTokens: observed, inputTokens: observed - 10 }),
-        ),
+        )
+        if (input.operation === 'plugin-http-settle-local-work') settlementReplies++
+        return result
+      },
     } as never,
   })
   cleanups.push(async () => client.dispose())
@@ -221,6 +267,24 @@ async function fixture() {
   }
   return {
     diagnostics,
+    home,
+    retireTrustOnPostRead: (read: number) => {
+      retireTrustAt = read
+    },
+    postTrustReads: () => postTrustReads,
+    settlementReplies: () => settlementReplies,
+    workChallengeStarted: () => workChallengeStarted,
+    holdChallenge: (hold: Promise<void>) => {
+      challengeHold = hold
+    },
+    permission: (allow: boolean) => {
+      workLease = { allow }
+      for (const changed of permissionListeners) changed()
+    },
+    workSettlement,
+    badSettlementPolicy: () => {
+      badSettlementPolicy = true
+    },
     upsertHold: (kind: string, promise: Promise<void>) => {
       upsertKind = kind
       upsertHold = promise
@@ -654,4 +718,166 @@ it('a late expired enrollment Native null cannot retire a fresh healthy same-acc
   }, async () => 'original-native')
   expect(me).toMatchObject({ status: 'accepted' })
   expect(f.registry.read()).toBeUndefined()
+})
+
+it('settles a Host-private durable snapshot without Native, lease or baseline across a reconnect gap', async () => {
+  const f = await fixture()
+  expect(await f.enroll()).toMatchObject({ status: 'accepted' })
+  f.native(null)
+  f.nativeRead.mockClear()
+  vi.useFakeTimers()
+  const binding = { ...f.localBinding, audience: 'local-work-income' as const }
+  expect(f.client.contract).toBe('cordisx.http-client/v4')
+  expect(f.workSettlement.contract).toBe('cordisx.local-work-settlement/v1')
+  expect(await f.workSettlement.settle(binding)).toMatchObject({ status: 'accepted' })
+  await vi.advanceTimersByTimeAsync(20_000)
+  f.observed(11_000)
+  expect(await f.workSettlement.settle(binding)).toMatchObject({ status: 'accepted' })
+  const submitted = f.seen.filter(p => p.contract === 'cordisx.local-work-settlement/v1')
+  expect(submitted).toHaveLength(2)
+  expect(submitted[1]).toMatchObject({ snapshot: { eligibleTokens: 11_000 } })
+  for (const payload of submitted) {
+    expect(payload).not.toHaveProperty('leaseId')
+    expect(payload).not.toHaveProperty('continuity')
+    expect(payload).not.toHaveProperty('baseline')
+  }
+  expect(f.transport.mock.calls.some(([url]) => String(url).endsWith('/v1/income/work/settle'))).toBe(true)
+  expect(f.nativeRead).not.toHaveBeenCalled()
+})
+it.each(['baseline', 'snapshot', 'amount', 'cursor', 'accountId', 'leaseId'])(
+  'rejects caller-selected settlement %s before POST',
+  async name => {
+    const f = await fixture()
+    expect(await f.enroll()).toMatchObject({ status: 'accepted' })
+    const before = f.seen.length
+    expect(await f.workSettlement.settle({ ...f.localBinding, audience: 'local-work-income', [name]: true } as never))
+      .toMatchObject({ status: 'unavailable' })
+    expect(f.seen).toHaveLength(before)
+  },
+)
+it('rejects a signed settlement receipt from a different financial policy', async () => {
+  const f = await fixture()
+  expect(await f.enroll()).toMatchObject({ status: 'accepted' })
+  f.badSettlementPolicy()
+  expect(await f.workSettlement.settle({ ...f.localBinding, audience: 'local-work-income' }))
+    .toMatchObject({ status: 'unavailable' })
+})
+it('retiring the shared HTTP client rejects settlement and discards its late response', async () => {
+  const f = await fixture()
+  expect(await f.enroll()).toMatchObject({ status: 'accepted' })
+  let release!: () => void
+  f.hold(
+    new Promise<void>(resolve => {
+      release = resolve
+    }),
+  )
+  const pending = f.workSettlement.settle({ ...f.localBinding, audience: 'local-work-income' })
+  await vi.waitFor(() => expect(f.seen.some(p => p.contract === 'cordisx.local-work-settlement/v1')).toBe(true))
+  f.client.dispose()
+  release()
+  expect(await pending).toMatchObject({ status: 'unavailable' })
+  const before = f.seen.length
+  expect(await f.workSettlement.settle({ ...f.localBinding, audience: 'local-work-income' }))
+    .toMatchObject({ status: 'unavailable', code: 'stale-generation' })
+  expect(f.seen).toHaveLength(before)
+})
+
+it('settlement requires usage authorization even when no permission callback is provided', async () => {
+  const request = vi.fn()
+  const { workSettlement } = createPluginHttpClients({
+    active: () => true,
+    principal: {} as never,
+    bridge: { request } as never,
+  })
+  expect(await workSettlement.settle({ ...binding, audience: 'local-work-income' }))
+    .toMatchObject({ status: 'unavailable', code: 'denied' })
+  expect(request).not.toHaveBeenCalled()
+})
+it('settlement permission wait consumes the original attempt deadline', async () => {
+  vi.useFakeTimers()
+  let authorize!: (value: boolean) => void
+  const request = vi.fn(), subscribe = vi.fn(() => () => {})
+  const { workSettlement } = createPluginHttpClients({
+    active: () => true,
+    principal: {} as never,
+    bridge: { request } as never,
+    subscribeWorkPermission: subscribe,
+    authorizeWork: () =>
+      new Promise<boolean>(resolve => {
+        authorize = resolve
+      }),
+  })
+  const pending = workSettlement.settle({ ...binding, audience: 'local-work-income' })
+  await vi.advanceTimersByTimeAsync(15_000)
+  expect(await pending).toMatchObject({ status: 'unavailable', code: 'deadline-exceeded' })
+  authorize(true)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(request).not.toHaveBeenCalled()
+  expect(subscribe).not.toHaveBeenCalled()
+})
+
+it('permission retirement during a held challenge prevents POST and regrant cannot revive that attempt', async () => {
+  const f = await fixture()
+  expect(await f.enroll()).toMatchObject({ status: 'accepted' })
+  let release!: () => void
+  f.holdChallenge(
+    new Promise<void>(resolve => {
+      release = resolve
+    }),
+  )
+  const pending = f.workSettlement.settle({ ...f.localBinding, audience: 'local-work-income' })
+  await vi.waitFor(() => expect(f.workChallengeStarted()).toBe(true))
+  f.permission(false)
+  expect(await pending).toMatchObject({ status: 'unavailable', code: 'denied' })
+  f.permission(true)
+  release()
+  await vi.waitFor(() => expect(f.settlementReplies()).toBe(1))
+  expect(f.seen.filter(p => p.contract === 'cordisx.local-work-settlement/v1')).toHaveLength(0)
+  expect(await f.workSettlement.settle({ ...f.localBinding, audience: 'local-work-income' }))
+    .toMatchObject({ status: 'accepted' })
+})
+it('permission retirement rejects a late settlement response while local balance remains usable', async () => {
+  const f = await fixture()
+  expect(await f.enroll()).toMatchObject({ status: 'accepted' })
+  let release!: () => void
+  f.hold(
+    new Promise<void>(resolve => {
+      release = resolve
+    }),
+  )
+  const pending = f.workSettlement.settle({ ...f.localBinding, audience: 'local-work-income' })
+  await vi.waitFor(() => expect(f.seen.some(p => p.contract === 'cordisx.local-work-settlement/v1')).toBe(true))
+  f.permission(false)
+  expect(await pending).toMatchObject({ status: 'unavailable', code: 'denied' })
+  f.permission(true)
+  release()
+  f.hold()
+  expect(await f.client.connectLocalAccount(f.localBinding)).toMatchObject({ status: 'accepted' })
+  expect(await f.workSettlement.settle({ ...f.localBinding, audience: 'local-work-income' })).toMatchObject({
+    status: 'accepted',
+  })
+})
+it('durable custody excludes both leased local and Native work channels without affecting balance', async () => {
+  const f = await fixture()
+  expect(await f.enroll()).toMatchObject({ status: 'accepted' })
+  const income = { ...f.localBinding, audience: 'local-work-income' as const }
+  expect(await f.workSettlement.settle(income)).toMatchObject({ status: 'accepted' })
+  const before = f.seen.length
+  expect(await f.client.submitLocalWorkUsage({ ...income, baseline: true })).toMatchObject({ status: 'unavailable' })
+  expect(await f.client.submitWorkUsage({ ...binding, audience: 'work-income', baseline: true })).toMatchObject({
+    status: 'unavailable',
+  })
+  expect(f.seen).toHaveLength(before)
+  expect(await f.client.connectLocalAccount(f.localBinding)).toMatchObject({ status: 'accepted' })
+})
+
+it('rechecks the original trust tuple after the final inner guard before publishing a settlement', async () => {
+  const f = await fixture()
+  expect(await f.enroll()).toMatchObject({ status: 'accepted' })
+  vi.useFakeTimers()
+  f.retireTrustOnPostRead(4)
+  expect(await f.workSettlement.settle({ ...f.localBinding, audience: 'local-work-income' })).toMatchObject({
+    status: 'unavailable',
+  })
+  expect(f.postTrustReads()).toBe(4)
 })

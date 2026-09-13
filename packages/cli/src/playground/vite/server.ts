@@ -1,3 +1,4 @@
+import { publishPluginHttpEnvelope } from '../../launcher/plugin-http-publication.js'
 import { relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
@@ -105,7 +106,16 @@ export async function startVitePlayground(options: VitePlaygroundOptions): Promi
             return
           }
           if (request.method === 'POST' && url.pathname === '/api/documents') {
-            sendJson(response, 200, await session.handleOwnerDocumentRequest(await requestBody(request, 8_388_608)))
+            sendJson(
+              response,
+              200,
+              publishPluginHttpEnvelope(
+                await session.handleOwnerDocumentRequest(await requestBody(request, 8_388_608)) as Record<
+                  string,
+                  unknown
+                >,
+              ),
+            )
             return
           }
           if (request.method === 'POST' && url.pathname === '/api/service-config') {

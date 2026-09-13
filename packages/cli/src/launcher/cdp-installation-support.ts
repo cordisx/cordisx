@@ -1,3 +1,4 @@
+import { publishPluginHttpEnvelope } from './plugin-http-publication.js'
 import { CdpCertifiedPermissionChannel } from './certified-permission-cdp.js'
 import {
   abortable,
@@ -517,7 +518,9 @@ export async function sendOwnerDocumentBindingResponse(
   payload: Record<string, unknown>,
 ): Promise<void> {
   await session.send('Runtime.evaluate', {
-    expression: `void globalThis.${OWNER_DOCUMENT_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    expression: `void globalThis.${OWNER_DOCUMENT_RECEIVER}?.(${
+      JSON.stringify(JSON.stringify(publishPluginHttpEnvelope(payload)))
+    })`,
     allowUnsafeEvalBlockedByCSP: true,
   })
 }
