@@ -68,6 +68,14 @@ secure storage fail closed. Retained requests verify account before transport
 and before returning success. Host account changes leave prior-account sessions
 isolated and retire their runtime grants; they do not synthesize remote identity.
 
+For the audited typed Native input, Host releases the individual account-read
+RPC invocation on caller abort and after settlement. It does not dispose the
+shared input service. A retained Native grant validates both account pins using
+one fresh read at each request checkpoint: before secret retrieval, before
+transport, and before accepting the complete response. Account observations are
+never reused across these asynchronous phases; conflicting or changed pins
+fail closed.
+
 Consumers validate restored sessions through the server's ordinary session
 endpoint, forget on confirmed invalid-session/expiry, and perform remote logout
 plus local forget on active exit. Transport failure must preserve the session.

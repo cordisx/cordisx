@@ -35,7 +35,28 @@ export async function readPinnedNativeAccount(
         // fall back to a second transport or a cached display identity.
         let result: { status?: unknown; reason?: unknown; data?: unknown } | null
         try {
-          result = await inputs.readAccountInfo() as typeof result
+          const invocation = inputs.readAccountInfo()
+          let released = false
+          const release = () => {
+            if (released) return
+            released = true
+            const dispose = (Symbol as SymbolConstructor & { readonly dispose?: symbol }).dispose
+            if (dispose !== undefined) {
+              const cleanup = (invocation as Promise<unknown> & { [key: symbol]: unknown })[dispose]
+              if (typeof cleanup === 'function') cleanup.call(invocation)
+            }
+          }
+          signal.addEventListener('abort', release, { once: true })
+          try {
+            // The call can synchronously abort while creating its invocation.
+            signal.throwIfAborted()
+            result = await invocation as typeof result
+            signal.throwIfAborted()
+          } finally {
+            signal.removeEventListener('abort', release)
+            // Release only this RPC invocation, never the shared account input.
+            release()
+          }
         } catch {
           return unavailable('typed-read-exception')
         }

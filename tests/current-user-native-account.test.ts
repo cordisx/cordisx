@@ -26,6 +26,7 @@ function expression(module: unknown, metadata: unknown = pin, url = 'app://-/ind
   const load = vi.fn(async () => module)
   const result = runInNewContext(source, {
     AbortController,
+    Symbol,
     setTimeout,
     clearTimeout,
     location: { href: url },
@@ -172,4 +173,100 @@ it.each(
   const module = native(value)
   expect(await expression(module).result).toEqual({ status: 'unavailable', reason })
   expect(module.post).not.toHaveBeenCalled()
+})
+
+const disposeSymbol = (Symbol as SymbolConstructor & { readonly dispose: symbol }).dispose
+function disposableRead(value: unknown, reject = false) {
+  const dispose = vi.fn()
+  const invocation = Object.assign(reject ? Promise.reject(new Error('fixture-rpc-error')) : Promise.resolve(value), {
+    [disposeSymbol]: dispose,
+  })
+  const readAccountInfo = vi.fn(() => invocation)
+  const sharedDispose = vi.fn()
+  return {
+    module: { TW: { accessInputs: { readAccountInfo, [disposeSymbol]: sharedDispose } } },
+    invocation,
+    dispose,
+    readAccountInfo,
+    sharedDispose,
+  }
+}
+it.each([
+  [{ status: 'ready', data: pair }, false, JSON.stringify([pair.accountId, pair.userId])],
+  [{ status: 'unavailable', reason: 'retired' }, false, { status: 'unavailable', reason: 'typed-retired' }],
+  [{ status: 'error' }, false, { status: 'unavailable', reason: 'typed-read-error' }],
+  [null, true, { status: 'unavailable', reason: 'typed-read-exception' }],
+])('releases exactly the original typed invocation after completion %j', async (value, reject, expected) => {
+  const f = disposableRead(value, reject as boolean)
+  expect(await expression(f.module).result).toEqual(expected)
+  expect(f.dispose).toHaveBeenCalledTimes(1)
+  expect(f.dispose.mock.contexts[0]).toBe(f.invocation)
+  expect(f.sharedDispose).not.toHaveBeenCalled()
+})
+it('releases a held RPC at the production timeout and never accepts its late ready result', async () => {
+  vi.useFakeTimers()
+  let resolve!: (value: unknown) => void
+  const dispose = vi.fn(), sharedDispose = vi.fn()
+  const invocation = Object.assign(
+    new Promise(r => {
+      resolve = r
+    }),
+    { [disposeSymbol]: dispose },
+  )
+  const f = expression({ TW: { accessInputs: { readAccountInfo: () => invocation, [disposeSymbol]: sharedDispose } } })
+  await vi.advanceTimersByTimeAsync(2000)
+  expect(await f.result).toEqual({ status: 'unavailable', reason: 'native-read-timeout' })
+  expect(dispose).toHaveBeenCalledTimes(1)
+  resolve({ status: 'ready', data: pair })
+  await Promise.resolve()
+  await Promise.resolve()
+  expect(await f.result).toEqual({ status: 'unavailable', reason: 'native-read-timeout' })
+  expect(dispose).toHaveBeenCalledTimes(1)
+  expect(sharedDispose).not.toHaveBeenCalled()
+  expect(vi.getTimerCount()).toBe(0)
+})
+it('releases once when invocation creation synchronously aborts and never calls a pre-aborted input', async () => {
+  const abort = new AbortController(), f = disposableRead({ status: 'ready', data: pair })
+  f.module.TW.accessInputs.readAccountInfo.mockImplementation(() => {
+    abort.abort()
+    return f.invocation
+  })
+  await expect(readPinnedNativeAccount('8881', f.module, abort.signal)).rejects.toThrow()
+  expect(f.dispose).toHaveBeenCalledTimes(1)
+  const before = f.readAccountInfo.mock.calls.length
+  await expect(readPinnedNativeAccount('8881', f.module, abort.signal)).rejects.toThrow()
+  expect(f.readAccountInfo).toHaveBeenCalledTimes(before)
+  expect(f.sharedDispose).not.toHaveBeenCalled()
+})
+it('aborting one concurrent read releases only its invocation and keeps the sibling and shared input usable', async () => {
+  const a = new AbortController(), b = new AbortController()
+  let finishA!: (value: unknown) => void, finishB!: (value: unknown) => void
+  const releaseA = vi.fn(), releaseB = vi.fn(), sharedDispose = vi.fn()
+  const pendingA = Object.assign(
+    new Promise(r => {
+      finishA = r
+    }),
+    { [disposeSymbol]: releaseA },
+  )
+  const pendingB = Object.assign(
+    new Promise(r => {
+      finishB = r
+    }),
+    { [disposeSymbol]: releaseB },
+  )
+  const readAccountInfo = vi.fn().mockReturnValueOnce(pendingA).mockReturnValueOnce(pendingB)
+  const module = { TW: { accessInputs: { readAccountInfo, [disposeSymbol]: sharedDispose } } }
+  const first = readPinnedNativeAccount('8881', module, a.signal)
+  const second = readPinnedNativeAccount('8881', module, b.signal)
+  a.abort()
+  await expect(first).rejects.toThrow()
+  expect(releaseA).toHaveBeenCalledTimes(1)
+  expect(releaseB).not.toHaveBeenCalled()
+  finishB({ status: 'ready', data: pair })
+  expect(await second).toEqual(pair)
+  finishA({ status: 'ready', data: pair })
+  await Promise.resolve()
+  expect(releaseA).toHaveBeenCalledTimes(1)
+  expect(releaseB).toHaveBeenCalledTimes(1)
+  expect(sharedDispose).not.toHaveBeenCalled()
 })

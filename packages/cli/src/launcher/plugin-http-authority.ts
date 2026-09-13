@@ -793,11 +793,18 @@ export class PluginHttpAuthority {
         abort.abort()
       }
     }, 100)
+    const matchesAccount = async () => {
+      const retained = grant.retained?.account, native = grant.nativeAccount
+      if (retained !== undefined && native !== undefined && retained !== native) return false
+      if (retained === undefined && native === undefined) return true
+      // One fresh read per checkpoint validates both pins. Never reuse it
+      // across the secret read, transport, or response body observation.
+      const current = await account?.()
+      return (retained === undefined || current === retained) && (native === undefined || current === native)
+        && grant.retained?.account === retained && grant.nativeAccount === native
+    }
     try {
-      if (
-        (grant.retained !== undefined && await account?.() !== grant.retained.account)
-        || (grant.nativeAccount !== undefined && await account?.() !== grant.nativeAccount)
-      ) {
+      if (!await matchesAccount()) {
         await this.retire(grant.connection.id, grant)
         return fail('credential-unavailable')
       }
@@ -808,10 +815,7 @@ export class PluginHttpAuthority {
           return fail('credential-unavailable')
         }
       }
-      if (
-        (grant.nativeAccount !== undefined && await account?.() !== grant.nativeAccount)
-        || (grant.retained !== undefined && await account?.() !== grant.retained.account)
-      ) {
+      if (!await matchesAccount()) {
         await this.retire(grant.connection.id, grant)
         return fail('credential-unavailable')
       }
@@ -847,10 +851,7 @@ export class PluginHttpAuthority {
           chunks.push(next.value)
         }
       }
-      if (
-        (grant.retained !== undefined && await account?.() !== grant.retained.account)
-        || (grant.nativeAccount !== undefined && await account?.() !== grant.nativeAccount)
-      ) {
+      if (!await matchesAccount()) {
         await this.retire(grant.connection.id, grant)
         return fail('credential-unavailable')
       }
