@@ -37,6 +37,7 @@ function localizedText(
 
 function choices(
   schema: SchemaNode,
+  locale: string,
 ): readonly { readonly label: string; readonly value: CordisXJsonScalar }[] | undefined {
   if (schema.type !== 'union' || schema.list === undefined) return undefined
   const result: { label: string; value: CordisXJsonScalar }[] = []
@@ -44,7 +45,10 @@ function choices(
     if (item.type !== 'const' || !['string', 'number', 'boolean'].includes(typeof item.value) && item.value !== null) {
       return undefined
     }
-    result.push({ label: String(item.value), value: item.value as CordisXJsonScalar })
+    result.push({
+      label: localizedText(item.meta?.extra?.label, locale) ?? String(item.value),
+      value: item.value as CordisXJsonScalar,
+    })
   }
   return result
 }
@@ -147,7 +151,7 @@ function localizedChoices(
   if (!Array.isArray(value) || value.length < 1 || value.length > 100) {
     throw new Error(`${label} must contain 1 to 100 choices`)
   }
-  const expected = choices(node)?.map(choice => choice.value)
+  const expected = choices(node, 'en-US')?.map(choice => choice.value)
   if (expected === undefined || expected.length === 0) throw new Error(`${label} requires a finite scalar enum field`)
   const result: ManagerContentPluginConfigLocalizedChoiceV2[] = []
   for (const [index, item] of value.entries()) {
@@ -243,7 +247,7 @@ function arrayChoices(
   schema: SchemaNode | undefined,
   locale: string,
 ): readonly { readonly label: string; readonly value: CordisXJsonScalar }[] | undefined {
-  const literalChoices = schema === undefined ? undefined : choices(schema)
+  const literalChoices = schema === undefined ? undefined : choices(schema, locale)
   if (literalChoices !== undefined) return literalChoices
   if (schema?.type !== 'boolean') return undefined
   const zh = locale.toLowerCase().startsWith('zh')
@@ -308,7 +312,7 @@ function formSchemaNode(schema: SchemaNode, locale: string): CordisXConfigFormSc
   const hasDefault = Object.hasOwn(schema.meta ?? {}, 'default') && !sensitive
   const label = localizedText(schema.meta?.extra?.label, locale)
   const description = localizedText(schema.meta?.description, locale)
-  const fieldChoices = choices(schema)
+  const fieldChoices = choices(schema, locale)
   const nestedArrayChoices = schema.type === 'array' ? arrayChoices(schema.inner, locale) : undefined
   const nodeChoices = fieldChoices ?? nestedArrayChoices
   const arrayItemType =
@@ -358,7 +362,7 @@ function fields(
   const sensitive = role !== undefined && isReservedConfigRole(role)
   const label = localizedText(schema.meta?.extra?.label, locale)
   const description = localizedText(schema.meta?.description, locale)
-  const fieldChoices = choices(schema)
+  const fieldChoices = choices(schema, locale)
   const nestedArrayChoices = schema.type === 'array' ? arrayChoices(schema.inner, locale) : undefined
   const fieldOptions = fieldChoices ?? nestedArrayChoices
   const arrayItemType =

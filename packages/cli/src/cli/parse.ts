@@ -30,6 +30,8 @@ export interface CordisXLauncherOptions {
   readonly debugPort?: number
   readonly onlineDevtools: boolean
   readonly dryRun: boolean
+  /** Explicit dev --config persistence opt-in. */
+  readonly writeConfig?: boolean
 }
 
 export interface CordisXHelpInvocation {
@@ -74,7 +76,7 @@ export type CordisXCliInvocation =
   | CordisXDoctorInvocation
   | CordisXDevInvocation
 
-type BooleanOptionName = 'attach' | 'system' | 'isolated' | 'onlineDevtools' | 'dryRun' | 'help'
+type BooleanOptionName = 'attach' | 'system' | 'isolated' | 'onlineDevtools' | 'dryRun' | 'writeConfig' | 'help'
 type ValueOptionName = 'dataMode' | 'profileDir' | 'executable' | 'debugPort' | 'configPath'
 type ParsedOptionName = BooleanOptionName | ValueOptionName
 
@@ -84,6 +86,7 @@ interface ParsedOptions {
   isolated: boolean
   onlineDevtools: boolean
   dryRun: boolean
+  writeConfig: boolean
   help: boolean
   dataMode?: CordisXDataMode
   profileDir?: string
@@ -98,6 +101,7 @@ const BOOLEAN_OPTIONS = new Map<string, BooleanOptionName>([
   ['--isolated', 'isolated'],
   ['--online-devtools', 'onlineDevtools'],
   ['--dry-run', 'dryRun'],
+  ['--write-config', 'writeConfig'],
   ['--help', 'help'],
   ['-h', 'help'],
 ])
@@ -153,6 +157,7 @@ function parseCordisXOptions(args: readonly string[]): {
     isolated: false,
     onlineDevtools: false,
     dryRun: false,
+    writeConfig: false,
     help: false,
   }
   const seen = new Set<ParsedOptionName>()
@@ -212,6 +217,7 @@ function launcherOptions(options: ParsedOptions): CordisXLauncherOptions {
     isolated: options.isolated,
     onlineDevtools: options.onlineDevtools,
     dryRun: options.dryRun,
+    ...(options.writeConfig ? { writeConfig: true } : {}),
     ...(options.profileDir === undefined ? {} : { profileDir: options.profileDir }),
     ...(options.executable === undefined ? {} : { executable: options.executable }),
     ...(options.debugPort === undefined ? {} : { debugPort: options.debugPort }),
@@ -276,6 +282,7 @@ function assertNoOptions(options: ParsedOptions, action: 'setup' | 'config' | 'd
     options.isolated && '--isolated',
     options.onlineDevtools && '--online-devtools',
     options.dryRun && '--dry-run',
+    options.writeConfig && '--write-config',
     options.dataMode !== undefined && '--data',
     options.profileDir !== undefined && '--profile-dir',
     options.executable !== undefined && '--executable',
@@ -346,6 +353,9 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
         'cordisx dev accepts either a plugin path or --config, not both',
       )
     }
+    if (options.writeConfig && options.configPath === undefined) {
+      throw new CordisXCliParseError('unsupported-option', '--write-config requires cordisx dev --config <path>')
+    }
     return {
       action: 'dev',
       ...(positionals[1] === undefined ? {} : { pluginPath: positionals[1] }),
@@ -356,6 +366,12 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
   }
 
   assertLauncherOptionCompatibility(options)
+  if (options.writeConfig) {
+    throw new CordisXCliParseError(
+      'unsupported-option',
+      '--write-config is only valid with cordisx dev --config <path>',
+    )
+  }
   if (options.configPath !== undefined) {
     throw new CordisXCliParseError('unsupported-option', '--config is only valid with cordisx dev')
   }

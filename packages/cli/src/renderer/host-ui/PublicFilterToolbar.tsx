@@ -2,12 +2,52 @@ import * as React from 'react'
 import type { FilterToolbarProps, SearchFieldProps } from '../../ui.js'
 import { HostIcon } from './HostIcon.js'
 
-export function SearchField({ className, value, onChange, ...props }: SearchFieldProps): React.ReactElement {
+export function SearchField({
+  className,
+  value,
+  onChange,
+  clearable = false,
+  clearLabel = 'Clear search',
+  ...props
+}: SearchFieldProps): React.ReactElement {
+  const input = React.useRef<HTMLInputElement>(null)
   return (
-    <label className={['cxr-ui-filter-search', className].filter(Boolean).join(' ')}>
+    <span
+      className={['cxr-ui-filter-search', className].filter(Boolean).join(' ')}
+      data-clearable={clearable ? 'true' : undefined}
+      onClick={event => {
+        const target = event.target as Element
+        if (target.closest('button,input,a,[role="button"]') !== null) return
+        input.current?.focus()
+      }}
+    >
       <HostIcon token="search" className="cxr-ui-filter-search__icon" size={16} />
-      <input {...props} type="search" value={value} onChange={event => onChange(event.currentTarget.value)} />
-    </label>
+      <input
+        {...props}
+        ref={input}
+        type="search"
+        value={value}
+        onChange={event => onChange(event.currentTarget.value)}
+      />
+      {clearable && value.length > 0
+        ? (
+          <button
+            type="button"
+            className="cxr-ui-button cxr-ui-filter-search__clear"
+            data-variant="ghost"
+            aria-label={clearLabel.trim() || 'Clear search'}
+            title={clearLabel.trim() || 'Clear search'}
+            disabled={props.disabled || props.readOnly}
+            onClick={() => {
+              onChange('')
+              input.current?.focus()
+            }}
+          >
+            <HostIcon token="close" surfaceToken="host:close" size={16} />
+          </button>
+        )
+        : null}
+    </span>
   )
 }
 

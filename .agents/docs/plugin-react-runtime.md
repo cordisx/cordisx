@@ -80,6 +80,19 @@ service. Header/footer remain structured Host chrome. See [plugin dialogs](dialo
 for this experimental capability's provider version, JSX context behavior and
 lifecycle contract.
 
+## Search controls
+
+The public `SearchField` from `cordisx/ui` accepts controlled `value` and
+`onChange`. Opt into `clearable` to replace the browser cancel glyph with the
+Host close icon. When the nonempty field can be edited, activating that button
+calls `onChange('')` once and focuses the input. The plugin updates its controlled
+value as usual. Disabled and read-only fields cannot clear. `clearLabel` supplies
+the accessible name and tooltip, defaulting to `Clear search`; localize it in
+the consuming plugin. An empty field has no clear action. Clicking the search
+icon or row spacing focuses the input. Without `clearable`, existing native
+search cancel behavior is preserved. The Host owns these controls and styles;
+plugins need no input ref or private CSS selectors.
+
 ## Runtime and ownership
 
 The immutable package path consumes the plugin's Vite ESM graph with automatic

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PluginHttpAuthority } from '../packages/cli/src/launcher/plugin-http-authority.js'
 import { issueOwnerDocumentPrincipalToken } from '../packages/cli/src/launcher/owner-document-rpc.js'
 import { createPluginHttpClient } from '../packages/cli/src/renderer/plugin-http.js'
+import type { PluginHttpDiagnostic } from '../packages/cli/src/launcher/plugin-http-diagnostics.js'
 
 const secret = 'test-authority-secret-only'
 const principal = {
@@ -18,7 +19,7 @@ afterEach(async () => {
   for (const close of active.splice(0)) await close()
 })
 
-async function fixture() {
+async function fixture(onDiagnostic?: (event: PluginHttpDiagnostic) => void) {
   const seen: { url?: string; authorization?: string }[] = []
   const server = createServer((request, response) => {
     seen.push({ url: request.url, authorization: request.headers.authorization })
@@ -56,6 +57,7 @@ async function fixture() {
   const secrets = new Map<string, string>()
   let live = true
   const authority = new PluginHttpAuthority({
+    onDiagnostic,
     secret,
     profileId: 'test',
     generation: 'g1',
@@ -110,6 +112,55 @@ async function fixture() {
 }
 
 describe('public plugin HTTP authority', () => {
+  it('disposing one same-owner renderer aborts only its transport and preserves sibling reads', async () => {
+    const diagnostics: PluginHttpDiagnostic[] = []
+    const f = await fixture(event => diagnostics.push(event))
+    const makeClient = () => {
+      const calls: Record<string, unknown>[] = [], local: string[] = []
+      const client = createPluginHttpClient({
+        principal: { ...principal.identity, moduleGeneration: 'm1', token },
+        active: () => true,
+        bridge: {
+          request: async (_: string, input: Record<string, unknown>) => {
+            calls.push(input)
+            return f.authority.handle({ ...connectionInput, ...input })
+          },
+        } as never,
+        consent: async () => ({ approved: true, secret: 'renderer-test-bearer' }),
+        diagnostic: code => local.push(code),
+      })
+      active.push(() => client.dispose())
+      return { client, calls, local }
+    }
+    const a = makeClient(), b = makeClient()
+    const first = await a.client.authorize({ origin: f.origin, credential: 'bearer' })
+    const second = await b.client.authorize({ origin: f.origin, credential: 'bearer' })
+    if (first.status !== 'accepted' || second.status !== 'accepted') throw new Error('renderer fixture grant')
+    expect(a.calls[0]?.clientId).not.toBe(b.calls[0]?.clientId)
+    expect(first.value).not.toHaveProperty('clientId')
+    const pending = a.client.request({
+      connection: first.value,
+      path: '/wait',
+      method: 'GET',
+      deadline: Date.now() + 2000,
+    })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    a.client.dispose()
+    expect(await pending).toMatchObject({ status: 'unavailable', code: 'stale-generation' })
+    expect(await b.client.request({ connection: second.value, path: '/', method: 'GET', deadline: Date.now() + 2000 }))
+      .toMatchObject({ status: 'accepted' })
+    expect(f.secrets.size).toBe(2) // Original fixture grant and the live sibling grant.
+    expect(diagnostics.filter(event => event.event === 'retired' && event.reason === 'client-disposed')).toHaveLength(1)
+    expect(JSON.stringify(diagnostics)).not.toContain(first.value.id)
+    expect(JSON.stringify(diagnostics)).not.toContain('renderer-test-bearer')
+    const dispatched = b.calls.length
+    for (let i = 0; i < 2; i++) {
+      expect(await b.client.request({ connection: first.value, path: '/', method: 'GET', deadline: Date.now() + 2000 }))
+        .toMatchObject({ code: 'connection-unavailable' })
+    }
+    expect(b.calls).toHaveLength(dispatched)
+    expect(b.local).toEqual(['renderer-connection-not-owned'])
+  })
   it('binds credentials to owner and origin, injects only launcher-side, and refuses escape paths and headers', async () => {
     const f = await fixture()
     expect(await f.send()).toEqual({
@@ -297,4 +348,47 @@ describe('public plugin HTTP authority', () => {
     expect(request).toHaveBeenCalledTimes(1)
     client.dispose()
   })
+})
+
+it('reports fixed invalid branches once without changing grant cap, cleanup or leaking request payloads', async () => {
+  const diagnostics: PluginHttpDiagnostic[] = []
+  const f = await fixture(event => {
+    diagnostics.push(event)
+    throw new Error('fixture-private-listener-error')
+  })
+  const ids = Array.from({ length: 8 }, () => crypto.randomUUID())
+  const pending = ids.map(operationId => f.send({ operationId, path: '/wait' }))
+  expect(await f.send({ path: '/fixture-private-path' })).toMatchObject({ code: 'invalid-request' })
+  expect(await f.send({ path: '/fixture-private-path' })).toMatchObject({ code: 'invalid-request' })
+  expect(await f.send({ operationId: ids[0] })).toMatchObject({ code: 'invalid-request' })
+  expect(await f.send({ operationId: 'fixture-private-invalid-id!' })).toMatchObject({ code: 'invalid-request' })
+  await f.authority.dispose()
+  await Promise.all(pending)
+  const reasons = diagnostics.filter(event => event.event === 'invalid-request').map(event => event.reason)
+  expect(reasons).toEqual(['request-concurrency-limit', 'request-id-duplicate', 'request-id-invalid'])
+  expect(JSON.stringify(diagnostics)).not.toMatch(
+    /fixture-private|test-bearer|test-authority-secret-only|file:\/\/\/game/u,
+  )
+})
+it('labels schema and unexpected authority exceptions without exposing payloads or creating diagnostic clients', async () => {
+  const diagnostics: PluginHttpDiagnostic[] = []
+  const f = await fixture(event => diagnostics.push(event))
+  expect(await f.send({ headers: 'fixture-private-headers' })).toMatchObject({ code: 'invalid-request' })
+  expect(await f.send({ method: 'fixture-private-method' })).toMatchObject({ code: 'invalid-request' })
+  const input = { ...connectionInput, connection: f.connection }
+  Object.defineProperty(input, 'operation', {
+    get() {
+      throw new Error('fixture-private-error-payload')
+    },
+  })
+  expect(await f.authority.handle(input)).toMatchObject({ code: 'invalid-request' })
+  expect(await f.authority.handle({ ...connectionInput, clientId: 'bad', operation: 'plugin-http-request' }))
+    .toMatchObject({ code: 'invalid-request' })
+  expect(diagnostics.filter(event => event.event === 'invalid-request').map(event => event.reason)).toEqual([
+    'record-invalid',
+    'request-method-invalid',
+    'authority-request-exception',
+  ])
+  expect(JSON.stringify(diagnostics)).not.toMatch(/fixture-private|test-authority-secret-only/u)
+  expect(await f.send()).toMatchObject({ status: 'accepted' })
 })

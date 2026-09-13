@@ -46,6 +46,7 @@ export const HOST_FORM_REACT_STYLES = String.raw`
   .cxf-section-heading p { margin: 3px 0 0; color: var(--cx-muted,#9ca5b5); font-size: 11px; line-height: 1.5; }
   .cxf-form-grid { display: grid; min-width: 0; overflow: clip; border: 1px solid var(--cx-border,#353a42); border-radius: 12px; background: color-mix(in srgb,var(--cx-surface-raised,#20242b) 86%,var(--cx-surface,#17191d)); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
   .cxf-item { display: grid; min-width: 0; grid-template-columns: minmax(0,1fr) minmax(13rem,min(44%,25rem)); grid-template-areas: "label control" "help control" "error error"; align-items: center; gap: 4px 20px; padding: 14px 16px; }
+  .cxf-item[data-has-description="false"]:not([data-full-width="true"]) { grid-template-areas: "label control" "error error"; }
   .cxf-item + .cxf-item { border-top: 1px solid var(--cx-border,#353a42); }
   .cxf-item[data-full-width="true"] { grid-template-columns: minmax(0,1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; }
   .cxf-label-row { grid-area: label; display: flex; min-width: 0; align-items: center; gap: 4px; }
@@ -96,7 +97,7 @@ export const HOST_FORM_REACT_STYLES = String.raw`
   .cxf-status { min-width: 0; flex: 1; color: var(--cx-muted,#9ca5b5); font-size: 11px; }
   .cxf-form-action-buttons { display: flex; flex: none; gap: 8px; }
   @media (max-width: 760px) {
-    .cxf-item, .cxf-item[data-full-width="true"] { grid-template-columns: minmax(0,1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; gap: 5px; }
+    .cxf-item, .cxf-item[data-full-width="true"], .cxf-item[data-has-description="false"]:not([data-full-width="true"]) { grid-template-columns: minmax(0,1fr); grid-template-areas: "label" "help" "control" "error"; align-items: start; gap: 5px; }
     .cxf-item[data-control-layout="compact"] .cxf-control-seat { justify-self: start; }
   }
 `
@@ -597,6 +598,7 @@ export function HostFieldRow(props: HostFieldRowProps) {
       data-primitive={resolved}
       data-presenter={field.presenter?.kind ?? 'auto'}
       data-invalid={String(issueText !== undefined)}
+      data-has-description={String(field.description !== undefined)}
     >
       <div className="cxf-label-row" id={labelId}>
         {props.fieldActions === 'static'

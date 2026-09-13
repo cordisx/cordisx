@@ -15,13 +15,25 @@ import { type ConfigBridgeHandler, createConfigBridgeHandler } from './config-rp
 export function createLauncherPluginConfigCandidateStore(
   configPath: string,
   profileId: string,
+  expectedComposition?: CordisXConfig,
 ): PluginConfigCandidateStore {
+  const topology = (config: CordisXConfig) =>
+    JSON.stringify(config.plugins.map(plugin => [
+      plugin.id,
+      plugin.entry,
+      plugin.developmentIdentityEntry ?? null,
+      plugin.enabled,
+    ]))
+  const expectedTopology = expectedComposition === undefined ? undefined : topology(expectedComposition)
   return createPluginConfigCandidateStore(async updater => {
     const updated = await updateConfigDocumentAtomic(
       configPath,
       'launcher config',
       value => {
-        parseConfigDocument(value, configPath, { profileId })
+        const parsed = parseConfigDocument(value, configPath, { profileId })
+        if (expectedTopology !== undefined && topology(parsed) !== expectedTopology) {
+          throw new Error('launcher plugin composition changed; restart development before saving configuration')
+        }
       },
       async current => {
         const ledger = await updater(current as unknown as PluginConfigDocument)
@@ -32,16 +44,22 @@ export function createLauncherPluginConfigCandidateStore(
   })
 }
 
-/** Production composition seam used by the Playground launcher envelope. */
+/** Production composition seam for explicitly writable launcher envelopes. */
 export function createLauncherConfigBridgeHandler(input: {
   readonly token: string
   readonly profileId: string
   readonly generation: string
   readonly configPath: string
   readonly composition: CordisXConfig
+  /** Reject writes after externally changed development owner topology. */
+  readonly preserveComposition?: boolean
 }): ConfigBridgeHandler {
   return createConfigBridgeHandler({
     ...input,
-    configuredPluginConfig: createLauncherPluginConfigCandidateStore(input.configPath, input.profileId),
+    configuredPluginConfig: createLauncherPluginConfigCandidateStore(
+      input.configPath,
+      input.profileId,
+      input.preserveComposition === true ? input.composition : undefined,
+    ),
   })
 }

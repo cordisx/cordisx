@@ -10,6 +10,7 @@ import {
   MemoryExtensionPointPolicyStore,
 } from '../../packages/cli/src/renderer/extension-points.js'
 import { NavigationRegistry, OutletRegistry, PageRegistry } from '../../packages/cli/src/renderer/navigation.js'
+import type { CordisXPageControls } from '../../packages/cli/src/contracts.js'
 import { TestCodexRouteHistory } from '../helpers/codex-route-history.js'
 import { fakeI18n, FakeOutlet, settle } from './navigation.fixtures.js'
 
@@ -512,8 +513,12 @@ export function registerOutletsTests() {
     commandRegistry.register('demo', { id: 'refresh', title: { key: 'refresh', fallback: 'Refresh' } }, () => {
       executions += 1
     })
+    let pageControls: CordisXPageControls | undefined
     let bodyContainer: HTMLElement | undefined
     pages.register('demo', {
+      $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/page.v4.schema.json',
+      schemaVersion: 4,
+      description: { key: 'description', fallback: 'Overview actions' },
       id: 'overview',
       title: { key: 'title', fallback: 'Overview' },
       icon: 'host:layers',
@@ -524,8 +529,14 @@ export function registerOutletsTests() {
         label: { key: 'refresh', fallback: 'Refresh' },
         icon: 'host:refresh',
         command: { id: 'refresh' },
+      }, {
+        id: 'guest',
+        label: { key: 'guest', fallback: 'Anonymous guest' },
+        visual: { kind: 'avatar' },
+        menu: [{ id: 'refresh', label: { key: 'refresh', fallback: 'Refresh' }, command: { id: 'refresh' } }],
       }],
-    }, ({ container }) => {
+    }, ({ container, controls }) => {
+      pageControls = controls
       bodyContainer = container
     })
     navigation.register('demo', { id: 'overview', path: '/overview', outlet: 'app', page: 'overview' })
@@ -536,10 +547,20 @@ export function registerOutletsTests() {
     const action = chrome.querySelector<HTMLButtonElement>('[data-cordisx-page-header-action="refresh"]')!
     expect(chrome.querySelector('[data-cordisx-page-leading] [data-host-icon="host:layers"]')).toBeNull()
     expect(chrome.querySelector('button[aria-label="Back"]')).not.toBeNull()
+    expect(chrome.querySelector('button[aria-label="Close"]')).toBeNull()
+    expect(dom.window.document.querySelector('header[data-app-shell-application-menu-bar] button')?.textContent).toBe(
+      'native',
+    )
     expect(title.textContent).toBe('Overview')
-    expect(action.classList.contains('native-icon-button')).toBe(true)
+    expect(action.classList.contains('native-icon-button')).toBe(false)
+    expect(action.classList.contains('cordisx-page-chrome-action')).toBe(true)
     expect(action.textContent).toBe('')
     expect(action.getAttribute('aria-label')).toBe('Refresh')
+    expect(pageControls?.setHeaderActionLabel('refresh', { key: 'refresh', fallback: 'Updated refresh' })).toBe(true)
+    expect(action.getAttribute('aria-label')).toBe('Updated refresh')
+    expect(action.textContent).toBe('')
+    expect(pageControls?.setHeaderActionLabel('native', { key: 'x' })).toBe(false)
+    expect(pageControls?.setHeaderActionLabel('guest', { key: 'x' })).toBe(false)
     expect(action.dataset.cordisxNoDrag).toBe('true')
     expect(action.querySelector('[data-host-icon="host:refresh"]')).not.toBeNull()
     expect(dom.window.document.querySelector('[role="tab"] [data-host-icon="host:info"]')).not.toBeNull()
@@ -560,16 +581,34 @@ export function registerOutletsTests() {
       authorized: true,
     })
 
+    const guest = chrome.querySelector<HTMLButtonElement>('[data-cordisx-page-header-action="guest"]')!
+    guest.click()
+    dom.window.document.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click()
+    await settle()
+    expect(executions).toBe(2)
+    expect(broker.accessDiagnostics().at(-1)).toMatchObject({
+      request: { operation: 'outlet.page.command.invoke', actionId: 'guest/refresh', commandId: 'demo:refresh' },
+      authorized: true,
+    })
+    guest.click()
     broker.setPolicy(identity, 'app', 'deny')
+    dom.window.document.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click()
+    await settle()
+    expect(executions).toBe(2)
+    expect(broker.accessDiagnostics().at(-1)).toMatchObject({
+      request: { actionId: 'guest/refresh' },
+      authorized: false,
+    })
     action.click()
     await settle()
-    expect(executions).toBe(1)
+    expect(executions).toBe(2)
     expect(broker.accessDiagnostics().at(-1)).toMatchObject({
       request: { operation: 'outlet.page.command.invoke', actionId: 'refresh' },
       authorized: false,
     })
 
     await navigation.dispose()
+    expect(pageControls?.setHeaderActionLabel('refresh', { key: 'refresh' })).toBe(false)
     commandRegistry.dispose()
     pages.dispose()
     outlets.dispose()

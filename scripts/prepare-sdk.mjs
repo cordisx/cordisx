@@ -1,3 +1,4 @@
+import { snapshotSource } from './sdk-source-snapshot.mjs'
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,12 +9,19 @@ const output = path.resolve(process.argv[2] ?? path.join(repository, 'artifacts/
 // Refuse reuse: a successful build must never borrow an existing installation.
 await mkdir(path.dirname(output), { recursive: true })
 await mkdir(output)
+const experimentalProtocol = process.argv[3] === '--experimental-protocol' ? process.argv[4] : undefined
+if (process.argv.length > 3 && !experimentalProtocol) throw new Error('Use --experimental-protocol <source> explicitly')
+let experimentalInputs
 const host = path.join(output, 'host')
 await mkdir(host)
 const commit = await run('git', ['rev-parse', 'HEAD'], repository)
 const archive = path.join(output, 'host-source.tar')
-await run('git', ['archive', '--format=tar', '--output', archive, commit], repository)
-await run('tar', ['-xf', archive, '-C', host], repository)
+if (experimentalProtocol) {
+  experimentalInputs = { host: await snapshotSource(repository, host) }
+} else {
+  await run('git', ['archive', '--format=tar', '--output', archive, commit], repository)
+  await run('tar', ['-xf', archive, '-C', host], repository)
+}
 const lockFile = path.join(host, 'package-lock.json')
 const lock = await json(lockFile)
 const originals = new Map([[lockFile, await readFile(lockFile)]])
@@ -28,7 +36,9 @@ for (const [location, dependency] of Object.entries(lock.packages)) {
   if (!item) {
     const source = path.join(output, 'sources', String(prepared.size))
     console.log(`[sdk] materializing ${spec}`)
-    await checkout(spec, source)
+    if (experimentalProtocol && location === 'node_modules/@cordisx/protocol') {
+      experimentalInputs.protocol = await snapshotSource(experimentalProtocol, source)
+    } else await checkout(spec, source)
     const tarball = await pack(source, path.join(output, 'bootstrap', String(prepared.size)))
     item = { source, tarball, integrity: `sha512-${await digest(tarball, 'sha512')}` }
     prepared.set(spec, item)
@@ -113,6 +123,7 @@ for (const filename of (await readdir(artifacts)).sort()) {
 }
 await save(path.join(output, 'sdk-evidence.json'), {
   hostCommit: commit,
+  ...(experimentalInputs ? { experimentalInputs } : {}),
   node: process.version,
   npm: await run('npm', ['--version'], host),
   sources: records.map(({ location, spec }) => ({ location, spec })),

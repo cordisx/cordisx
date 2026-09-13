@@ -1,12 +1,12 @@
+import { disposePluginProfileSurfaces, installPluginProfileSurfaces } from './plugin-profile-surfaces.js'
 import { installPluginDialogs } from './dialogs/plugin.js'
 import { notificationCenterForDocument } from './notifications/host.js'
 import { nativeAgentTaskClient } from './native-agent-session-recovery.js'
-import { createRestrictedContentService } from './restricted-content-service.js'
 import { createPluginHttpClient } from './plugin-http.js'
 import { installAgentTasks } from './agent-tasks-install.js'
 import { registerNativeSessionOwner } from './native-agent-session-recovery.js'
 import { installAgentTools } from './plugin-agent-tools.js'
-import { Context, type Fiber, type Plugin } from '@deepseek-ai/cordis'
+import { Context, type Fiber, type FiberState, type Plugin } from '@deepseek-ai/cordis'
 import { CORDISX_PLATFORM_CAPABILITIES, CORDISX_PLUGIN_ACTIVATION_SCHEMA_V1 } from '../contracts.js'
 import type {
   CordisXBrowserPlugin,
@@ -248,6 +248,9 @@ import {
   pluginFromModule,
 } from './runtime-shared.js'
 
+// Cordis erases its const enum from runtime exports; renderer bundling needs a local value.
+const ACTIVE_PLUGIN_FIBER_STATE: FiberState = 2
+
 export const createRuntimeDisposeControllerFiber = async (
   runtimeScope: RuntimeClosureScope,
   controller: PluginController,
@@ -322,10 +325,7 @@ export const createRuntimeDisposeControllerFiber = async (
     delete controller.unregisterDialogs
     controller.unregisterNotifications?.()
     delete controller.unregisterNotifications
-    controller.restrictedContent?.dispose()
-    await controller.unregisterRestrictedContent?.()
-    delete controller.restrictedContent
-    delete controller.unregisterRestrictedContent
+    await disposePluginProfileSurfaces(controller)
     controller.agentLoopControl?.dispose()
     await controller.unregisterAgentLoopControl?.()
     delete controller.agentLoopControl
@@ -666,8 +666,10 @@ export const createRuntimeMountPlugin = async (
     ).isolate('agentTools').isolate(
       'entities',
     ).isolate('documents').isolate('http').isolate('agentLoopControl').isolate('restrictedContent').isolate(
+      'isolatedGameUi',
+    ).isolate(
       'notifications',
-    ).isolate('dialogs').extend({
+    ).isolate('dialogs').isolate('currentUser').extend({
       [CORDISX_PLUGIN_ID]: controller.item.id,
       [CORDISX_PLUGIN_SOURCE]: controller.item.source,
       [CORDISX_PLUGIN_GENERATION]: runtimeScope.moduleGenerationOf()!(controller),
@@ -722,11 +724,7 @@ export const createRuntimeMountPlugin = async (
     name: () => controller.manifest.name ?? controller.item.id,
     active: () => agentLoopOptions.active() && runtimeScope.activeControllers()().includes(controller),
   }, notificationBinding?.api)
-  controller.restrictedContent = createRestrictedContentService(agentLoopOptions.active)
-  controller.unregisterRestrictedContent = pluginContext.reflect.provide(
-    'restrictedContent',
-    controller.restrictedContent,
-  )
+  installPluginProfileSurfaces(pluginContext, controller, document, agentLoopOptions)
   controller.documentsClient = documentsClient
   controller.unregisterDocuments = pluginContext.reflect.provide('documents', documentsClient)
   try {
@@ -742,6 +740,14 @@ export const createRuntimeMountPlugin = async (
       () => controller.principalLive,
     )
     const http = createPluginHttpClient({
+      diagnostic: (_, message) =>
+        runtimeScope.pluginConsole()!.diagnostic(controller.principal, 'http.transport', message),
+      authorizeWork: async () => {
+        const broker = runtimeScope.broker()!, generation = runtimeScope.moduleGenerationOf()!(controller)
+        const fence = broker.usageFence(controller.identity, generation)
+        return fence() && await broker.authorizeUsage(controller.identity) && fence()
+          && broker.usageAllowed(controller.identity)
+      },
       development: () =>
         runtimeScope.broker()!.isLocalDevelopment(
           controller.identity,
@@ -895,6 +901,9 @@ export const createRuntimeMountPlugin = async (
       runtimeScope.configuration()!.get(controller.item.id, runtimeScope.generationVisibility()!.view(pluginContext)),
     )
     await controller.fiber
+    if (controller.fiber.state !== ACTIVE_PLUGIN_FIBER_STATE) {
+      throw new Error('Plugin activation did not become active; required services may be unavailable')
+    }
     runtimeScope.agentRouteScopes()!.validateInstalledRoutes(owner)
     controller.status = 'active'
     runtimeScope.pluginConsole()!.lifecycle(
@@ -968,10 +977,7 @@ export const createRuntimeMountPlugin = async (
     delete controller.unregisterDialogs
     controller.unregisterNotifications?.()
     delete controller.unregisterNotifications
-    controller.restrictedContent?.dispose()
-    await controller.unregisterRestrictedContent?.()
-    delete controller.restrictedContent
-    delete controller.unregisterRestrictedContent
+    await disposePluginProfileSurfaces(controller)
     controller.agentLoopControl?.dispose()
     await controller.unregisterAgentLoopControl?.()
     delete controller.agentLoopControl

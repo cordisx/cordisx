@@ -74,6 +74,7 @@ const UI_EXPORTS = [
   'SearchField',
   'Select',
   'SelectionRail',
+  'SchemaForm',
   'Stack',
   'Text',
 ] as const

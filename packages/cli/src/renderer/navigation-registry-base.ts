@@ -1,3 +1,9 @@
+import { projectPageSurfaceTheme } from './page-surface-theme.js'
+import { mountLocalizedPageHeaderBreadcrumbs } from './page-header-breadcrumbs.js'
+import { projectPageContentAlignment } from './page-content-alignment.js'
+import type { CordisXPageHeaderVisual } from '../contracts.js'
+import { createPageHeaderChrome } from './page-header-chrome.js'
+import { mountPageHeaderActions } from './page-header-actions.js'
 import { resolveRouteLink } from './route-link-resolution.js'
 import type { RouteLinkResolutionResult } from '@cordisx/protocol/route-link-resolution/v1'
 import { Context, type Disposable, Service } from '@deepseek-ai/cordis'
@@ -262,7 +268,10 @@ export class NavigationRegistryBase {
       ) {
         return 'manager.content routes require route-v2 title and description'
       }
-      if (page.metadata.schemaVersion !== 3 || page.metadata.description === undefined) {
+      if (
+        (page.metadata.schemaVersion !== 3 && page.metadata.schemaVersion !== 4)
+        || page.metadata.description === undefined
+      ) {
         return `page ${page.qualifiedId} requires page-v3 title and description`
       }
       if (page.metadata.chrome === 'body-only') {
@@ -496,22 +505,12 @@ export class NavigationRegistryBase {
     const content = host.container.ownerDocument.createElement('section')
     content.dataset.cordisxPage = page.qualifiedId
     content.dataset.cordisxRoute = entry.record.qualifiedId
-    Object.assign(content.style, {
-      position: 'absolute',
-      inset: '0',
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
-      background: 'var(--color-background-surface-under, #141414)',
-      color: 'var(--color-text, #dfdfdf)',
-      font: '13px/1.45 ui-sans-serif, system-ui, sans-serif',
-      pointerEvents: 'auto',
-    })
     content.dataset.cordisxNoDrag = 'true'
     content.style.setProperty('-webkit-app-region', 'no-drag')
     host.container.append(content)
     const abort = new AbortController()
     const effects: Disposable<void>[] = []
+    effects.push(projectPageSurfaceTheme(content))
     const own: LocalizationEffectOwner = (setup) => {
       const cleanup = setup()
       let active = true
@@ -564,10 +563,12 @@ export class NavigationRegistryBase {
     state.mount = mount
     delete state.error
     try {
-      // A future page-admission route claim must finish at this Host-only
-      // activation boundary, before the page body mounts and before the
-      // navigation promise that led here can resolve.
+      // Activate Host page admission before mounting the body or resolving navigation.
       await this.pageAdmissionBindings.activate(pageAdmissionBinding)
+      let updateHeaderLabel: ((id: string, label: CordisXLocalizedText) => boolean) | undefined
+      let updateHeaderVisual: ((id: string, visual: CordisXPageHeaderVisual) => boolean) | undefined
+      let breadcrumbs: ReturnType<typeof mountLocalizedPageHeaderBreadcrumbs> | undefined
+      let alignment: { leading: HTMLElement; title: HTMLElement } | undefined
       const agentConversation = page.presentation === 'agent-conversation'
       const bodyOnly = page.metadata.chrome === 'body-only'
       content.dataset.cordisxPageChromePolicy = agentConversation
@@ -578,25 +579,8 @@ export class NavigationRegistryBase {
       if (!bodyOnly && !agentConversation) {
         // Keep native titlebar controls visible and reachable when the app outlet starts at x=0.
         content.style.clipPath = STANDARD_PAGE_CLIP_PATH
-        const chrome = content.ownerDocument.createElement('header')
-        chrome.dataset.cordisxPageChrome = 'true'
-        chrome.dataset.cordisxDrag = 'true'
-        Object.assign(chrome.style, {
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          minHeight: '46px',
-          padding: '0 12px',
-          borderBottom: '1px solid var(--color-border, rgba(255,255,255,.084))',
-          background: 'var(--color-background-surface, #181818)',
-          flex: '0 0 auto',
-        })
-        chrome.style.paddingLeft = 'max(12px, var(--cordisx-page-chrome-safe-left, 0px))'
-        chrome.style.setProperty('-webkit-app-region', 'drag')
-        const leading = content.ownerDocument.createElement('div')
-        leading.dataset.cordisxPageLeading = 'true'
-        leading.style.cssText =
-          'display:flex;width:28px;height:28px;flex:0 0 28px;align-items:center;justify-content:center'
+        const { chrome, leading, title } = createPageHeaderChrome(content)
+        alignment = { leading, title }
         if ((this.history.snapshot().index ?? 0) > 0 && page.metadata.breadcrumbs?.length !== 0) {
           const back = pageChromeButton(content.ownerDocument, 'Back', 'host:back')
           back.addEventListener('click', () => {
@@ -606,56 +590,60 @@ export class NavigationRegistryBase {
         } else if (page.metadata.icon !== undefined) {
           leading.append(createHostSurfaceIcon(content.ownerDocument, page.metadata.icon))
         }
-        const titleGroup = content.ownerDocument.createElement('div')
-        titleGroup.dataset.cordisxPageTitle = 'true'
-        titleGroup.style.cssText = 'display:flex;align-items:center;gap:8px;min-width:0;flex:1'
-        const title = content.ownerDocument.createElement('strong')
-        title.style.cssText = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'
-        const titleMessage = entry.record.definition.title ?? page.metadata.title
-        const titleSite = `page:${page.qualifiedId}:chrome.title`
-        localization.effect(() => {
-          title.textContent = this.i18n.resolveFor(page.owner, titleMessage, titleSite).text
-          return () => this.i18n.clearDiagnosticSite(page.owner, titleSite)
+        breadcrumbs = mountLocalizedPageHeaderBreadcrumbs({
+          leading,
+          title,
+          active: () => !abort.signal.aborted && !this.disposed,
+          i18n: this.i18n,
+          owner: page.owner,
+          site: `page:${page.qualifiedId}:chrome`,
+          defaultTitle: entry.record.definition.title ?? page.metadata.title,
+          localization,
+          navigate: reference => this.navigate(page.owner, reference),
+          state,
+          notify: () => this.notify(),
         })
-        titleGroup.append(title)
-        chrome.append(leading, titleGroup)
-        for (const action of page.metadata.headerActions ?? []) {
-          const button = pageChromeButton(content.ownerDocument, action.id, action.icon ?? 'host:more')
-          button.dataset.cordisxPageHeaderAction = action.id
-          const labelSite = `page:${page.qualifiedId}:chrome.actions.${action.id}.label`
-          const disabledSite = `page:${page.qualifiedId}:chrome.actions.${action.id}.disabled`
-          localization.effect(() => {
-            const accessible = this.i18n.resolveFor(page.owner, action.ariaLabel ?? action.label, labelSite).text
-            button.setAttribute('aria-label', accessible)
-            const disabledReason = action.disabled?.reason === undefined
-              ? undefined
-              : this.i18n.resolveFor(page.owner, action.disabled.reason, disabledSite).text
-            button.dataset.cordisxTooltip = action.disabled?.value === true && disabledReason !== undefined
-              ? disabledReason
-              : accessible
+        effects.push(() => breadcrumbs?.dispose())
+        const headerSites = new Set<string>()
+        effects.push(() => {
+          for (const site of headerSites) this.i18n.clearDiagnosticSite(page.owner, site)
+        })
+        effects.push(mountPageHeaderActions({
+          registerLabelUpdater: update => updateHeaderLabel = update,
+          registerVisualUpdater: update => {
+            updateHeaderVisual = update
+          },
+          chrome,
+          actions: page.metadata.headerActions ?? [],
+          button: (label, icon) => pageChromeButton(content.ownerDocument, label, icon),
+          resolve: (text, suffix) => {
+            const site = `page:${page.qualifiedId}:chrome.actions.${suffix}`
+            headerSites.add(site)
+            return this.i18n.resolveFor(page.owner, text, site).text
+          },
+          localize: refresh =>
+            localization.effect(() => {
+              refresh()
+              return () => {}
+            }),
+          visible: action => evaluateWhen(action.when, this.contexts.getSnapshot()),
+          available: action => this.commands?.hasFor(page.owner, action.command) ?? false,
+          subscribe: refresh => {
+            const context = this.contexts.subscribe(refresh)
+            const commands = this.commands?.subscribeInternal(refresh)
             return () => {
-              this.i18n.clearDiagnosticSite(page.owner, labelSite)
-              this.i18n.clearDiagnosticSite(page.owner, disabledSite)
+              context()
+              commands?.()
             }
-          })
-          const refresh = (): void => {
-            button.hidden = !evaluateWhen(action.when, this.contexts.getSnapshot())
-            button.disabled = action.disabled?.value === true
-              || !(this.commands?.hasFor(page.owner, action.command) ?? false)
-          }
-          refresh()
-          effects.push(tooltips.attach(button, () => button.dataset.cordisxTooltip, 'bottom'))
-          effects.push(this.contexts.subscribe(refresh))
-          if (this.commands !== undefined) effects.push(this.commands.subscribeInternal(refresh))
-          button.addEventListener('click', () => {
-            if (button.disabled || button.hidden || this.commands === undefined) return
+          },
+          execute: async (action, actionId) => {
             const commandId = qualifyOwnedId(page.owner, action.command.id)
             const decision = this.access?.authorizeOutletPageCommand(
               page.owner,
               name,
               entry.record.qualifiedId,
               page.qualifiedId,
-              action.id,
+              actionId,
               commandId,
             )
             if (decision !== undefined && !decision.authorized) {
@@ -663,20 +651,17 @@ export class NavigationRegistryBase {
               this.notify()
               return
             }
-            void this.commands.executeFor(
-              page.owner,
-              action.command,
-              `page:${page.qualifiedId}:header:${action.id}`,
-            ).catch((error: unknown) => {
+            try {
+              await this.commands?.executeFor(page.owner, action.command, `page:${page.qualifiedId}:header:${actionId}`)
+            } catch (error) {
               state.error = error instanceof Error ? error.message : String(error)
               this.notify()
-            })
-          })
-          chrome.append(button)
-        }
+            }
+          },
+        }))
         // Manager owns the modal close affordance. A manager.content page may expose
         // Back in its Host shell, but must not create a second adjacent close button.
-        if (name !== 'manager.content') {
+        if (name !== 'manager.content' && name !== 'app' && name !== 'main') {
           const close = pageChromeButton(content.ownerDocument, 'Close', 'host:close')
           close.addEventListener('click', () => {
             void this.close(page.owner, name as CordisXOutletName)
@@ -735,11 +720,19 @@ export class NavigationRegistryBase {
       }
       const body = content.ownerDocument.createElement('div')
       body.dataset.cordisxPageBody = 'true'
+      body.dataset.cordisxPageContentInset = page.metadata.contentInset ?? 'standard'
       body.style.cssText = `position:relative;flex:1;min-height:0;overflow:${
         agentConversation || bodyOnly ? 'hidden' : 'auto'
       }`
       content.append(body)
-      const controls = new HostPageControls(content.ownerDocument, content)
+      if (alignment) effects.push(projectPageContentAlignment(content, body, alignment))
+      const controls = new HostPageControls(
+        content.ownerDocument,
+        content,
+        (id, visual) => !abort.signal.aborted && (updateHeaderVisual?.(id, visual) ?? false),
+        (items, back) => breadcrumbs?.update(items, back) ?? false,
+        (id, label) => !abort.signal.aborted && (updateHeaderLabel?.(id, label) ?? false),
+      )
       effects.push(() => controls.dispose())
       const context: CordisXPageMountContext = {
         container: body,

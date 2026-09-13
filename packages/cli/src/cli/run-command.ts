@@ -1,3 +1,4 @@
+import { loadManagedSourceTrustNow } from '../launcher/managed-source-trust.js'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
@@ -146,6 +147,20 @@ import {
 } from './run-support.js'
 
 export async function runCordisXCli(argv: readonly string[], runtime: CordisXCliRuntime = {}): Promise<void> {
+  if (argv[0] === 'source-trust') {
+    const { runSourceTrust } = await import('./source-trust.js')
+    await runSourceTrust(
+      argv,
+      rootFromConfigPath(
+        resolveHomeConfigPath({
+          env: runtime.env ?? process.env,
+          ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
+        }),
+      ),
+      runtime.stdout ?? console.log,
+    )
+    return
+  }
   const invocation = parseCordisXCli(argv)
   const stdout = runtime.stdout ?? console.log
   const cwd = runtime.cwd ?? process.cwd()
@@ -558,6 +573,13 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         },
       })
     const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
+      onDiagnostic: event => stdout(`[cordisx] HTTP transport ${JSON.stringify(event)}`),
+      managedSourcesNow: () => loadManagedSourceTrustNow(rootFromConfigPath(configPath), selection.profileId),
+      managedSources: async () =>
+        (await import('../launcher/managed-source-trust.js')).loadManagedSourceTrust(
+          rootFromConfigPath(configPath),
+          selection.profileId,
+        ),
       plugins: composition.plugins,
       secret: rendererComposition.ownerDocumentSecret,
       profileId: selection.profileId,

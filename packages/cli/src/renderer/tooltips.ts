@@ -33,9 +33,13 @@ export class HostTooltipController {
   private timer: ReturnType<typeof setTimeout> | undefined
   private readonly theme: HostThemeProjection
 
-  constructor(private readonly document: Document) {
+  constructor(private readonly document: Document, private readonly appearance: 'default' | 'header' = 'default') {
     this.theme = new HostThemeProjection(document)
     document.addEventListener(DISMISS_EVENT, this.dismiss)
+    if (this.appearance === 'header') {
+      document.defaultView?.addEventListener('resize', this.dismiss)
+      document.addEventListener('scroll', this.dismiss, true)
+    }
   }
 
   attach(
@@ -44,10 +48,10 @@ export class HostTooltipController {
     preferredPlacement: HostTooltipPlacement,
     delayMs = 650,
   ): () => void {
-    const schedule = (): void => {
+    const schedule = (delay = delayMs): void => {
       this.hide()
       this.activeTarget = target
-      this.timer = setTimeout(() => this.show(target, label, preferredPlacement), delayMs)
+      this.timer = setTimeout(() => this.show(target, label, preferredPlacement), delay)
     }
     const hide = (): void => {
       if (this.activeTarget === target) this.hide()
@@ -58,16 +62,20 @@ export class HostTooltipController {
       event.stopPropagation()
       hide()
     }
-    target.addEventListener('pointerenter', schedule)
+    const pointerEnter = (): void => schedule()
+    const focus = (): void => schedule(this.appearance === 'header' ? 0 : delayMs)
+    target.addEventListener('pointerenter', pointerEnter)
     target.addEventListener('pointerleave', hide)
-    target.addEventListener('focus', schedule)
+    target.addEventListener('focus', focus)
     target.addEventListener('blur', hide)
+    if (this.appearance === 'header') target.addEventListener('pointerdown', hide)
     target.addEventListener('keydown', escape)
     return () => {
-      target.removeEventListener('pointerenter', schedule)
+      target.removeEventListener('pointerenter', pointerEnter)
       target.removeEventListener('pointerleave', hide)
-      target.removeEventListener('focus', schedule)
+      target.removeEventListener('focus', focus)
       target.removeEventListener('blur', hide)
+      if (this.appearance === 'header') target.removeEventListener('pointerdown', hide)
       target.removeEventListener('keydown', escape)
       hide()
     }
@@ -87,6 +95,10 @@ export class HostTooltipController {
 
   dispose(): void {
     this.document.removeEventListener(DISMISS_EVENT, this.dismiss)
+    if (this.appearance === 'header') {
+      this.document.defaultView?.removeEventListener('resize', this.dismiss)
+      this.document.removeEventListener('scroll', this.dismiss, true)
+    }
     this.hide()
   }
 
@@ -120,6 +132,21 @@ export class HostTooltipController {
       border: '1px solid var(--cx-border)',
       boxShadow: '0 8px 28px var(--cx-shadow)',
     })
+    if (this.appearance === 'header') {
+      tooltip.dataset.appearance = 'header'
+      Object.assign(tooltip.style, {
+        padding: '6px 9px',
+        borderRadius: '10px',
+        font: '500 12px/1.4 var(--font-sans, system-ui)',
+        background: 'var(--color-background-surface-hover, var(--color-background-surface, var(--cx-surface-raised)))',
+        color: 'var(--color-text-primary, var(--cx-text))',
+        border: '1px solid var(--color-border, color-mix(in srgb, currentColor 12%, transparent))',
+        boxShadow: '0 2px 8px rgb(0 0 0 / 12%)',
+        maxHeight: 'calc(100vh - 16px)',
+        overflow: 'hidden',
+        overflowWrap: 'anywhere',
+      })
+    }
     this.document.body.append(tooltip)
     const triggerRect = target.getBoundingClientRect()
     const tooltipRect = tooltip.getBoundingClientRect()
@@ -142,7 +169,10 @@ export class HostTooltipController {
       : triggerRect.bottom + gap
     tooltip.dataset.side = placement
     tooltip.style.left = `${Math.round(left * 2) / 2}px`
-    tooltip.style.top = `${Math.round(Math.max(edge, top) * 2) / 2}px`
+    const boundedTop = this.appearance === 'header'
+      ? Math.min(Math.max(edge, top), Math.max(edge, viewportHeight - tooltipRect.height - edge))
+      : Math.max(edge, top)
+    tooltip.style.top = `${Math.round(boundedTop * 2) / 2}px`
     target.setAttribute('aria-describedby', tooltip.id)
     this.activeTooltip = tooltip
     const remove = tooltip.remove.bind(tooltip)

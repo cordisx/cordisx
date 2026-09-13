@@ -165,3 +165,42 @@ This migration does not change public configuration contracts, add a schema
 registry or persistence ledger, implement asynchronous Standard Schema
 validation, provide hostile-code isolation, or grant plugins new UI authority.
 Real App interaction must be explicitly authorized and reported separately.
+
+## Embedded plugin forms
+
+`SchemaForm` from `cordisx/ui` embeds the same field projection, `HostFieldRow`,
+validation messages, and nested editors used by Host configuration pages and
+`form-schema-gallery`. The plugin supplies a trusted Schemastery object and a
+controlled draft; it does not implement field widgets. The public contract is
+[Schema form v1](https://github.com/cordisx/cordisx-protocol/blob/main/.agents/docs/schema-form.md).
+
+```tsx
+import Schema from '@deepseek-ai/schemastery'
+import { useState } from 'cordisx/react'
+import { SchemaForm } from 'cordisx/ui'
+
+const schema = Schema.object({
+  size: Schema.number().min(9).max(19).default(15),
+})
+export function BoardConfig() {
+  const [value, setValue] = useState<Record<string, unknown>>({ size: 15 })
+  return (
+    <SchemaForm
+      identity="board"
+      schema={schema}
+      value={value}
+      onChange={snapshot => setValue({ ...snapshot.value })}
+    />
+  )
+}
+```
+
+Keep invalid edits in the draft and use `snapshot.valid`/`issues` to control
+submission. `onValidationChange` also reports initial and externally changed
+values. Switch `identity` when editing another record or immutable game package.
+SchemaForm owns no save operation, page header, footer or outer scroll region.
+The caller owns persistence and layout. Only synchronous Schemastery validation
+is supported; asynchronous validators produce an explicit validation error.
+Remote game metadata must first pass a bounded data-only schema validator and be
+compiled through trusted factories; never construct executable Schemastery
+callbacks from a downloaded document.

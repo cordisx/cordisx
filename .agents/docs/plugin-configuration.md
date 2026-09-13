@@ -109,6 +109,30 @@ lease expiry/recovery is not implemented in v1; recovery currently requires a
 launcher-owned repair flow or removal of that candidate record while CordisX is
 stopped. This is a fail-closed availability boundary, not silent rollback.
 
+## Explicit development configuration writes
+
+`cordisx dev --config /absolute/path/composition.json --write-config` enables
+Manager plugin saves to that exact existing composition file. Development
+remains read-only without this opt-in. The flag is rejected for implicit
+project discovery, a direct plugin entry, and ordinary launch commands.
+`--dry-run` reports the selected write mode without writing the file or
+starting Native Host.
+
+Development reads and commits the `development` profile ledger, so a later
+normal `dev --config` launch loads the saved config and revision. The legacy
+`plugin.config` remains the revision-zero fallback. The existing owner,
+profile, generation, and revision fences govern stage, commit, and abort.
+The atomic writer revalidates the launcher envelope and preserves its other
+fields. An external change to plugin IDs, resolved entries, explicit
+`developmentIdentityEntry`, or enabled states rejects further writes until
+development is restarted. Saving plugin values does not change the development
+owner source or provision managed-source trust.
+
+The opt-in registers only plugin configuration persistence. Development
+service configuration, credentials, permission policy, and startup inputs
+remain under their separate owning authorities. Plugins receive no file path
+or arbitrary filesystem writer.
+
 ## Secret and trust boundary
 
 `secret`, `credential`, `credential-ref`, `permission`, and `capability` roles

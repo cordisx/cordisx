@@ -1,3 +1,4 @@
+import { projectNativePageHeaderLayout } from './page-header-layout.js'
 import type { OutletController, OutletHostSnapshot, OutletPlacement } from '../navigation.js'
 import type { OutletResolver, ResolvedOutletAnchor } from './types.js'
 import { normalizedInsets } from './dom.js'
@@ -33,7 +34,7 @@ export class DomOutletController implements OutletController {
       zIndex: '40',
       backgroundImage:
         'linear-gradient(var(--color-border, rgba(255,255,255,.084)), var(--color-border, rgba(255,255,255,.084)))',
-      backgroundPosition: 'left 45px',
+      backgroundPosition: 'left calc(var(--cordisx-page-chrome-height, 46px) - 1px)',
       backgroundSize: 'var(--cordisx-page-chrome-safe-left, 0px) 1px',
       backgroundRepeat: 'no-repeat',
     })
@@ -121,6 +122,7 @@ export class DomOutletController implements OutletController {
       '--cordisx-page-chrome-safe-left',
       `${Math.max(0, resolved.pageChromeSafeLeft ?? 0)}px`,
     )
+    if (this.outletId === 'main') projectNativePageHeaderLayout(this.document, resolved.anchor, this.layer)
     const isApp = this.outletId === 'app'
     const hostPosition = this.document.defaultView?.getComputedStyle(resolved.anchor).position
     const positioned = isApp || (hostPosition !== undefined && hostPosition !== '' && hostPosition !== 'static')

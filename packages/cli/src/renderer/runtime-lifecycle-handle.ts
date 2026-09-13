@@ -415,6 +415,12 @@ export const createRuntimeDispose = async (runtimeScope: RuntimeClosureScope): P
     delete controller.unregisterDialogs
     controller.unregisterNotifications?.()
     delete controller.unregisterNotifications
+    controller.unregisterCurrentUser?.()
+    delete controller.unregisterCurrentUser
+    controller.isolatedGameUi?.dispose()
+    await controller.unregisterIsolatedGameUi?.()
+    delete controller.isolatedGameUi
+    delete controller.unregisterIsolatedGameUi
     controller.restrictedContent?.dispose()
     await controller.unregisterRestrictedContent?.()
     delete controller.restrictedContent

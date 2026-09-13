@@ -14,6 +14,7 @@ import {
 } from '../packages/cli/src/icon-theme-contracts.js'
 import { HostIcon } from '../packages/cli/src/renderer/host-ui/HostIcon.js'
 import { HostSurfaceIcon } from '../packages/cli/src/renderer/host-ui/HostSurfaceIcon.js'
+import { PageRegistry } from '../packages/cli/src/renderer/navigation.js'
 import { IconThemeRegistry } from '../packages/cli/src/renderer/icon-theme-registry.js'
 import {
   bindIconThemeRegistry,
@@ -22,6 +23,7 @@ import {
   hostSurfaceIconKey,
   MANAGER_ICON_SEMANTICS,
   renderHostIconSvg,
+  renderHostSurfaceIconSvg,
 } from '../packages/cli/src/renderer/icons.js'
 import { resolveBuiltinReiconDescriptor } from '../packages/cli/src/renderer/reicon-icon-backend.js'
 
@@ -64,6 +66,49 @@ function isIconLibrary(moduleName: string): boolean {
 }
 
 describe('Host Reicon normalized backend', () => {
+  it('accepts the public log-out page action and renders a regular Reicon door/arrow at header size', () => {
+    const pages = new PageRegistry()
+    const dom = new JSDOM('<!doctype html>')
+    try {
+      expect(() =>
+        pages.register('demo', {
+          $schema: 'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/page.v4.schema.json',
+          schemaVersion: 4,
+          id: 'room',
+          title: { key: 'room' },
+          description: { key: 'description' },
+          headerActions: [{
+            id: 'leave',
+            label: { key: 'leave', fallback: 'Leave room' },
+            icon: 'host:log-out',
+            command: { id: 'leave' },
+          }],
+        }, () => undefined)
+      ).not.toThrow()
+      for (const theme of ['light', 'dark'] as const) {
+        const { svg, resolution } = renderHostSurfaceIconSvg(dom.window.document, 'host:log-out', { theme, size: 16 })
+        expect(resolution).toMatchObject({
+          key: 'host:log-out',
+          provider: 'builtin:reicon',
+          fallback: 'none',
+          variant: 'regular',
+          theme,
+        })
+        expect(svg.getAttribute('width')).toBe('16')
+        expect(svg.getAttribute('height')).toBe('16')
+        expect(svg.querySelectorAll('path')).toHaveLength(2)
+        expect(svg.outerHTML).not.toContain('neutral')
+        const filled =
+          renderHostSurfaceIconSvg(dom.window.document, 'host:log-out', { theme, size: 16, variant: 'filled' }).svg
+        expect([...svg.querySelectorAll('path')].map(path => path.getAttribute('d')))
+          .not.toEqual([...filled.querySelectorAll('path')].map(path => path.getAttribute('d')))
+      }
+    } finally {
+      pages.dispose()
+      dom.window.close()
+    }
+  })
+
   it('privately compiles and validates all 1,536 formal Protocol tuples', () => {
     let tuples = 0
     for (const key of SEMANTIC_ICON_KEYS) {

@@ -1,3 +1,4 @@
+import { readNativeHttpAccount } from './plugin-http-native-account.js'
 import { isPluginHttpRequest } from './plugin-http-authority.js'
 import { isNativeAgentSessionRequest } from './native-agent-session-rpc.js'
 import { isAgentToolRequest } from './plugin-agent-tools.js'
@@ -301,7 +302,13 @@ export async function install(
             activeOwnerDocumentRequests += 1
             try {
               const value = isPluginHttpRequest(parsed)
-                ? await ownerDocuments.http.handle(parsed)
+                ? await ownerDocuments.http.handle(parsed, () =>
+                  readNativeHttpAccount(
+                    session,
+                    params.executionContextId,
+                    () => ownerDocumentController?.signal.aborted !== true,
+                    reason => ownerDocuments.http.reportNativeAccountUnavailable(parsed, reason),
+                  ), history === undefined ? undefined : () => history.host.readWorkUsage())
                 : isNativeAgentSessionRequest(parsed) && ownerDocuments.nativeSessions !== undefined
                 ? await ownerDocuments.nativeSessions.handle(parsed)
                 : isAgentToolRequest(parsed) && ownerDocuments.agentTools !== undefined

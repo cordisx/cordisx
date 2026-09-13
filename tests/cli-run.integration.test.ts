@@ -43,6 +43,27 @@ async function createBuiltinSkillFixture(root: string): Promise<string> {
 }
 
 describe('functional CordisX CLI', () => {
+  it('enables only explicit development plugin writes and keeps dry-run disk state unchanged', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-dev-write-config-'))
+    const { project, configPath } = await createLocalDevelopmentFixture(root)
+    const before = await readFile(configPath, 'utf8')
+    const home = path.join(root, 'home')
+    for (const writable of [false, true]) {
+      const output: string[] = []
+      await runCordisXCli(['dev', '--config', configPath, '--dry-run', ...(writable ? ['--write-config'] : [])], {
+        cwd: project,
+        env: { CORDISX_HOME: home },
+        stdout: line => {
+          output.push(line)
+        },
+      })
+      const plan = JSON.parse(output.find(line => line.startsWith('{'))!) as { configurationWrite: string }
+      expect(plan.configurationWrite).toBe(writable ? 'enabled' : 'read-only')
+      expect(await readFile(configPath, 'utf8')).toBe(before)
+      await expect(access(home)).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  }, 30_000)
+
   it('opens one Launcher Certified authority for lifecycle and disposes it after dry-run', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-certified-authority-'))
     const home = path.join(root, 'home')

@@ -194,6 +194,7 @@ export class NavigationRegistry extends NavigationRegistryRouting {
       collectionRoot.dataset.cordisxManagerCollectionRoot = 'true'
       const pageBody = content.ownerDocument.createElement('div')
       pageBody.dataset.cordisxManagerPageBody = 'true'
+      pageBody.dataset.cordisxPageContentInset = page.metadata.contentInset ?? 'standard'
       content.append(collectionRoot, pageBody)
       const controls = new HostPageControls(content.ownerDocument, pageBody)
       effects.push(() => controls.dispose())

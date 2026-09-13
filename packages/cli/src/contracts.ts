@@ -1,4 +1,5 @@
 export type * from './dialog-contracts.js'
+export type * from './current-user-contracts.js'
 export * from './usage-contracts.js'
 export { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, type CordisXPluginManifestV11 } from './agent-task-permission-manifest.js'
 export {
@@ -250,6 +251,7 @@ export {
   CORDISX_PAGE_SCHEMA_V1,
   CORDISX_PAGE_SCHEMA_V2,
   CORDISX_PAGE_SCHEMA_V3,
+  CORDISX_PAGE_SCHEMA_V4,
   CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS,
   CORDISX_ROUTE_SCHEMA_V1,
   CORDISX_ROUTE_SCHEMA_V2,
@@ -310,8 +312,11 @@ export type {
   CordisXOutletName,
   CordisXPageControls,
   CordisXPageHeaderAction,
+  CordisXPageHeaderActionV4,
+  CordisXPageHeaderVisual,
   CordisXPageMetadata,
   CordisXPageMetadataV3,
+  CordisXPageMetadataV4,
   CordisXPageMount,
   CordisXPageMountContext,
   CordisXPageNavigation,

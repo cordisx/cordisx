@@ -135,3 +135,10 @@ reference without duplicating its authority.
 - [Plugin notifications](notifications.md): public operation feedback, card interactions and user rules.
 
 - [Plugin dialogs](dialogs.md): Host-owned chrome with full JSX bodies and owner-bound operations.
+
+- [Isolated game UI](isolated-game-ui.md): experimental opaque-frame HTML bridge and its execution limits.
+- [Current user display profile](current-user.md): read-only native profile adaptation, safe inline avatars and opaque local subjects.
+
+- [Page header actions](page-header-actions.md): versioned visuals and command menus.
+
+- [Managed source authentication](managed-source-auth.md): explicit peer pins, native account fences and Launcher work submission.

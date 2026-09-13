@@ -58,6 +58,8 @@ createElement(FilterToolbar, {
   search: createElement(SearchField, {
     'aria-label': 'Search team',
     value: '',
+    clearable: true,
+    clearLabel: 'Clear team search',
     onChange: () => {},
   }),
   filters: [createElement(Select, {

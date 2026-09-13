@@ -1,4 +1,5 @@
 import { PluginHttpAuthority } from './plugin-http-authority.js'
+import type { PluginHttpDiagnostic } from './plugin-http-diagnostics.js'
 import { NativeAgentSessionBridge } from './native-agent-session-rpc.js'
 import { PluginAgentToolAuthority } from './plugin-agent-tools.js'
 import type { CordisXConfigPlugin } from './config.js'
@@ -246,6 +247,8 @@ export interface OwnerDocumentBridgeHandler {
 }
 
 export function createOwnerDocumentBridgeHandler(input: {
+  readonly managedSources?: () => Promise<readonly import('./managed-source-authority.js').ManagedSourceTrust[]>
+  readonly managedSourcesNow?: () => readonly import('./managed-source-authority.js').ManagedSourceTrust[]
   readonly plugins?: readonly CordisXConfigPlugin[]
   readonly secret: string
   readonly profileId: string
@@ -253,6 +256,7 @@ export function createOwnerDocumentBridgeHandler(input: {
   readonly store: OwnerDocumentStore
   /** Synchronous Host principal lease check, repeated at commit. */
   readonly principalAllowed: (principal: OwnerDocumentPrincipal) => boolean
+  readonly onDiagnostic?: (event: PluginHttpDiagnostic) => void
 }): OwnerDocumentBridgeHandler {
   const agentTools = input.plugins === undefined
     ? undefined

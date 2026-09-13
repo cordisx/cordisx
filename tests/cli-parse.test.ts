@@ -103,6 +103,25 @@ describe('parseCordisXCli', () => {
     })
   })
 
+  it('requires an explicitly selected development file for configuration writes', () => {
+    expect(parseCordisXCli(['dev', '--config', './composition.json', '--write-config', '--attach']))
+      .toMatchObject({ action: 'dev', configPath: './composition.json', options: { writeConfig: true } })
+    for (
+      const args of [
+        ['dev', '--write-config'],
+        ['dev', './plugin.ts', '--write-config'],
+        ['--write-config'],
+        ['setup', '--write-config'],
+        ['config', '--write-config'],
+        ['doctor', '--write-config'],
+      ]
+    ) expect(() => parseCordisXCli(args)).toThrow('--write-config')
+    expect(parseCordisXCli(['dev', '--', '--write-config'])).toMatchObject({
+      options: { dryRun: false },
+      hostArgs: ['--write-config'],
+    })
+  })
+
   it('parses a development composition file without mixing it with a plugin path', () => {
     expect(parseCordisXCli(['dev', '--config', './cordisx.config.json'])).toMatchObject({
       action: 'dev',

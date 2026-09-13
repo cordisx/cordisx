@@ -1,3 +1,4 @@
+import { loadManagedSourceTrustNow } from '../launcher/managed-source-trust.js'
 import { resolveDevelopmentConfigIdentity } from '../launcher/development-source-identity.js'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -49,6 +50,7 @@ import { resolveLocalCodexProviderConfig } from '../providers/config.js'
 import type { CodexProviderConfig } from '../providers/contracts.js'
 import { CodexAgentHistoryHost } from '../launcher/agent-history.js'
 import { type ConfigBridgeHandler, createConfigBridgeHandler } from '../launcher/config-rpc.js'
+import { createLauncherConfigBridgeHandler } from '../launcher/launcher-plugin-config.js'
 import { type HostSecretState, HostServiceConfigNarrowApi } from '../launcher/service-config.js'
 import type { PlatformProviderServiceReconfigureRuntime } from '../launcher/platform-provider-service-batch.js'
 import { createServiceConfigBridgeHandler, type ServiceConfigBridgeHandler } from '../launcher/service-config-rpc.js'
@@ -130,6 +132,7 @@ Options:
   --debug-port <port>      Override the loopback CDP port
   --online-devtools        Allow the official online DevTools frontend
   --dry-run                Resolve and print the plan without starting the host
+  --write-config           Enable plugin saves to an explicit dev --config file
   dev without a path       Discover .cordisx/config.json (or cordisx.config.json) upwards
   -h, --help               Show this help`
 
@@ -253,6 +256,7 @@ export async function buildRendererComposition(
     readonly appId?: string
     readonly iconThemePreference?: HomeConfigIconThemePreference
     readonly writable?: boolean
+    readonly serviceConfigWritable?: boolean
     readonly permission?: {
       readonly profileId: string
       readonly policies: readonly CordisXPersistedPermissionPolicyRecord[]
@@ -285,7 +289,9 @@ export async function buildRendererComposition(
   const agentHistoryBridgeToken = randomBytes(32).toString('hex')
   const configBridgeToken = options.writable === true ? randomBytes(32).toString('hex') : undefined
   const ownerDocumentSecret = randomBytes(32).toString('hex')
-  const serviceConfigBridgeToken = options.writable === true ? randomBytes(32).toString('hex') : undefined
+  const serviceConfigBridgeToken = (options.serviceConfigWritable ?? options.writable) === true
+    ? randomBytes(32).toString('hex')
+    : undefined
   const permissionBridgeToken = options.permission?.persistent === true ? randomBytes(32).toString('hex') : undefined
   const iconThemePreferenceBridgeToken = options.writable === true && options.appId !== undefined
     ? randomBytes(32).toString('hex')
@@ -688,6 +694,12 @@ export async function runDevelopment(
   homeConfigOptions: HomeConfigPathOptions,
   runtime: CordisXCliRuntime,
 ): Promise<void> {
+  if (
+    invocation.options.writeConfig === true
+    && (invocation.configPath === undefined || invocation.pluginPath !== undefined)
+  ) {
+    throw new Error('--write-config requires cordisx dev --config <path>')
+  }
   const cordisxHomeDir = rootFromConfigPath(homeConfigPath)
   const entry = invocation.pluginPath === undefined ? undefined : path.resolve(cwd, invocation.pluginPath)
   const localIdentity = entry === undefined ? undefined : await localDevelopmentPluginIdentity(entry)
@@ -702,7 +714,7 @@ export async function runDevelopment(
     )
   }
   const suppliedConfig: CordisXConfig = entry === undefined
-    ? await loadConfig(location!.configPath, { projectRoot: location!.projectRoot })
+    ? await loadConfig(location!.configPath, { projectRoot: location!.projectRoot, profileId: 'development' })
     : {
       ...localDevelopmentHostConfig(cwd),
       plugins: [{ id: localIdentity!.id, source: localIdentity!.source, entry, enabled: true, config: {} }],
@@ -721,6 +733,8 @@ export async function runDevelopment(
     const activeVite = vite
     const composition = await buildRendererComposition(config, stdout, {
       profileId: 'development',
+      writable: invocation.options.writeConfig === true,
+      serviceConfigWritable: false,
       permission: { profileId: 'development', policies: [], persistent: false },
       developmentBuild: (nextConfig, options = {}) => activeVite.buildBootstrap(nextConfig, options),
     })
@@ -736,6 +750,7 @@ export async function runDevelopment(
               configPath: location!.configPath,
               projectRoot: location!.projectRoot,
               configRoot: location!.configRoot,
+              configurationWrite: composition.configBridgeToken === undefined ? 'read-only' : 'enabled',
               pluginIds: config.plugins.map(plugin => plugin.id),
             }
             : { origin: 'local-dev', pluginId: localIdentity!.id, sourcePath: entry }),
@@ -748,6 +763,16 @@ export async function runDevelopment(
       ))
       return
     }
+    const configBridge = composition.configBridgeToken === undefined
+      ? undefined
+      : createLauncherConfigBridgeHandler({
+        token: composition.configBridgeToken,
+        profileId: 'development',
+        generation: composition.generation,
+        configPath: location!.configPath,
+        composition: config,
+        preserveComposition: true,
+      })
     if (invocation.options.attach) {
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
     } else {
@@ -781,6 +806,10 @@ export async function runDevelopment(
       stable: identities.map(identity => ({ source: identity.source, pluginId: identity.id })),
     })
     const ownerDocumentHandler = createOwnerDocumentBridgeHandler({
+      onDiagnostic: event => stdout(`[cordisx] HTTP transport ${JSON.stringify(event)}`),
+      managedSourcesNow: () => loadManagedSourceTrustNow(cordisxHomeDir, 'development'),
+      managedSources: async () =>
+        (await import('../launcher/managed-source-trust.js')).loadManagedSourceTrust(cordisxHomeDir, 'development'),
       plugins: config.plugins,
       secret: composition.ownerDocumentSecret,
       profileId: 'development',
@@ -824,6 +853,7 @@ export async function runDevelopment(
       await runInjectedHost({
         source: composition.source,
         viteDevelopment: true,
+        ...(configBridge === undefined ? {} : { configBridge }),
         hasLoopbackGraph: false,
         agentHistoryHost: historyHost,
         agentHistoryBridgeToken: composition.agentHistoryBridgeToken,

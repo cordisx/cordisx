@@ -505,7 +505,10 @@ export abstract class NavigationRegistryRouting extends NavigationRegistryBase {
     if (page === undefined) {
       return { state: 'pending', detail: `page ${record.definition.page} is not registered by plugin ${record.owner}` }
     }
-    if (page.metadata.schemaVersion !== 3 || page.metadata.description === undefined) {
+    if (
+      (page.metadata.schemaVersion !== 3 && page.metadata.schemaVersion !== 4)
+      || page.metadata.description === undefined
+    ) {
       return { state: 'invalid', detail: `page ${page.qualifiedId} requires page-v3 title and description` }
     }
     if (page.metadata.chrome === 'body-only') {

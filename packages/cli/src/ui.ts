@@ -1,3 +1,4 @@
+import type { SchemaFormOptionsV1 } from '@cordisx/protocol/schema-form/v1'
 import type { DialogChromeV1, DialogHandleV1, DialogMountV1, DialogResultV1, DialogsV1 } from './dialog-contracts.js'
 import type * as React from 'react'
 import type { AgentAvatarRef } from '@cordisx/protocol/agent-avatar/v1'
@@ -145,6 +146,10 @@ export interface SearchFieldProps
 {
   readonly value: string
   readonly onChange: (value: string) => void
+  /** Opt into a Host-owned clear action that calls onChange('') and focuses the input. */
+  readonly clearable?: boolean
+  /** Accessible name for the clear action; defaults to "Clear search". */
+  readonly clearLabel?: string
 }
 
 export interface FilterToolbarProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'children'> {
@@ -273,3 +278,6 @@ export function defineDialog(_component: React.ComponentType<DialogViewProps>): 
 export function useDialog(): DialogHandleV1 {
   throw new Error('useDialog is available only inside a CordisX dialog body')
 }
+
+export type { SchemaFormOptionsV1, SchemaFormSnapshotV1 } from '@cordisx/protocol/schema-form/v1'
+export const SchemaForm = HostComponent<SchemaFormOptionsV1>('SchemaForm')
