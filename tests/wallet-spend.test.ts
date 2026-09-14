@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import path from 'node:path'
 import os from 'node:os'
 import { connect } from 'node:net'
+import { createServer } from 'node:http'
 import { WalletSpendAuthority } from '../packages/cli/src/launcher/wallet-spend-authority.js'
 import { listenWalletSpendProvider } from '../packages/cli/src/launcher/wallet-spend-ipc-server.js'
 import {
@@ -13,6 +14,7 @@ import {
 } from '../packages/cli/src/launcher/wallet-spend-ipc-wire.js'
 import { createWalletSpendClient } from '../packages/cli/src/renderer/wallet-spend.js'
 import { WALLET_SPEND_NATIVE_SCRIPT } from '../packages/cli/src/launcher/wallet-spend-native-consent.js'
+import { fetchWalletSpendSource } from '../packages/cli/src/launcher/wallet-spend-source-proof.js'
 import type { LocalWalletRegistry } from '../packages/cli/src/launcher/local-wallet-registry.js'
 import type { WalletSpendProviderSessionV1 } from '../packages/cli/src/launcher/wallet-spend-ipc-types.js'
 import type { BrowserOwnerDocumentBridge } from '../packages/cli/src/renderer/owner-documents.js'
@@ -48,7 +50,10 @@ afterEach(async () => {
   for (const close of resources.splice(0)) await close()
 })
 
-async function setup(confirm: ConstructorParameters<typeof WalletSpendAuthority>[0]['confirm'] = async () => true) {
+async function setup(
+  confirm: ConstructorParameters<typeof WalletSpendAuthority>[0]['confirm'] = async () => true,
+  fetchSource: typeof fetchWalletSpendSource = async () => source,
+) {
   const homeDir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'wsp-'))), socketPath = path.join(homeDir, 's')
   const secretFile = path.join(homeDir, 'secret'), secret = randomBytes(32)
   writeFileSync(secretFile, secret, { mode: 0o600 })
@@ -219,7 +224,7 @@ async function setup(confirm: ConstructorParameters<typeof WalletSpendAuthority>
     resolve: token => token === 'token' && state.live ? principal : undefined,
     registry: { active: () => profile, current: () => state.live } as unknown as LocalWalletRegistry,
     verifySource: async () => {},
-    fetchSource: async () => source,
+    fetchSource,
     confirm: async input => {
       state.approvals.push(input.document)
       return await confirm!(input)
@@ -242,7 +247,80 @@ async function setup(confirm: ConstructorParameters<typeof WalletSpendAuthority>
   return { homeDir, configFile, secretFile, secret, socketPath, state, authority, request, reserve }
 }
 
+async function operatorSourceSetup() {
+  const s = await setup(async () => false, fetchWalletSpendSource)
+  let origin = '', requests = 0
+  const metadata = { contract: 'economy.spend-service/v1', ...source }
+  const server = createServer((request, response) => {
+    requests += 1
+    expect(request.url).toBe('/v1/spend/identity')
+    expect(request.headers.authorization).toBeUndefined()
+    expect(request.headers.cookie).toBeUndefined()
+    response.end(JSON.stringify(metadata))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  origin = 'http://127.0.0.1:' + (server.address() as { port: number }).port
+  metadata.serviceOrigin = origin
+  const config = JSON.parse(readFileSync(s.configFile, 'utf8'))
+  config.services[0].source.serviceOrigin = origin
+  writeFileSync(s.configFile, JSON.stringify(config), { mode: 0o600 })
+  resources.push(async () => {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  })
+  return {
+    ...s,
+    origin,
+    metadata,
+    config,
+    requests: () => requests,
+    authorize: (serviceOrigin = origin) =>
+      s.authority.handle(s.request('authorize-source', { serviceOrigin, deadline: Date.now() + 10_000 })),
+  }
+}
+
 describe('wallet spend trusted boundary', () => {
+  it('reopens an exact active owner operator loopback pin after actual metadata verification without confirmation or writes', async () => {
+    const s = await operatorSourceSetup(), before = readFileSync(s.configFile, 'utf8')
+    expect(await s.authorize()).toEqual({ status: 'accepted', value: { ...source, serviceOrigin: s.origin } })
+    expect(s.requests()).toBe(1)
+    expect(readFileSync(s.configFile, 'utf8')).toBe(before)
+    expect(s.state.approvals).toHaveLength(0)
+    expect(s.state.mutations).toBe(0)
+    expect(s.state.closes).toBe(0)
+  })
+  it.each(['missing', 'foreign-owner', 'recovery-only', 'non-loopback'] as const)(
+    'rejects %s HTTP before metadata fetch and never persists a new pin',
+    async reason => {
+      const s = await operatorSourceSetup()
+      if (reason === 'missing') s.config.services = []
+      if (reason === 'foreign-owner') s.config.services[0].owner.pluginId = 'foreign'
+      if (reason === 'recovery-only') s.config.services[0].status = 'recovery-only'
+      writeFileSync(s.configFile, JSON.stringify(s.config), { mode: 0o600 })
+      const before = readFileSync(s.configFile, 'utf8')
+      expect(await s.authorize(reason === 'non-loopback' ? 'http://192.0.2.1' : s.origin)).toEqual({
+        status: 'unavailable',
+        code: 'source-unavailable',
+      })
+      expect(s.requests()).toBe(0)
+      expect(readFileSync(s.configFile, 'utf8')).toBe(before)
+      expect(s.state.approvals).toHaveLength(0)
+      expect(s.state.mutations).toBe(0)
+    },
+  )
+  it.each(['key', 'server', 'origin'] as const)(
+    'rejects changed HTTP metadata %s without key rotation or consent',
+    async field => {
+      const s = await operatorSourceSetup(), before = readFileSync(s.configFile, 'utf8')
+      if (field === 'key') s.metadata.servicePublicKey = publicKey(hostKey)
+      if (field === 'server') s.metadata.serverId = 'changed-server'
+      if (field === 'origin') s.metadata.serviceOrigin = 'https://foreign.example'
+      expect(await s.authorize()).toEqual({ status: 'unavailable', code: 'source-unavailable' })
+      expect(s.requests()).toBe(1)
+      expect(readFileSync(s.configFile, 'utf8')).toBe(before)
+      expect(s.state.approvals).toHaveLength(0)
+      expect(s.state.mutations).toBe(0)
+    },
+  )
   it('authenticates UDS, shows the exact complete terms, persists one reservation and recovers lost ACK', async () => {
     const s = await setup(), terms = signed(termsPayload())
     s.state.loseAck = true

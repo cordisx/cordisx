@@ -162,17 +162,31 @@ export class WalletSpendAuthority {
         if (this.confirming) return failure('denied')
         this.confirming = true
         releaseConfirmation = true
+        const prior = config.services.filter(entry =>
+          entry.owner.pluginId === principal.identity.pluginId
+          && entry.owner.source === principal.identity.source && entry.source.serviceOrigin === input.serviceOrigin
+        )
+        const operatorLocalPins = prior.filter(entry =>
+          entry.status === 'active' && new URL(entry.source.serviceOrigin).protocol === 'http:'
+        )
+        if (new URL(input.serviceOrigin).protocol !== 'https:' && !operatorLocalPins.length) {
+          return failure('source-unavailable')
+        }
         let fetched: WalletSpendSourceV1
         try {
-          fetched = await (this.options.fetchSource ?? fetchWalletSpendSource)(input.serviceOrigin, abort.signal)
+          fetched = await (this.options.fetchSource ?? fetchWalletSpendSource)(
+            input.serviceOrigin,
+            abort.signal,
+            operatorLocalPins.length > 0,
+          )
         } catch {
           return failure('source-unavailable')
         }
         guard()
-        const prior = config.services.filter(entry =>
-          entry.owner.pluginId === principal.identity.pluginId
-          && entry.owner.source === principal.identity.source && entry.source.serviceOrigin === fetched.serviceOrigin
-        )
+        // HTTP only reopens an exact active operator pin; it never onboards or rotates a key.
+        if (operatorLocalPins.length && !operatorLocalPins.some(entry => sameSpendSource(entry.source, fetched))) {
+          return failure('source-unavailable')
+        }
         if (prior.some(entry => entry.status === 'active' && sameSpendSource(entry.source, fetched))) {
           return { status: 'accepted', value: fetched }
         }

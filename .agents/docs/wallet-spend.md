@@ -52,7 +52,10 @@ Host persists an owner-specific pin. Rotation retains the old key solely for
 pending recovery. Reserve and account binding independently recheck active
 source metadata. Deployment-provisioned existing HTTP loopback sources can also
 be used, with local-device trust rather than TLS origin proof; dynamic source
-onboarding remains HTTPS-only.
+onboarding remains HTTPS-only. `authorizeSource` can also read an existing exact
+active operator HTTP loopback pin for the captured owner after verifying actual
+metadata. Missing, recovery-only, foreign-owner and changed-key HTTP pins fail;
+this read does not persist a new pin, rotate a key or open native confirmation.
 
 Transaction confirmation is an independent `/usr/bin/osascript` process with
 a read-only scrollable complete document. The JXA program is static and receives
