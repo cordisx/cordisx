@@ -76,6 +76,15 @@ transport, and before accepting the complete response. Account observations are
 never reused across these asynchronous phases; conflicting or changed pins
 fail closed.
 
+Launcher HTTP account reads allow five seconds for the fresh Native input, inside
+six-second evaluation and 6.5-second CDP response budgets. These bounded waits
+accommodate deferred delivery in hidden windows; they do not reuse an earlier
+identity. A real timeout still retires Native-bound grants and work continuity.
+After the Native input recovers, consumers can open a fresh account connection
+or restore its retained session; retired handles and late read results remain
+invalid. Current-user uses the same pinned input reader with its separate
+ten-second caller budget.
+
 Consumers validate restored sessions through the server's ordinary session
 endpoint, forget on confirmed invalid-session/expiry, and perform remote logout
 plus local forget on active exit. Transport failure must preserve the session.

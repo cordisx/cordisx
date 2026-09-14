@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { readPinnedNativeAccount } from '../packages/cli/src/current-user-native-account.js'
 import {
   HTTP_NATIVE_ACCOUNT_EXPRESSION,
+  HTTP_NATIVE_ACCOUNT_READ_TIMEOUT_MS,
   readNativeHttpAccount,
 } from '../packages/cli/src/launcher/plugin-http-native-account.js'
 
@@ -44,6 +45,30 @@ it('executes the 8881 production expression through typed ready input without le
   expect(module.readAccountInfo).toHaveBeenCalledTimes(1)
   expect(module.post).not.toHaveBeenCalled()
 })
+it('accepts a fresh typed ready result delayed three seconds and releases only its invocation', async () => {
+  vi.useFakeTimers()
+  expect(HTTP_NATIVE_ACCOUNT_READ_TIMEOUT_MS).toBe(5000)
+  const dispose = vi.fn(), sharedDispose = vi.fn()
+  const invocation = Object.assign(
+    new Promise(resolve => setTimeout(() => resolve({ status: 'ready', data: pair }), 3000)),
+    { [(Symbol as SymbolConstructor & { readonly dispose: symbol }).dispose]: dispose },
+  )
+  const f = expression({
+    TW: {
+      accessInputs: {
+        readAccountInfo: () => invocation,
+        [(Symbol as SymbolConstructor & { readonly dispose: symbol }).dispose]: sharedDispose,
+      },
+    },
+  })
+  await vi.advanceTimersByTimeAsync(2999)
+  expect(dispose).not.toHaveBeenCalled()
+  await vi.advanceTimersByTimeAsync(1)
+  expect(await f.result).toBe(JSON.stringify([pair.accountId, pair.userId]))
+  expect(dispose).toHaveBeenCalledTimes(1)
+  expect(sharedDispose).not.toHaveBeenCalled()
+  expect(vi.getTimerCount()).toBe(0)
+})
 it.each([
   { status: 'unavailable', reason: 'identity' },
   { status: 'error', message: 'fixture-private-error' },
@@ -82,7 +107,7 @@ it('bounds typed RPC observation and discards late ready completion', async () =
       resolve = r
     })
   const f = expression({ TW: { accessInputs: { readAccountInfo } } })
-  await vi.advanceTimersByTimeAsync(2000)
+  await vi.advanceTimersByTimeAsync(HTTP_NATIVE_ACCOUNT_READ_TIMEOUT_MS)
   expect(await f.result).toMatchObject({ status: 'unavailable' })
   resolve({ status: 'ready', data: pair })
   expect(await f.result).toMatchObject({ status: 'unavailable' })
@@ -214,7 +239,7 @@ it('releases a held RPC at the production timeout and never accepts its late rea
     { [disposeSymbol]: dispose },
   )
   const f = expression({ TW: { accessInputs: { readAccountInfo: () => invocation, [disposeSymbol]: sharedDispose } } })
-  await vi.advanceTimersByTimeAsync(2000)
+  await vi.advanceTimersByTimeAsync(HTTP_NATIVE_ACCOUNT_READ_TIMEOUT_MS)
   expect(await f.result).toEqual({ status: 'unavailable', reason: 'native-read-timeout' })
   expect(dispose).toHaveBeenCalledTimes(1)
   resolve({ status: 'ready', data: pair })

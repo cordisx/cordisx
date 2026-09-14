@@ -8,9 +8,14 @@ import {
   HttpNativeCallingContextUnavailableError,
   isHttpNativeAccountUnavailableReason,
 } from './plugin-http-native-account-diagnostics.js'
+// Hidden Native windows can defer their RPC delivery. Keep the typed read bounded
+// inside the evaluation and transport budgets without reusing an earlier identity.
+export const HTTP_NATIVE_ACCOUNT_READ_TIMEOUT_MS = 5_000
+const HTTP_NATIVE_ACCOUNT_EVALUATION_TIMEOUT_MS = 6_000
+const HTTP_NATIVE_ACCOUNT_CDP_TIMEOUT_MS = 6_500
 /** Launcher executes in the actual calling native context. Never accept account facts from plugin RPC input. */
 export const HTTP_NATIVE_ACCOUNT_EXPRESSION = `(async()=>{
-  const abort=new AbortController();const timer=setTimeout(()=>abort.abort(),2000);
+  const abort=new AbortController();const timer=setTimeout(()=>abort.abort(),${HTTP_NATIVE_ACCOUNT_READ_TIMEOUT_MS});
   const fail=reason=>({status:'unavailable',reason});let phase='native-pin-read-exception';
   try {
     if(globalThis.codexWindowType!=='electron'||globalThis.location?.href!=='app://-/index.html')return fail('context-rejected');
@@ -56,8 +61,8 @@ export async function readNativeHttpAccount(
       contextId,
       awaitPromise: true,
       returnByValue: true,
-      timeout: 3000,
-    }, 3500)
+      timeout: HTTP_NATIVE_ACCOUNT_EVALUATION_TIMEOUT_MS,
+    }, HTTP_NATIVE_ACCOUNT_CDP_TIMEOUT_MS)
     if (!active()) return unavailable('reader-closed')
     if (evaluated.exceptionDetails !== undefined) return unavailable('native-evaluation-exception')
     const result = (evaluated.result as { value?: unknown } | undefined)?.value

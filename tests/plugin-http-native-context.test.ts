@@ -156,6 +156,47 @@ function productionClient(f: ReturnType<typeof fixture>, contextId: number, opti
   return client
 }
 const work = { ...binding, audience: 'work-income' as const }
+it('fails a timed-out Native read closed, then accepts a fresh connection without reviving old handles or late reads', async () => {
+  vi.useFakeTimers()
+  const diagnostics: PluginHttpDiagnostic[] = []
+  const f = fixture(event => diagnostics.push(event))
+  let finish!: (value: unknown) => void
+  const held = new Promise(resolve => {
+    finish = resolve
+  })
+  let typed: unknown = { status: 'ready', data: { accountId: 'fixture-account', userId: 'fixture-user' } }
+  const client = productionClient(f, 17, { account: () => typed })
+  const first = await client.connectAccount(binding)
+  if (first.status !== 'accepted') throw new Error('initial Native fixture')
+  const read = (connection: typeof first.value.connection) =>
+    client.request({
+      connection,
+      method: 'GET',
+      path: '/v1/me',
+      deadline: Date.now() + 2000,
+    })
+  typed = held
+  await vi.advanceTimersByTimeAsync(6500)
+  expect(await read(first.value.connection)).toMatchObject({ code: 'connection-unavailable' })
+  expect(diagnostics.filter(event => event.event === 'native-account-read-unavailable').map(event => event.reason))
+    .toContain('native-read-timeout')
+  expect(diagnostics.filter(event => event.event === 'retired').map(event => event.reason))
+    .toEqual(['native-account-unavailable'])
+  typed = { status: 'ready', data: { accountId: 'fixture-account', userId: 'fixture-user' } }
+  const fresh = await client.connectAccount(binding)
+  if (fresh.status !== 'accepted') throw new Error('fresh Native recovery fixture')
+  expect(fresh.value.connection.id).not.toBe(first.value.connection.id)
+  expect(await read(fresh.value.connection)).toMatchObject({ status: 'accepted' })
+  finish({ status: 'ready', data: { accountId: 'late-obsolete-account', userId: 'fixture-user' } })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(await read(first.value.connection)).toMatchObject({ code: 'connection-unavailable' })
+  expect(await read(fresh.value.connection)).toMatchObject({ status: 'accepted' })
+  typed = { status: 'ready', data: { accountId: 'changed-account', userId: 'fixture-user' } }
+  await vi.advanceTimersByTimeAsync(1250)
+  expect(await read(fresh.value.connection)).toMatchObject({ code: 'connection-unavailable' })
+  expect(diagnostics.filter(event => event.event === 'retired').map(event => event.reason))
+    .toEqual(['native-account-unavailable', 'native-account-changed'])
+})
 it.each(['window-type', 'url'] as const)(
   'preserves healthy Native reads when a sibling %s calling context is rejected',
   async mode => {

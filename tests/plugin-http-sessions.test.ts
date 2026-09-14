@@ -340,9 +340,9 @@ describe('durable HTTP sessions', () => {
         contextId: 73,
         expression: HTTP_NATIVE_ACCOUNT_EXPRESSION,
         awaitPromise: true,
-        timeout: 3000,
+        timeout: 6000,
       }),
-      3500,
+      6500,
     )
     const exception = { send: async () => ({ exceptionDetails: { text: 'secret must never be projected' } }) }
     expect(await readNativeHttpAccount(exception, 73, () => true)).toBeNull()
