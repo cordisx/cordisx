@@ -3,7 +3,7 @@ import { disposePluginProfileSurfaces, installPluginProfileSurfaces } from './pl
 import { installPluginDialogs } from './dialogs/plugin.js'
 import { notificationCenterForDocument } from './notifications/host.js'
 import { nativeAgentTaskClient } from './native-agent-session-recovery.js'
-import { createPluginHttpClients } from './plugin-http.js'
+import { disposePluginTransports, installPluginTransports } from './plugin-transports.js'
 import { installAgentTasks } from './agent-tasks-install.js'
 import { registerNativeSessionOwner } from './native-agent-session-recovery.js'
 import { installAgentTools } from './plugin-agent-tools.js'
@@ -318,12 +318,7 @@ export const createRuntimeDisposeControllerFiber = async (
     delete controller.unregisterAgentSessionMigration
     controller.agentLoopClient?.dispose()
     delete controller.agentLoopClient
-    controller.httpClient?.dispose()
-    delete controller.httpClient
-    await controller.unregisterWorkSettlement?.()
-    delete controller.unregisterWorkSettlement
-    await controller.unregisterHttp?.()
-    delete controller.unregisterHttp
+    await disposePluginTransports(controller)
     controller.unregisterDialogs?.()
     delete controller.unregisterDialogs
     controller.unregisterNotifications?.()
@@ -725,7 +720,7 @@ export const createRuntimeMountPlugin = async (
       entityPrincipal,
       () => controller.principalLive,
     )
-    const { http, workSettlement } = createPluginHttpClients({
+    installPluginTransports(pluginContext, controller, {
       diagnostic: (_, message) =>
         runtimeScope.pluginConsole()!.diagnostic(controller.principal, 'http.transport', message),
       authorizeWork: async () => {
@@ -752,9 +747,6 @@ export const createRuntimeMountPlugin = async (
       configuredOrigins: () =>
         runtimeScope.configuration()!.configuredHttpOrigins(controller.item.id, controller.generationView),
     })
-    controller.httpClient = http
-    controller.unregisterHttp = pluginContext.reflect.provide('http', http)
-    controller.unregisterWorkSettlement = pluginContext.reflect.provide('workSettlement', workSettlement)
     const tools = installAgentTools(pluginContext, {
       bridge: runtimeScope.ownerDocumentBridge()!,
       principal: entityPrincipal,
@@ -962,12 +954,7 @@ export const createRuntimeMountPlugin = async (
     delete controller.unregisterAgentSessionMigration
     agentLoopClient.dispose()
     delete controller.agentLoopClient
-    controller.httpClient?.dispose()
-    delete controller.httpClient
-    await controller.unregisterWorkSettlement?.()
-    delete controller.unregisterWorkSettlement
-    await controller.unregisterHttp?.()
-    delete controller.unregisterHttp
+    await disposePluginTransports(controller)
     controller.unregisterDialogs?.()
     delete controller.unregisterDialogs
     controller.unregisterNotifications?.()

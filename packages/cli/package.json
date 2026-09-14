@@ -47,6 +47,10 @@
     "./agent-tools": {
       "types": "./dist/src/agent-tools.d.ts",
       "default": "./dist/src/agent-tools.js"
+    },
+    "./wallet-spend-provider/v1": {
+      "types": "./dist/src/wallet-spend-provider.d.ts",
+      "default": "./dist/src/wallet-spend-provider.js"
     }
   },
   "scripts": {

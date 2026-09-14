@@ -44,6 +44,10 @@
     "./agent-tools": {
       "types": "./packages/cli/dist/src/agent-tools.d.ts",
       "default": "./packages/cli/dist/src/agent-tools.js"
+    },
+    "./wallet-spend-provider/v1": {
+      "types": "./packages/cli/dist/src/wallet-spend-provider.d.ts",
+      "default": "./packages/cli/dist/src/wallet-spend-provider.js"
     }
   },
   "bundledDependencies": [

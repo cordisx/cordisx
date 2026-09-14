@@ -915,6 +915,7 @@ export async function runDevelopment(
         stdout,
       })
     } finally {
+      ownerDocuments.walletSpend?.dispose()
       await ownerDocuments.http.dispose()
       await ownerDocuments.agentTools?.close()
       if (!resourcesHandedOff) {

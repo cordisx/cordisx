@@ -348,6 +348,8 @@ export interface PluginController {
   httpClient?: import('@cordisx/protocol/plugin-http/v4').HttpClientV4
   unregisterHttp?: () => void | Promise<void>
   unregisterWorkSettlement?: () => void | Promise<void>
+  walletSpendClient?: import('@cordisx/protocol/wallet-spend/v1').WalletSpendV1
+  unregisterWalletSpend?: () => void | Promise<void>
   unregisterDialogs?: () => void
   unregisterNotifications?: () => void
   unregisterCurrentUser?: () => void

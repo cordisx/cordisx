@@ -1,3 +1,4 @@
+import { isWalletSpendRequest } from '../launcher/wallet-spend-authority.js'
 import { isPluginHttpRequest } from '../launcher/plugin-http-authority.js'
 import { randomBytes } from 'node:crypto'
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -383,6 +384,7 @@ export async function createPlaygroundSession(
   const nextGeneration = async (browserGraphOnly: boolean): Promise<PlaygroundGeneration> => {
     for (const lease of pendingGraphLeases) lease.retire()
     pendingGraphLeases = []
+    active?.documents.walletSpend?.dispose()
     await active?.documents.http.dispose()
     active?.channelConfig?.dispose()
     await active?.providerFleet?.close()
@@ -711,6 +713,9 @@ export async function createPlaygroundSession(
         }
         const generic = value as { readonly requestId?: unknown }
         requestId = typeof generic.requestId === 'string' ? generic.requestId : 'invalid'
+        if (isWalletSpendRequest(value)) {
+          return { requestId, ok: true, value: { status: 'unavailable', code: 'unsupported' } }
+        }
         if (isPluginHttpRequest(value)) return { requestId, ok: true, value: await active.documents.http.handle(value) }
         entityRequest = isEntityBindingRequest(value)
         if (entityRequest && active.documents.entities !== undefined) {
@@ -777,6 +782,7 @@ export async function createPlaygroundSession(
     },
     async reset() {
       await runCompositionOperation(async () => {
+        active?.documents.walletSpend?.dispose()
         await active?.documents.http.dispose()
         active?.channelConfig?.dispose()
         await active?.providerFleet?.close()
@@ -793,6 +799,7 @@ export async function createPlaygroundSession(
     },
     async close() {
       await runCompositionOperation(async () => {
+        active?.documents.walletSpend?.dispose()
         await active?.documents.http.dispose()
         active?.channelConfig?.dispose()
         await active?.providerFleet?.close()

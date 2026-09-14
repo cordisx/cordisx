@@ -34,6 +34,7 @@ export function isolateRuntimeOwnerServices(ctx: Context): Context {
       'documents',
       'http',
       'workSettlement',
+      'walletSpend',
       'agentLoopControl',
       'restrictedContent',
       'isolatedGameUi',

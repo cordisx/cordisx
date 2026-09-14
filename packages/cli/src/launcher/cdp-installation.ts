@@ -1,5 +1,6 @@
 import { readNativeHttpAccount } from './plugin-http-native-account.js'
 import { isPluginHttpRequest } from './plugin-http-authority.js'
+import { isWalletSpendRequest } from './wallet-spend-authority.js'
 import { isNativeAgentSessionRequest } from './native-agent-session-rpc.js'
 import { isAgentToolRequest } from './plugin-agent-tools.js'
 import { randomUUID } from 'node:crypto'
@@ -301,7 +302,13 @@ export async function install(
             }
             activeOwnerDocumentRequests += 1
             try {
-              const value = isPluginHttpRequest(parsed)
+              const value = isWalletSpendRequest(parsed)
+                ? await ownerDocuments.walletSpend?.handle(
+                  parsed,
+                  () => ownerDocumentController?.signal.aborted !== true,
+                )
+                  ?? { status: 'unavailable', code: 'unsupported' }
+                : isPluginHttpRequest(parsed)
                 ? await ownerDocuments.http.handle(
                   parsed,
                   () =>

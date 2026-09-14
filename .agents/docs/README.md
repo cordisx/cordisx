@@ -144,3 +144,4 @@ reference without duplicating its authority.
 - [Managed source authentication](managed-source-auth.md): explicit peer pins, native account fences and Launcher work submission.
 
 - [Host-profile local wallet authority](local-wallet-auth.md)
+- [Local wallet spending](wallet-spend.md): experimental native consent, authenticated Node provider and canonical local commerce.
