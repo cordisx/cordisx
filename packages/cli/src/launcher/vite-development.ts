@@ -747,7 +747,11 @@ if (import.meta.hot) {
         const action = data.action
         const task = (async () => {
           if (action === 'stage') {
+            // A different native window may already have committed this snapshot.
+            // Keep the current generation stageable without accepting retired ones.
+            const current = generations.get(pluginId)
             const generation = pendingGenerations.get(pluginId)?.get(moduleGeneration)
+              ?? (current?.moduleGeneration === moduleGeneration ? current : undefined)
             if (generation === undefined) throw new Error('Unknown or stale Vite plugin generation')
             if (generationTransactions.has(transactionId)) {
               throw new Error('Vite plugin generation transaction already exists')

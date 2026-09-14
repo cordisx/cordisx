@@ -230,6 +230,7 @@ import { BrowserPlaygroundAgentSessionPersistence } from './playground-agent-ses
 import type { PlaygroundSessionScenarioCatalogV1 } from '../playground/session-scenario-catalog.js'
 import type { CordisXOwnerDocumentsV1 } from '../durable-document-contracts.js'
 import type { RuntimeClosureScope } from './runtime-closure-scope.js'
+import { requestRuntimePluginLifecycle } from './runtime-development-reload.js'
 import {
   controllerHasRuntimeModule,
   CordisXRuntimeHandle,
@@ -753,12 +754,7 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
   settleRegistryProjection: runtimeScope.settleRegistryProjection()!,
   requestPluginLifecycle: (
     lifecycleOperation: CordisXPluginLifecycleOperationV1,
-  ): Promise<CordisXPluginLifecycleResultV1> => {
-    if (runtimeScope.lifecycleBridge()! === undefined) {
-      return Promise.reject(new Error('plugin lifecycle operations are unavailable'))
-    }
-    return runtimeScope.lifecycleBridge()!.request(runtimeScope.currentActivation.revision, lifecycleOperation)
-  },
+  ): Promise<CordisXPluginLifecycleResultV1> => requestRuntimePluginLifecycle(runtimeScope, lifecycleOperation),
   requestPluginBundleLifecycle: async (
     operation: CordisXPluginBundleLifecycleOperationV1,
   ): Promise<CordisXPluginBundleLifecycleResultV1> => {

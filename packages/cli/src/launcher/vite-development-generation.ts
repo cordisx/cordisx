@@ -25,7 +25,7 @@ export function createNativeViteEntityGenerationHandler(
 ): NativeVitePluginGenerationHandler {
   const committed = new Map<string, readonly EntityTemplatePayload['declaration'][]>()
   const staging = new Set<string>()
-  return async generation => {
+  return shareGenerationTransactions(async generation => {
     if (staging.has(generation.pluginId)) {
       throw new Error(`plugin ${generation.pluginId} already has a staged entity generation`)
     }
@@ -66,6 +66,74 @@ export function createNativeViteEntityGenerationHandler(
         settled = true
         authority.register(binding, previous ?? [])
         staging.delete(generation.pluginId)
+      },
+    }
+  })
+}
+
+/** Native windows share Host declarations but settle their renderer transactions independently. */
+function shareGenerationTransactions(handler: NativeVitePluginGenerationHandler): NativeVitePluginGenerationHandler {
+  const committed = new Map<string, string>()
+  const staging = new Map<string, {
+    generation: string
+    handle: Promise<NativeVitePluginGenerationTransaction>
+    participants: number
+    commit?: Promise<void>
+    committed: boolean
+  }>()
+  return async generation => {
+    const id = generation.pluginId
+    let shared = staging.get(id)
+    if (shared !== undefined && shared.generation !== generation.moduleGeneration) {
+      throw new Error(`plugin ${id} already has a staged entity generation`)
+    }
+    if (shared === undefined && committed.get(id) === generation.moduleGeneration) {
+      return { commit: async () => undefined, rollback: async () => undefined }
+    }
+    if (shared === undefined) {
+      shared = {
+        generation: generation.moduleGeneration,
+        handle: handler(generation),
+        participants: 0,
+        committed: false,
+      }
+      staging.set(id, shared)
+    }
+    const transaction = shared
+    transaction.participants += 1
+    let handle: NativeVitePluginGenerationTransaction
+    try {
+      handle = await transaction.handle
+    } catch (error) {
+      if (staging.get(id) === transaction) staging.delete(id)
+      throw error
+    }
+    let settled = false
+    return {
+      async commit() {
+        if (settled) return
+        transaction.commit ??= handle.commit().then(() => {
+          transaction.committed = true
+          committed.set(id, transaction.generation)
+          if (staging.get(id) === transaction) staging.delete(id)
+        })
+        await transaction.commit
+        settled = true
+        transaction.participants -= 1
+      },
+      async rollback() {
+        if (settled) return
+        settled = true
+        transaction.participants -= 1
+        // One failed window must not undo another window's successful publish.
+        await transaction.commit?.catch(() => undefined)
+        if (transaction.participants === 0 && !transaction.committed) {
+          try {
+            await handle.rollback()
+          } finally {
+            if (staging.get(id) === transaction) staging.delete(id)
+          }
+        }
       },
     }
   }

@@ -112,6 +112,7 @@ async function bootRuntime(bundle: string): Promise<{ readonly dom: JSDOM; reado
   )
   Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
   Object.defineProperty(dom.window, 'fetch', { value: async () => ({ ok: false, status: 503, text: async () => '' }) })
+  Object.defineProperty(dom.window, 'TextEncoder', { value: TextEncoder })
   dom.window.eval(bundle)
   for (
     let attempt = 0;
@@ -293,6 +294,7 @@ describe('renderer plugin generation transactions', () => {
     Object.defineProperty(dom.window, 'fetch', {
       value: async () => ({ ok: false, status: 503, text: async () => '' }),
     })
+    Object.defineProperty(dom.window, 'TextEncoder', { value: TextEncoder })
     dom.window.eval(bundle)
     for (
       let attempt = 0;

@@ -59,6 +59,7 @@ describe('local development Manager projection', () => {
       value: async () => ({ ok: false, status: 503, text: async () => '' }),
     })
     Object.defineProperty(dom.window, 'structuredClone', { value: structuredClone })
+    Object.defineProperty(dom.window, 'TextEncoder', { value: TextEncoder })
     dom.window.eval(bundle)
     for (
       let attempt = 0;
