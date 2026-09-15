@@ -16,7 +16,7 @@ import type {
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 // Exact Protocol baseline consumed by the Host root and publishable CLI.
-const protocolCommit = 'a1127780513b76f0c3b1acee70cd638b5348c6a5'
+const protocolCommit = 'a0e765d6ae3e2baba0b97dda60b7f62439a570aa'
 const protocolSource = `github:cordisx/cordisx-protocol#${protocolCommit}`
 const protocolResolvedSource = `git+ssh://git@github.com/cordisx/cordisx-protocol.git#${protocolCommit}`
 const staleProtocolCommit = '3f0dbcd8b04ae83c920d2d913ac2c313af5f83f1'
