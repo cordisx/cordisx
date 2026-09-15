@@ -7,7 +7,7 @@ import {
   usePackedDependencyClosure,
 } from '../scripts/installed-check-package-cache.mjs'
 
-const externalPackages = ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api', '@cordisx/protocol'] as const
+const externalPackages = ['@cordisx/protocol'] as const
 
 it.each(['node_modules', 'node_modules/cordisx/node_modules'])(
   'repacks %s dependencies without rerunning Git prepare hooks',
@@ -32,7 +32,10 @@ it.each(['node_modules', 'node_modules/cordisx/node_modules'])(
           'utf8',
         )
       }))
-      const closure = await packInstalledDependencyClosure(runner, pack, process.env)
+      const closure = await packInstalledDependencyClosure(runner, pack, {
+        ...process.env,
+        npm_config_cache: path.join(root, 'npm-cache'),
+      })
       expect(Object.keys(closure).sort()).toEqual([...externalPackages].sort())
       await Promise.all(Object.values(closure).map(async spec => await access(spec.slice('file:'.length))))
       const consumer = path.join(root, 'consumer.json')
@@ -42,7 +45,7 @@ it.each(['node_modules', 'node_modules/cordisx/node_modules'])(
       expect(manifest.devDependencies).toMatchObject(closure)
       expect(manifest.overrides).toEqual(Object.fromEntries(externalPackages.map(name => [name, `$${name}`])))
       const original = JSON.parse(
-        await readFile(path.join(runner, layout, '@cordisx', 'plugin-cli-proxy-api', 'package.json'), 'utf8'),
+        await readFile(path.join(runner, layout, '@cordisx', 'protocol', 'package.json'), 'utf8'),
       )
       expect(original.scripts.prepare).toContain('process.exit(97)')
     } finally {

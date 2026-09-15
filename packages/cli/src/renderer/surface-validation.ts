@@ -100,6 +100,7 @@ export const CORDISX_HOST_ICON_TOKENS = [
   'host:hierarchy',
   'host:history',
   'host:info',
+  'host:key',
   'host:layers',
   'host:link',
   'host:loader',

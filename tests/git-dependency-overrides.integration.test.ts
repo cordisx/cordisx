@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -27,29 +27,40 @@ async function commit(directory: string): Promise<string> {
   return (await execute('git', ['rev-parse', 'HEAD'], { cwd: directory })).stdout.trim()
 }
 
-it('uses package-level Git specs for workspace dependencies during transitive Git preparation', async () => {
+it('keeps bundled plugin source metadata outside the transitive Git dependency graph', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'cordisx-git-overrides-'))
   const dependency = path.join(root, 'dependency')
-  const legacyHost = path.join(root, 'legacy-host')
   const host = path.join(root, 'host')
   const consumer = path.join(root, 'consumer')
   const cache = path.join(root, 'npm-cache')
   try {
     await Promise.all([
       mkdir(dependency),
-      mkdir(legacyHost),
       mkdir(path.join(host, 'packages', 'cli'), { recursive: true }),
       mkdir(consumer),
     ])
-    await saveJson(path.join(legacyHost, 'package.json'), {
+    await saveJson(path.join(host, 'package.json'), {
       name: 'cordisx-git-override-host',
-      version: '0.9.0',
-      files: ['index.js'],
+      version: '1.0.0',
+      private: true,
+      workspaces: ['packages/*'],
+      files: ['index.js', 'prepare.mjs'],
       main: 'index.js',
+      scripts: { prepare: 'node prepare.mjs' },
+      cordisxSources: { '@cordisx-test/runtime': 'pending' },
     })
-    await writeFile(path.join(legacyHost, 'index.js'), 'module.exports = "legacy-host"\n', 'utf8')
-    const legacyHostCommit = await commit(legacyHost)
-    const legacyHostSpec = `git+file://${legacyHost}#${legacyHostCommit}`
+    await saveJson(path.join(host, 'packages/cli/package.json'), {
+      name: 'cordisx-git-override-cli',
+      version: '1.0.0',
+      cordisxSources: { '@cordisx-test/runtime': 'pending' },
+    })
+    await writeFile(
+      path.join(host, 'prepare.mjs'),
+      `import { writeFile } from 'node:fs/promises'\nawait writeFile('index.js', 'module.exports = "host"\\n')\n`,
+      'utf8',
+    )
+    const initialHostCommit = await commit(host)
+    const initialHostSpec = `git+file://${host}#${initialHostCommit}`
 
     await saveJson(path.join(dependency, 'package.json'), {
       name: '@cordisx-test/runtime',
@@ -57,7 +68,7 @@ it('uses package-level Git specs for workspace dependencies during transitive Gi
       files: ['index.js', 'prepare.mjs'],
       main: 'index.js',
       scripts: { prepare: 'node prepare.mjs' },
-      devDependencies: { 'cordisx-git-override-host': legacyHostSpec },
+      devDependencies: { 'cordisx-git-override-host': initialHostSpec },
     })
     await writeFile(
       path.join(dependency, 'prepare.mjs'),
@@ -69,40 +80,19 @@ it('uses package-level Git specs for workspace dependencies during transitive Gi
     const dependencyCommit = await commit(dependency)
     const dependencySpec = `git+file://${dependency}#${dependencyCommit}`
 
-    await saveJson(path.join(host, 'package.json'), {
-      name: 'cordisx-git-override-host',
-      version: '1.0.0',
-      private: true,
-      workspaces: ['packages/*'],
-      files: ['index.js', 'prepare.mjs'],
-      main: 'index.js',
-      scripts: { prepare: 'node prepare.mjs' },
-    })
-    await saveJson(path.join(host, 'packages/cli/package.json'), {
-      name: 'cordisx-git-override-cli',
-      version: '1.0.0',
-      dependencies: { '@cordisx-test/runtime': dependencySpec },
-    })
-    await writeFile(
-      path.join(host, 'prepare.mjs'),
-      `import { writeFile } from 'node:fs/promises'\n`
-        + `import runtime from '@cordisx-test/runtime'\n`
-        + `await writeFile('index.js', \`module.exports = \${JSON.stringify(\`host:\${runtime}\`)}\\n\`)\n`,
-      'utf8',
-    )
+    for (const manifestPath of [path.join(host, 'package.json'), path.join(host, 'packages/cli/package.json')]) {
+      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+      manifest.cordisxSources['@cordisx-test/runtime'] = dependencySpec
+      await saveJson(manifestPath, manifest)
+    }
     const hostCommit = await commit(host)
-    const hostSpec = `git+file://${host}#${hostCommit}`
-
-    const dependencyManifest = JSON.parse(await readFile(path.join(dependency, 'package.json'), 'utf8'))
-    dependencyManifest.devDependencies['cordisx-git-override-host'] = hostSpec
-    await saveJson(path.join(dependency, 'package.json'), dependencyManifest)
-    const consumerDependencyCommit = await commit(dependency)
 
     await saveJson(path.join(consumer, 'package.json'), {
       name: 'cordisx-git-override-consumer',
       version: '1.0.0',
       private: true,
-      dependencies: { '@cordisx-test/runtime': `git+file://${dependency}#${consumerDependencyCommit}` },
+      dependencies: { '@cordisx-test/runtime': dependencySpec },
+      overrides: { 'cordisx-git-override-host': `git+file://${host}#${hostCommit}` },
     })
     await execute('npm', ['install', '--offline', '--no-audit', '--no-fund', '--loglevel=error'], {
       cwd: consumer,
@@ -110,7 +100,13 @@ it('uses package-level Git specs for workspace dependencies during transitive Gi
       timeout: 30_000,
     })
     const runtime = await import(path.join(consumer, 'node_modules', '@cordisx-test', 'runtime', 'index.js'))
-    expect(runtime.default).toBe('runtime:host:runtime:legacy-host')
+    expect(runtime.default).toBe('runtime:host')
+    await expect(access(path.join(consumer, 'node_modules', 'cordisx-git-override-host'))).rejects.toThrow()
+    const committedHost = JSON.parse(
+      (await execute('git', ['show', `${hostCommit}:package.json`], { cwd: host })).stdout,
+    )
+    expect(committedHost.dependencies).toBeUndefined()
+    expect(committedHost.cordisxSources['@cordisx-test/runtime']).toBe(dependencySpec)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

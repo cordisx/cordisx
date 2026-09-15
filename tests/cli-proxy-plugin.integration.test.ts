@@ -1,5 +1,4 @@
 import { access, readFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
@@ -8,8 +7,9 @@ import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from '../packages/cli
 import { buildRendererBundle } from '../packages/cli/src/launcher/bundle.js'
 import { loadConfig } from '../packages/cli/src/launcher/config.js'
 import { exactDomPermissionPolicies, installPermissionPolicyBridge } from './helpers/dom-permission.js'
+import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
 
-const externalEntry = createRequire(import.meta.url).resolve('@cordisx/plugin-cli-proxy-api')
+const externalEntry = bundledPluginEntry('plugin-cli-proxy-api')
 const externalPackageRoot = path.resolve(path.dirname(externalEntry), '..', '..')
 
 interface RuntimeHandle {
@@ -49,7 +49,15 @@ interface RuntimeHandle {
         }
         productMetadata: { title?: string; description?: string; diagnostics: readonly unknown[] }
       }[]
+      outlets: readonly { id: string; mounted: boolean; activeRoute?: string }[]
     }
+    settingsNavigationItems?: readonly {
+      id: string
+      title: string
+      icon?: string
+      navigationGroup?: string
+      route: { id: string }
+    }[]
     platform: { mode: string; diagnostics: readonly { code: string }[] }
     permissions: readonly {
       capability: string
@@ -69,21 +77,6 @@ async function waitFor(predicate: () => boolean, attempts = 1_500): Promise<void
   throw new Error('timed out waiting for CLIProxy Manager projection')
 }
 
-function session(providerId: string) {
-  return {
-    contract: 'cordisx.platform-session/v1',
-    schemaVersion: 1,
-    ref: { providerId, remoteSessionId: 'shared-session' },
-    hostId: `cli-proxy-api:${providerId}`,
-    model: { providerId, modelId: 'shared-model' },
-    cwd: '/workspace',
-    title: `${providerId} conversation`,
-    state: 'active',
-    createdAt: '2026-08-24T00:00:00.000Z',
-    updatedAt: providerId === 'gateway-a' ? '2026-08-24T02:00:00.000Z' : '2026-08-24T01:00:00.000Z',
-  }
-}
-
 describe('CLIProxy provider plugin renderer', () => {
   it('loads the renderer and service artifacts from the exact standalone package', async () => {
     const manifest = JSON.parse(await readFile(path.join(externalPackageRoot, 'package.json'), 'utf8')) as {
@@ -96,7 +89,7 @@ describe('CLIProxy provider plugin renderer', () => {
     await expect(readFile(path.join(externalPackageRoot, 'src', 'index.ts'))).rejects.toThrow()
   })
 
-  it('uses the existing main outlet and keeps provider identity in models and colliding session rows', async () => {
+  it('projects the v14 subscription manager into the external accounts navigation group', async () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const config = await loadConfig(path.join(root, 'cordisx.cli-proxy.example.json'))
     const token = 'integration-provider-token'
@@ -115,7 +108,7 @@ describe('CLIProxy provider plugin renderer', () => {
         policies: exactDomPermissionPolicies('default', [{
           id: plugin.id,
           entry: plugin.entry,
-          pointIds: ['sidebar.navigation.items', 'main'],
+          pointIds: ['manager.settings.navigation-items', 'manager.content'],
         }]),
       },
     })
@@ -130,11 +123,11 @@ describe('CLIProxy provider plugin renderer', () => {
     `,
       { runScripts: 'dangerously', url: 'https://codex.local/native' },
     )
+    Object.defineProperty(dom.window, 'structuredClone', { value: structuredClone })
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
     Object.defineProperty(dom.window.navigator, 'platform', { value: 'MacIntel', configurable: true })
     Object.defineProperty(dom.window, 'confirm', { value: () => true })
     installPermissionPolicyBridge(dom.window)
-    const requests: { operation: string; input: Record<string, unknown> }[] = []
     const configRequests: { operation: string; config?: unknown }[] = []
     let configCandidate: { revision: number; config: unknown } | undefined
     let configRevision = 0
@@ -250,79 +243,6 @@ describe('CLIProxy provider plugin renderer', () => {
         })
       },
     })
-    Object.defineProperty(dom.window, '__cordisxProviderRequestV1', {
-      configurable: true,
-      value: (payload: string) => {
-        const request = JSON.parse(payload) as {
-          requestId: string
-          token: string
-          operation: string
-          input: Record<string, unknown>
-        }
-        expect(request.token).toBe(token)
-        requests.push({ operation: request.operation, input: request.input })
-        let value: unknown
-        if (request.operation === 'status') {
-          value = {
-            hostId: 'cordisx-provider-fleet',
-            hostName: 'CordisX External Provider Fleet',
-            mode: 'read-write',
-            supportedCapabilities: [
-              'models.read',
-              'tasks.catalog.read',
-              'tasks.content.read',
-              'tasks.create',
-              'tasks.control',
-              'turns.submit',
-              'turns.control',
-            ],
-            diagnostics: [{ code: 'current-connection-client-unavailable', message: 'native remains unavailable' }],
-            secondConnectionCreated: false,
-            rawBridgeExposed: false,
-          }
-        } else if (request.operation === 'availability') {
-          value = [
-            { providerId: 'gateway-a', displayName: 'Gateway A', generation: 'generation-a', state: 'ready' },
-            { providerId: 'gateway-b', displayName: 'Gateway B', generation: 'generation-b', state: 'ready' },
-          ]
-        } else if (request.operation === 'models.list') {
-          value = {
-            ok: true,
-            value: {
-              contract: 'cordisx.platform-model-page/v1',
-              schemaVersion: 1,
-              providerIds: ['gateway-a', 'gateway-b'],
-              models: ['gateway-a', 'gateway-b'].map(providerId => ({
-                contract: 'cordisx.platform-model/v1',
-                schemaVersion: 1,
-                ref: { providerId, modelId: 'shared-model' },
-                hostId: `cli-proxy-api:${providerId}`,
-                label: 'Shared model',
-                isDefault: true,
-              })),
-            },
-          }
-        } else if (request.operation === 'tasks.list') {
-          value = {
-            ok: true,
-            value: {
-              contract: 'cordisx.platform-session-page/v1',
-              schemaVersion: 1,
-              query: { providerIds: ['gateway-a', 'gateway-b'], limit: 50 },
-              snapshotId: 'snapshot-1',
-              sessions: [session('gateway-a'), session('gateway-b')],
-            },
-          }
-        } else {
-          value = { ok: false, error: { code: 'invalid-request', message: 'unexpected test operation' } }
-        }
-        queueMicrotask(() => {
-          const receiver = (dom.window as unknown as { __cordisxProviderReceiveV1?: (response: string) => void })
-            .__cordisxProviderReceiveV1
-          receiver?.(JSON.stringify({ requestId: request.requestId, ok: true, value }))
-        })
-      },
-    })
     dom.window.history.replaceState({ usr: null, key: 'native-test', idx: 0 }, '')
     dom.window.eval(bundle)
     for (
@@ -333,10 +253,6 @@ describe('CLIProxy provider plugin renderer', () => {
       await new Promise(resolve => setTimeout(resolve, 10))
     }
     const runtime = (dom.window as unknown as { __cordisxRuntime?: RuntimeHandle }).__cordisxRuntime
-    expect(runtime?.snapshot().platform).toMatchObject({ mode: 'read-write' })
-    expect(runtime?.snapshot().platform.diagnostics).toContainEqual(
-      expect.objectContaining({ code: 'current-connection-client-unavailable' }),
-    )
     const bundledPlugin = runtime?.snapshot().plugins.find(plugin => plugin.id === 'cli-proxy-api')
     expect(bundledPlugin?.readme).toContain('# CLIProxy Providers')
     expect(bundledPlugin?.readme).toContain('standalone owner')
@@ -353,36 +269,36 @@ describe('CLIProxy provider plugin renderer', () => {
       ['defaultCwd'],
     ])
     const providerRoute = runtime!.snapshot().navigation.routes.find(item =>
-      item.qualifiedId === 'cli-proxy-api:providers.sessions'
+      item.qualifiedId === 'cli-proxy-api:providers.upstream-subscriptions'
     )
     expect(providerRoute).toMatchObject({
       definition: {
         $schema: CORDISX_ROUTE_SCHEMA_V2,
         schemaVersion: 2,
-        id: 'providers.sessions',
-        path: '/main/providers/sessions',
-        outlet: 'main',
-        page: 'providers.sessions',
+        id: 'providers.upstream-subscriptions',
+        path: '/manager/extensions/cli-proxy-api/subscriptions',
+        outlet: 'manager.content',
+        page: 'providers.upstream-subscriptions',
       },
       productMetadata: {
-        title: 'Open Provider sessions',
-        description: 'Enter the external Provider sessions fleet from CordisX navigation or the Manager route catalog.',
+        title: 'CLIProxyAPI subscriptions',
+        description: 'Manage CLIProxyAPI account subscriptions, CordisX upstreams, and runtime status.',
         diagnostics: [],
       },
     })
     const providerPage = runtime!.snapshot().navigation.pages.find(item =>
-      item.qualifiedId === 'cli-proxy-api:providers.sessions'
+      item.qualifiedId === 'cli-proxy-api:providers.upstream-subscriptions'
     )
     expect(providerPage).toMatchObject({
       metadata: {
         $schema: CORDISX_PAGE_SCHEMA_V3,
         schemaVersion: 3,
-        id: 'providers.sessions',
-        icon: 'host:layers',
+        id: 'providers.upstream-subscriptions',
+        icon: 'host:key',
       },
       productMetadata: {
-        title: 'Provider sessions',
-        description: 'Create, search, resume, and manage sessions for configured Providers in the main workspace.',
+        title: 'CLIProxyAPI subscriptions',
+        description: 'View account subscriptions, CordisX upstream providers, and runtime status.',
         diagnostics: [],
       },
     })
@@ -392,64 +308,35 @@ describe('CLIProxy provider plugin renderer', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(
-      runtime!.snapshot().navigation.routes.find(item => item.qualifiedId === 'cli-proxy-api:providers.sessions')
+      runtime!.snapshot().navigation.routes.find(item =>
+        item.qualifiedId === 'cli-proxy-api:providers.upstream-subscriptions'
+      )
         ?.productMetadata,
     ).toEqual({
-      title: '打开 Provider 会话',
-      description: '从 CordisX 导航或 Manager 路由目录进入外部 Provider 会话 Fleet。',
+      title: 'CLIProxyAPI 订阅管理',
+      description: '管理 CLIProxyAPI 账户订阅、CordisX 上游和运行状态。',
       diagnostics: [],
     })
     expect(
-      runtime!.snapshot().navigation.pages.find(item => item.qualifiedId === 'cli-proxy-api:providers.sessions')
+      runtime!.snapshot().navigation.pages.find(item =>
+        item.qualifiedId === 'cli-proxy-api:providers.upstream-subscriptions'
+      )
         ?.productMetadata,
     ).toEqual({
-      title: 'Provider 会话',
-      description: '在主工作区为已配置的 Provider 创建、搜索、续聊和管理会话。',
+      title: 'CLIProxyAPI 订阅管理',
+      description: '查看账户订阅、CordisX 上游提供方和运行状态。',
       diagnostics: [],
     })
     dom.window.document.documentElement.lang = 'en'
     await new Promise(resolve => setTimeout(resolve, 0))
     await new Promise(resolve => setTimeout(resolve, 0))
-    await runtime!.navigate('cli-proxy-api', { id: 'providers.sessions' })
-    for (
-      let attempt = 0;
-      attempt < 100 && dom.window.document.querySelectorAll('[data-session]').length < 2;
-      attempt += 1
-    ) {
-      const decisions = dom.window.document.querySelectorAll<HTMLElement>(
-        '[data-permission-decision="allow-once"]',
-      )
-      for (const decision of decisions) decision.click()
-      if (decisions.length > 0) await new Promise(resolve => setTimeout(resolve, 0))
-      dom.window.document.querySelector<HTMLButtonElement>('[data-permission-action="confirm"]')?.click()
-      await new Promise(resolve => setTimeout(resolve, 10))
-    }
-    const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-provider-fleet="true"]')
-    expect(page?.closest('[data-cordisx-page-outlet="main"]')).not.toBeNull()
-    expect(dom.window.document.getElementById('native-conversation')?.textContent).toBe('native session remains')
-    const modelControl = page!.querySelector<HTMLSelectElement>('select[aria-label="Model"]')
-    expect(modelControl).not.toBeNull()
-    const modelLabels = [...modelControl!.options].map(option => option.textContent)
-    expect(modelLabels).toEqual(['[gateway-a] Shared model', '[gateway-b] Shared model'])
-    const keys = [...page!.querySelectorAll<HTMLElement>('[data-session]')].map(row => row.dataset.session)
-    expect(keys).toEqual([
-      JSON.stringify(['gateway-a', 'shared-session']),
-      JSON.stringify(['gateway-b', 'shared-session']),
-    ])
-    expect(requests.map(request => request.operation)).toEqual(
-      expect.arrayContaining(['status', 'availability', 'models.list', 'tasks.list']),
-    )
-    expect(runtime!.snapshot().permissions.find(item => item.capability === 'tasks.catalog.read')?.lastRequested)
-      .toMatchObject({ providerIds: ['gateway-a', 'gateway-b'] })
-    const catalogAvailability = runtime!.snapshot().permissions.find(item => item.capability === 'tasks.catalog.read')
-      ?.availability
-    expect(catalogAvailability?.status).toBe('supported')
-    expect(catalogAvailability?.providers).toEqual(expect.arrayContaining([
-      expect.objectContaining({ providerId: 'external:gateway-a', scope: { providers: ['gateway-a'] } }),
-      expect.objectContaining({ providerId: 'external:gateway-b', scope: { providers: ['gateway-b'] } }),
-    ]))
-    expect(await runtime!.listServiceConfigs?.('cli-proxy-api')).toHaveLength(2)
-
+    expect(runtime!.snapshot().settingsNavigationItems).toContainEqual(expect.objectContaining({
+      id: 'cli-proxy-api:upstream-subscriptions',
+      title: 'CLIProxyAPI subscriptions',
+      icon: 'host:key',
+      navigationGroup: 'external-accounts',
+      route: { id: 'providers.upstream-subscriptions' },
+    }))
     await waitFor(() => dom.window.document.querySelector('[data-cordisx-manager-trigger]') !== null)
     dom.window.document.querySelector<HTMLButtonElement>('[data-cordisx-manager-trigger]')!.click()
     await waitFor(() => dom.window.document.querySelector('[data-plugin-id="cli-proxy-api"]') !== null)
@@ -476,6 +363,17 @@ describe('CLIProxy provider plugin renderer', () => {
     expect(configPanel?.querySelector('[data-config-path="baseUrl"]')).toBeNull()
     expect(configPanel?.querySelector('[data-config-path="apiKey"]')).toBeNull()
     expect(configPanel?.querySelector('[data-config-path="codexExecutable"]')).toBeNull()
+
+    await runtime!.navigate('cli-proxy-api', { id: 'providers.upstream-subscriptions' })
+    await waitFor(() => dom.window.document.querySelector('[data-cordisx-upstream-manager="true"]') !== null)
+    const page = dom.window.document.querySelector<HTMLElement>('[data-cordisx-upstream-manager="true"]')!
+    expect(page.closest('[data-cordisx-manager-page]')).not.toBeNull()
+    expect(runtime!.snapshot().navigation.outlets.find(outlet => outlet.id === 'manager.content')).toMatchObject({
+      mounted: true,
+      activeRoute: 'cli-proxy-api:providers.upstream-subscriptions',
+    })
+    expect(dom.window.document.getElementById('native-conversation')?.textContent).toBe('native session remains')
+    expect(await runtime!.listServiceConfigs?.('cli-proxy-api')).toHaveLength(2)
     await runtime!.dispose()
   }, 20_000)
 })

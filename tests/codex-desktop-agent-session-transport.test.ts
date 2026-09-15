@@ -834,7 +834,7 @@ it('passes explicit native project identity or null and verifies returned task m
   let wrongProject = false
   let sequence = 0
   const bridge = {
-    getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS[2] }),
+    getSentryInitOptions: async () => ({ ...CODEX_DESKTOP_AGENT_SESSION_TRANSPORT_PINS.at(-1)! }),
     sendMessageFromView: async (value: any) => {
       const request = value.request
       if (value.type !== 'mcp-request') return

@@ -47,9 +47,7 @@
     }
   },
   "bundledDependencies": [
-    "@cordisx/schemastery-ui",
-    "@cordisx/channel",
-    "@cordisx/plugin-cli-proxy-api"
+    "@cordisx/schemastery-ui"
   ],
   "workspaces": [
     "packages/*"
@@ -69,7 +67,7 @@
     "predev": "npm run prepare:dev",
     "precheckpoint:local-dev:app": "npm run build --workspace=cordisx",
     "precheckpoint:local-dev": "npm run build --workspace=cordisx",
-    "prepare": "npm run build --workspace=cordisx",
+    "prepare": "npm run build --workspace=cordisx && node scripts/prepare-bundled-runtime-plugins.mjs",
     "prepare:dev": "npm run prepare:dev --workspace=cordisx",
     "smoke": "node packages/cli/scripts/live-smoke.mjs",
     "smoke:desktop-agents": "node packages/cli/scripts/run-codex-desktop-agent-session-harness.mjs",
@@ -94,8 +92,6 @@
     "node": ">=22.19"
   },
   "dependencies": {
-    "@cordisx/channel": "github:cordisx/plugin-channel#d426ec0a7a907746bc62317269a0ec5b3379adf9",
-    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#5857dac38a1d3d0f0a45b43150fe69b92321dab4",
     "@cordisx/protocol": "github:cordisx/cordisx-protocol#a1127780513b76f0c3b1acee70cd638b5348c6a5",
     "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",
@@ -129,11 +125,12 @@
     "swr": "2.5.1",
     "tar": "7.5.22",
     "tdesign-react": "1.18.2",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "yaml": "2.8.1"
   },
-  "overrides": {
+  "cordisxSources": {
     "@cordisx/channel": "github:cordisx/plugin-channel#d426ec0a7a907746bc62317269a0ec5b3379adf9",
-    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#5857dac38a1d3d0f0a45b43150fe69b92321dab4"
+    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#a6d2503df7aea0cfaaf33a0895a2e43cb7f37765"
   },
   "devDependencies": {
     "@cordisx/eslint-config": "github:cordisx/cordisxmono#c63c2e8c2ba7e11502934a52ad2ce3734e804cdc",
@@ -145,8 +142,6 @@
     "@projectwallace/stylelint-plugin": "0.7.0"
   },
   "bundleDependencies": [
-    "@cordisx/schemastery-ui",
-    "@cordisx/channel",
-    "@cordisx/plugin-cli-proxy-api"
+    "@cordisx/schemastery-ui"
   ]
 }

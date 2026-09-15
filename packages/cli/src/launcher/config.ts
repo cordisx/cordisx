@@ -4,7 +4,6 @@ import type { PluginRuntimeManifestV14 } from '@cordisx/protocol/plugin-manifest
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
-import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { resolveProviderConfigs } from '../providers/config.js'
 import type { CliProxyProviderConfig } from '../providers/contracts.js'
@@ -35,6 +34,7 @@ import type {
   CordisXPluginManifestV8,
   CordisXPluginManifestV9,
 } from '../permission-contracts.js'
+import { bundledPluginEntry } from './bundled-plugin.js'
 
 export interface CordisXConfigPlugin {
   readonly id: string
@@ -203,10 +203,10 @@ function nonEmptyString(value: unknown, label: string): string {
 function pluginEntry(value: unknown, label: string, rootDir: string): string {
   const entry = nonEmptyString(value, label)
   if (entry === 'cordisx:cli-proxy-api') {
-    return createRequire(import.meta.url).resolve('@cordisx/plugin-cli-proxy-api')
+    return bundledPluginEntry('plugin-cli-proxy-api')
   }
   if (entry === 'cordisx:channel') {
-    return createRequire(import.meta.url).resolve('@cordisx/channel')
+    return bundledPluginEntry('channel')
   }
   if (entry.startsWith('cordisx:')) throw new Error(`${label} uses an unknown built-in plugin`)
   return path.resolve(rootDir, entry)

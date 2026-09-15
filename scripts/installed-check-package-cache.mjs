@@ -5,7 +5,7 @@ import { promisify } from 'node:util'
 import { npmPackItem } from './npm-pack-report.mjs'
 
 const execute = promisify(execFile)
-const EXTERNAL_PACKAGES = ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api', '@cordisx/protocol']
+const EXTERNAL_PACKAGES = ['@cordisx/protocol']
 
 function packedFilename(stdout, packageName) {
   const report = JSON.parse(stdout)

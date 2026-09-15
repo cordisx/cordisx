@@ -1,7 +1,16 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { checkout, digest, json, linkBuildDependencies, pack, run, save, verifyPackage } from './sdk-build-tools.mjs'
+import {
+  checkout,
+  digest,
+  json,
+  linkPluginBuildDependencies,
+  pack,
+  run,
+  save,
+  verifyPackage,
+} from './sdk-build-tools.mjs'
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const output = path.resolve(process.argv[2] ?? path.join(repository, 'artifacts/sdk'))
@@ -70,32 +79,38 @@ await run('npm', ['run', 'build'], host)
 const cli = path.join(host, 'packages/cli')
 const cliManifest = await json(path.join(cli, 'package.json'))
 const artifacts = path.join(output, 'packages')
-for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api', '@cordisx/protocol']) {
-  const spec = cliManifest.cordisxSources?.[name] ?? cliManifest.dependencies[name]
-  const record = records.find(item => item.location === `node_modules/${name}`)
-  if (!record || !record.spec.endsWith(`#${spec.split('#')[1]}`)) throw new Error(`Unpinned output: ${name}`)
-  if (name !== '@cordisx/protocol') {
-    console.log(`[sdk] compiling ${name}`)
-    await linkBuildDependencies(record.source, host)
-    await run('npm', ['run', 'build'], record.source, {
-      ...process.env,
-      PATH: [path.join(host, 'node_modules/.bin'), path.join(cli, 'node_modules/.bin'), process.env.PATH].join(
-        path.delimiter,
-      ),
-    })
-  }
-  await verifyPackage(record.source, name !== '@cordisx/protocol')
-  const tarball = await pack(record.source, artifacts)
-  // Use npm's allowlist, not a raw source/node_modules copy.
-  const destination = path.join(host, 'node_modules', name)
-  await run('tar', ['-xf', tarball, '--strip-components=1', '-C', destination], host)
-  await verifyPackage(destination, name !== '@cordisx/protocol')
+const pluginSources = cliManifest.cordisxSources
+const pluginRecords = []
+for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api']) {
+  const spec = pluginSources?.[name]
+  if (typeof spec !== 'string') throw new Error(`Unpinned output: ${name}`)
+  const source = path.join(output, 'plugin-sources', name.replaceAll('/', '__'))
+  console.log(`[sdk] materializing ${spec}`)
+  await checkout(spec, source)
+  console.log(`[sdk] compiling ${name}`)
+  await linkPluginBuildDependencies(source, host)
+  await run('npm', ['run', 'build'], source, {
+    ...process.env,
+    PATH: [path.join(host, 'node_modules/.bin'), path.join(cli, 'node_modules/.bin'), process.env.PATH].join(
+      path.delimiter,
+    ),
+  })
+  await verifyPackage(source, true)
+  await pack(source, artifacts)
+  pluginRecords.push({ location: `packages/cli/dist/bundled-plugins/${name}`, spec })
 }
-await run(process.execPath, ['scripts/prepare-bundled-runtime-dependencies.mjs'], cli)
+const protocolSpec = cliManifest.dependencies['@cordisx/protocol']
+const protocolRecord = records.find(item => item.location === 'node_modules/@cordisx/protocol')
+if (!protocolRecord || !protocolRecord.spec.endsWith(`#${protocolSpec.split('#')[1]}`)) {
+  throw new Error('Unpinned output: @cordisx/protocol')
+}
+await verifyPackage(protocolRecord.source)
+await pack(protocolRecord.source, artifacts)
+await run(process.execPath, ['scripts/prepare-bundled-runtime-plugins.mjs'], host)
 const cliTarball = await pack(cli, artifacts)
 const packedFiles = (await run('tar', ['-tf', cliTarball], host)).split('\n')
 for (const name of ['@cordisx/channel', '@cordisx/plugin-cli-proxy-api']) {
-  if (!packedFiles.includes(`package/node_modules/${name}/package.json`)) {
+  if (!packedFiles.includes(`package/dist/bundled-plugins/${name}/package.json`)) {
     throw new Error(`CLI tarball omitted bundled runtime dependency: ${name}`)
   }
 }
@@ -115,7 +130,7 @@ await save(path.join(output, 'sdk-evidence.json'), {
   hostCommit: commit,
   node: process.version,
   npm: await run('npm', ['--version'], host),
-  sources: records.map(({ location, spec }) => ({ location, spec })),
+  sources: [...records.map(({ location, spec }) => ({ location, spec })), ...pluginRecords],
   packages,
 })
 console.log(`[sdk] verified packages and hashes: ${path.join(output, 'sdk-evidence.json')}`)

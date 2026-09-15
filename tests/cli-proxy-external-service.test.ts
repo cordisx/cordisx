@@ -1,4 +1,3 @@
-import { createRequire } from 'node:module'
 import { mkdtemp } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -16,9 +15,10 @@ import {
   HostPlatformProviderConfigurationRegistryV1,
   PlatformProviderServiceHostV1,
 } from '../packages/cli/src/launcher/platform-provider-service.js'
+import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
 
 it('stages and activates the external CLIProxy package-v14 service in the Host Fleet', async () => {
-  const entry = createRequire(import.meta.url).resolve('@cordisx/plugin-cli-proxy-api')
+  const entry = bundledPluginEntry('plugin-cli-proxy-api')
   const packageRoot = path.resolve(path.dirname(entry), '..', '..')
   const homeDir = await mkdtemp(path.join(os.tmpdir(), 'cordisx-external-cli-proxy-'))
   const staged = await stagePluginPackageSourceV1({

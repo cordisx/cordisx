@@ -22,8 +22,8 @@ const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const sourceCordisXManifest = JSON.parse(await readFile(path.join(repositoryRoot, 'packages/cli/package.json'), 'utf8'))
 const expectedGitDependencies = {
-  '@cordisx/channel': sourceCordisXManifest.dependencies?.['@cordisx/channel'],
-  '@cordisx/plugin-cli-proxy-api': sourceCordisXManifest.dependencies?.['@cordisx/plugin-cli-proxy-api'],
+  '@cordisx/channel': sourceCordisXManifest.cordisxSources?.['@cordisx/channel'],
+  '@cordisx/plugin-cli-proxy-api': sourceCordisXManifest.cordisxSources?.['@cordisx/plugin-cli-proxy-api'],
   '@cordisx/protocol': sourceCordisXManifest.dependencies?.['@cordisx/protocol'],
 }
 for (const [name, spec] of Object.entries(expectedGitDependencies)) {
@@ -94,9 +94,10 @@ try {
   if (
     installedCordisXManifest.dependencies?.['@oneworks/avatar'] !== '1.0.0-rc.8'
     || installedCordisXManifest.dependencies?.['@oneworks/avatar-react'] !== '1.0.0-rc.8'
-    || Object.entries(expectedGitDependencies).some(([name, spec]) => (
-      installedCordisXManifest.dependencies?.[name] !== spec
-    ))
+    || installedCordisXManifest.dependencies?.['@cordisx/protocol'] !== expectedProtocolSpec
+    || installedCordisXManifest.cordisxSources?.['@cordisx/channel'] !== expectedGitDependencies['@cordisx/channel']
+    || installedCordisXManifest.cordisxSources?.['@cordisx/plugin-cli-proxy-api']
+      !== expectedGitDependencies['@cordisx/plugin-cli-proxy-api']
   ) {
     throw new Error('installed cordisx must pin its Host-owned renderers and canonical Git dependencies')
   }

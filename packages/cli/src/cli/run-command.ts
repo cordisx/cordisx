@@ -5,7 +5,6 @@ import {
 } from '../launcher/native-submission-composition.js'
 import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
-import { createRequire } from 'node:module'
 import os from 'node:os'
 import { mkdtemp, rm } from 'node:fs/promises'
 import type { ChildProcess } from 'node:child_process'
@@ -92,6 +91,7 @@ import {
 } from '../plugin-lifecycle-contracts.js'
 import type { CordisXPluginBundleManagerSnapshotV1 } from '../plugin-bundle-contracts.js'
 import type { RollbackPlan } from '../launcher/packages/authority.js'
+import { bundledPluginEntry } from '../launcher/bundled-plugin.js'
 import { OwnerDocumentStore } from '../launcher/owner-document-store.js'
 import { EntityDirectoryAuthority } from '../launcher/entity-directory.js'
 import { createEntityBridgeHandler } from '../launcher/entity-rpc.js'
@@ -632,7 +632,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     const runHost = runtime.internalRunInjectedHost ?? runInjectedHost
     const launcherCliProxy = cliProxyConfigured
       ? await (async () => {
-        const entry = createRequire(import.meta.url).resolve('@cordisx/plugin-cli-proxy-api')
+        const entry = bundledPluginEntry('plugin-cli-proxy-api')
         const staged = await stagePluginPackageSourceV1({
           kind: 'local-directory',
           location: pathToFileURL(await findPackageRoot(entry)).href,

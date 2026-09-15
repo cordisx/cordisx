@@ -1,5 +1,4 @@
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -8,6 +7,7 @@ import {
   loadConfig,
   resolveCordisXProjectConfig,
 } from '../packages/cli/src/launcher/config.js'
+import { bundledPluginEntry } from '../packages/cli/src/launcher/bundled-plugin.js'
 
 describe('loadConfig', () => {
   it('resolves plugin entries relative to the config', async () => {
@@ -193,7 +193,7 @@ describe('loadConfig', () => {
     await expect(loadConfig(configPath)).rejects.toThrow('reserved plugin id: host')
   })
 
-  it('resolves the Channel convenience alias to the external package export', async () => {
+  it('resolves the Channel convenience alias to the bundled package export', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-channel-config-'))
     const configPath = path.join(directory, 'cordisx.config.json')
     await writeFile(
@@ -205,10 +205,10 @@ describe('loadConfig', () => {
     )
     const config = await loadConfig(configPath)
     expect(config.plugins[0]).toMatchObject({ id: 'channel', enabled: true, config: {} })
-    expect(config.plugins[0]?.entry).toMatch(/node_modules\/@cordisx\/channel\/dist\/channel\.js$/)
+    expect(config.plugins[0]?.entry).toBe(bundledPluginEntry('channel'))
   })
 
-  it('resolves the CLIProxy convenience alias to the external package export', async () => {
+  it('resolves the CLIProxy convenience alias to the bundled package export', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'cordisx-cli-proxy-config-'))
     const configPath = path.join(directory, 'cordisx.config.json')
     await writeFile(
@@ -231,6 +231,6 @@ describe('loadConfig', () => {
         ]),
       },
     })
-    expect(config.plugins[0]?.entry).toBe(createRequire(import.meta.url).resolve('@cordisx/plugin-cli-proxy-api'))
+    expect(config.plugins[0]?.entry).toBe(bundledPluginEntry('plugin-cli-proxy-api'))
   })
 })

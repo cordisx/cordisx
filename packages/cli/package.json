@@ -12,9 +12,7 @@
     "third_party"
   ],
   "bundledDependencies": [
-    "@cordisx/schemastery-ui",
-    "@cordisx/channel",
-    "@cordisx/plugin-cli-proxy-api"
+    "@cordisx/schemastery-ui"
   ],
   "bin": {
     "cordisx": "dist/src/cli.js"
@@ -59,7 +57,7 @@
     "generate:contributors": "node scripts/generate-contributors.mjs",
     "predev": "npm run prepare:dev",
     "prepare:dev": "npm run build",
-    "prepack": "npm run build && node scripts/prepare-bundled-runtime-dependencies.mjs",
+    "prepack": "npm run build && node ../../scripts/prepare-bundled-runtime-plugins.mjs",
     "smoke": "node scripts/live-smoke.mjs",
     "smoke:desktop-agents": "node scripts/run-codex-desktop-agent-session-harness.mjs",
     "typecheck": "npm run build --workspace=@cordisx/channel-runtime && npm run build --workspace=@cordisx/schemastery-ui && node scripts/prepare-bundled-schemastery-ui.mjs && tsc -p tsconfig.json --noEmit"
@@ -88,7 +86,6 @@
     "provenance": true
   },
   "dependencies": {
-    "@cordisx/channel": "github:cordisx/plugin-channel#d426ec0a7a907746bc62317269a0ec5b3379adf9",
     "@cordisx/protocol": "github:cordisx/cordisx-protocol#a1127780513b76f0c3b1acee70cd638b5348c6a5",
     "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",
@@ -125,7 +122,7 @@
     "tdesign-react": "1.18.2",
     "vite": "8.2.2",
     "ws": "^8.18.3",
-    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#5857dac38a1d3d0f0a45b43150fe69b92321dab4"
+    "yaml": "2.8.1"
   },
   "devDependencies": {
     "@cordisx/channel-runtime": "file:../channel-runtime",
@@ -141,12 +138,10 @@
     "vitest": "^3.2.4"
   },
   "bundleDependencies": [
-    "@cordisx/schemastery-ui",
-    "@cordisx/channel",
-    "@cordisx/plugin-cli-proxy-api"
+    "@cordisx/schemastery-ui"
   ],
   "cordisxSources": {
     "@cordisx/channel": "github:cordisx/plugin-channel#d426ec0a7a907746bc62317269a0ec5b3379adf9",
-    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#5857dac38a1d3d0f0a45b43150fe69b92321dab4"
+    "@cordisx/plugin-cli-proxy-api": "github:cordisx/plugin-cli-proxy-api#a6d2503df7aea0cfaaf33a0895a2e43cb7f37765"
   }
 }
