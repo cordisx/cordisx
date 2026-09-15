@@ -20,8 +20,18 @@ import {
 
 const execute = promisify(execFile)
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-// Canonical merged dialogs Protocol baseline.
-const expectedProtocolSpec = 'github:cordisx/cordisx-protocol#ffb4827fdfee550865b55593fc5b8a1cc51ed53c'
+const sourceCordisXManifest = JSON.parse(await readFile(path.join(repositoryRoot, 'packages/cli/package.json'), 'utf8'))
+const expectedGitDependencies = {
+  '@cordisx/channel': sourceCordisXManifest.dependencies?.['@cordisx/channel'],
+  '@cordisx/plugin-cli-proxy-api': sourceCordisXManifest.dependencies?.['@cordisx/plugin-cli-proxy-api'],
+  '@cordisx/protocol': sourceCordisXManifest.dependencies?.['@cordisx/protocol'],
+}
+for (const [name, spec] of Object.entries(expectedGitDependencies)) {
+  if (typeof spec !== 'string' || !/^github:cordisx\/[a-z0-9-]+#[0-9a-f]{40}$/.test(spec)) {
+    throw new Error(`source cordisx must pin ${name} to an exact Git commit`)
+  }
+}
+const expectedProtocolSpec = expectedGitDependencies['@cordisx/protocol']
 const protocolTarball = process.env.CORDISX_PROTOCOL_TARBALL === undefined
   ? undefined
   : path.resolve(process.env.CORDISX_PROTOCOL_TARBALL)
@@ -84,9 +94,11 @@ try {
   if (
     installedCordisXManifest.dependencies?.['@oneworks/avatar'] !== '1.0.0-rc.8'
     || installedCordisXManifest.dependencies?.['@oneworks/avatar-react'] !== '1.0.0-rc.8'
-    || installedCordisXManifest.dependencies?.['@cordisx/protocol'] !== expectedProtocolSpec
+    || Object.entries(expectedGitDependencies).some(([name, spec]) => (
+      installedCordisXManifest.dependencies?.[name] !== spec
+    ))
   ) {
-    throw new Error('installed cordisx must pin its Host-owned renderers and canonical Protocol')
+    throw new Error('installed cordisx must pin its Host-owned renderers and canonical Git dependencies')
   }
   const protocolPaths = (await run('npm', ['ls', '--parseable', '--all', '@cordisx/protocol'], {
     cwd: runnerDirectory,

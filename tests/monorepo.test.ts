@@ -50,6 +50,7 @@ describe('npm workspace boundary', () => {
       '@cordisx/channel': root.dependencies['@cordisx/channel'],
       '@cordisx/plugin-cli-proxy-api': root.dependencies['@cordisx/plugin-cli-proxy-api'],
     })
+    expect(cli.dependencies).toMatchObject(cli.cordisxSources as Record<string, unknown>)
     expect(cli).toMatchObject({
       name: 'cordisx',
       version: '0.1.0-beta.2',
