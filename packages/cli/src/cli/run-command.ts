@@ -9,15 +9,11 @@ import { createRequire } from 'node:module'
 import os from 'node:os'
 import { mkdtemp, rm } from 'node:fs/promises'
 import type { ChildProcess } from 'node:child_process'
-import { resolveHostAdapter } from '../adapters/registry.js'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
 import {
   ensureCordisXHomeDirectory,
-  ensureHomeConfig,
   type HomeConfigIconThemePreference,
-  type HomeConfigPathOptions,
   loadHomeConfig,
-  resolveHomeConfigPath,
 } from '../config/home-config.js'
 import { buildRendererBundle, type BuildRendererBundleOptions } from '../launcher/bundle.js'
 import { CdpPluginLifecycleRuntime, watchAndInject, type WatchInjectionOptions } from '../launcher/cdp.js'
@@ -48,7 +44,6 @@ import {
 } from '../launcher/process.js'
 import { settleInjectedHostCleanup } from './injected-host-cleanup.js'
 import { type CordisXDevInvocation, type CordisXLauncherOptions, parseCordisXCli } from './parse.js'
-import { resolveProfileSelection } from './profiles.js'
 import { ProviderFleet } from '../providers/fleet.js'
 import { resolveLocalCodexProviderConfig } from '../providers/config.js'
 import type { CodexProviderConfig } from '../providers/contracts.js'
@@ -140,107 +135,26 @@ import {
   configuredPluginTopology,
   type CordisXCliRuntime,
   deployBuiltinSkillWithoutOverwritingUserChanges,
-  HELP,
   localDevelopmentHostConfig,
-  ownValue,
   pluginIdentities,
   printPlan,
   providerConfigs,
   recoveredActivation,
   type RendererComposition,
   rootFromConfigPath,
-  runDevelopment,
   runInjectedHost,
   usesIsolatedPackageWorker,
   waitForAbort,
   waitForExit,
   waitForHostExitAfterReadiness,
 } from './run-support.js'
+import { prepareRunCommand } from './run-command-dispatch.js'
 
 export async function runCordisXCli(argv: readonly string[], runtime: CordisXCliRuntime = {}): Promise<void> {
-  const invocation = parseCordisXCli(argv)
-  const stdout = runtime.stdout ?? console.log
-  const cwd = runtime.cwd ?? process.cwd()
-  const environment = runtime.env ?? process.env
-  const homeConfigOptions: HomeConfigPathOptions = {
-    env: environment,
-    ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
-  }
-  const configPath = resolveHomeConfigPath(homeConfigOptions)
-
-  if (invocation.action === 'help') {
-    stdout(HELP)
-    return
-  }
-  if (invocation.action === 'setup') {
-    const config = await ensureHomeConfig(homeConfigOptions)
-    stdout(`[cordisx] configuration ready: ${configPath}`)
-    stdout(JSON.stringify(config, null, 2))
-    return
-  }
-  if (invocation.action === 'config') {
-    const config = await ensureHomeConfig(homeConfigOptions)
-    stdout(`[cordisx] configuration: ${configPath}`)
-    stdout(JSON.stringify(config, null, 2))
-    return
-  }
-  if (invocation.action === 'dev') {
-    await runDevelopment(invocation, cwd, stdout, environment, configPath, homeConfigOptions, runtime)
-    return
-  }
-
-  const config = await ensureHomeConfig(homeConfigOptions)
-  const appId = invocation.action === 'launch' ? invocation.app ?? config.defaultApp : config.defaultApp
-  const adapter = resolveHostAdapter(appId)
-  if (
-    invocation.action === 'launch' && invocation.options.attach && (
-      invocation.profile !== undefined || invocation.dataMode !== undefined
-    )
-  ) {
-    throw new Error('--attach cannot select or override a named profile')
-  }
-  if (invocation.action === 'launch' && invocation.options.system) {
-    const app = ownValue(config.apps, appId)
-    if (app === undefined) throw new Error(`host app is not configured: ${appId}`)
-    const profileId = invocation.profile ?? app.defaultProfile
-    const mode = invocation.dataMode ?? ownValue(app.profiles, profileId)?.dataMode ?? 'shared'
-    if (mode === 'host-isolated') throw new Error('--system cannot enforce a host-isolated profile')
-  }
-  const selection = await resolveProfileSelection({
-    config,
-    configPath,
-    appId,
-    ...(invocation.action === 'launch' && invocation.profile !== undefined
-      ? { profileId: invocation.profile }
-      : {}),
-    ...(invocation.action === 'launch' && invocation.dataMode !== undefined
-      ? { dataMode: invocation.dataMode }
-      : {}),
-  })
-
-  if (invocation.action === 'doctor') {
-    try {
-      const plan = await adapter.resolveLaunchPlan({
-        cordisxHomeDir: rootFromConfigPath(configPath),
-        profileId: selection.profileId,
-        dataMode: selection.dataMode,
-      })
-      printPlan(plan, stdout)
-    } catch (error) {
-      stdout(JSON.stringify(
-        {
-          status: 'unavailable',
-          appId,
-          profileId: selection.profileId,
-          dataMode: selection.dataMode,
-          diagnostic: error instanceof Error ? error.message : String(error),
-        },
-        null,
-        2,
-      ))
-    }
-    return
-  }
+  const parsedInvocation = parseCordisXCli(argv)
+  const prepared = await prepareRunCommand(parsedInvocation, runtime)
+  if (prepared === undefined) return
+  const { invocation, stdout, environment, configPath, selection, adapter, appId } = prepared
 
   const certifiedPermissionAuthority = await LauncherMarketplaceCertifiedAuthority.open({
     homeDir: rootFromConfigPath(configPath),

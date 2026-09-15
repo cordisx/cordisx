@@ -3,7 +3,6 @@ import type { Context } from '@deepseek-ai/cordis'
 export const inject = ['i18n', 'slots', 'pages', 'routes', 'managerContent', 'platform', 'managedServices']
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cordisxManagedServiceUIFixtures:
     | {
       readonly i18n: Context['i18n']

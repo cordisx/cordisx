@@ -48,9 +48,7 @@ interface AvailableServiceDescriptor {
 }
 
 declare global {
-  // eslint-disable-next-line no-var
   var __cordisxManagedServiceUIRequestV1: Binding | undefined
-  // eslint-disable-next-line no-var
   var __cordisxManagedServiceUIReceiveV1: ((payload: string) => void) | undefined
 }
 

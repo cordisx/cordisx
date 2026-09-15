@@ -46,6 +46,10 @@ describe('npm workspace boundary', () => {
       })
         .filter(([name]) => name !== '@vitejs/plugin-react' && name !== 'vite'),
     ))
+    expect(root.overrides).toEqual({
+      '@cordisx/channel': root.dependencies['@cordisx/channel'],
+      '@cordisx/plugin-cli-proxy-api': root.dependencies['@cordisx/plugin-cli-proxy-api'],
+    })
     expect(cli).toMatchObject({
       name: 'cordisx',
       version: '0.1.0-beta.2',

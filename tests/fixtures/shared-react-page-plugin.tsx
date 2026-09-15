@@ -16,11 +16,8 @@ import {
 import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from '../../packages/cli/src/contracts.js'
 
 declare global {
-  // eslint-disable-next-line no-var
   var __sharedReactPluginReact: typeof React | undefined
-  // eslint-disable-next-line no-var
   var __sharedReactEffectMounts: number | undefined
-  // eslint-disable-next-line no-var
   var __sharedReactEffectCleanups: number | undefined
 }
 

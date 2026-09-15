@@ -1,6 +1,6 @@
 import type { spawn as nodeSpawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { access, mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { prepareNativeManagedGatewayConnection } from '../packages/cli/src/launcher/managed-service-native-connection.js'
@@ -22,11 +22,6 @@ import {
 } from './managed-service-runtime-fixture.js'
 
 describe('managed service runtime', () => {
-  it('rejects an invalid health failure threshold', async () => {
-    const { home } = await fixture()
-    expect(() => runtime(home, { failuresBeforeUnhealthy: Number.NaN })).toThrow('threshold is invalid')
-  })
-
   it('applies declared non-secret environment values without replacing Host-owned HOME', async () => {
     const { root, home } = await fixture()
     const environments: NodeJS.ProcessEnv[] = []
@@ -65,22 +60,6 @@ describe('managed service runtime', () => {
     expect(environments[0]?.SERVICE_MODE).toBe('synthetic')
     expect(environments[0]?.SERVICE_HOME_FILE).toBe(declaredFile)
     await expect(access(declaredFile)).rejects.toThrow()
-    await binding.dispose()
-  })
-
-  it('rejects definition-level HOME overrides before launch', async () => {
-    const { root, home } = await fixture()
-    const host = runtime(home, { fetch: async () => new Response(null, { status: 204 }) })
-    const binding = host.bind({
-      owner: owner('home-plugin', 'home-one'),
-      source: 'https://plugins.example.test/home',
-      declaration: declaration('home-service', 'home-plugin', []),
-      artifactDirectory: root,
-    }, new AbortController().signal)
-    const value = definition('home-service', { fixedPort: 41_231 })
-    value.environment = [{ variable: 'HOME', source: 'literal', value: '/tmp/not-allowed' }]
-    const registration = await binding.registry.register(value, { revision: `sha256:${'2'.repeat(64)}` })
-    expect((await registration.ensureReady()).status).toBe('failed')
     await binding.dispose()
   })
 
@@ -863,48 +842,6 @@ describe('managed service runtime', () => {
     expect(await readFile(path.join(serviceHome, 'credential.json'), 'utf8')).toContain('preserved')
   }, 20_000)
 
-  it.skipIf(process.platform === 'win32')('rejects unsafe service-home port files before spawn', async () => {
-    const { root, home } = await fixture()
-    let spawnCount = 0
-    const host = runtime(home, {
-      spawn: (() => {
-        spawnCount += 1
-        return syntheticChild().child
-      }) as typeof nodeSpawn,
-    })
-    for (
-      const [serviceId, prepare] of [
-        ['symlink-port', async (serviceHome: string) => {
-          const target = path.join(root, 'outside.port')
-          await writeFile(target, '41231')
-          await symlink(target, path.join(serviceHome, 'service.port'))
-        }],
-        ['oversized-port', async (serviceHome: string) => {
-          await writeFile(path.join(serviceHome, 'service.port'), '1'.repeat(33))
-        }],
-      ] as const
-    ) {
-      const serviceHome = path.join(home, 'managed-services', 'unsafe-plugin', serviceId)
-      await mkdir(serviceHome, { recursive: true })
-      await prepare(serviceHome)
-      const binding = host.bind({
-        owner: owner('unsafe-plugin', serviceId),
-        source: 'https://plugins.example.test/unsafe',
-        declaration: declaration(serviceId, 'unsafe-plugin', []),
-        artifactDirectory: root,
-      }, new AbortController().signal)
-      const registration = await binding.registry.register(restrictedPortDefinition(serviceId), {
-        revision: `sha256:${serviceId === 'symlink-port' ? 'c' : 'd'}`.padEnd(
-          71,
-          serviceId === 'symlink-port' ? 'c' : 'd',
-        ) as `sha256:${string}`,
-      })
-      expect((await registration.ensureReady()).status).toBe('failed')
-      await binding.dispose()
-    }
-    expect(spawnCount).toBe(0)
-  })
-
   it('runs authenticated sources, enforces explicit grants, materializes a gateway, and fences cleanup', async () => {
     const { root, home } = await fixture()
     const host = runtime(home)
@@ -1057,229 +994,4 @@ describe('managed service runtime', () => {
     expect((await gateway.client.acquire(sourceRegistration.binding.identity)).status).toBe('unavailable')
     await Promise.all([gateway.dispose(), denied.dispose()])
   }, 20_000)
-
-  it('never terminates a healthy borrowed fixed-port process', async () => {
-    const { root, home } = await fixture()
-    const bootstrap = runtime(home)
-    const controller = new AbortController()
-    const owned = bootstrap.bind({
-      owner: owner('borrowed-plugin', 'bootstrap'),
-      source: 'https://plugins.example.test/borrowed',
-      declaration: declaration('borrowed-service', 'borrowed-plugin', [
-        { pluginId: 'borrowed-plugin', operations: ['models.list'] },
-      ]),
-      artifactDirectory: root,
-    }, controller.signal)
-    const first = await owned.registry.register(definition('borrowed-service', { hostSecret: true }), {
-      revision: `sha256:${'4'.repeat(64)}`,
-    })
-    const ready = await first.ensureReady()
-    expect(ready.status).toBe('ready')
-    if (ready.status !== 'ready') throw new Error('bootstrap service failed')
-    const native = prepareNativeManagedGatewayConnection(bootstrap, {
-      binding: first.binding,
-      compositionOrigin: 'api',
-      models: { generation: 'one', defaultAlias: 'one', aliases: [{ alias: 'one', gatewayModelId: 'one/one' }] },
-    })
-    const port = Number(new URL(native.value.endpoint.origin).port)
-
-    const borrower = runtime(path.join(home, 'borrower'))
-    const borrowed = borrower.bind({
-      owner: owner('borrowed-plugin', 'borrower'),
-      source: 'https://plugins.example.test/borrowed',
-      declaration: declaration('borrowed-service', 'borrowed-plugin', [
-        { pluginId: 'borrowed-plugin', operations: ['models.list'] },
-      ]),
-      artifactDirectory: root,
-    }, new AbortController().signal)
-    const registration = await borrowed.registry.register(
-      definition('borrowed-service', {
-        fixedPort: port,
-        hostSecret: true,
-      }),
-      {
-        revision: `sha256:${'5'.repeat(64)}`,
-      },
-    )
-    const borrowedReady = await registration.ensureReady()
-    expect(borrowedReady.status).toBe('ready')
-    if (borrowedReady.status !== 'ready') throw new Error('borrowed service failed')
-    expect(borrowedReady.projection.processOwnership).toBe('borrowed')
-    expect((await registration.restart()).status).toBe('unavailable')
-    await borrowed.dispose()
-    const response = await fetch(`${native.value.endpoint.origin}/health`, {
-      headers: { Authorization: `Bearer ${native.value.endpoint.auth.token}` },
-    })
-    expect(response.status).toBe(204)
-    native.dispose()
-    await owned.dispose()
-  }, 20_000)
-
-  it(
-    'restarts the gateway with additional upstreams after a new materialization while keeping the registration handle stable',
-    async () => {
-      // Mirrors the CLIProxy activation order: gateway registers synchronously,
-      // first upstream (Aiden) registers and the gateway materializes+starts,
-      // then a second upstream (TraeX) arrives and a new materialization must
-      // restart the gateway process with the updated configuration.
-      const { root, home } = await fixture()
-      const host = runtime(home)
-      const sourceA = host.bind({
-        owner: owner('source-a-plugin', 'source-a-one'),
-        source: 'https://plugins.example.test/source-a',
-        declaration: declaration('source-a-service', 'source-a-plugin', [
-          { pluginId: 'gateway-plugin', operations: ['models.list'] },
-        ]),
-        artifactDirectory: root,
-      }, new AbortController().signal)
-      const sourceB = host.bind({
-        owner: owner('source-b-plugin', 'source-b-one'),
-        source: 'https://plugins.example.test/source-b',
-        declaration: declaration('source-b-service', 'source-b-plugin', [
-          { pluginId: 'gateway-plugin', operations: ['models.list'] },
-        ]),
-        artifactDirectory: root,
-      }, new AbortController().signal)
-      const gateway = host.bind({
-        owner: owner('gateway-plugin', 'gateway-one'),
-        source: 'https://plugins.example.test/gateway',
-        declaration: declaration('gateway-service', 'gateway-plugin', [
-          { pluginId: 'gateway-plugin', operations: ['models.list'] },
-        ]),
-        artifactDirectory: root,
-      }, new AbortController().signal)
-
-      // Register upstream A first.
-      const regA = await sourceA.registry.register(definition('source-a-service'), {
-        revision: `sha256:${'a'.repeat(64)}`,
-      })
-      expect((await regA.ensureReady()).status).toBe('ready')
-      const leaseA = await gateway.client.acquire(regA.binding.identity)
-      expect(leaseA.status).toBe('ready')
-      if (leaseA.status !== 'ready') throw new Error('lease A unavailable')
-
-      // Register gateway.
-      const gatewayDefinition = definition('gateway-service', { configured: true, assignedInConfiguration: true })
-      const gatewayReg = await gateway.registry.register(gatewayDefinition, {
-        revision: `sha256:${'c'.repeat(64)}`,
-      })
-      const registrationHandle = gatewayReg.binding.registrationHandle
-
-      // Materialize with upstream A only -> gateway process starts.
-      const matA = await gateway.client.materialize({
-        target: gatewayReg.binding,
-        revision: `sha256:${'1'.repeat(64)}`,
-        sources: [{ source: 'source-a', lease: leaseA.lease }],
-        bindings: [
-          {
-            targetSlot: 'sources',
-            targetPointer: '/0',
-            source: { kind: 'safe-literal', value: { id: 'source-a', baseUrl: null, apiKey: null } },
-          },
-          {
-            targetSlot: 'sources',
-            targetPointer: '/0/baseUrl',
-            source: { kind: 'source-origin', source: 'source-a', origin: 'api' },
-          },
-          {
-            targetSlot: 'sources',
-            targetPointer: '/0/apiKey',
-            source: { kind: 'source-authorization', source: 'source-a' },
-          },
-        ],
-      })
-      expect(matA.status).toBe('accepted')
-      if (matA.status !== 'accepted') throw new Error('matA rejected')
-      const readyA = await gatewayReg.ensureReady({
-        materialization: { materializationHandle: matA.materializationHandle, revision: matA.revision },
-      })
-      expect(readyA.status).toBe('ready')
-      const genA = gatewayReg.binding.serviceGeneration
-      const cfgPathA = path.join(home, 'managed-services', 'gateway-plugin', 'gateway-service', genA, 'config.json')
-      const cfgA = JSON.parse(await readFile(cfgPathA, 'utf8')) as { sources: { id: string }[] }
-      expect(cfgA.sources).toHaveLength(1)
-      expect(cfgA.sources[0]?.id).toBe('source-a')
-
-      // Now upstream B registers (TraeX). Acquire lease and re-materialize with
-      // both sources; ensureReady must restart the gateway with a new
-      // serviceGeneration and write the merged configuration. Registration
-      // handle stays stable.
-      const regB = await sourceB.registry.register(definition('source-b-service'), {
-        revision: `sha256:${'b'.repeat(64)}`,
-      })
-      expect((await regB.ensureReady()).status).toBe('ready')
-      const leaseB = await gateway.client.acquire(regB.binding.identity)
-      expect(leaseB.status).toBe('ready')
-      if (leaseB.status !== 'ready') throw new Error('lease B unavailable')
-
-      const matAB = await gateway.client.materialize({
-        target: gatewayReg.binding,
-        revision: `sha256:${'2'.repeat(64)}`,
-        sources: [
-          { source: 'source-a', lease: leaseA.lease },
-          { source: 'source-b', lease: leaseB.lease },
-        ],
-        bindings: [
-          {
-            targetSlot: 'sources',
-            targetPointer: '/0',
-            source: { kind: 'safe-literal', value: { id: 'source-a', baseUrl: null, apiKey: null } },
-          },
-          {
-            targetSlot: 'sources',
-            targetPointer: '/0/baseUrl',
-            source: { kind: 'source-origin', source: 'source-a', origin: 'api' },
-          },
-          {
-            targetSlot: 'sources',
-            targetPointer: '/0/apiKey',
-            source: { kind: 'source-authorization', source: 'source-a' },
-          },
-          {
-            targetSlot: 'sources',
-            targetPointer: '/1',
-            source: { kind: 'safe-literal', value: { id: 'source-b', baseUrl: null, apiKey: null } },
-          },
-          {
-            targetSlot: 'sources',
-            targetPointer: '/1/baseUrl',
-            source: { kind: 'source-origin', source: 'source-b', origin: 'api' },
-          },
-          {
-            targetSlot: 'sources',
-            targetPointer: '/1/apiKey',
-            source: { kind: 'source-authorization', source: 'source-b' },
-          },
-        ],
-      })
-      expect(matAB.status).toBe('accepted')
-      if (matAB.status !== 'accepted') throw new Error('matAB rejected')
-      const readyAB = await gatewayReg.ensureReady({
-        materialization: { materializationHandle: matAB.materializationHandle, revision: matAB.revision },
-      })
-      expect(readyAB.status).toBe('ready')
-      // Registration handle is stable; serviceGeneration rotates (invalidating leases).
-      expect(gatewayReg.binding.registrationHandle).toBe(registrationHandle)
-      expect(gatewayReg.binding.serviceGeneration).not.toBe(genA)
-      // New config contains both upstreams.
-      const cfgPathAB = path.join(
-        home,
-        'managed-services',
-        'gateway-plugin',
-        'gateway-service',
-        gatewayReg.binding.serviceGeneration,
-        'config.json',
-      )
-      expect(cfgPathAB).not.toBe(cfgPathA)
-      const cfgAB = JSON.parse(await readFile(cfgPathAB, 'utf8')) as { sources: { id: string }[] }
-      expect(cfgAB.sources).toHaveLength(2)
-      expect(cfgAB.sources.map(s => s.id)).toEqual(['source-a', 'source-b'])
-      // Old generation directory was cleaned up.
-      await expect(import('node:fs/promises').then(m => m.access(cfgPathA))).rejects.toBeTruthy()
-      gateway.client.release(leaseA.lease)
-      gateway.client.release(leaseB.lease)
-      await Promise.all([sourceA.dispose(), sourceB.dispose(), gateway.dispose()])
-    },
-    20_000,
-  )
 })

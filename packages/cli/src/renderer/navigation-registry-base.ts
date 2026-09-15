@@ -115,13 +115,13 @@ import type {
 import { buildPath, matchPath, routeParameters, sameRouteParams } from './navigation-model.js'
 import { assertKeys, pageChromeButton, STANDARD_PAGE_CLIP_PATH } from './navigation-pages.js'
 import type { ManagerSettingsNavigationRouteResolution, ManagerSettingsRouteResolution } from './navigation-pages.js'
+import { projectNavigationProductMetadata } from './navigation-metadata.js'
 
 export class NavigationRegistryBase {
   protected readonly records = new Map<string, RouteRecord>()
   protected readonly states = new Map<string, OutletNavigationState>()
   protected readonly listeners = new Set<() => void>()
   readonly managerContent: ManagerContentNavigationRegistry
-  /** Host-protected page mount lifecycle; no plugin receives this registry directly. */
   /** Host-protected page mount lifecycle; no plugin receives this registry directly. */
   readonly pageAdmissionBindings: PageAdmissionBindingRegistry
   protected pageComposerAdapterFactory: PageComposerAdapterFactory | undefined
@@ -177,30 +177,7 @@ export class NavigationRegistryBase {
     description: CordisXPageMetadata['description'] | undefined,
     sites: Map<string, string>,
   ): NavigationProductMetadata {
-    const diagnostics: NavigationMetadataDiagnostic[] = []
-    const project = (
-      field: 'title' | 'description',
-      value: CordisXPageMetadata['title'] | undefined,
-    ): string | undefined => {
-      if (value === undefined) {
-        diagnostics.push(Object.freeze({
-          code: `metadata.missing-${field}`,
-          field,
-          message: `${kind} ${qualifiedId} should declare localized ${field} metadata`,
-        }) as NavigationMetadataDiagnostic)
-        return undefined
-      }
-      const site = `navigation:${kind}:${qualifiedId}:${field}`
-      sites.set(site, owner)
-      return this.i18n.resolveFor(owner, value, site).text
-    }
-    const projectedTitle = project('title', title)
-    const projectedDescription = project('description', description)
-    return Object.freeze({
-      ...(projectedTitle === undefined ? {} : { title: projectedTitle }),
-      ...(projectedDescription === undefined ? {} : { description: projectedDescription }),
-      diagnostics: Object.freeze(diagnostics),
-    })
+    return projectNavigationProductMetadata(this.i18n, kind, owner, qualifiedId, title, description, sites)
   }
 
   protected enqueue(action: () => void | Promise<void>): Promise<void> {

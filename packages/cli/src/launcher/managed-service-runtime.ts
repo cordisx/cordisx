@@ -11,9 +11,6 @@ import type {
 } from '@cordisx/protocol/managed-service-runtime/v1'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { spawn as nodeSpawn } from 'node:child_process'
-import { constants } from 'node:fs'
-import { access, chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import path from 'node:path'
 import { findFreeLoopbackPort } from './process.js'
 import { ManagedServiceSchemaRegistry } from './managed-service-schema.js'
 import type {
@@ -26,8 +23,6 @@ import { ManagedServiceRuntimeBroker } from './managed-service-runtime-broker.js
 import { managedServiceResourceMatchesTarget } from './managed-service-package-resources.js'
 import {
   assertManagedServiceEnvironmentBindings,
-  readManagedRuntimeResource,
-  resolveManagedRuntimeResource,
   resolveManagedServiceEnvironment,
 } from './managed-service-runtime-files.js'
 import {
@@ -38,26 +33,20 @@ import {
 } from './managed-service-runtime-record.js'
 import {
   managedServiceEnvironment,
-  managedServiceGenerationDirectory,
   managedServiceHome,
   runManagedServiceChildAction,
   terminateManagedServiceChild,
 } from './managed-service-process.js'
 import type { ManagedServiceChildTerminationTimeouts } from './managed-service-process.js'
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
+import { ManagedServiceRuntimeProcess } from './managed-service-runtime-process.js'
 import {
   managedBindingCurrent,
   managedDiagnostic,
   managedFailure,
   managedHandle,
   managedIdentityKey,
-  readManagedContainedFile,
-  readManagedResponseBody,
-  setManagedPointer,
 } from './managed-service-runtime-support.js'
 
-const MAX_HEALTH_BODY_BYTES = 64 * 1024
-const MAX_PORT_FILE_BYTES = 32
 export type { ManagedServiceActivationAccess } from './managed-service-runtime-record.js'
 
 export interface ManagedServiceRuntimeOptions {
@@ -112,12 +101,21 @@ export class ManagedServiceRuntime {
   private readonly nativeAuthorities = new Map<string, ManagedServiceRecord>()
   private readonly nativePublications = new ManagedNativeProviderPublications()
   private readonly broker: ManagedServiceRuntimeBroker
+  private readonly process: ManagedServiceRuntimeProcess
 
   constructor(private readonly options: ManagedServiceRuntimeOptions) {
     this.schemas = options.schemas ?? new ManagedServiceSchemaRegistry()
     this.fetch = options.fetch ?? globalThis.fetch
     this.spawn = options.spawn ?? nodeSpawn
     this.findFreePort = options.findFreePort ?? findFreeLoopbackPort
+    this.process = new ManagedServiceRuntimeProcess({
+      fetch: this.fetch,
+      spawn: this.spawn,
+      ...(options.childTerminationTimeouts === undefined
+        ? {}
+        : { childTerminationTimeouts: options.childTerminationTimeouts }),
+      invalidateExitedChild: (record, child) => this.invalidateExitedChild(record, child),
+    })
     const failuresBeforeUnhealthy = options.failuresBeforeUnhealthy ?? 3
     if (!Number.isSafeInteger(failuresBeforeUnhealthy) || failuresBeforeUnhealthy < 1) {
       throw new Error('managed service health failure threshold is invalid')
@@ -568,7 +566,7 @@ export class ManagedServiceRuntime {
     const takeoverBlocked = record.processOwnership === 'borrowed'
     try {
       this.assertOperationActive(record, signal)
-      await this.ensureServiceHome(record)
+      await this.process.ensureServiceHome(record)
       this.assertOperationActive(record, signal)
       await resolveManagedServiceEnvironment(record)
       this.assertOperationActive(record, signal)
@@ -581,9 +579,9 @@ export class ManagedServiceRuntime {
         ? await this.findFreePort()
         : undefined
       this.assertOperationActive(record, signal)
-      const configurationPath = await this.writeConfiguration(record)
+      const configurationPath = await this.process.writeConfiguration(record)
       this.assertOperationActive(record, signal)
-      const discovered = await this.discoverExisting(record, signal)
+      const discovered = await this.process.discoverExisting(record, signal)
       this.assertOperationActive(record, signal)
       if (discovered !== undefined) {
         record.processOwnership = 'borrowed'
@@ -592,7 +590,7 @@ export class ManagedServiceRuntime {
         throw new BorrowedServiceUnavailableError()
       } else {
         record.processOwnership = 'host-owned'
-        record.origin = await this.launch(record, configurationPath, signal)
+        record.origin = await this.process.launch(record, configurationPath, signal)
       }
       this.assertOperationActive(record, signal)
       if (record.state !== 'preparing') throw new Error('managed service readiness was revoked')
@@ -602,7 +600,7 @@ export class ManagedServiceRuntime {
       this.startHealthMonitoring(record)
       return { status: 'ready', projection: this.projection(record) }
     } catch (error) {
-      await Promise.allSettled([this.stopOwned(record), this.removeGenerationDirectory(record)])
+      await Promise.allSettled([this.stopOwned(record), this.process.removeGenerationDirectory(record)])
       this.revokeRuntimeState(record)
       if (record.disposed) return managedFailure('stale-generation', 'disposed', false)
       const cancelled = signal.aborted
@@ -738,7 +736,7 @@ export class ManagedServiceRuntime {
       failures.push(error)
     }
     try {
-      await this.removeGenerationDirectory(record)
+      await this.process.removeGenerationDirectory(record)
     } catch (error) {
       failures.push(error)
     }
@@ -765,9 +763,9 @@ export class ManagedServiceRuntime {
   ): Promise<'authenticated' | 'authentication-required' | 'failed'> {
     this.assertOperationActive(record, signal)
     assertManagedServiceEnvironmentBindings(record)
-    await this.ensureServiceHome(record)
+    await this.process.ensureServiceHome(record)
     this.assertOperationActive(record, signal)
-    const executable = await this.resolveExecutable(record, action.executable)
+    const executable = await this.process.resolveExecutable(record, action.executable)
     this.assertOperationActive(record, signal)
     const exitCode = await runManagedServiceChildAction({
       spawn: this.spawn,
@@ -782,164 +780,6 @@ export class ManagedServiceRuntime {
         : { terminationTimeouts: this.options.childTerminationTimeouts }),
     })
     return action.outcomes.find(outcome => outcome.exitCode === exitCode)?.state ?? 'failed'
-  }
-
-  private async writeConfiguration(record: ManagedServiceRecord): Promise<string | undefined> {
-    const configuration = record.definition.configuration
-    if (configuration === undefined) return undefined
-    const templatePath = await resolveManagedRuntimeResource(record, configuration.template, 'data')
-    const source = await readFile(templatePath, 'utf8')
-    const value = configuration.format === 'json' ? JSON.parse(source) as unknown : parseYaml(source) as unknown
-    for (const binding of record.definition.protectedBindings) {
-      if (binding.target !== 'configuration') continue
-      if (binding.source === 'composition') continue
-      const resolved = binding.source === 'host-assigned-loopback'
-        ? this.serializeAssignedLoopback(record, binding.serialization)
-        : record.secrets.get(binding.slot)
-      if (resolved === undefined) throw new Error('managed service configuration binding is missing')
-      setManagedPointer(value, binding.pointer, resolved)
-    }
-    for (const binding of record.selectedMaterialization?.values ?? []) {
-      if (binding.pointer !== undefined) setManagedPointer(value, binding.pointer, binding.value)
-    }
-    const directory = managedServiceGenerationDirectory(record.serviceHome, record.binding.serviceGeneration)
-    await mkdir(directory, { recursive: true, mode: 0o700 })
-    if (process.platform !== 'win32') await chmod(directory, 0o700)
-    const file = path.join(directory, configuration.format === 'json' ? 'config.json' : 'config.yaml')
-    const bytes = configuration.format === 'json' ? `${JSON.stringify(value, null, 2)}\n` : stringifyYaml(value)
-    await writeFile(file, bytes, { mode: 0o600 })
-    return file
-  }
-
-  private serializeAssignedLoopback(
-    record: ManagedServiceRecord,
-    serialization: 'origin' | 'authority' | 'host' | 'port',
-  ): string | number {
-    const port = record.assignedPort
-    if (port === undefined) throw new Error('managed service loopback port is not assigned')
-    if (serialization === 'port') return port
-    if (serialization === 'host') return '127.0.0.1'
-    if (serialization === 'authority') return `127.0.0.1:${port}`
-    return `http://127.0.0.1:${port}`
-  }
-
-  private async discoverExisting(record: ManagedServiceRecord, signal?: AbortSignal): Promise<string | undefined> {
-    let port: number | undefined
-    if (record.definition.discovery.kind === 'fixed-loopback') port = record.definition.discovery.port
-    if (record.definition.discovery.kind === 'restricted-port-file') port = await this.readRestrictedPort(record)
-    if (port === undefined) return undefined
-    const origin = `http://127.0.0.1:${port}`
-    return await this.healthy(record, origin, signal).catch(() => false) ? origin : undefined
-  }
-
-  private async readRestrictedPort(record: ManagedServiceRecord): Promise<number | undefined> {
-    if (record.definition.discovery.kind !== 'restricted-port-file') return undefined
-    const bytes = await (record.definition.discovery.root === 'package'
-      ? readManagedRuntimeResource(record, record.definition.discovery.file, 'data', MAX_PORT_FILE_BYTES)
-      : readManagedContainedFile(
-        record.serviceHome,
-        record.definition.discovery.file,
-        MAX_PORT_FILE_BYTES,
-      )).catch((error: NodeJS.ErrnoException) => {
-        if (error.code === 'ENOENT') return undefined
-        throw error
-      })
-    if (bytes === undefined) return undefined
-    const port = Number(bytes.toString('utf8').trim())
-    return Number.isSafeInteger(port) && port > 0 && port < 65_536 ? port : undefined
-  }
-
-  private async launch(
-    record: ManagedServiceRecord,
-    configurationPath: string | undefined,
-    signal: AbortSignal,
-  ): Promise<string> {
-    assertManagedServiceEnvironmentBindings(record)
-    const port = record.definition.discovery.kind === 'host-assigned-loopback'
-      ? record.assignedPort
-      : record.definition.discovery.kind === 'fixed-loopback'
-      ? record.definition.discovery.port
-      : undefined
-    const executable = await this.resolveExecutable(record, record.definition.launch.executable)
-    const arguments_ = record.definition.launch.arguments.map(argument => {
-      if (typeof argument === 'string') return argument
-      if (port === undefined) throw new Error('managed service port is not assigned')
-      if (argument.serialization === 'port') return String(port)
-      if (argument.serialization === 'authority') return `127.0.0.1:${port}`
-      return `http://127.0.0.1:${port}`
-    })
-    if (configurationPath !== undefined && record.definition.configuration !== undefined) {
-      arguments_.push(record.definition.configuration.delivery.argument, configurationPath)
-    }
-    const serviceHome = record.serviceHome
-    const environment = record.environment
-    for (const binding of record.definition.protectedBindings) {
-      if (binding.target !== 'environment') continue
-      const value = record.secrets.get(binding.slot)
-      if (typeof value !== 'string') throw new Error('managed service environment binding must be a string')
-      environment[binding.variable] = value
-    }
-    const child = this.spawn(executable, arguments_, {
-      cwd: record.access.artifactDirectory,
-      env: environment,
-      stdio: 'ignore',
-      detached: process.platform !== 'win32',
-    })
-    record.child = child
-    let childError: Error | undefined
-    child.on('error', error => {
-      childError = error
-      this.invalidateExitedChild(record, child)
-    })
-    child.once('exit', () => this.invalidateExitedChild(record, child))
-    const deadline = Date.now() + record.definition.launch.startupTimeoutMs
-    while (Date.now() < deadline) {
-      this.assertOperationActive(record, signal)
-      if (childError !== undefined) throw childError
-      if (child.exitCode !== null || child.signalCode !== null) throw new Error('managed service exited during startup')
-      const discoveredPort = port ?? await this.readRestrictedPort(record)
-      if (discoveredPort !== undefined) {
-        const origin = `http://127.0.0.1:${discoveredPort}`
-        if (await this.healthy(record, origin, signal).catch(() => false)) {
-          this.assertOperationActive(record, signal)
-          if (childError !== undefined || record.child !== child) {
-            throw childError ?? new Error('managed service exited')
-          }
-          return origin
-        }
-      }
-      await new Promise(resolve => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))))
-    }
-    throw new Error('managed service startup timed out')
-  }
-
-  private async resolveExecutable(
-    record: ManagedServiceRecord,
-    executable: ManagedServiceDefinitionV1['launch']['executable'],
-  ): Promise<string> {
-    if (executable.kind === 'named-command') return executable.command
-    const file = await resolveManagedRuntimeResource(record, executable.path, 'executable')
-    await access(file, process.platform === 'win32' ? constants.F_OK : constants.X_OK)
-    return file
-  }
-
-  private async healthy(record: ManagedServiceRecord, origin: string, signal?: AbortSignal): Promise<boolean> {
-    const timeout = AbortSignal.timeout(record.definition.health.timeoutMs)
-    const response = await this.fetch(new URL(record.definition.health.path, origin), {
-      method: 'GET',
-      headers: this.authorizationHeaders(record),
-      signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]),
-    })
-    const healthy = response.ok
-    await readManagedResponseBody(response, MAX_HEALTH_BODY_BYTES)
-    return healthy
-  }
-
-  private authorizationHeaders(record: ManagedServiceRecord): Record<string, string> {
-    if (record.definition.httpAuthentication.mode === 'none') return {}
-    const value = record.secrets.get(record.definition.httpAuthentication.slot)
-    if (value === undefined) throw new Error('managed service authorization is unavailable')
-    return { Authorization: `${record.definition.httpAuthentication.scheme} ${value}` }
   }
 
   private invalidateExitedChild(
@@ -990,7 +830,7 @@ export class ManagedServiceRuntime {
       ) {
         return
       }
-      const healthy = await this.healthy(record, origin, signal).catch(() => false)
+      const healthy = await this.process.healthy(record, origin, signal).catch(() => false)
       if (
         signal.aborted || record.disposed || record.binding.serviceGeneration !== generation || record.state !== 'ready'
       ) {
@@ -1061,7 +901,7 @@ export class ManagedServiceRuntime {
   ): Promise<ManagedServiceControlResultV1> {
     await this.stopOwned(record)
     this.assertOperationActive(record, signal)
-    await this.removeGenerationDirectory(record)
+    await this.process.removeGenerationDirectory(record)
     this.assertOperationActive(record, signal)
     this.revokeRuntimeState(record)
     record.binding = Object.freeze({
@@ -1149,22 +989,12 @@ export class ManagedServiceRuntime {
       this.registrations.delete(record.registrationHandle)
     }
     try {
-      await this.removeGenerationDirectory(record)
+      await this.process.removeGenerationDirectory(record)
     } catch (error) {
       failures.push(error)
     }
     if (failures.length === 1) throw failures[0]
     if (failures.length > 1) throw new AggregateError(failures, 'managed service disposal failed')
     return { status: 'accepted', projection: this.projection(record) }
-  }
-
-  private async ensureServiceHome(record: ManagedServiceRecord): Promise<void> {
-    await mkdir(record.serviceHome, { recursive: true, mode: 0o700 })
-    if (process.platform !== 'win32') await chmod(record.serviceHome, 0o700)
-  }
-
-  private async removeGenerationDirectory(record: ManagedServiceRecord): Promise<void> {
-    const directory = managedServiceGenerationDirectory(record.serviceHome, record.binding.serviceGeneration)
-    await rm(directory, { recursive: true, force: true })
   }
 }
