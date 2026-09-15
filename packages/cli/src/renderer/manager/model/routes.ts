@@ -1,7 +1,14 @@
 import type { CordisXRouteReference } from '../../../contracts.js'
 import type { CordisXPermissionCapabilityV4 } from '../../../permission-contracts.js'
 
-export type ManagerPrimaryPage = 'plugins' | 'plugin-bundles' | 'extension-points' | 'routes' | 'marketplace' | 'about'
+export type ManagerPrimaryPage =
+  | 'plugins'
+  | 'plugin-bundles'
+  | 'extension-points'
+  | 'routes'
+  | 'marketplace'
+  | 'about'
+  | 'model-services'
 export type PluginDetailPage = 'readme' | 'config' | 'permissions' | 'runtime' | 'logs' | 'extension-points' | 'routes'
 export type PluginBundleDetailPage = 'readme' | 'members' | 'permissions' | 'relations' | 'records'
 

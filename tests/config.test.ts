@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -223,15 +224,13 @@ describe('loadConfig', () => {
       enabled: true,
       config: {},
       manifest: {
-        schemaVersion: 13,
+        schemaVersion: 14,
         capabilities: expect.arrayContaining([
           expect.objectContaining({ name: 'tasks.create', scope: { runtime: 'exact-request' } }),
           expect.objectContaining({ name: 'turns.submit', scope: { runtime: 'exact-request' } }),
         ]),
       },
     })
-    expect(config.plugins[0]?.entry).toMatch(
-      /node_modules\/@cordisx\/plugin-cli-proxy-api\/dist\/runtime\/module\.js$/,
-    )
+    expect(config.plugins[0]?.entry).toBe(createRequire(import.meta.url).resolve('@cordisx/plugin-cli-proxy-api'))
   })
 })

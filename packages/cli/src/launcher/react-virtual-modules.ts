@@ -8,6 +8,7 @@ export const CORDISX_REACT_MODULE = 'cordisx/react'
 export const CORDISX_REACT_JSX_RUNTIME_MODULE = 'cordisx/react/jsx-runtime'
 export const CORDISX_REACT_JSX_DEV_RUNTIME_MODULE = 'cordisx/react/jsx-dev-runtime'
 export const CORDISX_UI_MODULE = 'cordisx/ui'
+export const CORDISX_MANAGED_SERVICE_UI_MODULE = '@cordisx/protocol/managed-service-ui/v1'
 
 const REACT_EXPORTS = [
   'Activity',
@@ -62,7 +63,9 @@ const UI_EXPORTS = [
   'AgentAvatar',
   'Button',
   'Card',
+  'Disclosure',
   'EmptyState',
+  'FieldList',
   'FilterToolbar',
   'Heading',
   'HorizontalSplitPane',
@@ -75,6 +78,7 @@ const UI_EXPORTS = [
   'Select',
   'SelectionRail',
   'Stack',
+  'StatusBadge',
   'Text',
 ] as const
 
@@ -147,6 +151,7 @@ export function cordisXSharedModuleSource(id: string): string {
   if (id === CORDISX_REACT_JSX_RUNTIME_MODULE) return jsxRuntimeModule(false)
   if (id === CORDISX_REACT_JSX_DEV_RUNTIME_MODULE) return jsxRuntimeModule(true)
   if (id === CORDISX_UI_MODULE) return uiModule()
+  if (id === CORDISX_MANAGED_SERVICE_UI_MODULE) return 'export {}'
   throw new Error(`unsupported CordisX virtual module: ${id}`)
 }
 
@@ -172,6 +177,10 @@ export function cordisXReactVirtualModules(entry: string): Plugin {
         }
       })
       build.onResolve({ filter: /^cordisx\/contracts$/ }, () => ({ path: CONTRACTS_MODULE_PATH }))
+      build.onResolve({ filter: /^@cordisx\/protocol\/managed-service-ui\/v1$/ }, args => ({
+        path: args.path,
+        namespace: 'cordisx-shared-react',
+      }))
       build.onResolve({ filter: /^cordisx\/(react(\/jsx-(dev-)?runtime)?|ui)$/ }, args => ({
         path: args.path,
         namespace: 'cordisx-shared-react',

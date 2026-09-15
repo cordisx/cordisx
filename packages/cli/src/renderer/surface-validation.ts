@@ -1,7 +1,8 @@
 import { Context, type Effect, Service } from '@deepseek-ai/cordis'
-import type { ManagerSettingsNavigationSurfaceProvenanceV2 } from '@cordisx/protocol/manager-settings-navigation/v2'
+import type { ManagerSettingsNavigationSurfaceProvenanceV3 } from '@cordisx/protocol/manager-settings-navigation/v3'
 import {
   CORDISX_IMPLEMENTED_SURFACE_NAMES,
+  CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V11,
   CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9,
   CORDISX_SURFACE_NAMES,
   type CordisXCommandReference,
@@ -101,6 +102,8 @@ export const CORDISX_HOST_ICON_TOKENS = [
   'host:info',
   'host:layers',
   'host:link',
+  'host:loader',
+  'host:log-in',
   'host:marketplace',
   'host:people',
   'host:more',
@@ -130,7 +133,7 @@ export interface SurfaceRecord {
   readonly controlLease?: CordisXExtensionPointControlLease & { dispose(): void }
   options: CordisXContributionOptions
   item: unknown
-  readonly managerSettingsNavigationSurfaceProvenance?: ManagerSettingsNavigationSurfaceProvenanceV2
+  readonly managerSettingsNavigationSurfaceProvenance?: ManagerSettingsNavigationSurfaceProvenanceV3
   validationError?: string
   rendered: boolean
 }
@@ -143,7 +146,7 @@ export interface SurfaceContributionSnapshot {
   readonly group: string
   readonly order: number
   readonly item: unknown
-  readonly managerSettingsNavigationSurfaceProvenance?: ManagerSettingsNavigationSurfaceProvenanceV2
+  readonly managerSettingsNavigationSurfaceProvenance?: ManagerSettingsNavigationSurfaceProvenanceV3
   readonly visible: boolean
   readonly authorized: boolean
   readonly pointPolicy: 'inherit' | 'allow' | 'deny'
@@ -401,7 +404,7 @@ export function managerSettingsNavigationSurfaceProvenance(
     readonly schemaVersion?: unknown
   }>,
   item: unknown,
-): ManagerSettingsNavigationSurfaceProvenanceV2 | undefined {
+): ManagerSettingsNavigationSurfaceProvenanceV3 | undefined {
   if (options.name !== 'manager.settings.navigation-items') return undefined
   const hasSchema = options.$schema !== undefined
   const hasVersion = options.schemaVersion !== undefined
@@ -413,18 +416,31 @@ export function managerSettingsNavigationSurfaceProvenance(
     : undefined
   if (!hasSchema) {
     if (navigationGroup !== undefined) {
-      throw new Error('manager settings navigationGroup requires the exact surface-contribution.v9 identity')
+      throw new Error('manager settings navigationGroup requires an accepted exact surface contribution identity')
     }
     return Object.freeze({ kind: 'legacy-unversioned' })
   }
-  if (options.$schema !== CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9 || options.schemaVersion !== 9) {
-    throw new Error('manager.settings.navigation-items requires the exact surface-contribution.v9 identity')
+  if (options.$schema === CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9 && options.schemaVersion === 9) {
+    if (
+      navigationGroup !== undefined
+      && (navigationGroup as { readonly id?: unknown }).id === 'external-accounts'
+    ) {
+      throw new Error('manager settings navigationGroup external-accounts requires surface-contribution.v11')
+    }
+    return Object.freeze({
+      kind: 'versioned',
+      $schema: CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9,
+      schemaVersion: 9,
+    })
   }
-  return Object.freeze({
-    kind: 'versioned',
-    $schema: CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9,
-    schemaVersion: 9,
-  })
+  if (options.$schema === CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V11 && options.schemaVersion === 11) {
+    return Object.freeze({
+      kind: 'versioned',
+      $schema: CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V11,
+      schemaVersion: 11,
+    })
+  }
+  throw new Error('manager.settings.navigation-items requires an accepted exact surface contribution identity')
 }
 
 export function validateItem(surface: CordisXSurfaceName, item: unknown): unknown {
@@ -667,7 +683,11 @@ export function validateItem(surface: CordisXSurfaceName, item: unknown): unknow
         || Array.isArray(navigation.navigationGroup)
       ) throw new Error('manager settings navigationGroup must be an object')
       assertKeys(navigation.navigationGroup, ['id'], 'manager settings navigationGroup')
-      if (!['resources', 'development', 'collaboration', 'other'].includes(navigation.navigationGroup.id)) {
+      if (
+        !['resources', 'development', 'collaboration', 'external-accounts', 'other'].includes(
+          navigation.navigationGroup.id,
+        )
+      ) {
         throw new Error(`manager settings navigationGroup ${String(navigation.navigationGroup.id)} is unknown`)
       }
     }

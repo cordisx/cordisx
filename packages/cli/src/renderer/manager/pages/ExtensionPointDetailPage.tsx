@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Select } from 'tdesign-react'
-import type { ManagerSettingsNavigationProjectionV2 } from '@cordisx/protocol/manager-settings-navigation/v2'
+import type { ManagerSettingsNavigationProjectionV3 } from '@cordisx/protocol/manager-settings-navigation/v3'
 import type { ManagerModel, ManagerSnapshot } from '../../manager.js'
 import { productLocale } from '../../ui-copy.js'
 import { type ManagerTab, ManagerTabs } from '../components/ManagerTabs.js'
@@ -12,7 +12,7 @@ type DiagnosticsLocale = 'zh-CN' | 'en'
 const diagnosticsCopy = {
   'zh-CN': {
     title: '导航分组契约',
-    contract: '支持 Surface contribution v9、manager-settings-navigation-item-v2 和 projection v2。',
+    contract: '支持 Surface contribution v9/v11、manager-settings-navigation-item-v2 和 projection v3。',
     distinction: '插入位置用于确定扩展入口的相对顺序；视觉分组用于组织 Manager 左侧导航，两者互不替代。',
     order: '顺序',
     fallback: '未声明的入口归入',
@@ -25,18 +25,24 @@ const diagnosticsCopy = {
     effectiveGroup: '生效的视觉分组',
     assignment: '分组结果',
     undeclared: '未声明',
-    versioned: 'versioned（精确 v9）',
+    versioned: 'versioned（精确 v9/v11）',
     legacy: 'legacy-unversioned（运行时未声明 schema 版本）',
     assignmentCopy: {
       declared: '使用声明的视觉分组',
       'legacy-fallback': 'legacy-unversioned 注册未声明视觉分组，归入兜底分组',
-      'unassigned-fallback': 'v9 注册未声明视觉分组，归入兜底分组',
+      'unassigned-fallback': 'v9/v11 注册未声明视觉分组，归入兜底分组',
     },
-    groupLabels: { resources: '资源', development: '开发', collaboration: '协作', other: '其他' },
+    groupLabels: {
+      resources: '资源',
+      development: '开发',
+      collaboration: '协作',
+      'external-accounts': '外部账号',
+      other: '其他',
+    },
   },
   en: {
     title: 'Navigation grouping contract',
-    contract: 'Supports surface contribution v9, manager-settings-navigation-item-v2, and projection v2.',
+    contract: 'Supports surface contribution v9/v11, manager-settings-navigation-item-v2, and projection v3.',
     distinction:
       'Insertion groups order extension entries. Visual navigation groups organize the Manager sidebar. They are independent fields.',
     order: 'Order',
@@ -50,14 +56,20 @@ const diagnosticsCopy = {
     effectiveGroup: 'Effective visual group',
     assignment: 'Assignment',
     undeclared: 'Undeclared',
-    versioned: 'versioned (exact v9)',
+    versioned: 'versioned (exact v9/v11)',
     legacy: 'legacy-unversioned (runtime schema version undeclared)',
     assignmentCopy: {
       declared: 'Uses the declared visual group',
       'legacy-fallback': 'Legacy-unversioned registration uses the fallback group',
-      'unassigned-fallback': 'Ungrouped v9 registration uses the fallback group',
+      'unassigned-fallback': 'Ungrouped v9/v11 registration uses the fallback group',
     },
-    groupLabels: { resources: 'Resources', development: 'Development', collaboration: 'Collaboration', other: 'Other' },
+    groupLabels: {
+      resources: 'Resources',
+      development: 'Development',
+      collaboration: 'Collaboration',
+      'external-accounts': 'External accounts',
+      other: 'Other',
+    },
   },
 } as const
 const tabs: readonly ManagerTab<ExtensionPointTab>[] = [
@@ -105,7 +117,7 @@ export function ExtensionPointDetailPage(
   }]
   const controlSnapshot = snapshot.extensionPointControls
   const control = controlSnapshot?.points.find(item => item.id === pointId)
-  const navigation: ManagerSettingsNavigationProjectionV2 | undefined = pointId === 'manager.settings.navigation-items'
+  const navigation: ManagerSettingsNavigationProjectionV3 | undefined = pointId === 'manager.settings.navigation-items'
     ? snapshot.extensionPoints?.managerSettingsNavigation
     : undefined
   const diagnosticsLocale: DiagnosticsLocale = navigation !== undefined

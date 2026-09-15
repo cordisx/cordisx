@@ -1,5 +1,6 @@
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
+import type { PluginRuntimeManifestV14 } from '@cordisx/protocol/plugin-manifest/v14'
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -17,6 +18,11 @@ import {
   resolveCliProxyProviderConfigs,
 } from '../providers/cli-proxy-service-config.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V13, normalizePluginManifestV13 } from '../runtime-exact-request-permissions.js'
+import {
+  CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+  normalizeLatestRuntimeManifest,
+  normalizePluginManifestV14,
+} from './latest-runtime-manifest.js'
 import { JsonPackageManifestV2Resolver } from './packages/manifest.js'
 import type { CordisXPluginDependencyV1 } from '../plugin-lifecycle-contracts.js'
 import type { CordisXLocalDevelopmentSnapshot } from '../local-development-contracts.js'
@@ -51,6 +57,7 @@ export interface CordisXConfigPlugin {
     | CordisXPluginManifestV11
     | CordisXPluginManifestV12
     | CordisXPluginManifestV13
+    | PluginRuntimeManifestV14
   readonly package?: {
     readonly version: string
     readonly digest: `sha256:${string}`
@@ -341,9 +348,14 @@ export async function loadConfig(configPath: string, options: LoadConfigOptions 
     const resolved = await new JsonPackageManifestV2Resolver({
       runtimeValidators: {
         [CORDISX_PLUGIN_MANIFEST_SCHEMA_V13]: value => normalizePluginManifestV13(value, plugin.id),
+        [CORDISX_PLUGIN_MANIFEST_SCHEMA_V14]: value => normalizePluginManifestV14(value, plugin.id),
       },
     }).resolve(packageRoot)
-    return { ...plugin, manifest: normalizePluginManifestV13(resolved.runtimeManifest, plugin.id) }
+    const manifest = normalizeLatestRuntimeManifest(resolved.runtimeManifest, plugin.id)
+    if (manifest === undefined) {
+      throw new Error(`unsupported CLIProxy runtime manifest: ${resolved.runtimeManifest.$schema}`)
+    }
+    return { ...plugin, manifest }
   }))
   return { ...config, plugins }
 }

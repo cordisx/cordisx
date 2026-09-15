@@ -36,6 +36,11 @@ export interface BuildRendererBundleOptions {
   readonly pluginLifecycleBridgeToken?: string
   readonly pluginBundleSnapshot?: CordisXPluginBundleManagerSnapshotV1
   readonly certifiedPermissionChannelToken?: string
+  readonly managedServiceUICapabilities?: readonly {
+    readonly pluginId: string
+    readonly pluginGeneration: string
+    readonly token: string
+  }[]
   readonly pluginActivation?: CordisXPluginActivationRecordV1
   readonly initialRegistryEpoch?: number
   readonly channelManager?: ChannelManagerProjectionV1
@@ -392,6 +397,10 @@ export async function buildRendererCompositionSource(
     options.certifiedPermissionChannelToken === undefined
       ? ''
       : `, certifiedPermissionChannelToken: ${JSON.stringify(options.certifiedPermissionChannelToken)}`
+  }${
+    options.managedServiceUICapabilities === undefined
+      ? ''
+      : `, managedServiceCapabilities: ${JSON.stringify(options.managedServiceUICapabilities)}`
   }${options.pluginActivation === undefined ? '' : `, pluginActivation: ${JSON.stringify(options.pluginActivation)}`}${
     options.initialRegistryEpoch === undefined
       ? ''

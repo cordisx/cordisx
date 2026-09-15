@@ -26,6 +26,7 @@ export const MAX_PLUGIN_GENERATION_GRAPH_BYTES = 256 * 1024 * 1024
 
 export type PluginGenerationArtifactFileKind = 'module' | 'stylesheet' | 'asset'
 export type PluginGenerationSharedImportV1 =
+  | '@cordisx/protocol/managed-service-ui/v1'
   | 'cordisx/contracts'
   | 'cordisx/react'
   | 'cordisx/react/jsx-dev-runtime'
@@ -178,6 +179,7 @@ function freezeArtifact(value: PluginGenerationArtifactV1): PluginGenerationArti
 }
 
 const SHARED_IMPORTS = new Set<PluginGenerationSharedImportV1>([
+  '@cordisx/protocol/managed-service-ui/v1',
   'cordisx/contracts',
   'cordisx/react',
   'cordisx/react/jsx-dev-runtime',

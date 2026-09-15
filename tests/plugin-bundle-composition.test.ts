@@ -30,6 +30,11 @@ describe('production plugin bundle composition', () => {
       plugins: [],
     }
     const bundles = { ...playgroundPluginBundleSnapshot(generation), profileId: 'work', operationsAvailable: true }
+    const managedServiceUICapabilities = [{
+      pluginId: 'cli-proxy-api',
+      pluginGeneration: 'cli-proxy-generation',
+      token: 'cli-proxy-capability-token',
+    }]
     const config: CordisXConfig = {
       version: 1,
       rootDir: process.cwd(),
@@ -43,6 +48,7 @@ describe('production plugin bundle composition', () => {
       generation,
       pluginLifecycle: { token: 'bundle-lifecycle-token', activation },
       pluginBundles: bundles,
+      managedServiceUICapabilities,
       internalBuildRendererBundle: async (_config, options) => {
         calls.push(options)
         return `bundle-${calls.length}`
@@ -54,6 +60,7 @@ describe('production plugin bundle composition', () => {
       generation,
       pluginLifecycleBridgeToken: 'bundle-lifecycle-token',
       pluginBundleSnapshot: { profileId: 'work', runtimeGeneration: generation, operationsAvailable: true },
+      managedServiceUICapabilities,
     })
     await composition.rebuild(config, activation, 9)
     expect(calls[1]).toMatchObject({
@@ -61,6 +68,7 @@ describe('production plugin bundle composition', () => {
       pluginBundleSnapshot: { profileId: 'work' },
       pluginActivation: { revision: 4 },
       initialRegistryEpoch: 9,
+      managedServiceUICapabilities,
     })
   })
 

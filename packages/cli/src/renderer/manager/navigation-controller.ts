@@ -1,5 +1,5 @@
 import type { CordisXRouteReference } from '../../contracts.js'
-import type { ManagerSettingsNavigationItemSnapshot } from '../manager.js'
+import type { ManagerModel, ManagerPluginSnapshot, ManagerSettingsNavigationItemSnapshot } from '../manager.js'
 import type { ManagerContentAgentDefinitionTarget } from '../navigation.js'
 import type { ManagerRoute } from './model/routes.js'
 
@@ -7,6 +7,13 @@ export interface HostManagerContentOpenRequest {
   readonly contributionId: string
   readonly root: CordisXRouteReference
   readonly target: CordisXRouteReference
+}
+
+export type HostManagerNavigationRequest = HostManagerContentOpenRequest | ManagerRoute
+
+export interface HostManagerSelfConfigurationNavigationOptions {
+  readonly resolve: (owner: string) => boolean
+  readonly open: (owner: string) => void
 }
 
 function sameRouteReference(left: CordisXRouteReference, right: CordisXRouteReference): boolean {
@@ -42,7 +49,7 @@ export function resolveHostManagerAgentDefinitionOpenRequest(
 
 /** Host-private bridge into the single Manager modal and its internal history. */
 export class HostManagerNavigationController {
-  private listener: ((request: HostManagerContentOpenRequest) => void) | undefined
+  private listener: ((request: HostManagerNavigationRequest) => void) | undefined
   private returnPort:
     | Readonly<
       { readonly capture: () => readonly ManagerRoute[]; readonly restore: (routes: readonly ManagerRoute[]) => void }
@@ -50,7 +57,7 @@ export class HostManagerNavigationController {
     | undefined
   private pendingReturn: readonly ManagerRoute[] | undefined
 
-  bind(listener: (request: HostManagerContentOpenRequest) => void): () => void {
+  bind(listener: (request: HostManagerNavigationRequest) => void): () => void {
     if (this.listener !== undefined) throw new Error('CordisX Manager navigation controller is already bound')
     this.listener = listener
     return () => {
@@ -61,6 +68,11 @@ export class HostManagerNavigationController {
   openManagerContent(request: HostManagerContentOpenRequest): void {
     if (this.listener === undefined) throw new Error('CordisX Manager is unavailable')
     this.listener(structuredClone(request))
+  }
+
+  openRoute(route: ManagerRoute): void {
+    if (this.listener === undefined) throw new Error('CordisX Manager is unavailable')
+    this.listener(structuredClone(route))
   }
 
   /** Binds Host-private current-route capture/restore across Manager remounts. */
@@ -92,6 +104,42 @@ export class HostManagerNavigationController {
     this.pendingReturn = undefined
     port.restore(structuredClone(pending))
   }
+}
+
+function actionableOwnConfiguration(plugin: ManagerPluginSnapshot): boolean {
+  return plugin.status === 'active'
+    && plugin.configuration.writable
+    && plugin.configuration.schemaKind === 'schemastery'
+    && plugin.configuration.fields.some(field => !field.disabled)
+}
+
+/** Resolve an installed plugin's writable native Manager configuration route. */
+export function resolveHostManagerSelfConfigurationRoute(
+  owner: string,
+  model: Pick<ManagerModel, 'snapshot' | 'updatePluginConfig'>,
+): ManagerRoute | undefined {
+  if (model.updatePluginConfig === undefined) return undefined
+  const matches = model.snapshot().plugins.filter(plugin => plugin.id === owner && actionableOwnConfiguration(plugin))
+  if (matches.length !== 1) return undefined
+  return Object.freeze({ kind: 'plugin', pluginId: owner, page: 'config' })
+}
+
+/** B-side callbacks for the principal-bound public Manager self-configuration facade. */
+export function createHostManagerSelfConfigurationNavigationOptions(
+  model: Pick<ManagerModel, 'snapshot' | 'updatePluginConfig'>,
+  controller: HostManagerNavigationController,
+): HostManagerSelfConfigurationNavigationOptions {
+  const route = (owner: string) => resolveHostManagerSelfConfigurationRoute(owner, model)
+  return Object.freeze({
+    resolve: (owner: string) => route(owner) !== undefined,
+    open: (owner: string) => {
+      const current = route(owner)
+      if (current === undefined) {
+        throw new Error('CordisX Manager configuration is unavailable for this plugin')
+      }
+      controller.openRoute(current)
+    },
+  })
 }
 
 /** Resolve a public plugin route to one visible, same-owner Manager navigation root. */

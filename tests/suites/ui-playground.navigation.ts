@@ -400,7 +400,7 @@ export function registerNavigationTests() {
     expect(app.match(/className="pg-sidebar-control"/g)).toHaveLength(1)
     expect(menu).toContain('aria-haspopup="menu"')
     expect(menu).toContain("event.key === 'Escape'")
-    expect(menu).toContain("event.key === 'ArrowDown' || event.key === 'ArrowRight'")
+    expect(menu).toContain("event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'ArrowRight'")
     expect(environment).toContain('new HostThemeProjection(document)')
     expect(environment).toContain('new DocumentLocaleAdapter(document)')
   })

@@ -13,6 +13,7 @@ import {
   CORDISX_PAGE_SCHEMA_V1,
   CORDISX_PAGE_SCHEMA_V2,
   CORDISX_PAGE_SCHEMA_V3,
+  CORDISX_PAGE_SCHEMA_V4,
   CORDISX_ROUTE_SCHEMA_V1,
   CORDISX_ROUTE_SCHEMA_V2,
 } from '../contracts.js'
@@ -46,6 +47,7 @@ import { mountManagerContentConfigForm } from './manager-content-config-form.js'
 import type { CordisXCommandService } from './commands.js'
 import { CordisXI18nService, type LocalizationEffectOwner } from './i18n.js'
 import type { ExtensionPointAccessResolver } from './extension-points.js'
+import { createHostBrandIcon } from './brand-icon.js'
 import { createHostSurfaceIcon } from './icons.js'
 import { ownerFromContext, qualifyOwnedId, sourceFromContext } from './ownership.js'
 import {
@@ -262,8 +264,14 @@ export class NavigationRegistryBase {
       ) {
         return 'manager.content routes require route-v2 title and description'
       }
-      if (page.metadata.schemaVersion !== 3 || page.metadata.description === undefined) {
-        return `page ${page.qualifiedId} requires page-v3 title and description`
+      if (
+        !(
+          (page.metadata.schemaVersion === 3 && page.metadata.$schema === CORDISX_PAGE_SCHEMA_V3)
+          || (page.metadata.schemaVersion === 4 && page.metadata.$schema === CORDISX_PAGE_SCHEMA_V4)
+        )
+        || page.metadata.description === undefined
+      ) {
+        return `page ${page.qualifiedId} requires page-v3/page-v4 title and description`
       }
       if (page.metadata.chrome === 'body-only') {
         return `page ${page.qualifiedId} must use standard chrome for manager.content`
@@ -604,7 +612,7 @@ export class NavigationRegistryBase {
           })
           leading.append(back)
         } else if (page.metadata.icon !== undefined) {
-          leading.append(createHostSurfaceIcon(content.ownerDocument, page.metadata.icon))
+          leading.append(createHostBrandIcon(content.ownerDocument, page.metadata.icon))
         }
         const titleGroup = content.ownerDocument.createElement('div')
         titleGroup.dataset.cordisxPageTitle = 'true'

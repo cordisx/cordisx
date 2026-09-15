@@ -15,6 +15,7 @@ import {
   CORDISX_EXTENSION_POINT_POLICY_SCHEMA_V1,
   CORDISX_EXTENSION_POINT_RUNTIME_CONTEXT_SCHEMA_V1,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V1,
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V11,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V2,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V3,
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V5,
@@ -317,12 +318,12 @@ describe('extension point runtime contract', () => {
     registry.dispose()
   })
 
-  it('registers Manager navigation groups through the v9 catalog while retaining compatibility points', () => {
+  it('registers Manager navigation groups through the v11 catalog while retaining v9 compatibility', () => {
     const registry = new ExtensionPointDescriptorRegistry(CORDISX_EXTENSION_POINT_LOCALE_CATALOGS)
     const remove = registry.registerCatalog(CORDISX_MANAGER_EXTENSION_POINT_CATALOG)
     expect(CORDISX_MANAGER_EXTENSION_POINT_CATALOG).toMatchObject({
-      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V9,
-      schemaVersion: 9,
+      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V11,
+      schemaVersion: 11,
     })
     expect(registry.descriptors()).toHaveLength(4)
     expect(registry.descriptor('manager.settings.tabs')).toMatchObject({
@@ -353,6 +354,7 @@ describe('extension point runtime contract', () => {
           expect.objectContaining({ id: 'resources', order: 100 }),
           expect.objectContaining({ id: 'development', order: 200 }),
           expect.objectContaining({ id: 'collaboration', order: 300 }),
+          expect.objectContaining({ id: 'external-accounts', order: 400 }),
           expect.objectContaining({ id: 'other', order: 1000 }),
         ],
       },
@@ -382,6 +384,28 @@ describe('extension point runtime contract', () => {
     expect(zh.messages['manager.content.description']).toContain('标准管理器页面标题')
     expect(registry.diagnostics()).toEqual([])
     remove()
+
+    const legacyGroups = {
+      $schema:
+        'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/manager-settings-navigation-groups.v1.schema.json',
+      contract: 'cordisx.manager-settings-navigation-groups/v1',
+      schemaVersion: 1,
+      groups: CORDISX_MANAGER_EXTENSION_POINT_CATALOG.points
+        .find(point => point.id === 'manager.settings.navigation-items')!
+        .navigationGroups.groups.filter(group => group.id !== 'external-accounts'),
+      fallbackGroup: 'other',
+    } as const
+    const removeLegacy = registry.registerCatalog({
+      $schema: CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V9,
+      schemaVersion: 9,
+      points: CORDISX_MANAGER_EXTENSION_POINT_CATALOG.points.map(point =>
+        point.id === 'manager.settings.navigation-items' ? { ...point, navigationGroups: legacyGroups } : point
+      ),
+    })
+    expect(registry.descriptor('manager.settings.navigation-items')?.navigationGroups?.groups.map(group => group.id))
+      .toEqual(['resources', 'development', 'collaboration', 'other'])
+    expect(registry.diagnostics()).toEqual([])
+    removeLegacy()
     registry.dispose()
   })
 

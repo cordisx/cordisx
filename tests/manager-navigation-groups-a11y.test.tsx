@@ -26,7 +26,11 @@ function keydown(dom: JSDOM, target: HTMLElement, key: string): void {
   target.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
 }
 
-async function mountNavigation(locale = 'zh-CN', includeContributions = true) {
+async function mountNavigation(
+  locale = 'zh-CN',
+  includeContributions = true,
+  route: ManagerRouter['route'] = { kind: 'primary', page: 'plugins' },
+) {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
     url: 'https://example.test/',
   })
@@ -41,7 +45,7 @@ async function mountNavigation(locale = 'zh-CN', includeContributions = true) {
   })
   const navigate = vi.fn()
   const router: ManagerRouter = {
-    route: { kind: 'primary', page: 'plugins' },
+    route,
     navigate,
     replace: vi.fn(),
     openDetail: vi.fn(),
@@ -77,6 +81,19 @@ async function mountNavigation(locale = 'zh-CN', includeContributions = true) {
         icon: 'host:hierarchy',
         route: { id: 'team' },
       }, {
+        id: 'accounts:connections',
+        owner: 'accounts',
+        group: 'after-settings',
+        navigationGroup: 'external-accounts',
+        order: 25,
+        disabled: false,
+        title: '外部连接',
+        description: '',
+        pageTitle: '外部连接',
+        pageDescription: '',
+        icon: 'host:settings',
+        route: { id: 'connections' },
+      }, {
         id: 'legacy:page',
         owner: 'legacy',
         group: 'before-settings',
@@ -88,6 +105,20 @@ async function mountNavigation(locale = 'zh-CN', includeContributions = true) {
         pageDescription: '',
         icon: 'host:settings',
         route: { id: 'legacy' },
+      }, {
+        id: 'review:page',
+        owner: 'review',
+        group: 'after-settings',
+        navigationGroup: 'resources',
+        order: 30,
+        disabled: false,
+        title: '待审核服务',
+        description: '需要确认权限后打开',
+        pageTitle: '待审核服务',
+        pageDescription: '需要确认权限后打开',
+        icon: 'host:settings',
+        route: { id: 'review' },
+        permissionReview: { capability: 'ui.extension-points.render', fingerprint: 'permission-1' },
       }]
       : [],
   } as unknown as ManagerSnapshot
@@ -106,18 +137,21 @@ describe('Manager grouped navigation', () => {
         'resources',
         'development',
         'collaboration',
+        'external-accounts',
         'other',
       ])
       expect(groups.map(group => group.querySelector('[role="heading"]')?.textContent)).toEqual([
         '资源',
         '开发',
         '协作',
+        '外部账号',
         '其他',
       ])
       expect(groups.at(0)?.querySelector('[data-tab="plugins"]')).not.toBeNull()
       expect(groups.at(0)?.querySelector('[data-settings-navigation-item="chatroom:talent"]')).not.toBeNull()
       expect(groups.at(2)?.querySelector('[data-settings-navigation-item="chatroom:team"]')).not.toBeNull()
-      expect(groups.at(3)?.querySelector('[data-settings-navigation-item="legacy:page"]')).not.toBeNull()
+      expect(groups.at(3)?.querySelector('[data-settings-navigation-item="accounts:connections"]')).not.toBeNull()
+      expect(groups.at(4)?.querySelector('[data-settings-navigation-item="legacy:page"]')).not.toBeNull()
       expect(dom.window.document.querySelector('[data-tab="plugin-bundles"]')).toBeNull()
       expect(groups.at(0)?.querySelector('[data-tab="marketplace"]')).not.toBeNull()
       const about = dom.window.document.querySelector('[data-tab="about"]')
@@ -135,6 +169,14 @@ describe('Manager grouped navigation', () => {
     const { dom, root, navigate } = await mountNavigation('en')
     try {
       const buttons = [...dom.window.document.querySelectorAll<HTMLButtonElement>('.cxr-nav button:not(:disabled)')]
+      expect([...dom.window.document.querySelectorAll<HTMLElement>('[data-navigation-group] [role="heading"]')]
+        .map(heading => heading.textContent)).toEqual([
+          'Resources',
+          'Development',
+          'Collaboration',
+          'External accounts',
+          'Other',
+        ])
       expect(buttons.every(button => button.tabIndex === 0)).toBe(true)
       buttons[0]!.focus()
       keydown(dom, buttons[0]!, 'ArrowDown')
@@ -149,6 +191,21 @@ describe('Manager grouped navigation', () => {
       expect(dom.window.document.activeElement).toBe(buttons[0])
       buttons.find(button => button.dataset.settingsNavigationItem === 'chatroom:team')?.click()
       expect(navigate).toHaveBeenCalledWith({ kind: 'manager-content', id: 'chatroom:team', reference: { id: 'team' } })
+      buttons.find(button => button.dataset.settingsNavigationItem === 'accounts:connections')?.click()
+      expect(navigate).toHaveBeenCalledWith({
+        kind: 'manager-content',
+        id: 'accounts:connections',
+        reference: { id: 'connections' },
+      })
+      buttons.find(button => button.dataset.settingsNavigationItem === 'review:page')?.click()
+      expect(navigate).toHaveBeenCalledWith({
+        kind: 'permission',
+        pluginId: 'review',
+        capability: 'ui.extension-points.render',
+        fingerprint: 'permission-1',
+      })
+      expect(dom.window.document.querySelector('[data-settings-navigation-item="review:page"] small')?.textContent)
+        .toBe('Review permissions')
     } finally {
       root.unmount()
       await new Promise(resolve => setImmediate(resolve))
@@ -163,6 +220,41 @@ describe('Manager grouped navigation', () => {
         .map(group => group.dataset.navigationGroup)).toEqual(['resources', 'development'])
       expect(dom.window.document.querySelector('[data-navigation-group="collaboration"]')).toBeNull()
       expect(dom.window.document.querySelector('[data-navigation-group="other"]')).toBeNull()
+    } finally {
+      root.unmount()
+      await new Promise(resolve => setImmediate(resolve))
+      dom.window.close()
+    }
+  })
+
+  it('marks an external account deep link as the current page', async () => {
+    const { dom, root } = await mountNavigation('en', true, {
+      kind: 'manager-content',
+      id: 'accounts:connections',
+      reference: { id: 'connections' },
+    })
+    try {
+      expect(dom.window.document.querySelectorAll('[aria-current="page"]')).toHaveLength(1)
+      expect(dom.window.document.querySelector('[aria-current="page"]')?.getAttribute('data-settings-navigation-item'))
+        .toBe('accounts:connections')
+    } finally {
+      root.unmount()
+      await new Promise(resolve => setImmediate(resolve))
+      dom.window.close()
+    }
+  })
+
+  it('marks only the reviewed contributed destination as the current page', async () => {
+    const { dom, root } = await mountNavigation('en', true, {
+      kind: 'permission',
+      pluginId: 'review',
+      capability: 'ui.extension-points.render',
+      fingerprint: 'permission-1',
+    })
+    try {
+      expect(dom.window.document.querySelectorAll('[aria-current="page"]')).toHaveLength(1)
+      expect(dom.window.document.querySelector('[aria-current="page"]')?.getAttribute('data-settings-navigation-item'))
+        .toBe('review:page')
     } finally {
       root.unmount()
       await new Promise(resolve => setImmediate(resolve))

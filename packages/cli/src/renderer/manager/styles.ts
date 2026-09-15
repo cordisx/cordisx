@@ -35,6 +35,10 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-nav button:focus-visible { outline: 2px solid var(--cx-focus, #8aa8ff); outline-offset: 1px; }
   .cxr-nav .cxh-icon-seat, .cxr-nav .cxm-host-icon { display: grid; width: 18px; height: 18px; place-items: center; }
   .cxr-nav button > :first-child { display: grid; width: 18px; height: 18px; align-self: center; justify-self: center; place-items: center; line-height: 1; }
+  .cxr-nav-item-copy { display: grid; min-width: 0; gap: 1px; }
+  .cxr-nav-item-copy > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cxr-nav-item-copy > small { color: var(--cx-warning,#e7b75b); font-size: 10px; line-height: 1.2; }
+  .cxr-nav button[data-permission-review="pending"] { color: var(--cx-text,#edf0f4); }
   .cxr-main { display: grid; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0,1fr); }
   .cxr-header { display: grid; grid-template-columns: 32px minmax(0,1fr) 32px; align-items: center; gap: 8px; padding: 10px 18px; border-bottom: 1px solid var(--cx-border, #353a42); }
   .cxr-header-seat { display: grid; width: 32px; height: 32px; place-items: center; }
@@ -50,6 +54,7 @@ export const REACT_MANAGER_STYLES = `${scopedTDesignReactCss}\n${HOST_ICON_16PX_
   .cxr-content { min-width: 0; min-height: 0; overflow: auto; padding: 16px 22px 22px; }
   .cxr-content:has(.cxr-plugin-config-panel) { overflow: hidden; padding-bottom: 0; }
   .cxr-content:has(.cxm-console-panel) { display: flex; overflow: hidden; }
+  .cxr-content:has(> .cxmp-management) { overflow: hidden; }
   .cxr-content:has(.cxm-console-panel) > * { min-height: 0; flex: 1; }
   .cxr-page { width: 100%; min-width: 0; }
   .cxr-content:has(> .cxr-manager-content-page) { overflow: hidden; }

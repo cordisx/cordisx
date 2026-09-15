@@ -1,10 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ManagerSettingsNavigationItemSnapshot } from '../packages/cli/src/renderer/manager.js'
 import {
+  createHostManagerSelfConfigurationNavigationOptions,
   HostManagerNavigationController,
   resolveHostManagerAgentDefinitionOpenRequest,
   resolveHostManagerRouteOpenRequest,
+  resolveHostManagerSelfConfigurationRoute,
 } from '../packages/cli/src/renderer/manager/navigation-controller.js'
+import type { ManagerModel, ManagerPluginSnapshot, ManagerSnapshot } from '../packages/cli/src/renderer/manager.js'
 import type { ManagerContentAgentDefinitionTarget } from '../packages/cli/src/renderer/navigation.js'
 
 function item(overrides: Partial<ManagerSettingsNavigationItemSnapshot> = {}): ManagerSettingsNavigationItemSnapshot {
@@ -114,4 +117,117 @@ it('resolves an exact same-owner root tab without inventing a parent route', () 
     ),
   ).toBeUndefined()
   expect(resolveHostManagerRouteOpenRequest('foreign', target, [root], () => undefined, tabs)).toBeUndefined()
+})
+
+function configurablePlugin(
+  overrides: Partial<ManagerPluginSnapshot> = {},
+): ManagerPluginSnapshot {
+  return {
+    id: 'gateway',
+    source: 'file:///gateway',
+    name: 'Gateway',
+    inject: [],
+    config: {},
+    status: 'active',
+    configuration: {
+      namespace: 'gateway',
+      schemaKind: 'schemastery',
+      applies: 'live',
+      writable: true,
+      revision: 1,
+      lastGoodRevision: 1,
+      value: { endpoint: 'http://localhost' },
+      fields: [{
+        namespace: 'gateway',
+        path: ['endpoint'],
+        type: 'string',
+        value: 'http://localhost',
+        disabled: false,
+        required: true,
+      }],
+      secrets: [],
+    },
+    ...overrides,
+  }
+}
+
+function selfConfigurationModel(
+  plugins: readonly ManagerPluginSnapshot[],
+): Pick<ManagerModel, 'snapshot' | 'updatePluginConfig'> {
+  return {
+    snapshot: () => ({ plugins }) as ManagerSnapshot,
+    updatePluginConfig: async () => {},
+  }
+}
+
+describe('Host Manager self-configuration navigation', () => {
+  it('accepts only one active, writable and actionable installed configuration', () => {
+    const plugin = configurablePlugin()
+    const model = selfConfigurationModel([plugin])
+    expect(resolveHostManagerSelfConfigurationRoute('gateway', model)).toEqual({
+      kind: 'plugin',
+      pluginId: 'gateway',
+      page: 'config',
+    })
+    expect(resolveHostManagerSelfConfigurationRoute('missing', model)).toBeUndefined()
+    expect(resolveHostManagerSelfConfigurationRoute(
+      'gateway',
+      selfConfigurationModel([
+        plugin,
+        configurablePlugin({ source: 'file:///duplicate' }),
+      ]),
+    )).toBeUndefined()
+    expect(resolveHostManagerSelfConfigurationRoute(
+      'gateway',
+      selfConfigurationModel([{ ...plugin, status: 'configured-disabled' }]),
+    )).toBeUndefined()
+    expect(resolveHostManagerSelfConfigurationRoute(
+      'gateway',
+      selfConfigurationModel([{
+        ...plugin,
+        configuration: { ...plugin.configuration, writable: false },
+      }]),
+    )).toBeUndefined()
+    expect(resolveHostManagerSelfConfigurationRoute(
+      'gateway',
+      selfConfigurationModel([{
+        ...plugin,
+        configuration: {
+          ...plugin.configuration,
+          fields: plugin.configuration.fields.map(field => ({
+            ...field,
+            disabled: true,
+          })),
+        },
+      }]),
+    )).toBeUndefined()
+    expect(resolveHostManagerSelfConfigurationRoute('gateway', {
+      snapshot: model.snapshot,
+    })).toBeUndefined()
+  })
+
+  it('rechecks eligibility at dispatch and throws for rejected, unbound, or disposed routes', () => {
+    let plugins: readonly ManagerPluginSnapshot[] = [configurablePlugin()]
+    const model: Pick<ManagerModel, 'snapshot' | 'updatePluginConfig'> = {
+      snapshot: () => ({ plugins }) as ManagerSnapshot,
+      updatePluginConfig: async () => {},
+    }
+    const controller = new HostManagerNavigationController()
+    const options = createHostManagerSelfConfigurationNavigationOptions(model, controller)
+    expect(options.resolve('gateway')).toBe(true)
+    expect(() => options.open('gateway')).toThrow(/Manager is unavailable/)
+
+    const listener = vi.fn()
+    const dispose = controller.bind(listener)
+    options.open('gateway')
+    expect(listener).toHaveBeenLastCalledWith({ kind: 'plugin', pluginId: 'gateway', page: 'config' })
+
+    plugins = [{ ...configurablePlugin(), status: 'configured-disabled' }]
+    expect(() => options.open('gateway')).toThrow(/configuration is unavailable/)
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    plugins = [configurablePlugin()]
+    dispose()
+    expect(() => options.open('gateway')).toThrow(/Manager is unavailable/)
+  })
 })

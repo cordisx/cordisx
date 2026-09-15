@@ -178,6 +178,7 @@ import {
 } from './configuration.js'
 import { ManagerContentConfigAuthority } from './manager-content-config.js'
 import { BrowserServiceConfigBridge } from './service-config-binding.js'
+import { BrowserManagedServiceUIBridge } from './managed-service-ui-bridge.js'
 import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
 import type {
@@ -492,6 +493,8 @@ export interface RuntimeClosureScope {
   scenarioSessionOwner: (_sessionId: string) => import('@cordisx/protocol/sessions/v1').PluginOwnerIdentity | undefined
   scenarioSessionScopeAuthority: PlaygroundScenarioSessionScopeAuthority | undefined
   readonly serviceConfigBridge: () => BrowserServiceConfigBridge | undefined
+  readonly managedServiceBridge: () => BrowserManagedServiceUIBridge | undefined
+  readonly modelProviders: () => import('./model-providers.js').ModelProviderRegistry
   readonly setExtensionPointControlAuthorization: () => (
     _expectedPolicyRevision: number,
     reference: Readonly<

@@ -4,6 +4,7 @@ import { build as viteBuild, normalizePath, type Plugin, type Rollup, type UserC
 import {
   assertNoPrivateReactModules,
   CONTRACTS_MODULE_PATH,
+  CORDISX_MANAGED_SERVICE_UI_MODULE,
   CORDISX_REACT_JSX_DEV_RUNTIME_MODULE,
   CORDISX_REACT_JSX_RUNTIME_MODULE,
   CORDISX_REACT_MODULE,
@@ -18,6 +19,7 @@ export const CORDISX_PLUGIN_GENERATION_ARTIFACT_SCHEMA =
 
 export type PluginGenerationArtifactFileKind = 'module' | 'stylesheet' | 'asset'
 export type PluginGenerationSharedImportV1 =
+  | '@cordisx/protocol/managed-service-ui/v1'
   | 'cordisx/contracts'
   | 'cordisx/react'
   | 'cordisx/react/jsx-dev-runtime'
@@ -96,6 +98,7 @@ export interface CordisXPluginViteConfigOptions {
 }
 
 const SHARED_MODULES = new Set<PluginGenerationSharedImportV1>([
+  CORDISX_MANAGED_SERVICE_UI_MODULE,
   CORDISX_REACT_MODULE,
   CORDISX_REACT_JSX_RUNTIME_MODULE,
   CORDISX_REACT_JSX_DEV_RUNTIME_MODULE,
@@ -111,6 +114,7 @@ const PEER_MODULES = new Set<PluginGenerationSharedImportV1>([
 const SHARED_PREFIX = '\0cordisx-production-shared:'
 
 function sharedModuleId(specifier: PluginGenerationSharedImportV1): string {
+  if (specifier === CORDISX_MANAGED_SERVICE_UI_MODULE) return specifier
   if (specifier === 'react-dom' || specifier === 'react-dom/client') return `peer:${specifier}`
   return specifier.startsWith('react') ? `cordisx/${specifier}` : specifier
 }

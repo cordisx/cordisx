@@ -13,6 +13,8 @@ import {
   type RuntimeReadinessObservation,
 } from '../../packages/cli/src/launcher/plugin-lifecycle.js'
 import { removeStagedPluginPackage } from '../../packages/cli/src/launcher/plugin-package.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../../packages/cli/src/launcher/latest-runtime-manifest.js'
+import { PLUGIN_PACKAGE_SCHEMA_V14 } from '../../packages/cli/src/launcher/packages/manifest.js'
 import {
   CORDISX_CERTIFIED_PERMISSION_PROJECTION_SCHEMA_V1,
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V4,
@@ -36,6 +38,9 @@ import {
 } from '../../packages/cli/src/plugin-lifecycle-contracts.js'
 
 export const temporary = new Set<string>()
+
+const MANAGED_SERVICE_DEFINITION_SCHEMA =
+  'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-definition.v1.schema.json'
 
 export class FakeRuntime implements PluginLifecycleRuntime {
   readonly staged: PluginRuntimeMutation[] = []
@@ -396,6 +401,85 @@ export async function localPackageV5(root: string, hostDomRequired = false, incl
     }\n`,
   )
   return source
+}
+
+export async function writeLocalPackageV14(
+  source: string,
+  id: string,
+  version = '1.0.0',
+): Promise<string> {
+  await Promise.all([
+    mkdir(path.join(source, 'src'), { recursive: true }),
+    mkdir(path.join(source, 'config'), { recursive: true }),
+  ])
+  const serviceSource = '#!/usr/bin/env node\nexport async function apply() {}\n'
+  const dataSource = '{"ready":true}\n'
+  const runtime = {
+    $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+    schemaVersion: 14,
+    id,
+    name: id.toUpperCase(),
+    capabilities: [],
+    services: [{
+      id: 'managed',
+      kind: 'managed-backend',
+      owner: 'host',
+      entry: './managed-service.mjs',
+      definitionSchema: MANAGED_SERVICE_DEFINITION_SCHEMA,
+      runtimeResources: [{
+        path: './managed-service.mjs',
+        mode: 'executable',
+        digest: `sha256:${createHash('sha256').update(serviceSource).digest('hex')}`,
+        byteLength: Buffer.byteLength(serviceSource),
+      }, {
+        path: './config/settings.json',
+        mode: 'data',
+        digest: `sha256:${createHash('sha256').update(dataSource).digest('hex')}`,
+        byteLength: Buffer.byteLength(dataSource),
+      }],
+      consumerGrants: [],
+    }],
+  } as const
+  const runtimeText = `${JSON.stringify(runtime, null, 2)}\n`
+  await Promise.all([
+    writeFile(path.join(source, 'runtime-manifest.json'), runtimeText),
+    writeFile(path.join(source, 'managed-service.mjs'), serviceSource),
+    writeFile(path.join(source, 'config', 'settings.json'), dataSource),
+    writeFile(path.join(source, 'src/index.ts'), 'export function apply() {}\n'),
+  ])
+  await writeFile(
+    path.join(source, 'cordisx-package.json'),
+    `${
+      JSON.stringify(
+        {
+          $schema: PLUGIN_PACKAGE_SCHEMA_V14,
+          schemaVersion: 14,
+          id,
+          version,
+          entry: './src/index.ts',
+          distribution: { mode: 'explicit-local-v1', signature: 'unsupported' },
+          compatibility: { runtimeAbi: 1, protocolSchemas: [CORDISX_PLUGIN_MANIFEST_SCHEMA_V14] },
+          dependencies: [],
+          runtimeManifest: {
+            path: './runtime-manifest.json',
+            schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+            digest: `sha256:${createHash('sha256').update(runtimeText).digest('hex')}`,
+          },
+        },
+        null,
+        2,
+      )
+    }\n`,
+  )
+  return source
+}
+
+export async function localPackageV14(root: string, version = '1.0.0'): Promise<string> {
+  return await writeLocalPackageV14(
+    path.join(root, `permission-v14-${Math.random().toString(36).slice(2)}`),
+    'permission-v14',
+    version,
+  )
 }
 
 export function request(

@@ -10,6 +10,8 @@ import { ManagerContentPage } from '../packages/cli/src/renderer/manager/pages/M
 import type { ManagerRouter } from '../packages/cli/src/renderer/manager/model/routes.js'
 import { REACT_MANAGER_STYLES } from '../packages/cli/src/renderer/manager/styles.js'
 
+const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=='
+
 const previous = {
   window: globalThis.window,
   document: globalThis.document,
@@ -71,7 +73,26 @@ describe('Host Manager entity record summary', () => {
       },
       tabs: [
         { id: 'overview', label: 'Overview', icon: 'host:info', route: overview, active: true },
-        { id: 'prompts', label: 'Prompts', icon: 'host:layers', route: prompts, active: false },
+        {
+          id: 'prompts',
+          label: 'Prompts',
+          icon: {
+            kind: 'raster-image',
+            image: {
+              $schema:
+                'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/raster-image-snapshot.v1.schema.json',
+              contract: 'cordisx.raster-image-snapshot/v1',
+              schemaVersion: 1,
+              mediaType: 'image/png',
+              encoding: 'base64',
+              data: PNG,
+              width: 1,
+              height: 1,
+            },
+          },
+          route: prompts,
+          active: false,
+        },
       ],
     }
     const replace = vi.fn()
@@ -129,6 +150,8 @@ describe('Host Manager entity record summary', () => {
       )
       expect(summary.querySelector('.oneworks-avatar')).not.toBeNull()
       expect(summary.querySelector('[data-host-icon]')).toBeNull()
+      expect(tabs.querySelector('[data-manager-content-tab="prompts"] img')?.getAttribute('src'))
+        .toBe(`data:image/png;base64,${PNG}`)
       expect(panel.querySelector('[data-entity-business-body]')?.textContent).toBe('Plugin prompt content')
 
       currentPresentation = {

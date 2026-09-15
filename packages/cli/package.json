@@ -89,7 +89,7 @@
   },
   "dependencies": {
     "@cordisx/channel": "0.1.0",
-    "@cordisx/protocol": "github:cordisx/cordisx-protocol#ffb4827fdfee550865b55593fc5b8a1cc51ed53c",
+    "@cordisx/protocol": "github:cordisx/cordisx-protocol#a1127780513b76f0c3b1acee70cd638b5348c6a5",
     "@cordisx/schemastery-ui": "0.1.0-beta.2",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "^3.18.1",
@@ -118,6 +118,7 @@
     "reicon": "1.2.1",
     "remark-gfm": "4.0.1",
     "shiki": "4.4.3",
+    "smol-toml": "1.8.0",
     "style-to-js": "1.1.21",
     "swr": "2.5.1",
     "tar": "7.5.22",

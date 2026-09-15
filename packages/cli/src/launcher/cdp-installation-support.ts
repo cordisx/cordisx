@@ -17,6 +17,14 @@ import { PLUGIN_LIFECYCLE_BINDING, PLUGIN_LIFECYCLE_RECEIVER } from './plugin-li
 import { PROVIDER_BINDING, PROVIDER_RECEIVER } from './provider-rpc.js'
 import { PUBLISHER_GRANT_BINDING, PUBLISHER_GRANT_RECEIVER } from './publisher-grant-rpc.js'
 import { SERVICE_CONFIG_BINDING, SERVICE_CONFIG_RECEIVER } from './service-config-rpc.js'
+import {
+  MANAGED_SERVICE_UI_BINDING,
+  MANAGED_SERVICE_UI_RECEIVER,
+  type ManagedServiceUIBridgeHandler,
+  type ManagedServiceUIOwner,
+  MAX_MANAGED_SERVICE_UI_REQUEST_BYTES,
+  parseManagedServiceUIBindingRequest,
+} from './managed-service-ui-rpc.js'
 
 export type { ProviderFleet } from '../providers/fleet.js'
 export type { CdpTarget } from './cdp-session.js'
@@ -93,6 +101,12 @@ export {
   PUBLISHER_GRANT_BINDING,
   type PublisherGrantBridgeHandler,
 } from './publisher-grant-rpc.js'
+export {
+  MANAGED_SERVICE_UI_BINDING,
+  MANAGED_SERVICE_UI_RECEIVER,
+  type ManagedServiceUIBridgeHandler,
+  MAX_MANAGED_SERVICE_UI_REQUEST_BYTES,
+} from './managed-service-ui-rpc.js'
 export { CdpLifecycleRequestGate, productionBootstrapSource } from './production-graph-admission.js'
 export {
   MAX_SERVICE_CONFIG_REQUEST_BYTES,
@@ -188,6 +202,8 @@ async function delay(milliseconds: number, signal?: AbortSignal): Promise<void> 
 }
 
 export interface InstalledScript {
+  readonly nativeChannel?: { dispose(): Promise<void> }
+  readonly nativeInterception?: { dispose(): Promise<void> }
   readonly viteDevelopment?: boolean
   readonly loopbackModules?: boolean
   readonly viteLoopbackPermission?: {
@@ -237,6 +253,9 @@ export interface InstalledScript {
   readonly removePublisherGrantBindingListener?: () => void
   readonly publisherGrantBindingInstalled: boolean
   readonly certifiedPermissionChannel?: CdpCertifiedPermissionChannel
+  readonly managedServiceUIController?: AbortController
+  readonly removeManagedServiceUIBindingListener?: () => void
+  readonly managedServiceUIBindingInstalled: boolean
 }
 
 const VITE_LOOPBACK_PERMISSIONS = ['loopback-network', 'local-network-access'] as const
@@ -454,6 +473,7 @@ export function installedBindingNames(installed: InstalledScript): readonly stri
     ...(installed.iconThemePreferenceBindingInstalled ? [ICON_THEME_PREFERENCE_BINDING] : []),
     ...(installed.lifecycleBindingInstalled ? [PLUGIN_LIFECYCLE_BINDING] : []),
     ...(installed.publisherGrantBindingInstalled ? [PUBLISHER_GRANT_BINDING] : []),
+    ...(installed.managedServiceUIBindingInstalled ? [MANAGED_SERVICE_UI_BINDING] : []),
   ]
 }
 
@@ -642,6 +662,18 @@ export async function sendPublisherGrantBindingResponse(
   })
 }
 
+export async function sendManagedServiceUIBindingResponse(
+  session: CdpSession,
+  payload: Record<string, unknown>,
+  executionContextId?: number,
+): Promise<void> {
+  await session.send('Runtime.evaluate', {
+    expression: `void globalThis.${MANAGED_SERVICE_UI_RECEIVER}?.(${JSON.stringify(JSON.stringify(payload))})`,
+    allowUnsafeEvalBlockedByCSP: true,
+    ...(executionContextId === undefined ? {} : { contextId: executionContextId }),
+  })
+}
+
 export function serviceConfigResponseEvaluation(
   payload: Record<string, unknown>,
   executionContextId?: number,
@@ -717,6 +749,10 @@ export async function uninstall(
   viteLoopbackPermissions?: ViteLoopbackPermissionCoordinator,
 ): Promise<void> {
   installed.marketplaceController.abort()
+  const nativeCleanup = await Promise.allSettled([
+    installed.nativeChannel?.dispose(),
+    installed.nativeInterception?.dispose(),
+  ])
   installed.providerController?.abort()
   installed.historyController?.abort()
   installed.configController?.abort()
@@ -728,6 +764,7 @@ export async function uninstall(
   installed.iconThemePreferenceController?.abort()
   installed.lifecycleController?.abort()
   installed.publisherGrantController?.abort()
+  installed.managedServiceUIController?.abort()
   installed.removeBindingListener()
   installed.removeProviderBindingListener?.()
   installed.removeHistoryBindingListener?.()
@@ -742,10 +779,13 @@ export async function uninstall(
   installed.removeLifecycleBindingListener?.()
   installed.unregisterLifecycleSession()
   installed.removePublisherGrantBindingListener?.()
+  installed.removeManagedServiceUIBindingListener?.()
   await installed.certifiedPermissionChannel?.dispose()
   try {
     const strictProductionCleanup = installed.loopbackModules === true && installed.viteDevelopment !== true
-    const cleanupFailures: unknown[] = []
+    const cleanupFailures: unknown[] = nativeCleanup.flatMap(result =>
+      result.status === 'rejected' ? [result.reason] : []
+    )
     const attemptCleanup = async (operation: Promise<unknown>): Promise<boolean> => {
       try {
         await operation
@@ -798,6 +838,9 @@ export async function uninstall(
         : []),
       ...(installed.publisherGrantBindingInstalled
         ? [installed.session.send('Runtime.removeBinding', { name: PUBLISHER_GRANT_BINDING })]
+        : []),
+      ...(installed.managedServiceUIBindingInstalled
+        ? [installed.session.send('Runtime.removeBinding', { name: MANAGED_SERVICE_UI_BINDING })]
         : []),
     ])
     const rendererGone = installed.session.isClosed()

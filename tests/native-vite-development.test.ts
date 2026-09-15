@@ -7,8 +7,11 @@ import WebSocket, { WebSocketServer } from 'ws'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createNativeViteEntityGenerationHandler,
+  nativeViteHotPayload,
   startNativeViteServer,
 } from '../packages/cli/src/launcher/vite-development.js'
+import { NativeViteSourceMapStore } from '../packages/cli/src/launcher/vite-development-source-maps.js'
+import { nativeViteWatchOptions } from '../packages/cli/src/launcher/vite-development-watcher.js'
 import { buildRendererComposition } from '../packages/cli/src/cli/run.js'
 import { CdpPluginLifecycleRuntime, watchAndInject } from '../packages/cli/src/launcher/cdp.js'
 import { EntityDirectoryAuthority, entityTreeDigest } from '../packages/cli/src/launcher/entity-directory.js'
@@ -42,6 +45,37 @@ afterEach(async () => {
 })
 
 describe('native Vite development transport', () => {
+  it('ignores launcher-owned package staging without suppressing source updates', () => {
+    const options = nativeViteWatchOptions('/repo/packages/cli/dist/', ['/home/packages/.source-staging'])
+
+    expect(options.ignored).toContain('/repo/packages/cli/dist/**')
+    expect(options.ignored).toContain('/home/packages/.source-staging/**')
+    expect(options.ignored).not.toContain('/repo/packages/cli/src/**')
+  })
+
+  it('converts full reloads into Host restarts without rebuilding the whole module graph', () => {
+    expect(nativeViteHotPayload({ type: 'full-reload', path: '*' }, 42)).toEqual({
+      type: 'custom',
+      event: 'cordisx:restart-host',
+      data: { timestamp: 42 },
+    })
+    const update = { type: 'update', updates: [] }
+    expect(nativeViteHotPayload(update, 42)).toBe(update)
+  })
+
+  it('bounds retained source maps by decoded bytes before allocating oversized maps', () => {
+    const maps = new NativeViteSourceMapStore({ maxEntries: 3, maxBytes: 10, maxEntryBytes: 6 })
+    const first = maps.remember('/dev/', Buffer.from('123456').toString('base64'))
+    const second = maps.remember('/dev/', Buffer.from('abcde').toString('base64'))
+    const oversized = maps.remember('/dev/', Buffer.from('1234567').toString('base64'))
+
+    expect(first).toBeDefined()
+    expect(second).toBeDefined()
+    expect(maps.get(first!)).toBeUndefined()
+    expect(maps.get(second!)).toBe('abcde')
+    expect(oversized).toBeUndefined()
+  })
+
   it('closes an idle server while retaining its reusable dependency cache', async () => {
     const vite = await startTestViteServer({
       version: 1,

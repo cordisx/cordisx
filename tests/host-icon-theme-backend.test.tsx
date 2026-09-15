@@ -22,6 +22,7 @@ import {
   hostSurfaceIconKey,
   MANAGER_ICON_SEMANTICS,
   renderHostIconSvg,
+  renderHostSurfaceIconSvg,
 } from '../packages/cli/src/renderer/icons.js'
 import { resolveBuiltinReiconDescriptor } from '../packages/cli/src/renderer/reicon-icon-backend.js'
 
@@ -192,6 +193,16 @@ describe('Host Reicon normalized backend', () => {
     expect(HOST_ICON_16PX_CSS).toContain('color: currentColor')
     dom.window.document.documentElement.className = 'electron-dark'
     expect(createManagerIcon(dom.window.document, 'search').querySelector('svg')?.dataset.hostIconTheme).toBe('dark')
+    dom.window.close()
+  })
+
+  it('renders dedicated login and loader Host surface glyphs', () => {
+    const dom = new JSDOM('<!doctype html>')
+    const login = renderHostSurfaceIconSvg(dom.window.document, 'host:log-in')
+    const loader = renderHostSurfaceIconSvg(dom.window.document, 'host:loader')
+    expect(login.resolution).toMatchObject({ key: 'host:log-in', provider: 'builtin:reicon', fallback: 'none' })
+    expect(loader.resolution).toMatchObject({ key: 'host:loader', provider: 'builtin:reicon', fallback: 'none' })
+    expect(login.svg.innerHTML).not.toBe(loader.svg.innerHTML)
     dom.window.close()
   })
 

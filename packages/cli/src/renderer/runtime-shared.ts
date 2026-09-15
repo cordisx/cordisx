@@ -181,6 +181,7 @@ import {
 } from './configuration.js'
 import { ManagerContentConfigAuthority } from './manager-content-config.js'
 import { BrowserServiceConfigBridge } from './service-config-binding.js'
+import { BrowserManagedServiceUIBridge } from './managed-service-ui-bridge.js'
 import { BrowserChannelCredentialBridge } from './channel-credential-binding.js'
 import { BrowserChannelActionsBridge } from './channel-actions-binding.js'
 import type {
@@ -268,6 +269,13 @@ export interface CordisXRuntimeMetadata {
     readonly token: string
   }[]
   readonly serviceConfigBridgeToken?: string
+  readonly managedServiceCapabilities?: readonly {
+    readonly pluginId: string
+    readonly pluginGeneration: string
+    readonly token: string
+  }[]
+  /** Host-private. True only when managed native model requests have a safe routing path. */
+  readonly nativeManagedModelRoutingAvailable?: boolean
   readonly channelCredentialBridgeToken?: string
   readonly channelActionsBridgeToken?: string
   readonly pluginLifecycleBridgeToken?: string
@@ -356,6 +364,8 @@ export interface PluginController {
   unregisterAgentLoop?: () => void | Promise<void>
   unregisterAgentTools?: () => void
   unregisterDocuments?: () => void | Promise<void>
+  unregisterManagedServices?: () => void | Promise<void>
+  unregisterModelProviders?: () => void | Promise<void>
   entityRegistryFiber?: Fiber
   agentRegistryFiber?: Fiber
   sessionRegistryFiber?: Fiber
@@ -445,6 +455,11 @@ export interface RendererPluginMutation {
   readonly candidate: CordisXPluginActivationRecordV1
   readonly targetId: string
   readonly affectedPluginIds: readonly string[]
+  readonly managedServiceUICapabilities?: readonly {
+    readonly pluginId: string
+    readonly pluginGeneration: string
+    readonly token: string
+  }[]
   readonly package?: {
     readonly manifest: CordisXPluginPackageManifestV1
     readonly digest: `sha256:${string}`

@@ -35,6 +35,7 @@ import type {
   CordisXPermissionCapabilityV4,
   CordisXPermissionScopeV4,
 } from '../permission-contracts.js'
+import type { BrandIconV1 } from '@cordisx/protocol/brand-icon/v1'
 import type {
   CordisXPluginBundleLifecycleOperationV1,
   CordisXPluginBundleLifecycleResultV1,
@@ -195,7 +196,7 @@ export interface ManagerSettingsNavigationItemSnapshot {
   readonly owner: string
   readonly group: 'before-settings' | 'after-settings'
   /** Host-resolved visual section; legacy/unassigned contributions use other. */
-  readonly navigationGroup: 'resources' | 'development' | 'collaboration' | 'other'
+  readonly navigationGroup: 'resources' | 'development' | 'collaboration' | 'external-accounts' | 'other'
   readonly order: number
   readonly disabled: boolean
   readonly disabledReason?: string
@@ -203,11 +204,17 @@ export interface ManagerSettingsNavigationItemSnapshot {
   readonly description: string
   readonly pageTitle: string
   readonly pageDescription: string
-  readonly icon: CordisXIconToken
+  readonly icon: BrandIconV1
   readonly route: CordisXRouteReference
+  /** The Host may expose this safe descriptor, but must not mount its protected body before review. */
+  readonly permissionReview?: Readonly<{
+    readonly capability: CordisXPermissionCapabilityV4 | 'ui.extension-points.interact' | 'usage.read'
+    readonly fingerprint: string
+  }>
 }
 
 export interface ManagerModel {
+  readonly modelProviders?: import('./model-providers.js').ModelProviderRegistry
   snapshot(): ManagerSnapshot
   pluginConsole?(id: string): CordisXPluginConsolePageV1
   clearPluginConsole?(id: string): void

@@ -2,6 +2,7 @@ import { chmod, mkdtemp, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  equivalentPluginActivation,
   normalizePluginActivation,
   PluginActivationStore,
   pluginDependentClosure,
@@ -59,6 +60,20 @@ function candidate(
 }
 
 describe('plugin activation graph and persistence', () => {
+  it('treats a durably committed active record as the same activation as its candidate', async () => {
+    const home = await mkdtemp(path.join(process.cwd(), '.plugin-activation-test-'))
+    temporary.add(home)
+    const store = new PluginActivationStore(home, 'work', 'runtime-1')
+    const staged = candidate('work', 'runtime-1', 'candidate-1', 1, [plugin('base')])
+    await store.writeCandidate(staged)
+    const committed = await store.commitCandidate('candidate-1')
+
+    expect(equivalentPluginActivation(committed, staged)).toBe(true)
+    expect(equivalentPluginActivation({ ...committed, revision: 2 }, staged)).toBe(false)
+    expect(equivalentPluginActivation({ ...committed, runtimeGeneration: 'runtime-2' }, staged)).toBe(false)
+    expect(equivalentPluginActivation({ ...committed, plugins: [plugin('other')] }, staged)).toBe(false)
+  })
+
   it('orders dependencies and computes only the target reverse-dependency closure', () => {
     const plugins = [
       plugin('base'),

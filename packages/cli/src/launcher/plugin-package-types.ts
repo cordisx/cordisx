@@ -1,5 +1,9 @@
 import type { CordisXPluginManifestV11 } from '../usage-permissions.js'
 import type { CordisXPluginManifestV12, CordisXPluginManifestV13 } from '../runtime-exact-request-permissions.js'
+import type {
+  PluginManifestManagedBackendServiceV14,
+  PluginRuntimeManifestV14,
+} from '@cordisx/protocol/plugin-manifest/v14'
 import type { CordisXPluginManifestV10 } from '../extension-point-interaction-permissions.js'
 import type {
   CordisXPluginManifestV4,
@@ -14,6 +18,7 @@ import type { CordisXPluginManifestV1 } from '../platform-contracts.js'
 import type { CordisXPluginPackageManifestV1 } from '../plugin-lifecycle-contracts.js'
 import type { EntityTemplatePayload } from './entity-directory.js'
 import type { BuiltPluginGenerationArtifact } from './production-plugin-build.js'
+import type { ManagedServicePackageResource } from './managed-service-package-resources.js'
 
 export interface StagedPluginPackage {
   readonly manifest: Omit<CordisXPluginPackageManifestV1, 'runtimeManifest'> & {
@@ -29,18 +34,20 @@ export interface StagedPluginPackage {
       | CordisXPluginManifestV11
       | CordisXPluginManifestV12
       | CordisXPluginManifestV13
+      | PluginRuntimeManifestV14
   }
   readonly digest: `sha256:${string}`
   readonly moduleSource: string
   readonly artifactSource: string
   readonly browserArtifact?: BuiltPluginGenerationArtifact
   readonly serviceModules: readonly StagedPluginServiceModule[]
+  readonly managedServiceResources: readonly ManagedServicePackageResource[]
   readonly entityTemplates: readonly EntityTemplatePayload[]
   readonly readme?: string
   readonly identitySource: string
 }
 
 export interface StagedPluginServiceModule {
-  readonly declaration: CordisXPluginServiceDeclarationV9
+  readonly declaration: CordisXPluginServiceDeclarationV9 | PluginManifestManagedBackendServiceV14
   readonly moduleSource: string
 }

@@ -1,6 +1,7 @@
 import {
   abortServiceConfigCandidate,
   commitServiceConfigCandidate,
+  markServiceConfigAppRestartApplied,
   readServiceConfigState,
   ServiceConfigConflictError,
   stageServiceConfigCandidate,
@@ -132,6 +133,7 @@ export interface HostServiceConfigPersistence {
   readonly stage: typeof stageServiceConfigCandidate
   readonly commit: typeof commitServiceConfigCandidate
   readonly abort: typeof abortServiceConfigCandidate
+  readonly markAppRestartApplied: typeof markServiceConfigAppRestartApplied
 }
 
 const DEFAULT_PERSISTENCE: HostServiceConfigPersistence = Object.freeze({
@@ -139,6 +141,7 @@ const DEFAULT_PERSISTENCE: HostServiceConfigPersistence = Object.freeze({
   stage: stageServiceConfigCandidate,
   commit: commitServiceConfigCandidate,
   abort: abortServiceConfigCandidate,
+  markAppRestartApplied: markServiceConfigAppRestartApplied,
 })
 
 const LOCAL_ID = /^[a-z0-9][a-z0-9._-]{0,95}$/

@@ -1,5 +1,8 @@
 import { createElement, createRef } from 'cordisx/react'
 import {
+  Dialog,
+  Disclosure,
+  FieldList,
   FilterToolbar,
   HorizontalSplitPane,
   type HorizontalSplitPaneProps,
@@ -9,6 +12,7 @@ import {
   type PanZoomCanvasHandle,
   SearchField,
   Select,
+  StatusBadge,
 } from 'cordisx/ui'
 
 declare const expanded: boolean
@@ -50,7 +54,17 @@ createElement(Select, {
   options: [{ value: 'all', label: 'All roles' }],
   onChange: () => {},
 })
-const semanticIcons: readonly IconName[] = ['role', 'session', 'relationship']
+const semanticIcons: readonly IconName[] = [
+  'role',
+  'session',
+  'relationship',
+  'account',
+  'refresh',
+  'logout',
+  'runtime',
+  'readiness',
+  'health',
+]
 semanticIcons.map(name => createElement(Icon, { name }))
 
 createElement(FilterToolbar, {
@@ -68,4 +82,18 @@ createElement(FilterToolbar, {
     options: [{ value: 'all', label: 'All roles' }],
     onChange: () => {},
   })],
+})
+
+createElement(StatusBadge, { tone: 'success' }, 'Ready')
+createElement(FieldList, {
+  density: 'compact',
+  columns: 2,
+  items: [{ id: 'status', label: 'Status', value: createElement(StatusBadge, { tone: 'info' }, 'Running') }],
+})
+createElement(Disclosure, { summary: 'Technical details', defaultOpen: false }, 'Diagnostic')
+createElement(Dialog, {
+  open: false,
+  title: 'Confirm change',
+  description: 'Review the target before continuing.',
+  onClose: reason => reason,
 })

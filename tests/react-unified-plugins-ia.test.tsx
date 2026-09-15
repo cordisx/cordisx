@@ -481,7 +481,7 @@ describe('unified Plugins information architecture', () => {
     }
   })
 
-  it('renders exactly Plugins and Plugin Store as core resource destinations', async () => {
+  it('renders Plugins, Model services and Plugin Store as core resource destinations', async () => {
     const fixture = await renderFixture()
     const state = managerSnapshot()
     try {
@@ -489,6 +489,7 @@ describe('unified Plugins information architecture', () => {
       const resources = fixture.document.querySelector('[data-navigation-group="resources"]')!
       expect([...resources.querySelectorAll('[data-tab]')].map(item => item.getAttribute('data-tab'))).toEqual([
         'plugins',
+        'model-services',
         'marketplace',
       ])
       expect(resources.querySelector('[data-tab="plugin-bundles"]')).toBeNull()

@@ -1,4 +1,8 @@
 import path from 'node:path'
+import {
+  createNativeSubmissionComposition,
+  type NativeSubmissionComposition,
+} from '../launcher/native-submission-composition.js'
 import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -33,6 +37,7 @@ import {
   resolveCordisXProjectConfig,
 } from '../launcher/config.js'
 import {
+  acquireCodexProfileLaunchLease,
   assertLoopbackPortAvailable,
   findFreeLoopbackPort,
   type IsolatedCodexProfile,
@@ -57,7 +62,7 @@ import {
 } from '../launcher/channel-credential-rpc.js'
 import { type ChannelActionsBridgeHandler, createChannelActionsBridgeHandler } from '../launcher/channel-actions-rpc.js'
 import { LauncherSecretStore } from '../launcher/secret-store.js'
-import { readServiceConfigState } from '../config/service-config.js'
+import { markServiceConfigAppRestartApplied, readServiceConfigState } from '../config/service-config.js'
 import {
   CLI_PROXY_PROVIDER_RUNTIME_CONFIG_CONTRACT,
   CLI_PROXY_PROVIDER_RUNTIME_CONFIG_INITIAL,
@@ -102,9 +107,11 @@ import {
 } from '../launcher/plugin-generation-loader.js'
 import { AgentLoopAuthority } from '../launcher/agent-loop-authority.js'
 import { createCliProxyPlatformProviderBatch } from '../launcher/cli-proxy-platform-provider-batch.js'
+import { PackagePluginServiceConfigStore } from '../launcher/package-plugin-service-config.js'
 import { PlatformProviderPluginLifecycleRuntime } from '../launcher/platform-provider-plugin-lifecycle.js'
 import { stagePluginPackageSourceV1 } from '../launcher/packages/index.js'
 import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V13, normalizePluginManifestV13 } from '../runtime-exact-request-permissions.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14, normalizePluginManifestV14 } from '../launcher/latest-runtime-manifest.js'
 import {
   CordisXSkillConflictError,
   type CordisXSkillDeploymentResult,
@@ -117,9 +124,14 @@ import {
   type OwnerDocumentBridgeHandler,
   OwnerDocumentLeaseRegistry,
 } from '../launcher/owner-document-rpc.js'
+import { managedBackendRuntimeServiceAccess } from '../launcher/packages/managed-backend-service-access.js'
+import { ManagedServiceRuntime } from '../launcher/managed-service-runtime.js'
+import { ManagedServiceNodeHost } from '../launcher/managed-service-node-host.js'
+import { ManagedServicePluginLifecycleRuntime } from '../launcher/managed-service-plugin-lifecycle.js'
 
 import {
   agentHistoryHost,
+  assertProductionGraphBootstrapSnapshot,
   assertProductionGraphLaunchOwnership,
   buildRendererComposition,
   type ChannelManagerBundleProjection,
@@ -242,6 +254,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     ? undefined
     : randomBytes(32).toString('hex')
   let pluginGenerationArtifactServer: PluginGenerationArtifactServer | undefined
+  let managedServiceLifecycleRuntime: ManagedServicePluginLifecycleRuntime | undefined
+  let nativeSubmission: NativeSubmissionComposition | undefined
   try {
     pluginGenerationArtifactServer = await startPluginGenerationArtifactServer()
     const activePluginGenerationArtifactServer = pluginGenerationArtifactServer
@@ -267,7 +281,50 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       lifecycleGeneration,
     )
     const lifecycleRuntime = new CdpPluginLifecycleRuntime()
-    const lifecycleTransactionRuntime = new PlatformProviderPluginLifecycleRuntime(lifecycleRuntime)
+    const platformProviderLifecycleRuntime = new PlatformProviderPluginLifecycleRuntime(lifecycleRuntime)
+    managedServiceLifecycleRuntime = new ManagedServicePluginLifecycleRuntime({
+      runtime: platformProviderLifecycleRuntime,
+      profileId: selection.profileId,
+      runtimeGeneration: lifecycleGeneration,
+      activate: async activation => {
+        if (invocation.options.dryRun) return undefined
+        const plugins = await loadPluginComposition(lifecycleStore, activation)
+        const accesses = await Promise.all(plugins.flatMap(plugin => {
+          if (!plugin.enabled || plugin.package === undefined || plugin.manifest?.schemaVersion !== 14) return []
+          return plugin.manifest.services.flatMap(service =>
+            service.kind === 'managed-backend'
+              ? [managedBackendRuntimeServiceAccess(
+                rootFromConfigPath(configPath),
+                {
+                  id: plugin.id,
+                  version: plugin.package!.version,
+                  digest: plugin.package!.digest,
+                  moduleGeneration: plugin.package!.moduleGeneration,
+                },
+                service.id,
+                lifecycleGeneration,
+              )]
+              : []
+          )
+        }))
+        if (accesses.length === 0) return undefined
+        const host = new ManagedServiceNodeHost(
+          new ManagedServiceRuntime({
+            homeDir: rootFromConfigPath(configPath),
+            environment: runtime.env ?? process.env,
+          }),
+          selection.profileId,
+          lifecycleGeneration,
+        )
+        try {
+          return await host.replace(accesses)
+        } catch (error) {
+          await host.dispose().catch(() => undefined)
+          throw error
+        }
+      },
+    })
+    const lifecycleTransactionRuntime = managedServiceLifecycleRuntime
     const configuredIds = new Set(configuredComposition.plugins.map(plugin => plugin.id))
     const pluginLifecycleCoordinator = new PluginLifecycleCoordinator({
       homeDir: rootFromConfigPath(configPath),
@@ -352,6 +409,8 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         },
       }
     }))
+    const activeLifecycleActivation = initialActivation ?? await lifecycleStore.loadActive()
+    await managedServiceLifecycleRuntime.initialize(activeLifecycleActivation)
     const permissionIdentities = new PluginPermissionIdentityRegistry([
       ...pluginIdentities(configuredComposition),
       ...pluginIdentities({ ...configuredComposition, plugins: activatedPlugins }),
@@ -425,6 +484,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       },
       runtime: lifecycleRuntime,
     }
+    const managedServiceActivation = managedServiceLifecycleRuntime.nativeActivation()
+    const managedServiceUICapabilities = managedServiceLifecycleRuntime.capabilities()
+    const managedServiceUI = managedServiceLifecycleRuntime.managedServiceUI
     const rendererComposition = await buildRendererComposition(composition, stdout, {
       appId,
       profileId: selection.profileId,
@@ -438,7 +500,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       generation: lifecycleGeneration,
       pluginLifecycle: {
         token: pluginLifecycleBridgeToken,
-        activation: initialActivation ?? await lifecycleStore.loadActive(),
+        activation: activeLifecycleActivation,
         ...(recoveryPlan === undefined ? {} : { registryEpoch: recoveryPlan.rollbackRegistryEpoch }),
       },
       pluginBundles: await pluginBundleCoordinator.snapshot(),
@@ -446,6 +508,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       ...(channelManager === undefined ? {} : { channelManager }),
       ...(channelCredentialBridgeToken === undefined ? {} : { channelCredentialBridgeToken }),
       ...(channelActionsBridgeToken === undefined ? {} : { channelActionsBridgeToken }),
+      managedServiceUICapabilities,
       ...(runtime.internalBuildRendererBundle === undefined
         ? {}
         : { internalBuildRendererBundle: runtime.internalBuildRendererBundle }),
@@ -483,6 +546,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       const permissionPolicies = freshHomeConfig.permissions.filter(policy =>
         policy.key.profileId === selection.profileId
       )
+      const managedServiceUICapabilities = managedServiceLifecycleRuntime!.capabilities()
       const currentComposition: CordisXConfig = {
         ...freshConfigured,
         plugins: [...freshConfigured.plugins, ...currentPackagePlugins],
@@ -494,6 +558,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         permissionPolicies,
         pluginBundles,
         freshChannelManager,
+        managedServiceUICapabilities,
         fingerprint: JSON.stringify({
           active,
           registryEpoch,
@@ -501,6 +566,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           permissionPolicies,
           pluginBundles,
           freshChannelManager,
+          managedServiceUICapabilities,
         }),
       }
     }
@@ -509,10 +575,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       expectedRegistryEpoch,
     ) => {
       const before = await loadCurrentProductionProjection()
-      if (
-        JSON.stringify(before.active) !== JSON.stringify(expectedActive)
-        || before.registryEpoch !== expectedRegistryEpoch
-      ) throw new Error('browser graph admission activation snapshot is stale')
+      assertProductionGraphBootstrapSnapshot(expectedActive, expectedRegistryEpoch, before)
       const rebuilt = await rendererComposition.rebuild(
         before.currentComposition,
         before.active,
@@ -520,6 +583,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         {
           permissionPolicies: before.permissionPolicies,
           pluginBundles: before.pluginBundles,
+          managedServiceUICapabilities: before.managedServiceUICapabilities,
           ...(before.freshChannelManager === undefined ? {} : { channelManager: before.freshChannelManager }),
         },
       )
@@ -615,6 +679,43 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     const fleetConfigs = providerConfigs(composition, runtime.env ?? process.env)
       .filter(provider => provider.kind === 'local-codex')
     const cliProxyConfigured = composition.plugins.some(plugin => plugin.id === 'cli-proxy-api' && plugin.enabled)
+    const cliProxyPackageOwned = activatedPlugins.some(plugin => plugin.id === 'cli-proxy-api' && plugin.enabled)
+    const cliProxyPackageServiceConfig = cliProxyPackageOwned
+      ? new PackagePluginServiceConfigStore(
+        rootFromConfigPath(configPath),
+        selection.profileId,
+        lifecycleGeneration,
+      )
+      : undefined
+    const markCliProxyStartupConfigApplied = async (): Promise<void> => {
+      if (!cliProxyConfigured) return
+      try {
+        const read = cliProxyPackageServiceConfig?.persistence.read ?? readServiceConfigState
+        const state = await read({
+          profileId: selection.profileId,
+          pluginId: 'cli-proxy-api',
+          serviceId: CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID,
+          initialConfig: CLI_PROXY_PROVIDER_STARTUP_CONFIG_INITIAL as unknown as Parameters<
+            typeof readServiceConfigState
+          >[0]['initialConfig'],
+        }, configPath)
+        if (state.restartRequired !== true) return
+        const markApplied = cliProxyPackageServiceConfig?.persistence.markAppRestartApplied
+          ?? markServiceConfigAppRestartApplied
+        await markApplied({
+          profileId: selection.profileId,
+          pluginId: 'cli-proxy-api',
+          serviceId: CLI_PROXY_PROVIDER_STARTUP_SERVICE_ID,
+          expectedRevision: state.revision,
+          initialConfig: CLI_PROXY_PROVIDER_STARTUP_CONFIG_INITIAL as unknown as Parameters<
+            typeof markServiceConfigAppRestartApplied
+          >[0]['initialConfig'],
+        }, configPath)
+      } catch (error) {
+        stdout(`[cordisx] failed to mark CLIProxy startup configuration applied: ${String(error)}`)
+      }
+    }
+    const runHost = runtime.internalRunInjectedHost ?? runInjectedHost
     const launcherCliProxy = cliProxyConfigured
       ? await (async () => {
         const entry = createRequire(import.meta.url).resolve('@cordisx/plugin-cli-proxy-api')
@@ -625,6 +726,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           homeDir: rootFromConfigPath(configPath),
           runtimeValidators: {
             [CORDISX_PLUGIN_MANIFEST_SCHEMA_V13]: value => normalizePluginManifestV13(value, 'cli-proxy-api'),
+            [CORDISX_PLUGIN_MANIFEST_SCHEMA_V14]: value => normalizePluginManifestV14(value, 'cli-proxy-api'),
           },
         })
         return {
@@ -657,9 +759,12 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         environment: runtime.env ?? process.env,
         activation: async () => await lifecycleStore.bindRuntimeGeneration(),
         ...(launcherCliProxy === undefined ? {} : { launcherCandidates: [launcherCliProxy] }),
+        ...(cliProxyPackageServiceConfig === undefined
+          ? {}
+          : { serviceConfigPersistence: cliProxyPackageServiceConfig.persistence }),
       })
     if (providerFleet !== undefined && platformProviderServices !== undefined) {
-      lifecycleTransactionRuntime.connect(async activation =>
+      platformProviderLifecycleRuntime.connect(async activation =>
         await platformProviderServices.reconfigure(
           providerFleet,
           fleetConfigs,
@@ -700,6 +805,9 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         environment: runtime.env ?? process.env,
         fleet: providerFleet,
         ...(platformProviderServices === undefined ? {} : { platformProviderServices }),
+        ...(cliProxyPackageServiceConfig === undefined
+          ? {}
+          : { persistence: cliProxyPackageServiceConfig.persistence }),
       }))
     }
     if (serviceConfigToken !== undefined && channelPlugin !== undefined && channelService !== undefined) {
@@ -764,7 +872,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       }
       stdout('[cordisx] built-in Skill deployment skipped for --attach because the Host HOME is unknown')
       try {
-        await runInjectedHost({
+        await runHost({
           source: rendererComposition.source,
           hasLoopbackGraph: rendererComposition.hasLoopbackGraph,
           pluginArtifactOrigin: activePluginGenerationArtifactServer.origin,
@@ -787,6 +895,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           ...(serviceConfigBridge === undefined ? {} : { serviceConfigBridge }),
           ...(channelCredentialBridge === undefined ? {} : { channelCredentialBridge }),
           ...(channelActionsBridge === undefined ? {} : { channelActionsBridge }),
+          managedServiceUI,
           ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
           ...(iconThemePreferencePersistence === undefined ? {} : { iconThemePreferencePersistence }),
           pluginLifecycle,
@@ -801,6 +910,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           debugPort,
           hostArgs: invocation.hostArgs,
           launcher: invocation.options,
+          onReady: markCliProxyStartupConfigApplied,
           stdout,
         })
       } finally {
@@ -839,19 +949,6 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
 
     const debugPort = invocation.options.debugPort ?? await findFreeLoopbackPort()
     if (invocation.options.debugPort !== undefined) await assertLoopbackPortAvailable(debugPort)
-    await adapter.prepareLaunch(plan)
-    await deployBuiltinSkillWithoutOverwritingUserChanges(
-      deployBundledCordisXSkill(plan, {
-        ...(runtime.internalBuiltinSkillSourceDir === undefined
-          ? {}
-          : { sourceDir: runtime.internalBuiltinSkillSourceDir }),
-        ...(runtime.internalSharedHomeDir === undefined
-          ? {}
-          : { sharedHomeOverride: runtime.internalSharedHomeDir }),
-      }),
-      stdout,
-    )
-    stdout(`[cordisx] loopback CDP port: ${debugPort}`)
     const chromiumProfile = plan.chromiumProfile
     const profile = chromiumProfile.mode === 'independent'
       ? {
@@ -862,8 +959,35 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         ),
       }
       : undefined
+    const profileLease = profile === undefined || runHost !== runInjectedHost
+      ? undefined
+      : await acquireCodexProfileLaunchLease(profile.userDataDir)
+    let profileLeaseHandedOff = false
     try {
-      await runInjectedHost({
+      await adapter.prepareLaunch(plan)
+      if ((runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION === '1') {
+        nativeSubmission = await createNativeSubmissionComposition(managedServiceActivation, plan.executable)
+      }
+      if (
+        nativeSubmission === undefined && (runtime.env ?? process.env).CORDISX_EXPERIMENTAL_NATIVE_SUBMISSION === '1'
+      ) {
+        stdout('[cordisx] native managed Desktop providers unavailable: native submission composition failed')
+      }
+      await deployBuiltinSkillWithoutOverwritingUserChanges(
+        deployBundledCordisXSkill(plan, {
+          ...(runtime.internalBuiltinSkillSourceDir === undefined
+            ? {}
+            : { sourceDir: runtime.internalBuiltinSkillSourceDir }),
+          ...(runtime.internalSharedHomeDir === undefined
+            ? {}
+            : { sharedHomeOverride: runtime.internalSharedHomeDir }),
+        }),
+        stdout,
+      )
+      stdout(`[cordisx] loopback CDP port: ${debugPort}`)
+      const createAgentHistoryHost = runtime.internalAgentHistoryHost ?? agentHistoryHost
+      const runHostInput: Parameters<typeof runHost>[0] = {
+        ...(nativeSubmission === undefined ? {} : { nativeSubmission: nativeSubmission.installation }),
         source: rendererComposition.source,
         hasLoopbackGraph: rendererComposition.hasLoopbackGraph,
         pluginArtifactOrigin: activePluginGenerationArtifactServer.origin,
@@ -871,7 +995,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         ...(rendererComposition.newDocumentSource === undefined ? {} : {
           newDocumentSource: rendererComposition.newDocumentSource,
         }),
-        agentHistoryHost: agentHistoryHost(
+        agentHistoryHost: createAgentHistoryHost(
           { ...(runtime.env ?? process.env), ...plan.environment },
           configPath,
           `${appId}:${selection.profileId}:${selection.dataMode}`,
@@ -886,6 +1010,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         ...(serviceConfigBridge === undefined ? {} : { serviceConfigBridge }),
         ...(channelCredentialBridge === undefined ? {} : { channelCredentialBridge }),
         ...(channelActionsBridge === undefined ? {} : { channelActionsBridge }),
+        managedServiceUI,
         ...(permissionPersistence === undefined ? {} : { permissionPersistence }),
         ...(iconThemePreferencePersistence === undefined ? {} : { iconThemePreferencePersistence }),
         pluginLifecycle,
@@ -902,17 +1027,26 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         debugPort,
         hostArgs: invocation.hostArgs,
         launcher: invocation.options,
+        onReady: markCliProxyStartupConfigApplied,
         ...(profile === undefined ? {} : { profile }),
-        ...(Object.keys(plan.environment).length === 0 ? {} : { environment: plan.environment }),
+        ...(profileLease === undefined ? {} : { profileLease }),
+        ...((Object.keys(plan.environment).length === 0 && nativeSubmission === undefined)
+          ? {}
+          : { environment: { ...plan.environment, ...nativeSubmission?.environment } }),
         stdout,
-      })
+      }
+      profileLeaseHandedOff = profileLease !== undefined
+      await runHost(runHostInput)
     } finally {
       await ownerDocuments.http.dispose()
+      if (profileLease !== undefined && !profileLeaseHandedOff) await profileLease.release()
       await ownerDocuments.agentTools?.close()
       await channelService?.dispose()
       await closeProviderFleet()
     }
   } finally {
+    await nativeSubmission?.close().catch(() => undefined)
+    await managedServiceLifecycleRuntime?.dispose().catch(() => undefined)
     await pluginGenerationArtifactServer?.close()
     await certifiedPermissionAuthority?.dispose()
   }

@@ -6,12 +6,14 @@ import {
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V1,
   CORDISX_MANAGER_CONTENT_NAVIGATION_SCHEMA_V3,
   CORDISX_PAGE_SCHEMA_V3,
+  CORDISX_PAGE_SCHEMA_V4,
   CORDISX_ROUTE_SCHEMA_V2,
   type CordisXLocalizationSeat,
 } from '../packages/cli/src/contracts.js'
 import type { CordisXI18nService, LocalizationEffectOwner } from '../packages/cli/src/renderer/i18n.js'
 import {
   compareManagerSettingsNavigationItems,
+  resolveManagerSettingsNavigationPermissionReview,
   sortManagerSettingsNavigationItems,
 } from '../packages/cli/src/renderer/manager-settings-navigation.js'
 import {
@@ -55,6 +57,38 @@ class FakeOutlet implements OutletController {
     this.hides += 1
   }
 }
+
+describe('Manager settings navigation permission discovery', () => {
+  const permission = {
+    identity: { id: 'demo' },
+    capability: 'ui.extension-points.render' as const,
+    fingerprint: 'review-fingerprint',
+    scope: { extensionPoints: ['manager.settings.navigation-items'] },
+  }
+
+  it('projects only an exact active Host permission review', () => {
+    expect(resolveManagerSettingsNavigationPermissionReview(
+      { owner: 'demo', authorized: false, pointPolicyReason: 'permission.review-pending' },
+      { owner: 'demo', authorized: true },
+      [permission],
+    )).toEqual({ capability: 'ui.extension-points.render', fingerprint: 'review-fingerprint' })
+    expect(resolveManagerSettingsNavigationPermissionReview(
+      { owner: 'demo', authorized: false, pointPolicyReason: 'permission.policy-denied' },
+      { owner: 'demo', authorized: true },
+      [permission],
+    )).toBeUndefined()
+    expect(resolveManagerSettingsNavigationPermissionReview(
+      { owner: 'demo', authorized: true },
+      { owner: 'demo', authorized: false, pointPolicyReason: 'permission.review-pending' },
+      [{ ...permission, scope: { extensionPoints: ['manager.content'] } }],
+    )).toEqual({ capability: 'ui.extension-points.render', fingerprint: 'review-fingerprint' })
+    expect(resolveManagerSettingsNavigationPermissionReview(
+      { owner: 'demo', authorized: true, error: 'route is unresolved' },
+      { owner: 'demo', authorized: false, pointPolicyReason: 'permission.review-pending' },
+      [{ ...permission, scope: { extensionPoints: ['manager.content'] } }],
+    )).toBeUndefined()
+  })
+})
 
 function fakeI18n(): CordisXI18nService {
   return {
@@ -250,8 +284,8 @@ describe('Manager Settings navigation core', () => {
     expect(navigation.managerSettingsNavigationRoute('demo', 'ready')).toMatchObject({ state: 'pending' })
 
     pages.register('demo', {
-      $schema: CORDISX_PAGE_SCHEMA_V3,
-      schemaVersion: 3,
+      $schema: CORDISX_PAGE_SCHEMA_V4,
+      schemaVersion: 4,
       id: 'ready',
       title: { key: 'page.title' },
       description: { key: 'page.description' },

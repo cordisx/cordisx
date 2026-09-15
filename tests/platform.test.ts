@@ -23,6 +23,7 @@ import {
   ProjectionPlatformAdapter,
   UnavailablePlatformAdapter,
 } from '../packages/cli/src/renderer/platform.js'
+import { CORDISX_PLUGIN_MANIFEST_SCHEMA_V14 } from '../packages/cli/src/launcher/latest-runtime-manifest.js'
 import { CORDISX_PLUGIN_ID, CORDISX_PLUGIN_SOURCE } from '../packages/cli/src/renderer/service.js'
 
 const identity: CordisXPluginIdentity = { source: 'file:///plugins/demo.ts', id: 'demo' }
@@ -164,6 +165,31 @@ async function platformContext(
 }
 
 describe('Platform capability runtime', () => {
+  it('projects Host-managed v14 services out of the renderer manifest', () => {
+    const normalized = normalizePluginManifest({
+      $schema: CORDISX_PLUGIN_MANIFEST_SCHEMA_V14,
+      schemaVersion: 14,
+      id: identity.id,
+      capabilities: [],
+      services: [{
+        id: 'backend',
+        kind: 'managed-backend',
+        owner: 'host',
+        entry: './services/backend.mjs',
+        definitionSchema:
+          'https://raw.githubusercontent.com/cordisx/cordisx-protocol/main/schemas/managed-service-definition.v1.schema.json',
+        runtimeResources: [],
+        consumerGrants: [],
+      }],
+    }, identity.id)
+
+    expect(normalized).toMatchObject({
+      schemaVersion: 13,
+      id: identity.id,
+      services: [],
+    })
+  })
+
   it('validates provider and model against current adapter data before two-phase creation', async () => {
     const adapter = fakeAdapter()
     const broker = new PermissionBroker(new MemoryPermissionPolicyStore(), prompt())

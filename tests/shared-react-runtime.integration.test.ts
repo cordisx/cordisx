@@ -16,6 +16,10 @@ interface SharedRuntime {
     readonly PanZoomCanvas?: unknown
     readonly FilterToolbar?: unknown
     readonly SearchField?: unknown
+    readonly Dialog?: unknown
+    readonly Disclosure?: unknown
+    readonly FieldList?: unknown
+    readonly StatusBadge?: unknown
   }>
 }
 
@@ -77,6 +81,10 @@ describe('shared React plugin runtime', () => {
     expect(typeof window.__cordisxSharedReactRuntime?.ui.PanZoomCanvas).toBe('function')
     expect(typeof window.__cordisxSharedReactRuntime?.ui.FilterToolbar).toBe('function')
     expect(typeof window.__cordisxSharedReactRuntime?.ui.SearchField).toBe('function')
+    expect(typeof window.__cordisxSharedReactRuntime?.ui.Dialog).toBe('function')
+    expect(typeof window.__cordisxSharedReactRuntime?.ui.Disclosure).toBe('function')
+    expect(typeof window.__cordisxSharedReactRuntime?.ui.FieldList).toBe('function')
+    expect(typeof window.__cordisxSharedReactRuntime?.ui.StatusBadge).toBe('function')
     expect(cordisXSharedModuleSource(CORDISX_UI_MODULE)).toContain(
       'export const HorizontalSplitPane = runtime.ui.HorizontalSplitPane;',
     )
@@ -92,6 +100,9 @@ describe('shared React plugin runtime', () => {
     expect(cordisXSharedModuleSource(CORDISX_UI_MODULE)).toContain(
       'export const SearchField = runtime.ui.SearchField;',
     )
+    for (const name of ['Dialog', 'Disclosure', 'FieldList', 'StatusBadge']) {
+      expect(cordisXSharedModuleSource(CORDISX_UI_MODULE)).toContain(`export const ${name} = runtime.ui.${name};`)
+    }
 
     let navigationSettled = false
     const navigation = window.__cordisxRuntime!.navigate('shared-react', { id: 'overview' })
@@ -122,6 +133,12 @@ describe('shared React plugin runtime', () => {
     expect(dom.window.document.querySelector('.cxr-ui-card')).not.toBeNull()
     expect(dom.window.document.querySelector('.cxr-ui-selection-rail')).not.toBeNull()
     expect(dom.window.document.querySelector('.cxr-ui-markdown')?.textContent).toContain('Safe Markdown')
+    expect(dom.window.document.querySelector('.cxr-ui-field-list')).not.toBeNull()
+    expect(dom.window.document.querySelector('.cxr-ui-status-badge')?.textContent).toBe('Ready')
+    expect(dom.window.document.querySelector('.cxr-ui-disclosure')).not.toBeNull()
+    dom.window.document.querySelector<HTMLButtonElement>('.cxr-ui-card:last-of-type > .cxr-ui-button')?.click()
+    await waitFor(() => dom.window.document.querySelector('.cxhd-dialog') !== null)
+    expect(dom.window.document.querySelector('.cxhd-dialog')?.textContent).toContain('Shared dialog')
     const sharedStyles = dom.window.document.querySelector<HTMLStyleElement>('[data-cordisx-shared-react="true"]')
     expect(sharedStyles?.textContent).toContain(
       '.cxr-ui-horizontal-split-pane{display:grid;width:100%;height:100%;min-width:0;min-height:0;overflow:hidden}',
@@ -135,6 +152,7 @@ describe('shared React plugin runtime', () => {
     await window.__cordisxRuntime!.dispose()
     await waitFor(() => window.__sharedReactEffectCleanups === 1)
     expect(dom.window.document.querySelector('[data-shared-react-page]')).toBeNull()
+    expect(dom.window.document.querySelector('.cxhd-dialog')).toBeNull()
     expect(dom.window.document.querySelector('[data-cordisx-shared-react]')).toBeNull()
     expect(window.__cordisxSharedReactRuntime).toBeUndefined()
     dom.window.close()

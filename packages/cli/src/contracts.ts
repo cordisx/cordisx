@@ -3,7 +3,9 @@ export * from './usage-contracts.js'
 export { CORDISX_PLUGIN_MANIFEST_SCHEMA_V11, type CordisXPluginManifestV11 } from './agent-task-permission-manifest.js'
 export {
   CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V10,
+  CORDISX_HOST_EXTENSION_POINT_CATALOG_SCHEMA_V11,
   type CordisXHostExtensionPointCatalogV10,
+  type CordisXHostExtensionPointCatalogV11,
 } from './contracts-extension-navigation.js'
 export {
   CORDISX_PLUGIN_MANIFEST_SCHEMA_V10,
@@ -168,6 +170,7 @@ export type {
   CordisXHostExtensionPointCatalogV8,
   CordisXHostExtensionPointCatalogV9,
   CordisXHostExtensionPointDescriptor,
+  CordisXHostExtensionPointDescriptorV11,
   CordisXHostExtensionPointDescriptorV2,
   CordisXHostExtensionPointDescriptorV3,
   CordisXHostExtensionPointDescriptorV5,
@@ -186,6 +189,7 @@ export type {
   CordisXLocalizationSnapshot,
   CordisXLocalizedProjection,
   CordisXLocalizedText,
+  CordisXManagerSettingsNavigationDescriptorV11,
   CordisXManagerSettingsNavigationDescriptorV9,
   CordisXMessageDefinition,
   CordisXMessageParam,
@@ -250,9 +254,11 @@ export {
   CORDISX_PAGE_SCHEMA_V1,
   CORDISX_PAGE_SCHEMA_V2,
   CORDISX_PAGE_SCHEMA_V3,
+  CORDISX_PAGE_SCHEMA_V4,
   CORDISX_ROOM_COMPOSITE_AVATAR_MAX_PARTICIPANTS,
   CORDISX_ROUTE_SCHEMA_V1,
   CORDISX_ROUTE_SCHEMA_V2,
+  CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V11,
   CORDISX_SURFACE_CONTRIBUTION_SCHEMA_V9,
   CORDISX_SURFACE_NAMES,
 } from './contracts-host-ui.js'
@@ -300,6 +306,8 @@ export type {
   CordisXManagerContentProjectionV3,
   CordisXManagerContentProjectionV4,
   CordisXManagerContentRecordTitleV1,
+  CordisXManagerOpenResult,
+  CordisXManagerService,
   CordisXManagerSettingsContentTabItem,
   CordisXManagerSettingsNavigationContributionOptions,
   CordisXManagerSettingsNavigationGroup,
@@ -312,6 +320,7 @@ export type {
   CordisXPageHeaderAction,
   CordisXPageMetadata,
   CordisXPageMetadataV3,
+  CordisXPageMetadataV4,
   CordisXPageMount,
   CordisXPageMountContext,
   CordisXPageNavigation,

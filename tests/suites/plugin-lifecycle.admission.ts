@@ -1,6 +1,14 @@
+import { execFile } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+import { promisify } from 'node:util'
 import { expect, it, vi } from 'vitest'
 import { partitionPermissionReviewPlan } from '../../packages/cli/src/capability-risk-catalog.js'
-import { PluginLifecycleCoordinator } from '../../packages/cli/src/launcher/plugin-lifecycle.js'
+import {
+  PluginLifecycleCoordinator,
+  type PluginRuntimeMutation,
+} from '../../packages/cli/src/launcher/plugin-lifecycle.js'
+import { isPermissionReviewV4ManifestVersion } from '../../packages/cli/src/launcher/plugin-lifecycle-model.js'
 import {
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V2,
   CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
@@ -12,13 +20,21 @@ import {
   FormalRuntime,
   install,
   localPackage,
+  localPackageV14,
   localPackageV4,
   localPackageV5,
   request,
   workspace,
 } from './plugin-lifecycle.fixtures.js'
 
+const execFileAsync = promisify(execFile)
+
 export function registerAdmissionTests() {
+  it('routes normalized manifest-v5 through manifest-v14 to V4 permission review', () => {
+    expect([5, 6, 7, 8, 9, 10, 11, 12, 13, 14].every(isPermissionReviewV4ManifestVersion)).toBe(true)
+    expect([1, 4, 15].some(isPermissionReviewV4ManifestVersion)).toBe(false)
+  })
+
   it('rejects first browser graph admission before authority prepare and preserves durable last-good', async () => {
     const { root, home } = await workspace()
     class AdmissionRejectingRuntime extends FormalRuntime {
@@ -227,6 +243,174 @@ export function registerAdmissionTests() {
     })
     expect(runtime.calls).toEqual(['prepare', 'stage', 'publish', 'complete', 'finalize'])
     expect(runtime.lastStaged?.authorizationDecision).toEqual(decision)
+  })
+
+  it('reviews and applies a manifest-v14 managed backend through an exact V4 candidate binding', async () => {
+    const { root, home } = await workspace()
+    class LaunchCheckingRuntime extends FormalRuntime {
+      readonly launched: PluginRuntimeMutation['operation'][] = []
+
+      override async stage(mutation: PluginRuntimeMutation) {
+        const observation = await super.stage(mutation)
+        if (mutation.package?.manifest.runtimeManifest.schemaVersion === 14) {
+          const executable = path.join(
+            home,
+            'packages',
+            'sha256',
+            mutation.package.digest.slice('sha256:'.length),
+            'managed-service.mjs',
+          )
+          if (process.platform === 'win32') await execFileAsync(process.execPath, [executable])
+          else await execFileAsync(executable)
+          this.launched.push(mutation.operation)
+        }
+        return observation
+      }
+    }
+    const runtime = new LaunchCheckingRuntime()
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      runtime,
+    })
+    const review = async (version: string, expectedRevision: number) => {
+      const planned = await coordinator.handle(request({
+        kind: 'inspect-local',
+        sourceDirectory: await localPackageV14(root, version),
+      }, expectedRevision))
+      expect(planned).toMatchObject({
+        outcome: 'planned',
+        operation: expectedRevision === 0 ? 'install' : 'update',
+        package: { id: 'permission-v14', version },
+      })
+      expect(planned.authorizationPlan).toBeUndefined()
+      const candidate = await coordinator.store.loadCandidate(planned.candidateId!)
+      const target = candidate.plugins.find(plugin => plugin.id === 'permission-v14')!
+      const plan = await coordinator.permissionReviewPlanV4({
+        requestId: `v14-plan-${version}`,
+        profileId: 'work',
+        runtimeGeneration: 'runtime-1',
+        expectedRevision,
+        target: { kind: 'candidate', candidateId: planned.candidateId! },
+      })
+      expect(plan).toMatchObject({
+        schemaVersion: 4,
+        operation: expectedRevision === 0 ? 'install' : 'update',
+        identity: { pluginId: 'permission-v14' },
+        binding: {
+          runtimeGeneration: 'runtime-1',
+          moduleGeneration: target.moduleGeneration,
+          requestId: planned.candidateId,
+        },
+        declarations: [],
+      })
+      const decision = {
+        $schema: CORDISX_PERMISSION_AUTHORIZATION_DECISION_SCHEMA_V4,
+        schemaVersion: 4 as const,
+        origin: 'explicit-user' as const,
+        planId: plan!.planId,
+        operation: plan!.operation,
+        profileId: plan!.profileId,
+        identity: plan!.identity,
+        binding: plan!.binding,
+        decisions: [],
+      }
+      return { planned, target, decision }
+    }
+
+    const installed = await review('1.0.0', 0)
+    expect(
+      await coordinator.applyPermissionReviewV4({
+        requestId: 'v14-install',
+        profileId: 'work',
+        runtimeGeneration: 'runtime-1',
+        expectedRevision: 0,
+        decision: installed.decision,
+      }),
+    ).toMatchObject({ outcome: 'applied', operation: 'install', revision: 1 })
+
+    const updated = await review('2.0.0', 1)
+    await expect(coordinator.applyPermissionReviewV4({
+      requestId: 'v14-forged',
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      expectedRevision: 1,
+      decision: {
+        ...updated.decision,
+        binding: { ...updated.decision.binding, moduleGeneration: 'forged-generation' },
+      },
+    })).rejects.toThrow()
+    await expect(coordinator.applyPermissionReviewV4({
+      requestId: 'v14-stale',
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      expectedRevision: 0,
+      decision: updated.decision,
+    })).rejects.toMatchObject({ code: 'stale-revision' })
+    expect(
+      await coordinator.applyPermissionReviewV4({
+        requestId: 'v14-update',
+        profileId: 'work',
+        runtimeGeneration: 'runtime-1',
+        expectedRevision: 1,
+        decision: updated.decision,
+      }),
+    ).toMatchObject({ outcome: 'applied', operation: 'update', revision: 2 })
+    expect(await coordinator.store.loadActive()).toMatchObject({
+      revision: 2,
+      plugins: [{
+        id: 'permission-v14',
+        version: '2.0.0',
+        digest: updated.target.digest,
+        enabled: true,
+      }],
+    })
+    expect(runtime.lastStaged?.authorizationDecision).toEqual(updated.decision)
+    expect(runtime.launched).toEqual(['install', 'update'])
+  })
+
+  it('persists a safe managed-service readiness diagnostic instead of only a generic rollback code', async () => {
+    const { root, home } = await workspace()
+    class MissingManagedServiceRuntime extends FormalRuntime {
+      override async stage(mutation: PluginRuntimeMutation) {
+        await super.stage(mutation)
+        throw new Error('plugin dependencies are unavailable: managedServices')
+      }
+    }
+    const coordinator = new PluginLifecycleCoordinator({
+      homeDir: home,
+      profileId: 'work',
+      runtimeGeneration: 'runtime-1',
+      permissionPolicies: [],
+      runtime: new MissingManagedServiceRuntime(),
+    })
+    const planned = await coordinator.handle(request({
+      kind: 'inspect-local',
+      sourceDirectory: await localPackage({ root, id: 'missing-managed-service' }),
+    }))
+    const applied = await coordinator.handle(request({
+      kind: 'install',
+      candidateId: planned.candidateId!,
+      authorizationDecision: decision(planned.authorizationPlan!),
+    }))
+    expect(applied).toMatchObject({
+      outcome: 'rolled-back',
+      error: {
+        code: 'readiness-failed',
+        message: 'The candidate managed-service generation was unavailable during renderer readiness.',
+      },
+    })
+    const journal = JSON.parse(
+      await readFile(
+        path.join(home, 'state', 'profiles', 'work', 'package-authority', 'journal.v1.json'),
+        'utf8',
+      ),
+    ) as { transactions: Record<string, { failureCode?: string }> }
+    expect(Object.values(journal.transactions)).toContainEqual(expect.objectContaining({
+      failureCode: 'managed-service-dependency-unavailable',
+    }))
   })
 
   it('queries certification only for catalog DOM capabilities and falls back to explicit review on lookup failure', async () => {

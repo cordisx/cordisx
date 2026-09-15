@@ -136,6 +136,23 @@ import {
   withGenerations,
 } from './plugin-lifecycle-model.js'
 
+function readinessFailureDiagnostic(error: unknown): { readonly failureCode: string; readonly message?: string } {
+  const message = error instanceof Error ? error.message : String(error)
+  if (message.includes('plugin dependencies are unavailable: managedServices')) {
+    return {
+      failureCode: 'managed-service-dependency-unavailable',
+      message: 'The candidate managed-service generation was unavailable during renderer readiness.',
+    }
+  }
+  if (message.startsWith('managed service candidate activation failed:')) {
+    return {
+      failureCode: 'managed-service-candidate-activation-failed',
+      message: 'The candidate managed-service generation failed Launcher readiness.',
+    }
+  }
+  return { failureCode: 'activation-or-readiness-failed' }
+}
+
 export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordinatorCore {
   protected async applyPackage(
     request: Pick<CordisXPluginLifecycleRequestV1, 'requestId' | 'profileId' | 'runtimeGeneration'> & {
@@ -510,7 +527,8 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
           await runtime.abort(transactionId).catch(() => undefined)
         } else {
           try {
-            const rollback = await authority.beginRollback(access, 'activation-or-readiness-failed')
+            const readinessDiagnostic = readinessFailureDiagnostic(error)
+            const rollback = await authority.beginRollback(access, readinessDiagnostic.failureCode)
             const rollbackPlan = await authority.resolveCandidate(access, 'rollback')
             await authority.resolveImpact({
               ownerId: access.ownerId,
@@ -543,7 +561,8 @@ export class PluginLifecycleCoordinatorTransaction extends PluginLifecycleCoordi
           }
           throw new LifecycleFailure(
             published ? 'activation-failed' : 'readiness-failed',
-            safeError(published ? 'activation-failed' : 'readiness-failed'),
+            readinessFailureDiagnostic(error).message
+              ?? safeError(published ? 'activation-failed' : 'readiness-failed'),
             'rolled-back',
           )
         }

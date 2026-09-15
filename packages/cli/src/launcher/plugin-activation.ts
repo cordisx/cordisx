@@ -117,6 +117,19 @@ export function normalizePluginActivation(value: unknown): CordisXPluginActivati
   return normalized
 }
 
+/** Compare the durable activation identity while ignoring candidate/active persistence metadata. */
+export function equivalentPluginActivation(
+  left: CordisXPluginActivationRecordV1,
+  right: CordisXPluginActivationRecordV1,
+): boolean {
+  return left.$schema === right.$schema
+    && left.schemaVersion === right.schemaVersion
+    && left.profileId === right.profileId
+    && left.revision === right.revision
+    && left.runtimeGeneration === right.runtimeGeneration
+    && JSON.stringify(left.plugins) === JSON.stringify(right.plugins)
+}
+
 /** Reject duplicate, missing, incompatible, disabled, and cyclic dependency graphs. */
 export function validatePluginActivationGraph(plugins: readonly CordisXPluginActivationItemV1[]): void {
   const byId = new Map<string, CordisXPluginActivationItemV1>()

@@ -8,8 +8,8 @@ import type { ManagerModel, ManagerSnapshot } from '../manager.js'
 import { HostIcon } from '../host-ui/HostIcon.js'
 import { BrandMark } from '../host-ui/BrandMark.js'
 import { createBrandMarkElement } from '../host-ui/BrandMark.js'
+import { HostBrandIcon } from '../host-ui/HostBrandIcon.js'
 import { HostBreadcrumbs, type HostBreadcrumbSegment } from '../host-ui/HostBreadcrumbs.js'
-import { HostSurfaceIcon } from '../host-ui/HostSurfaceIcon.js'
 import { createSidebarItem, type SidebarItemControl } from '../host-ui/SidebarItem.js'
 import { managerCopy, productLocale } from '../ui-copy.js'
 import { Navigation } from './components/Navigation.js'
@@ -32,6 +32,24 @@ import { PluginDetailPage } from './pages/PluginDetailPage.js'
 import { PluginBundleDetailPage } from './pages/PluginBundleDetailPage.js'
 import { PluginsPage } from './pages/PluginsPage.js'
 import { RoutesPage } from './pages/RoutesPage.js'
+
+import { ModelServicesPage } from './pages/ModelServicesPage.js'
+
+export function reconcileManagerContentRoute(
+  route: ManagerRoute,
+  items: ManagerSnapshot['settingsNavigationItems'],
+): ManagerRoute | undefined {
+  if (route.kind !== 'manager-content') return undefined
+  const item = items?.find(candidate => candidate.id === route.id)
+  if (item === undefined) return { kind: 'primary', page: 'plugins' }
+  if (item.permissionReview === undefined) return undefined
+  return {
+    kind: 'permission',
+    pluginId: item.owner,
+    capability: item.permissionReview.capability,
+    fingerprint: item.permissionReview.fingerprint,
+  }
+}
 
 function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
   const locale = snapshot.localization.locale
@@ -57,6 +75,7 @@ function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
   }
   const keys = {
     plugins: 'manager.nav.plugins',
+    'model-services': 'manager.nav.model-services',
     'plugin-bundles': 'manager.nav.plugins',
     'extension-points': 'manager.nav.extension-points',
     routes: 'manager.nav.routes',
@@ -69,6 +88,7 @@ function title(route: ManagerRoute, snapshot: ManagerSnapshot): string {
 function primaryIcon(route: ManagerRoute) {
   if (route.kind !== 'primary') return undefined
   if (route.page === 'plugins') return 'plugins' as const
+  if (route.page === 'model-services') return 'settings' as const
   if (route.page === 'plugin-bundles') return 'plugins' as const
   if (route.page === 'extension-points') return 'outlets' as const
   if (route.page === 'routes') return 'routes' as const
@@ -238,6 +258,13 @@ function Content(
   }
   if (current.kind === 'about-acknowledgements') return <AcknowledgementsPage locale={snapshot.localization.locale} />
   if (current.kind === 'manager-content') {
+    if (snapshot.settingsNavigationItems?.find(item => item.id === current.id)?.permissionReview !== undefined) {
+      return (
+        <div className="cxr-notice" role="status" data-manager-permission-review-redirect="true">
+          {managerCopy(snapshot.localization.locale, 'permission.review')}
+        </div>
+      )
+    }
     return <ManagerContentPage model={model} router={route} locale={snapshot.localization.locale} />
   }
   if (current.page === 'plugins' || current.page === 'plugin-bundles') {
@@ -245,6 +272,9 @@ function Content(
   }
   if (current.page === 'marketplace') {
     return <MarketplacePage marketplace={marketplace} manager={model} snapshot={snapshot} router={route} />
+  }
+  if (current.page === 'model-services') {
+    return <ModelServicesPage registry={model.modelProviders} locale={snapshot.localization.locale} />
   }
   if (current.page === 'extension-points') return <ExtensionPointsPage snapshot={snapshot} router={route} />
   if (current.page === 'routes') return <RoutesPage snapshot={snapshot} router={route} />
@@ -312,12 +342,16 @@ export function ManagerApp({ model, marketplace, triggerSeat, navigationControll
   const heading = useMemo(() => title(router.route, snapshot), [router.route, snapshot])
   useLayoutEffect(() =>
     navigationController?.bind(request => {
-      router.openDetail(
-        { kind: 'manager-content', id: request.contributionId, reference: request.root },
-        { kind: 'manager-content', id: request.contributionId, reference: request.target },
-      )
+      if ('contributionId' in request) {
+        router.openDetail(
+          { kind: 'manager-content', id: request.contributionId, reference: request.root },
+          { kind: 'manager-content', id: request.contributionId, reference: request.target },
+        )
+      } else {
+        router.navigate(request)
+      }
       setOpen(true)
-    }), [navigationController, router.openDetail])
+    }), [navigationController, router.navigate, router.openDetail])
   useLayoutEffect(() =>
     navigationController?.bindReturnPort({
       capture: () => open ? router.capture() : [],
@@ -345,11 +379,10 @@ export function ManagerApp({ model, marketplace, triggerSeat, navigationControll
     previousOpen.current = open
   }, [open, triggerSeat])
   useEffect(() => {
-    const route = router.route
-    if (!open || route.kind !== 'manager-content') return
-    if (snapshot.settingsNavigationItems?.some(item => item.id === route.id) === true) return
-    router.navigate({ kind: 'primary', page: 'plugins' })
-  }, [open, router.navigate, router.route, snapshot.settingsNavigationItems])
+    if (!open) return
+    const replacement = reconcileManagerContentRoute(router.route, snapshot.settingsNavigationItems)
+    if (replacement !== undefined) router.replace(replacement)
+  }, [open, router.replace, router.route, snapshot.settingsNavigationItems])
   const attach = useMemo(
     () => () =>
       triggerSeat.ownerDocument.querySelector<HTMLElement>('[data-cordisx-react-manager]')
@@ -429,7 +462,7 @@ export function ManagerApp({ model, marketplace, triggerSeat, navigationControll
                         />
                       )
                       : contributionIcon !== undefined
-                      ? <HostSurfaceIcon token={contributionIcon} />
+                      ? <HostBrandIcon icon={contributionIcon} />
                       : (
                         <Button
                           shape="square"

@@ -1,6 +1,18 @@
 import type { Context } from '@deepseek-ai/cordis'
 import React, { defineReactPage, useEffect, useState } from 'cordisx/react'
-import { Button, Card, Heading, MarkdownViewer, SelectionRail, Stack, Text } from 'cordisx/ui'
+import {
+  Button,
+  Card,
+  Dialog,
+  Disclosure,
+  FieldList,
+  Heading,
+  MarkdownViewer,
+  SelectionRail,
+  Stack,
+  StatusBadge,
+  Text,
+} from 'cordisx/ui'
 import { CORDISX_PAGE_SCHEMA_V3, CORDISX_ROUTE_SCHEMA_V2 } from '../../packages/cli/src/contracts.js'
 
 declare global {
@@ -43,6 +55,7 @@ const route = {
 const mount = defineReactPage<Messages>(({ t }) => {
   const [count, setCount] = useState(0)
   const [section, setSection] = useState('overview')
+  const [dialogOpen, setDialogOpen] = useState(false)
   useEffect(() => {
     globalThis.__sharedReactEffectMounts = (globalThis.__sharedReactEffectMounts ?? 0) + 1
     return () => {
@@ -74,6 +87,28 @@ const mount = defineReactPage<Messages>(({ t }) => {
           <MarkdownViewer source={`## ${section}\n\nSafe **Markdown**.`} />
         </div>
       </Card>
+      <Card>
+        <FieldList
+          aria-label="Runtime details"
+          density="compact"
+          columns={2}
+          items={[{
+            id: 'status',
+            label: 'Runtime status',
+            value: <StatusBadge tone="success">Ready</StatusBadge>,
+            description: 'Host-owned status and aligned fields.',
+          }]}
+        />
+        <Disclosure summary="Technical details">Generation shared-react-test</Disclosure>
+        <Button onClick={() => setDialogOpen(true)}>Open dialog</Button>
+      </Card>
+      <Dialog
+        open={dialogOpen}
+        title="Shared dialog"
+        description="Rendered through the Host portal."
+        onClose={() => setDialogOpen(false)}
+        actions={<Button onClick={() => setDialogOpen(false)}>Close</Button>}
+      />
     </Stack>
   )
 })

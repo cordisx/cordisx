@@ -117,6 +117,7 @@ import {
   identity,
   impactToken,
   isLegacyPermissionDeclarationV4,
+  isPermissionReviewV4ManifestVersion,
   LifecycleFailure,
   packageSummary,
   type PendingPermissionReview,
@@ -204,7 +205,7 @@ export class PluginLifecycleCoordinator extends PluginLifecycleCoordinatorTransa
     )
   }
 
-  /** Host-private manifest-v5/v6/v7 review; uses the same PackageLifecycleAuthority transaction. */
+  /** Host-private manifest-v5 through manifest-v14 review on the same lifecycle authority. */
   async permissionReviewPlanV4(
     input: HostPermissionLifecycleReviewV4Request,
   ): Promise<CordisXPermissionAuthorizationPlanV4 | undefined> {
@@ -227,12 +228,7 @@ export class PluginLifecycleCoordinator extends PluginLifecycleCoordinatorTransa
       const staged = await loadStagedPluginPackage(this.options.homeDir, target.digest).catch(error => {
         throw classify(error)
       })
-      if (
-        staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
-        && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8
-        && staged.manifest.runtimeManifest.schemaVersion !== 9 && staged.manifest.runtimeManifest.schemaVersion !== 11
-        && staged.manifest.runtimeManifest.schemaVersion !== 12 && staged.manifest.runtimeManifest.schemaVersion !== 10
-      ) return undefined
+      if (!isPermissionReviewV4ManifestVersion(staged.manifest.runtimeManifest.schemaVersion)) return undefined
       return authorizationPlanV4(
         staged,
         operation,
@@ -253,12 +249,7 @@ export class PluginLifecycleCoordinator extends PluginLifecycleCoordinatorTransa
     const staged = await loadStagedPluginPackage(this.options.homeDir, activeTarget.digest).catch(error => {
       throw classify(error)
     })
-    if (
-      staged.manifest.runtimeManifest.schemaVersion !== 5 && staged.manifest.runtimeManifest.schemaVersion !== 6
-      && staged.manifest.runtimeManifest.schemaVersion !== 7 && staged.manifest.runtimeManifest.schemaVersion !== 8
-      && staged.manifest.runtimeManifest.schemaVersion !== 9 && staged.manifest.runtimeManifest.schemaVersion !== 11
-      && staged.manifest.runtimeManifest.schemaVersion !== 12 && staged.manifest.runtimeManifest.schemaVersion !== 10
-    ) return undefined
+    if (!isPermissionReviewV4ManifestVersion(staged.manifest.runtimeManifest.schemaVersion)) return undefined
     const { candidate } = this.mutationCandidate(active, 'enable', pluginId)
     await this.store.writeCandidate(candidate)
     const target = candidate.plugins.find(plugin => plugin.id === pluginId)!
@@ -302,7 +293,7 @@ export class PluginLifecycleCoordinator extends PluginLifecycleCoordinatorTransa
     return await this.applyStateMutationV2(request, active, candidateId, input.decision)
   }
 
-  /** Applies one manifest-v5/v6/v7 review through the existing lifecycle authority. */
+  /** Applies one manifest-v5 through manifest-v14 review through the existing lifecycle authority. */
   async applyPermissionReviewV4(
     input: HostPermissionLifecycleApplyV4Request,
   ): Promise<CordisXPluginLifecycleResultV1> {

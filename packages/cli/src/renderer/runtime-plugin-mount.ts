@@ -338,6 +338,10 @@ export const createRuntimeDisposeControllerFiber = async (
     delete controller.unregisterAgentTools
     await controller.unregisterDocuments?.()
     delete controller.unregisterDocuments
+    await controller.unregisterManagedServices?.()
+    delete controller.unregisterManagedServices
+    await controller.unregisterModelProviders?.()
+    delete controller.unregisterModelProviders
     controller.connectorClient?.dispose()
     delete controller.connectorClient
     await controller.unregisterConnector?.()
@@ -652,7 +656,12 @@ export const createRuntimeMountPlugin = async (
       }
     },
   })
-  pluginContext = runtimeScope.ctx.isolate('connectors').isolate('agentLoop').isolate('agents').isolate('sessions')
+  pluginContext = runtimeScope.ctx.isolate('connectors').isolate('agentLoop').isolate('managedServices').isolate(
+    'modelProviders',
+  ).isolate(
+    'agents',
+  )
+    .isolate('sessions')
     .isolate('agentSessionDetailReferences').isolate('agentDetailNavigation').isolate('approvals')
     .isolate('agentAdmission').isolate('agentAdmissionOrigins').isolate('agentAdmissionReservations')
     .isolate('agentAdmissionBootstrapTargets').isolate('agentAdmissionBootstrapReservations')
@@ -729,6 +738,23 @@ export const createRuntimeMountPlugin = async (
   )
   controller.documentsClient = documentsClient
   controller.unregisterDocuments = pluginContext.reflect.provide('documents', documentsClient)
+  const managedServices = runtimeScope.managedServiceBridge()?.bind({
+    pluginId: controller.item.id,
+    pluginGeneration: runtimeScope.moduleGenerationOf()!(controller),
+  })
+  const modelProviderBinding = runtimeScope.modelProviders()!.bind(
+    controller.item.id,
+    runtimeScope.moduleGenerationOf()!(controller),
+    () => controller.principalLive,
+  )
+  const unprovideModelProviders = pluginContext.reflect.provide('modelProviders', modelProviderBinding.facade)
+  controller.unregisterModelProviders = async () => {
+    modelProviderBinding.dispose()
+    await unprovideModelProviders()
+  }
+  if (managedServices !== undefined) {
+    controller.unregisterManagedServices = pluginContext.reflect.provide('managedServices', managedServices)
+  }
   try {
     const owner = runtimeScope.agentSessionRuntime.ownerFromContext(pluginContext)
     const entityPrincipal = runtimeScope.entityPrincipalBindings()!.get(JSON.stringify([
@@ -895,6 +921,21 @@ export const createRuntimeMountPlugin = async (
       runtimeScope.configuration()!.get(controller.item.id, runtimeScope.generationVisibility()!.view(pluginContext)),
     )
     await controller.fiber
+    // Cordis publishes FiberState as a const enum (ACTIVE = 2) so the value is
+    // inlined at compile time. When a plugin fails to activate because an
+    // inject is missing, the fiber settles in FAILED/LOADING without throwing;
+    // surface the unavailable injects to make the failure actionable.
+    const fiber = controller.fiber
+    if (fiber === undefined) {
+      throw new Error('plugin activation fiber is unavailable')
+    }
+    const CORDIS_FIBER_ACTIVE = 2
+    if (fiber.state !== CORDIS_FIBER_ACTIVE) {
+      const missing = Object.keys(fiber.inject).filter(name => fiber.ctx.reflect.get(name) === undefined)
+      throw new Error(
+        `plugin dependencies are unavailable${missing.length === 0 ? '' : `: ${missing.join(', ')}`}`,
+      )
+    }
     runtimeScope.agentRouteScopes()!.validateInstalledRoutes(owner)
     controller.status = 'active'
     runtimeScope.pluginConsole()!.lifecycle(
@@ -984,6 +1025,10 @@ export const createRuntimeMountPlugin = async (
     delete controller.unregisterAgentTools
     await controller.unregisterDocuments?.()
     delete controller.unregisterDocuments
+    await controller.unregisterManagedServices?.()
+    delete controller.unregisterManagedServices
+    await controller.unregisterModelProviders?.()
+    delete controller.unregisterModelProviders
     connectorClient.dispose()
     delete controller.connectorClient
     await controller.unregisterConnector?.()

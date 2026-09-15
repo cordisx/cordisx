@@ -9,19 +9,22 @@ const channelRuntimeDestination = fileURLToPath(new URL('../dist/channel-runtime
 const channelServiceDestination = fileURLToPath(new URL('../dist/src/launcher/channel-service.js', import.meta.url))
 const cordisxSkillSource = fileURLToPath(new URL('../../../skills/cordisx-plugin-development', import.meta.url))
 const cordisxSkillDestination = fileURLToPath(new URL('../dist/skills/cordisx-plugin-development', import.meta.url))
-const markdownEditorStyleSource = fileURLToPath(
-  new URL('../src/renderer/host-ui/public-markdown-editor.css', import.meta.url),
-)
-const markdownEditorStyleDestination = fileURLToPath(
-  new URL('../dist/src/renderer/host-ui/public-markdown-editor.css', import.meta.url),
-)
+const preservedRendererStyles = [
+  'renderer/host-ui/public-markdown-editor.css',
+  'renderer/model-providers.css',
+  'renderer/manager/pages/model-services.css',
+]
 
 await mkdir(destination, { recursive: true })
 await cp(source, destination, { recursive: true, force: true })
-// TypeScript preserves the public editor's inline CSS import. Keep the source
-// beside its compiled module so Vite can resolve the normal installed graph.
-await mkdir(path.dirname(markdownEditorStyleDestination), { recursive: true })
-await copyFile(markdownEditorStyleSource, markdownEditorStyleDestination)
+// TypeScript preserves CSS imports used by the installed renderer graph. Keep
+// each stylesheet beside its compiled module so Vite can resolve that graph.
+for (const relative of preservedRendererStyles) {
+  const styleSource = fileURLToPath(new URL(`../src/${relative}`, import.meta.url))
+  const styleDestination = fileURLToPath(new URL(`../dist/src/${relative}`, import.meta.url))
+  await mkdir(path.dirname(styleDestination), { recursive: true })
+  await copyFile(styleSource, styleDestination)
+}
 // Channel runtime is private workspace infrastructure. Package the compiled
 // launcher-only runtime beside the CLI and rewrite its single Node entry import
 // so an installed `cordisx` tarball never relies on a workspace symlink.

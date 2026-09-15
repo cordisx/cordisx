@@ -3,6 +3,7 @@ import { CdpPluginLifecycleRuntime } from './cdp-plugin-lifecycle-runtime.js'
 import { install } from './cdp-installation.js'
 import * as support from './cdp-installation-support.js'
 import type { CdpTarget } from './cdp-session.js'
+import type { NativeSubmissionInstallation } from './native-submission-composition.js'
 import {
   type ProductionGraphBootstrap,
   type ProductionGraphOperations,
@@ -72,6 +73,7 @@ function nativeAppTarget(target: CdpTarget): boolean {
 }
 
 export interface WatchInjectionOptions {
+  readonly nativeSubmission?: NativeSubmissionInstallation
   /** Opt-in Vite development only: allow loopback modules, await boot, restore on exit. */
   readonly viteDevelopment?: boolean
   /** Host-owned launch-scoped immutable plugin module origin. */
@@ -93,7 +95,7 @@ export interface WatchInjectionOptions {
   readonly signal: AbortSignal
   readonly onStatus?: (message: string) => void
   /** Called after the first renderer accepts the CordisX bootstrap. */
-  readonly onReady?: () => void
+  readonly onReady?: () => void | Promise<void>
   readonly providerFleet?: support.ProviderFleet
   readonly providerBridgeToken?: string
   readonly agentHistoryHost?: support.CodexAgentHistoryHost
@@ -120,10 +122,16 @@ export interface WatchInjectionOptions {
     profileId: string
     runtimeGeneration: string
   }>
+  readonly managedServiceUI?: {
+    readonly handleBindingValue: (value: string) => Promise<Record<string, unknown>>
+  }
 }
 
 /** Track every current Codex page and keep one removable bootstrap installed per target. */
 export async function watchAndInject(options: WatchInjectionOptions): Promise<void> {
+  if (options.nativeSubmission !== undefined && options.launcherOwnedNativeTarget !== true) {
+    throw new Error('Native submission requires a launcher-owned target')
+  }
   if (options.hasLoopbackGraph === true && options.pluginArtifactOrigin === undefined) {
     throw new Error('production loopback graph requires its exact artifact origin')
   }
@@ -335,9 +343,11 @@ export async function watchAndInject(options: WatchInjectionOptions): Promise<vo
               viteLoopbackPermissions,
               options.signal,
               hostMutationGate,
+              options.managedServiceUI,
+              target.url === 'app://-/index.html' ? options.nativeSubmission : undefined,
             )
             installed.set(target.id, record)
-            options.onReady?.()
+            await options.onReady?.()
             options.onStatus?.(`injected target ${target.id} (${target.title || target.url})`)
           }
         })

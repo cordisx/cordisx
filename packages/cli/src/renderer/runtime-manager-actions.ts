@@ -141,7 +141,10 @@ import {
   MemoryExtensionPointPolicyStore,
 } from './extension-points.js'
 import { projectPublicRuntimeSnapshot } from './public-runtime-snapshot.js'
-import { sortManagerSettingsNavigationItems } from './manager-settings-navigation.js'
+import {
+  resolveManagerSettingsNavigationPermissionReview,
+  sortManagerSettingsNavigationItems,
+} from './manager-settings-navigation.js'
 import { BindingPlatformAdapter } from './provider-binding.js'
 import {
   BindingAgentLoopHost,
@@ -242,6 +245,7 @@ import {
 
 export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope): ManagerSnapshot => {
   const liveRegistrations = runtimeScope.slotService?.snapshot() ?? []
+  const permissionSnapshots = runtimeScope.broker()!.snapshots()
   const extensionPointControls = runtimeScope.slotService?.controlManagerSnapshot()
   const livePluginIds = new Set(liveRegistrations.map(item => item.owner))
   const activeRegistrationKeys = new Set(
@@ -330,7 +334,6 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
     liveRegistrations
       .filter(item =>
         item.surface === 'manager.settings.navigation-items'
-        && item.valid && item.visible && item.authorized && !item.pending
         && (item.group === 'before-settings' || item.group === 'after-settings')
       )
       .flatMap((registration): readonly ManagerSettingsNavigationItemSnapshot[] => {
@@ -338,7 +341,7 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
         const route = navigation.routes.find(candidate =>
           candidate.owner === registration.owner
           && candidate.qualifiedId === `${registration.owner}:${item.route.id}`
-          && candidate.valid && candidate.authorized
+          && candidate.valid
           && candidate.productMetadata.title !== undefined && candidate.productMetadata.description !== undefined
         )
         if (route === undefined) {
@@ -363,6 +366,16 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
         ) {
           return []
         }
+        const permissionReview = resolveManagerSettingsNavigationPermissionReview(
+          registration,
+          route,
+          permissionSnapshots,
+        )
+        if (registration.pending) return []
+        if (
+          !permissionReview
+          && (!registration.valid || !registration.visible || !registration.authorized || !route.authorized)
+        ) return []
         const disabledSite = `manager-settings-navigation:${registration.qualifiedId}:disabled`
         if (registration.disabledReason !== undefined) {
           nextSettingsNavigationSites.set(disabledSite, registration.owner)
@@ -385,6 +398,7 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
                 ?? registration.disabledReason.fallback ?? registration.disabledReason.key,
           }),
           route: item.route,
+          ...(permissionReview === undefined ? {} : { permissionReview }),
         })]
       }),
   )
@@ -462,7 +476,7 @@ export const createRuntimeManagerSnapshot = (runtimeScope: RuntimeClosureScope):
     },
     ...(runtimeScope.currentPluginBundles === undefined ? {} : { pluginBundles: runtimeScope.currentPluginBundles }),
     iconThemes: runtimeScope.iconThemeRegistry()!.redactedSnapshot(),
-    permissions: runtimeScope.broker()!.snapshots().map((permission: PlatformPermissionSnapshot) => {
+    permissions: permissionSnapshots.map((permission: PlatformPermissionSnapshot) => {
       const pointId = (permission.capability === 'ui.extension-points.render'
           || permission.capability === 'ui.extension-points.interact')
         ? permission.scope.extensionPoints?.[0]

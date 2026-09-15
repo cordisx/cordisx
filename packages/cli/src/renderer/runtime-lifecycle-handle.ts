@@ -487,6 +487,8 @@ export const createRuntimeDispose = async (runtimeScope: RuntimeClosureScope): P
   runtimeScope.rollbackReceipts()!.clear()
   runtimeScope.configBridge()!?.dispose()
   runtimeScope.serviceConfigBridge()!?.dispose()
+  runtimeScope.managedServiceBridge()!?.dispose()
+  runtimeScope.modelProviders()!.dispose()
   runtimeScope.iconThemePreferenceBridge()!?.dispose()
   runtimeScope.disposeIconThemePreferenceSubscription?.()
   runtimeScope.disposeIconThemePreferenceSubscription = undefined
@@ -870,6 +872,7 @@ export const createRuntimeHandle = (runtimeScope: RuntimeClosureScope): CordisXR
 export const createRuntimeManagerModel = (runtimeScope: RuntimeClosureScope): ManagerModel => ({
   ...runtimeScope.handle()!,
   snapshot: runtimeScope.managerSnapshot()!,
+  modelProviders: runtimeScope.modelProviders()!,
   iconThemePreferenceWritable: runtimeScope.iconThemePreferenceBridge()! !== undefined,
   selectIconTheme: (expectedProfileRevision, candidate) =>
     selectAndPersistIconTheme(

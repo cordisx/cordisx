@@ -36,6 +36,36 @@ export interface EmptyStateProps extends Omit<React.HTMLAttributes<HTMLDivElemen
   readonly action?: React.ReactNode
 }
 
+export interface StatusBadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
+  readonly tone?: 'neutral' | 'info' | 'success' | 'warning' | 'danger'
+}
+
+export interface FieldListItem {
+  readonly id: string
+  readonly label: React.ReactNode
+  readonly value: React.ReactNode
+  readonly description?: React.ReactNode
+}
+
+export interface FieldListProps extends Omit<React.HTMLAttributes<HTMLDListElement>, 'children'> {
+  readonly items: readonly FieldListItem[]
+  readonly density?: 'default' | 'compact'
+  readonly columns?: 1 | 2
+}
+
+export interface DisclosureProps
+  extends Omit<React.DetailsHTMLAttributes<HTMLDetailsElement>, 'children' | 'defaultOpen' | 'onToggle' | 'open'>
+{
+  readonly summary: React.ReactNode
+  readonly children?: React.ReactNode
+  /** Controlled open state. Omit to use native uncontrolled disclosure behavior. */
+  readonly open?: boolean
+  /** Initial state for an uncontrolled disclosure. Ignored when `open` is provided. */
+  readonly defaultOpen?: boolean
+  readonly onToggle?: (open: boolean) => void
+  readonly tone?: 'neutral' | 'warning' | 'danger'
+}
+
 export type IconName =
   | CordisXConfigFormIcon
   | 'search'
@@ -49,6 +79,12 @@ export type IconName =
   | 'relationship'
   | 'fit'
   | 'reset'
+  | 'account'
+  | 'refresh'
+  | 'logout'
+  | 'runtime'
+  | 'readiness'
+  | 'health'
 
 export interface IconProps extends React.HTMLAttributes<HTMLSpanElement> {
   readonly name: IconName
@@ -231,6 +267,9 @@ function HostComponent<Props>(name: string): React.ComponentType<Props> {
 export const Button = HostComponent<ButtonProps>('Button')
 export const Card = HostComponent<CardProps>('Card')
 export const EmptyState = HostComponent<EmptyStateProps>('EmptyState')
+export const StatusBadge = HostComponent<StatusBadgeProps>('StatusBadge')
+export const FieldList = HostComponent<FieldListProps>('FieldList')
+export const Disclosure = HostComponent<DisclosureProps>('Disclosure')
 export const Heading = HostComponent<HeadingProps>('Heading')
 export const Icon = HostComponent<IconProps>('Icon')
 export const HorizontalSplitPane = HostComponent<HorizontalSplitPaneProps>('HorizontalSplitPane')
@@ -247,14 +286,31 @@ export const AgentAvatar = HostComponent<AgentAvatarProps>('AgentAvatar')
 export const Stack = HostComponent<StackProps>('Stack')
 export const Text = HostComponent<TextProps>('Text')
 
+export type HostDialogCloseReason = 'escape' | 'backdrop'
+
+export interface HostDialogProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'title'> {
+  readonly open: boolean
+  readonly title: React.ReactNode
+  readonly description?: React.ReactNode
+  readonly children?: React.ReactNode
+  readonly actions?: React.ReactNode
+  readonly tone?: 'neutral' | 'danger'
+  readonly width?: 'small' | 'medium'
+  readonly initialFocusRef?: React.RefObject<HTMLElement | null>
+  readonly returnFocusRef?: React.RefObject<HTMLElement | null>
+  readonly closeOnBackdrop?: boolean
+  readonly onClose: (reason: HostDialogCloseReason) => void
+}
+
 /** Chrome accepts only structured descriptors; JSX is confined to the body seat. */
-export interface DialogProps extends DialogChromeV1 {
+export interface ManagedDialogProps extends DialogChromeV1 {
   readonly service?: DialogsV1
   readonly kind?: string
   readonly open: boolean
   readonly onOpenChange: (open: boolean, result: DialogResultV1) => void
   readonly children: React.ReactNode
 }
+export type DialogProps = ManagedDialogProps | HostDialogProps
 export interface DialogProviderProps {
   readonly service: DialogsV1
   readonly children: React.ReactNode

@@ -434,11 +434,12 @@ export const HOST_ICON_16PX_CSS = String.raw`
     -webkit-user-select: none;
     -webkit-user-drag: none;
   }
-  .cordisx-host-icon > svg {
+  .cordisx-host-icon > :is(svg,img) {
     display: block;
     inline-size: 100%;
     block-size: 100%;
     color: currentColor;
+    object-fit: contain;
     pointer-events: none;
   }
 `

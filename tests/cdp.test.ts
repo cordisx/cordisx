@@ -15,6 +15,7 @@ import {
   serviceConfigResponseEvaluation,
   watchAndInject,
 } from '../packages/cli/src/launcher/cdp.js'
+import { sendManagedServiceUIBindingResponse } from '../packages/cli/src/launcher/cdp-installation-support.js'
 import type { PluginRuntimeMutation } from '../packages/cli/src/launcher/plugin-lifecycle.js'
 import { PluginPermissionIdentityRegistry } from '../packages/cli/src/launcher/permission-rpc.js'
 import {
@@ -166,5 +167,23 @@ describe('service config CDP responses', () => {
     expect(params).toMatchObject({ contextId: 73, allowUnsafeEvalBlockedByCSP: true, returnByValue: true })
     expect(params.expression).toContain('__cordisxServiceConfigReceiveV1')
     expect(serviceConfigResponseEvaluation({ requestId: 'request-2', ok: false })).not.toHaveProperty('contextId')
+  })
+})
+
+describe('managed service UI CDP responses', () => {
+  it('returns to the exact execution context that issued the binding request', async () => {
+    const send = vi.fn(async () => ({}))
+    await sendManagedServiceUIBindingResponse(
+      { send } as unknown as Parameters<typeof sendManagedServiceUIBindingResponse>[0],
+      { requestId: 'request-1', ok: true, value: [] },
+      73,
+    )
+    expect(send).toHaveBeenCalledWith(
+      'Runtime.evaluate',
+      expect.objectContaining({
+        contextId: 73,
+        allowUnsafeEvalBlockedByCSP: true,
+      }),
+    )
   })
 })
