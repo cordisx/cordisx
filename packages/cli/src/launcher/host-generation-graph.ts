@@ -57,7 +57,17 @@ export async function buildHostGenerationGraph(
     path.dirname(fileURLToPath(import.meta.url)),
     `../renderer/runtime.${runtimeExtension}`,
   )
-  const composition = await buildRendererCompositionSource(config, options, { awaitBoot: true, runtimeImport })
+  const reactRuntimeImport = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    `../renderer/react-runtime.${runtimeExtension}`,
+  )
+  const baseComposition = await buildRendererCompositionSource(config, options, { awaitBoot: true, runtimeImport })
+  const composition = {
+    ...baseComposition,
+    source: `import { installSharedReactRuntime } from ${JSON.stringify(reactRuntimeImport)};
+if (!globalThis.__cordisxSharedReactRuntime) installSharedReactRuntime(document);
+${baseComposition.source}`,
+  }
   const virtualModules = new Set([
     CORDISX_MANAGED_SERVICE_UI_MODULE,
     CORDISX_REACT_MODULE,
