@@ -6,7 +6,7 @@ import {
 import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import os from 'node:os'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import type { ChildProcess } from 'node:child_process'
 import type { ResolvedLaunchPlan } from '../adapters/contracts.js'
 import {
@@ -149,12 +149,66 @@ import {
   waitForHostExitAfterReadiness,
 } from './run-support.js'
 import { prepareRunCommand } from './run-command-dispatch.js'
+import { isSupervisorCommand, runSupervisorCommand } from './supervisor-command.js'
+import { readSupervisorState, supervisorPaths, writeSupervisorState } from './supervisor-state.js'
+import { startSupervisorControlServer, type SupervisorControlServer } from './supervisor-control.js'
 
 export async function runCordisXCli(argv: readonly string[], runtime: CordisXCliRuntime = {}): Promise<void> {
   const parsedInvocation = parseCordisXCli(argv)
-  const prepared = await prepareRunCommand(parsedInvocation, runtime)
+  // Repository-only lifecycle seams model the historical foreground runner.
+  // They must never be inherited by a detached product supervisor child.
+  const internalForeground = runtime.internalRunInjectedHost !== undefined
+    || runtime.internalAgentHistoryHost !== undefined
+    || runtime.internalBuiltinSkillSourceDir !== undefined
+    || runtime.internalSharedHomeDir !== undefined
+    || runtime.internalBuildRendererBundle !== undefined
+    || runtime.internalObserveOwnerDocuments !== undefined
+  if (
+    isSupervisorCommand(parsedInvocation)
+    && !(parsedInvocation.action === 'start' && (
+      parsedInvocation.options.dryRun || parsedInvocation.options.attach || internalForeground
+    ))
+  ) {
+    await runSupervisorCommand(parsedInvocation, runtime)
+    return
+  }
+  // `run` deliberately takes the exact historic foreground assembly path.
+  const foregroundInvocation = (parsedInvocation.action === 'run'
+    ? { ...parsedInvocation, action: 'launch' as const }
+    : parsedInvocation.action === 'start' && (
+        parsedInvocation.options.dryRun || parsedInvocation.options.attach || internalForeground
+      )
+    ? { ...parsedInvocation, action: 'launch' as const }
+    : parsedInvocation) as Exclude<
+      typeof parsedInvocation,
+      { readonly action: 'run' | 'start' | 'status' | 'logs' | 'stop' | 'restart' }
+    >
+  const prepared = await prepareRunCommand(foregroundInvocation, runtime)
   if (prepared === undefined) return
   const { invocation, stdout, environment, configPath, selection, adapter, appId } = prepared
+  const supervisorHome = environment.CORDISX_SUPERVISOR_HOME
+  const supervisorApp = environment.CORDISX_SUPERVISOR_APP
+  const supervisorProfile = environment.CORDISX_SUPERVISOR_PROFILE
+  const supervisorFingerprint = environment.CORDISX_SUPERVISOR_FINGERPRINT
+  const supervisorTokenFile = environment.CORDISX_SUPERVISOR_TOKEN_FILE
+  const markSupervisorReady = async (debugPort: number): Promise<void> => {
+    if (
+      supervisorHome === undefined || supervisorApp === undefined || supervisorProfile === undefined
+      || supervisorFingerprint === undefined
+    ) return
+    const paths = supervisorPaths(supervisorHome, supervisorApp, supervisorProfile)
+    const current = await readSupervisorState(paths)
+    // Only the original detached child may advance its record. This prevents a
+    // stale process from resurrecting a replacement instance after restart.
+    if (current === undefined || current.pid !== process.pid || current.effectiveConfig !== supervisorFingerprint) {
+      return
+    }
+    await writeSupervisorState(paths, {
+      ...current,
+      phase: 'ready',
+      cdpEndpoint: `http://127.0.0.1:${debugPort}`,
+    })
+  }
 
   const certifiedPermissionAuthority = await LauncherMarketplaceCertifiedAuthority.open({
     homeDir: rootFromConfigPath(configPath),
@@ -167,6 +221,20 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
   const certifiedPermissionChannelToken = certifiedPermissionAuthority === undefined
     ? undefined
     : randomBytes(32).toString('hex')
+  let supervisorControl: SupervisorControlServer | undefined
+  if (
+    supervisorHome !== undefined && supervisorApp !== undefined && supervisorProfile !== undefined
+    && supervisorTokenFile !== undefined
+  ) {
+    const supervisorToken = (await readFile(supervisorTokenFile, 'utf8')).trim()
+    if (!/^[a-f0-9]{64}$/u.test(supervisorToken)) throw new Error('invalid transient supervisor bootstrap token')
+    await rm(supervisorTokenFile, { force: true })
+    supervisorControl = await startSupervisorControlServer({
+      socketPath: supervisorPaths(supervisorHome, supervisorApp, supervisorProfile).socket,
+      token: supervisorToken,
+      stop: () => process.kill(process.pid, 'SIGTERM'),
+    })
+  }
   let pluginGenerationArtifactServer: PluginGenerationArtifactServer | undefined
   let managedServiceLifecycleRuntime: ManagedServicePluginLifecycleRuntime | undefined
   let nativeSubmission: NativeSubmissionComposition | undefined
@@ -824,7 +892,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           debugPort,
           hostArgs: invocation.hostArgs,
           launcher: invocation.options,
-          onReady: markCliProxyStartupConfigApplied,
+          onReady: async () => {
+            await markCliProxyStartupConfigApplied()
+            await markSupervisorReady(debugPort)
+          },
           stdout,
         })
       } finally {
@@ -941,7 +1012,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         debugPort,
         hostArgs: invocation.hostArgs,
         launcher: invocation.options,
-        onReady: markCliProxyStartupConfigApplied,
+        onReady: async () => {
+          await markCliProxyStartupConfigApplied()
+          await markSupervisorReady(debugPort)
+        },
         ...(profile === undefined ? {} : { profile }),
         ...(profileLease === undefined ? {} : { profileLease }),
         ...((Object.keys(plan.environment).length === 0 && nativeSubmission === undefined)
@@ -959,6 +1033,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       await closeProviderFleet()
     }
   } finally {
+    await supervisorControl?.close().catch(() => undefined)
     await nativeSubmission?.close().catch(() => undefined)
     await managedServiceLifecycleRuntime?.dispose().catch(() => undefined)
     await pluginGenerationArtifactServer?.close()

@@ -88,6 +88,6 @@ export async function prepareRunCommand(
     }
     return
   }
-  if (invocation.action !== 'launch') throw new Error(`unsupported CordisX action: ${invocation satisfies never}`)
+  if (invocation.action !== 'launch') throw new Error(`unsupported CordisX action: ${invocation.action}`)
   return { invocation, stdout, environment, configPath, selection, adapter, appId }
 }

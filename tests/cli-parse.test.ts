@@ -2,15 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { CordisXCliParseError, parseCordisXCli } from '../packages/cli/src/cli/parse.js'
 
 describe('parseCordisXCli', () => {
-  it('parses the default launch without inventing an app or profile', () => {
+  it('parses the bare command as the default background start without inventing an app or profile', () => {
     expect(parseCordisXCli([])).toEqual({
-      action: 'launch',
+      action: 'start',
       options: {
         attach: false,
         system: false,
         isolated: false,
         onlineDevtools: false,
         dryRun: false,
+        json: false,
       },
       hostArgs: [],
     })
@@ -30,7 +31,7 @@ describe('parseCordisXCli', () => {
       '--online-devtools',
       '--dry-run',
     ])).toEqual({
-      action: 'launch',
+      action: 'start',
       app: 'codex',
       profile: 'work',
       dataMode: 'host-isolated',
@@ -43,6 +44,7 @@ describe('parseCordisXCli', () => {
         debugPort: 43123,
         onlineDevtools: true,
         dryRun: true,
+        json: false,
       },
       hostArgs: [],
     })
@@ -57,7 +59,7 @@ describe('parseCordisXCli', () => {
       '--',
       '-x',
     ])).toMatchObject({
-      action: 'launch',
+      action: 'start',
       app: 'codex',
       options: { attach: false },
       hostArgs: ['--config', 'host.json', '--', '-x'],
@@ -66,6 +68,26 @@ describe('parseCordisXCli', () => {
 
   it.each(['setup', 'config', 'doctor'] as const)('parses %s as a command action', action => {
     expect(parseCordisXCli([action])).toEqual({ action })
+  })
+
+  it('parses transient supervisor commands without confusing their app/profile target with a command', () => {
+    expect(parseCordisXCli(['status', 'codex', 'work', '--json'])).toMatchObject({
+      action: 'status',
+      app: 'codex',
+      profile: 'work',
+      options: { json: true },
+    })
+    expect(parseCordisXCli(['logs', 'codex', 'work', '--follow'])).toMatchObject({
+      action: 'logs',
+      app: 'codex',
+      profile: 'work',
+      follow: true,
+    })
+    expect(parseCordisXCli(['run', 'codex', 'work'])).toMatchObject({
+      action: 'run',
+      app: 'codex',
+      profile: 'work',
+    })
   })
 
   it('parses dev with one plugin path and preserved launcher options', () => {
@@ -84,6 +106,7 @@ describe('parseCordisXCli', () => {
         isolated: false,
         onlineDevtools: false,
         dryRun: false,
+        json: false,
       },
       hostArgs: ['--host-flag'],
     })
@@ -98,6 +121,7 @@ describe('parseCordisXCli', () => {
         isolated: false,
         onlineDevtools: false,
         dryRun: false,
+        json: false,
       },
       hostArgs: [],
     })
@@ -139,7 +163,7 @@ describe('parseCordisXCli', () => {
 
   it('rejects a third launch positional and a second dev positional', () => {
     expect(() => parseCordisXCli(['codex', 'work', 'extra'])).toThrowError(
-      'cordisx launch accepts at most two positional arguments: [app] [profile]',
+      'cordisx start accepts at most two positional arguments: [app] [profile]',
     )
     expect(() => parseCordisXCli(['dev', './one', './two'])).toThrowError(
       'cordisx dev accepts at most one plugin path',
