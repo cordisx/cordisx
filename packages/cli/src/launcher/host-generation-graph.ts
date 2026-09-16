@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { build, type Plugin } from 'vite'
 import type { CordisXConfig } from './config.js'
 import { type BuildRendererBundleOptions, buildRendererCompositionSource } from './bundle.js'
@@ -48,7 +49,11 @@ export async function buildHostGenerationGraph(
   config: CordisXConfig,
   options: BuildRendererBundleOptions = {},
 ): Promise<HostGenerationGraph> {
-  const composition = await buildRendererCompositionSource(config, options, { awaitBoot: true })
+  // The graph entry is virtual, so a path relative to a user's config root
+  // would resolve relative to that virtual id. Pin this private import to the
+  // Host package instead; plugin paths remain configuration-owned below.
+  const runtimeImport = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../renderer/runtime.ts')
+  const composition = await buildRendererCompositionSource(config, options, { awaitBoot: true, runtimeImport })
   const virtualModules = new Set([
     CORDISX_MANAGED_SERVICE_UI_MODULE,
     CORDISX_REACT_MODULE,
