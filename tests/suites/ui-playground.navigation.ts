@@ -357,8 +357,8 @@ export function registerNavigationTests() {
     expect(styles).not.toContain('.pg-brand-row')
     expect(styles).toContain('.pg-sidebar .cxsi-brand-mark')
     expect(styles).not.toContain('.pg-sidebar-footer .cxr-trigger-seat')
-    expect(styles).toContain(
-      'html[data-theme="light"] .pg-sidebar .cxsi-brand-mark > .cxr-brand-mark-light { display: block; }',
+    expect(styles).toMatch(
+      /html\[data-theme="light"\] \.pg-sidebar \.cxsi-brand-mark > \.cxr-brand-mark-light\s*\{\s*display:\s*block;\s*\}/,
     )
   })
 
@@ -383,7 +383,7 @@ export function registerNavigationTests() {
     expect(app).toContain('id="action.new"')
     expect(app).toContain('data-cordisx-playground-surface="sidebar.navigation.items"')
     expect(app).toContain('secondary={en ?')
-    expect(styles).toContain('.pg-sidebar .cxsi-primary { display: grid; width: 100%;')
+    expect(styles).toMatch(/\.pg-sidebar \.cxsi-primary\s*\{\s*display:\s*grid;\s*width:\s*100%;/)
     expect(styles).toContain('.pg-sidebar .cxsi-copy, .pg-sidebar .cxsi-actions')
     expect(seats).not.toContain('pg-workspace-toolbar')
     expect(seats).not.toContain('AgentConversationRenderer')
@@ -413,7 +413,9 @@ export function registerNavigationTests() {
       readFile(path.resolve('packages/cli/src/playground/vite/server.ts'), 'utf8'),
     ])
     expect(app.match(/id="pg-recent-task-list-title"/g)).toHaveLength(1)
-    expect(styles).toContain('.pg-recent-task-list > [data-recent-task-row] .cxsi-icon { border-radius: 50%; }')
+    expect(styles).toMatch(
+      /\.pg-recent-task-list > \[data-recent-task-row\] \.cxsi-icon\s*\{\s*border-radius:\s*50%;\s*\}/,
+    )
     expect(app).toContain("en ? 'Recent tasks' : '最近任务'")
     expect(app).toContain("en ? 'No recent tasks.' : '暂无最近任务。'")
     expect(app).toContain("en ? 'Scenario' : '场景'")
