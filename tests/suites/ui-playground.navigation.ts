@@ -537,15 +537,24 @@ export function registerNavigationTests() {
       expect(page).toContain('npm run dev:ui -- --config')
       expect(page).toContain('__cordisxServiceConfigRequestV1')
       expect(page).toContain('__cordisxChannelCredentialRequestV1')
-      const bundle = await fetch(`${playground.url}api/bundle`).then(response => response.text())
-      expect(bundle).toContain('hostKind: "playground"')
-      expect(bundle).toContain('installCordisX')
-      expect(bundle).toContain('pluginBundleSnapshot:')
-      expect(bundle).toContain('Workflow Essentials')
-      const serviceConfigToken = /serviceConfigBridgeToken: "([a-f0-9]{64})"/.exec(bundle)?.[1]
-      const generation = /generation: "(playground-[a-f0-9]+)"/.exec(bundle)?.[1]
+      const audit = await fetch(`${playground.url}api/bundle-audit`).then(response => response.json()) as {
+        readonly generation: string
+        readonly bytes: number
+        readonly hostKind: boolean
+        readonly installsRuntime: boolean
+        readonly includesPluginBundleSnapshot: boolean
+        readonly includesWorkflowEssentials: boolean
+        readonly serviceConfigBridgeToken?: string
+      }
+      expect(audit.hostKind).toBe(true)
+      expect(audit.installsRuntime).toBe(true)
+      expect(audit.includesPluginBundleSnapshot).toBe(true)
+      expect(audit.includesWorkflowEssentials).toBe(true)
+      expect(audit.bytes).toBeGreaterThan(0)
+      const serviceConfigToken = audit.serviceConfigBridgeToken
+      const generation = audit.generation
       expect(serviceConfigToken).toBeDefined()
-      expect(generation).toBeDefined()
+      expect(generation).toMatch(/^playground-[a-f0-9]+$/)
       const serviceList = await fetch(`${playground.url}api/service-config`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
