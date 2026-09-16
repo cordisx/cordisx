@@ -192,7 +192,9 @@ export async function runSupervisorCommand(
     if (state.version !== VERSION || state.effectiveConfig !== target.fingerprint) {
       throw new Error('CordisX instance version or effective configuration differs; run `cordisx restart` explicitly')
     }
-    output(runtime, display(state), json)
+    const ready = state.phase === 'ready' ? state : await waitForState(paths)
+    if (ready === undefined) throw new Error('background supervisor exited before readiness')
+    output(runtime, display(ready), json)
     return
   }
   const release = await acquireSupervisorStartLock(paths).catch(async error => {

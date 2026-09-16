@@ -14,7 +14,6 @@ import {
   ensureCordisXHomeDirectory,
   type HomeConfigIconThemePreference,
   loadHomeConfig,
-  resolveHomeConfigPath,
 } from '../config/home-config.js'
 import { buildRendererBundle, type BuildRendererBundleOptions } from '../launcher/bundle.js'
 import { CdpPluginLifecycleRuntime, watchAndInject, type WatchInjectionOptions } from '../launcher/cdp.js'
@@ -44,7 +43,7 @@ import {
   terminateIsolatedCodex,
 } from '../launcher/process.js'
 import { settleInjectedHostCleanup } from './injected-host-cleanup.js'
-import { type CordisXDevInvocation, type CordisXLauncherOptions, parseCordisXCli } from './parse.js'
+import { type CordisXDevInvocation, type CordisXLauncherOptions } from './parse.js'
 import { ProviderFleet } from '../providers/fleet.js'
 import { resolveLocalCodexProviderConfig } from '../providers/config.js'
 import type { CodexProviderConfig } from '../providers/contracts.js'
@@ -150,47 +149,11 @@ import {
   waitForExit,
   waitForHostExitAfterReadiness,
 } from './run-support.js'
-import { prepareRunCommand } from './run-command-dispatch.js'
-import { isSupervisorCommand, runSupervisorCommand } from './supervisor-command.js'
+import { prepareCliCommand } from './run-command-dispatch.js'
 import { createSupervisorRuntime } from './supervisor-runtime.js'
 
 export async function runCordisXCli(argv: readonly string[], runtime: CordisXCliRuntime = {}): Promise<void> {
-  if (argv[0] === 'source-trust') {
-    const { runSourceTrust } = await import('./source-trust.js')
-    await runSourceTrust(
-      argv,
-      rootFromConfigPath(
-        resolveHomeConfigPath({
-          env: runtime.env ?? process.env,
-          ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
-        }),
-      ),
-      runtime.stdout ?? console.log,
-    )
-    return
-  }
-  const parsedInvocation = parseCordisXCli(argv)
-  const internalForeground = [
-    runtime.internalRunInjectedHost,
-    runtime.internalAgentHistoryHost,
-    runtime.internalBuiltinSkillSourceDir,
-    runtime.internalSharedHomeDir,
-    runtime.internalBuildRendererBundle,
-    runtime.internalObserveOwnerDocuments,
-  ].some(value => value !== undefined)
-  const foregroundStart = parsedInvocation.action === 'start'
-    && (parsedInvocation.options.dryRun || parsedInvocation.options.attach || internalForeground)
-  if (isSupervisorCommand(parsedInvocation) && !foregroundStart) {
-    await runSupervisorCommand(parsedInvocation, runtime)
-    return
-  }
-  const foregroundInvocation = (parsedInvocation.action === 'run' || foregroundStart
-    ? { ...parsedInvocation, action: 'launch' as const }
-    : parsedInvocation) as Exclude<
-      typeof parsedInvocation,
-      { readonly action: 'run' | 'start' | 'status' | 'logs' | 'stop' | 'restart' }
-    >
-  const prepared = await prepareRunCommand(foregroundInvocation, runtime)
+  const prepared = await prepareCliCommand(argv, runtime)
   if (prepared === undefined) return
   const { invocation, stdout, environment, configPath, selection, adapter, appId } = prepared
   const supervisorRuntime = await createSupervisorRuntime(environment)

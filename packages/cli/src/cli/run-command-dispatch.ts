@@ -1,6 +1,7 @@
 import { resolveHostAdapter } from '../adapters/registry.js'
 import { ensureHomeConfig, type HomeConfigPathOptions, resolveHomeConfigPath } from '../config/home-config.js'
-import type { CordisXCliInvocation } from './parse.js'
+import { type CordisXCliInvocation, parseCordisXCli } from './parse.js'
+import { isSupervisorCommand, runSupervisorCommand } from './supervisor-command.js'
 import { type ResolvedProfileSelection, resolveProfileSelection } from './profiles.js'
 import { type CordisXCliRuntime, HELP, ownValue, printPlan, rootFromConfigPath, runDevelopment } from './run-support.js'
 
@@ -90,4 +91,46 @@ export async function prepareRunCommand(
   }
   if (invocation.action !== 'launch') throw new Error(`unsupported CordisX action: ${invocation.action}`)
   return { invocation, stdout, environment, configPath, selection, adapter, appId }
+}
+
+export async function prepareCliCommand(
+  argv: readonly string[],
+  runtime: CordisXCliRuntime,
+): Promise<PreparedRunCommand | undefined> {
+  if (argv[0] === 'source-trust') {
+    const { runSourceTrust } = await import('./source-trust.js')
+    await runSourceTrust(
+      argv,
+      rootFromConfigPath(
+        resolveHomeConfigPath({
+          env: runtime.env ?? process.env,
+          ...(runtime.homedir === undefined ? {} : { homedir: runtime.homedir }),
+        }),
+      ),
+      runtime.stdout ?? console.log,
+    )
+    return
+  }
+  const parsedInvocation = parseCordisXCli(argv)
+  const internalForeground = [
+    runtime.internalRunInjectedHost,
+    runtime.internalAgentHistoryHost,
+    runtime.internalBuiltinSkillSourceDir,
+    runtime.internalSharedHomeDir,
+    runtime.internalBuildRendererBundle,
+    runtime.internalObserveOwnerDocuments,
+  ].some(value => value !== undefined)
+  const foregroundStart = parsedInvocation.action === 'start'
+    && (parsedInvocation.options.dryRun || parsedInvocation.options.attach || internalForeground)
+  if (isSupervisorCommand(parsedInvocation) && !foregroundStart) {
+    await runSupervisorCommand(parsedInvocation, runtime)
+    return
+  }
+  const foregroundInvocation = (parsedInvocation.action === 'run' || foregroundStart
+    ? { ...parsedInvocation, action: 'launch' as const }
+    : parsedInvocation) as Exclude<
+      typeof parsedInvocation,
+      { readonly action: 'run' | 'start' | 'status' | 'logs' | 'stop' | 'restart' }
+    >
+  return prepareRunCommand(foregroundInvocation, runtime)
 }

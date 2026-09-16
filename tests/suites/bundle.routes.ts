@@ -439,7 +439,7 @@ export async function verifyRoutes(context: Awaited<ReturnType<typeof bootSurfac
   expect(appOutlet.hidden).toBe(false)
   const restoredAppChrome = appOutlet.querySelector<HTMLElement>('[data-cordisx-page-chrome]')!
   expect(restoredAppChrome).not.toBe(appChrome)
-  restoredAppChrome.querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click()
+  restoredAppChrome.querySelector<HTMLButtonElement>('button[aria-label="Back"]')!.click()
   for (
     let attempt = 0;
     attempt < 20
