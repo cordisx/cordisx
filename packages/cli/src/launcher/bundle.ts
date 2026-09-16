@@ -473,7 +473,11 @@ export async function buildRendererBundle(
   config: CordisXConfig,
   options: BuildRendererBundleOptions = {},
 ): Promise<string> {
-  const { source } = await buildRendererCompositionSource(config, options)
+  // Config roots can be outside this checkout (for example shared-profile
+  // launch tests). Keep the private Host runtime resolvable independently of
+  // the configured plugin project; plugin source is already compiled above.
+  const runtimeImport = fileURLToPath(new URL('../renderer/runtime.ts', import.meta.url))
+  const { source } = await buildRendererCompositionSource(config, options, { runtimeImport })
 
   const result = await build({
     stdin: { contents: source, resolveDir: config.rootDir, sourcefile: 'cordisx-composition.ts' },
@@ -492,6 +496,7 @@ export async function buildRendererBundle(
     minifyIdentifiers: false,
     legalComments: 'inline',
     loader: { '.svg': 'text', '.css': 'text', '.png': 'dataurl' },
+    plugins: [cordisXReactVirtualModules(runtimeImport)],
     write: false,
     logLevel: 'silent',
   })

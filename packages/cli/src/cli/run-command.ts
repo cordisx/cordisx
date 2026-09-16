@@ -425,6 +425,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       ...(channelCredentialBridgeToken === undefined ? {} : { channelCredentialBridgeToken }),
       ...(channelActionsBridgeToken === undefined ? {} : { channelActionsBridgeToken }),
       managedServiceUICapabilities,
+      productionGraph: !invocation.options.attach,
       ...(runtime.internalBuildRendererBundle === undefined
         ? {}
         : { internalBuildRendererBundle: runtime.internalBuildRendererBundle }),

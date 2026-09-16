@@ -331,6 +331,8 @@ export async function buildRendererComposition(
       readonly token: string
     }[]
     readonly internalBuildRendererBundle?: typeof buildRendererBundle
+    /** Launcher-owned native production uses the immutable Host graph. */
+    readonly productionGraph?: boolean
     /** Opt-in development transport; normal launches keep immutable package delivery. */
     readonly developmentBuild?: typeof buildRendererBundle
   } = {},
@@ -397,7 +399,10 @@ export async function buildRendererComposition(
     nextConfig: CordisXConfig,
     nextOptions: BuildRendererBundleOptions,
   ): Promise<string> => {
-    if (options.developmentBuild !== undefined || options.internalBuildRendererBundle !== undefined) {
+    if (
+      options.productionGraph !== true || options.developmentBuild !== undefined
+      || options.internalBuildRendererBundle !== undefined
+    ) {
       return await buildBundle(nextConfig, nextOptions)
     }
     const graph = await buildHostGenerationGraph(nextConfig, nextOptions)
@@ -412,7 +417,8 @@ export async function buildRendererComposition(
       certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
     })
   const enabled = config.plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id)
-  const hasLoopbackGraph = options.developmentBuild === undefined && options.internalBuildRendererBundle === undefined
+  const hasLoopbackGraph = options.productionGraph === true && options.developmentBuild === undefined
+      && options.internalBuildRendererBundle === undefined
     || config.plugins.some(plugin => plugin.enabled && plugin.runtimeGraph !== undefined)
   stdout(
     `[cordisx] ${
