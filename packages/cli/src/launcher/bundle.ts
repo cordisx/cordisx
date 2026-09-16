@@ -224,7 +224,14 @@ export async function buildRendererCompositionSource(
         globalName: '__cordisxPluginModule',
         platform: 'browser',
         target: ['chrome120'],
-        sourcemap: 'inline',
+        // This source is embedded in the production renderer payload.  An
+        // inline map makes every plugin's original sources part of the CDP
+        // injection, while Vite remains the development/debug transport.
+        sourcemap: false,
+        minify: true,
+        // Keep notices in the one injected artifact rather than creating an
+        // unserved sidecar file for a write:false build.
+        legalComments: 'inline',
         loader: { '.svg': 'text', '.css': 'text', '.png': 'dataurl' },
         jsx: 'automatic',
         jsxImportSource: 'cordisx/react',
@@ -466,7 +473,13 @@ export async function buildRendererBundle(
     format: 'iife',
     platform: 'browser',
     target: ['chrome120'],
-    sourcemap: 'inline',
+    // Native production injection is one CDP payload.  Never put an inline
+    // sourcemap in it: large maps can prevent the Desktop renderer from
+    // reaching Page.addScriptToEvaluateOnNewDocument readiness.  Vite owns
+    // development source maps and diagnostics independently.
+    sourcemap: false,
+    minify: true,
+    legalComments: 'inline',
     loader: { '.svg': 'text', '.css': 'text', '.png': 'dataurl' },
     write: false,
     logLevel: 'silent',

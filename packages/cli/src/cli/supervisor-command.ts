@@ -20,7 +20,9 @@ import { requestSupervisorStop } from './supervisor-control.js'
 
 const VERSION = '0.1.0-beta.4'
 const RETRY_DELAY = 50
-const START_TIMEOUT = 30_000
+/** Product launch budget; deliberately independent from shutdown escalation. */
+export const RENDERER_READINESS_TIMEOUT_MS = 60_000
+const SUPERVISOR_STOP_TIMEOUT_MS = 30_000
 
 type ManagedAction = 'start' | 'status' | 'logs' | 'stop' | 'restart'
 
@@ -68,14 +70,63 @@ async function selectionFor(
   }
 }
 
+function readinessTimeout(runtime: CordisXCliRuntime): number {
+  return runtime.internalSupervisorReadinessTimeoutMs ?? RENDERER_READINESS_TIMEOUT_MS
+}
+
+function failureMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+async function markSupervisorFailed(
+  paths: ReturnType<typeof supervisorPaths>,
+  state: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>,
+  failure: string,
+): Promise<void> {
+  const { cdpEndpoint: _cdpEndpoint, ...withoutEndpoint } = state
+  await writeSupervisorState(paths, {
+    ...withoutEndpoint,
+    phase: 'failed',
+    failure,
+    failedAt: new Date().toISOString(),
+  })
+}
+
+async function stopSupervisorProcessGroup(
+  state: NonNullable<Awaited<ReturnType<typeof readSupervisorState>>>,
+): Promise<void> {
+  if (!(await hasMatchingProcess(state))) return
+  try {
+    process.kill(-state.pid, 'SIGTERM')
+  } catch (error) {
+    if (!(error instanceof Error) || !('code' in error) || error.code !== 'ESRCH') throw error
+  }
+  const deadline = Date.now() + SUPERVISOR_STOP_TIMEOUT_MS
+  while (await hasMatchingProcess(state)) {
+    if (Date.now() > deadline) {
+      process.kill(-state.pid, 'SIGKILL')
+      break
+    }
+    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
+  }
+  if (await hasMatchingProcess(state)) throw new Error('timed out stopping the CordisX-owned process group')
+}
+
 async function waitForState(
   paths: ReturnType<typeof supervisorPaths>,
+  timeoutMs: number,
 ): Promise<Awaited<ReturnType<typeof readSupervisorState>>> {
-  const deadline = Date.now() + START_TIMEOUT
+  const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const state = await readSupervisorState(paths)
     if (state?.phase === 'ready') return state
-    if (state !== undefined && !(await hasMatchingProcess(state))) await removeSupervisorState(paths)
+    if (state?.phase === 'failed') {
+      throw new Error(state.failure ?? 'CordisX background supervisor failed before readiness')
+    }
+    if (state !== undefined && !(await hasMatchingProcess(state))) {
+      await markSupervisorFailed(paths, state, 'CordisX background supervisor exited before renderer readiness')
+      throw new Error('CordisX background supervisor exited before renderer readiness')
+    }
     await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
   }
   throw new Error('timed out waiting for CordisX renderer readiness')
@@ -100,10 +151,11 @@ function display(state: NonNullable<Awaited<ReturnType<typeof readSupervisorStat
     app: state.appId,
     profile: state.profileId,
     status: state.phase,
-    pid: state.pid,
+    pid: state.phase === 'failed' ? null : state.pid,
     uptime: Math.max(0, Date.now() - Date.parse(state.createdAt)),
     version: state.version,
     cdpEndpoint: state.cdpEndpoint ?? null,
+    ...(state.failure === undefined ? {} : { failure: state.failure }),
   }
 }
 
@@ -135,9 +187,9 @@ export async function runSupervisorCommand(
   const paths = supervisorPaths(path.dirname(target.configPath), target.appId, target.selection.profileId)
   const json = invocation.options.json
   let state = await readSupervisorState(paths)
-  if (state !== undefined && !(await hasMatchingProcess(state))) {
-    await removeSupervisorState(paths)
-    state = undefined
+  if (state !== undefined && state.phase !== 'failed' && !(await hasMatchingProcess(state))) {
+    await markSupervisorFailed(paths, state, 'CordisX background supervisor exited before renderer readiness')
+    state = await readSupervisorState(paths)
   }
   if (invocation.action === 'status') {
     output(
@@ -173,14 +225,10 @@ export async function runSupervisorCommand(
   }
   if (invocation.action === 'stop' || invocation.action === 'restart') {
     if (state !== undefined) {
-      // Prefer the authenticated private control seat.  Fall back to the
-      // detached process group only when the supervisor is still booting.
-      if (!(await requestSupervisorStop(paths.socket, state.instanceToken))) process.kill(-state.pid, 'SIGTERM')
-      const deadline = Date.now() + START_TIMEOUT
-      while (await hasMatchingProcess(state)) {
-        if (Date.now() > deadline) throw new Error('timed out stopping the CordisX-owned process group')
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
-      }
+      // Ask a ready supervisor to close normally, then fence any remaining
+      // launcher-owned helpers through the detached group.
+      await requestSupervisorStop(paths.socket, state.instanceToken)
+      await stopSupervisorProcessGroup(state)
       await removeSupervisorState(paths)
     }
     if (invocation.action === 'stop') {
@@ -189,17 +237,20 @@ export async function runSupervisorCommand(
     }
   }
   if (state !== undefined) {
+    if (state.phase === 'failed') state = undefined
+  }
+  if (state !== undefined) {
     if (state.version !== VERSION || state.effectiveConfig !== target.fingerprint) {
       throw new Error('CordisX instance version or effective configuration differs; run `cordisx restart` explicitly')
     }
-    const ready = state.phase === 'ready' ? state : await waitForState(paths)
+    const ready = state.phase === 'ready' ? state : await waitForState(paths, readinessTimeout(runtime))
     if (ready === undefined) throw new Error('background supervisor exited before readiness')
     output(runtime, display(ready), json)
     return
   }
   const release = await acquireSupervisorStartLock(paths).catch(async error => {
     if (!(error instanceof Error) || error.message !== 'CordisX instance start is already in progress') throw error
-    const waited = await waitForState(paths)
+    const waited = await waitForState(paths, readinessTimeout(runtime))
     if (waited === undefined) throw error
     output(runtime, display(waited), json)
     return undefined
@@ -244,9 +295,21 @@ export async function runSupervisorCommand(
       effectiveConfig: target.fingerprint,
     })
     child.unref()
-    const ready = await waitForState(paths)
-    if (ready === undefined) throw new Error('background supervisor exited before readiness')
-    output(runtime, display(ready), json)
+    try {
+      const ready = await waitForState(paths, readinessTimeout(runtime))
+      if (ready === undefined) throw new Error('background supervisor exited before readiness')
+      output(runtime, display(ready), json)
+    } catch (error) {
+      const current = await readSupervisorState(paths)
+      if (current !== undefined && current.phase !== 'failed') {
+        try {
+          await stopSupervisorProcessGroup(current)
+        } finally {
+          await markSupervisorFailed(paths, current, failureMessage(error))
+        }
+      }
+      throw error
+    }
   } finally {
     await release()
   }

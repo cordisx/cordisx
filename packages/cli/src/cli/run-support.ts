@@ -158,6 +158,8 @@ export interface CordisXCliRuntime {
     readonly env: NodeJS.ProcessEnv
     readonly logFd: number
   }) => Readonly<{ pid: number; unref(): void }>
+  /** Repository-only seam for bounded supervisor failure-path integration tests. */
+  readonly internalSupervisorReadinessTimeoutMs?: number
   /**
    * Internal-only renderer bundle closure for repository-controlled production
    * integration tests. It has no CLI/configuration/environment input and is

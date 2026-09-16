@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-export type SupervisorPhase = 'starting' | 'ready' | 'stopping'
+export type SupervisorPhase = 'starting' | 'ready' | 'stopping' | 'failed'
 
 /** Durable, deliberately non-secret projection of one transient Host owner. */
 export interface SupervisorState {
@@ -17,6 +17,9 @@ export interface SupervisorState {
   readonly version: string
   readonly effectiveConfig: string
   readonly cdpEndpoint?: string
+  /** Sanitized launch diagnosis; detailed output remains in host.log. */
+  readonly failure?: string
+  readonly failedAt?: string
 }
 
 export interface SupervisorPaths {
@@ -69,7 +72,7 @@ function validState(value: unknown): value is SupervisorState {
   return item.schemaVersion === 1
     && typeof item.appId === 'string'
     && typeof item.profileId === 'string'
-    && (item.phase === 'starting' || item.phase === 'ready' || item.phase === 'stopping')
+    && (item.phase === 'starting' || item.phase === 'ready' || item.phase === 'stopping' || item.phase === 'failed')
     && Number.isSafeInteger(item.pid) && (item.pid as number) > 0
     && typeof item.processStartedAt === 'string'
     && typeof item.instanceToken === 'string' && /^[a-f0-9]{32,}$/u.test(item.instanceToken)
@@ -77,6 +80,8 @@ function validState(value: unknown): value is SupervisorState {
     && typeof item.version === 'string'
     && typeof item.effectiveConfig === 'string'
     && (item.cdpEndpoint === undefined || typeof item.cdpEndpoint === 'string')
+    && (item.failure === undefined || typeof item.failure === 'string')
+    && (item.failedAt === undefined || typeof item.failedAt === 'string')
 }
 
 export async function readSupervisorState(paths: SupervisorPaths): Promise<SupervisorState | undefined> {
