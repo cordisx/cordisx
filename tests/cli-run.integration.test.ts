@@ -3,6 +3,7 @@ import {
   chmod,
   mkdir,
   mkdtemp as createTemporaryDirectory,
+  readdir,
   readFile,
   rm,
   stat,
@@ -21,11 +22,18 @@ import { defaultIsolatedProfileDir } from '../packages/cli/src/launcher/process.
 import { LauncherMarketplaceCertifiedAuthority } from '../packages/cli/src/launcher/marketplace-certified-authority.js'
 import { LocalUsageHost } from '../packages/cli/src/launcher/local-usage.js'
 
+import { removeStagedPluginPackage } from '../packages/cli/src/launcher/plugin-package.js'
+
 const directGrantStatePath = path.join('state', 'publisher-grants', 'direct-device-bound.v1.json')
 
 async function mkdtemp(prefix: string): Promise<string> {
   const root = await createTemporaryDirectory(prefix)
-  onTestFinished(() => rm(root, { recursive: true, force: true }))
+  onTestFinished(async () => {
+    const home = path.join(root, 'home')
+    const digests = await readdir(path.join(home, 'packages', 'sha256')).catch(() => [])
+    for (const digest of digests) await removeStagedPluginPackage(home, `sha256:${digest}`)
+    await rm(root, { recursive: true, force: true })
+  })
   return root
 }
 

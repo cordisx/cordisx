@@ -1,11 +1,11 @@
 import type { GameUiBundleV1 } from '@cordisx/protocol/isolated-game-ui/v1'
 import { gameUiBootstrap } from './sdk.js'
-const encoder = new TextEncoder()
 export async function htmlDocument(value: GameUiBundleV1, token: string): Promise<string> {
   if (!value || value.format !== 'html-v1' || value.bridgeVersion !== 1 || !value.assets) throw Error('invalid-bundle')
   if (Object.keys(value).some(key => !['format', 'bridgeVersion', 'entry', 'assets'].includes(key))) {
     throw Error('invalid-bundle')
   }
+  const encoder = new TextEncoder()
   const assets = Object.entries(value.assets)
   if (!assets.length || assets.length > 32) throw Error('invalid-bundle')
   let total = 0
