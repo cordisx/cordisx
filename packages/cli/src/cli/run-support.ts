@@ -17,6 +17,7 @@ import {
   resolveHomeConfigPath,
 } from '../config/home-config.js'
 import { buildRendererBundle, type BuildRendererBundleOptions } from '../launcher/bundle.js'
+import { buildHostGenerationGraph } from '../launcher/host-generation-graph.js'
 import { CdpPluginLifecycleRuntime, watchAndInject, type WatchInjectionOptions } from '../launcher/cdp.js'
 import { localDevelopmentPluginIdentity } from '../launcher/development.js'
 import { equivalentPluginActivation } from '../launcher/plugin-activation.js'
@@ -267,6 +268,8 @@ export interface RendererComposition {
       }[]
     }>,
   ) => Promise<Readonly<{ source: string; newDocumentSource?: string }>>
+  /** Releases every launch-scoped Host graph after the launcher drains CDP. */
+  close(): Promise<void>
 }
 
 export function assertProductionGraphLaunchOwnership(attach: boolean, hasLoopbackGraph: boolean): void {
@@ -387,15 +390,28 @@ export async function buildRendererComposition(
     ...(options.channelManager === undefined ? {} : { channelManager: options.channelManager }),
   }
   const buildBundle = options.developmentBuild ?? options.internalBuildRendererBundle ?? buildRendererBundle
-  const source = await buildBundle(config, bundleOptions)
+  const hostGraphs: { close(): Promise<void> }[] = []
+  const buildProductionSource = async (
+    nextConfig: CordisXConfig,
+    nextOptions: BuildRendererBundleOptions,
+  ): Promise<string> => {
+    if (options.developmentBuild !== undefined || options.internalBuildRendererBundle !== undefined) {
+      return await buildBundle(nextConfig, nextOptions)
+    }
+    const graph = await buildHostGenerationGraph(nextConfig, nextOptions)
+    hostGraphs.push(graph)
+    return graph.bootloader
+  }
+  const source = await buildProductionSource(config, bundleOptions)
   const newDocumentSource = options.certifiedPermissionChannelToken === undefined
     ? undefined
-    : await buildBundle(config, {
+    : await buildProductionSource(config, {
       ...bundleOptions,
       certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
     })
   const enabled = config.plugins.filter(plugin => plugin.enabled).map(plugin => plugin.id)
-  const hasLoopbackGraph = config.plugins.some(plugin => plugin.enabled && plugin.runtimeGraph !== undefined)
+  const hasLoopbackGraph = options.developmentBuild === undefined && options.internalBuildRendererBundle === undefined
+    || config.plugins.some(plugin => plugin.enabled && plugin.runtimeGraph !== undefined)
   stdout(
     `[cordisx] ${
       options.developmentBuild === undefined ? 'bundle' : 'Vite entry'
@@ -450,10 +466,10 @@ export async function buildRendererComposition(
         pluginActivation,
         initialRegistryEpoch,
       }
-      const rebuiltSource = await buildBundle(nextConfig, rebuildOptions)
+      const rebuiltSource = await buildProductionSource(nextConfig, rebuildOptions)
       const rebuiltNewDocumentSource = options.certifiedPermissionChannelToken === undefined
         ? undefined
-        : await buildBundle(nextConfig, {
+        : await buildProductionSource(nextConfig, {
           ...rebuildOptions,
           certifiedPermissionChannelToken: options.certifiedPermissionChannelToken,
         })
@@ -461,6 +477,9 @@ export async function buildRendererComposition(
         source: rebuiltSource,
         ...(rebuiltNewDocumentSource === undefined ? {} : { newDocumentSource: rebuiltNewDocumentSource }),
       }
+    },
+    async close() {
+      await Promise.allSettled(hostGraphs.map(graph => graph.close()))
     },
   }
 }

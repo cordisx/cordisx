@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net'
 import path from 'node:path'
 import { build, type Plugin } from 'vite'
 import type { CordisXConfig } from './config.js'
-import { buildRendererCompositionSource, type BuildRendererBundleOptions } from './bundle.js'
+import { type BuildRendererBundleOptions, buildRendererCompositionSource } from './bundle.js'
 import {
   CONTRACTS_MODULE_PATH,
   CORDISX_MANAGED_SERVICE_UI_MODULE,
@@ -116,12 +116,20 @@ export async function buildHostGenerationGraph(
     const fileName = item.fileName
     files.set(`/${fileName}`, {
       body,
-      contentType: fileName.endsWith('.css') ? 'text/css' : fileName.endsWith('.js') ? 'text/javascript' : 'application/octet-stream',
+      contentType: fileName.endsWith('.css')
+        ? 'text/css'
+        : fileName.endsWith('.js')
+        ? 'text/javascript'
+        : 'application/octet-stream',
     })
     if (item.type === 'chunk' && item.isEntry) entry = item
   }
   if (entry === undefined) throw new Error('Vite produced no Host graph entry')
-  const manifest = JSON.stringify({ version: 1, entry: `/${entry.fileName}`, digest: `sha256:${digest(entry.code ?? '')}` })
+  const manifest = JSON.stringify({
+    version: 1,
+    entry: `/${entry.fileName}`,
+    digest: `sha256:${digest(entry.code ?? '')}`,
+  })
   files.set('/manifest.json', { body: new TextEncoder().encode(manifest), contentType: 'application/json' })
   const secret = randomBytes(32).toString('hex')
   let origin = ''
@@ -129,7 +137,9 @@ export async function buildHostGenerationGraph(
   const server: Server = createServer((request, response) => {
     const url = new URL(request.url ?? '/', origin)
     const prefix = `/cordisx-host-generation/${secret}`
-    if ((request.method !== 'GET' && request.method !== 'HEAD') || url.search !== '' || !url.pathname.startsWith(prefix)) {
+    if (
+      (request.method !== 'GET' && request.method !== 'HEAD') || url.search !== '' || !url.pathname.startsWith(prefix)
+    ) {
       response.statusCode = 404
       response.end()
       return
@@ -148,21 +158,33 @@ export async function buildHostGenerationGraph(
   })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve() })
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject)
+      resolve()
+    })
   })
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}/cordisx-host-generation/${secret}`
-  const bootloader = `(()=>{const m=${JSON.stringify(`${origin}/manifest.json`)};fetch(m).then(r=>{if(!r.ok)throw Error('CordisX Host manifest unavailable');return r.json()}).then(x=>import(${JSON.stringify(origin)}+x.entry)).catch(e=>console.error('[cordisx] Host graph boot failed',e))})()`
+  const bootloader = `(()=>{const m=${
+    JSON.stringify(`${origin}/manifest.json`)
+  };const p=fetch(m).then(r=>{if(!r.ok)throw Error('CordisX Host manifest unavailable');return r.json()}).then(x=>import(${
+    JSON.stringify(origin)
+  }+x.entry)).then(x=>x.runtime);globalThis.__cordisxCompositionBoot=p;void p.catch(e=>console.error('[cordisx] Host graph boot failed',e))})()`
   if (Buffer.byteLength(bootloader) >= MAX_BOOTLOADER_BYTES) throw new Error('Host graph bootloader exceeds 16 KiB')
   return {
     entryUrl: `${origin}/${entry.fileName}`,
     manifestUrl: `${origin}/manifest.json`,
     bootloader,
-    eagerBytes: [...files.entries()].filter(([name]) => name.endsWith('.js')).reduce((total, [, file]) => total + file.body.byteLength, 0),
+    eagerBytes: [...files.entries()].filter(([name]) => name.endsWith('.js')).reduce(
+      (total, [, file]) => total + file.body.byteLength,
+      0,
+    ),
     files: [...files.entries()].map(([file, value]) => ({ path: file, bytes: value.body.byteLength })),
     async close() {
       if (closed) return
       closed = true
-      await new Promise<void>((resolve, reject) => server.close(error => error === undefined ? resolve() : reject(error)))
+      await new Promise<void>((resolve, reject) =>
+        server.close(error => error === undefined ? resolve() : reject(error))
+      )
     },
   }
 }

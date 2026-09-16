@@ -972,6 +972,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       profileLeaseHandedOff = profileLease !== undefined
       await runHost(runHostInput)
     } finally {
+      await rendererComposition.close()
       ownerDocuments.walletSpend?.dispose()
       await ownerDocuments.http.dispose()
       if (profileLease !== undefined && !profileLeaseHandedOff) await profileLease.release()
