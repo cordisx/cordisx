@@ -204,53 +204,59 @@ describe('native profile adaptation and bitmap normalization', () => {
     })
     expect(f.load).toHaveBeenCalledTimes(1)
   })
-  it('selects audited 8881 exports without /me and rejects mismatched old symbols or build identity', async () => {
-    const f = native()
-    vi.stubGlobal('electronBridge', {
-      getSentryInitOptions: () => ({ appVersion: '26.908.40834', buildNumber: '8881', buildFlavor: 'prod' }),
-    })
-    const profile = vi.fn(async () => ({ profile: { display_name: 'GH L' }, stats: { private: true } }))
-    const readAccountInfo = vi.fn(async () => ({
-      status: 'ready',
-      data: { accountId: 'private-account', userId: 'private-user' },
-    }))
-    const load = vi.fn(async () => ({
-      TW: { accessInputs: { readAccountInfo } },
-      mJt: { getInstance: () => f.client },
-      Uqt: { safeGet: profile },
-      Gqt: () => ({ nativeControl: '1' }),
-    }))
-    expect(await readNativeCurrentUser(new AbortController().signal, load)).toEqual({
-      status: 'available',
-      identity: JSON.stringify(['private-account', 'private-user']),
-      displayName: 'GH L',
-    })
-    expect(load).toHaveBeenCalledWith('app://-/assets/app-initial-9b95fa538c62.js')
-    expect(readAccountInfo).toHaveBeenCalledTimes(2)
-    expect(f.post).not.toHaveBeenCalled()
-    expect(profile).toHaveBeenCalledWith(
-      '/wham/profiles/me',
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    )
-    expect(await readNativeCurrentUser(new AbortController().signal, f.load)).toEqual({
-      status: 'unavailable',
-      reason: 'host-unavailable',
-    })
-    for (
-      const pin of [
-        { appVersion: '26.908.40834', buildNumber: '8378', buildFlavor: 'prod' },
-        { appVersion: '26.903.61454', buildNumber: '8881', buildFlavor: 'prod' },
-        { appVersion: '26.908.40834', buildNumber: '8881', buildFlavor: 'dev' },
-      ]
-    ) {
-      vi.stubGlobal('electronBridge', { getSentryInitOptions: () => pin })
+  it.each([
+    ['26.908.40834', '8881', '9b95fa538c62'],
+    ['26.908.70816', '9275', '4d7ea7f81c2d'],
+  ])(
+    'selects audited %s exports without /me and rejects mismatched symbols or identity',
+    async (appVersion, buildNumber, hash) => {
+      const f = native()
+      vi.stubGlobal('electronBridge', {
+        getSentryInitOptions: () => ({ appVersion, buildNumber, buildFlavor: 'prod' }),
+      })
+      const profile = vi.fn(async () => ({ profile: { display_name: 'GH L' }, stats: { private: true } }))
+      const readAccountInfo = vi.fn(async () => ({
+        status: 'ready',
+        data: { accountId: 'private-account', userId: 'private-user' },
+      }))
+      const load = vi.fn(async () => ({
+        TW: { accessInputs: { readAccountInfo } },
+        mJt: { getInstance: () => f.client },
+        Uqt: { safeGet: profile },
+        Gqt: () => ({ nativeControl: '1' }),
+      }))
       expect(await readNativeCurrentUser(new AbortController().signal, load)).toEqual({
+        status: 'available',
+        identity: JSON.stringify(['private-account', 'private-user']),
+        displayName: 'GH L',
+      })
+      expect(load).toHaveBeenCalledWith(`app://-/assets/app-initial-${hash}.js`)
+      expect(readAccountInfo).toHaveBeenCalledTimes(2)
+      expect(f.post).not.toHaveBeenCalled()
+      expect(profile).toHaveBeenCalledWith(
+        '/wham/profiles/me',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      )
+      expect(await readNativeCurrentUser(new AbortController().signal, f.load)).toEqual({
         status: 'unavailable',
         reason: 'host-unavailable',
       })
-    }
-    expect(load).toHaveBeenCalledTimes(1)
-  })
+      for (
+        const pin of [
+          { appVersion: '26.908.40834', buildNumber: '8378', buildFlavor: 'prod' },
+          { appVersion: '26.903.61454', buildNumber: '8881', buildFlavor: 'prod' },
+          { appVersion: '26.908.40834', buildNumber: '8881', buildFlavor: 'dev' },
+        ]
+      ) {
+        vi.stubGlobal('electronBridge', { getSentryInitOptions: () => pin })
+        expect(await readNativeCurrentUser(new AbortController().signal, load)).toEqual({
+          status: 'unavailable',
+          reason: 'host-unavailable',
+        })
+      }
+      expect(load).toHaveBeenCalledTimes(1)
+    },
+  )
   it('rejects native identity changes during a profile read and supports signed-out', async () => {
     const f = native()
     f.post.mockResolvedValueOnce({ body: { accountId: 'one', userId: 'user', email: 'private' } })

@@ -28,7 +28,7 @@ export async function readPinnedNativeAccount(
   })
   try {
     const operation = (async () => {
-      if (buildNumber === '8881') {
+      if (buildNumber === '8881' || buildNumber === '9275') {
         const inputs = native.TW?.accessInputs
         if (typeof inputs?.readAccountInfo !== 'function') return unavailable('typed-input-missing')
         // Match this build's own account query. A failed typed input must never

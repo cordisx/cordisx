@@ -9,8 +9,7 @@ export type CurrentUserSource = {
   readonly avatar?: string
 } | { readonly status: 'unavailable'; readonly reason: 'signed-out' | 'host-unavailable' }
 export const CURRENT_USER_NATIVE_PIN = CURRENT_USER_NATIVE_PINS[0]
-const CURRENT_USER_NATIVE_PIN_8881 = CURRENT_USER_NATIVE_PINS[1]
-interface NativeModule8881 {
+interface NativeModuleTyped {
   readonly TW: { readonly accessInputs: { readAccountInfo(): Promise<unknown> } }
   readonly mJt: { getInstance(): NativeClient }
   readonly Uqt: { safeGet(path: string, options: { signal: AbortSignal }): Promise<unknown> }
@@ -59,7 +58,7 @@ export function avatarRequest(value: unknown): { url: string; authenticated: boo
 /** Exact audited native display-profile client; no DOM, credential getter, login or Agent provider. */
 export async function readNativeCurrentUser(
   signal: AbortSignal,
-  load: (path: string) => Promise<NativeModule | NativeModule8881> = path => import(/* @vite-ignore */ path),
+  load: (path: string) => Promise<NativeModule | NativeModuleTyped> = path => import(/* @vite-ignore */ path),
 ): Promise<CurrentUserSource> {
   const page = globalThis as typeof globalThis & {
     electronBridge?: { getSentryInitOptions?: () => unknown }
@@ -69,19 +68,20 @@ export async function readNativeCurrentUser(
   if (page.codexWindowType !== 'electron' || page.location?.href !== 'app://-/index.html') return unavailable
   try {
     const pin = object(await page.electronBridge?.getSentryInitOptions?.())
-    const adapter = [CURRENT_USER_NATIVE_PIN, CURRENT_USER_NATIVE_PIN_8881].find(candidate =>
+    const adapter = CURRENT_USER_NATIVE_PINS.find(candidate =>
       pin.appVersion === candidate.appVersion && pin.buildNumber === candidate.buildNumber
       && pin.buildFlavor === candidate.buildFlavor
     )
     if (!adapter) return unavailable
     const module = await load(adapter.module)
-    // Build 8881's own Codex profile client supplies name/picture directly; the
+    // Audited builds 8881 and 9275 share the typed account/profile exports.
+    // Their own Codex profile client supplies name/picture directly; the
     // old /me export is absent. Never reuse old symbol names on a new bundle.
     const native: NativeModule = adapter === CURRENT_USER_NATIVE_PIN ? module as NativeModule : {
-      gJt: (module as NativeModule8881).mJt,
+      gJt: (module as NativeModuleTyped).mJt,
       eSt: async () => undefined,
-      jKt: (module as NativeModule8881).Uqt,
-      NKt: (module as NativeModule8881).Gqt,
+      jKt: (module as NativeModuleTyped).Uqt,
+      NKt: (module as NativeModuleTyped).Gqt,
     }
     if (!native.gJt?.getInstance || !native.eSt || !native.jKt?.safeGet || !native.NKt) return unavailable
     const client = native.gJt.getInstance()

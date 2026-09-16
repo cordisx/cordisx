@@ -295,3 +295,15 @@ it('aborting one concurrent read releases only its invocation and keeps the sibl
   expect(releaseB).toHaveBeenCalledTimes(1)
   expect(sharedDispose).not.toHaveBeenCalled()
 })
+
+it.each([
+  [{ status: 'ready', data: pair }, JSON.stringify([pair.accountId, pair.userId])],
+  [{ status: 'unavailable', reason: 'identity' }, { status: 'unavailable', reason: 'typed-identity' }],
+  [{ status: 'error' }, { status: 'unavailable', reason: 'typed-read-error' }],
+])('executes the audited 9275 production expression without fallback: %j', async (value, expected) => {
+  const module = native(value)
+  const f = expression(module, { appVersion: '26.908.70816', buildNumber: '9275', buildFlavor: 'prod' })
+  expect(await f.result).toEqual(expected)
+  expect(f.load).toHaveBeenCalledWith('app://-/assets/app-initial-4d7ea7f81c2d.js')
+  expect(module.post).not.toHaveBeenCalled()
+})
