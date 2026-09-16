@@ -182,7 +182,9 @@ describe('Playground Session timeline information architecture', () => {
     expect(component).toMatch(/<summary>\s*\{en/u)
     expect(component).toContain('rawSessionEvents.length} SessionEvent')
     expect(component).toContain('data-event-fact={factKind}')
-    expect(styles).toContain('.pg-event-raw-details > summary:focus-visible { outline: 2px solid var(--pg-accent);')
+    expect(styles).toMatch(
+      /\.pg-event-raw-details\s*>\s*summary:focus-visible\s*\{\s*outline:\s*2px\s+solid\s+var\(--pg-accent\);/u,
+    )
     expect(styles).toContain('.pg-event-timeline-item[data-trace-presentation="tool-use"] .pg-event-bubble')
     expect(styles).toContain('.pg-event-timeline-item[data-trace-presentation="tool-result"] .pg-event-bubble')
     expect(styles).toContain('html[data-theme="light"]')

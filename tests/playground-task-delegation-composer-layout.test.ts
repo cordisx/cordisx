@@ -21,11 +21,15 @@ describe('Playground task delegation composer layout', () => {
     expect(component).toMatch(/<button\s+className="pg-event-composer-submit"\s+type="submit"/u)
 
     expect(toolbarStyles).toContain('--pg-event-control-height: 40px')
-    expect(toolbarStyles).toContain(
-      '.pg-event-composer[data-composer-event-type="task-delegation"] { grid-template-columns: minmax(170px,.82fr) minmax(180px,1fr) minmax(240px,2.6fr) 78px; }',
+    expect(toolbarStyles).toMatch(
+      /\.pg-event-composer\[data-composer-event-type="task-delegation"\]\s*\{\s*grid-template-columns:\s*minmax\(170px,\s*(?:0)?\.82fr\)\s+minmax\(180px,\s*1fr\)\s+minmax\(240px,\s*2\.6fr\)\s+78px;\s*\}/u,
     )
-    expect(toolbarStyles).toContain('> .pg-event-composer-input > .pg-event-composer-delegation { display: contents; }')
-    expect(toolbarStyles).toContain('background: var(--pg-panel-raised); color: var(--pg-text);')
+    expect(toolbarStyles).toMatch(
+      />\s*\.pg-event-composer-input\s*>\s*\.pg-event-composer-delegation\s*\{\s*display:\s*contents;\s*\}/u,
+    )
+    expect(toolbarStyles).toMatch(
+      /background:\s*var\(--pg-panel-raised\);\s*color:\s*var\(--pg-text\);/u,
+    )
     expect(toolbarStyles).toContain('.pg-event-composer-select:focus-within .t-input')
     expect(toolbarStyles).toContain('.pg-event-composer-submit:hover:not(:disabled)')
     expect(toolbarStyles).toContain('.pg-event-composer-submit:focus-visible')
@@ -37,21 +41,21 @@ describe('Playground task delegation composer layout', () => {
     const styles = await readFile(path.resolve('packages/cli/src/playground/client/styles.css'), 'utf8')
     expect(styles).toContain('container: pg-task-debugger / inline-size')
     expect(styles).toContain('@container pg-task-debugger (max-width: 760px)')
-    expect(styles).toContain(
-      '.pg-event-composer[data-composer-event-type="task-delegation"] { grid-template-columns: minmax(132px,.82fr) minmax(180px,1.18fr) 40px; padding-inline: 12px; }',
+    expect(styles).toMatch(
+      /\.pg-event-composer\[data-composer-event-type="task-delegation"\]\s*\{\s*grid-template-columns:\s*minmax\(132px,\s*(?:0)?\.82fr\)\s+minmax\(180px,\s*1\.18fr\)\s+40px;\s*padding-inline:\s*12px;\s*\}/u,
     )
-    expect(styles).toContain(
-      '.pg-event-composer[data-composer-event-type="task-delegation"] .pg-event-composer-delegation > textarea { grid-column: 1 / -1; grid-row: 2; }',
+    expect(styles).toMatch(
+      /\.pg-event-composer\[data-composer-event-type="task-delegation"\]\s+\.pg-event-composer-delegation\s*>\s*textarea\s*\{\s*grid-column:\s*1\s*\/\s*-1;\s*grid-row:\s*2;\s*\}/u,
     )
     expect(styles).toContain('@container pg-task-debugger (max-width: 520px)')
-    expect(styles).toContain(
-      '.pg-event-composer[data-composer-event-type="task-delegation"] { grid-template-columns: minmax(0,1fr) 40px; }',
+    expect(styles).toMatch(
+      /\.pg-event-composer\[data-composer-event-type="task-delegation"\]\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+40px;\s*\}/u,
     )
-    expect(styles).toContain(
-      '.pg-event-composer[data-composer-event-type="task-delegation"] .pg-event-composer-delegation-target { grid-column: 1 / -1; grid-row: 2; }',
+    expect(styles).toMatch(
+      /\.pg-event-composer\[data-composer-event-type="task-delegation"\]\s+\.pg-event-composer-delegation-target\s*\{\s*grid-column:\s*1\s*\/\s*-1;\s*grid-row:\s*2;\s*\}/u,
     )
-    expect(styles).toContain(
-      '.pg-event-composer[data-composer-event-type="task-delegation"] .pg-event-composer-delegation > textarea { grid-column: 1 / -1; grid-row: 3; }',
+    expect(styles).toMatch(
+      /\.pg-event-composer\[data-composer-event-type="task-delegation"\]\s+\.pg-event-composer-delegation\s*>\s*textarea\s*\{\s*grid-column:\s*1\s*\/\s*-1;\s*grid-row:\s*3;\s*\}/u,
     )
   })
 })
