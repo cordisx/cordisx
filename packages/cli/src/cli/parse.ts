@@ -1,4 +1,16 @@
-export type CordisXCliAction = 'help' | 'launch' | 'setup' | 'config' | 'doctor' | 'dev'
+export type CordisXCliAction =
+  | 'help'
+  | 'launch'
+  | 'run'
+  | 'start'
+  | 'status'
+  | 'logs'
+  | 'stop'
+  | 'restart'
+  | 'setup'
+  | 'config'
+  | 'doctor'
+  | 'dev'
 export type CordisXDataMode = 'shared' | 'host-isolated'
 
 export type CordisXCliParseErrorCode =
@@ -34,6 +46,7 @@ export interface CordisXLauncherOptions {
   readonly dryRun: boolean
   /** Explicit dev --config persistence opt-in. */
   readonly writeConfig?: boolean
+  readonly json: boolean
 }
 
 export interface CordisXHelpInvocation {
@@ -47,6 +60,20 @@ export interface CordisXLaunchInvocation {
   readonly dataMode?: CordisXDataMode
   readonly options: CordisXLauncherOptions
   readonly hostArgs: readonly string[]
+}
+
+export interface CordisXRunInvocation extends Omit<CordisXLaunchInvocation, 'action'> {
+  readonly action: 'run'
+}
+
+export interface CordisXManagedInvocation {
+  readonly action: 'start' | 'status' | 'logs' | 'stop' | 'restart'
+  readonly app?: string
+  readonly profile?: string
+  readonly dataMode?: CordisXDataMode
+  readonly options: CordisXLauncherOptions
+  readonly hostArgs: readonly string[]
+  readonly follow?: true
 }
 
 export interface CordisXSetupInvocation {
@@ -73,12 +100,23 @@ export interface CordisXDevInvocation {
 export type CordisXCliInvocation =
   | CordisXHelpInvocation
   | CordisXLaunchInvocation
+  | CordisXRunInvocation
+  | CordisXManagedInvocation
   | CordisXSetupInvocation
   | CordisXConfigInvocation
   | CordisXDoctorInvocation
   | CordisXDevInvocation
 
-type BooleanOptionName = 'attach' | 'system' | 'isolated' | 'onlineDevtools' | 'dryRun' | 'writeConfig' | 'help'
+type BooleanOptionName =
+  | 'attach'
+  | 'system'
+  | 'isolated'
+  | 'onlineDevtools'
+  | 'dryRun'
+  | 'writeConfig'
+  | 'json'
+  | 'follow'
+  | 'help'
 type ValueOptionName = 'dataMode' | 'profileDir' | 'executable' | 'debugPort' | 'configPath' | 'workScopeGuard'
 type ParsedOptionName = BooleanOptionName | ValueOptionName
 
@@ -89,6 +127,8 @@ interface ParsedOptions {
   onlineDevtools: boolean
   dryRun: boolean
   writeConfig: boolean
+  json: boolean
+  follow: boolean
   help: boolean
   dataMode?: CordisXDataMode
   profileDir?: string
@@ -105,6 +145,8 @@ const BOOLEAN_OPTIONS = new Map<string, BooleanOptionName>([
   ['--online-devtools', 'onlineDevtools'],
   ['--dry-run', 'dryRun'],
   ['--write-config', 'writeConfig'],
+  ['--json', 'json'],
+  ['--follow', 'follow'],
   ['--help', 'help'],
   ['-h', 'help'],
 ])
@@ -119,7 +161,19 @@ const VALUE_OPTIONS = new Map<string, ValueOptionName>([
   ['-c', 'configPath'],
 ])
 
-const COMMANDS = new Set(['help', 'setup', 'config', 'doctor', 'dev'])
+const COMMANDS = new Set([
+  'help',
+  'setup',
+  'config',
+  'doctor',
+  'dev',
+  'run',
+  'start',
+  'status',
+  'logs',
+  'stop',
+  'restart',
+])
 const PROFILE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/
 
 function parseValue(option: string, name: ValueOptionName, raw: string): string | number {
@@ -165,6 +219,8 @@ function parseCordisXOptions(args: readonly string[]): {
     onlineDevtools: false,
     dryRun: false,
     writeConfig: false,
+    json: false,
+    follow: false,
     help: false,
   }
   const seen = new Set<ParsedOptionName>()
@@ -225,6 +281,7 @@ function launcherOptions(options: ParsedOptions): CordisXLauncherOptions {
     onlineDevtools: options.onlineDevtools,
     dryRun: options.dryRun,
     ...(options.writeConfig ? { writeConfig: true } : {}),
+    json: options.json,
     ...(options.profileDir === undefined ? {} : { profileDir: options.profileDir }),
     ...(options.executable === undefined ? {} : { executable: options.executable }),
     ...(options.debugPort === undefined ? {} : { debugPort: options.debugPort }),
@@ -291,6 +348,8 @@ function assertNoOptions(options: ParsedOptions, action: 'setup' | 'config' | 'd
     options.onlineDevtools && '--online-devtools',
     options.dryRun && '--dry-run',
     options.writeConfig && '--write-config',
+    options.json && '--json',
+    options.follow && '--follow',
     options.dataMode !== undefined && '--data',
     options.profileDir !== undefined && '--profile-dir',
     options.executable !== undefined && '--executable',
@@ -321,7 +380,10 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
   if (options.help || positionals[0] === 'help') return { action: 'help' }
 
   const first = positionals[0]
-  const action = first !== undefined && COMMANDS.has(first) ? first : 'launch'
+  const hasCommandPrefix = first !== undefined && COMMANDS.has(first)
+  // The bare command (including its optional app/profile) is intentionally the
+  // idempotent background default. `run` is the foreground escape hatch.
+  const action: CordisXCliAction = hasCommandPrefix ? first as CordisXCliAction : 'start'
   if (action === 'setup' || action === 'config' || action === 'doctor') {
     if (positionals.length > 1) {
       throw new CordisXCliParseError(
@@ -393,14 +455,15 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
       '--isolated is only valid with cordisx dev; use --data host-isolated for a separate Host root',
     )
   }
-  if (positionals.length > 2) {
+  if (positionals.length > (hasCommandPrefix ? 3 : 2)) {
     throw new CordisXCliParseError(
       'unexpected-positional',
-      'cordisx launch accepts at most two positional arguments: [app] [profile]',
+      `cordisx ${action} accepts at most two positional arguments: [app] [profile]`,
     )
   }
-  const profile = positionals[1]
-  const app = positionals[0]
+  const commandOffset = hasCommandPrefix ? 1 : 0
+  const profile = positionals[commandOffset + 1]
+  const app = positionals[commandOffset]
   if (app !== undefined && !PROFILE_ID.test(app)) {
     throw new CordisXCliParseError(
       'invalid-option-value',
@@ -426,11 +489,12 @@ export function parseCordisXCli(argv: readonly string[]): CordisXCliInvocation {
     )
   }
   return {
-    action: 'launch',
+    action: action as 'launch' | 'run' | 'start' | 'status' | 'logs' | 'stop' | 'restart',
     ...(app === undefined ? {} : { app }),
     ...(profile === undefined ? {} : { profile }),
     ...(options.dataMode === undefined ? {} : { dataMode: options.dataMode }),
     options: launcherOptions(options),
     hostArgs,
+    ...(options.follow ? { follow: true as const } : {}),
   }
 }

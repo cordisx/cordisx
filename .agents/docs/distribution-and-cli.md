@@ -18,6 +18,8 @@ The stable grammar is:
 
 ```text
 cordisx [app] [profile] [--data shared|host-isolated] [options] [-- host-arguments...]
+cordisx run [app] [profile] [options] [-- host-arguments...]
+cordisx start|status|logs|stop|restart [app] [profile] [options]
 cordisx setup
 cordisx config
 cordisx doctor
@@ -34,6 +36,17 @@ npx cordisx codex work --data host-isolated
 npx cordisx claude-code personal
 npx cordisx setup
 ```
+
+The bare command is an idempotent background `start`; `cordisx run` retains
+the foreground launcher lifecycle for terminals and development diagnostics.
+One authority exists per app/profile at `~/.cordisx/run/<app>/<profile>/`.
+`start` waits for CDP renderer readiness, reuses a ready matching instance, and
+rejects a version or effective-configuration mismatch until an explicit
+`restart`. `status --json` emits stable app, profile, status, PID, uptime,
+version, and CDP endpoint fields. `logs` reads that instance's private log and
+`logs --follow` streams appended lines. `stop` and `restart` address only the
+authenticated supervisor and its launcher-owned process group; they never use
+an unscoped application-name kill.
 
 `app` is an adapter id, not a hard-coded union owned by the CLI. `codex` is the
 first implementation. `claude-code` and later hosts use the same grammar only

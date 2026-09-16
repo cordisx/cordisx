@@ -218,7 +218,7 @@ launch never reads a project-local `cordisx.config.json`.
 
 ## Launch modes
 
-The default shared command starts an independent Host process with an
+The default shared command starts an independent Host process in the background with an
 automatically selected loopback CDP port and a persistent Chromium directory
 under `CORDISX_HOME`. It explicitly retains `HOME` and `CODEX_HOME`, so the
 existing account, conversations, projects, and models remain available without
@@ -230,6 +230,11 @@ npm run dev -- codex
 npm run dev -- codex work
 npm run dev -- codex work --data host-isolated
 ```
+
+Use `npm run dev -- status --json` to inspect an instance, `npm run dev -- logs
+--follow` to stream its launcher log, and `npm run dev -- run codex work` when
+the foreground lifecycle is required for terminal diagnostics. `stop` and
+`restart` stay scoped to the selected app/profile.
 
 The named profile is persisted in the CordisX home configuration. `default`
 and an unknown explicit profile such as `work` use independent, persistent

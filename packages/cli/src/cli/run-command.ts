@@ -151,6 +151,8 @@ import {
   waitForHostExitAfterReadiness,
 } from './run-support.js'
 import { prepareRunCommand } from './run-command-dispatch.js'
+import { isSupervisorCommand, runSupervisorCommand } from './supervisor-command.js'
+import { createSupervisorRuntime } from './supervisor-runtime.js'
 
 export async function runCordisXCli(argv: readonly string[], runtime: CordisXCliRuntime = {}): Promise<void> {
   if (argv[0] === 'source-trust') {
@@ -168,9 +170,30 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
     return
   }
   const parsedInvocation = parseCordisXCli(argv)
-  const prepared = await prepareRunCommand(parsedInvocation, runtime)
+  const internalForeground = [
+    runtime.internalRunInjectedHost,
+    runtime.internalAgentHistoryHost,
+    runtime.internalBuiltinSkillSourceDir,
+    runtime.internalSharedHomeDir,
+    runtime.internalBuildRendererBundle,
+    runtime.internalObserveOwnerDocuments,
+  ].some(value => value !== undefined)
+  const foregroundStart = parsedInvocation.action === 'start'
+    && (parsedInvocation.options.dryRun || parsedInvocation.options.attach || internalForeground)
+  if (isSupervisorCommand(parsedInvocation) && !foregroundStart) {
+    await runSupervisorCommand(parsedInvocation, runtime)
+    return
+  }
+  const foregroundInvocation = (parsedInvocation.action === 'run' || foregroundStart
+    ? { ...parsedInvocation, action: 'launch' as const }
+    : parsedInvocation) as Exclude<
+      typeof parsedInvocation,
+      { readonly action: 'run' | 'start' | 'status' | 'logs' | 'stop' | 'restart' }
+    >
+  const prepared = await prepareRunCommand(foregroundInvocation, runtime)
   if (prepared === undefined) return
   const { invocation, stdout, environment, configPath, selection, adapter, appId } = prepared
+  const supervisorRuntime = await createSupervisorRuntime(environment)
 
   const certifiedPermissionAuthority = await LauncherMarketplaceCertifiedAuthority.open({
     homeDir: rootFromConfigPath(configPath),
@@ -850,7 +873,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
           debugPort,
           hostArgs: invocation.hostArgs,
           launcher: invocation.options,
-          onReady: markCliProxyStartupConfigApplied,
+          onReady: async () => {
+            await markCliProxyStartupConfigApplied()
+            await supervisorRuntime.markReady(debugPort)
+          },
           stdout,
         })
       } finally {
@@ -969,7 +995,10 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
         debugPort,
         hostArgs: invocation.hostArgs,
         launcher: invocation.options,
-        onReady: markCliProxyStartupConfigApplied,
+        onReady: async () => {
+          await markCliProxyStartupConfigApplied()
+          await supervisorRuntime.markReady(debugPort)
+        },
         ...(profile === undefined ? {} : { profile }),
         ...(profileLease === undefined ? {} : { profileLease }),
         ...((Object.keys(plan.environment).length === 0 && nativeSubmission === undefined)
@@ -988,6 +1017,7 @@ export async function runCordisXCli(argv: readonly string[], runtime: CordisXCli
       await closeProviderFleet()
     }
   } finally {
+    await supervisorRuntime.close()
     await nativeSubmission?.close().catch(() => undefined)
     await managedServiceLifecycleRuntime?.dispose().catch(() => undefined)
     await pluginGenerationArtifactServer?.close()

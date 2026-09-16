@@ -150,6 +150,14 @@ export interface CordisXCliRuntime {
   /** Test/integration seam for the canonical default `~/.cordisx` root. */
   readonly homedir?: string
   readonly stdout?: (line: string) => void
+  /** Test-only cancellation seam for long-lived `cordisx logs --follow`. */
+  readonly internalSignal?: AbortSignal
+  /** Repository-only detached-supervisor seam; production always spawns the packaged CLI. */
+  readonly internalSpawnSupervisor?: (input: {
+    readonly args: readonly string[]
+    readonly env: NodeJS.ProcessEnv
+    readonly logFd: number
+  }) => Readonly<{ pid: number; unref(): void }>
   /**
    * Internal-only renderer bundle closure for repository-controlled production
    * integration tests. It has no CLI/configuration/environment input and is
