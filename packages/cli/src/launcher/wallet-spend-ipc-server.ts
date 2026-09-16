@@ -87,12 +87,19 @@ export async function listenWalletSpendProvider(options: {
               spendObject(p, [])
               value = session.identity()
               break
+            case 'pool-quote':
             case 'quote': {
               spendObject(p, ['terms', 'requestId'])
               spendId(p.requestId)
               if (typeof p.terms !== 'string' || Buffer.byteLength(p.terms) > 65_536) throw new Error('invalid terms')
-              const quote = session.quote(p.terms, p.requestId), token = randomBytes(32).toString('hex')
-              quotes.set(token, { kind: 'reserve', handle: quote.handle })
+              const quote = frame.operation === 'pool-quote'
+                  ? session.pool!.quote(p.terms, p.requestId)
+                  : session.quote(p.terms, p.requestId),
+                token = randomBytes(32).toString('hex')
+              quotes.set(token, {
+                kind: frame.operation === 'pool-quote' ? 'pool-reserve' : 'reserve',
+                handle: quote.handle,
+              })
               value = { token, terms: quote.terms }
               break
             }
@@ -106,27 +113,36 @@ export async function listenWalletSpendProvider(options: {
               value = { token, challenge: quote.challenge }
               break
             }
+            case 'pool-reserve':
             case 'reserve':
             case 'bind': {
               spendObject(p, ['token'])
               const quote = quotes.get(p.token)
               if (!quote || quote.kind !== frame.operation) throw new Error('retired quote')
               quotes.delete(p.token)
-              value = frame.operation === 'reserve'
+              value = frame.operation === 'pool-reserve'
+                ? session.pool!.reserve(quote.handle)
+                : frame.operation === 'reserve'
                 ? session.reserve(quote.handle)
                 : session.bindGameAccount(quote.handle)
               break
             }
+            case 'pool-lookup':
             case 'lookup':
               spendObject(p, ['source', 'requestId'])
-              value = session.lookup(spendSource(p.source), spendId(p.requestId))
+              value = frame.operation === 'pool-lookup'
+                ? session.pool!.lookup(spendSource(p.source), spendId(p.requestId))
+                : session.lookup(spendSource(p.source), spendId(p.requestId))
               break
+            case 'pool-apply':
             case 'apply':
               spendObject(p, ['source', 'decision'])
               if (typeof p.decision !== 'string' || Buffer.byteLength(p.decision) > 262_144) {
                 throw new Error('invalid decision')
               }
-              value = session.applyDecision(spendSource(p.source), p.decision)
+              value = frame.operation === 'pool-apply'
+                ? session.pool!.applyDecision(spendSource(p.source), p.decision)
+                : session.applyDecision(spendSource(p.source), p.decision)
               break
             case 'catalog':
             case 'orders':

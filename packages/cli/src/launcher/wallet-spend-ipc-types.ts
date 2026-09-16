@@ -10,6 +10,18 @@ export interface WalletSpendWalletV1 {
 }
 /** Runs inside the Economy authority process with its existing canonical SQLite store. */
 export interface WalletSpendProviderSessionV1 {
+  readonly pool?: {
+    quote(terms: string, requestId: string): { readonly handle: object; readonly terms: string }
+    reserve(handle: object): import('@cordisx/protocol/wallet-pool/v1').WalletPoolRecordV1
+    lookup(
+      source: WalletSpendSourceV1,
+      requestId: string,
+    ): import('@cordisx/protocol/wallet-pool/v1').WalletPoolRecordV1 | null
+    applyDecision(
+      source: WalletSpendSourceV1,
+      decision: string,
+    ): import('@cordisx/protocol/wallet-pool/v1').WalletPoolRecordV1
+  }
   identity(): WalletSpendIdentityV1
   quote(terms: string, requestId: string): { readonly handle: object; readonly terms: string }
   reserve(handle: object): WalletSpendRecordV1

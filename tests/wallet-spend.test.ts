@@ -95,6 +95,7 @@ async function setup(
   // Valid 43-character subject; no existing user's keychain or ledger is touched.
   profile.subject = 'host-local:'
     + createHash('sha256').update(Buffer.from(profile.publicKey, 'base64')).digest('base64url')
+  const poolRecords = new Map<string, import('@cordisx/protocol/wallet-pool/v1').WalletPoolRecordV1>()
   const reservations = new Map<string, { reservation: string; state: 'pending' }>(), orders = new Map<string, string>()
   const server = await listenWalletSpendProvider({
     socketPath,
@@ -107,6 +108,44 @@ async function setup(
         if (!active || !live()) throw new Error('retired')
       }
       return {
+        pool: {
+          quote(text, requestId) {
+            guard()
+            const payload = JSON.parse(text).payload
+            if (state.mismatchedQuote) {
+              payload.participants[0].amount = 99
+              text = signed(payload)
+            }
+            return { handle: { payload, requestId }, terms: text }
+          },
+          reserve(handle) {
+            guard()
+            const h = handle as { payload: ReturnType<typeof termsPayload>; requestId: string }
+            const value = {
+              reservation: signed({
+                contract: 'economy.pool-reservation/v1',
+                ...source,
+                matchId: h.payload.matchId,
+                termsHash: digest(h.payload),
+                reservationId: 'pool-1',
+                nonce: 'b'.repeat(64),
+                ...h.payload.participants[0],
+              }, receiptKey),
+              sequence: 0,
+              paid: 0,
+              exited: false,
+              decisionHash: null,
+            }
+            poolRecords.set(h.requestId, value)
+            state.mutations++
+            if (state.loseAck) throw Error('lost pool ACK')
+            return value
+          },
+          lookup: (_source, id) => poolRecords.get(id) ?? null,
+          applyDecision: () => {
+            throw Error('tested with real economy separately')
+          },
+        },
         identity: () => {
           guard()
           return identity
@@ -571,5 +610,48 @@ describe('wallet spend trusted boundary', () => {
     expect(WALLET_SPEND_NATIVE_SCRIPT).toContain('text.editable = false')
     expect(WALLET_SPEND_NATIVE_SCRIPT).toContain('JSON.parse(argv[0])')
     expect(WALLET_SPEND_NATIVE_SCRIPT).not.toContain('eval(')
+  })
+})
+
+describe('wallet pool authorization bridge', () => {
+  const terms = () =>
+    signed({ ...termsPayload(), contract: 'economy.pool-terms/v1', policy: 'winner-weights', rounds: 3 })
+  it('authorizes pool terms separately and recovers a lost reserve reply through original request', async () => {
+    const s = await setup(), input = { source, terms: terms(), requestId: 'pool:1', deadline: Date.now() + 30000 }
+    s.state.loseAck = true
+    expect(await s.authority.handle(s.request('pool-reserve', input))).toEqual({
+      status: 'unavailable',
+      code: 'outcome-unknown',
+    })
+    s.state.loseAck = false
+    const recovered = await s.authority.handle(s.request('pool-reserve', input))
+    expect(recovered.status).toBe('accepted')
+    expect(s.state.mutations).toBe(1)
+    expect(s.state.approvals).toHaveLength(1)
+    expect(await s.authority.handle(s.request('reserve', input))).toEqual({
+      status: 'unavailable',
+      code: 'invalid-request',
+    })
+  })
+  it('native denial, substituted quote and inactive source cannot reserve a pool', async () => {
+    const s = await setup(async () => false),
+      input = { source, terms: terms(), requestId: 'pool:1', deadline: Date.now() + 30000 }
+    expect(await s.authority.handle(s.request('pool-reserve', input))).toEqual({
+      status: 'unavailable',
+      code: 'denied',
+    })
+    s.state.mismatchedQuote = true
+    expect(await s.authority.handle(s.request('pool-reserve', input))).toEqual({
+      status: 'unavailable',
+      code: 'invalid-request',
+    })
+    const config = JSON.parse(readFileSync(s.configFile, 'utf8'))
+    config.services[0].status = 'recovery-only'
+    writeFileSync(s.configFile, JSON.stringify(config), { mode: 0o600 })
+    expect(await s.authority.handle(s.request('pool-reserve', input))).toEqual({
+      status: 'unavailable',
+      code: 'source-unavailable',
+    })
+    expect(s.state.mutations).toBe(0)
   })
 })

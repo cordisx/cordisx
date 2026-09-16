@@ -62,8 +62,14 @@ export function spendIdentity(value: unknown): WalletSpendIdentityV1 {
   const x = spendObject(value, ['walletId', 'walletPublicKey'])
   return { walletId: spendId(x.walletId), walletPublicKey: spendPublicKey(x.walletPublicKey) }
 }
-export function spendTerms(text: string, source: WalletSpendSourceV1, identity: WalletSpendIdentityV1, fresh = true) {
-  const p = spendSigned(text, 'economy.spend-terms/v1', source.servicePublicKey)
+export function spendTerms(
+  text: string,
+  source: WalletSpendSourceV1,
+  identity: WalletSpendIdentityV1,
+  fresh = true,
+  pool = false,
+) {
+  const p = spendSigned(text, pool ? 'economy.pool-terms/v1' : 'economy.spend-terms/v1', source.servicePublicKey)
   spendObject(p, [
     'contract',
     'serviceOrigin',
@@ -74,13 +80,18 @@ export function spendTerms(text: string, source: WalletSpendSourceV1, identity: 
     'participants',
     'policy',
     'acceptBefore',
+    ...(pool ? ['rounds'] : []),
   ])
   if (
     !sameSpendSource(
       source,
       spendSource({ serviceOrigin: p.serviceOrigin, servicePublicKey: p.servicePublicKey, serverId: p.serverId }),
     )
-    || p.policy !== 'capture-and-release' || !Number.isSafeInteger(p.acceptBefore) || p.acceptBefore < 0
+    || (pool
+      ? !['winner-weights', 'remaining-chips'].includes(p.policy) || !Number.isSafeInteger(p.rounds) || p.rounds < 1
+        || p.rounds > 1000
+      : p.policy !== 'capture-and-release')
+    || !Number.isSafeInteger(p.acceptBefore) || p.acceptBefore < 0
     || (fresh && p.acceptBefore <= Date.now())
     || !Array.isArray(p.participants) || p.participants.length < 1 || p.participants.length > 8
   ) throw new Error('invalid terms')

@@ -23,7 +23,9 @@ export function createWalletSpendClient(options: {
     } catch {
       return { status: 'unavailable', code: 'invalid-request' }
     }
-    const mutating = ['reserve', 'bind', 'purchase', 'cancel-purchase', 'apply'].includes(operation)
+    const mutating = ['reserve', 'bind', 'purchase', 'cancel-purchase', 'apply', 'pool-reserve', 'pool-apply'].includes(
+      operation,
+    )
     const cancel = () => {
       void options.bridge!.request(options.principal!.token, {
         operation: 'wallet-spend-abort',
@@ -60,6 +62,15 @@ export function createWalletSpendClient(options: {
   return Object.freeze(
     {
       contract: 'cordisx.wallet-spend/v1',
+      pool: Object.freeze({
+        contract: 'cordisx.wallet-pool/v1' as const,
+        reserve: (input: Parameters<NonNullable<WalletSpendV1['pool']>['reserve']>[0]) =>
+          call<import('@cordisx/protocol/wallet-pool/v1').WalletPoolRecordV1>('pool-reserve', input),
+        lookup: (input: Parameters<NonNullable<WalletSpendV1['pool']>['lookup']>[0]) =>
+          call<import('@cordisx/protocol/wallet-pool/v1').WalletPoolRecordV1 | null>('pool-lookup', input),
+        applyDecision: (input: Parameters<NonNullable<WalletSpendV1['pool']>['applyDecision']>[0]) =>
+          call<import('@cordisx/protocol/wallet-pool/v1').WalletPoolRecordV1>('pool-apply', input),
+      }),
       identity: () => call('identity'),
       authorizeSource: input => call('authorize-source', input),
       bindGameAccount: input => call('bind', input),

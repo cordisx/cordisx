@@ -1,3 +1,4 @@
+import { runPoolOperation } from './wallet-pool-operation.js'
 import type { WalletSpendFailureV1, WalletSpendResultV1, WalletSpendSourceV1 } from '@cordisx/protocol/wallet-spend/v1'
 import { createMacOSKeychainBackend } from './secret-store.js'
 import { localWalletRealm, LocalWalletRegistry } from './local-wallet-registry.js'
@@ -74,13 +75,13 @@ export class WalletSpendAuthority {
       const input = spendObject(request.input), operation = request.operation
       const expected = operation === 'wallet-spend-identity'
         ? []
-        : operation === 'wallet-spend-reserve'
+        : (operation === 'wallet-spend-reserve' || operation === 'wallet-spend-pool-reserve')
         ? ['source', 'terms', 'requestId', 'deadline']
         : operation === 'wallet-spend-bind'
         ? ['source', 'challenge', 'deadline']
-        : operation === 'wallet-spend-lookup'
+        : (operation === 'wallet-spend-lookup' || operation === 'wallet-spend-pool-lookup')
         ? ['source', 'requestId', 'deadline']
-        : operation === 'wallet-spend-apply'
+        : (operation === 'wallet-spend-apply' || operation === 'wallet-spend-pool-apply')
         ? ['source', 'decision', 'deadline']
         : undefined
       const commerceExpected = operation === 'wallet-spend-catalog' || operation === 'wallet-spend-orders'
@@ -119,7 +120,8 @@ export class WalletSpendAuthority {
         source && !config.services.some(entry =>
           entry.owner.pluginId === principal.identity.pluginId
           && entry.owner.source === principal.identity.source && sameSpendSource(entry.source, source)
-          && (!['wallet-spend-bind', 'wallet-spend-reserve'].includes(operation) || entry.status === 'active')
+          && (!['wallet-spend-bind', 'wallet-spend-reserve', 'wallet-spend-pool-reserve'].includes(operation)
+            || entry.status === 'active')
         )
       ) return failure('source-unavailable')
       if (
@@ -233,7 +235,28 @@ export class WalletSpendAuthority {
       const identity = spendIdentity(await client.call('identity', {}))
       guard()
       let value: unknown
-      if (operation === 'wallet-spend-identity') value = identity
+      if (operation.startsWith('wallet-spend-pool-')) {
+        if (operation === 'wallet-spend-pool-reserve') {
+          if (this.confirming) return failure('denied')
+          this.confirming = true
+          releaseConfirmation = true
+        }
+        value = await runPoolOperation({
+          operation,
+          input,
+          source: source!,
+          identity,
+          client,
+          guard,
+          markDispatched: () => {
+            dispatched = true
+          },
+          confirm: this.options.confirm ?? confirmWalletSpendNative,
+          signal: abort.signal,
+          plugin: principal.identity,
+        })
+        if (value === 'denied') return failure('denied')
+      } else if (operation === 'wallet-spend-identity') value = identity
       else if (
         operation === 'wallet-spend-catalog' || operation === 'wallet-spend-orders'
         || operation === 'wallet-spend-order'
