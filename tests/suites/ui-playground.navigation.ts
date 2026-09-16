@@ -611,6 +611,7 @@ export function registerNavigationTests() {
       try {
         Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value: () => ({ length: 1 }) })
         Object.defineProperty(dom.window, 'structuredClone', { value: globalThis.structuredClone })
+        Object.assign(dom.window, { TextEncoder, TextDecoder })
         dom.window.eval(bundle)
         await (dom.window as unknown as { __cordisxBoot?: Promise<unknown> }).__cordisxBoot
         const snapshot = (dom.window as unknown as {

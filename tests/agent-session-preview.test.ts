@@ -81,6 +81,7 @@ export async function apply(ctx) {
           value: () => ({ length: 1 }),
         })
         Object.defineProperty(dom.window, 'structuredClone', { configurable: true, value: structuredClone })
+        Object.assign(dom.window, { TextEncoder, TextDecoder })
         const composition = await session.buildComposition('/runtime.ts')
         expect(composition.source).toContain('file:///cordisx-local-dev/')
         expect(composition.source).toContain('origin":"local-dev')

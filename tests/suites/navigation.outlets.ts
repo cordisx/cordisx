@@ -560,7 +560,10 @@ export function registerOutletsTests() {
     expect(action.getAttribute('aria-label')).toBe('Updated refresh')
     expect(action.textContent).toBe('')
     expect(pageControls?.setHeaderActionLabel('native', { key: 'x' })).toBe(false)
-    expect(pageControls?.setHeaderActionLabel('guest', { key: 'x' })).toBe(false)
+    expect(pageControls?.setHeaderActionLabel('guest', { key: 'guest.updated', fallback: 'Updated guest' })).toBe(true)
+    expect(chrome.querySelector('[data-cordisx-page-header-action="guest"]')?.getAttribute('aria-label')).toBe(
+      'Updated guest',
+    )
     expect(action.dataset.cordisxNoDrag).toBe('true')
     expect(action.querySelector('[data-host-icon="host:refresh"]')).not.toBeNull()
     expect(dom.window.document.querySelector('[role="tab"] [data-host-icon="host:info"]')).not.toBeNull()

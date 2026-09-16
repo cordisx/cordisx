@@ -89,6 +89,7 @@ export function registerRuntimeTests() {
       )
       try {
         Object.defineProperty(dom.window, 'structuredClone', { configurable: true, value: structuredClone })
+        Object.assign(dom.window, { TextEncoder, TextDecoder })
         installPermissionPolicyBridge(dom.window)
         dom.window.eval(bundle)
         for (

@@ -1,8 +1,14 @@
 import React, { act } from 'react'
 import Schema from '@deepseek-ai/schemastery'
-import { expect, it } from 'vitest'
+import { beforeEach, expect, it } from 'vitest'
 import { dom, root } from './helpers/host-react-form.js'
-import { SchemaForm, schemaFormSnapshot } from '../packages/cli/src/renderer/host-ui/SchemaForm.js'
+let SchemaForm: typeof import('../packages/cli/src/renderer/host-ui/SchemaForm.js').SchemaForm
+let schemaFormSnapshot: typeof import('../packages/cli/src/renderer/host-ui/SchemaForm.js').schemaFormSnapshot
+
+// TDesign detects browser event support at import time; initialize the DOM first.
+beforeEach(async () => {
+  ;({ SchemaForm, schemaFormSnapshot } = await import('../packages/cli/src/renderer/host-ui/SchemaForm.js'))
+})
 
 it('uses configuration field rows and validates bounds without losing invalid drafts', async () => {
   const schema = Schema.object({ size: Schema.number().min(9).max(19).required() })
