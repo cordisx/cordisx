@@ -77,6 +77,16 @@ export async function buildHostGenerationGraph(
       if (id === ENTRY) return `\0${ENTRY}`
       if (id === COMPOSITION) return `\0${COMPOSITION}`
       if (id === 'cordisx/contracts') return CONTRACTS_MODULE_PATH
+      if (virtualModules.has(id) && importer?.includes('/renderer/')) {
+        const suffix = id === CORDISX_REACT_MODULE
+          ? 'react'
+          : id === CORDISX_REACT_JSX_RUNTIME_MODULE
+          ? 'react-jsx-runtime'
+          : id === CORDISX_REACT_JSX_DEV_RUNTIME_MODULE
+          ? 'react-jsx-dev-runtime'
+          : 'ui'
+        return path.resolve(path.dirname(fileURLToPath(import.meta.url)), `../${suffix}.${runtimeExtension}`)
+      }
       if (virtualModules.has(id)) return `\0cordisx-host:${id}`
       // Vite 8's Rolldown production adapter currently does not materialize
       // CSS `?inline` requests. `?raw` preserves the same string-valued Host
