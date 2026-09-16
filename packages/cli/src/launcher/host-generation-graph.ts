@@ -52,7 +52,11 @@ export async function buildHostGenerationGraph(
   // The graph entry is virtual, so a path relative to a user's config root
   // would resolve relative to that virtual id. Pin this private import to the
   // Host package instead; plugin paths remain configuration-owned below.
-  const runtimeImport = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../renderer/runtime.ts')
+  const runtimeExtension = import.meta.url.endsWith('.ts') ? 'ts' : 'js'
+  const runtimeImport = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    `../renderer/runtime.${runtimeExtension}`,
+  )
   const composition = await buildRendererCompositionSource(config, options, { awaitBoot: true, runtimeImport })
   const virtualModules = new Set([
     CORDISX_MANAGED_SERVICE_UI_MODULE,
